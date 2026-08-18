@@ -30,6 +30,7 @@ import {
 } from '../src/lib/alert-speech-state';
 import { VSCODE_THEMES, VSCODE_THEME_TYPES } from './themes';
 import { cfg } from '../src/cfg';
+import type { DormouseTheme } from '../src/lib/themes';
 
 // Initialize fake platform once at module scope
 const fakePlatform = initPlatform('fake');
@@ -217,10 +218,33 @@ const preview: Preview = {
       const primedAlertSpeech = context.parameters?.primedAlertSpeech as
         | Record<string, AlertSpeechState>
         | undefined;
-      const platform = fakePlatform as FakePtyAdapter;
+      const platform = fakePlatform as FakePtyAdapter & { hostOwnsTheme?: boolean };
 
       if (scenario) platform.setDefaultScenario(scenario);
       else platform.clearDefaultScenario();
+
+      // Both of these are read during render, so they are applied here rather
+      // than in the effect below with the rest of the primed state.
+
+      // The VS Code host owns the theme, which is how the Settings dialog
+      // decides to hide its Theme row (docs/specs/theme.md). Absent resets to
+      // undefined so it cannot leak into the next story.
+      platform.hostOwnsTheme = context.parameters?.hostOwnsTheme === true || undefined;
+
+      // Installed themes normally arrive from OpenVSX and live in localStorage,
+      // which every story shares — so a story that wants them names them, and
+      // every other story clears them.
+      const primedInstalledThemes = context.parameters?.primedInstalledThemes as
+        | DormouseTheme[]
+        | undefined;
+      if (primedInstalledThemes?.length) {
+        window.localStorage.setItem(
+          'dormouse:installed-themes',
+          JSON.stringify(primedInstalledThemes),
+        );
+      } else {
+        window.localStorage.removeItem('dormouse:installed-themes');
+      }
 
       useEffect(() => {
         let raf2 = 0;

@@ -19,10 +19,12 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
   let activitySnapshot = initialActivitySnapshot;
   let watchedCommands: string[] = [];
   let mouseSnapshot = new Map<string, MouseSelectionState>();
+  let themeListener: (() => void) | null = null;
+  let activeThemeId = "vscode.theme-defaults.dark_vs";
   const state = new TutorialState();
-  const detector = new TutDetector(
+  const detector = new TutDetector({
     state,
-    {
+    activityStore: {
       getActivitySnapshot: () => activitySnapshot,
       subscribeToActivity: (listener) => {
         activityListener = listener;
@@ -38,7 +40,7 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
         };
       },
     },
-    {
+    mouseStore: {
       getMouseSelectionSnapshot: () => mouseSnapshot,
       subscribeToMouseSelection: (listener) => {
         mouseListener = listener;
@@ -47,7 +49,16 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
         };
       },
     },
-  );
+    themeStore: {
+      getActiveThemeId: () => activeThemeId,
+      subscribeToActiveTheme: (listener) => {
+        themeListener = listener;
+        return () => {
+          themeListener = null;
+        };
+      },
+    },
+  });
 
   detector.start();
 
@@ -65,6 +76,10 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
     setMouseSnapshot: (snapshot: Map<string, MouseSelectionState>) => {
       mouseSnapshot = snapshot;
       mouseListener?.();
+    },
+    setActiveThemeId: (id: string) => {
+      activeThemeId = id;
+      themeListener?.();
     },
     // Arrow navigation / clicks surface as a pane `selectionChange` WallEvent (what
     // Wall.selectPane fires on both engines); the detector reads kb-arrows from it.
@@ -217,6 +232,23 @@ describe("TutDetector", () => {
       }],
     ]));
     expect(state.isComplete("al-cmd-exit")).toBe(true);
+  });
+
+
+  it("does not credit th-theme for the boot-time theme restore", () => {
+    const { state, setActiveThemeId } = makeDetectorHarness();
+
+    // A restore of the already-active theme still notifies in some paths; the
+    // seed read in start() is what keeps it from granting the item.
+    setActiveThemeId("vscode.theme-defaults.dark_vs");
+    expect(state.isComplete("th-theme")).toBe(false);
+  });
+
+  it("credits th-theme when the user picks a different theme", () => {
+    const { state, setActiveThemeId } = makeDetectorHarness();
+
+    setActiveThemeId("vscode.theme-kimbie-dark.kimbie-dark");
+    expect(state.isComplete("th-theme")).toBe(true);
   });
 
 

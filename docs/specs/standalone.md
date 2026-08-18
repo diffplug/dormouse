@@ -8,7 +8,7 @@
 Tauri app process (Rust — standalone/src-tauri/src/lib.rs)
 ├── WebView (Vite frontend — standalone/src/)
 │   ├── main.tsx           — bootstrap: platform init, theme restore, resumeOrRestore, updater
-│   ├── AppBar.tsx         — draggable titlebar: shell dropdown, theme picker, window controls
+│   ├── AppBar.tsx         — draggable titlebar: shell dropdown, window controls
 │   ├── tauri-adapter.ts   — TauriAdapter (PlatformAdapter over Tauri invoke/events)
 │   ├── updater.ts         — auto-update state machine (docs/specs/auto-update.md)
 │   └── browser-sidecar-{host,adapter}.ts — browser-dev harness (docs/specs/transport.md)
@@ -173,9 +173,10 @@ backstop (harmless post-teardown — the PTY map is already empty, so the sideca
 Source of truth: `standalone/src/AppBar.tsx`.
 
 The AppBar is the draggable titlebar region and carries, left to right: the
-shell controls, the theme picker (`docs/specs/theme.md`), and the window
-controls (minimize / maximize / close via `@tauri-apps/api/window`, with
-window-focus tracking dimming the bar). The shell controls are:
+shell controls and the window controls (minimize / maximize / close via
+`@tauri-apps/api/window`, with window-focus tracking dimming the bar). It
+carries no theme picker: theme selection lives in the Settings dialog at the
+bottom-right of the window (`docs/specs/theme.md`). The shell controls are:
 
 - **`[+]`** — spawns a new terminal with the currently selected shell, selects it,
   and enters passthrough immediately
@@ -470,7 +471,7 @@ root `package.json` for the `dev:standalone*` orchestration.
 | `standalone/src/main.tsx` | Webview bootstrap (boot sequence above); initializes the quit orchestrator and installs the confirmation gate on the Tauri branch, mounts `<QuitConfirmModalHost>` via Wall's `dialogHost` prop |
 | `standalone/src/quit.ts` | Quit orchestrator: listens for `dormouse://quit-requested`, runs the graceful teardown, calls `quit_ack` / `quit_progress` / `quit_proceed` / `quit_cancel` (§Quit flow) |
 | `standalone/src/quit-confirm-store.ts`, `QuitConfirmModal.tsx` | Quit-confirmation dialog: the running-work gate + module store, and the modal mounted via Wall's `dialogHost` prop (§Quit flow, "Confirmation dialog") |
-| `standalone/src/AppBar.tsx` | Titlebar: shell dropdown, theme picker, window controls |
+| `standalone/src/AppBar.tsx` | Titlebar: shell dropdown, window controls |
 | `standalone/src/tauri-adapter.ts` | `TauriAdapter`: PlatformAdapter over Tauri invoke/events, session persistence via the Rust store, control-request dispatch |
 | `standalone/src/tauri-session-store.ts` | `TauriSessionStore`: Rust-backed `SessionKeyValueStore` — boot-seeded write-through cache over `load_session` / `save_session` (§Persistence) |
 | `standalone/src/updater.ts`, `UpdateBanner.tsx`, `UpdateDebugModal.tsx` | Auto-update (owned by `docs/specs/auto-update.md`) |

@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { CaretDownIcon, MinusIcon, CornersOutIcon, CornersInIcon, XIcon, PlusIcon, CheckIcon } from '@phosphor-icons/react';
-import { ThemePicker } from '../../lib/src/components/ThemePicker';
 import { PopupButtonRow, chromeButton } from '../../lib/src/components/design';
 import { setDefaultShellOpts } from '../../lib/src/lib/shell-defaults';
 import { IS_MAC } from '../../lib/src/lib/platform';
@@ -276,14 +275,10 @@ export function AppBar({ shells }: AppBarProps) {
       {/* Draggable spacer */}
       <div data-tauri-drag-region className="flex-1 self-stretch" />
 
-      {/* Theme picker is right-aligned on every platform; Windows/Linux
-          additionally show the native-style window controls after it. */}
-      <div className="ml-auto flex items-stretch self-stretch">
-        <div className="flex items-center pr-2">
-          <ThemePicker variant="standalone-appbar" />
-        </div>
-        {!IS_MAC && <WinControls />}
-      </div>
+      {/* Theme selection lives in the Settings dialog at the bottom-right of
+          the window (docs/specs/theme.md), so the titlebar carries only the
+          native-style window controls on Windows/Linux. */}
+      {!IS_MAC && <WinControls />}
     </div>
   );
 }

@@ -8,7 +8,7 @@ import {
   SpeakerHighIcon,
   SpeakerSlashIcon,
 } from '@phosphor-icons/react';
-import { AlertSettingsDialog } from './AlertSettingsDialog';
+import { SettingsDialog } from './SettingsDialog';
 import { Door } from './Door';
 import { DialogKeyboardContext, DoorElementsContext } from './wall/wall-context';
 import type { DooredItem } from './wall/wall-types';
@@ -70,7 +70,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const [settingsOpen, setSettingsOpen] = useState(false);
   const setDialogKeyboardActive = useContext(DialogKeyboardContext);
 
-  // Suppress command-mode key dispatch while the settings dialog owns the
+  // Suppress command-mode key dispatch while the Settings dialog owns the
   // keyboard, so typing a timeout doesn't trigger pane shortcuts.
   useEffect(() => {
     setDialogKeyboardActive(settingsOpen);
@@ -283,7 +283,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
 
           <button
             className={`${BASEBOARD_BUTTON_CLASS} ${settings.speakEnabled ? 'text-app-fg' : ''}`}
-            aria-label={`Spoken alarms ${settings.speakEnabled ? 'enabled' : 'disabled'}; open Alarm settings`}
+            aria-label={`Spoken alarms ${settings.speakEnabled ? 'enabled' : 'disabled'}; open Settings`}
             title={`Spoken alarms ${settings.speakEnabled ? 'enabled' : 'disabled'}`}
             aria-haspopup="dialog"
             data-alarm-setting="speech"
@@ -296,7 +296,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
 
           <button
             className={`${BASEBOARD_BUTTON_CLASS} ${settings.pushEnabled ? 'text-app-fg' : ''}`}
-            aria-label={`Push notifications ${settings.pushEnabled ? 'enabled' : 'disabled'}; open Alarm settings`}
+            aria-label={`Push notifications ${settings.pushEnabled ? 'enabled' : 'disabled'}; open Settings`}
             title={`Push notifications ${settings.pushEnabled ? 'enabled' : 'disabled'}`}
             aria-haspopup="dialog"
             data-alarm-setting="push"
@@ -309,10 +309,10 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
 
           <button
             className={BASEBOARD_BUTTON_CLASS}
-            aria-label="Alarm settings"
-            title="Alarm settings"
+            aria-label="Settings"
+            title="Settings"
             aria-haspopup="dialog"
-            data-alarm-setting="settings"
+            data-open-settings="true"
             onClick={() => setSettingsOpen(true)}
           >
             <SlidersHorizontalIcon size={16} weight="bold" />
@@ -320,7 +320,11 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
         </div>
       </div>
 
-      {settingsOpen && <AlertSettingsDialog onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsDialog
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
     </div>
   );
 }

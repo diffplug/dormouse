@@ -5,6 +5,23 @@ import { flattenSelectionAlpha } from './flatten-alpha';
 
 let appliedThemeSnapshot: AppliedThemeSnapshot | null = null;
 
+const activeThemeListeners = new Set<() => void>();
+
+/**
+ * Notified whenever a *different* theme is applied — the boot-time
+ * `restoreActiveTheme()` of an already-applied theme is a no-op here, and so is
+ * re-selecting the active theme in the picker.
+ *
+ * Deliberately not `onTerminalThemeChange()` (`terminal-theme.ts`), which
+ * watches resolved xterm palette JSON through a `MutationObserver` and fires on
+ * the first mutation after it starts. Consumers here want "the user picked a
+ * theme", so pair this with a seed read of `getActiveThemeId()`.
+ */
+export function subscribeToActiveTheme(listener: () => void): () => void {
+  activeThemeListeners.add(listener);
+  return () => activeThemeListeners.delete(listener);
+}
+
 export interface AppliedThemeSnapshot {
   theme: DormouseTheme;
   providedVars: Record<string, string>;
@@ -33,6 +50,13 @@ function hasVisibleTheme(snapshot: AppliedThemeSnapshot): boolean {
 export function applyTheme(theme: DormouseTheme): void {
   if (typeof document === 'undefined') return;
   if (theme === appliedThemeSnapshot?.theme && hasVisibleTheme(appliedThemeSnapshot)) return;
+
+  // Captured before the write: a hydration re-apply of the *same* theme still
+  // runs the body writes below, and must not be reported as a theme change.
+  // Compared by id, not identity — `getInstalledThemes()` re-parses its JSON on
+  // every call, so an installed theme is a fresh object each time and an
+  // identity check would report every restore as a change.
+  const previousThemeId = appliedThemeSnapshot?.theme.id ?? null;
 
   if (appliedThemeSnapshot && theme !== appliedThemeSnapshot.theme) {
     for (const name of Object.keys(appliedThemeSnapshot.resolvedVars)) {
@@ -68,14 +92,37 @@ export function applyTheme(theme: DormouseTheme): void {
   // the OS preference. Owned here so every non-VSCode host (standalone, website,
   // Pocket) inherits it from one place instead of guessing in each HTML shell.
   document.body.style.colorScheme = theme.type === 'light' ? 'light' : 'dark';
+
+  if (previousThemeId !== theme.id) {
+    for (const listener of activeThemeListeners) listener();
+  }
 }
 
-/** Apply the persisted active theme. When nothing is persisted yet, fall
- *  back to `defaultThemeId` if it resolves to a known theme, otherwise to the
- *  first bundled theme. Idempotent and safe to call before render so the
- *  first paint already has --vscode-* set on body. Returns the theme that was
- *  applied, or null when no themes are available (e.g. SSR). */
-export function restoreActiveTheme(defaultThemeId?: string): DormouseTheme | null {
+let defaultThemeId: string | null = null;
+
+/**
+ * The host's preferred theme for when nothing is persisted yet — and the one
+ * `restoreActiveTheme()` falls back to when the active theme stops resolving,
+ * which is what uninstalling the active theme does.
+ *
+ * Module state, in the shape of `lib/src/lib/shell-defaults.ts`, rather than a
+ * prop threaded down to each caller. Every path that re-resolves the active
+ * theme has to agree on the fallback — the picker's uninstall, the store
+ * dialog's Remove, a host's boot restore — and they sit at unrelated depths, so
+ * a prop reaches some and misses others. Declared once by whoever boots the
+ * app (`useRestoredTheme`, or a host's own entry point).
+ */
+export function setDefaultThemeId(id: string | null): void {
+  defaultThemeId = id;
+}
+
+/** Apply the persisted active theme. When nothing is persisted yet — or the
+ *  persisted theme no longer resolves — fall back to `setDefaultThemeId`'s
+ *  value if it names a known theme, otherwise to the first bundled theme.
+ *  Idempotent and safe to call before render so the first paint already has
+ *  --vscode-* set on body. Returns the theme that was applied, or null when no
+ *  themes are available (e.g. SSR). */
+export function restoreActiveTheme(): DormouseTheme | null {
   const all = getAllThemes();
   const find = (id: string | null | undefined) => (id ? all.find((t) => t.id === id) : undefined);
   const theme = find(getStoredActiveThemeId()) ?? find(defaultThemeId) ?? all[0];

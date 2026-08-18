@@ -101,10 +101,11 @@ export function ThemeStoreDialog({
     }
   };
 
+  // No `window.confirm` gate: native dialogs are not dependable in the desktop
+  // webview (DESIGN.md -> Don't), and a Remove gated on one silently did
+  // nothing there. The button is already an explicit per-extension action, and
+  // re-installing is one click away in this same dialog.
   const handleRemoveExtension = (extensionId: string) => {
-    const confirmed = window.confirm(`Remove installed themes from ${extensionId}?`);
-    if (!confirmed) return;
-
     for (const theme of getInstalledThemes()) {
       if (theme.origin.kind === 'installed' && theme.origin.extensionId === extensionId) {
         removeInstalledTheme(theme.id);

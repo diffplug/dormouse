@@ -1,20 +1,23 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { AlertSettingsDialog } from '../components/AlertSettingsDialog';
+import { userEvent, within } from 'storybook/test';
+import type { DormouseTheme } from '../lib/themes';
+import { SettingsDialog } from '../components/SettingsDialog';
 
 /**
- * The app-global Alarm settings, normally opened from the far right of the
+ * The app-global Settings dialog, normally opened from the far right of the
  * baseboard. Rendering the dialog directly keeps these stories about its own
- * content — the rule list and the three settings groups — rather than about the
- * button that opens it (`Baseboard.stories.tsx` covers that). Everything here is
- * driven by story `parameters`, since the rule set, the settings, and the
- * push-device list are app-global stores rather than props.
+ * content — the theme row, the rule list, and the three alarm groups — rather
+ * than about the button that opens it (`Baseboard.stories.tsx` covers that).
+ * Everything below the theme row is driven by story `parameters`, since the
+ * rule set, the settings, and the push-device list are app-global stores rather
+ * than props.
  */
 function DialogStory() {
-  return <AlertSettingsDialog onClose={() => {}} />;
+  return <SettingsDialog onClose={() => {}} />;
 }
 
 const meta: Meta<typeof DialogStory> = {
-  title: 'Modals/AlertSettingsDialog',
+  title: 'Modals/SettingsDialog',
   component: DialogStory,
 };
 
@@ -139,5 +142,68 @@ export const ManyRules: Story = {
       'tsc',
     ],
     primedAlertSettings: { speakEnabled: true },
+  },
+};
+
+/** Storybook's `play` runs before the snapshot, but the menu positions itself
+ *  from a measured trigger rect — one commit later. Settle before returning so
+ *  Chromatic never captures the pre-measurement frame. The dialog renders in a
+ *  portal-less overlay above `canvasElement`, so scope to the document body. */
+async function openThemeMenu({ canvasElement }: { canvasElement: HTMLElement }) {
+  const body = within(canvasElement.ownerDocument.body);
+  await userEvent.click(body.getByRole('button', { name: /^Theme:/ }));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+}
+
+/**
+ * The theme dropdown open. It renders `position: fixed` off the trigger rect
+ * rather than absolutely, because the dialog surface is `overflow-y-auto` and
+ * would otherwise clip the menu (`docs/specs/theme.md`).
+ */
+export const ThemeMenuOpen: Story = {
+  parameters: {
+    primedWatchedCommands: [],
+    primedAlertSettings: {},
+  },
+  play: openThemeMenu,
+};
+
+/**
+ * The same menu with enough themes to overflow. The viewport clamp is what
+ * keeps a long list from running off the bottom of the window — it is
+ * `position: fixed`, so anything below the fold would be unreachable.
+ */
+export const ThemeMenuOpenWithInstalledThemes: Story = {
+  parameters: {
+    primedWatchedCommands: [],
+    primedAlertSettings: {},
+    primedInstalledThemes: Array.from({ length: 10 }, (_, index): DormouseTheme => ({
+      id: `storybook.installed-${index}`,
+      label: `Installed Theme ${index}`,
+      type: 'dark',
+      swatch: '#2f3b47',
+      accent: '#7fb4d8',
+      vars: {},
+      origin: {
+        kind: 'installed',
+        extensionId: `storybook/theme-${index}`,
+        installedAt: '2026-01-01T00:00:00.000Z',
+      },
+    })),
+  },
+  play: openThemeMenu,
+};
+
+/**
+ * The VS Code host: it owns the theme and has its own picker, so the Theme row
+ * is absent (`hostOwnsTheme`, docs/specs/theme.md). The rule list becomes the
+ * first section again and must drop its divider — a stray top border here is
+ * the visible symptom of that conditional going wrong.
+ */
+export const HostOwnsTheme: Story = {
+  parameters: {
+    hostOwnsTheme: true,
+    primedWatchedCommands: ['claude'],
+    primedAlertSettings: {},
   },
 };

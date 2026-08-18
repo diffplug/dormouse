@@ -142,6 +142,48 @@ export const modalOverlay = tv({
 
 export type ModalOverlayVariants = VariantProps<typeof modalOverlay>;
 
+/**
+ * The inset a modal overlay reserves around its surface. Hoisted because
+ * `OVERLAY_MAX_HEIGHT.modal` below is derived from it — `py-6`, doubled — and
+ * Tailwind needs both as literals, so the pair can only be kept honest by
+ * living side by side.
+ */
+export const MODAL_OVERLAY_INSET = 'px-4 py-6';
+
+/**
+ * The custom properties viewport-bounded overlays read for their height caps.
+ *
+ * These exist so a bound can be *narrowed* by an ancestor: a story overrides one
+ * to snapshot the short-viewport layout deterministically, which no `dvh` value
+ * can (Chromatic controls snapshot width, never height). Unset everywhere in the
+ * app, so each entry below falls through to the real viewport.
+ *
+ * One property per kind, not one shared: inside the Settings dialog the popover
+ * is a DOM descendant of the modal surface, and custom properties inherit
+ * through `position: fixed` — so a single knob narrowed to constrain the
+ * dropdown would silently cap the dialog containing it too.
+ */
+export const OVERLAY_MAX_HEIGHT_VAR = {
+  modal: '--overlay-max-h-modal',
+  popover: '--overlay-max-h-popover',
+} as const;
+
+/**
+ * Height caps for things that float over the viewport. One spelling per kind of
+ * inset, rather than the six hand-rolled `vh`/`dvh` literals these replaced.
+ *
+ * `dvh` rather than `vh` so a mobile browser's collapsing chrome counts. Written
+ * as whole literals because Tailwind scans source statically and cannot see a
+ * value assembled from a constant — `design.test.ts` pins `popover` to
+ * `OVERLAY_VIEWPORT_MARGIN_PX` so the two cannot drift.
+ */
+export const OVERLAY_MAX_HEIGHT = {
+  /** A `ModalFrame` surface: the viewport minus `MODAL_OVERLAY_INSET` doubled. */
+  modal: 'max-h-[var(--overlay-max-h-modal,calc(100dvh-3rem))]',
+  /** An anchored popover, matching `clampOverlayPosition`'s viewport margin. */
+  popover: 'max-h-[var(--overlay-max-h-popover,calc(100dvh-24px))]',
+} as const;
+
 export const modalSurface = tv({
   base: 'rounded-lg border border-border bg-surface-raised font-mono text-foreground shadow-lg',
   variants: {
@@ -498,6 +540,17 @@ function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElem
     const handleKeyDown = (event: KeyboardEvent) => {
       const modal = modalRef.current;
       if (!modal) return;
+
+      if (event.key !== 'Escape' && event.key !== 'Tab') return;
+
+      // A native modal <dialog> (ThemeStoreDialog, ThemeDebuggerDialog) sits in
+      // the browser's top layer and owns the keyboard with its own Tab/Escape
+      // handling. This listener is on window in the capture phase, so without
+      // this bail it would preventDefault every Tab and cycle focus back into
+      // the modal underneath — leaving the dialog's own fields untabbable.
+      // Kept below the key filter: it is a full-document query, and this
+      // handler runs for every keystroke while any modal is mounted.
+      if (document.querySelector('dialog[open]')) return;
 
       if (event.key === 'Escape') {
         if (onEscape) {

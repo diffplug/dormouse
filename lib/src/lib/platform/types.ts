@@ -139,6 +139,16 @@ export interface PlatformAdapter {
   persistsSession?: boolean;
 
   /**
+   * Whether the host owns the color theme, so Dormouse must not offer a theme
+   * picker of its own. Absent reads as `false`.
+   *
+   * `VSCodeAdapter` sets it `true`: VS Code supplies `--vscode-*` directly and
+   * its own theme UI is the only correct control there, so the Settings dialog
+   * hides its Theme row (docs/specs/theme.md).
+   */
+  hostOwnsTheme?: boolean;
+
+  /**
    * Agent resume invocations the host captured when it last tore down, keyed by
    * surface id — consumed once by a cold restore (`session-restore.ts`).
    *

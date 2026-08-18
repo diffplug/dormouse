@@ -9,21 +9,9 @@ import {
   getBundledThemes,
   getInstalledThemes,
 } from './store';
+import { installLocalStorageStub } from '../test-local-storage';
 
 const INSTALLED_KEY = 'dormouse:installed-themes';
-
-function installStorageStub(): void {
-  const values = new Map<string, string>();
-  Object.defineProperty(globalThis, 'localStorage', {
-    configurable: true,
-    value: {
-      clear: () => values.clear(),
-      getItem: (key: string) => values.get(key) ?? null,
-      removeItem: (key: string) => values.delete(key),
-      setItem: (key: string, value: string) => values.set(key, value),
-    },
-  });
-}
 
 function makeInstalledTheme(id: string): DormouseTheme {
   return {
@@ -39,7 +27,7 @@ function makeInstalledTheme(id: string): DormouseTheme {
 
 describe('theme store', () => {
   beforeEach(() => {
-    installStorageStub();
+    installLocalStorageStub();
   });
 
   it('returns [] when the installed-themes value is valid JSON but not an array', () => {
@@ -84,5 +72,35 @@ describe('theme store', () => {
 
     addInstalledTheme(makeInstalledTheme('a'));
     expect(getInstalledThemes().map((t) => t.id)).toEqual(['b', 'a']);
+  });
+
+  // `applyTheme` skips redundant work by comparing the incoming theme with the
+  // applied one. That comparison never held for installed themes while every
+  // call re-parsed the JSON into fresh objects.
+  it('hands back the same theme object while the stored JSON is unchanged', () => {
+    addInstalledTheme(makeInstalledTheme('pub.stable'));
+
+    const first = getInstalledThemes().find((t) => t.id === 'pub.stable');
+    const second = getInstalledThemes().find((t) => t.id === 'pub.stable');
+
+    expect(first).toBe(second);
+  });
+
+  it('hands back a new object once the stored JSON changes', () => {
+    addInstalledTheme(makeInstalledTheme('pub.rewritten'));
+    const before = getInstalledThemes().find((t) => t.id === 'pub.rewritten');
+
+    // A reinstall rewrites the entry, and its colors may differ.
+    addInstalledTheme({ ...makeInstalledTheme('pub.rewritten'), swatch: '#123456' });
+    const after = getInstalledThemes().find((t) => t.id === 'pub.rewritten');
+
+    expect(after).not.toBe(before);
+    expect(after?.swatch).toBe('#123456');
+  });
+
+  it('never hands out the cached array itself', () => {
+    addInstalledTheme(makeInstalledTheme('pub.array'));
+
+    expect(getInstalledThemes()).not.toBe(getInstalledThemes());
   });
 });

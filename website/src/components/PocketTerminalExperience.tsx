@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { MobileTerminalUi, type MobileTerminalKeyboardMode, type MobileTerminalTouchMode } from "dormouse-lib/components/MobileTerminalUi";
 import { MobileWall, useMobileWallSessionItems, type MobileWallSession } from "dormouse-lib/components/MobileWall";
-import { restoreActiveTheme } from "dormouse-lib/lib/themes";
 import {
   getMouseSelectionSnapshot,
   setOverride as setMouseOverride,
@@ -13,6 +12,7 @@ import { TutDetector } from "../lib/tut-detector";
 import { TutRunner } from "../lib/tut-runner";
 import { POCKET_TUTORIAL_PROFILE, type ItemId } from "../lib/tut-items";
 import { ChangelogRunner } from "../lib/changelog-runner";
+import { useRestoredTheme } from "dormouse-lib/lib/themes";
 
 // The default theme is defined by the real Pocket app so this playground —
 // whose whole purpose is proving out that experience — cannot drift from it.
@@ -43,21 +43,6 @@ const GESTURE_ARROW_INPUTS = new Set<MobileGestureInputId>([
 const GITHUB_URL = "https://github.com/diffplug/dormouse";
 const POCKET_NOTIFY_URL = "https://nedshed.dev/about";
 
-const useBrowserLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
-
-function usePocketTheme() {
-  const restoredRef = useRef(false);
-  if (!restoredRef.current) {
-    restoreActiveTheme(POCKET_THEME_ID);
-    restoredRef.current = true;
-  }
-  // Repeat after document hydration so MobileWall initializes from real
-  // Kimbie variables even if React reconciled away render-time body styles.
-  useBrowserLayoutEffect(() => {
-    restoreActiveTheme(POCKET_THEME_ID);
-  }, []);
-}
-
 export function PocketTerminalExperience({
   interactive,
   fillViewport = false,
@@ -65,7 +50,7 @@ export function PocketTerminalExperience({
   interactive: boolean;
   fillViewport?: boolean;
 }) {
-  usePocketTheme();
+  useRestoredTheme(POCKET_THEME_ID);
   const [terminalReady, setTerminalReady] = useState(false);
   const adapterRef = useRef<FakePtyAdapter | null>(null);
   const shellRegistryRef = useRef<PlaygroundShellRegistry | null>(null);
@@ -155,6 +140,7 @@ export function PocketTerminalExperience({
       const platform = await import("dormouse-lib/lib/platform");
       const registry = await import("dormouse-lib/lib/terminal-registry");
       const mouseSelection = await import("dormouse-lib/lib/mouse-selection");
+      const themes = await import("dormouse-lib/lib/themes");
       const scenarios = await import("dormouse-lib/lib/platform/fake-scenarios");
       const asciiSplash = await import("../lib/ascii-splash-runner");
       await import("dormouse-lib/index.css");
@@ -172,7 +158,12 @@ export function PocketTerminalExperience({
 
       const tutorialState = new TutorialState(POCKET_TUTORIAL_PROFILE.sections);
       tutorialStateRef.current = tutorialState;
-      const detector = new TutDetector(tutorialState, registry, mouseSelection);
+      const detector = new TutDetector({
+        state: tutorialState,
+        activityStore: registry,
+        mouseStore: mouseSelection,
+        themeStore: themes,
+      });
       detector.start();
       detectorRef.current = detector;
       const shellRegistry = new PlaygroundShellRegistry(

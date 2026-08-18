@@ -16,6 +16,9 @@ import type { DorControlResult } from 'dor/protocol';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 
 export class VSCodeAdapter implements PlatformAdapter {
+  // VS Code owns the theme here: it provides --vscode-* itself and has its own
+  // theme UI, so Dormouse hides the Settings dialog's Theme row.
+  readonly hostOwnsTheme = true;
   private vscode: ReturnType<typeof acquireVsCodeApi>;
   private hostState: unknown = (globalThis as typeof globalThis & { __DORMOUSE_HOST_STATE__?: unknown }).__DORMOUSE_HOST_STATE__ ?? null;
   // Captured once, at construction, from the global the extension host injects

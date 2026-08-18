@@ -32,6 +32,9 @@ export function motionIsInstant(): boolean {
   return !cfg.layout.animate || prefersReducedMotion();
 }
 
+/** Shared inset for fixed overlays clamped to the viewport. */
+export const OVERLAY_VIEWPORT_MARGIN_PX = 12;
+
 /** Clamp a fixed-position overlay so it stays inside the viewport with a margin. */
 export function clampOverlayPosition({ left, top, width, height }: {
   left: number;
@@ -39,7 +42,7 @@ export function clampOverlayPosition({ left, top, width, height }: {
   width: number;
   height: number;
 }): CSSProperties {
-  const margin = 12;
+  const margin = OVERLAY_VIEWPORT_MARGIN_PX;
   const maxLeft = Math.max(margin, window.innerWidth - width - margin);
   const maxTop = Math.max(margin, window.innerHeight - height - margin);
 
