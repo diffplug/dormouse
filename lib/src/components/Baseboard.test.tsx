@@ -17,6 +17,7 @@ import {
   addInstalledTheme,
   getActiveThemeId,
   setActiveThemeId,
+  setDefaultThemeId,
   type DormouseTheme,
 } from '../lib/themes';
 
@@ -54,6 +55,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Module state, so it outlives the component under test.
+  setDefaultThemeId(null);
   act(() => root.unmount());
   container.remove();
   applyAlertSettingsFromHost(DEFAULT_ALERT_SETTINGS);
@@ -116,14 +119,11 @@ describe('Baseboard settings controls', () => {
   it('uses the host fallback after uninstalling the active installed theme', () => {
     addInstalledTheme(INSTALLED_THEME);
     setActiveThemeId(INSTALLED_THEME.id);
+    // The host declares its fallback once at boot; nothing is threaded through
+    // Wall/Baseboard to reach the picker.
+    setDefaultThemeId(KIMBIE_DARK);
 
-    act(() => root.render(
-      <Baseboard
-        items={[]}
-        onReattach={() => {}}
-        defaultThemeId={KIMBIE_DARK}
-      />,
-    ));
+    act(() => root.render(<Baseboard items={[]} onReattach={() => {}} />));
     act(() => container.querySelector<HTMLButtonElement>('[data-open-settings]')?.click());
 
     const trigger = document.querySelector<HTMLButtonElement>('[aria-label="Theme: Review Installed"]');

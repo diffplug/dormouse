@@ -27,9 +27,6 @@ export type ThemePickerVariant = 'compact' | 'settings-dialog';
 
 export interface ThemePickerProps {
   variant: ThemePickerVariant;
-  /** Theme ID to apply when no theme is persisted yet. Falls back to the
-   *  first bundled theme if the ID does not resolve. */
-  defaultThemeId?: string;
   /** Controlled dropdown state. Omit both for the uncontrolled default; the
    *  Settings dialog controls them so its `onEscape` can close the menu before
    *  the dialog itself (`ModalFrame`'s capture-phase Escape handler would
@@ -46,7 +43,6 @@ const MENU_WIDTH_PX = 280;
 
 export function ThemePicker({
   variant,
-  defaultThemeId,
   open: controlledOpen,
   onOpenChange,
 }: ThemePickerProps) {
@@ -56,7 +52,7 @@ export function ThemePicker({
   // it, so each host restores its own theme at boot.
   const initialState = useRef<{ themes: DormouseTheme[]; activeId: string }>(null);
   if (initialState.current === null) {
-    const restored = restoreActiveTheme(defaultThemeId);
+    const restored = restoreActiveTheme();
     const themes = getAllThemes();
     initialState.current = { themes, activeId: restored?.id ?? themes[0]?.id ?? '' };
   }
@@ -84,18 +80,18 @@ export function ThemePicker({
   // React Router document hydration can reconcile render-time theme
   // application away; repeat once after commit so xterm sees real colors.
   useBrowserLayoutEffect(() => {
-    const theme = restoreActiveTheme(defaultThemeId);
+    const theme = restoreActiveTheme();
     if (theme) setActiveId(theme.id);
-  }, [defaultThemeId]);
+  }, []);
 
   const closeDropdown = useCallback(() => setOpen(false), [setOpen]);
   useCloseOnOutsideAndEscape(open, rootRef, closeDropdown);
 
   const refreshThemes = useCallback(() => {
     setThemes(getAllThemes());
-    const theme = restoreActiveTheme(defaultThemeId);
+    const theme = restoreActiveTheme();
     if (theme) setActiveId(theme.id);
-  }, [defaultThemeId]);
+  }, []);
 
   const selectTheme = (id: string) => {
     const theme = getTheme(id);
@@ -109,7 +105,7 @@ export function ThemePicker({
   const deleteTheme = (theme: DormouseTheme) => {
     if (theme.origin.kind !== 'installed') return;
     removeInstalledTheme(theme.id);
-    // Re-resolves the active theme through `defaultThemeId`, which is what
+    // Re-resolves the active theme through the host default, which is what
     // uninstalling the *active* theme needs; a no-op re-apply otherwise.
     refreshThemes();
   };

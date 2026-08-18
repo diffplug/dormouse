@@ -1,6 +1,13 @@
 export type { DormouseTheme, BundledOrigin, InstalledOrigin } from './types';
 export { CONSUMED_VSCODE_KEYS, convertVscodeThemeColors, uiThemeToType } from './convert';
-export { applyTheme, getAppliedThemeSnapshot, restoreActiveTheme, subscribeToActiveTheme } from './apply';
+export {
+  applyTheme,
+  getAppliedThemeSnapshot,
+  getDefaultThemeId,
+  restoreActiveTheme,
+  setDefaultThemeId,
+  subscribeToActiveTheme,
+} from './apply';
 export type { AppliedThemeSnapshot } from './apply';
 export { useRestoredTheme } from './use-restored-theme';
 export { computeDynamicPalette, pickDoorPair, pickDynamicPalette, pickFocusRing } from './dynamic-palette';

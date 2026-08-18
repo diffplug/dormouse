@@ -8,13 +8,21 @@
  * imports these modules and manages its own themes.
  */
 
-import { getAppliedThemeSnapshot, restoreActiveTheme, useRestoredTheme } from '../../lib/themes';
+import {
+  getAppliedThemeSnapshot,
+  restoreActiveTheme,
+  setDefaultThemeId,
+  useRestoredTheme,
+} from '../../lib/themes';
 
 /** Same default theme the website playground restores, unless the user picked one. */
 export const POCKET_THEME_ID = 'vscode.theme-kimbie-dark.kimbie-dark';
 
 export function restorePocketTheme(): void {
-  const theme = restoreActiveTheme(POCKET_THEME_ID);
+  // Reached straight from `main.tsx` as well as through `useRestoredTheme`, so
+  // it declares the fallback rather than assuming the hook ran first.
+  setDefaultThemeId(POCKET_THEME_ID);
+  const theme = restoreActiveTheme();
   if (!theme || typeof document === 'undefined') return;
   // Browser chrome outside the body: form-control palette and the
   // address-bar / status-bar tint follow the applied theme.

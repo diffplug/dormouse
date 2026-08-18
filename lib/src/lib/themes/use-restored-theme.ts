@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
-import { restoreActiveTheme } from './apply';
+import { restoreActiveTheme, setDefaultThemeId } from './apply';
 
 const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
@@ -18,14 +18,20 @@ const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLa
  */
 export function useRestoredTheme(
   defaultThemeId?: string,
-  restore: (defaultThemeId?: string) => void = restoreActiveTheme,
+  restore: () => void = restoreActiveTheme,
 ): void {
+  // Latched before the first restore, and before any child renders: the theme
+  // picker re-resolves through this fallback, and on some pages it mounts
+  // ahead of the component that calls this hook.
+  setDefaultThemeId(defaultThemeId ?? null);
+
   const restoredRef = useRef(false);
   if (!restoredRef.current) {
-    restore(defaultThemeId);
+    restore();
     restoredRef.current = true;
   }
   useBrowserLayoutEffect(() => {
-    restore(defaultThemeId);
+    setDefaultThemeId(defaultThemeId ?? null);
+    restore();
   }, [defaultThemeId, restore]);
 }

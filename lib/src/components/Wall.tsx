@@ -220,7 +220,6 @@ export function Wall({
   initialSurfaceRefsNext,
   onEvent,
   baseboardNotice,
-  defaultThemeId,
   dialogHost,
   showBaseboard = true,
   enableRemoteHost = false,
@@ -236,7 +235,6 @@ export function Wall({
   onEvent?: (event: WallEvent) => void;
   baseboardNotice?: ReactNode;
   /** Host fallback used by the Settings theme picker when no persisted theme resolves. */
-  defaultThemeId?: string;
   /**
    * Host-provided modal host(s) (e.g. the standalone quit-confirmation dialog),
    * mounted beside the built-in modal hosts inside the Wall's
@@ -1479,7 +1477,6 @@ export function Wall({
                 items={doors}
                 onReattach={handleReattach}
                 notice={baseboardNotice}
-                defaultThemeId={defaultThemeId}
                 onDoorDragStart={onDoorDragStart}
               />
             ) : null}

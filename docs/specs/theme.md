@@ -199,11 +199,8 @@ playground navbar — carries no theme control.
   `useRestoredTheme()` hook in `lib/src/lib/themes/use-restored-theme.ts` for
   the playground pages. It applies the theme at render init and repeats after
   commit, because React Router document hydration can reconcile the render-time
-  `body.style` writes away. A host with a baseboard also passes that same
-  `defaultThemeId` through `Wall` and `Baseboard` to the Settings picker, so
-  deleting the active installed theme returns to the host fallback rather than
-  the first bundle. `restorePocketTheme()` passes itself as the hook's `restore`
-  argument so Pocket layers its browser-chrome sync
+  `body.style` writes away. `restorePocketTheme()` passes itself as the hook's
+  `restore` argument so Pocket layers its browser-chrome sync
   (`color-scheme`, `meta[name="theme-color"]`) onto the same lifecycle.
 - The two `/playground/pocket` marketing mounts keep the free-floating
   `compact` picker: those pages render a mobile prototype with no baseboard, so
@@ -218,6 +215,17 @@ playground navbar — carries no theme control.
   the key first.
 - The collapsed trigger shows the active theme's `ThemeSwatch` beside its name,
   so it reads as the same control as the row it stands in for.
+- **The host's fallback theme is module state, not a prop.**
+  `setDefaultThemeId()` in `lib/src/lib/themes/apply.ts` (the shape of
+  `shell-defaults.ts`) holds it, and `restoreActiveTheme()` takes no argument —
+  so every path that re-resolves the active theme gets the same answer. That
+  matters because uninstalling the active theme is reachable from two depths:
+  the picker row's `X` and the store dialog's `Remove`. While the fallback was a
+  prop the picker held, `Remove` called `restoreActiveTheme()` without it and
+  dropped to the first bundled theme instead of the host's. Declared once by
+  whoever boots the app — `useRestoredTheme()` latches it before its first
+  restore, ahead of any child render, because on the desktop Pocket page the
+  header's picker mounts before the component that calls the hook.
 - **No `window.confirm` here** — no native dialog anywhere, see `DESIGN.md` →
   "Don't", since the cause is the webview rather than the theme UI. The standalone webview
   implements no confirm panel, so WebKit resolves the call `false` without
@@ -225,8 +233,7 @@ playground navbar — carries no theme control.
   desktop app. Uninstalling an installed theme (the row's `X`, and the store
   dialog's `Remove`) is a single click, matching `WatchedCommandList`'s remove
   control in the same dialog; re-installing is one click away in the menu
-  footer. Removing the *active* installed theme falls back through
-  `defaultThemeId`, which the host threads down for that purpose.
+  footer.
 - Heights follow the viewport, never a fixed pixel budget. Both surfaces take
   their cap from `OVERLAY_MAX_HEIGHT` in `lib/src/components/design.tsx` — the
   dialog uses `.modal`, the dropdown `.popover` — rather than spelling a `dvh`
