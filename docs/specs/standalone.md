@@ -193,7 +193,8 @@ selection itself (`hostOwnsShells`, VS Code). Picking a shell persists the
 choice in `localStorage`, updates `setDefaultShellOpts`, and dispatches
 `dormouse:new-terminal` with `replaceUntouched: true, announce: true`, so an
 untouched selected terminal is replaced in place (`docs/specs/layout.md`, Shell
-selection replacement).
+selection replacement). The choice dismisses the Settings dialog before that
+replacement takes keyboard focus on the next animation frame.
 
 The workspace strip lands here when the workspaces rollout reaches stage 3 —
 `docs/specs/layout.md` `## Future` (workspaces-rollout).

@@ -18,6 +18,9 @@ export interface ShellPickerProps {
    *  otherwise swallow the key before the picker ever sees it). */
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Dismiss the parent Settings dialog after a choice, before the spawned
+   *  terminal takes focus on the next animation frame. */
+  onSelect: () => void;
 }
 
 /**
@@ -28,7 +31,7 @@ export interface ShellPickerProps {
  * The dialog's `showShell` gate is the single owner of whether this row exists
  * at all (too few shells, or a host that owns shell selection).
  */
-export function ShellPicker({ open, onOpenChange }: ShellPickerProps) {
+export function ShellPicker({ open, onOpenChange, onSelect }: ShellPickerProps) {
   const { shells, selected } = useSyncExternalStore(subscribeToShells, getShellsSnapshot);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -70,8 +73,9 @@ export function ShellPicker({ open, onOpenChange }: ShellPickerProps) {
                   aria-checked={isSelected}
                   className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-foreground/10"
                   onClick={() => {
-                    selectShell(shell);
                     onOpenChange(false);
+                    onSelect();
+                    selectShell(shell);
                   }}
                 >
                   {/* Fixed-width slot so the names line up whether or not the

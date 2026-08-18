@@ -129,6 +129,24 @@ describe('Baseboard settings controls', () => {
     expect(dialog?.querySelector('[aria-label="Shell: zsh"]')).not.toBeNull();
   });
 
+  it('closes Settings when a shell is selected', () => {
+    seedShellStore([
+      { name: 'zsh', path: '/bin/zsh' },
+      { name: 'bash', path: '/bin/bash' },
+    ]);
+
+    act(() => root.render(<Baseboard items={[]} onReattach={() => {}} />));
+    act(() => container.querySelector<HTMLButtonElement>('[data-open-settings]')?.click());
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Shell: zsh"]')?.click());
+    act(() => {
+      const bash = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
+        .find((item) => item.textContent?.includes('bash'));
+      bash?.click();
+    });
+
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
   it('hides the Shell row when the host owns shell selection', async () => {
     const platform = await import('../lib/platform');
     vi.spyOn(platform, 'getPlatform').mockReturnValue({

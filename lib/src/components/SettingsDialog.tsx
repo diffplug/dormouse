@@ -133,6 +133,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           <ShellPicker
             open={openMenu === 'shell'}
             onOpenChange={onShellOpenChange}
+            onSelect={onClose}
           />
         </section>
       ) : null}
