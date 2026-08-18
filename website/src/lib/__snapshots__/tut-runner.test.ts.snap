@@ -91,13 +91,25 @@ exports[`TutRunner snapshots > renders the top-level menu 1`] = `
   [1mDormouse Playground Tutorial[0m
   [2m[36mEsc[39m/[36mq[39m to exit · [36mEnter[39m to open · [36m↑↓[39m to navigate[0m
 
-  [36m❯[0m [1mKeyboard navigation[0m  [2m[0/7 complete][0m
+  [36m❯[0m [1mMake it yours[0m  [2m[0/1 complete][0m
+    Keyboard navigation  [2m[0/7 complete][0m
     Alerts and attention  [2m[0/9 complete][0m
     Copy paste  [2m[0/4 complete][0m
     Starred on GitHub  [2m[not yet][0m
-    🐭 FlappyTerm 🐭  [2m[LOCKED 0/20][0m
+    🐭 FlappyTerm 🐭  [2m[LOCKED 0/21][0m
 
     [2mReset progress[0m
 
+"
+`;
+
+exports[`TutRunner snapshots > starts the desktop tutorial inside Make it yours 1`] = `
+"[H[2J
+  [1mMake it yours[0m  [2m0/1 complete[0m
+  [2m[36mEsc[39m to go back[0m
+
+   [33m●[0m  [1mChange the theme[0m
+        [3mClick the [36msliders[39m icon at the bottom-right to open Settings, then pick a[0m
+        [3mtheme.[0m
 "
 `;

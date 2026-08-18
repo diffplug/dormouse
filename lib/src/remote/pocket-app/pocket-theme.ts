@@ -8,13 +8,10 @@
  * imports these modules and manages its own themes.
  */
 
-import { useEffect, useLayoutEffect, useRef } from 'react';
-import { getAppliedThemeSnapshot, restoreActiveTheme } from '../../lib/themes';
+import { getAppliedThemeSnapshot, restoreActiveTheme, useRestoredTheme } from '../../lib/themes';
 
 /** Same default theme the website playground restores, unless the user picked one. */
 export const POCKET_THEME_ID = 'vscode.theme-kimbie-dark.kimbie-dark';
-
-const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 export function restorePocketTheme(): void {
   const theme = restoreActiveTheme(POCKET_THEME_ID);
@@ -28,14 +25,5 @@ export function restorePocketTheme(): void {
 }
 
 export function usePocketTheme() {
-  const restoredRef = useRef(false);
-  if (!restoredRef.current) {
-    restorePocketTheme();
-    restoredRef.current = true;
-  }
-  // Repeat after hydration so the wall reads real theme variables even if
-  // React reconciled away render-time body styles.
-  useBrowserLayoutEffect(() => {
-    restorePocketTheme();
-  }, []);
+  useRestoredTheme(POCKET_THEME_ID, restorePocketTheme);
 }

@@ -13,7 +13,7 @@ The website playground has canonical device-specific routes:
 
 The `tut` TUI has two device profiles, defined in `website/src/lib/tut-items.ts` (`DESKTOP_TUTORIAL_PROFILE`, `POCKET_TUTORIAL_PROFILE`):
 
-- **Desktop** starts at the top-level menu; sections: Keyboard navigation, Alerts and attention, Copy paste. The alert section covers all three of the tracks in `docs/specs/alert.md` — the command-keyed WATCHING rule and how it spreads across panes, program-sent terminal reports, and a command exiting while the user was away.
+- **Desktop** starts directly inside Make it yours (`initialSectionId`); sections: Make it yours, Keyboard navigation, Alerts and attention, Copy paste. Make it yours is one item — change the theme — and is deliberately first *and* auto-opened, so the tutorial's opening ask is a mouse action taken before any keyboard vocabulary has been introduced. The alert section covers all three of the tracks in `docs/specs/alert.md` — the command-keyed WATCHING rule and how it spreads across panes, program-sent terminal reports, and a command exiting while the user was away.
 - **Pocket** starts directly inside Gesture navigation (`initialSectionId`); sections: Gesture navigation, Copy paste.
 
 All section/item titles, hints, and prose live in `tut-items.ts`; the menu, Flappy Term, and star copy live in `tut-runner.ts`. This spec does not duplicate that text. Item ids are stable — they are the localStorage key suffixes.
@@ -31,7 +31,7 @@ Three browser-side pieces in `website/src/lib/`, mirroring `ascii-splash-runner.
 
 ## Layout
 
-- `SiteHeader` at top with the `Theme:` dropdown on `/playground/desktop`. Header is `themeAware` so `--vscode-*` variables drive its chrome.
+- `SiteHeader` at top, `themeAware` so `--vscode-*` variables drive its chrome. It carries no controls: theme selection moved into the Wall's Settings dialog (`docs/specs/theme.md`), so the page restores its own theme with `useRestoredTheme(POCKET_THEME_ID)` (`lib/src/lib/themes/use-restored-theme.ts`) rather than relying on the picker mounting.
 - `<main>` is a flex container so Wall's `flex-1 min-h-0` root gets a real height.
 - `/playground/desktop` runs `Wall` (`FakePtyAdapter`, `initialMode="passthrough"`) in a deterministic three-pane L-shape from `DESKTOP_PLAYGROUND_LAYOUT` in `website/src/lib/playground-desktop-layout.ts`: a 50/50 root row makes one vertical divider, and the right child is a 50/50 column making one horizontal divider. The explicit valid Lath seed avoids the generic synchronous `initialPaneIds` path, whose later leaves have no measured geometry yet and therefore cannot reliably choose alternating axes. Header titles are seeded as pending shell opts (`setPendingShellOpts(id, { title })`) before the Wall mounts; the lib applies each as a user-pin at first spawn, which `deriveHeader` ranks above the engine fallback:
   - **`tut-main`** (left, ~50%) — auto-launches `TutRunner` (`mainShell.runCommand("tut")`), title "tutorial".
@@ -44,7 +44,7 @@ Every visible pane gets a `TutorialShell` input handler via `PlaygroundShellRegi
 
 ## Menu and navigation behavior
 
-The desktop runner opens at a top-level menu; Pocket starts inside Gesture navigation and Esc returns to its menu. Selecting a section drills into its item list, showing `[N/M complete]` per section. Inside a section, items render `✓` (green, complete), `●` (yellow active marker — intentionally static so runner re-renders don't feed the activity monitor), or `·` (dim, later). Esc / `q` pop back one screen (section → menu → exit); Ctrl+C exits the runner immediately from any screen; re-running `tut` re-enters. `Reset progress` returns to the profile's initial screen.
+Both runners open inside their profile's first section (`initialSectionId`) and Esc returns to the menu. Selecting a section drills into its item list, showing `[N/M complete]` per section. Inside a section, items render `✓` (green, complete), `●` (yellow active marker — intentionally static so runner re-renders don't feed the activity monitor), or `·` (dim, later). Esc / `q` pop back one screen (section → menu → exit); Ctrl+C exits the runner immediately from any screen; re-running `tut` re-enters. `Reset progress` returns to the profile's initial screen.
 
 Below the sections the menu lists `Starred on GitHub` (persisted separately, calls `onOpenGithub`) and `🐭 FlappyTerm 🐭`. Flappy is `[LOCKED N/M]` until all section checklist items are complete (the star and Flappy rows don't count toward `N/M`), then shows `[High score: N]` and unlocks a runner-local mini-game. The game-over screen cross-links the other surface: desktop `p` → `onOpenPocket`, Pocket `n` → `onNotifyPocket`. The page wires these callbacks (and their URLs) in `PocketTerminalExperience.tsx` and the desktop playground page.
 
@@ -106,6 +106,7 @@ These exist in `dormouse-lib` (or `MobileTerminalUi`) specifically so the browse
 - **`FakePtyAdapter.sendOutput(id, data)`** — pushes data through the real protocol parser as if the PTY produced it, driving `alertManager.onData()` for visible bytes and the notification/semantic-event paths for OSCs. This is what lets the alert demos fake shell integration and a program-sent notification without a real shell. Unlike `writePty`, it is not suppressed while a scenario is playing.
 - **`subscribeToWatchedCommands` / `getWatchedCommands`** (`lib/src/lib/watched-commands.ts`, re-exported from `terminal-registry`) — the WATCHING rule set, which `TutDetector` watches to credit `al-watch-cmd`.
 - **`MobileTerminalUi.onGestureInput(input, data)`** — optional callback fired only for radial-menu actions, so Pocket credits gesture items without mistaking native keyboard input for gestures.
+- **`subscribeToActiveTheme` / `getActiveThemeId`** (`lib/src/lib/themes/`) — the active theme, which `TutDetector` watches to credit `th-theme`. It fires only on a change to a *different* theme, and the detector additionally seeds the id at `start()`, so a page's boot-time `restoreActiveTheme()` cannot grant the item. The picker has no keyboard shortcut, so any change here is a mouse interaction.
 
 `SCENARIO_TUTORIAL_MOTD` was removed — the runner owns the main pane's screen.
 
@@ -113,7 +114,7 @@ These exist in `dormouse-lib` (or `MobileTerminalUi`) specifically so the browse
 
 Implemented in `dormouse-lib/lib/themes` and `dormouse-lib/components/ThemePicker`. Bundled themes are a small built-in VS Code set (`bundled.json`: Dark/Light Visual Studio, Monokai, Quiet Light, Red, Kimbie Dark, Abyss, and Selenized variants); users can install more from OpenVSX via the dropdown footer (`Install theme from OpenVSX`). Installed rows have an `X` delete control (requires browser confirmation); deleting the active installed theme falls back to the page's `defaultThemeId` (Kimbie Dark on the playground/Pocket pages), with the first bundled theme as last resort.
 
-The picker is labeled `Theme:` and appears on `/playground/desktop` (inside the theme-aware `SiteHeader`), `/playground/pocket` mobile (floating over the terminal), and the desktop Pocket page (standalone appbar variant). `/pocket` redirects before rendering one.
+On `/playground/desktop` the picker lives in the Wall's Settings dialog, opened from the sliders control at the far right of the baseboard (`docs/specs/theme.md` → "Where the user picks a theme"); the `th-theme` tutorial item is what walks the user there. The `compact` free-floating variant remains on `/playground/pocket` mobile (floating over the terminal) and the desktop Pocket page, both of which render a mobile prototype with no baseboard. `/pocket` redirects before rendering one.
 
 Each theme is a map of `--vscode-*` overrides. `applyTheme()` cascades them into `--color-*` (via `theme.css` fallbacks), triggers the `MutationObserver` in `lib/src/lib/terminal-theme.ts` to re-read `getTerminalTheme()` for xterm.js terminals, and updates Tailwind tokens. The active theme is restored on mount.
 

@@ -14,7 +14,7 @@ function MobilePocketPlaygroundPage() {
     <main className="fixed inset-0 bg-[var(--color-app-bg)] text-[var(--color-app-fg)]">
       <PocketTerminalExperience interactive fillViewport />
       <div className="absolute right-2 top-10 z-30 rounded border border-[var(--vscode-panel-border)] bg-[var(--vscode-editorWidget-background)]/95 px-1.5 py-1 text-[var(--vscode-editor-foreground)] shadow-lg">
-        <ThemePicker variant="standalone-appbar" defaultThemeId={POCKET_THEME_ID} />
+        <ThemePicker variant="compact" defaultThemeId={POCKET_THEME_ID} />
       </div>
     </main>
   );
@@ -26,7 +26,7 @@ function DesktopPocketPlaygroundPage() {
       <SiteHeader
         activePath="/pocket"
         style={STATIC_PAGE_HEADER_STYLE}
-        controls={<ThemePicker variant="standalone-appbar" defaultThemeId={POCKET_THEME_ID} />}
+        controls={<ThemePicker variant="compact" defaultThemeId={POCKET_THEME_ID} />}
       />
       <main className="mx-auto grid min-h-screen max-w-6xl items-center gap-10 px-4 pb-10 pt-24 md:grid-cols-[minmax(0,1fr)_minmax(320px,390px)] md:px-8 md:pt-28">
         <section className="max-w-2xl">

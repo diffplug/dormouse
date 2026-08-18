@@ -499,6 +499,17 @@ function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElem
       const modal = modalRef.current;
       if (!modal) return;
 
+      if (event.key !== 'Escape' && event.key !== 'Tab') return;
+
+      // A native modal <dialog> (ThemeStoreDialog, ThemeDebuggerDialog) sits in
+      // the browser's top layer and owns the keyboard with its own Tab/Escape
+      // handling. This listener is on window in the capture phase, so without
+      // this bail it would preventDefault every Tab and cycle focus back into
+      // the modal underneath — leaving the dialog's own fields untabbable.
+      // Kept below the key filter: it is a full-document query, and this
+      // handler runs for every keystroke while any modal is mounted.
+      if (document.querySelector('dialog[open]')) return;
+
       if (event.key === 'Escape') {
         if (onEscape) {
           event.preventDefault();

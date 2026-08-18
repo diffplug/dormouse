@@ -5,6 +5,23 @@ import { flattenSelectionAlpha } from './flatten-alpha';
 
 let appliedThemeSnapshot: AppliedThemeSnapshot | null = null;
 
+const activeThemeListeners = new Set<() => void>();
+
+/**
+ * Notified whenever a *different* theme is applied — the boot-time
+ * `restoreActiveTheme()` of an already-applied theme is a no-op here, and so is
+ * re-selecting the active theme in the picker.
+ *
+ * Deliberately not `onTerminalThemeChange()` (`terminal-theme.ts`), which
+ * watches resolved xterm palette JSON through a `MutationObserver` and fires on
+ * the first mutation after it starts. Consumers here want "the user picked a
+ * theme", so pair this with a seed read of `getActiveThemeId()`.
+ */
+export function subscribeToActiveTheme(listener: () => void): () => void {
+  activeThemeListeners.add(listener);
+  return () => activeThemeListeners.delete(listener);
+}
+
 export interface AppliedThemeSnapshot {
   theme: DormouseTheme;
   providedVars: Record<string, string>;
@@ -33,6 +50,10 @@ function hasVisibleTheme(snapshot: AppliedThemeSnapshot): boolean {
 export function applyTheme(theme: DormouseTheme): void {
   if (typeof document === 'undefined') return;
   if (theme === appliedThemeSnapshot?.theme && hasVisibleTheme(appliedThemeSnapshot)) return;
+
+  // Captured before the write: a hydration re-apply of the *same* theme still
+  // runs the body writes below, and must not be reported as a theme change.
+  const previousTheme = appliedThemeSnapshot?.theme ?? null;
 
   if (appliedThemeSnapshot && theme !== appliedThemeSnapshot.theme) {
     for (const name of Object.keys(appliedThemeSnapshot.resolvedVars)) {
@@ -68,6 +89,10 @@ export function applyTheme(theme: DormouseTheme): void {
   // the OS preference. Owned here so every non-VSCode host (standalone, website,
   // Pocket) inherits it from one place instead of guessing in each HTML shell.
   document.body.style.colorScheme = theme.type === 'light' ? 'light' : 'dark';
+
+  if (previousTheme !== theme) {
+    for (const listener of activeThemeListeners) listener();
+  }
 }
 
 /** Apply the persisted active theme. When nothing is persisted yet, fall

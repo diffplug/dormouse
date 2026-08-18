@@ -131,7 +131,7 @@ Clearing behavior:
 
 ## Alarm settings
 
-A second app-global store sits beside the WATCHING rule set: the alarm settings, edited in one dialog reached from the far right of the baseboard.
+A second app-global store sits beside the WATCHING rule set: the alarm settings, edited in the app-global **Settings** dialog reached from the far right of the baseboard (`lib/src/components/SettingsDialog.tsx`). That dialog also carries the theme picker on hosts that do not own the theme; the alarm sections specified here are the rest of it. Theme selection is specified in [theme.md](./theme.md) and keeps its own store — it is never folded into `AlertSettings`, which is relayed wholesale to the VS Code extension host.
 
 Source of truth: `AlertSettings` in `lib/src/lib/alert-settings.ts` (renderer mirror, persisted at `dormouse:alert-settings`) and `lib/src/lib/alert-settings-host.ts` (multi-renderer coordinator).
 
@@ -163,7 +163,7 @@ When a Session transitions into `ALERT_RINGING` and is still ringing `speakDelay
 - **The in-flight utterance set is bounded.** A dropped utterance (the WebKit wedge above) never fires a callback to retire itself, so the set that exists for teardown evicts its oldest entry past a small cap rather than pinning a handler closure per ring for the life of the app. An evicted utterance that does still fire settles normally; after teardown the generation token makes any late callback inert.
 - `speaking` / `spoken` remains only while the originating Session is still `ALERT_RINGING`. Any deliberate action that resolves the ring clears it: clicking or entering the Pane, typing in passthrough, clicking/pressing `Enter` on its Door, dismissing the bell, or marking/clearing TODO. Mere visibility, hover, or command-mode selection does not. Killing the Session also clears it. The state is not persisted or sent to the host, so restore/reconnect never recreates it.
 - Renderer-side, via `window.speechSynthesis`. Where that is absent — Tauri on Linux (WebKitGTK ships no speech backend), or a test environment — speaking is a silent no-op rather than an error. `speak()` is the single seam a native host path would replace.
-- Desktop shell only: `MobileWall` / Pocket does not arm it and has no settings UI.
+- Desktop shell only: `MobileWall` / Pocket does not arm it and has no settings UI (no baseboard, so no Settings dialog).
 
 ### Push notifications
 
@@ -184,7 +184,7 @@ Push and speech are independent: both fire when both are on, each on its own del
 
 ### Settings dialog
 
-Reached from a control at the far right of the baseboard; placement and the baseboard's right cluster belong to `docs/specs/layout.md`. Source of truth: `lib/src/components/AlertSettingsDialog.tsx`.
+Reached from any of the controls at the far right of the baseboard; placement and the baseboard's right cluster belong to `docs/specs/layout.md`. Source of truth: `lib/src/components/SettingsDialog.tsx`. The alarm sections below sit under the theme row specified in [theme.md](./theme.md); when that row is hidden (VS Code), the rule list is first and drops its section divider.
 
 - Lists every watched command with a remove control, and **cannot add one**. WATCHING is keyed on a running command's name, so creating a rule stays a bell click / `a` press in the tab running it; the empty state says so. This dialog and the bell dialog are the two places a rule set on a since-closed Pane can be found and removed — they render the same `WatchedCommandList`, so the list has one implementation.
 - Delays are shown in seconds and committed on blur or `Enter`, never per keystroke — typing `3` on the way to `30` must not briefly install a 3-second timer. An out-of-range or empty entry snaps back to whatever the store clamped it to.
@@ -276,6 +276,6 @@ Alert-specific robustness requirements: multiple Sessions ring independently; mi
 | `lib/src/components/wall/TerminalPaneHeader.tsx` | Bell button, TODO pill, notification preview |
 | `lib/src/components/wall/AlertSpeechIndicator.tsx` | Whole-Pane `SPEAKING` / `SPOKEN` treatment |
 | `lib/src/components/TodoAlertDialog.tsx` | TODO + WATCHING-rule switches, notification detail, watched-command list |
-| `lib/src/components/AlertSettingsDialog.tsx` | App-global Alarm settings: rule list, inactivity timeout, spoken alarms, push notifications |
+| `lib/src/components/SettingsDialog.tsx` | App-global Settings dialog: theme row (see [theme.md](./theme.md)), rule list, inactivity timeout, spoken alarms, push notifications |
 | `lib/src/components/WatchedCommandList.tsx` | The WATCHING rule set with per-rule remove, shared by both dialogs |
 | `lib/src/components/Door.tsx` | Door bell + TODO display |

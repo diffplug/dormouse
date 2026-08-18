@@ -36,16 +36,16 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('Baseboard alarm settings controls', () => {
+describe('Baseboard settings controls', () => {
   it('keeps separate speech, push, and general settings buttons', () => {
     act(() => root.render(<Baseboard items={[]} onReattach={() => {}} />));
 
-    expect(container.querySelectorAll('[data-alarm-setting]')).toHaveLength(3);
+    expect(container.querySelectorAll('[data-alarm-setting]')).toHaveLength(2);
     expect(container.querySelector('[data-alarm-setting="speech"]')?.getAttribute('aria-label'))
       .toContain('disabled');
     expect(container.querySelector('[data-alarm-setting="push"]')?.getAttribute('aria-label'))
       .toContain('disabled');
-    expect(container.querySelector('[data-alarm-setting="settings"]')).not.toBeNull();
+    expect(container.querySelector('[data-open-settings]')).not.toBeNull();
   });
 
   it('reflects enabled states and opens the shared dialog from a status button', () => {
@@ -62,6 +62,25 @@ describe('Baseboard alarm settings controls', () => {
     expect(push?.getAttribute('aria-label')).toContain('enabled');
 
     act(() => speech?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Alarm settings');
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain('Settings');
+    // Not a VS Code host, so the Theme row is offered (`hostOwnsTheme` absent).
+    expect(dialog?.textContent).toContain('Theme:');
+  });
+
+  it('hides the Theme row when the host owns the theme', async () => {
+    const platform = await import('../lib/platform');
+    vi.spyOn(platform, 'getPlatform').mockReturnValue({
+      alertPublishSettings: vi.fn(),
+      hostOwnsTheme: true,
+    } as unknown as ReturnType<typeof platform.getPlatform>);
+
+    act(() => root.render(<Baseboard items={[]} onReattach={() => {}} />));
+    const button = container.querySelector<HTMLButtonElement>('[data-open-settings]');
+    act(() => button?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain('Settings');
+    expect(dialog?.textContent).not.toContain('Theme:');
   });
 });

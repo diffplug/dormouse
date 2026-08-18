@@ -7,7 +7,9 @@ import {
   Shortcut,
   UNDER_SWITCH_INDENT,
 } from './design';
+import { ThemePicker } from './ThemePicker';
 import { WatchedCommandList } from './WatchedCommandList';
+import { getPlatform } from '../lib/platform';
 import {
   clampAlertDelayMs,
   getAlertSettings,
@@ -21,7 +23,10 @@ import {
   type PushDevicesState,
 } from '../lib/terminal-registry';
 
-const TITLE_ID = 'alert-settings-dialog-title';
+const TITLE_ID = 'settings-dialog-title';
+
+/** Every section but the first draws its own divider. */
+const SECTION = 'mt-4 border-t border-border pt-3';
 
 /**
  * The "Push will be sent to …" line. Every state names a cause, because a push
@@ -44,19 +49,25 @@ function describePushTargets(push: PushDevicesState): string {
 }
 
 /**
- * The app-global Alarm settings (`docs/specs/alert.md` -> Alarm settings),
- * opened from the far right of the baseboard.
+ * The app-global Settings dialog, opened from the far right of the baseboard.
+ * Theme first (`docs/specs/theme.md`), then the alarm settings
+ * (`docs/specs/alert.md` -> Alarm settings).
  *
  * Rules are removable here but not addable: WATCHING is keyed on a running
  * command's name, so a rule is created by pressing `a` in the tab running it.
  * This dialog and the bell popover are the two places a rule set on a
  * since-closed Pane can be found and removed.
  */
-export function AlertSettingsDialog({ onClose }: { onClose: () => void }) {
+export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const watched = useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);
   const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
   const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const [themeMenuOpen, setThemeMenuOpen] = useState(false);
+
+  // VS Code owns the theme and has its own picker, so Dormouse offers none
+  // there. Every other host sets its theme here rather than in host chrome.
+  const showTheme = !getPlatform().hostOwnsTheme;
 
   // A phone can enable alerts long after this machine booted, so re-read the
   // list on open rather than showing whatever was true at Host start.
@@ -70,16 +81,30 @@ export function AlertSettingsDialog({ onClose }: { onClose: () => void }) {
       overlayClassName="px-4 py-6"
       className="max-h-[85vh] w-full max-w-[26rem] overflow-y-auto"
       initialFocusRef={closeRef}
-      onEscape={onClose}
+      // ModalFrame's Escape handler is a capture-phase window listener that
+      // stops propagation, so the picker's own Escape never fires. Route it:
+      // the open dropdown closes first, the dialog only on the next press.
+      onEscape={() => (themeMenuOpen ? setThemeMenuOpen(false) : onClose())}
     >
       <div className="flex items-start gap-3">
         <h2 id={TITLE_ID} className="min-w-0 flex-1 text-sm leading-5 font-semibold text-foreground">
-          Alarm settings
+          Settings
         </h2>
         <ModalCloseButton ref={closeRef} onClick={onClose} />
       </div>
 
-      <section className="mt-4">
+      {showTheme ? (
+        <section className="mt-4 flex items-center gap-1.5 text-sm text-foreground">
+          <span>Theme:</span>
+          <ThemePicker
+            variant="settings-dialog"
+            open={themeMenuOpen}
+            onOpenChange={setThemeMenuOpen}
+          />
+        </section>
+      ) : null}
+
+      <section className={showTheme ? SECTION : 'mt-4'}>
         <div className="text-sm text-foreground">
           Animation watcher enabled for commands that start with:
         </div>
@@ -95,7 +120,7 @@ export function AlertSettingsDialog({ onClose }: { onClose: () => void }) {
         )}
       </section>
 
-      <section className="mt-4 border-t border-border pt-3">
+      <section className={SECTION}>
         <SecondsField
           label="Inactivity timeout:"
           valueMs={settings.inactivityTimeoutMs}
@@ -152,7 +177,7 @@ function AlarmSinkSection({
   children?: React.ReactNode;
 }) {
   return (
-    <section className="mt-4 border-t border-border pt-3">
+    <section className={SECTION}>
       <SwitchRow label={switchLabel} on={enabled} onChange={onToggle} />
       <div className={`mt-2 ${UNDER_SWITCH_INDENT} ${enabled ? '' : 'opacity-50'}`}>
         <SecondsField

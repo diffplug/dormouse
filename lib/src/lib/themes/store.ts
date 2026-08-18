@@ -85,5 +85,8 @@ export function getStoredActiveThemeId(): string | undefined {
 export function setActiveThemeId(id: string): void {
   const storage = getStorage();
   if (!storage) return;
+  // `restoreActiveTheme` re-persists the id it just read, which is the common
+  // case now that the picker remounts on every Settings-dialog open.
+  if (storage.getItem(ACTIVE_KEY) === id) return;
   storage.setItem(ACTIVE_KEY, id);
 }

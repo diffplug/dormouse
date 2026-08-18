@@ -13,6 +13,17 @@ Each platform adapter wraps a PTY-spawning runtime and a transport channel betwe
 | Standalone browser-dev | sidecar process + local dev HTTP bridge | fetch commands + Server-Sent Events |
 | Fake (tests, playground) | in-process | direct function calls / event emitter |
 
+Optional members of `PlatformAdapter` are capability flags: absent means "this
+host cannot do it", and the UI hides whatever is not backed by a capability
+rather than branching on which host it is running in. Two are plain booleans
+rather than methods:
+
+- `persistsSession?` — absent reads as `true`; standalone sets it `false` (see
+  "The governing rule" below).
+- `hostOwnsTheme?` — absent reads as `false`; `VSCodeAdapter` sets it `true`, so
+  the Settings dialog hides its theme picker there
+  (`docs/specs/theme.md` → "Where the user picks a theme").
+
 ### Standalone browser-dev harness
 
 Source of truth: `standalone/scripts/dev-agent-browser.mjs`, `standalone/src/browser-sidecar-host.ts`, and `standalone/src/browser-sidecar-adapter.ts`.
