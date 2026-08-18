@@ -120,6 +120,86 @@ jobs:
             qualitative finding is BLOCKER. Do not call `exit` — the
             workflow inspects the status file.
 
+      # The SDK transcript is the only record of what the audit actually
+      # did. `claude-code-action` keeps it out of the logs on purpose
+      # (`show_full_output` stays off so tool output cannot leak into a
+      # public log), and the runner is ephemeral — so without this upload
+      # a run that finishes without writing a verdict is undiagnosable
+      # after the fact, which is exactly the failure this archive exists
+      # to explain. Uploaded unconditionally: a PASS transcript is the
+      # baseline you compare a bad one against.
+      #
+      # This repo is public, so the artifact is world-readable. That is
+      # consistent with the audit reports already posted to public
+      # issues. It is NOT consistent with log masking: `***` redaction
+      # applies to step logs, not to artifact contents, and the SDK
+      # serializes every message into this file — Bash `tool_result`
+      # bodies included — so raw tool output ships verbatim.
+      #
+      # The prompt only passes `$AUDIT_PAT` through an unexpanded
+      # `GH_TOKEN=` prefix and `gh api` never returns secret values, but
+      # that is a convention, not a control: the agent holds unrestricted
+      # Bash and is asked to audit code that touches secrets, so one
+      # `printenv` or one `set -x` would publish an admin-read PAT for
+      # the artifact's whole retention. The step below strips the values
+      # verbatim first. That does not stop an agent that encodes a
+      # secret, but it closes the accidental-print path, which is the
+      # one that actually happens.
+      # Both sinks, not just the archive. `audit-report.md` is `cat` into a
+      # public issue, which outlives the artifact's 14 days, is indexed, and
+      # is emailed to subscribers — and the prompt asks for evidence as
+      # "API response excerpt, or command output", so it invites exactly the
+      # paste this guards against.
+      #
+      # Fail closed. `Archive audit transcript` below is `if: always()` and
+      # does not depend on this step's outcome, so a throwing redactor would
+      # otherwise ship the raw file: on any error, delete every sink
+      # instead. Deleted rather than truncated — `: >` has to open the file
+      # and so fails on exactly the unreadable file that made the redactor
+      # throw, whereas `rm` needs only the directory. A nonzero count is not routine — it means a secret reached
+      # a file in cleartext — so it surfaces as an annotation rather than a
+      # log line, and the right response is to rotate.
+      - name: Redact secrets from agent output
+        if: always()
+        env:
+          AUDIT_PAT: ${{ secrets.AUDIT_PAT }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          TRANSCRIPT="$RUNNER_TEMP/claude-execution-output.json"
+          node -e '
+            const fs = require("fs");
+            let hits = 0;
+            for (const p of process.argv.slice(1)) {
+              if (!fs.existsSync(p)) continue;
+              let s = fs.readFileSync(p, "utf8");
+              for (const name of ["AUDIT_PAT", "CLAUDE_CODE_OAUTH_TOKEN"]) {
+                const v = process.env[name];
+                // Guard against a short or empty value turning into a
+                // global replace of something innocuous.
+                if (!v || v.length < 8) continue;
+                const parts = s.split(v);
+                hits += parts.length - 1;
+                s = parts.join("***");
+              }
+              fs.writeFileSync(p, s);
+            }
+            if (hits > 0) {
+              console.log("::warning::Redacted " + hits + " literal secret occurrence(s) from agent output. A secret reached a file in cleartext — rotate AUDIT_PAT and CLAUDE_CODE_OAUTH_TOKEN.");
+            } else {
+              console.log("No literal secret occurrences found.");
+            }
+          ' "$TRANSCRIPT" audit-report.md \
+            || { rm -f "$TRANSCRIPT" audit-report.md; exit 1; }
+
+      - name: Archive audit transcript
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: audit-transcript
+          path: ${{ runner.temp }}/claude-execution-output.json
+          retention-days: 14
+          if-no-files-found: warn
+
       - name: Surface result, file or close issue
         if: always()
         env:
@@ -127,7 +207,27 @@ jobs:
         run: |
           set -eo pipefail
 
-          STATUS=$(tr -d '[:space:]' < audit-status.txt 2>/dev/null || echo "FAIL")
+          # Three outcomes, not two. PASS and FAIL are verdicts the audit
+          # reached; MISSING means it never reached one — the agent ended
+          # its turn without writing the status file (observed on runs
+          # 31927560706 and 32100728239, both of which reported SDK
+          # success and simply never called Write). Collapsing MISSING
+          # into FAIL, as this step used to, files an identical issue for
+          # "the repo is insecure" and "the auditor stopped early",
+          # leaving no way to tell a real finding from a no-op run.
+          #
+          # MISSING still exits non-zero and still files under
+          # `security-audit-failure`: an audit that produced no verdict
+          # must not let the release gate in `release.yml` pass, and a
+          # later PASS should auto-close it like any other failure.
+          if [ -s audit-status.txt ]; then
+            STATUS=$(tr -d '[:space:]' < audit-status.txt)
+          fi
+          case "${STATUS:-}" in
+            PASS|FAIL) ;;
+            *) STATUS=MISSING ;;
+          esac
+
           DATE=$(date -u +%Y-%m-%dT%H:%MZ)
           RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
@@ -146,26 +246,80 @@ jobs:
             exit 0
           fi
 
-          if [ ! -s audit-report.md ]; then
-            printf '%s\n' \
-              "Audit step produced no \`audit-report.md\`. See workflow run logs." \
-              > audit-report.md
+          # Deep-link the transcript so the issue points at the evidence
+          # rather than at a run page the reader has to dig through. The
+          # id lookup needs `actions: read`, which this job holds. Left
+          # empty when there is no artifact — a run cancelled on
+          # `timeout-minutes` never writes the execution file, and those
+          # are exactly the runs a link to the run page would dead-end on,
+          # so both consumers below are gated rather than falling back.
+          ART_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+                     --jq '.artifacts[] | select(.name == "audit-transcript") | .id' \
+                     2>/dev/null | head -n1 || true)
+          if [ -n "$ART_ID" ]; then
+            TRANSCRIPT_URL="$RUN_URL/artifacts/$ART_ID"
+          else
+            TRANSCRIPT_URL=""
           fi
 
-          {
-            echo "Audit failed at $DATE. [Run]($RUN_URL)"
-            echo
-            cat audit-report.md
-          } > audit-comment.md
+          if [ "$STATUS" = "MISSING" ]; then
+            TITLE="[security-audit] INCONCLUSIVE on $(date -u +%Y-%m-%d)"
+            {
+              echo "Audit produced no verdict at $DATE. [Run]($RUN_URL)"
+              echo
+              echo "The audit step exited without writing \`audit-status.txt\`."
+              if [ -s audit-report.md ]; then
+                echo "It did leave a partial \`audit-report.md\`, reproduced below,"
+                echo "which may itself contain a real finding — read it first. The"
+                echo "prompt writes the report before the status file, so a report"
+                echo "without a verdict is the expected shape of a session that died"
+                echo "mid-write."
+              else
+                echo "**This is not a security finding** — the audit did not reach"
+                echo "one. Treat it as a failed audit run, not a failed audit."
+              fi
+              if [ -n "$TRANSCRIPT_URL" ]; then
+                echo
+                echo "[Download the transcript]($TRANSCRIPT_URL) to see where it stopped."
+              fi
+              if [ -s audit-report.md ]; then
+                echo
+                echo "---"
+                echo
+                cat audit-report.md
+              fi
+            } > audit-comment.md
+          else
+            TITLE="[security-audit] FAIL on $(date -u +%Y-%m-%d)"
+            if [ ! -s audit-report.md ]; then
+              printf '%s\n' \
+                "Audit reported FAIL but wrote no \`audit-report.md\`." \
+                > audit-report.md
+            fi
+            {
+              LINKS="[Run]($RUN_URL)"
+              [ -n "$TRANSCRIPT_URL" ] && LINKS="$LINKS · [Transcript]($TRANSCRIPT_URL)"
+              echo "Audit failed at $DATE. $LINKS"
+              echo
+              cat audit-report.md
+            } > audit-comment.md
+          fi
 
           EXISTING=$(gh issue list --label security-audit-failure \
                        --state open --json number --jq '.[0].number' || true)
           if [ -n "$EXISTING" ]; then
             gh issue comment "$EXISTING" --body-file audit-comment.md
-            echo "Appended re-audit failure to issue #$EXISTING"
+            # Upward only. FAIL is the ceiling: an inconclusive run must not
+            # relabel an issue that already carries real findings, and the
+            # title never needs walking back down because a PASS closes the
+            # issue outright.
+            if [ "$STATUS" = "FAIL" ]; then
+              gh issue edit "$EXISTING" --title "$TITLE"
+            fi
+            echo "Appended $STATUS to issue #$EXISTING"
           else
             gh issue create \
-              --title "[security-audit] FAIL on $(date -u +%Y-%m-%d)" \
+              --title "$TITLE" \
               --label security-audit-failure \
               --body-file audit-comment.md
           fi
