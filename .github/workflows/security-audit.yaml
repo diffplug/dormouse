@@ -145,31 +145,51 @@ jobs:
       # verbatim first. That does not stop an agent that encodes a
       # secret, but it closes the accidental-print path, which is the
       # one that actually happens.
-      - name: Redact secrets from transcript
+      # Both sinks, not just the archive. `audit-report.md` is `cat` into a
+      # public issue, which outlives the artifact's 14 days, is indexed, and
+      # is emailed to subscribers — and the prompt asks for evidence as
+      # "API response excerpt, or command output", so it invites exactly the
+      # paste this guards against.
+      #
+      # Fail closed. `Archive audit transcript` below is `if: always()` and
+      # does not depend on this step's outcome, so a throwing redactor would
+      # otherwise ship the raw file: on any error, delete every sink
+      # instead. Deleted rather than truncated — `: >` has to open the file
+      # and so fails on exactly the unreadable file that made the redactor
+      # throw, whereas `rm` needs only the directory. A nonzero count is not routine — it means a secret reached
+      # a file in cleartext — so it surfaces as an annotation rather than a
+      # log line, and the right response is to rotate.
+      - name: Redact secrets from agent output
         if: always()
         env:
           AUDIT_PAT: ${{ secrets.AUDIT_PAT }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
-          f="$RUNNER_TEMP/claude-execution-output.json"
-          [ -f "$f" ] || exit 0
+          TRANSCRIPT="$RUNNER_TEMP/claude-execution-output.json"
           node -e '
             const fs = require("fs");
-            const p = process.argv[1];
-            let s = fs.readFileSync(p, "utf8");
             let hits = 0;
-            for (const name of ["AUDIT_PAT", "CLAUDE_CODE_OAUTH_TOKEN"]) {
-              const v = process.env[name];
-              // Guard against a short or empty value turning into a
-              // global replace of something innocuous.
-              if (!v || v.length < 8) continue;
-              const parts = s.split(v);
-              hits += parts.length - 1;
-              s = parts.join("***");
+            for (const p of process.argv.slice(1)) {
+              if (!fs.existsSync(p)) continue;
+              let s = fs.readFileSync(p, "utf8");
+              for (const name of ["AUDIT_PAT", "CLAUDE_CODE_OAUTH_TOKEN"]) {
+                const v = process.env[name];
+                // Guard against a short or empty value turning into a
+                // global replace of something innocuous.
+                if (!v || v.length < 8) continue;
+                const parts = s.split(v);
+                hits += parts.length - 1;
+                s = parts.join("***");
+              }
+              fs.writeFileSync(p, s);
             }
-            fs.writeFileSync(p, s);
-            console.log(`redacted ${hits} literal secret occurrence(s)`);
-          ' "$f"
+            if (hits > 0) {
+              console.log("::warning::Redacted " + hits + " literal secret occurrence(s) from agent output. A secret reached a file in cleartext — rotate AUDIT_PAT and CLAUDE_CODE_OAUTH_TOKEN.");
+            } else {
+              console.log("No literal secret occurrences found.");
+            }
+          ' "$TRANSCRIPT" audit-report.md \
+            || { rm -f "$TRANSCRIPT" audit-report.md; exit 1; }
 
       - name: Archive audit transcript
         if: always()
@@ -228,8 +248,11 @@ jobs:
 
           # Deep-link the transcript so the issue points at the evidence
           # rather than at a run page the reader has to dig through. The
-          # id lookup needs `actions: read`, which this job holds; fall
-          # back to the run URL if the artifact expired or never uploaded.
+          # id lookup needs `actions: read`, which this job holds. Left
+          # empty when there is no artifact — a run cancelled on
+          # `timeout-minutes` never writes the execution file, and those
+          # are exactly the runs a link to the run page would dead-end on,
+          # so both consumers below are gated rather than falling back.
           ART_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
                      --jq '.artifacts[] | select(.name == "audit-transcript") | .id' \
                      2>/dev/null | head -n1 || true)
@@ -286,8 +309,14 @@ jobs:
                        --state open --json number --jq '.[0].number' || true)
           if [ -n "$EXISTING" ]; then
             gh issue comment "$EXISTING" --body-file audit-comment.md
-            gh issue edit "$EXISTING" --title "$TITLE"
-            echo "Appended $STATUS to issue #$EXISTING (retitled: $TITLE)"
+            # Upward only. FAIL is the ceiling: an inconclusive run must not
+            # relabel an issue that already carries real findings, and the
+            # title never needs walking back down because a PASS closes the
+            # issue outright.
+            if [ "$STATUS" = "FAIL" ]; then
+              gh issue edit "$EXISTING" --title "$TITLE"
+            fi
+            echo "Appended $STATUS to issue #$EXISTING"
           else
             gh issue create \
               --title "$TITLE" \

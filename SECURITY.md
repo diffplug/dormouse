@@ -83,7 +83,7 @@ An attacker who lands a prompt injection in tend's harness can reach three secre
 
 The VS Code extension is published by GitHub Actions. The secrets which allow this publish are `VSCE_PAT` and `OVSX_PAT`. These secrets are contained only within a protected GitHub environment. The environment requires a human to manually approve, and it can't be the same account which triggered the publish. This prevents a single compromised tag or maintainer account from immediately publishing a new extension version without an explicit release approval.
 
-- FAIL IF `.github/workflows/release.yml` is missing the `vscode-extension-publish` environment on the VS Code publish job, or references `VSCE_PAT` / `OVSX_PAT` from any job not bound to that environment.
+- FAIL IF `.github/workflows/release.yml` is missing the `vscode-extension-publish` environment on the VS Code publish job, or if `VSCE_PAT` / `OVSX_PAT` are referenced anywhere under `.github/workflows/**` from a job not bound to that environment. The second clause is repo-wide on purpose: scoping it to `release.yml` would let a reference from another workflow file pass unremarked.
 - FAIL IF `.github/workflows/release.yml` uses production desktop signing secrets in CI, or stops generating an ephemeral Tauri updater key for unsigned CI artifacts.
 
 ## Desktop Releases
