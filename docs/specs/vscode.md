@@ -298,6 +298,12 @@ Absence *is* the miss: a webview that owns nothing the request named answers wit
 
 The one field the transport itself reads out of an answer is a reserved `ptyId` (`routedPtyId`): an answer naming a PTY is claiming it, which is how the cross-window broker learns which window that PTY lives in. Nothing else about an answer is interpreted below the Host.
 
+Peer query results are snapshots, so the same bridge carries generic topic
+invalidations. Every webview announces `directory` when local pane state,
+activity, or focus changes; webview/window membership changes invalidate all
+topics. The Host subscribes to that topic and coalesces a fresh fan-out rather
+than retaining the old directory indefinitely.
+
 `attach` and `resize` on a foreign surface go to the owner rather than to the PTY, because attach-is-the-resize has to drive the live xterm or the owning pane's own view drifts from the size the phone set. The owner replies with the size it settled at and the `ptyId`; the Host then subscribes and streams. `detach` has nothing to undo on the owner — the Host stops streaming and the pane keeps its size, which is what last-attach-wins means.
 
 **Which webview owns a pane never reaches the protocol layer.** `resolveSurface(surfaceId, size)` answers with a `SurfaceHandle` — `ptyId`, the size it stands at, `resize`, `release` — or `null` if nobody owns it, and `remote-api.ts` holds one of those per attachment. That is the same trick the rest of the feature already plays: foreign `pty:data` is injected into the ordinary data path and `pty:input` / `pty:resize` route by table before falling back to the local manager, so `terminal.write` has no branch either. It makes local attach asynchronous too, which is the honest shape — a pane in another window *is* a round trip away, and the alternative was one path that answered synchronously and one that did not.

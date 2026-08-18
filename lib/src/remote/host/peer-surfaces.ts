@@ -23,7 +23,9 @@
 
 import { clampTerminalDimension, type DirectoryEntry } from 'server-lib-common';
 import { getPlatform } from '../../lib/platform';
+import { subscribeToActivity } from '../../lib/session-activity-store';
 import { registry } from '../../lib/terminal-store';
+import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
 import { collectDirectorySnapshot } from './directory-collect';
 
 /** What the Host can ask the owner of a surface to do with it. */
@@ -124,4 +126,14 @@ function driveOwnSurface({ surfaceId, op, cols, rows }: PeerSurfaceParams): Peer
 export function installPeerSurfaceResponder(): void {
   answerPeers('directory', () => collectDirectorySnapshot());
   answerPeers('surfaceOp', driveOwnSurface);
+
+  const peers = getPlatform().peers;
+  if (!peers) return;
+  const notifyDirectory = () => peers.notify('directory');
+  subscribeToTerminalPaneState(notifyDirectory);
+  subscribeToActivity(notifyDirectory);
+  if (typeof document !== 'undefined') {
+    document.addEventListener('focusin', notifyDirectory);
+    document.addEventListener('focusout', notifyDirectory);
+  }
 }

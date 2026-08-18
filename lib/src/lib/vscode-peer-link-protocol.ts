@@ -51,7 +51,9 @@ export type PeerLinkResponse =
   /** Unsolicited: bytes from a PTY the broker subscribed to. */
   | { kind: 'data'; ptyId: string; data: string }
   /** Unsolicited: that PTY ended. */
-  | { kind: 'exit'; ptyId: string; exitCode: number };
+  | { kind: 'exit'; ptyId: string; exitCode: number }
+  /** Unsolicited: future peer-query answers for this topic may differ. */
+  | { kind: 'notify'; topic: string | null };
 
 export type PeerLinkFrame = PeerLinkRequest | PeerLinkResponse;
 

@@ -164,6 +164,11 @@ any change the Host coalesces (150ms window, `DIRECTORY_DEBOUNCE_MS`) and
 resends the whole thing. Delta events are a future optimization there is no
 current reason to pay for.
 
+In VS Code, peer webviews and windows signal directory invalidation whenever
+their pane state, activity, focus, or membership changes. The Host feeds that
+signal through the same coalescer and re-queries all peers before sending the
+replacement snapshot.
+
 The picker renders from titles, activity, and the `ringing`/`hasTODO` badges;
 thumbnails are staged (see [Future](#future)). Browser panes are not listed;
 iframe surfaces additionally refuse attachment by design (see

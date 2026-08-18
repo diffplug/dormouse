@@ -43,6 +43,7 @@ export class VSCodeAdapter implements PlatformAdapter {
   private watchedCommandHandlers = new Set<(names: string[]) => void>();
   private alertSettingsHandlers = new Set<(settings: AlertSettings) => void>();
   private singletonHandlers = new Map<string, (held: boolean) => void>();
+  private peerChangeHandlers = new Map<string, Set<() => void>>();
   /** Hydrated host-store caches, by claimed prefix — see `hydrateScopedStore`. */
   private scopedCaches = new Map<string, Map<string, string>>();
   /**
@@ -192,6 +193,14 @@ export class VSCodeAdapter implements PlatformAdapter {
           requestId: msg.requestId,
           results: this.peerResponders.get(msg.op)?.(msg.params) ?? [],
         });
+      } else if (msg.type === 'peer:changed') {
+        if (msg.topic === null) {
+          for (const handlers of this.peerChangeHandlers.values()) {
+            for (const handler of handlers) handler();
+          }
+        } else {
+          for (const handler of this.peerChangeHandlers.get(msg.topic) ?? []) handler();
+        }
       }
     });
   }
@@ -267,6 +276,21 @@ export class VSCodeAdapter implements PlatformAdapter {
     },
     respond: (op, handler) => {
       this.peerResponders.set(op, handler);
+    },
+    notify: (topic) => {
+      this.vscode.postMessage({ type: 'peer:notify', topic });
+    },
+    subscribe: (topic, listener) => {
+      let handlers = this.peerChangeHandlers.get(topic);
+      if (!handlers) {
+        handlers = new Set();
+        this.peerChangeHandlers.set(topic, handlers);
+      }
+      handlers.add(listener);
+      return () => {
+        handlers!.delete(listener);
+        if (handlers!.size === 0) this.peerChangeHandlers.delete(topic);
+      };
     },
     streamPty: (ptyId) => {
       this.vscode.postMessage({ type: 'pty:subscribe', id: ptyId });

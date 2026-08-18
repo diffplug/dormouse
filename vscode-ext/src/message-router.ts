@@ -27,6 +27,7 @@ import { ensureWindowLease } from './window-lease';
 import {
   configurePeerLink,
   isRemotePty,
+  remoteNotifyPeerChange,
   remoteRequest,
   remoteResize,
   remoteSubscribe,
@@ -134,6 +135,7 @@ interface ActiveRouter {
   forwardDorControlRequest(request: DorControlRequest): void;
   notifyStoreChanged(key: string, value: string | null): void;
   notifyStoreSnapshot(prefix: string, entries: Record<string, string>): Thenable<boolean>;
+  notifyPeerChanged(topic: string | null): void;
   deliverForeignData(ptyId: string, data: string): void;
   deliverForeignExit(ptyId: string, exitCode: number): void;
   ask(requestId: string, op: string, params: unknown): void;
@@ -154,6 +156,7 @@ const peerRequests = new Map<string, PendingRequest>();
 // would reach them again, so it only ever gets the in-window broker.
 configurePeerLink({
   brokerRequest,
+  deliverRemotePeerChange,
   deliverRemotePtyData,
   deliverRemotePtyExit,
   onProcessedPtyData,
@@ -218,6 +221,16 @@ function deliverRemotePtyData(ptyId: string, data: string): void {
 /** As {@link deliverRemotePtyData}, for that PTY ending. */
 function deliverRemotePtyExit(ptyId: string, exitCode: number): void {
   for (const router of activeRouters) router.deliverForeignExit(ptyId, exitCode);
+}
+
+function deliverRemotePeerChange(topic: string | null): void {
+  broadcastPeerChange(topic);
+}
+
+function broadcastPeerChange(topic: string | null, exclude?: ActiveRouter): void {
+  for (const router of activeRouters) {
+    if (router !== exclude) router.notifyPeerChanged(topic);
+  }
 }
 
 /**
@@ -755,6 +768,11 @@ export function attachRouter(
         if (request.pending.size === 0) request.settle();
         break;
       }
+      case 'peer:notify':
+        if (typeof msg.topic !== 'string') break;
+        broadcastPeerChange(msg.topic, router);
+        remoteNotifyPeerChange(msg.topic);
+        break;
       case 'singleton:claim':
         // `WebviewMessage` is a claim about the sender, not a runtime check.
         if (typeof msg.name !== 'string') break;
@@ -957,6 +975,10 @@ export function attachRouter(
     notifyStoreSnapshot(prefix: string, entries: Record<string, string>) {
       return post({ type: 'store:snapshot', prefix, entries } satisfies ExtensionMessage);
     },
+    notifyPeerChanged(topic: string | null) {
+      if (disposed) return;
+      void post({ type: 'peer:changed', topic } satisfies ExtensionMessage);
+    },
     ask(requestId: string, op: string, params: unknown) {
       if (disposed) return;
       void post({ type: 'peer:ask', requestId, op, params } satisfies ExtensionMessage);
@@ -973,6 +995,8 @@ export function attachRouter(
       if (disposed) return;
       disposed = true;
       activeRouters.delete(router);
+      broadcastPeerChange(null);
+      remoteNotifyPeerChange(null);
       // A webview that goes away mid-fan-out must not hold the answer open.
       for (const request of peerRequests.values()) {
         if (!request.pending.delete(router)) continue;
@@ -998,5 +1022,7 @@ export function attachRouter(
   };
 
   activeRouters.add(router);
+  broadcastPeerChange(null, router);
+  remoteNotifyPeerChange(null);
   return router;
 }

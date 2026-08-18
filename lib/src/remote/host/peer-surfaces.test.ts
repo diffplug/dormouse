@@ -31,6 +31,7 @@ class PeerPlatform {
   readonly subscribed: string[] = [];
   readonly unsubscribed: string[] = [];
   readonly ops: Array<{ surfaceId: string; op: string; cols?: number; rows?: number }> = [];
+  readonly peerChangeHandlers = new Map<string, Set<() => void>>();
 
   /** Surfaces the imaginary sibling webview owns. */
   peerSurfaces = new Map<string, { ptyId: string; cols: number; rows: number }>();
@@ -56,6 +57,16 @@ class PeerPlatform {
       return [{ ptyId: surface.ptyId, cols: surface.cols, rows: surface.rows }];
     },
     respond: () => {},
+    notify: () => {},
+    subscribe: (topic: string, listener: () => void) => {
+      let handlers = this.peerChangeHandlers.get(topic);
+      if (!handlers) {
+        handlers = new Set();
+        this.peerChangeHandlers.set(topic, handlers);
+      }
+      handlers.add(listener);
+      return () => void handlers!.delete(listener);
+    },
     streamPty: (id: string) => {
       this.subscribed.push(id);
       return () => void this.unsubscribed.push(id);
@@ -76,6 +87,9 @@ class PeerPlatform {
   }
   emitData(id: string, data: string): void {
     for (const handler of this.dataHandlers) handler({ id, data });
+  }
+  emitPeerChange(topic: string): void {
+    for (const handler of this.peerChangeHandlers.get(topic) ?? []) handler();
   }
   asAdapter(): PlatformAdapter {
     return this as unknown as PlatformAdapter;
@@ -253,5 +267,22 @@ describe('remote-api peer surfaces', () => {
     // The phone should not wait on a round trip to see this window's own panes.
     expect(snapshots.length).toBe(2);
     expect(snapshots[1]).toEqual([{ surfaceId: 'surface-far', title: 'other webview' }]);
+  });
+
+  it('resnapshots when a peer directory changes', async () => {
+    const platform = new PeerPlatform();
+    platform.peerEntries = [{ surfaceId: 'surface-far', title: 'before' }];
+    const { api, sent } = session(platform);
+    api.handle({ requestId: 'dir-1', method: REMOTE_METHODS.directoryWatch, params: {} });
+    await settle();
+
+    platform.peerEntries = [{ surfaceId: 'surface-far', title: 'after' }];
+    platform.emitPeerChange('directory');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const snapshots = sent
+      .filter((p) => (p as RemoteEventMsg).event === REMOTE_EVENTS.directorySnapshot)
+      .map((p) => ((p as RemoteEventMsg).data as { entries: unknown[] }).entries);
+    expect(snapshots.at(-1)).toEqual([{ surfaceId: 'surface-far', title: 'after' }]);
   });
 });

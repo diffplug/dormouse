@@ -177,6 +177,7 @@ export class RemoteApiSession {
     const trigger = () => this.#scheduleDirectory();
     const unsubPane = subscribeToTerminalPaneState(trigger);
     const unsubActivity = subscribeToActivity(trigger);
+    const unsubPeers = getPlatform().peers?.subscribe('directory', trigger);
     const hasDocument = typeof document !== 'undefined';
     if (hasDocument) {
       document.addEventListener('focusin', trigger);
@@ -185,6 +186,7 @@ export class RemoteApiSession {
     this.#unsubDirectory = () => {
       unsubPane();
       unsubActivity();
+      unsubPeers?.();
       if (hasDocument) {
         document.removeEventListener('focusin', trigger);
         document.removeEventListener('focusout', trigger);

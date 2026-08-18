@@ -51,6 +51,7 @@ export interface PeerLinkDeps {
   brokerRequest(op: string, params: unknown): Promise<unknown[]>;
   deliverRemotePtyData(ptyId: string, data: string): void;
   deliverRemotePtyExit(ptyId: string, exitCode: number): void;
+  deliverRemotePeerChange(topic: string | null): void;
   onProcessedPtyData(listener: (id: string, data: string) => void): () => void;
   writePty(ptyId: string, data: string): void;
   resizePty(ptyId: string, cols: number, rows: number): void;
@@ -216,10 +217,11 @@ export function remoteResize(ptyId: string, cols: number, rows: number): boolean
 }
 
 function dropClient(client: PeerClient): void {
-  clients.delete(client);
+  const wasAuthenticated = clients.delete(client) && client.authenticated;
   // A window that went away takes its terminals with it; a later write must not
   // be routed into a dead socket.
   for (const ptyId of forgetPeerRoutes(routes, client)) deps?.deliverRemotePtyExit(ptyId, 0);
+  if (wasAuthenticated) deps?.deliverRemotePeerChange(null);
   client.socket.destroy();
 }
 
@@ -236,6 +238,9 @@ function onServerFrame(client: PeerClient, frame: unknown): void {
       return;
     }
     client.authenticated = true;
+    // Joining changes the answer set even if no surface changed while the
+    // socket was down, so every peer-backed snapshot must be reconsidered.
+    deps?.deliverRemotePeerChange(null);
     return;
   }
 
@@ -247,6 +252,10 @@ function onServerFrame(client: PeerClient, frame: unknown): void {
   if (response.kind === 'exit') {
     routes.delete(response.ptyId);
     deps?.deliverRemotePtyExit(response.ptyId, response.exitCode);
+    return;
+  }
+  if (response.kind === 'notify') {
+    deps?.deliverRemotePeerChange(response.topic);
     return;
   }
   if ('id' in response) pendingRequests.get(response.id)?.(response);
@@ -308,11 +317,22 @@ async function stopServer(): Promise<void> {
 let client: Socket | null = null;
 let clientRetry: ReturnType<typeof setTimeout> | null = null;
 let rendezvousWatcher: FSWatcher | null = null;
+const pendingNotifications = new Set<string | null>();
 /** PTYs this window is streaming to the broker, and how to stop. */
 const forwarding = new Map<string, () => void>();
 
 function respond(frame: PeerLinkResponse): void {
   client?.write(encodeFrame(frame));
+}
+
+export function remoteNotifyPeerChange(topic: string | null): void {
+  // The broker is the destination; its in-window routers were notified directly.
+  if (server) return;
+  if (!client || client.destroyed) {
+    pendingNotifications.add(topic);
+    return;
+  }
+  respond({ kind: 'notify', topic });
 }
 
 async function onClientFrame(frame: unknown): Promise<void> {
@@ -378,6 +398,8 @@ async function connectClient(): Promise<void> {
   socket.setEncoding('utf8');
   socket.on('connect', () => {
     socket.write(encodeFrame({ kind: 'hello', token: rendezvous.token }));
+    for (const topic of pendingNotifications) socket.write(encodeFrame({ kind: 'notify', topic }));
+    pendingNotifications.clear();
     log.info('[peer-link] connected to the broker window');
   });
   socket.on('data', (chunk: string) => {

@@ -38,6 +38,7 @@ export type WebviewMessage =
   | { type: 'pty:unsubscribe'; id: string }
   | { type: 'peer:request'; requestId: string; op: string; params: unknown }
   | { type: 'peer:answer'; requestId: string; results: unknown[] }
+  | { type: 'peer:notify'; topic: string }
   | { type: 'store:read'; prefix: string; requestId: string }
   | { type: 'store:write'; key: string; value: string | null }
   | { type: 'dormouse:init' }
@@ -91,6 +92,7 @@ export type ExtensionMessage =
   | { type: 'store:snapshot'; prefix: string; entries: Record<string, string> }
   | { type: 'peer:ask'; requestId: string; op: string; params: unknown }
   | { type: 'peer:results'; requestId: string; results: unknown[] }
+  | { type: 'peer:changed'; topic: string | null }
   | {
       type: 'dormouse:newTerminal';
       shell?: string;

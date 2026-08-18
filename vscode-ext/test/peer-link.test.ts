@@ -29,6 +29,7 @@ function fakeWindow(options: {
     resizes: [] as Array<{ ptyId: string; cols: number; rows: number }>,
     delivered: [] as Array<{ ptyId: string; data: string }>,
     exits: [] as Array<{ ptyId: string; exitCode: number }>,
+    peerChanges: [] as Array<string | null>,
     emitData(id: string, data: string) {
       for (const listener of dataListeners) listener(id, data);
     },
@@ -46,6 +47,7 @@ function fakeWindow(options: {
           void this.delivered.push({ ptyId, data }),
         deliverRemotePtyExit: (ptyId: string, exitCode: number) =>
           void this.exits.push({ ptyId, exitCode }),
+        deliverRemotePeerChange: (topic: string | null) => void this.peerChanges.push(topic),
         onProcessedPtyData: (listener: (id: string, data: string) => void) => {
           dataListeners.add(listener);
           return () => dataListeners.delete(listener);
@@ -118,6 +120,16 @@ describe('peer link between windows', () => {
       { surfaceId: 'far-1' },
       { surfaceId: 'far-2' },
     ]);
+  });
+
+  it('forwards peer change notifications to the broker window', async () => {
+    const { brokerSide, peer } = await linkedPair();
+    brokerSide.peerChanges.length = 0;
+
+    peer.remoteNotifyPeerChange('directory');
+
+    await waitFor(() => brokerSide.peerChanges.length > 0);
+    expect(brokerSide.peerChanges).toEqual(['directory']);
   });
 
   it('returns nothing when no other window is connected', async () => {

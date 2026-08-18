@@ -151,6 +151,12 @@ export interface PeerBridge {
   /** Answer `op` on behalf of this webview's own surfaces; no results = not mine. */
   respond(op: string, handler: (params: unknown) => unknown[]): void;
 
+  /** Announce that future answers for `topic` may differ. */
+  notify(topic: string): void;
+
+  /** Re-run a peer-backed subscription after another webview announces `topic`. */
+  subscribe(topic: string, listener: () => void): () => void;
+
   /**
    * Start receiving `pty:data` / `pty:exit` for a PTY this webview does not
    * own, and return the unsubscribe. A subscription, not a pair of calls, so
