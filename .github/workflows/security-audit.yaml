@@ -127,7 +127,22 @@ jobs:
         run: |
           set -eo pipefail
 
-          STATUS=$(tr -d '[:space:]' < audit-status.txt 2>/dev/null || echo "FAIL")
+          # An absent or empty status file is not a FAIL — it is the audit
+          # having reached no verdict at all: the agent ended its session
+          # without writing one, or the step before this errored out. Both
+          # cases still raise an issue, because an audit that did not run is
+          # not an audit that passed. But they say different things to whoever
+          # reads the tracker, and titling a harness hiccup `FAIL` pages a
+          # maintainer for a security problem that was never actually found.
+          #
+          # `2>/dev/null` on the old one-liner did not even hide the noise: the
+          # shell applies `< audit-status.txt` before the redirect, so a
+          # missing file printed `No such file or directory` regardless.
+          if [ -s audit-status.txt ]; then
+            STATUS=$(tr -d '[:space:]' < audit-status.txt)
+          else
+            STATUS=INCONCLUSIVE
+          fi
           DATE=$(date -u +%Y-%m-%dT%H:%MZ)
           RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
@@ -146,14 +161,25 @@ jobs:
             exit 0
           fi
 
+          # Both outcomes carry the same label, so the PASS branch above closes
+          # an inconclusive issue on the next clean run exactly as it closes a
+          # real failure. Only the wording a maintainer reads differs.
+          if [ "$STATUS" = "INCONCLUSIVE" ]; then
+            HEADLINE="Audit **inconclusive** at $DATE — the audit step reached no verdict. [Run]($RUN_URL)"
+            TITLE="[security-audit] inconclusive on $(date -u +%Y-%m-%d)"
+            NO_REPORT="The audit step wrote no \`audit-status.txt\`, so nothing was actually checked. This is an unfinished audit, not a security finding — re-run the workflow, and see the run logs for why the step stopped early."
+          else
+            HEADLINE="Audit failed at $DATE. [Run]($RUN_URL)"
+            TITLE="[security-audit] FAIL on $(date -u +%Y-%m-%d)"
+            NO_REPORT="Audit reported \`$STATUS\` but produced no \`audit-report.md\`. See workflow run logs."
+          fi
+
           if [ ! -s audit-report.md ]; then
-            printf '%s\n' \
-              "Audit step produced no \`audit-report.md\`. See workflow run logs." \
-              > audit-report.md
+            printf '%s\n' "$NO_REPORT" > audit-report.md
           fi
 
           {
-            echo "Audit failed at $DATE. [Run]($RUN_URL)"
+            echo "$HEADLINE"
             echo
             cat audit-report.md
           } > audit-comment.md
@@ -162,10 +188,10 @@ jobs:
                        --state open --json number --jq '.[0].number' || true)
           if [ -n "$EXISTING" ]; then
             gh issue comment "$EXISTING" --body-file audit-comment.md
-            echo "Appended re-audit failure to issue #$EXISTING"
+            echo "Appended re-audit result to issue #$EXISTING"
           else
             gh issue create \
-              --title "[security-audit] FAIL on $(date -u +%Y-%m-%d)" \
+              --title "$TITLE" \
               --label security-audit-failure \
               --body-file audit-comment.md
           fi
