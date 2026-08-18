@@ -88,6 +88,7 @@ export type ExtensionMessage =
   | { type: 'store:entries'; requestId: string; entries: Record<string, string> }
   | { type: 'singleton:lease'; name: string; held: boolean }
   | { type: 'store:changed'; key: string; value: string | null }
+  | { type: 'store:snapshot'; prefix: string; entries: Record<string, string> }
   | { type: 'peer:ask'; requestId: string; op: string; params: unknown }
   | { type: 'peer:results'; requestId: string; results: unknown[] }
   | {

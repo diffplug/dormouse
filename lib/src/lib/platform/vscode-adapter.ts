@@ -53,6 +53,8 @@ export class VSCodeAdapter implements PlatformAdapter {
    * value, not just the key, because a deletion has to survive too.
    */
   private pendingStoreChanges = new Map<string, string | null>();
+  /** Fresh lease-handoff snapshots that arrived before boot hydration finished. */
+  private pendingStoreSnapshots = new Map<string, Record<string, string>>();
 
   constructor() {
     this.vscode = acquireVsCodeApi();
@@ -178,6 +180,8 @@ export class VSCodeAdapter implements PlatformAdapter {
         this.singletonHandlers.get(msg.name)?.(!!msg.held);
       } else if (msg.type === 'store:changed') {
         this.applyStoreChange(msg.key, msg.value ?? null);
+      } else if (msg.type === 'store:snapshot') {
+        this.applyStoreSnapshot(msg.prefix, msg.entries ?? {});
       } else if (msg.type === 'peer:ask') {
         // Answer even with no responder installed, and even to say nothing: the
         // broker settles once every webview has replied, so silence would make
@@ -305,7 +309,9 @@ export class VSCodeAdapter implements PlatformAdapter {
           'continuing without it. A remote Host enrollment will read as absent.',
       );
     }
-    const cache = new Map(Object.entries(entries ?? {}));
+    const refreshed = this.pendingStoreSnapshots.get(prefix);
+    this.pendingStoreSnapshots.delete(prefix);
+    const cache = new Map(Object.entries(refreshed ?? entries ?? {}));
     // Anything committed while the read was in flight is newer than the
     // snapshot, so it is applied on top of it before the cache goes live.
     for (const [key, pending] of this.pendingStoreChanges) {
@@ -345,6 +351,23 @@ export class VSCodeAdapter implements PlatformAdapter {
     // it — `hydrateScopedStore` drains it) or nothing here claimed the prefix,
     // in which case the entry is inert.
     this.pendingStoreChanges.set(key, value);
+  }
+
+  /** Replace a whole prefix before a newly elected window starts its Host. */
+  private applyStoreSnapshot(prefix: string, entries: Record<string, string>): void {
+    const cache = this.scopedCaches.get(prefix);
+    if (cache) {
+      cache.clear();
+      for (const [key, value] of Object.entries(entries)) cache.set(key, value);
+      return;
+    }
+
+    // The snapshot is newer than any earlier per-key broadcast. Later changes
+    // remain buffered and are applied on top when hydration completes.
+    for (const key of this.pendingStoreChanges.keys()) {
+      if (key.startsWith(prefix)) this.pendingStoreChanges.delete(key);
+    }
+    this.pendingStoreSnapshots.set(prefix, entries);
   }
 
   shutdown(): void {

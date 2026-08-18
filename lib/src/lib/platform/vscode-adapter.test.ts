@@ -448,6 +448,38 @@ describe('VSCodeAdapter host store', () => {
     expect(loadJson<unknown[], null>(KEY, null)).toBeNull();
   });
 
+  it('replaces stale cached keys from a lease-handoff snapshot', async () => {
+    const enrollmentKey = `${PREFIX}enrollment`;
+    await hydrated({
+      [KEY]: JSON.stringify([{ id: 'old' }]),
+      [enrollmentKey]: JSON.stringify({ hostId: 'host-1' }),
+    });
+
+    windowTarget.dispatchEvent(hostMessage({
+      type: 'store:snapshot',
+      prefix: PREFIX,
+      entries: { [KEY]: JSON.stringify([{ id: 'new' }]) },
+    }));
+
+    expect(loadJson<unknown[]>(KEY, [])).toEqual([{ id: 'new' }]);
+    expect(loadJson<unknown, null>(enrollmentKey, null)).toBeNull();
+  });
+
+  it('uses a lease-handoff snapshot that arrives during hydration', async () => {
+    const adapter = new VSCodeAdapter();
+    const done = adapter.hydrateScopedStore(PREFIX);
+
+    windowTarget.dispatchEvent(hostMessage({
+      type: 'store:snapshot',
+      prefix: PREFIX,
+      entries: { [KEY]: JSON.stringify([{ id: 'fresh' }]) },
+    }));
+    answerRead({ [KEY]: JSON.stringify([{ id: 'stale' }]) });
+    await done;
+
+    expect(loadJson<unknown[]>(KEY, [])).toEqual([{ id: 'fresh' }]);
+  });
+
   it('ignores an unauthenticated broadcast', async () => {
     await hydrated({ [KEY]: JSON.stringify([{ id: 'a' }]) });
 

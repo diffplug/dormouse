@@ -21,7 +21,7 @@ import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
 import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
-import { readStore, writeStore } from './remote-host-store';
+import { readStore, REMOTE_HOST_STORE_PREFIX, writeStore } from './remote-host-store';
 import { PEER_REPLY_BUDGET_MS } from '../../lib/src/lib/vscode-peer-link-protocol';
 import { ensureWindowLease } from './window-lease';
 import {
@@ -74,6 +74,7 @@ const singletonHolders = new Map<string, SingletonClaimant>();
  * says this window won.
  */
 let windowLeaseHeld: boolean | null = null;
+let storeReadyForWindowLease = false;
 
 function wantedSingletonNames(): Set<string> {
   const names = new Set<string>();
@@ -86,10 +87,18 @@ function wantedSingletonNames(): Set<string> {
 function onWindowLeaseChange(held: boolean): void {
   if (windowLeaseHeld === held) return;
   windowLeaseHeld = held;
+  storeReadyForWindowLease = false;
   // The holder is the Host, so it is also the window every other one reports to.
   setPeerLinkRole(held);
   if (held) {
-    for (const name of wantedSingletonNames()) electSingleton(name);
+    // A different window may have committed ACL/enrollment writes since these
+    // webviews hydrated. Replace their caches before granting the Host role so
+    // the new holder cannot authorize from, or write back, a stale snapshot.
+    void refreshStoreCachesForLease().then(() => {
+      if (windowLeaseHeld !== true) return;
+      storeReadyForWindowLease = true;
+      for (const name of wantedSingletonNames()) electSingleton(name);
+    });
     return;
   }
   // Lost across windows: whoever held it here must stop, not merely stop being
@@ -99,7 +108,7 @@ function onWindowLeaseChange(held: boolean): void {
 }
 
 function electSingleton(name: string): void {
-  if (windowLeaseHeld !== true) return;
+  if (windowLeaseHeld !== true || !storeReadyForWindowLease) return;
   let holder = singletonHolders.get(name);
   if (!holder) {
     holder = [...singletonClaimants].find((claimant) => claimant.wants.has(name));
@@ -124,6 +133,7 @@ interface ActiveRouter {
   ownsPty(id: string): boolean;
   forwardDorControlRequest(request: DorControlRequest): void;
   notifyStoreChanged(key: string, value: string | null): void;
+  notifyStoreSnapshot(prefix: string, entries: Record<string, string>): Thenable<boolean>;
   deliverForeignData(ptyId: string, data: string): void;
   deliverForeignExit(ptyId: string, exitCode: number): void;
   ask(requestId: string, op: string, params: unknown): void;
@@ -222,6 +232,16 @@ function deliverRemotePtyExit(ptyId: string, exitCode: number): void {
  */
 function broadcastStoreChange(key: string, value: string | null): void {
   for (const router of activeRouters) router.notifyStoreChanged(key, value);
+}
+
+async function refreshStoreCachesForLease(): Promise<void> {
+  const entries = await readStore(REMOTE_HOST_STORE_PREFIX).catch(() => ({}));
+  if (windowLeaseHeld !== true) return;
+  await Promise.all(
+    [...activeRouters].map((router) =>
+      Promise.resolve(router.notifyStoreSnapshot(REMOTE_HOST_STORE_PREFIX, entries)),
+    ),
+  );
 }
 
 const activeRouters = new Set<ActiveRouter>();
@@ -933,6 +953,9 @@ export function attachRouter(
     notifyStoreChanged(key: string, value: string | null) {
       if (disposed) return;
       void post({ type: 'store:changed', key, value } satisfies ExtensionMessage);
+    },
+    notifyStoreSnapshot(prefix: string, entries: Record<string, string>) {
+      return post({ type: 'store:snapshot', prefix, entries } satisfies ExtensionMessage);
     },
     ask(requestId: string, op: string, params: unknown) {
       if (disposed) return;
