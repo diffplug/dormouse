@@ -24,6 +24,7 @@ Extension Host (vscode-ext/src/)
 ├── webview-html.ts           — CSP injection, nonce + message-token generation, asset URI rewriting
 ├── remote-host-store.ts      — SecretStorage/globalState backing for the webview's remote-Host keys
 ├── window-lease.ts           — cross-window Host lease: heartbeat record in globalStorageUri
+├── peer-link.ts              — socket between windows: broker serves, other windows report in
 │                             (peer-surface brokering lives in message-router.ts)
 ├── (../scripts/esbuild.mjs)  — outside src/: extension + pty-host bundles; bakes the webview's remote `connect-src`
 ├── webview-messaging.ts      — serveWebview: pairs a document with its message token, returns the WebviewChannel
@@ -295,7 +296,21 @@ Every webview installs a responder (`lib/src/remote/host/peer-surfaces.ts`) whet
 
 The directory emits **twice**: the local entries immediately, then a merged snapshot once the peers answer. The phone should not wait on a round trip to see the panes that are already here. The broker settles a fan-out when every webview has replied or a 1s budget expires, so a webview with no live content cannot hang the picker.
 
-Reserved: this is the within-window tier. Reaching terminals in *other windows* needs a channel between extension hosts — the lease holder is the natural broker and `dor`'s control socket is the pattern — and is not built.
+### Peer surfaces across windows
+
+The same problem one level out, and it cannot be solved the same way: VS Code runs one extension host per window, so there is no shared process to broker through. The window holding the Host lease therefore listens on a local socket and every other window connects to it.
+
+The lease makes this one-directional. Because the webview lease is gated on the window lease, the broker window *is* the Host window — so the broker never has to relay a request back out to a remote Host, and a peer window only ever answers.
+
+Roles follow the lease: acquire it and the window starts serving and publishes a rendezvous file (`remote-host.peer.json`, mode 0600, in `globalStorageUri`) naming the socket path and a token; lose it and the window tears the server down and connects as a client instead. Clients watch that file, so a handover does not wait out the reconnect backoff. The socket lives in the temp dir rather than beside the rendezvous file because macOS caps a unix socket path near 104 bytes and the extension's `globalStorage` path is most of that on its own.
+
+A peer window answers a `directory` or `surfaceOp` frame by running its **own in-window** fan-out — never the cross-window one, or a request would loop back out. That is why `configurePeerLink` is handed only `brokerDirectory` / `brokerSurfaceOp`, and why the link is injected with what it needs rather than importing the router (which imports the link).
+
+Once an attach succeeds the broker records which window owns that `ptyId`, because a PTY id says nothing about where it lives and input and resizes have to reach that window. `pty:input` and `pty:resize` consult that table first and fall back to the local `ptyManager`; `pty:subscribe` asks the owning window to start streaming, and its bytes are injected into the subscriber's normal `pty:data` path, so the Host webview cannot tell a remote terminal from a local one. When a peer disconnects, every PTY routed to it is dropped and reported as exited — a terminal in a closed window is gone, and a later write must not be posted into a dead socket.
+
+Trust: the socket is user-owned, its path is published only in a mode-0600 file, and a client's first frame must carry the token from that file — the same bar as the `dor` control socket.
+
+Source of truth: `vscode-ext/src/peer-link.ts` for the sockets and roles, `lib/src/lib/vscode-peer-link-protocol.ts` for the frames, framing, and PTY routing table (tested in `lib/src/lib/vscode-peer-link-protocol.test.ts`), and the `remote*` calls in `vscode-ext/src/message-router.ts`.
 
 Source of truth: the broker in `vscode-ext/src/message-router.ts` (`peer:*` cases, `subscribedPtyIds`), `PeerBridge` in `lib/src/lib/platform/types.ts` with its VS Code implementation in `vscode-adapter.ts`, the responder in `lib/src/remote/host/peer-surfaces.ts`, and the foreign-surface path in `remote-api.ts`, tested in `lib/src/remote/host/peer-surfaces.test.ts`.
 

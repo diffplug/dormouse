@@ -13,6 +13,7 @@ import { resolveSelectedShell, setSelectedShellPath, getSelectedShellPath } from
 import type { ExtensionMessage } from './message-types';
 import { initRemoteHostStore } from './remote-host-store';
 import { initWindowLease } from './window-lease';
+import { disposePeerLink, initPeerLink } from './peer-link';
 
 type NewTerminalMessage = Extract<ExtensionMessage, { type: 'dormouse:newTerminal' }>;
 
@@ -82,6 +83,8 @@ export function activate(context: vscode.ExtensionContext) {
   // Storage location only — the lease itself does not start until a webview
   // claims the Host role (window-lease.ts).
   initWindowLease(context);
+  initPeerLink(context);
+  context.subscriptions.push({ dispose: () => void disposePeerLink() });
   log.init();
   extensionContext = context;
   ptyManager.setExtensionPath(context.extensionPath);
