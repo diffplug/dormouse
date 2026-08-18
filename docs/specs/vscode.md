@@ -340,6 +340,10 @@ Once an answer names a `ptyId` the broker records which window it came from, bec
 
 Trust: the socket is user-owned, its path is published only in a mode-0600 file, and a client's first frame must carry the token from that file — the same bar as the `dor` control socket.
 
+Socket bind errors reject startup and are handled as an unavailable peer link;
+they never leave the listen promise pending or surface as an uncaught extension
+host error.
+
 Source of truth: `vscode-ext/src/peer-link.ts` for the sockets and roles, `lib/src/lib/vscode-peer-link-protocol.ts` for the frames, framing, and PTY routing table (tested in `lib/src/lib/vscode-peer-link-protocol.test.ts`), and the `remote*` calls in `vscode-ext/src/message-router.ts`.
 
 Source of truth: the broker in `vscode-ext/src/message-router.ts` (`brokerRequest`, the `peer:*` cases, `subscribedPtyIds`), `PeerBridge` in `lib/src/lib/platform/types.ts` with its VS Code implementation in `vscode-adapter.ts`, the operation map and responder in `lib/src/remote/host/peer-surfaces.ts`, the resolver in `lib/src/remote/host/surface-resolve.ts`, and the attachment it backs in `lib/src/remote/host/remote-api.ts`, tested in `lib/src/remote/host/peer-surfaces.test.ts`.

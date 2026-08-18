@@ -262,6 +262,23 @@ function onServerFrame(client: PeerClient, frame: unknown): void {
   if ('id' in response) pendingRequests.get(response.id)?.(response);
 }
 
+/** Turn Server.listen's event-based bind failure into a rejecting promise. */
+export function listenServer(nextServer: Server, socketPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onError = (error: Error) => reject(error);
+    nextServer.once('error', onError);
+    try {
+      nextServer.listen(socketPath, () => {
+        nextServer.off('error', onError);
+        resolve();
+      });
+    } catch (error) {
+      nextServer.off('error', onError);
+      reject(error);
+    }
+  });
+}
+
 async function startServer(): Promise<void> {
   const path = rendezvousPath();
   if (!path || server) return;
@@ -282,7 +299,7 @@ async function startServer(): Promise<void> {
 
   try {
     rendezvous = next;
-    await new Promise<void>((resolve) => server!.listen(next.socketPath, resolve));
+    await listenServer(server, next.socketPath);
     await mkdir(join(path, '..'), { recursive: true }).catch(() => {});
     // The token is the only thing standing between another local process and
     // this window's terminals, so it is never briefly world-readable: written
@@ -306,7 +323,7 @@ async function stopServer(): Promise<void> {
   const path = rendezvousPath();
   const socketPath = rendezvous?.socketPath;
   for (const client of [...clients]) dropClient(client);
-  server.close();
+  if (server.listening) server.close();
   server = null;
   rendezvous = null;
   if (socketPath) await rm(socketPath, { force: true }).catch(() => {});

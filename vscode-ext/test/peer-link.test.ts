@@ -9,6 +9,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { join } from 'node:path';
+import { createServer } from 'node:net';
 import { fakeContext, freshModule, removeDir, tempStorageDir, tick, waitFor, waitForFile } from './helpers';
 
 type LinkModule = typeof import('../src/peer-link');
@@ -120,6 +121,14 @@ afterEach(async () => {
 });
 
 describe('peer link between windows', () => {
+  it('rejects when the peer socket cannot be bound', async () => {
+    const mod = await openWindow(fakeWindow());
+    const failingServer = createServer();
+
+    await expect(mod.listenServer(failingServer, join(dir, 'missing', 'peer.sock')))
+      .rejects.toHaveProperty('code');
+  });
+
   it('collects directory entries from the other window', async () => {
     const peerSide = fakeWindow({ entries: [{ surfaceId: 'far-1' }, { surfaceId: 'far-2' }] });
     const { broker } = await linkedPair(fakeWindow(), peerSide);
