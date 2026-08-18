@@ -200,6 +200,20 @@ jobs:
           EXISTING=$(gh issue list --label security-audit-failure \
                        --state open --json number --jq '.[0].number' || true)
           if [ -n "$EXISTING" ]; then
+            # A real FAIL appended to an issue an inconclusive run opened would
+            # leave the tracker showing "inconclusive" over a genuine finding —
+            # this change's own premise, displaced one level. Retitle only on
+            # the inconclusive→FAIL upgrade, so an issue that was already a real
+            # FAIL keeps its first-observed date.
+            if [ "$STATUS" != "INCONCLUSIVE" ]; then
+              # `|| true`: under `set -e` an API blip on this lookup would abort
+              # the step before the FAIL comment posts. A missed retitle is a
+              # cosmetic loss; a missed comment drops the finding entirely.
+              PRIOR_TITLE=$(gh issue view "$EXISTING" --json title --jq '.title' || true)
+              case "$PRIOR_TITLE" in
+                *inconclusive*) gh issue edit "$EXISTING" --title "$TITLE" ;;
+              esac
+            fi
             gh issue comment "$EXISTING" --body-file audit-comment.md
             echo "Appended re-audit result to issue #$EXISTING"
           else
