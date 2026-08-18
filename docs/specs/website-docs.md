@@ -80,13 +80,28 @@ stays within Marketplace-compatible Markdown:
 - README image URLs use HTTPS.
 - User-provided SVG images are not allowed; content uses raster media or an
   approved badge provider.
-- Media is **project-owned and served from `dormouse.sh`**, backed by files in
-  `website/public/`. `github.com/user-attachments` URLs are specifically
-  excluded: they 302 to a signature-expiring S3 object (so `HEAD` 403s where
-  `GET` succeeds), cannot be cached downstream, leak every visitor's IP to a
-  third party, and disappear with the comment they were uploaded to — taking
-  the Marketplace listing's images with them. The public-doc lint enforces
-  both the origin and the file's presence on disk.
+- Media is **repo-relative local files under `vscode-ext/media/`**, referenced
+  the way GitHub expects (`media/hero.jpg`). The Markdown stays the source of
+  truth and ordinary GitHub authoring works: drop a file in and link it.
+  Remote media is rejected outright. `github.com/user-attachments` URLs in
+  particular 302 to a signature-expiring S3 object (so `HEAD` 403s where `GET`
+  succeeds), cannot be cached downstream, leak every visitor's IP to a third
+  party, and disappear with the comment they were uploaded to — taking the
+  listing's images with them.
+
+Each renderer resolves those relative paths differently, and all four are
+verified:
+
+| Renderer | How `media/x.gif` resolves |
+| --- | --- |
+| GitHub | Natively, relative to `vscode-ext/` |
+| Packaged extension pane | From `media/` inside the VSIX, retained by `!media/**` in `.vscodeignore` |
+| Marketplace / Open VSX | `vsce --baseImagesUrl https://dormouse.sh` rewrites both Markdown images **and** raw `<img src>` attributes at package time |
+| `/docs` | The generator copies `vscode-ext/media/` to `website/public/media/` and rewrites sources to `/media/` |
+
+`--baseImagesUrl` is passed explicitly in `vscode-ext/package.json` and in the
+release workflow rather than letting `vsce` infer a base, because inference
+uses the repository root and this extension lives in a subdirectory.
 - Critical documentation, install, issue, and media links are explicit absolute
   URLs. The monorepo does not rely on `vsce` inferring a relative subdirectory
   base for critical navigation.
@@ -312,7 +327,8 @@ verifies:
 - neither public README contains `TODO:` placeholders;
 - both canonical Markdown sources stay inside the parser's supported subset;
 - local Markdown links resolve and public links use canonical HTTPS URLs;
-- Marketplace README images use HTTPS and no SVG;
+- guide images are repo-relative files that exist under `vscode-ext/media/`,
+  with no remote URLs and no SVG, and every file there is referenced;
 - VS Code commands named by the guide exist in `vscode-ext/package.json`, and
   the listing metadata fields are present;
 - `/docs` heading ids are stable and unique;
@@ -336,7 +352,7 @@ spec.
 | `vscode-ext/README.md` | The canonical product guide |
 | `vscode-ext/package.json` | Listing metadata and VS Code command inventory |
 | `README.md` | Repository and contributor entry point |
-| `website/public/media/` | Project-owned guide media, served from `dormouse.sh` |
+| `vscode-ext/media/` | Guide media; the generator copies it to `website/public/media/` |
 | `dor/skill.md` | The bundled agent skill, rendered exactly at `/docs/agent-skill` |
 | `dor/test/snapshots/help/` | Tested CLI help, the source for `/docs/dor` |
 | `website/scripts/docs-parser.js` | Markdown subset parser, slugger, `<img>` allowlist |

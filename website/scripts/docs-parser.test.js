@@ -47,8 +47,14 @@ describe('inline', () => {
       .toThrow(UnsupportedMarkdownError);
   });
 
-  it('rejects a non-https img src', () => {
-    expect(() => parseInline('<img src="http://x.test/a.png" />')).toThrow(/must be https/);
+  it('accepts a repo-relative img src', () => {
+    const [img] = parseInline('<img width="22" height="22" alt="bell" src="media/alert-armed.gif" />');
+    expect(img).toMatchObject({ type: 'image', src: 'media/alert-armed.gif' });
+  });
+
+  it('rejects a non-https absolute img src', () => {
+    expect(() => parseInline('<img src="http://x.test/a.png" />')).toThrow(/relative or https/);
+    expect(() => parseInline('<img src="data:image/gif;base64,AA" />')).toThrow(/relative or https/);
   });
 
   it('rejects every other raw HTML tag', () => {

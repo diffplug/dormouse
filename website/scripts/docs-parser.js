@@ -80,8 +80,12 @@ function parseImgTag(raw, line) {
     throw new UnsupportedMarkdownError(`could not parse <img> attributes: "${leftover}"`, line);
   }
   if (!attrs.src) throw new UnsupportedMarkdownError('<img> requires a src', line);
-  if (!/^https:\/\//i.test(attrs.src)) {
-    throw new UnsupportedMarkdownError(`<img> src must be https: "${attrs.src}"`, line);
+  // A source is either a repo-relative local file (the authoring default, so
+  // GitHub renders it natively) or an absolute https URL. Anything else --
+  // http, protocol-relative, data: -- is rejected here; the public-doc lint
+  // additionally requires relative files to exist and bans third-party hosts.
+  if (/^[a-z][a-z0-9+.-]*:/i.test(attrs.src) && !/^https:\/\//i.test(attrs.src)) {
+    throw new UnsupportedMarkdownError(`<img> src must be relative or https: "${attrs.src}"`, line);
   }
   void consumed;
   return { type: 'image', src: attrs.src, alt: attrs.alt ?? '', width: attrs.width, height: attrs.height };

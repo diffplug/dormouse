@@ -17,7 +17,6 @@ lib/.vite/
 # VSCode extension
 vscode-ext/dist/
 vscode-ext/dor-cli/
-vscode-ext/media/
 vscode-ext/node_modules/
 vscode-ext/*.vsix
 
@@ -40,6 +39,7 @@ website/dist/
 website/node_modules/
 website/src/data/changelog.json
 website/src/data/docs.json
+website/public/media/
 
 # OS
 .DS_Store

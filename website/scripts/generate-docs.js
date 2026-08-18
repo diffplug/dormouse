@@ -12,7 +12,7 @@
  * See docs/specs/website-docs.md.
  */
 
-import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, readdir, writeFile, mkdir, copyFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createSlugger, parseMarkdown, inlineToText } from './docs-parser.js';
@@ -31,6 +31,10 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..', '..');
 const outFile = join(__dirname, '..', 'src', 'data', 'docs.json');
+/** Guide media lives next to the guide; the site serves a copy at /media/. */
+const mediaSrcDir = join(repoRoot, 'vscode-ext', 'media');
+const mediaOutDir = join(__dirname, '..', 'public', 'media');
+const MEDIA_URL_BASE = '/media/';
 
 /**
  * The complete `/docs` delta, per docs/specs/website-docs.md.
@@ -86,6 +90,52 @@ function buildToc(headings) {
   return top;
 }
 
+/**
+ * Copy the guide's media next to the site and rewrite relative image sources
+ * to the served path.
+ *
+ * The README is the source of truth and references its images the way GitHub
+ * expects -- repo-relative, so dropping a file into vscode-ext/media/ and
+ * linking it just works, on GitHub, in the packaged extension, and here. The
+ * website resolves those same paths to /media/ instead of duplicating assets.
+ */
+async function syncGuideMedia() {
+  await rm(mediaOutDir, { recursive: true, force: true });
+  await mkdir(mediaOutDir, { recursive: true });
+  const files = await readdir(mediaSrcDir);
+  for (const file of files) {
+    await copyFile(join(mediaSrcDir, file), join(mediaOutDir, file));
+  }
+  return files;
+}
+
+/** Rewrite `media/x.gif` -> `/media/x.gif` across every image node. */
+function rewriteMediaUrls(nodes, available, seen) {
+  for (const node of nodes ?? []) {
+    if (node.type === 'image' && node.src && !/^[a-z][a-z0-9+.-]*:|^\//i.test(node.src)) {
+      const rel = node.src.replace(/^\.\//, '');
+      if (!rel.startsWith('media/')) {
+        throw new Error(`guide image "${node.src}" must live under vscode-ext/media/`);
+      }
+      const file = rel.slice('media/'.length);
+      if (!available.includes(file)) {
+        throw new Error(`guide references media/${file}, which is not in vscode-ext/media/`);
+      }
+      seen.add(file);
+      node.src = MEDIA_URL_BASE + file;
+    }
+    for (const key of ['children', 'items', 'header', 'rows', 'blocks']) {
+      const child = node[key];
+      if (Array.isArray(child)) {
+        for (const entry of child) {
+          if (Array.isArray(entry)) rewriteMediaUrls(entry, available, seen);
+          else rewriteMediaUrls([entry], available, seen);
+        }
+      }
+    }
+  }
+}
+
 async function buildGuide() {
   const source = join(repoRoot, 'vscode-ext', 'README.md');
   const markdown = await readFile(source, 'utf8');
@@ -97,6 +147,11 @@ async function buildGuide() {
   const title = parsed.blocks.find((b) => b.type === 'heading' && b.depth === 1)?.text ?? 'Documentation';
   const { blocks, applied } = applyDelta(parsed.blocks);
   const headings = parsed.headings.filter((h) => h.depth > 1);
+
+  const available = await syncGuideMedia();
+  const used = new Set();
+  rewriteMediaUrls(blocks, available, used);
+  const unused = available.filter((f) => !used.has(f));
 
   const ids = headings.map((h) => h.id);
   const dupes = ids.filter((id, i) => ids.indexOf(id) !== i);
@@ -111,6 +166,7 @@ async function buildGuide() {
     headings,
     toc: buildToc(headings),
     delta: applied,
+    media: { available, unused },
   };
 }
 
@@ -287,7 +343,8 @@ async function main() {
   console.log(
     `Wrote docs data: guide ${guide.headings.length} headings, ` +
       `cli ${cli.commands.length} commands + ${cli.intro.length} intro sections, ` +
-      `skill ${Object.keys(skill.references).length} reference links`,
+      `skill ${Object.keys(skill.references).length} reference links, ` +
+      `${guide.media.available.length} media file(s)`,
   );
 }
 

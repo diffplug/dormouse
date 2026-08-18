@@ -107,9 +107,9 @@
     "build": "pnpm stage:dor-cli && esbuild src/extension.ts --bundle --outdir=dist --external:vscode --external:node-pty --format=cjs --platform=node && esbuild src/pty-host.js --bundle --outfile=dist/pty-host.js --external:node-pty --format=cjs --platform=node && cp -RL node_modules/node-pty dist/node-pty && rm -rf dist/shell-integration && cp -RL ../standalone/sidecar/shell-integration dist/shell-integration",
     "stage:dor-cli": "pnpm --filter dor build && node ../scripts/stage-dor-cli.mjs vscode-ext/dor-cli",
     "watch": "pnpm build --watch",
-    "package": "vsce package --no-dependencies --out dormouse.vsix",
+    "package": "vsce package --no-dependencies --baseImagesUrl https://dormouse.sh --out dormouse.vsix",
     "dogfood": "node ../scripts/dogfood-vscode.mjs",
-    "publish:marketplace": "vsce publish --no-dependencies",
+    "publish:marketplace": "vsce publish --no-dependencies --baseImagesUrl https://dormouse.sh",
     "publish:openvsx": "ovsx publish --no-dependencies"
   },
   "dependencies": {

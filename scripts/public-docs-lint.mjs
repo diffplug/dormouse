@@ -83,23 +83,34 @@ async function checkImages() {
   ];
   if (urls.length === 0) fail(`${GUIDE}: has no images; the listing needs at least a hero`);
   for (const url of urls) {
-    if (!/^https:\/\//i.test(url)) fail(`${GUIDE}: image is not https — ${url}`);
     if (/\.svg(\?|#|$)/i.test(url)) fail(`${GUIDE}: SVG images are not allowed on the Marketplace — ${url}`);
-    // Media must be project-owned. github.com/user-attachments URLs 302 to a
-    // signature-expiring S3 object, cannot be cached downstream, and vanish
-    // with the comment they were uploaded to -- taking the Marketplace
-    // listing's images with them.
-    if (!/^https:\/\/dormouse\.sh\//i.test(url)) {
-      fail(`${GUIDE}: image is not served from dormouse.sh — ${url}`);
+
+    // Guide images must be repo-relative local files, so the README stays the
+    // source of truth and ordinary GitHub authoring works. Remote media is
+    // rejected outright: github.com/user-attachments URLs 302 to a
+    // signature-expiring S3 object, cannot be cached downstream, leak visitor
+    // IPs, and vanish with the comment they were uploaded to.
+    if (/^[a-z][a-z0-9+.-]*:|^\/\//i.test(url)) {
+      fail(`${GUIDE}: image must be a repo-relative local file, not a remote URL — ${url}`);
+      continue;
+    }
+
+    const rel = url.replace(/^\.\//, '');
+    if (!rel.startsWith('media/')) {
+      fail(`${GUIDE}: image must live under vscode-ext/media/ — ${url}`);
+      continue;
+    }
+    if (!existsSync(join(repoRoot, 'vscode-ext', rel))) {
+      fail(`${GUIDE}: references ${url}, which does not exist in vscode-ext/`);
     }
   }
 
-  // Every referenced dormouse.sh media file must exist in website/public.
-  for (const url of urls) {
-    const m = /^https:\/\/dormouse\.sh\/(.+)$/i.exec(url);
-    if (!m) continue;
-    if (!existsSync(join(repoRoot, 'website', 'public', m[1]))) {
-      fail(`${GUIDE}: references https://dormouse.sh/${m[1]}, which is not in website/public/`);
+  // Every file in vscode-ext/media must be referenced, or it ships unused.
+  const mediaDir = join(repoRoot, 'vscode-ext', 'media');
+  if (existsSync(mediaDir)) {
+    const referenced = new Set(urls.map((u) => u.replace(/^\.\//, '').replace(/^media\//, '')));
+    for (const file of await readdir(mediaDir)) {
+      if (!referenced.has(file)) fail(`vscode-ext/media/${file} is not referenced by the guide`);
     }
   }
 }
