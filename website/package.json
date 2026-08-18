@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
-    "ascii-splash": "0.5.0",
+    "ascii-splash": "0.6.1",
     "dormouse-lib": "workspace:*",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",

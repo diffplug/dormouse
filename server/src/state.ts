@@ -5,6 +5,10 @@
  *     { accountId: "owner", passkeys: [{ credentialId, publicKey, label, createdAt }] }
  *   $DORMOUSE_STATE_DIR/hosts.json
  *     [{ hostId, hostToken, label, enrolledAt }]
+ *   $DORMOUSE_STATE_DIR/push-subscriptions.json
+ *     [{ hostId, devicePublicKey, endpoint, keys, vapidPublicKey, subscribedAt }]
+ *   $DORMOUSE_STATE_DIR/vapid.json
+ *     { publicKey, privateKey, createdAt }   (only when not supplied by env)
  *
  * Deliberately not a database: one account, a handful of passkeys and hosts,
  * hand-editable for revocation. Writes go through a temp-file-plus-rename so a
@@ -18,6 +22,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import { join } from 'node:path';
 
 import { SELFHOST_ACCOUNT_ID, toBase64Url } from 'server-lib-common';
+import type { PushSubscriptionPayload } from 'server-lib-common';
 
 /** A registered passkey as stored on disk. `publicKey` is base64url SPKI. */
 export interface StoredPasskey {
@@ -75,11 +80,19 @@ abstract class JsonFileStore {
     return JSON.parse(raw) as T;
   }
 
-  /** Overwrite the whole file atomically (temp file + rename). */
+  /**
+   * Overwrite the whole file atomically (temp file + rename). `hosts.json`
+   * holds `hostToken` in plaintext, so the directory is owner-only (`0o700`)
+   * and every file owner-read/write (`0o600`) — without an explicit mode both
+   * inherit the umask, which on a typical Linux box yields world-readable
+   * `0o755`/`0o644` and leaks live host tokens to every other local account.
+   * The mode only applies when the file is created, so `rename` onto an
+   * existing path keeps the temp file's `0o600`.
+   */
   protected async writeAtomic(value: unknown): Promise<void> {
-    await mkdir(this.#stateDir, { recursive: true });
+    await mkdir(this.#stateDir, { recursive: true, mode: 0o700 });
     const tmp = `${this.#path}.${randomUUID()}.tmp`;
-    await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
     await rename(tmp, this.#path);
   }
 
@@ -194,6 +207,194 @@ export class HostStore extends JsonFileStore {
       hosts.push(host);
       await this.writeAtomic(hosts);
       return host;
+    });
+  }
+}
+
+/** A Web Push subscription as stored in `push-subscriptions.json`. */
+export interface StoredPushSubscription {
+  readonly hostId: string;
+  readonly devicePublicKey: string;
+  readonly endpoint: string;
+  readonly keys: PushSubscriptionPayload['keys'];
+  /** Public VAPID key this endpoint was minted and registered under. */
+  readonly vapidPublicKey: string;
+  readonly subscribedAt: number;
+}
+
+export interface PushSubscriptionUpsertResult {
+  readonly subscription: StoredPushSubscription;
+  /**
+   * Every Host this device is registered with after the mutation, including the
+   * one just written. Computed inside the mutex, so it is the whole truth for
+   * the device at the instant it was committed rather than a delta the caller
+   * has to reconstruct.
+   */
+  readonly deviceHostIds: readonly string[];
+}
+
+/**
+ * Push subscriptions (`push-subscriptions.json`), keyed on the PAIR
+ * (`hostId`, `devicePublicKey`) — one Client subscribes once per Host it is
+ * paired with, and a Host can only ever see or reach its own subscribers.
+ *
+ * Unlike its append-only siblings this store deletes: a push service reports a
+ * dead subscription with 404/410, and re-subscribing after a browser rotates
+ * the endpoint must replace the stale row rather than accumulate one per
+ * rotation. Both paths run under the inherited mutex.
+ *
+ * No secret of ours lives here, but the endpoint plus its keys IS a bearer
+ * capability to notify that phone, so the inherited `0o600` still matters.
+ */
+export class PushSubscriptionStore extends JsonFileStore {
+  constructor(stateDir: string, now: () => number = () => Date.now()) {
+    super(stateDir, 'push-subscriptions.json', now);
+  }
+
+  /**
+   * The rows this Server can act on.
+   *
+   * Malformed rows are dropped here rather than defended against at each
+   * consumer: this file is hand-editable by design — revoking a device is
+   * deleting its rows — so a half-finished edit is a real case, and one guard
+   * at the read boundary is what lets {@link StoredPushSubscription} be true
+   * for every caller downstream. A mangled row therefore reads as a missing
+   * registration, which re-offers Enable and repairs itself, instead of as a
+   * live one that cannot be delivered to.
+   */
+  async list(): Promise<StoredPushSubscription[]> {
+    const rows = await this.read<unknown>([]);
+    return Array.isArray(rows) ? rows.filter(isStoredPushSubscription) : [];
+  }
+
+  async listForHost(hostId: string): Promise<StoredPushSubscription[]> {
+    const all = await this.list();
+    return all.filter((s) => s.hostId === hostId);
+  }
+
+  /**
+   * Replace any existing subscription for this (host, device), or add one.
+   *
+   * A service-worker scope has one subscription shared by every Host. If its
+   * endpoint, encryption keys, or VAPID key changes, every row for this device
+   * points at the old delivery address. Drop those sibling rows atomically so
+   * readback cannot claim they are still active.
+   */
+  upsert(
+    record: Omit<StoredPushSubscription, 'subscribedAt'>,
+  ): Promise<PushSubscriptionUpsertResult> {
+    return this.mutate(async () => {
+      const all = await this.list();
+      const stored: StoredPushSubscription = { ...record, subscribedAt: this.now() };
+      const deviceRegistrationsReset = all.some(
+        (s) => s.devicePublicKey === record.devicePublicKey && !samePushAddress(s, record),
+      );
+      const kept = all.filter((s) =>
+        deviceRegistrationsReset
+          ? s.devicePublicKey !== record.devicePublicKey
+          : !(s.hostId === record.hostId && s.devicePublicKey === record.devicePublicKey),
+      );
+      kept.push(stored);
+      await this.writeAtomic(kept);
+      // Every surviving row for this device necessarily shares `stored`'s
+      // address, and `samePushAddress` compares the VAPID key too — so a row
+      // minted under a rotated key is never among these, and the caller needs
+      // no further filtering to know they are all deliverable.
+      const deviceHostIds = kept
+        .filter((s) => s.devicePublicKey === record.devicePublicKey)
+        .map((s) => s.hostId);
+      return { subscription: stored, deviceHostIds };
+    });
+  }
+
+  /**
+   * Drop subscriptions the push service reported as gone. Matched on endpoint
+   * rather than device so a stale row cannot outlive its endpoint even if the
+   * same device has since re-subscribed with a new one.
+   *
+   * Takes the whole set because a fan-out can expire several at once, and one
+   * rewrite is both cheaper and less code than a serialized call per endpoint.
+   */
+  removeEndpoints(endpoints: readonly string[]): Promise<number> {
+    return this.mutate(async () => {
+      const gone = new Set(endpoints);
+      const all = await this.list();
+      const kept = all.filter((s) => !gone.has(s.endpoint));
+      if (kept.length === all.length) return 0;
+      await this.writeAtomic(kept);
+      return all.length - kept.length;
+    });
+  }
+}
+
+function samePushAddress(
+  left: Omit<StoredPushSubscription, 'subscribedAt'>,
+  right: Omit<StoredPushSubscription, 'subscribedAt'>,
+): boolean {
+  return (
+    left.endpoint === right.endpoint &&
+    left.keys.p256dh === right.keys.p256dh &&
+    left.keys.auth === right.keys.auth &&
+    left.vapidPublicKey === right.vapidPublicKey
+  );
+}
+
+/**
+ * Whether an on-disk row is a subscription this Server can use. Guards
+ * {@link PushSubscriptionStore.list}, which is the only way rows enter the
+ * process — so every field the type declares is present past that point.
+ */
+function isStoredPushSubscription(row: unknown): row is StoredPushSubscription {
+  const s = row as Partial<StoredPushSubscription> | null;
+  return (
+    typeof s?.hostId === 'string' &&
+    typeof s.devicePublicKey === 'string' &&
+    typeof s.endpoint === 'string' &&
+    typeof s.keys?.p256dh === 'string' &&
+    typeof s.keys.auth === 'string' &&
+    typeof s.vapidPublicKey === 'string' &&
+    typeof s.subscribedAt === 'number'
+  );
+}
+
+/** The VAPID keypair as stored in `vapid.json`. Both values are base64url. */
+export interface StoredVapidKeys {
+  readonly publicKey: string;
+  readonly privateKey: string;
+  readonly createdAt: number;
+}
+
+/**
+ * VAPID keypair custody (`vapid.json`). Only used when the keys are not
+ * supplied by env: a selfhost POC should not need a key ceremony before push
+ * works, but the keypair must still survive a restart or every phone's
+ * subscription is silently invalidated.
+ *
+ * This file holds a private key, which is exactly what the inherited
+ * `0o700`/`0o600` handling exists for.
+ */
+export class VapidStore extends JsonFileStore {
+  constructor(stateDir: string, now: () => number = () => Date.now()) {
+    super(stateDir, 'vapid.json', now);
+  }
+
+  load(): Promise<StoredVapidKeys | null> {
+    return this.read<StoredVapidKeys | null>(null);
+  }
+
+  /**
+   * Return the persisted keypair, generating and saving one on first call.
+   * Serialized with this store's other writes like every other mutation — note
+   * the mutex is per-process, so two servers sharing a state dir would still
+   * race; sharing one is already unsupported.
+   */
+  loadOrCreate(generate: () => { publicKey: string; privateKey: string }): Promise<StoredVapidKeys> {
+    return this.mutate(async () => {
+      const existing = await this.load();
+      if (existing) return existing;
+      const created: StoredVapidKeys = { ...generate(), createdAt: this.now() };
+      await this.writeAtomic(created);
+      return created;
     });
   }
 }

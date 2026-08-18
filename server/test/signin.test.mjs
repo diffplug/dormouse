@@ -158,3 +158,15 @@ test('requireSession gates a route on the Bearer token', async () => {
   // Sanity: the store still recognizes the live token.
   assert.ok(sessions.validate(sessionToken));
 });
+
+test('sign-in returns the asserted passkey public key', async () => {
+  // A Client needs it to build pair/connect requests; without it only the
+  // browser that registered could pair, which forced a second passkey on every
+  // new profile (docs/specs/pocket-app.md -> Installable web app).
+  const { app } = await freshApp();
+  const authenticator = await newAuthenticator();
+  await register(app, authenticator);
+  const { res } = await signin(app, authenticator);
+  const body = await res.json();
+  assert.equal(body.passkeyPublicKey, authenticator.publicKey);
+});

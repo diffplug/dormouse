@@ -11,14 +11,18 @@
  *
  *   await window.dormouseRemoteHost.enroll('https://your-server', 'SETUP_PASSWORD', 'My Laptop')
  *   window.dormouseRemoteHost.status()
+ *   window.dormouseRemoteHost.reconnect()      // needed after `displaced`
  *   window.dormouseRemoteHost.clearEnrollment()
  */
 
+import { resetPushDevices, setPushDevicesRefresher } from '../../lib/push-devices';
+import { refreshPushDevices, startAlertPush, type AlertPushDeps } from './alert-push';
 import { clearEnrollment, enrollHost, getEnrollment, type HostEnrollment } from './enrollment';
 import { RemoteApiSession } from './remote-api';
-import { RemoteHost } from './remote-host';
+import { RemoteHost, type RemoteHostStatus } from './remote-host';
 
 let current: RemoteHost | null = null;
+let stopPush: (() => void) | null = null;
 
 function startFromEnrollment(enrollment: HostEnrollment): RemoteHost {
   const host = new RemoteHost({
@@ -31,6 +35,22 @@ function startFromEnrollment(enrollment: HostEnrollment): RemoteHost {
       }),
   });
   host.start();
+
+  // Alarm push is armed here rather than in `Wall` so it exists exactly when a
+  // Host does: a build with no enrollment has nothing to push to, and this
+  // module is already the lazily-loaded standalone-only boundary
+  // (`docs/specs/alert.md` -> Push notifications).
+  const deps: AlertPushDeps = {
+    enrollment,
+    activeRecords: () => host.activeRecords,
+  };
+  stopPush = startAlertPush(deps);
+  // Populate the Alarm settings dialog's device line up front, and let the
+  // dialog ask for a fresh one when it opens — a phone can subscribe long after
+  // the Host booted, and a list only read at startup would name it never.
+  setPushDevicesRefresher(() => void refreshPushDevices(deps));
+  void refreshPushDevices(deps);
+
   return host;
 }
 
@@ -45,13 +65,23 @@ export function activateRemoteHost(): void {
 export function stopRemoteHost(): void {
   current?.stop();
   current = null;
+  stopPush?.();
+  stopPush = null;
+  // Back to `no-host`: the dialog must stop naming devices nothing can reach.
+  resetPushDevices();
 }
 
 export interface RemoteHostConsoleStatus {
   enrolled: boolean;
   serverUrl: string | null;
   hostId: string | null;
-  connection: string;
+  /**
+   * The relay socket's state. `displaced` is the one that needs acting on:
+   * another Dormouse instance enrolled with the same `hostId` took the relay
+   * slot, so this one stood down and no timer will bring it back — `reconnect()`
+   * takes the slot back (and displaces the other one in turn).
+   */
+  connection: RemoteHostStatus;
   pairedClients: number;
 }
 
@@ -79,6 +109,16 @@ export function installRemoteHostConsoleHook(): void {
       return { hostId: enrollment.hostId, serverUrl: enrollment.serverUrl };
     },
     status: remoteHostStatus,
+    /**
+     * Re-open the relay socket now. The only way back from `displaced`: an
+     * evicted Host stands down for good rather than fighting the Host that
+     * replaced it, so returning has to be asked for.
+     */
+    reconnect(): RemoteHostConsoleStatus {
+      activateRemoteHost();
+      current?.start();
+      return remoteHostStatus();
+    },
     clearEnrollment() {
       stopRemoteHost();
       clearEnrollment();

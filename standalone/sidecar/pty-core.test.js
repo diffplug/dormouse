@@ -360,6 +360,63 @@ test('create buffers scrollback for getScrollback requests', () => {
   });
 });
 
+test('interrupt writes one ^C to every live PTY and leaves scrollback readable', async () => {
+  const events = [];
+  const writes = [];
+  const killSignals = [];
+  const listeners = {};
+  const fakePty = {
+    pid: 7,
+    onData(handler) { listeners.data = handler; },
+    onExit(handler) { listeners.exit = handler; },
+    resize() {},
+    write(data) { writes.push(data); },
+    kill(signal) { killSignals.push(signal); },
+  };
+
+  let resolveDone;
+  const done = new Promise((resolve) => { resolveDone = resolve; });
+  const mgr = create((event, data) => {
+    events.push({ event, data });
+    if (event === 'interruptDone') resolveDone();
+  }, { spawn() { return fakePty; } });
+
+  mgr.spawn('pane-1');
+  mgr.interrupt(undefined, 'req-7');
+  await done;
+
+  // ONE press. A blanket second press destroys codex's hint, so whether to press
+  // again is the host's per-PTY decision after it sees what came back.
+  assert.deepEqual(writes, ['\x03']);
+  // The interrupt is input, never a signal — the tty resolves the foreground
+  // process group, which is why this reaches an agent where SIGTERM does not.
+  assert.deepEqual(killSignals, []);
+  assert.deepEqual(events.at(-1), { event: 'interruptDone', data: { requestId: 'req-7' } });
+
+  // What the agent printed on its way out is what capture reads.
+  listeners.data?.('claude --resume abc123\n');
+  mgr.getScrollback('pane-1', 'req-8');
+  assert.deepEqual(events.at(-1), {
+    event: 'scrollback',
+    data: { id: 'pane-1', data: 'claude --resume abc123\n', requestId: 'req-8' },
+  });
+});
+
+test('interrupt with no live PTYs still reports done', async () => {
+  const events = [];
+  let resolveDone;
+  const done = new Promise((resolve) => { resolveDone = resolve; });
+  const mgr = create((event, data) => {
+    events.push({ event, data });
+    if (event === 'interruptDone') resolveDone();
+  }, { spawn() { throw new Error('should not spawn'); } });
+
+  mgr.interrupt(undefined, 'req-empty');
+  await done;
+
+  assert.deepEqual(events.at(-1), { event: 'interruptDone', data: { requestId: 'req-empty' } });
+});
+
 test('gracefulKillAll SIGTERMs live PTYs, echoes requestId, preserves scrollback', async () => {
   const events = [];
   const killSignals = [];

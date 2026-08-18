@@ -13,6 +13,11 @@ this spec does not restate its release recipe. File pointers under
 `addons/addon-webgl/` refer to the fork repo (cloned at `~/projects/xterm.js`),
 not this repo.
 
+**Two webgl addons, one repo.** Production terminals render through *stock*
+`@xterm/addon-webgl` (`docs/specs/layout.md` → "Renderer"); only `canopy/`
+consumes the SDF fork. Everything below is about the fork. "Does Dormouse use
+WebGL?" is answered by layout.md, not here.
+
 ## Fork pipeline
 
 - **Repo/branches**: `master` on diffplug/xterm.js is a pristine fast-forward
@@ -20,16 +25,46 @@ not this repo.
   Upstreamable fixes branch off `master` and are cherry-picked into `sdf`.
 - **Versioning**: the addon is published as `@diffplug/xterm-addon-webgl-sdf`
   with versions shaped `<addon-version>-sdf<coreBeta>.<iteration>` (e.g.
-  `0.20.0-sdf288.5` = built from the commit of `@xterm/xterm@6.1.0-beta.288`,
-  iteration 5). The addon bundles xterm core internals, so consumers must pin
-  the exact `@xterm/xterm` beta encoded in the version — the pins in
-  `canopy/package.json` move in lockstep.
+  `0.20.0-sdf301.1` = built from the commit of `@xterm/xterm@6.1.0-beta.301`,
+  iteration 1). The addon bundles xterm core internals, so consumers must pin
+  the exact `@xterm/xterm` beta it was built from — the pins in
+  `canopy/package.json` move in lockstep. Since `0.20.0-sdf301.1` the tarball
+  also declares `peerDependencies: { '@xterm/xterm': '^<that beta>' }`, which is
+  what the lint checks: upstream's `bin/publish.js` injects that field at publish
+  time and our hand-cut `npm pack` release does not run it, so earlier fork
+  tarballs shipped without any peer range. It is also the only record of the
+  base as a *full* version — the `-sdfNNN` counter repeats across upstream
+  release lines (`5.6.0-beta.1..143`, then `6.1.0-beta.1..302`).
 - **Distribution**: GitHub Release assets consumed as a pnpm tarball-URL
   dependency. Deliberately not an npm registry: GitHub Packages requires auth
   even for public reads, and release assets need none. The lockfile records a
   sha512 integrity hash; treat published assets as immutable and cut a new
   iteration instead of replacing one. Renovate cannot see tarball URLs, so
-  version bumps are manual edits of `canopy/package.json`.
+  version bumps are manual edits of `canopy/package.json`. Because the tarball
+  is invisible to it, Renovate would otherwise drift canopy's two sibling pins
+  off the fork base unnoticed, so `.github/renovate.json` disables `@xterm/**`
+  scoped to `canopy/package.json` — both pins move only by hand (or via
+  `node scripts/xterm-bump.mjs --canopy <forkVersion>`, which rewrites the URL
+  and both pins from the commit the fork version encodes). `lib/` and
+  `standalone/` keep tracking upstream betas as one grouped `xterm` PR, so
+  between fork rebases the two can sit on different `@xterm/xterm` betas. That
+  divergence is expected and confined to the Storybook-only lab.
+- **Upstream pins are per-commit, not per-latest.** The four `@xterm/*`
+  packages ship from one repo but carry independent beta counters — an addon is
+  published only when its own content changes — and each addon's
+  `peerDependencies['@xterm/xterm']` names the exact core version published
+  from the same commit. So "the latest of each" is routinely a set spanning two
+  commits, and because `^6.1.0-beta.N` admits every later beta, nothing in npm
+  or pnpm complains while addons run against core internals they were not
+  compiled against. `scripts/xterm-lint.mjs` (offline, in `pnpm test`) enforces
+  three things this depends on: every addon pin's peer range equals `^` its
+  workspace's core pin — the SDF fork tarball included, which is what makes the
+  canopy lockstep exact rather than counter-deep — `lib` and `standalone` agree,
+  and canopy's tarball URL is self-consistent (tag, filename and `-sdfNNN`
+  counter agree with the core pin, which independently catches a release whose
+  tag misstates the base its peer range declares). `scripts/xterm-bump.mjs`
+  (`pnpm bump:xterm`) derives the newest set that all four packages published
+  from one commit and writes it.
 - **Releases are hand-cut today** (build, `npm pack`, `gh release create` per
   FORK.md); automating this is staged in `## Future`.
 - **Dev loop**: `pnpm link ~/projects/xterm.js/addons/addon-webgl` from
@@ -39,7 +74,35 @@ not this repo.
   and reinstall before trusting a tarball verification.
 
 Source of truth: `canopy/package.json` (pins), `canopy/README.md` (bump flow),
-FORK.md in the fork.
+`scripts/xterm-lint.mjs` + `scripts/xterm-bump.mjs` (the pin invariants and the
+tool that satisfies them), FORK.md in the fork.
+
+## Following upstream
+
+An `@xterm/*` bump is not a dependency chore that stops at `lib/` and
+`standalone/` — it is the trigger to re-evaluate the fork. Leaving the fork on
+an older base makes canopy's `UpstreamVsFork` harness compare against an
+upstream we no longer ship, which is the one thing the harness exists to
+prevent. Each time Renovate opens the grouped `xterm` PR:
+
+1. **Read the upstream diff first** and decide what it is worth. Start with
+   `node scripts/xterm-bump.mjs --dry-run`: it names the newest coherent set
+   (which is often an older core than Renovate proposed), prints the commit
+   range from canopy's fork base to it, and lists the files in that range under
+   `addons/addon-webgl/`. Most betas touch none of them, in which case the bump
+   is a no-op for us and the fork does not move; when they do, that diff is the
+   improvements-and-risks assessment.
+2. **Rebase and release the fork** per the `Merging upstream` section of
+   FORK.md — including its warning that a conflict-free merge is not a correct
+   one, because upstream regularly adds obligations to code we extended without
+   anything conflicting.
+3. **Bump `canopy/package.json`** — `node scripts/xterm-bump.mjs --canopy
+   <forkVersion>` moves the tarball URL and both pins together — and update the
+   version-correspondence comment at the `UpstreamWebglAddon` import in
+   `canopy/src/GlTerminal.stories.tsx`.
+
+Land all of it in the same PR as the `@xterm/*` bump, so the tree never records
+a state where lib and the fork disagree about which upstream they track.
 
 ## SDF glyph architecture
 

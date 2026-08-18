@@ -25,10 +25,20 @@ function stripAnsi(data: string): string {
 
 function getRunnerState(runner: AsciiSplashRunner) {
   return runner as unknown as {
-    commandExecutor: { patterns: unknown[] } | null;
-    currentPatternIndex: number;
+    commandExecutor: { runtime: unknown } | null;
     engine: { getPattern(): unknown } | null;
-    patterns: unknown[];
+    runtime:
+      | {
+          getSnapshot(): {
+            patternIndex: number;
+            patternCount: number;
+            patternKey: string;
+            themeName: string;
+            presetId: number;
+          };
+          getCurrentPattern(): unknown;
+        }
+      | null;
   };
 }
 
@@ -172,21 +182,95 @@ describe("AsciiSplashRunner", () => {
     runnerB.dispose();
   });
 
-  it("keeps command executor patterns synced after random pattern and theme commands", () => {
+  it("advances the pattern on n and keeps the engine on the selected slot", () => {
+    const { runner } = createHarness(["--pattern", "waves"]);
+    runner.start();
+    const state = getRunnerState(runner);
+    expect(state.runtime?.getSnapshot().patternKey).toBe("waves");
+
+    try {
+      runner.handleInput("n");
+
+      expect(state.runtime?.getSnapshot().patternIndex).toBe(1);
+      expect(state.engine?.getPattern()).toBe(state.runtime?.getCurrentPattern());
+    } finally {
+      runner.dispose();
+    }
+  });
+
+  it("selects a pattern by name through the p buffer", () => {
+    const { runner } = createHarness(["--pattern", "waves"]);
+    runner.start();
+    const state = getRunnerState(runner);
+
+    try {
+      runner.handleInput("p");
+      runner.handleInput("matrix");
+      runner.handleInput("\r");
+
+      expect(state.runtime?.getSnapshot().patternKey).toBe("matrix");
+      expect(state.engine?.getPattern()).toBe(state.runtime?.getCurrentPattern());
+    } finally {
+      runner.dispose();
+    }
+  });
+
+  it("rebuilds pattern slots on theme cycle without losing the active pattern", () => {
+    const { runner } = createHarness(["--pattern", "matrix", "--theme", "ocean"]);
+    runner.start();
+    const state = getRunnerState(runner);
+    const before = state.runtime?.getCurrentPattern();
+
+    try {
+      runner.handleInput("t");
+
+      const after = state.runtime?.getSnapshot();
+      expect(after?.themeName).toBe("matrix");
+      // Theme changes rebuild every slot, so the active pattern is a new
+      // instance — but it must still be the same slot, and the engine must
+      // be pointed at the replacement rather than the stale instance.
+      expect(after?.patternKey).toBe("matrix");
+      expect(state.runtime?.getCurrentPattern()).not.toBe(before);
+      expect(state.engine?.getPattern()).toBe(state.runtime?.getCurrentPattern());
+    } finally {
+      runner.dispose();
+    }
+  });
+
+  it("cycles presets on the active pattern", () => {
+    const { runner } = createHarness(["--pattern", "waves"]);
+    runner.start();
+    const state = getRunnerState(runner);
+    expect(state.runtime?.getSnapshot().presetId).toBe(1);
+
+    try {
+      runner.handleInput(".");
+
+      expect(state.runtime?.getSnapshot().presetId).toBeGreaterThan(1);
+    } finally {
+      runner.dispose();
+    }
+  });
+
+  it("keeps command executor scene state synced after random pattern and theme commands", () => {
     const { runner } = createHarness(["--pattern", "waves"]);
     runner.start();
     const targetPatternIndex = 2;
     const initialState = getRunnerState(runner);
-    expect(initialState.patterns.length).toBeGreaterThan(targetPatternIndex);
-    const random = vi.spyOn(Math, "random").mockReturnValue((targetPatternIndex + 0.1) / initialState.patterns.length);
+    const patternCount = initialState.runtime?.getSnapshot().patternCount ?? 0;
+    expect(patternCount).toBeGreaterThan(targetPatternIndex);
+    const random = vi.spyOn(Math, "random").mockReturnValue((targetPatternIndex + 0.1) / patternCount);
 
     try {
       runner.handleInput("r");
 
       const state = getRunnerState(runner);
-      expect(state.currentPatternIndex).toBe(targetPatternIndex);
-      expect(state.engine?.getPattern()).toBe(state.patterns[targetPatternIndex]);
-      expect(state.commandExecutor?.patterns).toBe(state.patterns);
+      // `r` runs `0**` (randomize), which routes through CommandExecutor into
+      // the RuntimeController the runner shares with it — one owner of the
+      // scene, so the engine's pattern can no longer drift from the selection.
+      expect(state.runtime?.getSnapshot().patternIndex).toBe(targetPatternIndex);
+      expect(state.engine?.getPattern()).toBe(state.runtime?.getCurrentPattern());
+      expect(state.commandExecutor?.runtime).toBe(state.runtime);
     } finally {
       runner.dispose();
       random.mockRestore();

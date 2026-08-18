@@ -2,10 +2,15 @@ import { clsx } from 'clsx';
 import { tv, type VariantProps } from 'tailwind-variants';
 import { XIcon } from '@phosphor-icons/react';
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode, RefObject } from 'react';
+import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, RefObject } from 'react';
+import { stepFocus } from './focus-step';
 
 // App-wide type scale, color strategy, and chrome conventions: see
 // docs/specs/theme.md and AGENTS.md.
+
+/** Desktop pane-header height. Geometry derived from the header (such as the
+ * elevated zoom inset) must use this constant so the chrome stays proportional. */
+export const PANE_HEADER_HEIGHT_PX = 30;
 
 // Pane headers/doors own the top corners; terminal bodies own the bottom.
 // All terminal-radius constants derive from this single source so the CSS
@@ -18,11 +23,61 @@ export const TERMINAL_BORDER_RADIUS_PX = TERMINAL_BORDER_RADIUS_REM * 16;
 export const TERMINAL_TOP_RADIUS_CLASS = 'rounded-t-lg';
 export const TERMINAL_BOTTOM_RADIUS_CLASS = 'rounded-b-lg';
 export const TERMINAL_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}rem`;
-export const DOOR_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}rem ${TERMINAL_BORDER_RADIUS_REM}rem 0 0`;
+
+// The gutter between panes (and around the wall's top/sides — the baseboard
+// side stays a tight 2px). Deliberately ODD: the passthrough ring is a 1px
+// stroke, and a 1px stroke can only sit dead-center of a gutter on whole
+// device pixels when the gutter is odd. Consumed by LATH_LAYOUT_OPTS.gap and
+// mirrored by the Tailwind inset classes in Wall.tsx / Baseboard.tsx
+// (`*-1.75` = 7px) — keep them in sync.
+export const PANE_GUTTER_PX = 7;
+
+// Concentric-corners rule: when a rounded outline wraps a rounded edge, both
+// arcs must share a corner center — outer radius = inner radius + offset.
+// Never tighten the inner radius to compensate. The pane focus ring draws on
+// a rect inflated by SELECTION_RING_INFLATE_PX, so its radius grows by the
+// same amount; rings at zero offset (doors, the Lath drop preview) keep the
+// pane radius as-is.
+//
+// The inflate is derived so the ring is CENTERED in the gutter: the 1px
+// passthrough border draws just inside the inflated rect, spanning
+// [INFLATE-1, INFLATE] from the pane edge, so its center sits at
+// INFLATE - 0.5 = PANE_GUTTER_PX / 2. (Both selection-ring strokes center on
+// the same line via their path inset — see SelectionRing.)
+export const SELECTION_RING_INFLATE_PX = (PANE_GUTTER_PX + 1) / 2;
+export const PANE_SELECTION_RING_RADIUS_PX = TERMINAL_BORDER_RADIUS_PX + SELECTION_RING_INFLATE_PX;
+
+// Focus-ring motion. The selection ring's travel between panes/doors, the pane
+// header's active/inactive palette crossfade, and the ring's unfocus-saturate
+// fade all run on this single duration so they resolve as one gesture. Half the
+// Lath layout motion (LATH_MOTION_MS = 440) — the ring is a light overlay chasing
+// geometry the wall has already committed, so it settles quicker. The ring travel
+// itself is a JS tween on a pointer-events-none overlay (WorkspaceSelectionOverlay
+// + rect-tween.ts), the same per-frame carve-out the Lath animator holds against
+// DESIGN.md's "don't animate layout properties" rule.
+export const FOCUS_MOTION_MS = 220;
+
+// The pane-header palette crossfade, as a complete Tailwind literal so the
+// scanner emits it (a template built from FOCUS_MOTION_MS would be invisible to
+// it). The duration + house curve are asserted against FOCUS_MOTION_MS in
+// design.test.ts so this literal can't silently drift from the ring's timing.
+export const HEADER_PALETTE_TRANSITION_CLASS =
+  'transition-colors duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none';
 
 // Letter-spacing for the small semibold TODO pill — wider tracking keeps the
 // tiny label legible. Shared so both pill sites stay in sync.
 export const TODO_PILL_TRACKING_CLASS = 'tracking-[0.08em]';
+
+// Spoken-alarm delivery is intentionally louder than resting chrome.
+// `--color-alarm-vs-terminal` is the dynamic black/white contrast pick for the
+// terminal body behind the overlay. The pulse itself is `alertSpeakingAnimationClass`
+// in `bell-icon-class.ts`, beside the other Chromatic-frozen alert animation.
+export const ALERT_SPEECH_TRACKING_CLASS = 'tracking-[0.12em]';
+
+// Chrome for small anchored popovers (title candidates, TODO preview, pane
+// context menu, rename warning). Text size and padding vary per popover and
+// stay at the call site; the surface recipe is shared so they can't drift.
+export const POPUP_SURFACE_CLASS = 'z-[1000] rounded border border-border bg-surface-raised font-mono text-foreground shadow-md';
 
 export function PopupButtonRow({
   className,
@@ -42,16 +97,12 @@ export function PopupButtonRow({
 export const popupButton = tv({
   base: 'm-0 px-1.5 py-0.5',
   variants: {
-    tone: {
-      foreground: '',
-      muted: 'text-muted hover:text-foreground',
-    },
     flashed: {
       true: 'animate-copy-flash bg-header-active-bg/25 text-header-active-bg',
       false: 'hover:bg-foreground/10',
     },
   },
-  defaultVariants: { tone: 'foreground', flashed: false },
+  defaultVariants: { flashed: false },
 });
 
 export type PopupButtonVariants = VariantProps<typeof popupButton>;
@@ -76,7 +127,10 @@ export const modalOverlay = tv({
   variants: {
     scope: {
       viewport: 'fixed inset-0',
-      target: 'rounded',
+      // The target veil covers the target's exact rect (zero offset), so the
+      // Concentric-Corners Rule (DESIGN.md) makes its radius EQUAL the target's
+      // — panes round at rounded-lg (TERMINAL_*_RADIUS_CLASS above).
+      target: 'rounded-lg',
     },
     backdrop: {
       standard: 'bg-app-bg/50',
@@ -87,6 +141,48 @@ export const modalOverlay = tv({
 });
 
 export type ModalOverlayVariants = VariantProps<typeof modalOverlay>;
+
+/**
+ * The inset a modal overlay reserves around its surface. Hoisted because
+ * `OVERLAY_MAX_HEIGHT.modal` below is derived from it — `py-6`, doubled — and
+ * Tailwind needs both as literals, so the pair can only be kept honest by
+ * living side by side.
+ */
+export const MODAL_OVERLAY_INSET = 'px-4 py-6';
+
+/**
+ * The custom properties viewport-bounded overlays read for their height caps.
+ *
+ * These exist so a bound can be *narrowed* by an ancestor: a story overrides one
+ * to snapshot the short-viewport layout deterministically, which no `dvh` value
+ * can (Chromatic controls snapshot width, never height). Unset everywhere in the
+ * app, so each entry below falls through to the real viewport.
+ *
+ * One property per kind, not one shared: inside the Settings dialog the popover
+ * is a DOM descendant of the modal surface, and custom properties inherit
+ * through `position: fixed` — so a single knob narrowed to constrain the
+ * dropdown would silently cap the dialog containing it too.
+ */
+export const OVERLAY_MAX_HEIGHT_VAR = {
+  modal: '--overlay-max-h-modal',
+  popover: '--overlay-max-h-popover',
+} as const;
+
+/**
+ * Height caps for things that float over the viewport. One spelling per kind of
+ * inset, rather than the six hand-rolled `vh`/`dvh` literals these replaced.
+ *
+ * `dvh` rather than `vh` so a mobile browser's collapsing chrome counts. Written
+ * as whole literals because Tailwind scans source statically and cannot see a
+ * value assembled from a constant — `design.test.ts` pins `popover` to
+ * `OVERLAY_VIEWPORT_MARGIN_PX` so the two cannot drift.
+ */
+export const OVERLAY_MAX_HEIGHT = {
+  /** A `ModalFrame` surface: the viewport minus `MODAL_OVERLAY_INSET` doubled. */
+  modal: 'max-h-[var(--overlay-max-h-modal,calc(100dvh-3rem))]',
+  /** An anchored popover, matching `clampOverlayPosition`'s viewport margin. */
+  popover: 'max-h-[var(--overlay-max-h-popover,calc(100dvh-24px))]',
+} as const;
 
 export const modalSurface = tv({
   base: 'rounded-lg border border-border bg-surface-raised font-mono text-foreground shadow-lg',
@@ -192,6 +288,86 @@ export const ModalCloseButton = forwardRef<HTMLButtonElement, ModalCloseButtonPr
     );
   },
 );
+
+// Form controls. The app has no checkbox anywhere: a boolean is an OnOffSwitch,
+// and a number is a NumericInput. Both live here so dialogs share one vocabulary
+// rather than each restyling a bare <input> (DESIGN.md -> Inputs).
+
+export type NumericInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'type' | 'value'> & {
+  value: string;
+  onChange: (next: string) => void;
+  /** Max digits the field holds — sizes the box so rows stay compact. */
+  chars?: number;
+};
+
+/**
+ * A compact underlined number field. Filters non-numeric input at the keystroke
+ * rather than relying on `type="number"`, whose spinners and locale parsing do
+ * not fit the app's chrome.
+ */
+export const NumericInput = forwardRef<HTMLInputElement, NumericInputProps>(
+  function NumericInput({ value, onChange, chars = 4, className, style, ...props }, ref) {
+    return (
+      <input
+        ref={ref}
+        type="text"
+        inputMode="numeric"
+        value={value}
+        onChange={(e) => onChange(e.target.value.replace(/[^0-9.]/g, ''))}
+        style={{ width: `calc(${chars}ch + 0.5rem)`, ...style }}
+        className={clsx(
+          'border-0 border-b border-border bg-transparent px-0.5 py-0.5 font-mono text-foreground outline-none focus:border-focus-ring',
+          className,
+        )}
+        {...props}
+      />
+    );
+  },
+);
+
+/**
+ * Left margin that lines content up under an `OnOffSwitch`'s label rather than
+ * its pill: the switch's `w-14` plus the usual `gap-3` between them. Lives here
+ * so it moves with the switch's own geometry.
+ */
+export const UNDER_SWITCH_INDENT = 'ml-[4.25rem]';
+
+/**
+ * The app's boolean control: a two-position pill reading "on | off". Rendered as
+ * a `role="switch"` button, so it is disabled natively by a surrounding
+ * `<fieldset disabled>`.
+ */
+export function OnOffSwitch({
+  on,
+  onEnable,
+  onDisable,
+  label,
+}: {
+  on: boolean;
+  onEnable: () => void;
+  onDisable: () => void;
+  /** Describes what is being switched; announced with the current position. */
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={`${label} ${on ? 'on' : 'off'}`}
+      onClick={() => (on ? onDisable() : onEnable())}
+      className="relative inline-flex h-5 w-14 items-center rounded-full border border-border bg-app-bg text-sm font-medium"
+    >
+      <span
+        aria-hidden
+        className="absolute inset-y-0.5 w-[calc(50%-2px)] rounded-full bg-header-active-bg/25 transition-transform"
+        style={{ transform: on ? 'translateX(2px)' : 'translateX(calc(100% + 2px))' }}
+      />
+      <span className={clsx('z-10 flex-1 text-center', on ? 'text-header-active-bg' : 'text-muted')}>on</span>
+      <span className={clsx('z-10 flex-1 text-center', on ? 'text-muted' : 'text-header-active-bg')}>off</span>
+    </button>
+  );
+}
 
 export function useMeasuredElementRect(element: HTMLElement | null): ModalRect | null {
   const [rect, setRect] = useState<ModalRect | null>(null);
@@ -365,6 +541,17 @@ function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElem
       const modal = modalRef.current;
       if (!modal) return;
 
+      if (event.key !== 'Escape' && event.key !== 'Tab') return;
+
+      // A native modal <dialog> (ThemeStoreDialog, ThemeDebuggerDialog) sits in
+      // the browser's top layer and owns the keyboard with its own Tab/Escape
+      // handling. This listener is on window in the capture phase, so without
+      // this bail it would preventDefault every Tab and cycle focus back into
+      // the modal underneath — leaving the dialog's own fields untabbable.
+      // Kept below the key filter: it is a full-document query, and this
+      // handler runs for every keystroke while any modal is mounted.
+      if (document.querySelector('dialog[open]')) return;
+
       if (event.key === 'Escape') {
         if (onEscape) {
           event.preventDefault();
@@ -376,16 +563,11 @@ function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElem
 
       if (event.key !== 'Tab') return;
 
-      const focusables = Array.from(modal.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR));
-      if (focusables.length === 0) return;
-
-      const currentIndex = focusables.findIndex((item) => item === document.activeElement);
-      const nextIndex = currentIndex === -1
-        ? 0
-        : (currentIndex + (event.shiftKey ? -1 : 1) + focusables.length) % focusables.length;
-
       event.preventDefault();
-      focusables[nextIndex]?.focus();
+      stepFocus(
+        Array.from(modal.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR)),
+        event.shiftKey ? -1 : 1,
+      );
     };
 
     window.addEventListener('keydown', handleKeyDown, true);
@@ -412,6 +594,21 @@ export const chromeButton = tv({
 });
 
 export type ChromeButtonVariants = VariantProps<typeof chromeButton>;
+
+/** Pane-header zoom control. The zoomed pane swaps its header foreground and
+ * background tokens so Unzoom reads as the active escape hatch in every theme. */
+export function paneZoomButtonClass(zoomed: boolean, activeHeader: boolean): string {
+  return clsx(
+    // The zoom pill's tokens flip with the header palette, so it rides the same
+    // crossfade timing as the header background instead of the default transition.
+    `flex h-5 min-w-5 items-center justify-center rounded ${HEADER_PALETTE_TRANSITION_CLASS}`,
+    zoomed
+      ? activeHeader
+        ? 'bg-header-active-fg text-header-active-bg'
+        : 'bg-header-inactive-fg text-header-inactive-bg'
+      : 'hover:bg-current/10',
+  );
+}
 
 /** Keyboard shortcut rendered as `[keys]` in muted color. Use everywhere key
  *  bindings appear in UI text so the bracket convention is consistent. */

@@ -30,9 +30,10 @@ import {
 } from 'react';
 import { type LathTree, type Rect, leaves } from '../../lib/lath/model';
 import { layout, sashes } from '../../lib/lath/layout';
+import { LATH_LAYER_DYING, LATH_LAYER_ELEVATED, LATH_LAYER_TILED } from '../../lib/lath/animator';
 import { type DropTarget, resize } from '../../lib/lath/ops';
 import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
-import { TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
+import { PANE_HEADER_HEIGHT_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import type { PaneProps } from './pane-props';
 import { type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { nowMs, type LathWallEngine } from './lath-wall-engine';
@@ -41,6 +42,7 @@ import { TerminalPanel } from './TerminalPanel';
 import { BrowserPanel } from './BrowserPanel';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
+import { AlertSpeechIndicator } from './AlertSpeechIndicator';
 
 /** Widened pointer target over each (thin) sash band, in px. */
 const SASH_HIT = 8;
@@ -53,12 +55,49 @@ const Z_ZOOMED = 40;
 /** The drop-preview overlay floats above every tiled/dying leaf (a drag can't start
  *  while a leaf is zoomed, so it never competes with `Z_ZOOMED`). */
 const Z_PREVIEW = 45;
+/** Reveal half a pane header of tiled layout around an elevated zoomed pane. */
+export const LATH_ZOOM_MARGIN = PANE_HEADER_HEIGHT_PX / 2;
+/** Soft app-chrome halo separates the elevated pane from tiled content below. */
+export const LATH_ZOOM_SHADOW = '0 0 5px 5px var(--color-app-bg)';
 
-/** Test seam: swap the resolved body/tab components (keyed by component name) so
- *  jsdom tests never mount the real TerminalPane/xterm. */
+const PANE_HEADER_STYLE: CSSProperties = {
+  flex: `0 0 ${PANE_HEADER_HEIGHT_PX}px`,
+  height: PANE_HEADER_HEIGHT_PX,
+};
+
+function zoomRect(rect: Rect): Rect {
+  const inset = Math.min(LATH_ZOOM_MARGIN, rect.width / 2, rect.height / 2);
+  return {
+    x: rect.x + inset,
+    y: rect.y + inset,
+    width: Math.max(0, rect.width - inset * 2),
+    height: Math.max(0, rect.height - inset * 2),
+  };
+}
+
+function zIndexForLayer(layer: number): number {
+  if (layer >= LATH_LAYER_ELEVATED) return Z_ZOOMED;
+  if (layer >= LATH_LAYER_DYING) return Z_DYING;
+  return Z_TILED;
+}
+
+/** Apply presentation-only zoom without touching the split tree beneath it. */
+function presentationTargets(tree: LathTree, rect: Rect, zoomedId: string | null) {
+  const targets = layout(tree, rect, LATH_LAYOUT_OPTS);
+  const layers = new Map<string, number>();
+  if (zoomedId && targets.has(zoomedId)) {
+    targets.set(zoomedId, zoomRect(rect));
+    layers.set(zoomedId, LATH_LAYER_ELEVATED);
+  }
+  return { targets, layers };
+}
+
+/** Test seam: swap the resolved body/tab/overlay components (keyed by component
+ *  name) so jsdom tests never mount the real TerminalPane/xterm. */
 export type LathComponentsOverride = {
   bodies?: Record<string, ComponentType<PaneProps>>;
   tabs?: Record<string, ComponentType<PaneProps>>;
+  overlays?: Record<string, ComponentType<PaneProps>>;
 };
 
 // Body components keyed by `leafMeta.component`; `surface` headers to
@@ -70,6 +109,19 @@ const BODY_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
 const TAB_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
   terminal: TerminalPaneHeader,
   surface: SurfacePaneHeader,
+};
+
+/** For a terminal Surface the pane id is its session id (docs/specs/layout.md). */
+function TerminalLeafOverlay({ id }: PaneProps) {
+  return <AlertSpeechIndicator sessionId={id} />;
+}
+
+// Whole-leaf overlays keyed by `leafMeta.component`: pointer-transparent chrome
+// spanning header *and* body, which neither the Body nor the Tab slot can cover.
+// Keyed off the same metadata as those two so leaf content resolves one way, not
+// one way plus a surface-kind branch in the render path.
+const OVERLAY_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
+  terminal: TerminalLeafOverlay,
 };
 
 type DragState = {
@@ -95,7 +147,8 @@ type LeafCallbacks = {
  *  identity (id / meta / resolved components / the stable header-press handler), so a
  *  geometry-only frame — a sash-drag preview or a resize commit re-renders the
  *  positioned wrapper — never re-renders the header or body. Returned as a fragment so
- *  the header/body stay direct flex children of `.lath-leaf`. A mounted leaf is always
+ *  the header/body and the whole-leaf overlay stay direct children of
+ *  `.lath-leaf`. A mounted leaf is always
  *  engine-visible, so the pane props carry no visibility flag (docs/specs/
  *  tiling-engine.md → "Pane props contract"). */
 const LathLeafContent = memo(function LathLeafContent({
@@ -103,22 +156,25 @@ const LathLeafContent = memo(function LathLeafContent({
   meta,
   Body,
   Tab,
+  Overlay,
   onHeaderPointerDown,
 }: {
   id: string;
   meta: LeafMeta | undefined;
   Body: ComponentType<PaneProps> | undefined;
   Tab: ComponentType<PaneProps> | undefined;
+  Overlay: ComponentType<PaneProps> | undefined;
   /** Header-press → maybe a pane drag (threshold-gated in the drag controller). Stable. */
   onHeaderPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
 }) {
   const paneProps: PaneProps = { id, title: meta?.title, params: meta?.params };
   return (
     <>
-      <div className="lath-leaf-header" onPointerDown={onHeaderPointerDown}>
+      <div className="lath-leaf-header" style={PANE_HEADER_STYLE} onPointerDown={onHeaderPointerDown}>
         {Tab ? <Tab {...paneProps} /> : null}
       </div>
       <div className="lath-leaf-body">{Body ? <Body {...paneProps} /> : null}</div>
+      {Overlay ? <Overlay {...paneProps} /> : null}
     </>
   );
 });
@@ -134,6 +190,7 @@ const LathLeaf = memo(function LathLeaf({
   meta,
   Body,
   Tab,
+  Overlay,
   left,
   top,
   width,
@@ -148,6 +205,7 @@ const LathLeaf = memo(function LathLeaf({
   meta: LeafMeta | undefined;
   Body: ComponentType<PaneProps> | undefined;
   Tab: ComponentType<PaneProps> | undefined;
+  Overlay: ComponentType<PaneProps> | undefined;
   left: number;
   top: number;
   width: number;
@@ -169,7 +227,14 @@ const LathLeaf = memo(function LathLeaf({
       ref={registerEl}
       onFocusCapture={() => onLeafFocused?.(id)}
     >
-      <LathLeafContent id={id} meta={meta} Body={Body} Tab={Tab} onHeaderPointerDown={onHeaderPointerDown} />
+      <LathLeafContent
+        id={id}
+        meta={meta}
+        Body={Body}
+        Tab={Tab}
+        Overlay={Overlay}
+        onHeaderPointerDown={onHeaderPointerDown}
+      />
     </div>
   );
 });
@@ -347,14 +412,13 @@ export function LathHost({
   }, [dragging, onCommitResize]);
 
   const activeTree = preview ?? snapshot.tree;
-  const frames = layout(activeTree, rect, LATH_LAYOUT_OPTS);
+  const { targets: frames, layers } = presentationTargets(activeTree, rect, snapshot.zoomedId);
   const sashList = sashes(activeTree, rect, LATH_LAYOUT_OPTS);
 
   // DOM order is sorted-by-id and STABLE across layout changes; z-index (not DOM
   // order) lifts the zoomed leaf, so keyed siblings never reorder. `leaves()`
   // already returns a fresh array, so sort it in place.
   const sortedIds = leaves(snapshot.tree).sort();
-  const zoomedId = snapshot.zoomedId;
 
   // Create-once-per-id callback bundle so the memoized LathLeaf sees a stable
   // `registerEl` identity across commits.
@@ -421,35 +485,22 @@ export function LathHost({
   // Holds the latest `step` for the rAF schedule inside `pump`, so `pump` needn't take
   // `step` as a dependency (they reference each other).
   const stepRef = useRef<() => void>(() => {});
-  // The zoomed leaf's geometry is React-driven (full-rect), but dying opacity /
-  // pointer-events still come from the animator. Kept in a ref so the rAF callback
-  // always sees the latest.
-  const zoomedIdRef = useRef<string | null>(null);
-  zoomedIdRef.current = zoomedId;
-
   const applyFrames = useCallback(
     (t: number) => {
       const paint = animator.framesAt(t);
-      const zoomed = zoomedIdRef.current;
       for (const [id, el] of leafElsRef.current) {
         const f = paint.get(id);
         if (!f) continue; // not tracked (e.g. just-removed) — leave React's styles
-        const isZoomed = id === zoomed;
-        if (!isZoomed) {
-          el.style.left = `${f.rect.x}px`;
-          el.style.top = `${f.rect.y}px`;
-          el.style.width = `${f.rect.width}px`;
-          el.style.height = `${f.rect.height}px`;
-        }
+        el.style.left = `${f.rect.x}px`;
+        el.style.top = `${f.rect.y}px`;
+        el.style.width = `${f.rect.width}px`;
+        el.style.height = `${f.rect.height}px`;
         el.style.opacity = f.opacity >= 1 ? '' : `${f.opacity}`;
-        if (f.layer >= 1) {
-          // Dying: fade above the survivors and swallow no pointer events.
-          el.style.zIndex = `${Z_DYING}`;
-          el.style.pointerEvents = 'none';
-        } else {
-          el.style.zIndex = isZoomed ? `${Z_ZOOMED}` : `${Z_TILED}`;
-          el.style.pointerEvents = '';
-        }
+        el.style.zIndex = `${zIndexForLayer(f.layer)}`;
+        el.style.boxShadow = f.layer >= LATH_LAYER_ELEVATED ? LATH_ZOOM_SHADOW : '';
+        // Elevated zoom is interactive; only the animator's dying state makes a
+        // pane inert while it fades.
+        el.style.pointerEvents = animator.isDying(id) ? 'none' : '';
       }
     },
     [animator],
@@ -475,24 +526,23 @@ export function LathHost({
   }, [pump]);
   stepRef.current = step;
 
-  // A committed layout change (store commit that alters the tree). Retarget every
-  // leaf FROM its current interpolated frame (interruptible); a sash-drag commit
-  // snaps instead. Keyed on tree identity so meta/zoom commits never retarget (the
-  // other referenced values are stable refs/callbacks).
+  // A committed layout or zoom change. Retarget every leaf FROM its current
+  // interpolated frame (interruptible); a sash-drag commit snaps instead. Zoom is
+  // only presentation geometry + stacking, so the split tree stays unchanged.
   useLayoutEffect(() => {
-    const targets = layout(snapshot.tree, rectRef.current, LATH_LAYOUT_OPTS);
-    animator.retarget(targets, nowMs(), lath.store.consumeEnterHints(), { snap: snapNextRef.current });
+    const { targets, layers } = presentationTargets(snapshot.tree, rectRef.current, snapshot.zoomedId);
+    animator.retarget(targets, nowMs(), lath.store.consumeEnterHints(), { snap: snapNextRef.current, layers });
     snapNextRef.current = false;
     pump();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snapshot.tree]);
+  }, [snapshot.tree, snapshot.zoomedId]);
 
   // A container resize re-lays out instantly (snap) — tweening every resize frame
   // would lag. Skipped before the first measurement.
   useLayoutEffect(() => {
     if (size.width === 0 && size.height === 0) return;
-    const targets = layout(snapshot.tree, rectRef.current, LATH_LAYOUT_OPTS);
-    animator.retarget(targets, nowMs(), undefined, { snap: true });
+    const { targets, layers } = presentationTargets(snapshot.tree, rectRef.current, snapshot.zoomedId);
+    animator.retarget(targets, nowMs(), undefined, { snap: true, layers });
     pump();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [size.width, size.height]);
@@ -520,21 +570,29 @@ export function LathHost({
     componentsOverride?.bodies?.[component] ?? BODY_COMPONENTS[component];
   const resolveTab = (tabComponent: string): ComponentType<PaneProps> | undefined =>
     componentsOverride?.tabs?.[tabComponent] ?? TAB_COMPONENTS[tabComponent];
+  const resolveOverlay = (component: string): ComponentType<PaneProps> | undefined =>
+    componentsOverride?.overlays?.[component] ?? OVERLAY_COMPONENTS[component];
 
   return (
     <div ref={containerRef} className="lath-host">
       {sortedIds.map((id) => {
         const meta = snapshot.leafMeta.get(id);
         const f = frames.get(id);
-        const isZoomed = zoomedId === id;
         // Geometry passed as primitives so the memoized leaf can shallow-compare.
-        // Zoomed → full rect on top; laid-out → its frame at z 0; neither → hidden.
+        // Zoomed → inset wall rect on top; laid-out → its frame at z 0; neither → hidden.
         const cb = leafCallbacks(id);
-        const geom = isZoomed
-          ? { left: 0, top: 0, width: rect.width, height: rect.height, zIndex: Z_ZOOMED, hidden: false }
-          : f
-            ? { left: f.x, top: f.y, width: f.width, height: f.height, zIndex: Z_TILED, hidden: false }
-            : { left: 0, top: 0, width: 0, height: 0, zIndex: Z_TILED, hidden: true };
+        // Stacking comes from the same layer bands the animator tweens, so this
+        // pre-tween frame agrees with every frame applyFrames writes afterward.
+        const geom = f
+          ? {
+              left: f.x,
+              top: f.y,
+              width: f.width,
+              height: f.height,
+              zIndex: zIndexForLayer(layers.get(id) ?? LATH_LAYER_TILED),
+              hidden: false,
+            }
+          : { left: 0, top: 0, width: 0, height: 0, zIndex: Z_TILED, hidden: true };
         return (
           <LathLeaf
             key={id}
@@ -542,6 +600,7 @@ export function LathHost({
             meta={meta}
             Body={meta ? resolveBody(meta.component) : undefined}
             Tab={meta ? resolveTab(meta.tabComponent) : undefined}
+            Overlay={meta ? resolveOverlay(meta.component) : undefined}
             {...geom}
             registerEl={cb.registerEl}
             onHeaderPointerDown={cb.onHeaderPointerDown}

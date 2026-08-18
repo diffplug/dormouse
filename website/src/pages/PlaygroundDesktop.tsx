@@ -3,30 +3,63 @@ import { Link } from "react-router";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 import { PlaceToPaste } from "../components/PlaceToPaste";
 import { POCKET_THEME_ID } from "../components/PocketTerminalExperience";
-import { ThemePicker } from "dormouse-lib/components/ThemePicker";
+import { useRestoredTheme } from "dormouse-lib/lib/themes";
 import { PlaygroundShellRegistry } from "../lib/playground-shells";
 import { TutorialState } from "../lib/tutorial-state";
 import { TutDetector } from "../lib/tut-detector";
-import { BUSY_DEMO_DURATION_MS, BUSY_DEMO_INTERVAL_MS, TutRunner } from "../lib/tut-runner";
+import {
+  BUSY_DEMO_DURATION_MS,
+  BUSY_DEMO_INTERVAL_MS,
+  TutRunner,
+  WATCH_DEMO_COMMAND_MS,
+} from "../lib/tut-runner";
 import { ChangelogRunner } from "../lib/changelog-runner";
 import { POCKET_PLAYGROUND_PATH, usePreferredPlayground } from "../lib/playground-routing";
-
-const PANE_MAIN = "tut-main";
-const PANE_BOXED = "tut-boxed";
-const PANE_SPLASH = "tut-splash";
-const DESKTOP_PANES: PaneSpec[] = [
-  { id: PANE_MAIN, command: "tut", title: "tutorial" },
-  { id: PANE_BOXED, command: "changelog", title: "changelog" },
-  { id: PANE_SPLASH, command: "ascii-splash", title: "ascii-splash" },
-];
+import {
+  DESKTOP_PANES,
+  DESKTOP_PLAYGROUND_LAYOUT,
+  PANE_BOXED,
+  PANE_MAIN,
+  PANE_SPLASH,
+  type DesktopPaneSpec,
+} from "../lib/playground-desktop-layout";
 
 type FakePtyAdapter = import("dormouse-lib/lib/platform/fake-adapter").FakePtyAdapter;
+type TerminalRegistry = typeof import("dormouse-lib/lib/terminal-registry");
 type WallEvent = import("dormouse-lib/components/Wall").WallEvent;
 
-interface PaneSpec {
-  id: string;
-  command: string;
-  title: string;
+/** The two panes the alert section drives; the third hosts the runner itself. */
+const ALERT_DEMO_PANES = [PANE_BOXED, PANE_SPLASH] as const;
+
+function sendToPane(
+  adapter: FakePtyAdapter,
+  registry: TerminalRegistry,
+  paneId: string,
+  data: string,
+): void {
+  adapter.sendOutput(registry.resolveTerminalSessionId(paneId), data);
+}
+
+/**
+ * Report a foreground command the way a shell with integration would. The OSCs
+ * are stripped from visible output, so this never disturbs the TUI the pane is
+ * already drawing.
+ */
+function startFakeCommand(
+  adapter: FakePtyAdapter,
+  registry: TerminalRegistry,
+  paneId: string,
+  commandLine: string,
+): void {
+  sendToPane(adapter, registry, paneId, `\x1b]633;E;${commandLine}\x07\x1b]633;C\x07`);
+}
+
+function finishFakeCommand(
+  adapter: FakePtyAdapter,
+  registry: TerminalRegistry,
+  paneId: string,
+): void {
+  sendToPane(adapter, registry, paneId, "\x1b]633;D;0\x07");
 }
 
 function DesktopPlaygroundUnavailable() {
@@ -56,6 +89,11 @@ function DesktopPlaygroundUnavailable() {
 }
 
 function PlaygroundDesktopExperience() {
+  // The navbar picker used to theme this page as a side effect of its own
+  // render-time restore. The picker now lives in the Settings dialog and only
+  // mounts when opened, so the page restores its own theme.
+  useRestoredTheme(POCKET_THEME_ID);
+
   const [WallModule, setWallModule] = useState<{
     Wall: React.ComponentType<any>;
   } | null>(null);
@@ -68,7 +106,8 @@ function PlaygroundDesktopExperience() {
   const autoStartedRef = useRef<Set<string>>(new Set());
   const spawnUnsubRef = useRef<(() => void) | null>(null);
   const busyDemoDisposeRef = useRef<(() => void) | null>(null);
-  const alertDemoPaneIdRef = useRef<string | null>(null);
+  const busyDemoFinishTimerRef = useRef<number | null>(null);
+  const demoTimersRef = useRef<number[]>([]);
 
   const handleOpenGithub = useCallback(() => {
     window.open(
@@ -82,7 +121,7 @@ function PlaygroundDesktopExperience() {
     window.open(POCKET_PLAYGROUND_PATH, "_blank", "noopener,noreferrer");
   }, []);
 
-  const tryAutoStart = useCallback((pane: PaneSpec) => {
+  const tryAutoStart = useCallback((pane: DesktopPaneSpec) => {
     if (autoStartedRef.current.has(pane.id)) return;
     const shellRegistry = shellRegistryRef.current;
     if (!shellRegistry) return;
@@ -96,6 +135,7 @@ function PlaygroundDesktopExperience() {
       const platform = await import("dormouse-lib/lib/platform");
       const registry = await import("dormouse-lib/lib/terminal-registry");
       const mouseSelection = await import("dormouse-lib/lib/mouse-selection");
+      const themes = await import("dormouse-lib/lib/themes");
       const wall = await import("dormouse-lib/components/Wall");
       const scenarios = await import("dormouse-lib/lib/platform/fake-scenarios");
       const asciiSplash = await import("../lib/ascii-splash-runner");
@@ -116,10 +156,11 @@ function PlaygroundDesktopExperience() {
 
       const tutorialState = new TutorialState();
       stateRef.current = tutorialState;
-      const detector = new TutDetector(tutorialState, registry, mouseSelection, {
-        onWatchingDemoPaneChange: (id) => {
-          alertDemoPaneIdRef.current = id;
-        },
+      const detector = new TutDetector({
+        state: tutorialState,
+        activityStore: registry,
+        mouseStore: mouseSelection,
+        themeStore: themes,
       });
       detectorRef.current = detector;
       // The detector now reads app state entirely through the WallEvent stream and
@@ -136,14 +177,58 @@ function PlaygroundDesktopExperience() {
               terminalId,
               state: tutorialState,
               onExit,
+              // WATCHING is keyed on the running command, so the demo has to
+              // report one through shell integration. Both alert panes run the
+              // same fake `longtask`, which is what lets one bell click light
+              // up the other pane (docs/specs/alert.md).
               onTriggerBusyDemo: () => {
-                const paneId = alertDemoPaneIdRef.current ?? PANE_BOXED;
-                const sessionId = registry.resolveTerminalSessionId(paneId);
                 busyDemoDisposeRef.current?.();
+                if (busyDemoFinishTimerRef.current !== null) {
+                  window.clearTimeout(busyDemoFinishTimerRef.current);
+                  busyDemoFinishTimerRef.current = null;
+                }
+                for (const paneId of ALERT_DEMO_PANES) {
+                  startFakeCommand(adapter, registry, paneId, "longtask");
+                }
+                // Always pump the changelog pane: it is the quiet one, so it can
+                // actually go silent and ring. ascii-splash animates forever, so
+                // it stays BUSY — which is a fine demo of the rule applying, but
+                // it could never reach ALERT_RINGING.
                 busyDemoDisposeRef.current = adapter.pumpActivity(
-                  sessionId,
+                  registry.resolveTerminalSessionId(PANE_BOXED),
                   BUSY_DEMO_DURATION_MS,
                   BUSY_DEMO_INTERVAL_MS,
+                );
+                busyDemoFinishTimerRef.current = window.setTimeout(() => {
+                  busyDemoFinishTimerRef.current = null;
+                  for (const paneId of ALERT_DEMO_PANES) {
+                    finishFakeCommand(adapter, registry, paneId);
+                    // The pane's real program is still drawing, so put its
+                    // actual command line back rather than leaving the pane
+                    // looking idle.
+                    shellRegistryRef.current?.ensureShell(paneId).reportRunningCommand();
+                  }
+                }, WATCH_DEMO_COMMAND_MS);
+              },
+              // Terminal reports need no rule at all — this is a raw OSC 777
+              // notification, parsed by the same code a real PTY feeds.
+              onTriggerNotifyDemo: () => {
+                sendToPane(
+                  adapter,
+                  registry,
+                  PANE_BOXED,
+                  "\x1b]777;notify;Build finished;3 packages rebuilt\x07",
+                );
+              },
+              // An unwatched command, so the command-exit track owns the bell:
+              // the user attends the pane, leaves, and the exit rings.
+              onTriggerCommandExitDemo: () => {
+                startFakeCommand(adapter, registry, PANE_SPLASH, "slowbuild");
+                demoTimersRef.current.push(
+                  window.setTimeout(() => {
+                    finishFakeCommand(adapter, registry, PANE_SPLASH);
+                    shellRegistryRef.current?.ensureShell(PANE_SPLASH).reportRunningCommand();
+                  }, BUSY_DEMO_DURATION_MS),
                 );
               },
               onTogglePlaceToPaste: () => setPlaceToPasteOpen((open) => !open),
@@ -197,11 +282,16 @@ function PlaygroundDesktopExperience() {
       shellRegistryRef.current = null;
       stateRef.current = null;
       autoStartedRef.current.clear();
-      alertDemoPaneIdRef.current = null;
       spawnUnsubRef.current?.();
       spawnUnsubRef.current = null;
       busyDemoDisposeRef.current?.();
       busyDemoDisposeRef.current = null;
+      if (busyDemoFinishTimerRef.current !== null) {
+        window.clearTimeout(busyDemoFinishTimerRef.current);
+        busyDemoFinishTimerRef.current = null;
+      }
+      for (const timer of demoTimersRef.current) window.clearTimeout(timer);
+      demoTimersRef.current = [];
     };
   }, [handleOpenGithub, handleOpenPocket, tryAutoStart]);
 
@@ -217,21 +307,12 @@ function PlaygroundDesktopExperience() {
 
   return (
     <>
-      <SiteHeader
-        activePath="/playground"
-        themeAware
-        controls={
-          <ThemePicker
-            variant="playground-header"
-            defaultThemeId={POCKET_THEME_ID}
-          />
-        }
-      />
+      <SiteHeader activePath="/playground" themeAware />
 
       <main className="fixed top-16 right-0 bottom-0 left-0 flex min-h-0 md:top-20">
         {WallModule ? (
           <WallModule.Wall
-            initialPaneIds={[PANE_MAIN, PANE_BOXED, PANE_SPLASH]}
+            restoredLathLayout={DESKTOP_PLAYGROUND_LAYOUT}
             initialMode="passthrough"
             onEvent={handleWallEvent}
           />

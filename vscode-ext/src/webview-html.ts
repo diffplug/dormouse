@@ -1,6 +1,9 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { randomBytes } from 'crypto';
+import { HOST_MESSAGE_TOKEN_GLOBAL } from '../../lib/src/lib/vscode-message-token';
+import { RECOVERY_COMMANDS_GLOBAL } from '../../lib/src/lib/vscode-recovery-global';
 
 function serializeForInlineScript(value: unknown): string {
   return JSON.stringify(value ?? null)
@@ -9,17 +12,34 @@ function serializeForInlineScript(value: unknown): string {
     .replace(/\u2029/g, '\\u2029');
 }
 
+/**
+ * Build a webview document. Returns the message token minted for it alongside
+ * the HTML, because the two are only meaningful together — `serveWebview` in
+ * `webview-messaging.ts` is what pairs them.
+ */
 export function getWebviewHtml(
   webview: vscode.Webview,
   mediaPath: string,
   initialState?: unknown,
   selectedShell?: { shell?: string; args?: string[] } | null,
-): string {
+  /**
+   * Surface id -> agent resume invocation, captured by the last teardown. Rides
+   * the boot payload rather than `initialState` because it is host-owned and
+   * single-use: the webview never writes it back, so no save/restore cycle can
+   * replay it (docs/specs/transport.md -> "Consuming it").
+   */
+  recoveryCommands?: Record<string, string> | null,
+): { html: string; messageToken: string } {
   const indexPath = path.join(mediaPath, 'index.html');
   let html = fs.readFileSync(indexPath, 'utf-8');
 
   const mediaUri = webview.asWebviewUri(vscode.Uri.file(mediaPath));
-  const nonce = getNonce();
+  const nonce = randomSecret();
+  // A separate secret from the nonce above, deliberately: the nonce authorizes
+  // script execution, this authenticates the sender of every host → webview
+  // message so framed content can't forge one. See
+  // lib/src/lib/vscode-message-token.ts.
+  const messageToken = randomSecret();
 
   html = html.replace(/(href|src)="\.?\/?assets\//g, `$1="${mediaUri}/assets/`);
 
@@ -53,17 +73,17 @@ export function getWebviewHtml(
   // get a duplicate nonce attribute from the regex above.
   html = html.replace(
     '</head>',
-    `    <script nonce="${nonce}">globalThis.__DORMOUSE_HOST_STATE__ = ${serializeForInlineScript(initialState)};\nglobalThis.__DORMOUSE_SELECTED_SHELL__ = ${serializeForInlineScript(selectedShell ?? null)};</script>\n  </head>`,
+    `    <script nonce="${nonce}">globalThis.${HOST_MESSAGE_TOKEN_GLOBAL} = ${serializeForInlineScript(messageToken)};\nglobalThis.__DORMOUSE_HOST_STATE__ = ${serializeForInlineScript(initialState)};\nglobalThis.__DORMOUSE_SELECTED_SHELL__ = ${serializeForInlineScript(selectedShell ?? null)};\nglobalThis.${RECOVERY_COMMANDS_GLOBAL} = ${serializeForInlineScript(recoveryCommands ?? null)};</script>\n  </head>`,
   );
 
-  return html;
+  return { html, messageToken };
 }
 
-function getNonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let nonce = '';
-  for (let i = 0; i < 32; i++) {
-    nonce += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return nonce;
+/**
+ * One per-document secret: a CSP nonce or a message token. Either is only as
+ * good as its unpredictability, so both come from the OS CSPRNG — never
+ * `Math.random()`. 24 bytes of base64url is 32 characters.
+ */
+function randomSecret(): string {
+  return randomBytes(24).toString('base64url');
 }

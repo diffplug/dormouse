@@ -18,7 +18,9 @@
     "paths": {
       "dormouse-lib/*": ["../lib/src/*"],
       "dor/*": ["../dor/src/*"],
-      "server-lib-common": ["../server-lib-common/src/index.ts"]
+      "server-lib-common": ["../server-lib-common/src/index.ts"],
+      "dor-lib-common": ["../dor-lib-common/src/index.ts"],
+      "dor-lib-common/agent-browser": ["../dor-lib-common/src/agent-browser.ts"]
     }
   },
   "include": ["src"]

@@ -47,6 +47,8 @@ function writePasteToPty(terminalId: string, text: string): void {
   if (!text) return;
   const bracketed = getMouseSelectionState(terminalId).bracketedPaste;
   const payload = bracketed ? `\x1b[200~${text}\x1b[201~` : text;
+  // Paste and file-drop input bypass xterm's onData handler, so the touch has to
+  // be marked here rather than by the keystroke path.
   markSessionTouched(terminalId);
   getPlatform().writePty(terminalId, payload);
 }

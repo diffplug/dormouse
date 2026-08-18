@@ -26,7 +26,8 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 // Force the Windows code path so the sidecar-kill-before-install branch is
-// exercised. updater.ts only consumes PLATFORM_STRING from this module.
+// exercised. updater.ts consumes IS_WINDOWS (gates the sidecar kill) and
+// PLATFORM_STRING (debug report) from this module.
 vi.mock('dormouse-lib/lib/platform', () => ({
   PLATFORM_STRING: 'Windows',
   IS_WINDOWS: true,
@@ -151,7 +152,7 @@ describe('updater', () => {
       expect(mocks.check).toHaveBeenCalledOnce();
     });
 
-    it('does not crash on download failure', async () => {
+    it('does not crash on download failure, and leaves no pending install', async () => {
       const update = makeUpdate();
       update.download.mockRejectedValue(new Error('disk full'));
       mocks.check.mockResolvedValue(update);
@@ -163,6 +164,30 @@ describe('updater', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(update.download).toHaveBeenCalledOnce();
+      // A failed download must revert the banner (downloading → available) and
+      // leave pendingUpdate null, so nothing bogus tries to install at quit.
+      // See updater.ts downloadApprovedUpdate's catch branch.
+      expect(hasPendingUpdate()).toBe(false);
+    });
+
+    it('retries the download when approval fires again after a failure', async () => {
+      const update = makeUpdate();
+      update.download.mockRejectedValue(new Error('disk full'));
+      mocks.check.mockResolvedValue(update);
+
+      startUpdateCheck();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(0);
+      approveUpdate();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(update.download).toHaveBeenCalledOnce();
+
+      // availableUpdate survives a failed download, so a second approval
+      // re-attempts it rather than silently no-op'ing.
+      approveUpdate();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(update.download).toHaveBeenCalledTimes(2);
     });
   });
 

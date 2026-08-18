@@ -35,6 +35,8 @@ UI lives in `lib`/`standalone`.
 | `DORMOUSE_STATE_DIR`      | Where the JSON state files live. Default `./data`.         |
 | `PORT`                    | Default 3000.                                              |
 | `DORMOUSE_BIND_HOST`      | Interface to listen on. Unset binds every interface (what a container wants); set `127.0.0.1` when a TLS proxy on the same machine is the front door. |
+| `DORMOUSE_VAPID_PUBLIC_KEY` / `DORMOUSE_VAPID_PRIVATE_KEY` | Web Push signing keypair. Set both or neither. At startup the Server decodes both, derives the P-256 public point from the private key, and exits on a missing, malformed, or mismatched pair. Unset, the server mints a pair on first boot and persists it to `vapid.json`. |
+| `DORMOUSE_VAPID_SUBJECT`  | `mailto:`/`https:` contact for push-service operators (RFC 8292). Defaults to `DORMOUSE_ORIGIN` when that origin is https and not loopback; otherwise there is no default and push stays off. The Server parses and validates it at startup and exits on an invalid value — including a loopback contact, which Apple rejects. |
 
 WebAuthn requires a secure context: `localhost` works for development; for a
 real phone, put the server behind TLS (`tailscale serve` is the intended
@@ -53,6 +55,9 @@ Source of truth: `server/src/config.ts` (`readConfig`) maps the environment to
 the entrypoint's config and is unit-tested in `server/test/config.test.mjs`;
 `server/test/bind-host.test.mjs` spawns the real entrypoint and asserts the
 plaintext port is unreachable off-loopback when `DORMOUSE_BIND_HOST=127.0.0.1`.
+The `DORMOUSE_VAPID_*` vars stay in `server/src/index.ts` rather than
+`readConfig`, because resolving the keypair reads and may write `vapid.json`
+and `readConfig` is pure.
 
 `DORMOUSE_ORIGIN` is parsed once and normalized with `URL.origin`; WebAuthn
 clientData checks, passkey assertion verification, and the Host enrollment
@@ -87,11 +92,47 @@ $DORMOUSE_STATE_DIR/
                    passkeys: [{ credentialId, publicKey /* SPKI b64u */,
                                 label, createdAt }] }
   hosts.json     [{ hostId, hostToken, label, enrolledAt }]
+  push-subscriptions.json
+                 [{ hostId, devicePublicKey, endpoint, keys,
+                    vapidPublicKey, subscribedAt }]
+  vapid.json     { publicKey, privateKey, createdAt }   (only when unset by env)
 ```
 
 That is the entire persistent state. The Host's ACL is not here — it lives on
 the Host, in webview `localStorage` (`lib/src/lib/local-json-store.ts`),
 which is the whole point of the security model.
+
+`push-subscriptions.json` is the one store that deletes rather than appends: a
+push service reports a dead subscription with 404/410, and a browser that
+rotates its endpoint must replace the stale row rather than leave one per
+rotation. Rows are keyed on the **pair** (`hostId`, `devicePublicKey`), so a
+phone paired with two laptops subscribes twice and a Host can only ever read or
+reach its own subscribers. Each row records the public VAPID key it was
+registered under, so a key rotation makes the Client readback treat the row as
+stale and offer re-registration rather than claiming delivery still works.
+Because one service-worker scope has only one subscription, an upsert whose
+endpoint, encryption keys, or VAPID key differs from an existing row for that
+device atomically deletes all of the device's prior Host rows. The response
+reports the state that mutation left behind — every Host this device is still
+registered with — rather than the fact that a deletion happened, so a committed
+POST whose response was lost is repaired by its own idempotent retry. Scoping
+that answer to the device is safe where `GET /api/push/subscriptions` must not
+be: the request carries a device signature, so the caller has proven it owns the
+identity being reported on. The row holds no label — the Server never learns
+one. Rows are validated as they are read, so a hand-edit that leaves one
+malformed reads as a missing registration (which Pocket repairs by re-offering
+Enable) instead of a live one nothing can be delivered to. Source of truth:
+`PushSubscriptionStore.list` / `.upsert` in `server/src/state.ts` and the
+subscribe route in `server/src/app.ts`.
+
+`hosts.json` stores `hostToken` — the host↔server relay bearer secret — in
+plaintext, and `vapid.json` a private key, so both files are written owner-only:
+the state dir is created
+`0o700` and every write lands in a `0o600` temp file before the rename
+(`server/src/state.ts`, `writeAtomic`). Without explicit modes these inherit
+the umask and end up world-readable, handing live host tokens to any other
+local account on a shared machine. Any new file under `$DORMOUSE_STATE_DIR`
+must go through `writeAtomic` for the same reason.
 
 ## WebAuthn without a WebAuthn library
 
@@ -129,22 +170,142 @@ so `node --test` can drive setup → pairing → connect end to end via
 | `POST /api/setup/begin`          | setup password | `{ challenge }` for registration. Only the password gates it — re-presenting the password adds another passkey to the account |
 | `POST /api/setup/finish`         | setup password | `{ credentialId, publicKey, clientDataJSON }` → creates/updates `account.json` |
 | `POST /api/signin/begin`         | —              | `{ challenge }` for sign-in                        |
-| `POST /api/signin/finish`        | —              | full assertion → verified → `{ sessionToken }` (random, in-memory, hours-scale TTL) |
+| `POST /api/signin/finish`        | —              | full assertion → verified → `{ sessionToken, passkeyPublicKey }` (token is random, in-memory, hours-scale TTL) |
 | `POST /api/reauth/begin`         | session token  | `{ challenge }` to re-assert presence on the current session |
 | `POST /api/reauth/finish`        | session token  | full assertion → verified (same checks as sign-in) → refreshes the session's presence stamp; the token and relay socket are kept |
 | `POST /api/host/enroll`          | setup password | `{ label }` → `{ hostId, hostToken, origin, rpId }`; appends to `hosts.json` |
 | `GET /api/hosts`                 | session token  | Enrolled hosts + whether each is currently connected |
+| `GET /api/push/config`           | —              | `{ applicationServerKey }` — the VAPID public key, or `null` when push is unconfigured. Public by construction |
+| `POST /api/push/challenge`       | session token  | `{ challenge }` for the device signature below (no body — the challenge is a pool-wide nonce; the host binding lives in the signature) |
+| `POST /api/push/subscribe`       | session token + device signature | Upserts the `(hostId, devicePublicKey)` subscription |
+| `GET /api/push/subscriptions`    | session token  | The account's registrations for the current VAPID key as identities, so a reloaded Client can tell which Hosts it already registered with. With push disabled, returns the stored identities for diagnosis |
+| `GET /api/push/devices`          | host token     | The `devicePublicKey`s subscribed to **this** Host under the current VAPID key |
+| `POST /api/push/send`            | host token     | Fans a notification out to the named devices; `devicePublicKeys` is required |
 | `GET /ws/host`                   | host token     | The Host's relay socket                            |
 | `GET /ws/client`                 | session token  | A Client's relay socket                            |
 
 The setup password is compared in constant time with a small fixed delay on
 failure; that is the extent of the hardening today.
 
+Every session-gated route — including the `/ws/client` upgrade, which is
+rejected before `injectWebSocket` ever sees it — answers an unknown or expired
+token with 401 and the shared `UNAUTHORIZED_ERROR` from
+`server-lib-common/src/remote/wire.ts`. That exact string is load-bearing:
+Pocket keys its "sign in again" recovery on it, and a bare 401 is ambiguous,
+since a wrong setup password and a rejected device signature answer 401 as well
+([pocket-app.md](./pocket-app.md) -> An expired session drops to sign-in).
+
+### Web Push
+
+The relay routes between two live sockets; a push has to reach a phone whose app
+is closed. That is a separate capability, so it is plain HTTP rather than a new
+relay frame, and delivery goes out to the platform's push service (APNs, FCM)
+through `web-push` — the one third-party runtime dependency the server has.
+Source of truth: `server/src/push.ts` and the routes in `server/src/app.ts`.
+
+- **Two audiences, two credentials.** A Client registers its own subscription
+  with a session token; a Host reads and sends with its `hostToken`. The send
+  route takes the `hostId` from the token and never from the body, so naming a
+  device explicitly cannot escape the calling Host's own scope.
+- **The Server never selects recipients.** `devicePublicKeys` is required and
+  non-empty; an absent or empty list is a 400, not a fan-out. The Host holds the
+  ACL and is the only party that may decide who a push reaches.
+- **Reads are scoped by credential, never by a supplied identity.** A Host token
+  reads its own subscribers (`/api/push/devices`); a session reads the account's
+  registrations (`/api/push/subscriptions`) and the Client filters to its own
+  device. Neither takes a `devicePublicKey` as input, so there is no endpoint
+  that reports on an identity the caller does not hold. Both return identities
+  only — the endpoint and its keys are a bearer capability to notify that phone
+  and never leave the Server.
+- **Delivery views are VAPID-current.** With push configured,
+  `/api/push/subscriptions` and the Host's `/api/push/devices` omit rows
+  registered under a different (or legacy unknown) public key, and
+  `/api/push/send` never targets them. Those endpoints cannot receive a send
+  signed by the current key; hiding them exposes Pocket's re-registration
+  action and keeps the Host from naming or retrying an unreachable device after
+  rotation. The file rows are retained until that upsert; when push is disabled
+  the Client subscriptions route still returns their identities for diagnosis,
+  while the Host has no deliverable devices.
+- **The subscription is bound to a Client identity by signature.** The Client
+  signs `(hostId, challenge, devicePublicKey, endpoint)` with its device key
+  under `PUSH_SUBSCRIBE_DOMAIN` — deliberately *not* `DEVICE_AUTH_DOMAIN`, since
+  the Server relays Host-issued challenges during `connect` and so sees them in
+  transit. Binding the endpoint is what stops a captured signature registering a
+  different endpoint under the same identity. The challenge is single-use and
+  consumed before verification, as at sign-in.
+- **A subscription authorizes nothing.** It is a delivery address the Host may
+  write to; the Host's ACL remains the only thing that decides what a Client may
+  reach ([remote-security-model.md](./remote-security-model.md)).
+- **Endpoint egress is public HTTPS only.** Registration rejects credentials,
+  localhost, and non-public IP literals. Delivery uses a dedicated HTTPS agent
+  whose connection-time DNS lookup rejects loopback, private, carrier-grade NAT
+  (including Tailscale's `100.64/10`), link-local, documentation, benchmark,
+  multicast, reserved, IPv4-mapped, unique-local, and site-local ranges. A
+  hostname with any blocked answer is rejected wholesale; the accepted DNS
+  result is the one handed to the socket, so mixed answers and rebinding cannot
+  create a second unchecked resolution. Source of truth:
+  `server/src/push-endpoint.ts`, wired into registration in
+  `server/src/app.ts` and delivery in `server/src/push.ts`.
+- **Payload text is re-sanitized at this boundary** even though the Host already
+  did it, because it originates in a renderer and is ultimately Pane-derived
+  ([alert.md](./alert.md) -> Text And Security). Both sides call the same
+  `boundedPushText`, so the two layers cannot enforce different rules.
+- **Delivery outcomes prune.** 404/410 means the subscription is permanently
+  gone and its row is deleted; anything else is transient and left alone, but
+  never silent: the refusal is logged (origin only — the endpoint is a bearer
+  capability) and counted in the response's `failed`, since the route answers
+  200 either way and the Host needs to tell an all-failed fan-out from
+  success. The log carries the push service's own reason body alongside the
+  status — whitespace-collapsed and capped at 200 characters so an HTML error
+  page cannot flood it — because a status alone does not separate a bad subject
+  from a bad key from a bad payload, and this is the only place that
+  explanation is ever visible. Delivery is bounded twice, and both bounds
+  resolve as `failed` — so the row survives to be retried, unlike a 404/410.
+  The inner bound is a 10-second socket-inactivity timeout on each push-service
+  request. The outer is a 15-second wall-clock deadline per send, which catches
+  what inactivity cannot: a service that trickles bytes or stalls mid-handshake
+  resets the inactivity timer indefinitely. The deadline is applied by the
+  route rather than by the sender, so it holds for any injected `PushSender`,
+  and because every send in a fan-out starts at once it also bounds the route
+  as a whole regardless of device count. It bounds the *route*, not the socket:
+  `web-push` accepts no `AbortSignal`, so a request that loses the race is left
+  to its own inactivity timeout rather than cancelled. What this prevents is a
+  wedged push service holding the handler open while successive alarms stack
+  concurrent sends behind it. Both are separate from the 300-second provider
+  TTL — an alarm that arrives an hour late is noise, not information.
+- Push is disabled, not half-working, when no VAPID key **or no VAPID subject**
+  is configured: the config route reports `null` and subscribe/send answer 503.
+  The key and the subject are advertised together or not at all — a phone that
+  registered against a key the Server has no contact to sign with would be
+  subscribed to a push it can never receive.
+- **A VAPID subject naming a loopback host is a startup error, not a default.**
+  Apple answers `403 {"reason":"BadJwtToken"}` for one — verified against
+  `web.push.apple.com` for `mailto:admin@localhost` and `https://localhost:3000`,
+  while `mailto:admin@example.com` and an ordinary https origin were accepted, so
+  the rule is loopback specifically and not reachability of the contact.
+  `web-push` only warns about the https form, at send time, and says nothing
+  about `mailto:` at `localhost`. This mattered: the previous default
+  (`mailto:admin@localhost`) let a Server boot clean, answer 200 on send, and
+  deliver nothing to any iPhone — the one platform the feature targets. Hence
+  the origin-derived default, and hence a loopback dev server turning push off
+  instead of guessing a placeholder contact. Source of truth:
+  `defaultVapidSubject` / `assertVapidSubject` in `server/src/push.ts`.
+
 ## Relay
 
 The server routes JSON envelopes between client sockets and host sockets
 (`@hono/node-ws`). Before a session is authorized it only forwards an
 allowlist of handshake types; after authorization it is a dumb pipe.
+
+Only one socket may own a `hostId`. Registering a second one for the same
+`hostId` displaces the first: clients bound to it are told `host-gone`, their
+sessions are cleared, and the old socket is closed with
+`WS_CLOSE_HOST_REPLACED` (4000) / `WS_CLOSE_HOST_REPLACED_REASON`. Both
+constants live in `server-lib-common` rather than in `server` because the code
+is a contract, not a log line: the evicted Host keys its stand-down on it (see
+[Host side](#host-side-lib--standalone)), and if the two sides disagreed on the
+number the two Hosts would evict each other forever. Source of truth:
+`server/src/relay.ts` (`registerHost`).
 
 The relay keeps one current Host binding per Client socket. Host-originated
 handshake replies and `msg` frames are routed only when the frame comes from
@@ -170,12 +331,12 @@ timestamp.
 phone                        server                        host (laptop)
   |-- signin (passkey) -------->|                              |
   |   generate device key       |                              |
-  |-- pair-request ------------>|-- pair-request ------------->|  approval modal
+  |-- pair -------------------->|-- pair --------------------->|  approval modal
   |                             |                              |  user clicks Approve
   |<-- pair-result -------------|<-- pair-result --------------|  ACL record saved
 ```
 
-The `pair-request` carries the `PairingRequest` shape from `server-lib-common`
+The `pair` frame carries the `PairingRequest` shape from `server-lib-common`
 (`accountId`, `passkeyCredentialId`, `passkeyPublicKeyHash`,
 `devicePublicKey`, `requestedLabel`). The server checks the request's
 credential is a registered passkey of the account (and that its public-key
@@ -195,7 +356,7 @@ approval UI.
 
 ```
 phone                        server                        host
-  |-- connect-request {hostId}->|-- challenge-request -------->|
+  |-- connect {hostId} -------->|-- connect {clientId} ------->|
   |<-- challenge ---------------|<-- challenge (HostChallengeIssuer)
   |   ONE biometric prompt:     |                              |
   |   WebAuthn get({challenge}) |                              |
@@ -203,7 +364,7 @@ phone                        server                        host
   |-- ConnectionRequest ------->|  server verifies the         |
   |                             |  assertion itself, then      |
   |                             |-- ConnectionRequest -------->|  authorizeConnection()
-  |<-- session-established -----|<-- decision -----------------|  (final authority)
+  |<-- decision ----------------|<-- decision -----------------|  (final authority)
   |============ opaque remote-api relay from here ============>|
 ```
 
@@ -229,6 +390,20 @@ A `remote-host` module in `lib`, active in standalone:
   `POST /api/host/enroll` → persist `{ serverUrl, hostId, hostToken, origin,
   rpId }` in webview `localStorage` (`local-json-store.ts` — deliberately no
   platform-adapter dependency); open and maintain `GET /ws/host`.
+* **Relay socket policy**: one socket at a time, reconnected with exponential
+  backoff (1s, doubling to 30s) after any close — except a close carrying
+  `WS_CLOSE_HOST_REPLACED`, which is **terminal**. That code means another
+  Dormouse instance enrolled with the same `hostId` took the relay slot, so
+  this one disposes its sessions, reports `displaced`, and arms no timer;
+  reconnecting on it would evict the newer Host, which would reconnect and
+  evict this one, forever. Coming back is an explicit act —
+  `window.dormouseRemoteHost.reconnect()` (or `RemoteHost.start()`), which
+  takes the slot back and displaces the other Host in turn. Nothing surfaces
+  `displaced` in the UI yet; `window.dormouseRemoteHost.status()` reports it as
+  `connection`, distinct from the retrying `disconnected`. A close event from a
+  socket the controller no longer owns is ignored, so a dead socket's late
+  eviction cannot stand down the live one. Source of truth:
+  `lib/src/remote/host/remote-host.ts`, `lib/src/remote/host/activation.ts`.
 * **Security**: `HostAcl` (persisted to `localStorage` as
   `records()`/`fromRecords`), `HostChallengeIssuer`, `PairingCeremony`, and
   `authorizeConnection` — all straight from `server-lib-common`, running in
@@ -258,6 +433,11 @@ Served by the server, built from `lib`:
   straight away.
 * Picker renders `directory.snapshot`; tapping a pane attaches with the
   phone's cols/rows and reuses the existing mobile terminal UI (xterm).
+* All of it — auth screens included — renders on the shared themeable design
+  system, with the theme restored before first paint
+  (`docs/specs/pocket-app.md`, Design system and theming). The server serves
+  no styling of its own; its only self-authored output is the plaintext
+  missing-build stub.
 
 ## Testing
 
@@ -289,6 +469,18 @@ Builds the Pocket app (`lib/dist-pocket`) and the server, then serves both on
 `DORMOUSE_ORIGIN` to your TLS origin (e.g. via `tailscale serve`) — WebAuthn
 needs a secure context, and only `localhost` is exempt.
 
+On the default localhost origin **push is off** and the server says so at
+startup: there is no routable operator contact to sign a VAPID JWT with, and a
+phone could not route to localhost anyway. Setting `DORMOUSE_ORIGIN` to an https
+origin enables it with no further configuration, since that origin becomes the
+subject. To exercise push against a desktop browser on localhost, supply a
+contact explicitly:
+
+```sh
+DORMOUSE_SETUP_PASSWORD=hunter2 DORMOUSE_VAPID_SUBJECT=mailto:you@example.com \
+  pnpm dev:pocket-server
+```
+
 **2. Host** (the laptop being controlled): `pnpm dev:standalone`, then enroll
 once from the devtools console of the standalone webview:
 
@@ -310,11 +502,19 @@ First-time setup (password + label) creates the passkey and signs you in →
 Hosts → **Pair** → approve in the modal on the laptop → **Connect** (one
 biometric prompt) → pick a pane → type.
 
-Limitations to know about: pair/connect only works from the browser that
-registered the passkey (the passkey public key is stored client-side at
-registration); clearing site data destroys the device key → re-pair, per the
-security model; a dropped WebSocket sends you back to the Hosts view —
-reconnect by tapping Connect again.
+To test push, **add Pocket to the Home Screen before signing in** and do all of
+the above inside the installed app: iOS delivers Web Push only there, and the
+install is a separate storage partition needing its own pairing, so setting up
+in the tab first means doing it twice ([pocket-app.md](./pocket-app.md) ->
+Installable web app). Alerts are then a per-Host opt-in — **Enable alerts** on the Host's
+row, which is the user gesture iOS requires before it will prompt for
+permission. Connecting alone does not subscribe.
+
+Limitations to know about: each browser storage partition has its own device key
+and therefore needs its own Host pairing, even when a synced passkey signs it
+in; clearing site data destroys that device key → re-pair, per the security
+model; a dropped WebSocket sends you back to the Hosts view — reconnect by
+tapping Connect again.
 
 Everything past this loop (browser surfaces, in-flight replay, thumbnails,
 the tethering display, WebRTC) is staged in remote-api.md `## Future` as

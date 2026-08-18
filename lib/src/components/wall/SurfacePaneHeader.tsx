@@ -15,7 +15,7 @@ import {
   XIcon,
 } from '@phosphor-icons/react';
 import { HeaderActionButton } from '../HeaderActionButton';
-import { TERMINAL_TOP_RADIUS_CLASS } from '../design';
+import { HEADER_PALETTE_TRANSITION_CLASS, paneZoomButtonClass, TERMINAL_TOP_RADIUS_CLASS } from '../design';
 import {
   useAgentBrowserChromeSnapshot,
   useAgentBrowserScreenController,
@@ -31,7 +31,7 @@ import {
   SelectedIdContext,
   WallActionsContext,
   WindowFocusedContext,
-  ZoomedContext,
+  ZoomedIdContext,
 } from './wall-context';
 
 /** The far-left chip reflects the surface's render backend at a glance, and
@@ -52,7 +52,7 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
   const windowFocused = useContext(WindowFocusedContext);
-  const zoomed = useContext(ZoomedContext);
+  const zoomed = useContext(ZoomedIdContext) === id;
   const actions = useContext(WallActionsContext);
   const isActiveHeader = mode === 'passthrough' && selectedId === id && windowFocused;
 
@@ -97,7 +97,7 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
 
   return (
     <div
-      className={`flex h-full w-full cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing ${isActiveHeader ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg'}`}
+      className={`flex h-full w-full cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS} ${isActiveHeader ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg'}`}
       onMouseDown={() => actions.onClickPanel(id)}
     >
       {screen && screenSnapshot && chrome ? (
@@ -222,10 +222,10 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
           tooltip={'Split top/bottom [-] or ["]'}
         ><SplitVerticalIcon size={14} /></HeaderActionButton>
         <HeaderActionButton
-          className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
+          className={paneZoomButtonClass(zoomed, isActiveHeader)}
           onClick={(e) => { e.stopPropagation(); actions.onZoom(id); }}
           ariaLabel={zoomed ? 'Unzoom' : 'Zoom'}
-          tooltip={zoomed ? 'Unzoom [z]' : 'Zoom [z]'}
+          tooltip={zoomed ? 'Unzoom' : 'Zoom [z]'}
         >{zoomed ? <ArrowsInIcon size={14} /> : <ArrowsOutIcon size={14} />}</HeaderActionButton>
       </div>
       <div className="ml-1 flex shrink-0 items-center gap-0.5">

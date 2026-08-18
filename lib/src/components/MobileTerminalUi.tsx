@@ -44,7 +44,6 @@ import { TouchUiContext } from './touch-ui-context';
 import type { SessionStatus } from '../lib/terminal-registry';
 
 export type MobileTerminalKeyboardMode = 'sessions' | 'recent' | 'type' | 'draft';
-export type MobileTerminalSection = MobileTerminalKeyboardMode;
 export type MobileTerminalTouchMode = 'gestures' | 'selection' | 'cursor';
 type PhosphorIcon = ComponentType<{ size?: number; weight?: 'regular' | 'bold' | 'duotone' | 'fill' }>;
 
@@ -213,7 +212,8 @@ function TouchModeSelector({
       aria-label="Touch mode"
       className="flex h-9 shrink-0 items-center bg-terminal-bg px-2"
     >
-      <div className="grid min-w-0 flex-1 grid-cols-3 gap-1 rounded bg-terminal-bg p-1 shadow-[inset_0_0_0_1px_var(--color-border)]">
+      {/* Concentric-Corners Rule (DESIGN.md): 4px chips at p-1 (4px) need an 8px tray. */}
+      <div className="grid min-w-0 flex-1 grid-cols-3 gap-1 rounded-lg bg-terminal-bg p-1 shadow-[inset_0_0_0_1px_var(--color-border)]">
         {TOUCH_MODES.map((item) => {
           const selected = item.id === mode;
           const itemDisabled = disabled || (item.id === 'cursor' && !cursorAvailable);
@@ -260,7 +260,8 @@ function KeyboardModeSelector({
       aria-label="Input mode"
       className="flex h-9 shrink-0 items-center border-t border-border bg-header-inactive-bg px-2 text-header-inactive-fg"
     >
-      <nav className="grid min-w-0 flex-1 grid-cols-[1.25fr_repeat(3,minmax(0,1fr))] gap-1 rounded bg-header-inactive-bg p-1 shadow-[inset_0_0_0_1px_var(--color-border)]">
+      {/* Concentric-Corners Rule (DESIGN.md): 4px chips at p-1 (4px) need an 8px tray. */}
+      <nav className="grid min-w-0 flex-1 grid-cols-[1.25fr_repeat(3,minmax(0,1fr))] gap-1 rounded-lg bg-header-inactive-bg p-1 shadow-[inset_0_0_0_1px_var(--color-border)]">
         {KEYBOARD_MODES.map((item) => (
           <KeyboardModeButton
             key={item.id}
@@ -325,16 +326,19 @@ function SessionsPane({
                 'flex min-h-10 min-w-0 items-center gap-2 rounded px-2 text-left font-mono text-xs transition-colors',
                 'focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
                 'disabled:pointer-events-none disabled:opacity-60',
+                // Rows sit on the header-inactive reserve, so the inactive row
+                // recesses to the app pair — the guaranteed app↔inactive delta
+                // (theme.md's three-pair rule); surface-raised is unreliable here.
                 active
                   ? 'bg-header-active-bg text-header-active-fg shadow-[inset_0_0_0_1px_var(--color-focus-ring)]'
-                  : 'bg-surface-raised text-foreground hover:bg-header-inactive-bg',
+                  : 'bg-app-bg text-app-fg',
               )}
             >
               <TerminalWindowIcon size={15} weight={active ? 'bold' : 'regular'} className="shrink-0" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-medium">{session.title}</span>
                 {session.secondary ? (
-                  <span className={clsx('block truncate', active ? 'opacity-70' : 'text-muted')}>{session.secondary}</span>
+                  <span className="block truncate opacity-70">{session.secondary}</span>
                 ) : null}
               </span>
               {session.todo ? (

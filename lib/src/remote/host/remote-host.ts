@@ -13,6 +13,11 @@
  *                     remote-api handler.
  *   - `client-gone` → drop that client's transient state.
  *
+ * A dropped socket reconnects with exponential backoff, with one exception: a
+ * close carrying `WS_CLOSE_HOST_REPLACED` means the relay deliberately evicted
+ * us because another Host claimed the same `hostId`. That close is terminal —
+ * see `#onClose`.
+ *
  * The remote-api handler is injected (`createSession`) so this controller has no
  * dependency on the terminal registry / xterm / DOM — the wiring lives in
  * `activation.ts`, and this file stays unit-testable against a fake socket.
@@ -23,6 +28,7 @@ import {
   HostChallengeIssuer,
   PairingError,
   PairingCeremony,
+  WS_CLOSE_HOST_REPLACED,
   WS_ROUTES,
   WS_TOKEN_PARAM,
   authorizeConnection,
@@ -61,7 +67,18 @@ interface ClientState {
   session?: RemoteApiSessionLike;
 }
 
-export type RemoteHostStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'stopped';
+/**
+ * `disconnected` is a socket we expect to get back (a reconnect is armed);
+ * `displaced` is a socket another Host took from us and no timer will restore
+ * (see {@link RemoteHost.start}); `stopped` is a socket we closed ourselves.
+ */
+export type RemoteHostStatus =
+  | 'idle'
+  | 'connecting'
+  | 'connected'
+  | 'disconnected'
+  | 'displaced'
+  | 'stopped';
 
 export interface RemoteHostOptions {
   enrollment: HostEnrollment;
@@ -111,6 +128,8 @@ export class RemoteHost {
   #ws: WebSocketLike | null = null;
   #status: RemoteHostStatus = 'idle';
   #stopped = false;
+  /** Latched by a {@link WS_CLOSE_HOST_REPLACED} close; only `start()` clears it. */
+  #displaced = false;
   #backoffMs = INITIAL_BACKOFF_MS;
   #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -143,18 +162,24 @@ export class RemoteHost {
     return this.#acl.activeRecords();
   }
 
+  /**
+   * Open the relay socket. Also the one way back from `displaced`: an evicted
+   * Host never reconnects on a timer, so returning is a deliberate act that
+   * evicts whichever Host currently holds the hostId. Idempotent while a socket
+   * is live.
+   */
   start(): void {
     this.#stopped = false;
+    this.#displaced = false;
+    this.#clearReconnectTimer();
+    this.#backoffMs = INITIAL_BACKOFF_MS;
     this.#connect();
   }
 
   stop(): void {
     this.#stopped = true;
     this.#status = 'stopped';
-    if (this.#reconnectTimer) {
-      clearTimeout(this.#reconnectTimer);
-      this.#reconnectTimer = null;
-    }
+    this.#clearReconnectTimer();
     this.#dropTransientState();
     try {
       this.#ws?.close();
@@ -167,7 +192,7 @@ export class RemoteHost {
   // --- Socket lifecycle ---
 
   #connect(): void {
-    if (this.#ws || this.#stopped) return;
+    if (this.#ws || this.#stopped || this.#displaced) return;
     this.#status = 'connecting';
     const wsBase = this.#enrollment.serverUrl.replace(/^http/, 'ws');
     const url = `${wsBase}${WS_ROUTES.host}?${WS_TOKEN_PARAM}=${encodeURIComponent(this.#enrollment.hostToken)}`;
@@ -183,15 +208,33 @@ export class RemoteHost {
     ws.addEventListener('error', () => {
       // A `close` always follows; reconnection is handled there.
     });
-    ws.addEventListener('close', () => {
+    ws.addEventListener('close', (ev) => {
+      // Generation guard: only the socket we currently own drives the lifecycle.
+      // `stop()` drops `#ws` without waiting for the close event, so a late
+      // close from a superseded socket could otherwise null out the live socket,
+      // open a second one, and make this Host displace *itself*.
+      if (this.#ws !== ws) return;
       this.#ws = null;
-      this.#onClose();
+      this.#onClose(closeCode(ev));
     });
   }
 
-  #onClose(): void {
+  #onClose(code: number | undefined): void {
     this.#dropTransientState();
-    if (this.#stopped || !this.#reconnect) {
+    if (this.#stopped) {
+      this.#status = 'stopped';
+      return;
+    }
+    if (code === WS_CLOSE_HOST_REPLACED) {
+      // Another Host claimed this hostId and the relay evicted us on purpose
+      // (server/src/relay.ts `registerHost`). Reconnecting would evict that one,
+      // which would reconnect and evict us, forever — so this close is terminal
+      // and coming back requires an explicit `start()`.
+      this.#displaced = true;
+      this.#status = 'displaced';
+      return;
+    }
+    if (!this.#reconnect) {
       this.#status = 'stopped';
       return;
     }
@@ -202,6 +245,13 @@ export class RemoteHost {
       this.#reconnectTimer = null;
       this.#connect();
     }, delay);
+  }
+
+  #clearReconnectTimer(): void {
+    if (this.#reconnectTimer) {
+      clearTimeout(this.#reconnectTimer);
+      this.#reconnectTimer = null;
+    }
   }
 
   /** Connection-scoped state resets on a dropped socket (the ACL persists). */
@@ -359,6 +409,12 @@ export class RemoteHost {
     this.#clients.delete(clientId);
     this.#dismissApproval(clientId);
   }
+}
+
+/** The `code` of a `CloseEvent`, or undefined if the socket gave us none. */
+function closeCode(ev: unknown): number | undefined {
+  const code = (ev as { code?: unknown } | null)?.code;
+  return typeof code === 'number' ? code : undefined;
 }
 
 function pairingApprovalError(error: unknown): string {

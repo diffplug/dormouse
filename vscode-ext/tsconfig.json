@@ -1,18 +1,35 @@
+// Check-only. `tsc` never emits here — `pnpm build` bundles with esbuild — so
+// this config exists to typecheck (`pnpm typecheck`, part of `pnpm test`) and to
+// drive editor IntelliSense.
+//
+// The program deliberately spans two runtimes. `src/` is extension-host Node
+// code, but it imports shared modules from `../lib/src/`, some of which are
+// webview code (`platform/vscode-adapter.ts` reaches `lib/src/lib/platform/index.ts`).
+// So `lib` carries both DOM and Node, which is looser than either environment
+// alone — each side is checked precisely by its own project (`lib/tsconfig.app.json`
+// for the webview). What this catches, and what nothing caught before, is
+// vscode-ext's own code referring to something that no longer exists.
 {
   "compilerOptions": {
     "module": "commonjs",
     "target": "ES2022",
-    "lib": ["ES2022"],
-    "outDir": "dist",
-    "rootDir": "src",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "noEmit": true,
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "declaration": true,
-    "sourceMap": true
+    "types": ["vscode", "node"],
+    // The `dor` CLI is staged onto the PATH rather than installed as a package
+    // dependency, so its protocol types resolve by path — same mapping the lib
+    // app project uses.
+    "paths": {
+      "dor/*": ["../dor/src/*"]
+    }
   },
-  "include": ["src/**/*"],
+  // `../lib/src/globals.d.ts` declares the webview's `acquireVsCodeApi`, which
+  // the shared platform module references.
+  "include": ["src/**/*", "../lib/src/globals.d.ts"],
   "exclude": ["node_modules", "dist"]
 }

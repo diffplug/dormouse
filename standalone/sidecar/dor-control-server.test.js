@@ -123,3 +123,34 @@ test('dor control server rejects invalid tokens', async () => {
     server.close();
   }
 });
+
+test('dor control server rejects a missing (non-string) token', async () => {
+  const socketPath = testSocketPath('token-missing');
+  const sent = [];
+  const server = createDorControlServer({
+    socketPath,
+    token: 'secret',
+    send(event, data) {
+      sent.push({ event, data });
+    },
+  });
+
+  assert.ok(server);
+  await server.ready;
+
+  try {
+    const response = await sendSocketRequest(socketPath, {
+      requestId: 'request-1',
+      method: 'surface.list',
+    });
+
+    assert.deepEqual(sent, []);
+    assert.deepEqual(response, {
+      requestId: 'request-1',
+      ok: false,
+      error: 'invalid Dormouse control token',
+    });
+  } finally {
+    server.close();
+  }
+});

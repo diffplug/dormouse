@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { handlePaneShortcuts } from './handle-pane-shortcuts';
 import type { WallKeyboardCtx } from './types';
 
@@ -22,6 +22,11 @@ vi.mock('../../../lib/terminal-registry', () => ({
 vi.mock('../../KillConfirm', () => ({
   randomKillChar: () => 'Q',
 }));
+
+// jsdom here ships no `CSS` global; the header lookup escapes ids via CSS.escape.
+globalThis.CSS ??= {
+  escape: (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, (c) => `\\${c}`),
+} as unknown as typeof CSS;
 
 function makeNav(overrides: Partial<WallKeyboardCtx['nav']> = {}): WallKeyboardCtx['nav'] {
   return {
@@ -171,5 +176,43 @@ describe('handlePaneShortcuts Cmd-Arrow swap (nav seam)', () => {
 
     expect(ctx.swapWithNeighbor).not.toHaveBeenCalled();
     expect(ctx.selectPane).not.toHaveBeenCalled();
+  });
+});
+
+describe('handlePaneShortcuts `>` header context menu', () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => { document.body.innerHTML = ''; });
+
+  function makeHeaderEl(id: string): ReturnType<typeof vi.fn> {
+    const el = document.createElement('div');
+    el.setAttribute('data-pane-header-for', id);
+    document.body.appendChild(el);
+    const onContextMenu = vi.fn();
+    el.addEventListener('contextmenu', onContextMenu);
+    return onContextMenu;
+  }
+
+  it('dispatches contextmenu on the selected pane header element', () => {
+    const onContextMenu = makeHeaderEl('pane-a');
+
+    expect(handlePaneShortcuts(keydown('>'), makeCtx(), { current: null })).toBe(true);
+
+    expect(onContextMenu).toHaveBeenCalledTimes(1);
+    expect(onContextMenu.mock.calls[0][0].type).toBe('contextmenu');
+  });
+
+  it('consumes `>` without throwing when no header element matches', () => {
+    const ctx = makeCtx();
+    expect(document.querySelector('[data-pane-header-for="pane-a"]')).toBeNull();
+    expect(() => handlePaneShortcuts(keydown('>'), ctx, { current: null })).not.toThrow();
+    expect(handlePaneShortcuts(keydown('>'), ctx, { current: null })).toBe(true);
+  });
+
+  it('does nothing when a door is selected', () => {
+    const onContextMenu = makeHeaderEl('pane-a');
+    const ctx = makeCtx({ selectedTypeRef: { current: 'door' } });
+
+    expect(handlePaneShortcuts(keydown('>'), ctx, { current: null })).toBe(false);
+    expect(onContextMenu).not.toHaveBeenCalled();
   });
 });

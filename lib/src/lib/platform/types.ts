@@ -1,4 +1,5 @@
 import type { AlertState } from '../alert-manager';
+import type { AlertSettings } from '../alert-settings';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 // Defined in its own dependency-free file so the Node proxy in lib/src/host can
 // share it without pulling this browser-typed module into a Node tsconfig.
@@ -125,9 +126,41 @@ export interface PlatformAdapter {
   resizePty(id: string, cols: number, rows: number): void;
   killPty(id: string): void;
 
+  /**
+   * Whether this host keeps a Session snapshot across a restart. `false` means
+   * `saveSession` does no work at all rather than building a record for a
+   * `saveState` that discards it — the gate belongs above the per-pane `getCwd`
+   * round trips, not below them.
+   *
+   * Absent reads as `true`. Standalone sets it `false`: quitting is a deliberate
+   * ending and a crash captured nothing, so every launch starts fresh
+   * (docs/specs/transport.md -> "The governing rule").
+   */
+  persistsSession?: boolean;
+
+  /**
+   * Whether the host owns the color theme, so Dormouse must not offer a theme
+   * picker of its own. Absent reads as `false`.
+   *
+   * `VSCodeAdapter` sets it `true`: VS Code supplies `--vscode-*` directly and
+   * its own theme UI is the only correct control there, so the Settings dialog
+   * hides its Theme row (docs/specs/theme.md).
+   */
+  hostOwnsTheme?: boolean;
+
+  /**
+   * Agent resume invocations the host captured when it last tore down, keyed by
+   * surface id — consumed once by a cold restore (`session-restore.ts`).
+   *
+   * Deliberately *not* part of the persisted session: it is host-owned and
+   * single-use, and a webview that could save it back would replay a stale
+   * invocation on a later restore. Absent on adapters whose host captures
+   * nothing (docs/specs/transport.md -> "Consuming it").
+   */
+  getRecoveryCommands?(): Record<string, string>;
+
   // PTY queries
   getCwd(id: string): Promise<string | null>;
-  getScrollback(id: string): Promise<string | null>;
   /** TCP listening ports opened by this terminal's process tree (shell + descendants). */
   getOpenPorts(id: string): Promise<OpenPort[]>;
 
@@ -226,18 +259,33 @@ export interface PlatformAdapter {
 
   // Alert management
   alertRemove(id: string): void;
-  alertToggle(id: string): void;
-  alertDisable(id: string): void;
+  /** Offer persisted WATCHING rules as the host's startup seed. */
+  alertSetWatchedCommands(names: string[]): void;
+  /** Mutate one bare-command WATCHING rule without replacing unrelated rules. */
+  alertSetCommandWatched(name: string, watched: boolean): void;
+  /**
+   * Push alarm settings to the host. `seed: true` offers them as the startup
+   * seed, which a multi-webview host accepts only once; `seed: false` is a user
+   * edit and always replaces.
+   */
+  alertPublishSettings(settings: AlertSettings, opts: { seed: boolean }): void;
   alertDismiss(id: string): void;
-  alertDismissOrToggle(id: string, displayedStatus: string): void;
   alertAttend(id: string): void;
   alertResize(id: string): void;
   alertClearAttention(id?: string): void;
   alertToggleTodo(id: string): void;
   alertMarkTodo(id: string): void;
   alertClearTodo(id: string): void;
+  // Alert subscriptions have no `off` counterpart, unlike the PTY listeners
+  // above: their handlers are stable module-level functions registered once for
+  // the renderer's lifetime (`initAlertStateReceiver`), so adapters store them
+  // in a `Set` and re-registration is idempotent. Add the pair back if a
+  // caller ever needs to unsubscribe.
   onAlertState(handler: (detail: AlertStateDetail) => void): void;
-  offAlertState(handler: (detail: AlertStateDetail) => void): void;
+  /** Receive the host's canonical WATCHING rule snapshot. */
+  onWatchedCommands(handler: (names: string[]) => void): void;
+  /** Receive the host's canonical alarm settings. */
+  onAlertSettings(handler: (settings: AlertSettings) => void): void;
 
   // State persistence
   saveState(state: unknown): void;

@@ -1,72 +1,26 @@
 import { useLayoutEffect, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { XIcon } from '@phosphor-icons/react';
-import { Shortcut } from './design';
+import { OnOffSwitch, Shortcut } from './design';
+import { WatchedCommandList } from './WatchedCommandList';
+import { usePopoverFocusTrap } from './use-popover-focus-trap';
 import { clampOverlayPosition, pointInConvexPolygon } from '../lib/ui-geometry';
 import {
   clearSessionTodo,
   DEFAULT_ACTIVITY_STATE,
-  disableSessionAlert,
   dismissOrToggleAlert,
   getActivity,
   getActivitySnapshot,
+  getRunningCommandArgv0,
+  getTerminalPaneStateSnapshot,
+  getWatchedCommandsSnapshot,
   markSessionTodo,
+  setCommandWatched,
   subscribeToActivity,
-  toggleSessionAlert,
+  subscribeToTerminalPaneState,
+  subscribeToWatchedCommands,
   toggleSessionTodo,
 } from '../lib/terminal-registry';
-
-/**
- * Manages focus trapping, Escape-to-close, and click-outside-to-close for
- * portal-based popovers. Scopes keyboard handling to the popover's DOM subtree
- * so Tab/Escape don't leak to the rest of the app.
- */
-function usePopoverFocusTrap(
-  ref: React.RefObject<HTMLElement | null>,
-  onClose: () => void,
-) {
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-
-    const handleMouseDown = (e: MouseEvent) => {
-      if (!el.contains(e.target as Node)) onClose();
-    };
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Only handle keys when focus is inside the popover
-      if (!el.contains(document.activeElement)) return;
-
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        onClose();
-        return;
-      }
-      if (e.key !== 'Tab') return;
-
-      const focusables = Array.from(
-        el.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex]:not([tabindex="-1"])'),
-      );
-      if (focusables.length === 0) return;
-
-      const currentIndex = focusables.findIndex((f) => f === document.activeElement);
-      const nextIndex = currentIndex === -1
-        ? 0
-        : (currentIndex + (e.shiftKey ? -1 : 1) + focusables.length) % focusables.length;
-
-      e.preventDefault();
-      focusables[nextIndex]?.focus();
-    };
-
-    window.addEventListener('mousedown', handleMouseDown);
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => {
-      window.removeEventListener('mousedown', handleMouseDown);
-      window.removeEventListener('keydown', handleKeyDown, true);
-    };
-  }, [ref, onClose]);
-}
 
 export function TodoAlertDialog({
   triggerRect,
@@ -81,6 +35,11 @@ export function TodoAlertDialog({
 }) {
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
   const activity = activityStates.get(sessionId) ?? DEFAULT_ACTIVITY_STATE;
+  const watched = useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);
+  // WATCHING is a rule on the running command, so the switch is only meaningful
+  // while something is running (`docs/specs/alert.md`).
+  useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
+  const argv0 = getRunningCommandArgv0(sessionId);
   const dialogRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<CSSProperties>({
     left: triggerRect.left,
@@ -183,7 +142,9 @@ export function TodoAlertDialog({
         <XIcon size={12} weight="bold" />
       </button>
 
-      <div className="mb-3 grid w-fit grid-cols-[auto_auto_auto] items-center gap-x-2 gap-y-2">
+      {/* pr-6 keeps the right-hand switches clear of the absolutely-positioned
+          close button, whatever the rows end up containing. */}
+      <div className="mb-3 grid w-fit grid-cols-[auto_auto_auto] items-center gap-x-2 gap-y-2 pr-6">
         <Shortcut>t</Shortcut>
         <span className="text-sm font-medium text-foreground">TODO</span>
         <OnOffSwitch
@@ -193,15 +154,40 @@ export function TodoAlertDialog({
           label="TODO"
         />
 
-        <Shortcut>a</Shortcut>
-        <span className="text-sm font-medium text-foreground">WATCHING</span>
-        <OnOffSwitch
-          on={activity.watchingEnabled}
-          onEnable={() => toggleSessionAlert(sessionId)}
-          onDisable={() => disableSessionAlert(sessionId)}
-          label="WATCHING"
-        />
+        {argv0 && (
+          <>
+            <Shortcut>a</Shortcut>
+            {/* argv0 is a basename so it is normally short, but nothing enforces
+                that — cap it so a pathological name truncates instead of
+                stretching the dialog. The full name stays readable in the rule
+                list below and in the title attribute. */}
+            <span className="flex min-w-0 items-baseline gap-1.5 text-sm font-medium text-foreground">
+              <span className="shrink-0">Alert on all</span>
+              <span className="min-w-0 max-w-48 truncate font-mono" title={argv0}>"{argv0}"</span>
+            </span>
+            <OnOffSwitch
+              on={watched.includes(argv0)}
+              onEnable={() => setCommandWatched(argv0, true)}
+              onDisable={() => setCommandWatched(argv0, false)}
+              label={`Alert on all ${argv0}`}
+            />
+          </>
+        )}
       </div>
+
+      {!argv0 && (
+        <div className="mb-3 max-w-72 border-t border-border pt-2 text-sm leading-relaxed text-muted">
+          Nothing is running in this tab. Alerts are enabled per command — start
+          something, then press <Shortcut>a</Shortcut> to alert on every tab running it.
+        </div>
+      )}
+
+      {watched.length > 0 && (
+        <div className="mb-3 max-w-72 border-t border-border pt-2">
+          <div className="mb-1 text-sm font-medium text-muted">Alerting on</div>
+          <WatchedCommandList />
+        </div>
+      )}
 
       {activity.notification && (
         <div className="mb-3 max-w-80 border-t border-border pt-2 text-sm leading-relaxed text-foreground">
@@ -223,36 +209,5 @@ export function TodoAlertDialog({
       </div>
     </div>,
     document.body,
-  );
-}
-
-function OnOffSwitch({
-  on,
-  onEnable,
-  onDisable,
-  label,
-}: {
-  on: boolean;
-  onEnable: () => void;
-  onDisable: () => void;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      aria-label={`${label} ${on ? 'on' : 'off'}`}
-      onClick={() => (on ? onDisable() : onEnable())}
-      className="relative inline-flex h-5 w-14 items-center rounded-full border border-border bg-app-bg text-sm font-medium"
-    >
-      <span
-        aria-hidden
-        className="absolute inset-y-0.5 w-[calc(50%-2px)] rounded-full bg-header-active-bg/25 transition-transform"
-        style={{ transform: on ? 'translateX(2px)' : 'translateX(calc(100% + 2px))' }}
-      />
-      <span className={['z-10 flex-1 text-center', on ? 'text-header-active-bg' : 'text-muted'].join(' ')}>on</span>
-      <span className={['z-10 flex-1 text-center', on ? 'text-muted' : 'text-header-active-bg'].join(' ')}>off</span>
-    </button>
   );
 }

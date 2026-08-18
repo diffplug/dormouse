@@ -13,7 +13,7 @@ The website playground has canonical device-specific routes:
 
 The `tut` TUI has two device profiles, defined in `website/src/lib/tut-items.ts` (`DESKTOP_TUTORIAL_PROFILE`, `POCKET_TUTORIAL_PROFILE`):
 
-- **Desktop** starts at the top-level menu; sections: Keyboard navigation, Alert and TODO, Copy paste.
+- **Desktop** starts directly inside Make it yours (`initialSectionId`); sections: Make it yours, Keyboard navigation, Alerts and attention, Copy paste. Make it yours is one item — change the theme — and is deliberately first *and* auto-opened, so the tutorial's opening ask is a mouse action taken before any keyboard vocabulary has been introduced. The alert section covers all three of the tracks in `docs/specs/alert.md` — the command-keyed WATCHING rule and how it spreads across panes, program-sent terminal reports, and a command exiting while the user was away.
 - **Pocket** starts directly inside Gesture navigation (`initialSectionId`); sections: Gesture navigation, Copy paste.
 
 All section/item titles, hints, and prose live in `tut-items.ts`; the menu, Flappy Term, and star copy live in `tut-runner.ts`. This spec does not duplicate that text. Item ids are stable — they are the localStorage key suffixes.
@@ -25,15 +25,15 @@ Each item starts pending; the first incomplete item is marked active, and comple
 Three browser-side pieces in `website/src/lib/`, mirroring `ascii-splash-runner.ts` (xterm alt-screen + `FakePtyAdapter` boundary, no Node `terminal-kit`):
 
 - **`tut-runner.ts`** (`TutRunner`) — profile-aware alt-screen TUI. Subscribes to `TutorialState`, re-renders on progress changes, routes input via `FakePtyAdapter.writePty`.
-- **`tut-detector.ts`** (`TutDetector`) — wires app events to `TutorialState.markComplete(id)`. It is engine-neutral: `start()` seeds its prev-state maps and subscribes to `subscribeToActivity` (`dormouse-lib/lib/terminal-registry`) and `subscribeToMouseSelection` (`dormouse-lib/lib/mouse-selection`); everything else arrives on the `WallEvent` stream (`handleWallEvent`). It never touches the tiling engine — kb-arrows is credited from `selectionChange` (a pane selection change to a distinct pane while in command mode), which `Wall.selectPane` fires. The per-item detection contract — which transition credits which id, the Cmd/Ctrl+Arrow `move` consume-first guard, and the guards against falsely crediting restored/spawned state — lives in this file's code and comments.
+- **`tut-detector.ts`** (`TutDetector`) — wires app events to `TutorialState.markComplete(id)`. It is engine-neutral: `start()` seeds its prev-state maps and subscribes to `subscribeToActivity` (`dormouse-lib/lib/terminal-registry`) and `subscribeToMouseSelection` (`dormouse-lib/lib/mouse-selection`); everything else arrives on the `WallEvent` stream (`handleWallEvent`). It never touches the tiling engine — keyboard split completion is credited before the split's automatic passthrough transition, and the following kb-arrows hint directs the user to re-enter command mode; kb-arrows itself is credited from `selectionChange` (a pane selection change to a distinct pane while in command mode), which `Wall.selectPane` fires. The per-item detection contract — which transition credits which id, the Cmd/Ctrl+Arrow `move` consume-first guard, and the guards against falsely crediting restored/spawned state — lives in this file's code and comments.
 - **`tutorial-state.ts`** (`TutorialState`) — in-memory progress store; see [Storage](#storage) for keys. Profile totals are computed from the active profile's section list.
 - **`tut-items.ts`** — section + item definitions and the two profiles, shared by runner and detector.
 
 ## Layout
 
-- `SiteHeader` at top with the `Theme:` dropdown on `/playground/desktop`. Header is `themeAware` so `--vscode-*` variables drive its chrome.
+- `SiteHeader` at top, `themeAware` so `--vscode-*` variables drive its chrome. It carries no controls: theme selection moved into the Wall's Settings dialog (`docs/specs/theme.md`), so the page restores its own theme with `useRestoredTheme(POCKET_THEME_ID)` (`lib/src/lib/themes/use-restored-theme.ts`) rather than relying on the picker mounting. That call is also what declares the host fallback the Settings picker re-resolves through (`docs/specs/theme.md`).
 - `<main>` is a flex container so Wall's `flex-1 min-h-0` root gets a real height.
-- `/playground/desktop` runs `Wall` (`FakePtyAdapter`, `initialMode="passthrough"`) in a three-pane layout. The page passes `initialPaneIds={[tut-main, tut-boxed, tut-splash]}`: the Wall's fresh-panes seed splits each new pane off the previous by the aspect heuristic (Lath `autoEdge`), reproducing the L-shape below on a wide desktop. Header titles are seeded as pending shell opts (`setPendingShellOpts(id, { title })`) before the Wall mounts; the lib applies each as a user-pin at first spawn, which `deriveHeader` ranks above the engine fallback:
+- `/playground/desktop` runs `Wall` (`FakePtyAdapter`, `initialMode="passthrough"`) in a deterministic three-pane L-shape from `DESKTOP_PLAYGROUND_LAYOUT` in `website/src/lib/playground-desktop-layout.ts`: a 50/50 root row makes one vertical divider, and the right child is a 50/50 column making one horizontal divider. The explicit valid Lath seed avoids the generic synchronous `initialPaneIds` path, whose later leaves have no measured geometry yet and therefore cannot reliably choose alternating axes. Header titles are seeded as pending shell opts (`setPendingShellOpts(id, { title })`) before the Wall mounts; the lib applies each as a user-pin at first spawn, which `deriveHeader` ranks above the engine fallback:
   - **`tut-main`** (left, ~50%) — auto-launches `TutRunner` (`mainShell.runCommand("tut")`), title "tutorial".
   - **`tut-boxed`** (right-top, ~25%, "changelog") — auto-launches `ChangelogRunner`. Doubles as the Copy Rewrapped target; its wrapped lines exercise the rewrap path.
   - **`tut-splash`** (right-bottom, ~25%, "ascii-splash") — auto-launches `AsciiSplashRunner`.
@@ -44,15 +44,17 @@ Every visible pane gets a `TutorialShell` input handler via `PlaygroundShellRegi
 
 ## Menu and navigation behavior
 
-The desktop runner opens at a top-level menu; Pocket starts inside Gesture navigation and Esc returns to its menu. Selecting a section drills into its item list, showing `[N/M complete]` per section. Inside a section, items render `✓` (green, complete), `●` (yellow active marker — intentionally static so runner re-renders don't feed the activity monitor), or `·` (dim, later). Esc / `q` pop back one screen (section → menu → exit); Ctrl+C exits the runner immediately from any screen; re-running `tut` re-enters. `Reset progress` returns to the profile's initial screen.
+Both runners open inside their profile's first section (`initialSectionId`) and Esc returns to the menu. Selecting a section drills into its item list, showing `[N/M complete]` per section. Inside a section, items render `✓` (green, complete), `●` (yellow active marker — intentionally static so runner re-renders don't feed the activity monitor), or `·` (dim, later). Esc / `q` pop back one screen (section → menu → exit); Ctrl+C exits the runner immediately from any screen; re-running `tut` re-enters. `Reset progress` returns to the profile's initial screen.
 
 Below the sections the menu lists `Starred on GitHub` (persisted separately, calls `onOpenGithub`) and `🐭 FlappyTerm 🐭`. Flappy is `[LOCKED N/M]` until all section checklist items are complete (the star and Flappy rows don't count toward `N/M`), then shows `[High score: N]` and unlocks a runner-local mini-game. The game-over screen cross-links the other surface: desktop `p` → `onOpenPocket`, Pocket `n` → `onNotifyPocket`. The page wires these callbacks (and their URLs) in `PocketTerminalExperience.tsx` and the desktop playground page.
 
 ### Runner-local intercepts
 
-Two keys are intercepted by `TutRunner` while a specific section is open — they are **not** real Dormouse shortcuts:
+Four keys are intercepted by `TutRunner` while a specific section is open — they are **not** real Dormouse shortcuts. The three alert demos all report their fake commands through `OSC 633 ; E / C / D` written with `FakePtyAdapter.sendOutput`, which the fake adapter runs through the real `TerminalProtocolParser`; the OSCs are stripped from visible output, so a demo never disturbs the TUI its pane is drawing. Each demo's duration must outlast `cfg.alert.userAttention` so the bell actually rings rather than being suppressed as "user is looking"; see the comments in `tut-runner.ts`.
 
-- **`s`** (Alert section) — drives a fake busy task on the WATCHING-enabled pane via `FakePtyAdapter.pumpActivity` (no text output) and animates an in-place countdown. The duration must outlast `cfg.alert.userAttention` so the bell actually rings rather than being suppressed as "user is looking"; see the comment in `tut-runner.ts`. Falls back to `PANE_BOXED` if no WATCHING pane is known.
+- **`s`** (Alerts section) — reports a fake `longtask` on *both* alert demo panes (`tut-boxed`, `tut-splash`), overriding the command their shell is really running, and drives `FakePtyAdapter.pumpActivity` on `tut-boxed` with an in-place countdown. Two panes running one command is what makes `al-spreads` observable: WATCHING is keyed on the command name, so a single bell click lights both (`docs/specs/alert.md`). The pump always targets `tut-boxed` because it is the quiet pane — `tut-splash` animates forever, so it stays `BUSY` and can never reach `ALERT_RINGING`. The fake exit is reported `WATCH_DEMO_COMMAND_MS` later, not when the burst ends: WATCHING rings on *silence from a still-running command*, and reporting the exit early would dispose the monitor before it could ring. Restarting the demo after its countdown finishes cancels that prior delayed exit before starting the new run, so an old completion cannot terminate the new fake command. Afterwards each pane's real command line is put back via `TutorialShell.reportRunningCommand()`, so a pane whose TUI is still drawing never looks idle.
+- **`n`** (Alerts section) — writes a raw `OSC 777` notification to `tut-boxed`, exercising the terminal-report track, which needs no WATCHING rule.
+- **`x`** (Alerts section) — starts a fake `slowbuild` on `tut-splash` and reports its exit after the same duration. Deliberately an *unwatched* command name, so the command-exit track (rather than WATCHING) owns the bell; the user has to attend the pane and leave it for the ring to arm.
 - **`p`** (Copy paste section) — toggles the **Place To Paste** scratch modal (`website/src/components/PlaceToPaste.tsx`) via `onTogglePlaceToPaste`. Only wired on desktop; Pocket omits the callback.
 
 ### Pocket Copy paste specifics
@@ -66,6 +68,14 @@ is all the playground needs. Minimum useful behavior:
 
 * Echo typed characters and maintain a command-line buffer; Enter submits,
   Backspace edits.
+* Report shell integration for every command it runs — `OSC 633 ; A/B` around
+  the prompt, `633 ; E` + `633 ; C` on launch, `633 ; D` on exit (`127` for an
+  unknown command). This is load-bearing rather than cosmetic: WATCHING is keyed
+  on the running command's name (`docs/specs/alert.md`), so without it no
+  playground pane could be alerted on at all — every bell would report "nothing
+  is running", including the pane hosting the tutorial itself. It also means
+  playground panes are OSC-driven, so the keystroke fallback in
+  `docs/specs/terminal-state.md` never engages there.
 * Up/Down arrows recall command history at the shell prompt; Escape, Tab, and Left/Right are no-ops at the base prompt (full-screen runners like `ascii-splash` give them behavior).
 * When a fake full-screen app such as `ascii-splash`, `splash`, `changelog`, or
   `tut` is running, `Ctrl+C` sends `\x03` to that app; if the app exits, the
@@ -93,16 +103,18 @@ These exist in `dormouse-lib` (or `MobileTerminalUi`) specifically so the browse
 
 - **`WallEvent.kill` / `WallEvent.move` / `WallEvent.paneAdded`** — discriminants on the `WallEvent` union (`lib/src/components/wall/wall-types.ts`); `kill` fires from `acceptKill`, `move` from `handle-pane-shortcuts.ts` after the Cmd/Ctrl-Arrow swap. `paneAdded` fires once per pane that becomes visible (seed ids, splits, dor surfaces, restores, auto-spawn) via the Lath store-subscription leaf-id diff (seed ids announced explicitly so they are emitted too) — so the page can create a fake shell for each pane without touching the tiling engine.
 - **`FakePtyAdapter.pumpActivity(id, durationMs, intervalMs)`** — drives the alert manager for a fixed duration with no data output (used by the `s` busy demo).
-- **`FakePtyAdapter.sendOutput(id, data)`** — pushes data through the data handlers as if the PTY produced it, also driving `alertManager.onData()`.
+- **`FakePtyAdapter.sendOutput(id, data)`** — pushes data through the real protocol parser as if the PTY produced it, driving `alertManager.onData()` for visible bytes and the notification/semantic-event paths for OSCs. This is what lets the alert demos fake shell integration and a program-sent notification without a real shell. Unlike `writePty`, it is not suppressed while a scenario is playing.
+- **`subscribeToWatchedCommands` / `getWatchedCommands`** (`lib/src/lib/watched-commands.ts`, re-exported from `terminal-registry`) — the WATCHING rule set, which `TutDetector` watches to credit `al-watch-cmd`.
 - **`MobileTerminalUi.onGestureInput(input, data)`** — optional callback fired only for radial-menu actions, so Pocket credits gesture items without mistaking native keyboard input for gestures.
+- **`subscribeToActiveTheme` / `getActiveThemeId`** (`lib/src/lib/themes/`) — the active theme, which `TutDetector` watches to credit `th-theme`. It fires only on a change to a *different* theme, and the detector additionally seeds the id at `start()`, so a page's boot-time `restoreActiveTheme()` cannot grant the item. The picker has no keyboard shortcut, so any change here is a mouse interaction.
 
 `SCENARIO_TUTORIAL_MOTD` was removed — the runner owns the main pane's screen.
 
 ## Theme Picker
 
-Implemented in `dormouse-lib/lib/themes` and `dormouse-lib/components/ThemePicker`. Bundled themes are a small built-in VS Code set (`bundled.json`: Dark/Light Visual Studio, Monokai, Quiet Light, Red, Kimbie Dark, Abyss, and Selenized variants); users can install more from OpenVSX via the dropdown footer (`Install theme from OpenVSX`). Installed rows have an `X` delete control (requires browser confirmation); deleting the active installed theme falls back to the page's `defaultThemeId` (Kimbie Dark on the playground/Pocket pages), with the first bundled theme as last resort.
+Implemented in `dormouse-lib/lib/themes` and `dormouse-lib/components/ThemePicker`. Bundled themes are a small built-in VS Code set (`bundled.json`: Dark/Light Visual Studio, Monokai, Quiet Light, Red, Kimbie Dark, Abyss, and Selenized variants); users can install more from OpenVSX via the dropdown footer (`Install theme from OpenVSX`). Installed rows have an `X` uninstall control — a single click, no confirmation (`docs/specs/theme.md`); uninstalling the active installed theme falls back to the default the page declared through `useRestoredTheme` (Kimbie Dark on the playground/Pocket pages), with the first bundled theme as last resort.
 
-The picker is labeled `Theme:` and appears on `/playground/desktop` (inside the theme-aware `SiteHeader`), `/playground/pocket` mobile (floating over the terminal), and the desktop Pocket page (standalone appbar variant). `/pocket` redirects before rendering one.
+On `/playground/desktop` the picker lives in the Wall's Settings dialog, opened from the sliders control at the far right of the baseboard (`docs/specs/theme.md` → "Where the user picks a theme"); the `th-theme` tutorial item is what walks the user there. The `compact` free-floating variant remains on `/playground/pocket` mobile (floating over the terminal) and the desktop Pocket page, both of which render a mobile prototype with no baseboard. `/pocket` redirects before rendering one.
 
 Each theme is a map of `--vscode-*` overrides. `applyTheme()` cascades them into `--color-*` (via `theme.css` fallbacks), triggers the `MutationObserver` in `lib/src/lib/terminal-theme.ts` to re-read `getTerminalTheme()` for xterm.js terminals, and updates Tailwind tokens. The active theme is restored on mount.
 

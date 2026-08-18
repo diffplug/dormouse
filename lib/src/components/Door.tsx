@@ -1,15 +1,21 @@
 import { type PointerEvent as ReactPointerEvent } from 'react';
-import { BellIcon } from '@phosphor-icons/react';
-import type { SessionStatus, TodoState } from '../lib/terminal-registry';
+import { clsx } from 'clsx';
+import { BellIcon, SpeakerHighIcon } from '@phosphor-icons/react';
+import type { AlertSpeechState, SessionStatus, TodoState } from '../lib/terminal-registry';
 import { useTodoPillContent } from './TodoPillBody';
-import { bellIconClass } from './bell-icon-class';
-import { TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
+import { alertSpeakingAnimationClass, bellIconClass } from './bell-icon-class';
+import {
+  ALERT_SPEECH_TRACKING_CLASS,
+  TERMINAL_TOP_RADIUS_CLASS,
+  TODO_PILL_TRACKING_CLASS,
+} from './design';
 
 export interface DoorProps {
   doorId?: string;
   title: string;
   status?: SessionStatus;
   todo?: TodoState;
+  speechState?: AlertSpeechState;
   onClick?: () => void;
   /** When provided, a primary-button press reports its start point and the Wall begins
    *  an (inactive) LathHost drag — LathHost owns the threshold, click suppression, and
@@ -23,12 +29,15 @@ export function Door({
   title,
   status = 'WATCHING_DISABLED',
   todo = false,
+  speechState,
   onClick,
   onDragPress,
 }: DoorProps) {
   const showBell = status !== 'WATCHING_DISABLED';
   const alertRinging = status === 'ALERT_RINGING';
   const todoPill = useTodoPillContent(todo);
+  const speaking = speechState === 'speaking';
+  const spoken = speechState === 'spoken';
 
   const onPointerDown = onDragPress
     ? (e: ReactPointerEvent<HTMLButtonElement>): void => {
@@ -40,21 +49,36 @@ export function Door({
   return (
     <button
       data-door-id={doorId}
-      className={[
+      className={clsx(
         'relative flex h-6 max-w-[220px] min-w-[68px] items-center gap-2 overflow-hidden px-2.5',
-        TERMINAL_TOP_RADIUS_CLASS,
-        'bg-door-bg text-door-fg',
         'text-sm font-medium font-mono',
-      ].join(' ')}
+        TERMINAL_TOP_RADIUS_CLASS,
+        speaking
+          ? clsx('bg-alarm-vs-door text-door-bg', alertSpeakingAnimationClass())
+          : 'bg-door-bg text-door-fg',
+        spoken && 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-door)]',
+      )}
       onClick={onClick}
       onPointerDown={onPointerDown}
-      title={title}
+      title={speechState ? `${title} — ${speechState}` : title}
+      aria-label={speechState ? `${title}, ${speechState}` : undefined}
+      data-alert-speech-state={speechState}
     >
       <span className="min-w-0 flex-1 truncate">
         {title}
       </span>
-      {(todoPill.visible || showBell) && (
+      {/* `spoken` is unbounded (it lasts until the ring is attended), so it joins
+          the badge cluster instead of replacing it — see docs/specs/layout.md. */}
+      {speaking ? (
+        <span className={clsx('flex shrink-0 items-center gap-1 text-xs font-bold', ALERT_SPEECH_TRACKING_CLASS)}>
+          <SpeakerHighIcon size={13} weight="fill" />
+          <span>SPEAKING</span>
+        </span>
+      ) : (spoken || todoPill.visible || showBell) && (
         <span className="flex shrink-0 items-center gap-1.5">
+          {spoken && (
+            <SpeakerHighIcon size={12} weight="fill" className="text-alarm-vs-door" />
+          )}
           {todoPill.visible && (
             <span
               className={`todo-pill-shell text-xs font-semibold ${TODO_PILL_TRACKING_CLASS}`}

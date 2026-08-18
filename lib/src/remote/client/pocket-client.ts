@@ -21,10 +21,13 @@ import {
   REMOTE_EVENTS,
   REMOTE_METHODS,
   SELFHOST_ACCOUNT_ID,
+  UNAUTHORIZED_ERROR,
   WS_ROUTES,
   WS_TOKEN_PARAM,
   hashPasskeyPublicKey,
+  pushEndpointFingerprint,
   signDeviceChallenge,
+  signPushSubscribe,
   type ClientFrame,
   type ConnectionFailure,
   type ConnectionRequest,
@@ -35,6 +38,11 @@ import {
   type HostAclRecord,
   type HostsResponse,
   type PairingRequest,
+  type PushChallengeResponse,
+  type PushConfigResponse,
+  type PushSubscribeResponse,
+  type PushSubscriptionPayload,
+  type PushSubscriptionsResponse,
   type ReauthFinishResponse,
   type RemoteEventMsg,
   type RemoteResponse,
@@ -54,10 +62,10 @@ import type { RemoteWebSocket } from '../ws';
 export type PocketSocket = RemoteWebSocket;
 
 /**
- * Persistent per-device state. Passkey public keys are stashed at registration
- * keyed by credential id, because the wire never returns a passkey's public key
- * on sign-in — so pairing/connecting can only build its request on the device
- * that created the passkey (a documented POC limitation).
+ * Persistent per-device state. Passkey public keys are cached by credential id
+ * at registration *and* at sign-in — the Server returns the asserted key — so
+ * any browser profile holding a synced passkey can build pair and connect
+ * requests, not only the one that performed the registration.
  */
 export interface PocketStorage {
   getPasskeyPublicKey(credentialId: string): string | null;
@@ -67,6 +75,14 @@ export interface PocketStorage {
   isPaired(hostId: string): boolean;
   markPaired(hostId: string): void;
   unmarkPaired(hostId: string): void;
+  /**
+   * Digest of the delivery address last registered with the Server, or null if
+   * this device has never registered one. Per device, not per Host: one
+   * service-worker scope holds one subscription, so if it rotates, every Host
+   * row for this device is stale at once.
+   */
+  getRegisteredPushEndpoint(): string | null;
+  setRegisteredPushEndpoint(fingerprint: string): void;
 }
 
 export interface PocketClientDeps {
@@ -100,6 +116,27 @@ export interface PairResult {
   readonly approved: boolean;
   readonly record?: HostAclRecord;
   readonly error?: string;
+}
+
+/** Shown when the Server no longer accepts our session token. */
+export const SESSION_EXPIRED_MESSAGE = 'Your session expired. Sign in again to continue.';
+
+/**
+ * The Server rejected our session token, so nothing works until the user signs
+ * in again. Distinct from an ordinary failure because the UI must react rather
+ * than report: sessions live only in the Server's memory (docs/specs/server.md),
+ * so they die on a 12h expiry *and* on every Server restart, and an installed
+ * Pocket has no address bar to reload from. Left as a message, the user is
+ * stuck holding a dead token with force-quitting the app as the only way out.
+ *
+ * {@link PocketClient} clears the token before throwing this, so recovery is
+ * exactly "sign in again" with the passkey and paired-host markers intact.
+ */
+export class SessionExpiredError extends Error {
+  constructor() {
+    super(SESSION_EXPIRED_MESSAGE);
+    this.name = 'SessionExpiredError';
+  }
 }
 
 interface Waiter {
@@ -165,6 +202,16 @@ export class PocketClient {
     return this.#storage.isPaired(hostId);
   }
 
+  /**
+   * Digest of the delivery address this device last registered, for detecting
+   * a push service that rotated the endpoint behind our back. Null until the
+   * first successful registration — which reads as "no opinion", so a device
+   * that registered before this was recorded is not made to re-register.
+   */
+  registeredPushEndpoint(): string | null {
+    return this.#storage.getRegisteredPushEndpoint();
+  }
+
   /** Notified when the Host drops (a `host-gone` frame or a closed socket). */
   setOnHostGone(callback: (() => void) | null): void {
     this.#onHostGone = callback;
@@ -188,8 +235,8 @@ export class PocketClient {
       clientDataJSON: registration.clientDataJSON,
       label,
     });
-    // Stash the public key so this device can later build pairing/connect
-    // requests (the wire never hands it back on sign-in).
+    // Cache immediately so this profile can build pairing/connect requests;
+    // sign-in also refreshes this value from the Server's verified response.
     this.#storage.setPasskeyPublicKey(registration.credentialId, registration.publicKey);
     this.#credentialId = registration.credentialId;
     return finish;
@@ -203,6 +250,12 @@ export class PocketClient {
     const finish = await this.#api<SigninFinishResponse>(API_ROUTES.signinFinish, { assertion });
     this.#sessionToken = finish.sessionToken;
     this.#credentialId = assertion.credentialId;
+    // Signing in is enough to pair from here. The Server returns the asserted
+    // passkey's public key, so a browser profile that never performed the
+    // registration — an iOS Home Screen install, a second browser — can still
+    // build pair and connect requests instead of being pushed into creating a
+    // redundant second passkey.
+    this.#storage.setPasskeyPublicKey(assertion.credentialId, finish.passkeyPublicKey);
     return finish;
   }
 
@@ -215,6 +268,83 @@ export class PocketClient {
     return response.hosts;
   }
 
+  // --- Web Push ------------------------------------------------------------
+
+  /**
+   * The VAPID public key a browser needs before it can subscribe, or `null`
+   * when the server has push disabled. Unauthenticated — the key is public by
+   * construction.
+   */
+  async getPushConfig(): Promise<string | null> {
+    const response = await this.#api<PushConfigResponse>(
+      API_ROUTES.pushConfig,
+      undefined,
+      { method: 'GET' },
+    );
+    return response.applicationServerKey;
+  }
+
+  /**
+   * The Hosts **this device** is already registered to receive push from.
+   *
+   * The Server answers with the whole account's registrations and the filter
+   * happens here, so there is no endpoint that reports on a `devicePublicKey`
+   * the caller does not hold. Lets a reloaded Pocket show "Alerts on." instead
+   * of re-offering an action already taken.
+   */
+  async listPushSubscribedHosts(): Promise<string[]> {
+    const response = await this.#api<PushSubscriptionsResponse>(
+      API_ROUTES.pushSubscriptions,
+      undefined,
+      { method: 'GET', headers: { authorization: `Bearer ${this.#requireToken()}` } },
+    );
+    const { devicePublicKey } = await this.#getDeviceKey();
+    return response.subscriptions
+      .filter((s) => s.devicePublicKey === devicePublicKey)
+      .map((s) => s.hostId);
+  }
+
+  /**
+   * Register a browser push subscription against `hostId`, signing it with this
+   * device's key so the Server can bind it to the same Client identity the
+   * Host's ACL records. Subscriptions are per (host, device): a phone paired
+   * with two laptops subscribes twice.
+   *
+   * The signature covers the endpoint, so a captured one cannot be reused to
+   * register a different endpoint under this identity.
+   */
+  async subscribeToPush(
+    hostId: string,
+    subscription: PushSubscriptionPayload,
+  ): Promise<PushSubscribeResponse> {
+    const token = this.#requireToken();
+    const auth = { authorization: `Bearer ${token}` };
+    const { challenge } = await this.#api<PushChallengeResponse>(
+      API_ROUTES.pushChallenge,
+      undefined,
+      { headers: auth },
+    );
+    const deviceKey = await this.#getDeviceKey();
+    const signature = await signPushSubscribe(deviceKey.privateKey, {
+      hostId,
+      challenge,
+      devicePublicKey: deviceKey.devicePublicKey,
+      endpoint: subscription.endpoint,
+    });
+    const result = await this.#api<PushSubscribeResponse>(
+      API_ROUTES.pushSubscribe,
+      { hostId, devicePublicKey: deviceKey.devicePublicKey, challenge, signature, subscription },
+      { headers: auth },
+    );
+    // Recorded only once the Server has the row, mirroring how `pair` marks a
+    // Host paired: this is a note about what the Server holds, not about what
+    // the browser minted.
+    this.#storage.setRegisteredPushEndpoint(
+      await pushEndpointFingerprint(subscription.endpoint),
+    );
+    return result;
+  }
+
   // --- Relay socket --------------------------------------------------------
 
   /** True while a live relay socket exists; false after any close. */
@@ -223,7 +353,17 @@ export class PocketClient {
   }
 
   /** Open the `/ws/client` relay socket; resolves once it is open. */
-  openSocket(): Promise<void> {
+  async openSocket(): Promise<void> {
+    try {
+      await this.#openSocket();
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      if (error instanceof SessionExpiredError) throw error;
+      await this.#diagnoseSocketFailure(error);
+    }
+  }
+
+  #openSocket(): Promise<void> {
     const token = this.#requireToken();
     const url = `${this.#wsBase}${WS_ROUTES.client}?${WS_TOKEN_PARAM}=${encodeURIComponent(token)}`;
     const ws = this.#createWebSocket(url);
@@ -561,8 +701,40 @@ export class PocketClient {
       ...(method === 'GET' ? {} : { body: JSON.stringify(body ?? {}) }),
     });
     const parsed = (await response.json().catch(() => ({}))) as T & { error?: string };
+    // Only the session gate's 401 means "sign in again" — a wrong setup
+    // password and a rejected device signature answer 401 too, and bouncing the
+    // user to sign-in for those would be a worse bug than the one this fixes.
+    if (response.status === 401 && parsed.error === UNAUTHORIZED_ERROR) {
+      // Drop the token here rather than at the call site: every later request
+      // and every relay upgrade would fail the same way, and keeping it would
+      // let the UI believe it is still signed in.
+      this.#sessionToken = null;
+      throw new SessionExpiredError();
+    }
     if (!response.ok) throw new Error(parsed.error ?? `request failed (${response.status})`);
     return parsed;
+  }
+
+  /**
+   * Turn a relay-socket failure into a {@link SessionExpiredError} when the
+   * session is the reason. A rejected WS upgrade reaches the browser as a bare
+   * `error` event with no status, so the only way to tell "session died" from
+   * "network is down" is to ask an authenticated route — which answers the
+   * question and costs one request on a path that has already failed.
+   */
+  async #diagnoseSocketFailure(original: Error): Promise<never> {
+    if (this.#sessionToken === null) throw original;
+    try {
+      await this.#api<HostsResponse>(API_ROUTES.hosts, undefined, {
+        method: 'GET',
+        headers: { authorization: `Bearer ${this.#sessionToken}` },
+      });
+    } catch (err) {
+      if (err instanceof SessionExpiredError) throw err;
+      // Probe failed for its own reason — report the socket failure, which is
+      // what the user actually hit.
+    }
+    throw original;
   }
 
   #requireToken(): string {
@@ -577,8 +749,8 @@ export class PocketClient {
 }
 
 export const PASSKEY_UNAVAILABLE_MESSAGE =
-  "This device does not hold the passkey's public key, so it cannot pair or connect. " +
-  'Pair from the device that first created the passkey (POC limitation).';
+  "This app no longer has the signed-in passkey's public key, so it cannot pair or connect. " +
+  'Sign in again to restore it.';
 
 const RECOVERABLE_PAIRING_FAILURES = new Set<ConnectionFailure>([
   'passkey-not-paired',
@@ -600,6 +772,7 @@ function uuid(): string {
 export function localStoragePocketStorage(): PocketStorage {
   const PASSKEY_PREFIX = 'dormouse-pocket:passkey:';
   const PAIRED_PREFIX = 'dormouse-pocket:paired:';
+  const PUSH_ENDPOINT_KEY = 'dormouse-pocket:push-endpoint';
   return {
     getPasskeyPublicKey: (credentialId) =>
       globalThis.localStorage.getItem(PASSKEY_PREFIX + credentialId),
@@ -617,5 +790,8 @@ export function localStoragePocketStorage(): PocketStorage {
     isPaired: (hostId) => globalThis.localStorage.getItem(PAIRED_PREFIX + hostId) === '1',
     markPaired: (hostId) => globalThis.localStorage.setItem(PAIRED_PREFIX + hostId, '1'),
     unmarkPaired: (hostId) => globalThis.localStorage.removeItem(PAIRED_PREFIX + hostId),
+    getRegisteredPushEndpoint: () => globalThis.localStorage.getItem(PUSH_ENDPOINT_KEY),
+    setRegisteredPushEndpoint: (fingerprint) =>
+      globalThis.localStorage.setItem(PUSH_ENDPOINT_KEY, fingerprint),
   };
 }

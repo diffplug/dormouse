@@ -1,14 +1,16 @@
 /*
- * Browser adapter for ascii-splash@0.5.0 in the Dormouse website playground.
+ * Browser adapter for ascii-splash@0.6.0 in the Dormouse website playground.
  *
  * This file is not the upstream CLI entrypoint. It imports upstream internals
  * from ascii-splash/dist through the website's `ascii-splash-internal` Vite
  * alias, then replaces the Node terminal-kit boundary with a FakePtyAdapter
  * runner that speaks xterm byte streams.
  *
- * Upstream pieces kept: AnimationEngine, Buffer, CommandBuffer, CommandParser,
- * CommandExecutor, themes, defaults, UI overlay classes, TransitionManager, and
- * all pattern classes.
+ * Upstream pieces kept: AnimationEngine, RuntimeController, PatternCatalog,
+ * Buffer, CommandBuffer, CommandParser, CommandExecutor, themes, defaults, UI
+ * overlay classes, and TransitionManager. Scene state (pattern, preset, theme,
+ * quality, seeds) lives in RuntimeController exactly as it does upstream; this
+ * file only renders it and feeds it input.
  *
  * Local changes/wrapping:
  * - BrowserTerminalRenderer writes ANSI output through FakePtyAdapter.sendOutput.
@@ -17,6 +19,8 @@
  *   are handled for xterm.js inside Dormouse.
  * - UI overlays/transitions are instantiated per runner instead of using
  *   upstream singleton getters so multiple panes can run independently.
+ * - Photo and workspace pattern slots are omitted: both need Node (`sharp`, the
+ *   workspace scanner). `sharp` is aliased away in vite.config.ts.
  * - Config persistence is intentionally omitted; upstream commands that need a
  *   config loader report that it is unavailable.
  */
@@ -24,38 +28,24 @@ import { AnimationEngine } from "ascii-splash-internal/engine/AnimationEngine.js
 import { CommandBuffer } from "ascii-splash-internal/engine/CommandBuffer.js";
 import { CommandExecutor } from "ascii-splash-internal/engine/CommandExecutor.js";
 import { CommandParser } from "ascii-splash-internal/engine/CommandParser.js";
-import { defaultConfig, qualityPresets } from "ascii-splash-internal/config/defaults.js";
-import { getNextThemeName, getTheme, THEME_NAMES, THEMES } from "ascii-splash-internal/config/themes.js";
+import { RuntimeController } from "ascii-splash-internal/engine/RuntimeController.js";
+import { createDefaultConfig, qualityPresets } from "ascii-splash-internal/config/defaults.js";
+import { getTheme, THEME_NAMES } from "ascii-splash-internal/config/themes.js";
+import { buildPatternSlots } from "ascii-splash-internal/patterns/PatternCatalog.js";
 import { TransitionManager } from "ascii-splash-internal/renderer/TransitionManager.js";
 import { Buffer as SplashBuffer } from "ascii-splash-internal/renderer/Buffer.js";
 import { HelpOverlay } from "ascii-splash-internal/ui/HelpOverlay.js";
 import { StatusBar } from "ascii-splash-internal/ui/StatusBar.js";
 import { ToastManager } from "ascii-splash-internal/ui/ToastManager.js";
-import { Mulberry32, randomSeed } from "ascii-splash-internal/utils/random.js";
-import { AquariumPattern } from "ascii-splash-internal/patterns/AquariumPattern.js";
-import { CampfirePattern } from "ascii-splash-internal/patterns/CampfirePattern.js";
-import { DNAPattern } from "ascii-splash-internal/patterns/DNAPattern.js";
-import { FireworksPattern } from "ascii-splash-internal/patterns/FireworksPattern.js";
-import { LavaLampPattern } from "ascii-splash-internal/patterns/LavaLampPattern.js";
-import { LifePattern } from "ascii-splash-internal/patterns/LifePattern.js";
-import { LightningPattern } from "ascii-splash-internal/patterns/LightningPattern.js";
-import { MatrixPattern } from "ascii-splash-internal/patterns/MatrixPattern.js";
-import { MazePattern } from "ascii-splash-internal/patterns/MazePattern.js";
-import { MetaballPattern } from "ascii-splash-internal/patterns/MetaballPattern.js";
-import { NightSkyPattern } from "ascii-splash-internal/patterns/NightSkyPattern.js";
-import { OceanBeachPattern } from "ascii-splash-internal/patterns/OceanBeachPattern.js";
-import { ParticlePattern } from "ascii-splash-internal/patterns/ParticlePattern.js";
-import { PlasmaPattern } from "ascii-splash-internal/patterns/PlasmaPattern.js";
-import { QuicksilverPattern } from "ascii-splash-internal/patterns/QuicksilverPattern.js";
-import { RainPattern } from "ascii-splash-internal/patterns/RainPattern.js";
-import { SmokePattern } from "ascii-splash-internal/patterns/SmokePattern.js";
-import { SnowfallParkPattern } from "ascii-splash-internal/patterns/SnowfallParkPattern.js";
-import { SnowPattern } from "ascii-splash-internal/patterns/SnowPattern.js";
-import { SpiralPattern } from "ascii-splash-internal/patterns/SpiralPattern.js";
-import { StarfieldPattern } from "ascii-splash-internal/patterns/StarfieldPattern.js";
-import { TunnelPattern } from "ascii-splash-internal/patterns/TunnelPattern.js";
-import { WavePattern } from "ascii-splash-internal/patterns/WavePattern.js";
-import type { Cell, Color, Pattern, Point, Size, Theme } from "ascii-splash-internal/types/index.js";
+import { PROCEDURAL_PATTERN_IDS } from "ascii-splash-internal/utils/shareCode.js";
+import type {
+  Cell,
+  Color,
+  ConfigSchema,
+  Point,
+  QualityPreset,
+  Size,
+} from "ascii-splash-internal/types/index.js";
 import {
   ENTER_ALT_SCREEN,
   LEAVE_ALT_SCREEN,
@@ -64,8 +54,6 @@ import {
 } from "dormouse-lib/lib/ansi";
 import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import type { InteractiveProgram } from "./tutorial-shell";
-
-type QualityPreset = "low" | "medium" | "high";
 
 interface AsciiSplashRunnerOptions {
   adapter: FakePtyAdapter;
@@ -85,78 +73,16 @@ interface ParsedOptions {
   error?: string;
 }
 
-interface SplashConfig {
-  defaultPattern?: string;
-  quality?: QualityPreset;
-  fps?: number;
-  theme?: string;
-  mouseEnabled?: boolean;
-  patterns?: typeof defaultConfig.patterns;
-}
-
 interface KeyInput {
   name: string;
   data: { isCharacter: boolean; codepoint?: number };
 }
 
-const VERSION = "0.5.0";
-
-const PATTERN_NAMES = [
-  "waves",
-  "starfield",
-  "matrix",
-  "rain",
-  "quicksilver",
-  "particles",
-  "spiral",
-  "plasma",
-  "tunnel",
-  "lightning",
-  "fireworks",
-  "maze",
-  "life",
-  "dna",
-  "lavalamp",
-  "smoke",
-  "snow",
-  "oceanbeach",
-  "campfire",
-  "nightsky",
-  "aquarium",
-  "snowfallpark",
-  "metaball",
-] as const;
-
-const PATTERN_DISPLAY_NAMES: Record<string, string> = {
-  waves: "Waves",
-  starfield: "Starfield",
-  matrix: "Matrix",
-  rain: "Rain",
-  quicksilver: "Quicksilver",
-  particles: "Particles",
-  spiral: "Spiral",
-  plasma: "Plasma",
-  tunnel: "Tunnel",
-  lightning: "Lightning",
-  fireworks: "Fireworks",
-  maze: "Maze",
-  life: "Life",
-  dna: "DNA",
-  lavalamp: "Lava Lamp",
-  smoke: "Smoke",
-  snow: "Snow",
-  oceanbeach: "Ocean Beach",
-  campfire: "Campfire",
-  nightsky: "Night Sky",
-  aquarium: "Aquarium",
-  snowfallpark: "Snowfall Park",
-  metaball: "Metaball",
-};
+const VERSION = "0.6.0";
 
 const ARROW_KEY_NAMES: Record<string, string> = { A: "UP", B: "DOWN", C: "RIGHT", D: "LEFT" };
 
-const OCEANBEACH_PATTERN_INDEX = PATTERN_NAMES.indexOf("oceanbeach");
-const PRESET_COUNT = 6;
+const OCEANBEACH_PATTERN_INDEX = PROCEDURAL_PATTERN_IDS.indexOf("oceanbeach");
 const PATTERN_BUFFER_TIMEOUT_MS = 5000;
 const PATTERN_SWITCH_GUARD_MS = 16;
 
@@ -234,7 +160,7 @@ function parseArgs(args: string[]): ParsedOptions {
     }
   }
 
-  if (parsed.pattern && !PATTERN_NAMES.includes(parsed.pattern as (typeof PATTERN_NAMES)[number])) {
+  if (parsed.pattern && !PROCEDURAL_PATTERN_IDS.includes(parsed.pattern)) {
     return { ...parsed, error: `Invalid pattern: ${parsed.pattern}` };
   }
   if (!["low", "medium", "high"].includes(parsed.quality)) {
@@ -247,146 +173,6 @@ function parseArgs(args: string[]): ParsedOptions {
     return { ...parsed, error: `Invalid theme: ${parsed.theme}` };
   }
   return parsed;
-}
-
-function createPatternsFromConfig(config: SplashConfig, theme: Theme): Pattern[] {
-  const rng = () => new Mulberry32(randomSeed());
-
-  return [
-    new WavePattern(theme, {
-      layers: config.patterns?.waves?.layers,
-      amplitude: config.patterns?.waves?.amplitude,
-      speed: config.patterns?.waves?.speed,
-      frequency: config.patterns?.waves?.frequency,
-    }),
-    new StarfieldPattern(theme, rng(), {
-      starCount: config.patterns?.starfield?.starCount,
-      speed: config.patterns?.starfield?.speed,
-    }),
-    new MatrixPattern(theme, rng(), {
-      density: config.patterns?.matrix?.columnDensity,
-      speed: config.patterns?.matrix?.speed,
-    }),
-    new RainPattern(theme, rng(), {
-      density: config.patterns?.rain?.dropCount ? config.patterns.rain.dropCount / 500 : undefined,
-      speed: config.patterns?.rain?.speed,
-    }),
-    new QuicksilverPattern(theme, rng(), {
-      speed: config.patterns?.quicksilver?.speed,
-      flowIntensity: config.patterns?.quicksilver?.viscosity,
-      noiseScale: 0.05,
-    }),
-    new ParticlePattern(theme, rng(), {
-      particleCount: config.patterns?.particles?.particleCount,
-      speed: config.patterns?.particles?.speed,
-      gravity: config.patterns?.particles?.gravity,
-      mouseForce: config.patterns?.particles?.mouseForce,
-      spawnRate: config.patterns?.particles?.spawnRate,
-    }),
-    new SpiralPattern(theme, rng(), {
-      armCount: config.patterns?.spiral?.armCount,
-      particleCount: config.patterns?.spiral?.particleCount,
-      spiralTightness: config.patterns?.spiral?.spiralTightness,
-      rotationSpeed: config.patterns?.spiral?.rotationSpeed,
-      particleSpeed: config.patterns?.spiral?.particleSpeed,
-      trailLength: config.patterns?.spiral?.trailLength,
-      direction: config.patterns?.spiral?.direction,
-      pulseEffect: config.patterns?.spiral?.pulseEffect,
-    }),
-    new PlasmaPattern(theme, rng(), {
-      frequency: config.patterns?.plasma?.frequency,
-      speed: config.patterns?.plasma?.speed,
-      complexity: config.patterns?.plasma?.complexity,
-    }),
-    new TunnelPattern(theme, rng(), {
-      shape: config.patterns?.tunnel?.shape,
-      ringCount: config.patterns?.tunnel?.ringCount,
-      speed: config.patterns?.tunnel?.speed,
-      particleCount: config.patterns?.tunnel?.particleCount,
-      speedLineCount: config.patterns?.tunnel?.speedLineCount,
-      turbulence: config.patterns?.tunnel?.turbulence,
-      glowIntensity: config.patterns?.tunnel?.glowIntensity,
-      chromatic: config.patterns?.tunnel?.chromatic,
-      rotationSpeed: config.patterns?.tunnel?.rotationSpeed,
-      radius: config.patterns?.tunnel?.radius,
-    }),
-    new LightningPattern(theme, rng(), {
-      branchProbability: config.patterns?.lightning?.branchProbability,
-      fadeTime: config.patterns?.lightning?.fadeTime,
-      strikeInterval: config.patterns?.lightning?.strikeInterval,
-      mainPathJaggedness: config.patterns?.lightning?.mainPathJaggedness,
-      branchSpread: config.patterns?.lightning?.branchSpread,
-    }),
-    new FireworksPattern(theme, rng(), {
-      burstSize: config.patterns?.fireworks?.burstSize,
-      launchSpeed: config.patterns?.fireworks?.launchSpeed,
-      gravity: config.patterns?.fireworks?.gravity,
-      fadeRate: config.patterns?.fireworks?.fadeRate,
-      spawnInterval: config.patterns?.fireworks?.spawnInterval,
-      trailLength: config.patterns?.fireworks?.trailLength,
-    }),
-    new MazePattern(theme, rng(), {
-      algorithm: config.patterns?.maze?.algorithm,
-      cellSize: config.patterns?.maze?.cellSize,
-      generationSpeed: config.patterns?.maze?.generationSpeed,
-      wallChar: config.patterns?.maze?.wallChar,
-      pathChar: config.patterns?.maze?.pathChar,
-      animateGeneration: config.patterns?.maze?.animateGeneration,
-    }),
-    new LifePattern(theme, rng(), {
-      cellSize: config.patterns?.life?.cellSize,
-      updateSpeed: config.patterns?.life?.updateSpeed,
-      wrapEdges: config.patterns?.life?.wrapEdges,
-      aliveChar: config.patterns?.life?.aliveChar,
-      deadChar: config.patterns?.life?.deadChar,
-      randomDensity: config.patterns?.life?.randomDensity,
-      initialPattern: config.patterns?.life?.initialPattern,
-    }),
-    new DNAPattern(theme, rng(), {
-      rotationSpeed: config.patterns?.dna?.rotationSpeed,
-      helixRadius: config.patterns?.dna?.helixRadius,
-      basePairDensity: config.patterns?.dna?.basePairSpacing ? 1 / config.patterns.dna.basePairSpacing : undefined,
-      twistRate: config.patterns?.dna?.twistRate,
-      showLabels: true,
-    }),
-    new LavaLampPattern(theme, rng(), {
-      blobCount: config.patterns?.lavaLamp?.blobCount,
-      minRadius: config.patterns?.lavaLamp?.minRadius,
-      maxRadius: config.patterns?.lavaLamp?.maxRadius,
-      riseSpeed: config.patterns?.lavaLamp?.riseSpeed,
-      driftSpeed: config.patterns?.lavaLamp?.driftSpeed,
-      threshold: config.patterns?.lavaLamp?.threshold,
-      mouseForce: config.patterns?.lavaLamp?.mouseForce,
-      turbulence: config.patterns?.lavaLamp?.turbulence,
-      gravity: config.patterns?.lavaLamp?.gravity,
-    }),
-    new SmokePattern(theme, rng(), {
-      plumeCount: config.patterns?.smoke?.plumeCount,
-      particleCount: config.patterns?.smoke?.particleCount,
-      riseSpeed: config.patterns?.smoke?.riseSpeed,
-      dissipationRate: config.patterns?.smoke?.dissipationRate,
-      turbulence: config.patterns?.smoke?.turbulence,
-      spread: config.patterns?.smoke?.spread,
-      windStrength: config.patterns?.smoke?.windStrength,
-      mouseBlowForce: config.patterns?.smoke?.mouseBlowForce,
-    }),
-    new SnowPattern(theme, rng(), {
-      particleCount: config.patterns?.snow?.particleCount,
-      fallSpeed: config.patterns?.snow?.fallSpeed,
-      windStrength: config.patterns?.snow?.windStrength,
-      turbulence: config.patterns?.snow?.turbulence,
-      rotationSpeed: config.patterns?.snow?.rotationSpeed,
-      particleType: config.patterns?.snow?.particleType,
-      accumulation: config.patterns?.snow?.accumulation,
-      mouseWindForce: config.patterns?.snow?.mouseWindForce,
-    }),
-    new OceanBeachPattern(theme, rng(), {}),
-    new CampfirePattern(theme, rng(), {}),
-    new NightSkyPattern(theme, rng(), {}),
-    new AquariumPattern(theme, rng(), {}),
-    new SnowfallParkPattern(theme, rng(), {}),
-    new MetaballPattern(theme, rng(), {}),
-  ];
 }
 
 function setCell(buffer: Cell[][], x: number, y: number, char: string, colorValue: Color): void {
@@ -455,7 +241,6 @@ class BrowserTerminalRenderer {
   clearScreen(): void {
     this.write("\x1b[2J\x1b[H");
     this.buffer.clear();
-    this.buffer.clearAllOverlays();
     this.buffer.swap();
   }
 
@@ -504,6 +289,8 @@ export class AsciiSplashRunner implements InteractiveProgram {
   private onExit: () => void;
   private renderer: BrowserTerminalRenderer | null = null;
   private engine: AnimationEngine | null = null;
+  private runtime: RuntimeController | null = null;
+  private unsubscribeRuntime: (() => void) | null = null;
   private commandExecutor: CommandExecutor | null = null;
   private commandBuffer = new CommandBuffer();
   private commandParser = new CommandParser();
@@ -511,18 +298,13 @@ export class AsciiSplashRunner implements InteractiveProgram {
   private statusBar = new StatusBar();
   private toastManager = new ToastManager();
   private transitionManager = new TransitionManager();
-  private patterns: Pattern[] = [];
-  private currentPatternIndex = 0;
-  private currentPresetIndex = 1;
-  private currentThemeIndex = 0;
-  private currentTheme: Theme = getTheme("ocean");
   private patternBuffer = "";
   private patternBufferActive = false;
   private patternBufferTimeout: ReturnType<typeof setTimeout> | null = null;
   private debugMode = false;
   private isPatternSwitching = false;
   private disposed = false;
-  private config: SplashConfig = defaultConfig;
+  private config: ConfigSchema = createDefaultConfig();
 
   constructor(options: AsciiSplashRunnerOptions) {
     this.adapter = options.adapter;
@@ -549,19 +331,24 @@ export class AsciiSplashRunner implements InteractiveProgram {
       return;
     }
 
+    const baseConfig = createDefaultConfig();
     this.config = {
-      ...defaultConfig,
-      defaultPattern: parsed.pattern ?? defaultConfig.defaultPattern,
+      ...baseConfig,
+      defaultPattern: parsed.pattern ?? baseConfig.defaultPattern,
       quality: parsed.quality,
       fps: parsed.fps,
       theme: parsed.theme,
       mouseEnabled: parsed.mouseEnabled,
-      patterns: defaultConfig.patterns,
     };
-    this.currentTheme = getTheme(parsed.theme);
-    this.currentThemeIndex = THEME_NAMES.indexOf(this.currentTheme.name);
-    this.patterns = createPatternsFromConfig(this.config, this.currentTheme);
-    this.currentPatternIndex = Math.max(0, PATTERN_NAMES.indexOf((this.config.defaultPattern ?? "waves") as (typeof PATTERN_NAMES)[number]));
+
+    const initialTheme = getTheme(parsed.theme);
+    // Photo and workspace slots need Node, so the playground catalog is the
+    // procedural registry alone — slot index equals PROCEDURAL_PATTERN_IDS index.
+    const initialSlots = buildPatternSlots({ config: this.config, theme: initialTheme });
+    const initialPatternIndex = Math.max(
+      0,
+      initialSlots.findIndex((slot) => slot.key === (this.config.defaultPattern ?? "waves")),
+    );
 
     this.renderer = new BrowserTerminalRenderer({
       adapter: this.adapter,
@@ -571,41 +358,61 @@ export class AsciiSplashRunner implements InteractiveProgram {
     this.renderer.start();
 
     const initialFps = parsed.fps ?? qualityPresets[parsed.quality];
-    this.engine = new AnimationEngine(this.renderer, this.patterns[this.currentPatternIndex], initialFps);
-    this.commandExecutor = new CommandExecutor(
-      this.engine,
-      this.patterns,
-      Object.values(THEMES),
-      this.currentPatternIndex,
-      this.currentThemeIndex,
-      undefined,
-    );
+    this.engine = new AnimationEngine(this.renderer, initialSlots[initialPatternIndex].pattern, initialFps);
+    this.transitionManager.setDefaultConfig({ type: "crossfade", duration: 300 });
 
-    this.commandExecutor.setThemeChangeCallback((themeIndex: number) => {
-      const themeName = THEME_NAMES[themeIndex] ?? "ocean";
-      this.currentTheme = getTheme(themeName);
-      this.currentThemeIndex = themeIndex;
-      this.syncCurrentPatternIndexFromEngine();
-      this.rebuildPatterns();
-      const nextPattern = this.patterns[this.currentPatternIndex] ?? this.patterns[0];
-      this.engine?.setPattern(nextPattern);
-      this.commandExecutor?.updateState(this.currentPatternIndex, this.currentThemeIndex);
-      this.statusBar.update({ themeName: this.currentTheme.displayName });
+    this.runtime = new RuntimeController({
+      engine: this.engine,
+      themes: THEME_NAMES.map((name) => getTheme(name)),
+      initialSlots,
+      initialPatternIndex,
+      initialThemeIndex: THEME_NAMES.indexOf(initialTheme.name),
+      initialQuality: parsed.quality,
+      rebuildSlots: (theme, priorSeeds) =>
+        buildPatternSlots({ config: this.config, theme, priorSeeds }),
+      beforePatternSwitch: () => this.beginPatternTransition(),
+    });
+    this.commandExecutor = new CommandExecutor(this.runtime, undefined);
+
+    this.unsubscribeRuntime = this.runtime.subscribe((event) => {
+      const state = event.current;
+      this.statusBar.update({
+        patternName: state.patternDisplayName,
+        presetNumber: state.presetId,
+        themeName: state.themeDisplayName,
+        fps: state.fps,
+      });
+      if (event.kind === "pattern" || event.kind === "scene") {
+        this.toastManager.info(`Pattern: ${state.patternDisplayName}`, 2000);
+      }
     });
 
+    const initial = this.runtime.getSnapshot();
     this.statusBar.update({
-      patternName: this.getCurrentPatternDisplayName(),
-      presetNumber: this.currentPresetIndex,
-      themeName: this.currentTheme.displayName,
+      patternName: initial.patternDisplayName,
+      presetNumber: initial.presetId,
+      themeName: initial.themeDisplayName,
       fps: initialFps,
       shuffleMode: "off",
       paused: false,
     });
-    this.transitionManager.setDefaultConfig({ type: "crossfade", duration: 300 });
 
     this.engine.setBeforeTerminalRenderCallback(() => this.renderBufferOverlays());
     this.toastManager.info("ascii-splash - Press ? for help | q to quit", 1500);
     this.engine.start();
+  }
+
+  /**
+   * Crossfade out of the frame the outgoing pattern last rendered. The guard
+   * suppresses overlay drawing for one frame so the transition owns the buffer.
+   */
+  private beginPatternTransition(): void {
+    this.isPatternSwitching = true;
+    const sourceFrame = this.engine?.getLastPatternFrame();
+    if (sourceFrame) this.transitionManager.start(sourceFrame);
+    setTimeout(() => {
+      this.isPatternSwitching = false;
+    }, PATTERN_SWITCH_GUARD_MS);
   }
 
   handleInput(data: string): void {
@@ -662,7 +469,6 @@ export class AsciiSplashRunner implements InteractiveProgram {
             ? this.commandExecutor.execute(parsed)
             : { success: false, message: "Invalid command" };
           this.showCommandResult(result.message, result.success);
-          this.syncStateFromEngine();
         }
       } else if (input.name === "BACKSPACE") {
         this.commandBuffer.backspace();
@@ -715,9 +521,9 @@ export class AsciiSplashRunner implements InteractiveProgram {
     } else if (input.name === "o") {
       this.switchPattern(OCEANBEACH_PATTERN_INDEX);
     } else if (input.name === "n") {
-      this.switchPattern((this.currentPatternIndex + 1) % this.patterns.length);
+      this.switchPattern(this.wrapPatternIndex(1));
     } else if (input.name === "b") {
-      this.switchPattern(this.currentPatternIndex === 0 ? this.patterns.length - 1 : this.currentPatternIndex - 1);
+      this.switchPattern(this.wrapPatternIndex(-1));
     } else if (input.name === "p") {
       this.activatePatternBuffer();
     } else if (input.name === ".") {
@@ -739,7 +545,6 @@ export class AsciiSplashRunner implements InteractiveProgram {
       if (parsed && this.commandExecutor) {
         const result = this.commandExecutor.execute(parsed);
         this.showCommandResult(result.message, result.success);
-        this.syncStateFromEngine();
       }
     } else if (input.name === "s") {
       const parsed = this.commandParser.parse("0s");
@@ -761,7 +566,8 @@ export class AsciiSplashRunner implements InteractiveProgram {
   }
 
   private handleMouse(code: number, x: number, y: number, final: string): void {
-    const pattern = this.patterns[this.currentPatternIndex];
+    const pattern = this.runtime?.getCurrentPattern();
+    if (!pattern) return;
     const pos: Point = { x, y };
     const isMotion = (code & 32) === 32;
     const button = code & 3;
@@ -772,64 +578,41 @@ export class AsciiSplashRunner implements InteractiveProgram {
     }
   }
 
-  private switchPattern(index: number): void {
-    if (!this.engine || index < 0 || index >= this.patterns.length || index === this.currentPatternIndex) return;
-    this.isPatternSwitching = true;
-    const oldPattern = this.patterns[this.currentPatternIndex];
-    this.currentPatternIndex = index;
-    this.currentPresetIndex = 1;
-    const newPattern = this.patterns[this.currentPatternIndex];
-    this.transitionManager.start(oldPattern, newPattern, this.renderer?.getSize() ?? { width: 80, height: 30 });
-    this.engine.setPattern(newPattern);
-    this.commandExecutor?.updateState(this.currentPatternIndex, this.currentThemeIndex);
-    this.statusBar.update({
-      patternName: this.getCurrentPatternDisplayName(),
-      presetNumber: this.currentPresetIndex,
-    });
-    this.toastManager.info(`Pattern: ${this.getCurrentPatternDisplayName()}`, 2000);
-    setTimeout(() => {
-      this.isPatternSwitching = false;
-    }, PATTERN_SWITCH_GUARD_MS);
+  private wrapPatternIndex(direction: 1 | -1): number {
+    const snapshot = this.runtime?.getSnapshot();
+    if (!snapshot) return 0;
+    return (snapshot.patternIndex + direction + snapshot.patternCount) % snapshot.patternCount;
+  }
+
+  private switchPattern(index: number, presetId?: number): void {
+    this.runtime?.switchPattern(index, presetId);
   }
 
   private cyclePreset(direction: 1 | -1): void {
-    const currentPattern = this.patterns[this.currentPatternIndex];
-    if (!currentPattern.applyPreset) return;
-    const nextPreset = direction === 1
-      ? (this.currentPresetIndex % PRESET_COUNT) + 1
-      : this.currentPresetIndex === 1 ? PRESET_COUNT : this.currentPresetIndex - 1;
-    if (!currentPattern.applyPreset(nextPreset)) return;
-    this.currentPresetIndex = nextPreset;
-    this.statusBar.update({ presetNumber: nextPreset });
-    this.toastManager.info(`${this.getCurrentPatternDisplayName()} - Preset ${nextPreset}`, 1500);
+    const result = this.runtime?.cyclePreset(direction);
+    if (!result?.changed) return;
+    this.toastManager.info(
+      `${result.snapshot.patternDisplayName} - Preset ${result.snapshot.presetId}`,
+      1500,
+    );
   }
 
   private setFps(fps: number): void {
-    this.engine?.setFps(fps);
-    this.statusBar.update({ fps });
+    const result = this.runtime?.setFps(fps);
+    if (!result?.success) return;
     this.toastManager.info(`Speed: ${fps} FPS`, 1500);
   }
 
   private setQuality(quality: QualityPreset): void {
     this.config = { ...this.config, quality };
-    this.syncCurrentPatternIndexFromEngine();
-    this.rebuildPatterns();
-    this.setFps(qualityPresets[quality]);
-    this.engine?.setPattern(this.patterns[this.currentPatternIndex]);
-    this.commandExecutor?.updateState(this.currentPatternIndex, this.currentThemeIndex);
+    this.runtime?.setQuality(quality);
     this.toastManager.info(`Quality: ${quality.toUpperCase()} (${qualityPresets[quality]} FPS)`, 1500);
   }
 
   private cycleTheme(): void {
-    const nextThemeName = getNextThemeName(this.currentTheme.name);
-    this.currentTheme = getTheme(nextThemeName);
-    this.currentThemeIndex = THEME_NAMES.indexOf(this.currentTheme.name);
-    this.syncCurrentPatternIndexFromEngine();
-    this.rebuildPatterns();
-    this.engine?.setPattern(this.patterns[this.currentPatternIndex]);
-    this.commandExecutor?.updateState(this.currentPatternIndex, this.currentThemeIndex);
-    this.statusBar.update({ themeName: this.currentTheme.displayName });
-    this.toastManager.info(`Theme: ${this.currentTheme.displayName}`, 1500);
+    const result = this.runtime?.cycleTheme();
+    if (!result) return;
+    this.toastManager.info(`Theme: ${result.snapshot.themeDisplayName}`, 1500);
   }
 
   private activatePatternBuffer(): void {
@@ -859,47 +642,38 @@ export class AsciiSplashRunner implements InteractiveProgram {
   private executePatternBuffer(): void {
     const input = this.patternBuffer.trim();
     this.cancelPatternBuffer();
+    const { runtime } = this;
+    if (!runtime) return;
     if (!input) {
-      this.switchPattern(this.currentPatternIndex === 0 ? this.patterns.length - 1 : this.currentPatternIndex - 1);
+      this.switchPattern(this.wrapPatternIndex(-1));
       return;
     }
 
-    if (input.includes(".")) {
-      const [patternPart, presetPart] = input.split(".");
-      const patternNum = Number(patternPart);
-      const presetNum = Number(presetPart);
-      if (Number.isInteger(patternNum) && Number.isInteger(presetNum) && patternNum >= 1 && patternNum <= this.patterns.length) {
-        this.switchPattern(patternNum - 1);
-        const pattern = this.patterns[patternNum - 1];
-        if (pattern.applyPreset?.(presetNum)) {
-          this.currentPresetIndex = presetNum;
-          this.statusBar.update({ presetNumber: presetNum });
-          this.toastManager.info(`${this.getCurrentPatternDisplayName()} - Preset ${presetNum}`, 1500);
-        } else {
-          this.toastManager.error(`Invalid preset: ${presetNum}`, 1500);
-        }
-        return;
-      }
-    }
-
-    const patternNum = Number(input);
-    if (Number.isInteger(patternNum) && patternNum >= 1 && patternNum <= this.patterns.length) {
-      this.switchPattern(patternNum - 1);
+    // `p<n>.<preset>` selects a pattern and a preset in one move; everything
+    // else is a bare pattern query. RuntimeController.findPattern resolves
+    // 1-based numbers plus exact/partial stable, legacy, and display names.
+    const [patternPart, presetPart] = input.includes(".") ? input.split(".") : [input, undefined];
+    const patternNum = Number(patternPart);
+    const query = Number.isInteger(patternNum) && patternPart !== "" ? patternNum : patternPart;
+    const index = runtime.findPattern(query);
+    if (index < 0) {
+      this.toastManager.error(`Unknown pattern: ${input}`, 1500);
       return;
     }
 
-    const lowerInput = input.toLowerCase();
-    const exactIndex = PATTERN_NAMES.indexOf(lowerInput as (typeof PATTERN_NAMES)[number]);
-    if (exactIndex >= 0) {
-      this.switchPattern(exactIndex);
+    if (presetPart === undefined) {
+      this.switchPattern(index);
       return;
     }
-    const partialIndex = PATTERN_NAMES.findIndex((name) => name.startsWith(lowerInput));
-    if (partialIndex >= 0) {
-      this.switchPattern(partialIndex);
+
+    const presetNum = Number(presetPart);
+    if (!Number.isInteger(presetNum) || !runtime.switchPattern(index, presetNum).success) {
+      // Land on the pattern anyway so the keystroke is not simply swallowed.
+      this.switchPattern(index);
+      this.toastManager.error(`Invalid preset: ${presetPart}`, 1500);
       return;
     }
-    this.toastManager.error(`Unknown pattern: ${input}`, 1500);
+    this.toastManager.info(`${this.getCurrentPatternDisplayName()} - Preset ${presetNum}`, 1500);
   }
 
   private showCommandResult(message: string, success: boolean): void {
@@ -911,29 +685,6 @@ export class AsciiSplashRunner implements InteractiveProgram {
     this.statusBar.update({
       shuffleMode: shuffleInfo ? (shuffleInfo.includes("ALL") ? "all" : "preset") : "off",
     });
-  }
-
-  private rebuildPatterns(): void {
-    const nextPatterns = createPatternsFromConfig(this.config, this.currentTheme);
-    this.patterns.splice(0, this.patterns.length, ...nextPatterns);
-    this.currentPatternIndex = Math.min(this.currentPatternIndex, Math.max(0, this.patterns.length - 1));
-  }
-
-  private syncCurrentPatternIndexFromEngine(): void {
-    const active = this.engine?.getPattern();
-    const index = active ? this.patterns.indexOf(active) : -1;
-    if (index >= 0) this.currentPatternIndex = index;
-  }
-
-  private syncStateFromEngine(): void {
-    this.syncCurrentPatternIndexFromEngine();
-    this.statusBar.update({
-      patternName: this.getCurrentPatternDisplayName(),
-      presetNumber: this.currentPresetIndex,
-      themeName: this.currentTheme.displayName,
-      fps: this.engine?.getFps() ?? qualityPresets[this.config.quality ?? "medium"],
-    });
-    this.commandExecutor?.updateState(this.currentPatternIndex, this.currentThemeIndex);
   }
 
   private renderBufferOverlays(): void {
@@ -994,16 +745,17 @@ export class AsciiSplashRunner implements InteractiveProgram {
   }
 
   private renderDebugOverlay(buffer: Cell[][], size: Size): void {
-    if (!this.engine) return;
+    if (!this.engine || !this.runtime) return;
     const metrics = this.engine.getPerformanceMonitor().getMetrics();
     const stats = this.engine.getPerformanceMonitor().getStats();
-    const currentPattern = this.patterns[this.currentPatternIndex];
+    const snapshot = this.runtime.getSnapshot();
+    const currentPattern = this.runtime.getCurrentPattern();
     const lines = [
       "PERFORMANCE DEBUG",
       "-----------------",
       `Pattern: ${currentPattern.name}`,
-      `Theme: ${this.currentTheme.displayName}`,
-      `Quality: ${(this.config.quality ?? "medium").toUpperCase()}`,
+      `Theme: ${snapshot.themeDisplayName}`,
+      `Quality: ${snapshot.quality.toUpperCase()}`,
       `FPS: ${metrics.fps.toFixed(1)} / ${metrics.targetFps}`,
       `Frame: ${metrics.frameTime.toFixed(2)}ms`,
       `Changed: ${metrics.changedCells} / ${size.width * size.height}`,
@@ -1024,8 +776,7 @@ export class AsciiSplashRunner implements InteractiveProgram {
   }
 
   private getCurrentPatternDisplayName(): string {
-    const name = PATTERN_NAMES[this.currentPatternIndex] ?? this.patterns[this.currentPatternIndex]?.name ?? "waves";
-    return PATTERN_DISPLAY_NAMES[name] ?? name;
+    return this.runtime?.getSnapshot().patternDisplayName ?? "Waves";
   }
 
   private finishSoon(): void {
@@ -1041,11 +792,14 @@ export class AsciiSplashRunner implements InteractiveProgram {
       clearTimeout(this.patternBufferTimeout);
       this.patternBufferTimeout = null;
     }
+    this.unsubscribeRuntime?.();
+    this.unsubscribeRuntime = null;
     this.commandExecutor?.cleanup();
     this.engine?.stop();
     this.renderer?.cleanup();
     this.engine = null;
     this.renderer = null;
+    this.runtime = null;
     if (notifyExit) this.onExit();
   }
 }

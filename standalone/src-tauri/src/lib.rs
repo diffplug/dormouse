@@ -315,6 +315,15 @@ fn request_from_sidecar(
     request_from_sidecar_timeout(state, event, data, Duration::from_secs(1))
 }
 
+/// INVARIANT: every `#[tauri::command]` that reaches these two blocking helpers
+/// must be declared `#[tauri::command(async)]` (or be an `async fn`). Tauri runs
+/// a plain sync command on the **main thread**, where the `recv_timeout` below
+/// stops the webview from painting for the whole round trip — up to
+/// `AGENT_BROWSER_TIMEOUT` (30s) for a hung agent-browser, and a visible ~3s
+/// freeze on a cold `agent-browser open`, which is long enough to look like a
+/// pane that never appeared. `(async)` moves the same blocking body onto a
+/// runtime worker, so the UI keeps rendering while the sidecar works.
+
 fn request_from_sidecar_timeout(
     state: &SidecarState,
     event: &str,
@@ -417,7 +426,7 @@ fn dor_control_response(state: tauri::State<'_, SidecarState>, response: DorCont
     send_to_sidecar(&state, msg.to_string());
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn pty_get_cwd(
     state: tauri::State<'_, SidecarState>,
     id: String,
@@ -431,7 +440,7 @@ fn pty_get_cwd(
 // Mirrors `OPEN_PORT_TIMEOUT_MS` in `lib/src/lib/platform/types.ts` — keep in sync.
 const OPEN_PORT_TIMEOUT_MS: u64 = 3000;
 
-#[tauri::command]
+#[tauri::command(async)]
 fn pty_get_open_ports(
     state: tauri::State<'_, SidecarState>,
     id: String,
@@ -448,7 +457,7 @@ fn pty_get_open_ports(
         .unwrap_or_else(|| JsonValue::Array(Vec::new())))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn pty_get_scrollback(
     state: tauri::State<'_, SidecarState>,
     id: String,
@@ -481,7 +490,7 @@ async fn pty_graceful_kill_all(
 // Stands up the loopback iframe proxy in the sidecar and returns the
 // IframeProxyResult JSON the webview's IframePanel expects. The proxy server is
 // the shared lib/src/host/iframe-proxy.ts; this only bridges the request.
-#[tauri::command]
+#[tauri::command(async)]
 fn iframe_create_proxy_url(
     state: tauri::State<'_, SidecarState>,
     target: String,
@@ -514,7 +523,7 @@ fn agent_browser_forward(
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn agent_browser_command(
     state: tauri::State<'_, SidecarState>,
     session: String,
@@ -528,7 +537,7 @@ fn agent_browser_command(
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn agent_browser_edit(
     state: tauri::State<'_, SidecarState>,
     session: String,
@@ -542,7 +551,7 @@ fn agent_browser_edit(
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn agent_browser_stream_status(
     state: tauri::State<'_, SidecarState>,
     session: String,
@@ -555,7 +564,7 @@ fn agent_browser_stream_status(
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn agent_browser_open(
     state: tauri::State<'_, SidecarState>,
     url: String,
@@ -570,7 +579,7 @@ fn agent_browser_open(
 }
 
 // `rect` is accepted by the adapter but unused — no window positioning today.
-#[tauri::command]
+#[tauri::command(async)]
 fn agent_browser_pop_out(
     state: tauri::State<'_, SidecarState>,
     session: String,
@@ -584,7 +593,7 @@ fn agent_browser_pop_out(
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn agent_browser_pop_in(
     state: tauri::State<'_, SidecarState>,
     session: String,
@@ -604,7 +613,7 @@ fn agent_browser_pop_in(
 // decodes with createImageBitmap). A base64 `bytesBase64` field is kept as a
 // fallback for a stale sidecar bundle (dev-time version skew), but the path
 // branch is preferred.
-#[tauri::command]
+#[tauri::command(async)]
 fn agent_browser_screenshot(
     state: tauri::State<'_, SidecarState>,
     session: String,
@@ -643,7 +652,7 @@ fn agent_browser_screenshot(
 // Clipboard reads run natively on Windows (see clipboard_win) to avoid the
 // console-window flicker of shelling out to PowerShell; other platforms keep the
 // sidecar path (pbpaste/xclip never pop a console window).
-#[tauri::command]
+#[tauri::command(async)]
 fn read_clipboard_file_paths(
     state: tauri::State<'_, SidecarState>,
 ) -> Result<Vec<String>, String> {
@@ -663,7 +672,7 @@ fn read_clipboard_file_paths(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn read_clipboard_image_as_file_path(
     state: tauri::State<'_, SidecarState>,
 ) -> Result<Option<String>, String> {
@@ -682,7 +691,7 @@ fn read_clipboard_image_as_file_path(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn read_clipboard_text(
     state: tauri::State<'_, SidecarState>,
 ) -> Result<String, String> {
@@ -791,6 +800,36 @@ async fn load_session(window: tauri::Window) -> Result<Option<String>, String> {
 #[tauri::command]
 async fn save_session(window: tauri::Window, state: String) -> Result<(), String> {
     write_session_to(&sessions_dir(window.app_handle())?, window.label(), &state)
+}
+
+fn remove_session_from(dir: &Path, label: &str) -> Result<(), String> {
+    let file_name = session_file_name(label);
+    let paths = [dir.join(&file_name), dir.join(format!("{file_name}.tmp"))];
+    let mut first_error = None;
+    for path in paths {
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            // Already gone is the desired end state, not a failure.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) if first_error.is_none() => {
+                first_error = Some(format!("remove session artifact {}: {e}", path.display()));
+            }
+            Err(_) => {}
+        }
+    }
+    first_error.map_or(Ok(()), Err)
+}
+
+/// Delete this window's snapshot and any orphaned temp write outright.
+///
+/// Deleting rather than blanking matters: a pre-upgrade snapshot carries a
+/// transcript, and the point of clearing it is that those bytes stop being on
+/// disk (docs/specs/transport.md -> "Retiring the transcripts already on disk").
+/// Overwriting with an empty string would also leave every reader of the store
+/// obliged to treat `""` as a distinct third state alongside present and absent.
+#[tauri::command]
+async fn clear_session(window: tauri::Window) -> Result<(), String> {
+    remove_session_from(&sessions_dir(window.app_handle())?, window.label())
 }
 
 #[tauri::command]
@@ -923,7 +962,7 @@ struct ShellInfo {
     args: Vec<String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_available_shells(state: tauri::State<'_, SidecarState>) -> Result<Vec<ShellInfo>, String> {
     let response = request_from_sidecar_timeout(&state, "pty:getShells", serde_json::json!({}), Duration::from_secs(10))?;
     let shells: Vec<ShellInfo> = response
@@ -1060,11 +1099,15 @@ fn dor_control_socket_path() -> String {
 }
 
 fn dor_control_token() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-    format!("{}-{nanos}", std::process::id())
+    // Must be unguessable: it is the sole authenticator for the private `dor`
+    // control socket. A PID+timestamp value is locally discoverable (`ps`) and
+    // bounded by the app's launch window, so draw 24 bytes from the OS CSPRNG and
+    // hex-encode them — matching the VS Code host's randomBytes(24).toString('hex')
+    // in pty-manager.ts. Aborting on CSPRNG failure is deliberate: never fall back
+    // to a weak token.
+    let mut bytes = [0u8; 24];
+    getrandom::fill(&mut bytes).expect("OS CSPRNG unavailable for dor control token");
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn dor_cli_paths_from_root(root: PathBuf) -> DorCliPaths {
@@ -1380,6 +1423,7 @@ pub fn run() {
             read_update_log,
             load_session,
             save_session,
+            clear_session,
             agent_browser_command,
             agent_browser_edit,
             agent_browser_screenshot,
@@ -1417,8 +1461,8 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        find_node_binary, read_session_from, resolve_dor_cli_paths, resolve_sidecar_path,
-        session_file_name, strip_windows_verbatim_prefix, write_session_to,
+        find_node_binary, read_session_from, remove_session_from, resolve_dor_cli_paths,
+        resolve_sidecar_path, session_file_name, strip_windows_verbatim_prefix, write_session_to,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -1668,10 +1712,140 @@ mod tests {
     }
 
     #[test]
+    fn clearing_a_session_removes_the_file_and_leaves_other_windows_alone() {
+        let dir = TempDir::new("sessions-clear");
+        write_session_to(dir.path(), "main", r#"{"v":1,"who":"main"}"#).unwrap();
+        write_session_to(dir.path(), "win-2", r#"{"v":1,"who":"win-2"}"#).unwrap();
+        fs::write(dir.path().join("main.json.tmp"), b"main transcript").unwrap();
+        fs::write(dir.path().join("win-2.json.tmp"), b"win-2 transcript").unwrap();
+
+        remove_session_from(dir.path(), "main").unwrap();
+
+        // Absent, not blank: a pre-upgrade snapshot carries a transcript, and the
+        // point of clearing is that those bytes leave the disk.
+        assert_eq!(read_session_from(dir.path(), "main").unwrap(), None);
+        assert!(!dir.path().join("main.json").exists());
+        assert!(!dir.path().join("main.json.tmp").exists());
+        assert_eq!(
+            read_session_from(dir.path(), "win-2").unwrap().as_deref(),
+            Some(r#"{"v":1,"who":"win-2"}"#),
+        );
+        assert!(dir.path().join("win-2.json.tmp").exists());
+    }
+
+    #[test]
+    fn clearing_an_orphaned_temp_session_removes_it() {
+        let dir = TempDir::new("sessions-clear-orphaned-temp");
+        let tmp = dir.path().join("main.json.tmp");
+        fs::write(&tmp, b"legacy transcript").unwrap();
+
+        remove_session_from(dir.path(), "main").unwrap();
+
+        assert!(!tmp.exists());
+    }
+
+    #[test]
+    fn clearing_an_absent_session_succeeds() {
+        // Already gone is the desired end state; a first launch must not error.
+        let dir = TempDir::new("sessions-clear-missing");
+        assert!(remove_session_from(dir.path(), "main").is_ok());
+    }
+
+    #[test]
     fn session_label_cannot_escape_directory() {
         // A hostile label is flattened to a plain filename inside the dir.
         assert_eq!(session_file_name("../../evil"), "______evil.json");
         assert_eq!(session_file_name("main"), "main.json");
         assert_eq!(session_file_name("a/b"), "a_b.json");
+    }
+
+    // Enforces the INVARIANT documented above `request_from_sidecar_timeout`:
+    // every `#[tauri::command]` whose body reaches the blocking sidecar helpers
+    // must be `#[tauri::command(async)]` (or an `async fn`). A plain-sync command
+    // runs on the main thread, where `recv_timeout` freezes the webview for the
+    // whole round trip — up to 10s on a clipboard image paste. Three clipboard
+    // commands once slipped through the async port; this scans the source so the
+    // omission can't silently recur.
+    #[test]
+    fn sidecar_commands_are_async() {
+        let src = include_str!("lib.rs");
+        let lines: Vec<&str> = src.lines().collect();
+        let mut offenders: Vec<String> = Vec::new();
+
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim_start();
+            if !trimmed.starts_with("#[tauri::command") {
+                continue;
+            }
+            let is_async_attr = trimmed.contains("(async)");
+
+            // Skip any further attribute lines / blanks down to the fn signature.
+            let mut j = i + 1;
+            while j < lines.len() {
+                let t = lines[j].trim_start();
+                if t.starts_with("#[") || t.is_empty() {
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+            if j >= lines.len() {
+                continue;
+            }
+            let sig = lines[j].trim_start();
+            let is_async_fn = sig.starts_with("async fn") || sig.starts_with("pub async fn");
+            let name = sig
+                .trim_start_matches("pub ")
+                .trim_start_matches("async ")
+                .trim_start_matches("fn ")
+                .split('(')
+                .next()
+                .unwrap_or("<unknown>")
+                .trim();
+
+            // Extract the fn body by brace-counting from the signature onward.
+            // This is a naive char count, not a lexer: a lone `{`/`}` inside a
+            // string or char literal (e.g. `'{'`, or `"missing }"`) would throw
+            // off the depth. It holds across the command bodies scanned here
+            // because none of them contain such a literal; a future command that
+            // did would need a real tokenizer. Good enough to enforce the
+            // async-attribute invariant, not a general Rust brace matcher.
+            let mut depth = 0i32;
+            let mut started = false;
+            let mut body = String::new();
+            for l in &lines[j..] {
+                for ch in l.chars() {
+                    if ch == '{' {
+                        depth += 1;
+                        started = true;
+                    } else if ch == '}' {
+                        depth -= 1;
+                    }
+                }
+                body.push_str(l);
+                if started && depth == 0 {
+                    break;
+                }
+            }
+
+            // Match direct callers of the blocking helper *and* the
+            // agent-browser commands, which reach it transitively through the
+            // `agent_browser_forward` wrapper (their bodies never name
+            // `request_from_sidecar` directly). That family carries the longest
+            // timeout (AGENT_BROWSER_TIMEOUT = 30s), so it's the worst case to
+            // let slip plain-sync.
+            let reaches_sidecar =
+                body.contains("request_from_sidecar") || body.contains("agent_browser_forward");
+            if reaches_sidecar && !(is_async_attr || is_async_fn) {
+                offenders.push(name.to_string());
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "these #[tauri::command] fns reach the blocking sidecar helpers but are \
+             not declared #[tauri::command(async)] (see the INVARIANT above \
+             request_from_sidecar_timeout): {offenders:?}",
+        );
     }
 }

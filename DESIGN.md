@@ -22,6 +22,7 @@ colors:
   error: "var(--vscode-terminal-ansiRed)"
   success: "var(--vscode-terminal-ansiGreen)"
   alarm: "var(--vscode-terminal-ansiYellow)"
+  alarm-vs-terminal: "var(--color-alarm-vs-terminal)"
   window-close-hover: "#b92a1b"
 typography:
   body:
@@ -97,6 +98,8 @@ The system is intentionally minimal and bg-only. Chrome recedes; terminals are t
 
 The system explicitly rejects: rounded SaaS cards, gradient accents, hacker-aesthetic green-on-black, "Slack-style" Electron chrome bloat, decorative animations, and any token that hardcodes a color. If a user installs a high-contrast theme, the chrome can look flatter than usual: that is accepted, not "fixed" with overrides.
 
+**Scope.** This design system governs every product surface: the lib components, the VS Code webview, the standalone app, and the server-served Pocket app — auth screens included (`docs/specs/pocket-app.md`). The marketing website keeps its own separate "homepage" design system (`website/src/index.css`: Ubuntu Mono / Ubuntu Sans Mono, a fixed dark palette, the caramel accent), scoped to marketing pages only. The two share nothing except lib components embedded in the site's playgrounds, which bring this system's tokens with them; product surfaces never consume homepage tokens, and marketing chrome never consumes `--vscode-*`.
+
 **Key Characteristics:**
 - Host-theme-driven palette: every color is a `var(--vscode-*)` passthrough.
 - Bg-only chrome: no decorative borders, no resting shadows, no accent stripes.
@@ -134,7 +137,7 @@ This system has no "primary" accent in the brand sense. The closest analogue is 
 - **Terminal Background / Foreground** (`var(--vscode-terminal-background)` / `var(--vscode-terminal-foreground)`): the terminal content surface and xterm default text. Orthogonal to the chrome.
 - **Error** (`var(--vscode-terminal-ansiRed)`): destructive actions and kill-confirm letter flash.
 - **Success** (`var(--vscode-terminal-ansiGreen)`): TODO check, theme-store install confirm.
-- **Alarm** (`var(--vscode-terminal-ansiYellow)` baseline; runtime-overridden): bell-ringing alert tint. `computeDynamicPalette()` replaces each `--color-alarm-vs-*` token with plain white or black by the OKLab lightness of the bg the bell sits on (active header, inactive header, or door), so the ringing bell stays maximally legible on any surface.
+- **Alarm** (`var(--vscode-terminal-ansiYellow)` baseline; runtime-overridden): alert tint. `computeDynamicPalette()` replaces each `--color-alarm-vs-*` token with plain white or black by the OKLab lightness of its background (active header, inactive header, Door, or terminal body), so ringing bells and the whole-Pane spoken-alarm treatment stay maximally legible on any surface.
 
 ### Fixed Exception
 - **Window Close Hover** (`#b92a1b`): the only literal color in the whole system. Native OS close-button hover on Windows/Linux chrome buttons; matches the platform convention across themes.
@@ -183,6 +186,8 @@ Shadows appear only on **raised surfaces that float above content**: popovers, t
 
 **The Inset-Over-Border Rule.** When a surface needs a 1px stroke that may toggle on state change (active vs. inactive), prefer `shadow-[inset_0_0_0_1px_…]` over `border`. The shadow does not affect layout; the border does.
 
+**The Concentric-Corners Rule.** When a rounded corner nests inside another rounded corner (a focus ring wrapping a pane, an outline hugging a rounded surface), both arcs must share a corner center: outer radius = inner radius + the gap between them. Resolve violations by growing the outer radius — never tighten the inner one. Rings at zero offset keep the wrapped element's radius. Source of truth: the `SELECTION_RING_INFLATE_PX` / `PANE_SELECTION_RING_RADIUS_PX` derivation in `lib/src/components/design.tsx`.
+
 ## 5. Components
 
 ### Doors
@@ -192,6 +197,7 @@ Doors are the pane-header indicators on the baseboard. The most signature compon
 - **Dimensions:** `h-6` (24px), `min-w-[68px]`, `max-w-[220px]`, horizontal padding `px-2.5` (10px), `gap-2` between title and badges.
 - **Type:** `text-sm font-medium font-mono`.
 - **Content:** truncated title; optional TODO pill (`text-xs font-semibold tracking-[0.08em]`, success-tinted when flourishing); optional bell icon (`size={11}`, `weight="fill"`), `text-alarm-vs-door` when ringing.
+- **Spoken alarm:** `SPEAKING` inverts and pulses the whole Door and takes the badge slot for its speaker-plus-label — it lasts one utterance. `SPOKEN` persists until the ring is attended, so it keeps a static 2px inset and adds its speaker icon *beside* the TODO pill and bell instead of evicting them. Both carry a speaker icon (shape, not color) and name the state in the accessible name.
 - **Hover/Focus:** no decorative hover. The whole door is a button; the focus state is conveyed by the parent pane's selection ring, not by a per-door treatment.
 
 ### Buttons
@@ -202,6 +208,11 @@ The icon-and-tooltip button used inside pane headers (kill, alert toggle, todo, 
 - **Color:** `text-inherit` — inherits the header's foreground, so it tints with the active/inactive header palette.
 - **Hover:** `hover:bg-current/10` — a 10%-opacity wash of the current text color. Theme-agnostic, works light or dark.
 - **Tooltip:** rendered through a portal as a `PopupButtonRow` 8px below the button, with `text-sm` primary line and an optional muted detail line. Keybindings inside the tooltip auto-render as `[bracketed]` shortcuts.
+
+#### Popup Button (`popupButton`)
+The flat segments inside a `PopupButtonRow` — the row owns the border, background, shadow, and `text-sm`, so a segment contributes only padding and state. Every segment currently inherits the row's foreground; these rows offer rather than ask, so none of them carries an emphasized action.
+- **Hover:** `hover:bg-foreground/10`, a wash over the row's surface.
+- **Flash:** `flashed` swaps in `animate-copy-flash` with `bg-header-active-bg/25` for copy-confirm moments.
 
 #### Chrome Button (window controls)
 The Windows/Linux native-style window control row in the standalone app bar.
@@ -214,6 +225,8 @@ The system uses **raised surfaces**, not "cards." There are no nested cards. The
 - **Raised surface** (`PopupButtonRow`, tooltips, popups): `bg-surface-raised`, `border border-border`, `rounded` (4px), `shadow-md`, `font-mono text-sm`.
 - **Dialog** (`KillConfirm`, `TodoAlertDialog`): `bg-surface-raised`, `border border-border`, `rounded-lg` (8px), `shadow-lg`, generous padding (`px-6 py-4` for kill-confirm).
 - **Modal** (`ThemePicker` dropdown, `ThemeDebugger`, `ThemeStoreDialog`): `bg-surface-raised`, `border`, `rounded`, `shadow-2xl`, fixed-position with viewport-clamped sizing.
+
+**The Viewport-Bound Rule.** Anything floating over the viewport takes its height cap from `OVERLAY_MAX_HEIGHT` in `design.tsx` — `.modal` for a `ModalFrame` surface (the viewport minus `MODAL_OVERLAY_INSET` doubled), `.popover` for an anchored overlay (matching `clampOverlayPosition`'s margin). Don't hand-write a `vh`/`dvh` literal at the call site: the six that predated this token had drifted to five different budgets, and one silently shadowed its own overlay's padding. Each entry reads its own custom property first (`--overlay-max-h-modal` / `--overlay-max-h-popover`), so a story — or a host with less room than the window — can narrow one bound without touching the component. They are deliberately separate: a popover inside a modal is a DOM descendant of it, and custom properties inherit, so one shared knob would cap the dialog too. A deliberately *smaller* budget than the viewport (a context menu at `max-h-[70vh]`) is a different decision and stays at the call site.
 
 ### Inputs
 - Used by `ThemePicker`. Style: `bg-input-bg`, `border border-input-border`, `rounded`, `font-mono`, `text-sm`.
@@ -242,7 +255,10 @@ The most distinctive motion in the system. Implemented as `clip-path` reveals, n
 - **Reduced-motion:** all of the above are nulled.
 
 #### Marching Ants (Command Mode)
-The selection ring around the focused pane in command mode is an SVG with `stroke-dasharray` and an infinite `marching-ants` keyframe that increments `stroke-dashoffset` by `var(--march-offset)`. Color: `var(--color-focus-ring)`. This is the system's only ongoing animation; it is meant to be the visual signature of "you are now in command mode."
+The selection ring around the focused pane in command mode is an SVG with `stroke-dasharray` and an infinite `marching-ants` keyframe that increments `stroke-dashoffset` by `var(--march-offset)`. Color: `var(--color-focus-ring)`. This is the system's only ongoing animation; it is meant to be the visual signature of "you are now in command mode." The ring stays crisp while travelling; motion reads instead from soft directional bands drawn behind each edge, sized by how fast that edge is moving across itself.
+
+#### Focus Ring Travel & Header Crossfade
+When selection moves between panes/doors, the focus ring **glides** to the new target over 220ms (`FOCUS_MOTION_MS`, half the pane-motion duration) on the house curve `cubic-bezier(0.22, 1, 0.36, 1)`, and the source/destination pane headers crossfade their active/inactive palette over the same 220ms (`HEADER_PALETTE_TRANSITION_CLASS` in `design.tsx`), so the two read as one gesture. The ring's rect is a per-frame JS tween (`rect-tween.ts`), not a CSS transition; same-identity re-measures (sash drag, window resize, animator frames) snap 1:1, and a pane↔door move lerps the corner radii so the shape never pops. Reduced motion nulls both: the ring snaps and the header palette swaps instantly.
 
 ## 6. Do's and Don'ts
 
@@ -264,7 +280,8 @@ The selection ring around the focused pane in command mode is an SVG with `strok
 - **Don't** introduce a `text-muted` color inside an active or inactive pane header. Header-internal text inherits the header foreground; muting inside it breaks the focus signal.
 - **Don't** use rounded SaaS cards, gradient accents, gradient text, or glassmorphism. PRODUCT.md names these directly: "Generic SaaS (rounded cards, gradients, startup illustrations)," "Electron bloat (Slack — heavy, slow-feeling, too much chrome)."
 - **Don't** use hacker-aesthetic green-on-black, terminal-cliché Matrix tints, or any color that signals "this is a programmer tool." The user's theme decides what color this tool is.
-- **Don't** animate layout properties (`width`, `height`, `top`, `left`, `padding`). Pane transitions use `clip-path` and `opacity` deliberately so layout measurements stay valid mid-animation.
+- **Don't** animate layout properties (`width`, `height`, `top`, `left`, `padding`) **with a CSS transition**. Pane transitions use `clip-path` and `opacity` deliberately so layout measurements stay valid mid-animation. The one carve-out is a JS tween that writes true per-frame values on a `pointer-events: none` overlay (the Lath animator; the focus ring's `rect-tween`): it moves through real intermediate geometry every frame rather than letting the browser interpolate an opaque box, so measurements stay valid — a CSS `transition: top/left/width/height` does not qualify and stays banned.
 - **Don't** add an emoji, mascot, or illustration to chrome. PRODUCT.md is explicit: "Overly playful (too many animations, emojis, mascots)."
+- **Don't** gate app chrome on `window.alert` / `confirm` / `prompt`. Native dialogs are not dependable in the desktop webview: the theme uninstall was gated on `confirm` and silently did nothing there, because the call returned without ever showing a dialog. Whether a given webview suppresses the panel or never implements it, a control gated on one cannot be trusted to run. Use `ModalFrame`, or make the action a single click when it is cheap and reversible. The marketing website is exempt — it only ever runs in a real browser, where `ShareUrlButton`'s `prompt` is a reasonable last-resort clipboard fallback.
 - **Don't** wrap things in containers. Most surfaces don't need one; the host's sidebar already is the container.
 - **Don't** introduce a new pass-through `--mt-*` token or a one-off color for tabs, badges, accents, or button hovers. If a new rendered surface truly needs a token that isn't in the hierarchy above, update `theme.css` and `design.tsx` together, document the addition in `docs/specs/theme.md`, and update `CONSUMED_VSCODE_KEYS` in `bundle-themes.mjs`.

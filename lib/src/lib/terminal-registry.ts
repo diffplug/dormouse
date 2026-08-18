@@ -1,6 +1,7 @@
 export type { SessionStatus } from './activity-monitor';
-export type { TodoState, AlertButtonActionResult } from './alert-manager';
-export type { ActivityState } from './session-activity-store';
+export type { TodoState } from './alert-manager';
+export type { AlertSpeechState } from './alert-speech-state';
+export type { ActivityState, AlertButtonActionResult } from './session-activity-store';
 export type { TerminalEntry, TerminalOverlayDims } from './terminal-store';
 export type {
   CommandRun,
@@ -37,6 +38,7 @@ export {
 
 export { resolveTerminalSessionId } from './terminal-store';
 
+
 export {
   disposeAllSessions,
   disposeSession,
@@ -59,12 +61,48 @@ export type { SurfaceFocusHandle } from './terminal-lifecycle';
 export { setDefaultShellOpts, getDefaultShellOpts } from './shell-defaults';
 
 export {
+  getWatchedCommands,
+  getWatchedCommandsSnapshot,
+  isCommandWatched,
+  setCommandWatched,
+  subscribeToWatchedCommands,
+} from './watched-commands';
+
+export {
+  applyAlertSettingsFromHost,
+  clampAlertDelayMs,
+  getAlertSettings,
+  subscribeToAlertSettings,
+  updateAlertSettings,
+} from './alert-settings';
+export type { AlertSettings } from './alert-settings';
+
+export {
+  getPushDevices,
+  refreshPushDevicesNow,
+  resetPushDevices,
+  setPushDevices,
+  setPushDevicesRefresher,
+  subscribeToPushDevices,
+} from './push-devices';
+export type { PushDevice, PushDevicesState } from './push-devices';
+
+export { deriveSessionLabel } from './session-label';
+
+export {
+  getAlertSpeechState,
+  getAlertSpeechSnapshot,
+  subscribeToAlertSpeech,
+} from './alert-speech-state';
+
+export {
   applyTerminalSemanticEvents,
   applyTerminalSemanticEventsByPtyId,
   countRunningSessions,
   ensureTerminalPaneState,
   fillTerminalProcessCwd,
   fillTerminalProcessCwdByPtyId,
+  getRunningCommandArgv0,
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,
   isPaneOscDriven,

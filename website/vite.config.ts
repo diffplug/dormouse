@@ -16,6 +16,10 @@ export default defineConfig(({ mode }) => ({
       // `server-lib-common`, whose package `exports` resolve to a `dist` this
       // build never compiles. Alias it to source, exactly like `dormouse-lib`.
       "server-lib-common": path.resolve(__dirname, "../server-lib-common/src"),
+      // Same story for `dor-lib-common`: `Wall` → `useDorControl` → `connect-port`
+      // imports its `./agent-browser` subpath. The directory alias covers both
+      // that subpath and the bare specifier.
+      "dor-lib-common": path.resolve(__dirname, "../dor-lib-common/src"),
       // Wall also imports `dor/*` (protocol + command types); `dor` has no
       // package `exports`, and vite does not read tsconfig paths, so resolve it
       // to source — the same alias lib and standalone use.
@@ -24,6 +28,10 @@ export default defineConfig(({ mode }) => ({
         __dirname,
         "node_modules/ascii-splash/dist",
       ),
+      // ascii-splash's pattern registry statically imports PhotoPattern, which
+      // statically imports `sharp`. The playground never builds a photo slot,
+      // so keep the native module out of the bundle. See sharp-browser-stub.ts.
+      sharp: path.resolve(__dirname, "src/lib/sharp-browser-stub.ts"),
       "@standalone-latest": path.resolve(
         __dirname,
         "public/standalone-latest.json",

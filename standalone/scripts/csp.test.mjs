@@ -14,7 +14,7 @@ test('the shipped default CSP is scoped to the SaaS origin', () => {
   assert.ok(csp.includes(DEFAULT_REMOTE_CONNECT_SRC), 'default remote sources present');
   // Secure by default: no scheme-wide `https:`/`wss:` in connect-src that
   // would let the webview reach an arbitrary internet host.
-  assert.ok(!csp.includes(' https: '), 'no bare https: source');
+  assert.ok(!csp.includes(' https:;') && !csp.includes(' https: '), 'no bare https: source');
   assert.ok(!csp.includes(' wss:;') && !csp.includes(' wss: '), 'no bare wss: source');
   // Localhost stays allowed (dev + local self-host server).
   assert.ok(csp.includes('http://localhost:*') && csp.includes('ws://localhost:*'));

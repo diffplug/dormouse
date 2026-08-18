@@ -13,7 +13,7 @@
  *   onPtyExit        ← terminal.closed
  *
  * Everything outside that PTY core no-ops or is absent — the interface is built
- * for capability degradation (getCwd/getScrollback → null, getOpenPorts → [],
+ * for capability degradation (getCwd → null, getOpenPorts → [],
  * shells/clipboard empty, alerts no-op; alert/TODO/ringing badges instead ride
  * the directory snapshot and are read via {@link getDirectoryEntries}).
  *
@@ -318,10 +318,6 @@ export class RemotePtyAdapter implements PlatformAdapter {
     return null;
   }
 
-  async getScrollback(): Promise<string | null> {
-    return null;
-  }
-
   async getOpenPorts(): Promise<OpenPort[]> {
     return [];
   }
@@ -346,10 +342,10 @@ export class RemotePtyAdapter implements PlatformAdapter {
   // Alerts are Host-authoritative (surfaced via the directory snapshot), so the
   // phone-side alert controls are inert.
   alertRemove(): void {}
-  alertToggle(): void {}
-  alertDisable(): void {}
+  alertSetWatchedCommands(): void {}
+  alertSetCommandWatched(): void {}
+  alertPublishSettings(): void {}
   alertDismiss(): void {}
-  alertDismissOrToggle(): void {}
   alertAttend(): void {}
   alertResize(): void {}
   alertClearAttention(): void {}
@@ -357,7 +353,8 @@ export class RemotePtyAdapter implements PlatformAdapter {
   alertMarkTodo(): void {}
   alertClearTodo(): void {}
   onAlertState(): void {}
-  offAlertState(): void {}
+  onWatchedCommands(): void {}
+  onAlertSettings(): void {}
 
   saveState(state: unknown): void {
     this.#savedState = state;

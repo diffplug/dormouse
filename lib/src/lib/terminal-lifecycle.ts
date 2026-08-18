@@ -1,7 +1,9 @@
 import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
+import { WebglAddon } from '@xterm/addon-webgl';
 import { getPlatform, IS_MAC, IS_WINDOWS } from './platform';
+import { DIM, RESET } from './ansi';
 import { cfg } from '../cfg';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
 import { attachMouseModeObserver } from './mouse-mode-observer';
@@ -13,6 +15,7 @@ import {
   setSelection as setMouseSelection,
 } from './mouse-selection';
 import { extractSelectionText } from './selection-text';
+import { normalizeResumeCommand } from './resume-patterns';
 import {
   pendingShellOpts,
   registry,
@@ -96,6 +99,61 @@ function readDisplayTextFromBuffer(terminal: Terminal, range: IBufferRange): str
     return text.trim();
   } catch {
     return '';
+  }
+}
+
+/**
+ * Swap xterm's DOM renderer for the WebGL one, and record which one this
+ * terminal ended up on as `data-renderer` on its host element.
+ *
+ * The DOM renderer emits one `<span>` per style run per row, so a TUI that
+ * paints every cell a different truecolor (an animated pattern, `btop`, a
+ * syntax-highlighted pager) turns into one span-with-inline-style per cell,
+ * rebuilt every frame. On a 99x25 pane that is ~1150 elements of style
+ * recalc + layout per frame; WebKit spends ~95ms/frame on it and the whole
+ * page drops to ~9fps. The WebGL renderer rasterizes the same grid from a
+ * glyph atlas and leaves the DOM untouched.
+ *
+ * Called on first MOUNT, not on create: a GL context is a scarce per-page
+ * resource (16 in Safari, evicted oldest-first), and cold restore builds a
+ * session for every persisted pane *including minimized doors*, which never
+ * paint. Claiming contexts at create would spend the budget on invisible
+ * surfaces and, because eviction is oldest-first and one-way, permanently
+ * demote the earliest-restored panes.
+ *
+ * Falls back to the DOM renderer whenever WebGL is unavailable: no GL
+ * context (headless/jsdom, blocklisted GPU) throws at construction, and
+ * exceeding the browser's live-context budget fires `onContextLoss` later.
+ * Both paths dispose the addon, which is xterm's documented signal to
+ * resume DOM rendering — degraded, never broken.
+ */
+function tryEnableWebglRenderer(terminal: Terminal, host: HTMLElement): void {
+  const markDom = () => host.setAttribute('data-renderer', 'dom');
+  // Cheap pre-check so environments that could never succeed don't pay for a
+  // doomed context request. jsdom in particular has no `getContext`, and
+  // attempting one makes every terminal-creating unit test log a
+  // "Not implemented" error through the virtual console.
+  if (!cfg.terminal.webglRenderer || typeof WebGL2RenderingContext === 'undefined') {
+    markDom();
+    return;
+  }
+  let addon: WebglAddon;
+  try {
+    addon = new WebglAddon();
+  } catch {
+    markDom();
+    return;
+  }
+  addon.onContextLoss(() => {
+    addon.dispose();
+    markDom();
+  });
+  try {
+    terminal.loadAddon(addon);
+    host.setAttribute('data-renderer', 'webgl');
+  } catch {
+    addon.dispose();
+    markDom();
   }
 }
 
@@ -343,7 +401,12 @@ function typeCommandWhenPromptReady(id: string, command: string, requireIntegrat
   const timeoutMs = requireIntegration ? INTEGRATION_TYPE_TIMEOUT_MS : LAUNCH_PROMPT_TIMEOUT_MS;
   let elapsed = 0;
   const timer = setInterval(() => {
-    if (!registry.has(id)) {
+    // A gone shell can't run anything. `exited` also covers a spawn that failed
+    // outright (pty-core answers a spawn error with an exit), where the seeded
+    // command has just been cleared and `ready` would otherwise read as true —
+    // typing into a pty that never existed.
+    const entry = registry.get(id);
+    if (!entry || entry.exited) {
       clearInterval(timer);
       return;
     }
@@ -419,9 +482,12 @@ export function resumeTerminal(
   return entry;
 }
 
+// A cold restore never replays a transcript — scrollback is not persisted
+// (docs/specs/transport.md -> "What is persisted"). What can come back is the
+// agent the host interrupted on its way down, which this pane re-runs itself.
 export function restoreTerminal(
   id: string,
-  opts: { cwd?: string | null; scrollback?: string | null; title?: string | null; cwdWarning?: string | null; shell?: string; args?: string[]; untouched?: boolean },
+  opts: { cwd?: string | null; title?: string | null; cwdWarning?: string | null; shell?: string; args?: string[]; untouched?: boolean; resumeCommand?: string | null },
 ): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
@@ -434,13 +500,6 @@ export function restoreTerminal(
     setTerminalUserTitle(id, trimmedTitle);
   }
 
-  if (opts.scrollback) {
-    // Saved process is gone: append the reset tail (see REPLAY_MODE_RESET),
-    // inside writeReplay so `isReplaying` covers it, and before the '\r\n'
-    // separator so the alt-screen exit lands before the separator line.
-    writeReplay(entry, opts.scrollback, REPLAY_MODE_RESET, '\r\n');
-    seedPromptShapeFromScrollback(id, opts.scrollback);
-  }
   if (opts.cwdWarning) {
     entry.terminal.write(`\r\n\x1b[33m${opts.cwdWarning}\x1b[0m\r\n`);
   }
@@ -455,6 +514,21 @@ export function restoreTerminal(
   });
   seedProcessCwdAfterSpawn(id);
 
+  // Revalidated rather than trusted: the snapshot may have been written by an
+  // older detector, and this string is about to be executed.
+  const resume = opts.resumeCommand ? normalizeResumeCommand(opts.resumeCommand) : null;
+  if (resume) {
+    // A passive notice, not a dialog: the pane has no transcript, so without it
+    // an agent simply appears. It also states the discontinuity the resume hides
+    // — the interrupted turn did not continue.
+    entry.terminal.write(`${DIM}⟲ resuming agent session: ${resume}${RESET}\r\n`);
+    // Seeded before the write because this bypasses xterm's keystroke fallback,
+    // and typed only once the fresh shell reaches a prompt — spawn-then-type is
+    // exactly the window shell startup swallows keystrokes in.
+    seedLaunchedCommand(id, resume, opts.cwd ?? undefined);
+    typeCommandWhenPromptReady(id, resume, false);
+  }
+
   return entry;
 }
 
@@ -462,6 +536,12 @@ export function mountElement(id: string, container: HTMLElement): void {
   const entry = registry.get(id);
   if (!entry) return;
   container.appendChild(entry.element);
+  // First paint is the earliest point worth claiming a GL context — see
+  // `tryEnableWebglRenderer` on why create is too early.
+  if (!entry.webglAttempted) {
+    entry.webglAttempted = true;
+    tryEnableWebglRenderer(entry.terminal, entry.element);
+  }
   requestAnimationFrame(() => entry.fit.fit());
 }
 

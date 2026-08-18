@@ -31,8 +31,11 @@ export type ScreenState = 'SYNCED' | 'SCALED';
  *      becomes a stub.
  *    - `iframe`        — the page's own DOM in a proxied iframe: native + zero-lag,
  *      but loopback-only and not agent-drivable.
- *  Absent ⇒ `ab-screencast` — a surface with no explicit mode reads as a
- *  screencast. */
+ *  Absent from params ⇒ `iframe` — a surface with no explicit mode resolves to
+ *  the engine-less embed (`resolveRenderMode` in browser-surface.ts;
+ *  docs/specs/dor-browser.md → "Canonical Params"). Note this differs from the
+ *  `ScreenSnapshot.renderMode` glyph default below, which reads absent as
+ *  `ab-screencast`. */
 export type RenderMode = 'ab-screencast' | 'ab-popout' | 'iframe';
 
 export interface ScreenSnapshot {

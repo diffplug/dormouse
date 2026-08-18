@@ -14,6 +14,7 @@ import {
   SELFHOST_ACCOUNT_ID,
   generateDeviceKeyPair,
   hashPasskeyPublicKey,
+  pushEndpointFingerprint,
   toBase64Url,
   type DeviceKeyPair,
   type PasskeyAssertion,
@@ -21,7 +22,9 @@ import {
 
 import {
   hasRecoverablePairingFailure,
+  PASSKEY_UNAVAILABLE_MESSAGE,
   PocketClient,
+  SessionExpiredError,
   type PocketSocket,
   type PocketStorage,
   type PocketClientDeps,
@@ -34,6 +37,11 @@ import type { PasskeyRegistration, WebAuthnClient } from './webauthn';
 const CREDENTIAL_ID = 'cred-123';
 const PASSKEY_PUBLIC_KEY = 'pk-spki-b64u';
 const RP_ID = 'localhost';
+
+it('directs a missing passkey cache back through sign-in', () => {
+  expect(PASSKEY_UNAVAILABLE_MESSAGE).toContain('Sign in again');
+  expect(PASSKEY_UNAVAILABLE_MESSAGE).not.toContain('device that first created');
+});
 
 /** A base64url string usable as a real challenge (device signing decodes it). */
 function b64uChallenge(seed: number): string {
@@ -91,6 +99,7 @@ function makeFetch(routes: Record<string, (body: unknown) => { status?: number; 
 function memoryStorage(): PocketStorage {
   const passkeys = new Map<string, string>();
   const paired = new Set<string>();
+  let pushEndpoint: string | null = null;
   return {
     getPasskeyPublicKey: (id) => passkeys.get(id) ?? null,
     setPasskeyPublicKey: (id, pk) => void passkeys.set(id, pk),
@@ -98,6 +107,8 @@ function memoryStorage(): PocketStorage {
     isPaired: (hostId) => paired.has(hostId),
     markPaired: (hostId) => void paired.add(hostId),
     unmarkPaired: (hostId) => void paired.delete(hostId),
+    getRegisteredPushEndpoint: () => pushEndpoint,
+    setRegisteredPushEndpoint: (fingerprint) => void (pushEndpoint = fingerprint),
   };
 }
 
@@ -152,6 +163,12 @@ class FakeSocket implements PocketSocket {
   fireOpen(): void {
     this.readyState = 1;
     this.#emit('open', {});
+  }
+
+  /** A rejected upgrade: the browser fires `error` with no status, never `open`. */
+  fireError(): void {
+    this.readyState = 3;
+    this.#emit('error', {});
   }
 
   /** Simulate the server sending a frame to this client. */
@@ -217,7 +234,12 @@ const AUTH_ROUTES = {
   }),
   '/api/signin/begin': () => ({ json: { challenge: b64uChallenge(9), rpId: RP_ID } }),
   '/api/signin/finish': () => ({
-    json: { sessionToken: 'tok-abc', accountId: SELFHOST_ACCOUNT_ID, expiresAt: 1 },
+    json: {
+      sessionToken: 'tok-abc',
+      accountId: SELFHOST_ACCOUNT_ID,
+      expiresAt: 1,
+      passkeyPublicKey: PASSKEY_PUBLIC_KEY,
+    },
   }),
   '/api/hosts': () => ({ json: { hosts: [{ hostId: 'h1', label: 'Laptop', online: true }] } }),
 } as const;
@@ -259,11 +281,133 @@ describe('setup + signin', () => {
     expect(hostsCall.headers.authorization).toBe('Bearer tok-abc');
   });
 
+  /**
+   * The account-centric half of the model: a synced passkey is enough to pair
+   * from a browser profile that never performed the registration — an iOS Home
+   * Screen install, a second browser — because sign-in returns the asserted
+   * passkey's public key. Before this, only the registering profile could build
+   * a pairing request, which forced a redundant second passkey per install.
+   *
+   * The device-centric half is untouched: this Client still needs its own
+   * approval on the Host before it reaches anything.
+   */
+  it('can pair after signing in on a profile that never registered', async () => {
+    const harness = makeClient({ ...AUTH_ROUTES });
+    // No setup() — this profile's storage starts empty, as a fresh install's does.
+    await harness.client.signin();
+
+    const open = harness.client.openSocket();
+    harness.socket.fireOpen();
+    await open;
+
+    const pairing = harness.client.pair('h1', 'iPhone (Home Screen)');
+    const frame = await nextSent(harness.socket, (f) => f.t === 'pair');
+    harness.socket.server({ t: 'pair-result', approved: true, record: { hostId: 'h1' } });
+    await pairing;
+
+    // The request carries the hash of the key sign-in handed back.
+    const request = (frame as { request: { passkeyPublicKeyHash: string } }).request;
+    expect(request.passkeyPublicKeyHash).toBe(await hashPasskeyPublicKey(PASSKEY_PUBLIC_KEY));
+  });
+
   it('rejects with the server error message on a failed request', async () => {
     const harness = makeClient({
       '/api/setup/begin': () => ({ status: 401, json: { error: 'invalid setup password' } }),
     });
     await expect(harness.client.setup('wrong', 'Phone')).rejects.toThrow('invalid setup password');
+  });
+});
+
+describe('subscribeToPush', () => {
+  const SUBSCRIPTION = {
+    endpoint: 'https://push.example/original',
+    keys: { p256dh: 'p256dh', auth: 'auth' },
+  };
+  const PUSH_ROUTES = {
+    ...AUTH_ROUTES,
+    '/api/push/challenge': () => ({ json: { challenge: b64uChallenge(3), expiresAt: 1 } }),
+    '/api/push/subscribe': () => ({ json: { subscribedAt: 1, hostIds: ['h1'] } }),
+  };
+
+  /**
+   * A push service may rotate an endpoint on its own, with the VAPID key
+   * unchanged, which leaves every stored row pointing somewhere unreachable
+   * while the browser still reports a valid subscription. Recording what was
+   * registered is the only way the next app open can notice.
+   */
+  it('records the registered delivery address so a later rotation is detectable', async () => {
+    const harness = makeClient(PUSH_ROUTES);
+    await harness.client.setup('pw', 'My Phone');
+    await harness.client.signin();
+    expect(harness.client.registeredPushEndpoint()).toBeNull();
+
+    await harness.client.subscribeToPush('h1', SUBSCRIPTION);
+
+    expect(harness.client.registeredPushEndpoint()).toBe(
+      await pushEndpointFingerprint(SUBSCRIPTION.endpoint),
+    );
+    // A digest, not the address itself — the endpoint is a bearer capability and
+    // equality is all the check needs.
+    expect(harness.client.registeredPushEndpoint()).not.toContain('push.example');
+  });
+
+  it('records nothing when the Server rejected the registration', async () => {
+    const harness = makeClient({
+      ...PUSH_ROUTES,
+      '/api/push/subscribe': () => ({ status: 401, json: { error: 'device signature rejected' } }),
+    });
+    await harness.client.setup('pw', 'My Phone');
+    await harness.client.signin();
+
+    await expect(harness.client.subscribeToPush('h1', SUBSCRIPTION)).rejects.toThrow();
+    expect(harness.client.registeredPushEndpoint()).toBeNull();
+  });
+});
+
+describe('listPushSubscribedHosts', () => {
+  /**
+   * The Server answers with the whole account's registrations, so the filter to
+   * "this device" happens client-side — that is what keeps the API from being
+   * an enumeration primitive over a `devicePublicKey` the caller does not hold.
+   */
+  it('keeps only the Hosts this device registered', async () => {
+    const device = await generateDeviceKeyPair();
+    const harness = makeClient(
+      {
+        ...AUTH_ROUTES,
+        '/api/push/subscriptions': () => ({
+          json: {
+            subscriptions: [
+              { hostId: 'h1', devicePublicKey: device.devicePublicKey, subscribedAt: 1 },
+              { hostId: 'h2', devicePublicKey: 'some-other-device', subscribedAt: 2 },
+              { hostId: 'h3', devicePublicKey: device.devicePublicKey, subscribedAt: 3 },
+            ],
+          },
+        }),
+      },
+      { deviceKey: async () => device },
+    );
+    await harness.client.setup('pw', 'My Phone');
+    await harness.client.signin();
+
+    expect(await harness.client.listPushSubscribedHosts()).toEqual(['h1', 'h3']);
+    const call = harness.calls.find((c) => c.url.endsWith('/api/push/subscriptions'))!;
+    expect(call.method).toBe('GET');
+    expect(call.headers.authorization).toBe('Bearer tok-abc');
+    // The device identity is never sent — the Server has no input to filter on.
+    expect(call.body).toBeUndefined();
+  });
+
+  it('is empty when this device registered nothing', async () => {
+    const harness = makeClient({
+      ...AUTH_ROUTES,
+      '/api/push/subscriptions': () => ({
+        json: { subscriptions: [{ hostId: 'h1', devicePublicKey: 'other', subscribedAt: 1 }] },
+      }),
+    });
+    await harness.client.setup('pw', 'My Phone');
+    await harness.client.signin();
+    expect(await harness.client.listPushSubscribedHosts()).toEqual([]);
   });
 });
 
@@ -453,6 +597,65 @@ async function connectEstablished(harness: Harness): Promise<void> {
   socket.server({ t: 'decision', allowed: true });
   await connecting;
 }
+
+describe('session expiry', () => {
+  /** Signed in, with `/api/hosts` switchable between healthy and session-gate 401. */
+  async function withHostsRoute(
+    response: () => { status?: number; json: unknown },
+  ): Promise<Harness> {
+    const harness = makeClient({ ...AUTH_ROUTES, '/api/hosts': response });
+    await harness.client.setup('pw', 'My Phone');
+    await harness.client.signin();
+    return harness;
+  }
+
+  it('discards the token and reports expiry on the session gate 401', async () => {
+    let live = true;
+    const harness = await withHostsRoute(() =>
+      live ? { json: { hosts: [] } } : { status: 401, json: { error: 'unauthorized' } },
+    );
+    expect(harness.client.sessionToken).toBe('tok-abc');
+
+    live = false;
+    await expect(harness.client.listHosts()).rejects.toBeInstanceOf(SessionExpiredError);
+    // Keeping it would leave the UI believing it is still signed in.
+    expect(harness.client.sessionToken).toBeNull();
+  });
+
+  // A wrong setup password and a rejected device signature also answer 401;
+  // treating those as expiry would sign the user out mid-action.
+  it('leaves a 401 that is not the session gate as an ordinary failure', async () => {
+    const harness = await withHostsRoute(() => ({
+      status: 401,
+      json: { error: 'device signature rejected' },
+    }));
+
+    await expect(harness.client.listHosts()).rejects.toThrow('device signature rejected');
+    expect(harness.client.sessionToken).toBe('tok-abc');
+  });
+
+  it('turns a rejected relay upgrade into expiry when the session is the reason', async () => {
+    let live = true;
+    const harness = await withHostsRoute(() =>
+      live ? { json: { hosts: [] } } : { status: 401, json: { error: 'unauthorized' } },
+    );
+
+    live = false;
+    const opening = harness.client.openSocket();
+    harness.socket.fireError();
+    await expect(opening).rejects.toBeInstanceOf(SessionExpiredError);
+    expect(harness.client.sessionToken).toBeNull();
+  });
+
+  it('keeps a socket failure a socket failure while the session is alive', async () => {
+    const harness = await withHostsRoute(() => ({ json: { hosts: [] } }));
+
+    const opening = harness.client.openSocket();
+    harness.socket.fireError();
+    await expect(opening).rejects.toThrow('relay socket error');
+    expect(harness.client.sessionToken).toBe('tok-abc');
+  });
+});
 
 describe('socket lifecycle', () => {
   it('an unexpected close fires host-gone for an established session and resets the socket', async () => {

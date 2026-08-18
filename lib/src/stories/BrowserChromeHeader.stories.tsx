@@ -5,7 +5,6 @@ import {
   SelectedIdContext,
   WallActionsContext,
   WindowFocusedContext,
-  ZoomedContext,
   type WallActions,
 } from '../components/wall/wall-context';
 import { SurfacePaneHeader } from '../components/wall/SurfacePaneHeader';
@@ -47,6 +46,8 @@ const loggingActions: WallActions = {
   onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
   onSwapRenderMode: (id, mode) => console.log('[story] swap render', id, mode),
+  resolveSurfaceRef: (id) => id,
+  onConnectPort: (id, url) => console.log('[story] connect port', id, url),
 };
 
 interface StoryArgs {
@@ -144,19 +145,19 @@ function BrowserChromeStory(args: StoryArgs) {
     <ModeContext.Provider value="passthrough">
       <SelectedIdContext.Provider value={args.selected ? surfaceId : null}>
         <WindowFocusedContext.Provider value={true}>
-          <ZoomedContext.Provider value={false}>
-            <WallActionsContext.Provider value={loggingActions}>
-              <div style={{ width: args.width }}>
-                <div className="bg-app-bg" style={{ height: 26 }}>
-                  <SurfacePaneHeader
-                    id={surfaceId}
-                    title={args.htmlTitle || hostPathDisplay(args.url)}
-                    params={undefined}
-                  />
-                </div>
+          {/* No ZoomedIdContext provider: its `null` default is exactly this
+              story's un-zoomed header. */}
+          <WallActionsContext.Provider value={loggingActions}>
+            <div style={{ width: args.width }}>
+              <div className="bg-app-bg" style={{ height: 26 }}>
+                <SurfacePaneHeader
+                  id={surfaceId}
+                  title={args.htmlTitle || hostPathDisplay(args.url)}
+                  params={undefined}
+                />
               </div>
-            </WallActionsContext.Provider>
-          </ZoomedContext.Provider>
+            </div>
+          </WallActionsContext.Provider>
         </WindowFocusedContext.Provider>
       </SelectedIdContext.Provider>
     </ModeContext.Provider>

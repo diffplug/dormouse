@@ -10,9 +10,11 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
+import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { Wall } from './Wall';
 import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
+import type { PlatformAdapter } from '../lib/platform/types';
 import * as terminalRegistry from '../lib/terminal-registry';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -59,8 +61,6 @@ beforeEach(() => {
     removeListener() {},
     dispatchEvent() { return false; },
   })) as unknown as typeof matchMedia;
-  // The selection overlay's marching-ants path calls SVG getTotalLength (unimplemented in jsdom).
-  (SVGElement.prototype as unknown as { getTotalLength?: () => number }).getTotalLength ??= () => 100;
   Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
     configurable: true,
     value: vi.fn(() => null),
@@ -102,6 +102,10 @@ describe('Wall on the Lath engine', () => {
     });
     await flush();
     expect(leafCount()).toBe(2);
+    const focusedAfterSplit = Array.from(container.querySelectorAll<HTMLElement>('[data-session-id]'))
+      .filter((el) => el.dataset.focused === 'true');
+    expect(focusedAfterSplit).toHaveLength(1);
+    expect(focusedAfterSplit[0].dataset.sessionId).not.toBe('pane-a');
 
     // 3. Kill the second surface (dor kill, dangerously) → back to one leaf.
     await act(async () => {
@@ -133,6 +137,46 @@ describe('Wall on the Lath engine', () => {
     expect(Object.keys(saved!.lathLayout!.leafMeta ?? {})).toContain('pane-a');
   });
 
+  it('manual keyboard splits enter passthrough on the new pane immediately', async () => {
+    const onEvent = vi.fn();
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard onEvent={onEvent} />);
+    });
+    await flush();
+    onEvent.mockClear();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true }));
+    });
+    await flush();
+
+    const panes = Array.from(container.querySelectorAll<HTMLElement>('[data-session-id]'));
+    const newPane = panes.find((pane) => pane.dataset.sessionId !== 'pane-a');
+    expect(newPane?.dataset.focused).toBe('true');
+    expect(panes.find((pane) => pane.dataset.sessionId === 'pane-a')?.dataset.focused).toBe('false');
+    expect(onEvent).toHaveBeenCalledWith({ type: 'modeChange', mode: 'passthrough' });
+    expect(onEvent).toHaveBeenCalledWith({ type: 'selectionChange', id: newPane?.dataset.sessionId, kind: 'pane' });
+  });
+
+  it('host New Terminal actions enter passthrough on the spawned pane', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:new-terminal', {
+        detail: { shell: '/bin/zsh', name: 'zsh' },
+      }));
+    });
+    await flush();
+
+    const panes = Array.from(container.querySelectorAll<HTMLElement>('[data-session-id]'));
+    const newPane = panes.find((pane) => pane.dataset.sessionId !== 'pane-a');
+    expect(newPane?.dataset.focused).toBe('true');
+    expect(panes.find((pane) => pane.dataset.sessionId === 'pane-a')?.dataset.focused).toBe('false');
+  });
+
   it('retires a killed surface ref instead of reusing its number, and persists the counter', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
@@ -157,8 +201,11 @@ describe('Wall on the Lath engine', () => {
     });
     await flush();
 
-    // Split again → the fresh pane must be surface:3, never a reused surface:2.
+    // Manual split entered passthrough; return to command mode before splitting
+    // again. The fresh pane must be surface:3, never a reused surface:2.
     await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', location: 1, bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', location: 2, bubbles: true }));
       window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true }));
     });
     await flush();
@@ -378,6 +425,99 @@ describe('Wall on the Lath engine', () => {
     expect(onEvent).not.toHaveBeenCalledWith({ type: 'zoomChange', zoomed: true });
   });
 
+  it('gives passthrough focus to a pane when it gains zoom, and unzooms when passthrough focus ends', async () => {
+    const onEvent = vi.fn();
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard onEvent={onEvent} />);
+    });
+    await flush();
+    onEvent.mockClear();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', bubbles: true }));
+    });
+    await flush();
+
+    expect(onEvent).toHaveBeenCalledWith({ type: 'zoomChange', zoomed: true });
+    expect(onEvent).toHaveBeenCalledWith({ type: 'modeChange', mode: 'passthrough' });
+    expect(container.querySelector('[data-session-id="pane-a"]')?.getAttribute('data-focused')).toBe('true');
+    const unzoom = container.querySelector<HTMLButtonElement>('button[aria-label="Unzoom"]');
+    expect(unzoom).not.toBeNull();
+    // jsdom's document is not window-focused, so Wall renders the inactive
+    // header palette here; the surface-header unit test covers the active pair.
+    expect(unzoom?.className).toContain('bg-header-inactive-fg');
+    expect(unzoom?.className).toContain('text-header-inactive-bg');
+
+    // The normal passthrough-exit gesture gives focus back to command mode; zoom
+    // follows focus and begins its return to the tiled layout in the same action.
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', location: 1, bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', location: 2, bubbles: true }));
+    });
+    await flush();
+
+    expect(onEvent).toHaveBeenCalledWith({ type: 'zoomChange', zoomed: false });
+    expect(onEvent).toHaveBeenCalledWith({ type: 'modeChange', mode: 'command' });
+    expect(container.querySelector('[data-session-id="pane-a"]')?.getAttribute('data-focused')).toBe('false');
+  });
+
+  it('unzooms the focused pane when another pane gains focus', async () => {
+    const onEvent = vi.fn();
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard onEvent={onEvent} />);
+    });
+    await flush();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', bubbles: true }));
+    });
+    await flush();
+    expect(container.querySelector('[data-session-id="pane-a"]')?.getAttribute('data-focused')).toBe('true');
+    expect(container.querySelectorAll('button[aria-label="Unzoom"]')).toHaveLength(1);
+    expect(container.querySelector('[data-lath-leaf="pane-a"] button[aria-label="Unzoom"]')).not.toBeNull();
+    expect(container.querySelector('[data-lath-leaf="pane-b"] button[aria-label="Zoom"]')).not.toBeNull();
+
+    onEvent.mockClear();
+    const paneBHeader = container.querySelector<HTMLElement>('[data-lath-leaf="pane-b"] .lath-leaf-header > div');
+    expect(paneBHeader).not.toBeNull();
+    await act(async () => {
+      paneBHeader!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    await flush();
+
+    expect(onEvent).toHaveBeenCalledWith({ type: 'zoomChange', zoomed: false });
+    expect(onEvent).toHaveBeenCalledWith({ type: 'selectionChange', id: 'pane-b', kind: 'pane' });
+    expect(container.querySelector('[data-session-id="pane-a"]')?.getAttribute('data-focused')).toBe('false');
+    expect(container.querySelector('[data-session-id="pane-b"]')?.getAttribute('data-focused')).toBe('true');
+  });
+
+  it('hands zoom over when a partially exposed pane\'s Zoom control is clicked', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', bubbles: true }));
+    });
+    await flush();
+    expect(container.querySelector('[data-lath-leaf="pane-a"] button[aria-label="Unzoom"]')).not.toBeNull();
+
+    // The elevated pane exposes a perimeter, so pane-b's Zoom control is reachable
+    // while pane-a is zoomed. HeaderActionButton stops mousedown, so no selection
+    // runs first: onZoom itself must hand zoom over rather than only unzoom pane-a.
+    const zoomB = container.querySelector<HTMLButtonElement>('[data-lath-leaf="pane-b"] button[aria-label="Zoom"]');
+    expect(zoomB).not.toBeNull();
+    await act(async () => {
+      zoomB!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-lath-leaf="pane-b"] button[aria-label="Unzoom"]')).not.toBeNull();
+    expect(container.querySelectorAll('button[aria-label="Unzoom"]')).toHaveLength(1);
+    expect(container.querySelector('[data-session-id="pane-b"]')?.getAttribute('data-focused')).toBe('true');
+  });
+
   it('dor kill can target a minimized surface ref', async () => {
     let response: { ok: boolean; error?: string } | undefined;
     await act(async () => {
@@ -568,6 +708,22 @@ describe('Wall on the Lath engine', () => {
     return response!.result!.surfaceId!;
   }
 
+  async function dispatchAgentBrowser(params: Record<string, unknown>): Promise<string> {
+    let response: { ok: boolean; result?: { surfaceId?: string } } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.agentBrowser,
+          params,
+          respond: (r: typeof response) => { response = r; },
+        },
+      }));
+    });
+    await flush();
+    expect(response?.ok).toBe(true);
+    return response!.result!.surfaceId!;
+  }
+
   it('dor split transfers focus to the new surface (passthrough)', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" showBaseboard />);
@@ -598,6 +754,79 @@ describe('Wall on the Lath engine', () => {
     // new surface is not focused.
     expect(focusOf('pane-a')).toBe('true');
     expect(focusOf(newId)).toBe('false');
+  });
+
+  it('keeps dor agent-browser focus-neutral but enters passthrough for a user port activation', async () => {
+    const defaultSession = sessionForKey('default');
+    const onEvent = vi.fn();
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+
+    try {
+      // The CLI arm creates Browser B without moving selection or keyboard input
+      // away from the passthrough terminal.
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" showBaseboard onEvent={onEvent} />);
+      });
+      await flush();
+      expect(focusOf('pane-a')).toBe('true');
+
+      const browserId = await dispatchAgentBrowser({
+        session: defaultSession,
+        surface: 'surface:1',
+      });
+      expect(focusOf('pane-a')).toBe('true');
+
+      // Return to command mode, then invoke the human right-click path. Even
+      // from command mode, activating a port is an explicit focus request:
+      // Browser B becomes selected in passthrough.
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', location: 1, bubbles: true }));
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', location: 2, bubbles: true }));
+      });
+      await flush();
+
+      (fake as PlatformAdapter).agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+      if (!fake.hasPty('pane-a')) fake.spawnPty('pane-a');
+      fake.setOpenPorts('pane-a', [{
+        protocol: 'tcp',
+        family: 'IPv4',
+        address: '127.0.0.1',
+        port: 5173,
+        pid: 100,
+        processName: 'vite',
+      }]);
+      onEvent.mockClear();
+
+      const header = container.querySelector<HTMLElement>('[data-pane-header-for="pane-a"]')!;
+      await act(async () => {
+        header.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 10,
+          clientY: 10,
+        }));
+      });
+      await flush();
+
+      const portRow = document.querySelector<HTMLButtonElement>(
+        '[data-pane-context-menu-for="pane-a"] button[data-port-entry="5173"]',
+      );
+      expect(portRow).not.toBeNull();
+      await act(async () => {
+        portRow!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      await flush();
+
+      expect(onEvent).toHaveBeenCalledWith({ type: 'selectionChange', id: browserId, kind: 'pane' });
+      expect(onEvent).toHaveBeenCalledWith({ type: 'modeChange', mode: 'passthrough' });
+      expect((fake as PlatformAdapter).agentBrowserCommand).toHaveBeenCalledWith(
+        defaultSession,
+        ['open', 'http://localhost:5173/'],
+        undefined,
+      );
+    } finally {
+      untouchedSpy.mockRestore();
+    }
   });
 
   it('dor split -- (empty tail) opens a blank surface without stealing focus', async () => {

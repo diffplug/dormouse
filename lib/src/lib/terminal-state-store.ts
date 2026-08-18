@@ -1,4 +1,5 @@
 import {
+  commandArgv0,
   createTerminalPaneState,
   cwdFromManualPath,
   cwdFromProcessPath,
@@ -15,6 +16,7 @@ import {
   type PromptSubmitState,
 } from './terminal-command-input';
 import { derivePromptShape, extractCommand, type PromptShape } from './terminal-prompt-shape';
+import { stripTerminalControls } from './terminal-controls';
 import { getSessionIdByPtyId } from './terminal-store';
 
 const paneStates = new Map<string, TerminalPaneState>();
@@ -61,6 +63,17 @@ export function getTerminalPaneStateSnapshot(): Map<string, TerminalPaneState> {
 
 export function getTerminalPaneState(id: string): TerminalPaneState {
   return paneStates.get(id) ?? createTerminalPaneState();
+}
+
+/**
+ * The bare program name of the pane's foreground command, or null when the pane
+ * is at a prompt (or its shell reported no command line). This is the key the
+ * WATCHING rule set is stored under, so the bell and the alert dialog both use
+ * it to decide which rule they are toggling — see `docs/specs/alert.md`.
+ */
+export function getRunningCommandArgv0(id: string): string | null {
+  const raw = paneStates.get(id)?.currentCommand?.rawCommandLine;
+  return raw ? commandArgv0(raw) : null;
 }
 
 // Count sessions whose latest activity is a live/running command (not an idle
@@ -181,14 +194,16 @@ export function recordTerminalUserInputByPtyId(ptyId: string, input: string, rea
   recordTerminalUserInput(resolvePaneStateIdByPtyId(ptyId), input, reader);
 }
 
-// `dor split/ensure -- <command>` spawns a real interactive shell and types the
-// command into it once it reaches a prompt (see typeCommandWhenPromptReady),
-// rather than running `shell -c command`. We seed that command here at spawn,
-// before it is typed, for two reasons. First, it is the readiness sentinel:
+// Programmatically launched interactive commands bypass xterm's onData
+// keystroke fallback, so callers seed their semantic command state here before
+// the PTY write. `dor split/ensure -- <command>` does this at spawn, before
+// typeCommandWhenPromptReady types it. The cold-restore resume action does it
+// immediately before its direct write. For split/ensure it is also the readiness
+// sentinel:
 // typeCommandWhenPromptReady waits for this currentCommand to clear, which
 // happens when the shell draws its first prompt (OSC promptStart, or the
 // keystroke heuristic's prompt detector for shells without integration) — the
-// signal the shell can take input. Second, it bridges the matching window until
+// signal the shell can take input. It then bridges the matching window until
 // the command is typed and the integration re-reports it via OSC 633, so
 // `dor ensure` can match a surface it (or a prior ensure) created. Sourced as
 // `user_input` so it does not mark the pane OSC-driven and so the first-prompt
@@ -320,15 +335,39 @@ function resolvePaneStateIdByPtyId(ptyId: string): string {
 // integration, returning the prompt line (for shape learning) or null. Custom
 // prompts that lack the path/user context signal (`/`, `~`, `@`, `:`) or a
 // recognized terminator (`$`, `#`, `%`, `>`) won't match — intentional, since
-// false positives would prematurely flip a running command back to idle.
+// false positives would prematurely flip a running command back to idle. The
+// 1024-char tail this reads lands mid-sequence routinely, which is why the
+// shared `stripTerminalControls` swallows an unterminated string control: a
+// buffer ending in a half-arrived title OSC would otherwise offer its payload
+// up as the last visible line.
 function detectReturnedShellPrompt(output: string): string | null {
   const visible = stripAltScreenSpans(output);
-  const text = stripTerminalControls(visible).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const normalizeBreaks = (value: string) => value.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  // Boundary mode, for the same reason `detectResumeCommand` uses it: deleting a
+  // redraw's cursor move welds text that was never adjacent on screen, and this
+  // reads the result as a *line*. Without it, `building...\x1b[1;1H➜  ~ ` reads
+  // as the single line `building...➜  ~ `, and the prompt goes undetected.
+  const text = normalizeBreaks(stripTerminalControls(visible, { boundaries: true }));
+  // A boundary is not a real line break, though, and the difference decides the
+  // safe direction. A genuine trailing newline means nothing has been painted on
+  // the current line yet — no prompt — and that must keep returning null, because
+  // a false positive here flips a running command back to idle. A *boundary* at
+  // the tail means only that a control sequence closed the line: a prompt that
+  // clears to end-of-line after painting itself (`➜  ~ \x1b[K`) is the common
+  // case, and treating that as an empty last line would hide every such prompt.
+  // Stripping without boundaries leaves exactly the real breaks, so it answers
+  // which one this is.
+  const endsOnRealNewline = /\n$/.test(normalizeBreaks(stripTerminalControls(visible)));
+  let searchEnd = text.length;
+  if (!endsOnRealNewline) {
+    while (searchEnd > 0 && text[searchEnd - 1] === '\n') searchEnd--;
+  }
+  const head = text.slice(0, searchEnd);
   // Prompts usually come on a fresh line; that rejects arbitrary command output
   // that happens to end with a prompt-like character. The spawn-time first
   // prompt may be the whole buffer with no leading newline, so accept that too.
-  const newlineIndex = text.lastIndexOf('\n');
-  const lastLine = (newlineIndex === -1 ? text : text.slice(newlineIndex + 1)).trimStart();
+  const newlineIndex = head.lastIndexOf('\n');
+  const lastLine = (newlineIndex === -1 ? head : head.slice(newlineIndex + 1)).trimStart();
   if (lastLine.length > 200) return null;
   // PowerShell `PS C:\path>` (with optional trailing space).
   if (/^PS\s+\S.*>\s?$/.test(lastLine)) return lastLine;
@@ -342,7 +381,7 @@ function detectReturnedShellPrompt(output: string): string | null {
   // preceding non-blank line carries prompt context, so stray output ending in
   // `$ ` doesn't match.
   if (/^[$#%]\s*$/.test(lastLine)) {
-    return precedingLineHasPromptContext(text, newlineIndex) ? lastLine : null;
+    return precedingLineHasPromptContext(head, newlineIndex) ? lastLine : null;
   }
   // Generic single-line prompts: require a path/user context signal AND a
   // trailing prompt char + space. The context check rejects lines like
@@ -392,15 +431,6 @@ function stripAltScreenSpans(input: string): string {
     }
   }
   return result;
-}
-
-function stripTerminalControls(input: string): string {
-  return input
-    .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, '')
-    .replace(/\x1bP[\s\S]*?\x1b\\/g, '')
-    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
-    .replace(/\x1b[()][A-Za-z0-9]/g, '')
-    .replace(/\x1b[@-_]/g, '');
 }
 
 function notifyTerminalPaneStateListeners(): void {

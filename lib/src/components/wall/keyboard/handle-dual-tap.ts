@@ -3,7 +3,7 @@ import type { DualTapState, WallKeyboardCtx } from './types';
 /**
  * Detects left-then-right Meta or Shift within 500 ms and exits passthrough.
  * Always consumes Meta/Shift presses (returns true) so later handlers don't
- * misinterpret a modifier release as a navigation key.
+ * misinterpret a bare modifier press as a navigation key.
  */
 export function handleDualTap(
   e: KeyboardEvent,

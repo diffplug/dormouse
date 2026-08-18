@@ -14,11 +14,22 @@ pnpm dev:canopy   # storybook on http://localhost:6007
 - The addon is consumed as a **GitHub-release tarball URL** (no npm registry,
   no auth). pnpm records an integrity hash in the lockfile.
 - The addon bundles xterm core internals, so `@xterm/xterm` here must be the
-  exact beta the fork release was built from — the release version encodes it:
-  `0.20.0-sdf288.1` ⇒ built from `@xterm/xterm@6.1.0-beta.288`.
-- Renovate cannot see tarball URLs. Bumps are manual: cut a fork release, then
-  update the URL (and the `@xterm/xterm` pin if the base beta moved) in
-  `package.json` here.
+  exact beta the fork release was built from. Two things record that base: the
+  release version encodes its counter (`0.20.0-sdf301.1` ⇒ built from
+  `@xterm/xterm@6.1.0-beta.301`), and — as of `0.20.0-sdf301.1` — the tarball
+  declares `peerDependencies: { "@xterm/xterm": "^6.1.0-beta.301" }`, the way
+  every upstream addon does. The peer range is the authoritative one: it names
+  the full version, whereas the counter in the tag repeats across upstream
+  release lines.
+- Renovate cannot see tarball URLs, and `.github/renovate.json` disables
+  `@xterm/**` for this file so it cannot drift the two pins off the fork base
+  either. Bumps are manual: cut a fork release, then
+  `node scripts/xterm-bump.mjs --canopy <forkVersion>` from the repo root
+  rewrites the URL and both pins together. `scripts/xterm-lint.mjs` (in
+  `pnpm test`) fails if the fork's declared peer range and the `@xterm/xterm`
+  pin ever disagree. The trigger and the review process are in
+  `docs/specs/webgl-text.md`; the fork-side recipe is in FORK.md on the `sdf`
+  branch.
 
 ## Regression harness
 
@@ -27,8 +38,9 @@ stacked: pristine upstream `@xterm/addon-webgl`, the fork with `sdf: false`
 (isolates the instance-layout/shader changes), and the fork with `sdf: true`
 (isolates the SDF glyph path). The upstream pin must be the same commit as the
 fork base — the addon's beta counter is offset from core's (addon
-`0.20.0-beta.287` == core `6.1.0-beta.288` == commit `8aab3103`); re-derive it
-with `npm view @xterm/addon-webgl@<ver> gitHead` when the fork rebases.
+`0.20.0-beta.298` == core `6.1.0-beta.301` == commit `8c9b9fdb`); re-derive it
+with `npm view @xterm/addon-webgl@<ver> gitHead` when the fork rebases, or let
+`node scripts/xterm-bump.mjs --canopy <forkVersion>` pick the matching addon.
 
 Story content writes PUA glyphs (powerline chevrons etc.) as `\uE0BX` escapes,
 never literal characters — the literals are invisible in editors and were once

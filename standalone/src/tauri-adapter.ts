@@ -15,7 +15,8 @@ import type {
   PlatformAdapter,
   PtyInfo,
 } from "dormouse-lib/lib/platform/types";
-import { AlertManager, type SessionStatus } from "dormouse-lib/lib/alert-manager";
+import { AlertManager } from "dormouse-lib/lib/alert-manager";
+import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { loadSessionState, saveSessionState } from "dormouse-lib/lib/window-persistence";
 import { TauriSessionStore } from "./tauri-session-store";
@@ -186,6 +187,7 @@ export class TauriAdapter implements PlatformAdapter {
       console.error("[tauri-adapter] load_session failed:", err);
     }
     this.sessionStore.hydrate(seed);
+    await this.clearLegacySessionState();
   }
 
   shutdown(): void {
@@ -225,12 +227,6 @@ export class TauriAdapter implements PlatformAdapter {
   async getCwd(id: string): Promise<string | null> {
     try {
       return await rawInvoke<string | null>("pty_get_cwd", { id });
-    } catch { return null; }
-  }
-
-  async getScrollback(id: string): Promise<string | null> {
-    try {
-      return await rawInvoke<string | null>("pty_get_scrollback", { id });
     } catch { return null; }
   }
 
@@ -453,20 +449,20 @@ export class TauriAdapter implements PlatformAdapter {
     this.alertManager.remove(id);
   }
 
-  alertToggle(id: string): void {
-    this.alertManager.toggleAlert(id);
+  alertSetWatchedCommands(names: string[]): void {
+    this.alertManager.setWatchedCommands(names);
   }
 
-  alertDisable(id: string): void {
-    this.alertManager.disableAlert(id);
+  alertSetCommandWatched(name: string, watched: boolean): void {
+    this.alertManager.setCommandWatched(name, watched);
+  }
+
+  alertPublishSettings(settings: AlertSettings): void {
+    this.alertManager.setInactivityTimeoutMs(settings.inactivityTimeoutMs);
   }
 
   alertDismiss(id: string): void {
     this.alertManager.dismissAlert(id);
-  }
-
-  alertDismissOrToggle(id: string, displayedStatus: string): void {
-    this.alertManager.dismissOrToggleAlert(id, displayedStatus as SessionStatus);
   }
 
   alertAttend(id: string): void {
@@ -497,19 +493,37 @@ export class TauriAdapter implements PlatformAdapter {
     this.alertStateHandlers.add(handler);
   }
 
-  offAlertState(handler: (detail: AlertStateDetail) => void): void {
-    this.alertStateHandlers.delete(handler);
-  }
+  // Single webview owning the AlertManager, so localStorage is the only store
+  // and there is no canonical snapshot to broadcast back.
+  onWatchedCommands(_handler: (names: string[]) => void): void {}
+
+  onAlertSettings(_handler: (settings: AlertSettings) => void): void {}
 
   // --- State persistence ---
 
   private static STATE_KEY = 'dormouse.session';
 
-  // Persisted blob is a PersistedWindow when the workspaces flag is on, a bare
-  // PersistedSession when off (docs/specs/transport.md). The window-persistence
-  // helpers own the translation + JSON plumbing; the backing store is the
-  // Rust-backed cache (hydrated in init()), not WebKit localStorage.
+  // Standalone persists no Session state: quitting the app is a deliberate
+  // ending, and a crash captured nothing, so every launch starts fresh
+  // (docs/specs/transport.md -> "The governing rule").
+  //
+  // This is a gate at the adapter boundary, not a removal of the store. The
+  // plumbing below it — TauriSessionStore, the Rust temp-then-rename file store,
+  // the quit flush/drain ordering — is intact and still needed by the
+  // workspaces-rollout scope (docs/specs/layout.md -> `## Future`). Bringing
+  // VS Code-style restoration to standalone later is flipping this flag plus
+  // adding capture to the existing quit teardown, which already has the right
+  // shape (flush -> kill -> flush -> drain).
+  private static PERSIST_SESSION = false;
+
+  /**
+   * Read by `saveSession`, which skips the whole record build — not just the
+   * write — when a host persists nothing (`PlatformAdapter.persistsSession`).
+   */
+  readonly persistsSession = TauriAdapter.PERSIST_SESSION;
+
   saveState(state: unknown): void {
+    if (!TauriAdapter.PERSIST_SESSION) return;
     try {
       saveSessionState(this.sessionStore, TauriAdapter.STATE_KEY, state);
     } catch {
@@ -518,10 +532,37 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   getState(): unknown {
+    if (!TauriAdapter.PERSIST_SESSION) return null;
     try {
       return loadSessionState(this.sessionStore, TauriAdapter.STATE_KEY);
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Delete any pre-upgrade snapshot or orphaned temp write. Those carry
+   * transcripts, so ignoring the slot is not enough — the bytes have to leave the
+   * disk (docs/specs/transport.md -> "Retiring the transcripts already on disk").
+   * Called from init() after the store hydrates.
+   *
+   * Deletes the file through the Rust store that owns it rather than blanking the
+   * slot: a sentinel would leave the bytes in place until some later write, and
+   * would oblige every reader to treat `''` as a third state alongside present
+   * and absent.
+   */
+  private async clearLegacySessionState(): Promise<void> {
+    const hadReadableSnapshot = this.sessionStore.getItem(TauriAdapter.STATE_KEY) !== null;
+    try {
+      // Always ask Rust to clear: load_session cannot see a .json.tmp left by a
+      // crash before rename, but that file still contains the legacy transcript.
+      await rawInvoke<void>("clear_session");
+      this.sessionStore.hydrate(null);
+      if (hadReadableSnapshot) {
+        console.info('[tauri-adapter] Cleared legacy persisted session (transcripts are no longer stored)');
+      }
+    } catch (err) {
+      console.error('[tauri-adapter] Failed to clear legacy session state:', err);
     }
   }
 

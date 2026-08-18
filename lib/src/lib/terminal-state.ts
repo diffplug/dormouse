@@ -191,19 +191,16 @@ export function reduceTerminalState(
       if (state.pendingCommandLine === event.commandLine) return state;
       return { ...state, pendingCommandLine: event.commandLine };
     case 'commandStart': {
-      const raw = state.pendingCommandLine;
-      const source = event.source === 'osc633_boundaries' && raw
-        ? 'osc633_E'
-        : event.source ?? (raw ? 'osc633_E' : 'osc133_boundaries');
+      const resolved = resolveCommandStart(state.pendingCommandLine, event, {
+        now,
+        fallbackTitle: () => deriveFallbackCommandTitle(state),
+      });
       return {
         ...state,
         currentCommand: {
           id: createId(),
-          rawCommandLine: raw,
-          displayCommand: raw ? summarizeCommandLine(raw) : deriveFallbackCommandTitle(state),
+          ...resolved,
           cwdAtStart: state.cwd,
-          startedAt: event.startedAt ?? now(),
-          source,
         },
         activity: { kind: 'running' },
         pendingCommandLine: null,
@@ -374,6 +371,57 @@ export function summarizeCommandLine(raw: string): string {
   const visibleTokens = commandTitleTokens(commandTokens);
   const suffix = hasPipeline ? ' | ...' : hasCompound ? ' ...' : '';
   return truncateCommandTitle(`${visibleTokens.join(' ')}${suffix}`);
+}
+
+/**
+ * The first word of a command line, reduced to a bare program name: anything
+ * after the first pipeline/compound boundary is dropped, leading `VAR=value`
+ * assignments and a leading `env` are skipped, and argv[0] is taken as a
+ * basename. `claude`, `/usr/bin/claude --print`, and `FOO=1 env BAR=2 claude`
+ * all yield `claude`; `foo | claude` yields `foo`. Returns null when the line
+ * holds no runnable word.
+ *
+ * This is the key WATCHING rules are stored under — see `docs/specs/alert.md`.
+ */
+export function commandArgv0(raw: string): string | null {
+  const commandTokens = takePrimaryCommandTokens(tokenizeCommand(raw.trim()));
+  const command = commandTokens[0];
+  if (!command) return null;
+  return command.split(/[\\/]/).pop() || null;
+}
+
+export interface ResolvedCommandStart {
+  rawCommandLine: string | null;
+  displayCommand: string;
+  source: CommandRunSource;
+  startedAt: number;
+}
+
+/**
+ * Turn a `commandStart` event plus the command line staged by the preceding
+ * `commandLine` event into the fields a command run needs. Shared by the
+ * terminal-state reducer and the alert manager's command-exit track so the
+ * source resolution and display summarization exist in one place.
+ *
+ * `fallbackTitle` supplies the display label when the shell reported no command
+ * line (`OSC 133;C` carries none); it defaults to `DEFAULT_COMMAND_TITLE`.
+ */
+export function resolveCommandStart(
+  pendingCommandLine: string | null,
+  event: Extract<TerminalSemanticEvent, { type: 'commandStart' }>,
+  options: { now?: () => number; fallbackTitle?: () => string } = {},
+): ResolvedCommandStart {
+  const raw = pendingCommandLine;
+  return {
+    rawCommandLine: raw,
+    displayCommand: raw
+      ? summarizeCommandLine(raw)
+      : options.fallbackTitle?.() ?? DEFAULT_COMMAND_TITLE,
+    source: event.source === 'osc633_boundaries' && raw
+      ? 'osc633_E'
+      : event.source ?? (raw ? 'osc633_E' : 'osc133_boundaries'),
+    startedAt: event.startedAt ?? (options.now ?? Date.now)(),
+  };
 }
 
 // Fold the Windows spellings of one directory to a single key so `dor ensure`

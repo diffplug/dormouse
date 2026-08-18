@@ -6,6 +6,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { stat } from 'node:fs/promises';
+import { join } from 'node:path';
 
 import { API_ROUTES, WS_ROUTES, WS_TOKEN_PARAM } from 'server-lib-common';
 
@@ -56,6 +58,14 @@ test('a second enrollment appends and gets distinct credentials', async () => {
   const { sessionToken } = await ownerSession(app);
   const { body } = await listHosts(app, sessionToken);
   assert.equal(body.hosts.length, 2);
+});
+
+test('hosts.json is owner-only, since it stores hostToken in plaintext', async (t) => {
+  if (process.platform === 'win32') return t.skip('POSIX file modes only');
+  const { app, stateDir } = await freshApp();
+  await enrollHost(app);
+  const { mode } = await stat(join(stateDir, 'hosts.json'));
+  assert.equal(mode & 0o777, 0o600);
 });
 
 test('GET /api/hosts requires a session', async () => {

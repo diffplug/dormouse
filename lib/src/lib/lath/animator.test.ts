@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { createAnimator, cubicBezier, LATH_EASING, LATH_MOTION_MS } from './animator';
+import {
+  createAnimator,
+  cubicBezier,
+  LATH_EASING,
+  LATH_LAYER_DYING,
+  LATH_LAYER_ELEVATED,
+  LATH_LAYER_TILED,
+  LATH_MOTION_MS,
+} from './animator';
 import type { Rect } from './model';
 import { R } from './test-util';
 
@@ -43,6 +51,42 @@ describe('cubicBezier', () => {
   it('house easing (0.22,1,0.36,1) leads its input (fast-out)', () => {
     expect(LATH_EASING(0.5)).toBeGreaterThan(0.5);
     expect(LATH_MOTION_MS).toBe(440);
+  });
+});
+
+describe('cubicBezier slope', () => {
+  it('is 1 everywhere on a linear curve', () => {
+    const linear = cubicBezier(1 / 3, 1 / 3, 2 / 3, 2 / 3);
+    for (const t of [0, 0.25, 0.5, 0.8, 1]) {
+      expect(linear.slope(t)).toBeCloseTo(1, 5);
+    }
+  });
+
+  it('opens at y1/x1 on the house curve and decays to rest', () => {
+    // dy/dx at t=0 is 3*y1 / 3*x1 — the ease-out's peak, 4.545x its average.
+    expect(LATH_EASING.slope(0)).toBeCloseTo(1 / 0.22, 5);
+    expect(LATH_EASING.slope(1)).toBeCloseTo(0, 5);
+  });
+
+  it('decreases monotonically across the unit interval', () => {
+    let prev = Infinity;
+    for (let t = 0; t <= 1.0001; t += 0.05) {
+      const v = LATH_EASING.slope(t);
+      expect(v).toBeLessThanOrEqual(prev + 1e-9);
+      prev = v;
+    }
+  });
+
+  it('clamps to the endpoint slopes outside [0,1]', () => {
+    expect(LATH_EASING.slope(-5)).toBe(LATH_EASING.slope(0));
+    expect(LATH_EASING.slope(5)).toBe(LATH_EASING.slope(1));
+  });
+
+  it('returns 0 rather than dividing by zero when a control point sits on the axis', () => {
+    // x1 === 0 makes dx/ds vanish at t=0; nothing in-repo uses such a curve, but
+    // the guard exists so a future easing cannot produce Infinity/NaN.
+    expect(cubicBezier(0, 1, 0.36, 1).slope(0)).toBe(0);
+    expect(Number.isFinite(cubicBezier(0, 1, 0.36, 1).slope(0.5))).toBe(true);
   });
 });
 
@@ -131,17 +175,33 @@ describe('animator retarget + framesAt', () => {
     expect(a.framesAt(T0 + DUR / 2).get('x')!.rect).toEqual(C);
     expect(a.settledAt(T0 + DUR / 2)).toBe(true);
   });
+
+  it('rises before moving and stays elevated until its return motion settles', () => {
+    const a = make();
+    a.retarget(new Map([['x', A]]), T0);
+
+    a.retarget(new Map([['x', B]]), T0, undefined, {
+      layers: new Map([['x', LATH_LAYER_ELEVATED]]),
+    });
+    expect(a.framesAt(T0).get('x')!.layer).toBe(LATH_LAYER_ELEVATED);
+    expect(a.framesAt(T0 + DUR).get('x')!.layer).toBe(LATH_LAYER_ELEVATED);
+
+    a.retarget(new Map([['x', A]]), T0 + DUR);
+    expect(a.framesAt(T0 + DUR).get('x')!.layer).toBe(LATH_LAYER_ELEVATED);
+    expect(a.framesAt(T0 + DUR + DUR / 2).get('x')!.layer).toBe(LATH_LAYER_ELEVATED);
+    expect(a.framesAt(T0 + DUR * 2).get('x')!.layer).toBe(LATH_LAYER_TILED);
+  });
 });
 
 describe('animator markDying', () => {
-  it('fades opacity → 0 over the duration with the rect frozen, layer 1', () => {
+  it('fades opacity → 0 over the duration with the rect frozen in the dying layer', () => {
     const a = make();
     a.retarget(new Map([['x', A]]), T0);
     a.markDying('x', T0);
     expect(a.isDying('x')).toBe(true);
     const start = a.framesAt(T0).get('x')!;
     expect(start.opacity).toBe(1);
-    expect(start.layer).toBe(1);
+    expect(start.layer).toBe(LATH_LAYER_DYING);
     expect(start.rect).toEqual(A); // frozen
 
     const mid = a.framesAt(T0 + DUR / 2).get('x')!;
@@ -179,7 +239,7 @@ describe('animator markDying', () => {
     // A commit while x is still in the tree (e.g. another pane resized): x stays dying.
     a.retarget(new Map([['x', A], ['y', B]]), T0);
     expect(a.isDying('x')).toBe(true);
-    expect(a.framesAt(T0).get('x')!.layer).toBe(1);
+    expect(a.framesAt(T0).get('x')!.layer).toBe(LATH_LAYER_DYING);
     // The remove commits: x is gone from the targets → dropped.
     a.retarget(new Map([['y', B]]), T0 + DUR);
     expect(a.isDying('x')).toBe(false);
@@ -191,6 +251,15 @@ describe('animator markDying', () => {
     a.markDying('ghost', T0);
     expect(a.isDying('ghost')).toBe(false);
     expect(a.framesAt(T0).has('ghost')).toBe(false);
+  });
+
+  it('keeps an elevated leaf elevated while it dies', () => {
+    const a = make();
+    a.retarget(new Map([['x', A]]), T0, undefined, {
+      layers: new Map([['x', LATH_LAYER_ELEVATED]]),
+    });
+    a.markDying('x', T0);
+    expect(a.framesAt(T0).get('x')!.layer).toBe(LATH_LAYER_ELEVATED);
   });
 });
 

@@ -1,23 +1,5 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`TutRunner snapshots > renders Alert and TODO with all items incomplete 1`] = `
-"[H[2J
-  [1mAlert and TODO[0m  [2m0/6 complete[0m
-  [2m[36mEsc[39m to go back[0m
-
-   [33m●[0m  [1mEnable WATCHING on a pane[0m
-        [3mClick the bell on the pane you want to use, or press [36ma[39m in command mode[0m
-        [3mwith that pane selected.[0m
-   [2m·[0m  Watch the bell tilt while a task runs
-   [2m·[0m  Bell rings when the task completes
-   [2m·[0m  TODO tag appears when you dismiss the ringing alert
-   [2m·[0m  Press [36mEnter[39m inside the pane to clear the TODO
-   [2m·[0m  Manually add a TODO
-
-  [2mPress [36ms[39m here to start a fake busy task.[0m
-"
-`;
-
 exports[`TutRunner snapshots > renders Copy paste with all items incomplete 1`] = `
 "[H[2J
   [1mCopy paste[0m  [2m0/4 complete[0m
@@ -76,18 +58,58 @@ exports[`TutRunner snapshots > renders Keyboard navigation with all items incomp
 "
 `;
 
+exports[`TutRunner snapshots > renders the alert section with all items incomplete 1`] = `
+"[H[2J
+  [1mAlerts and attention[0m  [2m0/9 complete[0m
+  [2m[36mEsc[39m to go back[0m
+
+   [33m●[0m  [1mAlert me whenever [36mlongtask[39m runs[0m
+        [3mPress [36ms[39m to start a fake [36mlongtask[39m, then click that pane's bell (or select[0m
+        [3mit and press [36ma[39m). Alerts belong to the command, not the tab — the bell[0m
+        [3msays "Alert on all longtask".[0m
+   [2m·[0m  The rule covers every pane running that command
+   [2m·[0m  The bell tilts while the command works
+   [2m·[0m  It rings when the command goes quiet
+   [2m·[0m  Dismissing a ringing alert leaves a TODO behind
+   [2m·[0m  Press [36mEnter[39m inside the pane to clear the TODO
+   [2m·[0m  Add a TODO by hand
+   [2m·[0m  A program can ring the bell itself
+   [2m·[0m  A long command that finished while you were away
+
+  [2mThree different things can ring the bell: a rule you set on a command name, a[0m
+  [2mnotification the program sends, and a long command finishing while you were[0m
+  [2melsewhere. None of them ring while you are actually looking at the pane.[0m
+
+  [2mPress [36ms[39m to start a fake [36mlongtask[39m.[0m
+  [2mPress [36mn[39m for a program that rings the bell itself.[0m
+  [2mPress [36mx[39m to start a fake [36mslowbuild[39m.[0m
+"
+`;
+
 exports[`TutRunner snapshots > renders the top-level menu 1`] = `
 "[H[2J
   [1mDormouse Playground Tutorial[0m
   [2m[36mEsc[39m/[36mq[39m to exit · [36mEnter[39m to open · [36m↑↓[39m to navigate[0m
 
-  [36m❯[0m [1mKeyboard navigation[0m  [2m[0/7 complete][0m
-    Alert and TODO  [2m[0/6 complete][0m
+  [36m❯[0m [1mMake it yours[0m  [2m[0/1 complete][0m
+    Keyboard navigation  [2m[0/7 complete][0m
+    Alerts and attention  [2m[0/9 complete][0m
     Copy paste  [2m[0/4 complete][0m
     Starred on GitHub  [2m[not yet][0m
-    🐭 FlappyTerm 🐭  [2m[LOCKED 0/17][0m
+    🐭 FlappyTerm 🐭  [2m[LOCKED 0/21][0m
 
     [2mReset progress[0m
 
+"
+`;
+
+exports[`TutRunner snapshots > starts the desktop tutorial inside Make it yours 1`] = `
+"[H[2J
+  [1mMake it yours[0m  [2m0/1 complete[0m
+  [2m[36mEsc[39m to go back[0m
+
+   [33m●[0m  [1mChange the theme[0m
+        [3mClick the [36msliders[39m icon at the bottom-right to open Settings, then pick a[0m
+        [3mtheme.[0m
 "
 `;

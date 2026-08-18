@@ -2,7 +2,7 @@
   "name": "dormouse-root",
   "private": true,
   "license": "FSL-1.1-MIT",
-  "packageManager": "pnpm@11.9.0",
+  "packageManager": "pnpm@11.17.0",
   "devEngines": {
     "runtime": {
       "name": "node",
@@ -12,8 +12,10 @@
   },
   "scripts": {
     "build": "pnpm run build:vscode && pnpm --filter dormouse-website build",
-    "test": "node scripts/spec-lint.mjs && pnpm -r run test",
+    "test": "node scripts/spec-lint.mjs && node scripts/xterm-lint.mjs && pnpm -r run test",
     "lint:specs": "node scripts/spec-lint.mjs",
+    "lint:xterm": "node scripts/xterm-lint.mjs",
+    "bump:xterm": "node scripts/xterm-bump.mjs",
     "dev:canopy": "pnpm --filter canopy storybook",
     "dev:lib": "pnpm --filter dormouse-lib dev",
     "dev:standalone": "node scripts/free-dev-port.mjs && pnpm --filter dormouse-standalone tauri dev",

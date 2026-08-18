@@ -2,10 +2,12 @@ import { useRef } from 'react';
 import { ProhibitIcon, WarningOctagonIcon } from '@phosphor-icons/react';
 import type { DisplayMatchVerdict, ExternalUriDecision } from '../lib/external-links';
 import {
+  MODAL_OVERLAY_INSET,
+  modalActionButton,
   ModalCloseButton,
   ModalFrame,
   ModalReviewBlock,
-  modalActionButton,
+  OVERLAY_MAX_HEIGHT,
 } from './design';
 
 export interface ExternalLinkModalRequest {
@@ -72,8 +74,8 @@ export function ExternalLinkModal({
       layer="critical"
       backdrop="strong"
       elevation="modal"
-      overlayClassName="px-4 py-6"
-      className="w-full max-w-[34rem]"
+      overlayClassName={MODAL_OVERLAY_INSET}
+      className={`${OVERLAY_MAX_HEIGHT.modal} w-full max-w-[34rem] overflow-y-auto`}
       // Deceptive case: focus the copy action so a default Enter doesn't dismiss
       // silently. Everywhere else: focus the safe affordance (Cancel/Close).
       initialFocusRef={isDeceptive ? primaryButtonRef : secondaryButtonRef}

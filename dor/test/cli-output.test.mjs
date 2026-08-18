@@ -708,6 +708,16 @@ test('kill missing confirmation output', async () => {
   await snapshot('kill-missing-confirmation', await runCli(['kill', 'surface:2'], { client: fixtureClient() }));
 });
 
+test('kill conflicting confirmation output', async () => {
+  await snapshot(
+    'kill-conflicting-confirmation',
+    await runCli(
+      ['kill', 'surface:2', '--confirm-dangerously', '--confirm-if-read', 'done'],
+      { client: fixtureClient() },
+    ),
+  );
+});
+
 test('kill short confirm-if-read output', async () => {
   await snapshot(
     'kill-short-confirm-if-read',

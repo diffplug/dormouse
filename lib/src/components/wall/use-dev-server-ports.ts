@@ -26,8 +26,7 @@
  */
 import { useEffect } from 'react';
 import { getPlatform } from '../../lib/platform';
-import { getActivitySnapshot, getTerminalPaneStateSnapshot } from '../../lib/terminal-registry';
-import { buildAppTitleResolver, deriveSurfaceLabel, DEFAULT_IDLE_TITLE } from '../../lib/terminal-state';
+import { deriveSessionLabel } from '../../lib/session-label';
 import {
   getWantedDevServerPorts,
   setDevServerResolution,
@@ -37,6 +36,7 @@ import {
 import type { DooredItem } from './wall-types';
 import type { LathWallEngine } from './lath-wall-engine';
 import { isBrowserParams } from './browser-surface';
+import { servesLoopback } from './port-url';
 
 // Wait this long after interest changes before scanning, so a tab's open +
 // initial screencast settle first and quick navigation coalesces into one scan.
@@ -55,13 +55,6 @@ function isTerminalParams(params: unknown): boolean {
 
 function isTerminalDoor(door: DooredItem): boolean {
   return (door.component ?? 'terminal') === 'terminal';
-}
-
-// A process bound here answers `localhost:<port>`: loopback (127.0.0.1 / ::1)
-// or any-interface (0.0.0.0 / ::). A process bound to one specific non-loopback
-// interface is excluded — it isn't reachable as localhost.
-export function servesLoopback(address: string): boolean {
-  return address === '127.0.0.1' || address === '::1' || address === '0.0.0.0' || address === '::';
 }
 
 // requestIdleCallback isn't universal (absent in WKWebView / Tauri on macOS),
@@ -96,20 +89,6 @@ export function useDevServerPortCorrelation({
     // Ports already matched to a pane. We don't rescan these until a reload
     // (clears the whole set) or the port leaves "wanted" (navigation).
     const settled = new Set<number>();
-
-    // Concise pane label (e.g. `pnpm dev`), mirroring buildDorSurfaces; falls
-    // back to the panel/door title. Works for visible panes and minimized doors
-    // alike (both keep their pty + terminal state).
-    const labelForPane = (id: string, fallbackTitle: string | null): string => {
-      const states = getTerminalPaneStateSnapshot();
-      const state = states.get(id);
-      if (state) {
-        const appTitleForPane = buildAppTitleResolver(states, getActivitySnapshot());
-        const primary = deriveSurfaceLabel(state, [state], appTitleForPane, fallbackTitle);
-        if (primary && primary !== DEFAULT_IDLE_TITLE) return primary;
-      }
-      return fallbackTitle?.trim() || 'terminal';
-    };
 
     const resolveOnce = async (): Promise<ResolveOutcome> => {
       if (cancelled || running) return 'busy';
@@ -179,7 +158,7 @@ export function useDevServerPortCorrelation({
           // (e.g. the dev server is still starting up).
           if (list.length === 1) {
             settled.add(port);
-            setDevServerResolution(port, { paneId: list[0], label: labelForPane(list[0], titles.get(list[0]) ?? null) });
+            setDevServerResolution(port, { paneId: list[0], label: deriveSessionLabel(list[0], titles.get(list[0]) ?? null) });
           } else {
             setDevServerResolution(port, null);
           }

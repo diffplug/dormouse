@@ -14,11 +14,12 @@ import {
 } from '@phosphor-icons/react';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { TodoAlertDialog } from '../TodoAlertDialog';
-import { TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
+import { HEADER_PALETTE_TRANSITION_CLASS, paneZoomButtonClass, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
 import { bellIconClass } from '../bell-icon-class';
 import { useTodoPillContent } from '../TodoPillBody';
 import type { PaneProps } from './pane-props';
 import { IllegalRenameWarning, type RenameRejection } from './IllegalRenameWarning';
+import { PaneHeaderContextMenu } from './PaneHeaderContextMenu';
 import {
   DEFAULT_MOUSE_SELECTION_STATE,
   getMouseSelectionSnapshot,
@@ -36,13 +37,12 @@ import {
 } from '../../lib/terminal-registry';
 import {
   buildAppTitleResolver,
+  commandArgv0,
   createTerminalPaneState,
   COMMAND_FAIL_GLYPH,
   deriveHeader,
   resolveDisplayPrimary,
   titleCandidatesForDisplay,
-  titleSourceLabel,
-  type TerminalTitle,
 } from '../../lib/terminal-state';
 import {
   DialogKeyboardContext,
@@ -51,11 +51,13 @@ import {
   RenamingIdContext,
   SelectedIdContext,
   WindowFocusedContext,
-  ZoomedContext,
+  ZoomedIdContext,
 } from './wall-context';
 
 const tabVariant = tv({
-  base: `flex h-full w-full cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing`,
+  // The active/inactive palette swap crossfades in step with the focus ring's
+  // travel (HEADER_PALETTE_TRANSITION_CLASS); children inherit via `text-inherit`.
+  base: `flex h-full w-full cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS}`,
   variants: {
     state: {
       active: 'bg-header-active-bg text-header-active-fg',
@@ -66,27 +68,25 @@ const tabVariant = tv({
 
 type HeaderTier = 'full' | 'compact' | 'minimal';
 
-const ALERT_BUTTON_ENABLED = { aria: 'Disable watching', tooltip: '[a] Disable WATCHING' };
-const ALERT_BUTTON_LABELS: Record<SessionStatus, { aria: string; tooltip: string }> = {
-  WATCHING_DISABLED: { aria: 'Enable watching', tooltip: '[a] Enable WATCHING' },
-  NOTHING_TO_SHOW: ALERT_BUTTON_ENABLED,
-  MIGHT_BE_BUSY: ALERT_BUTTON_ENABLED,
-  BUSY: ALERT_BUTTON_ENABLED,
-  MIGHT_NEED_ATTENTION: ALERT_BUTTON_ENABLED,
-  ALERT_RINGING: { aria: 'Alert ringing', tooltip: 'Alert ringing' },
-  OSC_NOTIF_BUSY: { aria: 'Progress active', tooltip: 'Progress active' },
-  COMMAND_EXIT_ARMED: { aria: 'Command running', tooltip: 'Command running' },
-};
+// WATCHING is a rule on the running command, so the bell says which command it
+// would act on rather than naming an abstract toggle (`docs/specs/alert.md`).
+function alertButtonLabelsFor(status: SessionStatus, argv0: string | null): { aria: string; tooltip: string } {
+  if (status === 'ALERT_RINGING') return { aria: 'Alert ringing', tooltip: 'Alert ringing' };
+  if (status === 'OSC_NOTIF_BUSY') return { aria: 'Progress active', tooltip: 'Progress active' };
+  if (status === 'COMMAND_EXIT_ARMED') return { aria: 'Command running', tooltip: 'Command running' };
+  if (!argv0) return { aria: 'Alerts are per command', tooltip: '[a] Alerts are per command' };
+  return status === 'WATCHING_DISABLED'
+    ? { aria: `Alert on all ${argv0}`, tooltip: `[a] Alert on all "${argv0}"` }
+    : { aria: `Stop alerting on all ${argv0}`, tooltip: `[a] Stop alerting on all "${argv0}"` };
+}
 const TODO_PREVIEW_GAP = 6;
 const TODO_PREVIEW_MARGIN = 8;
-const TITLE_CANDIDATES_GAP = 6;
-const TITLE_CANDIDATES_MARGIN = 8;
 
 export function TerminalPaneHeader({ id, title }: PaneProps) {
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
   const renamingId = useContext(RenamingIdContext);
-  const zoomed = useContext(ZoomedContext);
+  const zoomed = useContext(ZoomedIdContext) === id;
   const windowFocused = useContext(WindowFocusedContext);
   const setDialogKeyboardActive = useContext(DialogKeyboardContext);
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
@@ -128,12 +128,15 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
   const [tier, setTier] = useState<HeaderTier>('full');
   const [dialogTriggerRect, setDialogTriggerRect] = useState<DOMRect | null>(null);
   const [todoPreviewRect, setTodoPreviewRect] = useState<DOMRect | null>(null);
-  const [titleCandidatesRect, setTitleCandidatesRect] = useState<DOMRect | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [renameWarning, setRenameWarning] = useState<{ rect: DOMRect; reason: RenameRejection; value: string } | null>(null);
   const todoPill = useTodoPillContent(activity.todo);
   const titleCandidates = useMemo(() => titleCandidatesForDisplay(paneState), [paneState]);
   const showTodoPill = todoPill.visible && tier !== 'minimal';
-  const alertButtonLabels = ALERT_BUTTON_LABELS[activity.status];
+  const runningArgv0 = paneState.currentCommand?.rawCommandLine
+    ? commandArgv0(paneState.currentCommand.rawCommandLine)
+    : null;
+  const alertButtonLabels = alertButtonLabelsFor(activity.status, runningArgv0);
   const alertButtonAriaLabel = alertButtonLabels.aria;
   const alertButtonTooltip = alertButtonLabels.tooltip;
   const alertButtonTooltipDetail = activity.status === 'ALERT_RINGING'
@@ -144,7 +147,7 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
 
   const closeDialog = useCallback(() => setDialogTriggerRect(null), []);
   const closeTodoPreview = useCallback(() => setTodoPreviewRect(null), []);
-  const closeTitleCandidates = useCallback(() => setTitleCandidatesRect(null), []);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
   const closeRenameWarning = useCallback(() => setRenameWarning(null), []);
   const submitRename = useCallback((value: string, anchor: HTMLElement) => {
     const rect = anchor.getBoundingClientRect();
@@ -162,7 +165,9 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
 
   const triggerAlertButtonAction = useCallback((displayedStatus: SessionStatus, button: HTMLButtonElement) => {
     const result = actions.onAlertButton(id, displayedStatus);
-    if (result === 'dismissed' || result === 'menu') {
+    // 'no-command' opens the dialog too — it is where we explain that alerts are
+    // keyed on the running command and there is nothing running here.
+    if (result === 'dismissed' || result === 'menu' || result === 'no-command') {
       setDialogTriggerRect(button.getBoundingClientRect());
     }
   }, [actions, id]);
@@ -184,30 +189,20 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
     if (!activity.notification) setTodoPreviewRect(null);
   }, [activity.notification]);
 
-  const titleCandidatesOpen = !!titleCandidatesRect;
-  useEffect(() => {
-    if (!titleCandidatesOpen) return;
-    const close = () => setTitleCandidatesRect(null);
-    const closeOnKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') close();
-    };
-    window.addEventListener('pointerdown', close);
-    window.addEventListener('resize', close);
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('keydown', closeOnKey);
-    return () => {
-      window.removeEventListener('pointerdown', close);
-      window.removeEventListener('resize', close);
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('keydown', closeOnKey);
-    };
-  }, [titleCandidatesOpen]);
-
   return (
     <div
       ref={tabRef}
+      data-pane-header-for={id}
       className={tabVariant({ state: isActiveHeader ? 'active' : 'inactive' })}
       onMouseDown={() => actions.onClickPanel(id)}
+      onContextMenu={(e) => {
+        // The whole header opens this one menu; only the bell button
+        // stopPropagations its own right-click (the alert dialog). Right-clicks
+        // on the title now bubble here — the menu offers "title candidates".
+        e.preventDefault();
+        e.stopPropagation();
+        setContextMenu({ x: e.clientX, y: e.clientY });
+      }}
     >
       <div className="flex flex-1 min-w-0 items-center gap-1.5 overflow-hidden">
         {isRenaming ? (
@@ -230,15 +225,10 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
           />
         ) : (
           <span
-            data-title-candidates-for={id}
+            data-pane-title-for={id}
             className="inline-flex max-w-full min-w-0 shrink cursor-text items-baseline overflow-hidden font-medium text-inherit decoration-current/50 underline-offset-2 hover:underline"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); actions.onStartRename(id); }}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setTitleCandidatesRect(e.currentTarget.getBoundingClientRect());
-            }}
           >
             <span className="min-w-0 shrink truncate">{displayTitleBase}</span>
             {showsFailGlyph && (
@@ -352,10 +342,10 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
                 tooltip={'Split top/bottom [-] or ["]'}
               ><SplitVerticalIcon size={14} /></HeaderActionButton>
               <HeaderActionButton
-                className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
+                className={paneZoomButtonClass(zoomed, isActiveHeader)}
                 onClick={(e) => { e.stopPropagation(); actions.onZoom(id); }}
                 ariaLabel={zoomed ? 'Unzoom' : 'Zoom'}
-                tooltip={zoomed ? 'Unzoom [z]' : 'Zoom [z]'}
+                tooltip={zoomed ? 'Unzoom' : 'Zoom [z]'}
               >{zoomed ? <ArrowsInIcon size={14} /> : <ArrowsOutIcon size={14} />}</HeaderActionButton>
             </div>
           )}
@@ -398,12 +388,14 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
           anchorRect={todoPreviewRect}
         />
       )}
-      {titleCandidatesRect && !dialogTriggerRect && (
-        <TitleCandidatesPopover
-          anchorRect={titleCandidatesRect}
+      {contextMenu && (
+        <PaneHeaderContextMenu
+          id={id}
+          anchor={contextMenu}
+          onClose={closeContextMenu}
+          onKeyboardActiveChange={setDialogKeyboardActive}
           candidates={titleCandidates}
           currentTitle={displayTitleBase}
-          onClose={closeTitleCandidates}
         />
       )}
       {renameWarning && (
@@ -415,80 +407,6 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
         />
       )}
     </div>
-  );
-}
-
-function TitleCandidatesPopover({
-  anchorRect,
-  candidates,
-  currentTitle,
-  onClose,
-}: {
-  anchorRect: DOMRect;
-  candidates: TerminalTitle[];
-  currentTitle: string;
-  onClose: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [style, setStyle] = useState<CSSProperties>({
-    position: 'fixed',
-    left: anchorRect.left,
-    top: anchorRect.bottom + TITLE_CANDIDATES_GAP,
-  });
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const top = anchorRect.bottom + TITLE_CANDIDATES_GAP;
-    const maxLeft = Math.max(TITLE_CANDIDATES_MARGIN, window.innerWidth - rect.width - TITLE_CANDIDATES_MARGIN);
-    setStyle({
-      position: 'fixed',
-      left: Math.min(Math.max(anchorRect.left, TITLE_CANDIDATES_MARGIN), maxLeft),
-      top,
-      maxHeight: Math.max(80, window.innerHeight - top - TITLE_CANDIDATES_MARGIN),
-    });
-  }, [anchorRect]);
-
-  return createPortal(
-    <div
-      ref={ref}
-      role="dialog"
-      aria-label="Title candidates"
-      className="z-[1000] max-w-96 overflow-auto rounded border border-border bg-surface-raised px-2.5 py-2 font-mono text-sm leading-snug text-foreground shadow-md"
-      style={style}
-      onPointerDown={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
-      onContextMenu={(e) => e.preventDefault()}
-    >
-      <div className="mb-2 flex items-center justify-between gap-3 border-b border-border pb-1.5">
-        <div className="min-w-0 truncate font-medium">{currentTitle}</div>
-        <button
-          type="button"
-          className="shrink-0 rounded px-1 text-muted transition-colors hover:bg-current/10 hover:text-foreground"
-          aria-label="Close title candidates"
-          onClick={onClose}
-        >
-          <XIcon size={12} />
-        </button>
-      </div>
-      {candidates.length === 0 ? (
-        <div className="text-muted">No title candidates</div>
-      ) : (
-        <div className="space-y-1.5">
-          {candidates.map((candidate) => (
-            <div key={candidate.source} className="grid grid-cols-[4.75rem_minmax(0,1fr)_auto] items-baseline gap-2">
-              <span className="text-muted">{titleSourceLabel(candidate.source)}</span>
-              <span className="min-w-0 truncate" title={candidate.title}>{candidate.title}</span>
-              <time className="text-xs text-muted" dateTime={formatTitleCandidateDateTime(candidate.updatedAt)}>
-                {formatTitleCandidateTime(candidate.updatedAt)}
-              </time>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>,
-    document.body,
   );
 }
 
@@ -527,7 +445,7 @@ function TodoNotificationPreview({
       ref={ref}
       id={id}
       role="tooltip"
-      className="z-[1000] max-w-80 rounded border border-border bg-surface-raised px-2.5 py-2 font-mono text-sm leading-snug text-foreground shadow-md"
+      className={`${POPUP_SURFACE_CLASS} max-w-80 px-2.5 py-2 text-sm leading-snug`}
       style={style}
     >
       {notification.title && (
@@ -557,18 +475,4 @@ function formatNotificationPreview(notification: { title: string | null; body: s
   if (parts.length === 0) return undefined;
   const preview = parts.join('\n');
   return preview.length > 512 ? `${preview.slice(0, 509)}...` : preview;
-}
-
-function formatTitleCandidateTime(timestamp: number): string {
-  if (!Number.isFinite(timestamp)) return 'unknown';
-  return new Date(timestamp).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
-}
-
-function formatTitleCandidateDateTime(timestamp: number): string | undefined {
-  if (!Number.isFinite(timestamp)) return undefined;
-  return new Date(timestamp).toISOString();
 }

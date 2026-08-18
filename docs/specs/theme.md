@@ -8,7 +8,12 @@ theme-appropriate xterm.js colors.
 
 VSCode extension mode gets `--vscode-*` variables from VSCode. Standalone and
 website mode apply the same shape of variables to `document.body` with
-`applyTheme()` from a bundled or installed Dormouse theme. Both paths run the
+`applyTheme()` from a bundled or installed Dormouse theme. The Pocket app is
+a fourth host: it restores the persisted/bundled theme with
+`restoreActiveTheme()` before its first paint — auth screens included — and
+additionally syncs document-level browser chrome (`color-scheme`,
+`meta[name="theme-color"]`); see
+[pocket-app.md](./pocket-app.md#design-system-and-theming). All paths run the
 same consumed-token resolver from `lib/src/lib/themes/vscode-color-resolver.ts`
 so omitted theme JSON keys behave like VSCode registry defaults before
 Dormouse renders.
@@ -47,7 +52,7 @@ chrome in `lib/src/remote/pocket-app/App.tsx`.
 Source of truth: `lib/src/theme.css` defines token→VSCode-key bindings. The
 runtime-picked `--color-door-bg` / `--color-door-fg`, `--color-focus-ring`, and
 the per-surface alarm tints
-(`--color-alarm-vs-{header-active,header-inactive,door}`) are computed by
+(`--color-alarm-vs-{header-active,header-inactive,door,terminal}`) are computed by
 `computeDynamicPalette()` in `lib/src/lib/themes/dynamic-palette.ts` using OKLab
 distance/chroma helpers from `lib/src/lib/color-contrast.ts`;
 `useDynamicPalette()` in `lib/src/lib/themes/use-dynamic-palette.ts` publishes
@@ -60,9 +65,10 @@ the chosen variables on `document.body`. Public theme helpers are exported from
 - Focus ring prefers a chromatic `focusBorder`, then a chromatic active-header
   background, then the highest contrast fallback.
 - Each alarm tint is plain white or black, picked by the OKLab lightness of
-  the background the ringing bell sits on (`pickAlarmColor`): the active
-  header, the inactive header, or the door. The `--vscode-terminal-ansiYellow`
-  binding in `theme.css` is only the pre-publish baseline. Because
+  the background the alert treatment sits on (`pickAlarmColor`): the active
+  header, the inactive header, the door, or the terminal body. The terminal
+  variant drives the whole-Pane spoken-alarm overlay. The
+  `--vscode-terminal-ansiYellow` binding in `theme.css` is only the pre-publish baseline. Because
   `--color-alarm-vs-door` derives from `--color-door-bg`, which the same pass
   computes, the first pass after a theme change reads the previous door bg —
   the `MutationObserver` re-fires on the pass's own `body.style` write, so the
@@ -106,7 +112,7 @@ state saying a theme is active while xterm.js sees fallback colors.
 declarations so Tailwind can generate utility classes, but treat the body-level
 declarations as the runtime source of truth.
 Dynamic palette tokens (`--color-door-bg`, `--color-door-fg`,
-`--color-focus-ring`, and the three `--color-alarm-vs-*` tokens) also have
+`--color-focus-ring`, and the four `--color-alarm-vs-*` tokens) also have
 body-level baseline bindings matching the `@theme` declarations, so direct
 CSS-var consumers such as the mobile gesture SVG — and a ringing bell before
 the first dynamic pass — render visibly before `useDynamicPalette()` publishes
@@ -165,6 +171,80 @@ persistence are implementation details of `lib/src/lib/themes/` and
 `ThemePicker.tsx`. They must preserve the rendering contract above but do not
 need separate spec rules here.
 
+`subscribeToActiveTheme()` in `lib/src/lib/themes/apply.ts` notifies when a
+*different* theme is applied. A same-theme re-apply — the hydration repeat above
+— is not a change, and neither is re-selecting the active theme, so the
+boot-time `restoreActiveTheme()` cannot be mistaken for a user picking one. It
+exists for the website tutorial's theme step
+([tutorial.md](./tutorial.md)); do not reach for `onTerminalThemeChange()`
+(`terminal-theme.ts`) instead, which watches resolved xterm palette JSON through
+a `MutationObserver` and fires on the first mutation after it starts.
+
+## Where the user picks a theme
+
+One rule: **every host that lets the user pick a theme does it in the Settings
+dialog**, opened from the far right of the baseboard
+(`lib/src/components/SettingsDialog.tsx`, alarm sections in
+[alert.md](./alert.md)). Host chrome — the standalone titlebar, the website
+playground navbar — carries no theme control.
+
+- **VS Code** offers none at all. `VSCodeAdapter` sets the optional
+  `hostOwnsTheme` capability on `PlatformAdapter`, and the dialog hides its
+  Theme row when it is set; VS Code supplies `--vscode-*` itself and its own
+  theme UI is the only correct control there. Absent reads as `false`, so every
+  other adapter gets the row.
+- Because the picker now mounts only when the dialog opens, its own render-time
+  `restoreActiveTheme()` can no longer theme a page. **Each host restores its
+  theme at boot**: `standalone/src/main.tsx`, and the shared
+  `useRestoredTheme()` hook in `lib/src/lib/themes/use-restored-theme.ts` for
+  the playground pages. It applies the theme at render init and repeats after
+  commit, because React Router document hydration can reconcile the render-time
+  `body.style` writes away. `restorePocketTheme()` passes itself as the hook's
+  `restore` argument so Pocket layers its browser-chrome sync
+  (`color-scheme`, `meta[name="theme-color"]`) onto the same lifecycle.
+- The two `/playground/pocket` marketing mounts keep the free-floating
+  `compact` picker: those pages render a mobile prototype with no baseboard, so
+  there is no Settings dialog to put it in.
+- Inside the dialog the menu renders `position: fixed`, anchored off the
+  measured trigger rect, because the dialog surface is `overflow-y-auto` and
+  would clip an absolutely-positioned one. It closes on scroll rather than
+  drifting away from its trigger. The panel is capped to the viewport inset;
+  its theme list flex-shrinks and scrolls while the footer remains visible. The
+  dialog owns the dropdown's open state so `Escape` closes the menu before the
+  dialog — `ModalFrame`'s capture-phase Escape handler would otherwise swallow
+  the key first.
+- The collapsed trigger shows the active theme's `ThemeSwatch` beside its name,
+  so it reads as the same control as the row it stands in for.
+- **The host's fallback theme is module state, not a prop.**
+  `setDefaultThemeId()` in `lib/src/lib/themes/apply.ts` (the shape of
+  `shell-defaults.ts`) holds it, and `restoreActiveTheme()` takes no argument —
+  so every path that re-resolves the active theme gets the same answer. That
+  matters because uninstalling the active theme is reachable from two depths:
+  the picker row's `X` and the store dialog's `Remove`. While the fallback was a
+  prop the picker held, `Remove` called `restoreActiveTheme()` without it and
+  dropped to the first bundled theme instead of the host's. Declared once by
+  whoever boots the app — `useRestoredTheme()` latches it before its first
+  restore, ahead of any child render, because on the desktop Pocket page the
+  header's picker mounts before the component that calls the hook.
+- **No `window.confirm` here** — no native dialog in app chrome at all, see
+  `DESIGN.md` → "Don't", since the cause is the webview rather than the theme
+  UI. An uninstall gated on `confirm` silently did nothing on the desktop app:
+  the call returned there without ever showing a dialog. Uninstalling an installed theme (the row's `X`, and the store
+  dialog's `Remove`) is a single click, matching `WatchedCommandList`'s remove
+  control in the same dialog. Recovery is not symmetric, though: the store
+  dialog's own `Remove` leaves the extension row on screen to re-install, while
+  the picker row's `X` means re-finding the extension through an OpenVSX
+  search — so that control keeps a gap from the row's select target rather than
+  sitting flush against it.
+- Heights follow the viewport, never a fixed pixel budget. Both surfaces take
+  their cap from `OVERLAY_MAX_HEIGHT` in `lib/src/components/design.tsx` — the
+  dialog uses `.modal`, the dropdown `.popover` — rather than spelling a `dvh`
+  value of their own (see DESIGN.md → Cards / Containers). The list's `max-h-80`
+  is a preferred *ceiling* on a tall screen, not a floor: it is `flex-1
+  min-h-0`, so the panel cap shrinks it on a short one while the footer actions
+  stay put. That geometry is pinned by the `OpenOnShortViewport` story rather
+  than a unit test, since jsdom runs no layout.
+
 Storybook simulates VSCode themes through `lib/.storybook/themes.ts`. It must
 also run bundled theme vars through `completeThemeVars()` (with the same host
 typography defaults as `applyTheme()`) before injecting them, so isolated
@@ -174,7 +254,7 @@ defines Storybook's default simulated host theme, with fallback to the first
 bundled theme so a renamed or removed bundle cannot leave stories without theme
 vars.
 The Storybook preview decorator also computes and publishes the dynamic palette
-vars (door pair, focus ring, and the `--color-alarm-vs-*` tints) through the
+vars (door pair, focus ring, and the four `--color-alarm-vs-*` tints) through the
 shared `computeDynamicPalette()` helper, matching the runtime
 `useDynamicPalette()` hook for stories that render doors, baseboards, focus
 rings, or ringing bells outside a full Wall instance.
@@ -200,7 +280,8 @@ terminal colors. It captures the current DOM-visible theme state and shows:
   `pickFocusRing()` helpers used by Wall's `computeDynamicPalette()`.
 
 Standalone, playground, and the website `/playground/pocket` prototype expose
-the debugger as `Debug current theme` in the `ThemePicker` menu.
+the debugger as `Debug current theme` in the `ThemePicker` menu — reached
+through the Settings dialog on standalone and the desktop playground.
 `/playground/pocket` uses the same picker in the desktop share page header and
 as a floating control above the mobile terminal prototype, both with the Kimbie
 Dark default theme fallback. `/pocket` redirects before rendering a picker.

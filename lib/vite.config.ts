@@ -12,6 +12,15 @@ export default defineConfig({
       // path; Vite (and vitest) do not read tsconfig paths, and `dor` has no
       // package exports, so resolve it to source — the same alias standalone uses.
       dor: path.resolve(__dirname, "../dor/src"),
+      // `connect-port.ts` imports `dor-lib-common/agent-browser`; that package's
+      // `exports` resolve to a `dist` a vitest run has no reason to have built.
+      // Alias to source so the tests never depend on build order.
+      "dor-lib-common": path.resolve(__dirname, "../dor-lib-common/src"),
+      // Same rationale — and the service-worker mirror test uses
+      // `boundedPushText` as its oracle, so a watch-mode run must compare
+      // against the source, not whatever dist was last built (`pretest`
+      // rebuilds it; a bare `vitest` does not).
+      "server-lib-common": path.resolve(__dirname, "../server-lib-common/src"),
     },
   },
 });

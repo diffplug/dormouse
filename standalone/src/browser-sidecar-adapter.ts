@@ -12,7 +12,8 @@ import type {
   PlatformAdapter,
   PtyInfo,
 } from "dormouse-lib/lib/platform/types";
-import { AlertManager, type SessionStatus } from "dormouse-lib/lib/alert-manager";
+import { AlertManager } from "dormouse-lib/lib/alert-manager";
+import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { loadSessionState, saveSessionState } from "dormouse-lib/lib/window-persistence";
 import {
@@ -110,10 +111,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     try { return await this.host.invoke("pty_get_cwd", { id }); } catch { return null; }
   }
 
-  async getScrollback(id: string): Promise<string | null> {
-    try { return await this.host.invoke("pty_get_scrollback", { id }); } catch { return null; }
-  }
-
   async getOpenPorts(id: string): Promise<OpenPort[]> {
     try { return await this.host.invoke("pty_get_open_ports", { id }); } catch { return []; }
   }
@@ -205,10 +202,10 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   notifySessionFlushComplete(_requestId: string): void {}
 
   alertRemove(id: string): void { this.alertManager.remove(id); }
-  alertToggle(id: string): void { this.alertManager.toggleAlert(id); }
-  alertDisable(id: string): void { this.alertManager.disableAlert(id); }
+  alertSetWatchedCommands(names: string[]): void { this.alertManager.setWatchedCommands(names); }
+  alertSetCommandWatched(name: string, watched: boolean): void { this.alertManager.setCommandWatched(name, watched); }
+  alertPublishSettings(settings: AlertSettings): void { this.alertManager.setInactivityTimeoutMs(settings.inactivityTimeoutMs); }
   alertDismiss(id: string): void { this.alertManager.dismissAlert(id); }
-  alertDismissOrToggle(id: string, displayedStatus: string): void { this.alertManager.dismissOrToggleAlert(id, displayedStatus as SessionStatus); }
   alertAttend(id: string): void { this.alertManager.attend(id); }
   alertResize(id: string): void { this.alertManager.onResize(id); }
   alertClearAttention(id?: string): void { this.alertManager.clearAttention(id); }
@@ -216,7 +213,9 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   alertMarkTodo(id: string): void { this.alertManager.markTodo(id); }
   alertClearTodo(id: string): void { this.alertManager.clearTodo(id); }
   onAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.add(handler); }
-  offAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.delete(handler); }
+  // See TauriAdapter: single webview, so nothing is broadcast back.
+  onWatchedCommands(_handler: (names: string[]) => void): void {}
+  onAlertSettings(_handler: (settings: AlertSettings) => void): void {}
 
   private static STATE_KEY = 'dormouse.browser-sidecar.session';
 

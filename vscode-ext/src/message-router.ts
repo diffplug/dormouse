@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
-import { AlertManager, type SessionStatus } from '../../lib/src/lib/alert-manager';
+import { AlertManager } from '../../lib/src/lib/alert-manager';
+import { WatchedCommandHost } from '../../lib/src/lib/watched-command-host';
+import { AlertSettingsHost } from '../../lib/src/lib/alert-settings-host';
 import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
@@ -20,6 +22,7 @@ import type { DorControlRequest } from './pty-manager';
 import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
 import { log } from './log';
+import type { WebviewChannel } from './webview-messaging';
 
 const clipboardOps = require('../../lib/clipboard-ops.cjs') as {
   readClipboardFilePaths(): Promise<string[]>;
@@ -42,6 +45,8 @@ const ALLOWED_WORKBENCH_COMMANDS = new Set<string>(VSCODE_WORKBENCH_COMMANDS);
 // Shared alert manager — survives router disposal so alert state persists
 // across webview collapse/expand cycles.
 const alertManager = new AlertManager();
+const watchedCommandHost = new WatchedCommandHost(alertManager);
+const alertSettingsHost = new AlertSettingsHost(alertManager);
 const alertProtocolParsers = new Map<string, TerminalProtocolParser>();
 
 // The extension-host parser has no DOM, so webviews push their resolved terminal
@@ -143,7 +148,7 @@ export async function flushAllSessions(timeoutMs = 1000): Promise<void> {
 }
 
 export function attachRouter(
-  webview: vscode.Webview,
+  channel: WebviewChannel,
   options?: {
     reconnect?: boolean;
     killOnDispose?: boolean;
@@ -159,6 +164,11 @@ export function attachRouter(
   const reconnect = options?.reconnect ?? false;
   const killOnDispose = options?.killOnDispose ?? false;
 
+  // The router's only send path — it stamps this webview's message token, which
+  // the webview requires (docs/specs/vscode.md → "Webview message
+  // authentication"). A raw `vscode.Webview` never reaches this scope.
+  const post = (message: ExtensionMessage): Thenable<boolean> => channel.post(message);
+
   // Track which PTY IDs were spawned (or reconnected) through this webview
   const ownedPtyIds = new Set<string>();
   const pendingFlushRequests = new Map<string, { resolve: () => void; timeout: ReturnType<typeof setTimeout> }>();
@@ -167,6 +177,18 @@ export function attachRouter(
   // Webview-facing subscriptions — only active when the webview has live content.
   // Subscribed on dormouse:init, unsubscribed when webview content is gone.
   let disconnectWebview: (() => void) | null = null;
+  const removeWatchedCommandListener = watchedCommandHost.subscribe((names) => {
+    void post({
+      type: 'alert:watchedCommands',
+      names,
+    } satisfies ExtensionMessage);
+  });
+  const removeAlertSettingsListener = alertSettingsHost.subscribe((settings) => {
+    void post({
+      type: 'alert:settings',
+      settings,
+    } satisfies ExtensionMessage);
+  });
 
   function claim(id: string): void {
     ownedPtyIds.add(id);
@@ -220,7 +242,7 @@ export function attachRouter(
         timeout,
       });
 
-      void webview.postMessage({ type: 'dormouse:flushSessionSave', requestId } satisfies ExtensionMessage);
+      void post({ type: 'dormouse:flushSessionSave', requestId } satisfies ExtensionMessage);
     });
   }
 
@@ -229,7 +251,7 @@ export function attachRouter(
   }
 
   function forwardDorControlRequest(request: DorControlRequest): void {
-    void webview.postMessage({
+    void post({
       type: 'dor:controlRequest',
       requestId: request.requestId,
       surfaceId: request.surfaceId,
@@ -262,23 +284,23 @@ export function attachRouter(
   function connectWebview(): () => void {
     const removeProcessedListener = onProcessedPtyData((id, visibleData) => {
       if (!ownedPtyIds.has(id)) return;
-      webview.postMessage({ type: 'pty:data', id, data: visibleData } satisfies ExtensionMessage);
+      post({ type: 'pty:data', id, data: visibleData } satisfies ExtensionMessage);
     });
     const removeSemanticListener = onTerminalSemanticEvents((id, events) => {
       if (!ownedPtyIds.has(id)) return;
-      webview.postMessage({ type: 'terminal:semanticEvents', id, events } satisfies ExtensionMessage);
+      post({ type: 'terminal:semanticEvents', id, events } satisfies ExtensionMessage);
     });
     const removePtyCallbacks = ptyManager.addCallbacks({
       onData() {},
       onExit(id: string, exitCode: number) {
         if (!ownedPtyIds.has(id)) return;
-        webview.postMessage({ type: 'pty:exit', id, exitCode } satisfies ExtensionMessage);
+        post({ type: 'pty:exit', id, exitCode } satisfies ExtensionMessage);
       },
     });
 
     const removeAlertListener = alertManager.onStateChange((id, state) => {
       if (!ownedPtyIds.has(id)) return;
-      webview.postMessage({
+      post({
         type: 'alert:state',
         id,
         status: state.status,
@@ -299,7 +321,7 @@ export function attachRouter(
   }
 
   // Route webview messages to the PTY manager
-  const messageDisposable = webview.onDidReceiveMessage((msg: WebviewMessage) => {
+  const messageDisposable = channel.onDidReceiveMessage((msg: WebviewMessage) => {
     switch (msg.type) {
       case 'pty:spawn': {
         claim(msg.id);
@@ -324,46 +346,39 @@ export function attachRouter(
         break;
       case 'pty:getCwd':
         ptyManager.getCwd(msg.id).then((cwd) => {
-          webview.postMessage({ type: 'pty:cwd', id: msg.id, cwd, requestId: msg.requestId } satisfies ExtensionMessage);
+          post({ type: 'pty:cwd', id: msg.id, cwd, requestId: msg.requestId } satisfies ExtensionMessage);
         });
         break;
       case 'pty:getOpenPorts':
         ptyManager.getOpenPorts(msg.id).then((ports) => {
-          webview.postMessage({ type: 'pty:openPorts', id: msg.id, ports, requestId: msg.requestId } satisfies ExtensionMessage);
+          post({ type: 'pty:openPorts', id: msg.id, ports, requestId: msg.requestId } satisfies ExtensionMessage);
         });
-        break;
-      case 'pty:getScrollback':
-        webview.postMessage({
-          type: 'pty:scrollback', id: msg.id,
-          data: ptyManager.getScrollback(msg.id),
-          requestId: msg.requestId,
-        } satisfies ExtensionMessage);
         break;
       case 'pty:getShells':
         ptyManager.getAvailableShells().then((shells) => {
-          webview.postMessage({
+          post({
             type: 'pty:shells', shells, requestId: msg.requestId,
           } satisfies ExtensionMessage);
         });
         break;
       case 'clipboard:readFiles':
         clipboardOps.readClipboardFilePaths()
-          .then((paths) => webview.postMessage({
+          .then((paths) => post({
             type: 'clipboard:files', paths: paths.length ? paths : null, requestId: msg.requestId,
           } satisfies ExtensionMessage))
           .catch((err) => {
             log.info(`[clipboard] readFiles failed: ${err?.message ?? err}`);
-            webview.postMessage({ type: 'clipboard:files', paths: null, requestId: msg.requestId } satisfies ExtensionMessage);
+            post({ type: 'clipboard:files', paths: null, requestId: msg.requestId } satisfies ExtensionMessage);
           });
         break;
       case 'clipboard:readImage':
         clipboardOps.readClipboardImageAsFilePath()
-          .then((path) => webview.postMessage({
+          .then((path) => post({
             type: 'clipboard:image', path, requestId: msg.requestId,
           } satisfies ExtensionMessage))
           .catch((err) => {
             log.info(`[clipboard] readImage failed: ${err?.message ?? err}`);
-            webview.postMessage({ type: 'clipboard:image', path: null, requestId: msg.requestId } satisfies ExtensionMessage);
+            post({ type: 'clipboard:image', path: null, requestId: msg.requestId } satisfies ExtensionMessage);
           });
         break;
       case 'dormouse:openExternal': {
@@ -388,7 +403,7 @@ export function attachRouter(
           Array.isArray(msg.args) ? msg.args : [],
           typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
         ).then((result) => {
-          webview.postMessage({
+          post({
             type: 'agentBrowser:commandResult', requestId: msg.requestId, ...result,
           } satisfies ExtensionMessage);
         });
@@ -399,7 +414,7 @@ export function attachRouter(
           msg.op,
           typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
         ).then((result) => {
-          webview.postMessage({
+          post({
             type: 'agentBrowser:editResult', requestId: msg.requestId, ...result,
           } satisfies ExtensionMessage);
         });
@@ -410,7 +425,7 @@ export function attachRouter(
           { format: msg.format, quality: msg.quality },
           typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
         ).then((result) => {
-          webview.postMessage({
+          post({
             type: 'agentBrowser:screenshotResult', requestId: msg.requestId, ...result,
           } satisfies ExtensionMessage);
         });
@@ -420,7 +435,7 @@ export function attachRouter(
           msg.session,
           typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
         ).then((result) => {
-          webview.postMessage({
+          post({
             type: 'agentBrowser:streamStatusResult', requestId: msg.requestId, ...result,
           } satisfies ExtensionMessage);
         });
@@ -428,15 +443,15 @@ export function attachRouter(
       case 'agentBrowser:getStreamUrl': {
         const streamPort = Number.isInteger(msg.port) && msg.port > 0 && msg.port <= 65535 ? msg.port : null;
         if (!streamPort) {
-          webview.postMessage({ type: 'agentBrowser:streamUrl', requestId: msg.requestId, url: null } satisfies ExtensionMessage);
+          post({ type: 'agentBrowser:streamUrl', requestId: msg.requestId, url: null } satisfies ExtensionMessage);
           break;
         }
         createStreamRelayUrl(streamPort).then(
-          (url) => webview.postMessage({
+          (url) => post({
             type: 'agentBrowser:streamUrl', requestId: msg.requestId,
             url,
           } satisfies ExtensionMessage),
-          () => webview.postMessage({ type: 'agentBrowser:streamUrl', requestId: msg.requestId, url: null } satisfies ExtensionMessage),
+          () => post({ type: 'agentBrowser:streamUrl', requestId: msg.requestId, url: null } satisfies ExtensionMessage),
         );
         break;
       }
@@ -446,7 +461,7 @@ export function attachRouter(
           { headed: msg.headed === true },
           typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
         ).then((result) => {
-          webview.postMessage({ type: 'agentBrowser:openResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
+          post({ type: 'agentBrowser:openResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
         });
         break;
       case 'agentBrowser:popOut':
@@ -455,7 +470,7 @@ export function attachRouter(
           { url: typeof msg.url === 'string' ? msg.url : undefined, rect: msg.rect },
           typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
         ).then((result) => {
-          webview.postMessage({ type: 'agentBrowser:popResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
+          post({ type: 'agentBrowser:popResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
         });
         break;
       case 'agentBrowser:popIn':
@@ -464,15 +479,15 @@ export function attachRouter(
           { url: typeof msg.url === 'string' ? msg.url : undefined },
           typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
         ).then((result) => {
-          webview.postMessage({ type: 'agentBrowser:popResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
+          post({ type: 'agentBrowser:popResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
         });
         break;
       case 'iframe:createProxyUrl':
         createIframeProxyUrl(typeof msg.url === 'string' ? msg.url : '').then(
-          (result) => webview.postMessage({
+          (result) => post({
             type: 'iframe:proxyUrl', requestId: msg.requestId, result,
           } satisfies ExtensionMessage),
-          (err) => webview.postMessage({
+          (err) => post({
             type: 'iframe:proxyUrl', requestId: msg.requestId,
             result: { ok: false, reason: 'unreachable', detail: err?.message ?? String(err) },
           } satisfies ExtensionMessage),
@@ -492,7 +507,7 @@ export function attachRouter(
         // freshly-mounted webview know what to use.
         const selected = options?.getSelectedShell?.();
         if (selected) {
-          webview.postMessage({
+          post({
             type: 'dormouse:selectedShell',
             shell: selected.shell,
             args: selected.args,
@@ -501,7 +516,7 @@ export function attachRouter(
 
         if (!reconnect) {
           // Fresh instance — no existing PTYs to restore
-          webview.postMessage({ type: 'pty:list', ptys: [] } satisfies ExtensionMessage);
+          post({ type: 'pty:list', ptys: [] } satisfies ExtensionMessage);
           break;
         }
         // Snapshot IDs owned before claiming so we can choose the right data source below
@@ -551,7 +566,7 @@ export function attachRouter(
             id, alive: info.alive, exitCode: info.exitCode,
           })),
         };
-        webview.postMessage(list);
+        post(list);
         // Send replay/scrollback data for each reconnectable PTY
         for (const [id] of reconnectable) {
           // For already-owned PTYs the replay buffer was consumed on first connect,
@@ -562,14 +577,14 @@ export function attachRouter(
             : ptyManager.getReplayData(id);
           if (data) {
             const replay: ExtensionMessage = { type: 'pty:replay', id, data };
-            webview.postMessage(replay);
+            post(replay);
           }
         }
         // Send current alert state for all reconnectable PTYs
         for (const [id] of reconnectable) {
           const alertState = alertManager.getState(id);
           log.info(`[alert-reconnect] ${id}: sending ${alertState.status} (todo=${alertState.todo})`);
-          webview.postMessage({
+          post({
             type: 'alert:state',
             id,
             status: alertState.status,
@@ -600,17 +615,22 @@ export function attachRouter(
       case 'alert:remove':
         alertManager.remove(msg.id);
         break;
-      case 'alert:toggle':
-        alertManager.toggleAlert(msg.id);
+      case 'alert:initializeWatchedCommands':
+        watchedCommandHost.initialize(msg.names);
         break;
-      case 'alert:disable':
-        alertManager.disableAlert(msg.id);
+      case 'alert:setCommandWatched':
+        watchedCommandHost.setCommandWatched(msg.name, msg.watched);
+        break;
+      // The host revalidates and clamps: a webview must never be able to install
+      // a NaN or absurd timer (`docs/specs/transport.md`).
+      case 'alert:initializeSettings':
+        alertSettingsHost.initialize(msg.settings);
+        break;
+      case 'alert:updateSettings':
+        alertSettingsHost.update(msg.settings);
         break;
       case 'alert:dismiss':
         alertManager.dismissAlert(msg.id);
-        break;
-      case 'alert:dismissOrToggle':
-        alertManager.dismissOrToggleAlert(msg.id, msg.displayedStatus as SessionStatus);
         break;
       case 'alert:attend':
         alertManager.attend(msg.id);
@@ -641,6 +661,8 @@ export function attachRouter(
       if (disposed) return;
       disposed = true;
       activeRouters.delete(router);
+      removeWatchedCommandListener();
+      removeAlertSettingsListener();
       resolveAllFlushRequests();
       disconnectWebview?.();
       disconnectWebview = null;

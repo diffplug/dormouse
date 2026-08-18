@@ -5,19 +5,32 @@ import '../src/theme.css';
 import '../src/index.css';
 import { initPlatform, type FakePtyAdapter, type FakeScenario } from '../src/lib/platform';
 import {
+  applyAlertSettingsFromHost,
   clearPrimedActivity,
   disposeAllSessions,
   getActivitySnapshot,
   getTerminalPaneStateSnapshot,
+  getWatchedCommands,
   primeActivity,
   removeTerminalPaneState,
+  resetPushDevices,
   resetTerminalPaneState,
+  setCommandWatched,
+  setPushDevices,
   type ActivityState,
+  type AlertSettings,
+  type PushDevicesState,
   type TerminalPaneState,
 } from '../src/lib/terminal-registry';
 import { computeDynamicPalette } from '../src/lib/themes/dynamic-palette';
+import {
+  clearAllAlertSpeechStates,
+  setAlertSpeechState,
+  type AlertSpeechState,
+} from '../src/lib/alert-speech-state';
 import { VSCODE_THEMES, VSCODE_THEME_TYPES } from './themes';
 import { cfg } from '../src/cfg';
+import type { DormouseTheme } from '../src/lib/themes';
 
 // Initialize fake platform once at module scope
 const fakePlatform = initPlatform('fake');
@@ -29,6 +42,10 @@ if (window?.navigator?.userAgent?.includes('Chromatic')) {
   // A blinking cursor is captured on-or-off depending on the frame; freeze it to a
   // stable solid block so the terminal contributes no non-determinism.
   cfg.terminal.cursorBlink = false;
+  // Keep terminals on the DOM renderer. WebGL paints into a <canvas>, which
+  // snapshots as an opaque bitmap and varies with the GPU/driver the runner
+  // happens to get; styled spans diff deterministically.
+  cfg.terminal.webglRenderer = false;
   // Snap pane splits/restores to their final geometry instead of tweening. A
   // mid-tween split resizes panes through many transient widths, and xterm's DOM
   // renderer can latch a frame where a pane is still narrow — freezing its last
@@ -49,12 +66,23 @@ const DYNAMIC_PALETTE_VARS = [
   '--color-alarm-vs-header-active',
   '--color-alarm-vs-header-inactive',
   '--color-alarm-vs-door',
+  '--color-alarm-vs-terminal',
 ] as const;
 const PREFERRED_STORYBOOK_THEME = 'Light (Visual Studio)';
 const FIRST_STORYBOOK_THEME = Object.keys(VSCODE_THEMES)[0] ?? '';
 const DEFAULT_STORYBOOK_THEME = VSCODE_THEMES[PREFERRED_STORYBOOK_THEME]
   ? PREFERRED_STORYBOOK_THEME
   : FIRST_STORYBOOK_THEME;
+
+/**
+ * Replace the WATCHING rule set (`docs/specs/alert.md`). The set is app-global
+ * and persists to localStorage, so a story that sets a rule would otherwise leak
+ * it into every story that runs after it — always clear before applying.
+ */
+function applyWatchedCommands(names: readonly string[]): void {
+  for (const existing of getWatchedCommands()) setCommandWatched(existing, false);
+  for (const name of names) setCommandWatched(name, true);
+}
 
 function setStylePropertyIfChanged(
   style: CSSStyleDeclaration,
@@ -178,15 +206,65 @@ const preview: Preview = {
             byId?: Record<string, Partial<TerminalPaneState>>;
           }
         | undefined;
-      const platform = fakePlatform as FakePtyAdapter;
+      const primedWatchedCommands = context.parameters?.primedWatchedCommands as
+        | readonly string[]
+        | undefined;
+      const primedAlertSettings = context.parameters?.primedAlertSettings as
+        | Partial<AlertSettings>
+        | undefined;
+      const primedPushDevices = context.parameters?.primedPushDevices as
+        | PushDevicesState
+        | undefined;
+      const primedAlertSpeech = context.parameters?.primedAlertSpeech as
+        | Record<string, AlertSpeechState>
+        | undefined;
+      const platform = fakePlatform as FakePtyAdapter & { hostOwnsTheme?: boolean };
 
       if (scenario) platform.setDefaultScenario(scenario);
       else platform.clearDefaultScenario();
+
+      // Both of these are read during render, so they are applied here rather
+      // than in the effect below with the rest of the primed state.
+
+      // The VS Code host owns the theme, which is how the Settings dialog
+      // decides to hide its Theme row (docs/specs/theme.md). Absent resets to
+      // undefined so it cannot leak into the next story.
+      platform.hostOwnsTheme = context.parameters?.hostOwnsTheme === true || undefined;
+
+      // Installed themes normally arrive from OpenVSX and live in localStorage,
+      // which every story shares — so a story that wants them names them, and
+      // every other story clears them.
+      const primedInstalledThemes = context.parameters?.primedInstalledThemes as
+        | DormouseTheme[]
+        | undefined;
+      if (primedInstalledThemes?.length) {
+        window.localStorage.setItem(
+          'dormouse:installed-themes',
+          JSON.stringify(primedInstalledThemes),
+        );
+      } else {
+        window.localStorage.removeItem('dormouse:installed-themes');
+      }
 
       useEffect(() => {
         let raf2 = 0;
 
         const applyPrimedState = () => {
+          applyWatchedCommands(primedWatchedCommands ?? []);
+          // Alarm settings (`docs/specs/alert.md` -> Alarm settings) leak between
+          // stories the same way the rule set above does. No merge needed:
+          // applyAlertSettingsFromHost normalizes, so a partial — or undefined —
+          // resets every field it does not name.
+          applyAlertSettingsFromHost(primedAlertSettings);
+          // The push-device list is renderer-only derived state normally written
+          // by the remote Host, which no story runs — so a story that wants the
+          // Alarm dialog's device line names one, and every other story resets
+          // to `no-host`.
+          setPushDevices(primedPushDevices ?? { status: 'no-host', devices: [] });
+          clearAllAlertSpeechStates();
+          for (const [id, state] of Object.entries(primedAlertSpeech ?? {})) {
+            setAlertSpeechState(id, state);
+          }
           clearPrimedActivity();
           for (const id of getTerminalPaneStateSnapshot().keys()) {
             removeTerminalPaneState(id);
@@ -216,6 +294,10 @@ const preview: Preview = {
         return () => {
           window.cancelAnimationFrame(raf1);
           window.cancelAnimationFrame(raf2);
+          applyWatchedCommands([]);
+          applyAlertSettingsFromHost(undefined);
+          resetPushDevices();
+          clearAllAlertSpeechStates();
           clearPrimedActivity();
           for (const id of getTerminalPaneStateSnapshot().keys()) {
             removeTerminalPaneState(id);
@@ -223,7 +305,7 @@ const preview: Preview = {
           platform.clearDefaultScenario();
           disposeAllSessions();
         };
-      }, [platform, primedSessionState, primedTerminalState]);
+      }, [platform, primedSessionState, primedTerminalState, primedWatchedCommands, primedAlertSettings, primedPushDevices, primedAlertSpeech]);
 
       return createElement(Story);
     },

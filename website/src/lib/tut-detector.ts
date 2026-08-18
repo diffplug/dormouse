@@ -9,47 +9,59 @@ type MouseSelectionState = import("dormouse-lib/lib/mouse-selection").MouseSelec
 interface ActivityStoreModule {
   subscribeToActivity: (listener: () => void) => () => void;
   getActivitySnapshot: () => Map<string, ActivityState>;
+  subscribeToWatchedCommands: (listener: () => void) => () => void;
+  getWatchedCommands: () => string[];
 }
+
+/** Notification sources a program emits for itself, as opposed to the ones
+ *  Dormouse synthesizes for a command exit (`docs/specs/alert.md`). */
+const TERMINAL_REPORT_SOURCES = new Set(["BEL", "OSC 9", "OSC 9;4", "OSC 99", "OSC 777"]);
 
 interface MouseSelectionModule {
   subscribeToMouseSelection: (listener: () => void) => () => void;
   getMouseSelectionSnapshot: () => Map<string, MouseSelectionState>;
 }
 
-interface TutDetectorOptions {
-  onWatchingDemoPaneChange?: (id: string | null) => void;
+interface ThemeStoreModule {
+  subscribeToActiveTheme: (listener: () => void) => () => void;
+  getActiveThemeId: () => string;
+}
+
+/** One options object rather than a growing positional list, matching the
+ *  sibling runners (`TutRunner`, `ChangelogRunner`, `AsciiSplashRunner`). Each
+ *  store is passed in so the detector stays engine-neutral and testable. */
+export interface TutDetectorOptions {
+  state: TutorialState;
+  activityStore: ActivityStoreModule;
+  mouseStore: MouseSelectionModule;
+  themeStore: ThemeStoreModule;
 }
 
 export class TutDetector {
   private state: TutorialState;
   private activityStore: ActivityStoreModule;
   private mouseStore: MouseSelectionModule;
-  private onWatchingDemoPaneChange?: (id: string | null) => void;
+  private themeStore: ThemeStoreModule;
   private started = false;
   private currentMode: WallMode = "command";
   private currentPaneId: string | null = null;
   private commandModePanels = new Set<string>();
   private watchingEnabledPaneIds = new Set<string>();
-  private preferredWatchingPaneId: string | null = null;
   private pendingMoveTargetId: string | null = null;
   private pendingMoveClearTimer: ReturnType<typeof setTimeout> | null = null;
   private prevActivity = new Map<string, ActivityState>();
   private prevMouse = new Map<string, MouseSelectionState>();
+  private startThemeId = '';
   private disposables: (() => void)[] = [];
 
-  constructor(
-    state: TutorialState,
-    activityStore: ActivityStoreModule,
-    mouseStore: MouseSelectionModule,
-    options: TutDetectorOptions = {},
-  ) {
+  constructor({ state, activityStore, mouseStore, themeStore }: TutDetectorOptions) {
     this.state = state;
     this.activityStore = activityStore;
     this.mouseStore = mouseStore;
-    this.onWatchingDemoPaneChange = options.onWatchingDemoPaneChange;
+    this.themeStore = themeStore;
   }
 
-  /** Seed the prev-state maps and subscribe to the activity/mouse stores. The
+  /** Seed the prev-state maps and subscribe to the activity/mouse/theme stores. The
    *  detector is otherwise driven by the `WallEvent` stream (`handleWallEvent`), so
    *  it is engine-neutral — it never touches the tiling api. */
   start(): void {
@@ -61,21 +73,26 @@ export class TutDetector {
     // mis-read as a transition from "nothing".
     for (const [id, s] of this.activityStore.getActivitySnapshot()) {
       this.prevActivity.set(id, { ...s });
-      if (s.watchingEnabled) {
-        this.watchingEnabledPaneIds.add(id);
-        this.preferredWatchingPaneId ??= id;
-      }
+      if (s.watchingEnabled) this.watchingEnabledPaneIds.add(id);
     }
-    this.emitWatchingDemoPaneChange();
     for (const [id, s] of this.mouseStore.getMouseSelectionSnapshot()) {
       this.prevMouse.set(id, { ...s });
     }
+    // Same guard, one value wide: the page restores a persisted theme at boot,
+    // which must not read as the user having picked one.
+    this.startThemeId = this.themeStore.getActiveThemeId();
 
     this.disposables.push(
       this.activityStore.subscribeToActivity(() => this.processActivity()),
     );
     this.disposables.push(
+      this.activityStore.subscribeToWatchedCommands(() => this.processWatchedCommands()),
+    );
+    this.disposables.push(
       this.mouseStore.subscribeToMouseSelection(() => this.processMouse()),
+    );
+    this.disposables.push(
+      this.themeStore.subscribeToActiveTheme(() => this.processTheme()),
     );
   }
 
@@ -160,6 +177,21 @@ export class TutDetector {
     }
   }
 
+  /** The active theme moved off whatever was restored at start. The picker
+   *  lives in the Settings dialog and has no keyboard shortcut, so any change
+   *  here is a mouse interaction. */
+  private processTheme(): void {
+    const current = this.themeStore.getActiveThemeId();
+    if (current !== this.startThemeId) this.state.markComplete("th-theme");
+  }
+
+  /** A rule exists at all — the user turned alerts on for a command name. */
+  private processWatchedCommands(): void {
+    if (this.activityStore.getWatchedCommands().length > 0) {
+      this.state.markComplete("al-watch-cmd");
+    }
+  }
+
   private processActivity(): void {
     const snapshot = this.activityStore.getActivitySnapshot();
     for (const [id, current] of snapshot) {
@@ -175,16 +207,14 @@ export class TutDetector {
       }
 
       if (!prev.watchingEnabled && current.watchingEnabled) {
-        this.state.markComplete("al-enable");
         this.watchingEnabledPaneIds.add(id);
-        this.preferredWatchingPaneId = id;
-        this.emitWatchingDemoPaneChange();
+        // One rule, many panes: the second pane to light up never had its own
+        // bell clicked, which is the whole point of command-keyed WATCHING.
+        if (this.watchingEnabledPaneIds.size > 1) {
+          this.state.markComplete("al-spreads");
+        }
       } else if (prev.watchingEnabled && !current.watchingEnabled) {
         this.watchingEnabledPaneIds.delete(id);
-        if (this.preferredWatchingPaneId === id) {
-          this.preferredWatchingPaneId = this.watchingEnabledPaneIds.values().next().value ?? null;
-          this.emitWatchingDemoPaneChange();
-        }
       }
 
       // Gate al-busy / al-ring on a true status transition. Without the
@@ -202,10 +232,20 @@ export class TutDetector {
         this.state.markComplete("al-ring");
       }
 
+      // Credit the two rule-free alarm paths off the notification that landed,
+      // not off the status: both project to plain ALERT_RINGING.
+      const source = current.notification?.source;
+      if (source && source !== prev.notification?.source) {
+        if (source === "COMMAND_EXIT") this.state.markComplete("al-cmd-exit");
+        else if (TERMINAL_REPORT_SOURCES.has(source)) this.state.markComplete("al-notif");
+      }
+
       if (!prev.todo && current.todo) {
         if (prev.status === "ALERT_RINGING") {
           this.state.markComplete("al-todo-auto");
-        } else {
+        } else if (!source) {
+          // A protocol or command-exit ring sets TODO itself; only a bare
+          // TODO with no notification behind it was added by hand.
           this.state.markComplete("al-todo-manual");
         }
       }
@@ -219,10 +259,6 @@ export class TutDetector {
       if (!snapshot.has(id)) {
         this.prevActivity.delete(id);
         this.watchingEnabledPaneIds.delete(id);
-        if (this.preferredWatchingPaneId === id) {
-          this.preferredWatchingPaneId = this.watchingEnabledPaneIds.values().next().value ?? null;
-          this.emitWatchingDemoPaneChange();
-        }
       }
     }
   }
@@ -258,7 +294,4 @@ export class TutDetector {
     this.clearPendingMoveTarget();
   }
 
-  private emitWatchingDemoPaneChange(): void {
-    this.onWatchingDemoPaneChange?.(this.preferredWatchingPaneId);
-  }
 }

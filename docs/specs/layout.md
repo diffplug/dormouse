@@ -35,7 +35,7 @@ The user can navigate between all elements using the mouse, or by entering `comm
 Wall
 ├── Context providers (Mode, SelectedId, WallActions, PaneElements, DoorElements, RenamingId, Zoomed, WindowFocused)
 │   └── div (h-screen, flex col)
-│       ├── Content wrapper (flex-1, 6px top/sides inset, 2px bottom inset)
+│       ├── Content wrapper (flex-1, 7px top/sides inset, 2px bottom inset)
 │       │   ├── LathHost (the tiling engine's HTML adapter)
 │       │   │   └── Leaf divs (one Surface per leaf, absolutely positioned, never re-parented)
 │       │   │       ├── TerminalPanel → TerminalPane → xterm.js  (or BrowserPanel)
@@ -65,7 +65,7 @@ Wall
 
 ## Content
 
-The content area is a tiling layout of panes rendered by Lath (`docs/specs/tiling-engine.md`). Each pane is one **leaf** in Lath's split tree — a stable, absolutely-positioned div that is never re-parented (so a moved `<iframe>` never reloads and a focused xterm never blurs). Panes are separated by a 6px gap. There is no tab stacking: one Surface per leaf, always.
+The content area is a tiling layout of panes rendered by Lath (`docs/specs/tiling-engine.md`). Each pane is one **leaf** in Lath's split tree — a stable, absolutely-positioned div that is never re-parented (so a moved `<iframe>` never reloads and a focused xterm never blurs). Panes are separated by a 7px gap — odd on purpose, so the 1px selection ring can center in it on whole pixels (see Selection overlay). There is no tab stacking: one Surface per leaf, always.
 
 ### Tiling constraints
 
@@ -77,20 +77,30 @@ The content area is a tiling layout of panes rendered by Lath (`docs/specs/tilin
 
 Each pane has a 30px header that doubles as a drag handle (a `pointerdown` on the header, past a 5px threshold, begins a Lath pane drag; below the threshold the header's own click behavior stands). The header uses `cursor-grab` / `active:cursor-grabbing`, `select-none`, and the shared terminal top radius from `lib/src/components/design.tsx`. Background and foreground use the `--color-header-active-*` / `--color-header-inactive-*` token pairs, which map to VSCode file-tree list colors.
 
-The header label is the `DerivedHeader` returned by `deriveHeader(paneState, visiblePanes)` in `docs/specs/terminal-state.md` — that spec is the single source of truth for the priority chain (user-pinned title, app-sent overrides, current command title, `<idle> ${LAST_TITLE}` for finished panes, plain `<idle>` for fresh panes), the disambiguator rule, and which OSC sources contribute. Layout's job is to render the result: the primary label truncates with ellipsis, the secondary label (when present) is shown muted next to it, click renames/pins, right-click opens the diagnostic popup.
+The header label is the `DerivedHeader` returned by `deriveHeader(paneState, visiblePanes)` in `docs/specs/terminal-state.md` — that spec is the single source of truth for the priority chain (user-pinned title, app-sent overrides, current command title, `<idle> ${LAST_TITLE}` for finished panes, plain `<idle>` for fresh panes), the disambiguator rule, and which OSC sources contribute. Layout's job is to render the result: the primary label truncates with ellipsis, the secondary label (when present) is shown muted next to it, click renames/pins, right-click — or `>` in command mode — opens the header context menu, which leads with the title-candidates table.
 
-The diagnostic popup lists the latest entry per `titleCandidates` channel as defined in `docs/specs/terminal-state.md`. Each row shows the channel, latest candidate text, and timestamp. The popup is diagnostic only; it does not change the title priority rules.
+Right-clicking anywhere on the header opens the pane's single **context menu** at the pointer; pressing `>` in command mode opens the same menu for the selected pane, anchored under the header's left edge (the handler finds the header via `data-pane-header-for` and dispatches a synthetic `contextmenu` at that corner, so both paths share one code path; browser surfaces and Doors have no such header, so `>` no-ops there). Only the alert bell owns its own right-click (`stopPropagation`, opening the alert dialog); every other region — including the title span — bubbles to this one menu. It is portaled to `document.body`, viewport-clamped, and dismissed by outside `pointerdown`, `Escape`, `resize`, or capture-phase `scroll` — except scrolls originating inside the menu itself, which must not dismiss it (arrow-key focus moves auto-scroll the overflowing list).
+
+Content, top to bottom:
+
+- **Header row** — the current display title, the pane's `surface:N` handle (`resolveSurfaceRef`, muted), and a close button.
+- **Title-candidates table** — the latest entry per `titleCandidates` channel as defined in `docs/specs/terminal-state.md`: channel, latest candidate text, and timestamp per row, or a muted `No title candidates` line. Diagnostic only; it does not change the title priority rules.
+- **Port rows** — the TCP ports the pane's process tree binds: a spinner while `getOpenPorts` runs (once per open — reopen to rescan), then one `host:port` row per distinct port (digit accelerator chip first, process name muted beside it), or a muted `no listening ports` / `port scan failed` line.
+
+The menu owns the keyboard while open: it takes DOM focus on mount and restores the previously focused element when a dismissal leaves input ownership unchanged, and it registers as dialog-keyboard-active so command-mode keys don't fire underneath (`use-wall-keyboard.ts`). A port activation instead focuses its destination browser in passthrough. `1`–`9` activate the corresponding port row; presses while the scan is still running are dropped, not buffered — the spinner explains why nothing happened. `↑`/`↓` rove focus across the port rows (wrapping), `Enter`/`Space` activate the focused row, `Tab`/`Shift+Tab` cycle every focusable element, and `Escape` closes.
+
+Activating a port row (click, digit, or `Enter` on the focused row) reproduces `dor ab open <url>` for that port and closes the menu at once (`docs/specs/dor-browser.md` → Pane Context Menu Connect): the browser surface appears immediately and becomes the selection in passthrough (reattaching first if it was minimized) — the one command-mode gesture whose side effect moves selection off the pane it targeted and exits command mode — and loading/errors surface in the pane, not the menu. On hosts that cannot open a browser surface the rows are inert labels with no digit chips, and digits do nothing. Only terminal panes have this menu. Source of truth: `PaneHeaderContextMenu.tsx`, `TerminalPaneHeader.tsx`, `handle-pane-shortcuts.ts`.
 
 Elements from left to right:
 
-- Derived session label (click to rename/pin, right-click to inspect title candidates, truncates with ellipsis)
+- Derived session label (click to rename/pin, right-click opens the header context menu with the title-candidates table, truncates with ellipsis)
 - Alert bell button (reflects session activity status)
 - TODO pill (if todo state is set; hidden in minimal tier)
 - Flexible gap
 - Mouse-reporting override icon (only when the inside program requests mouse reporting; hidden in minimal tier)
 - SplitHorizontalIcon `split left/right [|]` (full tier only)
 - SplitVerticalIcon `split top/bottom [-]` (full tier only)
-- ArrowsOutIcon / ArrowsInIcon `zoom / unzoom [z]` (full tier only)
+- ArrowsOutIcon / ArrowsInIcon `zoom [z] / unzoom` (full tier only)
 - ArrowLineDownIcon `minimize [m]`
 - XIcon `kill [x]` (hover turns error-red)
 
@@ -99,6 +109,19 @@ The alert bell and TODO pill are defined in `docs/specs/alert.md` (visual states
 ### Pane body
 
 The pane body paints `--color-terminal-bg` on the React pane wrapper and the `TerminalPane` mount point. The persistent xterm host element, `.xterm-screen`, and xterm scroll container are also painted with the concrete background from `getTerminalTheme()`. This is intentional: xterm.js only paints its own rendered terminal surface, and integer row fitting can leave a sub-row remainder at the bottom of the pane. The host background must match the terminal screen exactly and clip to the pane's shared rounded bottom corners so the terminal surface reaches the selection overlay cleanly.
+
+### Spoken-alarm overlay
+
+A terminal Session with transient speech-delivery state gets a pointer-transparent overlay spanning its whole Lath leaf; browser surfaces never render it. It resolves through the tiling engine's per-leaf overlay slot (`docs/specs/tiling-engine.md`), never intercepts pointer/focus routing, and never changes leaf geometry.
+
+It renders as **two layers straddling the header's stacking context** (`.lath-leaf-header` is `position: relative; z-index: 20`):
+
+- **Wash + label at `z-index: 19`** — below the header, so the wash never tints the header band, where `--color-alarm-vs-terminal` (picked against the *terminal body*) carries no contrast guarantee; above terminal content; below the `z-index: 20` pane-corner mouse-override banner, which therefore stays untinted. Only `SPEAKING` washes, at 20%: `SPOKEN` persists until the ring is attended, which is unbounded, and a tint degrading terminal-text contrast for that whole window is the same mistake the Door's badge cluster avoids. The label sits `PANE_HEADER_HEIGHT_PX + 4` from the Pane top, centered, in both states.
+- **Perimeter ring at `z-index: 25`** — above the header so the treatment still reads as one rounded rectangle around the whole Pane, below the `z-index: 30` sashes. An inset border at the leaf's edge covers nothing. 5px for `SPEAKING`, 3px for `SPOKEN`; it is what carries `SPOKEN` on its own.
+
+Header popovers are not a factor in this layering: every one of them (pane context menu, title candidates, notification preview, rename warning) portals to `document.body` with `position: fixed`, so they render in the root stacking context above the whole wall regardless of leaf z-indices.
+
+Both layers wear the leaf's own rounding (header radius on top, terminal radius on the bottom). Under `SPEAKING` both pulse when motion is allowed and `cfg.alert.ringingPaused` is not set. Behavior and clearing rules belong to `docs/specs/alert.md`. Source of truth: `AlertSpeechIndicator.tsx`, registered as the `terminal` overlay by `LathHost.tsx`.
 
 ### Pane header responsive sizing
 
@@ -112,11 +135,13 @@ The mouse-override icon only appears when the inside program has requested mouse
 
 ## Baseboard
 
-Below the content area is the baseboard (`h-7`, 28px). It is visible by default and has no top divider. The content area ends 2px above it, leaving a narrow theme-colored gap that keeps rounded pane corners distinct from the baseboard. Its horizontal padding matches the content wrapper's 6px inset, so doors align with the panes above. When empty, it shows keyboard shortcut hints when there are no doors and the container is wider than 350px — platform-aware: `LCmd → RCmd to enter command mode` on macOS, `LShift → RShift to enter command mode` elsewhere (`Baseboard.tsx`).
+Below the content area is the baseboard (`h-7`, 28px). It is visible by default and has no top divider. The content area ends 2px above it, leaving a narrow theme-colored gap that keeps rounded pane corners distinct from the baseboard. Its horizontal padding matches the content wrapper's 7px inset, so doors align with the panes above. When empty, it shows keyboard shortcut hints when there are no doors and the container is wider than 350px — platform-aware: `LCmd → RCmd to enter command mode` on macOS, `LShift → RShift to enter command mode` elsewhere (`Baseboard.tsx`).
 
 `Wall` accepts `showBaseboard={false}` for constrained embedders such as the website's mobile Pocket playground, where a separate bottom navigation owns the area below the terminal and door workflows are outside the prototype scope. The main app shell keeps the default `showBaseboard=true`.
 
-When a session is minimized, it becomes a **door** on the baseboard. The door displays the same derived terminal label as the pane header, a TODO badge (if set), and an alert bell icon with activity dot. It uses the bottom edge of the window as its bottom border, with left, top, and right borders using the shared terminal top radius from `lib/src/components/design.tsx` — resembling a mouse hole and matching pane rounding. Door dimensions: `min-w-[68px] max-w-[220px] h-6`.
+The far right of the baseboard is a single flex cluster, right-aligned as a unit: the `N more →` overflow arrow, then the host-supplied `notice` slot (standalone puts the update banner there), then three always-present 24px **Settings** controls. The first is a 16px speaker/slashed-speaker reflecting spoken alarms enabled/disabled; the second is a 16px ringing-bell/slashed-bell reflecting push notifications enabled/disabled; the third is the 16px sliders icon for the dialog itself. Shape and accessible text both carry each state, so the status does not rely on color. All three open the same app-global Settings dialog — theme in `docs/specs/theme.md`, alarms in `docs/specs/alert.md` → Alarm settings; the status controls do not toggle settings directly. Every baseboard-level button shares one class constant in `Baseboard.tsx`. The cluster's always-present part is measured and subtracted from the door-fitting budget below; the overflow arrow stays out of that measurement because its presence is an *output* of the fit, so measuring it would feed back into its own input.
+
+When a session is minimized, it becomes a **door** on the baseboard. The door displays the same derived terminal label as the pane header, a TODO badge (if set), and an alert bell icon with activity dot. Speech state is layered on top: `SPEAKING` takes the whole badge slot — a speaker plus label, inverting and pulsing the entire Door — because it lasts exactly one utterance. `SPOKEN` does **not**: it persists until the ring is attended, which is unbounded, so it adds a speaker icon *beside* the TODO pill and bell rather than replacing them, plus a static 2px contrast inset on the Door. A Door that hid both persistent signals for that whole window would be indistinguishable from a quiet one. Both states name themselves in the Door's `title` and accessible name. It uses the bottom edge of the window as its bottom border, with left, top, and right borders using the shared terminal top radius from `lib/src/components/design.tsx` — resembling a mouse hole and matching pane rounding. Door dimensions: `min-w-[68px] max-w-[220px] h-6`.
 
 ### Door interaction
 
@@ -130,6 +155,7 @@ When a session is minimized, it becomes a **door** on the baseboard. The door di
 
 Doors are measured in a hidden off-screen container first:
 
+- Subtract the measured right cluster (notice + the three alarm-settings controls) and its gap from the available width before fitting anything — that space is never available to doors.
 - If they all fit, display them all. If there is remaining space, show the keyboard shortcut hint.
 - If they do not all fit:
   - Reserve space for a `N more →` button on the right edge
@@ -172,6 +198,8 @@ Wall starts in `command` mode by default. Embedders may pass `initialMode="passt
 **Enter passthrough mode:**
 - Click any pane body or header
 - Press `Enter` on a selected pane in command mode
+- Create a terminal through a manual split (`|` / `%` / `-` / `"`, a header split button) or a host New Terminal action; the new pane is selected and focused immediately
+- Press `z` on a selected pane in command mode (also zooms it)
 - Click or press `Enter` on a door (restores session first)
 - Focus is deferred via `requestAnimationFrame` so it lands after the click/mousedown event finishes
 
@@ -180,6 +208,7 @@ Wall starts in `command` mode by default. Embedders may pass `initialMode="passt
 - Detected via capture-phase `keydown` listener on `e.key === 'Meta'` (or `e.key === 'Shift'`) and `e.location` (1 = left, 2 = right). The Meta and Shift tracks are independent, so a Left Cmd followed by a Right Shift does not trigger.
 - Works even when xterm has DOM focus because listener uses capture phase
 - On keyboards without a right Meta key (common on Windows/Linux laptops), the Shift track is the available gesture; both tracks are always active.
+- If the focused pane is zoomed, returning keyboard focus to command mode starts unzoom immediately.
 
 ## Keyboard shortcuts (command mode)
 
@@ -187,21 +216,21 @@ All handled in a single capture-phase `keydown` listener on `window`. Every hand
 
 | Key | On pane | On door |
 |-----|---------|---------|
-| `\|` / `%` | Horizontal split — new pane to the right | — |
-| `-` / `"` | Vertical split — new pane below | — |
+| `\|` / `%` | Horizontal split — new pane to the right, then enter passthrough | — |
+| `-` / `"` | Vertical split — new pane below, then enter passthrough | — |
 | Arrow keys | Spatial navigation between panes | Left/Right between doors, Up to panes |
 | `Cmd/Ctrl+Arrow` | Swap session content with neighbor | — |
 | `Enter` | Enter passthrough mode | Restore session + enter passthrough |
 | `,` | Inline rename | — |
 | `x` / `k` | Kill with confirmation | Restore session + kill confirmation |
 | `m` / `d` | Minimize to door | Restore session (stay in command) |
-| `z` | Toggle maximize/restore | — |
+| `z` | Zoom pane and enter passthrough | — |
 | `t` | Toggle TODO flag | — |
 | `a` | Dismiss or toggle alert | — |
 
 ### Split cwd inheritance
 
-When a split is initiated from an existing pane (via `|`/`%`/`-`/`"`, the header split buttons, or `Cmd/Ctrl+Click` on a split icon), the new pane spawns with its source pane's last-known cwd as the spawn directory. The source cwd is read from `getTerminalPaneState(sourceId).cwd`; remote cwds (`isRemote === true`, e.g. an OSC 7 path reported over ssh) are ignored because they aren't usable as a local spawn cwd. When no source cwd is known, when the split has no source pane (initial pane creation), or when the source is remote, the host's default cwd applies. The inherited cwd rides through `setPendingShellOpts` alongside the inherited shell selection and is consumed by `getOrCreateTerminal` on the next `platform.spawnPty`.
+When a split is initiated from an existing pane (via `|`/`%`/`-`/`"`, the header split buttons, or `Cmd/Ctrl+Click` on a split icon), the new pane spawns with its source pane's last-known cwd as the spawn directory, then becomes selected and enters passthrough immediately. Host New Terminal actions use the same focus tail. Repeated layout construction therefore requires re-entering command mode between manual splits. Focus-neutral control-plane creation (`dor split -- …`, `dor ensure`, `dor iframe`, `dor ab`) retains its documented background behavior. The source cwd is read from `getTerminalPaneState(sourceId).cwd`; remote cwds (`isRemote === true`, e.g. an OSC 7 path reported over ssh) are ignored because they aren't usable as a local spawn cwd. When no source cwd is known, when the split has no source pane (initial pane creation), or when the source is remote, the host's default cwd applies. The inherited cwd rides through `setPendingShellOpts` alongside the inherited shell selection and is consumed by `getOrCreateTerminal` on the next `platform.spawnPty`.
 
 ### Kill confirmation
 
@@ -211,25 +240,46 @@ Untouched sessions skip this confirmation. A newly spawned shell starts `untouch
 
 ## Selection overlay
 
-A fixed-positioned element rendered on top of the Lath host. Covers the active element's area inflated by 3px (half the 6px gap) for panes; doors are not inflated.
+A fixed-positioned element rendered on top of the Lath host. Covers the active element's area inflated by `SELECTION_RING_INFLATE_PX` (4px) for panes; doors are not inflated. The inflate is derived in `lib/src/components/design.tsx` so both ring strokes center on the gutter's midline: the 1px passthrough border spans [3px, 4px] from the pane edge — dead center of the 7px gutter, on whole pixels because the gutter is odd.
 
 - A pane or door can be **active** or **inactive**. Only one element is active at a time.
-- **Passthrough:** `border: 1px solid ${color}` — no glow
-- **Command:** animated SVG marching-ants border — rounded rectangle path with `stroke-dasharray` animation (10px segment, 60% dash / 40% gap, 0.4s cycle, 2px stroke)
-- Border radius: shared terminal radius from `lib/src/components/design.tsx`: full `0.5rem` for panes, `0.5rem 0.5rem 0 0` for doors
+- One SVG renderer (`SelectionRing`, `variant: 'ants' | 'solid'`) draws both modes:
+- **Passthrough:** `variant='solid'` — a 1px solid SVG stroke that replaced the old `border: 1px solid ${color}` CSS border, placed pixel-identically (centerline `strokeWidth/2` inside the div edge for both panes and doors), no glow
+- **Command:** `variant='ants'` — animated SVG marching-ants border, rounded rectangle path with `stroke-dasharray` animation (10px segment, 60% dash / 40% gap, 0.4s cycle, 2px stroke). Unchanged while the ring travels; the motion smear is a separate layer behind it (see "Ring travel")
+- Border radius follows DESIGN.md's Concentric-Corners Rule: the pane ring's rect is inflated by `SELECTION_RING_INFLATE_PX`, so its radius is the pane radius plus that offset (`PANE_SELECTION_RING_RADIUS_PX` in `lib/src/components/design.tsx`, with the marching-ants path inset so its stroke centerline sits on the same gutter midline, concentric with the pane corner); doors sit at zero offset and keep `0.5rem 0.5rem 0 0`
 - Color from CSS custom property `--mt-selection-terminal`
-- `z-index: 50`, `pointer-events: none`, `transition: 150ms`
+- `z-index: 50`, `pointer-events: none`
+
+### Ring travel
+
+The ring's rect (and its `{tl,tr,br,bl,inset}` shape) is driven **per-frame by a JS tween**, not a CSS transition — the tween writes true interpolated values each rAF frame, the same pointer-events-none carve-out the Lath animator holds (DESIGN.md's "don't animate layout properties" bans CSS transitions on layout props, not this). Motion is `FOCUS_MOTION_MS` (220ms — half `LATH_MOTION_MS`) on the house curve `cubic-bezier(0.22, 1, 0.36, 1)`. Source of truth: the pure tween core `lib/src/lib/rect-tween.ts` (position and velocity); the pure outline/smear geometry `lib/src/lib/ring-geometry.ts`; the overlay's rAF loop in `WorkspaceSelectionOverlay.tsx`; the SVG shell `lib/src/components/wall/SelectionRing.tsx`.
+
+Per-frame writes are **imperative** — the same React-owns-structure / frame-owns-mutations split LathHost uses for the animator. `SelectionRing` renders a stable shell once (per variant/color/focus change) and lifts its DOM nodes (container div, ring path, smear group) back to the overlay via refs; the rAF loop writes `top/left/width/height`, the path `d`, the marching-ants dash, and every smear piece's `d` / width / opacity directly, and re-applies once after any structural render (pre-paint, so a freshly mounted ring never flashes). Do **not** reintroduce per-frame React state: a per-frame reconcile of this subtree competes with the travel for the frame budget.
+
+- **Identity change → tween.** When the incoming measurement's identity (`${selectedType}:${selectedId}`) differs from the one on screen, the ring glides from its current interpolated position to the new target, clock restarted (arrow-key spam stays responsive).
+- **Same identity → snap 1:1.** A same-identity re-measure with no tween in flight (sash drag, window resize, a settled leaf's store commit) writes the new rect directly — the ring tracks the geometry exactly instead of easing behind it.
+- **In-flight retarget.** A same-identity re-measure *during* a tween retargets the destination without resetting the clock, so the ring converges on a moving target (select-a-neighbor-during-kill) and still lands on the original completion instant.
+- **Snap gate.** `!cfg.layout.animate` (Chromatic) or `prefersReducedMotion()` → the ring settles instantly, mirroring the animator's 0-duration path (`lath-wall-engine.ts`). Only the unfocus-saturate fade keeps a CSS transition (`filter ${FOCUS_MOTION_MS}ms`), unconditionally.
+- Pane↔door selection morphs the corner radii (12px all-round ⇄ `8,8,0,0`) and stroke inset through the same tween, so the shape lerps instead of popping.
+- **Directional motion smear.** While travelling, each ring edge trails a soft band sized by its own motion. A line smears only by moving *across* itself — sliding along its own length leaves it unchanged — so **a horizontal edge is driven by its vertical speed and a vertical edge by its horizontal speed, and all four edges are independent.** Speeds come from `sampleRingVelocity` — the tween's **analytic derivative**, not a difference of rendered frames. Each edge's position is `from + (to - from) * E(t)`, so its speed is `|to - from| * E'(t) / durationMs`, with `E'` supplied by `LATH_EASING.slope`. Each speed normalizes against `cfg.focusRing.smearFullSpeed` into a single `t`, and extent and intensity are independent linear ramps off it — width from `strokeWidth` to `smearMaxPx`, alpha from 0 to `smearPeakAlpha`. Both start at zero, so an edge that is not moving contributes nothing rather than laying a band under the crisp ring. A settled or reduced-motion ring has null speeds and the smear layer is `display: none`, so snapshots stay deterministic.
+  - **Invariant: the smear is strongest on the opening frame and decays from there.** The house ease-out peaks at `E'(0) = 4.545x` its average speed, so that is where the blur belongs. **Do not go back to finite-differencing rendered positions**: it has no previous sample to difference on the first frame, so the smear was hidden outright for the frame covering ~31% of a 220ms travel; an EMA over it lagged ~1.7 frames, under-reporting at launch and lingering after the ring had parked; and a backward difference under-reports any decelerating curve. The rendered peak landed mid-travel at ~46% of true peak velocity — visibly wrong, and the reason this is analytic now. Analytic velocity is also jitter-free by construction (it never differences wall-clock timestamps), so it needs no smoothing.
+  - **Extent and intensity are deliberately independent.** `smearMaxPx` is how far the smear reaches, `smearPeakAlpha` how strongly it reads, and `smearFullSpeed` the speed at which both max out. Alpha is *not* divided by the widening factor: strict ink conservation ties peak alpha to the extent, which makes the effect impossible to strengthen by widening — a wider band just spreads the same ink thinner. `smearFullSpeed` sets the shape over a travel: low values pin nearly every move at full smear (uniform blur), high values make blur track speed so short hops smear less than long jumps.
+  - **Per-edge, not per-axis.** Collapsing the four edges to one horizontal and one vertical speed (e.g. from the ring *centre's* velocity) is wrong for ordinary split layouts: moving between panes that are flush at the top but differ in height, the top edge translates purely sideways and must stay crisp while the bottom edge moves diagonally and smears hard. A centre velocity averages those into the same wrong answer for both.
+  - **Two layers, because the geometry is incompatible.** The ring is one closed path so the marching-ants dash phase runs unbroken around the perimeter; SVG `stroke-width` is a single scalar, so that one path cannot carry four different widths. The smear is therefore a sibling `<g data-ring="smear">` of eight solid pieces drawn underneath, and the ring (`<path data-ring="outline">`) is never transformed, re-dashed, or re-alpha'd — it renders exactly as it did before any smear existed. Keeping all dash bookkeeping on the untouched path is the point of the split.
+  - **Dash length is computed, not measured.** `ringPerimeter` returns the outline's exact length in closed form — straight runs plus `1.6232252401402307 × r` per corner, the arc length of the *quadratic* quarter-turn the path actually draws. Do not substitute `π/2` (the quarter-*circle* value); it is 3% short and would silently shift every dash. `SVGGeometryElement.getTotalLength()` was the previous source and is not to be reinstated: it forces a synchronous style+layout flush on every frame of a travel, at a cost scaling with the whole document rather than this one path, and it is itself only an approximation (browsers flatten curves to measure). Verified in Safari to agree with `getTotalLength()` to 6e-4px on a 3253px ring — the residual is WebKit's flattening error, not ours. Removing it also let the jsdom `getTotalLength` stubs go, so tests assert real dash geometry instead of a fabricated perimeter.
+  - **Eight pieces: four edges plus four corners.** Straight edges carry their width in a plain `stroke-width` and need no transform. A corner cannot — it has to reach two different widths at once — so each corner arc is stroked at unit width and given `transform: scale(a, b)` with `a` the vertical neighbour's width and `b` the horizontal neighbour's. Under that scale a unit stroke renders `b` thick where its tangent is horizontal and `a` thick where vertical, interpolating between, so the corner tapers between its two edges with no seam at either join; `cornerPath` pre-divides the arc by the same `(a, b)` so the on-screen curve is unchanged. Opacity cannot vary along a stroke, so a corner takes the mean of its two edges'. Every piece is cut from ONE shared point set (`ringPoints`), which is also what `roundedRectPath` walks — so the smear provably tiles the ring rather than agreeing with it by inspection, and `ring-geometry.test.ts` pins that. The overlay finds each piece by its `data-piece` attribute, never by index, so render order stays presentational. Source of truth: `lib/src/lib/ring-geometry.ts`.
+  - This replaced an SVG `feGaussianBlur`. **Do not go back**: WebKit CPU-rasterizes SVG filters every frame, measured in Safari 26.5 at 25.6ms/frame with 31 of 98 frames over 25ms during travel, versus a locked 16.7ms with zero dropped frames. Stroke widths, scale transforms and opacities are GPU-composited and cost nothing. CSS `filter: blur()` is also free, so the cost is SVG filters specifically, not blur.
 
 ### Position tracking
 - Each pane body registers its DOM element in a `paneElements` Map on mount and removes it on unmount (`usePaneChrome`); the overlay resolves the enclosing Lath leaf (`[data-lath-leaf]`) via `resolvePaneElement` so the ring covers the full leaf (header + body)
 - Door elements are registered by the `Baseboard` via `DoorElementsContext` from `components/wall/wall-context.tsx` (queries `[data-door-id]` attributes)
-- Updates on: selection change, resize (`ResizeObserver`), every Lath store commit (`revision` via `useSyncExternalStore`), and — while an animation runs — every animator frame (so the ring tracks kills, restores, and tweens frame-accurately, with its 150ms CSS transition dropped)
+- Re-measures on: selection change, resize (`ResizeObserver`), every Lath store commit (`revision` via `useSyncExternalStore`), and — while the wall streams animator frames — every frame (so the ring tracks kills, restores, and tweens frame-accurately). If the selected leaf is momentarily absent the overlay bails and holds the last rect.
 
 ## Spatial navigation
 
 ### Direction detection
 
-Lath's pure `neighbors(tree, rect, id, direction, opts)` query resolves the nearest pane in an arrow's direction — no DOM rect scanning; it computes against the same laid-out rects the screen shows (`docs/specs/tiling-engine.md` → "Layout"). The keyboard handlers reach it through the engine-neutral `WallNav` seam (`lib/src/components/wall/keyboard/types.ts`), whose `findInDirection` calls `lath.neighborOf`. The semantics:
+Lath's pure `neighbors(tree, rect, id, direction, opts)` query resolves the nearest pane in an arrow's direction — no DOM rect scanning; it computes against the same laid-out rects the screen shows (`docs/specs/tiling-engine.md` → "Layout"). The keyboard handlers reach it through the engine-neutral `WallNav` seam (`lib/src/components/wall/keyboard/types.ts`), whose `findInDirection` calls `lath.store.neighborOf`. The semantics:
 
 1. **Edge-based direction check**: candidate must be strictly beyond the leaf's edge on the primary axis
 2. **Overlap requirement**: candidate overlapping on the secondary axis is preferred
@@ -295,15 +345,111 @@ Submitted values are rejected when empty or when they fail the `setTerminalUserT
 
 For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getOrCreateTerminal(id)` on React mount and `unmountElement(id)` on React unmount. The session (xterm.js instance, PTY, DOM element) persists in the registry across mount/unmount cycles — the DOM element is detached from its container but the Registry entry stays `Mounted`. A browser surface's pane ID is a Surface id with no registry entry or PTY (`docs/specs/glossary.md`); its DOM is hosted by LathHost's leaf div and it is reconstructed from persisted params, not from the registry.
 
-- **Create**: `getOrCreateTerminal` spawns xterm.js + UnicodeGraphemesAddon + FitAddon + PTY, returns existing if already created. The xterm instance sets `allowProposedApi: true` because UnicodeGraphemesAddon activates through xterm's proposed Unicode API.
+- **Create**: `getOrCreateTerminal` spawns xterm.js + UnicodeGraphemesAddon + FitAddon + PTY, returns existing if already created. The xterm instance sets `allowProposedApi: true` because UnicodeGraphemesAddon activates through xterm's proposed Unicode API. The WebGL addon is *not* loaded at create — it is claimed lazily on the session's first mount (see "Renderer" below).
 - **Resume**: `resumeTerminal` creates xterm entry and writes replay data without spawning a new PTY. Used when the webview is recreated while the host retains Live PTYs (Link: Severed → Resuming → Live).
-- **Restore**: `restoreTerminal` creates xterm entry and spawns a new PTY with saved cwd and scrollback. Used on cold start from a saved Snapshot (Link: Cold → Live).
+- **Restore**: `restoreTerminal` creates xterm entry and spawns a new PTY with the saved cwd. It replays no transcript — scrollback is not persisted (`docs/specs/transport.md` → "What is persisted"). Used on cold start from a saved Snapshot (Link: Cold → Live).
+- **Agent resume**: a restored pane the host captured a resume invocation for re-runs it automatically. See "Agent resume on cold restore" below.
 - **Untouched**: new `getOrCreateTerminal` sessions start untouched. `isUntouched(id)` exposes the flag, and user-originated PTY input clears it via the registry input paths. Resume/restore seed the persisted flag; missing legacy snapshot data defaults to touched (`false`) so close confirmation remains conservative.
 - **Shell selection replacement**: the standalone shell dropdown and VS Code shell picker send `dormouse:new-terminal` with `replaceUntouched` when the selected shell type changes. `Wall` always creates a new session id and a fresh `surface:N` ref for that request. If the currently selected pane or door is untouched, the new terminal takes over the same leaf via a Lath `replace` op (an atomic identity swap; doors first reattach through the normal restore path), the old untouched session is disposed, and the replaced Surface's ref is retired. If the selected terminal is touched or no terminal is selected, the request spawns a new pane beside the selected one. Announced shell-selection spawns show a transient pane-anchored notice such as `Switched to zsh` or `Opened bash`.
-- During resume/restore replay, xterm.js may emit terminal-generated replies for OSC/CSI/DCS queries that were embedded in saved output. The registry drops those replay-time replies before they reach the new shell. This filter is limited to query/focus reports, and must not swallow user keyboard escape sequences such as arrows, function keys, or bracketed paste.
+- During **resume** replay, xterm.js may emit terminal-generated replies for OSC/CSI/DCS queries that were embedded in buffered output. The registry drops those replay-time replies before they reach the new shell. This filter is limited to query/focus reports, and must not swallow user keyboard escape sequences such as arrows, function keys, or bracketed paste.
 - **mount / unmount (DOM)**: `mountElement` reparents the persistent DOM element into a container; `unmountElement` removes it. The Registry entry survives.
 - **Dispose**: `disposeSession` kills the PTY, disposes xterm, removes the registry entry. Only called on explicit kill (`x`).
 - **Swap**: the Cmd/Ctrl+Arrow swap trades two leaf identities via a Lath `swap` op — per-leaf metadata and registry entries are keyed by id, so they follow the swap with no DOM reattach or title swap (see "Cmd/Ctrl+Arrow swap" above).
+
+### Agent resume on cold restore
+
+A cold **restore** spawns a *fresh* shell and replays nothing. What can come back
+is the agent the host interrupted on its way down: when the host's boot payload
+carries an invocation for that surface (`PlatformAdapter.getRecoveryCommands`;
+`docs/specs/transport.md` → "The recovery command"), the restored pane runs it —
+no prompt, no button.
+
+- **Restore only.** `restoreSession` passes the command to `restoreTerminal` per
+  terminal pane; **resume** never does, because there the agent is still Live and
+  has nothing to resume. Browser surfaces are skipped with the rest of the terminal
+  restore path.
+- **Revalidated, not trusted.** `normalizeResumeCommand` re-checks the invocation
+  before it is typed, so a snapshot written by an older detector cannot execute
+  something the current grammar would reject.
+- **Typed at the prompt, not at spawn.** The command goes through the same
+  `typeCommandWhenPromptReady` wait as a `dor split` launch: spawn-then-type is
+  exactly the window in which shell startup swallows keystrokes. `commandLine` +
+  `commandStart(user_input)` are seeded synchronously first, because the platform
+  write bypasses xterm's keystroke fallback and a non-integrated shell would
+  otherwise never count the agent as running (`docs/specs/terminal-state.md`).
+- **The pane announces it.** One dim line — `⟲ resuming agent session: <command>` —
+  written to xterm, not the PTY. With no transcript to explain the pane, it is the
+  only thing saying why an agent appeared, and it marks the discontinuity the
+  resume otherwise hides: the interrupted turn did **not** continue. It is a
+  notice, not a control; it has no dismiss and no retirement rules.
+- **No confirmation gate.** `claude --resume <id>` restores the conversation, lands
+  at an idle prompt, and issues no request until the user types; the command came
+  from a process the host had already interrupted itself and read back within one
+  bounded wait; and a wrong id fails closed, since agent session files are per-user
+  and per-project-directory. The reasoning is recorded in `docs/specs/transport.md`
+  → "Consuming it".
+
+Source of truth: `restoreTerminal` in `lib/src/lib/terminal-lifecycle.ts`, called
+from `lib/src/lib/session-restore.ts`.
+
+### Renderer
+
+Every terminal renders through stock `@xterm/addon-webgl`, claimed lazily by
+`tryEnableWebglRenderer` on a session's first `mountElement` — not in
+`createXtermHost` — and guarded by `webglAttempted` so each session claims at
+most one GL context. First paint is the earliest point worth the context: a
+session created but never mounted (e.g. a minimized door awaiting restore) never
+allocates one, keeping scarce GL contexts for terminals that are actually shown.
+xterm's built-in DOM renderer is the fallback, never the default.
+
+The DOM renderer emits one `<span>` per style run per row, so a TUI that paints
+every cell its own truecolor collapses to one span-with-inline-style *per cell*,
+rebuilt every frame. On a 99×25 pane that is ~1150 elements of style recalc plus
+layout per frame: measured in Safari 26.5, a single such pane held the whole page
+at ~110ms/frame (~9fps) while the rest of the app was idle. The same pane on the
+WebGL renderer holds a locked 60fps (16.6ms, zero frames over 25ms) — the grid
+rasterizes from a glyph atlas and the DOM stays untouched.
+
+Fallback to the DOM renderer is automatic and must stay that way, because two
+failure modes are expected in the field:
+
+- **No WebGL at all** (headless/jsdom, blocklisted GPU, a host webview with GPU
+  disabled). Construction throws; `tryEnableWebglRenderer` swallows it. A
+  `typeof WebGL2RenderingContext === 'undefined'` pre-check skips the doomed
+  request entirely so unit tests don't log a `getContext` failure per terminal.
+- **Context-budget eviction.** Browsers cap live WebGL contexts per page —
+  measured at **16 in Safari 26.5**, evicted oldest-first. One context per
+  terminal means a Window past ~16 terminals silently drops its *oldest* panes
+  back to the DOM renderer. The `onContextLoss` handler disposes the addon,
+  which is xterm's documented signal to resume DOM rendering; verified live by
+  exhausting the budget and watching the panes keep painting.
+
+Degradation is therefore never worse than the pre-WebGL behavior, but it is also
+one-way: a pane that loses its context stays on the DOM renderer even after other
+panes close. Re-arming the focused pane after a loss is unbuilt — see `## Future`.
+
+The addon is loaded on a session's **first mount**, not at creation. A GL context
+is a scarce per-page resource, and cold restore builds a session for every
+persisted pane *including minimized doors*, which never paint — claiming contexts
+at create would spend the budget on invisible surfaces and, since eviction is
+oldest-first and one-way, permanently demote the earliest-restored panes.
+`TerminalEntry.webglAttempted` keeps it to once per session.
+
+Which renderer a terminal ended up on is recorded as `data-renderer="webgl"|"dom"`
+on its host element, so the outcome is inspectable rather than silent — including
+after a context loss demotes a pane. `cfg.terminal.webglRenderer` disables the
+whole path; `.storybook/preview.ts` pins it off under Chromatic, because a canvas
+snapshots as an opaque bitmap that varies with the runner's GPU while styled spans
+diff deterministically.
+
+Verified in Safari 26.5 (the numbers above) and structurally in Chrome. **Not yet
+verified inside Tauri's WKWebView**: same engine as Safari and Tauri does not
+disable the GPU, so it is expected to work — read `data-renderer` on a pane's host
+element to confirm.
+
+Source of truth: `tryEnableWebglRenderer` in `lib/src/lib/terminal-lifecycle.ts`.
+Not to be confused with the SDF fork in `docs/specs/webgl-text.md`, which is a
+different addon consumed only by `canopy/`.
 
 ### Session persistence
 
@@ -321,13 +467,13 @@ On startup, recovery is priority-based:
 
 ### Activity state
 
-Each session carries `ActivityState` with `status: SessionStatus`, `watchingEnabled: boolean`, `todo: boolean`, and `notification: ActivityNotification | null`. `status` is the projected public status from the timer-based WATCHING track, terminal-report protocol track, and command-exit track described in `docs/specs/alert.md`; it may be `OSC_NOTIF_BUSY` when OSC progress has cocked the bell or `COMMAND_EXIT_ARMED` when a watched foreground command is running after attention was lost. `watchingEnabled` keeps the WATCHING toggle accurate when `status` is projected to a stronger protocol or command-exit state. These are synced to React via `useSyncExternalStore`. State that arrives from the platform before a registry entry exists (resume scenario) is held as "primed state" and applied when the registry entry is created.
+Each session carries `ActivityState` with `status: SessionStatus`, `watchingEnabled: boolean`, `todo: boolean`, and `notification: ActivityNotification | null`. `status` is the projected public status from the timer-based WATCHING track, terminal-report protocol track, and command-exit track described in `docs/specs/alert.md`; it may be `OSC_NOTIF_BUSY` when OSC progress has cocked the bell or `COMMAND_EXIT_ARMED` when a foreground command is running after attention was lost with WATCHING off. `watchingEnabled` reports whether the running command matches a WATCHING rule, which stays accurate when `status` is projected to a stronger protocol state. These are synced to React via `useSyncExternalStore`. State that arrives from the platform before a registry entry exists (resume scenario) is held as "primed state" and applied when the registry entry is created.
 
 Each session also carries `TerminalPaneState` from `docs/specs/terminal-state.md`. The frontend store is keyed by the current pane/session id, and PTY-originated semantic events are resolved through `ptyId` so swapped sessions keep their CWD and command state with the terminal content.
 
 ## Theme
 
-The Lath host styling lives in the `.lath-host` / `.lath-leaf` rules in `lib/src/index.css`: an app-bg host, a 30px header band per leaf, and a terminal-bg body. The content area uses a 6px top/sides inset and 2px bottom inset (`px-1.5 pt-1.5 pb-0.5` on wrapper, `inset-x-1.5 top-1.5 bottom-0.5` on container); the `LATH_LAYOUT_OPTS` gap of 6px is the only visual separator between panes.
+The Lath host styling lives in the `.lath-host` / `.lath-leaf` rules in `lib/src/index.css`: an app-bg host and a terminal-bg body. Each leaf has a 30px header band applied by LathHost from the shared `PANE_HEADER_HEIGHT_PX` in `lib/src/components/design.tsx`. The content area uses a 7px top/sides inset and 2px bottom inset (`px-1.75 pt-1.75 pb-0.5` on wrapper, `inset-x-1.75 top-1.75 bottom-0.5` on container); the `LATH_LAYOUT_OPTS` gap of 7px (`PANE_GUTTER_PX`) is the only visual separator between panes.
 
 Colors use a two-layer CSS variable strategy: `@theme --color-*` tokens → `var(--vscode-*)`. VSCode provides host theme variables in extension mode; standalone and website mode apply bundled or installed theme variables before rendering. Tailwind v4 `@theme` block registers `--color-*` tokens as Tailwind colors (e.g., `bg-app-bg`, `text-app-fg`, `border-border`). See `theme.css` for the full token map.
 
@@ -336,6 +482,10 @@ The Lath host paints `var(--color-app-bg)` so gutters and rounded pane/header co
 ## Animations
 
 All pane motion is owned by the Lath **animator** — a pure function of time that turns committed layout changes into interpolated frames, applied imperatively to the leaf divs by LathHost (`docs/specs/tiling-engine.md` → "Animation"). Default motion is 440ms `cubic-bezier(0.22, 1, 0.36, 1)`; under reduced motion the animator runs the same code with a 0 duration (instant). The selection overlay measures the leaf divs, which carry the interpolated inline geometry, so `getBoundingClientRect` tracks the tween frame-accurately. There are no CSS entrance/exit classes. Terminal panes, by contrast, do not refit every frame: `TerminalPane`'s resize observer throttles `refitSession` (leading edge, then at most one per ~150ms while resizes keep arriving, plus a trailing call at rest), so a motion or sash drag reflows the xterm buffer and fires a PTY resize a handful of times instead of once per animated cell-boundary crossing, while the resting geometry still gets an exact fit.
+
+### Zoom (elevated expansion)
+
+Zoom is presentation-only: the split tree and every tiled rect remain unchanged. It is coupled to passthrough focus: acquiring zoom enters passthrough and focuses that pane; exiting passthrough, focusing another pane, or selecting a Door starts unzoom immediately. Only the zoom owner's header shows Unzoom, with its foreground/background header tokens inverted so the escape action stands out; partially exposed panes retain their normal Zoom control. Only the owner's control toggles zoom off — the perimeter leaves other headers reachable, and their Zoom control hands zoom over (focus included) rather than merely unzooming the owner. The chosen pane rises above the tiled/dying bands and sashes before expanding from its tiled rect to the Wall rect inset by half the 30px pane-header height (15px). The perimeter exposes the tiled layout beneath, while a blurred `--color-app-bg` shadow separates the elevated edge from the content below. Unzoom reverses the geometry while keeping the pane elevated and shadowed for the whole return; both elevation effects clear only on the settled frame. Source of truth: focus/zoom orchestration and `ZoomedIdContext` in `lib/src/components/Wall.tsx`; `paneZoomButtonClass` and `PANE_HEADER_HEIGHT_PX` in `lib/src/components/design.tsx`; `presentationTargets`, `LATH_ZOOM_MARGIN`, `LATH_ZOOM_SHADOW`, and the layer-to-z-index mapping in `lib/src/components/wall/LathHost.tsx`; discrete layer lifetime in `lib/src/lib/lath/animator.ts`.
 
 ### Spawn (new pane reveal)
 
@@ -374,17 +524,20 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/components/Wall.tsx` | Main layout orchestrator: selected mode/state, session actions, minimize/reattach, provider composition |
 | `lib/src/components/wall/wall-types.ts` / `wall-context.tsx` | Shared Wall types and React contexts used by Wall, pane headers, panels, overlays, and the baseboard |
 | `lib/src/components/wall/LathHost.tsx` | The tiling engine's HTML adapter: leaf divs, sashes, the pane/door drag gesture, and imperative animator frame application. Engine internals are mapped in `docs/specs/tiling-engine.md`. |
+| `lib/src/components/wall/AlertSpeechIndicator.tsx` | Pointer-transparent whole-Pane `SPEAKING` / `SPOKEN` overlay |
 | `lib/src/components/wall/TerminalPanel.tsx` | Pane body wrapper; registers the pane's DOM element (`usePaneChrome`) |
-| `lib/src/components/wall/TerminalPaneHeader.tsx` | Pane header with rename, alert/TODO, mouse override, split/zoom/minimize/kill controls |
-| `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` | Pane/door focus ring and marching-ants overlay; re-measures on Lath store commits + animator frames |
-| `lib/src/components/wall/MarchingAntsRect.tsx` | SVG marching-ants border path and dash sizing |
+| `lib/src/components/wall/TerminalPaneHeader.tsx` | Pane header with rename, alert/TODO, mouse override, split/zoom/minimize/kill controls, and the right-click context menu |
+| `lib/src/components/wall/PaneHeaderContextMenu.tsx` | Pane-header right-click menu: the `surface:N` handle plus the pane's bound TCP ports; a port click connects it to the default browser (`docs/specs/dor-browser.md`) |
+| `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` | Pane/door focus ring: the JS travel tween + rAF loop; re-measures on Lath store commits + animator frames; computes the directional motion-blur velocity |
+| `lib/src/components/wall/SelectionRing.tsx` | The SVG shell: one ring path (`solid` passthrough / `ants` command) plus the eight-piece smear group, all driven imperatively |
+| `lib/src/lib/ring-geometry.ts` | Pure ring outline + smear-piece path geometry, and the piece/corner taxonomy |
 | `lib/src/components/wall/MouseOverrideBanner.tsx` | Temporary mouse override banner shown from the header icon |
 | `lib/src/components/wall/use-wall-keyboard.ts` | Capture-phase keyboard dispatch for mode switching, pane/door commands, copy/paste, selection drag keys |
 | `lib/src/lib/vscode-keybindings.ts` | VS Code-hosted workbench chord mirror allowlist |
 | `lib/src/components/wall/use-session-persistence.ts` | Debounced layout/session save, flush requests, pagehide, PTY exit, file-drop paste routing |
 | `lib/src/components/wall/use-dor-control.ts` | The `dor` CLI's webview control-plane hook (`useDorControl`): the `dormouse:control-request` handler for `surface.*` methods plus its surface-resolution/param-coercion/command-quoting helpers (`docs/specs/dor-cli.md`) |
 | `lib/src/components/wall/use-window-focused.ts` | Window focus tracking hook for header and selection overlay dimming |
-| `lib/src/components/Baseboard.tsx` | Always-visible bottom strip with door components, overflow arrows, and shortcut hints |
+| `lib/src/components/Baseboard.tsx` | Always-visible bottom strip with door components, overflow arrows, shortcut hints, and the right cluster (notice slot + three alarm settings/status buttons) |
 | `lib/src/components/Door.tsx` | Individual door element — mouse-hole styled button with alert/TODO indicators |
 | `lib/src/components/TerminalPane.tsx` | Thin xterm.js mount point — mounts/unmounts persistent session elements |
 | `lib/src/lib/terminal-registry.ts` | Public facade preserving registry imports |
@@ -400,10 +553,10 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/lib/activity-monitor.ts` | Per-session activity state machine: output timing → alert escalation |
 | `lib/src/lib/alert-manager.ts` | Manages ActivityMonitors + attention tracking + TODO state per session |
 | `lib/src/lib/session-types.ts` | Type definitions for persisted sessions (`PersistedPane`, `PersistedDoor`, `PersistedSession`) |
-| `lib/src/lib/session-save.ts` | Serialization: collects layout, scrollback, cwd, alert state for persistence |
+| `lib/src/lib/session-save.ts` | Serialization: collects layout, cwd, alert state for persistence (never scrollback) |
 | `lib/src/lib/session-restore.ts` | Deserialization: loads saved session, calls `restoreTerminal()` for each pane |
 | `lib/src/lib/reconnect.ts` | Priority-based recovery: live PTYs first, then saved session, then empty |
-| `lib/src/lib/resume-patterns.ts` | Detects resumable commands (`claude --resume`, etc.) in scrollback |
+| `lib/src/lib/resume-patterns.ts` | Detects an agent resume invocation in a live buffer — rightmost (newest) match in the tail window, rebuilt as invocation + captured id |
 | `lib/src/index.css` | Lath host styling — `.lath-host` / `.lath-leaf` / `.lath-sash` / drop-preview layout and background flattening |
 | `lib/src/theme.css` | Two-layer VSCode theme token system (`@theme --color-*` → `--vscode-*`) and Tailwind v4 `@theme` integration |
 
@@ -435,5 +588,21 @@ Activating another Workspace (`switchWorkspace`) mounts the target Workspace's S
 Stage 4 also lifts the single-Workspace cap and wires the lifecycle UX:
 
 - **Create** (`createWorkspace`): adds a new Workspace, gives it a default name (`Workspace N`), makes it active, and spawns a single fresh pane — matching the empty-state behavior in Session persistence above.
-- **Close** (`closeWorkspace`): `kill`s each member Surface and removes the Workspace. Closing a Workspace that contains touched Surfaces confirms first (reusing the kill-confirm vocabulary); the exact confirmation surface is settled in the Storybook UI pass. The last remaining Workspace cannot be closed — there is always one active Workspace, just as there is always one visible pane (corner case #10).
+- **Close** (`closeWorkspace`): `kill`s each member Surface and removes the Workspace. Closing a Workspace that contains touched Surfaces confirms first (reusing the kill-confirm vocabulary); the exact confirmation surface is settled in the Storybook UI pass. The last remaining Workspace cannot be closed — there is always one active Workspace, just as there is always one visible pane (corner case #5).
 - **Rename** (`renameWorkspace`): edits the Workspace `name` only. It does not touch any Surface title or the per-pane inline rename.
+
+### Re-arming the WebGL renderer after context loss
+
+A pane that loses its WebGL context (see [Renderer](#renderer)) stays on the DOM
+renderer for the rest of its life, even once other panes close and free budget.
+The eviction order is also backwards from what a tiling terminal wants: browsers
+evict *oldest-first*, but the pane that most deserves the GPU is the focused one.
+
+The fix is to retry `tryEnableWebglRenderer` when a DOM-fallback pane gains
+focus. It is unbuilt because the naive version can thrash: past the context cap,
+focusing panes in turn would evict and rebuild glyph atlases on every focus
+change, which is plausibly worse than sitting still on the DOM renderer. Any
+implementation needs a re-arm budget (e.g. at most once per pane, or a cooldown)
+and a measurement showing focus-cycling does not regress. Not worth building
+until someone actually runs a Window past the cap — 16 concurrent terminals in
+one Window is well beyond observed usage.

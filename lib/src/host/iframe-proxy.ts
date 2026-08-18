@@ -79,7 +79,7 @@ let lastSweep = 0;
  * Stand up a loopback proxy in front of `targetUrl` and return the URL the
  * panel should frame, or a structured reason it could not. The actual upstream
  * fetch happens lazily when the iframe loads the returned URL, so reachability
- * and frame-refusal surface as served error pages rather than here.
+ * surfaces as a served error page rather than here.
  */
 export async function createIframeProxyUrl(
   targetUrl: string,

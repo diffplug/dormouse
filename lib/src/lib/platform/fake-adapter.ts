@@ -1,5 +1,6 @@
 import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo } from './types';
-import { AlertManager, type SessionStatus } from '../alert-manager';
+import { AlertManager } from '../alert-manager';
+import type { AlertSettings } from '../alert-settings';
 import { normalizeExternalUri } from '../external-links';
 import {
   applyTerminalProtocolEvents,
@@ -184,7 +185,6 @@ export class FakePtyAdapter implements PlatformAdapter {
   }
 
   async getCwd(_id: string): Promise<string | null> { return null; }
-  async getScrollback(_id: string): Promise<string | null> { return null; }
 
   /** Ports the playground/tests want a given terminal to report. */
   setOpenPorts(id: string, ports: OpenPort[]): void {
@@ -243,10 +243,10 @@ export class FakePtyAdapter implements PlatformAdapter {
 
   // Alert management (local AlertManager, same as TauriAdapter)
   alertRemove(id: string): void { this.alertManager.remove(id); }
-  alertToggle(id: string): void { this.alertManager.toggleAlert(id); }
-  alertDisable(id: string): void { this.alertManager.disableAlert(id); }
+  alertSetWatchedCommands(names: string[]): void { this.alertManager.setWatchedCommands(names); }
+  alertSetCommandWatched(name: string, watched: boolean): void { this.alertManager.setCommandWatched(name, watched); }
+  alertPublishSettings(settings: AlertSettings): void { this.alertManager.setInactivityTimeoutMs(settings.inactivityTimeoutMs); }
   alertDismiss(id: string): void { this.alertManager.dismissAlert(id); }
-  alertDismissOrToggle(id: string, displayedStatus: string): void { this.alertManager.dismissOrToggleAlert(id, displayedStatus as SessionStatus); }
   alertAttend(id: string): void { this.alertManager.attend(id); }
   alertResize(id: string): void { this.alertManager.onResize(id); }
   alertClearAttention(id?: string): void { this.alertManager.clearAttention(id); }
@@ -254,7 +254,10 @@ export class FakePtyAdapter implements PlatformAdapter {
   alertMarkTodo(id: string): void { this.alertManager.markTodo(id); }
   alertClearTodo(id: string): void { this.alertManager.clearTodo(id); }
   onAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.add(handler); }
-  offAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.delete(handler); }
+  // Single renderer owning the AlertManager, so localStorage is the only store
+  // and there is no canonical snapshot to broadcast back.
+  onWatchedCommands(_handler: (names: string[]) => void): void {}
+  onAlertSettings(_handler: (settings: AlertSettings) => void): void {}
 
   private savedState: unknown = null;
   saveState(state: unknown): void { this.savedState = state; }

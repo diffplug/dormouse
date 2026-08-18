@@ -70,6 +70,7 @@ import type { WallNav } from './wall/keyboard/types';
 import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
 import { useDevServerPortCorrelation } from './wall/use-dev-server-ports';
+import { useAlertSpeech } from './wall/use-alert-speech';
 import { useDorControl } from './wall/use-dor-control';
 import { useWindowFocused } from './wall/use-window-focused';
 import {
@@ -82,7 +83,7 @@ import {
   RenamingIdContext,
   SelectedIdContext,
   WindowFocusedContext,
-  ZoomedContext,
+  ZoomedIdContext,
   type PaneWriteActions,
   type WallActions,
 } from './wall/wall-context';
@@ -111,10 +112,11 @@ export {
   RenamingIdContext,
   SelectedIdContext,
   WindowFocusedContext,
-  ZoomedContext,
+  ZoomedIdContext,
 } from './wall/wall-context';
 export type { WallActions } from './wall/wall-context';
-export { MarchingAntsRect, roundedRectPath } from './wall/MarchingAntsRect';
+export { SelectionRing } from './wall/SelectionRing';
+export { roundedRectPath } from '../lib/ring-geometry';
 export { TerminalPaneHeader } from './wall/TerminalPaneHeader';
 
 function persistedPanelTitle(title: string | null | undefined): string {
@@ -348,9 +350,10 @@ export function Wall({
   // external-drag hit-testing; the chip stays in `doors` until it lands on a target.
   const [doorDrag, setDoorDrag] = useState<{ item: DooredItem; startX: number; startY: number } | null>(null);
   // Zoom is presentation state the store owns (`zoomedId`, cleared when a kill/replace
-  // removes the zoomed leaf); derive the Wall's boolean straight from it rather than
-  // mirroring into local state (docs/specs/tiling-engine.md).
-  const zoomed = useSyncExternalStore(lath.store.subscribe, () => lath.store.getSnapshot().zoomedId !== null);
+  // removes the zoomed leaf). Subscribe to the id (not only its boolean projection)
+  // because focus policy needs to know whether a transition stays on that exact pane.
+  const zoomedId = useSyncExternalStore(lath.store.subscribe, () => lath.store.getSnapshot().zoomedId);
+  const zoomed = zoomedId !== null;
   const [shellSpawnNotice, setShellSpawnNotice] = useState<ShellSpawnNoticeState | null>(null);
   const shellSpawnNoticeCounterRef = useRef(0);
   const shellSpawnNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -414,14 +417,23 @@ export function Wall({
 
   // --- Helpers ---
 
+  /** Zoom belongs to the focused passthrough pane (docs/specs/layout.md → "Zoom"),
+   *  so every focus transition off its owner starts the return to the tiled layout.
+   *  `keepId` is the pane the transition lands on, or null when focus leaves panes
+   *  entirely (a Door, or back to the Wall). `setZoomed` no-ops when already there. */
+  const releaseZoomExcept = useCallback((keepId: string | null = null) => {
+    if (lath.store.getSnapshot().zoomedId !== keepId) lath.store.setZoomed(null);
+  }, [lath]);
+
   /** Select a pane: the Wall state is the sole selection authority (Lath has no
    *  concept of selection/activation). */
   const selectPane = useCallback((id: string) => {
+    releaseZoomExcept(id);
     selectedIdRef.current = id;
     selectedTypeRef.current = 'pane';
     setSelectedId(id);
     setSelectedType('pane');
-  }, []);
+  }, [releaseZoomExcept]);
 
   // The shared tail of both reattach paths (click-reattach + drag-out): drop the Door
   // chip from the baseboard and select the now-restored pane.
@@ -544,24 +556,22 @@ export function Wall({
 
   /** Select a door in the baseboard */
   const selectDoor = useCallback((id: string) => {
+    releaseZoomExcept();
     selectedIdRef.current = id;
     selectedTypeRef.current = 'door';
     setSelectedId(id);
     setSelectedType('door');
-  }, []);
+  }, [releaseZoomExcept]);
 
   /** Enter terminal mode for the given panel */
   const enterTerminalMode = useCallback((id: string) => {
+    selectPane(id);
     modeRef.current = 'passthrough';
-    selectedIdRef.current = id;
-    selectedTypeRef.current = 'pane';
-    setSelectedId(id);
-    setSelectedType('pane');
     setMode('passthrough');
     markSessionAttention(id);
     // Defer focus so it happens after the mousedown/click event finishes.
     requestAnimationFrame(() => focusSession(id, true));
-  }, []);
+  }, [selectPane]);
   const enterTerminalModeRef = useRef(enterTerminalMode);
   enterTerminalModeRef.current = enterTerminalMode;
 
@@ -617,11 +627,14 @@ export function Wall({
 
   /** Exit terminal mode */
   const exitTerminalMode = useCallback(() => {
+    // Giving keyboard focus back to the Wall ends zoom even though command-mode
+    // selection remains on the pane.
+    releaseZoomExcept();
     modeRef.current = 'command';
     setMode('command');
     const id = selectedIdRef.current;
     if (id) focusSession(id, false);
-  }, []);
+  }, [releaseZoomExcept]);
 
   useEffect(() => {
     // An iframe surface taking focus blurs this window without backgrounding the
@@ -720,6 +733,9 @@ export function Wall({
   // --- Dev-server port → pane correlation (browser header connection chip) ---
   useDevServerPortCorrelation({ lath, doorsRef });
 
+  // --- Spoken alarms (`docs/specs/alert.md` -> Alarm settings) ---
+  useAlertSpeech();
+
   // --- Reattach ---
 
   const handleReattach = useCallback((
@@ -771,6 +787,20 @@ export function Wall({
   }, [selectPane, removeDoorAndSelect, enterTerminalMode, killPaneImmediately, forgetSurfaceRef, showShellSpawnNotice, lath, nav]);
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
+
+  /** Focus a surface for the human half of `connectPort`: activating a port row
+   *  is an explicit request to look at and control that browser. A visible pane
+   *  enters passthrough in place; a minimized one reattaches on the same terms
+   *  as clicking its Door chip. This is deliberately unlike `dor ab`, whose
+   *  agent-initiated control path remains focus-neutral. */
+  const revealSurface = useCallback((id: string) => {
+    if (nav.hasPane(id)) {
+      enterTerminalMode(id);
+      return;
+    }
+    const door = doorsRef.current.find((item) => item.id === id);
+    if (door) handleReattachRef.current(door);
+  }, [nav, enterTerminalMode]);
 
   // The Surfaces of the current Workspace. `buildDorSurfaces` is the visible-pane
   // projection used for geometry/placement; `buildDorSurfaceList` additionally
@@ -1096,17 +1126,19 @@ export function Wall({
       const edge = selectedPaneVisible ? lath.store.autoEdgeFor(selectedPaneId!) : null;
       // The enter hint is derived inside `addLeaf` from the edge it commits.
       lath.store.addLeaf(newId, terminalLeafMeta(), edge ? { refId: selectedPaneId!, edge } : null);
-      selectPane(newId);
+      // A host New Terminal action is an interactive spawn: put the user straight
+      // into the new shell. Replacement paths above preserve their existing mode.
+      enterTerminalMode(newId);
       if (detail.announce) {
         showShellSpawnNotice(newId, `Opened ${shellName}`);
       }
     };
     window.addEventListener('dormouse:new-terminal', handler);
     return () => window.removeEventListener('dormouse:new-terminal', handler);
-  }, [generatePaneId, surfaceRefForId, forgetSurfaceRef, selectPane, showShellSpawnNotice, lath, nav]);
+  }, [generatePaneId, surfaceRefForId, forgetSurfaceRef, selectPane, enterTerminalMode, showShellSpawnNotice, lath, nav]);
 
   // --- dor control plane (the `dor` CLI's webview handler) ---
-  useDorControl({
+  const { connectPort } = useDorControl({
     lath,
     nav,
     doorsRef,
@@ -1117,6 +1149,7 @@ export function Wall({
     createSplitSurface,
     createContentSurface,
     killPaneImmediately,
+    revealSurface,
     lastAgentBrowserBinaryPathRef,
   });
 
@@ -1142,9 +1175,11 @@ export function Wall({
     const edge: Edge = direction === 'right' ? 'right' : 'bottom';
     // The enter hint is derived inside `addLeaf` from the edge it commits.
     lath.store.addLeaf(newId, terminalLeafMeta(), refId ? { refId, edge } : null);
-    selectPane(newId);
+    // Manual split is an intent to use the new terminal: select it, enter
+    // passthrough, and defer DOM focus through the shared focus path.
+    enterTerminalMode(newId);
     onEventRef.current?.({ type: 'split', direction: splitDirection, source });
-  }, [selectPane, generatePaneId, surfaceRefForId, lath, nav]);
+  }, [enterTerminalMode, generatePaneId, surfaceRefForId, lath, nav]);
 
   // --- Wall actions (for tab buttons) ---
 
@@ -1175,12 +1210,25 @@ export function Wall({
     },
     onZoom: (id: string) => {
       if (!nav.hasPane(id)) return;
-      // Zoom is presentation state in the store (the tree is untouched). Toggle:
-      // any leaf zoomed → unzoom; else zoom this leaf. The Wall's `zoomed` boolean
-      // follows via the store subscription (below), which also un-zooms when a
-      // kill/replace clears the zoomed leaf.
-      const zoomedNow = lath.store.getSnapshot().zoomedId !== null;
-      lath.store.setZoomed(zoomedNow ? null : id);
+      // Zoom belongs to focus: only the owner's control toggles zoom off. Another
+      // pane's Zoom control means "zoom me" — the elevated pane exposes a
+      // perimeter, so a partially covered header is reachable and must hand zoom
+      // over rather than merely unzoom the owner. Acquiring zoom first enters
+      // passthrough on this pane (unless it already owns focus); selectPane's
+      // `releaseZoomExcept` drops the previous owner on the way through.
+      const currentZoom = lath.store.getSnapshot().zoomedId;
+      if (currentZoom === id) {
+        lath.store.setZoomed(null);
+        return;
+      }
+      if (
+        modeRef.current !== 'passthrough' ||
+        selectedTypeRef.current !== 'pane' ||
+        selectedIdRef.current !== id
+      ) {
+        enterTerminalMode(id);
+      }
+      lath.store.setZoomed(id);
     },
     onClickPanel: (id: string) => {
       setConfirmKill(null);
@@ -1285,7 +1333,10 @@ export function Wall({
         title: hostPathDisplay(url, true),
       });
     },
-  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface, lath, nav]);
+    resolveSurfaceRef: surfaceRefForId,
+    // The pane context menu's "connect a port" action: act like `dor ab open`.
+    onConnectPort: connectPort,
+  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, connectPort, lath, nav]);
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
 
@@ -1397,13 +1448,14 @@ export function Wall({
           <PaneElementsContext.Provider value={paneElementsContextValue}>
           <DoorElementsContext.Provider value={doorElementsContextValue}>
           <RenamingIdContext.Provider value={renamingPaneId}>
-          <ZoomedContext.Provider value={zoomed}>
+          <ZoomedIdContext.Provider value={zoomedId}>
           <WindowFocusedContext.Provider value={windowFocused}>
           <DialogKeyboardContext.Provider value={setDialogKeyboardActive}>
           <div className="flex-1 min-h-0 flex flex-col bg-app-bg text-app-fg font-sans overflow-hidden">
             {/* The tiling area — 2px bottom inset keeps rounded panes distinct from the baseboard when present. */}
-            <div className={clsx('flex-1 min-h-0 relative px-1.5 pt-1.5', showBaseboard ? 'pb-0.5' : 'pb-1.5')}>
-              <div className={clsx('absolute inset-x-1.5 top-1.5', showBaseboard ? 'bottom-0.5' : 'bottom-1.5')}>
+            {/* 1.75 = PANE_GUTTER_PX (7px) in design.tsx — keep in sync. */}
+            <div className={clsx('flex-1 min-h-0 relative px-1.75 pt-1.75', showBaseboard ? 'pb-0.5' : 'pb-1.75')}>
+              <div className={clsx('absolute inset-x-1.75 top-1.75', showBaseboard ? 'bottom-0.5' : 'bottom-1.75')}>
                 <LathHost
                   lath={lath}
                   onCommitResize={onCommitResize}
@@ -1458,7 +1510,7 @@ export function Wall({
           </div>
           </DialogKeyboardContext.Provider>
           </WindowFocusedContext.Provider>
-          </ZoomedContext.Provider>
+          </ZoomedIdContext.Provider>
           </RenamingIdContext.Provider>
           </DoorElementsContext.Provider>
           </PaneElementsContext.Provider>

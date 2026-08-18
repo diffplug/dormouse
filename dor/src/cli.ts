@@ -1,6 +1,7 @@
 import {
   buildApplication,
   buildRouteMap,
+  help,
   run as runStricli,
   text_en,
   type ApplicationText,
@@ -122,6 +123,28 @@ const APPLICATION = buildApplication(
     localization: {
       text: DOR_TEXT,
     },
+  },
+  // Replaces stricli's default integration set, which also registers
+  // `--help-all`/`-H`. That flag bypasses the `helpPatches` in `applyHelpPatches`
+  // (which only fire for `--help`/`-h`), so it printed raw generated usage lines
+  // that contradict what the commands accept — `dor ensure ... <command>...`
+  // without the `--` that `validateEnsureDelimiter` requires, and the
+  // mutually-exclusive `split`/`send` flags shown as freely combinable. Dropping
+  // it leaves `--help` as the single documented help surface.
+  {
+    help: help({
+      brief: text_en.briefs.help,
+      alias: 'h',
+      defaultForRouteMap: true,
+      includeHidden: false,
+      // stricli would derive these from `documentation`, but an explicit
+      // integration set opts out of that defaulting, so restate them.
+      formatting: {
+        useAliasInUsageLine: false,
+        onlyRequiredInUsageLine: false,
+        caseStyle: 'convert-camel-to-kebab',
+      },
+    }),
   },
 );
 

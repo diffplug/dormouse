@@ -7,8 +7,14 @@
 
 import { rectsClose, type Edge, type Rect } from './model';
 
-/** A presentation frame for one leaf at a given instant. `layer` is a discrete band
- *  the adapter maps to z-index (0 = tiled, 1 = dying/on-top); it is never interpolated. */
+/** Renderer-neutral stacking bands. Adapters map these to their own z-order. */
+export const LATH_LAYER_TILED = 0;
+export const LATH_LAYER_DYING = 1;
+export const LATH_LAYER_ELEVATED = 2;
+
+/** A presentation frame for one leaf at a given instant. `layer` is discrete: a
+ *  rising leaf adopts the higher layer before it moves, while a lowering leaf keeps
+ *  the higher layer until its motion finishes. */
 export type Frame = { rect: Rect; opacity: number; layer: number };
 
 /** Where an entering leaf's frames begin: collapsed against one `Edge` of its target
@@ -19,10 +25,23 @@ export type EnterFrom = Edge | 'top-left';
 /** House motion, matched to the pre-Lath CSS constants. */
 export const LATH_MOTION_MS = 440;
 
+/** A `t → eased` progress mapping, carrying its own analytic derivative. */
+export interface Easing {
+  (t: number): number;
+  /** `dEased/dt` at `t`, in eased-units per t-unit. Callers that need a *rate*
+   *  (rather than a position) should use this instead of finite-differencing
+   *  successive samples: differencing costs a frame of lag, cannot report
+   *  anything on the first frame, and under-reports a curve that is bending —
+   *  all three of which are visible on a 220ms ease-out. Clamped to the
+   *  endpoints' one-sided slopes outside `[0, 1]`. */
+  slope(t: number): number;
+}
+
 /** Cubic-bezier easing solver: `(x1,y1)`/`(x2,y2)` are the two control points of a
  *  curve from `(0,0)` to `(1,1)`. Returns a `t → eased` progress mapping (Newton–
- *  Raphson with a bisection fallback), exact at the endpoints. Exported for tests. */
-export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (t: number) => number {
+ *  Raphson with a bisection fallback), exact at the endpoints, plus `slope()` for
+ *  its derivative. Exported for tests. */
+export function cubicBezier(x1: number, y1: number, x2: number, y2: number): Easing {
   // Polynomial coefficients of the cubic bezier in each axis (P0 = 0, P3 = 1).
   const cx = 3 * x1;
   const bx = 3 * (x2 - x1) - cx;
@@ -33,6 +52,7 @@ export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (t:
   const sampleX = (s: number): number => ((ax * s + bx) * s + cx) * s;
   const sampleY = (s: number): number => ((ay * s + by) * s + cy) * s;
   const sampleDX = (s: number): number => (3 * ax * s + 2 * bx) * s + cx;
+  const sampleDY = (s: number): number => (3 * ay * s + 2 * by) * s + cy;
 
   const solveX = (x: number): number => {
     // Newton–Raphson from x as the initial guess.
@@ -58,11 +78,23 @@ export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (t:
     return s;
   };
 
-  return (t: number): number => {
+  const eased = (t: number): number => {
     if (t <= 0) return 0;
     if (t >= 1) return 1;
     return sampleY(solveX(t));
   };
+
+  // dy/dt = (dy/ds) / (dx/ds), both evaluated at the parametric s the solver
+  // already finds for this t. Endpoints are clamped inward rather than evaluated
+  // outside [0,1], where the curve is undefined; the `dx` guard covers a control
+  // point sitting on the axis (x1 === 0), which makes dx/ds vanish at t = 0.
+  const slope = (t: number): number => {
+    const s = solveX(t <= 0 ? 0 : t >= 1 ? 1 : t);
+    const dx = sampleDX(s);
+    return Math.abs(dx) < 1e-6 ? 0 : sampleDY(s) / dx;
+  };
+
+  return Object.assign(eased, { slope });
 }
 
 /** The house easing (`cubic-bezier(0.22, 1, 0.36, 1)`), solved in JS to match the
@@ -77,12 +109,13 @@ export interface LathAnimator {
    *  its target. A leaf currently dying is left dying if still in `targets`, dropped
    *  otherwise. Leaves absent from `targets` (and not dying) are dropped immediately.
    *  `opts.snap` starts every leaf already at its target (no tween) — used when the
-   *  user placed the geometry by hand (sash-drag commit) or on a container resize. */
+   *  user placed the geometry by hand (sash-drag commit) or on a container resize.
+   *  `opts.layers` supplies presentation stacking independently of geometry. */
   retarget(
     targets: ReadonlyMap<string, Rect>,
     now: number,
     enters?: ReadonlyMap<string, EnterFrom>,
-    opts?: { snap?: boolean },
+    opts?: { snap?: boolean; layers?: ReadonlyMap<string, number> },
   ): void;
   /** Exit phase 1: freeze the leaf's rect (or, with `shrinkTowardBottomRight`, tween
    *  it toward its own bottom-right corner at zero size — the last-pane kill) and fade
@@ -120,7 +153,7 @@ function collapsedRect(to: Rect, edge: EnterFrom): Rect {
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
-function lerpFrame(from: Frame, to: Frame, t: number): Frame {
+function lerpFrame(from: Frame, to: Frame, t: number, settled: boolean): Frame {
   return {
     rect: {
       x: lerp(from.rect.x, to.rect.x, t),
@@ -129,16 +162,17 @@ function lerpFrame(from: Frame, to: Frame, t: number): Frame {
       height: lerp(from.rect.height, to.rect.height, t),
     },
     opacity: lerp(from.opacity, to.opacity, t),
-    // `layer` is discrete: it never interpolates. `from` and `to` always agree, so
-    // either works; take `to`.
-    layer: to.layer,
+    // Stacking is discrete, not interpolated. Rise before motion starts; on the
+    // return trip remain elevated until the geometry has stopped overlapping its
+    // neighbors, then settle into the lower target band.
+    layer: settled ? to.layer : Math.max(from.layer, to.layer),
   };
 }
 
 /** Whether two frames are close enough to treat as "no visual change" (so the
  *  segment can start already-settled, keeping `settledAt` honest). */
 function framesClose(a: Frame, b: Frame): boolean {
-  return rectsClose(a.rect, b.rect, 0.01) && Math.abs(a.opacity - b.opacity) < 0.01;
+  return rectsClose(a.rect, b.rect, 0.01) && Math.abs(a.opacity - b.opacity) < 0.01 && a.layer === b.layer;
 }
 
 export function createAnimator(opts: { durationMs: number; easing?: (t: number) => number }): LathAnimator {
@@ -153,7 +187,7 @@ export function createAnimator(opts: { durationMs: number; easing?: (t: number) 
   const sample = (seg: Segment, now: number): Frame => {
     const raw = duration <= 0 ? 1 : (now - seg.start) / duration;
     const clamped = raw < 0 ? 0 : raw > 1 ? 1 : raw;
-    return lerpFrame(seg.from, seg.to, easing(clamped));
+    return lerpFrame(seg.from, seg.to, easing(clamped), clamped >= 1);
   };
 
   const framesAt = (now: number): Map<string, Frame> => {
@@ -176,7 +210,7 @@ export function createAnimator(opts: { durationMs: number; easing?: (t: number) 
         // resurrect it into a tiled tween.
         if (dying.has(id)) continue;
 
-        const to: Frame = { rect: toRect, opacity: 1, layer: 0 };
+        const to: Frame = { rect: toRect, opacity: 1, layer: retargetOpts?.layers?.get(id) ?? LATH_LAYER_TILED };
         let from: Frame;
         if (snap) {
           from = to;
@@ -184,7 +218,7 @@ export function createAnimator(opts: { durationMs: number; easing?: (t: number) 
           from = current.get(id) ?? to;
         } else {
           const enter = enters?.get(id);
-          from = enter ? { rect: collapsedRect(toRect, enter), opacity: 0, layer: 0 } : to;
+          from = enter ? { rect: collapsedRect(toRect, enter), opacity: 0, layer: to.layer } : to;
         }
         // Unchanged (or snapped) leaves start already-settled so `settledAt` and the
         // adapter's tick loop don't spin on frames that never move.
@@ -212,8 +246,8 @@ export function createAnimator(opts: { durationMs: number; easing?: (t: number) 
         ? { x: fromRect.x + fromRect.width, y: fromRect.y + fromRect.height, width: 0, height: 0 }
         : fromRect;
       dying.set(id, {
-        from: { rect: fromRect, opacity: cur.opacity, layer: 1 },
-        to: { rect: toRect, opacity: 0, layer: 1 },
+        from: { rect: fromRect, opacity: cur.opacity, layer: Math.max(cur.layer, LATH_LAYER_DYING) },
+        to: { rect: toRect, opacity: 0, layer: Math.max(cur.layer, LATH_LAYER_DYING) },
         start: now,
       });
       anims.delete(id);

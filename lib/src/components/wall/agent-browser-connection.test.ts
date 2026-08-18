@@ -84,9 +84,16 @@ describe('agent-browser connection', () => {
     const connection = createAgentBrowserConnection({
       session: 'dormouse.1.default',
       streamPort: 1234,
+      wantFrameData: () => true,
     });
     let pulses = 0;
-    connection.subscribe((event) => { if (event.type === 'frame-pulse') pulses += 1; });
+    const provisionalFrames: Array<string | undefined> = [];
+    connection.subscribe((event) => {
+      if (event.type === 'frame-pulse') {
+        pulses += 1;
+        provisionalFrames.push(event.data);
+      }
+    });
 
     await Promise.resolve();
     const ws = WebSocketMock.instances[0];
@@ -104,6 +111,29 @@ describe('agent-browser connection', () => {
 
     ws.emitMessage(frameA); // changed again — forwarded
     expect(pulses).toBe(3);
+    expect(provisionalFrames).toEqual(['AAAAAAAAAA', 'BBBBBBBBBB', 'AAAAAAAAAA']);
+  });
+
+  it('parses a large stream frame for provisional painting', async () => {
+    const connection = createAgentBrowserConnection({
+      session: 'dormouse.1.default',
+      streamPort: 1234,
+      wantFrameData: () => true,
+    });
+    const frames: string[] = [];
+    connection.subscribe((event) => {
+      if (event.type === 'frame-pulse' && event.data) frames.push(event.data);
+    });
+
+    await Promise.resolve();
+    const data = 'A'.repeat(20_000);
+    WebSocketMock.instances[0].emitMessage(JSON.stringify({
+      type: 'frame',
+      data,
+      metadata: { deviceWidth: 800, deviceHeight: 600 },
+    }));
+
+    expect(frames).toEqual([data]);
   });
 
   it('drops identical tab-snapshot re-broadcasts but forwards real changes', async () => {
@@ -135,6 +165,37 @@ describe('agent-browser connection', () => {
       ],
     }));
     expect(tabsEvents).toBe(2);
+  });
+
+  it('routes an oversized tabs snapshot to the tab list instead of dropping it as a frame', async () => {
+    // Default deps → wantFrameData is absent → the idle hot path (false), which
+    // is the dominant real-world case on hosts with crisp screenshots.
+    const connection = createAgentBrowserConnection({
+      session: 'dormouse.1.default',
+      streamPort: 1234,
+    });
+    const tabsEventCounts: number[] = [];
+    connection.subscribe((event) => { if (event.type === 'tabs') tabsEventCounts.push(event.tabs.length); });
+
+    await Promise.resolve();
+    const ws = WebSocketMock.instances[0];
+
+    // Many tabs with long URLs/titles push the control message past
+    // FRAME_PULSE_THRESHOLD (16384). Size alone must not misclassify it as a frame.
+    const tabs = Array.from({ length: 80 }, (_, i) => ({
+      tabId: `t${i}`,
+      title: `Tab number ${i} — ${'x'.repeat(40)}`,
+      url: `https://example.com/very/long/path/segment/${i}?q=${'y'.repeat(120)}`,
+      active: i === 0,
+    }));
+    const payload = JSON.stringify({ type: 'tabs', tabs });
+    expect(payload.length).toBeGreaterThan(16384);
+
+    ws.emitMessage(payload);
+
+    expect(connection.snapshot().tabs).toHaveLength(80);
+    expect(tabsEventCounts).toEqual([80]);
+    expect(connection.snapshot().tabs[0]).toMatchObject({ tabId: 't0', active: true });
   });
 
   it('re-primes after a reconnect so the first identical frame/tabs still forwards', async () => {

@@ -27,6 +27,12 @@ export function restoreSession(platform: PlatformAdapter): RestoredSession | nul
   const doors = saved.doors ?? [];
   const doorIds = new Set(doors.map((item) => item.id));
   const shellOpts = getDefaultShellOpts();
+  // Host-owned and single-use, and read here rather than off the pane: the
+  // session blob the webview saves must never carry one, or a later restore
+  // would replay it (docs/specs/transport.md -> "Consuming it"). Restore-only —
+  // the live-resume path in reconnect.ts never reaches here, because there the
+  // agent is still Live and has nothing to resume.
+  const recoveryCommands = platform.getRecoveryCommands?.() ?? {};
 
   for (const pane of saved.panes) {
     // Browser surfaces have no PTY or xterm; the persisted layout recreates them
@@ -38,11 +44,11 @@ export function restoreSession(platform: PlatformAdapter): RestoredSession | nul
     }
     restoreTerminal(pane.id, {
       cwd: pane.cwd,
-      scrollback: pane.scrollback,
       title: pane.title,
       shell: shellOpts?.shell,
       args: shellOpts?.args,
       untouched: pane.untouched,
+      resumeCommand: recoveryCommands[pane.id] ?? null,
     });
   }
 

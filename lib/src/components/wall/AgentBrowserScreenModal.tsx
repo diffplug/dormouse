@@ -27,7 +27,14 @@ import {
   LockSimpleIcon,
   XIcon,
 } from '@phosphor-icons/react';
-import { ModalCloseButton, ModalFrame, modalActionButton } from '../design';
+import {
+  MODAL_OVERLAY_INSET,
+  modalActionButton,
+  ModalCloseButton,
+  ModalFrame,
+  NumericInput,
+  OVERLAY_MAX_HEIGHT,
+} from '../design';
 import type { RenderMode, ScreenController, ScreenSnapshot } from './agent-browser-screen';
 import { useAgentBrowserScreenSnapshot } from './agent-browser-screen';
 
@@ -198,8 +205,8 @@ export function AgentBrowserScreenModal({
       layer="critical"
       backdrop="strong"
       elevation="modal"
-      overlayClassName="px-4 py-6"
-      className="max-h-[85vh] w-full max-w-[30rem] overflow-y-auto"
+      overlayClassName={MODAL_OVERLAY_INSET}
+      className={`${OVERLAY_MAX_HEIGHT.modal} w-full max-w-[30rem] overflow-y-auto`}
       initialFocusRef={cancelRef}
       onEscape={onClose}
     >
@@ -344,15 +351,12 @@ function DimInput({
   return (
     <span className={`inline-flex items-center gap-1 text-xs text-muted ${disabled ? 'opacity-50' : ''}`}>
       {label}
-      <input
-        type="text"
-        inputMode="numeric"
+      <NumericInput
         value={value}
+        onChange={onChange}
+        chars={chars}
         disabled={disabled}
         onFocus={onFocus}
-        onChange={(e) => onChange(e.target.value.replace(/[^0-9.]/g, ''))}
-        style={{ width: `calc(${chars}ch + 0.5rem)` }}
-        className="border-0 border-b border-border bg-transparent px-0.5 py-0.5 font-mono text-foreground outline-none focus:border-focus-ring"
       />
     </span>
   );

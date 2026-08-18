@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { CaretDownIcon } from '@phosphor-icons/react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { CaretDownIcon, XIcon } from '@phosphor-icons/react';
 import type { DormouseTheme } from '../lib/themes';
 import {
   applyTheme,
@@ -14,57 +14,84 @@ import { ThemeSwatch } from './theme-picker/ThemeSwatch';
 import { ThemeStoreDialog } from './theme-picker/ThemeStoreDialog';
 import { useCloseOnOutsideAndEscape } from './theme-picker/use-close-on-outside';
 import { themePickerStyles as styles } from './theme-picker/styles';
-import { chromeButton } from './design';
+import { chromeButton, modalIconButton, OVERLAY_MAX_HEIGHT, useMeasuredElementRect } from './design';
+import { clampOverlayPosition } from '../lib/ui-geometry';
 
-export type ThemePickerVariant = 'playground-header' | 'standalone-appbar';
+/**
+ * `compact` is the free-floating trigger used by the website's Pocket
+ * playground pages, which have no baseboard and therefore no Settings dialog.
+ * `settings-dialog` is the row inside the Settings dialog, which is where every
+ * host with a baseboard sets its theme (docs/specs/theme.md).
+ */
+export type ThemePickerVariant = 'compact' | 'settings-dialog';
 
 export interface ThemePickerProps {
   variant: ThemePickerVariant;
-  className?: string;
-  /** Theme ID to apply when no theme is persisted yet. Falls back to the
-   *  first bundled theme if the ID does not resolve. */
-  defaultThemeId?: string;
+  /** Controlled dropdown state. Omit both for the uncontrolled default; the
+   *  Settings dialog controls them so its `onEscape` can close the menu before
+   *  the dialog itself (`ModalFrame`'s capture-phase Escape handler would
+   *  otherwise swallow the key before the picker ever sees it). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
-export function ThemePicker({ variant, className = '', defaultThemeId }: ThemePickerProps) {
-  const currentId = useId();
+/** Menu width. Mirrored by the `w-[280px]` literal on the non-dialog variant,
+ *  which Tailwind must be able to scan statically. */
+const MENU_WIDTH_PX = 280;
+
+export function ThemePicker({
+  variant,
+  open: controlledOpen,
+  onOpenChange,
+}: ThemePickerProps) {
   // Apply the persisted theme during render initialization, before commit, so
-  // the first paint already has --vscode-* on body — eliminates the flash of
-  // unstyled chrome on the website playground where ThemePicker mounts before
-  // any other entry point has a chance to apply a theme.
+  // the first paint already has --vscode-* on body. Hosts must not *rely* on
+  // this: inside the Settings dialog the picker only mounts once the user opens
+  // it, so each host restores its own theme at boot.
   const initialState = useRef<{ themes: DormouseTheme[]; activeId: string }>(null);
   if (initialState.current === null) {
-    const restored = restoreActiveTheme(defaultThemeId);
+    const restored = restoreActiveTheme();
     const themes = getAllThemes();
     initialState.current = { themes, activeId: restored?.id ?? themes[0]?.id ?? '' };
   }
   const [themes, setThemes] = useState(initialState.current.themes);
   const [activeId, setActiveId] = useState(initialState.current.activeId);
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [storeOpen, setStoreOpen] = useState(false);
   const [debuggerOpen, setDebuggerOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const [triggerEl, setTriggerEl] = useState<HTMLButtonElement | null>(null);
+  const [menuEl, setMenuEl] = useState<HTMLDivElement | null>(null);
 
-  const isPlayground = variant === 'playground-header';
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = useCallback(
+    (next: boolean) => {
+      setUncontrolledOpen(next);
+      onOpenChange?.(next);
+    },
+    [onOpenChange],
+  );
+
+  const inDialog = variant === 'settings-dialog';
   const activeTheme = themes.find((theme) => theme.id === activeId) ?? themes[0];
 
-  // React Router document hydration can reconcile <body> after render-time
-  // theme application; repeat once after commit so xterm sees real colors.
+  // React Router document hydration can reconcile render-time theme
+  // application away; repeat once after commit so xterm sees real colors.
   useBrowserLayoutEffect(() => {
-    const theme = restoreActiveTheme(defaultThemeId);
+    const theme = restoreActiveTheme();
     if (theme) setActiveId(theme.id);
-  }, [defaultThemeId]);
+  }, []);
 
-  const closeDropdown = useCallback(() => setOpen(false), []);
+  const closeDropdown = useCallback(() => setOpen(false), [setOpen]);
   useCloseOnOutsideAndEscape(open, rootRef, closeDropdown);
 
   const refreshThemes = useCallback(() => {
     setThemes(getAllThemes());
-    const theme = restoreActiveTheme(defaultThemeId);
+    const theme = restoreActiveTheme();
     if (theme) setActiveId(theme.id);
-  }, [defaultThemeId]);
+  }, []);
 
   const selectTheme = (id: string) => {
     const theme = getTheme(id);
@@ -77,65 +104,71 @@ export function ThemePicker({ variant, className = '', defaultThemeId }: ThemePi
 
   const deleteTheme = (theme: DormouseTheme) => {
     if (theme.origin.kind !== 'installed') return;
-    const confirmed = window.confirm(`Delete "${theme.label}"?`);
-    if (!confirmed) return;
-
     removeInstalledTheme(theme.id);
-    setThemes(getAllThemes());
-
-    if (theme.id === activeId) {
-      const fallback = restoreActiveTheme(defaultThemeId);
-      if (fallback) setActiveId(fallback.id);
-    }
+    // Re-resolves the active theme through the host default, which is what
+    // uninstalling the *active* theme needs; a no-op re-apply otherwise.
+    refreshThemes();
   };
 
-  const rootClass = isPlayground
-    ? 'relative flex min-w-0 items-baseline'
-    : 'relative flex items-center';
-  const triggerClass = isPlayground
-    ? 'flex w-[116px] min-w-0 cursor-pointer items-baseline justify-end gap-1.5 rounded-md bg-[var(--color-header-inactive-bg)] text-right text-sm text-[var(--color-header-inactive-fg)] sm:w-40 md:w-56'
-    : chromeButton({ kind: 'labeled' });
-  const menuClass = isPlayground
-    ? 'fixed top-16 right-4 left-4 z-50 overflow-hidden rounded border font-mono shadow-2xl md:absolute md:top-full md:right-0 md:left-auto md:mt-2 md:w-[22rem]'
-    : 'absolute right-0 top-full z-50 mt-1 w-[280px] overflow-hidden rounded border font-mono shadow-2xl';
-  const rowButtonClass = isPlayground
-    ? 'flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left text-sm'
-    : 'flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm';
-  const swatchSize = isPlayground ? 'md' : 'sm';
+  // Anchor the dialog menu off the measured trigger rect: the Settings dialog
+  // surface is `overflow-y-auto`, which would clip an absolutely-positioned
+  // menu. A fixed descendant escapes ancestor overflow because no modal
+  // ancestor sets `transform`. The menu's own rect feeds the viewport clamp, so
+  // a long theme list can't run off the bottom of a short window; it is 0 on
+  // the first pass, which is why the menu stays hidden until measured. The
+  // height cap is `OVERLAY_MAX_HEIGHT.popover` on the panel below, not part of
+  // this style.
+  const triggerRect = useMeasuredElementRect(inDialog && open ? triggerEl : null);
+  const menuRect = useMeasuredElementRect(inDialog && open ? menuEl : null);
+  const menuStyle: CSSProperties = inDialog
+    ? {
+        ...styles.panel,
+        width: MENU_WIDTH_PX,
+        ...(triggerRect
+          ? clampOverlayPosition({
+              left: triggerRect.left,
+              top: triggerRect.top + triggerRect.height + 4,
+              width: MENU_WIDTH_PX,
+              height: menuRect?.height ?? 0,
+            })
+          : { position: 'fixed', visibility: 'hidden' }),
+      }
+    : styles.panel;
 
   return (
-    <div ref={rootRef} className={`${rootClass} ${className}`}>
+    <div ref={rootRef} className="relative flex items-center">
       <button
+        ref={setTriggerEl}
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`Theme: ${activeTheme?.label ?? 'Select theme'}`}
-        data-theme-picker-trigger={isPlayground ? 'playground' : undefined}
-        onClick={() => setOpen((value) => !value)}
-        className={triggerClass}
+        onClick={() => setOpen(!open)}
+        className={chromeButton({ kind: 'labeled' })}
       >
-        {isPlayground ? (
-          <>
-            <CaretDownIcon size={10} weight="bold" className="shrink-0 opacity-65" aria-hidden="true" />
-            <span
-              id={currentId}
-              data-theme-picker-current="true"
-              className="min-w-0 truncate underline-offset-4 decoration-[var(--color-header-inactive-fg)]"
-            >
-              {activeTheme?.label ?? 'Select theme'}
-            </span>
-          </>
-        ) : (
-          <>
-            <span id={currentId}>Theme</span>
-            <CaretDownIcon size={10} weight="bold" className="shrink-0 opacity-65" aria-hidden="true" />
-          </>
-        )}
+        {activeTheme ? <ThemeSwatch theme={activeTheme} /> : null}
+        <span className="min-w-0 truncate">
+          {inDialog ? (activeTheme?.label ?? 'Select theme') : 'Theme'}
+        </span>
+        <CaretDownIcon size={10} weight="bold" className="shrink-0 opacity-65" aria-hidden="true" />
       </button>
 
+      {/* z-50 earns its keep in both variants. Inside the dialog the alarm
+          sections' `opacity-50` wrappers are stacking contexts too, and being
+          later in tree order they would otherwise paint through this menu. */}
       {open ? (
-        <div role="menu" aria-label={isPlayground ? 'Select theme' : undefined} className={menuClass} style={styles.panel}>
-          <div className="overflow-y-auto py-1" style={{ maxHeight: isPlayground ? 'min(24rem, calc(100vh - 9rem))' : 320 }}>
+        <div
+          ref={setMenuEl}
+          role="menu"
+          aria-label="Select theme"
+          className={`z-50 flex flex-col overflow-hidden rounded border font-mono shadow-2xl ${OVERLAY_MAX_HEIGHT.popover} ${
+            inDialog ? '' : 'absolute right-0 top-full mt-1 w-[280px]'
+          }`}
+          style={menuStyle}
+        >
+          {/* max-h-80 is a ceiling on a tall screen, never a floor: the
+              panel's own viewport cap shrinks this further on a short one. */}
+          <div className="max-h-80 min-h-0 flex-1 overflow-y-auto py-1">
             {themes.map((theme) => {
               const isActive = theme.id === activeId;
               const isInstalled = theme.origin.kind === 'installed';
@@ -150,18 +183,23 @@ export function ThemePicker({ variant, className = '', defaultThemeId }: ThemePi
                     role="menuitemradio"
                     aria-checked={isActive}
                     onClick={() => selectTheme(theme.id)}
-                    className={rowButtonClass}
+                    className={`flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-3 text-left text-sm ${
+                      isInstalled ? 'pr-1' : 'pr-3'
+                    }`}
                     style={{ color: 'inherit' }}
                   >
-                    <ThemeSwatch theme={theme} size={swatchSize} />
+                    <ThemeSwatch theme={theme} />
                     <span className="min-w-0 flex-1 truncate">{theme.label}</span>
                   </button>
                   {isInstalled ? (
                     <button
                       type="button"
-                      aria-label={`Delete ${theme.label}`}
-                      title={`Delete ${theme.label}`}
-                      className="mr-2 flex h-5 w-5 shrink-0 items-center justify-center rounded text-sm opacity-60 transition-opacity hover:opacity-100 focus:opacity-100"
+                      aria-label={`Uninstall ${theme.label}`}
+                      title={`Uninstall ${theme.label}`}
+                      // Bigger target and a gap from the row's select action:
+                      // unlike `WatchedCommandList`'s remove, undoing this
+                      // means re-finding the extension on OpenVSX.
+                      className={modalIconButton({ class: 'mr-2 ml-1 p-1.5' })}
                       style={{ color: 'inherit' }}
                       onClick={(event) => {
                         event.preventDefault();
@@ -169,7 +207,7 @@ export function ThemePicker({ variant, className = '', defaultThemeId }: ThemePi
                         deleteTheme(theme);
                       }}
                     >
-                      X
+                      <XIcon size={12} weight="bold" />
                     </button>
                   ) : null}
                 </div>
@@ -177,16 +215,14 @@ export function ThemePicker({ variant, className = '', defaultThemeId }: ThemePi
             })}
           </div>
 
-          <div className="border-t p-1" style={styles.border}>
+          <div className="shrink-0 border-t p-1" style={styles.border}>
             <button
               type="button"
               onClick={() => {
                 setOpen(false);
                 setDebuggerOpen(true);
               }}
-              className={`w-full rounded text-left text-sm font-medium transition-opacity hover:opacity-85 ${
-                isPlayground ? 'px-3 py-2' : 'px-3 py-1.5'
-              }`}
+              className="w-full rounded px-3 py-1.5 text-left text-sm font-medium transition-opacity hover:opacity-85"
               style={styles.foreground}
             >
               Debug current theme
@@ -197,9 +233,7 @@ export function ThemePicker({ variant, className = '', defaultThemeId }: ThemePi
                 setOpen(false);
                 setStoreOpen(true);
               }}
-              className={`w-full rounded text-left text-sm font-medium transition-opacity hover:opacity-85 ${
-                isPlayground ? 'px-3 py-2' : 'px-3 py-1.5'
-              }`}
+              className="w-full rounded px-3 py-1.5 text-left text-sm font-medium transition-opacity hover:opacity-85"
               style={styles.link}
             >
               Install theme from OpenVSX

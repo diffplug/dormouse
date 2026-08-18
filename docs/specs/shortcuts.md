@@ -21,14 +21,15 @@ In the VS Code extension host, selected workbench chords are mirrored: the termi
 
 | Key | Action | Description |
 |-----|--------|-------------|
-| `\|` or `%` | Split left/right | Split the selected pane into two side-by-side panes. |
-| `-` or `"` | Split top/bottom | Split the selected pane into two stacked panes. |
-| `z` | Toggle zoom | Fullscreen the selected pane, or return to the normal layout. |
+| `\|` or `%` | Split left/right | Create a pane to the right, select it, and enter passthrough. |
+| `-` or `"` | Split top/bottom | Create a pane below, select it, and enter passthrough. |
+| `z` | Zoom and focus | Elevate the selected pane and enter passthrough; leaving passthrough or focusing elsewhere ends zoom. |
 | `m` or `d` | Minimize / reattach | Minimize the selected pane to the baseboard, or reattach a minimized door. |
 | `k` or `x` | Kill | Kill the selected pane or door. Prompts for a random character to confirm; untouched (never-typed-in) panes and doors are killed immediately without the prompt. |
 | `,` | Rename | Enter rename mode for the selected pane's title. |
 | `a` | Toggle alert | Dismiss or toggle the bell alert for the selected pane. Meaningful only for a terminal Surface — a browser surface has no bell to ring (`docs/specs/glossary.md`). |
 | `t` | Toggle todo | Toggle the TODO marker on or off for the selected pane's Surface. Works on any Surface — a terminal Session or a browser surface. |
+| `>` | Header context menu | Open the selected pane's header context menu — current title + `surface:N`, title candidates, and bound ports with digit-to-connect (mirrors tmux's pane `display-menu` binding). Terminal panes only; no-op on browser surfaces and doors. |
 
 ## Navigation (command mode)
 
@@ -65,6 +66,8 @@ On macOS, `Ctrl+C` passes through to the running program (only `⌘C` copies); `
 | Prompted character | Confirm kill | Type the character shown in the kill prompt to confirm termination. |
 | `a` (alert dialog open) | Toggle alert | Same as command-mode `a`. |
 | `t` (alert dialog open) | Toggle todo | Same as command-mode `t`. |
+| `1`–`9` (header context menu open) | Connect port | Open the nth port row in a browser surface, select it, and enter passthrough. Dropped while the port scan is running; inert on hosts that can't open a browser surface. |
+| `↑` / `↓` (header context menu open) | Move row focus | Rove focus across port rows, wrapping; `Enter` or `Space` activates the focused row. |
 
 ## Implementation references
 
