@@ -290,7 +290,10 @@ describe('peer link between windows', () => {
       // socket, and no temp file from the write that was abandoned.
       expect(await readdir(dir)).toEqual([]);
     } finally {
-      process.env.TMPDIR = realTmp;
+      // Assigning `undefined` would set the literal string, and a Linux runner
+      // has no TMPDIR to put back — which the *next* test's mkdtemp would wear.
+      if (realTmp === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = realTmp;
     }
   });
 
