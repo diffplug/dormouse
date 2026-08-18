@@ -36,6 +36,7 @@ import {
   setPeerLinkRole,
 } from './peer-link';
 import { log } from './log';
+import { PtySubscriptions } from './pty-subscriptions';
 import type { WebviewChannel } from './webview-messaging';
 
 const clipboardOps = require('../../lib/clipboard-ops.cjs') as {
@@ -405,7 +406,7 @@ export function attachRouter(
    * it never affects Workspace union status, `killOnDispose`, or which webview
    * the host considers the owner.
    */
-  const subscribedPtyIds = new Set<string>();
+  const subscribedPtyIds = new PtySubscriptions();
 
   // This webview's stake in the window-wide single-instance roles.
   const claimant: SingletonClaimant = {
@@ -738,14 +739,14 @@ export function attachRouter(
         break;
       case 'pty:subscribe':
         if (typeof msg.id !== 'string') break;
-        subscribedPtyIds.add(msg.id);
+        if (!subscribedPtyIds.subscribe(msg.id)) break;
         // A PTY in another window has no local listener to hook; ask its window
         // to start sending it.
         if (isRemotePty(msg.id)) remoteSubscribe(msg.id);
         break;
       case 'pty:unsubscribe':
         if (typeof msg.id !== 'string') break;
-        subscribedPtyIds.delete(msg.id);
+        if (!subscribedPtyIds.unsubscribe(msg.id)) break;
         if (isRemotePty(msg.id)) remoteUnsubscribe(msg.id);
         break;
       case 'peer:request': {

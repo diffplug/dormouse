@@ -311,6 +311,9 @@ than retaining the old directory indefinitely.
 Resolving a peer's surface *is* the attach: the requested size travels with it, because the owner has to apply it inside that round trip — there is no reaching into its xterm afterwards without a second one. A local pane is left alone at resolve and resized by the caller, which subscribes to the PTY first so a synchronous repaint is not lost. Either way the handle reports the size as it stands and the caller reconciles, which is why the same-size repaint bounce fires for a peer attach (its owner already applied the size) and the resize path fires for a local one.
 
 Subscribing is a subscription, not a pair of calls: `peers.streamPty(ptyId)` returns its own unsubscribe, so a caller cannot leak a stream by losing track of the id it opened it with.
+The router reference-counts those handles per PTY: only zero-to-one starts
+cross-window forwarding and only one-to-zero stops it, so detaching one of two
+concurrent viewers cannot silence the other.
 
 The directory emits **twice**: the local entries immediately, then a merged snapshot once the peers answer. The phone should not wait on a round trip to see the panes that are already here.
 
