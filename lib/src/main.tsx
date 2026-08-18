@@ -5,6 +5,7 @@ import { resumeOrRestore } from "./lib/reconnect";
 import { initAlertStateReceiver } from "./lib/terminal-registry";
 import { installVscodeThemeVarResolver } from "./lib/themes/vscode-color-observer";
 import { REMOTE_HOST_STORE_PREFIX, setHostStoreReady } from "./remote/host/store";
+import { installPeerSurfaceResponder } from "./remote/host/peer-surfaces";
 import App from "./App";
 import "./index.css";
 
@@ -17,6 +18,10 @@ const isVscode = typeof acquireVsCodeApi === "function";
 
 if (isVscode) {
   installVscodeThemeVarResolver();
+  // Every webview answers for its own terminals, whether or not it is the one
+  // holding the Host — that is what lets the phone see a whole window rather
+  // than one webview's panes.
+  installPeerSurfaceResponder();
 }
 
 // Wire up alert state before reconnect so state messages are handled

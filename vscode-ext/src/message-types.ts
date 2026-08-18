@@ -29,6 +29,14 @@ export type WebviewMessage =
   | { type: 'agentBrowser:popIn'; session: string; url?: string; binaryPath?: string; requestId: string }
   | { type: 'iframe:createProxyUrl'; url: string; requestId: string }
   | { type: 'singleton:claim'; name: string }
+  // Peer surfaces: one webview is the remote Host, but the terminals live in
+  // whichever webview opened them. See docs/specs/vscode.md → "Peer surfaces".
+  | { type: 'pty:subscribe'; id: string }
+  | { type: 'pty:unsubscribe'; id: string }
+  | { type: 'peer:directory'; requestId: string }
+  | { type: 'peer:directoryEntries'; requestId: string; entries: unknown[] }
+  | { type: 'peer:surfaceOp'; requestId: string; surfaceId: string; op: 'attach' | 'detach' | 'resize'; cols?: number; rows?: number }
+  | { type: 'peer:surfaceResult'; requestId: string; ok: boolean; ptyId?: string; cols?: number; rows?: number }
   | { type: 'store:read'; prefix: string; requestId: string }
   | { type: 'store:write'; key: string; value: string | null }
   | { type: 'dormouse:init' }
@@ -79,6 +87,10 @@ export type ExtensionMessage =
   | { type: 'store:entries'; requestId: string; entries: Record<string, string> }
   | { type: 'singleton:lease'; name: string; held: boolean }
   | { type: 'store:changed'; key: string; value: string | null }
+  | { type: 'peer:directoryRequest'; requestId: string }
+  | { type: 'peer:directoryResult'; requestId: string; entries: unknown[] }
+  | { type: 'peer:surfaceRequest'; requestId: string; surfaceId: string; op: 'attach' | 'detach' | 'resize'; cols?: number; rows?: number }
+  | { type: 'peer:surfaceOpResult'; requestId: string; ok: boolean; ptyId?: string; cols?: number; rows?: number }
   | {
       type: 'dormouse:newTerminal';
       shell?: string;

@@ -24,6 +24,7 @@ Extension Host (vscode-ext/src/)
 ├── webview-html.ts           — CSP injection, nonce + message-token generation, asset URI rewriting
 ├── remote-host-store.ts      — SecretStorage/globalState backing for the webview's remote-Host keys
 ├── window-lease.ts           — cross-window Host lease: heartbeat record in globalStorageUri
+│                             (peer-surface brokering lives in message-router.ts)
 ├── (../scripts/esbuild.mjs)  — outside src/: extension + pty-host bundles; bakes the webview's remote `connect-src`
 ├── webview-messaging.ts      — serveWebview: pairs a document with its message token, returns the WebviewChannel
 └── log.ts                    — extension logging
@@ -277,6 +278,26 @@ Source of truth: the rules and the cycle in `lib/src/lib/vscode-window-lease.ts`
 Source of truth: the `SingletonClaimant` arbiter in `vscode-ext/src/message-router.ts`, `PlatformAdapter.claimSingleton`, `setRemoteHostOwnership` in `lib/src/remote/host/activation.ts`, tested in `lib/src/remote/host/activation.test.ts`.
 
 **Lifetime.** The Host lives as long as a Dormouse webview exists in the window. `retainContextWhenHidden: true` is set on both hosting modes, so hiding the panel keeps it connected; only disposing every Dormouse view, or closing the window, takes it offline.
+
+### Peer surfaces
+
+The Host runs in one webview, but a window's terminals are spread across all of them: each webview is its own JS realm with its own xterm registry (`lib/src/lib/terminal-store.ts`). Left alone the phone would see one webview's panes — not the window's — because `collectDirectorySnapshot` iterates the local registry and `surface.attach` resolves against it.
+
+The extension host brokers, since it is the only party that can see every webview. Three things make it work, and two of them were already true:
+
+- **PTY input and resize are not ownership-gated.** `pty:input` and `pty:resize` go straight to `ptyManager`, so the Host webview can already drive a sibling's PTY.
+- **Pane ids are unique across webviews.** They are minted `pane-<counter>-<random>` (`lib/src/components/Wall.tsx`), so surface ids need no namespacing to be routed.
+- **Streaming needed one change.** `pty:data` was delivered only to the owning webview; a webview may now also `pty:subscribe` to a PTY it does not own. Subscriptions are tracked separately from `ownedPtyIds`, so they never affect Workspace union status, `killOnDispose`, or who the host considers the owner. Semantic events stay owner-only — they drive the owner's pane state, and a subscriber is streaming bytes, not keeping a second copy of that state.
+
+Every webview installs a responder (`lib/src/remote/host/peer-surfaces.ts`) whether or not it is the Host, so its terminals are reachable from whichever one is. It carries none of the relay, enrollment, or pairing machinery — a registry lookup, the directory collector, and a resize.
+
+`attach` and `resize` on a foreign surface go to the owner rather than to the PTY, because attach-is-the-resize has to drive the live xterm or the owning pane's own view drifts from the size the phone set. The owner replies with the size it settled at and the `ptyId`; the Host then subscribes and streams. `detach` has nothing to undo on the owner — the Host stops streaming and the pane keeps its size, which is what last-attach-wins means.
+
+The directory emits **twice**: the local entries immediately, then a merged snapshot once the peers answer. The phone should not wait on a round trip to see the panes that are already here. The broker settles a fan-out when every webview has replied or a 1s budget expires, so a webview with no live content cannot hang the picker.
+
+Reserved: this is the within-window tier. Reaching terminals in *other windows* needs a channel between extension hosts — the lease holder is the natural broker and `dor`'s control socket is the pattern — and is not built.
+
+Source of truth: the broker in `vscode-ext/src/message-router.ts` (`peer:*` cases, `subscribedPtyIds`), `PeerBridge` in `lib/src/lib/platform/types.ts` with its VS Code implementation in `vscode-adapter.ts`, the responder in `lib/src/remote/host/peer-surfaces.ts`, and the foreign-surface path in `remote-api.ts`, tested in `lib/src/remote/host/peer-surfaces.test.ts`.
 
 ### Build and development
 

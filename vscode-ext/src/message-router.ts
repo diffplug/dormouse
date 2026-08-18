@@ -111,7 +111,42 @@ interface ActiveRouter {
   ownsPty(id: string): boolean;
   forwardDorControlRequest(request: DorControlRequest): void;
   notifyStoreChanged(key: string, value: string | null): void;
+  askDirectory(requestId: string): void;
+  askSurface(
+    requestId: string,
+    surfaceId: string,
+    op: 'attach' | 'detach' | 'resize',
+    cols?: number,
+    rows?: number,
+  ): void;
 }
+
+/**
+ * Ask every *other* webview in this window to answer a peer request, and settle
+ * once they all have (or the budget runs out).
+ *
+ * The remote Host runs in one webview, but a window's terminals are spread
+ * across all of them — each webview has its own xterm registry, so the Host can
+ * neither list nor attach to a sibling's pane without asking. The extension
+ * host is the only party that can ask, so it brokers. See docs/specs/vscode.md
+ * → "Peer surfaces".
+ */
+const PEER_REPLY_BUDGET_MS = 1_000;
+
+interface PeerRequest {
+  /** Replies still outstanding; the request settles when it empties. */
+  pending: Set<ActiveRouter>;
+  entries: unknown[];
+  settle: () => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+const peerDirectoryRequests = new Map<string, PeerRequest>();
+
+interface PeerSurfaceRequest {
+  settle: (result: { ok: boolean; ptyId?: string; cols?: number; rows?: number }) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+const peerSurfaceRequests = new Map<string, PeerSurfaceRequest>();
 
 /**
  * Tell every webview about a committed Host-store write.
@@ -260,6 +295,13 @@ export function attachRouter(
 
   // Track which PTY IDs were spawned (or reconnected) through this webview
   const ownedPtyIds = new Set<string>();
+  /**
+   * PTYs this webview asked to watch without owning them — the remote Host
+   * streaming a sibling webview's terminal. Kept separate from `ownedPtyIds` so
+   * it never affects Workspace union status, `killOnDispose`, or which webview
+   * the host considers the owner.
+   */
+  const subscribedPtyIds = new Set<string>();
 
   // This webview's stake in the window-wide single-instance roles.
   const claimant: SingletonClaimant = {
@@ -380,10 +422,12 @@ export function attachRouter(
    */
   function connectWebview(): () => void {
     const removeProcessedListener = onProcessedPtyData((id, visibleData) => {
-      if (!ownedPtyIds.has(id)) return;
+      if (!ownedPtyIds.has(id) && !subscribedPtyIds.has(id)) return;
       post({ type: 'pty:data', id, data: visibleData } satisfies ExtensionMessage);
     });
     const removeSemanticListener = onTerminalSemanticEvents((id, events) => {
+      // Semantic events drive the *owner's* pane state; a subscriber is
+      // streaming bytes, not maintaining a second copy of that state.
       if (!ownedPtyIds.has(id)) return;
       post({ type: 'terminal:semanticEvents', id, events } satisfies ExtensionMessage);
     });
@@ -590,6 +634,82 @@ export function attachRouter(
           } satisfies ExtensionMessage),
         );
         break;
+      case 'pty:subscribe':
+        if (typeof msg.id === 'string') subscribedPtyIds.add(msg.id);
+        break;
+      case 'pty:unsubscribe':
+        if (typeof msg.id === 'string') subscribedPtyIds.delete(msg.id);
+        break;
+      case 'peer:directory': {
+        // Fan out to the other webviews in this window and answer once they
+        // have all replied, or the budget expires — a webview with no live
+        // content never replies, and must not hang the phone's picker.
+        const requestId = msg.requestId;
+        const peers = [...activeRouters].filter((other) => other !== router);
+        if (peers.length === 0) {
+          void post({ type: 'peer:directoryResult', requestId, entries: [] } satisfies ExtensionMessage);
+          break;
+        }
+        const settle = () => {
+          const request = peerDirectoryRequests.get(requestId);
+          if (!request) return;
+          peerDirectoryRequests.delete(requestId);
+          clearTimeout(request.timer);
+          void post({
+            type: 'peer:directoryResult', requestId, entries: request.entries,
+          } satisfies ExtensionMessage);
+        };
+        peerDirectoryRequests.set(requestId, {
+          pending: new Set(peers),
+          entries: [],
+          settle,
+          timer: setTimeout(settle, PEER_REPLY_BUDGET_MS),
+        });
+        for (const peer of peers) peer.askDirectory(requestId);
+        break;
+      }
+      case 'peer:directoryEntries': {
+        const request = peerDirectoryRequests.get(msg.requestId);
+        if (!request) break;
+        if (Array.isArray(msg.entries)) request.entries.push(...msg.entries);
+        request.pending.delete(router);
+        if (request.pending.size === 0) request.settle();
+        break;
+      }
+      case 'peer:surfaceOp': {
+        // Broadcast rather than track surfaceId ownership: only the owning
+        // webview can answer, the others stay silent, and a window holds a
+        // handful of webviews.
+        const requestId = msg.requestId;
+        const peers = [...activeRouters].filter((other) => other !== router);
+        const settle = (result: { ok: boolean; ptyId?: string; cols?: number; rows?: number }) => {
+          const request = peerSurfaceRequests.get(requestId);
+          if (!request) return;
+          peerSurfaceRequests.delete(requestId);
+          clearTimeout(request.timer);
+          void post({ type: 'peer:surfaceOpResult', requestId, ...result } satisfies ExtensionMessage);
+        };
+        if (peers.length === 0) {
+          settle({ ok: false });
+          break;
+        }
+        peerSurfaceRequests.set(requestId, {
+          settle,
+          timer: setTimeout(() => settle({ ok: false }), PEER_REPLY_BUDGET_MS),
+        });
+        for (const peer of peers) {
+          peer.askSurface(requestId, msg.surfaceId, msg.op, msg.cols, msg.rows);
+        }
+        break;
+      }
+      case 'peer:surfaceResult': {
+        // Only the owner replies `ok`; a miss from a non-owner is not an answer.
+        if (!msg.ok) break;
+        peerSurfaceRequests.get(msg.requestId)?.settle({
+          ok: true, ptyId: msg.ptyId, cols: msg.cols, rows: msg.rows,
+        });
+        break;
+      }
       case 'singleton:claim':
         // `WebviewMessage` is a claim about the sender, not a runtime check.
         if (typeof msg.name !== 'string') break;
@@ -789,10 +909,32 @@ export function attachRouter(
       if (disposed) return;
       void post({ type: 'store:changed', key, value } satisfies ExtensionMessage);
     },
+    askDirectory(requestId: string) {
+      if (disposed) return;
+      void post({ type: 'peer:directoryRequest', requestId } satisfies ExtensionMessage);
+    },
+    askSurface(
+      requestId: string,
+      surfaceId: string,
+      op: 'attach' | 'detach' | 'resize',
+      cols?: number,
+      rows?: number,
+    ) {
+      if (disposed) return;
+      void post({
+        type: 'peer:surfaceRequest', requestId, surfaceId, op, cols, rows,
+      } satisfies ExtensionMessage);
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
       activeRouters.delete(router);
+      // A webview that goes away mid-fan-out must not hold the answer open.
+      for (const request of peerDirectoryRequests.values()) {
+        if (!request.pending.delete(router)) continue;
+        if (request.pending.size === 0) request.settle();
+      }
+      subscribedPtyIds.clear();
       releaseSingletons(claimant);
       removeWatchedCommandListener();
       removeAlertSettingsListener();

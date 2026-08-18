@@ -14,6 +14,7 @@ import { getTerminalTheme, onTerminalThemeChange } from '../terminal-theme';
 import { isHostMessage, readHostMessageToken } from '../vscode-message-token';
 import type { DorControlResult } from 'dor/protocol';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
+import type { PeerBridge } from './types';
 import { setJsonStoreBackend } from '../local-json-store';
 
 /**
@@ -22,6 +23,13 @@ import { setJsonStoreBackend } from '../local-json-store';
  * failing loudly.
  */
 const HOST_STORE_READ_TIMEOUT_MS = 10_000;
+
+/**
+ * Budget for a peer round trip. Comfortably above the broker's own
+ * `PEER_REPLY_BUDGET_MS`, so a slow sibling shows up as an incomplete directory
+ * rather than as a timeout on this side.
+ */
+const PEER_REQUEST_TIMEOUT_MS = 3_000;
 
 export class VSCodeAdapter implements PlatformAdapter {
   private vscode: ReturnType<typeof acquireVsCodeApi>;
@@ -174,6 +182,21 @@ export class VSCodeAdapter implements PlatformAdapter {
         this.singletonHandlers.get(msg.name)?.(!!msg.held);
       } else if (msg.type === 'store:changed') {
         this.applyStoreChange(msg.key, msg.value ?? null);
+      } else if (msg.type === 'peer:directoryRequest') {
+        // Answer even with no handler installed: the broker waits for every
+        // webview, so silence would stall the asker until its budget expires.
+        this.vscode.postMessage({
+          type: 'peer:directoryEntries',
+          requestId: msg.requestId,
+          entries: this.peerHandlers?.directory() ?? [],
+        });
+      } else if (msg.type === 'peer:surfaceRequest') {
+        // Only the owner answers; a miss stays silent so it cannot beat the
+        // real owner's reply to the broker.
+        const result = this.peerHandlers?.surfaceOp(msg.surfaceId, msg.op, msg.cols, msg.rows);
+        if (result?.ok) {
+          this.vscode.postMessage({ type: 'peer:surfaceResult', requestId: msg.requestId, ...result });
+        }
       }
     });
   }
@@ -220,6 +243,41 @@ export class VSCodeAdapter implements PlatformAdapter {
    * the role when the holder is disposed, so closing the Dormouse view hands
    * the Host to another open one rather than dropping it until reload.
    */
+  /**
+   * Reach terminals owned by sibling webviews, brokered by the extension host
+   * (docs/specs/vscode.md → "Peer surfaces"). Present unconditionally: every
+   * webview both asks (when it is the Host) and answers (for its own panes).
+   */
+  readonly peers: PeerBridge = {
+    directory: async () => {
+      const entries = await this.requestResponse(
+        'peer:directory',
+        'peer:directoryResult',
+        {},
+        (msg) => msg.entries as unknown[],
+        PEER_REQUEST_TIMEOUT_MS,
+      );
+      return entries ?? [];
+    },
+    surfaceOp: async (surfaceId, op, cols, rows) => {
+      const result = await this.requestResponse(
+        'peer:surfaceOp',
+        'peer:surfaceOpResult',
+        { surfaceId, op, cols, rows },
+        (msg) => ({ ok: !!msg.ok, ptyId: msg.ptyId, cols: msg.cols, rows: msg.rows }),
+        PEER_REQUEST_TIMEOUT_MS,
+      );
+      return result ?? { ok: false };
+    },
+    subscribePty: (id) => this.vscode.postMessage({ type: 'pty:subscribe', id }),
+    unsubscribePty: (id) => this.vscode.postMessage({ type: 'pty:unsubscribe', id }),
+    serve: (handlers) => {
+      this.peerHandlers = handlers;
+    },
+  };
+
+  private peerHandlers: Parameters<PeerBridge['serve']>[0] | null = null;
+
   claimSingleton(name: string, onChange: (held: boolean) => void): void {
     // One entry per role, dispatched from the constructor's authenticated
     // listener: re-claiming (a React effect remounting, StrictMode's double

@@ -112,6 +112,48 @@ export interface AgentBrowserPopResult {
   error?: string;
 }
 
+/** What a peer webview reports back about a surface it owns. */
+export interface PeerSurfaceResult {
+  ok: boolean;
+  ptyId?: string;
+  cols?: number;
+  rows?: number;
+}
+
+/**
+ * Reach terminals that belong to another webview of the same host window.
+ *
+ * The remote Host runs in exactly one webview, but a window's terminals are
+ * spread across all of them and each webview has its own xterm registry. The
+ * Host therefore cannot list or drive a sibling's pane directly; the host
+ * process brokers, and this is the webview end of that. See
+ * docs/specs/vscode.md → "Peer surfaces".
+ */
+export interface PeerBridge {
+  /** Directory entries contributed by every other webview in this window. */
+  directory(): Promise<unknown[]>;
+  /** Drive a surface owned by another webview; `ok: false` if nobody owns it. */
+  surfaceOp(
+    surfaceId: string,
+    op: 'attach' | 'detach' | 'resize',
+    cols?: number,
+    rows?: number,
+  ): Promise<PeerSurfaceResult>;
+  /** Start/stop receiving `pty:data` for a PTY this webview does not own. */
+  subscribePty(id: string): void;
+  unsubscribePty(id: string): void;
+  /** Answer the broker on behalf of this webview's own surfaces. */
+  serve(handlers: {
+    directory: () => unknown[];
+    surfaceOp: (
+      surfaceId: string,
+      op: 'attach' | 'detach' | 'resize',
+      cols?: number,
+      rows?: number,
+    ) => PeerSurfaceResult;
+  }): void;
+}
+
 export interface PlatformAdapter {
   // Lifecycle
   init(): Promise<void>;
@@ -135,6 +177,12 @@ export interface PlatformAdapter {
    * that omit it are single-instance, so callers treat the role as held.
    */
   claimSingleton?(name: string, onChange: (held: boolean) => void): void;
+
+  /**
+   * Reach surfaces owned by sibling webviews. Optional: only a host that can
+   * show several webviews over one backend has peers at all.
+   */
+  peers?: PeerBridge;
 
   // Shell detection
   getAvailableShells(): Promise<{ name: string; path: string; args?: string[] }[]>;
