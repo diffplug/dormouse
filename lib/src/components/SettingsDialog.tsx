@@ -69,8 +69,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
   const shellState = useSyncExternalStore(subscribeToShells, getShellsSnapshot);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const [themeMenuOpen, setThemeMenuOpen] = useState(false);
-  const [shellMenuOpen, setShellMenuOpen] = useState(false);
+  // One union rather than a boolean per picker, so two menus can never be open
+  // at once and Escape has a single thing to close.
+  const [openMenu, setOpenMenu] = useState<'theme' | 'shell' | null>(null);
 
   // VS Code owns the theme and has its own picker, so Dormouse offers none
   // there. Every other host sets its theme here rather than in host chrome.
@@ -94,15 +95,10 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       className={`${OVERLAY_MAX_HEIGHT.modal} w-full max-w-[26rem] overflow-y-auto`}
       initialFocusRef={closeRef}
       // ModalFrame's Escape handler is a capture-phase window listener that
-      // stops propagation, so a picker's own Escape never fires. Route it: an
-      // open dropdown closes first, the dialog only on the next press.
-      onEscape={() =>
-        themeMenuOpen
-          ? setThemeMenuOpen(false)
-          : shellMenuOpen
-            ? setShellMenuOpen(false)
-            : onClose()
-      }
+      // stops propagation, so a picker's own Escape never fires. Route it:
+      // whichever dropdown is open closes first, the dialog only on the next
+      // press.
+      onEscape={() => (openMenu ? setOpenMenu(null) : onClose())}
     >
       <div className="flex items-start gap-3">
         <h2 id={TITLE_ID} className="min-w-0 flex-1 text-sm leading-5 font-semibold text-foreground">
@@ -116,8 +112,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           <span>Theme:</span>
           <ThemePicker
             variant="settings-dialog"
-            open={themeMenuOpen}
-            onOpenChange={setThemeMenuOpen}
+            open={openMenu === 'theme'}
+            onOpenChange={(open) => setOpenMenu(open ? 'theme' : null)}
           />
         </section>
       ) : null}
@@ -129,7 +125,10 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           className={`${showTheme ? 'mt-2' : 'mt-4'} flex items-center gap-1.5 text-sm text-foreground`}
         >
           <span>Shell:</span>
-          <ShellPicker open={shellMenuOpen} onOpenChange={setShellMenuOpen} />
+          <ShellPicker
+            open={openMenu === 'shell'}
+            onOpenChange={(open) => setOpenMenu(open ? 'shell' : null)}
+          />
         </section>
       ) : null}
 

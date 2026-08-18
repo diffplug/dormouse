@@ -1,4 +1,5 @@
-import { setDefaultShellOpts } from './shell-defaults';
+import { setDefaultShellOpts, type ShellEntry } from './shell-defaults';
+import { getStorage } from './safe-storage';
 
 /**
  * The Window's detected shells and which one is selected, for the Settings
@@ -16,36 +17,17 @@ import { setDefaultShellOpts } from './shell-defaults';
 
 const SELECTED_KEY = 'dormouse:selected-shell';
 
-/** One detected shell. The canonical shape every adapter's
- *  `getAvailableShells()` returns. */
-export interface ShellEntry {
-  name: string;
-  path: string;
-  args?: string[];
-}
+/** Lives in `shell-defaults.ts` — the dependency-free module the Node-side
+ *  `PlatformAdapter` contract can also import — and is re-exported here so
+ *  UI-side callers have one shell import. */
+export type { ShellEntry } from './shell-defaults';
 
 export interface ShellsState {
   shells: ShellEntry[];
   selected: ShellEntry | undefined;
 }
 
-function getStorage(): Storage | null {
-  const storage = globalThis.localStorage;
-  if (
-    typeof storage?.getItem !== 'function' ||
-    typeof storage?.setItem !== 'function' ||
-    typeof storage?.removeItem !== 'function'
-  ) {
-    return null;
-  }
-  return storage;
-}
-
-function emptyState(): ShellsState {
-  return { shells: [], selected: undefined };
-}
-
-let state: ShellsState = emptyState();
+let state: ShellsState = { shells: [], selected: undefined };
 const listeners = new Set<() => void>();
 
 function emit(next: ShellsState): void {
@@ -79,8 +61,13 @@ function publishSelected(selected: ShellEntry | undefined): void {
  * temporarily missing (a version bump mid-reinstall) recovers its selection
  * once it returns, rather than being silently replaced by the fallback. Only
  * `selectShell` writes.
+ *
+ * An empty list empties the store, which is what `resetShellStore` is. Emptying
+ * an already-empty store is skipped outright: Storybook resets every story, and
+ * a notification with nothing behind it only churns subscribers.
  */
 export function seedShellStore(shells: ShellEntry[]): void {
+  if (shells.length === 0 && state.shells.length === 0) return;
   const savedPath = getStorage()?.getItem(SELECTED_KEY) ?? null;
   const selected = shells.find((shell) => shell.path === savedPath) ?? shells[0];
   publishSelected(selected);
@@ -114,7 +101,13 @@ export function selectShell(shell: ShellEntry): void {
   );
 }
 
-/** Empty the store (tests / Storybook — module state outlives components). */
+/**
+ * Empty the store (tests / Storybook — module state outlives components).
+ *
+ * Seeding nothing *is* emptying, so there is one code path: it also unpublishes
+ * the default shell, which a teardown that only cleared the store used to leak
+ * into the next test.
+ */
 export function resetShellStore(): void {
-  emit(emptyState());
+  seedShellStore([]);
 }

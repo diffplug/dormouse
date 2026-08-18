@@ -145,14 +145,18 @@ export const ManyRules: Story = {
   },
 };
 
-/** Storybook's `play` runs before the snapshot, but the menu positions itself
+/** Opens the picker whose trigger matches `name`.
+ *
+ *  Storybook's `play` runs before the snapshot, but the menu positions itself
  *  from a measured trigger rect — one commit later. Settle before returning so
  *  Chromatic never captures the pre-measurement frame. The dialog renders in a
  *  portal-less overlay above `canvasElement`, so scope to the document body. */
-async function openThemeMenu({ canvasElement }: { canvasElement: HTMLElement }) {
-  const body = within(canvasElement.ownerDocument.body);
-  await userEvent.click(body.getByRole('button', { name: /^Theme:/ }));
-  await new Promise((resolve) => setTimeout(resolve, 100));
+function openPickerMenu(name: RegExp) {
+  return async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+    const body = within(canvasElement.ownerDocument.body);
+    await userEvent.click(body.getByRole('button', { name }));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  };
 }
 
 /**
@@ -165,7 +169,7 @@ export const ThemeMenuOpen: Story = {
     primedWatchedCommands: [],
     primedAlertSettings: {},
   },
-  play: openThemeMenu,
+  play: openPickerMenu(/^Theme:/),
 };
 
 /**
@@ -191,7 +195,7 @@ export const ThemeMenuOpenWithInstalledThemes: Story = {
       },
     })),
   },
-  play: openThemeMenu,
+  play: openPickerMenu(/^Theme:/),
 };
 
 /**
@@ -230,13 +234,6 @@ export const ShellRow: Story = {
   },
 };
 
-/** Same measured-rect settle as `openThemeMenu`. */
-async function openShellMenu({ canvasElement }: { canvasElement: HTMLElement }) {
-  const body = within(canvasElement.ownerDocument.body);
-  await userEvent.click(body.getByRole('button', { name: /^Shell:/ }));
-  await new Promise((resolve) => setTimeout(resolve, 100));
-}
-
 /**
  * The shell dropdown open, with the selected row's check. Positioned `fixed`
  * off the trigger rect for the same reason the theme menu is.
@@ -247,7 +244,7 @@ export const ShellMenuOpen: Story = {
     primedWatchedCommands: [],
     primedAlertSettings: {},
   },
-  play: openShellMenu,
+  play: openPickerMenu(/^Shell:/),
 };
 
 /**

@@ -208,7 +208,10 @@ playground navbar — carries no theme control.
 - Inside the dialog the menu renders `position: fixed`, anchored off the
   measured trigger rect, because the dialog surface is `overflow-y-auto` and
   would clip an absolutely-positioned one. It closes on scroll rather than
-  drifting away from its trigger. The panel is capped to the viewport inset;
+  drifting away from its trigger. Both the anchoring and the dismissal are
+  shared with the dialog's Shell row — source of truth:
+  `useAnchoredMenu` / `useCloseOnOutsideAndEscape` in
+  `lib/src/components/use-anchored-menu.ts`. The panel is capped to the viewport inset;
   its theme list flex-shrinks and scrolls while the footer remains visible. The
   dialog owns the dropdown's open state so `Escape` closes the menu before the
   dialog — `ModalFrame`'s capture-phase Escape handler would otherwise swallow

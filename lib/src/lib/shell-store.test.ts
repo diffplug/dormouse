@@ -3,7 +3,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installLocalStorageStub } from './test-local-storage';
-import { getDefaultShellOpts, setDefaultShellOpts } from './shell-defaults';
+import { getDefaultShellOpts } from './shell-defaults';
 import { getShellsSnapshot, resetShellStore, seedShellStore, selectShell } from './shell-store';
 
 const SELECTED_KEY = 'dormouse:selected-shell';
@@ -26,9 +26,9 @@ describe('shell store', () => {
 
   afterEach(() => {
     window.removeEventListener('dormouse:new-terminal', onSpawn);
-    // Module state, so it outlives the test that wrote it.
+    // Module state, so it outlives the test that wrote it. Reset unpublishes the
+    // default shell too, so there is nothing else to undo.
     resetShellStore();
-    setDefaultShellOpts(null);
     vi.unstubAllGlobals();
   });
 
@@ -72,6 +72,16 @@ describe('shell store', () => {
         announce: true,
       },
     ]);
+  });
+
+  it('unpublishes the default shell when the store is emptied', () => {
+    seedShellStore(SHELLS);
+
+    resetShellStore();
+
+    expect(getShellsSnapshot().shells).toEqual([]);
+    // A teardown that left this published leaked the shell into the next test.
+    expect(getDefaultShellOpts()).toBeNull();
   });
 
   it('ignores re-selecting the shell already in use', () => {

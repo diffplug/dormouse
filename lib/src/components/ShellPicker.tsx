@@ -1,13 +1,12 @@
-import { useCallback, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
+import { useCallback, useRef, useSyncExternalStore } from 'react';
 import { CaretDownIcon, CheckIcon } from '@phosphor-icons/react';
 import {
   getShellsSnapshot,
   selectShell,
   subscribeToShells,
 } from '../lib/shell-store';
-import { useCloseOnOutsideAndEscape } from './theme-picker/use-close-on-outside';
-import { chromeButton, OVERLAY_MAX_HEIGHT, PopupButtonRow, useMeasuredElementRect } from './design';
-import { clampOverlayPosition } from '../lib/ui-geometry';
+import { useAnchoredMenu, useCloseOnOutsideAndEscape } from './use-anchored-menu';
+import { chromeButton, OVERLAY_MAX_HEIGHT, PopupButtonRow } from './design';
 
 /** Menu width. A shell name is a basename, so this is generous; the clamp below
  *  needs a number, not `w-max`. */
@@ -26,39 +25,16 @@ export interface ShellPickerProps {
  * spawn with (`lib/src/lib/shell-store.ts`). Choosing one swaps an untouched
  * pane in place — the store owns that dispatch, this is only the trigger.
  *
- * Renders nothing when no shells were detected. The dialog also hides the row
- * below two shells and on hosts that own shell selection, so this is
- * belt-and-braces for a direct render.
+ * The dialog's `showShell` gate is the single owner of whether this row exists
+ * at all (too few shells, or a host that owns shell selection).
  */
 export function ShellPicker({ open, onOpenChange }: ShellPickerProps) {
   const { shells, selected } = useSyncExternalStore(subscribeToShells, getShellsSnapshot);
   const rootRef = useRef<HTMLDivElement>(null);
-  const [triggerEl, setTriggerEl] = useState<HTMLButtonElement | null>(null);
-  const [menuEl, setMenuEl] = useState<HTMLDivElement | null>(null);
 
   const closeMenu = useCallback(() => onOpenChange(false), [onOpenChange]);
   useCloseOnOutsideAndEscape(open, rootRef, closeMenu);
-
-  // Anchor off the measured trigger rect, exactly as `ThemePicker` does: the
-  // Settings dialog surface is `overflow-y-auto` and would clip an absolutely
-  // positioned menu, while a fixed descendant escapes that overflow. The menu's
-  // own rect feeds the viewport clamp, and is 0 on the first pass — which is
-  // why the menu stays hidden until it has been measured.
-  const triggerRect = useMeasuredElementRect(open ? triggerEl : null);
-  const menuRect = useMeasuredElementRect(open ? menuEl : null);
-  const menuStyle: CSSProperties = {
-    width: MENU_WIDTH_PX,
-    ...(triggerRect
-      ? clampOverlayPosition({
-          left: triggerRect.left,
-          top: triggerRect.top + triggerRect.height + 4,
-          width: MENU_WIDTH_PX,
-          height: menuRect?.height ?? 0,
-        })
-      : { position: 'fixed', visibility: 'hidden' }),
-  };
-
-  if (shells.length === 0) return null;
+  const { setTriggerEl, setMenuEl, menuStyle } = useAnchoredMenu(open, MENU_WIDTH_PX);
 
   return (
     <div ref={rootRef} className="relative flex items-center">
@@ -75,9 +51,7 @@ export function ShellPicker({ open, onOpenChange }: ShellPickerProps) {
         <CaretDownIcon size={10} weight="bold" className="shrink-0 opacity-65" aria-hidden="true" />
       </button>
 
-      {/* z-50 for the same reason as `ThemePicker`'s: the alarm sections'
-          `opacity-50` wrappers below are stacking contexts, and being later in
-          tree order they would otherwise paint through this menu. */}
+      {/* z-50 for the reason `useAnchoredMenu` documents. */}
       {open ? (
         <div ref={setMenuEl} className="z-50" style={menuStyle}>
           {/* `PopupButtonRow` takes no ref, so the fixed positioning and the

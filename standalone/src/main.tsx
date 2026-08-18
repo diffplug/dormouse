@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { setPlatform } from "dormouse-lib/lib/platform";
 import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
 import { resumeOrRestore } from "dormouse-lib/lib/reconnect";
-import { seedShellStore, type ShellEntry } from "dormouse-lib/lib/shell-store";
+import { seedShellStore } from "dormouse-lib/lib/shell-store";
 import { restoreActiveTheme } from "dormouse-lib/lib/themes";
 import App from "dormouse-lib/App";
 import "dormouse-lib/index.css";
@@ -104,10 +104,10 @@ async function bootstrap() {
   // Seed the shell store from the active host backend: it restores the
   // persisted selection and publishes it as the default shell, and it feeds the
   // Settings dialog's Shell row. Must run before resumeOrRestore/render so the
-  // first restored pane already spawns with the selected shell.
-  const detectedShells = await platform.getAvailableShells();
-  const shells: ShellEntry[] = detectedShells.length > 0 ? detectedShells : [{ name: 'shell', path: '' }];
-  seedShellStore(shells);
+  // first restored pane already spawns with the selected shell. Detecting
+  // nothing seeds nothing, which publishes no default — every spawn path then
+  // omits `shell` and the sidecar resolves the OS default itself.
+  seedShellStore(await platform.getAvailableShells());
 
   const result = await resumeOrRestore(platform);
 

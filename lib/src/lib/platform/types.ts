@@ -1,7 +1,7 @@
 import type { AlertState } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
-import type { ShellEntry } from '../shell-store';
+import type { ShellEntry } from '../shell-defaults';
 // Defined in its own dependency-free file so the Node proxy in lib/src/host can
 // share it without pulling this browser-typed module into a Node tsconfig.
 import type { IframeProxyResult } from './iframe-proxy-types';

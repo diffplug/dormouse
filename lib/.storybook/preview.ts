@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, StrictMode } from 'react';
 import { createElement } from 'react';
 import '../src/theme.css';
 import '../src/index.css';
-import { initPlatform, type FakePtyAdapter, type FakeScenario } from '../src/lib/platform';
+import { initPlatform, type FakeScenario } from '../src/lib/platform';
 import {
   applyAlertSettingsFromHost,
   clearPrimedActivity,
@@ -31,7 +31,7 @@ import {
 import { VSCODE_THEMES, VSCODE_THEME_TYPES } from './themes';
 import { cfg } from '../src/cfg';
 import type { DormouseTheme } from '../src/lib/themes';
-import { resetShellStore, seedShellStore, type ShellEntry } from '../src/lib/shell-store';
+import { seedShellStore, type ShellEntry } from '../src/lib/shell-store';
 
 // Initialize fake platform once at module scope
 const fakePlatform = initPlatform('fake');
@@ -219,10 +219,7 @@ const preview: Preview = {
       const primedAlertSpeech = context.parameters?.primedAlertSpeech as
         | Record<string, AlertSpeechState>
         | undefined;
-      const platform = fakePlatform as FakePtyAdapter & {
-        hostOwnsTheme?: boolean;
-        hostOwnsShells?: boolean;
-      };
+      const platform = fakePlatform;
 
       if (scenario) platform.setDefaultScenario(scenario);
       else platform.clearDefaultScenario();
@@ -256,12 +253,12 @@ const preview: Preview = {
 
       // Shells are detected by the host at boot and seeded into a module store,
       // which no story runs — so a story that wants the Shell row names its
-      // shells, and every other story empties the store. The persisted
-      // selection goes with it: it is shared localStorage like the themes above.
+      // shells, and every other story empties the store (seeding nothing is what
+      // emptying it is). The persisted selection goes with it: it is shared
+      // localStorage like the themes above.
       const primedShells = context.parameters?.primedShells as ShellEntry[] | undefined;
       window.localStorage.removeItem('dormouse:selected-shell');
-      if (primedShells?.length) seedShellStore(primedShells);
-      else resetShellStore();
+      seedShellStore(primedShells ?? []);
 
       useEffect(() => {
         let raf2 = 0;
