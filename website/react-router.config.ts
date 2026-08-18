@@ -12,6 +12,7 @@ export default {
       "/playground/pocket",
       "/pocket",
       "/changelog",
+      "/docs",
       "/supply-chain",
     ];
   },

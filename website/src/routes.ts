@@ -12,5 +12,6 @@ export default [
   route("pocket", "./pages/Pocket.tsx"),
   route("changelog", "./pages/Changelog.tsx"),
   route("changelog/after/:version", "./pages/ChangelogAfter.tsx"),
+  route("docs", "./pages/Docs.tsx"),
   route("supply-chain", "./pages/SupplyChain.tsx"),
 ] satisfies RouteConfig;

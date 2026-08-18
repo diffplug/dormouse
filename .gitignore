@@ -39,6 +39,7 @@ standalone/node_modules/
 website/dist/
 website/node_modules/
 website/src/data/changelog.json
+website/src/data/docs.json
 
 # OS
 .DS_Store
