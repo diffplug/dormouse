@@ -12,6 +12,7 @@ import { workspaceTitle } from './workspace-chrome';
 import { resolveSelectedShell, setSelectedShellPath, getSelectedShellPath } from './shell-selection';
 import type { ExtensionMessage } from './message-types';
 import { initRemoteHostStore } from './remote-host-store';
+import { initWindowLease } from './window-lease';
 
 type NewTerminalMessage = Extract<ExtensionMessage, { type: 'dormouse:newTerminal' }>;
 
@@ -78,6 +79,9 @@ export function activate(context: vscode.ExtensionContext) {
   // read by the webview through `store:read`; give the store its context
   // before any webview can ask. See remote-host-store.ts.
   initRemoteHostStore(context);
+  // Storage location only — the lease itself does not start until a webview
+  // claims the Host role (window-lease.ts).
+  initWindowLease(context);
   log.init();
   extensionContext = context;
   ptyManager.setExtensionPath(context.extensionPath);

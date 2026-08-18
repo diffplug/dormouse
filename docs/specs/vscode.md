@@ -23,6 +23,7 @@ Extension Host (vscode-ext/src/)
 ├── iframe-proxy-host.ts      — VS Code binding for the iframe transparent proxy (injects the logger)
 ├── webview-html.ts           — CSP injection, nonce + message-token generation, asset URI rewriting
 ├── remote-host-store.ts      — SecretStorage/globalState backing for the webview's remote-Host keys
+├── window-lease.ts           — cross-window Host lease: heartbeat record in globalStorageUri
 ├── (../scripts/esbuild.mjs)  — outside src/: extension + pty-host bundles; bakes the webview's remote `connect-src`
 ├── webview-messaging.ts      — serveWebview: pairs a document with its message token, returns the WebviewChannel
 └── log.ts                    — extension logging
@@ -261,7 +262,17 @@ Source of truth: `vscode-ext/src/remote-host-store.ts`, `lib/src/lib/platform/vs
 
 On the webview side `activation.ts` starts un-owned whenever the adapter offers `claimSingleton`, so two webviews racing to mount cannot both activate before the first answer arrives. Adapters without the hook (standalone, the website) are single-instance and stay owned from the start.
 
-**Scope of the lease.** It is per-window, because the extension host is per-window — but the enrollment it guards lives in `SecretStorage`/`globalState`, which are machine-wide. Two VS Code windows each showing a Dormouse view therefore elect one holder *each*, and the relay displaces whichever connected first. The lease removes the multi-webview case, not the multi-window one; a cross-window lease would have to be arbitrated on shared state rather than in extension-host memory. Until then the server remains the final arbiter, which is correct but noisier than it should be.
+**Across windows.** The election above is per-window, because the extension host is — but the enrollment it guards is machine-wide, so window-local arbitration alone is not enough. Left there, every window would elect its own Host, all of them would connect `/ws/host` with the same enrollment, and the server would close the displaced socket (`server/src/relay.ts`) whose `close` handler reconnects and displaces the next one: an endless fight, with each window arming its own alarm push.
+
+So there is a second tier. A window may grant the role only while it holds a lease recorded in the extension's `globalStorageUri` — per-extension, shared by every window, and (unlike `globalState`) with no cross-window change event to depend on, so ownership is a heartbeat with a TTL rather than a flag. The holder re-stamps every 5s; a record unstamped for 15s is free. That TTL is what recovers the role from a window that died without running its disposables; a clean dispose deletes the record so the handoff is prompt, and a filesystem watcher makes the next window notice without waiting for its poll.
+
+A fresh claim is confirmed by re-reading: two windows can judge the same record stale in the same instant and both write, and the loser must not believe it won. Renewing skips that round trip, since the record already named the renewer. A heartbeat stamped far in the *future* counts as stale too — otherwise a clock jump would lock every window out of the role until the skew elapsed.
+
+Losing the window lease is not merely losing the right to be re-offered the role: any webview holding it is told `held: false` and stops its Host. That is the one path that sends a revocation, and it is why the lease is a boolean rather than a one-way grant.
+
+Nothing here starts until a webview first claims `remote-host`, so a user who never enrolls a Host never gets the file or the timer.
+
+Source of truth: the rules and the cycle in `lib/src/lib/vscode-window-lease.ts` (tested in `lib/src/lib/vscode-window-lease.test.ts`), the filesystem and timers around them in `vscode-ext/src/window-lease.ts`, and `windowLeaseHeld` gating `electSingleton` in `vscode-ext/src/message-router.ts`.
 
 Source of truth: the `SingletonClaimant` arbiter in `vscode-ext/src/message-router.ts`, `PlatformAdapter.claimSingleton`, `setRemoteHostOwnership` in `lib/src/remote/host/activation.ts`, tested in `lib/src/remote/host/activation.test.ts`.
 

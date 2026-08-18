@@ -22,6 +22,7 @@ import type { DorControlRequest } from './pty-manager';
 import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
 import { readStore, writeStore } from './remote-host-store';
+import { ensureWindowLease } from './window-lease';
 import { log } from './log';
 import type { WebviewChannel } from './webview-messaging';
 
@@ -51,7 +52,41 @@ const singletonClaimants = new Set<SingletonClaimant>();
 /** Who currently holds each role — the one place the answer is stored. */
 const singletonHolders = new Map<string, SingletonClaimant>();
 
+/**
+ * Whether this *window* may hold single-instance roles at all.
+ *
+ * One extension host runs per window, so the arbitration above is blind to
+ * every other window. Left to itself each window would elect its own Host, all
+ * of them would connect `/ws/host` with the same enrollment, and the server's
+ * displacement would turn into an endless reconnect fight. `window-lease.ts`
+ * arbitrates across windows on shared storage; nothing is granted here until it
+ * says this window won.
+ */
+let windowLeaseHeld = false;
+
+function wantedSingletonNames(): Set<string> {
+  const names = new Set<string>();
+  for (const claimant of singletonClaimants) {
+    for (const name of claimant.wants) names.add(name);
+  }
+  return names;
+}
+
+function onWindowLeaseChange(held: boolean): void {
+  if (windowLeaseHeld === held) return;
+  windowLeaseHeld = held;
+  if (held) {
+    for (const name of wantedSingletonNames()) electSingleton(name);
+    return;
+  }
+  // Lost across windows: whoever held it here must stop, not merely stop being
+  // re-offered it.
+  for (const [name, holder] of singletonHolders) holder.notify(name, false);
+  singletonHolders.clear();
+}
+
 function electSingleton(name: string): void {
+  if (!windowLeaseHeld) return;
   let holder = singletonHolders.get(name);
   if (!holder) {
     holder = [...singletonClaimants].find((claimant) => claimant.wants.has(name));
@@ -559,6 +594,9 @@ export function attachRouter(
         // `WebviewMessage` is a claim about the sender, not a runtime check.
         if (typeof msg.name !== 'string') break;
         claimant.wants.add(msg.name);
+        // First claim in this window starts the cross-window arbitration; it
+        // answers asynchronously, and `onWindowLeaseChange` elects when it does.
+        ensureWindowLease(onWindowLeaseChange);
         electSingleton(msg.name);
         break;
       case 'store:read':
