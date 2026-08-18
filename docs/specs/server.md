@@ -34,11 +34,25 @@ UI lives in `lib`/`standalone`.
 | `DORMOUSE_ORIGIN`         | External origin, e.g. `https://dormouse.tailnet.ts.net`. Source of the WebAuthn `rpId`/`origin` and the Host's `ConnectionPolicy`. Defaults to `http://localhost:<port>` for dev. |
 | `DORMOUSE_STATE_DIR`      | Where the JSON state files live. Default `./data`.         |
 | `PORT`                    | Default 3000.                                              |
+| `DORMOUSE_BIND_HOST`      | Interface to listen on. Unset binds every interface (what a container wants); set `127.0.0.1` when a TLS proxy on the same machine is the front door. |
 
 WebAuthn requires a secure context: `localhost` works for development; for a
 real phone, put the server behind TLS (`tailscale serve` is the intended
 selfhost path, any reverse proxy works). The server itself always speaks
 plain HTTP.
+
+Because the server always speaks plain HTTP, the listen interface is a security
+boundary whenever the TLS proxy is local: `tailscale serve` reaches the app over
+loopback, so leaving the socket on every interface would also publish the
+plaintext port to the LAN and to the tailnet itself. `DORMOUSE_BIND_HOST` exists
+to close that, and the selfhost install sets it. The default stays unbound so a
+container — where the namespace is the boundary and the port is published
+explicitly — keeps working unchanged.
+
+Source of truth: `server/src/config.ts` (`readConfig`) maps the environment to
+the entrypoint's config and is unit-tested in `server/test/config.test.mjs`;
+`server/test/bind-host.test.mjs` spawns the real entrypoint and asserts the
+plaintext port is unreachable off-loopback when `DORMOUSE_BIND_HOST=127.0.0.1`.
 
 `DORMOUSE_ORIGIN` is parsed once and normalized with `URL.origin`; WebAuthn
 clientData checks, passkey assertion verification, and the Host enrollment

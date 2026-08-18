@@ -66,11 +66,15 @@ known:
   ```
 
   `standalone/scripts/tauri.mjs` reads that variable and overrides the
-  checked-in CSP for that build only. Note the limitation before promising it
-  works everywhere: `vscode-ext/src/webview-html.ts` hardcodes its webview
-  `connect-src` with no override hook and no remote origin, so `pnpm
-  dogfood:vscode` currently produces a Host that cannot reach a tailnet relay.
-  Use the standalone Host, or widen that CSP first and say so.
+  checked-in CSP for that build only.
+
+  The Host must be the standalone app. Remote hosting is standalone-only today:
+  `enableRemoteHost` is passed just by `standalone/src/main.tsx`, so the shared
+  webview entrypoint `lib/src/main.tsx` — the one the VS Code extension renders
+  — never loads the relay, enrollment, or pairing modules at all. That, not the
+  webview CSP in `vscode-ext/src/webview-html.ts`, is why `pnpm dogfood:vscode`
+  cannot produce a Host for a self-host relay. Do not offer the user a CSP
+  override as a fix; supporting a VS Code Host is a feature, not a build flag.
 
 ## Architecture
 
@@ -189,22 +193,23 @@ Running that command a second time updates the installed release from the
 current checkout. It must not run `git pull`, switch branches, fetch a release,
 or install a scheduled updater.
 
-This also requires the server entrypoint to support an explicit
-loopback bind setting. Add a narrowly named variable such as
-`DORMOUSE_BIND_HOST`, pass it through the supported `@hono/node-server` listen
-option, and cover it with a test. Do not overload an unrelated generic `HOST`
-variable. Preserve the current default so the cloud path under `## Future` stays
-compatible, but the local configuration must set:
+The server already supports an explicit loopback bind: `DORMOUSE_BIND_HOST` is
+read by `server/src/config.ts` and passed through the `@hono/node-server` listen
+option, with the unset default still binding every interface. The local
+configuration must set:
 
 ```dotenv
 DORMOUSE_BIND_HOST=127.0.0.1
 ```
 
-Update `docs/specs/server.md` above the fold with the new configuration and
-installation behavior, using `Source of truth:` pointers. Add
-`deploy/local/install-macos.sh` to that spec's exhaustive Files/Code Map if it
-has one. Update `SECURITY.md` only if the local installer changes an invariant
-it audits; this path adds no GitHub workflow or deployment secret.
+Do not reintroduce a generic `HOST` variable for this, and do not change the
+unset default — `server/test/bind-host.test.mjs` asserts both halves.
+
+Update `docs/specs/server.md` above the fold with the installation behavior,
+using `Source of truth:` pointers. Add `deploy/local/install-macos.sh` to that
+spec's exhaustive Files/Code Map if it has one. Update `SECURITY.md` only if the
+installer changes an invariant it audits; this path adds no GitHub workflow or
+deployment secret.
 
 ### 2: installer contract
 
@@ -258,7 +263,8 @@ On each invocation it must:
    release. The LaunchAgent must not depend on Homebrew, nvm, Volta, pnpm's
    cache, the source checkout, or the user's interactive shell `PATH` after
    installation. Verify the copied runtime's version and macOS architecture.
-7. Copy `lib/dist-pocket` into the layout expected by `server/src/index.ts`.
+7. Copy `lib/dist-pocket` into the layout expected by `server/src/config.ts`
+   (or point `DORMOUSE_POCKET_DIR` at it).
 8. Write a `RELEASE` metadata file containing at least Git SHA, dirty status,
    build timestamp, Node version, and source checkout path. Do not claim a dirty
    build is reproducibly identified by its SHA alone.
@@ -590,7 +596,7 @@ Also update:
   the repository intentionally adopts injected workspace packages. Do not
   silently change pnpm workspace semantics just for this image.
 - Copy `lib/dist-pocket` into the runtime layout expected by
-  `server/src/index.ts`.
+  `server/src/config.ts`.
 - Run as a fixed unprivileged UID/GID such as `10001:10001` and document that
   the Droplet state directory must have matching ownership.
 - Expose port 3000, include a health check against `/api/hello`, and start
