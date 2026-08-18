@@ -109,10 +109,13 @@ describe('Baseboard settings controls', () => {
     expect(dialog?.textContent).not.toContain('Theme:');
   });
 
-  it('uses the host fallback after deleting the active installed theme', () => {
+  // No `window.confirm` stub on purpose. Mocking it to `true` is what let this
+  // test pass while the shipped standalone webview — which implements no
+  // confirm panel, so WebKit resolves it `false` — silently uninstalled
+  // nothing. Uninstall is a plain click now, exactly as exercised here.
+  it('uses the host fallback after uninstalling the active installed theme', () => {
     addInstalledTheme(INSTALLED_THEME);
     setActiveThemeId(INSTALLED_THEME.id);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     act(() => root.render(
       <Baseboard
@@ -126,7 +129,11 @@ describe('Baseboard settings controls', () => {
     const trigger = document.querySelector<HTMLButtonElement>('[aria-label="Theme: Review Installed"]');
     expect(trigger).not.toBeNull();
     act(() => trigger?.click());
-    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Delete Review Installed"]')?.click());
+    const uninstall = document.querySelector<HTMLButtonElement>(
+      '[aria-label="Uninstall Review Installed"]',
+    );
+    expect(uninstall).not.toBeNull();
+    act(() => uninstall?.click());
 
     expect(getActiveThemeId()).toBe(KIMBIE_DARK);
     expect(document.querySelector('[aria-label="Theme: Kimbie Dark"]')).not.toBeNull();

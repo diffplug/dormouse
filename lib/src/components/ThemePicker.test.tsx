@@ -40,11 +40,23 @@ describe('ThemePicker', () => {
       .find((button) => button.textContent === 'Debug current theme')
       ?.parentElement;
 
-    expect(menu?.style.maxHeight).toBe('calc(100vh - 24px)');
+    expect(menu?.style.maxHeight).toBe('calc(100dvh - 24px)');
     expect(menu?.classList.contains('flex')).toBe(true);
     expect(menu?.classList.contains('flex-col')).toBe(true);
     expect(list?.classList.contains('min-h-0')).toBe(true);
     expect(list?.classList.contains('overflow-y-auto')).toBe(true);
     expect(footer?.classList.contains('shrink-0')).toBe(true);
+    // A ceiling on a tall screen, not a floor: `flex-1` lets the list take the
+    // slack, and the panel cap above shrinks it on a short one.
+    expect(list?.classList.contains('flex-1')).toBe(true);
+  });
+
+  it('shows the active theme swatch on the collapsed trigger', () => {
+    act(() => root.render(<ThemePicker variant="settings-dialog" />));
+
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]');
+    // The collapsed trigger has to carry the same swatch as the row it stands
+    // in for, so collapsed and expanded read as one control.
+    expect(trigger?.querySelector('span[class*="rounded-full"]')).not.toBeNull();
   });
 });

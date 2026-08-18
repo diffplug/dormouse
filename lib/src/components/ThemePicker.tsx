@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { CaretDownIcon } from '@phosphor-icons/react';
+import { CaretDownIcon, XIcon } from '@phosphor-icons/react';
 import type { DormouseTheme } from '../lib/themes';
 import {
   applyTheme,
@@ -14,7 +14,7 @@ import { ThemeSwatch } from './theme-picker/ThemeSwatch';
 import { ThemeStoreDialog } from './theme-picker/ThemeStoreDialog';
 import { useCloseOnOutsideAndEscape } from './theme-picker/use-close-on-outside';
 import { themePickerStyles as styles } from './theme-picker/styles';
-import { chromeButton, useMeasuredElementRect } from './design';
+import { chromeButton, modalIconButton, useMeasuredElementRect } from './design';
 import { clampOverlayPosition, OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
 
 /**
@@ -43,7 +43,11 @@ const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLa
 /** Menu width. Mirrored by the `w-[280px]` literal on the non-dialog variant,
  *  which Tailwind must be able to scan statically. */
 const MENU_WIDTH_PX = 280;
-const MENU_MAX_HEIGHT = `calc(100vh - ${OVERLAY_VIEWPORT_MARGIN_PX * 2}px)`;
+const MENU_MAX_HEIGHT = `calc(100dvh - ${OVERLAY_VIEWPORT_MARGIN_PX * 2}px)`;
+
+/** Preferred cap on the scrolling list. A ceiling on a tall screen, never a
+ *  floor: the panel's viewport cap shrinks it further on a short one. */
+const MENU_LIST_MAX_PX = 320;
 
 export function ThemePicker({
   variant,
@@ -109,8 +113,6 @@ export function ThemePicker({
 
   const deleteTheme = (theme: DormouseTheme) => {
     if (theme.origin.kind !== 'installed') return;
-    const confirmed = window.confirm(`Delete "${theme.label}"?`);
-    if (!confirmed) return;
 
     removeInstalledTheme(theme.id);
     setThemes(getAllThemes());
@@ -161,6 +163,7 @@ export function ThemePicker({
         onClick={() => setOpen(!open)}
         className={chromeButton({ kind: 'labeled' })}
       >
+        {activeTheme ? <ThemeSwatch theme={activeTheme} /> : null}
         <span className="min-w-0 truncate">
           {inDialog ? (activeTheme?.label ?? 'Select theme') : 'Theme'}
         </span>
@@ -180,7 +183,7 @@ export function ThemePicker({
           }`}
           style={menuStyle}
         >
-          <div className="min-h-0 overflow-y-auto py-1" style={{ maxHeight: 320 }}>
+          <div className="min-h-0 flex-1 overflow-y-auto py-1" style={{ maxHeight: MENU_LIST_MAX_PX }}>
             {themes.map((theme) => {
               const isActive = theme.id === activeId;
               const isInstalled = theme.origin.kind === 'installed';
@@ -204,9 +207,9 @@ export function ThemePicker({
                   {isInstalled ? (
                     <button
                       type="button"
-                      aria-label={`Delete ${theme.label}`}
-                      title={`Delete ${theme.label}`}
-                      className="mr-2 flex h-5 w-5 shrink-0 items-center justify-center rounded text-sm opacity-60 transition-opacity hover:opacity-100 focus:opacity-100"
+                      aria-label={`Uninstall ${theme.label}`}
+                      title={`Uninstall ${theme.label}`}
+                      className={`mr-2 ${modalIconButton()}`}
                       style={{ color: 'inherit' }}
                       onClick={(event) => {
                         event.preventDefault();
@@ -214,7 +217,7 @@ export function ThemePicker({
                         deleteTheme(theme);
                       }}
                     >
-                      X
+                      <XIcon size={12} weight="bold" />
                     </button>
                   ) : null}
                 </div>
