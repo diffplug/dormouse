@@ -23,7 +23,7 @@ Extension Host (vscode-ext/src/)
 ├── iframe-proxy-host.ts      — VS Code binding for the iframe transparent proxy (injects the logger)
 ├── webview-html.ts           — CSP injection, nonce + message-token generation, asset URI rewriting
 ├── remote-host-store.ts      — SecretStorage/globalState backing for the webview's remote-Host keys
-└── (../scripts/esbuild.mjs)  — outside src/: extension + pty-host bundles; bakes the webview's remote `connect-src`
+├── (../scripts/esbuild.mjs)  — outside src/: extension + pty-host bundles; bakes the webview's remote `connect-src`
 ├── webview-messaging.ts      — serveWebview: pairs a document with its message token, returns the WebviewChannel
 └── log.ts                    — extension logging
 
@@ -247,7 +247,9 @@ VS Code is a first-class remote Host. Two things have to be true that standalone
 
 **The store.** The Host's enrollment (`{ serverUrl, hostId, hostToken, origin, rpId }`) and its ACL persist through `local-json-store`, which defaults to `localStorage`. That is wrong here twice over: webview `localStorage` is not VS Code's persistence story, and `hostToken` is a bearer credential that grants the `/ws/host` socket. So the webview claims the `dormouse.remote-host.` prefix and backs it with the extension host — enrollment in `SecretStorage` (OS keychain), ACL in `globalState`, both global because a Host identity belongs to the machine and not to a folder.
 
-`local-json-store` is synchronous by contract, so the store is pulled across at boot and installed as an in-memory, write-through backend before anything reads it: `lib/src/main.tsx` awaits `PlatformAdapter.hydrateScopedStore` alongside `resumeOrRestore`. A failed read installs an empty cache rather than throwing — the Host then behaves as un-enrolled instead of blocking webview boot.
+`local-json-store` is synchronous by contract, so the store is pulled across at boot and installed as an in-memory, write-through backend. First paint deliberately does not wait on it: the read is gated on an OS keychain unlock, and a blank terminal for that long reads as a hang. The real constraint is narrower — hydrated before anything reads a `dormouse.remote-host.` key — so `lib/src/main.tsx` starts the read and publishes it with `setHostStoreReady`, and the lazily-mounted `RemotePairingModalHost` awaits `hostStoreReady()` before calling `installRemoteHostConsoleHook`. A read that never answers installs an empty cache and warns: the Host reads as un-enrolled, which is fail-safe for the data but would otherwise be silent.
+
+A broadcast that lands while a webview is still hydrating is buffered and applied on top of the snapshot, because the host reads `globalState` before it waits on the keychain — so the snapshot in flight can be older than a write that has already committed.
 
 Both sides gate on the prefix. The webview names the keys, so `remote-host-store.ts` refuses any key outside the Host namespace and caps values at 64 KiB; a compromised webview can neither read nor write unrelated extension state.
 

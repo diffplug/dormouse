@@ -572,7 +572,7 @@ export function attachRouter(
           } satisfies ExtensionMessage));
         break;
       case 'store:write': {
-        // Same bar as `store:read` below: a non-string key would throw inside
+        // Same bar as `store:read` above: a non-string key would throw inside
         // `allowed()` as an unhandled rejection rather than a refused write.
         const key = msg.key;
         const value = msg.value;

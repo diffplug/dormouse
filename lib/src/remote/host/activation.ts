@@ -140,7 +140,8 @@ export function installRemoteHostConsoleHook(): void {
       const enrollment = await enrollHost(serverUrl, password, label);
       stopRemoteHost();
       // Enrolling does not override the lease: a webview that is not the holder
-      // persists the credentials and leaves starting to whichever one is.
+      // only persists the credentials. Nothing signals the current holder, so
+      // the Host starts on the next lease grant or reload, not on this call.
       if (owned) current = startFromEnrollment(enrollment);
       return { hostId: enrollment.hostId, serverUrl: enrollment.serverUrl };
     },

@@ -4,7 +4,7 @@ import { initPlatform } from "./lib/platform";
 import { resumeOrRestore } from "./lib/reconnect";
 import { initAlertStateReceiver } from "./lib/terminal-registry";
 import { installVscodeThemeVarResolver } from "./lib/themes/vscode-color-observer";
-import { REMOTE_HOST_STORE_PREFIX } from "./remote/host/store";
+import { REMOTE_HOST_STORE_PREFIX, setHostStoreReady } from "./remote/host/store";
 import App from "./App";
 import "./index.css";
 
@@ -25,15 +25,15 @@ initAlertStateReceiver();
 // Request PTY list before rendering so Wall can restore existing sessions.
 // On non-VSCode platforms (or first launch), this resolves immediately with no IDs.
 //
-// The Host store is hydrated in the same wait: `local-json-store` is
-// synchronous by contract, so a host that keeps those keys outside the webview
-// (VS Code → extension-host SecretStorage) must have them in memory before the
-// remote-Host modules read them at mount. Adapters without the hook resolve
-// immediately and keep localStorage.
-Promise.all([
-  resumeOrRestore(platform),
-  platform.hydrateScopedStore?.(REMOTE_HOST_STORE_PREFIX),
-]).then(([result]) => {
+// Host-store hydration starts now but deliberately does not gate first paint:
+// its read waits on an OS keychain, and a blank terminal for that long reads as
+// a hang. `local-json-store` is synchronous by contract, so the keys must be in
+// memory before the remote-Host modules read them — but that happens when the
+// lazily-mounted Host calls `installRemoteHostConsoleHook`, well after render,
+// so it awaits `hostStoreReady()` instead.
+setHostStoreReady(platform.hydrateScopedStore?.(REMOTE_HOST_STORE_PREFIX));
+
+resumeOrRestore(platform).then((result) => {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <App initialPaneIds={result.paneIds} restoredLathLayout={result.lathLayout} initialDoors={result.doors} initialSurfaceRefs={result.surfaceRefs} initialSurfaceRefsNext={result.surfaceRefsNext} enableRemoteHost={isVscode} />

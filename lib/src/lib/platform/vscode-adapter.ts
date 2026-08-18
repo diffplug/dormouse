@@ -41,6 +41,14 @@ export class VSCodeAdapter implements PlatformAdapter {
   private singletonHandlers = new Map<string, (held: boolean) => void>();
   /** Hydrated host-store caches, by claimed prefix — see `hydrateScopedStore`. */
   private scopedCaches = new Map<string, Map<string, string>>();
+  /**
+   * Broadcasts that landed before their prefix finished hydrating. The read is
+   * gated on a keychain unlock, so this window is wide enough to matter: the
+   * host snapshots `globalState` before that wait, so another webview can
+   * commit a change that the in-flight snapshot will not contain. Carries the
+   * value, not just the key, because a deletion has to survive too.
+   */
+  private pendingStoreChanges = new Map<string, string | null>();
 
   constructor() {
     this.vscode = acquireVsCodeApi();
@@ -250,6 +258,14 @@ export class VSCodeAdapter implements PlatformAdapter {
       );
     }
     const cache = new Map(Object.entries(entries ?? {}));
+    // Anything committed while the read was in flight is newer than the
+    // snapshot, so it is applied on top of it before the cache goes live.
+    for (const [key, pending] of this.pendingStoreChanges) {
+      if (!key.startsWith(prefix)) continue;
+      if (pending === null) cache.delete(key);
+      else cache.set(key, pending);
+      this.pendingStoreChanges.delete(key);
+    }
     this.scopedCaches.set(prefix, cache);
     setJsonStoreBackend(prefix, {
       getItem: (key) => cache.get(key) ?? null,
@@ -277,6 +293,10 @@ export class VSCodeAdapter implements PlatformAdapter {
       else cache.set(key, value);
       return;
     }
+    // No cache holds this key yet: either its prefix is still hydrating (buffer
+    // it — `hydrateScopedStore` drains it) or nothing here claimed the prefix,
+    // in which case the entry is inert.
+    this.pendingStoreChanges.set(key, value);
   }
 
   shutdown(): void {

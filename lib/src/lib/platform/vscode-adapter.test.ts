@@ -458,6 +458,32 @@ describe('VSCodeAdapter host store', () => {
     expect(loadJson<unknown[]>(KEY, [])).toEqual([{ id: 'a' }]);
   });
 
+  it('keeps a write committed while the read is still in flight', async () => {
+    const adapter = new VSCodeAdapter();
+    const done = adapter.hydrateScopedStore(PREFIX);
+
+    // The host snapshots globalState before it waits on the keychain, so the
+    // holder can commit a pairing that the in-flight snapshot cannot contain.
+    windowTarget.dispatchEvent(
+      hostMessage({ type: 'store:changed', key: KEY, value: JSON.stringify([{ id: 'a' }, { id: 'b' }]) }),
+    );
+    answerRead({ [KEY]: JSON.stringify([{ id: 'a' }]) });
+    await done;
+
+    expect(loadJson<unknown[]>(KEY, [])).toEqual([{ id: 'a' }, { id: 'b' }]);
+  });
+
+  it('keeps a deletion committed while the read is still in flight', async () => {
+    const adapter = new VSCodeAdapter();
+    const done = adapter.hydrateScopedStore(PREFIX);
+
+    windowTarget.dispatchEvent(hostMessage({ type: 'store:changed', key: KEY, value: null }));
+    answerRead({ [KEY]: JSON.stringify([{ id: 'a' }]) });
+    await done;
+
+    expect(loadJson<unknown[], null>(KEY, null)).toBeNull();
+  });
+
   it('installs an empty cache when the host never answers', async () => {
     vi.useFakeTimers();
     try {
