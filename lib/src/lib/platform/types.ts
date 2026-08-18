@@ -4,7 +4,6 @@ import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 // Defined in its own dependency-free file so the Node proxy in lib/src/host can
 // share it without pulling this browser-typed module into a Node tsconfig.
 import type { IframeProxyResult } from './iframe-proxy-types';
-import type { PeerSurfaceOp, PeerSurfaceResult } from '../vscode-peer-link-protocol';
 
 export interface PtyInfo {
   id: string;
@@ -114,39 +113,50 @@ export interface AgentBrowserPopResult {
 }
 
 /**
- * Reach terminals that belong to another webview of the same host window.
+ * Coordination between the several webviews one host backend can show
+ * (docs/specs/vscode.md → "Peer surfaces").
  *
  * The remote Host runs in exactly one webview, but a window's terminals are
  * spread across all of them and each webview has its own xterm registry. The
  * Host therefore cannot list or drive a sibling's pane directly; the host
- * process brokers, and this is the webview end of that. See
- * docs/specs/vscode.md → "Peer surfaces".
+ * process brokers, and this is the webview end of that.
+ *
+ * Arbitrating a single-holder role and asking a sibling a question are two
+ * facets of one precondition — being able to show more than one webview over
+ * one backend — so they sit behind one optional member rather than two. A host
+ * either has peers to elect among and ask, or it has neither: standalone and
+ * the website are one webview per app, so they omit this and callers treat
+ * themselves as the only instance.
+ *
+ * `op` is deliberately opaque here. *What* a peer can be asked is a property of
+ * the remote Host, not of the platform, so the operation map and its real types
+ * live in `lib/src/remote/host/peer-surfaces.ts`; this layer, the extension-host
+ * broker, and the cross-window link only carry the bytes.
  */
-export type { PeerSurfaceOp, PeerSurfaceResult };
-
 export interface PeerBridge {
-  /** Directory entries contributed by every other webview in this window. */
-  directory(): Promise<unknown[]>;
-  /** Drive a surface owned by another webview; `ok: false` if nobody owns it. */
-  surfaceOp(
-    surfaceId: string,
-    op: PeerSurfaceOp,
-    cols?: number,
-    rows?: number,
-  ): Promise<PeerSurfaceResult>;
-  /** Start/stop receiving `pty:data` for a PTY this webview does not own. */
-  subscribePty(id: string): void;
-  unsubscribePty(id: string): void;
-  /** Answer the broker on behalf of this webview's own surfaces. */
-  serve(handlers: {
-    directory: () => unknown[];
-    surfaceOp: (
-      surfaceId: string,
-      op: PeerSurfaceOp,
-      cols?: number,
-      rows?: number,
-    ) => PeerSurfaceResult;
-  }): void;
+  /**
+   * Claim a named role that at most one webview may hold, and be told whenever
+   * the claim is granted or revoked. The host arbitrates, because it is the
+   * only party that sees every webview and outlives each one.
+   */
+  claimSingleton(name: string, onChange: (held: boolean) => void): void;
+
+  /**
+   * Put `op` to every peer and collect what they answer. Each peer contributes
+   * zero or more results, so an empty array means nobody owned what was asked
+   * about — there is no separate miss signal.
+   */
+  request(op: string, params: unknown): Promise<unknown[]>;
+
+  /** Answer `op` on behalf of this webview's own surfaces; no results = not mine. */
+  respond(op: string, handler: (params: unknown) => unknown[]): void;
+
+  /**
+   * Start receiving `pty:data` / `pty:exit` for a PTY this webview does not
+   * own, and return the unsubscribe. A subscription, not a pair of calls, so
+   * the caller cannot leak one by forgetting the id it used.
+   */
+  streamPty(ptyId: string): () => void;
 }
 
 export interface PlatformAdapter {
@@ -166,16 +176,10 @@ export interface PlatformAdapter {
   hydrateScopedStore?(prefix: string): Promise<void>;
 
   /**
-   * Claim a named role that at most one app instance may hold, and be told
-   * whenever the claim is granted or revoked. Optional: only hosts that can
-   * show several webviews over one backend implement it (VS Code). Adapters
-   * that omit it are single-instance, so callers treat the role as held.
-   */
-  claimSingleton?(name: string, onChange: (held: boolean) => void): void;
-
-  /**
-   * Reach surfaces owned by sibling webviews. Optional: only a host that can
-   * show several webviews over one backend has peers at all.
+   * Elect among, and reach surfaces owned by, sibling webviews. Optional: only
+   * a host that can show several webviews over one backend has peers at all
+   * (VS Code). Adapters that omit it are single-instance, so callers hold every
+   * role and have nobody to ask.
    */
   peers?: PeerBridge;
 

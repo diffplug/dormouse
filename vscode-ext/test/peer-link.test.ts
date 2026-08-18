@@ -34,10 +34,13 @@ function fakeWindow(options: {
     },
     deps() {
       return {
-        brokerDirectory: async () => this.entries,
-        brokerSurfaceOp: async (surfaceId: string) => {
+        // One generic fan-out covers every peer operation; `op` is opaque to
+        // the link, so the window answers zero or more results per request.
+        brokerRequest: async (op: string, params: unknown) => {
+          if (op === 'directory') return this.entries;
+          const { surfaceId } = params as { surfaceId: string };
           const surface = this.surfaces[surfaceId];
-          return surface ? { ok: true, ...surface } : { ok: false };
+          return surface ? [surface] : [];
         },
         deliverRemotePtyData: (ptyId: string, data: string) =>
           void this.delivered.push({ ptyId, data }),
@@ -65,6 +68,10 @@ async function openWindow(deps: ReturnType<typeof fakeWindow>): Promise<LinkModu
 
 const waitForRendezvous = () => waitForFile(join(dir, 'remote-host.peer.json'));
 
+/** Attach to the terminal {@link farWindow} owns, which is what places its route. */
+const attachFar = (broker: LinkModule) =>
+  broker.remoteRequest('surfaceOp', { surfaceId: 'far-1', op: 'attach', cols: 80, rows: 24 });
+
 /** A window owning one terminal, which is what most of these tests need. */
 const farWindow = () =>
   fakeWindow({
@@ -88,7 +95,7 @@ async function linkedPair(
   const peer = await openWindow(peerSide);
   peer.setPeerLinkRole(false);
   // The handshake is asynchronous; the first answered request proves it landed.
-  await waitFor(async () => (await broker.remoteDirectory()).length > 0);
+  await waitFor(async () => (await broker.remoteRequest('directory', {})).length > 0);
   return { broker, brokerSide, peer, peerSide };
 }
 
@@ -107,14 +114,17 @@ describe('peer link between windows', () => {
     const peerSide = fakeWindow({ entries: [{ surfaceId: 'far-1' }, { surfaceId: 'far-2' }] });
     const { broker } = await linkedPair(fakeWindow(), peerSide);
 
-    expect(await broker.remoteDirectory()).toEqual([{ surfaceId: 'far-1' }, { surfaceId: 'far-2' }]);
+    expect(await broker.remoteRequest('directory', {})).toEqual([
+      { surfaceId: 'far-1' },
+      { surfaceId: 'far-2' },
+    ]);
   });
 
   it('returns nothing when no other window is connected', async () => {
     const broker = await openWindow(fakeWindow());
     broker.setPeerLinkRole(true);
     await waitForRendezvous();
-    expect(await broker.remoteDirectory()).toEqual([]);
+    expect(await broker.remoteRequest('directory', {})).toEqual([]);
   });
 
   it('drives a surface owned by the other window and remembers where it lives', async () => {
@@ -124,22 +134,27 @@ describe('peer link between windows', () => {
     });
     const { broker } = await linkedPair(fakeWindow(), peerSide);
 
-    const result = await broker.remoteSurfaceOp('far-1', 'attach', 100, 30);
-    expect(result).toEqual({ ok: true, ptyId: 'pty-far', cols: 100, rows: 30 });
+    const results = await broker.remoteRequest('surfaceOp', {
+      surfaceId: 'far-1', op: 'attach', cols: 100, rows: 30,
+    });
+    expect(results).toEqual([{ ptyId: 'pty-far', cols: 100, rows: 30 }]);
     // Input and resizes have to reach that window afterwards.
     expect(broker.isRemotePty('pty-far')).toBe(true);
   });
 
   it('reports a surface nobody owns', async () => {
     const { broker } = await linkedPair(fakeWindow(), fakeWindow({ entries: [{ s: 1 }] }));
-    expect(await broker.remoteSurfaceOp('nobody', 'attach', 80, 24)).toEqual({ ok: false });
+    // Nothing answered, which is the only "not mine" signal there is.
+    expect(await broker.remoteRequest('surfaceOp', {
+      surfaceId: 'nobody', op: 'attach', cols: 80, rows: 24,
+    })).toEqual([]);
     expect(broker.isRemotePty('nobody')).toBe(false);
   });
 
   it('streams a subscribed PTY from the owning window', async () => {
     const peerSide = farWindow();
     const { broker, brokerSide } = await linkedPair(fakeWindow(), peerSide);
-    await broker.remoteSurfaceOp('far-1', 'attach', 80, 24);
+    await attachFar(broker);
 
     broker.remoteSubscribe('pty-far');
     await tick();
@@ -152,7 +167,7 @@ describe('peer link between windows', () => {
   it('does not stream PTYs it never subscribed to', async () => {
     const peerSide = farWindow();
     const { broker, brokerSide } = await linkedPair(fakeWindow(), peerSide);
-    await broker.remoteSurfaceOp('far-1', 'attach', 80, 24);
+    await attachFar(broker);
 
     peerSide.emitData('pty-other', 'not subscribed');
     await tick(100);
@@ -162,7 +177,7 @@ describe('peer link between windows', () => {
   it('stops the stream on unsubscribe', async () => {
     const peerSide = farWindow();
     const { broker, brokerSide } = await linkedPair(fakeWindow(), peerSide);
-    await broker.remoteSurfaceOp('far-1', 'attach', 80, 24);
+    await attachFar(broker);
     broker.remoteSubscribe('pty-far');
     await tick();
 
@@ -179,7 +194,7 @@ describe('peer link between windows', () => {
   it('routes input and resize to the owning window', async () => {
     const peerSide = farWindow();
     const { broker } = await linkedPair(fakeWindow(), peerSide);
-    await broker.remoteSurfaceOp('far-1', 'attach', 80, 24);
+    await attachFar(broker);
 
     expect(broker.remoteWrite('pty-far', 'ls\r')).toBe(true);
     expect(broker.remoteResize('pty-far', 120, 40)).toBe(true);
@@ -199,7 +214,7 @@ describe('peer link between windows', () => {
   it('reports terminals as exited when their window disconnects', async () => {
     const peerSide = farWindow();
     const { broker, brokerSide, peer } = await linkedPair(fakeWindow(), peerSide);
-    await broker.remoteSurfaceOp('far-1', 'attach', 80, 24);
+    await attachFar(broker);
     expect(broker.isRemotePty('pty-far')).toBe(true);
 
     // The window was closed: its terminals are gone, and a later write must not
@@ -228,7 +243,7 @@ describe('peer link between windows', () => {
 
     // The server drops it rather than answering anything.
     await new Promise((resolve) => socket.on('close', resolve));
-    expect(await broker.remoteDirectory()).toEqual([]);
+    expect(await broker.remoteRequest('directory', {})).toEqual([]);
     socket.destroy();
   });
 });

@@ -3,12 +3,12 @@
  * across windows").
  *
  * Within a window the extension host sees every webview, so brokering is a
- * function call (`brokerDirectory` / `brokerSurfaceOp`). Across windows there
- * is no shared process at all — one extension host each — so the window holding
- * the Host lease listens on a local socket and every other window connects to
- * it. Because the webview lease is itself gated on the window lease, the broker
- * window is always the Host window; the broker never has to relay back out to a
- * remote Host, which keeps this one-directional.
+ * function call (`brokerRequest`). Across windows there is no shared process at
+ * all — one extension host each — so the window holding the Host lease listens
+ * on a local socket and every other window connects to it. Because the webview
+ * lease is itself gated on the window lease, the broker window is always the
+ * Host window; the broker never has to relay back out to a remote Host, which
+ * keeps this one-directional.
  *
  * Roles follow the lease: acquire it and you become the server, lose it and you
  * become a client. The frame shapes, framing, and PTY routing table are in
@@ -34,11 +34,10 @@ import {
   PEER_REPLY_BUDGET_MS,
   encodeFrame,
   forgetPeerRoutes,
+  routedPtyId,
   type PeerLinkHello,
   type PeerLinkRequest,
   type PeerLinkResponse,
-  type PeerSurfaceOp,
-  type PeerSurfaceResult,
 } from '../../lib/src/lib/vscode-peer-link-protocol';
 import { log } from './log';
 
@@ -49,13 +48,7 @@ import { log } from './log';
  */
 export interface PeerLinkDeps {
   /** Fan out to this window's own webviews — never to other windows. */
-  brokerDirectory(): Promise<unknown[]>;
-  brokerSurfaceOp(
-    surfaceId: string,
-    op: PeerSurfaceOp,
-    cols?: number,
-    rows?: number,
-  ): Promise<PeerSurfaceResult>;
+  brokerRequest(op: string, params: unknown): Promise<unknown[]>;
   deliverRemotePtyData(ptyId: string, data: string): void;
   deliverRemotePtyExit(ptyId: string, exitCode: number): void;
   onProcessedPtyData(listener: (id: string, data: string) => void): () => void;
@@ -156,39 +149,39 @@ function authenticatedClients(): PeerClient[] {
   return [...clients].filter((client) => client.authenticated);
 }
 
-/** Directory entries from every other window. Empty when nothing is connected. */
-export async function remoteDirectory(): Promise<unknown[]> {
+/**
+ * Put one peer request to every other window and collect what they answer.
+ * Empty when nothing is connected, and when nobody owned what was asked about.
+ *
+ * All windows at once, not one after another: a window that has gone
+ * unresponsive would otherwise make every request behind it wait out its own
+ * budget before the window that actually owns the thing is even asked.
+ *
+ * `op` is opaque — the operation map lives in
+ * `lib/src/remote/host/peer-surfaces.ts`. The single exception is
+ * {@link routedPtyId}: an answer that names a PTY is how this window learns
+ * where that PTY lives, and every later write, resize, and subscribe depends on
+ * knowing.
+ */
+export async function remoteRequest(op: string, params: unknown): Promise<unknown[]> {
   const peers = authenticatedClients();
   if (peers.length === 0) return [];
   const replies = await Promise.all(
-    peers.map((client) => ask(client, { kind: 'directory', id: `r${++nextRequestId}` })),
+    peers.map(async (client) =>
+      [client, await ask(client, { kind: 'request', id: `r${++nextRequestId}`, op, params })] as const,
+    ),
   );
-  return replies.flatMap((reply) =>
-    reply?.kind === 'directoryResult' ? reply.entries : [],
-  );
-}
 
-/**
- * Drive a surface owned by another window. The first window to claim it wins;
- * the rest own no such id and answer `ok: false`.
- */
-export async function remoteSurfaceOp(
-  surfaceId: string,
-  op: PeerSurfaceOp,
-  cols?: number,
-  rows?: number,
-): Promise<PeerSurfaceResult> {
-  for (const client of authenticatedClients()) {
-    const reply = await ask(client, {
-      kind: 'surfaceOp', id: `r${++nextRequestId}`, surfaceId, op, cols, rows,
-    });
-    if (reply?.kind !== 'surfaceResult' || !reply.ok) continue;
-    // Remember where this PTY lives: a ptyId alone says nothing about which
-    // window owns it, and input and resizes have to reach that window.
-    if (reply.ptyId) routes.set(reply.ptyId, client);
-    return { ok: true, ptyId: reply.ptyId, cols: reply.cols, rows: reply.rows };
+  const results: unknown[] = [];
+  for (const [client, reply] of replies) {
+    if (reply?.kind !== 'result') continue;
+    for (const result of reply.results) {
+      const ptyId = routedPtyId(result);
+      if (ptyId) routes.set(ptyId, client);
+      results.push(result);
+    }
   }
-  return { ok: false };
+  return results;
 }
 
 /** Whether this PTY is streaming from another window. */
@@ -325,16 +318,13 @@ function respond(frame: PeerLinkResponse): void {
 async function onClientFrame(frame: unknown): Promise<void> {
   const request = frame as PeerLinkRequest;
   switch (request.kind) {
-    case 'directory':
-      respond({ kind: 'directoryResult', id: request.id, entries: (await deps?.brokerDirectory()) ?? [] });
+    case 'request':
+      respond({
+        kind: 'result',
+        id: request.id,
+        results: (await deps?.brokerRequest(request.op, request.params)) ?? [],
+      });
       break;
-    case 'surfaceOp': {
-      const result = (await deps?.brokerSurfaceOp(
-        request.surfaceId, request.op, request.cols, request.rows,
-      )) ?? { ok: false };
-      respond({ kind: 'surfaceResult', id: request.id, ...result });
-      break;
-    }
     case 'subscribe': {
       if (forwarding.has(request.ptyId)) break;
       const stop = deps?.onProcessedPtyData((id, data) => {

@@ -40,6 +40,7 @@ import type { TerminalEntry } from '../../lib/terminal-store';
 import { subscribeToActivity } from '../../lib/session-activity-store';
 import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
 import { collectDirectorySnapshot } from './directory-collect';
+import { peerDirectory, peerSurfaceOp } from './peer-surfaces';
 
 /** Coalesce window for directory re-snapshots (remote-api.md: "Host coalesces"). */
 const DIRECTORY_DEBOUNCE_MS = 150;
@@ -72,6 +73,8 @@ interface Attachment {
   subId: string;
   onData: (detail: { id: string; data: string }) => void;
   onExit: (detail: { id: string; exitCode: number }) => void;
+  /** Stops the peer stream; absent for a pane this webview owns. */
+  stopStream: (() => void) | null;
   /** Pending same-size repaint bounce (see FORCE_REPAINT_BOUNCE_MS), if any. */
   bounceTimer: ReturnType<typeof setTimeout> | null;
 }
@@ -215,8 +218,7 @@ export class RemoteApiSession {
     if (this.#directorySubId === null) return;
     const subId = this.#directorySubId;
     const local = collectDirectorySnapshot();
-    const peers = getPlatform().peers;
-    if (!peers) {
+    if (!getPlatform().peers) {
       this.#event(subId, REMOTE_EVENTS.directorySnapshot, { entries: local });
       return;
     }
@@ -225,7 +227,7 @@ export class RemoteApiSession {
     // surfaces"). Emit twice rather than delaying the local panes behind a
     // round trip: the phone renders what is here immediately, then fills in.
     this.#event(subId, REMOTE_EVENTS.directorySnapshot, { entries: local });
-    void peers.directory().then((remote) => {
+    void peerDirectory().then((remote) => {
       // The subscription may have been replaced or torn down while we waited.
       if (this.#directorySubId !== subId || remote.length === 0) return;
       this.#event(subId, REMOTE_EVENTS.directorySnapshot, {
@@ -243,7 +245,7 @@ export class RemoteApiSession {
 
     const entry = registry.get(params.surfaceId);
     if (entry) {
-      this.#beginAttach(request, params, { kind: 'local', entry }, entry.ptyId);
+      this.#beginAttach(request, params, { kind: 'local', entry }, entry.ptyId, null);
       return;
     }
 
@@ -255,22 +257,23 @@ export class RemoteApiSession {
       this.#fail(request, `no such surface: ${params.surfaceId}`);
       return;
     }
-    void peers.surfaceOp(params.surfaceId, 'attach', params.cols, params.rows).then((result) => {
-      if (!result.ok || !result.ptyId) {
+    void peerSurfaceOp({
+      surfaceId: params.surfaceId,
+      op: 'attach',
+      cols: params.cols,
+      rows: params.rows,
+    }).then((owner) => {
+      if (!owner) {
         this.#fail(request, `no such surface: ${params.surfaceId}`);
         return;
       }
-      peers.subscribePty(result.ptyId);
+      const stopStream = peers.streamPty(owner.ptyId);
       this.#beginAttach(
         request,
         params,
-        {
-          kind: 'peer',
-          surfaceId: params.surfaceId,
-          cols: result.cols ?? 0,
-          rows: result.rows ?? 0,
-        },
-        result.ptyId,
+        { kind: 'peer', surfaceId: params.surfaceId, cols: owner.cols, rows: owner.rows },
+        owner.ptyId,
+        stopStream,
       );
     });
   }
@@ -280,6 +283,7 @@ export class RemoteApiSession {
     params: AttachParams,
     target: SurfaceTarget,
     ptyId: string,
+    stopStream: (() => void) | null,
   ): void {
     // v1: one attachment per session — replace any prior stream.
     this.#teardownAttachment();
@@ -327,6 +331,7 @@ export class RemoteApiSession {
       subId,
       onData,
       onExit,
+      stopStream,
       bounceTimer: null,
     };
     this.#attachment = attachment;
@@ -419,11 +424,10 @@ export class RemoteApiSession {
     cols: number,
     rows: number,
   ): Promise<{ cols: number; rows: number }> {
-    const peers = getPlatform().peers;
-    const result = await peers?.surfaceOp(target.surfaceId, 'resize', cols, rows);
-    if (result?.ok) {
-      target.cols = result.cols ?? cols;
-      target.rows = result.rows ?? rows;
+    const owner = await peerSurfaceOp({ surfaceId: target.surfaceId, op: 'resize', cols, rows });
+    if (owner) {
+      target.cols = owner.cols;
+      target.rows = owner.rows;
     }
     return { cols: target.cols, rows: target.rows };
   }
@@ -438,9 +442,7 @@ export class RemoteApiSession {
     platform.offPtyData(this.#attachment.onData);
     platform.offPtyExit(this.#attachment.onExit);
     // Stop the host forwarding a PTY this webview never owned.
-    if (this.#attachment.target.kind === 'peer') {
-      platform.peers?.unsubscribePty(this.#attachment.ptyId);
-    }
+    this.#attachment.stopStream?.();
     this.#attachment = null;
   }
 }

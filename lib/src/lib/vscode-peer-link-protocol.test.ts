@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { FrameDecoder, encodeFrame, forgetPeerRoutes } from './vscode-peer-link-protocol';
+import { FrameDecoder, encodeFrame, forgetPeerRoutes, routedPtyId } from './vscode-peer-link-protocol';
 
 describe('FrameDecoder', () => {
   it('reads one frame per line', () => {
     const decoder = new FrameDecoder();
     const frames = decoder.push(
-      encodeFrame({ kind: 'directory', id: 'a' }) + encodeFrame({ kind: 'ack', id: 'b' }),
+      encodeFrame({ kind: 'request', id: 'a', op: 'directory', params: {} }) +
+        encodeFrame({ kind: 'result', id: 'b', results: [] }),
     );
     expect(frames).toEqual([
-      { kind: 'directory', id: 'a' },
-      { kind: 'ack', id: 'b' },
+      { kind: 'request', id: 'a', op: 'directory', params: {} },
+      { kind: 'result', id: 'b', results: [] },
     ]);
   });
 
@@ -26,15 +27,19 @@ describe('FrameDecoder', () => {
 
   it('holds a trailing partial frame until its newline arrives', () => {
     const decoder = new FrameDecoder();
-    const whole = encodeFrame({ kind: 'ack', id: 'a' });
-    expect(decoder.push(`${whole}{"kind":"ack","id":`)).toEqual([{ kind: 'ack', id: 'a' }]);
-    expect(decoder.push('"b"}\n')).toEqual([{ kind: 'ack', id: 'b' }]);
+    const whole = encodeFrame({ kind: 'result', id: 'a', results: [] });
+    expect(decoder.push(`${whole}{"kind":"result","id":`)).toEqual([
+      { kind: 'result', id: 'a', results: [] },
+    ]);
+    expect(decoder.push('"b","results":[]}\n')).toEqual([{ kind: 'result', id: 'b', results: [] }]);
   });
 
   it('skips a malformed frame without dropping the ones around it', () => {
     const decoder = new FrameDecoder();
-    const frames = decoder.push(`{not json}\n${encodeFrame({ kind: 'ack', id: 'a' })}`);
-    expect(frames).toEqual([{ kind: 'ack', id: 'a' }]);
+    const frames = decoder.push(
+      `{not json}\n${encodeFrame({ kind: 'result', id: 'a', results: [] })}`,
+    );
+    expect(frames).toEqual([{ kind: 'result', id: 'a', results: [] }]);
   });
 
   it('ignores blank lines', () => {
@@ -46,7 +51,24 @@ describe('FrameDecoder', () => {
     const decoder = new FrameDecoder(64);
     expect(decoder.push('x'.repeat(100))).toEqual([]);
     // The buffer was reset, so a well-formed frame still gets through after.
-    expect(decoder.push(encodeFrame({ kind: 'ack', id: 'a' }))).toEqual([{ kind: 'ack', id: 'a' }]);
+    expect(decoder.push(encodeFrame({ kind: 'result', id: 'a', results: [] }))).toEqual([
+      { kind: 'result', id: 'a', results: [] },
+    ]);
+  });
+});
+
+describe('routedPtyId', () => {
+  it('reads the routing hint out of an otherwise opaque answer', () => {
+    expect(routedPtyId({ ptyId: 'pty-1', cols: 80, rows: 24 })).toBe('pty-1');
+  });
+
+  it('routes nothing for an answer that names no PTY', () => {
+    // Directory entries travel the same generic path and must not enter the
+    // routing table.
+    expect(routedPtyId({ surfaceId: 'pane-1', title: 'zsh' })).toBeNull();
+    expect(routedPtyId({ ptyId: 42 })).toBeNull();
+    expect(routedPtyId(null)).toBeNull();
+    expect(routedPtyId('pty-1')).toBeNull();
   });
 });
 

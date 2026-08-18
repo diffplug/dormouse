@@ -45,8 +45,11 @@ vi.mock('./enrollment', () => ({
 }));
 
 let claimSingleton: ((name: string, onChange: (held: boolean) => void) => void) | undefined;
+// A host with peers is exactly a host that arbitrates the role, so the lease
+// arrives through the same optional member (`PeerBridge`); no peers means
+// single-instance.
 vi.mock('../../lib/platform', () => ({
-  getPlatform: () => ({ claimSingleton }),
+  getPlatform: () => ({ peers: claimSingleton ? { claimSingleton } : undefined }),
 }));
 
 async function freshModule() {

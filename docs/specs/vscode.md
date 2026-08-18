@@ -262,7 +262,7 @@ Source of truth: `vscode-ext/src/remote-host-store.ts`, `lib/src/lib/platform/vs
 
 **The lease.** A window can show a `WebviewView` and any number of `WebviewPanel`s at once. Each mounts the same Wall, so each would start its own `RemoteHost` against the same enrollment — they would displace each other on the single `/ws/host` socket (`server/test/relay-displaced.test.mjs`) and each would arm its own alarm push. The extension host arbitrates instead, because it is the only party that sees every webview and outlives each one: `message-router.ts` grants the named role `remote-host` to the first claimant and re-offers it when the holder is disposed, so closing the Dormouse view hands the Host to another open one rather than dropping it until a reload.
 
-On the webview side `activation.ts` starts un-owned whenever the adapter offers `claimSingleton`, so two webviews racing to mount cannot both activate before the first answer arrives. Adapters without the hook (standalone, the website) are single-instance and stay owned from the start.
+On the webview side `activation.ts` starts un-owned whenever the adapter offers `peers`, so two webviews racing to mount cannot both activate before the first answer arrives. Adapters without it (standalone, the website) are single-instance and stay owned from the start. Having peers at all is exactly the condition that needs arbitrating, which is why the role lease and the sibling RPC hang off one optional member (`PeerBridge`) rather than two that a host could implement half of.
 
 **Across windows.** The election above is per-window, because the extension host is — but the enrollment it guards is machine-wide, so window-local arbitration alone is not enough. Left there, every window would elect its own Host, all of them would connect `/ws/host` with the same enrollment, and the server would close the displaced socket (`server/src/relay.ts`) whose `close` handler reconnects and displaces the next one: an endless fight, with each window arming its own alarm push.
 
@@ -276,7 +276,7 @@ Nothing here starts until a webview first claims `remote-host`, so a user who ne
 
 Source of truth: the rules and the cycle in `lib/src/lib/vscode-window-lease.ts` (tested in `lib/src/lib/vscode-window-lease.test.ts`), the filesystem and timers around them in `vscode-ext/src/window-lease.ts`, and `windowLeaseHeld` gating `electSingleton` in `vscode-ext/src/message-router.ts`.
 
-Source of truth: the `SingletonClaimant` arbiter in `vscode-ext/src/message-router.ts`, `PlatformAdapter.claimSingleton`, `setRemoteHostOwnership` in `lib/src/remote/host/activation.ts`, tested in `lib/src/remote/host/activation.test.ts`.
+Source of truth: the `SingletonClaimant` arbiter in `vscode-ext/src/message-router.ts`, `PeerBridge.claimSingleton` in `lib/src/lib/platform/types.ts`, `setRemoteHostOwnership` in `lib/src/remote/host/activation.ts`, tested in `lib/src/remote/host/activation.test.ts`.
 
 **Lifetime.** The Host lives as long as a Dormouse webview exists in the window. `retainContextWhenHidden: true` is set on both hosting modes, so hiding the panel keeps it connected; only disposing every Dormouse view, or closing the window, takes it offline.
 
@@ -292,9 +292,17 @@ The extension host brokers, since it is the only party that can see every webvie
 
 Every webview installs a responder (`lib/src/remote/host/peer-surfaces.ts`) whether or not it is the Host, so its terminals are reachable from whichever one is. It carries none of the relay, enrollment, or pairing machinery — a registry lookup, the directory collector, and a resize.
 
+**One generic seam, one fan-out rule.** A peer request is `(op, params)` and an answer is *zero or more results*; that is the whole contract the adapter, the extension-host broker, and the cross-window socket implement. `op` is opaque to all three, because *what* a peer may be asked belongs to the remote Host and not to the transport: the operation map — `directory` and `surfaceOp`, with their real parameter and result types — lives in `lib/src/remote/host/peer-surfaces.ts` alongside the responder that answers them, so adding an operation is one entry there plus its caller, not a parallel ladder of types at every layer.
+
+Absence *is* the miss: a webview that owns nothing the request named answers with no results, so there is no `ok` flag anywhere and every field of a result that does come back is required. Every webview answers regardless, which is what lets the broker settle a fan-out as fast on a miss as on a hit; it settles when all of them have replied or a 1s budget expires, so a webview with no live content cannot hang the picker.
+
+The one field the transport itself reads out of an answer is a reserved `ptyId` (`routedPtyId`): an answer naming a PTY is claiming it, which is how the cross-window broker learns which window that PTY lives in. Nothing else about an answer is interpreted below the Host.
+
 `attach` and `resize` on a foreign surface go to the owner rather than to the PTY, because attach-is-the-resize has to drive the live xterm or the owning pane's own view drifts from the size the phone set. The owner replies with the size it settled at and the `ptyId`; the Host then subscribes and streams. `detach` has nothing to undo on the owner — the Host stops streaming and the pane keeps its size, which is what last-attach-wins means.
 
-The directory emits **twice**: the local entries immediately, then a merged snapshot once the peers answer. The phone should not wait on a round trip to see the panes that are already here. The broker settles a fan-out when every webview has replied or a 1s budget expires, so a webview with no live content cannot hang the picker.
+Subscribing is a subscription, not a pair of calls: `peers.streamPty(ptyId)` returns its own unsubscribe, so a caller cannot leak a stream by losing track of the id it opened it with.
+
+The directory emits **twice**: the local entries immediately, then a merged snapshot once the peers answer. The phone should not wait on a round trip to see the panes that are already here.
 
 ### Peer surfaces across windows
 
@@ -304,15 +312,17 @@ The lease makes this one-directional. Because the webview lease is gated on the 
 
 Roles follow the lease: acquire it and the window starts serving and publishes a rendezvous file (`remote-host.peer.json`, mode 0600, in `globalStorageUri`) naming the socket path and a token; lose it and the window tears the server down and connects as a client instead. Clients watch that file, so a handover does not wait out the reconnect backoff. The socket lives in the temp dir rather than beside the rendezvous file because macOS caps a unix socket path near 104 bytes and the extension's `globalStorage` path is most of that on its own.
 
-A peer window answers a `directory` or `surfaceOp` frame by running its **own in-window** fan-out — never the cross-window one, or a request would loop back out. That is why `configurePeerLink` is handed only `brokerDirectory` / `brokerSurfaceOp`, and why the link is injected with what it needs rather than importing the router (which imports the link).
+A peer window answers a `request` frame by running its **own in-window** fan-out — never the cross-window one, or a request would loop back out. That is why `configurePeerLink` is handed only `brokerRequest`, and why the link is injected with what it needs rather than importing the router (which imports the link).
 
-Once an attach succeeds the broker records which window owns that `ptyId`, because a PTY id says nothing about where it lives and input and resizes have to reach that window. `pty:input` and `pty:resize` consult that table first and fall back to the local `ptyManager`; `pty:subscribe` asks the owning window to start streaming, and its bytes are injected into the subscriber's normal `pty:data` path, so the Host webview cannot tell a remote terminal from a local one. When a peer disconnects, every PTY routed to it is dropped and reported as exited — a terminal in a closed window is gone, and a later write must not be posted into a dead socket.
+Both tiers are asked at once rather than one after the other: what is asked about lives in exactly one webview of one window, and asking in series would pay a whole tier's budget — or a hung window's — before reaching the tier that owns it.
+
+Once an answer names a `ptyId` the broker records which window it came from, because a PTY id says nothing about where it lives and input and resizes have to reach that window. `pty:input` and `pty:resize` consult that table first and fall back to the local `ptyManager`; `pty:subscribe` asks the owning window to start streaming, and its bytes are injected into the subscriber's normal `pty:data` path, so the Host webview cannot tell a remote terminal from a local one. When a peer disconnects, every PTY routed to it is dropped and reported as exited — a terminal in a closed window is gone, and a later write must not be posted into a dead socket.
 
 Trust: the socket is user-owned, its path is published only in a mode-0600 file, and a client's first frame must carry the token from that file — the same bar as the `dor` control socket.
 
 Source of truth: `vscode-ext/src/peer-link.ts` for the sockets and roles, `lib/src/lib/vscode-peer-link-protocol.ts` for the frames, framing, and PTY routing table (tested in `lib/src/lib/vscode-peer-link-protocol.test.ts`), and the `remote*` calls in `vscode-ext/src/message-router.ts`.
 
-Source of truth: the broker in `vscode-ext/src/message-router.ts` (`peer:*` cases, `subscribedPtyIds`), `PeerBridge` in `lib/src/lib/platform/types.ts` with its VS Code implementation in `vscode-adapter.ts`, the responder in `lib/src/remote/host/peer-surfaces.ts`, and the foreign-surface path in `remote-api.ts`, tested in `lib/src/remote/host/peer-surfaces.test.ts`.
+Source of truth: the broker in `vscode-ext/src/message-router.ts` (`brokerRequest`, the `peer:*` cases, `subscribedPtyIds`), `PeerBridge` in `lib/src/lib/platform/types.ts` with its VS Code implementation in `vscode-adapter.ts`, the operation map and responder in `lib/src/remote/host/peer-surfaces.ts`, and the foreign-surface path in `remote-api.ts`, tested in `lib/src/remote/host/peer-surfaces.test.ts`.
 
 ### Testing the extension host
 

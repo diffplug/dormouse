@@ -1,10 +1,19 @@
 /**
- * The responder half of peer surfaces (docs/specs/vscode.md → "Peer surfaces").
+ * What one webview may ask its peers, and the answers it gives back
+ * (docs/specs/vscode.md → "Peer surfaces").
  *
  * The remote Host runs in one webview, but a window's terminals are spread
  * across all of them and each webview has its own xterm registry. So *every*
- * webview installs this, not just the Host's: it answers the broker's questions
- * about the panes this webview owns, and drives them when the Host asks.
+ * webview installs the responder here, not just the Host's: it answers the
+ * broker's questions about the panes this webview owns, and drives them when
+ * the Host asks.
+ *
+ * This is also the one place the peer operations have real types. The platform
+ * adapter, the extension-host broker, and the cross-window socket all treat
+ * `op` as opaque, because *what* a peer can be asked belongs to the remote Host
+ * and not to any of them — {@link PeerOps} is the whole vocabulary, and adding
+ * an operation means one entry here plus its caller, not a parallel ladder of
+ * message types at every layer.
  *
  * Deliberately light — the registry, the directory collector, and a resize. It
  * carries none of the relay, enrollment, or pairing machinery, so a webview
@@ -12,11 +21,74 @@
  * reachable from one that is.
  */
 
-import { clampTerminalDimension } from 'server-lib-common';
+import { clampTerminalDimension, type DirectoryEntry } from 'server-lib-common';
 import { getPlatform } from '../../lib/platform';
-import type { PeerSurfaceResult } from '../../lib/platform/types';
 import { registry } from '../../lib/terminal-store';
 import { collectDirectorySnapshot } from './directory-collect';
+
+/** What the Host can ask the owner of a surface to do with it. */
+export type PeerSurfaceOp = 'attach' | 'detach' | 'resize';
+
+export interface PeerSurfaceParams {
+  surfaceId: string;
+  op: PeerSurfaceOp;
+  cols?: number;
+  rows?: number;
+}
+
+/**
+ * What the owner reports back. There is no `ok` flag: an owner answers with one
+ * of these and everyone else answers with nothing, so presence *is* ownership —
+ * which is also what lets every field be required.
+ *
+ * `ptyId` is read by the cross-window link as the routing hint that says which
+ * window this PTY lives in (`routedPtyId` in `lib/src/lib/vscode-peer-link-protocol.ts`).
+ */
+export interface PeerSurfaceResult {
+  ptyId: string;
+  cols: number;
+  rows: number;
+}
+
+/**
+ * Every peer operation, keyed by the name that goes on the wire. `result` is
+ * the type of *one* answer: a peer contributes zero or more of them, so the
+ * directory returns its entries and a surface op returns one result or none.
+ */
+export interface PeerOps {
+  directory: { params: Record<string, never>; result: DirectoryEntry };
+  surfaceOp: { params: PeerSurfaceParams; result: PeerSurfaceResult };
+}
+
+/** Put `op` to every peer and collect their answers; empty means nobody owns it. */
+async function askPeers<K extends keyof PeerOps>(
+  op: K,
+  params: PeerOps[K]['params'],
+): Promise<PeerOps[K]['result'][]> {
+  const peers = getPlatform().peers;
+  if (!peers) return [];
+  return (await peers.request(op, params)) as PeerOps[K]['result'][];
+}
+
+/** Answer `op` for this webview's own surfaces. No-op where there are no peers. */
+function answerPeers<K extends keyof PeerOps>(
+  op: K,
+  handler: (params: PeerOps[K]['params']) => PeerOps[K]['result'][],
+): void {
+  getPlatform().peers?.respond(op, (params) => handler(params as PeerOps[K]['params']));
+}
+
+/** Directory entries contributed by every other webview and window. */
+export function peerDirectory(): Promise<DirectoryEntry[]> {
+  return askPeers('directory', {});
+}
+
+/** Drive a surface someone else owns; `null` if nobody does. */
+export async function peerSurfaceOp(params: PeerSurfaceParams): Promise<PeerSurfaceResult | null> {
+  // Surface ids are unique across webviews, so at most one peer answers.
+  const [owner] = await askPeers('surfaceOp', params);
+  return owner ?? null;
+}
 
 /**
  * Drive one of this webview's own surfaces on the Host's behalf.
@@ -28,18 +100,13 @@ import { collectDirectorySnapshot } from './directory-collect';
  * streaming on its side, and the pane keeps whatever size it was left at, which
  * is what last-attach-wins means.
  */
-function surfaceOp(
-  surfaceId: string,
-  op: 'attach' | 'detach' | 'resize',
-  cols?: number,
-  rows?: number,
-): PeerSurfaceResult {
+function driveOwnSurface({ surfaceId, op, cols, rows }: PeerSurfaceParams): PeerSurfaceResult[] {
   const entry = registry.get(surfaceId);
-  if (!entry) return { ok: false };
+  if (!entry) return [];
 
   const term = entry.terminal;
   if (op === 'detach') {
-    return { ok: true, ptyId: entry.ptyId, cols: term.cols, rows: term.rows };
+    return [{ ptyId: entry.ptyId, cols: term.cols, rows: term.rows }];
   }
 
   const nextCols = clampTerminalDimension(cols, term.cols);
@@ -47,7 +114,7 @@ function surfaceOp(
   if (term.cols !== nextCols || term.rows !== nextRows) {
     term.resize(nextCols, nextRows);
   }
-  return { ok: true, ptyId: entry.ptyId, cols: term.cols, rows: term.rows };
+  return [{ ptyId: entry.ptyId, cols: term.cols, rows: term.rows }];
 }
 
 /**
@@ -55,8 +122,6 @@ function surfaceOp(
  * Idempotent, and a no-op on hosts with no peers (standalone, the website).
  */
 export function installPeerSurfaceResponder(): void {
-  getPlatform().peers?.serve({
-    directory: () => collectDirectorySnapshot(),
-    surfaceOp,
-  });
+  answerPeers('directory', () => collectDirectorySnapshot());
+  answerPeers('surfaceOp', driveOwnSurface);
 }
