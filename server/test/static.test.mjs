@@ -81,6 +81,20 @@ test('the unhashed shell is revalidated instead', async () => {
   }
 });
 
+test('a hashed asset that no longer exists 404s instead of being answered with the shell', async () => {
+  // `emptyOutDir` deletes the previous build's assets, so a client mid-deploy
+  // can ask for one that is gone. Answering with the shell would store an HTML
+  // body under that URL — and under the immutable class, where no reload could
+  // revalidate it away, so an unchanged chunk keeping its hash across builds
+  // would serve the poisoned entry forever.
+  const { app: hono } = app({ pocketDir: await makePocketDir() });
+  const res = await hono.request('/assets/index-DELETED.js');
+
+  assert.equal(res.status, 404);
+  assert.equal(res.headers.get('cache-control'), 'no-cache');
+  assert.doesNotMatch(await res.text(), /pocket-root/);
+});
+
 test('falls back to the build-instructions stub when no Pocket build exists', async () => {
   const { app: hono } = app({ pocketDir: join(tmpdir(), 'dormouse-nonexistent-pocket-dir') });
   const res = await hono.request('/');

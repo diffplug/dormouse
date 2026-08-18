@@ -363,7 +363,16 @@ exist, and the app fails to boot. The class is decided from the request path
 if Vite ever emits an unhashed file into `assets/`, or `assetsDir` is overridden,
 that test silently mislabels it. The header is staged on the context *before*
 `serveStatic` runs, since its `onFound` hook fires after the Response is already
-built and cannot add to it. Source of truth: `registerPocketServing` in
+built and cannot add to it.
+
+The SPA fallback overrides that staged class rather than inheriting it, because
+it answers with the shell whatever was asked for, and a response's cache policy
+describes the response. A miss under `/assets/` does not reach the shell at all
+— it is a `404`. The shell is never a useful answer to a subresource request,
+and answering one stored an HTML body under a hashed-asset URL under the
+`immutable` class, where no reload could revalidate it away: a request made
+during a deploy, the exact window this policy exists for, would have broken the
+app permanently. Source of truth: `registerPocketServing` in
 `server/src/app.ts`.
 
 ### An expired session drops to sign-in

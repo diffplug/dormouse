@@ -781,10 +781,18 @@ function registerPocketServing(app: Hono<AppEnv>, pocketDir?: string): void {
   // keep pointing at deleted files until the server restarts. The fallback is
   // not a hot path, and a read failure degrades to a 404 instead of a crash.
   app.get('*', async (c) => {
+    // This handler answers with the shell or with nothing, whatever was asked
+    // for, so the class the static handler staged from the *request* path is
+    // wrong here — a response's cache policy describes the response.
+    c.header('Cache-Control', POCKET_SHELL_CACHE_CONTROL);
+    // A subresource miss is not a routing question, and the shell is never a
+    // useful answer to one. Answering it put an HTML body under a hashed-asset
+    // URL: `immutable` then meant the browser could never revalidate it away,
+    // turning a request made during a deploy — exactly the window this cache
+    // policy exists for — into a permanently broken app.
+    if (c.req.path.startsWith('/assets/')) return c.notFound();
     const html = await readFile(indexHtmlPath, 'utf8').catch(() => null);
-    if (!html) return c.notFound();
-    c.header('Cache-Control', pocketCacheControl(c.req.path));
-    return c.html(html);
+    return html ? c.html(html) : c.notFound();
   });
 }
 
