@@ -113,9 +113,9 @@ describe('Baseboard settings controls', () => {
   });
 
   // No `window.confirm` stub on purpose. Mocking it to `true` is what let this
-  // test pass while the shipped standalone webview — which implements no
-  // confirm panel, so WebKit resolves it `false` — silently uninstalled
-  // nothing. Uninstall is a plain click now, exactly as exercised here.
+  // test pass while the shipped standalone app silently uninstalled nothing:
+  // there, the `confirm` call returned without ever showing a dialog.
+  // Uninstall is a plain click now, exactly as exercised here.
   it('uses the host fallback after uninstalling the active installed theme', () => {
     addInstalledTheme(INSTALLED_THEME);
     setActiveThemeId(INSTALLED_THEME.id);

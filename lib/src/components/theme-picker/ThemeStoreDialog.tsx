@@ -101,10 +101,10 @@ export function ThemeStoreDialog({
     }
   };
 
-  // No `window.confirm` gate: the standalone webview implements no confirm
-  // panel, so WebKit resolves it `false` and Remove silently did nothing. The
-  // button is already an explicit per-extension action, and re-installing is
-  // one click away in this same dialog.
+  // No `window.confirm` gate: native dialogs are not dependable in the desktop
+  // webview (DESIGN.md -> Don't), and a Remove gated on one silently did
+  // nothing there. The button is already an explicit per-extension action, and
+  // re-installing is one click away in this same dialog.
   const handleRemoveExtension = (extensionId: string) => {
     for (const theme of getInstalledThemes()) {
       if (theme.origin.kind === 'installed' && theme.origin.extensionId === extensionId) {

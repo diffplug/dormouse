@@ -9,21 +9,9 @@ import {
   getBundledThemes,
   getInstalledThemes,
 } from './store';
+import { installLocalStorageStub } from '../test-local-storage';
 
 const INSTALLED_KEY = 'dormouse:installed-themes';
-
-function installStorageStub(): void {
-  const values = new Map<string, string>();
-  Object.defineProperty(globalThis, 'localStorage', {
-    configurable: true,
-    value: {
-      clear: () => values.clear(),
-      getItem: (key: string) => values.get(key) ?? null,
-      removeItem: (key: string) => values.delete(key),
-      setItem: (key: string, value: string) => values.set(key, value),
-    },
-  });
-}
 
 function makeInstalledTheme(id: string): DormouseTheme {
   return {
@@ -39,7 +27,7 @@ function makeInstalledTheme(id: string): DormouseTheme {
 
 describe('theme store', () => {
   beforeEach(() => {
-    installStorageStub();
+    installLocalStorageStub();
   });
 
   it('returns [] when the installed-themes value is valid JSON but not an array', () => {

@@ -226,11 +226,10 @@ playground navbar — carries no theme control.
   whoever boots the app — `useRestoredTheme()` latches it before its first
   restore, ahead of any child render, because on the desktop Pocket page the
   header's picker mounts before the component that calls the hook.
-- **No `window.confirm` here** — no native dialog anywhere, see `DESIGN.md` →
-  "Don't", since the cause is the webview rather than the theme UI. The standalone webview
-  implements no confirm panel, so WebKit resolves the call `false` without
-  showing anything — an uninstall gated on it silently did nothing on the
-  desktop app. Uninstalling an installed theme (the row's `X`, and the store
+- **No `window.confirm` here** — no native dialog in app chrome at all, see
+  `DESIGN.md` → "Don't", since the cause is the webview rather than the theme
+  UI. An uninstall gated on `confirm` silently did nothing on the desktop app:
+  the call returned there without ever showing a dialog. Uninstalling an installed theme (the row's `X`, and the store
   dialog's `Remove`) is a single click, matching `WatchedCommandList`'s remove
   control in the same dialog; re-installing is one click away in the menu
   footer.

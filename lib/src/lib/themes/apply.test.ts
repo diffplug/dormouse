@@ -12,6 +12,7 @@ import {
   setActiveThemeId,
 } from './store';
 import type { DormouseTheme } from './types';
+import { installLocalStorageStub } from '../test-local-storage';
 
 const KIMBIE_DARK = 'vscode.theme-kimbie-dark.kimbie-dark';
 
@@ -29,22 +30,9 @@ const INSTALLED_THEME: DormouseTheme = {
   },
 };
 
-function installStorageStub(): void {
-  const values = new Map<string, string>();
-  Object.defineProperty(globalThis, 'localStorage', {
-    configurable: true,
-    value: {
-      clear: () => values.clear(),
-      getItem: (key: string) => values.get(key) ?? null,
-      removeItem: (key: string) => values.delete(key),
-      setItem: (key: string, value: string) => values.set(key, value),
-    },
-  });
-}
-
 describe('applyTheme', () => {
   beforeEach(() => {
-    installStorageStub();
+    installLocalStorageStub();
     // Module state, so it outlives the test that set it.
     setDefaultThemeId(null);
     document.body.removeAttribute('class');
