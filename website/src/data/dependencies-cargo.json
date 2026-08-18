@@ -2,7 +2,7 @@
   "direct": [
     {
       "name": "base64",
-      "version": "0.23.0",
+      "version": "0.23.1",
       "license": "MIT OR Apache-2.0",
       "author": "Marshall Pierce <marshall@mpierce.org>",
       "homepage": "https://github.com/marshallpierce/rust-base64",
