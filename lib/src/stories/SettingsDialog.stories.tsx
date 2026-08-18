@@ -207,3 +207,58 @@ export const HostOwnsTheme: Story = {
     primedAlertSettings: {},
   },
 };
+
+/** The shells a standalone host detects, seeded into the shell store the way
+ *  `main.tsx` does at boot. */
+const DEFAULT_SHELLS = [
+  { name: 'zsh', path: '/bin/zsh' },
+  { name: 'bash', path: '/bin/bash' },
+  { name: 'fish', path: '/opt/homebrew/bin/fish' },
+];
+
+/**
+ * Standalone with several shells detected: the Shell row joins the Theme row,
+ * grouped with it rather than divided from it. Below two shells there is
+ * nothing to switch between and the row is absent, which is why every other
+ * story here has no Shell row.
+ */
+export const ShellRow: Story = {
+  parameters: {
+    primedShells: DEFAULT_SHELLS,
+    primedWatchedCommands: ['claude'],
+    primedAlertSettings: {},
+  },
+};
+
+/** Same measured-rect settle as `openThemeMenu`. */
+async function openShellMenu({ canvasElement }: { canvasElement: HTMLElement }) {
+  const body = within(canvasElement.ownerDocument.body);
+  await userEvent.click(body.getByRole('button', { name: /^Shell:/ }));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+}
+
+/**
+ * The shell dropdown open, with the selected row's check. Positioned `fixed`
+ * off the trigger rect for the same reason the theme menu is.
+ */
+export const ShellMenuOpen: Story = {
+  parameters: {
+    primedShells: DEFAULT_SHELLS,
+    primedWatchedCommands: [],
+    primedAlertSettings: {},
+  },
+  play: openShellMenu,
+};
+
+/**
+ * The VS Code host again: its native `dormouse.selectShell` QuickPick owns the
+ * shell, so the row is absent despite shells being seeded (`hostOwnsShells`).
+ */
+export const HostOwnsShells: Story = {
+  parameters: {
+    hostOwnsShells: true,
+    primedShells: DEFAULT_SHELLS,
+    primedWatchedCommands: ['claude'],
+    primedAlertSettings: {},
+  },
+};

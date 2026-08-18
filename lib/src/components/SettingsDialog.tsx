@@ -10,8 +10,10 @@ import {
   UNDER_SWITCH_INDENT,
 } from './design';
 import { ThemePicker } from './ThemePicker';
+import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
 import { getPlatform } from '../lib/platform';
+import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
 import {
   clampAlertDelayMs,
   getAlertSettings,
@@ -52,7 +54,8 @@ function describePushTargets(push: PushDevicesState): string {
 
 /**
  * The app-global Settings dialog, opened from the far right of the baseboard.
- * Theme first (`docs/specs/theme.md`), then the alarm settings
+ * Theme first (`docs/specs/theme.md`), then the shell new terminals spawn with
+ * (`lib/src/lib/shell-store.ts`), then the alarm settings
  * (`docs/specs/alert.md` -> Alarm settings).
  *
  * Rules are removable here but not addable: WATCHING is keyed on a running
@@ -64,12 +67,19 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const watched = useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);
   const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
   const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
+  const shellState = useSyncExternalStore(subscribeToShells, getShellsSnapshot);
   const closeRef = useRef<HTMLButtonElement>(null);
   const [themeMenuOpen, setThemeMenuOpen] = useState(false);
+  const [shellMenuOpen, setShellMenuOpen] = useState(false);
 
   // VS Code owns the theme and has its own picker, so Dormouse offers none
   // there. Every other host sets its theme here rather than in host chrome.
   const showTheme = !getPlatform().hostOwnsTheme;
+
+  // Same for the shell, plus: with nothing to switch between there is nothing
+  // to offer. That also covers every host whose adapter detects no shells and
+  // every host that never seeds the store (fake = 1, remote = 0).
+  const showShell = !getPlatform().hostOwnsShells && shellState.shells.length >= 2;
 
   // A phone can enable alerts long after this machine booted, so re-read the
   // list on open rather than showing whatever was true at Host start.
@@ -84,9 +94,15 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       className={`${OVERLAY_MAX_HEIGHT.modal} w-full max-w-[26rem] overflow-y-auto`}
       initialFocusRef={closeRef}
       // ModalFrame's Escape handler is a capture-phase window listener that
-      // stops propagation, so the picker's own Escape never fires. Route it:
-      // the open dropdown closes first, the dialog only on the next press.
-      onEscape={() => (themeMenuOpen ? setThemeMenuOpen(false) : onClose())}
+      // stops propagation, so a picker's own Escape never fires. Route it: an
+      // open dropdown closes first, the dialog only on the next press.
+      onEscape={() =>
+        themeMenuOpen
+          ? setThemeMenuOpen(false)
+          : shellMenuOpen
+            ? setShellMenuOpen(false)
+            : onClose()
+      }
     >
       <div className="flex items-start gap-3">
         <h2 id={TITLE_ID} className="min-w-0 flex-1 text-sm leading-5 font-semibold text-foreground">
@@ -106,7 +122,18 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         </section>
       ) : null}
 
-      <section className={showTheme ? SECTION : 'mt-4'}>
+      {/* Grouped with the Theme row rather than divided from it: both name what
+          this Window looks and runs like. */}
+      {showShell ? (
+        <section
+          className={`${showTheme ? 'mt-2' : 'mt-4'} flex items-center gap-1.5 text-sm text-foreground`}
+        >
+          <span>Shell:</span>
+          <ShellPicker open={shellMenuOpen} onOpenChange={setShellMenuOpen} />
+        </section>
+      ) : null}
+
+      <section className={showTheme || showShell ? SECTION : 'mt-4'}>
         <div className="text-sm text-foreground">
           Animation watcher enabled for commands that start with:
         </div>
