@@ -877,12 +877,21 @@ export default function Home() {
 
         {/* Section 5: browser surfaces — mock left, text right */}
         <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-center`}>
-          <div className="order-2 md:order-1 overflow-hidden rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04]">
+          <div className="order-2 md:order-1 space-y-4">
+          {/* Authored transcript. Command syntax tracks dor/test/snapshots/help/;
+              the output lines are illustrative and not generated from a test. */}
+          <div className="overflow-x-auto rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04] p-4 font-mono text-sm leading-relaxed">
+            <div><span className="opacity-40">$ </span>dor ensure -- pnpm dev</div>
+            <div className="opacity-60">created surface:3&nbsp;&nbsp;&quot;pnpm dev&quot;</div>
+            <div className="mt-3"><span className="opacity-40">$ </span>dor ab open surface:3</div>
+            <div className="opacity-60">&#8594; <span className="text-[var(--color-caramel)]">http://localhost:5173/</span></div>
+          </div>
+          <div className="overflow-hidden rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04]">
             <div className="flex items-center gap-2 border-b border-[var(--color-text)]/10 px-3 py-2">
               <span className="size-2.5 rounded-full bg-[var(--color-text)]/20" />
               <span className="size-2.5 rounded-full bg-[var(--color-text)]/20" />
               <div className="ml-1 flex-1 truncate rounded bg-[var(--color-text)]/10 px-2 py-1 font-mono text-xs opacity-70">
-                localhost:3000
+                localhost:5173
               </div>
               <span className="rounded border border-[var(--color-caramel)]/40 px-1.5 py-0.5 font-mono text-[0.65rem] text-[var(--color-caramel)]">
                 screencast
@@ -900,6 +909,7 @@ export default function Home() {
               </div>
             </div>
           </div>
+          </div>
           <div className="order-1 md:order-2">
             <h2 className="font-display text-xl mb-6">Browsers for you (and your agents)</h2>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
@@ -915,10 +925,17 @@ export default function Home() {
               already watching. Pop it out to a real OS window when you need the
               real thing.
             </p>
-            <p className="text-lg leading-relaxed opacity-70">
+            <p className="text-lg leading-relaxed opacity-70 mb-4">
               Dormouse drives the{" "}
               <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">agent-browser</code>{" "}
               you already have installed — it doesn't ship a browser of its own.
+            </p>
+            <p className="text-base leading-relaxed opacity-60">
+              <a href="/docs#browsers-for-you-and-your-agents" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">How it works</a>
+              {" · "}
+              <a href="/docs/dor#agent-browser" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">CLI reference</a>
+              {" · "}
+              <a href="/docs/agent-skill" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">Agent skill</a>
             </p>
           </div>
         </section>
