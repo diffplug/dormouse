@@ -222,6 +222,17 @@ export interface StoredPushSubscription {
   readonly subscribedAt: number;
 }
 
+export interface PushSubscriptionUpsertResult {
+  readonly subscription: StoredPushSubscription;
+  /**
+   * Every Host this device is registered with after the mutation, including the
+   * one just written. Computed inside the mutex, so it is the whole truth for
+   * the device at the instant it was committed rather than a delta the caller
+   * has to reconstruct.
+   */
+  readonly deviceHostIds: readonly string[];
+}
+
 /**
  * Push subscriptions (`push-subscriptions.json`), keyed on the PAIR
  * (`hostId`, `devicePublicKey`) — one Client subscribes once per Host it is
@@ -240,8 +251,20 @@ export class PushSubscriptionStore extends JsonFileStore {
     super(stateDir, 'push-subscriptions.json', now);
   }
 
-  list(): Promise<StoredPushSubscription[]> {
-    return this.read<StoredPushSubscription[]>([]);
+  /**
+   * The rows this Server can act on.
+   *
+   * Malformed rows are dropped here rather than defended against at each
+   * consumer: this file is hand-editable by design — revoking a device is
+   * deleting its rows — so a half-finished edit is a real case, and one guard
+   * at the read boundary is what lets {@link StoredPushSubscription} be true
+   * for every caller downstream. A mangled row therefore reads as a missing
+   * registration, which re-offers Enable and repairs itself, instead of as a
+   * live one that cannot be delivered to.
+   */
+  async list(): Promise<StoredPushSubscription[]> {
+    const rows = await this.read<unknown>([]);
+    return Array.isArray(rows) ? rows.filter(isStoredPushSubscription) : [];
   }
 
   async listForHost(hostId: string): Promise<StoredPushSubscription[]> {
@@ -249,19 +272,38 @@ export class PushSubscriptionStore extends JsonFileStore {
     return all.filter((s) => s.hostId === hostId);
   }
 
-  /** Replace any existing subscription for this (host, device), or add one. */
+  /**
+   * Replace any existing subscription for this (host, device), or add one.
+   *
+   * A service-worker scope has one subscription shared by every Host. If its
+   * endpoint, encryption keys, or VAPID key changes, every row for this device
+   * points at the old delivery address. Drop those sibling rows atomically so
+   * readback cannot claim they are still active.
+   */
   upsert(
     record: Omit<StoredPushSubscription, 'subscribedAt'>,
-  ): Promise<StoredPushSubscription> {
+  ): Promise<PushSubscriptionUpsertResult> {
     return this.mutate(async () => {
       const all = await this.list();
       const stored: StoredPushSubscription = { ...record, subscribedAt: this.now() };
-      const kept = all.filter(
-        (s) => !(s.hostId === record.hostId && s.devicePublicKey === record.devicePublicKey),
+      const deviceRegistrationsReset = all.some(
+        (s) => s.devicePublicKey === record.devicePublicKey && !samePushAddress(s, record),
+      );
+      const kept = all.filter((s) =>
+        deviceRegistrationsReset
+          ? s.devicePublicKey !== record.devicePublicKey
+          : !(s.hostId === record.hostId && s.devicePublicKey === record.devicePublicKey),
       );
       kept.push(stored);
       await this.writeAtomic(kept);
-      return stored;
+      // Every surviving row for this device necessarily shares `stored`'s
+      // address, and `samePushAddress` compares the VAPID key too — so a row
+      // minted under a rotated key is never among these, and the caller needs
+      // no further filtering to know they are all deliverable.
+      const deviceHostIds = kept
+        .filter((s) => s.devicePublicKey === record.devicePublicKey)
+        .map((s) => s.hostId);
+      return { subscription: stored, deviceHostIds };
     });
   }
 
@@ -283,6 +325,36 @@ export class PushSubscriptionStore extends JsonFileStore {
       return all.length - kept.length;
     });
   }
+}
+
+function samePushAddress(
+  left: Omit<StoredPushSubscription, 'subscribedAt'>,
+  right: Omit<StoredPushSubscription, 'subscribedAt'>,
+): boolean {
+  return (
+    left.endpoint === right.endpoint &&
+    left.keys.p256dh === right.keys.p256dh &&
+    left.keys.auth === right.keys.auth &&
+    left.vapidPublicKey === right.vapidPublicKey
+  );
+}
+
+/**
+ * Whether an on-disk row is a subscription this Server can use. Guards
+ * {@link PushSubscriptionStore.list}, which is the only way rows enter the
+ * process — so every field the type declares is present past that point.
+ */
+function isStoredPushSubscription(row: unknown): row is StoredPushSubscription {
+  const s = row as Partial<StoredPushSubscription> | null;
+  return (
+    typeof s?.hostId === 'string' &&
+    typeof s.devicePublicKey === 'string' &&
+    typeof s.endpoint === 'string' &&
+    typeof s.keys?.p256dh === 'string' &&
+    typeof s.keys.auth === 'string' &&
+    typeof s.vapidPublicKey === 'string' &&
+    typeof s.subscribedAt === 'number'
+  );
 }
 
 /** The VAPID keypair as stored in `vapid.json`. Both values are base64url. */

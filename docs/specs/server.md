@@ -92,8 +92,21 @@ rotation. Rows are keyed on the **pair** (`hostId`, `devicePublicKey`), so a
 phone paired with two laptops subscribes twice and a Host can only ever read or
 reach its own subscribers. Each row records the public VAPID key it was
 registered under, so a key rotation makes the Client readback treat the row as
-stale and offer re-registration rather than claiming delivery still works. It
-holds no label — the Server never learns one.
+stale and offer re-registration rather than claiming delivery still works.
+Because one service-worker scope has only one subscription, an upsert whose
+endpoint, encryption keys, or VAPID key differs from an existing row for that
+device atomically deletes all of the device's prior Host rows. The response
+reports the state that mutation left behind — every Host this device is still
+registered with — rather than the fact that a deletion happened, so a committed
+POST whose response was lost is repaired by its own idempotent retry. Scoping
+that answer to the device is safe where `GET /api/push/subscriptions` must not
+be: the request carries a device signature, so the caller has proven it owns the
+identity being reported on. The row holds no label — the Server never learns
+one. Rows are validated as they are read, so a hand-edit that leaves one
+malformed reads as a missing registration (which Pocket repairs by re-offering
+Enable) instead of a live one nothing can be delivered to. Source of truth:
+`PushSubscriptionStore.list` / `.upsert` in `server/src/state.ts` and the
+subscribe route in `server/src/app.ts`.
 
 `hosts.json` stores `hostToken` — the host↔server relay bearer secret — in
 plaintext, and `vapid.json` a private key, so both files are written owner-only:
@@ -149,7 +162,7 @@ so `node --test` can drive setup → pairing → connect end to end via
 | `POST /api/push/challenge`       | session token  | `{ challenge }` for the device signature below (no body — the challenge is a pool-wide nonce; the host binding lives in the signature) |
 | `POST /api/push/subscribe`       | session token + device signature | Upserts the `(hostId, devicePublicKey)` subscription |
 | `GET /api/push/subscriptions`    | session token  | The account's registrations for the current VAPID key as identities, so a reloaded Client can tell which Hosts it already registered with. With push disabled, returns the stored identities for diagnosis |
-| `GET /api/push/devices`          | host token     | The `devicePublicKey`s subscribed to **this** Host  |
+| `GET /api/push/devices`          | host token     | The `devicePublicKey`s subscribed to **this** Host under the current VAPID key |
 | `POST /api/push/send`            | host token     | Fans a notification out to the named devices; `devicePublicKeys` is required |
 | `GET /ws/host`                   | host token     | The Host's relay socket                            |
 | `GET /ws/client`                 | session token  | A Client's relay socket                            |
@@ -187,12 +200,15 @@ Source of truth: `server/src/push.ts` and the routes in `server/src/app.ts`.
   that reports on an identity the caller does not hold. Both return identities
   only — the endpoint and its keys are a bearer capability to notify that phone
   and never leave the Server.
-- **Client readback is VAPID-current.** With push configured,
-  `/api/push/subscriptions` omits rows registered under a different (or legacy
-  unknown) public key. Those endpoints cannot receive a send signed by the
-  current key, and hiding them is what exposes Pocket's re-registration action
-  after rotation. The file rows are retained until that upsert; when push is
-  disabled the route still returns their identities for diagnosis.
+- **Delivery views are VAPID-current.** With push configured,
+  `/api/push/subscriptions` and the Host's `/api/push/devices` omit rows
+  registered under a different (or legacy unknown) public key, and
+  `/api/push/send` never targets them. Those endpoints cannot receive a send
+  signed by the current key; hiding them exposes Pocket's re-registration
+  action and keeps the Host from naming or retrying an unreachable device after
+  rotation. The file rows are retained until that upsert; when push is disabled
+  the Client subscriptions route still returns their identities for diagnosis,
+  while the Host has no deliverable devices.
 - **The subscription is bound to a Client identity by signature.** The Client
   signs `(hostId, challenge, devicePublicKey, endpoint)` with its device key
   under `PUSH_SUBSCRIBE_DOMAIN` — deliberately *not* `DEVICE_AUTH_DOMAIN`, since
@@ -226,8 +242,20 @@ Source of truth: `server/src/push.ts` and the routes in `server/src/app.ts`.
   status — whitespace-collapsed and capped at 200 characters so an HTML error
   page cannot flood it — because a status alone does not separate a bad subject
   from a bad key from a bad payload, and this is the only place that
-  explanation is ever visible. TTL is 300s — an alarm that arrives an hour late
-  is noise, not information.
+  explanation is ever visible. Delivery is bounded twice, and both bounds
+  resolve as `failed` — so the row survives to be retried, unlike a 404/410.
+  The inner bound is a 10-second socket-inactivity timeout on each push-service
+  request. The outer is a 15-second wall-clock deadline per send, which catches
+  what inactivity cannot: a service that trickles bytes or stalls mid-handshake
+  resets the inactivity timer indefinitely. The deadline is applied by the
+  route rather than by the sender, so it holds for any injected `PushSender`,
+  and because every send in a fan-out starts at once it also bounds the route
+  as a whole regardless of device count. It bounds the *route*, not the socket:
+  `web-push` accepts no `AbortSignal`, so a request that loses the race is left
+  to its own inactivity timeout rather than cancelled. What this prevents is a
+  wedged push service holding the handler open while successive alarms stack
+  concurrent sends behind it. Both are separate from the 300-second provider
+  TTL — an alarm that arrives an hour late is noise, not information.
 - Push is disabled, not half-working, when no VAPID key **or no VAPID subject**
   is configured: the config route reports `null` and subscribe/send answer 503.
   The key and the subject are advertised together or not at all — a phone that

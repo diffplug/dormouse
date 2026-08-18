@@ -5,12 +5,7 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  HostsView,
-  reconcilePushSubscribedHosts,
-  type HostView,
-  type PushConfigStatus,
-} from './App';
+import { HostsView, type HostView, type PushConfigStatus } from './App';
 import type { PushAvailability } from '../client/push-subscribe';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -165,30 +160,5 @@ describe('HostsView push registration', () => {
     expect(enableButtonIn(row)).toBeNull();
     act(() => retryButtonIn(row)!.click());
     expect(onRetryPushConfig).toHaveBeenCalledOnce();
-  });
-});
-
-describe('push registration reconciliation', () => {
-  it('keeps the server snapshot plus only registrations completed during the read', () => {
-    const reconciled = reconcilePushSubscribedHosts(
-      ['host-a', 'host-b'],
-      new Map([['stale-local', 1]]),
-      new Map([
-        ['stale-local', 1],
-        ['host-c', 1],
-      ]),
-    );
-
-    expect([...reconciled]).toEqual(['host-a', 'host-b', 'host-c']);
-  });
-
-  it('keeps a repeated registration of the same Host completed during the read', () => {
-    const reconciled = reconcilePushSubscribedHosts(
-      [],
-      new Map([['host-a', 1]]),
-      new Map([['host-a', 2]]),
-    );
-
-    expect([...reconciled]).toEqual(['host-a']);
   });
 });

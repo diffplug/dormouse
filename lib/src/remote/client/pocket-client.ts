@@ -25,6 +25,7 @@ import {
   WS_ROUTES,
   WS_TOKEN_PARAM,
   hashPasskeyPublicKey,
+  pushEndpointFingerprint,
   signDeviceChallenge,
   signPushSubscribe,
   type ClientFrame,
@@ -74,6 +75,14 @@ export interface PocketStorage {
   isPaired(hostId: string): boolean;
   markPaired(hostId: string): void;
   unmarkPaired(hostId: string): void;
+  /**
+   * Digest of the delivery address last registered with the Server, or null if
+   * this device has never registered one. Per device, not per Host: one
+   * service-worker scope holds one subscription, so if it rotates, every Host
+   * row for this device is stale at once.
+   */
+  getRegisteredPushEndpoint(): string | null;
+  setRegisteredPushEndpoint(fingerprint: string): void;
 }
 
 export interface PocketClientDeps {
@@ -191,6 +200,16 @@ export class PocketClient {
 
   isPaired(hostId: string): boolean {
     return this.#storage.isPaired(hostId);
+  }
+
+  /**
+   * Digest of the delivery address this device last registered, for detecting
+   * a push service that rotated the endpoint behind our back. Null until the
+   * first successful registration — which reads as "no opinion", so a device
+   * that registered before this was recorded is not made to re-register.
+   */
+  registeredPushEndpoint(): string | null {
+    return this.#storage.getRegisteredPushEndpoint();
   }
 
   /** Notified when the Host drops (a `host-gone` frame or a closed socket). */
@@ -312,11 +331,18 @@ export class PocketClient {
       devicePublicKey: deviceKey.devicePublicKey,
       endpoint: subscription.endpoint,
     });
-    return this.#api<PushSubscribeResponse>(
+    const result = await this.#api<PushSubscribeResponse>(
       API_ROUTES.pushSubscribe,
       { hostId, devicePublicKey: deviceKey.devicePublicKey, challenge, signature, subscription },
       { headers: auth },
     );
+    // Recorded only once the Server has the row, mirroring how `pair` marks a
+    // Host paired: this is a note about what the Server holds, not about what
+    // the browser minted.
+    this.#storage.setRegisteredPushEndpoint(
+      await pushEndpointFingerprint(subscription.endpoint),
+    );
+    return result;
   }
 
   // --- Relay socket --------------------------------------------------------
@@ -746,6 +772,7 @@ function uuid(): string {
 export function localStoragePocketStorage(): PocketStorage {
   const PASSKEY_PREFIX = 'dormouse-pocket:passkey:';
   const PAIRED_PREFIX = 'dormouse-pocket:paired:';
+  const PUSH_ENDPOINT_KEY = 'dormouse-pocket:push-endpoint';
   return {
     getPasskeyPublicKey: (credentialId) =>
       globalThis.localStorage.getItem(PASSKEY_PREFIX + credentialId),
@@ -763,5 +790,8 @@ export function localStoragePocketStorage(): PocketStorage {
     isPaired: (hostId) => globalThis.localStorage.getItem(PAIRED_PREFIX + hostId) === '1',
     markPaired: (hostId) => globalThis.localStorage.setItem(PAIRED_PREFIX + hostId, '1'),
     unmarkPaired: (hostId) => globalThis.localStorage.removeItem(PAIRED_PREFIX + hostId),
+    getRegisteredPushEndpoint: () => globalThis.localStorage.getItem(PUSH_ENDPOINT_KEY),
+    setRegisteredPushEndpoint: (fingerprint) =>
+      globalThis.localStorage.setItem(PUSH_ENDPOINT_KEY, fingerprint),
   };
 }

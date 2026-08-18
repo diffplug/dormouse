@@ -14,11 +14,14 @@ import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { API_ROUTES, signPushSubscribe } from 'server-lib-common';
+import webpush from 'web-push';
 
 import { SimClient } from '../../server-lib-common/test/harness/actors.mjs';
 import {
+  PUSH_REQUEST_TIMEOUT_MS,
   assertVapidKeyPair,
   assertVapidSubject,
+  createWebPushSender,
   defaultVapidSubject,
   generateVapidKeys,
 } from '../dist/push.js';
@@ -43,6 +46,25 @@ test('VAPID subject validation accepts contact URLs and rejects invalid values',
 
   for (const subject of ['', 'admin@example.com', 'http://example.com/contact']) {
     assert.throws(() => assertVapidSubject(subject), /valid mailto: or https: URL/);
+  }
+});
+
+test('real delivery gives push-service requests a bounded socket timeout', async () => {
+  const originalSendNotification = webpush.sendNotification;
+  let requestOptions;
+  webpush.sendNotification = async (_subscription, _payload, options) => {
+    requestOptions = options;
+    return { statusCode: 201, body: '', headers: {} };
+  };
+
+  try {
+    const sender = createWebPushSender(generateVapidKeys(), 'mailto:admin@example.com');
+    const result = await sender.send(subscription(), '{}');
+    assert.equal(result, 'delivered');
+    assert.equal(requestOptions.timeout, PUSH_REQUEST_TIMEOUT_MS);
+    assert.equal(PUSH_REQUEST_TIMEOUT_MS, 10_000);
+  } finally {
+    webpush.sendNotification = originalSendNotification;
   }
 });
 
@@ -90,9 +112,9 @@ function subscription(endpoint = 'https://push.example.com/sub/abc') {
 }
 
 /** A fresh app with push configured, plus an enrolled host and a signed-in owner. */
-async function pushApp() {
+async function pushApp(overrides = {}) {
   const sender = fakePushSender();
-  const app = await freshApp({ vapidPublicKey: VAPID_PUBLIC, pushSender: sender });
+  const app = await freshApp({ vapidPublicKey: VAPID_PUBLIC, pushSender: sender, ...overrides });
   const { body: host } = await enrollHost(app.app, { label: 'Laptop' });
   const { sessionToken } = await ownerSession(app.app);
   return { ...app, sender, host, sessionToken };
@@ -129,6 +151,18 @@ async function subscribe(app, { sessionToken, host, client, sub = subscription()
 
 function sendAs(app, hostToken, body) {
   return authed(app, API_ROUTES.pushSend, hostToken, body);
+}
+
+/**
+ * Model a Server VAPID rotation while preserving the existing state file: the
+ * stored endpoints are now unusable with the current signer, and every read
+ * path must treat them as absent rather than as "Alerts on".
+ */
+async function rotateStoredVapidKey(stateDir) {
+  const path = join(stateDir, 'push-subscriptions.json');
+  const stored = JSON.parse(await readFile(path, 'utf8'));
+  for (const row of stored) row.vapidPublicKey = 'BOldVapidPublicKey';
+  await writeFile(path, `${JSON.stringify(stored, null, 2)}\n`);
 }
 
 // --- config ----------------------------------------------------------------
@@ -323,6 +357,97 @@ test('re-subscribing replaces the row rather than accumulating one per rotation'
   assert.equal(stored[0].endpoint, 'https://push.example.com/2');
 });
 
+test('rotating a device subscription invalidates its registrations for other Hosts', async () => {
+  const { app, stateDir, host, sessionToken } = await pushApp();
+  const { body: other } = await enrollHost(app, { label: 'Other laptop' });
+  const client = await SimClient.create({ origin: ORIGIN });
+  const original = subscription('https://push.example.com/original');
+
+  assert.equal(
+    (
+      await subscribe(app, {
+        sessionToken,
+        host,
+        client,
+        sub: original,
+      })
+    ).status,
+    200,
+  );
+  assert.equal(
+    (
+      await subscribe(app, {
+        sessionToken,
+        host: other,
+        client,
+        sub: original,
+      })
+    ).status,
+    200,
+  );
+
+  const replacement = await subscribe(app, {
+    sessionToken,
+    host,
+    client,
+    sub: subscription('https://push.example.com/replacement'),
+  });
+  const replacementBody = await replacement.json();
+  assert.equal(typeof replacementBody.subscribedAt, 'number');
+  // The response is the device's whole surviving set, so the dropped sibling is
+  // reported by its absence rather than by a flag the Client has to interpret.
+  assert.deepEqual(replacementBody.hostIds, [host.hostId]);
+
+  const stored = JSON.parse(await readFile(join(stateDir, 'push-subscriptions.json'), 'utf8'));
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].hostId, host.hostId);
+  assert.equal(stored[0].endpoint, 'https://push.example.com/replacement');
+});
+
+test('subscribe answers with every Host this device is registered with', async () => {
+  const { app, host, sessionToken } = await pushApp();
+  const { body: other } = await enrollHost(app, { label: 'Other laptop' });
+  const client = await SimClient.create({ origin: ORIGIN });
+  const otherClient = await SimClient.create({ origin: ORIGIN });
+
+  const first = await subscribe(app, { sessionToken, host, client });
+  assert.deepEqual((await first.json()).hostIds, [host.hostId]);
+
+  // Same address, second Host: both rows survive, and the answer grows.
+  const second = await subscribe(app, { sessionToken, host: other, client });
+  assert.deepEqual((await second.json()).hostIds.sort(), [host.hostId, other.hostId].sort());
+
+  // Another device's rows are never mixed in — the response is scoped to the
+  // identity that signed the request.
+  const foreign = await subscribe(app, {
+    sessionToken,
+    host,
+    client: otherClient,
+    sub: subscription('https://push.example.com/other-device'),
+  });
+  assert.deepEqual((await foreign.json()).hostIds, [host.hostId]);
+});
+
+test('a retried subscribe whose first response was lost still reports the truth', async () => {
+  // The Client cannot tell a lost response from a failed request, so it retries.
+  // The mutation is idempotent and cannot re-announce the sibling rows it
+  // already deleted — but it can always answer what is registered now, which is
+  // what lets the Client repair its view without remembering what it did.
+  const { app, host, sessionToken } = await pushApp();
+  const { body: other } = await enrollHost(app, { label: 'Other laptop' });
+  const client = await SimClient.create({ origin: ORIGIN });
+  await subscribe(app, { sessionToken, host, client });
+  await subscribe(app, { sessionToken, host: other, client });
+
+  const rotated = subscription('https://push.example.com/rotated');
+  const committed = await subscribe(app, { sessionToken, host, client, sub: rotated });
+  assert.deepEqual((await committed.json()).hostIds, [host.hostId]);
+
+  const retry = await subscribe(app, { sessionToken, host, client, sub: rotated });
+  assert.equal(retry.status, 200);
+  assert.deepEqual((await retry.json()).hostIds, [host.hostId]);
+});
+
 // --- subscriptions (client-facing) -----------------------------------------
 
 test('subscriptions lets a reloaded client find the Hosts it already registered', async () => {
@@ -363,18 +488,36 @@ test('subscriptions hides rows registered under an old VAPID key', async () => {
   const client = await SimClient.create({ origin: ORIGIN });
   await subscribe(app, { sessionToken, host, client });
 
-  // Model a Server key rotation while preserving the existing state file. The
-  // endpoint is now unusable with the current signer and Pocket must be offered
-  // the repair action instead of seeing "Alerts on."
+  await rotateStoredVapidKey(stateDir);
+
+  const res = await app.request(API_ROUTES.pushSubscriptions, {
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  assert.deepEqual(await res.json(), { subscriptions: [] });
+});
+
+test('a malformed stored row is dropped rather than surfaced as a live one', async () => {
+  // `push-subscriptions.json` is hand-editable by design — revoking a device is
+  // deleting its rows — so a half-finished edit has to read as a missing
+  // registration, which re-offers Enable, not as one that cannot be delivered to.
+  const { app, stateDir, host, sessionToken } = await pushApp();
+  const client = await SimClient.create({ origin: ORIGIN });
+  await subscribe(app, { sessionToken, host, client });
+
   const path = join(stateDir, 'push-subscriptions.json');
   const stored = JSON.parse(await readFile(path, 'utf8'));
-  stored[0].vapidPublicKey = 'BOldVapidPublicKey';
+  delete stored[0].keys;
   await writeFile(path, `${JSON.stringify(stored, null, 2)}\n`);
 
   const res = await app.request(API_ROUTES.pushSubscriptions, {
     headers: { Authorization: `Bearer ${sessionToken}` },
   });
   assert.deepEqual(await res.json(), { subscriptions: [] });
+
+  // And re-subscribing over it succeeds instead of throwing out of the route.
+  const repair = await subscribe(app, { sessionToken, host, client });
+  assert.equal(repair.status, 200);
+  assert.deepEqual((await repair.json()).hostIds, [host.hostId]);
 });
 
 test('subscriptions requires a session and rejects a host token', async () => {
@@ -423,6 +566,19 @@ test('a host cannot see another host subscribers', async () => {
 
   const res = await app.request(API_ROUTES.pushDevices, {
     headers: { Authorization: `Bearer ${other.hostToken}` },
+  });
+  assert.deepEqual(await res.json(), { devices: [] });
+});
+
+test('devices hides subscriptions registered under an old VAPID key', async () => {
+  const { app, stateDir, host, sessionToken } = await pushApp();
+  const client = await SimClient.create({ origin: ORIGIN });
+  await subscribe(app, { sessionToken, host, client });
+
+  await rotateStoredVapidKey(stateDir);
+
+  const res = await app.request(API_ROUTES.pushDevices, {
+    headers: { Authorization: `Bearer ${host.hostToken}` },
   });
   assert.deepEqual(await res.json(), { devices: [] });
 });
@@ -501,6 +657,22 @@ test('a named device with no subscription counts as unknown, not delivered', asy
   assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 1, failed: 0 });
 });
 
+test('send treats a subscription registered under an old VAPID key as unknown', async () => {
+  const { app, sender, stateDir, host, sessionToken } = await pushApp();
+  const client = await SimClient.create({ origin: ORIGIN });
+  await subscribe(app, { sessionToken, host, client });
+
+  await rotateStoredVapidKey(stateDir);
+
+  const res = await sendAs(app, host.hostToken, {
+    devicePublicKeys: [client.deviceKey.devicePublicKey],
+    title: 'x',
+    body: 'y',
+  });
+  assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 1, failed: 0 });
+  assert.equal(sender.sent.length, 0);
+});
+
 test('a subscription the push service calls gone is dropped', async () => {
   const { app, sender, stateDir, host, sessionToken } = await pushApp();
   const client = await SimClient.create({ origin: ORIGIN });
@@ -533,6 +705,54 @@ test('a transient failure leaves the subscription in place', async () => {
 
   const stored = JSON.parse(await readFile(join(stateDir, 'push-subscriptions.json'), 'utf8'));
   assert.equal(stored.length, 1);
+});
+
+test('a send that never answers is bounded and leaves the subscription in place', async () => {
+  // A push service can accept the connection and then go quiet, which resets
+  // the socket-inactivity timer forever. Without a wall-clock bound the handler
+  // stays open and successive alarms stack concurrent sends on top of it.
+  const { app, sender, stateDir, host, sessionToken } = await pushApp({ pushSendDeadlineMs: 30 });
+  const client = await SimClient.create({ origin: ORIGIN });
+  const endpoint = 'https://push.example.com/wedged';
+  await subscribe(app, { sessionToken, host, client, sub: subscription(endpoint) });
+  sender.hang(endpoint);
+
+  const res = await sendAs(app, host.hostToken, {
+    devicePublicKeys: [client.deviceKey.devicePublicKey],
+    title: 'x',
+    body: 'y',
+  });
+  // Transient, like any other failure — so the row survives to be retried,
+  // rather than being pruned the way a 404/410 would prune it.
+  assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 0, failed: 1 });
+  const stored = JSON.parse(await readFile(join(stateDir, 'push-subscriptions.json'), 'utf8'));
+  assert.equal(stored.length, 1);
+});
+
+test('one wedged device does not hold up the rest of the fan-out', async () => {
+  const { app, sender, host, sessionToken } = await pushApp({ pushSendDeadlineMs: 30 });
+  const wedged = await SimClient.create({ origin: ORIGIN });
+  const healthy = await SimClient.create({ origin: ORIGIN });
+  await subscribe(app, {
+    sessionToken,
+    host,
+    client: wedged,
+    sub: subscription('https://push.example.com/wedged'),
+  });
+  await subscribe(app, {
+    sessionToken,
+    host,
+    client: healthy,
+    sub: subscription('https://push.example.com/healthy'),
+  });
+  sender.hang('https://push.example.com/wedged');
+
+  const res = await sendAs(app, host.hostToken, {
+    devicePublicKeys: [wedged.deviceKey.devicePublicKey, healthy.deviceKey.devicePublicKey],
+    title: 'x',
+    body: 'y',
+  });
+  assert.deepEqual(await res.json(), { delivered: 1, expired: 0, unknown: 0, failed: 1 });
 });
 
 test('a host cannot push to another host subscribers', async () => {

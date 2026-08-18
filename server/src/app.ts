@@ -78,7 +78,8 @@ import {
   HostStore,
   PushSubscriptionStore,
 } from './state.js';
-import type { StoredHost } from './state.js';
+import type { StoredHost, StoredPushSubscription } from './state.js';
+import { PUSH_SEND_DEADLINE_MS, sendWithinDeadline } from './push.js';
 import type { PushSender } from './push.js';
 import { isPublicHttpsPushEndpoint } from './push-endpoint.js';
 
@@ -119,6 +120,12 @@ export interface AppConfig {
    * implementation.
    */
   readonly pushSender?: PushSender;
+  /**
+   * Wall-clock bound on a single delivery attempt; defaults to
+   * `PUSH_SEND_DEADLINE_MS`. Injectable for the same reason as `now` — a test
+   * cannot wait out the real one.
+   */
+  readonly pushSendDeadlineMs?: number;
 }
 
 /** A live sign-in session held in memory (server.md: everything transient is in memory). */
@@ -525,7 +532,10 @@ export function createApp(config: AppConfig): CreatedApp {
       keys: body.subscription.keys,
       vapidPublicKey: config.vapidPublicKey,
     });
-    const res: PushSubscribeResponse = { subscribedAt: stored.subscribedAt };
+    const res: PushSubscribeResponse = {
+      subscribedAt: stored.subscription.subscribedAt,
+      hostIds: [...stored.deviceHostIds],
+    };
     return c.json(res);
   });
 
@@ -544,7 +554,7 @@ export function createApp(config: AppConfig): CreatedApp {
     // same way. When push is disabled the raw rows remain readable, preserving
     // the route's diagnostic behavior without claiming they are deliverable.
     const subscriptions = config.vapidPublicKey
-      ? allSubscriptions.filter((s) => s.vapidPublicKey === config.vapidPublicKey)
+      ? allSubscriptions.filter(isVapidCurrent)
       : allSubscriptions;
     // Identities only: the endpoint and its keys are a bearer capability to
     // notify that phone, and never leave the Server.
@@ -559,7 +569,7 @@ export function createApp(config: AppConfig): CreatedApp {
   });
 
   app.get(API_ROUTES.pushDevices, requireHost, async (c) => {
-    const subscriptions = await pushStore.listForHost(c.get('host').hostId);
+    const subscriptions = await currentPushSubscriptionsForHost(c.get('host').hostId);
     // Identities only. The Host holds the ACL and is the only side that can turn
     // a devicePublicKey into a human label, so the Server never learns one.
     const res: PushDevicesResponse = {
@@ -589,7 +599,7 @@ export function createApp(config: AppConfig): CreatedApp {
 
     // The Host is identified by its token, never by the body: a Host can only
     // ever reach subscriptions registered against itself.
-    const subscriptions = await pushStore.listForHost(c.get('host').hostId);
+    const subscriptions = await currentPushSubscriptionsForHost(c.get('host').hostId);
     const targets = subscriptions.filter((s) => names.includes(s.devicePublicKey));
 
     // Title and body originate in a renderer and are ultimately Pane-derived,
@@ -609,10 +619,18 @@ export function createApp(config: AppConfig): CreatedApp {
         : {}),
     });
 
+    // Every send starts at once, so one deadline per send also bounds the whole
+    // route regardless of how many devices a Host has.
+    const deadlineMs = config.pushSendDeadlineMs ?? PUSH_SEND_DEADLINE_MS;
     const results = await Promise.all(
       targets.map(async (s) => ({
         endpoint: s.endpoint,
-        result: await sender.send({ endpoint: s.endpoint, keys: s.keys }, payload),
+        result: await sendWithinDeadline(
+          sender,
+          { endpoint: s.endpoint, keys: s.keys },
+          payload,
+          deadlineMs,
+        ),
       })),
     );
     // Forget subscriptions the push service called permanently gone, so a
@@ -629,6 +647,26 @@ export function createApp(config: AppConfig): CreatedApp {
     };
     return c.json(res);
   });
+
+  /**
+   * Whether a stored row was minted for the active VAPID key, and is therefore
+   * deliverable. The one definition both the Client readback and the Host-facing
+   * views below filter on; they differ only in what an unconfigured key means.
+   */
+  function isVapidCurrent(s: StoredPushSubscription): boolean {
+    return s.vapidPublicKey === config.vapidPublicKey;
+  }
+
+  /**
+   * Only subscriptions minted for the active VAPID key are deliverable.
+   * Old-key rows remain on disk so Pocket can diagnose and repair a rotation,
+   * but they must never appear in the Host's device view or send fan-out.
+   */
+  async function currentPushSubscriptionsForHost(hostId: string) {
+    if (!config.vapidPublicKey) return [];
+    const subscriptions = await pushStore.listForHost(hostId);
+    return subscriptions.filter(isVapidCurrent);
+  }
 
   // --- The relay: one host socket per hostId, many client sockets ----------
   // Auth rides the `token` query param (browsers cannot set WS headers). A bad
@@ -729,15 +767,59 @@ function registerPocketServing(app: Hono<AppEnv>, pocketDir?: string): void {
   // `serveStatic` joins its `root` onto the request path relative to cwd, so a
   // path relative to cwd is the portable way to point it at an arbitrary dir.
   const root = relative(process.cwd(), pocketDir) || '.';
-  app.get('/*', serveStatic({ root }));
+  const serveFile = serveStatic({ root });
+  app.get('/*', (c, next) => {
+    // Staged before `serveFile` so its `c.body(...)` picks the header up, the
+    // same way it picks up its own `Content-Type`. Deliberately not
+    // `serveStatic`'s `onFound` hook, which runs *after* the Response has been
+    // built and so cannot add a header to it.
+    c.header('Cache-Control', pocketCacheControl(c.req.path));
+    return serveFile(c, next);
+  });
   // Re-read the SPA shell per deep-link fallback: a Pocket rebuild swaps in an
   // index.html referencing new content-hashed assets, and a cached copy would
   // keep pointing at deleted files until the server restarts. The fallback is
   // not a hot path, and a read failure degrades to a 404 instead of a crash.
   app.get('*', async (c) => {
+    // This handler answers with the shell or with nothing, whatever was asked
+    // for, so the class the static handler staged from the *request* path is
+    // wrong here — a response's cache policy describes the response.
+    c.header('Cache-Control', POCKET_SHELL_CACHE_CONTROL);
+    // A subresource miss is not a routing question, and the shell is never a
+    // useful answer to one. Answering it put an HTML body under a hashed-asset
+    // URL: `immutable` then meant the browser could never revalidate it away,
+    // turning a request made during a deploy — exactly the window this cache
+    // policy exists for — into a permanently broken app.
+    if (c.req.path.startsWith('/assets/')) return c.notFound();
     const html = await readFile(indexHtmlPath, 'utf8').catch(() => null);
     return html ? c.html(html) : c.notFound();
   });
+}
+
+/** Keep a hashed asset forever; its name changes when its content does. */
+const POCKET_ASSET_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+/** Revalidate everything else before use. */
+const POCKET_SHELL_CACHE_CONTROL = 'no-cache';
+
+/**
+ * The Pocket build comes in exactly two kinds. Vite content-hashes everything
+ * it emits into `assets/`, while `public/` passes through unhashed to the root
+ * (`sw.js`, the manifest, the icons) alongside the generated `index.html`.
+ *
+ * Revalidating the unhashed half is the load-bearing part: `emptyOutDir`
+ * deletes the previous build's hashed assets, so a heuristically cached
+ * `index.html` does not merely serve stale code — it requests files that no
+ * longer exist, and the app fails to boot rather than degrading. `immutable` on
+ * the hashed half is only a bonus, and is safe for exactly the same reason.
+ *
+ * Decided from the request path rather than the resolved file path, which is
+ * platform-shaped. If Vite ever emits an unhashed file into `assets/`, or
+ * `assetsDir` is overridden, this test silently mislabels it.
+ */
+function pocketCacheControl(requestPath: string): string {
+  return requestPath.startsWith('/assets/')
+    ? POCKET_ASSET_CACHE_CONTROL
+    : POCKET_SHELL_CACHE_CONTROL;
 }
 
 // ---------------------------------------------------------------------------

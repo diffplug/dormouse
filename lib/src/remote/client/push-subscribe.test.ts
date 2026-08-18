@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { pushEndpointFingerprint } from 'server-lib-common';
 
 const getRegistration = vi.fn();
 vi.mock('../pocket-app/service-worker', () => ({
@@ -173,7 +174,7 @@ describe('hasCurrentPushSubscription', () => {
       }),
     );
 
-    await expect(hasCurrentPushSubscription('AQID')).resolves.toBe(true);
+    await expect(hasCurrentPushSubscription('AQID', null)).resolves.toBe(true);
   });
 
   it('rejects a subscription minted for an old VAPID key', async () => {
@@ -184,7 +185,7 @@ describe('hasCurrentPushSubscription', () => {
       }),
     );
 
-    await expect(hasCurrentPushSubscription('AQID')).resolves.toBe(false);
+    await expect(hasCurrentPushSubscription('AQID', null)).resolves.toBe(false);
   });
 
   it('rejects a stored subscription after notification permission is revoked', async () => {
@@ -195,14 +196,42 @@ describe('hasCurrentPushSubscription', () => {
       }),
     );
 
-    await expect(hasCurrentPushSubscription('AQID')).resolves.toBe(false);
+    await expect(hasCurrentPushSubscription('AQID', null)).resolves.toBe(false);
   });
 
   it('rejects a missing browser subscription even if the Server may still hold a row', async () => {
     stubBrowser({ permission: 'granted' });
     getRegistration.mockResolvedValue(registration(null));
 
-    await expect(hasCurrentPushSubscription('AQID')).resolves.toBe(false);
+    await expect(hasCurrentPushSubscription('AQID', null)).resolves.toBe(false);
+  });
+
+  it('rejects an endpoint the push service rotated behind our back', async () => {
+    // The VAPID key still matches and the subscription is perfectly valid — it
+    // just points somewhere new, so every row the Server holds is unreachable.
+    stubBrowser({ permission: 'granted' });
+    getRegistration.mockResolvedValue(
+      registration({
+        endpoint: 'https://push.example/rotated',
+        options: { applicationServerKey: Uint8Array.of(1, 2, 3).buffer },
+      }),
+    );
+    const registered = await pushEndpointFingerprint('https://push.example/original');
+
+    await expect(hasCurrentPushSubscription('AQID', registered)).resolves.toBe(false);
+  });
+
+  it('accepts the endpoint that was actually registered', async () => {
+    stubBrowser({ permission: 'granted' });
+    getRegistration.mockResolvedValue(
+      registration({
+        endpoint: 'https://push.example/original',
+        options: { applicationServerKey: Uint8Array.of(1, 2, 3).buffer },
+      }),
+    );
+    const registered = await pushEndpointFingerprint('https://push.example/original');
+
+    await expect(hasCurrentPushSubscription('AQID', registered)).resolves.toBe(true);
   });
 });
 
@@ -210,7 +239,7 @@ describe('subscribeToPushInBrowser', () => {
   it('explains a missing worker instead of hanging on serviceWorker.ready', async () => {
     stubBrowser({});
     getRegistration.mockResolvedValue(null);
-    await expect(subscribeToPushInBrowser('BKey')).rejects.toThrow(/background worker/i);
+    await expect(subscribeToPushInBrowser('BKey', () => {})).rejects.toThrow(/background worker/i);
   });
 
   it('does not prompt for permission when there is no worker to subscribe with', async () => {
@@ -220,7 +249,7 @@ describe('subscribeToPushInBrowser', () => {
     (globalThis.Notification as unknown as { requestPermission: unknown }).requestPermission =
       requestPermission;
 
-    await expect(subscribeToPushInBrowser('BKey')).rejects.toThrow();
+    await expect(subscribeToPushInBrowser('BKey', () => {})).rejects.toThrow();
     expect(requestPermission).not.toHaveBeenCalled();
   });
 
@@ -228,7 +257,7 @@ describe('subscribeToPushInBrowser', () => {
     stubBrowser({});
     (globalThis.Notification as unknown as { requestPermission: unknown }).requestPermission =
       async () => 'denied';
-    await expect(subscribeToPushInBrowser('BKey')).rejects.toThrow(/browser settings/i);
+    await expect(subscribeToPushInBrowser('BKey', () => {})).rejects.toThrow(/browser settings/i);
   });
 
   it('reuses a scope-wide subscription minted for the same VAPID key', async () => {
@@ -249,13 +278,16 @@ describe('subscribeToPushInBrowser', () => {
     getRegistration.mockResolvedValue({
       pushManager: { getSubscription: async () => existing, subscribe },
     });
+    const onReplaced = vi.fn();
 
-    await expect(subscribeToPushInBrowser('AQID')).resolves.toEqual({
+    await expect(subscribeToPushInBrowser('AQID', onReplaced)).resolves.toEqual({
       endpoint: 'https://push.example/existing',
       keys: { p256dh: 'p256dh', auth: 'auth' },
     });
     expect(unsubscribe).not.toHaveBeenCalled();
     expect(subscribe).not.toHaveBeenCalled();
+    // The address other Hosts registered is still live, so nothing was replaced.
+    expect(onReplaced).not.toHaveBeenCalled();
   });
 
   it('rotates the subscription when the VAPID key changed', async () => {
@@ -281,14 +313,43 @@ describe('subscribeToPushInBrowser', () => {
       },
     });
 
-    await expect(subscribeToPushInBrowser('AQID')).resolves.toEqual({
+    const onReplaced = vi.fn();
+
+    await expect(subscribeToPushInBrowser('AQID', onReplaced)).resolves.toEqual({
       endpoint: 'https://push.example/replacement',
       keys: { p256dh: 'new-p256dh', auth: 'new-auth' },
     });
+    expect(onReplaced).toHaveBeenCalledOnce();
     expect(unsubscribe).toHaveBeenCalledOnce();
     expect(subscribe).toHaveBeenCalledWith({
       userVisibleOnly: true,
       applicationServerKey: Uint8Array.of(1, 2, 3),
     });
+  });
+
+  it('reports the replaced delivery address even when subscribe throws', async () => {
+    // The old endpoint is dead as soon as `unsubscribe` resolves. If the
+    // failure swallowed that fact, every other Host would keep claiming alerts
+    // through an address nothing can reach.
+    stubBrowser({});
+    (globalThis.Notification as unknown as { requestPermission: unknown }).requestPermission =
+      async () => 'granted';
+    const unsubscribe = vi.fn().mockResolvedValue(true);
+    const subscribe = vi.fn().mockRejectedValue(new Error('push service unreachable'));
+    getRegistration.mockResolvedValue({
+      pushManager: {
+        getSubscription: async () => ({
+          options: { applicationServerKey: Uint8Array.of(9, 9, 9).buffer },
+          unsubscribe,
+        }),
+        subscribe,
+      },
+    });
+    const onReplaced = vi.fn();
+
+    await expect(subscribeToPushInBrowser('AQID', onReplaced)).rejects.toThrow(
+      'push service unreachable',
+    );
+    expect(onReplaced).toHaveBeenCalledOnce();
   });
 });

@@ -17,7 +17,7 @@
  * different statement under a different domain — see below.
  */
 
-import { fromBase64Url, lengthPrefixedConcat, utf8Encode } from './bytes.js';
+import { fromBase64Url, lengthPrefixedConcat, toBase64Url, utf8Encode } from './bytes.js';
 import { signDevicePayload, verifyDevicePayload } from './deviceKey.js';
 import { getWebCrypto, type CryptoKeyLike, type WebCryptoLike } from './webcrypto.js';
 
@@ -63,6 +63,27 @@ export function pushSubscribePayload(context: PushSubscribeContext): Uint8Array 
     fromBase64Url(context.devicePublicKey),
     utf8Encode(context.endpoint),
   ]);
+}
+
+/**
+ * A stable digest of a delivery address, for answering one question only: is
+ * the endpoint the browser holds now the same one that was registered?
+ *
+ * A push service may rotate an endpoint on its own, without the VAPID key
+ * changing, which leaves every stored row pointing somewhere unreachable while
+ * the browser still reports a perfectly valid subscription. Comparing digests
+ * catches that; the Client stores this rather than the endpoint so a bearer
+ * capability is not copied into `localStorage` to answer a yes/no question.
+ *
+ * Not a security boundary — it is a change detector, and a device comparing it
+ * against its own record already holds the endpoint itself.
+ */
+export async function pushEndpointFingerprint(
+  endpoint: string,
+  crypto: WebCryptoLike = getWebCrypto(),
+): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', utf8Encode(endpoint));
+  return toBase64Url(new Uint8Array(digest));
 }
 
 /** Client side: sign a subscription with the device private key. Returns base64url. */

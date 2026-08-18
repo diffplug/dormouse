@@ -8,7 +8,11 @@
  * token and the device key the Server demands.
  */
 
-import { fromBase64Url, type PushSubscriptionPayload } from 'server-lib-common';
+import {
+  fromBase64Url,
+  pushEndpointFingerprint,
+  type PushSubscriptionPayload,
+} from 'server-lib-common';
 import { getPushServiceWorkerRegistration } from '../pocket-app/service-worker';
 
 /**
@@ -85,12 +89,21 @@ export async function getPushAvailability(): Promise<PushAvailability> {
  * Server's current VAPID key.
  *
  * A Server row alone is not enough to claim "Alerts on": permission may have
- * been revoked, the browser subscription may have disappeared, or the Server
- * may have rotated its VAPID key. In all three cases Pocket must leave Enable
- * available so {@link subscribeToPushInBrowser} can repair the registration.
+ * been revoked, the browser subscription may have disappeared, the Server may
+ * have rotated its VAPID key, or the push service may have rotated the endpoint
+ * on its own. In all four cases Pocket must leave Enable available so
+ * {@link subscribeToPushInBrowser} can repair the registration.
+ *
+ * That last case is invisible to the VAPID check — the subscription is valid
+ * and minted for the right key, it just points somewhere new, leaving every
+ * stored row unreachable. `registeredEndpoint` is the digest of the address
+ * this device last registered: a different one means the address moved. Null
+ * is "no opinion", not "mismatch", so a device that subscribed before this was
+ * recorded, or one whose storage was cleared, is not made to re-register.
  */
 export async function hasCurrentPushSubscription(
   applicationServerKey: string,
+  registeredEndpoint: string | null,
 ): Promise<boolean> {
   if (
     !('serviceWorker' in navigator) ||
@@ -102,11 +115,12 @@ export async function hasCurrentPushSubscription(
   }
   const registration = await getPushServiceWorkerRegistration();
   const subscription = await registration?.pushManager.getSubscription();
-  return (
-    subscription !== null &&
-    subscription !== undefined &&
-    sameBytes(subscription.options.applicationServerKey, fromBase64Url(applicationServerKey))
-  );
+  if (!subscription) return false;
+  if (!sameBytes(subscription.options.applicationServerKey, fromBase64Url(applicationServerKey))) {
+    return false;
+  }
+  if (registeredEndpoint === null) return true;
+  return (await pushEndpointFingerprint(subscription.endpoint)) === registeredEndpoint;
 }
 
 /**
@@ -116,9 +130,16 @@ export async function hasCurrentPushSubscription(
  *
  * Returns the subscription in the shape the Server stores, or throws with a
  * message worth showing.
+ *
+ * `onDeliveryAddressReplaced` is called the moment the previously registered
+ * address stops being valid, before the replacement is minted. It is required
+ * rather than optional because a caller that ignored it would leave every other
+ * Host claiming alerts through an endpoint that is already dead — including
+ * when the `subscribe()` below throws, which no return value can report.
  */
 export async function subscribeToPushInBrowser(
   applicationServerKey: string,
+  onDeliveryAddressReplaced: () => void,
 ): Promise<PushSubscriptionPayload> {
   // Checked before the permission prompt so a missing worker fails with an
   // explanation rather than after the user has already answered a dialog.
@@ -153,6 +174,12 @@ export async function subscribeToPushInBrowser(
     subscription = null;
   }
 
+  // Nullish rather than falsy so this cannot disagree with the `??=` below,
+  // which is what actually decides whether a new address gets minted. Announced
+  // before the round trip, not after: the old address is already gone (either
+  // unsubscribed above or never there), so a `subscribe()` that throws must not
+  // take that fact with it.
+  if (subscription == null) onDeliveryAddressReplaced();
   subscription ??= await registration.pushManager.subscribe({
     // Mandatory in Chrome and on iOS: a promise that every push we receive
     // becomes a visible notification. `sw.js` keeps it.

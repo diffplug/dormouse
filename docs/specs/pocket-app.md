@@ -155,8 +155,9 @@ output by hand.
   useless without a live relay connection, so an offline cache would buy no
   working screens while actively fighting `registerPocketServing`, which
   re-reads `index.html` per request precisely because a rebuild swaps in new
-  content-hashed assets. It handles `push` and `notificationclick`, and nothing
-  else.
+  content-hashed assets. It handles `push` and `notificationclick`, plus
+  `install`/`activate` to take over immediately (`skipWaiting` + `clients.claim`,
+  which cost nothing when there is no cache to migrate), and nothing else.
 - **A push that cannot be parsed still shows a notification.** Subscribing with
   `userVisibleOnly: true` promises the browser that every delivery becomes
   visible; a browser that catches the worker showing none substitutes its own
@@ -269,42 +270,110 @@ identities and is filtered to this device by `PocketClient`. It is deliberately
 not parameterized by `devicePublicKey`: an endpoint answering "which Hosts is
 device X registered with" would be an enumeration primitive over an input the
 caller need not own, where the account's own rows are already its to read — the
-same scoping `GET /api/hosts` uses. The response is authoritative and replaces
-the set, except that a registration completed while the read was in flight
-wins, since it is the newer fact: Pocket merges the Server snapshot with the
-specific Host registrations whose per-Host completion version advanced after
-that request began (including a repeated repair of the same Host), while
-earlier local ids remain subject to authoritative removal. Pocket clears the
-previous snapshot when a read begins; if the read fails, only registrations
-that completed since then can have added themselves back. That re-offers an
-idempotent action instead of preserving a stale **Alerts on** claim.
-Source of truth: `getPushAvailability` in
+same scoping `GET /api/hosts` uses. `POST /api/push/subscribe` answers with the
+same thing — every Host this device is registered with after the mutation — so
+both answers are complete for the device and neither is a delta. There is
+therefore nothing to merge: the only question is which is newer. Pocket counts
+completed registrations, captures that count when a read begins, and discards
+the read's snapshot if a registration overtook it. Earlier local ids remain
+subject to authoritative removal. Pocket clears the previous snapshot when a
+read begins; if the read fails, only a registration that completed since then
+can have set one. That re-offers an idempotent action instead of preserving a
+stale **Alerts on** claim. Source of truth: `getPushAvailability` in
 `lib/src/remote/client/push-subscribe.ts`,
-`PocketClient.listPushSubscribedHosts`, and `reconcilePushSubscribedHosts` in
+`PocketClient.listPushSubscribedHosts`, and the hosts-phase effect in
 `lib/src/remote/pocket-app/App.tsx`.
 
 The row is necessary but not sufficient for **Alerts on**: Pocket also verifies
-that notification permission remains granted and the service-worker scope still
-holds a `PushSubscription` minted for the Server's current VAPID key. A missing
-subscription, revoked permission, or VAPID rotation therefore exposes Enable
-again instead of letting a stale Server row hide the repair path. The Server
-also omits rows registered under an old VAPID key, so repairing one Host after a
-rotation cannot make the other Hosts' old endpoints look current. Source of
-truth: `hasCurrentPushSubscription` in
-`lib/src/remote/client/push-subscribe.ts`, the `vapidPublicKey` field in
+that notification permission remains granted, that the service-worker scope
+still holds a `PushSubscription` minted for the Server's current VAPID key, and
+that it still points at the address that was actually registered. A missing
+subscription, revoked permission, VAPID rotation, or a rotated endpoint
+therefore exposes Enable again instead of letting a stale Server row hide the
+repair path. The Server also omits rows registered under an old VAPID key, so
+repairing one Host after a rotation cannot make the other Hosts' old endpoints
+look current.
+
+The endpoint check exists because a push service may rotate an address on its
+own, with the VAPID key unchanged. The subscription stays valid and correctly
+keyed, so every other check passes while every stored row points somewhere
+unreachable. Pocket therefore records a SHA-256 digest of the address each time
+the Server accepts a registration (`dormouse-pocket:push-endpoint`, beside the
+existing `:passkey:` and `:paired:` keys) and compares it on open. A digest
+rather than the address, because the endpoint is a bearer capability and
+equality is the only question being asked. One key per device, not per Host —
+one service-worker scope holds one subscription, so if it moves, every Host row
+for that device is stale at once. **Absent reads as no opinion, not as a
+mismatch**, so a device that registered before this was recorded — or one whose
+storage was cleared — is not forced to re-register. Source of truth:
+`hasCurrentPushSubscription` in `lib/src/remote/client/push-subscribe.ts`,
+`pushEndpointFingerprint` in `server-lib-common/src/security/push.ts`,
+`PocketClient.subscribeToPush`, the `vapidPublicKey` field in
 `server/src/state.ts`, and the subscriptions read in `server/src/app.ts`.
+
+Detection is all the page can do, and `sw.js` is deliberately not where it
+happens. A `pushsubscriptionchange` handler could reach the device key (it is a
+non-extractable `CryptoKey` in IndexedDB, which a worker can open) but not a
+session token: that lives only in memory on `PocketClient`, is never persisted,
+and is minted solely by `POST /api/signin/finish` behind a fresh WebAuthn
+assertion — and `navigator.credentials` does not exist in a worker. Re-
+registering unattended would need a long-lived credential that
+[remote-security-model.md](./remote-security-model.md) does not grant, so the
+repair is deliberately deferred to the next time the user opens the app.
 
 Registering another Host or retrying that POST reuses the service-worker
 scope's existing `PushSubscription` when its `applicationServerKey` matches the
 Server's VAPID public key byte-for-byte. Pocket unsubscribes and creates a new
 endpoint only when the key differs, because replacing a matching subscription
-would invalidate the endpoint already stored for every other Host. Source of
-truth: `subscribeToPushInBrowser` in
-`lib/src/remote/client/push-subscribe.ts`.
+would invalidate the endpoint already stored for every other Host. If the
+subscription disappeared or had to rotate, the Server drops that device's other
+Host rows in the same mutation and its response lists what survived, so Pocket
+learns the consequence from the answer rather than tracking what it did. That is
+what makes a committed POST whose response was lost self-repairing: the
+idempotent retry cannot re-announce a deletion it already performed, but it can
+always say what is registered now.
 
-The existing static serving needs no special-casing: `serveStatic` already
-answers `application/manifest+json` for `.webmanifest` and `text/javascript` for
-`sw.js`.
+`subscribeToPushInBrowser` still reports the replacement through a required
+callback, fired at the moment the old delivery address stops being valid —
+before the replacement is minted, so a `subscribe()` that throws cannot take it
+away, which is why the fact is not a return value. Its one job is the UI: Pocket
+stops claiming **Alerts on** for every Host at that instant, since they all
+pointed at the address that just died, and a throw leaves no response to correct
+the view with. Source of truth: `subscribeToPushInBrowser` in
+`lib/src/remote/client/push-subscribe.ts`, `PushSubscriptionStore.upsert` in
+`server/src/state.ts`, and `onEnablePush` in
+`lib/src/remote/pocket-app/App.tsx`.
+
+The existing static serving needs no special-casing for content types:
+`serveStatic` already answers `application/manifest+json` for `.webmanifest` and
+`text/javascript` for `sw.js`.
+
+Caching is set explicitly, because the build has exactly two kinds of file and
+they need opposite answers. Vite content-hashes everything it emits into
+`assets/`, so those may be kept forever (`immutable`) — the name changes when
+the content does. Everything else is unhashed: `index.html`, plus the `public/`
+passthroughs at the root (`sw.js`, the manifest, the icons). Those are served
+`no-cache`, meaning revalidate before use rather than never store.
+
+Revalidating the unhashed half is the load-bearing part. `emptyOutDir` deletes
+the previous build's hashed assets, so a browser reusing a heuristically cached
+`index.html` does not merely run stale code — it requests files that no longer
+exist, and the app fails to boot. The class is decided from the request path
+(`/assets/` or not) rather than the resolved file path, which is platform-shaped;
+if Vite ever emits an unhashed file into `assets/`, or `assetsDir` is overridden,
+that test silently mislabels it. The header is staged on the context *before*
+`serveStatic` runs, since its `onFound` hook fires after the Response is already
+built and cannot add to it.
+
+The SPA fallback overrides that staged class rather than inheriting it, because
+it answers with the shell whatever was asked for, and a response's cache policy
+describes the response. A miss under `/assets/` does not reach the shell at all
+— it is a `404`. The shell is never a useful answer to a subresource request,
+and answering one stored an HTML body under a hashed-asset URL under the
+`immutable` class, where no reload could revalidate it away: a request made
+during a deploy, the exact window this policy exists for, would have broken the
+app permanently. Source of truth: `registerPocketServing` in
+`server/src/app.ts`.
 
 ### An expired session drops to sign-in
 

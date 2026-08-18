@@ -179,9 +179,62 @@ function decodeVapidKey(value: string, name: 'public' | 'private', length: numbe
 /**
  * Real delivery through `web-push`. TTL is deliberately short: an alarm that
  * arrives an hour late is noise, not information, so a push service holding one
- * for an offline phone should drop it rather than deliver it stale.
+ * for an offline phone should drop it rather than deliver it stale. The
+ * request timeout is a separate bound on socket inactivity while talking to
+ * the push service.
  */
 export const PUSH_TTL_SECONDS = 300;
+export const PUSH_REQUEST_TIMEOUT_MS = 10_000;
+
+/**
+ * Wall-clock bound on one delivery attempt, deliberately above
+ * {@link PUSH_REQUEST_TIMEOUT_MS} so it only fires where socket inactivity
+ * cannot: a push service that trickles bytes, or stalls mid-handshake, keeps
+ * resetting the inactivity timer forever. Far below {@link PUSH_TTL_SECONDS},
+ * since a delivery still in flight after this long has already missed the
+ * alarm it was carrying.
+ */
+export const PUSH_SEND_DEADLINE_MS = 15_000;
+
+/**
+ * Run one send under a wall-clock deadline, reporting `failed` if it does not
+ * finish in time. Applied by the send route rather than by
+ * {@link createWebPushSender}, so the bound holds for whatever {@link PushSender}
+ * is injected and is stated where the route's own latency contract lives.
+ *
+ * The deadline bounds the *route*, not the socket: `web-push` accepts no
+ * `AbortSignal`, so a request that loses the race is left to its own
+ * inactivity timeout rather than cancelled. What this prevents is a hung push
+ * service holding the handler open indefinitely and letting successive alarms
+ * pile up concurrent sends.
+ */
+export async function sendWithinDeadline(
+  sender: PushSender,
+  target: PushTarget,
+  payload: string,
+  deadlineMs: number,
+): Promise<PushDeliveryResult> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      // A `PushSender` is contracted to classify its own errors, but it is an
+      // injection point — a throwing one must not take the whole fan-out down.
+      Promise.resolve(sender.send(target, payload)).catch(() => 'failed' as const),
+      new Promise<PushDeliveryResult>((resolve) => {
+        timer = setTimeout(() => {
+          // Same reasoning as the failure log below: origin only, and this is
+          // the only trace a wedged push service leaves.
+          console.warn(
+            `push delivery exceeded ${deadlineMs}ms for ${endpointOrigin(target.endpoint)}`,
+          );
+          resolve('failed');
+        }, deadlineMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function endpointOrigin(endpoint: string): string {
   try {
@@ -227,6 +280,7 @@ export function createWebPushSender(keys: VapidKeys, subject: string): PushSende
           {
             vapidDetails: { subject, publicKey: keys.publicKey, privateKey: keys.privateKey },
             TTL: PUSH_TTL_SECONDS,
+            timeout: PUSH_REQUEST_TIMEOUT_MS,
             urgency: 'high',
             agent,
           },

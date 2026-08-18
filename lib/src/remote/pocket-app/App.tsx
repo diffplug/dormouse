@@ -160,12 +160,12 @@ export default function App(): React.ReactElement {
   const [pushSubscriptionCurrent, setPushSubscriptionCurrent] = useState(false);
   const [pushConfig, setPushConfig] = useState<PushConfigState>({ status: 'loading' });
   /**
-   * Per-Host registration completion versions. The Server read below replaces
-   * the whole set, except for Hosts whose version advanced after that read
-   * began. A counter per Host (rather than a Set) also detects a repeated repair
-   * of the same Host.
+   * Advances on every completed registration. Both the subscribe response and
+   * the subscriptions read answer with this device's whole Host set, so the
+   * only question between them is which is newer: a read that this counter
+   * overtook is stale and gets dropped rather than merged.
    */
-  const pushEnableVersionsRef = useRef<Map<string, number>>(new Map());
+  const pushRegistrationVersionRef = useRef(0);
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
 
   // Availability depends on browser state the app cannot change (permission,
@@ -185,7 +185,7 @@ export default function App(): React.ReactElement {
       .getPushConfig()
       .then(async (key) => {
         const subscriptionCurrent =
-          key !== null ? await hasCurrentPushSubscription(key).catch(() => false) : false;
+          key !== null ? await hasCurrentPushSubscription(key, client.registeredPushEndpoint()).catch(() => false) : false;
         if (live) {
           setPushConfig(key === null ? { status: 'disabled' } : { status: 'ready', key });
           setPushSubscriptionCurrent(subscriptionCurrent);
@@ -199,24 +199,20 @@ export default function App(): React.ReactElement {
     // holds a row for. Authoritative rather than merged, so a row pruned after
     // a 410 stops claiming alerts are on.
     setPushSubscribedHostIds(new Set());
-    const enableVersionsAtStart = new Map(pushEnableVersionsRef.current);
+    const registrationVersionAtStart = pushRegistrationVersionRef.current;
     void client
       .listPushSubscribedHosts()
       .then((hostIds) => {
-        if (live) {
-          setPushSubscribedHostIds(
-            reconcilePushSubscribedHosts(
-              hostIds,
-              enableVersionsAtStart,
-              pushEnableVersionsRef.current,
-            ),
-          );
-        }
+        // A registration that landed while this was in flight already answered
+        // the same question about the same device, and did so later. Nothing to
+        // merge — the newer complete answer simply stands.
+        if (!live || pushRegistrationVersionRef.current !== registrationVersionAtStart) return;
+        setPushSubscribedHostIds(new Set(hostIds));
       })
       .catch(() => {
         // Best-effort: the previous snapshot was cleared before this request,
-        // while any Enable that completed since then added itself back. That
-        // re-offers an idempotent action instead of preserving a stale claim.
+        // while any Enable that completed since then set its own. That re-offers
+        // an idempotent action instead of preserving a stale claim.
       });
     return () => {
       live = false;
@@ -331,14 +327,20 @@ export default function App(): React.ReactElement {
       if (pushConfig.status !== 'ready') {
         throw new Error('Check the server configuration before enabling alerts.');
       }
-      const subscription = await subscribeToPushInBrowser(pushConfig.key);
-      await client.subscribeToPush(host.hostId, subscription);
-      pushEnableVersionsRef.current.set(
-        host.hostId,
-        (pushEnableVersionsRef.current.get(host.hostId) ?? 0) + 1,
-      );
+      const subscription = await subscribeToPushInBrowser(pushConfig.key, () => {
+        // The scope no longer holds an address the Server can reach, so no Host
+        // may keep claiming alerts through it. Stated the moment it becomes
+        // true, which is what re-offers Enable if minting the replacement then
+        // throws and there is no response to correct the UI with.
+        setPushSubscriptionCurrent(false);
+      });
+      const { hostIds } = await client.subscribeToPush(host.hostId, subscription);
+      pushRegistrationVersionRef.current += 1;
       setPushSubscriptionCurrent(true);
-      setPushSubscribedHostIds((prev) => new Set(prev).add(host.hostId));
+      // Authoritative and complete for this device — including after a retry
+      // whose first attempt committed but lost its response — so it replaces
+      // the set rather than adding to it.
+      setPushSubscribedHostIds(new Set(hostIds));
     });
 
   // A config retry deliberately stops after caching the key. The next tap on
@@ -349,7 +351,7 @@ export default function App(): React.ReactElement {
       try {
         const key = await client.getPushConfig();
         const subscriptionCurrent =
-          key !== null ? await hasCurrentPushSubscription(key).catch(() => false) : false;
+          key !== null ? await hasCurrentPushSubscription(key, client.registeredPushEndpoint()).catch(() => false) : false;
         setPushConfig(key === null ? { status: 'disabled' } : { status: 'ready', key });
         setPushSubscriptionCurrent(subscriptionCurrent);
       } catch (err) {
@@ -422,23 +424,6 @@ export default function App(): React.ReactElement {
       <div className={clsx(PK.body, PK.bodyCenter)}>…</div>
     </div>
   );
-}
-
-/**
- * Apply an authoritative Server snapshot without losing a registration that
- * completed after the read began. Earlier local ids are deliberately omitted
- * when the Server no longer reports them: pruning must self-correct the UI.
- */
-export function reconcilePushSubscribedHosts(
-  serverHostIds: readonly string[],
-  enableVersionsAtReadStart: ReadonlyMap<string, number>,
-  enableVersionsNow: ReadonlyMap<string, number>,
-): Set<string> {
-  const reconciled = new Set(serverHostIds);
-  for (const [hostId, version] of enableVersionsNow) {
-    if (version > (enableVersionsAtReadStart.get(hostId) ?? 0)) reconciled.add(hostId);
-  }
-  return reconciled;
 }
 
 // --- ConnectedView ---------------------------------------------------------

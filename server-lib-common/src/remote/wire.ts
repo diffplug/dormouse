@@ -176,6 +176,22 @@ export interface PushSubscribeRequest {
 }
 export interface PushSubscribeResponse {
   subscribedAt: number;
+  /**
+   * Every Host this device is registered with after the mutation — the state,
+   * not the delta. One service-worker scope has one subscription, so a changed
+   * delivery address drops the device's other Host rows in the same mutation
+   * and this is what survives it.
+   *
+   * Reporting the result rather than the event is what makes a lost response
+   * self-healing: the idempotent retry cannot re-announce a deletion it already
+   * performed, but it can always answer what is there now, so the Client needs
+   * no memory of what it did.
+   *
+   * Safe to scope to the device even though `PushSubscriptionsResponse`
+   * deliberately is not: this request carries a device signature, so the caller
+   * has proven it owns the identity being reported on.
+   */
+  hostIds: string[];
 }
 
 /**

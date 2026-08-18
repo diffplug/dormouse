@@ -6,7 +6,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -19,6 +19,11 @@ async function makePocketDir() {
   const dir = await mkdtemp(join(tmpdir(), 'dormouse-pocket-'));
   await writeFile(join(dir, 'index.html'), '<!doctype html><title>Pocket</title><div id=pocket-root></div>');
   await writeFile(join(dir, 'app.js'), 'console.log("pocket");');
+  // Mirrors the real build's two kinds: `public/` passthroughs at the root and
+  // Vite's content-hashed output under `assets/`.
+  await writeFile(join(dir, 'sw.js'), 'self.addEventListener("push", () => {});');
+  await mkdir(join(dir, 'assets'), { recursive: true });
+  await writeFile(join(dir, 'assets', 'index-Cv4RGHv-.js'), 'export default 1;');
   return dir;
 }
 
@@ -55,6 +60,39 @@ test('API routes still win over static serving', async () => {
   assert.equal(res.status, 401);
   const body = await res.json();
   assert.equal(body.error, 'unauthorized');
+});
+
+test('a content-hashed asset may be cached forever', async () => {
+  const { app: hono } = app({ pocketDir: await makePocketDir() });
+  const res = await hono.request('/assets/index-Cv4RGHv-.js');
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+});
+
+test('the unhashed shell is revalidated instead', async () => {
+  // `emptyOutDir` deletes the previous build's hashed assets, so a cached
+  // index.html would not serve stale code — it would request files that no
+  // longer exist. The worker and the SPA fallback answer the same way.
+  const { app: hono } = app({ pocketDir: await makePocketDir() });
+  for (const path of ['/', '/sw.js', '/some/deep/link']) {
+    const res = await hono.request(path);
+    assert.equal(res.status, 200, path);
+    assert.equal(res.headers.get('cache-control'), 'no-cache', path);
+  }
+});
+
+test('a hashed asset that no longer exists 404s instead of being answered with the shell', async () => {
+  // `emptyOutDir` deletes the previous build's assets, so a client mid-deploy
+  // can ask for one that is gone. Answering with the shell would store an HTML
+  // body under that URL — and under the immutable class, where no reload could
+  // revalidate it away, so an unchanged chunk keeping its hash across builds
+  // would serve the poisoned entry forever.
+  const { app: hono } = app({ pocketDir: await makePocketDir() });
+  const res = await hono.request('/assets/index-DELETED.js');
+
+  assert.equal(res.status, 404);
+  assert.equal(res.headers.get('cache-control'), 'no-cache');
+  assert.doesNotMatch(await res.text(), /pocket-root/);
 });
 
 test('falls back to the build-instructions stub when no Pocket build exists', async () => {
