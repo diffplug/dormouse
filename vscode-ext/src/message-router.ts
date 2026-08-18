@@ -1009,7 +1009,9 @@ export function attachRouter(
         if (!request.pending.delete(router)) continue;
         if (request.pending.size === 0) request.settle();
       }
-      subscribedPtyIds.clear();
+      subscribedPtyIds.releaseAll((ptyId) => {
+        if (isRemotePty(ptyId)) remoteUnsubscribe(ptyId);
+      });
       releaseSingletons(claimant);
       removeWatchedCommandListener();
       removeAlertSettingsListener();

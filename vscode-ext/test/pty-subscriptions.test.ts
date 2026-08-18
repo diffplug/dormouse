@@ -20,4 +20,18 @@ describe('PtySubscriptions', () => {
     const subscriptions = new PtySubscriptions();
     expect(subscriptions.unsubscribe('pty-missing')).toBe(false);
   });
+
+  it('releases each unique stream once on router disposal', () => {
+    const subscriptions = new PtySubscriptions();
+    subscriptions.subscribe('pty-1');
+    subscriptions.subscribe('pty-1');
+    subscriptions.subscribe('pty-2');
+    const released: string[] = [];
+
+    subscriptions.releaseAll((ptyId) => released.push(ptyId));
+
+    expect(released.sort()).toEqual(['pty-1', 'pty-2']);
+    expect(subscriptions.has('pty-1')).toBe(false);
+    expect(subscriptions.has('pty-2')).toBe(false);
+  });
 });

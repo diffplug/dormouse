@@ -25,11 +25,9 @@ export class PtySubscriptions {
     return true;
   }
 
-  ids(): IterableIterator<string> {
-    return this.#counts.keys();
-  }
-
-  clear(): void {
+  /** Release every underlying unique stream, regardless of viewer count. */
+  releaseAll(release: (ptyId: string) => void): void {
+    for (const ptyId of this.#counts.keys()) release(ptyId);
     this.#counts.clear();
   }
 }

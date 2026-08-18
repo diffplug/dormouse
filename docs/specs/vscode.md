@@ -319,6 +319,9 @@ Subscribing is a subscription, not a pair of calls: `peers.streamPty(ptyId)` ret
 The router reference-counts those handles per PTY: only zero-to-one starts
 cross-window forwarding and only one-to-zero stops it, so detaching one of two
 concurrent viewers cannot silence the other.
+Router disposal releases every still-counted cross-window PTY once before
+clearing the counts, so document teardown cannot leave an owner forwarding to
+a webview that no longer exists.
 
 The directory emits **twice**: the local entries immediately, then a merged snapshot once the peers answer. The phone should not wait on a round trip to see the panes that are already here.
 
