@@ -13,7 +13,6 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import SiteHeader from "../components/SiteHeader";
 import posterUrl from "../assets/video-climb-blink-and-stare.webp";
 import videoUrl from "../assets/video-climb-blink-and-stare.mp4";
-import alertVideoUrl from "../assets/video-alert.mp4";
 import copyPasteVideoUrl from "../assets/video-copy-paste.mp4";
 import tmuxVideoUrl from "../assets/video-tmux.mp4";
 import visualStudioIconUrl from "../assets/visual-studio-icon.svg";
@@ -21,7 +20,6 @@ import tinyIconUrl from "../assets/icon-tiny-dark.png";
 import phoneMockupUrl from "../assets/phone-mockup.webp";
 import standaloneLatest from "@standalone-latest";
 import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
-import { NotifySignupForm } from "../components/NotifySignupForm";
 
 /** Multiplier on scroll required to drive the hero animation.
  *  1 = baseline, 2 = half as sensitive, 0.5 = twice as sensitive. */
@@ -759,7 +757,7 @@ export default function Home() {
               terminal
             </span>
             <span ref={word2Ref} style={{ opacity: 0, transform: "translateY(12px)" }}>
-              <span className="text-[var(--color-caramel)]">for mice</span>
+              <span className="text-[var(--color-caramel)]">for mice and thumbs</span>
             </span>
             <p
               ref={footnoteRef}
@@ -774,60 +772,148 @@ export default function Home() {
 
       {/* ── Content sections — pulled up to appear as video starts scrolling ── */}
       <div ref={contentRef} className="relative z-10 bg-[var(--color-bg)]" style={{ marginTop: `-${(1 - UNPIN_THRESHOLD) * RUNWAY_VH}vh` }}>
-        {/* Section 1: narrow text over a full-width video — lead with the tmux story */}
-        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`}>
+        {/* Section 1: distribution + layout — one terminal, two homes */}
+        <section id="features" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`}>
           <div className="mx-auto max-w-2xl">
-            <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-6">Soft as a mouse, sharp as a tmux</h2>
+            <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-6">VS Code or Standalone</h2>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
-              Upgrade your VS Code or native terminal with a flexible multipane
-              layout. Sleep the tasks you're not watching down to a compact
-              status indicator.
+              One terminal, two homes. Inside VS Code it borrows your theme and
+              your keybindings — it should be hard to tell it isn't built in.
+              Outside, it's a native app that starts in a blink. Same layout,
+              same alerts, same everything — pick whichever one matches the day.
+            </p>
+            <div className="mt-8 mb-8 grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="flex items-center gap-3 rounded-lg border border-[var(--color-text)]/15 px-4 py-3">
+                <VsCodeIcon className="size-7" />
+                <div>
+                  <div className="font-display text-base">VS Code</div>
+                  <div className="text-sm opacity-60">and its forks</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 rounded-lg border border-[var(--color-text)]/15 px-4 py-3">
+                <img src={tinyIconUrl} alt="" aria-hidden="true" className="size-7 shrink-0" />
+                <div>
+                  <div className="font-display text-base">Standalone</div>
+                  <div className="text-sm opacity-60">Mac, Windows, Linux</div>
+                </div>
+              </div>
+            </div>
+            <p className="text-lg leading-relaxed opacity-70 mb-4">
+              Soft as a mouse, sharp as a tmux. A real tiling layout for the
+              terminals you actually run at once — minimize the ones you're not
+              watching down to a compact status indicator, and they keep
+              running, and keep reporting.
             </p>
             <p className="text-lg leading-relaxed opacity-70">
               Do it all with the mouse, or keep your hands on the keyboard with
-              tmux keybinds.
+              tmux keybinds. Same prefix, same splits, same pane navigation —
+              nothing you already know gets taken away.
             </p>
           </div>
           <FeatureVideo src={tmuxVideoUrl} variant="intrinsic" className="mt-8" />
         </section>
-
         {/* Section 2: image left, text right */}
-        <section id="features" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[3fr_2fr] gap-8 md:gap-12 items-start`}>
-          <FeatureVideo src={alertVideoUrl} className="order-2 md:order-1" />
+        <section id="notify" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
+          <img
+            src={phoneMockupUrl}
+            alt="Dormouse Pocket running on a phone"
+            className="order-2 md:order-1 block w-full max-w-[280px] mx-auto md:max-w-none"
+          />
           <div className="order-1 md:order-2">
-            <h2 className="font-display text-xl mb-6">Stop watching terminals spin</h2>
-            <p className="text-lg leading-relaxed opacity-70 mb-4">
-              Dormouse tracks activity the same way you do — visual motion. When a
-              pane stops changing for two seconds, it marks the task complete and
-              alerts you.
+            <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)] mb-6">
+              Push notifications you can self-host
+            </h2>
+            <p className="mb-4 text-lg leading-relaxed opacity-70">
+              Your agent hits a permission prompt four minutes after you leave,
+              then sits there until you get back. Dormouse already knows that
+              pane is asking for a human — so it buzzes your phone. A real push
+              notification, delivered by Apple or Google, to an app that's
+              completely closed.
+            </p>
+            <p className="mb-4 text-lg leading-relaxed opacity-70">
+              Then you answer it. Tap the terminal and a radial menu opens under
+              your thumb: drag down-right for{" "}
+              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">y</code>,
+              up-right for{" "}
+              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">n</code>,
+              or out to Esc, Ctrl+C, and a quit menu. One drag and the agent's
+              moving again. No keyboard, no squinting.
+            </p>
+            <p className="mb-4 text-lg leading-relaxed opacity-70">
+              The relay is one Node process. No database — state is JSON on
+              disk, and push keys mint themselves on first boot. Put{" "}
+              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">tailscale serve</code>{" "}
+              in front of it and you're done: no account, no cloud dependency,
+              nothing anyone can shut off. Your laptop decides which phones get
+              notified — the server isn't allowed to choose for it.
             </p>
             <p className="text-lg leading-relaxed opacity-70">
-              Works with any CLI tool that prints to a terminal — no plugins, no
-              configuration. Also supports{" "}
-              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">BEL</code>{" "}
-              and{" "}
-              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">OSC 9/99/777</code>{" "}
-              for native TUI integration.
+              <a href="/playground/pocket" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">Dormouse Pocket</a>{" "}
+              is in development — try the phone interface in your browser, and
+              sign up there to hear when it's ready.
             </p>
+          </div>
+        </section>
+
+        {/* Section 4: port awareness — text left, context-menu mock right */}
+        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-center`}>
+          <div>
+            <h2 className="font-display text-xl mb-6">Terminals that know their ports</h2>
+            <p className="text-lg leading-relaxed opacity-70 mb-4">
+              Six panes running and something's serving{" "}
+              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">:3000</code>.
+              Which one?
+            </p>
+            <p className="text-lg leading-relaxed opacity-70">
+              Right-click a pane and Dormouse lists the ports that pane's
+              process tree is actually listening on — hit a number to open one.
+              No{" "}
+              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">lsof</code>,
+              no scrolling back to find where Vite printed the URL.
+            </p>
+          </div>
+          <div className="rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04] p-4">
+            <div className="mb-3 flex items-center gap-2 text-sm opacity-60">
+              <TerminalIcon size={15} weight="bold" />
+              <span className="font-mono">web — pnpm dev</span>
+            </div>
+            <div className="space-y-1 font-mono text-sm">
+              {[
+                { key: "1", port: "3000", label: "vite" },
+                { key: "2", port: "24678", label: "vite hmr" },
+                { key: "3", port: "5432", label: "postgres" },
+              ].map(({ key, port, label }) => (
+                <div
+                  key={port}
+                  className="flex items-center gap-3 rounded px-2 py-1.5 hover:bg-[var(--color-text)]/10"
+                >
+                  <span className="w-4 text-center opacity-40">{key}</span>
+                  <span className="text-[var(--color-caramel)]">localhost:{port}</span>
+                  <span className="ml-auto opacity-50">{label}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
 
         {/* Section 3: text left, image right */}
         <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
           <div>
-            <h2 className="font-display text-xl mb-6">Newlines and copy paste like you meant</h2>
+            <h2 className="font-display text-xl mb-6">Select and copy-paste like you meant</h2>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
-              You're used to{" "}
-              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">Shift+Enter</code>{" "}
-              for a newline in the browser — but it's broken in your terminal?
-              Not anymore. Dormouse works the way you'd expect, no arcane
-              terminal knowledge required.
+              Click and drag in a "mouse conformant" terminal doesn't select
+              text; it fires escape code{" "}
+              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">{"\\e[<0;x;yM"}</code>{" "}
+              at whatever's running. Dormouse notices when a TUI has grabbed the
+              mouse and hands you a one-click override, so you can just — select
+              the thing.
             </p>
             <p className="text-lg leading-relaxed opacity-70">
-              Click and drag in a "mouse conformant" terminal doesn't select text;
-              it sends escape code{" "}
-              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">{"\\e[<0;x;yM"}</code>.
-              Dormouse lets you copy-paste like a human, not a terminal.
+              Then copy it the way you meant it. <strong className="font-semibold opacity-100">Raw</strong> keeps
+              the hard wraps; <strong className="font-semibold opacity-100">Rewrapped</strong> joins them back
+              into the line the program actually printed. Tap{" "}
+              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">e</code>{" "}
+              mid-drag to snap the selection out to the whole URL or file path.
             </p>
           </div>
           <FeatureVideo src={copyPasteVideoUrl} />
@@ -835,7 +921,7 @@ export default function Home() {
 
         <section id="download" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`} style={downloadAccentStyle}>
           <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)]">Get Dormouse</h2>
-          <p className="mb-4 text-lg leading-relaxed opacity-70">A dormouse knows when to wake up. Multitasking terminal for mice.</p>
+          <p className="mb-4 text-lg leading-relaxed opacity-70">A dormouse knows when to wake up. Multitasking terminal for mice and thumbs.</p>
           <DownloadButton
             href="/playground"
             icon={<TerminalIcon size={26} weight="bold" />}
@@ -925,29 +1011,6 @@ export default function Home() {
                 </div>
               )}
             </div>
-          </div>
-        </section>
-
-        <section id="notify" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
-          <img
-            src={phoneMockupUrl}
-            alt="Dormouse Pocket running on a phone"
-            className="order-2 md:order-1 block w-full max-w-[280px] mx-auto md:max-w-none"
-          />
-          <div className="order-1 md:order-2">
-            <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)] mb-6">
-              Walk away. Keep going.
-            </h2>
-            <p className="mb-4 text-lg leading-relaxed opacity-70">
-              Coming next: <a href="/playground/pocket" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">Dormouse Pocket</a>.
-              Tether a terminal session to your phone over WebRTC and take a stroll — Dormouse
-              buzzes your phone when something needs attention. A hosted auto-pairing service comes
-              later, so you can close the laptop and walk away, no setup dance.
-            </p>
-            <p className="mb-4 text-lg leading-relaxed opacity-70">
-              Open source and free to self-host, or pay a small monthly fee for our hosted version. Early adopters get a launch discount.
-            </p>
-            <NotifySignupForm />
           </div>
         </section>
 
