@@ -314,6 +314,14 @@ Source of truth: `vscode-ext/src/peer-link.ts` for the sockets and roles, `lib/s
 
 Source of truth: the broker in `vscode-ext/src/message-router.ts` (`peer:*` cases, `subscribedPtyIds`), `PeerBridge` in `lib/src/lib/platform/types.ts` with its VS Code implementation in `vscode-adapter.ts`, the responder in `lib/src/remote/host/peer-surfaces.ts`, and the foreign-surface path in `remote-api.ts`, tested in `lib/src/remote/host/peer-surfaces.test.ts`.
 
+### Testing the extension host
+
+`vscode-ext` runs vitest (`pnpm --filter dormouse test`, which typechecks first). The `vscode` module only exists inside a running editor, so `vitest.config.mts` aliases it to a stub providing just the output channel `log.ts` opens — most modules worth testing import `vscode` as `import type`, which erases.
+
+The tests that matter here are the ones that need real I/O, since the pure halves already live in `lib`: `test/window-lease.test.ts` drives two module instances against a real directory (two windows contending, and a handover on dispose), and `test/peer-link.test.ts` stands up a broker and a peer over a real socket to cover the rendezvous handshake, PTY routing, streaming, token rejection, and what a disconnect does to in-flight terminals. Separate module instances come from `vi.resetModules()` plus a dynamic import, which is what makes one process able to play two windows.
+
+Not covered: anything needing the real editor — command registration, webview hosting, the theme observer. Those would need `@vscode/test-electron`.
+
 ### Build and development
 
 Source of truth:

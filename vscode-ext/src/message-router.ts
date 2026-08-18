@@ -179,6 +179,8 @@ configurePeerLink({
   deliverRemotePtyData: (ptyId, data) => deliverRemotePtyData(ptyId, data),
   deliverRemotePtyExit: (ptyId, code) => deliverRemotePtyExit(ptyId, code),
   onProcessedPtyData: (listener) => onProcessedPtyData(listener),
+  writePty: (ptyId, data) => ptyManager.write(ptyId, data),
+  resizePty: (ptyId, cols, rows) => ptyManager.resize(ptyId, cols, rows),
 });
 
 /**

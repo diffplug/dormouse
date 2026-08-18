@@ -37,7 +37,6 @@ import {
   type PeerLinkResponse,
 } from '../../lib/src/lib/vscode-peer-link-protocol';
 import { log } from './log';
-import * as ptyManager from './pty-manager';
 
 export interface PeerSurfaceResult {
   ok: boolean;
@@ -63,6 +62,8 @@ export interface PeerLinkDeps {
   deliverRemotePtyData(ptyId: string, data: string): void;
   deliverRemotePtyExit(ptyId: string, exitCode: number): void;
   onProcessedPtyData(listener: (id: string, data: string) => void): () => void;
+  writePty(ptyId: string, data: string): void;
+  resizePty(ptyId: string, cols: number, rows: number): void;
 }
 
 let deps: PeerLinkDeps | null = null;
@@ -269,14 +270,22 @@ async function startServer(): Promise<void> {
     socket.on('close', () => dropClient(client));
   });
 
-  await new Promise<void>((resolve) => server!.listen(serverSocketPath, resolve));
-  await mkdir(join(path, '..'), { recursive: true }).catch(() => {});
-  const rendezvous: Rendezvous = { socketPath: serverSocketPath, token: serverToken };
-  await writeFile(path, JSON.stringify(rendezvous), 'utf8');
-  // The token is the only thing standing between another local process and this
-  // window's terminals.
-  await chmod(path, 0o600).catch(() => {});
-  log.info('[peer-link] serving peers');
+  try {
+    await new Promise<void>((resolve) => server!.listen(serverSocketPath, resolve));
+    await mkdir(join(path, '..'), { recursive: true }).catch(() => {});
+    const rendezvous: Rendezvous = { socketPath: serverSocketPath, token: serverToken };
+    await writeFile(path, JSON.stringify(rendezvous), 'utf8');
+    // The token is the only thing standing between another local process and
+    // this window's terminals.
+    await chmod(path, 0o600).catch(() => {});
+    log.info('[peer-link] serving peers');
+  } catch (err) {
+    // Started fire-and-forget from the lease callback, so a rejection here
+    // would surface as an unhandled one rather than as a broken link. An
+    // unwritable globalStorage means no peers, not a crashed extension host.
+    log.error(`[peer-link] could not start serving: ${String(err)}`);
+    await stopServer();
+  }
 }
 
 async function stopServer(): Promise<void> {
@@ -329,10 +338,10 @@ async function onClientFrame(frame: unknown): Promise<void> {
       respond({ kind: 'ack', id: request.id });
       break;
     case 'write':
-      ptyManager.write(request.ptyId, request.data);
+      deps?.writePty(request.ptyId, request.data);
       break;
     case 'resizePty':
-      ptyManager.resize(request.ptyId, request.cols, request.rows);
+      deps?.resizePty(request.ptyId, request.cols, request.rows);
       break;
   }
 }
