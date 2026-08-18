@@ -14,17 +14,6 @@
  * that vanishes mid-attach) are testable without spawning processes.
  */
 
-/** What the broker can ask a window to do with one of its surfaces. */
-export type PeerSurfaceOp = 'attach' | 'detach' | 'resize';
-
-/** What a window reports back about a surface it owns. */
-export interface PeerSurfaceResult {
-  ok: boolean;
-  ptyId?: string;
-  cols?: number;
-  rows?: number;
-}
-
 /** How long the broker waits for a window to answer before giving up on it. */
 export const PEER_REPLY_BUDGET_MS = 1_000;
 
@@ -35,17 +24,17 @@ export const PEER_REPLY_BUDGET_MS = 1_000;
  */
 export const PEER_REQUEST_TIMEOUT_MS = 3_000;
 
-/** Broker → peer window. */
+/**
+ * Broker → peer window.
+ *
+ * `request` carries one peer operation, and `op` is opaque here: what a peer
+ * may be asked is a property of the remote Host, not of the transport, so the
+ * operation map and its real types live in `lib/src/remote/host/peer-surfaces.ts`
+ * and this layer only moves the bytes. Adding an operation touches neither this
+ * file nor the socket code.
+ */
 export type PeerLinkRequest =
-  | { kind: 'directory'; id: string }
-  | {
-      kind: 'surfaceOp';
-      id: string;
-      surfaceId: string;
-      op: PeerSurfaceOp;
-      cols?: number;
-      rows?: number;
-    }
+  | { kind: 'request'; id: string; op: string; params: unknown }
   | { kind: 'subscribe'; id: string; ptyId: string }
   | { kind: 'unsubscribe'; id: string; ptyId: string }
   | { kind: 'write'; id: string; ptyId: string; data: string }
@@ -53,8 +42,12 @@ export type PeerLinkRequest =
 
 /** Peer window → broker. */
 export type PeerLinkResponse =
-  | { kind: 'directoryResult'; id: string; entries: unknown[] }
-  | ({ kind: 'surfaceResult'; id: string } & PeerSurfaceResult)
+  /**
+   * Everything that window's webviews answered, concatenated. A peer that owns
+   * nothing the request named contributes no results, so an empty array is how
+   * "not mine" arrives.
+   */
+  | { kind: 'result'; id: string; results: unknown[] }
   /** Unsolicited: bytes from a PTY the broker subscribed to. */
   | { kind: 'data'; ptyId: string; data: string }
   /** Unsolicited: that PTY ended. */
@@ -111,6 +104,21 @@ export class FrameDecoder {
     }
     return frames;
   }
+}
+
+/**
+ * The one field the transport reads out of an otherwise opaque answer.
+ *
+ * Reserved: an answer that names a `ptyId` is claiming the PTY behind it, and
+ * that is the only way the broker can learn which window a PTY lives in — a
+ * `ptyId` on its own says nothing about where it is, and every later write,
+ * resize, and subscribe has to reach that window. Any peer operation whose
+ * result carries a `ptyId` therefore gets routed by it; nothing else about the
+ * answer is interpreted here.
+ */
+export function routedPtyId(result: unknown): string | null {
+  const ptyId = (result as { ptyId?: unknown } | null | undefined)?.ptyId;
+  return typeof ptyId === 'string' ? ptyId : null;
 }
 
 /**

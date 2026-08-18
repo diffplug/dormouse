@@ -36,21 +36,30 @@ class PeerPlatform {
   peerSurfaces = new Map<string, { ptyId: string; cols: number; rows: number }>();
   peerEntries: unknown[] = [];
 
+  /**
+   * One generic seam: `op` is opaque to the adapter, and a peer answers with
+   * zero or more results — none of them meaning nobody owns it.
+   */
   readonly peers = {
-    directory: async () => this.peerEntries,
-    surfaceOp: async (surfaceId: string, op: 'attach' | 'detach' | 'resize', cols?: number, rows?: number) => {
-      this.ops.push({ surfaceId, op, cols, rows });
+    claimSingleton: () => {},
+    request: async (op: string, params: unknown) => {
+      if (op === 'directory') return this.peerEntries;
+      const { surfaceId, op: surfaceOp, cols, rows } =
+        params as { surfaceId: string; op: string; cols?: number; rows?: number };
+      this.ops.push({ surfaceId, op: surfaceOp, cols, rows });
       const surface = this.peerSurfaces.get(surfaceId);
-      if (!surface) return { ok: false };
-      if (op !== 'detach' && cols && rows) {
+      if (!surface) return [];
+      if (surfaceOp !== 'detach' && cols && rows) {
         surface.cols = cols;
         surface.rows = rows;
       }
-      return { ok: true, ptyId: surface.ptyId, cols: surface.cols, rows: surface.rows };
+      return [{ ptyId: surface.ptyId, cols: surface.cols, rows: surface.rows }];
     },
-    subscribePty: (id: string) => void this.subscribed.push(id),
-    unsubscribePty: (id: string) => void this.unsubscribed.push(id),
-    serve: () => {},
+    respond: () => {},
+    streamPty: (id: string) => {
+      this.subscribed.push(id);
+      return () => void this.unsubscribed.push(id);
+    },
   };
 
   onPtyData(handler: DataHandler): void {

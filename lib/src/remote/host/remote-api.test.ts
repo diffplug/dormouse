@@ -81,12 +81,26 @@ function registerSurface(
   } as unknown as TerminalEntry);
 }
 
-function attach(session: RemoteApiSession, cols: number, rows: number, surfaceId = 'surface-1'): void {
+/**
+ * Resolving a surface is a promise now — a pane in a sibling webview is a round
+ * trip away, and the local path takes the same seam rather than a second one
+ * (`surface-resolve.ts`) — so an attach lands a microtask later even here.
+ * `terminal.resize` on a resolved pane is still synchronous, so everything the
+ * attach does still happens in one go once it starts.
+ */
+async function attach(session: RemoteApiSession, cols: number, rows: number, surfaceId = 'surface-1'): Promise<void> {
   session.handle({
     requestId: 'attach-1',
     method: REMOTE_METHODS.surfaceAttach,
     params: { surfaceId, cols, rows },
   });
+  await settle();
+}
+
+/** Let a promise-tailed handler run; microtasks are unaffected by fake timers. */
+async function settle(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 function decodeTerminalData(payload: SentPayload): string {
@@ -101,14 +115,14 @@ describe('RemoteApiSession surface.attach', () => {
     setPlatform(new FakePtyAdapter());
   });
 
-  it('keeps synchronous repaint data from terminal resize', () => {
+  it('keeps synchronous repaint data from terminal resize', async () => {
     const platform = new RepaintOnResizePlatform();
     setPlatform(platform.asAdapter());
     registerSurface(platform, 80, 24);
     const sent: SentPayload[] = [];
     const session = new RemoteApiSession({ hostId: 'host-1', send: (payload) => sent.push(payload) });
 
-    attach(session, 100, 30);
+    await attach(session, 100, 30);
 
     expect(sent[0]).toMatchObject({
       requestId: 'attach-1',
@@ -122,7 +136,7 @@ describe('RemoteApiSession surface.attach', () => {
     expect(decodeTerminalData(sent[1]!)).toBe('terminal-resize:100x30');
   });
 
-  it('keeps synchronous repaint data from the same-size PTY bounce', () => {
+  it('keeps synchronous repaint data from the same-size PTY bounce', async () => {
     vi.useFakeTimers();
     const platform = new RepaintOnResizePlatform();
     setPlatform(platform.asAdapter());
@@ -130,7 +144,7 @@ describe('RemoteApiSession surface.attach', () => {
     const sent: SentPayload[] = [];
     const session = new RemoteApiSession({ hostId: 'host-1', send: (payload) => sent.push(payload) });
 
-    attach(session, 80, 24);
+    await attach(session, 80, 24);
 
     expect(platform.resizePty).toHaveBeenNthCalledWith(1, 'pty-1', 80, 23);
     expect(sent[0]).toMatchObject({
@@ -148,7 +162,7 @@ describe('RemoteApiSession surface.attach', () => {
     expect(platform.resizePty).toHaveBeenNthCalledWith(2, 'pty-1', 80, 24);
   });
 
-  it('does not fire the same-size bounce restore after detaching', () => {
+  it('does not fire the same-size bounce restore after detaching', async () => {
     vi.useFakeTimers();
     const platform = new RepaintOnResizePlatform();
     setPlatform(platform.asAdapter());
@@ -156,7 +170,7 @@ describe('RemoteApiSession surface.attach', () => {
     const sent: SentPayload[] = [];
     const session = new RemoteApiSession({ hostId: 'host-1', send: (payload) => sent.push(payload) });
 
-    attach(session, 80, 24);
+    await attach(session, 80, 24);
 
     // The synchronous bounce away from `rows` has fired; the restore is pending.
     expect(platform.resizePty).toHaveBeenNthCalledWith(1, 'pty-1', 80, 23);
@@ -176,7 +190,7 @@ describe('RemoteApiSession surface.attach', () => {
     expect(platform.resizePty).not.toHaveBeenCalledWith('pty-1', 80, 24);
   });
 
-  it('does not let a stale bounce restore clobber a newer attachment', () => {
+  it('does not let a stale bounce restore clobber a newer attachment', async () => {
     vi.useFakeTimers();
     const platform = new RepaintOnResizePlatform();
     setPlatform(platform.asAdapter());
@@ -186,12 +200,12 @@ describe('RemoteApiSession surface.attach', () => {
     const session = new RemoteApiSession({ hostId: 'host-1', send: (payload) => sent.push(payload) });
 
     // First attach schedules a restore bounce for pty-1.
-    attach(session, 80, 24, 'surface-1');
+    await attach(session, 80, 24, 'surface-1');
     expect(platform.resizePty).toHaveBeenNthCalledWith(1, 'pty-1', 80, 23);
 
     // Re-attaching to a different surface replaces the attachment (last-attach-wins)
     // and must cancel the prior pty-1 restore.
-    attach(session, 80, 24, 'surface-2');
+    await attach(session, 80, 24, 'surface-2');
     expect(platform.resizePty).toHaveBeenNthCalledWith(2, 'pty-2', 80, 23);
 
     vi.advanceTimersByTime(60);
@@ -202,7 +216,7 @@ describe('RemoteApiSession surface.attach', () => {
     expect(platform.resizePty).not.toHaveBeenCalledWith('pty-1', 80, 24);
   });
 
-  it('rejects write and resize unless the surface is the current attachment', () => {
+  it('rejects write and resize unless the surface is the current attachment', async () => {
     const platform = new RepaintOnResizePlatform();
     setPlatform(platform.asAdapter());
     registerSurface(platform, 80, 24, 'surface-1', 'pty-1');
@@ -210,7 +224,7 @@ describe('RemoteApiSession surface.attach', () => {
     const sent: SentPayload[] = [];
     const session = new RemoteApiSession({ hostId: 'host-1', send: (payload) => sent.push(payload) });
 
-    attach(session, 80, 24, 'surface-1');
+    await attach(session, 80, 24, 'surface-1');
     sent.length = 0;
 
     session.handle({
@@ -262,7 +276,7 @@ describe('RemoteApiSession surface.attach', () => {
     ]);
   });
 
-  it('keeps write and resize pinned to the attached terminal after pane swaps', () => {
+  it('keeps write and resize pinned to the attached terminal after pane swaps', async () => {
     const platform = new RepaintOnResizePlatform();
     setPlatform(platform.asAdapter());
     registerSurface(platform, 80, 24, 'surface-1', 'pty-1');
@@ -270,7 +284,7 @@ describe('RemoteApiSession surface.attach', () => {
     const sent: SentPayload[] = [];
     const session = new RemoteApiSession({ hostId: 'host-1', send: (payload) => sent.push(payload) });
 
-    attach(session, 90, 25, 'surface-1');
+    await attach(session, 90, 25, 'surface-1');
     const attachedEntry = registry.get('surface-1')!;
     const swappedInEntry = registry.get('surface-2')!;
     registry.set('surface-1', swappedInEntry);
@@ -292,10 +306,14 @@ describe('RemoteApiSession surface.attach', () => {
       params: { surfaceId: 'surface-1', cols: 120, rows: 40 },
     });
 
+    // The xterm resize is synchronous; only the reply waits on the handle,
+    // which for a sibling's pane is a round trip.
     expect((attachedEntry.terminal as { cols: number; rows: number }).cols).toBe(120);
     expect((attachedEntry.terminal as { cols: number; rows: number }).rows).toBe(40);
     expect((swappedInEntry.terminal as { cols: number; rows: number }).cols).toBe(100);
     expect((swappedInEntry.terminal as { cols: number; rows: number }).rows).toBe(30);
+
+    await settle();
     expect(sent).toEqual([
       {
         requestId: 'write-after-swap',
@@ -315,14 +333,14 @@ describe('RemoteApiSession surface.attach', () => {
     ]);
   });
 
-  it('tears down the attachment when the attached PTY exits', () => {
+  it('tears down the attachment when the attached PTY exits', async () => {
     const platform = new RepaintOnResizePlatform();
     setPlatform(platform.asAdapter());
     registerSurface(platform, 80, 24, 'surface-1', 'pty-1');
     const sent: SentPayload[] = [];
     const session = new RemoteApiSession({ hostId: 'host-1', send: (payload) => sent.push(payload) });
 
-    attach(session, 100, 30, 'surface-1');
+    await attach(session, 100, 30, 'surface-1');
     sent.length = 0;
 
     // The attached PTY exits (process death, or the pane disposed on the Host).

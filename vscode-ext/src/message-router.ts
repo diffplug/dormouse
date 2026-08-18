@@ -22,19 +22,14 @@ import type { DorControlRequest } from './pty-manager';
 import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
 import { readStore, writeStore } from './remote-host-store';
-import {
-  PEER_REPLY_BUDGET_MS,
-  type PeerSurfaceOp,
-  type PeerSurfaceResult,
-} from '../../lib/src/lib/vscode-peer-link-protocol';
+import { PEER_REPLY_BUDGET_MS } from '../../lib/src/lib/vscode-peer-link-protocol';
 import { ensureWindowLease } from './window-lease';
 import {
   configurePeerLink,
   isRemotePty,
-  remoteDirectory,
+  remoteRequest,
   remoteResize,
   remoteSubscribe,
-  remoteSurfaceOp,
   remoteUnsubscribe,
   remoteWrite,
   setPeerLinkRole,
@@ -129,52 +124,26 @@ interface ActiveRouter {
   ownsPty(id: string): boolean;
   forwardDorControlRequest(request: DorControlRequest): void;
   notifyStoreChanged(key: string, value: string | null): void;
-  askDirectory(requestId: string): void;
   deliverForeignData(ptyId: string, data: string): void;
   deliverForeignExit(ptyId: string, exitCode: number): void;
-  askSurface(
-    requestId: string,
-    surfaceId: string,
-    op: PeerSurfaceOp,
-    cols?: number,
-    rows?: number,
-  ): void;
+  ask(requestId: string, op: string, params: unknown): void;
 }
-
-/**
- * Ask every *other* webview in this window to answer a peer request, and settle
- * once they all have (or the budget runs out).
- *
- * The remote Host runs in one webview, but a window's terminals are spread
- * across all of them — each webview has its own xterm registry, so the Host can
- * neither list nor attach to a sibling's pane without asking. The extension
- * host is the only party that can ask, so it brokers. See docs/specs/vscode.md
- * → "Peer surfaces".
- */
 
 let nextBrokerRequestId = 0;
 
-interface PendingDirectory {
+interface PendingRequest {
+  /** Answers still outstanding, so a miss settles as fast as a hit. */
   pending: Set<ActiveRouter>;
-  entries: unknown[];
+  results: unknown[];
   settle: () => void;
   timer: ReturnType<typeof setTimeout>;
 }
-const peerDirectoryRequests = new Map<string, PendingDirectory>();
-
-interface PendingSurface {
-  /** Answers still outstanding, so a miss settles as fast as a hit. */
-  pending: Set<ActiveRouter>;
-  settle: (result: PeerSurfaceResult) => void;
-  timer: ReturnType<typeof setTimeout>;
-}
-const peerSurfaceRequests = new Map<string, PendingSurface>();
+const peerRequests = new Map<string, PendingRequest>();
 
 // The link reaches other windows; it must never call back into a fan-out that
-// would reach them again, so it only ever gets the in-window brokers.
+// would reach them again, so it only ever gets the in-window broker.
 configurePeerLink({
-  brokerDirectory,
-  brokerSurfaceOp,
+  brokerRequest,
   deliverRemotePtyData,
   deliverRemotePtyExit,
   onProcessedPtyData,
@@ -183,67 +152,44 @@ configurePeerLink({
 });
 
 /**
- * Collect directory entries from every webview in this window except `exclude`.
+ * Put one peer request to every webview in this window except `exclude`, and
+ * settle with everything they answered.
  *
- * Settles when they have all answered or the budget expires: a webview with no
- * live content never replies, and must not hang the phone's picker. Callable
- * from a webview request (the Host asking) and from a peer window's socket
- * (tier 2), which is why it is a plain promise rather than message plumbing.
+ * The remote Host runs in one webview, but a window's terminals are spread
+ * across all of them — each webview has its own xterm registry, so the Host can
+ * neither list nor attach to a sibling's pane without asking. The extension
+ * host is the only party that can ask, so it brokers. See docs/specs/vscode.md
+ * → "Peer surfaces".
+ *
+ * `op` and `params` are opaque here on purpose: the operation map lives in
+ * `lib/src/remote/host/peer-surfaces.ts`, and one fan-out rule covers all of
+ * it — every webview answers with zero or more results, so a webview that owns
+ * nothing settles the request as fast as the one that does. The budget is the
+ * backstop for a webview with no live content, which must not hang the phone's
+ * picker. Callable from a webview request (the Host asking) and from a peer
+ * window's socket (tier 2), which is why it is a plain promise rather than
+ * message plumbing.
  */
-function brokerDirectory(exclude?: ActiveRouter): Promise<unknown[]> {
+function brokerRequest(op: string, params: unknown, exclude?: ActiveRouter): Promise<unknown[]> {
   const peers = [...activeRouters].filter((router) => router !== exclude);
   if (peers.length === 0) return Promise.resolve([]);
 
-  const requestId = `broker-dir-${++nextBrokerRequestId}`;
+  const requestId = `broker-${++nextBrokerRequestId}`;
   return new Promise((resolve) => {
     const settle = () => {
-      const request = peerDirectoryRequests.get(requestId);
+      const request = peerRequests.get(requestId);
       if (!request) return;
-      peerDirectoryRequests.delete(requestId);
+      peerRequests.delete(requestId);
       clearTimeout(request.timer);
-      resolve(request.entries);
+      resolve(request.results);
     };
-    peerDirectoryRequests.set(requestId, {
+    peerRequests.set(requestId, {
       pending: new Set(peers),
-      entries: [],
+      results: [],
       settle,
       timer: setTimeout(settle, PEER_REPLY_BUDGET_MS),
     });
-    for (const peer of peers) peer.askDirectory(requestId);
-  });
-}
-
-/**
- * Ask every webview except `exclude` to drive a surface; only its owner answers.
- *
- * Broadcast rather than tracking surfaceId ownership: a window holds a handful
- * of webviews, and the owner is the only one that can act anyway.
- */
-function brokerSurfaceOp(
-  surfaceId: string,
-  op: PeerSurfaceOp,
-  cols?: number,
-  rows?: number,
-  exclude?: ActiveRouter,
-): Promise<PeerSurfaceResult> {
-  const peers = [...activeRouters].filter((router) => router !== exclude);
-  if (peers.length === 0) return Promise.resolve({ ok: false });
-
-  const requestId = `broker-surface-${++nextBrokerRequestId}`;
-  return new Promise((resolve) => {
-    const settle = (result: PeerSurfaceResult) => {
-      const request = peerSurfaceRequests.get(requestId);
-      if (!request) return;
-      peerSurfaceRequests.delete(requestId);
-      clearTimeout(request.timer);
-      resolve(result);
-    };
-    peerSurfaceRequests.set(requestId, {
-      pending: new Set(peers),
-      settle,
-      timer: setTimeout(() => settle({ ok: false }), PEER_REPLY_BUDGET_MS),
-    });
-    for (const peer of peers) peer.askSurface(requestId, surfaceId, op, cols, rows);
+    for (const peer of peers) peer.ask(requestId, op, params);
   });
 }
 
@@ -763,47 +709,30 @@ export function attachRouter(
         subscribedPtyIds.delete(msg.id);
         if (isRemotePty(msg.id)) remoteUnsubscribe(msg.id);
         break;
-      case 'peer:directory': {
-        // This window's other webviews, plus every window reporting to us.
+      case 'peer:request': {
+        // This window's other webviews, plus every window reporting to us. Both
+        // at once rather than falling through: what is asked about lives in
+        // exactly one of them, and asking in series would pay a whole tier's
+        // budget before reaching the tier that owns it.
         const requestId = msg.requestId;
-        void Promise.all([brokerDirectory(router), remoteDirectory()]).then(([here, elsewhere]) =>
-          post({
-            type: 'peer:directoryResult', requestId, entries: [...here, ...elsewhere],
-          } satisfies ExtensionMessage),
+        const { op, params } = msg;
+        void Promise.all([brokerRequest(op, params, router), remoteRequest(op, params)]).then(
+          ([here, elsewhere]) =>
+            post({
+              type: 'peer:results', requestId, results: [...here, ...elsewhere],
+            } satisfies ExtensionMessage),
         );
         break;
       }
-      case 'peer:directoryEntries': {
-        const request = peerDirectoryRequests.get(msg.requestId);
+      case 'peer:answer': {
+        // Every webview answers, so "nobody owns it" settles immediately
+        // instead of waiting out the budget — which is the common case when
+        // what was asked about actually lives in another window.
+        const request = peerRequests.get(msg.requestId);
         if (!request) break;
-        if (Array.isArray(msg.entries)) request.entries.push(...msg.entries);
+        if (Array.isArray(msg.results)) request.results.push(...msg.results);
         request.pending.delete(router);
         if (request.pending.size === 0) request.settle();
-        break;
-      }
-      case 'peer:surfaceOp': {
-        const requestId = msg.requestId;
-        const { surfaceId, op, cols, rows } = msg;
-        void brokerSurfaceOp(surfaceId, op, cols, rows, router)
-          // Nobody here owns it — try the windows reporting to us.
-          .then((result) => (result.ok ? result : remoteSurfaceOp(surfaceId, op, cols, rows)))
-          .then((result) =>
-            post({ type: 'peer:surfaceOpResult', requestId, ...result } satisfies ExtensionMessage),
-          );
-        break;
-      }
-      case 'peer:surfaceResult': {
-        const request = peerSurfaceRequests.get(msg.requestId);
-        if (!request) break;
-        if (msg.ok) {
-          request.settle({ ok: true, ptyId: msg.ptyId, cols: msg.cols, rows: msg.rows });
-          break;
-        }
-        // Every webview answers, so "nobody owns it" settles immediately
-        // instead of waiting out the budget — which is the common case when the
-        // surface actually lives in another window.
-        request.pending.delete(router);
-        if (request.pending.size === 0) request.settle({ ok: false });
         break;
       }
       case 'singleton:claim':
@@ -1005,9 +934,9 @@ export function attachRouter(
       if (disposed) return;
       void post({ type: 'store:changed', key, value } satisfies ExtensionMessage);
     },
-    askDirectory(requestId: string) {
+    ask(requestId: string, op: string, params: unknown) {
       if (disposed) return;
-      void post({ type: 'peer:directoryRequest', requestId } satisfies ExtensionMessage);
+      void post({ type: 'peer:ask', requestId, op, params } satisfies ExtensionMessage);
     },
     deliverForeignData(ptyId: string, data: string) {
       if (disposed || !subscribedPtyIds.has(ptyId)) return;
@@ -1017,30 +946,14 @@ export function attachRouter(
       if (disposed || !subscribedPtyIds.has(ptyId)) return;
       void post({ type: 'pty:exit', id: ptyId, exitCode } satisfies ExtensionMessage);
     },
-    askSurface(
-      requestId: string,
-      surfaceId: string,
-      op: PeerSurfaceOp,
-      cols?: number,
-      rows?: number,
-    ) {
-      if (disposed) return;
-      void post({
-        type: 'peer:surfaceRequest', requestId, surfaceId, op, cols, rows,
-      } satisfies ExtensionMessage);
-    },
     dispose() {
       if (disposed) return;
       disposed = true;
       activeRouters.delete(router);
       // A webview that goes away mid-fan-out must not hold the answer open.
-      for (const request of peerDirectoryRequests.values()) {
+      for (const request of peerRequests.values()) {
         if (!request.pending.delete(router)) continue;
         if (request.pending.size === 0) request.settle();
-      }
-      for (const request of peerSurfaceRequests.values()) {
-        if (!request.pending.delete(router)) continue;
-        if (request.pending.size === 0) request.settle({ ok: false });
       }
       subscribedPtyIds.clear();
       releaseSingletons(claimant);

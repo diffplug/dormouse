@@ -121,15 +121,15 @@ function remoteHostStatus(): RemoteHostConsoleStatus {
 
 /** Install the `window.dormouseRemoteHost` console hook and activate. Idempotent. */
 export function installRemoteHostConsoleHook(): void {
-  // A host that can show several webviews arbitrates which one is the Host.
-  // Start un-owned so two webviews racing to mount cannot both activate before
-  // the first lease answer arrives, and let the grant do the activating.
-  // Called through the platform object, never a detached reference — the
-  // adapter's methods are `this`-bound to their message channel.
-  const platform = getPlatform();
-  if (platform.claimSingleton) {
+  // A host that can show several webviews arbitrates which one is the Host —
+  // having peers at all is exactly the condition that needs arbitrating, which
+  // is why one member answers both. Start un-owned so two webviews racing to
+  // mount cannot both activate before the first lease answer arrives, and let
+  // the grant do the activating.
+  const peers = getPlatform().peers;
+  if (peers) {
     owned = false;
-    platform.claimSingleton('remote-host', setRemoteHostOwnership);
+    peers.claimSingleton('remote-host', setRemoteHostOwnership);
   } else {
     activateRemoteHost();
   }

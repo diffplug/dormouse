@@ -178,23 +178,15 @@ export class VSCodeAdapter implements PlatformAdapter {
         this.singletonHandlers.get(msg.name)?.(!!msg.held);
       } else if (msg.type === 'store:changed') {
         this.applyStoreChange(msg.key, msg.value ?? null);
-      } else if (msg.type === 'peer:directoryRequest') {
-        // Answer even with no handler installed: the broker waits for every
-        // webview, so silence would stall the asker until its budget expires.
+      } else if (msg.type === 'peer:ask') {
+        // Answer even with no responder installed, and even to say nothing: the
+        // broker settles once every webview has replied, so silence would make
+        // it wait out the full budget on what is usually a miss. An empty
+        // answer claims nothing, so it can never beat the real owner.
         this.vscode.postMessage({
-          type: 'peer:directoryEntries',
+          type: 'peer:answer',
           requestId: msg.requestId,
-          entries: this.peerHandlers?.directory() ?? [],
-        });
-      } else if (msg.type === 'peer:surfaceRequest') {
-        // Answer either way: the broker settles once every webview has replied,
-        // so staying silent on a miss would make it wait out the full budget.
-        // Only an `ok` claims the surface, so a miss cannot beat the owner.
-        const result = this.peerHandlers?.surfaceOp(msg.surfaceId, msg.op, msg.cols, msg.rows);
-        this.vscode.postMessage({
-          type: 'peer:surfaceResult',
-          requestId: msg.requestId,
-          ...(result ?? { ok: false }),
+          results: this.peerResponders.get(msg.op)?.(msg.params) ?? [],
         });
       }
     });
@@ -236,55 +228,54 @@ export class VSCodeAdapter implements PlatformAdapter {
   }
 
   /**
-   * Ask the extension host for a named single-instance role and report every
-   * grant/revoke. The extension host is the arbiter because it is the only
-   * thing that outlives and sees all of this window's webviews; it re-offers
-   * the role when the holder is disposed, so closing the Dormouse view hands
-   * the Host to another open one rather than dropping it until reload.
-   */
-  /**
-   * Reach terminals owned by sibling webviews, brokered by the extension host
-   * (docs/specs/vscode.md → "Peer surfaces"). Present unconditionally: every
-   * webview both asks (when it is the Host) and answers (for its own panes).
+   * Elect among, and reach terminals owned by, sibling webviews — both brokered
+   * by the extension host (docs/specs/vscode.md → "Peer surfaces"). Present
+   * unconditionally: every webview both asks (when it is the Host) and answers
+   * (for its own panes).
    */
   readonly peers: PeerBridge = {
-    directory: async () => {
-      const entries = await this.requestResponse(
-        'peer:directory',
-        'peer:directoryResult',
-        {},
-        (msg) => msg.entries as unknown[],
+    /**
+     * Ask the extension host for a named single-instance role and report every
+     * grant/revoke. The extension host is the arbiter because it is the only
+     * thing that outlives and sees all of this window's webviews; it re-offers
+     * the role when the holder is disposed, so closing the Dormouse view hands
+     * the Host to another open one rather than dropping it until reload.
+     */
+    claimSingleton: (name, onChange) => {
+      // One entry per role, dispatched from the constructor's authenticated
+      // listener: re-claiming (a React effect remounting, StrictMode's double
+      // mount) replaces the handler instead of stacking another listener on the
+      // busiest message path in the app.
+      this.singletonHandlers.set(name, onChange);
+      this.vscode.postMessage({ type: 'singleton:claim', name });
+    },
+    request: async (op, params) => {
+      const results = await this.requestResponse(
+        'peer:request',
+        'peer:results',
+        { op, params },
+        (msg) => msg.results as unknown[],
         PEER_REQUEST_TIMEOUT_MS,
       );
-      return entries ?? [];
+      // A timeout reads as "nobody answered", which is what a miss looks like
+      // anyway — the caller has no repair to make either way.
+      return results ?? [];
     },
-    surfaceOp: async (surfaceId, op, cols, rows) => {
-      const result = await this.requestResponse(
-        'peer:surfaceOp',
-        'peer:surfaceOpResult',
-        { surfaceId, op, cols, rows },
-        (msg) => ({ ok: !!msg.ok, ptyId: msg.ptyId, cols: msg.cols, rows: msg.rows }),
-        PEER_REQUEST_TIMEOUT_MS,
-      );
-      return result ?? { ok: false };
+    respond: (op, handler) => {
+      this.peerResponders.set(op, handler);
     },
-    subscribePty: (id) => this.vscode.postMessage({ type: 'pty:subscribe', id }),
-    unsubscribePty: (id) => this.vscode.postMessage({ type: 'pty:unsubscribe', id }),
-    serve: (handlers) => {
-      this.peerHandlers = handlers;
+    streamPty: (ptyId) => {
+      this.vscode.postMessage({ type: 'pty:subscribe', id: ptyId });
+      let live = true;
+      return () => {
+        if (!live) return;
+        live = false;
+        this.vscode.postMessage({ type: 'pty:unsubscribe', id: ptyId });
+      };
     },
   };
 
-  private peerHandlers: Parameters<PeerBridge['serve']>[0] | null = null;
-
-  claimSingleton(name: string, onChange: (held: boolean) => void): void {
-    // One entry per role, dispatched from the constructor's authenticated
-    // listener: re-claiming (a React effect remounting, StrictMode's double
-    // mount) replaces the handler instead of stacking another listener on the
-    // busiest message path in the app.
-    this.singletonHandlers.set(name, onChange);
-    this.vscode.postMessage({ type: 'singleton:claim', name });
-  }
+  private peerResponders = new Map<string, (params: unknown) => unknown[]>();
 
   /**
    * Pull every `prefix`-scoped value out of extension-host storage and install
