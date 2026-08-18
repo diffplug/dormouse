@@ -4,8 +4,7 @@
  * instances — standing in for two VS Code windows — against a real directory.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { EventEmitter } from 'node:events';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fakeContext, freshModule, removeDir, tempStorageDir, waitFor } from './helpers';
@@ -34,23 +33,6 @@ afterEach(async () => {
 });
 
 describe('window lease over a real directory', () => {
-  it('closes an asynchronously failing watcher and falls back', async () => {
-    const mod = await openWindow();
-    const watcher = new EventEmitter() as EventEmitter & { close: ReturnType<typeof vi.fn> };
-    watcher.close = vi.fn();
-    const errors: Error[] = [];
-    mod.installWatcherErrorFallback(
-      watcher as unknown as import('node:fs').FSWatcher,
-      (error) => errors.push(error),
-    );
-
-    const failure = new Error('watch resources exhausted');
-    watcher.emit('error', failure);
-
-    expect(watcher.close).toHaveBeenCalledOnce();
-    expect(errors).toEqual([failure]);
-  });
-
   it('acquires when nothing holds it, and records an owner', async () => {
     const window = await openWindow();
     window.ensureWindowLease(() => {});

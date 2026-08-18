@@ -8,7 +8,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { access } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { fakeContext, freshModule, removeDir, tempStorageDir, tick, waitFor, waitForFile } from './helpers';
@@ -78,7 +78,8 @@ async function openWindow(deps: ReturnType<typeof fakeWindow>): Promise<LinkModu
   return mod;
 }
 
-const waitForRendezvous = () => waitForFile(join(dir, 'remote-host.peer.json'));
+const rendezvousFile = () => join(dir, 'remote-host.peer.json');
+const waitForRendezvous = () => waitForFile(rendezvousFile());
 
 /** Attach to the terminal {@link farWindow} owns, which is what places its route. */
 const attachFar = (broker: LinkModule) =>
@@ -271,32 +272,36 @@ describe('peer link between windows', () => {
     expect(broker.remoteWrite('pty-far', 'x')).toBe(false);
   });
 
-  it('publishes no rendezvous when the lease flips back mid-startup', async () => {
-    const mod = await openWindow(fakeWindow());
+  it('leaves nothing behind when the lease flips back mid-startup', async () => {
+    // Peer sockets live in the temp dir; point that at this test's own storage
+    // dir so a server nobody closed is as visible as a file nobody removed.
+    const realTmp = process.env.TMPDIR;
+    process.env.TMPDIR = dir;
+    try {
+      const mod = await openWindow(fakeWindow());
 
-    // Same tick: startup is several awaits long, so the flip back lands inside
-    // it. A rendezvous published afterwards would name a socket the teardown
-    // already unlinked, and every peer would dial it, fail, and sit in the
-    // reconnect backoff until some later broker rewrote the file.
-    mod.setPeerLinkRole(true);
-    mod.setPeerLinkRole(false);
-    await tick(200);
+      // Both calls in one tick, so the flip back lands inside startup's awaits.
+      mod.setPeerLinkRole(true);
+      mod.setPeerLinkRole(false);
+      await tick();
 
-    await expect(access(join(dir, 'remote-host.peer.json'))).rejects.toHaveProperty(
-      'code',
-      'ENOENT',
-    );
+      // No rendezvous (peers would dial a socket the teardown already unlinked
+      // and back off until some later broker rewrote the file), no listening
+      // socket, and no temp file from the write that was abandoned.
+      expect(await readdir(dir)).toEqual([]);
+    } finally {
+      process.env.TMPDIR = realTmp;
+    }
   });
 
   it('rejects a client that does not know the token', async () => {
     const brokerSide = fakeWindow();
     const broker = await openWindow(brokerSide);
     broker.setPeerLinkRole(true);
-    const rendezvousPath = join(dir, 'remote-host.peer.json');
     await waitForRendezvous();
 
     const { readFile } = await import('node:fs/promises');
-    const { socketPath } = JSON.parse(await readFile(rendezvousPath, 'utf8'));
+    const { socketPath } = JSON.parse(await readFile(rendezvousFile(), 'utf8'));
     const { createConnection } = await import('node:net');
     const socket = createConnection({ path: socketPath });
     await new Promise((resolve) => socket.on('connect', resolve));

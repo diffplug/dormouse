@@ -79,7 +79,7 @@ export class RemoteApiSession {
   #unsubDirectory: (() => void) | null = null;
   #directoryTimer: ReturnType<typeof setTimeout> | null = null;
   #attachment: Attachment | null = null;
-  #lifecycleGeneration = 0;
+  #attachGeneration = 0;
   #disposed = false;
 
   constructor(options: RemoteApiSessionOptions) {
@@ -118,7 +118,6 @@ export class RemoteApiSession {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
-    this.#lifecycleGeneration += 1;
     this.#directorySubId = null;
     if (this.#directoryTimer) {
       clearTimeout(this.#directoryTimer);
@@ -239,16 +238,14 @@ export class RemoteApiSession {
     // about VS Code webview hosting, not a protocol concept, so it is settled
     // below this line and never seen here (`surface-resolve.ts`).
     //
-    // Bumped per attach, not only per session: last-attach-wins
-    // (docs/specs/remote-api.md) has to hold even while a resolve is in flight,
-    // and the two paths are wildly different lengths — a sibling's pane is a
-    // socket round trip away while a local one settles on the next microtask.
-    // Sharing one generation across concurrent attaches would let the older,
-    // slower one land last and steal the attachment from the newer one.
-    this.#lifecycleGeneration += 1;
-    const generation = this.#lifecycleGeneration;
+    // Per attach, not per session: last-attach-wins has to hold while a
+    // resolve is in flight, and the two paths are wildly different lengths — a
+    // sibling's pane is a round trip away while a local one settles on the next
+    // microtask, so one shared epoch would let the older, slower attach land
+    // last and take the attachment.
+    const generation = ++this.#attachGeneration;
     void resolveSurface(params.surfaceId, params).then((handle) => {
-      if (this.#disposed || this.#lifecycleGeneration !== generation) {
+      if (this.#disposed || this.#attachGeneration !== generation) {
         // A foreign resolve starts its stream before returning the handle. If
         // the session died or a newer attach superseded this one during that
         // round trip, unwind it immediately.

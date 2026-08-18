@@ -108,6 +108,22 @@ function decodeTerminalData(payload: SentPayload): string {
 /** Let the peer round trips (they are promises) settle. */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+/** A pane in *this* webview's registry, which resolves without asking anyone. */
+function registerLocalSurface(surfaceId: string, ptyId: string) {
+  const terminal = { cols: 80, rows: 24, resize: vi.fn() };
+  registry.set(surfaceId, { ptyId, terminal } as unknown as TerminalEntry);
+  return terminal;
+}
+
+/** Hold every peer surface round trip open until the returned function is called. */
+function gatePeers(platform: PeerPlatform): () => void {
+  let release!: () => void;
+  platform.surfaceRequestGate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return release;
+}
+
 describe('remote-api peer surfaces', () => {
   afterEach(() => {
     registry.clear();
@@ -228,10 +244,7 @@ describe('remote-api peer surfaces', () => {
   it('releases a peer handle that resolves after session disposal', async () => {
     const platform = new PeerPlatform();
     platform.peerSurfaces.set('surface-far', { ptyId: 'pty-far', cols: 80, rows: 24 });
-    let finishResolve!: () => void;
-    platform.surfaceRequestGate = new Promise<void>((resolve) => {
-      finishResolve = resolve;
-    });
+    const finishResolve = gatePeers(platform);
     const { api, sent } = session(platform);
 
     api.handle({
@@ -251,17 +264,12 @@ describe('remote-api peer surfaces', () => {
   it('does not let a gated peer attach outrank the newer attach that replaced it', async () => {
     const platform = new PeerPlatform();
     platform.peerSurfaces.set('surface-far', { ptyId: 'pty-far', cols: 80, rows: 24 });
-    const terminal = { cols: 80, rows: 24, resize: vi.fn() };
-    registry.set('surface-near', { ptyId: 'pty-near', terminal } as unknown as TerminalEntry);
-    let finishResolve!: () => void;
-    platform.surfaceRequestGate = new Promise<void>((resolve) => {
-      finishResolve = resolve;
-    });
+    registerLocalSurface('surface-near', 'pty-near');
+    const finishResolve = gatePeers(platform);
     const { api, sent } = session(platform);
 
     // The client attaches a sibling's pane and switches to a local one before
-    // the sibling answers. The local resolve is a microtask, the peer's a round
-    // trip, so they land out of order.
+    // the sibling answers, so the two resolves land out of order.
     api.handle({
       requestId: 'attach-far',
       method: REMOTE_METHODS.surfaceAttach,
@@ -277,8 +285,7 @@ describe('remote-api peer surfaces', () => {
     await settle();
 
     // Last attach wins: the superseded one unwinds the stream it opened on the
-    // way instead of tearing down the newer attachment, and is answered rather
-    // than left pending on the client forever.
+    // way instead of tearing down the newer attachment.
     expect(platform.unsubscribed).toEqual(['pty-far']);
     const near = sent.find((p) => (p as RemoteResponse).requestId === 'attach-near') as RemoteResponse;
     expect(near.ok).toBe(true);
@@ -312,8 +319,7 @@ describe('remote-api peer surfaces', () => {
 
   it('prefers a local surface without asking any peer', async () => {
     const platform = new PeerPlatform();
-    const terminal = { cols: 80, rows: 24, resize: vi.fn() };
-    registry.set('surface-near', { ptyId: 'pty-near', terminal } as unknown as TerminalEntry);
+    registerLocalSurface('surface-near', 'pty-near');
     const { api } = session(platform);
 
     api.handle({

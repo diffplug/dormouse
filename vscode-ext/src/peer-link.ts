@@ -23,7 +23,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { watch, type FSWatcher } from 'node:fs';
+import { type FSWatcher } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -40,7 +40,7 @@ import {
   type PeerLinkResponse,
 } from '../../lib/src/lib/vscode-peer-link-protocol';
 import { log } from './log';
-import { installWatcherErrorFallback } from './window-lease';
+import { watchDirFile } from './watch-dir-file';
 
 /**
  * What this module needs from the router, injected rather than imported: the
@@ -119,8 +119,10 @@ interface PeerClient {
   authenticated: boolean;
 }
 
+/** The role the lease last asked for; an in-flight transition re-reads it. */
+let brokerRole = false;
 let server: Server | null = null;
-/** Set exactly while `server` is listening; the two move together. */
+/** Claimed and cleared with `server`; the two always move together. */
 let rendezvous: Rendezvous | null = null;
 const clients = new Set<PeerClient>();
 const routes = new Map<string, PeerClient>();
@@ -280,13 +282,9 @@ export function listenServer(nextServer: Server, socketPath: string): Promise<vo
   });
 }
 
-/**
- * Close a server this window is no longer the broker for, without touching
- * whatever holds the role now. Never `stopServer`: that would tear down a
- * newer broker's socket and rendezvous along with this abandoned one.
- */
-async function abandonServer(orphan: Server, socketPath: string): Promise<void> {
-  if (orphan.listening) orphan.close();
+/** Close one server and unlink its socket. Touches no module state. */
+async function closeServer(target: Server, socketPath: string): Promise<void> {
+  if (target.listening) target.close();
   await rm(socketPath, { force: true }).catch(() => {});
 }
 
@@ -295,6 +293,7 @@ async function startServer(): Promise<void> {
   if (!path || server) return;
 
   const next: Rendezvous = { socketPath: newSocketPath(), token: randomUUID() };
+  const temp = `${path}.${randomUUID()}.tmp`;
   const nextServer = createServer((socket) => {
     const client: PeerClient = { socket, decoder: new FrameDecoder(), authenticated: false };
     clients.add(client);
@@ -305,30 +304,45 @@ async function startServer(): Promise<void> {
     socket.on('error', () => dropClient(client));
     socket.on('close', () => dropClient(client));
   });
-  // Claimed in the same tick as the guard above so that `server === nextServer`
-  // is the whole staleness test below — nothing can slip in between. Startup is
-  // several awaits long and the lease can flip back to client inside any of
-  // them, which runs `stopServer` and nulls `server`; a continuation that did
-  // not notice would publish a rendezvous naming a socket that is already
-  // unlinked, and every peer would dial it, fail, and sit in the reconnect
-  // backoff until some later broker rewrote the file.
+  // Claimed in the same tick as the guard above, which is what makes
+  // `server === nextServer` a complete staleness test: nothing can slip in
+  // between. Everything below awaits, and the lease can flip back to client
+  // inside any of those gaps.
   server = nextServer;
   rendezvous = next;
 
+  /**
+   * Give back what this attempt claimed, leaving whoever holds the role now
+   * alone — `stopServer` would unlink a newer broker's socket and rendezvous
+   * along with this one. Anyone who connected in the meantime is left to the
+   * socket's own 'close' handler.
+   */
+  const abandon = async (): Promise<void> => {
+    await closeServer(nextServer, next.socketPath);
+    await rm(temp, { force: true }).catch(() => {});
+  };
+
   try {
+    // The bind fails hard if anything owns this path. Nothing should — it is
+    // six fresh random bytes — and clearing it first is one fs call on a path
+    // taken once per lease acquisition.
     await rm(next.socketPath, { force: true }).catch(() => {});
-    if (server !== nextServer) return;
+    if (server !== nextServer) {
+      await abandon();
+      return;
+    }
     await listenServer(nextServer, next.socketPath);
     await mkdir(join(path, '..'), { recursive: true }).catch(() => {});
     // The token is the only thing standing between another local process and
     // this window's terminals, so it is never briefly world-readable: written
     // 0600 to a temp file and renamed into place, which also means a reader
     // never sees a half-written rendezvous and falls into the retry backoff.
-    const temp = `${path}.${randomUUID()}.tmp`;
     await writeFile(temp, JSON.stringify(next), { encoding: 'utf8', mode: 0o600 });
+    // Stopped while we were publishing: the socket named in there is already
+    // unlinked, so renaming it into place would leave every peer dialing a
+    // dead path until some later broker rewrote the file.
     if (server !== nextServer) {
-      await rm(temp, { force: true }).catch(() => {});
-      await abandonServer(nextServer, next.socketPath);
+      await abandon();
       return;
     }
     await rename(temp, path);
@@ -338,20 +352,20 @@ async function startServer(): Promise<void> {
     // would surface as an unhandled one rather than as a broken link. An
     // unwritable globalStorage means no peers, not a crashed extension host.
     log.error(`[peer-link] could not start serving: ${String(err)}`);
+    await abandon();
     if (server === nextServer) await stopServer();
-    else await abandonServer(nextServer, next.socketPath);
   }
 }
 
 async function stopServer(): Promise<void> {
-  if (!server) return;
+  const closing = server;
+  if (!closing) return;
   const path = rendezvousPath();
   const socketPath = rendezvous?.socketPath;
   for (const client of [...clients]) dropClient(client);
-  if (server.listening) server.close();
   server = null;
   rendezvous = null;
-  if (socketPath) await rm(socketPath, { force: true }).catch(() => {});
+  if (socketPath) await closeServer(closing, socketPath);
   if (path) await rm(path, { force: true }).catch(() => {});
 }
 
@@ -493,8 +507,15 @@ function disconnectClient(): void {
 /**
  * Follow the window lease: the holder serves, everyone else connects to it.
  * Called on every lease change, and idempotent for an unchanged role.
+ *
+ * Either direction takes several awaits to settle and another flip can land
+ * inside them, so each branch re-checks the role it is transitioning into
+ * rather than assuming it still holds: `brokerRole` on the client side, and
+ * `server === nextServer` on the broker side, which additionally tells a later
+ * startup that already claimed the slot from this one.
  */
 export function setPeerLinkRole(isBroker: boolean): void {
+  brokerRole = isBroker;
   if (isBroker) {
     disconnectClient();
     stopWatchingRendezvous();
@@ -503,6 +524,9 @@ export function setPeerLinkRole(isBroker: boolean): void {
   }
   void (async () => {
     await stopServer();
+    // Flipped back to broker while that was tearing down: a broker must not
+    // watch the rendezvous, or it wakes itself on its own writes.
+    if (brokerRole) return;
     watchRendezvous();
     await connectClient();
   })();
@@ -516,23 +540,19 @@ export function setPeerLinkRole(isBroker: boolean): void {
  */
 function watchRendezvous(): void {
   if (rendezvousWatcher || !context) return;
-  try {
-    const watcher = watch(context.globalStorageUri.fsPath, (_event, filename) => {
-      if (filename && filename !== RENDEZVOUS_FILE) return;
+  const watcher = watchDirFile(
+    context.globalStorageUri.fsPath,
+    RENDEZVOUS_FILE,
+    () => {
       disconnectClient();
       void connectClient();
-    });
-    rendezvousWatcher = watcher;
-    // Same directory, same hazard as the lease watcher: an inotify handle the
-    // kernel invalidates emits asynchronously, and an unheard 'error' on an
-    // EventEmitter is rethrown — taking the whole extension host with it.
-    installWatcherErrorFallback(watcher, (error) => {
-      log.error(`[peer-link] rendezvous watcher failed; the reconnect timer converges: ${String(error)}`);
+    },
+    (error) => {
+      log.error(`[peer-link] rendezvous watcher failed; the timer converges: ${String(error)}`);
       if (rendezvousWatcher === watcher) rendezvousWatcher = null;
-    });
-  } catch {
-    // No watcher here: the reconnect timer still converges.
-  }
+    },
+  );
+  rendezvousWatcher = watcher;
 }
 
 function stopWatchingRendezvous(): void {

@@ -14,7 +14,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { watch, type FSWatcher } from 'node:fs';
+import { type FSWatcher } from 'node:fs';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -27,6 +27,7 @@ import {
   type WindowLeaseRecord,
 } from '../../lib/src/lib/vscode-window-lease';
 import { log } from './log';
+import { watchDirFile } from './watch-dir-file';
 
 const LEASE_FILE = 'remote-host.lease.json';
 
@@ -89,17 +90,6 @@ function setHeld(current: LeaseState, held: boolean): void {
   current.onChange(held);
 }
 
-/** Make an FSWatcher failure degrade to polling instead of becoming uncaught. */
-export function installWatcherErrorFallback(
-  watcher: FSWatcher,
-  onUnavailable: (error: Error) => void,
-): void {
-  watcher.once('error', (error) => {
-    watcher.close();
-    onUnavailable(error);
-  });
-}
-
 async function tick(current: LeaseState): Promise<void> {
   // `state !== current` is how a disposed lease stops; a separate flag would be
   // a second copy of the same fact.
@@ -158,12 +148,14 @@ export function ensureWindowLease(onChange: (held: boolean) => void): void {
     await tick(current);
 
     current.timer = setInterval(() => void tick(current), LEASE_RENEW_MS);
-    try {
-      // The heartbeat alone would make a clean handoff take up to a TTL; the
-      // watcher turns "the holder released it" into a prompt takeover. Purely
-      // an accelerator — correctness is the timer's job.
-      const watcher = watch(dir, (_event, filename) => {
-        if (filename && filename !== LEASE_FILE) return;
+    // The heartbeat alone would make a clean handoff take up to a TTL; the
+    // watcher turns "the holder released it" into a prompt takeover. Purely an
+    // accelerator — correctness is the timer's job, which is why no watcher at
+    // all is an acceptable answer.
+    const watcher = watchDirFile(
+      dir,
+      LEASE_FILE,
+      () => {
         // The holder's own heartbeat lands here too, and re-ticking on it turns
         // the heartbeat into a write loop that re-arms itself — ~50x the
         // intended I/O, with overlapping writes colliding and each failure
@@ -171,15 +163,13 @@ export function ensureWindowLease(onChange: (held: boolean) => void): void {
         // accelerator.
         if (current.held === true) return;
         void tick(current);
-      });
-      current.watcher = watcher;
-      installWatcherErrorFallback(watcher, (error) => {
+      },
+      (error) => {
         log.error(`[window-lease] watcher failed; falling back to polling: ${String(error)}`);
         if (current.watcher === watcher) current.watcher = null;
-      });
-    } catch {
-      // No watcher on this platform/filesystem: the interval still converges.
-    }
+      },
+    );
+    current.watcher = watcher;
   })();
 
   context.subscriptions.push({ dispose: () => void disposeWindowLease() });
