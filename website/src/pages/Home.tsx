@@ -774,41 +774,20 @@ export default function Home() {
       <div ref={contentRef} className="relative z-10 bg-[var(--color-bg)]" style={{ marginTop: `-${(1 - UNPIN_THRESHOLD) * RUNWAY_VH}vh` }}>
         {/* Section 1: distribution + layout — one terminal, two homes */}
         <section id="features" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`}>
-          <div className="mx-auto max-w-2xl">
-            <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-6">VS Code or Standalone</h2>
-            <p className="text-lg leading-relaxed opacity-70 mb-4">
-              One terminal, two homes. Inside VS Code it borrows your theme and
-              your keybindings — it should be hard to tell it isn't built in.
-              Outside, it's a native app that starts in a blink. Same layout,
-              same alerts, same everything — pick whichever one matches the day.
-            </p>
-            <div className="mt-8 mb-8 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="flex items-center gap-3 rounded-lg border border-[var(--color-text)]/15 px-4 py-3">
-                <VsCodeIcon className="size-7" />
-                <div>
-                  <div className="font-display text-base">VS Code</div>
-                  <div className="text-sm opacity-60">and its forks</div>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 rounded-lg border border-[var(--color-text)]/15 px-4 py-3">
-                <img src={tinyIconUrl} alt="" aria-hidden="true" className="size-7 shrink-0" />
-                <div>
-                  <div className="font-display text-base">Standalone</div>
-                  <div className="text-sm opacity-60">Mac, Windows, Linux</div>
-                </div>
-              </div>
+          <div>
+            <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-6">Tmux with browsers, for VS Code and Standalone</h2>
+            <div className="grid gap-x-8 gap-y-4 md:grid-cols-2">
+              <p className="text-lg leading-relaxed opacity-70">
+                Soft as a mouse, sharp as a tmux. A real tiling layout for
+                terminals and browser embeds.
+                Do it all with the mouse, or keep your hands on the keyboard with
+                tmux keybinds.
+              </p>
+              <p className="text-lg leading-relaxed opacity-70">
+                Inside VS Code it follows your theme exactly - hard to tell it isn't built in.
+                Standalone, it's a Tauri app that starts in a blink. Same features in both places.
+              </p>
             </div>
-            <p className="text-lg leading-relaxed opacity-70 mb-4">
-              Soft as a mouse, sharp as a tmux. A real tiling layout for the
-              terminals you actually run at once — minimize the ones you're not
-              watching down to a compact status indicator, and they keep
-              running, and keep reporting.
-            </p>
-            <p className="text-lg leading-relaxed opacity-70">
-              Do it all with the mouse, or keep your hands on the keyboard with
-              tmux keybinds. Same prefix, same splits, same pane navigation —
-              nothing you already know gets taken away.
-            </p>
           </div>
           <FeatureVideo src={tmuxVideoUrl} variant="intrinsic" className="mt-8" />
         </section>
@@ -893,6 +872,54 @@ export default function Home() {
                 </div>
               ))}
             </div>
+          </div>
+        </section>
+
+        {/* Section 5: browser surfaces — mock left, text right */}
+        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-center`}>
+          <div className="order-2 md:order-1 overflow-hidden rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04]">
+            <div className="flex items-center gap-2 border-b border-[var(--color-text)]/10 px-3 py-2">
+              <span className="size-2.5 rounded-full bg-[var(--color-text)]/20" />
+              <span className="size-2.5 rounded-full bg-[var(--color-text)]/20" />
+              <div className="ml-1 flex-1 truncate rounded bg-[var(--color-text)]/10 px-2 py-1 font-mono text-xs opacity-70">
+                localhost:3000
+              </div>
+              <span className="rounded border border-[var(--color-caramel)]/40 px-1.5 py-0.5 font-mono text-[0.65rem] text-[var(--color-caramel)]">
+                screencast
+              </span>
+            </div>
+            <div className="space-y-2.5 p-4">
+              <div className="h-2.5 w-1/3 rounded bg-[var(--color-text)]/20" />
+              <div className="h-2 w-full rounded bg-[var(--color-text)]/10" />
+              <div className="h-2 w-11/12 rounded bg-[var(--color-text)]/10" />
+              <div className="h-2 w-4/5 rounded bg-[var(--color-text)]/10" />
+              <div className="mt-4 grid grid-cols-3 gap-2.5">
+                <div className="h-12 rounded bg-[var(--color-text)]/10" />
+                <div className="h-12 rounded bg-[var(--color-text)]/10" />
+                <div className="h-12 rounded bg-[var(--color-text)]/10" />
+              </div>
+            </div>
+          </div>
+          <div className="order-1 md:order-2">
+            <h2 className="font-display text-xl mb-6">Browsers for you (and your agents)</h2>
+            <p className="text-lg leading-relaxed opacity-70 mb-4">
+              A browser is just another pane. Park your dev server next to the
+              terminal that's running it — same tiling layout, same keybinds, no
+              alt-tab and no second monitor.
+            </p>
+            <p className="text-lg leading-relaxed opacity-70 mb-4">
+              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">dor ab open surface:2</code>{" "}
+              aims a browser at the port that terminal is serving — the one from
+              the section above. Your agents run the same command, so when an
+              agent wants to see what it just built, it opens a pane you're
+              already watching. Pop it out to a real OS window when you need the
+              real thing.
+            </p>
+            <p className="text-lg leading-relaxed opacity-70">
+              Dormouse drives the{" "}
+              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">agent-browser</code>{" "}
+              you already have installed — it doesn't ship a browser of its own.
+            </p>
           </div>
         </section>
 
