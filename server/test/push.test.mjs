@@ -72,9 +72,9 @@ function subscription(endpoint = 'https://push.example.com/sub/abc') {
 }
 
 /** A fresh app with push configured, plus an enrolled host and a signed-in owner. */
-async function pushApp() {
+async function pushApp(overrides = {}) {
   const sender = fakePushSender();
-  const app = await freshApp({ vapidPublicKey: VAPID_PUBLIC, pushSender: sender });
+  const app = await freshApp({ vapidPublicKey: VAPID_PUBLIC, pushSender: sender, ...overrides });
   const { body: host } = await enrollHost(app.app, { label: 'Laptop' });
   const { sessionToken } = await ownerSession(app.app);
   return { ...app, sender, host, sessionToken };
@@ -665,6 +665,54 @@ test('a transient failure leaves the subscription in place', async () => {
 
   const stored = JSON.parse(await readFile(join(stateDir, 'push-subscriptions.json'), 'utf8'));
   assert.equal(stored.length, 1);
+});
+
+test('a send that never answers is bounded and leaves the subscription in place', async () => {
+  // A push service can accept the connection and then go quiet, which resets
+  // the socket-inactivity timer forever. Without a wall-clock bound the handler
+  // stays open and successive alarms stack concurrent sends on top of it.
+  const { app, sender, stateDir, host, sessionToken } = await pushApp({ pushSendDeadlineMs: 30 });
+  const client = await SimClient.create({ origin: ORIGIN });
+  const endpoint = 'https://push.example.com/wedged';
+  await subscribe(app, { sessionToken, host, client, sub: subscription(endpoint) });
+  sender.hang(endpoint);
+
+  const res = await sendAs(app, host.hostToken, {
+    devicePublicKeys: [client.deviceKey.devicePublicKey],
+    title: 'x',
+    body: 'y',
+  });
+  // Transient, like any other failure — so the row survives to be retried,
+  // rather than being pruned the way a 404/410 would prune it.
+  assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 0, failed: 1 });
+  const stored = JSON.parse(await readFile(join(stateDir, 'push-subscriptions.json'), 'utf8'));
+  assert.equal(stored.length, 1);
+});
+
+test('one wedged device does not hold up the rest of the fan-out', async () => {
+  const { app, sender, host, sessionToken } = await pushApp({ pushSendDeadlineMs: 30 });
+  const wedged = await SimClient.create({ origin: ORIGIN });
+  const healthy = await SimClient.create({ origin: ORIGIN });
+  await subscribe(app, {
+    sessionToken,
+    host,
+    client: wedged,
+    sub: subscription('https://push.example.com/wedged'),
+  });
+  await subscribe(app, {
+    sessionToken,
+    host,
+    client: healthy,
+    sub: subscription('https://push.example.com/healthy'),
+  });
+  sender.hang('https://push.example.com/wedged');
+
+  const res = await sendAs(app, host.hostToken, {
+    devicePublicKeys: [wedged.deviceKey.devicePublicKey, healthy.deviceKey.devicePublicKey],
+    title: 'x',
+    body: 'y',
+  });
+  assert.deepEqual(await res.json(), { delivered: 1, expired: 0, unknown: 0, failed: 1 });
 });
 
 test('a host cannot push to another host subscribers', async () => {

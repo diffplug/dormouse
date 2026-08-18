@@ -53,19 +53,24 @@ export async function freshApp({
 
 /**
  * A {@link PushSender} that records instead of sending. `expire` / `fail` name
- * endpoints that should report those outcomes, so the pruning and counting
- * paths are testable without a real push service.
+ * endpoints that should report those outcomes, and `hang` names one that never
+ * settles, so the pruning, counting, and deadline paths are all testable
+ * without a real push service.
  */
 export function fakePushSender() {
   const sent = [];
   const expired = new Set();
   const failing = new Set();
+  const hanging = new Set();
   return {
     sent,
     expire: (endpoint) => expired.add(endpoint),
     fail: (endpoint) => failing.add(endpoint),
+    /** Models a push service that accepts the connection and then goes quiet. */
+    hang: (endpoint) => hanging.add(endpoint),
     async send(target, payload) {
       sent.push({ endpoint: target.endpoint, keys: target.keys, payload });
+      if (hanging.has(target.endpoint)) return new Promise(() => {});
       if (expired.has(target.endpoint)) return 'expired';
       if (failing.has(target.endpoint)) return 'failed';
       return 'delivered';

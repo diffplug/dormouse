@@ -230,9 +230,20 @@ Source of truth: `server/src/push.ts` and the routes in `server/src/app.ts`.
   never silent: the refusal is logged (origin only — the endpoint is a bearer
   capability) and counted in the response's `failed`, since the route answers
   200 either way and the Host needs to tell an all-failed fan-out from
-  success. Each push-service request has a 10-second socket-inactivity timeout,
-  which resolves as `failed`; this is separate from the 300-second provider
-  TTL, which prevents a delayed alarm from arriving after it is useful.
+  success. Delivery is bounded twice, and both bounds resolve as `failed` — so
+  the row survives to be retried, unlike a 404/410. The inner bound is a
+  10-second socket-inactivity timeout on each push-service request. The outer
+  is a 15-second wall-clock deadline per send, which catches what inactivity
+  cannot: a service that trickles bytes or stalls mid-handshake resets the
+  inactivity timer indefinitely. The deadline is applied by the route rather
+  than by the sender, so it holds for any injected `PushSender`, and because
+  every send in a fan-out starts at once it also bounds the route as a whole
+  regardless of device count. It bounds the *route*, not the socket: `web-push`
+  accepts no `AbortSignal`, so a request that loses the race is left to its own
+  inactivity timeout rather than cancelled. What this prevents is a wedged push
+  service holding the handler open while successive alarms stack concurrent
+  sends behind it. Both are separate from the 300-second provider TTL, which
+  prevents a delayed alarm from arriving after it is useful.
 - Push is disabled, not half-working, when no VAPID key is configured: the
   config route reports `null` and subscribe/send answer 503.
 

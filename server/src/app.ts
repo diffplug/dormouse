@@ -78,6 +78,7 @@ import {
   PushSubscriptionStore,
 } from './state.js';
 import type { StoredHost, StoredPushSubscription } from './state.js';
+import { PUSH_SEND_DEADLINE_MS, sendWithinDeadline } from './push.js';
 import type { PushSender } from './push.js';
 import { isPublicHttpsPushEndpoint } from './push-endpoint.js';
 
@@ -118,6 +119,12 @@ export interface AppConfig {
    * implementation.
    */
   readonly pushSender?: PushSender;
+  /**
+   * Wall-clock bound on a single delivery attempt; defaults to
+   * `PUSH_SEND_DEADLINE_MS`. Injectable for the same reason as `now` — a test
+   * cannot wait out the real one.
+   */
+  readonly pushSendDeadlineMs?: number;
 }
 
 /** A live sign-in session held in memory (server.md: everything transient is in memory). */
@@ -611,10 +618,18 @@ export function createApp(config: AppConfig): CreatedApp {
         : {}),
     });
 
+    // Every send starts at once, so one deadline per send also bounds the whole
+    // route regardless of how many devices a Host has.
+    const deadlineMs = config.pushSendDeadlineMs ?? PUSH_SEND_DEADLINE_MS;
     const results = await Promise.all(
       targets.map(async (s) => ({
         endpoint: s.endpoint,
-        result: await sender.send({ endpoint: s.endpoint, keys: s.keys }, payload),
+        result: await sendWithinDeadline(
+          sender,
+          { endpoint: s.endpoint, keys: s.keys },
+          payload,
+          deadlineMs,
+        ),
       })),
     );
     // Forget subscriptions the push service called permanently gone, so a
