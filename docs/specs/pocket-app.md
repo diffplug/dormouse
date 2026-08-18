@@ -317,9 +317,27 @@ the view with. Source of truth: `subscribeToPushInBrowser` in
 `server/src/state.ts`, and `onEnablePush` in
 `lib/src/remote/pocket-app/App.tsx`.
 
-The existing static serving needs no special-casing: `serveStatic` already
-answers `application/manifest+json` for `.webmanifest` and `text/javascript` for
-`sw.js`.
+The existing static serving needs no special-casing for content types:
+`serveStatic` already answers `application/manifest+json` for `.webmanifest` and
+`text/javascript` for `sw.js`.
+
+Caching is set explicitly, because the build has exactly two kinds of file and
+they need opposite answers. Vite content-hashes everything it emits into
+`assets/`, so those may be kept forever (`immutable`) — the name changes when
+the content does. Everything else is unhashed: `index.html`, plus the `public/`
+passthroughs at the root (`sw.js`, the manifest, the icons). Those are served
+`no-cache`, meaning revalidate before use rather than never store.
+
+Revalidating the unhashed half is the load-bearing part. `emptyOutDir` deletes
+the previous build's hashed assets, so a browser reusing a heuristically cached
+`index.html` does not merely run stale code — it requests files that no longer
+exist, and the app fails to boot. The class is decided from the request path
+(`/assets/` or not) rather than the resolved file path, which is platform-shaped;
+if Vite ever emits an unhashed file into `assets/`, or `assetsDir` is overridden,
+that test silently mislabels it. The header is staged on the context *before*
+`serveStatic` runs, since its `onFound` hook fires after the Response is already
+built and cannot add to it. Source of truth: `registerPocketServing` in
+`server/src/app.ts`.
 
 ## Deployment: same-origin, always
 

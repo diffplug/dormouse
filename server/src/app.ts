@@ -751,15 +751,51 @@ function registerPocketServing(app: Hono<AppEnv>, pocketDir?: string): void {
   // `serveStatic` joins its `root` onto the request path relative to cwd, so a
   // path relative to cwd is the portable way to point it at an arbitrary dir.
   const root = relative(process.cwd(), pocketDir) || '.';
-  app.get('/*', serveStatic({ root }));
+  const serveFile = serveStatic({ root });
+  app.get('/*', (c, next) => {
+    // Staged before `serveFile` so its `c.body(...)` picks the header up, the
+    // same way it picks up its own `Content-Type`. Deliberately not
+    // `serveStatic`'s `onFound` hook, which runs *after* the Response has been
+    // built and so cannot add a header to it.
+    c.header('Cache-Control', pocketCacheControl(c.req.path));
+    return serveFile(c, next);
+  });
   // Re-read the SPA shell per deep-link fallback: a Pocket rebuild swaps in an
   // index.html referencing new content-hashed assets, and a cached copy would
   // keep pointing at deleted files until the server restarts. The fallback is
   // not a hot path, and a read failure degrades to a 404 instead of a crash.
   app.get('*', async (c) => {
     const html = await readFile(indexHtmlPath, 'utf8').catch(() => null);
-    return html ? c.html(html) : c.notFound();
+    if (!html) return c.notFound();
+    c.header('Cache-Control', pocketCacheControl(c.req.path));
+    return c.html(html);
   });
+}
+
+/** Keep a hashed asset forever; its name changes when its content does. */
+const POCKET_ASSET_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+/** Revalidate everything else before use. */
+const POCKET_SHELL_CACHE_CONTROL = 'no-cache';
+
+/**
+ * The Pocket build comes in exactly two kinds. Vite content-hashes everything
+ * it emits into `assets/`, while `public/` passes through unhashed to the root
+ * (`sw.js`, the manifest, the icons) alongside the generated `index.html`.
+ *
+ * Revalidating the unhashed half is the load-bearing part: `emptyOutDir`
+ * deletes the previous build's hashed assets, so a heuristically cached
+ * `index.html` does not merely serve stale code — it requests files that no
+ * longer exist, and the app fails to boot rather than degrading. `immutable` on
+ * the hashed half is only a bonus, and is safe for exactly the same reason.
+ *
+ * Decided from the request path rather than the resolved file path, which is
+ * platform-shaped. If Vite ever emits an unhashed file into `assets/`, or
+ * `assetsDir` is overridden, this test silently mislabels it.
+ */
+function pocketCacheControl(requestPath: string): string {
+  return requestPath.startsWith('/assets/')
+    ? POCKET_ASSET_CACHE_CONTROL
+    : POCKET_SHELL_CACHE_CONTROL;
 }
 
 // ---------------------------------------------------------------------------
