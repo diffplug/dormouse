@@ -192,6 +192,22 @@ bottom-right of the window (`docs/specs/theme.md`). The shell controls are:
 The workspace strip lands here when the workspaces rollout reaches stage 3 —
 `docs/specs/layout.md` `## Future` (workspaces-rollout).
 
+### Application menu
+
+Source of truth: the `.menu(...)` builder in `standalone/src-tauri/src/lib.rs`.
+
+The app replaces Tauri's default menu with an App submenu (about / services /
+hide / quit) and a Window submenu (minimize / maximize / close) — deliberately
+**no Edit submenu**, because its predefined Paste item binds Cmd+V natively and
+would fire alongside the terminal's own DOM-level Cmd+V handling
+(`docs/specs/mouse-and-clipboard.md` §8.2).
+
+The consequence is that macOS delivers Cmd+C/X/V to the webview as plain
+keydowns and WKWebView performs no native edit, in Dormouse's own text fields
+too (pane rename, the browser URL editor, dialogs). Those fields get their
+clipboard from the wall's keyboard chain instead — `docs/specs/mouse-and-clipboard.md`
+§8.9. Any future menu item must not claim a chord the webview already handles.
+
 ## Persistence
 
 `TauriAdapter.saveState` / `getState` route the session blob through

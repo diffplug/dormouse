@@ -56,6 +56,8 @@ In the VS Code extension host, selected workbench chords are mirrored: the termi
 
 On macOS, `Ctrl+C` passes through to the running program (only `⌘C` copies); `Ctrl+V` is intercepted for paste everywhere — use the shell's `quoted-insert` (`Ctrl+Q`) to send a literal `0x16` (`docs/specs/mouse-and-clipboard.md` §8.3).
 
+Inside Dormouse's own text fields (pane rename, the browser URL editor, dialog inputs) the same chords cut/copy/paste that field's text instead — plain text only, and only on hosts whose webview has no native Edit menu (`docs/specs/mouse-and-clipboard.md` §8.9).
+
 ## Dialogs & prompts
 
 | Key | Action | Description |

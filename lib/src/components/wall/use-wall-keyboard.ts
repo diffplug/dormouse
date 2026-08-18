@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { handleDualTap } from './keyboard/handle-dual-tap';
+import { handleEditableClipboard } from './keyboard/handle-editable-clipboard';
 import { handleMouseSelectionKeys } from './keyboard/handle-mouse-selection-keys';
 import { handleKillConfirm } from './keyboard/handle-kill-confirm';
 import { handlePaneShortcuts } from './keyboard/handle-pane-shortcuts';
@@ -27,6 +28,9 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       const c = ctxRef.current;
 
       if (handleDualTap(e, c, dualTapState)) return;
+      // Before every mode/renaming gate below: a focused text field owns its
+      // clipboard chords no matter what the wall is doing.
+      if (handleEditableClipboard(e)) return;
       if (handleMouseSelectionKeys(e, c)) return;
       if (c.modeRef.current === 'passthrough') return;
       if (c.renamingRef.current) return;

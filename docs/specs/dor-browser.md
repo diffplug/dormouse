@@ -124,7 +124,10 @@ Header contract:
   link/lock depending on whether viewport CSS size matches pane CSS size.
 - Primary text is URL-oriented: host+path, with query omitted in the live header.
   HTML title is tooltip/secondary state.
-- Clicking the URL opens an inline editor. `normalizeNavUrl` keeps explicit
+- Clicking the URL opens an inline editor — the same `InlineEditInput` as pane
+  rename (`docs/specs/layout.md` → "Inline rename"), pre-filled with the full URL
+  and pre-selected, except that blur discards like a browser omnibox instead of
+  committing. `normalizeNavUrl` keeps explicit
   schemes and otherwise picks a scheme the same way the `dor iframe` / `dor ab
   open` CLI does (`docs/specs/dor-cli.md` → Browser Open Target Resolution): an
   explicit **port** means `http://` (a `host:port` is a dev/infra server —
