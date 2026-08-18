@@ -138,11 +138,16 @@ jobs:
           # `2>/dev/null` on the old one-liner did not even hide the noise: the
           # shell applies `< audit-status.txt` before the redirect, so a
           # missing file printed `No such file or directory` regardless.
-          if [ -s audit-status.txt ]; then
+          #
+          # Test the normalized value, not the file size: a status file holding
+          # only whitespace is as much a non-verdict as an absent one, and a
+          # size test would let it through as the empty string, which matches
+          # no branch below and lands in FAIL.
+          STATUS=""
+          if [ -f audit-status.txt ]; then
             STATUS=$(tr -d '[:space:]' < audit-status.txt)
-          else
-            STATUS=INCONCLUSIVE
           fi
+          [ -n "$STATUS" ] || STATUS=INCONCLUSIVE
           DATE=$(date -u +%Y-%m-%dT%H:%MZ)
           RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
@@ -167,11 +172,19 @@ jobs:
           if [ "$STATUS" = "INCONCLUSIVE" ]; then
             HEADLINE="Audit **inconclusive** at $DATE — the audit step reached no verdict. [Run]($RUN_URL)"
             TITLE="[security-audit] inconclusive on $(date -u +%Y-%m-%d)"
-            NO_REPORT="The audit step wrote no \`audit-status.txt\`, so nothing was actually checked. This is an unfinished audit, not a security finding — re-run the workflow, and see the run logs for why the step stopped early."
+            NO_REPORT="The audit step recorded no verdict in \`audit-status.txt\`, so nothing was actually checked. This is an unfinished audit, not a security finding — re-run the workflow, and see the run logs for why the step stopped early."
           else
             HEADLINE="Audit failed at $DATE. [Run]($RUN_URL)"
             TITLE="[security-audit] FAIL on $(date -u +%Y-%m-%d)"
             NO_REPORT="Audit reported \`$STATUS\` but produced no \`audit-report.md\`. See workflow run logs."
+          fi
+
+          # An inconclusive run that still left a report is not a no-op: the
+          # prompt writes `audit-report.md` before `audit-status.txt`, so this
+          # is the likelier partial-write shape, and that report may carry a
+          # real FAIL. Say so, or the title buries a finding as a hiccup.
+          if [ "$STATUS" = "INCONCLUSIVE" ] && [ -s audit-report.md ]; then
+            HEADLINE="$HEADLINE The step did leave a partial \`audit-report.md\` — read it below before treating this as a harness hiccup."
           fi
 
           if [ ! -s audit-report.md ]; then
