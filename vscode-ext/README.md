@@ -38,10 +38,10 @@ Dormouse can owe you attention in three independent ways. Two of them need no se
 
 Dormouse never guesses which commands deserve an alert. Watching is a rule you create on a command name, and turning it off anywhere removes it everywhere.
 
-- <img width="22" height="22" alt="todo-disabled" src="https://github.com/user-attachments/assets/29178d1e-062f-4e4d-8de8-250e01b73125" /> no watch rule for this pane's command
-- <img width="22" height="22" alt="todo-enabled" src="https://github.com/user-attachments/assets/1f6dfeb3-7d8e-4724-b777-af6b350cbc80" /> this command is watched
-- <img width="22" height="22" alt="todo-armed" src="https://github.com/user-attachments/assets/a02e9b7c-4a48-459d-910a-ef0b0ae2a27f" /> a watched command is running; it will alert when it goes quiet
-- <img width="22" height="22" alt="todo-ringing" src="https://github.com/user-attachments/assets/55082f42-ddcc-402c-b550-814d84b86630" /> finished, and it needs your attention
+- <img width="22" height="22" alt="Bell icon, alerts off" src="https://dormouse.sh/media/alert-disabled.gif" /> no watch rule for this pane's command
+- <img width="22" height="22" alt="Bell icon, command watched" src="https://dormouse.sh/media/alert-enabled.gif" /> this command is watched
+- <img width="22" height="22" alt="Bell icon, watched command running" src="https://dormouse.sh/media/alert-armed.gif" /> a watched command is running; it will alert when it goes quiet
+- <img width="22" height="22" alt="Bell icon, ringing for attention" src="https://dormouse.sh/media/alert-ringing.gif" /> finished, and it needs your attention
 
 Whichever way a pane rings, the ring becomes a **TODO** — a marker beside the pane's title that outlives the alert, so a ring you dismissed does not disappear without a trace. Clear it by clicking it or pressing `t` in command mode.
 
@@ -70,7 +70,6 @@ Then copy it the way you meant it:
 - **Copy Raw** keeps the hard wraps exactly as the terminal drew them.
 - **Copy Rewrapped** joins those wrapped lines back into the line the program actually printed.
 
-![Copy Rewrapped joining hard-wrapped terminal output back into one line](https://github.com/user-attachments/assets/8e905ba1-a8b7-43c5-86af-e7dfd84f04db)
 
 Hold `Alt` while dragging to toggle between block and linewise selection, and press `e` mid-drag to extend the selection out to the whole URL or file path.
 

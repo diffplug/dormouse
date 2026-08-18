@@ -80,6 +80,13 @@ stays within Marketplace-compatible Markdown:
 - README image URLs use HTTPS.
 - User-provided SVG images are not allowed; content uses raster media or an
   approved badge provider.
+- Media is **project-owned and served from `dormouse.sh`**, backed by files in
+  `website/public/`. `github.com/user-attachments` URLs are specifically
+  excluded: they 302 to a signature-expiring S3 object (so `HEAD` 403s where
+  `GET` succeeds), cannot be cached downstream, leak every visitor's IP to a
+  third party, and disappear with the comment they were uploaded to — taking
+  the Marketplace listing's images with them. The public-doc lint enforces
+  both the origin and the file's presence on disk.
 - Critical documentation, install, issue, and media links are explicit absolute
   URLs. The monorepo does not rely on `vsce` inferring a relative subdirectory
   base for critical navigation.
@@ -329,6 +336,7 @@ spec.
 | `vscode-ext/README.md` | The canonical product guide |
 | `vscode-ext/package.json` | Listing metadata and VS Code command inventory |
 | `README.md` | Repository and contributor entry point |
+| `website/public/media/` | Project-owned guide media, served from `dormouse.sh` |
 | `dor/skill.md` | The bundled agent skill, rendered exactly at `/docs/agent-skill` |
 | `dor/test/snapshots/help/` | Tested CLI help, the source for `/docs/dor` |
 | `website/scripts/docs-parser.js` | Markdown subset parser, slugger, `<img>` allowlist |
@@ -348,19 +356,15 @@ spec.
 
 Remaining work, in staged order:
 
-1. **Project-owned guide media.** The guide's four alert-state icons and its
-   copy/paste image are hosted on `github.com/user-attachments/...`, which are
-   not project-owned stable URLs. Migrate them to raster files served from the
-   website, keeping the `<img>` sizing the icons need.
-2. **VSIX packaging verification.** Package the extension and inspect its
+1. **VSIX packaging verification.** Package the extension and inspect its
    README and media inventory as part of release, so a listing cannot ship with
    a broken image or an unretained local asset. `vscode-ext/.vscodeignore`
    already retains `README.md`, `icon.png`, and `media/`.
-3. **Live listing verification.** After publication, inspect the rendered
+2. **Live listing verification.** After publication, inspect the rendered
    Marketplace and Open VSX pages, and preview the root README under GitHub
    Markdown. If packaged or live README inspection becomes a release step,
    [deploy.md](deploy.md) owns that release ordering and verification.
-4. **Promote public-doc contracts.** Move the contracts that constrain CLI help
+3. **Promote public-doc contracts.** Move the contracts that constrain CLI help
    text and VS Code command titles into [dor-cli.md](dor-cli.md) and
    [vscode.md](vscode.md), so a change there sees the public-doc consequence
    without reading this spec. Public wording alone does not change a behavior

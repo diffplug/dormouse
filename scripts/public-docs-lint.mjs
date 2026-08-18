@@ -85,6 +85,22 @@ async function checkImages() {
   for (const url of urls) {
     if (!/^https:\/\//i.test(url)) fail(`${GUIDE}: image is not https — ${url}`);
     if (/\.svg(\?|#|$)/i.test(url)) fail(`${GUIDE}: SVG images are not allowed on the Marketplace — ${url}`);
+    // Media must be project-owned. github.com/user-attachments URLs 302 to a
+    // signature-expiring S3 object, cannot be cached downstream, and vanish
+    // with the comment they were uploaded to -- taking the Marketplace
+    // listing's images with them.
+    if (!/^https:\/\/dormouse\.sh\//i.test(url)) {
+      fail(`${GUIDE}: image is not served from dormouse.sh — ${url}`);
+    }
+  }
+
+  // Every referenced dormouse.sh media file must exist in website/public.
+  for (const url of urls) {
+    const m = /^https:\/\/dormouse\.sh\/(.+)$/i.exec(url);
+    if (!m) continue;
+    if (!existsSync(join(repoRoot, 'website', 'public', m[1]))) {
+      fail(`${GUIDE}: references https://dormouse.sh/${m[1]}, which is not in website/public/`);
+    }
   }
 }
 
