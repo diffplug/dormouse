@@ -280,6 +280,16 @@ The server routes JSON envelopes between client sockets and host sockets
 (`@hono/node-ws`). Before a session is authorized it only forwards an
 allowlist of handshake types; after authorization it is a dumb pipe.
 
+Only one socket may own a `hostId`. Registering a second one for the same
+`hostId` displaces the first: clients bound to it are told `host-gone`, their
+sessions are cleared, and the old socket is closed with
+`WS_CLOSE_HOST_REPLACED` (4000) / `WS_CLOSE_HOST_REPLACED_REASON`. Both
+constants live in `server-lib-common` rather than in `server` because the code
+is a contract, not a log line: the evicted Host keys its stand-down on it (see
+[Host side](#host-side-lib--standalone)), and if the two sides disagreed on the
+number the two Hosts would evict each other forever. Source of truth:
+`server/src/relay.ts` (`registerHost`).
+
 The relay keeps one current Host binding per Client socket. Host-originated
 handshake replies and `msg` frames are routed only when the frame comes from
 that current Host; late replies from a previous Host are ignored and cannot
@@ -363,6 +373,20 @@ A `remote-host` module in `lib`, active in standalone:
   `POST /api/host/enroll` → persist `{ serverUrl, hostId, hostToken, origin,
   rpId }` in webview `localStorage` (`local-json-store.ts` — deliberately no
   platform-adapter dependency); open and maintain `GET /ws/host`.
+* **Relay socket policy**: one socket at a time, reconnected with exponential
+  backoff (1s, doubling to 30s) after any close — except a close carrying
+  `WS_CLOSE_HOST_REPLACED`, which is **terminal**. That code means another
+  Dormouse instance enrolled with the same `hostId` took the relay slot, so
+  this one disposes its sessions, reports `displaced`, and arms no timer;
+  reconnecting on it would evict the newer Host, which would reconnect and
+  evict this one, forever. Coming back is an explicit act —
+  `window.dormouseRemoteHost.reconnect()` (or `RemoteHost.start()`), which
+  takes the slot back and displaces the other Host in turn. Nothing surfaces
+  `displaced` in the UI yet; `window.dormouseRemoteHost.status()` reports it as
+  `connection`, distinct from the retrying `disconnected`. A close event from a
+  socket the controller no longer owns is ignored, so a dead socket's late
+  eviction cannot stand down the live one. Source of truth:
+  `lib/src/remote/host/remote-host.ts`, `lib/src/remote/host/activation.ts`.
 * **Security**: `HostAcl` (persisted to `localStorage` as
   `records()`/`fromRecords`), `HostChallengeIssuer`, `PairingCeremony`, and
   `authorizeConnection` — all straight from `server-lib-common`, running in

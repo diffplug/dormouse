@@ -47,6 +47,22 @@ export const WS_ROUTES = {
 /** WS auth rides a query parameter (browsers cannot set WS headers). */
 export const WS_TOKEN_PARAM = 'token';
 
+/**
+ * Close code the relay sends to a Host socket it displaces when a newer socket
+ * claims the same `hostId` (only one socket may own a hostId — see server.md
+ * "Relay"). In the 4000-4999 application-private range.
+ *
+ * This lives on the wire contract rather than inside `server` because the Host
+ * keys its reconnect policy on it: every other close is transient and gets
+ * backoff-reconnected, but this one is deliberate and terminal, so the evicted
+ * Host stands down instead of reconnecting. If the two sides disagreed on the
+ * number, two Hosts would evict each other in an endless loop.
+ */
+export const WS_CLOSE_HOST_REPLACED = 4000;
+
+/** Human-readable reason paired with {@link WS_CLOSE_HOST_REPLACED}. */
+export const WS_CLOSE_HOST_REPLACED_REASON = 'replaced by a newer host connection';
+
 /** The selfhost mode has exactly one account. */
 export const SELFHOST_ACCOUNT_ID = 'owner';
 

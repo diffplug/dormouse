@@ -26,7 +26,11 @@
 
 import { randomBytes } from 'node:crypto';
 
-import { toBase64Url } from 'server-lib-common';
+import {
+  WS_CLOSE_HOST_REPLACED,
+  WS_CLOSE_HOST_REPLACED_REASON,
+  toBase64Url,
+} from 'server-lib-common';
 import type {
   ClientFrame,
   HostFrame,
@@ -91,6 +95,11 @@ export class RelayHub {
    * in-flight `msg` frames must never be treated as authorized. Handling this
    * on disconnect alone is not enough; because the displaced socket's `close` is
    * a no-op here, the invalidation has to happen at replacement time too.
+   *
+   * The eviction is announced with {@link WS_CLOSE_HOST_REPLACED} rather than a
+   * plain close so the evicted Host can tell it apart from a network drop: it
+   * stands down on this code instead of backing off and reconnecting, which
+   * would evict the replacement and start an endless swap.
    */
   registerHost(hostId: string, socket: RelaySocket): HostConn {
     const conn: HostConn = { hostId, socket };
@@ -98,7 +107,7 @@ export class RelayHub {
     this.#hosts.set(hostId, conn);
     if (existing) {
       this.#dropClientsOf(hostId);
-      safeClose(existing.socket, 4000, 'replaced by a newer host connection');
+      safeClose(existing.socket, WS_CLOSE_HOST_REPLACED, WS_CLOSE_HOST_REPLACED_REASON);
     }
     return conn;
   }

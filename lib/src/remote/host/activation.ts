@@ -11,6 +11,7 @@
  *
  *   await window.dormouseRemoteHost.enroll('https://your-server', 'SETUP_PASSWORD', 'My Laptop')
  *   window.dormouseRemoteHost.status()
+ *   window.dormouseRemoteHost.reconnect()      // needed after `displaced`
  *   window.dormouseRemoteHost.clearEnrollment()
  */
 
@@ -18,7 +19,7 @@ import { resetPushDevices, setPushDevicesRefresher } from '../../lib/push-device
 import { refreshPushDevices, startAlertPush, type AlertPushDeps } from './alert-push';
 import { clearEnrollment, enrollHost, getEnrollment, type HostEnrollment } from './enrollment';
 import { RemoteApiSession } from './remote-api';
-import { RemoteHost } from './remote-host';
+import { RemoteHost, type RemoteHostStatus } from './remote-host';
 
 let current: RemoteHost | null = null;
 let stopPush: (() => void) | null = null;
@@ -74,7 +75,13 @@ export interface RemoteHostConsoleStatus {
   enrolled: boolean;
   serverUrl: string | null;
   hostId: string | null;
-  connection: string;
+  /**
+   * The relay socket's state. `displaced` is the one that needs acting on:
+   * another Dormouse instance enrolled with the same `hostId` took the relay
+   * slot, so this one stood down and no timer will bring it back — `reconnect()`
+   * takes the slot back (and displaces the other one in turn).
+   */
+  connection: RemoteHostStatus;
   pairedClients: number;
 }
 
@@ -102,6 +109,16 @@ export function installRemoteHostConsoleHook(): void {
       return { hostId: enrollment.hostId, serverUrl: enrollment.serverUrl };
     },
     status: remoteHostStatus,
+    /**
+     * Re-open the relay socket now. The only way back from `displaced`: an
+     * evicted Host stands down for good rather than fighting the Host that
+     * replaced it, so returning has to be asked for.
+     */
+    reconnect(): RemoteHostConsoleStatus {
+      activateRemoteHost();
+      current?.start();
+      return remoteHostStatus();
+    },
     clearEnrollment() {
       stopRemoteHost();
       clearEnrollment();
