@@ -7,8 +7,9 @@
  * version-matched rather than pointing its instructions at the latest website.
  */
 import { useState } from "react";
-import docs from "../data/docs.json";
+import skill from "../data/docs.skill.json";
 import DocsLayout from "../components/DocsLayout";
+import { LINK_CLASS } from "../components/docs-tokens";
 import MarkdownDocument, { type BlockNode } from "../components/MarkdownDocument";
 
 export function meta() {
@@ -43,25 +44,10 @@ function CopyButton({ text, children }: { text: string; children: React.ReactNod
   );
 }
 
-/**
- * Insert the CLI reference link directly after the heading it belongs to, so
- * the skill body itself stays untouched.
- */
-function withReferenceLinks(blocks: BlockNode[], references: Record<string, { href: string; label: string }>) {
-  const out: { key: string; node: BlockNode | null; reference?: { href: string; label: string } }[] = [];
-  blocks.forEach((node, i) => {
-    out.push({ key: `b${i}`, node });
-    if (node.type === "heading" && references[node.id]) {
-      out.push({ key: `r${i}`, node: null, reference: references[node.id] });
-    }
-  });
-  return out;
-}
+type Reference = { href: string; label: string };
+const references: Record<string, Reference> = skill.references;
 
 export default function AgentSkillDocs() {
-  const skill = docs.skill;
-  const entries = withReferenceLinks(skill.blocks as BlockNode[], skill.references);
-
   return (
     <DocsLayout
       activePath="/docs/agent-skill"
@@ -75,21 +61,21 @@ export default function AgentSkillDocs() {
         <CopyButton text="dor skill --install">dor skill --install</CopyButton>
       </div>
 
-      {entries.map((entry) =>
-        entry.reference ? (
-          <p key={entry.key} className="-mt-2 mb-4 text-sm opacity-60">
-            CLI reference:{" "}
-            <a
-              href={entry.reference.href}
-              className="text-[var(--color-caramel)] underline-offset-2 hover:underline font-mono"
-            >
-              {entry.reference.label}
-            </a>
-          </p>
-        ) : (
-          <MarkdownDocument key={entry.key} blocks={[entry.node as BlockNode]} />
-        ),
-      )}
+      <MarkdownDocument
+        blocks={skill.blocks as BlockNode[]}
+        renderAfterHeading={(heading) => {
+          const reference = references[heading.id];
+          if (!reference) return null;
+          return (
+            <p className="-mt-2 mb-4 text-sm opacity-60">
+              CLI reference:{" "}
+              <a href={reference.href} className={`${LINK_CLASS} font-mono`}>
+                {reference.label}
+              </a>
+            </p>
+          );
+        }}
+      />
     </DocsLayout>
   );
 }

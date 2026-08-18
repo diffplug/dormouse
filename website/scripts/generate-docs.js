@@ -2,9 +2,10 @@
  * Build-time codegen for the public documentation pages.
  *
  * Reads the canonical sources, parses them with the in-repo Markdown parser,
- * and writes one gitignored data module the website imports. Browser code never
- * imports Dor implementation modules (they use Node APIs) or reads Markdown at
- * runtime — everything it needs is in the generated JSON.
+ * and writes one gitignored data file per page. Browser code never imports Dor
+ * implementation modules (they use Node APIs) or reads Markdown at runtime —
+ * everything it needs is in the generated JSON, split per page so /docs does
+ * not ship the CLI reference and the agent skill along with it.
  *
  * Wired into website `predev` / `pretest` / `prebuild`, mirroring
  * generate-changelog.js.
@@ -15,7 +16,7 @@
 import { readFile, readdir, writeFile, mkdir, copyFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createSlugger, parseMarkdown, inlineToText } from './docs-parser.js';
+import { createSlugger, parseMarkdown, visit } from './docs-parser.js';
 import {
   parseSnapshot,
   parseHelp,
@@ -30,11 +31,12 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..', '..');
-const outFile = join(__dirname, '..', 'src', 'data', 'docs.json');
+const dataDir = join(__dirname, '..', 'src', 'data');
 /** Guide media lives next to the guide; the site serves a copy at /media/. */
 const mediaSrcDir = join(repoRoot, 'vscode-ext', 'media');
 const mediaOutDir = join(__dirname, '..', 'public', 'media');
 const MEDIA_URL_BASE = '/media/';
+const MEDIA_SRC_PREFIX = 'media/';
 
 /**
  * The complete `/docs` delta, per docs/specs/website-docs.md.
@@ -51,6 +53,32 @@ const DOCS_DELTA = [
     match: (block) => block.type === 'heading' && block.depth === 1,
     operation: 'remove',
   },
+];
+
+/** Sections of dor/skill.md reused verbatim as the CLI page's introduction. */
+const CLI_INTRO_SECTIONS = [
+  { prefix: 'Targeting', id: 'targeting', title: 'Targeting' },
+  { prefix: 'Surface handles', id: 'surface-handles', title: 'Surface handles' },
+];
+
+/**
+ * Contextual links rendered beside matching agent-skill headings.
+ *
+ * The prose half is derived from CLI_INTRO_SECTIONS so a renamed skill section
+ * is edited in one table, not two. `command` entries match on a backticked
+ * token inside the heading, because skill headings carry descriptive suffixes
+ * ("`dor list` — find surfaces").
+ */
+const SKILL_REFERENCES = [
+  ...CLI_INTRO_SECTIONS.map((section) => ({ prefix: section.prefix, anchor: section.id })),
+  { command: 'dor list', anchor: 'list' },
+  { command: 'dor split', anchor: 'split' },
+  { command: 'dor ensure', anchor: 'ensure' },
+  { command: 'dor send', anchor: 'send' },
+  { command: 'dor read', anchor: 'read' },
+  { command: 'dor kill', anchor: 'kill' },
+  { command: 'dor ab', anchor: 'agent-browser' },
+  { command: 'dor iframe', anchor: 'iframe' },
 ];
 
 function applyDelta(blocks) {
@@ -76,11 +104,19 @@ function applyDelta(blocks) {
   return { blocks: result, applied };
 }
 
-/** Build the nested table of contents the docs shell renders. */
+/** Headings that survive the delta, in document order. */
+function headingsOf(blocks) {
+  const headings = [];
+  visit(blocks, (node) => {
+    if (node.type === 'heading') headings.push({ depth: node.depth, id: node.id, text: node.text });
+  });
+  return headings;
+}
+
+/** Nested table of contents from an already-filtered heading list. */
 function buildToc(headings) {
   const top = [];
   for (const h of headings) {
-    if (h.depth <= 1) continue;
     if (h.depth === 2) {
       top.push({ id: h.id, text: h.text, children: [] });
     } else if (h.depth === 3 && top.length > 0) {
@@ -90,74 +126,71 @@ function buildToc(headings) {
   return top;
 }
 
-/**
- * Copy the guide's media next to the site and rewrite relative image sources
- * to the served path.
- *
- * The README is the source of truth and references its images the way GitHub
- * expects -- repo-relative, so dropping a file into vscode-ext/media/ and
- * linking it just works, on GitHub, in the packaged extension, and here. The
- * website resolves those same paths to /media/ instead of duplicating assets.
- */
-async function syncGuideMedia() {
-  await rm(mediaOutDir, { recursive: true, force: true });
-  await mkdir(mediaOutDir, { recursive: true });
-  const files = await readdir(mediaSrcDir);
-  for (const file of files) {
-    await copyFile(join(mediaSrcDir, file), join(mediaOutDir, file));
-  }
-  return files;
+/** Fail unless exactly one heading matches, naming the rule that looked. */
+function findExactlyOneHeading(headings, predicate, label) {
+  const matches = headings.filter(predicate);
+  if (matches.length === 0) throw new Error(`no heading matches "${label}"`);
+  if (matches.length > 1) throw new Error(`heading "${label}" is ambiguous (${matches.length} matches)`);
+  return matches[0];
 }
 
-/** Rewrite `media/x.gif` -> `/media/x.gif` across every image node. */
-function rewriteMediaUrls(nodes, available, seen) {
-  for (const node of nodes ?? []) {
-    if (node.type === 'image' && node.src && !/^[a-z][a-z0-9+.-]*:|^\//i.test(node.src)) {
-      const rel = node.src.replace(/^\.\//, '');
-      if (!rel.startsWith('media/')) {
-        throw new Error(`guide image "${node.src}" must live under vscode-ext/media/`);
-      }
-      const file = rel.slice('media/'.length);
-      if (!available.includes(file)) {
-        throw new Error(`guide references media/${file}, which is not in vscode-ext/media/`);
-      }
-      seen.add(file);
-      node.src = MEDIA_URL_BASE + file;
+/** Fail on any duplicate id, so a page's anchors stay addressable. */
+function assertUniqueIds(ids, where) {
+  const dupes = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
+  if (dupes.length > 0) throw new Error(`duplicate anchor ids on ${where}: ${dupes.join(', ')}`);
+}
+
+/**
+ * Rewrite the guide's relative image sources to the path the site serves, and
+ * report which media files were actually used.
+ *
+ * The README is the source of truth and references images the way GitHub
+ * expects — repo-relative — so dropping a file into vscode-ext/media/ and
+ * linking it just works on GitHub, in the packaged extension, and here.
+ */
+function resolveGuideMedia(blocks, available) {
+  const used = new Set();
+  visit(blocks, (node) => {
+    if (node.type !== 'image' || !node.src) return;
+    if (/^[a-z][a-z0-9+.-]*:|^\//i.test(node.src)) {
+      throw new Error(`guide image "${node.src}" must be a repo-relative local file`);
     }
-    for (const key of ['children', 'items', 'header', 'rows', 'blocks']) {
-      const child = node[key];
-      if (Array.isArray(child)) {
-        for (const entry of child) {
-          if (Array.isArray(entry)) rewriteMediaUrls(entry, available, seen);
-          else rewriteMediaUrls([entry], available, seen);
-        }
-      }
+    const rel = node.src.replace(/^\.\//, '');
+    if (!rel.startsWith(MEDIA_SRC_PREFIX)) {
+      throw new Error(`guide image "${node.src}" must live under vscode-ext/${MEDIA_SRC_PREFIX}`);
     }
-  }
+    const file = rel.slice(MEDIA_SRC_PREFIX.length);
+    if (!available.includes(file)) {
+      throw new Error(`guide references ${rel}, which is not in vscode-ext/${MEDIA_SRC_PREFIX}`);
+    }
+    used.add(file);
+    node.src = MEDIA_URL_BASE + file;
+  });
+  return { used: [...used], unused: available.filter((f) => !used.has(f)) };
+}
+
+/** Copy the guide's media next to the site. Only `main()` should call this. */
+async function syncGuideMedia(files) {
+  await rm(mediaOutDir, { recursive: true, force: true });
+  await mkdir(mediaOutDir, { recursive: true });
+  await Promise.all(files.map((f) => copyFile(join(mediaSrcDir, f), join(mediaOutDir, f))));
 }
 
 async function buildGuide() {
-  const source = join(repoRoot, 'vscode-ext', 'README.md');
-  const markdown = await readFile(source, 'utf8');
+  const markdown = await readFile(join(repoRoot, 'vscode-ext', 'README.md'), 'utf8');
 
   // One slugger for the whole document, so ids are unique across the page.
-  const slug = createSlugger();
-  const parsed = parseMarkdown(markdown, { slug });
-
+  const parsed = parseMarkdown(markdown, { slug: createSlugger() });
   const title = parsed.blocks.find((b) => b.type === 'heading' && b.depth === 1)?.text ?? 'Documentation';
+
   const { blocks, applied } = applyDelta(parsed.blocks);
-  const headings = parsed.headings.filter((h) => h.depth > 1);
+  // Derived from the post-delta tree, so the delta is expressed once: whatever
+  // it removes disappears from the heading inventory and the TOC for free.
+  const headings = headingsOf(blocks);
+  assertUniqueIds(headings.map((h) => h.id), '/docs');
 
-  const available = await syncGuideMedia();
-  const used = new Set();
-  rewriteMediaUrls(blocks, available, used);
-  const unused = available.filter((f) => !used.has(f));
-
-  const ids = headings.map((h) => h.id);
-  const dupes = ids.filter((id, i) => ids.indexOf(id) !== i);
-  if (dupes.length > 0) {
-    throw new Error(`duplicate heading ids in the product guide: ${[...new Set(dupes)].join(', ')}`);
-  }
+  const available = (await readdir(mediaSrcDir)).sort();
+  const media = resolveGuideMedia(blocks, available);
 
   return {
     source: 'vscode-ext/README.md',
@@ -166,70 +199,43 @@ async function buildGuide() {
     headings,
     toc: buildToc(headings),
     delta: applied,
-    media: { available, unused },
+    media: { available, ...media },
   };
 }
 
-/**
- * Contextual links rendered beside matching agent-skill headings.
- *
- * `command` entries match on a backticked token inside the heading, because
- * skill headings carry descriptive suffixes ("`dor list` — find surfaces").
- * `prefix` entries match the heading text's opening words. Either way a rule
- * that matches zero or several headings fails the build, which is what keeps
- * the spec's "missing or ambiguous" guarantee meaningful.
- */
-const SKILL_REFERENCES = [
-  { prefix: 'Targeting', anchor: 'targeting' },
-  { prefix: 'Surface handles', anchor: 'surface-handles' },
-  { command: 'dor list', anchor: 'list' },
-  { command: 'dor split', anchor: 'split' },
-  { command: 'dor ensure', anchor: 'ensure' },
-  { command: 'dor send', anchor: 'send' },
-  { command: 'dor read', anchor: 'read' },
-  { command: 'dor kill', anchor: 'kill' },
-  { command: 'dor ab', anchor: 'agent-browser' },
-  { command: 'dor iframe', anchor: 'iframe' },
-];
-
-/** Sections of dor/skill.md reused verbatim as the CLI page's introduction. */
-const CLI_INTRO_SECTIONS = [
-  { prefix: 'Targeting', id: 'targeting', title: 'Targeting' },
-  { prefix: 'Surface handles', id: 'surface-handles', title: 'Surface handles' },
-];
+/** Blocks belonging to a heading: everything up to the next heading of <= depth. */
+function sectionBlocks(blocks, heading) {
+  const start = blocks.indexOf(heading);
+  const out = [];
+  for (let i = start + 1; i < blocks.length; i++) {
+    const b = blocks[i];
+    if (b.type === 'heading' && b.depth <= heading.depth) break;
+    out.push(b);
+  }
+  return out;
+}
 
 /** Backticked tokens inside a heading's inline nodes. */
 function headingCodeTokens(heading) {
   return (heading.children ?? []).filter((n) => n.type === 'code').map((n) => n.value.trim());
 }
 
-/** Blocks belonging to a heading: everything up to the next heading of <= depth. */
-function sectionBlocks(blocks, headingIndex) {
-  const start = blocks[headingIndex];
-  const out = [];
-  for (let i = headingIndex + 1; i < blocks.length; i++) {
-    const b = blocks[i];
-    if (b.type === 'heading' && b.depth <= start.depth) break;
-    out.push(b);
-  }
-  return out;
-}
-
 async function buildCli(skill) {
   const helpDir = join(repoRoot, 'dor', 'test', 'snapshots', 'help');
   const files = (await readdir(helpDir)).filter((f) => f.endsWith('.md')).sort();
+  const texts = await Promise.all(files.map((f) => readFile(join(helpDir, f), 'utf8')));
 
   const snapshots = new Map();
-  for (const file of files) {
+  files.forEach((file, i) => {
     const id = file.replace(/\.md$/, '');
     if (snapshots.has(id)) throw new MalformedSnapshotError(`duplicate command id "${id}"`);
-    const parsed = parseSnapshot(await readFile(join(helpDir, file), 'utf8'), file);
+    const parsed = parseSnapshot(texts[i], file);
     const nodes = parseHelp(parsed.raw);
     if (reconstruct(nodes) !== parsed.raw) {
       throw new MalformedSnapshotError(`${file}: parsed nodes do not reconstruct the raw help`);
     }
     snapshots.set(id, { id, file, ...parsed, nodes });
-  }
+  });
 
   const root = snapshots.get('dor');
   if (!root) throw new MalformedSnapshotError('missing root help snapshot dor.md');
@@ -246,8 +252,7 @@ async function buildCli(skill) {
   }
 
   const toSection = (snap) => {
-    const nodes = snap.nodes;
-    const pick = (kind) => nodes.filter((n) => n.kind === kind);
+    const pick = (kind) => snap.nodes.filter((n) => n.kind === kind);
     return {
       id: snap.id,
       title: snap.title,
@@ -268,48 +273,54 @@ async function buildCli(skill) {
   };
 
   // Intro sections lifted from the skill, not re-authored here.
+  const skillHeadings = skill.blocks.filter((b) => b.type === 'heading');
   const intro = CLI_INTRO_SECTIONS.map(({ prefix, id, title }) => {
-    const matches = skill.parsed.blocks
-      .map((b, i) => ({ b, i }))
-      .filter(({ b }) => b.type === 'heading' && b.text.startsWith(prefix));
-    if (matches.length === 0) throw new Error(`CLI intro section "${prefix}" not found in dor/skill.md`);
-    if (matches.length > 1) throw new Error(`CLI intro section "${prefix}" is ambiguous in dor/skill.md`);
-    return { id, title, blocks: sectionBlocks(skill.parsed.blocks, matches[0].i) };
+    const heading = findExactlyOneHeading(skillHeadings, (h) => h.text.startsWith(prefix), prefix);
+    return { id, title, blocks: sectionBlocks(skill.blocks, heading) };
   });
 
-  return {
-    source: 'dor/test/snapshots/help/',
-    intro,
-    root: toSection(root),
-    commands: inventory.map((name) => toSection(snapshots.get(name))),
-  };
+  const commands = inventory.map((name) => toSection(snapshots.get(name)));
+
+  // Every id addressable on /docs/dor, from all three of its sources: the
+  // intro sections, the root section, the command sections, and any heading
+  // inside a lifted intro block. Nothing else may collide with a command
+  // anchor that SKILL_REFERENCES links into.
+  const anchors = [
+    ...intro.map((s) => s.id),
+    ...intro.flatMap((s) => headingsOf(s.blocks).map((h) => h.id)),
+    'dor',
+    ...commands.map((c) => c.id),
+  ];
+  assertUniqueIds(anchors, '/docs/dor');
+
+  return { source: 'dor/test/snapshots/help/', intro, root: toSection(root), commands, anchors };
 }
 
 async function buildSkill() {
-  const source = join(repoRoot, 'dor', 'skill.md');
-  const markdown = await readFile(source, 'utf8');
-  const slug = createSlugger();
-  const parsed = parseMarkdown(markdown, { slug });
-  return { source: 'dor/skill.md', markdown, parsed };
+  const markdown = await readFile(join(repoRoot, 'dor', 'skill.md'), 'utf8');
+  const parsed = parseMarkdown(markdown, { slug: createSlugger() });
+  return { source: 'dor/skill.md', blocks: parsed.blocks, headings: parsed.headings };
 }
 
 /** Attach a CLI reference link to each mapped skill heading. */
 function linkSkillHeadings(skill, cli) {
-  const anchors = new Set([...cli.intro.map((s) => s.id), 'dor', ...cli.commands.map((c) => c.id)]);
-  const headings = skill.parsed.blocks.filter((b) => b.type === 'heading');
+  const anchors = new Set(cli.anchors);
+  const headings = skill.blocks.filter((b) => b.type === 'heading');
   const links = {};
 
   for (const rule of SKILL_REFERENCES) {
     if (!anchors.has(rule.anchor)) {
       throw new Error(`skill reference target "#${rule.anchor}" does not exist in the CLI reference`);
     }
-    const matches = rule.command
-      ? headings.filter((h) => headingCodeTokens(h).includes(rule.command))
-      : headings.filter((h) => h.text.startsWith(rule.prefix));
     const label = rule.command ?? rule.prefix;
-    if (matches.length === 0) throw new Error(`skill heading for "${label}" is missing`);
-    if (matches.length > 1) throw new Error(`skill heading for "${label}" is ambiguous (${matches.length} matches)`);
-    links[matches[0].id] = { href: `/docs/dor#${rule.anchor}`, label };
+    const heading = findExactlyOneHeading(
+      headings,
+      rule.command
+        ? (h) => headingCodeTokens(h).includes(rule.command)
+        : (h) => h.text.startsWith(rule.prefix),
+      label,
+    );
+    links[heading.id] = { href: `/docs/dor#${rule.anchor}`, label };
   }
 
   return links;
@@ -326,10 +337,9 @@ export async function generateDocs() {
     cli,
     skill: {
       source: skill.source,
-      markdown: skill.markdown,
-      blocks: skill.parsed.blocks,
-      headings: skill.parsed.headings,
-      toc: buildToc(skill.parsed.headings),
+      blocks: skill.blocks,
+      headings: skill.headings,
+      toc: buildToc(skill.headings.filter((h) => h.depth > 1)),
       references,
     },
   };
@@ -337,8 +347,15 @@ export async function generateDocs() {
 
 async function main() {
   const data = await generateDocs();
-  await mkdir(dirname(outFile), { recursive: true });
-  await writeFile(outFile, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+  await mkdir(dataDir, { recursive: true });
+  // One file per page: importing a single combined module made every docs
+  // route ship all three documents in one shared chunk.
+  await Promise.all([
+    ...Object.entries(data).map(([name, value]) =>
+      writeFile(join(dataDir, `docs.${name}.json`), `${JSON.stringify(value, null, 2)}\n`, 'utf8'),
+    ),
+    syncGuideMedia(data.guide.media.available),
+  ]);
   const { guide, cli, skill } = data;
   console.log(
     `Wrote docs data: guide ${guide.headings.length} headings, ` +

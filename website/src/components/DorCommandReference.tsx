@@ -8,6 +8,8 @@
  * See docs/specs/website-docs.md -> /docs/dor reference.
  */
 
+import { PRE_CLASS } from "./docs-tokens";
+
 export type DefinitionGroup = { label: string; rows: { term: string; description: string }[] };
 export type LabelledBlock = { label: string; body: string };
 
@@ -22,17 +24,21 @@ export type CommandSection = {
   raw: string;
 };
 
-const PRE_CLASS =
-  "overflow-x-auto rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04] p-4 font-mono text-sm";
+/** A linkable section heading, shared by the CLI page and its command sections. */
+export function AnchoredHeading({ id, children, className = "mb-4" }: { id: string; children: React.ReactNode; className?: string }) {
+  return (
+    <h2 id={id} className={`font-display text-2xl scroll-mt-24 ${className}`}>
+      <a href={`#${id}`} className="no-underline hover:underline underline-offset-4">
+        {children}
+      </a>
+    </h2>
+  );
+}
 
 export default function DorCommandReference({ section }: { section: CommandSection }) {
   return (
     <section className="mb-14">
-      <h2 id={section.id} className="font-display text-2xl mb-1 scroll-mt-24">
-        <a href={`#${section.id}`} className="no-underline hover:underline underline-offset-4">
-          {section.title}
-        </a>
-      </h2>
+      <AnchoredHeading id={section.id} className="mb-1">{section.title}</AnchoredHeading>
       <p className="mb-4 font-mono text-sm opacity-60">{section.invocation}</p>
 
       {section.usage.length > 0 && (

@@ -33,10 +33,14 @@ describe('cli reference', () => {
   });
 
   it('provides the anchors the skill links into', () => {
-    const anchors = new Set([...data.cli.intro.map((s) => s.id), 'dor', ...data.cli.commands.map((c) => c.id)]);
+    const anchors = new Set(data.cli.anchors);
     for (const a of ['targeting', 'surface-handles', 'dor', 'list', 'split', 'ensure', 'send', 'read', 'kill', 'agent-browser', 'iframe']) {
       expect(anchors, `missing anchor #${a}`).toContain(a);
     }
+  });
+
+  it('exposes a collision-free anchor namespace', () => {
+    expect(new Set(data.cli.anchors).size).toBe(data.cli.anchors.length);
   });
 
   it('keeps exact help alongside the parsed view', () => {
@@ -53,14 +57,23 @@ describe('cli reference', () => {
 });
 
 describe('agent skill', () => {
-  it('retains the skill markdown byte for byte', async () => {
+  it('reproduces every heading in dor/skill.md, with matching ids', async () => {
+    // Independently parse the file and compare, rather than asserting the
+    // generator's own copy of its own input equals its own input.
     const { readFile } = await import('node:fs/promises');
+    const { parseMarkdown, createSlugger } = await import('./docs-parser.js');
     const onDisk = await readFile(new URL('../../dor/skill.md', import.meta.url), 'utf8');
-    expect(data.skill.markdown).toBe(onDisk);
+    const expected = parseMarkdown(onDisk, { slug: createSlugger() }).headings;
+    expect(data.skill.headings).toEqual(expected);
+  });
+
+  it('does not ship the raw skill markdown to the browser', () => {
+    // Nothing renders it, and it is ~10 KB on every docs page.
+    expect(data.skill.markdown).toBeUndefined();
   });
 
   it('resolves every reference into an existing CLI anchor', () => {
-    const anchors = new Set([...data.cli.intro.map((s) => s.id), 'dor', ...data.cli.commands.map((c) => c.id)]);
+    const anchors = new Set(data.cli.anchors);
     const refs = Object.values(data.skill.references);
     expect(refs.length).toBe(10);
     for (const ref of refs) {

@@ -38,7 +38,7 @@ standalone/node_modules/
 website/dist/
 website/node_modules/
 website/src/data/changelog.json
-website/src/data/docs.json
+website/src/data/docs.*.json
 website/public/media/
 
 # OS

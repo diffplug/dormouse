@@ -64,15 +64,13 @@ function parseImgTag(raw, line) {
   const attrs = {};
   const re = /([a-zA-Z][a-zA-Z0-9-]*)\s*=\s*"([^"]*)"/g;
   let m;
-  let consumed = 0;
   while ((m = re.exec(inner))) {
-    const [full, name, value] = m;
+    const [, name, value] = m;
     const key = name.toLowerCase();
     if (!IMG_ALLOWED_ATTRS.has(key)) {
       throw new UnsupportedMarkdownError(`<img> attribute "${name}" is not allowed`, line);
     }
     attrs[key] = value;
-    consumed += full.length;
   }
   // Anything left over means unquoted or malformed attributes we did not parse.
   const leftover = inner.replace(re, '').trim();
@@ -87,7 +85,6 @@ function parseImgTag(raw, line) {
   if (/^[a-z][a-z0-9+.-]*:/i.test(attrs.src) && !/^https:\/\//i.test(attrs.src)) {
     throw new UnsupportedMarkdownError(`<img> src must be relative or https: "${attrs.src}"`, line);
   }
-  void consumed;
   return { type: 'image', src: attrs.src, alt: attrs.alt ?? '', width: attrs.width, height: attrs.height };
 }
 
@@ -230,6 +227,9 @@ function matchLink(text, start) {
 
 const LIST_ITEM = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
 
+/** Closing-fence matchers, one per marker character, compiled once. */
+const FENCE_CLOSE = { '`': /^\s*`{3,}\s*$/, '~': /^\s*~{3,}\s*$/ };
+
 /**
  * Split a table row into cells, honouring backslash-escaped pipes so a cell
  * containing `` `\|` `` (which the shortcut table needs) survives intact.
@@ -250,7 +250,7 @@ function splitRow(row, line) {
 }
 
 function isDelimiterRow(row) {
-  return /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/.test(row) && row.includes('-');
+  return /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/.test(row);
 }
 
 function alignmentsFrom(row) {
@@ -285,13 +285,13 @@ export function parseMarkdown(markdown, options = {}) {
     // Fenced code
     const fence = /^(\s*)(`{3,}|~{3,})\s*([\w+-]*)\s*$/.exec(raw);
     if (fence) {
-      const marker = fence[2][0].repeat(3);
+      const closeRe = FENCE_CLOSE[fence[2][0]];
       const lang = fence[3] || null;
       const body = [];
       i++;
       let closed = false;
       while (i < lines.length) {
-        if (new RegExp(`^\\s*${marker[0]}{3,}\\s*$`).test(lines[i])) { closed = true; i++; break; }
+        if (closeRe.test(lines[i])) { closed = true; i++; break; }
         body.push(lines[i]);
         i++;
       }
@@ -355,7 +355,7 @@ export function parseMarkdown(markdown, options = {}) {
 
     // Standalone <img> block
     if (/^\s*<img\b/i.test(raw)) {
-      blocks.push({ type: 'paragraph', children: parseInline(raw.trim(), lineNo) });
+      blocks.push({ type: 'paragraph', children: markStandalone(parseInline(raw.trim(), lineNo)) });
       i++;
       continue;
     }
@@ -374,10 +374,24 @@ export function parseMarkdown(markdown, options = {}) {
       para.push(l.trim());
       i++;
     }
-    blocks.push({ type: 'paragraph', children: parseInline(para.join(' '), lineNo) });
+    blocks.push({ type: 'paragraph', children: markStandalone(parseInline(para.join(' '), lineNo)) });
   }
 
   return { blocks, headings };
+}
+
+/**
+ * Tag an image that is the whole paragraph as standalone art.
+ *
+ * The distinction between page art and an inline icon is known here and
+ * nowhere else; without it a renderer has to guess from something incidental
+ * like the presence of a width attribute, which then silently reclassifies any
+ * image that gains one.
+ */
+function markStandalone(children) {
+  const visible = children.filter((n) => !(n.type === 'text' && n.value.trim() === ''));
+  if (visible.length === 1 && visible[0].type === 'image') visible[0].standalone = true;
+  return children;
 }
 
 function parseList(lines, start, slug) {
@@ -415,6 +429,31 @@ function parseList(lines, start, slug) {
 
   return { node: { type: 'list', ordered, items }, next: i };
 }
+
+/**
+ * Visit every node in a parsed tree, blocks and inlines alike.
+ *
+ * The parser owns the node schema, so it owns the traversal too — a consumer
+ * that mirrors the container keys drifts the moment a node type gains a child
+ * list. (The first such mirror missed table body cells entirely, since a row
+ * is an array of cell arrays rather than a node.)
+ *
+ * Accepts a node, an array, or an arbitrarily nested array of either.
+ */
+export function visit(tree, fn) {
+  if (Array.isArray(tree)) {
+    for (const entry of tree) visit(entry, fn);
+    return;
+  }
+  if (!tree || typeof tree !== 'object') return;
+  fn(tree);
+  for (const key of CONTAINER_KEYS) {
+    if (key in tree) visit(tree[key], fn);
+  }
+}
+
+/** Every key on any node that can hold child nodes. */
+const CONTAINER_KEYS = ['children', 'items', 'header', 'rows', 'blocks'];
 
 export function inlineToText(nodes) {
   return nodes

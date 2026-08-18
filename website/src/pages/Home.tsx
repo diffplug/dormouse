@@ -772,7 +772,7 @@ export default function Home() {
 
       {/* ── Content sections — pulled up to appear as video starts scrolling ── */}
       <div ref={contentRef} className="relative z-10 bg-[var(--color-bg)]" style={{ marginTop: `-${(1 - UNPIN_THRESHOLD) * RUNWAY_VH}vh` }}>
-        {/* Section 1: distribution + layout — one terminal, two homes */}
+        {/* 1. Distribution + layout — one terminal, two homes */}
         <section id="features" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`}>
           <div>
             <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-6">Tmux with browsers, for VS Code and Standalone</h2>
@@ -834,7 +834,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Section 4: port awareness — text left, context-menu mock right */}
+        {/* 3. Port awareness — text left, context-menu mock right */}
         <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-center`}>
           <div>
             <h2 className="font-display text-xl mb-6">Terminals that know their ports</h2>
@@ -875,7 +875,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Section 5: browser surfaces — mock left, text right */}
+        {/* 4. Browser surfaces — transcript + preview left, text right */}
         <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-center`}>
           <div className="order-2 md:order-1 space-y-4">
           {/* Authored transcript. Command syntax tracks dor/test/snapshots/help/;
@@ -940,7 +940,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Section 3: text left, image right */}
+        {/* 5. Selection and copy/paste — text left, video right */}
         <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
           <div>
             <h2 className="font-display text-xl mb-6">Select and copy-paste like you meant</h2>

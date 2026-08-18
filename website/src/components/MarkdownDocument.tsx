@@ -8,12 +8,13 @@
  *
  * See docs/specs/website-docs.md -> /docs rendering contract.
  */
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
+import { CODE_CLASS, LINK_CLASS, SITE_ORIGIN } from "./docs-tokens";
 
 export type InlineNode =
   | { type: "text"; value: string }
   | { type: "code"; value: string }
-  | { type: "image"; src: string; alt?: string; width?: string; height?: string; title?: string }
+  | { type: "image"; src: string; alt?: string; width?: string; height?: string; title?: string; standalone?: boolean }
   | { type: "link"; href: string; title?: string; children: InlineNode[] }
   | { type: "strong"; children: InlineNode[] }
   | { type: "em"; children: InlineNode[] };
@@ -27,12 +28,9 @@ export type BlockNode =
   | { type: "blockquote"; children: BlockNode[] }
   | { type: "thematicBreak" };
 
-const LINK_CLASS = "text-[var(--color-caramel)] underline-offset-2 hover:underline";
-const CODE_CLASS = "text-[0.9em] bg-[var(--color-text)]/15 px-1.5 py-0.5 rounded font-mono";
-
 /** Same-origin links stay in the tab; anything else opens safely in a new one. */
 function isExternal(href: string): boolean {
-  return /^[a-z][a-z0-9+.-]*:/i.test(href) && !href.startsWith("https://dormouse.sh");
+  return /^[a-z][a-z0-9+.-]*:/i.test(href) && !href.startsWith(SITE_ORIGIN);
 }
 
 function Inline({ nodes }: { nodes: InlineNode[] }): ReactNode {
@@ -55,9 +53,9 @@ function Inline({ nodes }: { nodes: InlineNode[] }): ReactNode {
             title={node.title}
             width={node.width}
             height={node.height}
-            // Inline icons keep their intrinsic size; standalone art is capped
-            // to the column so nothing forces a horizontal scroll on mobile.
-            className={node.width ? "inline-block align-text-bottom" : "block h-auto max-w-full rounded-lg my-6"}
+            // Standalone art is capped to the column so nothing forces a
+            // horizontal scroll on mobile; inline icons keep intrinsic size.
+            className={node.standalone ? "block h-auto max-w-full rounded-lg my-6" : "inline-block align-text-bottom"}
             loading="lazy"
           />
         );
@@ -81,20 +79,22 @@ function Inline({ nodes }: { nodes: InlineNode[] }): ReactNode {
   });
 }
 
-const HEADING_CLASS: Record<number, string> = {
-  2: "font-display text-2xl mt-12 mb-4 scroll-mt-24",
-  3: "font-display text-xl mt-8 mb-3 scroll-mt-24",
-  4: "font-display text-lg mt-6 mb-2 scroll-mt-24",
-  5: "font-display text-base mt-4 mb-2 scroll-mt-24",
-  6: "font-display text-base mt-4 mb-2 scroll-mt-24",
+const HEADING_BASE = "font-display scroll-mt-24";
+/** Size and spacing per depth; the shared base is applied alongside. */
+const HEADING_SIZE: Record<number, string> = {
+  2: "text-2xl mt-12 mb-4",
+  3: "text-xl mt-8 mb-3",
+  4: "text-lg mt-6 mb-2",
+  5: "text-base mt-4 mb-2",
+  6: "text-base mt-4 mb-2",
 };
 
-function Block({ node }: { node: BlockNode }): ReactNode {
+export function Block({ node }: { node: BlockNode }): ReactNode {
   switch (node.type) {
     case "heading": {
       const Tag = `h${Math.min(node.depth, 6)}` as "h2";
       return (
-        <Tag id={node.id} className={HEADING_CLASS[node.depth] ?? HEADING_CLASS[6]}>
+        <Tag id={node.id} className={`${HEADING_BASE} ${HEADING_SIZE[node.depth] ?? HEADING_SIZE[6]}`}>
           <a href={`#${node.id}`} className="no-underline hover:underline underline-offset-4">
             <Inline nodes={node.children} />
           </a>
@@ -169,6 +169,29 @@ function Blocks({ nodes }: { nodes: BlockNode[] }): ReactNode {
   return nodes.map((node, i) => <Block key={i} node={node} />);
 }
 
-export default function MarkdownDocument({ blocks }: { blocks: BlockNode[] }) {
-  return <div className="docs-body">{<Blocks nodes={blocks} />}</div>;
+/**
+ * Render a parsed document.
+ *
+ * `renderAfterHeading` lets a page splice its own content in after a heading
+ * (the agent-skill page uses it for CLI reference links) without the page
+ * having to slice the block list up and reassemble the document itself.
+ */
+export default function MarkdownDocument({
+  blocks,
+  renderAfterHeading,
+}: {
+  blocks: BlockNode[];
+  renderAfterHeading?: (heading: Extract<BlockNode, { type: "heading" }>) => ReactNode;
+}) {
+  if (!renderAfterHeading) return <Blocks nodes={blocks} />;
+  return (
+    <>
+      {blocks.map((node, i) => (
+        <Fragment key={i}>
+          <Block node={node} />
+          {node.type === "heading" && renderAfterHeading(node)}
+        </Fragment>
+      ))}
+    </>
+  );
 }

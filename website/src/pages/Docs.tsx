@@ -3,7 +3,7 @@
  * product prose. Content and the applied structural delta both come from
  * generated data (`website/scripts/generate-docs.js`).
  */
-import docs from "../data/docs.json";
+import guide from "../data/docs.guide.json";
 import DocsLayout from "../components/DocsLayout";
 import MarkdownDocument, { type BlockNode } from "../components/MarkdownDocument";
 
@@ -24,9 +24,9 @@ export default function Docs() {
       activePath="/docs"
       title="Documentation"
       intro="Everything Dormouse does, in one page. The CLI and agent-skill references are linked at the bottom."
-      toc={docs.guide.toc}
+      toc={guide.toc}
     >
-      <MarkdownDocument blocks={docs.guide.blocks as BlockNode[]} />
+      <MarkdownDocument blocks={guide.blocks as BlockNode[]} />
     </DocsLayout>
   );
 }

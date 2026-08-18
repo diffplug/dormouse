@@ -105,6 +105,28 @@ export function usageLines(node) {
 }
 
 /**
+ * The most frequent value, breaking ties toward the highest or lowest.
+ *
+ * Both column heuristics below are this same argmax: descriptions align on one
+ * column (ties go right, since a term may contain its own short gap like
+ * "-h  --help"), and terms share one indent (ties go left).
+ */
+function mostCommon(values, tieBreak) {
+  const tally = new Map();
+  for (const v of values) tally.set(v, (tally.get(v) ?? 0) + 1);
+  let winner = 0;
+  let best = 0;
+  for (const [value, count] of tally) {
+    const wins = count > best || (count === best && (tieBreak === 'highest' ? value > winner : value < winner));
+    if (wins) {
+      winner = value;
+      best = count;
+    }
+  }
+  return winner;
+}
+
+/**
  * Definition rows under FLAGS / ARGUMENTS / COMMANDS. The CLI aligns them on
  * whitespace runs; a row whose description wraps continues the previous row.
  */
@@ -116,40 +138,20 @@ export function definitionRows(node) {
   // of every 2+ space run and keeping the column that appears in the most
   // lines (ties resolve to the rightmost, since a term may itself contain a
   // short gap -- "-h  --help").
-  const tally = new Map();
-  for (const line of lines) {
-    for (const m of line.matchAll(/\s{2,}/g)) {
-      const col = m.index + m[0].length;
-      if (col >= line.length) continue;
-      tally.set(col, (tally.get(col) ?? 0) + 1);
-    }
-  }
-  let column = 0;
-  let best = 0;
-  for (const [col, count] of tally) {
-    if (count > best || (count === best && col > column)) {
-      column = col;
-      best = count;
-    }
-  }
+  const column = mostCommon(
+    lines.flatMap((line) =>
+      [...line.matchAll(/\s{2,}/g)]
+        .map((m) => m.index + m[0].length)
+        .filter((col) => col < line.length),
+    ),
+    'highest',
+  );
 
   // The column most terms start at, used to tell a wrapped description from a
   // new term: a continuation begins nearer the description column than the
   // term column. `dor split --help` wraps at indent 18 against a description
   // column of 19, so an exact `indent >= column` test would miss it.
-  const indentTally = new Map();
-  for (const line of lines) {
-    const indent = line.length - line.trimStart().length;
-    indentTally.set(indent, (indentTally.get(indent) ?? 0) + 1);
-  }
-  let termIndent = 0;
-  let bestIndent = 0;
-  for (const [indent, count] of indentTally) {
-    if (count > bestIndent || (count === bestIndent && indent < termIndent)) {
-      termIndent = indent;
-      bestIndent = count;
-    }
-  }
+  const termIndent = mostCommon(lines.map((line) => line.length - line.trimStart().length), 'lowest');
 
   const rows = [];
   for (const line of lines) {

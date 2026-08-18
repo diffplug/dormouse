@@ -14,7 +14,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseMarkdown, UnsupportedMarkdownError } from '../website/scripts/docs-parser.js';
+import { parseMarkdown, visit, UnsupportedMarkdownError } from '../website/scripts/docs-parser.js';
 import { generateDocs } from '../website/scripts/generate-docs.js';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -23,6 +23,7 @@ const fail = (msg) => failures.push(msg);
 
 const GUIDE = 'vscode-ext/README.md';
 const ROOT_README = 'README.md';
+const SKILL = 'dor/skill.md';
 
 /** Sections the canonical guide must carry. */
 const REQUIRED_GUIDE_SECTIONS = [
@@ -40,47 +41,51 @@ const REQUIRED_GUIDE_SECTIONS = [
 
 const read = (rel) => readFile(join(repoRoot, rel), 'utf8');
 
-async function checkNoPlaceholders() {
-  for (const rel of [GUIDE, ROOT_README]) {
-    const text = await read(rel);
-    if (/\bTODO:/.test(text)) fail(`${rel}: contains a TODO: placeholder`);
-  }
-}
+/** Each source read once and parsed once, then shared by every check. */
+const src = {
+  [GUIDE]: await read(GUIDE),
+  [ROOT_README]: await read(ROOT_README),
+  [SKILL]: await read(SKILL),
+};
 
-/**
- * The guide must stay inside the Markdown subset the in-repo parser supports.
- * Without this, an unsupported construct renders wrong at /docs instead of
- * failing the build — the tradeoff we accepted by hand-rolling the parser.
- */
-async function checkGuideParses() {
-  for (const rel of [GUIDE, 'dor/skill.md']) {
-    try {
-      parseMarkdown(await read(rel));
-    } catch (error) {
-      if (error instanceof UnsupportedMarkdownError) {
-        fail(`${rel}: uses Markdown outside the supported subset — ${error.message}`);
-      } else {
-        throw error;
-      }
+/** Parsed form, or null when the source is outside the supported subset. */
+const parsed = {};
+for (const rel of [GUIDE, SKILL]) {
+  try {
+    parsed[rel] = parseMarkdown(src[rel]);
+  } catch (error) {
+    parsed[rel] = null;
+    if (error instanceof UnsupportedMarkdownError) {
+      fail(`${rel}: uses Markdown outside the supported subset — ${error.message}`);
+    } else {
+      throw error;
     }
   }
 }
 
+async function checkNoPlaceholders() {
+  for (const rel of [GUIDE, ROOT_README]) {
+    if (/\bTODO:/.test(src[rel])) fail(`${rel}: contains a TODO: placeholder`);
+  }
+}
+
 async function checkGuideSections() {
-  const { headings } = parseMarkdown(await read(GUIDE));
-  const present = headings.map((h) => h.text.toLowerCase());
+  if (!parsed[GUIDE]) return;
+  const present = parsed[GUIDE].headings.map((h) => h.text.toLowerCase());
   for (const required of REQUIRED_GUIDE_SECTIONS) {
     if (!present.includes(required)) fail(`${GUIDE}: missing required section "${required}"`);
   }
 }
 
-/** Marketplace media rules: https only, raster only. */
+/** Marketplace media rules, read off the parsed tree rather than the source.
+ *  A regex over raw Markdown also matches <img> examples inside fenced code
+ *  blocks and misses images the parser normalizes. */
 async function checkImages() {
-  const text = await read(GUIDE);
-  const urls = [
-    ...[...text.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)].map((m) => m[1]),
-    ...[...text.matchAll(/<img[^>]*\ssrc="([^"]+)"/g)].map((m) => m[1]),
-  ];
+  if (!parsed[GUIDE]) return;
+  const urls = [];
+  visit(parsed[GUIDE].blocks, (node) => {
+    if (node.type === 'image' && node.src) urls.push(node.src);
+  });
   if (urls.length === 0) fail(`${GUIDE}: has no images; the listing needs at least a hero`);
   for (const url of urls) {
     if (/\.svg(\?|#|$)/i.test(url)) fail(`${GUIDE}: SVG images are not allowed on the Marketplace — ${url}`);
@@ -90,27 +95,11 @@ async function checkImages() {
     // rejected outright: github.com/user-attachments URLs 302 to a
     // signature-expiring S3 object, cannot be cached downstream, leak visitor
     // IPs, and vanish with the comment they were uploaded to.
+    //
+    // Where the file must live, that it exists, and that nothing is unused are
+    // the generator's rules (resolveGuideMedia); checkGenerated reports those.
     if (/^[a-z][a-z0-9+.-]*:|^\/\//i.test(url)) {
       fail(`${GUIDE}: image must be a repo-relative local file, not a remote URL — ${url}`);
-      continue;
-    }
-
-    const rel = url.replace(/^\.\//, '');
-    if (!rel.startsWith('media/')) {
-      fail(`${GUIDE}: image must live under vscode-ext/media/ — ${url}`);
-      continue;
-    }
-    if (!existsSync(join(repoRoot, 'vscode-ext', rel))) {
-      fail(`${GUIDE}: references ${url}, which does not exist in vscode-ext/`);
-    }
-  }
-
-  // Every file in vscode-ext/media must be referenced, or it ships unused.
-  const mediaDir = join(repoRoot, 'vscode-ext', 'media');
-  if (existsSync(mediaDir)) {
-    const referenced = new Set(urls.map((u) => u.replace(/^\.\//, '').replace(/^media\//, '')));
-    for (const file of await readdir(mediaDir)) {
-      if (!referenced.has(file)) fail(`vscode-ext/media/${file} is not referenced by the guide`);
     }
   }
 }
@@ -118,7 +107,18 @@ async function checkImages() {
 /** Local Markdown links must resolve; public links must be absolute https. */
 async function checkLinks() {
   for (const rel of [GUIDE, ROOT_README]) {
-    const text = await read(rel);
+    // Skip fenced code blocks: a link-looking string inside a sample is not a
+    // link, and reporting it as broken would be a false failure.
+    const text = src[rel]
+      .split('\n')
+      .reduce(
+        (acc, line) => {
+          if (/^\s*(```|~~~)/.test(line)) return { ...acc, inFence: !acc.inFence };
+          return acc.inFence ? acc : { ...acc, out: acc.out.concat(line) };
+        },
+        { inFence: false, out: [] },
+      )
+      .out.join('\n');
     for (const [, href] of text.matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)) {
       if (href.startsWith('#')) continue;
       if (/^https:\/\//i.test(href)) continue;
@@ -137,8 +137,7 @@ async function checkLinks() {
 async function checkVsCodeCommands() {
   const manifest = JSON.parse(await read('vscode-ext/package.json'));
   const titles = new Set((manifest.contributes?.commands ?? []).map((c) => c.title));
-  const text = await read(GUIDE);
-  for (const [, title] of text.matchAll(/\*\*(Dormouse: [^*]+)\*\*/g)) {
+  for (const [, title] of src[GUIDE].matchAll(/\*\*(Dormouse: [^*]+)\*\*/g)) {
     if (!titles.has(title)) fail(`${GUIDE}: names VS Code command "${title}", which is not in vscode-ext/package.json`);
   }
   for (const field of ['bugs', 'homepage', 'repository', 'icon']) {
@@ -164,34 +163,20 @@ async function checkGenerated() {
     return;
   }
 
-  const ids = data.guide.headings.map((h) => h.id);
-  const dupes = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
-  if (dupes.length > 0) fail(`/docs heading ids are not unique: ${dupes.join(', ')}`);
-
-  const helpDir = join(repoRoot, 'dor', 'test', 'snapshots', 'help');
-  const snapshotIds = (await readdir(helpDir)).filter((f) => f.endsWith('.md')).map((f) => f.replace(/\.md$/, ''));
-  const generated = new Set([...data.cli.commands.map((c) => c.id), data.cli.root.id]);
-  for (const id of snapshotIds) {
-    if (!generated.has(id)) fail(`/docs/dor is missing command snapshot "${id}"`);
+  // Everything else the generator guarantees by throwing: unique ids per page,
+  // snapshot/inventory agreement in both directions, and reference anchors
+  // resolving. Re-asserting them here would state each invariant twice with a
+  // different message, so only the generator owns them and the catch above
+  // reports any failure.
+  for (const file of data.guide.media.unused) {
+    fail(`vscode-ext/media/${file} is not referenced by the guide`);
   }
-  for (const id of generated) {
-    if (!snapshotIds.includes(id)) fail(`/docs/dor generated command "${id}" has no snapshot`);
-  }
-
-  const anchors = new Set([...data.cli.intro.map((s) => s.id), 'dor', ...data.cli.commands.map((c) => c.id)]);
-  for (const ref of Object.values(data.skill.references)) {
-    const anchor = ref.href.replace('/docs/dor#', '');
-    if (!anchors.has(anchor)) fail(`agent-skill reference target #${anchor} does not exist in /docs/dor`);
-  }
-
-  const skillOnDisk = await read('dor/skill.md');
-  if (data.skill.markdown !== skillOnDisk) fail('/docs/agent-skill markdown is not byte-identical to dor/skill.md');
 }
 
 /** Public copy must not present staged WebRTC as shipped. */
 async function checkNoStagedClaims() {
   for (const rel of [GUIDE, ROOT_README, 'website/src/pages/Home.tsx']) {
-    const text = await read(rel);
+    const text = rel in src ? src[rel] : await read(rel);
     if (/WebRTC/i.test(text)) {
       fail(`${rel}: mentions WebRTC, which is staged in docs/specs/remote-api.md and must not be presented as shipped`);
     }
@@ -200,7 +185,6 @@ async function checkNoStagedClaims() {
 
 const checks = [
   checkNoPlaceholders,
-  checkGuideParses,
   checkGuideSections,
   checkImages,
   checkLinks,

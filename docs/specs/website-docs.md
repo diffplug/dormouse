@@ -219,8 +219,11 @@ Source of truth: `website/scripts/help-parser.js`,
 
 The agent page renders `dor/skill.md` exactly. Page chrome adds a table of
 contents, stable heading ids, styled code blocks, copy buttons for `dor skill`
-and `dor skill --install`, and reference links, but the generated data retains
-the skill Markdown byte for byte — asserted against the file on disk.
+and `dor skill --install`, and reference links, but adds nothing to the skill
+body. The raw Markdown is deliberately **not** emitted into the generated data:
+nothing renders it, and a copy of the generator's own input proves nothing about
+the generator. A test instead re-parses the file independently and compares the
+resulting heading inventory and ids.
 
 The web rendering adds contextual reference links beside matching skill
 headings. Command rules match on a backticked token inside the heading, since
