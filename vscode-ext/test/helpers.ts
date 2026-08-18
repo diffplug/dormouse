@@ -14,7 +14,9 @@ export async function tempStorageDir(): Promise<string> {
 }
 
 export async function removeDir(dir: string): Promise<void> {
-  await rm(dir, { recursive: true, force: true });
+  // Retry ENOTEMPTY: a file landing while `rm` walks the directory fails the
+  // rmdir, and these suites are all about modules doing filesystem work.
+  await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
 }
 
 export async function waitFor(

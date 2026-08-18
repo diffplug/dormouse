@@ -78,8 +78,18 @@ async function readRecord(file: string): Promise<WindowLeaseRecord | null> {
  * one name make the second rename fail with ENOENT.
  */
 async function writeRecord(current: LeaseState, record: WindowLeaseRecord): Promise<void> {
+  // A cycle outlives the lease that started it: the read that decided on this
+  // write happened while this window still arbitrated, and both steps below
+  // await. Stamping our name on the record after `disposeWindowLease` — which
+  // deletes it precisely so the next window does not wait — would resurrect a
+  // lease owned by nobody, and every other window would sit out the TTL for it.
+  if (state !== current) return;
   const temp = `${current.file}.${randomUUID()}.tmp`;
   await writeFile(temp, JSON.stringify(record), 'utf8');
+  if (state !== current) {
+    await unlink(temp).catch(() => {});
+    return;
+  }
   await rename(temp, current.file);
 }
 
