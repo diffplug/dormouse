@@ -11,6 +11,8 @@
 // (`standalone/scripts/tauri.mjs` + `csp.mjs`) so both Hosts widen the same way
 // with the same variable. See docs/specs/server.md → "Host webview CSP".
 
+import { readFileSync } from 'node:fs';
+
 import * as esbuild from 'esbuild';
 
 import { resolveRemoteConnectSrc } from '../../scripts/csp-defaults.mjs';
@@ -48,4 +50,31 @@ if (watch) {
   console.error('[esbuild] watching');
 } else {
   await Promise.all(builds.map((options) => esbuild.build(options)));
+  assertConnectSrcBaked();
+}
+
+/**
+ * Fail the build if the `define` did not reach the bundle.
+ *
+ * `webview-html.ts` reads `__DORMOUSE_REMOTE_CONNECT_SRC__` as a `declare const`,
+ * so if the substitution is ever lost — someone re-inlines the esbuild call, or
+ * adds a bundle entry that pulls in that module without the define — TypeScript
+ * still compiles and the failure only appears at runtime, as a ReferenceError
+ * inside `getWebviewHtml` that renders an empty webview. The standalone side
+ * fails loudly on the same class of drift (`standalone/scripts/csp.mjs`), so
+ * this side should too.
+ */
+function assertConnectSrcBaked() {
+  const bundle = readFileSync('dist/extension.js', 'utf8');
+  if (bundle.includes('__DORMOUSE_REMOTE_CONNECT_SRC__')) {
+    throw new Error(
+      'CSP: __DORMOUSE_REMOTE_CONNECT_SRC__ survived into dist/extension.js — the esbuild ' +
+        'define did not apply, and the webview would throw a ReferenceError at render.',
+    );
+  }
+  if (!bundle.includes(remoteSrc)) {
+    throw new Error(
+      `CSP: dist/extension.js does not contain the resolved connect-src sources (${remoteSrc}).`,
+    );
+  }
 }

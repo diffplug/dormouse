@@ -16,6 +16,13 @@ import type { DorControlResult } from 'dor/protocol';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 import { setJsonStoreBackend } from '../local-json-store';
 
+/**
+ * Budget for the boot-time host-store read. Generous because it is gated on an
+ * OS keychain unlock, and a miss degrades the Host to "un-enrolled" rather than
+ * failing loudly.
+ */
+const HOST_STORE_READ_TIMEOUT_MS = 10_000;
+
 export class VSCodeAdapter implements PlatformAdapter {
   private vscode: ReturnType<typeof acquireVsCodeApi>;
   private hostState: unknown = (globalThis as typeof globalThis & { __DORMOUSE_HOST_STATE__?: unknown }).__DORMOUSE_HOST_STATE__ ?? null;
@@ -32,6 +39,8 @@ export class VSCodeAdapter implements PlatformAdapter {
   private watchedCommandHandlers = new Set<(names: string[]) => void>();
   private alertSettingsHandlers = new Set<(settings: AlertSettings) => void>();
   private singletonHandlers = new Map<string, (held: boolean) => void>();
+  /** Hydrated host-store caches, by claimed prefix — see `hydrateScopedStore`. */
+  private scopedCaches = new Map<string, Map<string, string>>();
 
   constructor() {
     this.vscode = acquireVsCodeApi();
@@ -155,6 +164,8 @@ export class VSCodeAdapter implements PlatformAdapter {
         }));
       } else if (msg.type === 'singleton:lease') {
         this.singletonHandlers.get(msg.name)?.(!!msg.held);
+      } else if (msg.type === 'store:changed') {
+        this.applyStoreChange(msg.key, msg.value ?? null);
       }
     });
   }
@@ -212,27 +223,34 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   /**
    * Pull every `prefix`-scoped value out of extension-host storage and install
-   * a synchronous, write-through backend over it (docs/specs/vscode.md → "Host
-   * store"). Webview `localStorage` is not the VS Code persistence story, and
+   * a synchronous, write-through backend over it (docs/specs/vscode.md →
+   * "Remote Host: store and lease"). Webview `localStorage` is not the VS Code persistence story, and
    * the remote Host's enrollment carries a bearer credential that belongs in
    * `SecretStorage`, so the store has to live on the other side of the message
    * boundary. A failed read installs an empty cache rather than throwing: the
    * Host then behaves as un-enrolled instead of blocking webview boot.
    */
   async hydrateScopedStore(prefix: string): Promise<void> {
-    let entries: Record<string, string> = {};
-    try {
-      entries =
-        (await this.requestResponse(
-          'store:read',
-          'store:entries',
-          { prefix },
-          (msg) => msg.entries as Record<string, string>,
-        )) ?? {};
-    } catch {
-      // Timed out or the host declined — fall through with an empty cache.
+    // The host answers only after reading `SecretStorage`, which on a cold OS
+    // keychain (or a locked libsecret) can take well over the default second.
+    // `requestResponse` resolves `null` on timeout rather than rejecting, so a
+    // too-short budget silently installs an empty cache and the Host reads as
+    // un-enrolled — indistinguishable from never having enrolled.
+    const entries = await this.requestResponse(
+      'store:read',
+      'store:entries',
+      { prefix },
+      (msg) => msg.entries as Record<string, string>,
+      HOST_STORE_READ_TIMEOUT_MS,
+    );
+    if (entries === null) {
+      console.warn(
+        `[dormouse] host store "${prefix}" did not answer in ${HOST_STORE_READ_TIMEOUT_MS}ms; ` +
+          'continuing without it. A remote Host enrollment will read as absent.',
+      );
     }
-    const cache = new Map(Object.entries(entries));
+    const cache = new Map(Object.entries(entries ?? {}));
+    this.scopedCaches.set(prefix, cache);
     setJsonStoreBackend(prefix, {
       getItem: (key) => cache.get(key) ?? null,
       setItem: (key, value) => {
@@ -244,6 +262,21 @@ export class VSCodeAdapter implements PlatformAdapter {
         this.vscode.postMessage({ type: 'store:write', key, value: null });
       },
     });
+  }
+
+  /**
+   * Apply another webview's committed write to this one's cache. Without it a
+   * webview serves reads from its boot-time snapshot forever, and — because the
+   * lease can hand it the Host later — would start from that snapshot and write
+   * it back, dropping every pairing the previous holder approved.
+   */
+  private applyStoreChange(key: string, value: string | null): void {
+    for (const [prefix, cache] of this.scopedCaches) {
+      if (!key.startsWith(prefix)) continue;
+      if (value === null) cache.delete(key);
+      else cache.set(key, value);
+      return;
+    }
   }
 
   shutdown(): void {

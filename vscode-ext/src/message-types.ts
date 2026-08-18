@@ -78,6 +78,7 @@ export type ExtensionMessage =
   | { type: 'iframe:proxyUrl'; requestId: string; result: IframeProxyResult }
   | { type: 'store:entries'; requestId: string; entries: Record<string, string> }
   | { type: 'singleton:lease'; name: string; held: boolean }
+  | { type: 'store:changed'; key: string; value: string | null }
   | {
       type: 'dormouse:newTerminal';
       shell?: string;

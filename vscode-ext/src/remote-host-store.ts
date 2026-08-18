@@ -1,6 +1,6 @@
 /**
  * Extension-host storage for the webview's remote-Host keys
- * (docs/specs/vscode.md → "Host store").
+ * (docs/specs/vscode.md → "Remote Host: store and lease").
  *
  * The webview cannot keep these in `localStorage`: VS Code's persistence story
  * is `setState`/`workspaceState`/`globalState`, and the enrollment blob carries
@@ -68,16 +68,20 @@ export async function readStore(prefix: string): Promise<Record<string, string>>
   return entries;
 }
 
-/** Write (or, with `null`, delete) one Host-namespace key. */
-export async function writeStore(key: string, value: string | null): Promise<void> {
-  if (!context || !allowed(key)) return;
-  if (value !== null && Buffer.byteLength(value, 'utf8') > MAX_VALUE_BYTES) return;
+/**
+ * Write (or, with `null`, delete) one Host-namespace key. Returns whether the
+ * write happened, so the caller only announces changes that are real.
+ */
+export async function writeStore(key: string, value: string | null): Promise<boolean> {
+  if (!context || !allowed(key)) return false;
+  if (value !== null && Buffer.byteLength(value, 'utf8') > MAX_VALUE_BYTES) return false;
 
   if (key === ENROLLMENT_KEY) {
     if (value === null) await context.secrets.delete(key);
     else await context.secrets.store(key, value);
-    return;
+    return true;
   }
 
   await context.globalState.update(key, value === null ? undefined : value);
+  return true;
 }

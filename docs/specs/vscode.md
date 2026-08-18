@@ -23,7 +23,7 @@ Extension Host (vscode-ext/src/)
 ├── iframe-proxy-host.ts      — VS Code binding for the iframe transparent proxy (injects the logger)
 ├── webview-html.ts           — CSP injection, nonce + message-token generation, asset URI rewriting
 ├── remote-host-store.ts      — SecretStorage/globalState backing for the webview's remote-Host keys
-├── scripts/esbuild.mjs       — extension + pty-host bundles; bakes the webview's remote `connect-src`
+└── (../scripts/esbuild.mjs)  — outside src/: extension + pty-host bundles; bakes the webview's remote `connect-src`
 ├── webview-messaging.ts      — serveWebview: pairs a document with its message token, returns the WebviewChannel
 └── log.ts                    — extension logging
 
@@ -250,6 +250,8 @@ VS Code is a first-class remote Host. Two things have to be true that standalone
 `local-json-store` is synchronous by contract, so the store is pulled across at boot and installed as an in-memory, write-through backend before anything reads it: `lib/src/main.tsx` awaits `PlatformAdapter.hydrateScopedStore` alongside `resumeOrRestore`. A failed read installs an empty cache rather than throwing — the Host then behaves as un-enrolled instead of blocking webview boot.
 
 Both sides gate on the prefix. The webview names the keys, so `remote-host-store.ts` refuses any key outside the Host namespace and caps values at 64 KiB; a compromised webview can neither read nor write unrelated extension state.
+
+A boot-time snapshot alone would be wrong, because the lease hands the Host between webviews: a webview that hydrated before another approved a pairing would later take the lease, read its stale ACL, and write that back — dropping the pairing permanently. So a committed write is broadcast to every webview (`store:changed`) and applied to each cache. The broadcast goes to the writer too; re-applying your own write is a no-op, and skipping self would mean identifying it. Only writes that actually happened are announced, which is why `writeStore` returns whether it wrote.
 
 Source of truth: `vscode-ext/src/remote-host-store.ts`, `lib/src/lib/platform/vscode-adapter.ts` (`hydrateScopedStore`), `lib/src/lib/local-json-store.ts` (prefix claims), `lib/src/remote/host/store.ts` (the shared prefix).
 

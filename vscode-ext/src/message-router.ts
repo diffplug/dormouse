@@ -75,6 +75,21 @@ interface ActiveRouter {
   flushSessionSave(timeoutMs?: number): Promise<void>;
   ownsPty(id: string): boolean;
   forwardDorControlRequest(request: DorControlRequest): void;
+  notifyStoreChanged(key: string, value: string | null): void;
+}
+
+/**
+ * Tell every webview about a committed Host-store write.
+ *
+ * Each webview caches the store at boot and serves reads from that cache, so
+ * without this a second webview keeps a stale snapshot — and since the lease
+ * can hand it the Host later, it would start from that snapshot and write it
+ * back, losing every pairing approved by the previous holder. Broadcast to all
+ * routers including the writer: re-applying your own write is a no-op, and
+ * skipping self would mean identifying it.
+ */
+function broadcastStoreChange(key: string, value: string | null): void {
+  for (const router of activeRouters) router.notifyStoreChanged(key, value);
 }
 
 const activeRouters = new Set<ActiveRouter>();
@@ -541,6 +556,8 @@ export function attachRouter(
         );
         break;
       case 'singleton:claim':
+        // `WebviewMessage` is a claim about the sender, not a runtime check.
+        if (typeof msg.name !== 'string') break;
         claimant.wants.add(msg.name);
         electSingleton(msg.name);
         break;
@@ -554,9 +571,18 @@ export function attachRouter(
             type: 'store:entries', requestId: msg.requestId, entries,
           } satisfies ExtensionMessage));
         break;
-      case 'store:write':
-        void writeStore(msg.key, msg.value);
+      case 'store:write': {
+        // Same bar as `store:read` below: a non-string key would throw inside
+        // `allowed()` as an unhandled rejection rather than a refused write.
+        const key = msg.key;
+        const value = msg.value;
+        if (typeof key !== 'string') break;
+        if (typeof value !== 'string' && value !== null) break;
+        void writeStore(key, value).then((written) => {
+          if (written) broadcastStoreChange(key, value);
+        });
         break;
+      }
       case 'dormouse:themeColors':
         // Webview reports its resolved terminal theme; cache for OSC color replies.
         latestThemeColors = { foreground: msg.foreground, background: msg.background, cursor: msg.cursor };
@@ -721,6 +747,10 @@ export function attachRouter(
     flushSessionSave,
     ownsPty,
     forwardDorControlRequest,
+    notifyStoreChanged(key: string, value: string | null) {
+      if (disposed) return;
+      void post({ type: 'store:changed', key, value } satisfies ExtensionMessage);
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
