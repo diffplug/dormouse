@@ -8,6 +8,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { fakeContext, freshModule, removeDir, tempStorageDir, tick, waitFor, waitForFile } from './helpers';
@@ -268,6 +269,23 @@ describe('peer link between windows', () => {
     expect(brokerSide.exits).toEqual([{ ptyId: 'pty-far', exitCode: 0 }]);
     expect(broker.isRemotePty('pty-far')).toBe(false);
     expect(broker.remoteWrite('pty-far', 'x')).toBe(false);
+  });
+
+  it('publishes no rendezvous when the lease flips back mid-startup', async () => {
+    const mod = await openWindow(fakeWindow());
+
+    // Same tick: startup is several awaits long, so the flip back lands inside
+    // it. A rendezvous published afterwards would name a socket the teardown
+    // already unlinked, and every peer would dial it, fail, and sit in the
+    // reconnect backoff until some later broker rewrote the file.
+    mod.setPeerLinkRole(true);
+    mod.setPeerLinkRole(false);
+    await tick(200);
+
+    await expect(access(join(dir, 'remote-host.peer.json'))).rejects.toHaveProperty(
+      'code',
+      'ENOENT',
+    );
   });
 
   it('rejects a client that does not know the token', async () => {

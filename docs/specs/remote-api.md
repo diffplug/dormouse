@@ -261,9 +261,15 @@ rather than re-resolving the old `surfaceId` through the current registry slot.
 When that PTY exits, the Host emits `terminal.closed` and then drops the
 attachment, so a later `terminal.write`/`terminal.resize` for the surface is
 rejected ("surface is not attached") instead of acting on the disposed terminal.
-Disposing the Viewer also invalidates an in-flight peer surface resolution; a
-handle that resolves after disposal is released immediately and never becomes
-an attachment.
+Disposing the Viewer, and any newer `surface.attach`, invalidate an in-flight
+peer surface resolution: a handle that resolves late is released immediately and
+never becomes an attachment. That is what keeps last-attach-wins true when the
+two resolutions take different lengths of time — a sibling window's pane is a
+round trip away while a local one resolves immediately, so without it the older,
+slower attach would land last and take the attachment. A superseded attach is
+answered with an error rather than left pending, since the client holds a
+request open until it is answered; a disposed session has no transport left to
+answer on.
 
 #### Size authority: last-attach-wins
 

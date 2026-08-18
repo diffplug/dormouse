@@ -10,7 +10,9 @@ import {
   REMOTE_EVENTS,
   REMOTE_METHODS,
   fromBase64Url,
+  toBase64Url,
   utf8Decode,
+  utf8Encode,
   type RemoteEventMsg,
   type RemoteResponse,
 } from 'server-lib-common';
@@ -244,6 +246,53 @@ describe('remote-api peer surfaces', () => {
     expect(platform.subscribed).toEqual(['pty-far']);
     expect(platform.unsubscribed).toEqual(['pty-far']);
     expect(sent.some((p) => (p as RemoteResponse).requestId === 'attach-1')).toBe(false);
+  });
+
+  it('does not let a gated peer attach outrank the newer attach that replaced it', async () => {
+    const platform = new PeerPlatform();
+    platform.peerSurfaces.set('surface-far', { ptyId: 'pty-far', cols: 80, rows: 24 });
+    const terminal = { cols: 80, rows: 24, resize: vi.fn() };
+    registry.set('surface-near', { ptyId: 'pty-near', terminal } as unknown as TerminalEntry);
+    let finishResolve!: () => void;
+    platform.surfaceRequestGate = new Promise<void>((resolve) => {
+      finishResolve = resolve;
+    });
+    const { api, sent } = session(platform);
+
+    // The client attaches a sibling's pane and switches to a local one before
+    // the sibling answers. The local resolve is a microtask, the peer's a round
+    // trip, so they land out of order.
+    api.handle({
+      requestId: 'attach-far',
+      method: REMOTE_METHODS.surfaceAttach,
+      params: { surfaceId: 'surface-far', cols: 80, rows: 24 },
+    });
+    api.handle({
+      requestId: 'attach-near',
+      method: REMOTE_METHODS.surfaceAttach,
+      params: { surfaceId: 'surface-near', cols: 100, rows: 30 },
+    });
+    await settle();
+    finishResolve();
+    await settle();
+
+    // Last attach wins: the superseded one unwinds the stream it opened on the
+    // way instead of tearing down the newer attachment, and is answered rather
+    // than left pending on the client forever.
+    expect(platform.unsubscribed).toEqual(['pty-far']);
+    const near = sent.find((p) => (p as RemoteResponse).requestId === 'attach-near') as RemoteResponse;
+    expect(near.ok).toBe(true);
+    const far = sent.find((p) => (p as RemoteResponse).requestId === 'attach-far') as RemoteResponse;
+    expect(far.ok).toBe(false);
+    expect(far.error).toMatch(/superseded/);
+
+    // Input still reaches the surface the client actually attached.
+    api.handle({
+      requestId: 'write-1',
+      method: REMOTE_METHODS.terminalWrite,
+      params: { surfaceId: 'surface-near', bytes: toBase64Url(utf8Encode('ls')) },
+    });
+    expect(platform.writePty).toHaveBeenCalledWith('pty-near', 'ls');
   });
 
   it('fails cleanly when no webview owns the surface', async () => {

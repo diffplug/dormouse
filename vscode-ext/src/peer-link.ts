@@ -40,6 +40,7 @@ import {
   type PeerLinkResponse,
 } from '../../lib/src/lib/vscode-peer-link-protocol';
 import { log } from './log';
+import { installWatcherErrorFallback } from './window-lease';
 
 /**
  * What this module needs from the router, injected rather than imported: the
@@ -279,14 +280,22 @@ export function listenServer(nextServer: Server, socketPath: string): Promise<vo
   });
 }
 
+/**
+ * Close a server this window is no longer the broker for, without touching
+ * whatever holds the role now. Never `stopServer`: that would tear down a
+ * newer broker's socket and rendezvous along with this abandoned one.
+ */
+async function abandonServer(orphan: Server, socketPath: string): Promise<void> {
+  if (orphan.listening) orphan.close();
+  await rm(socketPath, { force: true }).catch(() => {});
+}
+
 async function startServer(): Promise<void> {
   const path = rendezvousPath();
   if (!path || server) return;
 
   const next: Rendezvous = { socketPath: newSocketPath(), token: randomUUID() };
-  await rm(next.socketPath, { force: true }).catch(() => {});
-
-  server = createServer((socket) => {
+  const nextServer = createServer((socket) => {
     const client: PeerClient = { socket, decoder: new FrameDecoder(), authenticated: false };
     clients.add(client);
     socket.setEncoding('utf8');
@@ -296,10 +305,20 @@ async function startServer(): Promise<void> {
     socket.on('error', () => dropClient(client));
     socket.on('close', () => dropClient(client));
   });
+  // Claimed in the same tick as the guard above so that `server === nextServer`
+  // is the whole staleness test below — nothing can slip in between. Startup is
+  // several awaits long and the lease can flip back to client inside any of
+  // them, which runs `stopServer` and nulls `server`; a continuation that did
+  // not notice would publish a rendezvous naming a socket that is already
+  // unlinked, and every peer would dial it, fail, and sit in the reconnect
+  // backoff until some later broker rewrote the file.
+  server = nextServer;
+  rendezvous = next;
 
   try {
-    rendezvous = next;
-    await listenServer(server, next.socketPath);
+    await rm(next.socketPath, { force: true }).catch(() => {});
+    if (server !== nextServer) return;
+    await listenServer(nextServer, next.socketPath);
     await mkdir(join(path, '..'), { recursive: true }).catch(() => {});
     // The token is the only thing standing between another local process and
     // this window's terminals, so it is never briefly world-readable: written
@@ -307,6 +326,11 @@ async function startServer(): Promise<void> {
     // never sees a half-written rendezvous and falls into the retry backoff.
     const temp = `${path}.${randomUUID()}.tmp`;
     await writeFile(temp, JSON.stringify(next), { encoding: 'utf8', mode: 0o600 });
+    if (server !== nextServer) {
+      await rm(temp, { force: true }).catch(() => {});
+      await abandonServer(nextServer, next.socketPath);
+      return;
+    }
     await rename(temp, path);
     log.info('[peer-link] serving peers');
   } catch (err) {
@@ -314,7 +338,8 @@ async function startServer(): Promise<void> {
     // would surface as an unhandled one rather than as a broken link. An
     // unwritable globalStorage means no peers, not a crashed extension host.
     log.error(`[peer-link] could not start serving: ${String(err)}`);
-    await stopServer();
+    if (server === nextServer) await stopServer();
+    else await abandonServer(nextServer, next.socketPath);
   }
 }
 
@@ -492,10 +517,18 @@ export function setPeerLinkRole(isBroker: boolean): void {
 function watchRendezvous(): void {
   if (rendezvousWatcher || !context) return;
   try {
-    rendezvousWatcher = watch(context.globalStorageUri.fsPath, (_event, filename) => {
+    const watcher = watch(context.globalStorageUri.fsPath, (_event, filename) => {
       if (filename && filename !== RENDEZVOUS_FILE) return;
       disconnectClient();
       void connectClient();
+    });
+    rendezvousWatcher = watcher;
+    // Same directory, same hazard as the lease watcher: an inotify handle the
+    // kernel invalidates emits asynchronously, and an unheard 'error' on an
+    // EventEmitter is rethrown — taking the whole extension host with it.
+    installWatcherErrorFallback(watcher, (error) => {
+      log.error(`[peer-link] rendezvous watcher failed; the reconnect timer converges: ${String(error)}`);
+      if (rendezvousWatcher === watcher) rendezvousWatcher = null;
     });
   } catch {
     // No watcher here: the reconnect timer still converges.
