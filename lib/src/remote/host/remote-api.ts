@@ -35,12 +35,11 @@ import {
   type TerminalWriteParams,
 } from 'server-lib-common';
 import { getPlatform } from '../../lib/platform';
-import { registry } from '../../lib/terminal-store';
-import type { TerminalEntry } from '../../lib/terminal-store';
 import { subscribeToActivity } from '../../lib/session-activity-store';
 import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
 import { collectDirectorySnapshot } from './directory-collect';
-import { peerDirectory, peerSurfaceOp } from './peer-surfaces';
+import { peerDirectory } from './peer-surfaces';
+import { resolveSurface, type SurfaceHandle } from './surface-resolve';
 
 /** Coalesce window for directory re-snapshots (remote-api.md: "Host coalesces"). */
 const DIRECTORY_DEBOUNCE_MS = 150;
@@ -50,31 +49,18 @@ const DIRECTORY_DEBOUNCE_MS = 150;
  */
 const FORCE_REPAINT_BOUNCE_MS = 60;
 
-/**
- * Where an attached surface lives. A window's terminals are spread across its
- * webviews and only one of them is the Host, so an attachment is either to a
- * pane in this webview's registry or to one a sibling owns, driven through the
- * peer bridge (docs/specs/vscode.md → "Peer surfaces").
- */
-type SurfaceTarget =
-  | { kind: 'local'; entry: TerminalEntry }
-  | { kind: 'peer'; surfaceId: string; cols: number; rows: number };
-
-function targetSize(target: SurfaceTarget): { cols: number; rows: number } {
-  return target.kind === 'local'
-    ? { cols: target.entry.terminal.cols, rows: target.entry.terminal.rows }
-    : { cols: target.cols, rows: target.rows };
-}
-
 interface Attachment {
   surfaceId: string;
-  ptyId: string;
-  target: SurfaceTarget;
+  /**
+   * The resolved surface. Pinned at attach — a pane swap must not move the
+   * attachment onto a different terminal — and it is the only thing here that
+   * knows whether the pane is this webview's or a sibling's
+   * (`surface-resolve.ts`).
+   */
+  handle: SurfaceHandle;
   subId: string;
   onData: (detail: { id: string; data: string }) => void;
   onExit: (detail: { id: string; exitCode: number }) => void;
-  /** Stops the peer stream; absent for a pane this webview owns. */
-  stopStream: (() => void) | null;
   /** Pending same-size repaint bounce (see FORCE_REPAINT_BOUNCE_MS), if any. */
   bounceTimer: ReturnType<typeof setTimeout> | null;
 }
@@ -217,18 +203,16 @@ export class RemoteApiSession {
   #emitDirectory(): void {
     if (this.#directorySubId === null) return;
     const subId = this.#directorySubId;
-    const local = collectDirectorySnapshot();
-    if (!getPlatform().peers) {
-      this.#event(subId, REMOTE_EVENTS.directorySnapshot, { entries: local });
-      return;
-    }
-    // A window's terminals are spread across its webviews, and only this one is
-    // the Host — the rest have to be asked (docs/specs/vscode.md → "Peer
-    // surfaces"). Emit twice rather than delaying the local panes behind a
-    // round trip: the phone renders what is here immediately, then fills in.
-    this.#event(subId, REMOTE_EVENTS.directorySnapshot, { entries: local });
+    // A window's terminals may be spread across several webviews with only this
+    // one as the Host, so the rest have to be asked (docs/specs/vscode.md →
+    // "Peer surfaces"). Emit twice rather than delaying the local panes behind
+    // a round trip: the phone renders what is here immediately, then fills in.
+    this.#event(subId, REMOTE_EVENTS.directorySnapshot, {
+      entries: collectDirectorySnapshot(),
+    });
     void peerDirectory().then((remote) => {
-      // The subscription may have been replaced or torn down while we waited.
+      // Nothing to fill in on a host with no peers, and the subscription may
+      // have been replaced or torn down while we waited.
       if (this.#directorySubId !== subId || remote.length === 0) return;
       this.#event(subId, REMOTE_EVENTS.directorySnapshot, {
         entries: [...collectDirectorySnapshot(), ...remote],
@@ -243,54 +227,26 @@ export class RemoteApiSession {
       return;
     }
 
-    const entry = registry.get(params.surfaceId);
-    if (entry) {
-      this.#beginAttach(request, params, { kind: 'local', entry }, entry.ptyId, null);
-      return;
-    }
-
-    // Not ours: ask the other webviews of this window. The owner resizes its
-    // own xterm — attach-is-the-resize has to go through the live terminal, not
-    // the PTY, or the owning pane's view drifts from the size the phone set.
-    const peers = getPlatform().peers;
-    if (!peers) {
-      this.#fail(request, `no such surface: ${params.surfaceId}`);
-      return;
-    }
-    void peerSurfaceOp({
-      surfaceId: params.surfaceId,
-      op: 'attach',
-      cols: params.cols,
-      rows: params.rows,
-    }).then((owner) => {
-      if (!owner) {
+    // Where the pane lives — this webview's registry or a sibling's — is a fact
+    // about VS Code webview hosting, not a protocol concept, so it is settled
+    // below this line and never seen here (`surface-resolve.ts`).
+    void resolveSurface(params.surfaceId, params).then((handle) => {
+      if (!handle) {
         this.#fail(request, `no such surface: ${params.surfaceId}`);
         return;
       }
-      const stopStream = peers.streamPty(owner.ptyId);
-      this.#beginAttach(
-        request,
-        params,
-        { kind: 'peer', surfaceId: params.surfaceId, cols: owner.cols, rows: owner.rows },
-        owner.ptyId,
-        stopStream,
-      );
+      this.#beginAttach(request, params, handle);
     });
   }
 
-  #beginAttach(
-    request: RemoteRequest,
-    params: AttachParams,
-    target: SurfaceTarget,
-    ptyId: string,
-    stopStream: (() => void) | null,
-  ): void {
+  #beginAttach(request: RemoteRequest, params: AttachParams, handle: SurfaceHandle): void {
     // v1: one attachment per session — replace any prior stream.
     this.#teardownAttachment();
 
-    const current = targetSize(target);
-    const cols = clampTerminalDimension(params.cols, current.cols);
-    const rows = clampTerminalDimension(params.rows, current.rows);
+    const ptyId = handle.ptyId;
+    const cols = clampTerminalDimension(params.cols, handle.cols);
+    const rows = clampTerminalDimension(params.rows, handle.rows);
+    const sameSize = handle.cols === cols && handle.rows === rows;
     const platform = getPlatform();
     const subId = request.requestId;
     const pendingEvents: Array<{ event: string; data: unknown }> = [];
@@ -326,12 +282,10 @@ export class RemoteApiSession {
     platform.onPtyExit(onExit);
     const attachment: Attachment = {
       surfaceId: params.surfaceId,
-      ptyId,
-      target,
+      handle,
       subId,
       onData,
       onExit,
-      stopStream,
       bounceTimer: null,
     };
     this.#attachment = attachment;
@@ -340,11 +294,10 @@ export class RemoteApiSession {
     // which drives resizePty → SIGWINCH → the TUI/shell repaints, and that
     // repaint is what fills the client's screen (no snapshot transfer). The
     // stream is subscribed first because some PTYs repaint synchronously.
-    // A peer owner already applied the size in its own xterm before replying,
-    // so only the local path still has a resize to perform here.
-    if (current.cols !== cols || current.rows !== rows) {
-      if (target.kind === 'local') target.entry.terminal.resize(cols, rows);
-      else void this.#resizePeer(target, cols, rows);
+    // A sibling's owner already applied the size inside the attach round trip,
+    // so its handle resolves at the requested size and takes the bounce below.
+    if (!sameSize) {
+      void handle.resize(cols, rows);
     } else {
       // Same size: force one repaint with a quick rows bounce on the PTY only,
       // leaving the already-correct local xterm buffer untouched. Bounce away
@@ -365,8 +318,7 @@ export class RemoteApiSession {
       }, FORCE_REPAINT_BOUNCE_MS);
     }
 
-    const settled = targetSize(target);
-    const result: TerminalAttachResult = { cols: settled.cols, rows: settled.rows };
+    const result: TerminalAttachResult = { cols: handle.cols, rows: handle.rows };
     this.#ok(request, result);
     streaming = true;
     for (const event of pendingEvents) {
@@ -390,7 +342,7 @@ export class RemoteApiSession {
     if (!resolved) return;
     const { params, attachment } = resolved;
     // Feed the existing PTY input path; the local echo returns via onPtyData.
-    getPlatform().writePty(attachment.ptyId, utf8Decode(fromBase64Url(params.bytes)));
+    getPlatform().writePty(attachment.handle.ptyId, utf8Decode(fromBase64Url(params.bytes)));
     this.#ok(request, {});
   }
 
@@ -398,38 +350,13 @@ export class RemoteApiSession {
     const resolved = this.#attachedParams<TerminalResizeParams>(request);
     if (!resolved) return;
     const { params, attachment } = resolved;
-    const target = attachment.target;
-    const current = targetSize(target);
-    const cols = clampTerminalDimension(params.cols, current.cols);
-    const rows = clampTerminalDimension(params.rows, current.rows);
+    const handle = attachment.handle;
+    const cols = clampTerminalDimension(params.cols, handle.cols);
+    const rows = clampTerminalDimension(params.rows, handle.rows);
 
-    if (target.kind === 'local') {
-      const term = target.entry.terminal;
-      if (term.cols !== cols || term.rows !== rows) term.resize(cols, rows);
-      this.#ok(request, { cols: term.cols, rows: term.rows } satisfies TerminalAttachResult);
-      return;
-    }
-
-    void this.#resizePeer(target, cols, rows).then((size) => {
+    void handle.resize(cols, rows).then((size) => {
       this.#ok(request, { cols: size.cols, rows: size.rows } satisfies TerminalAttachResult);
     });
-  }
-
-  /**
-   * Resize a sibling-owned surface and record the size it settled at, so
-   * `targetSize` keeps answering for the pane we cannot read directly.
-   */
-  async #resizePeer(
-    target: Extract<SurfaceTarget, { kind: 'peer' }>,
-    cols: number,
-    rows: number,
-  ): Promise<{ cols: number; rows: number }> {
-    const owner = await peerSurfaceOp({ surfaceId: target.surfaceId, op: 'resize', cols, rows });
-    if (owner) {
-      target.cols = owner.cols;
-      target.rows = owner.rows;
-    }
-    return { cols: target.cols, rows: target.rows };
   }
 
   #teardownAttachment(): void {
@@ -441,8 +368,9 @@ export class RemoteApiSession {
     const platform = getPlatform();
     platform.offPtyData(this.#attachment.onData);
     platform.offPtyExit(this.#attachment.onExit);
-    // Stop the host forwarding a PTY this webview never owned.
-    this.#attachment.stopStream?.();
+    // Stops the host forwarding a PTY this webview never owned; nothing to undo
+    // for one it does.
+    this.#attachment.handle.release();
     this.#attachment = null;
   }
 }

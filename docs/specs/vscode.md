@@ -300,6 +300,10 @@ The one field the transport itself reads out of an answer is a reserved `ptyId` 
 
 `attach` and `resize` on a foreign surface go to the owner rather than to the PTY, because attach-is-the-resize has to drive the live xterm or the owning pane's own view drifts from the size the phone set. The owner replies with the size it settled at and the `ptyId`; the Host then subscribes and streams. `detach` has nothing to undo on the owner — the Host stops streaming and the pane keeps its size, which is what last-attach-wins means.
 
+**Which webview owns a pane never reaches the protocol layer.** `resolveSurface(surfaceId, size)` answers with a `SurfaceHandle` — `ptyId`, the size it stands at, `resize`, `release` — or `null` if nobody owns it, and `remote-api.ts` holds one of those per attachment. That is the same trick the rest of the feature already plays: foreign `pty:data` is injected into the ordinary data path and `pty:input` / `pty:resize` route by table before falling back to the local manager, so `terminal.write` has no branch either. It makes local attach asynchronous too, which is the honest shape — a pane in another window *is* a round trip away, and the alternative was one path that answered synchronously and one that did not.
+
+Resolving a peer's surface *is* the attach: the requested size travels with it, because the owner has to apply it inside that round trip — there is no reaching into its xterm afterwards without a second one. A local pane is left alone at resolve and resized by the caller, which subscribes to the PTY first so a synchronous repaint is not lost. Either way the handle reports the size as it stands and the caller reconciles, which is why the same-size repaint bounce fires for a peer attach (its owner already applied the size) and the resize path fires for a local one.
+
 Subscribing is a subscription, not a pair of calls: `peers.streamPty(ptyId)` returns its own unsubscribe, so a caller cannot leak a stream by losing track of the id it opened it with.
 
 The directory emits **twice**: the local entries immediately, then a merged snapshot once the peers answer. The phone should not wait on a round trip to see the panes that are already here.
@@ -322,7 +326,7 @@ Trust: the socket is user-owned, its path is published only in a mode-0600 file,
 
 Source of truth: `vscode-ext/src/peer-link.ts` for the sockets and roles, `lib/src/lib/vscode-peer-link-protocol.ts` for the frames, framing, and PTY routing table (tested in `lib/src/lib/vscode-peer-link-protocol.test.ts`), and the `remote*` calls in `vscode-ext/src/message-router.ts`.
 
-Source of truth: the broker in `vscode-ext/src/message-router.ts` (`brokerRequest`, the `peer:*` cases, `subscribedPtyIds`), `PeerBridge` in `lib/src/lib/platform/types.ts` with its VS Code implementation in `vscode-adapter.ts`, the operation map and responder in `lib/src/remote/host/peer-surfaces.ts`, and the foreign-surface path in `remote-api.ts`, tested in `lib/src/remote/host/peer-surfaces.test.ts`.
+Source of truth: the broker in `vscode-ext/src/message-router.ts` (`brokerRequest`, the `peer:*` cases, `subscribedPtyIds`), `PeerBridge` in `lib/src/lib/platform/types.ts` with its VS Code implementation in `vscode-adapter.ts`, the operation map and responder in `lib/src/remote/host/peer-surfaces.ts`, the resolver in `lib/src/remote/host/surface-resolve.ts`, and the attachment it backs in `lib/src/remote/host/remote-api.ts`, tested in `lib/src/remote/host/peer-surfaces.test.ts`.
 
 ### Testing the extension host
 
