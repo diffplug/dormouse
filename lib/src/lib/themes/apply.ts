@@ -116,7 +116,6 @@ export function setDefaultThemeId(id: string | null): void {
   defaultThemeId = id;
 }
 
-
 /** Apply the persisted active theme. When nothing is persisted yet — or the
  *  persisted theme no longer resolves — fall back to `setDefaultThemeId`'s
  *  value if it names a known theme, otherwise to the first bundled theme.

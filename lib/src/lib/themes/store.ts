@@ -22,12 +22,29 @@ export function getBundledThemes(): DormouseTheme[] {
   return bundledThemes;
 }
 
+/**
+ * Parsed installed themes, keyed by the exact JSON they came from.
+ *
+ * Bundled themes are a module array, so repeated `getBundledThemes()` calls
+ * hand back the same objects; installed ones were re-parsed on every call and
+ * so never had stable identity. `applyTheme` compares the incoming theme with
+ * the applied one to skip redundant work, and that comparison silently never
+ * held for an installed theme — every restore cleared and rewrote ~44 CSS
+ * variables. Keying on the raw string keeps the semantics exact: reinstalling
+ * an extension rewrites the JSON, so the objects are new and the re-apply
+ * happens as it should.
+ */
+let installedCache: { raw: string; themes: DormouseTheme[] } | null = null;
+
 export function getInstalledThemes(): DormouseTheme[] {
   const storage = getStorage();
   if (!storage) return [];
   try {
     const raw = storage.getItem(INSTALLED_KEY);
     if (!raw) return [];
+    // A fresh array over cached elements: identity matters per theme, and no
+    // caller should be able to reach in and mutate the cache.
+    if (installedCache?.raw === raw) return [...installedCache.themes];
     // Guard against valid-but-wrong-shaped JSON (corrupted or externally
     // tampered storage): a non-array value, or an array with malformed
     // elements, would otherwise be returned cast as DormouseTheme[], and the
@@ -36,10 +53,12 @@ export function getInstalledThemes(): DormouseTheme[] {
     // Drop only the malformed entries so well-formed themes still load.
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
+    const themes = parsed.filter(
       (t): t is DormouseTheme =>
         typeof t === 'object' && t !== null && typeof (t as { id?: unknown }).id === 'string',
     );
+    installedCache = { raw, themes };
+    return [...themes];
   } catch {
     return [];
   }

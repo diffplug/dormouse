@@ -196,7 +196,10 @@ export function ThemePicker({
                       type="button"
                       aria-label={`Uninstall ${theme.label}`}
                       title={`Uninstall ${theme.label}`}
-                      className={`mr-2 ml-1 p-1.5 ${modalIconButton()}`}
+                      // Bigger target and a gap from the row's select action:
+                      // unlike `WatchedCommandList`'s remove, undoing this
+                      // means re-finding the extension on OpenVSX.
+                      className={modalIconButton({ class: 'mr-2 ml-1 p-1.5' })}
                       style={{ color: 'inherit' }}
                       onClick={(event) => {
                         event.preventDefault();

@@ -31,15 +31,11 @@ export function useCloseOnOutsideAndEscape(
     };
     const closeOnScroll = (event: Event) => {
       const root = ref.current;
-      if (!root) return;
-      // The document scrolling moves everything, including a `fixed` anchor's
-      // reference point; otherwise only an ancestor scroller matters.
-      const target = event.target;
-      if (target === document || target === window) {
-        onClose();
-        return;
-      }
-      if (target instanceof Node && target.contains(root)) onClose();
+      // Only a scroller the trigger sits inside can move it. `document` is
+      // itself a Node containing everything, so viewport scrolling — which the
+      // DOM dispatches at the Document — satisfies this too.
+      if (!root || !(event.target instanceof Node)) return;
+      if (event.target.contains(root)) onClose();
     };
 
     window.addEventListener('pointerdown', closeOnPointerDown, true);

@@ -101,7 +101,6 @@ describe('applyTheme', () => {
   // theme is a *different object* each time even though it is the same theme.
   // An identity check here reported every restore as a fresh user choice.
   it('does not notify when an already-active installed theme is re-restored', () => {
-    setDefaultThemeId(null);
     addInstalledTheme(INSTALLED_THEME);
     setActiveThemeId(INSTALLED_THEME.id);
     restoreActiveTheme();
