@@ -272,7 +272,10 @@ A fresh claim is confirmed by re-reading: two windows can judge the same record 
 
 Losing the window lease is not merely losing the right to be re-offered the role: any webview holding it is told `held: false` and stops its Host. That is the one path that sends a revocation, and it is why the lease is a boolean rather than a one-way grant.
 
-Nothing here starts until a webview first claims `remote-host`, so a user who never enrolls a Host never gets the file or the timer.
+Nothing here starts until a hydrated webview finds a persisted enrollment, or
+a first enrollment succeeds and initiates the claim. A user who never enrolls
+a Host therefore gets no heartbeat file, timer, or peer socket merely by
+opening Dormouse.
 
 Source of truth: the rules and the cycle in `lib/src/lib/vscode-window-lease.ts` (tested in `lib/src/lib/vscode-window-lease.test.ts`), the filesystem and timers around them in `vscode-ext/src/window-lease.ts`, and `windowLeaseHeld` gating `electSingleton` in `vscode-ext/src/message-router.ts`.
 

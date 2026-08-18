@@ -23,6 +23,7 @@ import { RemoteHost } from './remote-host';
 
 let current: RemoteHost | null = null;
 let stopPush: (() => void) | null = null;
+let leaseClaimRequested = false;
 
 /**
  * Whether this app instance is the one allowed to be the Host.
@@ -129,7 +130,10 @@ export function installRemoteHostConsoleHook(): void {
   const peers = getPlatform().peers;
   if (peers) {
     owned = false;
-    peers.claimSingleton('remote-host', setRemoteHostOwnership);
+    if (getEnrollment()) {
+      leaseClaimRequested = true;
+      peers.claimSingleton('remote-host', setRemoteHostOwnership);
+    }
   } else {
     activateRemoteHost();
   }
@@ -139,10 +143,12 @@ export function installRemoteHostConsoleHook(): void {
     async enroll(serverUrl: string, password: string, label: string) {
       const enrollment = await enrollHost(serverUrl, password, label);
       stopRemoteHost();
-      // Enrolling does not override the lease: a webview that is not the holder
-      // only persists the credentials. Nothing signals the current holder, so
-      // the Host starts on the next lease grant or reload, not on this call.
-      if (owned) current = startFromEnrollment(enrollment);
+      if (peers && !leaseClaimRequested) {
+        leaseClaimRequested = true;
+        peers.claimSingleton('remote-host', setRemoteHostOwnership);
+      }
+      // A synchronous grant may already have activated from persisted storage.
+      if (owned && !current) current = startFromEnrollment(enrollment);
       return { hostId: enrollment.hostId, serverUrl: enrollment.serverUrl };
     },
     status: remoteHostStatus,
