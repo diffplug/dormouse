@@ -18,7 +18,9 @@
  *   window.dormouseRemoteHost.clearEnrollment()
  */
 
+import type { PairingRequest } from 'server-lib-common';
 import type {
+  AdoptResult,
   PairingQueueEvent,
   PairingQueueItem,
   PushDevicesResult,
@@ -26,9 +28,9 @@ import type {
 } from '../../host/remote/service-protocol';
 import { getPlatform } from '../../lib/platform';
 import type { RemoteHostLink } from '../../lib/platform/types';
-import { setPushDevicesRefresher } from '../../lib/push-devices';
+import { resetPushDevices, setPushDevicesRefresher } from '../../lib/push-devices';
 import { clearAclRecords, loadAclRecords } from './acl';
-import { commitPushDevices, watchPushRings } from './alert-push';
+import { commitPushDevices, invalidatePushDeviceRefreshes, watchPushRings } from './alert-push';
 import { clearEnrollment, getEnrollment } from './enrollment';
 import { armWhileEnrolled } from './enrolled-gate';
 import {
@@ -95,7 +97,17 @@ function installBridgeMode(link: RemoteHostLink): void {
       void link.command('push', { sessionId, title }).catch(() => {});
     });
     refresh();
-    return stopRings;
+    return () => {
+      stopRings();
+      // The Host is gone, so the dialog must stop naming devices nothing can
+      // reach — including any list still on the wire, which would otherwise put
+      // them back the moment it lands.
+      invalidatePushDeviceRefreshes();
+      resetPushDevices();
+      // `resetPushDevices` also drops the refresher, which stays installed on
+      // an un-enrolled machine so the dialog can still ask and be told `no-host`.
+      setPushDevicesRefresher(refresh);
+    };
   });
 
   const target = globalThis as unknown as { dormouseRemoteHost?: unknown };
@@ -114,24 +126,30 @@ function installBridgeMode(link: RemoteHostLink): void {
 /**
  * Hand a Host this webview persisted before the service existed over to it,
  * once. The service keeps whichever enrollment it already has, so this can only
- * add; either way the webview's copy is obsolete afterwards and is cleared —
- * leaving it would be a second ACL for the same hostId, diverging from the
- * moment the next device pairs.
+ * add.
+ *
+ * The copy is cleared only once the service reports it is holding the Host
+ * somewhere that survives a restart — leaving it otherwise would be a second
+ * ACL for the same hostId, diverging from the moment the next device pairs, but
+ * clearing it against an in-memory store (a dev harness with no state
+ * directory) would throw the only surviving copy away.
  */
 async function adoptWebviewHost(link: RemoteHostLink): Promise<void> {
   const enrollment = getEnrollment();
   if (!enrollment) return;
+  let result: AdoptResult | null;
   try {
-    await link.command('adopt', {
+    result = (await link.command('adopt', {
       enrollment,
       aclRecords: loadAclRecords(enrollment.hostId),
-    });
+    })) as AdoptResult | null;
   } catch (error) {
     // Keep the local copy for the next launch rather than dropping a Host on
     // the floor because one command failed.
     console.warn('remote-host: could not hand the persisted Host to the service', error);
     return;
   }
+  if (!result?.persisted) return;
   clearEnrollment();
   clearAclRecords(enrollment.hostId);
 }
@@ -142,11 +160,20 @@ function mirrorPairingQueue(link: RemoteHostLink, queue: readonly PairingQueueIt
   for (const pending of getPairingApprovalSnapshot()) {
     if (!present.has(pending.clientId)) resolvePairingApproval(pending.clientId);
   }
-  const mirrored = new Set(getPairingApprovalSnapshot().map((pending) => pending.clientId));
+  const mirrored = new Map(getPairingApprovalSnapshot().map((pending) => [pending.clientId, pending]));
   for (const item of queue) {
+    const showing = mirrored.get(item.clientId);
     // Re-enqueuing an unchanged request would reorder the queue and re-render
     // the modal for nothing; the approve/deny closures only need the clientId.
-    if (mirrored.has(item.clientId)) continue;
+    if (showing && showing.requestedAt === item.requestedAt && sameRequest(showing.request, item.request)) {
+      continue;
+    }
+    // Changed under the same id. The service coalesces a re-sent pair by
+    // replacing what it holds for that clientId, so approving authorizes the
+    // *new* device — and the modal must therefore be showing the new device.
+    // Anything else approves something the user was never shown
+    // (docs/specs/remote-security-model.md).
+    if (showing) resolvePairingApproval(item.clientId);
     enqueuePairingApproval({
       clientId: item.clientId,
       request: item.request,
@@ -155,4 +182,19 @@ function mirrorPairingQueue(link: RemoteHostLink, queue: readonly PairingQueueIt
       deny: () => void link.command('deny', { clientId: item.clientId }).catch(() => {}),
     });
   }
+}
+
+/**
+ * Whether the mirror already shows exactly this request. Field by field rather
+ * than by identity: every snapshot arrives as fresh JSON off the bridge, so
+ * identity always differs and would re-render the modal on every event.
+ */
+function sameRequest(a: PairingRequest, b: PairingRequest): boolean {
+  return (
+    a.accountId === b.accountId &&
+    a.passkeyCredentialId === b.passkeyCredentialId &&
+    a.passkeyPublicKeyHash === b.passkeyPublicKeyHash &&
+    a.devicePublicKey === b.devicePublicKey &&
+    a.requestedLabel === b.requestedLabel
+  );
 }

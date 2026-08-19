@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { FrameDecoder, encodeFrame, forgetPeerRoutes, routedPtyId } from './vscode-peer-link-protocol';
+import { ASK_BUDGET_MS } from '../host/remote/service-protocol';
+import {
+  FrameDecoder,
+  PEER_REPLY_BUDGET_MS,
+  encodeFrame,
+  forgetPeerRoutes,
+  routedPtyId,
+} from './vscode-peer-link-protocol';
+
+describe('reply budgets', () => {
+  it('gives the cross-window wait more room than the fan-out it contains', () => {
+    // Not a tidiness assertion: the broker's wait for a peer window strictly
+    // contains that window's own full-budget fan-out to its webviews plus two
+    // socket hops. Equal budgets make a slow sibling look like a timeout on the
+    // broker's side and throw away results that were on their way, so unifying
+    // these two constants is a regression, not a simplification.
+    expect(PEER_REPLY_BUDGET_MS).toBeGreaterThan(ASK_BUDGET_MS);
+  });
+});
 
 describe('FrameDecoder', () => {
   it('reads one frame per line', () => {
@@ -73,10 +91,30 @@ describe('FrameDecoder', () => {
     ]);
   });
 
-  it('drops a peer that never terminates a frame', () => {
+  it('drops an oversized frame without losing the ones it arrived with', () => {
+    const decoder = new FrameDecoder(64);
+    const small = encodeFrame({ kind: 'result', id: 'a', results: [] });
+
+    // One chunk carrying a whole frame and the start of a frame past the cap.
+    // Clearing the buffer wholesale would swallow the small frame too, and a
+    // dropped `commandResult` or `exit` is a webview waiting out its timeout.
+    expect(decoder.push(small + 'x'.repeat(100))).toEqual([
+      { kind: 'result', id: 'a', results: [] },
+    ]);
+
+    // The rest of the oversized frame is still arriving; none of it is a frame.
+    expect(decoder.push('y'.repeat(100))).toEqual([]);
+    // Its tail must not be resynced as frames of its own — only its terminating
+    // newline puts the stream back on a frame boundary.
+    expect(decoder.push(`{"kind":"junk"}\n${small}`)).toEqual([
+      { kind: 'result', id: 'a', results: [] },
+    ]);
+  });
+
+  it('resumes on the newline that ends the oversized frame', () => {
     const decoder = new FrameDecoder(64);
     expect(decoder.push('x'.repeat(100))).toEqual([]);
-    // The buffer was reset, so a well-formed frame still gets through after.
+    expect(decoder.push(`${'x'.repeat(100)}\n`)).toEqual([]);
     expect(decoder.push(encodeFrame({ kind: 'result', id: 'a', results: [] }))).toEqual([
       { kind: 'result', id: 'a', results: [] },
     ]);

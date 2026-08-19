@@ -23,17 +23,42 @@ import { isEnrollment, type HostEnrollment } from '../../lib/src/remote/host/enr
 import { ENROLLMENT_KEY } from '../../lib/src/remote/host/store';
 
 export class VsCodeHostStateStore implements HostStateStore {
+  /** Writes here survive a restart, so an adopting webview may drop its copy. */
+  readonly persistent = true;
+
   readonly #context: vscode.ExtensionContext;
   #enrollment: Promise<HostEnrollment | null> | null = null;
+  #watch: vscode.Disposable | undefined;
 
-  constructor(context: vscode.ExtensionContext) {
+  /**
+   * @param onEnrollmentChanged Some window of this extension wrote or cleared
+   * the enrollment. Fires after the memo is dropped, so a reader called from it
+   * sees the new value.
+   */
+  constructor(context: vscode.ExtensionContext, onEnrollmentChanged?: () => void) {
     this.#context = context;
+    // Cross-window invalidation. `SecretStorage` is shared by every window of
+    // an extension and `onDidChange` fires in all of them, so without this a
+    // window that read the enrollment once could keep serving a Host another
+    // window cleared — or miss one another window created.
+    this.#watch = context.secrets.onDidChange?.((event) => {
+      if (event.key !== ENROLLMENT_KEY) return;
+      this.#enrollment = null;
+      onEnrollmentChanged?.();
+    });
+  }
+
+  /** Stop listening; the store is otherwise stateless and can be dropped. */
+  dispose(): void {
+    this.#watch?.dispose();
+    this.#watch = undefined;
   }
 
   async loadEnrollment(): Promise<HostEnrollment | null> {
     // Read once and keep it, like `FileHostStateStore`: `SecretStorage` is a
-    // keychain round trip, this extension host is the only writer of the key,
-    // and the activation probe and the service both want the same answer.
+    // keychain round trip, and the activation probe and the service both want
+    // the same answer. The memo is only safe because a write from any window
+    // invalidates it — see the constructor.
     this.#enrollment ??= this.#readEnrollment();
     return this.#enrollment;
   }

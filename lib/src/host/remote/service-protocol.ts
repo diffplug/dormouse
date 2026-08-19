@@ -114,6 +114,18 @@ export interface AdoptParams {
   aclRecords: unknown[];
 }
 
+/**
+ * Whether the service now holds this Host somewhere that survives a restart —
+ * because it just wrote the enrollment, or because it already had one of its
+ * own. The webview drops its localStorage copy only on `true`: behind an
+ * in-memory store (the dev harness with no state directory) that copy is the
+ * only one that outlives the process, and clearing it would lose the Host at
+ * the next launch.
+ */
+export interface AdoptResult {
+  persisted: boolean;
+}
+
 /** Answers an outstanding {@link RemoteHostAsk}; `rhId` is the ask's, not a new one. */
 export interface AnswerParams {
   rhId: string;

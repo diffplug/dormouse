@@ -81,6 +81,7 @@ export class RemoteApiSession {
   #directorySubId: string | null = null;
   #unsubDirectory: (() => void) | null = null;
   #directoryTimer: ReturnType<typeof setTimeout> | null = null;
+  #directoryGeneration = 0;
   #attachment: Attachment | null = null;
   #attachGeneration = 0;
   #disposed = false;
@@ -197,13 +198,20 @@ export class RemoteApiSession {
   async #emitDirectory(): Promise<void> {
     if (this.#directorySubId === null) return;
     const subId = this.#directorySubId;
+    // Per collect, like the attach generation below and for the same reason:
+    // two collects overlap whenever something changes during a slow round trip,
+    // and they can settle in either order. Only the newest may emit, or a stale
+    // one — including a collect that timed out to an empty answer — lands on
+    // the client after a fresh snapshot and blanks its picker until the next
+    // change.
+    const generation = ++this.#directoryGeneration;
     // One snapshot per collect. The provider answers for every surface the Host
     // can reach, so there is no longer a subset that is known sooner than the
     // rest — this replaces the old local-then-merged double emit, which existed
     // only because the peer round trip was visible from here.
     const entries = await this.#provider.collectDirectory();
     // The subscription may have been replaced or torn down while we waited.
-    if (this.#directorySubId !== subId) return;
+    if (this.#directorySubId !== subId || this.#directoryGeneration !== generation) return;
     this.#event(subId, REMOTE_EVENTS.directorySnapshot, { entries });
   }
 

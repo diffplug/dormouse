@@ -29,6 +29,7 @@ const enrollmentState = vi.hoisted(() => ({
 const pushWatch = vi.hoisted(() => ({
   fire: undefined as ((sessionId: string, title: string) => void) | undefined,
   stopped: 0,
+  invalidated: 0,
   loads: [] as Array<() => Promise<unknown>>,
 }));
 vi.mock('./alert-push', () => ({
@@ -43,10 +44,16 @@ vi.mock('./alert-push', () => ({
     pushWatch.loads.push(load);
     await load();
   },
+  invalidatePushDeviceRefreshes: () => {
+    pushWatch.invalidated += 1;
+  },
 }));
-const pushRefreshers = vi.hoisted(() => ({ current: [] as Array<() => void> }));
+const pushRefreshers = vi.hoisted(() => ({ current: [] as Array<() => void>, resets: 0 }));
 vi.mock('../../lib/push-devices', () => ({
   setPushDevicesRefresher: (refresh: () => void) => void pushRefreshers.current.push(refresh),
+  resetPushDevices: () => {
+    pushRefreshers.resets += 1;
+  },
 }));
 const aclState = vi.hoisted(() => ({
   records: [] as unknown[],
@@ -74,8 +81,10 @@ beforeEach(() => {
   remoteHostLink = undefined;
   pushWatch.fire = undefined;
   pushWatch.stopped = 0;
+  pushWatch.invalidated = 0;
   pushWatch.loads.length = 0;
   pushRefreshers.current.length = 0;
+  pushRefreshers.resets = 0;
   aclState.records = [];
   aclState.cleared.length = 0;
   enrollmentState.current = {
@@ -141,6 +150,9 @@ function fakeLink(): FakeLink {
  */
 async function installBridge(link: FakeLink) {
   link.results.status ??= { enrolled: true };
+  // A store that survives a restart, which is what lets the webview drop its
+  // own copy of an adopted Host.
+  link.results.adopt ??= { persisted: true };
   remoteHostLink = link;
   vi.resetModules();
   const mod = await import('./activation');
@@ -209,10 +221,24 @@ describe('remote host bridge mode', () => {
       enrollment: { hostId: 'host-1' },
       aclRecords: [{ hostId: 'host-1' }],
     });
-    // Whatever the service decided, this copy is obsolete — leaving it would be
-    // a second ACL for the same hostId.
+    // The service is holding it somewhere durable now, so this copy is obsolete
+    // — leaving it would be a second ACL for the same hostId.
     expect(enrollmentState.current).toBeNull();
     expect(aclState.cleared).toEqual(['host-1']);
+  });
+
+  it('keeps the local copy when the service could not persist it', async () => {
+    // The dev harness with no state directory holds the Host in memory only:
+    // this copy is the one that survives the process, and clearing it would
+    // lose the Host at the next launch.
+    aclState.records = [{ hostId: 'host-1' }];
+    const link = fakeLink();
+    link.results.adopt = { persisted: false };
+    await installBridge(link);
+
+    expect(link.commands.some((c) => c.cmd === 'adopt')).toBe(true);
+    expect(enrollmentState.current).not.toBeNull();
+    expect(aclState.cleared).toEqual([]);
   });
 
   it('adopts nothing when the webview never was a Host', async () => {
@@ -280,6 +306,49 @@ describe('remote host bridge mode', () => {
     expect(pairing.getPairingApprovalSnapshot()).toEqual([]);
   });
 
+  it('re-mirrors a request the service replaced under the same clientId', async () => {
+    // The service coalesces a re-sent pair by clientId, so the same id can come
+    // to name a different device. Approving authorizes what the *service*
+    // holds, so a mirror that skipped the update would show device #1 while
+    // Approve wrote device #2 (docs/specs/remote-security-model.md).
+    const link = fakeLink();
+    const { pairing } = await installBridge(link);
+    const second = {
+      ...PAIRING_REQUEST,
+      devicePublicKey: 'device-2',
+      requestedLabel: 'Android Chrome',
+    };
+
+    link.emit('pairing-queue', {
+      name: 'pairing-queue',
+      queue: [{ clientId: 'c1', request: PAIRING_REQUEST, requestedAt: 5 }],
+    });
+    link.emit('pairing-queue', {
+      name: 'pairing-queue',
+      queue: [{ clientId: 'c1', request: second, requestedAt: 9 }],
+    });
+
+    const head = pairing.getPairingApprovalSnapshot();
+    expect(head).toHaveLength(1);
+    expect(head[0]).toMatchObject({ clientId: 'c1', request: second, requestedAt: 9 });
+  });
+
+  it('leaves an unchanged request alone, so the modal does not churn', async () => {
+    // Every snapshot arrives as fresh JSON, so "unchanged" has to be decided by
+    // value — comparing identity would re-render the modal on every event.
+    const link = fakeLink();
+    const { pairing } = await installBridge(link);
+    const snapshot = () => ({
+      name: 'pairing-queue',
+      queue: [{ clientId: 'c1', request: { ...PAIRING_REQUEST }, requestedAt: 5 }],
+    });
+
+    link.emit('pairing-queue', snapshot());
+    const first = pairing.getPairingApprovalSnapshot()[0];
+    link.emit('pairing-queue', snapshot());
+    expect(pairing.getPairingApprovalSnapshot()[0]).toBe(first);
+  });
+
   it('seeds the mirror once, for a webview that reloaded mid-pairing', async () => {
     const link = fakeLink();
     link.results.pairingQueue = [{ clientId: 'c1', request: PAIRING_REQUEST, requestedAt: 5 }];
@@ -339,6 +408,17 @@ describe('remote host bridge mode', () => {
     link.emit('status', { name: 'status', enrolled: false });
     expect(pushWatch.fire).toBeUndefined();
     expect(pushWatch.stopped).toBe(1);
+    // The dialog must stop naming devices nothing can push to — including any
+    // list still on the wire, which would otherwise put them back on arrival.
+    expect(pushWatch.invalidated).toBe(1);
+    expect(pushRefreshers.resets).toBe(1);
+    // And the refresher goes back in: the dialog may still open on an
+    // un-enrolled machine, where asking is one command that answers `no-host`.
+    expect(pushRefreshers.current.at(-1)).toBeDefined();
+    link.commands.length = 0;
+    pushRefreshers.current.at(-1)!();
+    await settle();
+    expect(link.commands.map((c) => c.cmd)).toEqual(['pushDevices']);
   });
 
   it('is idempotent under a StrictMode double mount', async () => {

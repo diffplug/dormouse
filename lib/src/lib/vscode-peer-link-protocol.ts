@@ -21,11 +21,15 @@ import {
 } from '../host/remote/service-protocol';
 
 /**
- * How long the broker waits for a window to answer before giving up on it. The
- * same budget as the service's own ask, because it is the same wait seen one
- * layer down: the webview that has to answer is at the far end of both.
+ * How long the broker waits for another window to answer before giving up on it.
+ *
+ * Must exceed {@link ASK_BUDGET_MS}, the budget that window then spends fanning
+ * the same question out to its own webviews, or a slow sibling shows up here as
+ * a timeout instead of as the incomplete answer it really is — and the broker
+ * would discard results that were on their way. The margin also covers the two
+ * socket hops the inner budget knows nothing about.
  */
-export const PEER_REPLY_BUDGET_MS = ASK_BUDGET_MS;
+export const PEER_REPLY_BUDGET_MS = ASK_BUDGET_MS + 2_000;
 
 /**
  * Broker → peer window.
@@ -80,13 +84,56 @@ export type PeerLinkResponse =
 
 export type PeerLinkFrame = PeerLinkRequest | PeerLinkResponse;
 
-/** The first frame a client sends; the server drops the socket if it mismatches. */
-export interface PeerLinkHello {
-  kind: 'hello';
-  token: string;
+/**
+ * The three-frame opening handshake, in order: `challenge` (server → client),
+ * `hello` (client → server), `welcome` (server → client).
+ *
+ * The shared secret never crosses the socket. Each side proves it knows the
+ * token by answering the *other* side's fresh nonce with an HMAC over it, so a
+ * co-resident process that guessed the socket path learns nothing it can replay:
+ * the proofs are bound to nonces it did not choose, and its own challenge buys
+ * it only an HMAC of a value it picked, which is not the token.
+ *
+ * The server speaks first and the client verifies the `welcome` before it sends
+ * or answers anything else. That direction is what makes squatting the path
+ * useless rather than merely expensive — a fake server never proves knowledge of
+ * the token, so a client hands it no directory, no PTY stream, and no commands
+ * (`vscode-ext/src/peer-link.ts`).
+ *
+ * The HMAC itself is computed in the socket module, which may import
+ * `node:crypto`; this one stays Node-free so the webview can share its types.
+ */
+export interface PeerLinkChallenge {
+  kind: 'challenge';
+  /** Server nonce, base64url. The client's proof is over this. */
+  nonce: string;
 }
 
-export function encodeFrame(frame: PeerLinkFrame | PeerLinkHello): string {
+export interface PeerLinkHello {
+  kind: 'hello';
+  /** Client nonce, base64url. The server's proof is over this. */
+  nonce: string;
+  /** `HMAC-SHA256(token, PEER_CLIENT_PROOF_DOMAIN + serverNonce)`, base64url. */
+  proof: string;
+}
+
+export interface PeerLinkWelcome {
+  kind: 'welcome';
+  /** `HMAC-SHA256(token, PEER_SERVER_PROOF_DOMAIN + clientNonce)`, base64url. */
+  proof: string;
+}
+
+/**
+ * Domain separation. Without distinct prefixes the two proofs are the same
+ * function of the same key, so a fake server could reflect a client's own proof
+ * back as its welcome and pass for a broker that knows the token.
+ */
+export const PEER_CLIENT_PROOF_DOMAIN = 'client:';
+export const PEER_SERVER_PROOF_DOMAIN = 'server:';
+
+export type PeerLinkHandshake = PeerLinkChallenge | PeerLinkHello | PeerLinkWelcome;
+
+export function encodeFrame(frame: PeerLinkFrame | PeerLinkHandshake): string {
   return `${JSON.stringify(frame)}\n`;
 }
 
@@ -99,6 +146,13 @@ export function encodeFrame(frame: PeerLinkFrame | PeerLinkHello): string {
  */
 export class FrameDecoder {
   #buffer = '';
+  /**
+   * Set once one frame has outgrown the cap: everything up to the next newline
+   * belongs to that frame and is dropped, and normal accumulation resumes after
+   * it. Resetting the buffer without this would resync mid-frame and read the
+   * oversized frame's tail as frames of its own.
+   */
+  #discarding = false;
   readonly #maxFrameBytes: number;
 
   /** Bounds a peer that never sends a newline; the default fits a screenful. */
@@ -108,25 +162,31 @@ export class FrameDecoder {
 
   push(chunk: string): unknown[] {
     this.#buffer += chunk;
-    if (this.#buffer.length > this.#maxFrameBytes) {
-      // A peer that will not terminate a frame is not one we can talk to.
-      this.#buffer = '';
-      return [];
-    }
     const frames: unknown[] = [];
-    let newline = this.#buffer.indexOf('\n');
-    while (newline !== -1) {
+    for (;;) {
+      const newline = this.#buffer.indexOf('\n');
+      if (newline === -1) break;
       const line = this.#buffer.slice(0, newline);
       this.#buffer = this.#buffer.slice(newline + 1);
-      if (line.trim()) {
-        try {
-          frames.push(JSON.parse(line));
-        } catch {
-          // Malformed frame: skip it, keep the link.
-        }
+      if (this.#discarding) {
+        // That was the oversized frame's terminator; the bytes after it are a
+        // frame boundary again.
+        this.#discarding = false;
+        continue;
       }
-      newline = this.#buffer.indexOf('\n');
+      if (!line.trim()) continue;
+      try {
+        frames.push(JSON.parse(line));
+      } catch {
+        // Malformed frame: skip it, keep the link.
+      }
     }
+    // Whatever is left is one unterminated frame. Past the cap it is a frame we
+    // can never read, so it goes — but the whole frames already taken out of
+    // the buffer above are real, and dropping them with it would lose traffic
+    // from a link that is otherwise healthy.
+    if (this.#buffer.length > this.#maxFrameBytes) this.#discarding = true;
+    if (this.#discarding) this.#buffer = '';
     return frames;
   }
 }

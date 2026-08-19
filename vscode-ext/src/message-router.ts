@@ -21,13 +21,14 @@ import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
 import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
-import { PEER_REPLY_BUDGET_MS } from '../../lib/src/lib/vscode-peer-link-protocol';
+import { ASK_BUDGET_MS } from '../../lib/src/host/remote/service-protocol';
 import { configurePeerLink, remoteNotifyPeerChange } from './peer-link';
 import {
   configureRemoteHost,
   deliverCommandResult,
   deliverUiEvent,
   dropForwardedCommands,
+  greetPeerWindow,
   handleForwardedCommand,
   handleRemoteHostCommand,
   notifyDirectoryChanged,
@@ -78,6 +79,7 @@ configurePeerLink({
   dropForwardedCommands,
   deliverCommandResult,
   deliverUiEvent,
+  onClientAuthenticated: greetPeerWindow,
 });
 
 configureRemoteHost({
@@ -103,9 +105,11 @@ configureRemoteHost({
  * it — every webview answers with zero or more results, so a webview that owns
  * nothing settles the request as fast as the one that does. The budget is the
  * backstop for a webview with no live content, which must not hang the phone's
- * picker. The asker is this window's own Host service, or the broker window's
- * over the link, never a webview; that is why it is a plain promise rather than
- * message plumbing.
+ * picker; it is the *inner* one, deliberately shorter than the broker's
+ * cross-window `PEER_REPLY_BUDGET_MS`, which has to contain a whole run of this
+ * plus two socket hops. The asker is this window's own Host service, or the
+ * broker window's over the link, never a webview; that is why it is a plain
+ * promise rather than message plumbing.
  */
 function brokerRequest(op: string, params: unknown): Promise<unknown[]> {
   const peers = [...activeRouters];
@@ -124,7 +128,7 @@ function brokerRequest(op: string, params: unknown): Promise<unknown[]> {
       pending: new Set(peers),
       results: [],
       settle,
-      timer: setTimeout(settle, PEER_REPLY_BUDGET_MS),
+      timer: setTimeout(settle, ASK_BUDGET_MS),
     });
     for (const peer of peers) peer.ask(requestId, op, params);
   });

@@ -10,7 +10,7 @@ import type { HostAclRecord, PairingRequest } from 'server-lib-common';
 import type { HostEnrollment } from '../../remote/host/enrollment';
 import type { HostSurfaceProvider } from '../../remote/host/host-surface-provider';
 import type { WebSocketLike } from '../../remote/host/remote-host';
-import type { HostStateStore } from './host-state-store';
+import { createEphemeralHostStateStore, type HostStateStore } from './host-state-store';
 import { RemoteHostService } from './service';
 import type {
   HostStatusEvent,
@@ -315,6 +315,33 @@ describe('start', () => {
     expect(status).toMatchObject({ enrolled: true, connection: 'connecting' });
   });
 
+  it('builds one Host when a start and an adopt race', async () => {
+    // Both read `#host`, both await the store, and both then act on what they
+    // read. Unserialized they each see no Host and each build one — and the
+    // second holds a relay socket nothing has a reference to, so it can never
+    // be stopped and the two displace each other on the server forever.
+    createService({ enrollment: ENROLLMENT });
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const seeded = store.loadEnrollment;
+    store.loadEnrollment = async () => {
+      await gate;
+      return seeded();
+    };
+
+    const started = service.start();
+    const adopted = service.handleCommand({ rhId: 'race', cmd: 'adopt', params: { enrollment: ENROLLMENT, aclRecords: [] } });
+    release();
+    await Promise.all([started, adopted]);
+
+    expect(sockets).toHaveLength(1);
+    // And the one that exists is the one `dispose()` can reach.
+    service.dispose();
+    expect(sockets[0]!.readyState).toBe(3);
+  });
+
   it('clearEnrollment stops the Host and forgets it, keeping the records', async () => {
     createService({ enrollment: ENROLLMENT, acl: { 'host-1': [aclRecord('device-1')] } });
     await service.start();
@@ -336,9 +363,8 @@ describe('adopt', () => {
       aclRecords: [aclRecord('device-1')],
     });
 
-    // Nothing to report: the webview clears its copy either way, because a
-    // second copy of one hostId is a second ACL.
-    expect(result.result).toEqual({});
+    // `persisted` is what tells the webview it may drop its own copy.
+    expect(result.result).toEqual({ persisted: true });
     expect(store.enrollment).toEqual(ENROLLMENT);
     expect(store.acl['host-1']).toHaveLength(1);
     expect(sockets).toHaveLength(1);
@@ -349,10 +375,75 @@ describe('adopt', () => {
     await service.start();
 
     const other = { ...ENROLLMENT, hostId: 'host-2', hostToken: 'other' };
-    await command('adopt', { enrollment: other, aclRecords: [] });
+    const result = await command('adopt', { enrollment: other, aclRecords: [] });
 
     expect(store.enrollment).toEqual(ENROLLMENT);
     expect(sockets).toHaveLength(1);
+    // The webview's copy is obsolete regardless: a second copy of one hostId is
+    // a second ACL, and this store is holding a Host that survives a restart.
+    expect(result.result).toEqual({ persisted: true });
+  });
+
+  it('refuses an origin outside the build’s allowed sources', async () => {
+    // A Host handed over from an older build's localStorage may name a relay
+    // this build may not reach; adopting it would connect there anyway.
+    createService();
+    const result = await command('adopt', {
+      enrollment: { ...ENROLLMENT, serverUrl: 'https://relay.example.com' },
+      aclRecords: [],
+    });
+
+    expect(result.error).toContain(CONNECT_SRC);
+    expect(store.enrollment).toBeNull();
+    expect(sockets).toEqual([]);
+  });
+
+  it('persists no enrollment when the ACL write fails', async () => {
+    // Order matters: the records go first, so a failure here leaves the store
+    // with no enrollment and the next launch re-adopts from the webview's copy
+    // rather than running a Host whose devices were silently dropped.
+    createService();
+    store.saveAcl = async () => {
+      throw new Error('globalState is full');
+    };
+
+    const result = await command('adopt', {
+      enrollment: ENROLLMENT,
+      aclRecords: [aclRecord('device-1')],
+    });
+
+    expect(result.error).toContain('globalState is full');
+    expect(store.enrollment).toBeNull();
+    expect(sockets).toEqual([]);
+  });
+
+  it('runs a session Host from an in-memory store, and says it did not persist', async () => {
+    // The dev harness with no state directory: the Host has to work for the
+    // session, but the webview's copy is the only one that outlives it.
+    const warnings: string[] = [];
+    const ephemeral = createEphemeralHostStateStore((message) => warnings.push(message));
+    service = new RemoteHostService({
+      store: ephemeral,
+      provider: fakeProvider(),
+      sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
+      connectSrc: CONNECT_SRC,
+      createWebSocket: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+      fetch: fakeFetch(),
+    });
+
+    const result = await command('adopt', {
+      enrollment: ENROLLMENT,
+      aclRecords: [aclRecord('device-1')],
+    });
+
+    expect(result.result).toEqual({ persisted: false });
+    expect(sockets).toHaveLength(1);
+    expect(await ephemeral.loadAcl('host-1')).toHaveLength(1);
+    expect(warnings).toHaveLength(1);
   });
 
   it('drops records that name another host', async () => {

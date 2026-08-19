@@ -345,6 +345,42 @@ describe('RemoteApiSession directory.watch', () => {
     ]);
   });
 
+  it('emits only the newest collect when two overlap and settle out of order', async () => {
+    // Two collects overlap whenever something changes during a slow round trip,
+    // and the near tier can answer long after the far one. Without a generation
+    // the older one emits last — and a collect that timed out to an empty
+    // answer would blank the phone's picker until the next change.
+    vi.useFakeTimers();
+    const provider = new FakeProvider();
+    provider.entries = [entry('surface-1', 'first')];
+    const { session, sent } = makeSession(provider);
+    await watchDirectory(session);
+    expect(snapshots(sent)).toHaveLength(1);
+
+    const slow = gate();
+    provider.collectGate = slow.promise;
+    provider.entries = [];
+    provider.changeDirectory();
+    vi.advanceTimersByTime(150);
+    await settle();
+    expect(provider.collects).toBe(2);
+
+    // A second change while the first is still in flight, answered immediately.
+    provider.collectGate = null;
+    provider.entries = [entry('surface-1', 'newest')];
+    provider.changeDirectory();
+    vi.advanceTimersByTime(150);
+    await settle();
+
+    slow.release();
+    await settle();
+
+    expect(snapshots(sent).map((s) => s.entries)).toEqual([
+      [entry('surface-1', 'first')],
+      [entry('surface-1', 'newest')],
+    ]);
+  });
+
   it('watches once across repeated directory.watch requests', async () => {
     const provider = new FakeProvider();
     const { session } = makeSession(provider);

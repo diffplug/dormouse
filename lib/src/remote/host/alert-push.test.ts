@@ -5,7 +5,7 @@ vi.mock('../../lib/platform', () => ({
 }));
 
 import type { HostAclRecord } from 'server-lib-common';
-import { commitPushDevices, watchPushRings } from './alert-push';
+import { commitPushDevices, invalidatePushDeviceRefreshes, watchPushRings } from './alert-push';
 // Delivery — the Server calls, the recipient rule, the title bounds — runs in
 // the Host's process, so it lives beside neither webview nor sidecar.
 import { loadPushDevices, sendPush, toPushText, type AlertPushDeps } from './push-delivery';
@@ -322,6 +322,32 @@ describe('push device list', () => {
       fetch: (async () => ({ ok: false, status: 500 })) as unknown as typeof globalThis.fetch,
     });
     expect(getPushDevices()).toEqual({ status: 'error', devices: [] });
+  });
+
+  it('discards a refresh that lands after the Host went away', async () => {
+    // The enrolled gate disarms on `clearEnrollment` and resets the store to
+    // `no-host`. A request already on the wire resolves afterwards and would
+    // otherwise repopulate the dialog with phones there is nothing to push to.
+    let land: (response: Response) => void = () => {};
+    const inFlight = refreshPushDevices({
+      enrollment: ENROLLMENT,
+      activeRecords: () => records,
+      fetch: (() =>
+        new Promise((resolve) => {
+          land = resolve;
+        })) as unknown as typeof globalThis.fetch,
+    });
+
+    invalidatePushDeviceRefreshes();
+    resetPushDevices();
+
+    land({
+      ok: true,
+      json: async () => ({ devices: [{ devicePublicKey: 'device-phone', subscribedAt: 1 }] }),
+    } as Response);
+    await inFlight;
+
+    expect(getPushDevices()).toEqual({ status: 'no-host', devices: [] });
   });
 
   it('keeps a newer refresh when an older request resolves last', async () => {

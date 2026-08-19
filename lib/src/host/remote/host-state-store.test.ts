@@ -2,6 +2,33 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+/**
+ * Watches the two filesystem steps a save is made of, so a test can see whether
+ * two saves interleave. Only the temp writes are timed — the tests' own
+ * `writeFile` calls go straight through.
+ */
+const fsProbe = vi.hoisted(() => ({ steps: [] as string[], tmpWriteDelayMs: 0 }));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const real = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...real,
+    writeFile: async (path: string, data: never, options: never) => {
+      if (String(path).endsWith('.tmp')) {
+        fsProbe.steps.push('write');
+        if (fsProbe.tmpWriteDelayMs) {
+          await new Promise((resolve) => setTimeout(resolve, fsProbe.tmpWriteDelayMs));
+        }
+      }
+      return real.writeFile(path, data, options);
+    },
+    rename: async (from: string, to: string) => {
+      fsProbe.steps.push('rename');
+      return real.rename(from, to);
+    },
+  };
+});
 import type { HostAclRecord } from 'server-lib-common';
 import type { HostEnrollment } from '../../remote/host/enrollment';
 import { createEphemeralHostStateStore, FileHostStateStore } from './host-state-store';
@@ -33,6 +60,8 @@ const file = (): string => join(dir, 'remote-host.json');
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'dormouse-host-state-'));
+  fsProbe.steps.length = 0;
+  fsProbe.tmpWriteDelayMs = 0;
 });
 
 afterEach(async () => {
@@ -102,6 +131,44 @@ describe('FileHostStateStore', () => {
     expect(parsed.enrollment.hostId).toBe('host-2');
   });
 
+  it('serializes concurrent saves instead of interleaving their writes', async () => {
+    // Two saves in flight at once is the normal case — the ACL is written in
+    // the background while a command writes the enrollment. Overlapping them
+    // used to share one temp path per process, so the first rename moved the
+    // file out from under the second, which then failed with ENOENT.
+    fsProbe.tmpWriteDelayMs = 30;
+    const store = new FileHostStateStore(dir);
+
+    await Promise.all([
+      store.saveAcl('host-1', [aclRecord('host-1', 'device-1')]),
+      store.saveEnrollment(ENROLLMENT),
+    ]);
+
+    expect(fsProbe.steps).toEqual(['write', 'rename', 'write', 'rename']);
+    // And the file the last one left is whole, with both changes in it.
+    const parsed = JSON.parse(await readFile(file(), 'utf8')) as {
+      enrollment: HostEnrollment;
+      acl: Record<string, HostAclRecord[]>;
+    };
+    expect(parsed.enrollment).toEqual(ENROLLMENT);
+    expect(parsed.acl['host-1']).toHaveLength(1);
+    const { readdir } = await import('node:fs/promises');
+    expect(await readdir(dir)).toEqual(['remote-host.json']);
+  });
+
+  it('keeps saving after one write fails', async () => {
+    // The chain must not wedge on a single unwritable moment, and the caller
+    // still has to see the failure.
+    const store = new FileHostStateStore(dir);
+    await rm(dir, { recursive: true, force: true });
+    const blocker = join(dir);
+    await writeFile(blocker, 'not a directory');
+
+    await expect(store.saveEnrollment(ENROLLMENT)).rejects.toBeTruthy();
+    await rm(blocker, { force: true });
+    await expect(store.saveEnrollment(ENROLLMENT)).resolves.toBeUndefined();
+  });
+
   it('starts empty and warns on a malformed file', async () => {
     // Fail closed but loudly: an empty ACL silently de-pairs every device.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -127,14 +194,30 @@ describe('FileHostStateStore', () => {
 });
 
 describe('createEphemeralHostStateStore', () => {
-  it('reads empty, drops writes, and says so once', async () => {
+  it('keeps the Host for the session, and says once that it goes no further', async () => {
+    // Reads that answered empty would de-pair every device the moment it was
+    // approved: the ACL this Host authorizes with is the one it just wrote.
     const warnings: string[] = [];
     const store = createEphemeralHostStateStore((message) => warnings.push(message));
 
     await store.saveEnrollment(ENROLLMENT);
     await store.saveAcl('host-1', [aclRecord('host-1', 'device-1')]);
-    expect(await store.loadEnrollment()).toBeNull();
-    expect(await store.loadAcl('host-1')).toEqual([]);
+    expect(await store.loadEnrollment()).toEqual(ENROLLMENT);
+    expect(await store.loadAcl('host-1')).toHaveLength(1);
     expect(warnings).toHaveLength(1);
+
+    await store.clearEnrollment();
+    expect(await store.loadEnrollment()).toBeNull();
+  });
+
+  it('declares that nothing here survives, so an adopting webview keeps its copy', () => {
+    expect(createEphemeralHostStateStore(() => {}).persistent).toBe(false);
+    expect(new FileHostStateStore(dir).persistent).toBe(true);
+  });
+
+  it('files records under their own host, like the real store', async () => {
+    const store = createEphemeralHostStateStore(() => {});
+    await store.saveAcl('host-1', [aclRecord('other', 'device-1')]);
+    expect(await store.loadAcl('host-1')).toEqual([]);
   });
 });

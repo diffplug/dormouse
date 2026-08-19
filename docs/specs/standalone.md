@@ -135,9 +135,14 @@ enrollment can never end up describing a different Host than the records
 approved under it. `hostToken` is a bearer credential and never enters a webview
 realm. If the directory cannot be created, Rust passes an empty value and the
 sidecar falls back to an ephemeral store — a Host can be enrolled and used for
-the session, but nothing survives a restart, and it warns once when a write is
-dropped. The browser dev harness passes a per-run temp directory instead, so a
-dev enrollment lives and dies with that run.
+the session, because the store holds both values **in memory** rather than
+dropping the writes: reads that answered empty would de-pair each device the
+moment it was approved, since the ACL a Host authorizes against is the one it
+just wrote. Nothing survives the process, and it warns once. That store reports
+`persistent: false`, which is what an `adopt` answers back to the webview so the
+webview keeps its own copy of the Host rather than clearing the only one that
+outlives the run. The browser dev harness passes a per-run temp directory
+instead, so a dev enrollment lives and dies with that run.
 
 **The bridge.** Webview → sidecar is one generic passthrough invoke,
 `remote_host_command(payload)`, which writes `{"event":"remoteHost:command",
@@ -176,6 +181,13 @@ already answers its queries, and a second answer from this process would write
 duplicate bytes into the PTY's input and corrupt whatever the program was
 parsing. Semantic events (cwd, prompt, title) stay the webview's for the same
 reason.
+
+"Discarded" and "not parsed" are different things, and the difference is the one
+place the parser needs a colour: with no colour provider it *declines* an OSC
+10/11/12 `?` query, which leaves it in `visibleData`, reaches the phone's xterm,
+and gets answered a second time. So the strip parser is built with a constant
+provider whose value is never sent anywhere — it exists only to make the query
+be consumed, and its generated response is thrown away with every other event.
 
 The tap is inside `pty-core`'s event callback in `main.js`, ahead of the send to
 the webview, and is wrapped: **a remote listener must never break the local

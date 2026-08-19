@@ -7,12 +7,14 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server, type Socket } from 'node:net';
-import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { mkdir } from 'node:fs/promises';
+import { dirname } from 'node:path';
 
-import { FrameDecoder } from '../../lib/src/lib/vscode-peer-link-protocol';
+import { FrameDecoder, encodeFrame } from '../../lib/src/lib/vscode-peer-link-protocol';
+import { ENROLLMENT_KEY } from '../../lib/src/remote/host/store';
 import type { ExtensionMessage } from '../src/message-types';
 import {
+  derivedSocketPath as socketPathFor,
   fakeSink,
   fakeWindow,
   freshModule,
@@ -33,25 +35,46 @@ let opened: LinkModule | null = null;
 let squatter: Server | null = null;
 const squatted: Socket[] = [];
 
-/** Mirrors `socketPath()` — see the note in peer-link.test.ts. */
-function derivedSocketPath(): string {
-  const id = createHash('sha256').update(dir).digest('hex').slice(0, 12);
-  return join(dir, `dormouse-peer-${id}.sock`);
+const derivedSocketPath = (): string => socketPathFor(dir);
+
+/** One `secrets.onDidChange` subscriber, as VS Code hands them out. */
+interface SecretWatcher {
+  (event: { key: string }): void;
 }
 
 /** The slice of `ExtensionContext` the store reads, in memory. */
 function fakeContext() {
   const secrets = new Map<string, string>();
   const global = new Map<string, string>();
+  const watchers = new Set<SecretWatcher>();
+  /** Every keychain round trip, so a test can see the memo working. */
+  const reads: string[] = [];
+  /** What `SecretStorage` does across every window of one extension. */
+  const announce = (key: string) => {
+    for (const watcher of [...watchers]) watcher({ key });
+  };
   return {
-    store: { secrets, global },
+    store: { secrets, global, announce, watchers, reads },
     context: {
       globalStorageUri: { fsPath: dir },
       subscriptions: [] as unknown[],
       secrets: {
-        get: async (key: string) => secrets.get(key),
-        store: async (key: string, value: string) => void secrets.set(key, value),
-        delete: async (key: string) => void secrets.delete(key),
+        get: async (key: string) => {
+          reads.push(key);
+          return secrets.get(key);
+        },
+        store: async (key: string, value: string) => {
+          secrets.set(key, value);
+          announce(key);
+        },
+        delete: async (key: string) => {
+          secrets.delete(key);
+          announce(key);
+        },
+        onDidChange: (watcher: SecretWatcher) => {
+          watchers.add(watcher);
+          return { dispose: () => void watchers.delete(watcher) };
+        },
       },
       globalState: {
         get: (key: string) => global.get(key),
@@ -134,6 +157,7 @@ function bridgeLinkToHost(
     dropForwardedCommands: mod.dropForwardedCommands,
     deliverCommandResult: mod.deliverCommandResult,
     deliverUiEvent: mod.deliverUiEvent,
+    onClientAuthenticated: mod.greetPeerWindow,
   });
 }
 
@@ -147,20 +171,47 @@ async function openFarWindow(side: ReturnType<typeof fakeWindow>): Promise<LinkM
   return link;
 }
 
-/** Occupy the socket, so the module under test can only ever be a client. */
+/**
+ * Occupy the socket, so the module under test can only ever be a client.
+ *
+ * It has to complete the real handshake — the token file is right there in the
+ * storage dir, which is what a *legitimate* second window has too — because a
+ * client that cannot verify the welcome disconnects and forwards nothing.
+ */
 async function otherWindowHoldsTheHost(): Promise<{ frames: Array<{ kind: string }> }> {
   const frames: Array<{ kind: string }> = [];
+  const { createHmac } = await import('node:crypto');
+  const { readFile } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+  const path = derivedSocketPath();
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   // Sockets are kept so cleanup can drop them: `close()` waits for every live
   // connection, and this stand-in has no lifecycle of its own to end them.
   const server = createServer((socket) => {
     squatted.push(socket);
     const decoder = new FrameDecoder();
     socket.setEncoding('utf8');
+    socket.write(encodeFrame({ kind: 'challenge', nonce: 'broker-nonce' }));
     socket.on('data', (chunk: string) => {
-      for (const frame of decoder.push(chunk)) frames.push(frame as { kind: string });
+      for (const frame of decoder.push(chunk)) {
+        const typed = frame as { kind: string; nonce?: string };
+        frames.push(typed);
+        if (typed.kind !== 'hello') continue;
+        void (async () => {
+          const token = (await readFile(join(dir, 'remote-host.peer-token'), 'utf8')).trim();
+          socket.write(
+            encodeFrame({
+              kind: 'welcome',
+              proof: createHmac('sha256', token)
+                .update(`server:${typed.nonce ?? ''}`)
+                .digest('base64url'),
+            }),
+          );
+        })();
+      }
     });
   });
-  await new Promise<void>((resolve) => server.listen(derivedSocketPath(), resolve));
+  await new Promise<void>((resolve) => server.listen(path, resolve));
   squatter = server;
   return { frames };
 }
@@ -190,6 +241,7 @@ afterEach(async () => {
   squatter = null;
   if (realTmp === undefined) delete process.env.TMPDIR;
   else process.env.TMPDIR = realTmp;
+  vi.unstubAllGlobals();
   await removeDir(dir);
 });
 
@@ -238,6 +290,47 @@ describe('host state store', () => {
     expect(await target.loadAcl('host-1')).toEqual([
       { hostId: 'host-1', devicePublicKey: 'device-1' },
     ]);
+  });
+
+  it('re-reads the enrollment after another window changed it', async () => {
+    // The memo is a keychain round trip saved, but `SecretStorage` is shared by
+    // every window of the extension: without invalidation a window that read it
+    // once could keep serving a Host another window cleared, or never see one
+    // another window created.
+    const { VsCodeHostStateStore } = await import('../src/remote-host-store');
+    const { context, store } = fakeContext();
+    const changes: number[] = [];
+    const target = new VsCodeHostStateStore(context, () => changes.push(1));
+    const enrollment = {
+      serverUrl: 'https://relay.dormouse.sh',
+      hostId: 'host-1',
+      hostToken: 'token',
+      origin: 'https://relay.dormouse.sh',
+      rpId: 'relay.dormouse.sh',
+    };
+    store.secrets.set(ENROLLMENT_KEY, JSON.stringify(enrollment));
+
+    expect(await target.loadEnrollment()).toEqual(enrollment);
+    // Memoized: a second read costs no round trip.
+    await target.loadEnrollment();
+    expect(store.reads).toHaveLength(1);
+
+    // Another window cleared it.
+    store.secrets.delete(ENROLLMENT_KEY);
+    store.announce(ENROLLMENT_KEY);
+    expect(await target.loadEnrollment()).toBeNull();
+    expect(store.reads).toHaveLength(2);
+    expect(changes).toHaveLength(1);
+
+    // Some other secret changing is none of its business.
+    store.secrets.set(ENROLLMENT_KEY, JSON.stringify(enrollment));
+    store.announce('some.other.secret');
+    expect(await target.loadEnrollment()).toBeNull();
+    expect(store.reads).toHaveLength(2);
+
+    target.dispose();
+    store.announce(ENROLLMENT_KEY);
+    expect(changes).toHaveLength(1);
   });
 
   it('drops records that name a different host, and unreadable values', async () => {
@@ -333,6 +426,133 @@ describe('remote host service glue', () => {
     mod.handleRemoteHostCommand(undefined);
     mod.handleRemoteHostCommand({ rhId: 'rh-1' } as never);
     expect(bound.posted).toEqual([]);
+  });
+
+  it('holds a command that arrives while the contention is still settling', async () => {
+    // An enrolled machine contends at activation, and that takes a bind and a
+    // handshake. Refusing in that window tells the webview it has no Host
+    // seconds before it gets one, and the gates that arm on that answer stay
+    // down until the whole window reloads.
+    const mod = await freshHost();
+    const bound = fakeDeps();
+    mod.configureRemoteHost(bound.deps());
+    const { context, store } = fakeContext();
+    // Outside this build's allowed sources, so the service starts and idles
+    // rather than opening a real relay socket.
+    store.secrets.set(
+      ENROLLMENT_KEY,
+      JSON.stringify({
+        serverUrl: 'https://relay.example.com',
+        hostId: 'host-1',
+        hostToken: 'token',
+        origin: 'https://relay.example.com',
+        rpId: 'relay.example.com',
+      }),
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mod.initRemoteHost(context);
+    // Enough microtasks for the enrollment probe to land and the contention to
+    // start, and far too few for any of its filesystem work to finish.
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+
+    mod.handleRemoteHostCommand({ rhId: 'rh-1', cmd: 'status' });
+    expect(results(bound.posted)).toEqual([]);
+
+    await waitFor(() => results(bound.posted).length > 0);
+    // Answered by the Host this window went on to run, not refused.
+    expect(results(bound.posted)[0]).toMatchObject({ rhId: 'rh-1' });
+    expect(results(bound.posted)[0]!.error).toBeUndefined();
+    expect(opened!.isPeerBroker()).toBe(true);
+    warn.mockRestore();
+  });
+
+  it('contends when another window enrolls, without a reload', async () => {
+    // This window was un-enrolled at activation, so it never contended and has
+    // no socket and no broker to hear from. The shared `SecretStorage` is the
+    // only signal it gets that a Host now exists.
+    const mod = await freshHost();
+    const bound = fakeDeps();
+    mod.configureRemoteHost(bound.deps());
+    const { context, store } = fakeContext();
+    mod.initRemoteHost(context);
+    await tick();
+    expect(opened!.isPeerBroker()).toBe(false);
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    store.secrets.set(
+      ENROLLMENT_KEY,
+      JSON.stringify({
+        serverUrl: 'https://relay.example.com',
+        hostId: 'host-1',
+        hostToken: 'token',
+        origin: 'https://relay.example.com',
+        rpId: 'relay.example.com',
+      }),
+    );
+    store.announce(ENROLLMENT_KEY);
+
+    await waitFor(() => opened!.isPeerBroker());
+    warn.mockRestore();
+  });
+});
+
+describe('the relay socket', () => {
+  /** A `ws` server that greets, echoes one frame, and closes with a code. */
+  async function wsServer() {
+    const { WebSocketServer } = await import('ws');
+    const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+    await new Promise((resolve) => server.on('listening', resolve));
+    server.on('connection', (socket) => {
+      socket.send('hello from the relay');
+      socket.on('message', () => socket.close(4001, 'done'));
+    });
+    const { port } = server.address() as { port: number };
+    return { url: `ws://127.0.0.1:${port}`, close: () => server.close() };
+  }
+
+  it('uses the bundled ws where the extension host has no global WebSocket', async () => {
+    // `globalThis.WebSocket` arrived in Node 22, and `engines.vscode` is
+    // `^1.85.0` — VS Code 1.85 shipped Node 18, so the supported range spans
+    // the boundary and the fallback is the only implementation on the old side.
+    const mod = await freshHost();
+    const relay = await wsServer();
+    vi.stubGlobal('WebSocket', undefined);
+    try {
+      const socket = mod.createRelaySocket(relay.url);
+      const received: string[] = [];
+      const closes: number[] = [];
+      // Exactly the surface `RemoteHost` reads, and nothing more.
+      socket.addEventListener('message', (ev) => {
+        received.push(String((ev as { data?: unknown }).data));
+      });
+      socket.addEventListener('close', (ev) => {
+        closes.push(Number((ev as { code?: unknown }).code));
+      });
+      await new Promise<void>((resolve) => socket.addEventListener('open', () => resolve()));
+      expect(socket.readyState).toBe(1);
+
+      await waitFor(() => received.length > 0);
+      expect(received).toEqual(['hello from the relay']);
+
+      socket.send(JSON.stringify({ t: 'hello' }));
+      await waitFor(() => closes.length > 0);
+      expect(closes).toEqual([4001]);
+    } finally {
+      relay.close();
+    }
+  });
+
+  it('prefers whatever the extension host already provides', async () => {
+    const mod = await freshHost();
+    const built: string[] = [];
+    class PlatformSocket {
+      constructor(url: string) {
+        built.push(url);
+      }
+    }
+    vi.stubGlobal('WebSocket', PlatformSocket);
+    expect(mod.createRelaySocket('wss://relay.dormouse.sh/ws/host')).toBeInstanceOf(PlatformSocket);
+    expect(built).toEqual(['wss://relay.dormouse.sh/ws/host']);
   });
 });
 
@@ -501,6 +721,30 @@ describe('serving the other windows', () => {
     far.emitData('pty-far', 'after the unsubscribe');
     await tick(100);
     expect(sink.data).toEqual(['from the other window']);
+  });
+
+  it('tells a joining window whether there is a Host, without waiting for a change', async () => {
+    // `status` events are emitted when the Host's lifecycle changes, and a
+    // window connecting changes nothing — so a window opened after the
+    // enrollment would sit disarmed until the user reloaded it.
+    const mod = await freshHost();
+    const bound = fakeDeps();
+    mod.configureRemoteHost(bound.deps());
+    bridgeLinkToHost(mod, opened!, bound);
+    mod.initRemoteHost(fakeContext().context);
+    mod.handleRemoteHostCommand({
+      rhId: 'rh-0',
+      cmd: 'enroll',
+      params: { serverUrl: 'https://evil.example', password: 'p', label: 'Laptop' },
+    });
+    await waitFor(() => opened!.isPeerBroker());
+
+    const far = fakeWindow();
+    await openFarWindow(far);
+
+    await waitFor(() => far.uiEvents.length > 0);
+    // Addressed to the window that joined, and nothing else is invented for it.
+    expect(far.uiEvents).toEqual([{ name: 'status', enrolled: false }]);
   });
 
   it('answers a forwarded command over the link and nowhere else', async () => {

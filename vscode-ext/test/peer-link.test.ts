@@ -9,11 +9,18 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { access, readFile } from 'node:fs/promises';
-import { createConnection, createServer } from 'node:net';
-import { join } from 'node:path';
+import { createHmac } from 'node:crypto';
+import { access, chmod, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { createConnection, createServer, type Server } from 'node:net';
+import { dirname, join } from 'node:path';
 import {
+  FrameDecoder,
+  PEER_CLIENT_PROOF_DOMAIN,
+  PEER_SERVER_PROOF_DOMAIN,
+  encodeFrame,
+} from '../../lib/src/lib/vscode-peer-link-protocol';
+import {
+  derivedSocketPath as socketPathFor,
   fakeContext,
   fakeSink,
   fakeWindow,
@@ -32,15 +39,14 @@ let dir: string;
 let realTmp: string | undefined;
 const opened: LinkModule[] = [];
 
-/**
- * The one path every window of an installation contends for, mirroring
- * `socketPath()`. Duplicated here on purpose: a derivation that drifted would
- * silently give each window its own lease and its own Host.
- */
-function derivedSocketPath(): string {
-  const id = createHash('sha256').update(dir).digest('hex').slice(0, 12);
-  return join(dir, `dormouse-peer-${id}.sock`);
-}
+const derivedSocketPath = (): string => socketPathFor(dir);
+
+/** The token the whole installation shares, as it sits on disk. */
+const readToken = async (): Promise<string> =>
+  (await readFile(join(dir, 'remote-host.peer-token'), 'utf8')).trim();
+
+const proof = (token: string, domain: string, nonce: string): string =>
+  createHmac('sha256', token).update(domain + nonce).digest('base64url');
 
 async function openWindow(deps: ReturnType<typeof fakeWindow>): Promise<LinkModule> {
   const mod = await freshModule<LinkModule>(() => import('../src/peer-link'));
@@ -129,6 +135,7 @@ describe('bind-as-lease', () => {
 
   it('takes over a socket whose broker died without unlinking it', async () => {
     const path = derivedSocketPath();
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     // A killed process leaves the inode behind — `close()` would unlink it, so
     // the only way to produce this state is to not let the owner close.
     const corpse = spawn(process.execPath, [
@@ -148,6 +155,79 @@ describe('bind-as-lease', () => {
     expect(roles).toEqual([true]);
     expect(mod.isPeerBroker()).toBe(true);
   });
+
+  it('re-binds when the socket it reclaimed is unlinked out from under it', async () => {
+    // Two windows can clear the same corpse and the second bind displaces the
+    // first without any error — the loser keeps serving an inode no client can
+    // reach. On unix a path that has *gone* after our bind is the same failure,
+    // and reading it as "still ours" leaves a broker nobody can dial.
+    const path = derivedSocketPath();
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    const corpse = spawn(process.execPath, [
+      '-e',
+      `require('node:net').createServer().listen(${JSON.stringify(path)})`,
+    ]);
+    await waitForFile(path);
+    corpse.kill('SIGKILL');
+    await new Promise((resolve) => corpse.on('exit', resolve));
+    const dead = (await stat(path)).ino;
+
+    const mod = await openWindow(fakeWindow());
+    const settled = mod.ensurePeerNet(() => {});
+    // Stand in for the competing reclaim: take the path away the moment this
+    // window has bound it, inside its own verification window.
+    void (async () => {
+      for (let i = 0; i < 2000; i++) {
+        const now = await stat(path).catch(() => null);
+        if (now && now.ino !== dead) {
+          await rm(path, { force: true });
+          return;
+        }
+        await tick(5);
+      }
+    })();
+    await settled;
+
+    // It bound again rather than settling on a path that no longer names it.
+    expect(mod.isPeerBroker()).toBe(true);
+    await expect(access(path)).resolves.toBeUndefined();
+    // Which is the property that matters: another window can actually reach it.
+    const peer = await openWindow(fakeWindow({ entries: [{ surfaceId: 'far-1' }] }));
+    await peer.ensurePeerNet(() => {});
+    expect(peer.isPeerBroker()).toBe(false);
+  }, 30_000);
+
+  it('settles two windows racing for one corpse into a broker and a client', async () => {
+    // Both find the same dead socket, both may unlink it, and the second bind
+    // silently displaces the first. Whoever loses that has to notice and stand
+    // down rather than serve an inode nobody can reach — and must then end up a
+    // client, not wedged.
+    const path = derivedSocketPath();
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    const corpse = spawn(process.execPath, [
+      '-e',
+      `require('node:net').createServer().listen(${JSON.stringify(path)})`,
+    ]);
+    await waitForFile(path);
+    corpse.kill('SIGKILL');
+    await new Promise((resolve) => corpse.on('exit', resolve));
+
+    const first = await openWindow(fakeWindow());
+    const second = await openWindow(fakeWindow());
+    const firstRoles: boolean[] = [];
+    const secondRoles: boolean[] = [];
+    await Promise.all([
+      first.ensurePeerNet((held) => firstRoles.push(held)),
+      second.ensurePeerNet((held) => secondRoles.push(held)),
+    ]);
+
+    const brokers = [first, second].filter((mod) => mod.isPeerBroker());
+    expect(brokers).toHaveLength(1);
+    // And the loser reached the broker rather than giving up: it can forward.
+    const loser = [first, second].find((mod) => !mod.isPeerBroker())!;
+    await waitFor(() => loser.forwardCommand({ rhId: 'rh-1', cmd: 'status' }), 15_000);
+    expect(firstRoles.concat(secondRoles)).toEqual([true]);
+  }, 30_000);
 
   it('collects directory entries from the other window', async () => {
     const peerSide = fakeWindow({ entries: [{ surfaceId: 'far-1' }, { surfaceId: 'far-2' }] });
@@ -240,7 +320,7 @@ describe('bind-as-lease', () => {
     expect(broker.isRemotePty('pty-far')).toBe(false);
   });
 
-  it('stops the stream on unsubscribe', async () => {
+  it('stops the stream on unsubscribe but keeps the route', async () => {
     const peerSide = farWindow();
     const { broker } = await linkedPair(fakeWindow(), peerSide);
     await attachFar(broker);
@@ -252,10 +332,48 @@ describe('bind-as-lease', () => {
     await tick();
     peerSide.emitData('pty-far', 'after unsubscribe');
     await tick(100);
-
     expect(sink.data).toEqual([]);
-    // Unsubscribing also forgets the route, so a later write is not misrouted.
-    expect(broker.isRemotePty('pty-far')).toBe(false);
+
+    // The route stays: "nobody is watching it" is not "it moved". Re-attaching
+    // an already-attached surface places the new route *before* the old
+    // attachment is torn down, so dropping it here would delete the fresh one.
+    expect(broker.isRemotePty('pty-far')).toBe(true);
+
+    // And a second attach streams again over the route that was never lost.
+    const again = fakeSink();
+    broker.remoteSubscribe('pty-far', again);
+    await tick();
+    peerSide.emitData('pty-far', 'flowing again');
+    await waitFor(() => again.data.length > 0);
+    expect(again.data).toEqual(['flowing again']);
+  });
+
+  it('keeps serving a surface that is re-attached while still attached', async () => {
+    // Attach-over-attach: the new route is placed by the resolve, and only then
+    // does the old attachment's teardown unsubscribe. The route must survive
+    // that teardown or every later write goes nowhere.
+    const peerSide = farWindow();
+    const { broker } = await linkedPair(fakeWindow(), peerSide);
+    await attachFar(broker);
+    const first = fakeSink();
+    broker.remoteSubscribe('pty-far', first);
+    await tick();
+
+    // The order `RemoteApiSession` actually uses: the resolve re-places the
+    // route, then the *old* attachment is torn down, then the new one
+    // subscribes. A teardown that dropped the route would leave that last
+    // subscribe with nowhere to send.
+    await attachFar(broker);
+    const second = fakeSink();
+    broker.remoteUnsubscribe('pty-far', first);
+    broker.remoteSubscribe('pty-far', second);
+    await tick();
+
+    expect(broker.isRemotePty('pty-far')).toBe(true);
+    expect(broker.remoteWrite('pty-far', 'ls\r')).toBe(true);
+    peerSide.emitData('pty-far', 'still here');
+    await waitFor(() => second.data.length > 0);
+    expect(second.data).toEqual(['still here']);
   });
 
   it('keeps a second viewer streaming when the first detaches', async () => {
@@ -399,22 +517,228 @@ describe('bind-as-lease', () => {
     expect(brokerSide.dropped[0]).toBe(brokerSide.forwarded[0].from);
   });
 
-  it('rejects a client that does not know the token', async () => {
+  it('reports a joining window so the broker can hand it the Host state', async () => {
+    // Nothing about the Host changes because a window connected, so the events
+    // its webviews arm on are never coming on their own — the broker has to
+    // volunteer them, and this is the only signal it gets.
+    const brokerSide = fakeWindow();
+    const { broker, peerSide } = await linkedPair(brokerSide);
+
+    expect(brokerSide.joined).toHaveLength(1);
+    const event = { name: 'status', enrolled: true };
+    broker.sendUiEvent(brokerSide.joined[0]!, event);
+
+    await waitFor(() => peerSide.uiEvents.length > 0);
+    expect(peerSide.uiEvents).toEqual([event]);
+  });
+});
+
+/**
+ * The opening handshake. The socket path is derived from the storage location,
+ * so anything on the machine can compute it; these are the properties that make
+ * knowing it worthless.
+ */
+describe('peer handshake', () => {
+  /** Read one frame at a time off a raw socket. */
+  function frameReader(socket: import('node:net').Socket) {
+    const decoder = new FrameDecoder();
+    const queue: Array<Record<string, unknown>> = [];
+    const waiters: Array<(frame: Record<string, unknown>) => void> = [];
+    socket.setEncoding('utf8');
+    socket.on('data', (chunk: string) => {
+      for (const frame of decoder.push(chunk)) {
+        const typed = frame as Record<string, unknown>;
+        const waiter = waiters.shift();
+        if (waiter) waiter(typed);
+        else queue.push(typed);
+      }
+    });
+    return {
+      frames: queue,
+      next(): Promise<Record<string, unknown>> {
+        const ready = queue.shift();
+        if (ready) return Promise.resolve(ready);
+        return new Promise((resolve) => waiters.push(resolve));
+      },
+    };
+  }
+
+  it('runs challenge → hello → welcome over a real socket, without sending the token', async () => {
+    const broker = await openWindow(fakeWindow({ entries: [{ surfaceId: 'near-1' }] }));
+    await broker.ensurePeerNet(() => {});
+    const token = await readToken();
+    expect(token).toBeTruthy();
+
+    const socket = createConnection({ path: derivedSocketPath() });
+    const reader = frameReader(socket);
+    await new Promise((resolve) => socket.on('connect', resolve));
+
+    // The server speaks first: a client must never volunteer a proof into
+    // whatever bound the path.
+    const challenge = await reader.next();
+    expect(challenge.kind).toBe('challenge');
+    expect(typeof challenge.nonce).toBe('string');
+
+    const nonce = 'client-nonce-1';
+    socket.write(
+      encodeFrame({
+        kind: 'hello',
+        nonce,
+        proof: proof(token, PEER_CLIENT_PROOF_DOMAIN, String(challenge.nonce)),
+      }),
+    );
+
+    const welcome = await reader.next();
+    expect(welcome).toEqual({
+      kind: 'welcome',
+      proof: proof(token, PEER_SERVER_PROOF_DOMAIN, nonce),
+    });
+    // The raw token never crossed in either direction.
+    expect(JSON.stringify([challenge, welcome])).not.toContain(token);
+
+    // And the socket is a working peer afterwards.
+    socket.write(encodeFrame({ kind: 'notify', topic: 'directory' }));
+    socket.destroy();
+  });
+
+  it('drops a client whose proof is over the wrong token', async () => {
     const brokerSide = fakeWindow();
     const broker = await openWindow(brokerSide);
     await broker.ensurePeerNet(() => {});
 
-    // The socket path is derived from the storage location, so it is guessable;
-    // the token in the 0600 file beside it is the only secret.
-    expect((await readFile(join(dir, 'remote-host.peer-token'), 'utf8')).trim()).toBeTruthy();
-
     const socket = createConnection({ path: derivedSocketPath() });
+    const reader = frameReader(socket);
     await new Promise((resolve) => socket.on('connect', resolve));
-    socket.write(`${JSON.stringify({ kind: 'hello', token: 'wrong' })}\n`);
+    const challenge = await reader.next();
+    socket.write(
+      encodeFrame({
+        kind: 'hello',
+        nonce: 'n',
+        proof: proof('not the token', PEER_CLIENT_PROOF_DOMAIN, String(challenge.nonce)),
+      }),
+    );
 
-    // The server drops it rather than answering anything.
+    // Dropped rather than answered — no welcome, and it never joins.
     await new Promise((resolve) => socket.on('close', resolve));
+    expect(reader.frames).toEqual([]);
+    expect(brokerSide.joined).toEqual([]);
     expect(await broker.remoteRequest('directory', {})).toEqual([]);
     socket.destroy();
+  });
+
+  it('rejects a proof replayed from another connection', async () => {
+    const broker = await openWindow(fakeWindow());
+    await broker.ensurePeerNet(() => {});
+    const token = await readToken();
+
+    const first = createConnection({ path: derivedSocketPath() });
+    const firstReader = frameReader(first);
+    await new Promise((resolve) => first.on('connect', resolve));
+    const captured = await firstReader.next();
+    const stolen = proof(token, PEER_CLIENT_PROOF_DOMAIN, String(captured.nonce));
+    first.destroy();
+
+    // A second connection gets a fresh challenge, so the captured proof is
+    // worth nothing — which is the whole point of the nonce.
+    const second = createConnection({ path: derivedSocketPath() });
+    const secondReader = frameReader(second);
+    await new Promise((resolve) => second.on('connect', resolve));
+    const fresh = await secondReader.next();
+    expect(fresh.nonce).not.toBe(captured.nonce);
+    second.write(encodeFrame({ kind: 'hello', nonce: 'n', proof: stolen }));
+
+    await new Promise((resolve) => second.on('close', resolve));
+    expect(secondReader.frames).toEqual([]);
+    second.destroy();
+  });
+
+  it('serves nothing to a squatter that took the path but not the token', async () => {
+    // The co-resident-user attack: bind the path first, then wait to be handed
+    // this installation's terminals. The client must send its hello and nothing
+    // else, and must disconnect on a welcome it cannot verify.
+    const received: Array<Record<string, unknown>> = [];
+    let squatterSocket: import('node:net').Socket | null = null;
+    let closed = false;
+    const squatter: Server = createServer((socket) => {
+      squatterSocket = socket;
+      const reader = frameReader(socket);
+      socket.on('close', () => {
+        closed = true;
+      });
+      void (async () => {
+        socket.write(encodeFrame({ kind: 'challenge', nonce: 'squatter-nonce' }));
+        for (;;) {
+          const frame = await reader.next();
+          received.push(frame);
+          if (frame.kind === 'hello') {
+            // It cannot compute the real proof, so it guesses.
+            socket.write(encodeFrame({ kind: 'welcome', proof: 'made up' }));
+          }
+        }
+      })();
+    });
+    const path = derivedSocketPath();
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    await new Promise<void>((resolve) => squatter.listen(path, resolve));
+
+    try {
+      const side = fakeWindow({ entries: [{ surfaceId: 'secret-1' }] });
+      const window = await openWindow(side);
+      const roles: boolean[] = [];
+      void window.ensurePeerNet((held) => roles.push(held));
+
+      await waitFor(() => received.length > 0);
+      await tick(200);
+
+      // Exactly one frame, the hello, and it carries no token — only an HMAC
+      // over a nonce the squatter chose, which is not the token.
+      expect(received.map((frame) => frame.kind)).toEqual(['hello']);
+      expect(JSON.stringify(received)).not.toContain(await readToken());
+      // No directory, no surfaces, no PTY: it never became this window's broker.
+      expect(closed).toBe(true);
+      expect(window.isPeerBroker()).toBe(false);
+      expect(window.forwardCommand({ rhId: 'rh-1', cmd: 'status' })).toBe(false);
+      expect(roles).toEqual([]);
+      expect(side.writes).toEqual([]);
+    } finally {
+      squatterSocket?.destroy();
+      await new Promise((resolve) => squatter.close(resolve));
+    }
+  });
+
+  it('keeps the socket directory private to this user', async () => {
+    // The layer below the handshake: in a shared tmpdir, a directory anyone can
+    // write to is one where a co-resident user can create the path first.
+    const peerDir = dirname(derivedSocketPath());
+    await mkdir(peerDir, { recursive: true, mode: 0o700 });
+    await chmod(peerDir, 0o777);
+
+    const mod = await openWindow(fakeWindow());
+    await mod.ensurePeerNet(() => {});
+
+    // Ours, so it is tightened rather than refused.
+    expect(mod.isPeerBroker()).toBe(true);
+    expect((await stat(peerDir)).mode & 0o777).toBe(0o700);
+  });
+
+  it('stands down for good when the socket directory is not one', async () => {
+    // Something else holds the only place these sockets may live. No amount of
+    // retrying changes that, so the link stops rather than spinning — and the
+    // waiting caller is released rather than left hanging.
+    const peerDir = dirname(derivedSocketPath());
+    await writeFile(peerDir, 'not a directory');
+
+    const mod = await openWindow(fakeWindow());
+    const roles: boolean[] = [];
+    await mod.ensurePeerNet((held) => roles.push(held));
+
+    expect(roles).toEqual([]);
+    expect(mod.isPeerBroker()).toBe(false);
+    // No retry loop: what was there is untouched a second later.
+    await tick(150);
+    expect((await stat(peerDir)).isFile()).toBe(true);
+    // And a later caller is answered immediately rather than restarting it.
+    await mod.ensurePeerNet(() => {});
+    expect(mod.isPeerBroker()).toBe(false);
   });
 });

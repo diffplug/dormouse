@@ -23,14 +23,23 @@
  * webviews' Host commands to the broker, which is the only process running a
  * service, and take back its results and UI events.
  *
- * Trust: the socket is a user-owned unix socket (or named pipe) and a client
- * must open with a token from a mode-0600 file in the extension's
- * `globalStorageUri` — the same bar as the `dor` control socket.
+ * Trust: the path is derived, not secret — it has to be the same in every
+ * window, so anything running as any user on the machine can compute it. Two
+ * things stand between that and this installation's terminals. On unix the
+ * sockets live in a 0700 directory of this user's own, checked before every bind
+ * and every connect, so a co-resident user cannot create the path first (Windows
+ * named pipes are not filesystem objects and carry their own ACL, so they skip
+ * that layer). And both ends prove they hold the shared token — from a 0600 file
+ * in the extension's `globalStorageUri`, the same bar as the `dor` control
+ * socket — through the mutual handshake below, without the token itself ever
+ * crossing the wire. The client verifies the server *before* it sends or serves
+ * anything, so squatting the path buys nothing: a process that cannot prove the
+ * token gets no directory, no PTY stream, and no commands.
  */
 
-import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import { chmod, lstat, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -42,13 +51,17 @@ import type {
 } from '../../lib/src/host/remote/service-protocol';
 import {
   FrameDecoder,
+  PEER_CLIENT_PROOF_DOMAIN,
   PEER_REPLY_BUDGET_MS,
+  PEER_SERVER_PROOF_DOMAIN,
   encodeFrame,
   forgetPeerRoutes,
   routedPtyId,
+  type PeerLinkChallenge,
   type PeerLinkHello,
   type PeerLinkRequest,
   type PeerLinkResponse,
+  type PeerLinkWelcome,
 } from '../../lib/src/lib/vscode-peer-link-protocol';
 import { log } from './log';
 
@@ -83,6 +96,13 @@ export interface PeerLinkDeps {
   deliverCommandResult(payload: RemoteHostResult): void;
   /** Client side: a Host UI event, for this window's webviews to render. */
   deliverUiEvent(payload: unknown): void;
+  /**
+   * Broker side: that window just finished the handshake. Nothing about the
+   * Host has changed *because* it joined, so the events its webviews gate
+   * themselves on are never coming on their own — whoever holds the Host state
+   * has to hand it the current one now (`remote-host.ts`).
+   */
+  onClientAuthenticated(client: PeerLinkClient): void;
 }
 
 let deps: PeerLinkDeps | null = null;
@@ -97,17 +117,44 @@ const TOKEN_FILE = 'remote-host.peer-token';
 const RETRY_MS = 1_000;
 
 /**
- * Constant-time token compare, mirroring `tokenMatches` in
- * `standalone/sidecar/dor-control-server.js`. That module is CommonJS and the
- * shared protocol module must stay Node-free for the webview, so this is a
- * deliberate second copy — but the property cannot differ: `!==` leaks the
- * token byte-by-byte to a co-resident local process that can time the response.
+ * How long a connect may spend between `accept` and a verified `welcome`. A
+ * process that takes the path and then says nothing would otherwise hold the
+ * contention loop open forever, because the loop awaits this rather than polls.
  */
-function tokenMatches(provided: unknown, expected: string): boolean {
+const HANDSHAKE_BUDGET_MS = 5_000;
+
+/**
+ * One side's proof that it holds the token, computed over the *other* side's
+ * fresh nonce.
+ *
+ * The token never crosses the socket, so a process that guessed the path and
+ * captured the whole exchange has an HMAC over a nonce that will never be used
+ * again, and nothing it can replay. `domain` is what keeps the two directions
+ * from being the same function of the same key — without it a fake server could
+ * reflect the client's own proof back as its welcome and pass for a broker.
+ */
+function proveToken(token: string, domain: string, nonce: string): string {
+  return createHmac('sha256', token).update(domain + nonce).digest('base64url');
+}
+
+/**
+ * Constant-time proof compare, with the same property the `dor` control socket's
+ * `tokenMatches` has and for the same reason: `!==` on a secret-derived value
+ * leaks it byte-by-byte to a co-resident local process that can time the
+ * response, which is precisely the attacker this handshake exists to stop.
+ * (That module is CommonJS and the shared protocol module must stay Node-free
+ * for the webview, so the compare is a deliberate second copy.)
+ */
+function proofMatches(provided: unknown, expected: string): boolean {
   if (typeof provided !== 'string') return false;
   const a = createHash('sha256').update(provided).digest();
   const b = createHash('sha256').update(expected).digest();
   return timingSafeEqual(a, b);
+}
+
+/** 128 bits, so no connection ever reuses another's challenge. */
+function freshNonce(): string {
+  return randomBytes(16).toString('base64url');
 }
 
 let context: vscode.ExtensionContext | null = null;
@@ -118,6 +165,54 @@ export function initPeerLink(ctx: vscode.ExtensionContext): void {
 
 function tokenPath(): string | null {
   return context ? join(context.globalStorageUri.fsPath, TOKEN_FILE) : null;
+}
+
+/**
+ * The directory the peer sockets live in, one per OS user.
+ *
+ * `tmpdir()` is shared by every user on the machine and the socket path is
+ * derived rather than random — it has to be, since binding it *is* the
+ * arbitration — so left in the open a co-resident user could create the path
+ * first and have every Dormouse window in this installation dial them. A
+ * private directory they cannot write to takes that away before the handshake
+ * has to.
+ */
+function peerDirPath(): string {
+  return join(tmpdir(), `dormouse-peer-${process.getuid?.() ?? 0}`);
+}
+
+/**
+ * Make the per-user socket directory and report whether it is safe to use.
+ *
+ * Anything but a plain directory of ours at mode 0700 is somebody else's,
+ * possibly on purpose, and no amount of retrying makes it ours — so the caller
+ * stands the peer link down for good rather than spinning against it.
+ *
+ * Windows named pipes are not filesystem objects and carry their own ACL, so
+ * there is nothing here for them to check.
+ */
+async function peerDirIsSafe(): Promise<boolean> {
+  if (process.platform === 'win32') return true;
+  const dir = peerDirPath();
+  await mkdir(dir, { recursive: true, mode: 0o700 }).catch(() => {});
+  const uid = process.getuid?.();
+  let info = await lstat(dir).catch(() => null);
+  // Ours but loose — a permissive umask, or a directory from before this check
+  // existed. Tightening something we already own is safe and keeps the test
+  // below exact rather than "0700 or better".
+  if (info?.isDirectory() && info.uid === uid && (info.mode & 0o777) !== 0o700) {
+    await chmod(dir, 0o700).catch(() => {});
+    info = await lstat(dir).catch(() => null);
+  }
+  return (
+    !!info &&
+    info.isDirectory() &&
+    // `lstat` does not follow, so a symlink reports as one rather than as
+    // whatever it points at — which is the whole reason it is `lstat`.
+    !info.isSymbolicLink() &&
+    info.uid === uid &&
+    (info.mode & 0o777) === 0o700
+  );
 }
 
 /**
@@ -136,7 +231,7 @@ function socketPath(): string | null {
     .slice(0, 12);
   return process.platform === 'win32'
     ? `\\\\.\\pipe\\dormouse-peer-${id}`
-    : join(tmpdir(), `dormouse-peer-${id}.sock`);
+    : join(peerDirPath(), `${id}.sock`);
 }
 
 /**
@@ -177,6 +272,8 @@ export interface PeerLinkClient {
   socket: Socket;
   decoder: FrameDecoder;
   authenticated: boolean;
+  /** The nonce this window challenged it with; its proof must be over exactly this. */
+  challenge: string;
 }
 
 /** Where bytes from another window's PTY go, once something asks for them. */
@@ -194,7 +291,10 @@ const remoteSinks = new Map<string, Set<RemotePtySink>>();
 const pendingRequests = new Map<string, (frame: PeerLinkResponse) => void>();
 let nextRequestId = 0;
 
-function send(client: PeerLinkClient, frame: PeerLinkRequest): void {
+function send(
+  client: PeerLinkClient,
+  frame: PeerLinkRequest | PeerLinkChallenge | PeerLinkWelcome,
+): void {
   if (client.socket.destroyed) return;
   client.socket.write(encodeFrame(frame));
 }
@@ -283,13 +383,17 @@ export function remoteSubscribe(ptyId: string, sink: RemotePtySink): void {
 export function remoteUnsubscribe(ptyId: string, sink: RemotePtySink): void {
   const sinks = remoteSinks.get(ptyId);
   if (!sinks?.delete(sink) || sinks.size > 0) return;
-  // Last viewer gone: stop the owner forwarding and drop the route — a later
-  // attach re-places it from the owner's answer.
+  // Last viewer gone: stop the owner forwarding. The route stays — "nobody is
+  // watching it" is not "it moved". Re-attaching an already-attached surface
+  // resolves the new route first and only then tears the old attachment down,
+  // so dropping the route here would delete the fresh one and strand every
+  // later write. Routes are refreshed by every resolve and dropped by the two
+  // things that really mean the terminal is gone: an `exit` frame, and the
+  // owning window disconnecting (`forgetPeerRoutes`).
   remoteSinks.delete(ptyId);
   const client = routes.get(ptyId);
   if (!client) return;
   send(client, { kind: 'unsubscribe', id: `r${++nextRequestId}`, ptyId });
-  routes.delete(ptyId);
 }
 
 export function remoteWrite(ptyId: string, data: string): boolean {
@@ -321,7 +425,16 @@ export function sendCommandResult(client: PeerLinkClient, payload: RemoteHostRes
  * may be answered from any of them, so the queue cannot be addressed.
  */
 export function broadcastUiEvent(payload: unknown): void {
-  for (const peer of authenticatedClients()) send(peer, { kind: 'uiEvent', payload });
+  for (const peer of authenticatedClients()) sendUiEvent(peer, payload);
+}
+
+/**
+ * Put a Host UI event in front of one window's webviews — the joining window's
+ * catch-up, which nobody else needs and which carries no state another window
+ * has not already been told (`remote-host.ts`).
+ */
+export function sendUiEvent(client: PeerLinkClient, payload: unknown): void {
+  send(client, { kind: 'uiEvent', payload });
 }
 
 function dropClient(client: PeerLinkClient): void {
@@ -341,21 +454,39 @@ function dropClient(client: PeerLinkClient): void {
 }
 
 function onServerFrame(client: PeerLinkClient, frame: unknown): void {
-  const message = frame as (PeerLinkResponse | { kind: 'hello'; token: string }) & {
-    kind: string;
-  };
+  const message = frame as (PeerLinkResponse | PeerLinkHello) & { kind: string };
   if (!client.authenticated) {
-    // First frame must be the hello; anything else is not a peer of ours.
+    // First frame must be the hello, answering the challenge this window sent
+    // on accept; anything else is not a peer of ours.
     const hello = message as Partial<PeerLinkHello>;
-    if (hello.kind !== 'hello' || !serverToken || !tokenMatches(hello.token, serverToken)) {
+    if (
+      hello.kind !== 'hello' ||
+      typeof hello.nonce !== 'string' ||
+      !hello.nonce ||
+      !serverToken ||
+      !proofMatches(
+        hello.proof,
+        proveToken(serverToken, PEER_CLIENT_PROOF_DOMAIN, client.challenge),
+      )
+    ) {
       log.error('[peer-link] rejected a client with a bad hello');
       dropClient(client);
       return;
     }
     client.authenticated = true;
+    // Our half, over the nonce *it* chose: a client has no other way to tell
+    // this window's broker from something that merely bound the path first, and
+    // it serves nothing until it has this.
+    send(client, {
+      kind: 'welcome',
+      proof: proveToken(serverToken, PEER_SERVER_PROOF_DOMAIN, hello.nonce),
+    });
     // Joining changes the answer set even if no surface changed while the
     // socket was down, so every peer-backed snapshot must be reconsidered.
     deps?.invalidateDirectory();
+    // And nothing about the Host changed *because* it joined, so the state its
+    // webviews gate on has to be handed to it rather than waited for.
+    deps?.onClientAuthenticated(client);
     return;
   }
 
@@ -403,7 +534,12 @@ export function listenServer(nextServer: Server, path: string): Promise<void> {
 /** Take the socket path, or report that somebody else holds it. */
 async function tryBind(path: string, token: string): Promise<boolean> {
   const nextServer = createServer((socket) => {
-    const client: PeerLinkClient = { socket, decoder: new FrameDecoder(), authenticated: false };
+    const client: PeerLinkClient = {
+      socket,
+      decoder: new FrameDecoder(),
+      authenticated: false,
+      challenge: freshNonce(),
+    };
     clients.add(client);
     socket.setEncoding('utf8');
     socket.on('data', (chunk: string) => {
@@ -411,6 +547,9 @@ async function tryBind(path: string, token: string): Promise<boolean> {
     });
     socket.on('error', () => dropClient(client));
     socket.on('close', () => dropClient(client));
+    // The server speaks first, on purpose: a client that has not yet seen proof
+    // of the token must not volunteer one into whatever bound this path.
+    send(client, { kind: 'challenge', nonce: client.challenge });
   });
   try {
     await listenServer(nextServer, path);
@@ -515,39 +654,104 @@ function stopForwarding(): void {
 }
 
 /**
- * Connect to whoever holds the socket. `'refused'` means the path exists but
- * nothing is listening on it — a broker that died without unlinking — which is
- * the caller's cue to clear it and bind.
+ * Connect to whoever holds the socket and finish the mutual handshake.
+ * `'refused'` means the path exists but nothing is listening on it — a broker
+ * that died without unlinking — which is the caller's cue to clear it and bind.
+ *
+ * Between `connect` and a verified `welcome` this window sends exactly one
+ * frame, its `hello`, and answers nothing: no directory, no PTY stream, no
+ * command. Until the far end has proved it holds the token it is only a process
+ * that guessed the path, and the whole point of the ordering is that guessing
+ * the path is not enough to be served.
  */
 function tryConnect(path: string, token: string): Promise<'connected' | 'refused' | 'failed'> {
   return new Promise((resolve) => {
     const socket = createConnection({ path });
     const decoder = new FrameDecoder();
-    socket.setEncoding('utf8');
-    socket.once('error', (error: NodeJS.ErrnoException) => {
-      socket.destroy();
-      resolve(error.code === 'ECONNREFUSED' || error.code === 'ENOENT' ? 'refused' : 'failed');
-    });
-    socket.once('connect', () => {
-      socket.removeAllListeners('error');
-      socket.write(encodeFrame({ kind: 'hello', token }));
+    /** Ours, so the server's proof is over something it could not choose. */
+    const nonce = freshNonce();
+    let helloSent = false;
+    let settled = false;
+
+    const finish = (outcome: 'connected' | 'refused' | 'failed'): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (outcome !== 'connected') socket.destroy();
+      resolve(outcome);
+    };
+    const timer = setTimeout(() => finish('failed'), HANDSHAKE_BUDGET_MS);
+
+    const drop = () => {
+      if (client !== socket) return;
+      client = null;
+      stopForwarding();
+      // The broker is gone. Every client races for the bind; one wins.
+      if (!disposed) void contend();
+    };
+
+    const onFrame = (frame: unknown): void => {
+      // Past the handshake — `client` is only ever assigned below — so this is
+      // ordinary traffic from a broker that has proved itself.
+      if (client === socket) {
+        void onClientFrame(frame);
+        return;
+      }
+      // The two handshake frames, read loosely: nothing here is trusted enough
+      // yet to be typed as one of them.
+      const message = frame as { kind?: string; nonce?: unknown; proof?: unknown };
+      if (!helloSent) {
+        if (message.kind !== 'challenge' || typeof message.nonce !== 'string' || !message.nonce) {
+          log.error('[peer-link] the process holding the socket did not open with a challenge');
+          finish('failed');
+          return;
+        }
+        helloSent = true;
+        // Answering a challenge proves nothing about the challenger, which is
+        // why this is all that is sent until the welcome comes back.
+        socket.write(
+          encodeFrame({
+            kind: 'hello',
+            nonce,
+            proof: proveToken(token, PEER_CLIENT_PROOF_DOMAIN, message.nonce),
+          }),
+        );
+        return;
+      }
+      if (
+        message.kind !== 'welcome' ||
+        !proofMatches(message.proof, proveToken(token, PEER_SERVER_PROOF_DOMAIN, nonce))
+      ) {
+        // Whatever holds the path cannot prove it holds the token, so it is not
+        // this installation's broker. Disconnect rather than serve it this
+        // window's terminals; the contention loop retries and one of the real
+        // windows ends up binding.
+        log.error('[peer-link] the process holding the socket could not prove it is our broker');
+        finish('failed');
+        return;
+      }
+      // Proved in both directions: from here it is the broker.
+      client = socket;
       for (const topic of pendingNotifications) socket.write(encodeFrame({ kind: 'notify', topic }));
       pendingNotifications.clear();
-      socket.on('data', (chunk: string) => {
-        for (const frame of decoder.push(chunk)) void onClientFrame(frame);
-      });
-      const drop = () => {
-        if (client !== socket) return;
-        client = null;
-        stopForwarding();
-        // The broker is gone. Every client races for the bind; one wins.
-        if (!disposed) void contend();
-      };
+      socket.removeAllListeners('error');
       socket.on('error', drop);
       socket.on('close', drop);
-      client = socket;
       log.info('[peer-link] connected to the broker window');
-      resolve('connected');
+      finish('connected');
+    };
+
+    socket.setEncoding('utf8');
+    socket.once('error', (error: NodeJS.ErrnoException) => {
+      finish(error.code === 'ECONNREFUSED' || error.code === 'ENOENT' ? 'refused' : 'failed');
+    });
+    // A server that drops us mid-handshake (a bad hello) must settle the attempt
+    // now rather than wait out the budget.
+    socket.once('close', () => finish('failed'));
+    socket.once('connect', () => {
+      socket.on('data', (chunk: string) => {
+        for (const frame of decoder.push(chunk)) onFrame(frame);
+      });
     });
   });
 }
@@ -562,6 +766,13 @@ function disconnectClient(): void {
 
 let disposed = false;
 let contending = false;
+/**
+ * Latched when there is no safe place to put the socket. Unlike every other
+ * failure here that is not transient — another user owns the only directory
+ * these sockets may live in — so the link stands down for good instead of
+ * spinning against it.
+ */
+let refused = false;
 let nextAttemptAt = 0;
 let announceRole: ((broker: boolean) => void) | null = null;
 let settledOnce: Promise<void> | null = null;
@@ -584,8 +795,8 @@ export function ensurePeerNet(onRole: (broker: boolean) => void): Promise<void> 
     return Promise.resolve();
   }
   // No storage location means no socket to contend for, and no amount of
-  // retrying would produce one.
-  if (!context || disposed) return Promise.resolve();
+  // retrying would produce one; neither would an unsafe socket directory.
+  if (!context || disposed || refused) return Promise.resolve();
   settledOnce ??= new Promise<void>((resolve) => {
     markSettled = resolve;
   });
@@ -613,6 +824,17 @@ function settle(broker: boolean): void {
 async function attempt(): Promise<boolean> {
   const path = socketPath();
   if (!path) return false;
+  if (!(await peerDirIsSafe())) {
+    log.error(
+      `[peer-link] ${peerDirPath()} is not a private directory of this user; the peer link is off`,
+    );
+    refused = true;
+    // A role of sorts: this window will never broker and will never reach one,
+    // so callers waiting on the contention are released rather than left
+    // hanging on a loop that has stopped.
+    settle(false);
+    return true;
+  }
   const token = await ensureToken();
 
   if (await tryBind(path, token)) {
@@ -627,7 +849,40 @@ async function attempt(): Promise<boolean> {
     return true;
   }
 
-  const outcome = await tryConnect(path, token);
+  let outcome = await tryConnect(path, token);
+  if (outcome === 'refused') {
+    // The path exists but nothing answers: a broker that died without running
+    // its disposables.
+    //
+    // Every client of that broker reaches this line at the same instant, so the
+    // unlink is jittered — otherwise they clear the corpse in lockstep, several
+    // bind, and all but one end up serving an inode nobody can reach.
+    await delay(Math.floor(Math.random() * RECLAIM_JITTER_MS));
+    // And one of them may have rebound it while we waited. Unlinking a live
+    // broker's socket would strand every window dialing it, so ask again: a
+    // second refusal is what makes the unlink below safe.
+    outcome = await tryConnect(path, token);
+    if (outcome === 'refused') {
+      await rm(path, { force: true }).catch(() => {});
+      if (await tryBind(path, token)) {
+        if (disposed) {
+          await closeServer(true);
+          return true;
+        }
+        if (await stillOurs(path)) {
+          log.info('[peer-link] took over a socket its broker left behind');
+          settle(true);
+          return true;
+        }
+        // Another window cleared the same corpse and bound after us, so the
+        // path now names its socket and ours is unreachable. Stand down rather
+        // than run a second Host: `bind` is only the arbiter when nobody
+        // unlinks. The loop's next round finds that window and connects.
+        await closeServer(false);
+      }
+      return false;
+    }
+  }
   if (outcome === 'connected') {
     // Same as the bind above: a connection opened after disposal has nobody
     // left to close it.
@@ -635,32 +890,13 @@ async function attempt(): Promise<boolean> {
     else settle(false);
     return true;
   }
-  if (outcome === 'refused') {
-    // The path exists but nothing answers: a broker that died without running
-    // its disposables. Unlinking is safe because a live broker would have
-    // accepted the connection above.
-    await rm(path, { force: true }).catch(() => {});
-    if (await tryBind(path, token)) {
-      if (disposed) {
-        await closeServer(true);
-        return true;
-      }
-      if (await stillOurs(path)) {
-        log.info('[peer-link] took over a socket its broker left behind');
-        settle(true);
-        return true;
-      }
-      // Another window cleared the same corpse and bound after us, so the path
-      // now names its socket and ours is unreachable. Stand down rather than
-      // run a second Host: `bind` is only the arbiter when nobody unlinks.
-      await closeServer(false);
-    }
-  }
   return false;
 }
 
 /** How long to let a competing reclaim land before believing we won it. */
 const RECLAIM_VERIFY_MS = 250;
+/** Spread over which a stampede of orphaned clients clears one corpse. */
+const RECLAIM_JITTER_MS = 250;
 
 /**
  * Whether the socket path still names the inode we just bound.
@@ -668,22 +904,27 @@ const RECLAIM_VERIFY_MS = 250;
  * Two windows can find the same corpse and both unlink it, and the second bind
  * silently displaces the first — the loser keeps serving an inode no client can
  * reach. Nothing on the bind path detects that, so it is checked afterwards.
- * Windows named pipes cannot get here (a pipe dies with its process) and do not
- * stat, so an unreadable path is taken as ours.
+ *
+ * A path that has *gone* is the same failure on unix: somebody unlinked it after
+ * our bind, so every window dialing it will miss us. Only Windows may read that
+ * as ours — named pipes are not filesystem objects, cannot be stat-ed, and die
+ * with the process that made them, so nothing there can displace us.
  */
 async function stillOurs(path: string): Promise<boolean> {
+  const unstattable = process.platform === 'win32';
   const mine = await stat(path).catch(() => null);
-  if (!mine) return true;
+  if (!mine) return unstattable;
   await delay(RECLAIM_VERIFY_MS);
   const now = await stat(path).catch(() => null);
-  return !now || now.ino === mine.ino;
+  if (!now) return unstattable;
+  return now.ino === mine.ino;
 }
 
 async function contend(): Promise<void> {
   if (contending || disposed) return;
   contending = true;
   try {
-    while (!disposed && !server && !client) {
+    while (!disposed && !refused && !server && !client) {
       const wait = nextAttemptAt - Date.now();
       if (wait > 0) await delay(wait);
       // Spaced rather than immediate on repeat: a broker that refuses this

@@ -189,7 +189,11 @@ current reason to pay for.
 can reach, so there is no subset that is known sooner than the rest and the
 session emits exactly one `directory.snapshot` per collect. A collect that
 finishes after its subscription was replaced or torn down is dropped rather than
-sent.
+sent, and so is one that is no longer the newest: collects overlap whenever
+something changes during a slow round trip and can settle in either order, so a
+per-collect generation (the same shape as the per-attach one) keeps a stale
+answer — including one that timed out to an empty list — from landing on top of
+a fresh snapshot and blanking the picker until the next change.
 
 Invalidation reaches the session through `watchDirectory`: webviews announce
 that their pane state, activity, or focus changed, and membership changes (a

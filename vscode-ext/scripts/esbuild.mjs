@@ -8,8 +8,10 @@
 //   DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:vscode
 //
 // This mirrors the standalone binary's build-time override
-// (`standalone/scripts/tauri.mjs` + `csp.mjs`) so both Hosts widen the same way
-// with the same variable. See docs/specs/server.md → "Host webview CSP".
+// (`standalone/scripts/build-sidecar-proxy.mjs`, which bakes the same value into
+// the sidecar's Host) so both Hosts widen the same way with the same variable.
+// `scripts/csp-defaults.mjs` is the one definition of the default for both. See
+// docs/specs/server.md → "Host webview CSP".
 
 import * as esbuild from 'esbuild';
 
@@ -27,7 +29,11 @@ const common = {
   bundle: true,
   format: 'cjs',
   platform: 'node',
-  external: ['vscode', 'node-pty'],
+  // `bufferutil` / `utf-8-validate` are `ws`'s optional native accelerators.
+  // They are not installed and must not be — a `.node` addon cannot be bundled
+  // and would have to be shipped per platform — so they stay as runtime
+  // `require`s that `ws` already catches and falls back from.
+  external: ['vscode', 'node-pty', 'bufferutil', 'utf-8-validate'],
 };
 
 const builds = [

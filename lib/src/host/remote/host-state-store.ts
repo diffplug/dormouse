@@ -9,6 +9,7 @@
  * is the sidecar's: one file, 0600, under a directory the app passes in.
  */
 
+import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { HostAclRecord } from 'server-lib-common';
@@ -20,6 +21,13 @@ import { isEnrollment, type HostEnrollment } from '../../remote/host/enrollment'
 export type { HostAclRecord };
 
 export interface HostStateStore {
+  /**
+   * Whether a write survives this process. Absent means yes; only the
+   * dev-harness store (no state directory) says otherwise, and an adopting
+   * webview reads it to decide whether it may drop its own copy of the Host
+   * (`service.ts` → `#adopt`).
+   */
+  readonly persistent?: boolean;
   loadEnrollment(): Promise<HostEnrollment | null>;
   saveEnrollment(enrollment: HostEnrollment): Promise<void>;
   clearEnrollment(): Promise<void>;
@@ -60,9 +68,17 @@ function parseState(raw: string): HostStateFile {
  * can never end up describing different Hosts.
  */
 export class FileHostStateStore implements HostStateStore {
+  readonly persistent = true;
+
   readonly #dir: string;
   readonly #path: string;
   #state: Promise<HostStateFile> | null = null;
+  /**
+   * Serializes mutations, the way `server/src/state.ts` does: every save is a
+   * read-modify-write of the whole file, so two of them running together can
+   * interleave their writes and renames and land the older one last.
+   */
+  #tail: Promise<unknown> = Promise.resolve();
 
   constructor(stateDir: string) {
     this.#dir = stateDir;
@@ -73,26 +89,43 @@ export class FileHostStateStore implements HostStateStore {
     return (await this.#read()).enrollment;
   }
 
-  async saveEnrollment(enrollment: HostEnrollment): Promise<void> {
-    const state = await this.#read();
-    state.enrollment = enrollment;
-    await this.#write(state);
+  saveEnrollment(enrollment: HostEnrollment): Promise<void> {
+    return this.#mutate(async (state) => {
+      state.enrollment = enrollment;
+    });
   }
 
-  async clearEnrollment(): Promise<void> {
-    const state = await this.#read();
-    state.enrollment = null;
-    await this.#write(state);
+  clearEnrollment(): Promise<void> {
+    return this.#mutate(async (state) => {
+      state.enrollment = null;
+    });
   }
 
   async loadAcl(hostId: string): Promise<HostAclRecord[]> {
     return filterAclRecords(hostId, (await this.#read()).acl[hostId] ?? []);
   }
 
-  async saveAcl(hostId: string, records: readonly HostAclRecord[]): Promise<void> {
-    const state = await this.#read();
-    state.acl[hostId] = [...records];
-    await this.#write(state);
+  saveAcl(hostId: string, records: readonly HostAclRecord[]): Promise<void> {
+    return this.#mutate(async (state) => {
+      state.acl[hostId] = [...records];
+    });
+  }
+
+  /** Apply one change to the in-memory state and flush it, one at a time. */
+  #mutate(change: (state: HostStateFile) => Promise<void>): Promise<void> {
+    const run = async (): Promise<void> => {
+      const state = await this.#read();
+      await change(state);
+      await this.#write(state);
+    };
+    const result = this.#tail.then(run, run);
+    // The chain survives a failed write — one unwritable moment must not stop
+    // every later save — while the caller still sees the rejection.
+    this.#tail = result.then(
+      () => {},
+      () => {},
+    );
+    return result;
   }
 
   #read(): Promise<HostStateFile> {
@@ -119,29 +152,47 @@ export class FileHostStateStore implements HostStateStore {
     await mkdir(this.#dir, { recursive: true, mode: 0o700 });
     // Temp-then-rename in the same directory, so a crash mid-write leaves the
     // previous state intact rather than a truncated file that reads as "no Host".
-    const tmp = `${this.#path}.${process.pid}.tmp`;
+    // Unique per write rather than per process: `#mutate` already keeps this
+    // process's saves apart, and a second Dormouse sharing the state directory
+    // would otherwise rename a file the first one is still writing.
+    const tmp = `${this.#path}.${randomUUID()}.tmp`;
     await writeFile(tmp, JSON.stringify(state), { mode: 0o600 });
     await rename(tmp, this.#path);
   }
 }
 
 /**
- * The store for a run with no state directory (the browser dev harness). Reads
- * answer empty and writes are dropped, so a Host can be enrolled and used for
- * the session but nothing survives a restart.
+ * The store for a run with no state directory (the browser dev harness).
+ *
+ * Held in memory rather than dropped: a Host enrolled here has to keep working
+ * for the rest of the session — its ACL is what authorizes every pairing it
+ * then approves, and reads that answered empty would de-pair each device the
+ * moment it was approved. Nothing survives the process, which `persistent`
+ * says out loud so the webview keeps its own copy of an adopted Host.
  */
 export function createEphemeralHostStateStore(onWarn: (message: string) => void): HostStateStore {
   let warned = false;
   const warnOnce = (): void => {
     if (warned) return;
     warned = true;
-    onWarn('[remote-host] no state directory; enrollment will not survive a restart');
+    onWarn('[remote-host] no state directory; the Host is in memory and will not survive a restart');
   };
+  let enrollment: HostEnrollment | null = null;
+  const acl = new Map<string, HostAclRecord[]>();
   return {
-    loadEnrollment: async () => null,
-    saveEnrollment: async () => warnOnce(),
-    clearEnrollment: async () => {},
-    loadAcl: async () => [],
-    saveAcl: async () => warnOnce(),
+    persistent: false,
+    loadEnrollment: async () => enrollment,
+    saveEnrollment: async (next) => {
+      warnOnce();
+      enrollment = next;
+    },
+    clearEnrollment: async () => {
+      enrollment = null;
+    },
+    loadAcl: async (hostId) => filterAclRecords(hostId, acl.get(hostId) ?? []),
+    saveAcl: async (hostId, records) => {
+      warnOnce();
+      acl.set(hostId, [...records]);
+    },
   };
 }

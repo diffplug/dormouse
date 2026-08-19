@@ -25,6 +25,7 @@ import {
   type AskSurfaceProvider,
 } from '../../lib/src/host/remote/ask-surface-provider';
 import { bakedConnectSrc } from '../../lib/src/host/remote/connect-src';
+import { REMOTE_HOST_COMMAND_TIMEOUT_MS } from '../../lib/src/host/remote/link-client';
 import { RemoteHostService } from '../../lib/src/host/remote/service';
 import {
   REMOTE_HOST_EVENT_EVENT,
@@ -33,6 +34,7 @@ import {
   type RemoteHostResult,
 } from '../../lib/src/host/remote/service-protocol';
 import type { HostSurfaceProvider, PtySink } from '../../lib/src/remote/host/host-surface-provider';
+import type { WebSocketLike } from '../../lib/src/remote/host/remote-host';
 import type { ExtensionMessage } from './message-types';
 import {
   broadcastUiEvent,
@@ -45,6 +47,7 @@ import {
   remoteUnsubscribe,
   remoteWrite,
   sendCommandResult,
+  sendUiEvent,
   type PeerLinkClient,
 } from './peer-link';
 import { VsCodeHostStateStore } from './remote-host-store';
@@ -201,12 +204,32 @@ export function notifyDirectoryChanged(topic?: string | null): void {
   askProvider?.notifyDirectoryChanged(topic);
 }
 
+/**
+ * The relay socket, preferring whatever this extension host already provides.
+ *
+ * `globalThis.WebSocket` only landed in Node 22, and `engines.vscode` here is
+ * `^1.85.0` — VS Code 1.85 shipped Electron 25 / Node 18, and the supported
+ * range spans the boundary — so on an older host there is no global to use and
+ * the bundled `ws` is the only implementation. Its socket satisfies the same
+ * surface `RemoteHost` reads and nothing more: `send`, `close`, `readyState`,
+ * `addEventListener`, with `message` events carrying `.data` and `close` events
+ * carrying `.code`.
+ *
+ * `ws`'s optional native accelerators (`bufferutil`, `utf-8-validate`) are
+ * deliberately left unbundled and unshipped; `ws` falls back to its JS paths.
+ */
+export function createRelaySocket(url: string): WebSocketLike {
+  const Impl = globalThis.WebSocket ?? (require('ws') as typeof import('ws')).WebSocket;
+  return new Impl(url) as unknown as WebSocketLike;
+}
+
 function startService(): void {
   if (service || !context || !deps) return;
   const bound = deps;
   service = new RemoteHostService({
     store: hostStateStore(context),
     provider: createRemoteHostProvider(bound),
+    createWebSocket: createRelaySocket,
     sendToUi: (event, data) => {
       if (event === REMOTE_HOST_RESULT_EVENT) {
         answer(data as RemoteHostResult);
@@ -226,13 +249,32 @@ function startService(): void {
 }
 
 /**
+ * Whether a contention is running right now. While it is, this window is
+ * neither a broker nor a client: {@link handleRemoteHostCommand} holds commands
+ * instead of refusing them, because a refusal here is indistinguishable to the
+ * caller from "this machine has no Host at all".
+ */
+let settling: Promise<void> | null = null;
+
+/**
  * Join the contention for the Host and start serving if this window wins it.
  * Idempotent; resolves once a role is settled.
  */
 function contendForHost(): Promise<void> {
-  return ensurePeerNet((broker) => {
+  settling ??= ensurePeerNet((broker) => {
     if (broker) startService();
-  });
+  }).then(
+    () => {
+      settling = null;
+      drainQueuedCommands();
+    },
+    (error: unknown) => {
+      settling = null;
+      log.error(`[remote-host] contention failed: ${String(error)}`);
+      drainQueuedCommands();
+    },
+  );
+  return settling;
 }
 
 /**
@@ -265,18 +307,61 @@ function answer(payload: RemoteHostResult): void {
 }
 
 /**
+ * Commands that arrived while the contention was still running, oldest first.
+ *
+ * Bounded, because a console hook or a dialog can keep asking and a contention
+ * that never settles must not grow this without limit. Each carries its own
+ * deadline, derived from the asking adapter's rather than picked: a command the
+ * settle never drains has to be refused *before* that adapter gives up, or the
+ * webview sees a bare timeout where it could have seen a reason.
+ */
+const queued: Array<{ payload: RemoteHostCommand; timer: ReturnType<typeof setTimeout> }> = [];
+const QUEUE_LIMIT = 12;
+const QUEUE_BUDGET_MS = REMOTE_HOST_COMMAND_TIMEOUT_MS - 1_000;
+
+function enqueueCommand(payload: RemoteHostCommand): void {
+  // At the limit the oldest goes: its asker has waited longest and is nearest
+  // to timing out anyway, so a reason reaches it while it can still be read.
+  if (queued.length >= QUEUE_LIMIT) dropQueued(queued[0]!.payload.rhId);
+  const timer = setTimeout(() => dropQueued(payload.rhId), QUEUE_BUDGET_MS);
+  queued.push({ payload, timer });
+}
+
+/** Take one command out of the queue and refuse it. */
+function dropQueued(rhId: string): void {
+  const index = queued.findIndex((entry) => entry.payload.rhId === rhId);
+  if (index === -1) return;
+  clearTimeout(queued[index]!.timer);
+  queued.splice(index, 1);
+  refuse(rhId);
+}
+
+/** A role settled: every held command now has somewhere to go. */
+function drainQueuedCommands(): void {
+  const pending = queued.splice(0);
+  for (const { payload, timer } of pending) {
+    clearTimeout(timer);
+    if (service) void service.handleCommand(payload);
+    else if (!forwardCommand(payload)) refuse(payload.rhId);
+  }
+}
+
+/**
  * Hand one of this window's webview commands to the Host.
  *
  * The broker runs it; every other window forwards it over the link and gets the
- * broker's answer back as a `remoteHost:result` like any other. Only a window
- * with neither — no service and no broker to dial — refuses, and it says so
- * rather than dropping the command silently, which would leave the console hook
- * hanging for its whole timeout.
+ * broker's answer back as a `remoteHost:result` like any other.
  *
- * `enroll` is the exception: it is how an installation with no Host at all
- * bootstraps, so it starts the contention first and re-checks. If that
- * contention settles as a client, some other window enrolled first and the
- * command belongs to it.
+ * A window that is still contending has neither yet, and the contention takes
+ * as long as a bind and a handshake — so the command is held and drained when a
+ * role settles rather than refused. Refusing then would tell an enrolled
+ * machine's webview that it has no Host, seconds before it gets one, and the
+ * gates that arm on that answer would stay down.
+ *
+ * `enroll` is the one command that may start the contention: it is how an
+ * installation with no Host at all bootstraps. Everything else refuses only
+ * where there is genuinely nothing to reach — nothing contending, no service,
+ * no broker.
  */
 export function handleRemoteHostCommand(payload: RemoteHostCommand | undefined): void {
   if (!isCommand(payload)) return;
@@ -286,10 +371,15 @@ export function handleRemoteHostCommand(payload: RemoteHostCommand | undefined):
   }
   if (forwardCommand(payload)) return;
   if (payload.cmd === 'enroll') {
-    void contendForHost().then(() => {
-      if (service) void service.handleCommand(payload);
-      else if (!forwardCommand(payload)) refuse(payload.rhId);
-    });
+    // Held rather than run inline once the contention settles: if some other
+    // window enrolled first, this window is a client and the command belongs
+    // on the link, which is exactly what the drain does.
+    enqueueCommand(payload);
+    void contendForHost();
+    return;
+  }
+  if (settling) {
+    enqueueCommand(payload);
     return;
   }
   refuse(payload.rhId);
@@ -333,6 +423,21 @@ export function deliverUiEvent(payload: unknown): void {
   deps?.broadcastToWebviews({ type: 'remoteHost:event', payload });
 }
 
+/**
+ * A window just joined this broker. Hand it the Host state its webviews gate
+ * themselves on.
+ *
+ * Without this a window that opened after the enrollment is told nothing:
+ * `status` events are emitted on change, and nothing about the Host changes
+ * because a window connected. Its webviews would sit disarmed — announcing no
+ * directory changes, watching for no rings — until the user reloaded the whole
+ * window (`lib/src/remote/host/enrolled-gate.ts`).
+ */
+export function greetPeerWindow(client: PeerLinkClient): void {
+  if (!service) return;
+  sendUiEvent(client, service.statusEvent());
+}
+
 function isCommand(payload: RemoteHostCommand | undefined): payload is RemoteHostCommand {
   return !!payload && typeof payload.rhId === 'string' && typeof payload.cmd === 'string';
 }
@@ -347,14 +452,7 @@ function refuse(rhId: string): void {
  */
 export function initRemoteHost(ctx: vscode.ExtensionContext): vscode.Disposable {
   context = ctx;
-  void hostStateStore(ctx)
-    .loadEnrollment()
-    .then((enrollment) => {
-      if (enrollment) return contendForHost();
-    })
-    .catch((error: unknown) => {
-      log.error(`[remote-host] could not read the enrollment: ${String(error)}`);
-    });
+  void contendIfEnrolled(ctx);
 
   return {
     dispose() {
@@ -362,14 +460,37 @@ export function initRemoteHost(ctx: vscode.ExtensionContext): vscode.Disposable 
       service = null;
       askProvider = null;
       commandRoutes.clear();
+      for (const { timer } of queued.splice(0)) clearTimeout(timer);
+      store?.dispose();
       store = null;
       context = null;
     },
   };
 }
 
-/** The window's one store, made on first use. */
+function contendIfEnrolled(ctx: vscode.ExtensionContext): Promise<void> {
+  return hostStateStore(ctx)
+    .loadEnrollment()
+    .then((enrollment) => {
+      if (enrollment) return contendForHost();
+    })
+    .catch((error: unknown) => {
+      log.error(`[remote-host] could not read the enrollment: ${String(error)}`);
+    });
+}
+
+/**
+ * The window's one store, made on first use.
+ *
+ * It reports enrollment writes from *any* window of this extension, which is
+ * the only signal a window that was un-enrolled at activation ever gets: it
+ * never contended, so it has no socket and no broker to hear from. Re-checking
+ * here is what lets a second window join the Host a first one just enrolled,
+ * without a reload.
+ */
 function hostStateStore(ctx: vscode.ExtensionContext): VsCodeHostStateStore {
-  store ??= new VsCodeHostStateStore(ctx);
+  store ??= new VsCodeHostStateStore(ctx, () => {
+    void contendIfEnrolled(ctx);
+  });
   return store;
 }

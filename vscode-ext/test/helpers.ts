@@ -5,6 +5,7 @@
  */
 
 import { vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import { access, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,6 +18,18 @@ import type { PeerLinkClient, PeerLinkDeps } from '../src/peer-link';
 
 export async function tempStorageDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), 'dormouse-ext-'));
+}
+
+/**
+ * The one path every window of an installation contends for, mirroring
+ * `socketPath()` and `peerDirPath()`. Duplicated on purpose: a derivation that
+ * drifted would silently give each window its own lease and its own Host, and
+ * the per-user directory is the layer that keeps another OS user from creating
+ * the path first.
+ */
+export function derivedSocketPath(storageDir: string): string {
+  const id = createHash('sha256').update(storageDir).digest('hex').slice(0, 12);
+  return join(tmpdir(), `dormouse-peer-${process.getuid?.() ?? 0}`, `${id}.sock`);
 }
 
 export async function removeDir(dir: string): Promise<void> {
@@ -92,6 +105,8 @@ export function fakeWindow(
     /** What came back for commands this window forwarded to its broker. */
     results: [] as RemoteHostResult[],
     uiEvents: [] as unknown[],
+    /** Windows that finished the handshake with this one as the broker. */
+    joined: [] as PeerLinkClient[],
     emitData(id: string, data: string) {
       for (const listener of dataListeners) listener(id, data);
     },
@@ -125,6 +140,7 @@ export function fakeWindow(
         dropForwardedCommands: (from) => void this.dropped.push(from),
         deliverCommandResult: (payload) => void this.results.push(payload),
         deliverUiEvent: (payload) => void this.uiEvents.push(payload),
+        onClientAuthenticated: (client) => void this.joined.push(client),
       };
     },
   };

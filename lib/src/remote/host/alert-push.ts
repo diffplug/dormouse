@@ -42,6 +42,8 @@ export async function commitPushDevices(
   const commit = (next: PushDevicesState) => {
     if (pushDevicesRefreshSequence === sequence) setPushDevices(next);
   };
+  // The same fence covers {@link invalidatePushDeviceRefreshes}: a Host that
+  // went away is not a newer request, but it has the same claim on the result.
   commit({ status: 'loading', devices: [] });
   try {
     const devices = await load();
@@ -49,6 +51,18 @@ export async function commitPushDevices(
   } catch {
     commit({ status: 'error', devices: [] });
   }
+}
+
+/**
+ * Discard every refresh currently in flight.
+ *
+ * Called when the Host goes away (`activation.ts`, the enrolled gate's disarm).
+ * A request that was already on the wire resolves afterwards and would otherwise
+ * repopulate the dialog with devices there is no longer anything to push to —
+ * the list would name phones and the Host behind them would be gone.
+ */
+export function invalidatePushDeviceRefreshes(): void {
+  pushDevicesRefreshSequence += 1;
 }
 
 /**

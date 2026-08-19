@@ -31,6 +31,7 @@ import {
   REMOTE_HOST_EVENT_EVENT,
   REMOTE_HOST_RESULT_EVENT,
   type AdoptParams,
+  type AdoptResult,
   type ApproveParams,
   type DenyParams,
   type EnrollParams,
@@ -68,6 +69,17 @@ export class RemoteHostService {
   #host: RemoteHost | null = null;
   #enrollment: HostEnrollment | null = null;
   /**
+   * Everything that starts or stops the Host runs one at a time on this chain.
+   *
+   * Each of those reads `#host`, awaits a store round trip, and then acts on
+   * what it read — so overlapping them (an activation `start` and a webview's
+   * `adopt`, a reconnect during an enroll) lets two of them both see no Host and
+   * both build one. The second `RemoteHost` would hold a relay socket nothing
+   * has a reference to and could not be stopped, and the two would displace each
+   * other on the server forever.
+   */
+  #lifecycle: Promise<unknown> = Promise.resolve();
+  /**
    * Pairings awaiting local approval, service-side. The webview mirrors a
    * serializable projection of this and answers by clientId; the approve/deny
    * closures the `RemoteHost` handed us never leave this process.
@@ -84,8 +96,27 @@ export class RemoteHostService {
     this.#now = options.now ?? (() => Date.now());
   }
 
+  /**
+   * Append `work` to the lifecycle chain and hand back its result.
+   *
+   * The chain continues through a failure — a refused enroll must not wedge
+   * every later command — so the tail swallows what the caller is still given.
+   */
+  #serialize<T>(work: () => Promise<T>): Promise<T> {
+    const result = this.#lifecycle.then(work, work);
+    this.#lifecycle = result.then(
+      () => {},
+      () => {},
+    );
+    return result;
+  }
+
   /** Start from a persisted enrollment, if there is one this build may reach. */
-  async start(): Promise<void> {
+  start(): Promise<void> {
+    return this.#serialize(() => this.#start());
+  }
+
+  async #start(): Promise<void> {
     const enrollment = await this.#store.loadEnrollment();
     if (!enrollment) return;
     if (!this.#allowed(enrollment.serverUrl)) {
@@ -121,14 +152,16 @@ export class RemoteHostService {
 
   async #run(cmd: string, params: unknown): Promise<unknown> {
     switch (cmd) {
+      // The four that start or stop the Host share the lifecycle chain with
+      // `start()`; everything below only reads what they left.
       case 'enroll':
-        return this.#enroll(params as EnrollParams);
+        return this.#serialize(() => this.#enroll(params as EnrollParams));
       case 'status':
         return this.#status();
       case 'reconnect':
-        return this.#reconnect();
+        return this.#serialize(() => this.#reconnect());
       case 'clearEnrollment':
-        return this.#clearEnrollment();
+        return this.#serialize(() => this.#clearEnrollment());
       case 'approve':
         return this.#approve(params as ApproveParams);
       case 'deny':
@@ -140,7 +173,7 @@ export class RemoteHostService {
       case 'pairingQueue':
         return this.#queueSnapshot();
       case 'adopt':
-        return this.#adopt(params as AdoptParams);
+        return this.#serialize(() => this.#adopt(params as AdoptParams));
       default:
         throw new Error(`unknown remote-host command: ${cmd}`);
     }
@@ -181,7 +214,7 @@ export class RemoteHostService {
    */
   async #reconnect(): Promise<RemoteHostConsoleStatus> {
     if (this.#host) this.#host.start();
-    else await this.start();
+    else await this.#start();
     return this.#status();
   }
 
@@ -225,22 +258,39 @@ export class RemoteHostService {
     return { devices: await loadPushDevices(deps) };
   }
 
-  async #adopt(params: AdoptParams): Promise<Record<string, never>> {
+  async #adopt(params: AdoptParams): Promise<AdoptResult> {
     const existing = await this.#store.loadEnrollment();
+    // A store that keeps nothing across restarts (the dev harness) can run the
+    // Host for this session but must not be treated as having taken custody of
+    // it: the webview's copy is then the only one that survives.
+    const durable = this.#store.persistent !== false;
+    let persisted = existing ? durable : false;
+
     if (!existing && isEnrollment(params.enrollment)) {
       const enrollment = params.enrollment;
-      await this.#store.saveEnrollment(enrollment);
+      // The same gate as `#enroll`, for the same reason: a Host handed over from
+      // an older build's localStorage may name a relay this build is not allowed
+      // to reach, and adopting it would connect there anyway.
+      if (!this.#allowed(enrollment.serverUrl)) {
+        throw new Error(
+          `${enrollment.serverUrl} is outside this build's allowed remote sources (${this.#connectSrc}). ` +
+            'A self-host build bakes its own via DORMOUSE_REMOTE_CONNECT_SRC.',
+        );
+      }
+      // Records first, enrollment last. A failed ACL write then fails the whole
+      // adopt while the store still holds no enrollment, so the next launch
+      // re-adopts from the webview's copy and retries cleanly — the other order
+      // leaves a Host running with every paired device silently dropped.
       const records = filterAclRecords(enrollment.hostId, params.aclRecords ?? []);
       if (records.length > 0) await this.#store.saveAcl(enrollment.hostId, records);
+      await this.#store.saveEnrollment(enrollment);
+      persisted = durable;
     }
     // Either way there may now be a Host to run: an adoption just supplied one,
     // and a rejected adoption means the store already had one this service may
     // not have started yet (a webview that reloads before `start()` lands).
-    //
-    // The webview is told nothing about which happened: it clears its copy
-    // regardless, because a second copy of the same hostId is a second ACL.
-    if (!this.#host) await this.start();
-    return {};
+    if (!this.#host) await this.#start();
+    return { persisted };
   }
 
   // --- Host lifecycle ---
@@ -254,6 +304,10 @@ export class RemoteHostService {
   }
 
   async #startHost(enrollment: HostEnrollment): Promise<void> {
+    // Never two. Callers are serialized (see `#lifecycle`), but a Host left in
+    // `#host` here would be dropped without its socket being closed, so the
+    // replacement is explicit rather than implied by the assignment below.
+    this.#stopHost();
     // The controller wants the ACL synchronously; the store is async because
     // the places it lives are. Read it before constructing, and let saves run
     // in the background — a failed write must not fail the pairing that is
@@ -294,10 +348,16 @@ export class RemoteHostService {
    * name, which is how a webview seeds before any event arrives.
    */
   #emitStatus(): void {
-    this.#sendToUi(REMOTE_HOST_EVENT_EVENT, {
-      name: 'status',
-      enrolled: !!this.#enrollment,
-    } satisfies HostStatusEvent);
+    this.#sendToUi(REMOTE_HOST_EVENT_EVENT, this.statusEvent());
+  }
+
+  /**
+   * The status event as it stands, for a UI that arrived after the last change
+   * and so has no event coming (`vscode-ext/src/remote-host.ts` greets a window
+   * that joins the broker with it).
+   */
+  statusEvent(): HostStatusEvent {
+    return { name: 'status', enrolled: !!this.#enrollment };
   }
 
   #stopHost(): void {

@@ -41,10 +41,16 @@ describe('createPtyStrip', () => {
     expect(second('plain')).toBe('plain');
   });
 
-  it('leaves a color query for the client to answer', () => {
+  it('swallows a color query rather than passing it to the phone', () => {
     const strip = createPtyStrip();
-    // No theme lives here, so the query falls through exactly as it does in a
-    // webview whose provider declines.
-    expect(strip(`${ESC}]11;?${BEL}`)).toBe(`${ESC}]11;?${BEL}`);
+    // The local adapter answers OSC 10/11/12 from the real theme. Left in the
+    // stream this query reaches the phone's xterm, which answers it too, and
+    // the second reply is written into the PTY's input — so it is consumed here
+    // and the answer generated for it is thrown away.
+    const out = strip(`before${ESC}]11;?${BEL}after`);
+    expect(out).toBe('beforeafter');
+    expect(out).not.toContain('?');
+    expect(out).not.toContain('rgb:');
+    expect(strip(`${ESC}]10;?${BEL}x${ESC}]12;?${BEL}y`)).toBe('xy');
   });
 });

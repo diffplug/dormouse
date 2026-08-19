@@ -467,7 +467,16 @@ away.
 * **Pairing approval modal**: the queue is service-side; webviews mirror a
   serializable projection of it (`{ clientId, request, requestedAt }[]`, pushed
   whole on every change) and answer by `clientId`, so the approve/deny closures
-  never leave the Host's process. The modal shows the requested label + account;
+  never leave the Host's process. **The mirror is compared by content, not by
+  id.** The service coalesces a re-sent pair under one `clientId` by *replacing*
+  what it holds, so the same id can come to name a different device — and
+  Approve authorizes what the service holds. A mirror that skipped an item whose
+  id it already showed would put the user's consent on a device they were never
+  shown, so an item whose `requestedAt` or request fields differ replaces the
+  mirrored one and the modal remounts (it is keyed on `clientId:requestedAt`).
+  An unchanged item is left alone: every snapshot arrives as fresh JSON, so
+  identity comparison would re-render the modal on every event. The modal shows
+  the requested label + account;
   Approve / Deny. (Same modal pattern as KillConfirm.) If the Host user approves
   after the pairing ticket expires, the Host sends `pair-result approved:false`
   with an error and dismisses the modal; the ACL is untouched. In VS Code the
