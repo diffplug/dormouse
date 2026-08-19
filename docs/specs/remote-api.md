@@ -194,6 +194,9 @@ something changes during a slow round trip and can settle in either order, so a
 per-collect generation (the same shape as the per-attach one) keeps a stale
 answer — including one that timed out to an empty list — from landing on top of
 a fresh snapshot and blanking the picker until the next change.
+A provider collection that rejects emits nothing and leaves the last good
+snapshot standing. The rejection is contained inside the session, and the next
+invalidation or `directory.watch` retries the collection.
 
 Invalidation reaches the session through `watchDirectory`: webviews announce
 that their pane state, activity, or focus changed, and membership changes (a
@@ -302,6 +305,11 @@ slower attach would land last and take the attachment. A superseded attach is
 answered with an error rather than left pending, since the client holds a
 request open until it is answered; a disposed session has no transport left to
 answer on.
+Provider resolution and resize are asynchronous process/window boundaries.
+An attach is not acknowledged until its required resize settles; rejected
+surface resolution, attach resize, and `terminal.resize` are returned as
+protocol errors and are contained inside the session rather than becoming
+unhandled Host-process rejections.
 
 #### Size authority: last-attach-wins
 

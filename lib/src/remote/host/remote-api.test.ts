@@ -51,6 +51,9 @@ class FakeProvider implements HostSurfaceProvider {
   entries: DirectoryEntry[] = [];
   collects = 0;
   watchers = 0;
+  collectError: Error | null = null;
+  resolveError: Error | null = null;
+  resizeError: Error | null = null;
 
   /** Hold every resolve open, the way an owner a round trip away would. */
   resolveGate: Promise<void> | null = null;
@@ -65,6 +68,7 @@ class FakeProvider implements HostSurfaceProvider {
   collectDirectory = async (): Promise<DirectoryEntry[]> => {
     this.collects += 1;
     await this.collectGate;
+    if (this.collectError) throw this.collectError;
     return this.entries;
   };
 
@@ -81,6 +85,7 @@ class FakeProvider implements HostSurfaceProvider {
     this.resolved.push(surfaceId);
     const surface = this.surfaces.get(surfaceId);
     await this.resolveGate;
+    if (this.resolveError) throw this.resolveError;
     return surface ? this.#handleFor(surface) : null;
   };
 
@@ -142,6 +147,7 @@ class FakeProvider implements HostSurfaceProvider {
       },
       resize: async (cols, rows) => {
         this.handleResizes.push([surface.ptyId, cols, rows]);
+        if (this.resizeError) throw this.resizeError;
         if (surface.cols !== cols || surface.rows !== rows) {
           surface.cols = cols;
           surface.rows = rows;
@@ -242,6 +248,7 @@ function reply(sent: SentPayload[], requestId: string): RemoteResponse {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe('RemoteApiSession hello', () => {
@@ -407,6 +414,34 @@ describe('RemoteApiSession directory.watch', () => {
     expect(provider.watchers).toBe(0);
     expect(snapshots(sent)).toEqual([]);
   });
+
+  it('keeps the last good snapshot and retries after collection rejects', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const provider = new FakeProvider();
+    provider.entries = [entry('surface-1', 'before')];
+    const { session, sent } = makeSession(provider);
+    await watchDirectory(session, 'dir-1');
+
+    provider.collectError = new Error('peer unavailable');
+    await watchDirectory(session, 'dir-2');
+
+    expect(snapshots(sent)).toEqual([
+      { subId: 'dir-1', entries: [entry('surface-1', 'before')] },
+    ]);
+    expect(warn).toHaveBeenCalledWith(
+      'remote-host: directory collection failed',
+      provider.collectError,
+    );
+
+    provider.collectError = null;
+    provider.entries = [entry('surface-1', 'after')];
+    await watchDirectory(session, 'dir-3');
+
+    expect(snapshots(sent)).toEqual([
+      { subId: 'dir-1', entries: [entry('surface-1', 'before')] },
+      { subId: 'dir-3', entries: [entry('surface-1', 'after')] },
+    ]);
+  });
 });
 
 describe('RemoteApiSession surface.attach', () => {
@@ -567,6 +602,41 @@ describe('RemoteApiSession surface.attach', () => {
       error: 'no such surface: nobody',
     });
     expect(provider.streamed).toEqual([]);
+  });
+
+  it('fails an attach when its owner cannot resolve the surface', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.resolveError = new Error('owner unavailable');
+    const { session, sent } = makeSession(provider);
+
+    await attach(session, 100, 30);
+
+    expect(reply(sent, 'attach-1')).toEqual({
+      requestId: 'attach-1',
+      ok: false,
+      error: 'surface attach failed: owner unavailable',
+    });
+    expect(provider.streamed).toEqual([]);
+    expect(provider.released).toEqual([]);
+  });
+
+  it('fails and unwinds an attach whose resize is rejected', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.resizeError = new Error('owner unavailable');
+    const { session, sent } = makeSession(provider);
+
+    await attach(session, 100, 30);
+
+    expect(reply(sent, 'attach-1')).toEqual({
+      requestId: 'attach-1',
+      ok: false,
+      error: 'surface attach failed: owner unavailable',
+    });
+    expect(provider.streamed).toEqual(['pty-1']);
+    expect(provider.unstreamed).toEqual(['pty-1']);
+    expect(provider.released).toEqual(['pty-1']);
   });
 
   it('fails an attach with no surfaceId without asking the provider', async () => {
@@ -792,6 +862,28 @@ describe('RemoteApiSession terminal input', () => {
     // Neither dimension was usable, so the surface keeps the size it has.
     expect(provider.handleResizes.at(-1)).toEqual(['pty-1', 1, 40]);
     expect(reply(sent, 'resize-2').result).toEqual({ cols: 1, rows: 40 });
+  });
+
+  it('answers a rejected terminal resize instead of leaving it pending', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    const { session, sent } = makeSession(provider);
+    await attach(session, 100, 30);
+    provider.resizeError = new Error('owner unavailable');
+    sent.length = 0;
+
+    session.handle({
+      requestId: 'resize-1',
+      method: REMOTE_METHODS.terminalResize,
+      params: { surfaceId: 'surface-1', cols: 120, rows: 40 },
+    });
+    await settle();
+
+    expect(reply(sent, 'resize-1')).toEqual({
+      requestId: 'resize-1',
+      ok: false,
+      error: 'terminal resize failed: owner unavailable',
+    });
   });
 });
 

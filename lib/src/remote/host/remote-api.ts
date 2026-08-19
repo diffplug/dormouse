@@ -32,6 +32,7 @@ import {
   utf8Decode,
   utf8Encode,
   type AttachParams,
+  type DirectoryEntry,
   type HelloResult,
   type RemoteEventMsg,
   type RemoteRequest,
@@ -209,7 +210,23 @@ export class RemoteApiSession {
     // can reach, so there is no longer a subset that is known sooner than the
     // rest — this replaces the old local-then-merged double emit, which existed
     // only because the peer round trip was visible from here.
-    const entries = await this.#provider.collectDirectory();
+    let entries: DirectoryEntry[];
+    try {
+      entries = await this.#provider.collectDirectory();
+    } catch (error) {
+      // This provider crosses a process/window boundary. A failed collection
+      // leaves the last good snapshot standing and a later invalidation (or
+      // re-watch) retries; it must not become an unhandled rejection that can
+      // take down the Node Host process.
+      if (
+        this.#directorySubId === subId &&
+        this.#directoryGeneration === generation &&
+        !this.#disposed
+      ) {
+        console.warn('remote-host: directory collection failed', error);
+      }
+      return;
+    }
     // The subscription may have been replaced or torn down while we waited.
     if (this.#directorySubId !== subId || this.#directoryGeneration !== generation) return;
     this.#event(subId, REMOTE_EVENTS.directorySnapshot, { entries });
@@ -232,29 +249,52 @@ export class RemoteApiSession {
     // microtask, so one shared epoch would let the older, slower attach land
     // last and take the attachment.
     const generation = ++this.#attachGeneration;
-    void this.#provider.resolveSurface(params.surfaceId, params).then((handle) => {
-      if (this.#disposed || this.#attachGeneration !== generation) {
-        // A foreign resolve starts its stream before returning the handle. If
-        // the session died or a newer attach superseded this one during that
-        // round trip, unwind it immediately.
-        handle?.release();
-        // The client holds a request pending until it is answered, so a
-        // superseded attach is failed rather than dropped — that also drops its
-        // event subscription. A disposed session has no transport to answer on.
-        if (!this.#disposed) {
-          this.#fail(request, `superseded by a newer attach: ${params.surfaceId}`);
+    void this.#provider.resolveSurface(params.surfaceId, params).then(
+      (handle) => {
+        if (this.#disposed || this.#attachGeneration !== generation) {
+          // A foreign resolve starts its stream before returning the handle. If
+          // the session died or a newer attach superseded this one during that
+          // round trip, unwind it immediately.
+          handle?.release();
+          // The client holds a request pending until it is answered, so a
+          // superseded attach is failed rather than dropped — that also drops its
+          // event subscription. A disposed session has no transport to answer on.
+          if (!this.#disposed) {
+            this.#fail(request, `superseded by a newer attach: ${params.surfaceId}`);
+          }
+          return;
         }
-        return;
-      }
-      if (!handle) {
-        this.#fail(request, `no such surface: ${params.surfaceId}`);
-        return;
-      }
-      this.#beginAttach(request, params, handle);
-    });
+        if (!handle) {
+          this.#fail(request, `no such surface: ${params.surfaceId}`);
+          return;
+        }
+        try {
+          this.#beginAttach(request, params, handle, generation);
+        } catch (error) {
+          // `streamPty` / the repaint bounce are provider calls too, and may
+          // throw before an attachment is fully installed.
+          if (this.#attachment?.handle === handle) this.#teardownAttachment();
+          else handle.release();
+          this.#fail(request, `surface attach failed: ${errorMessage(error)}`);
+        }
+      },
+      (error) => {
+        if (this.#disposed) return;
+        if (this.#attachGeneration !== generation) {
+          this.#fail(request, `superseded by a newer attach: ${params.surfaceId}`);
+          return;
+        }
+        this.#fail(request, `surface attach failed: ${errorMessage(error)}`);
+      },
+    );
   }
 
-  #beginAttach(request: RemoteRequest, params: AttachParams, handle: SurfaceHandle): void {
+  #beginAttach(
+    request: RemoteRequest,
+    params: AttachParams,
+    handle: SurfaceHandle,
+    generation: number,
+  ): void {
     // v1: one attachment per session — replace any prior stream.
     this.#teardownAttachment();
 
@@ -309,8 +349,41 @@ export class RemoteApiSession {
     // stream is subscribed first because some PTYs repaint synchronously.
     // A sibling's owner already applied the size inside the attach round trip,
     // so its handle resolves at the requested size and takes the bounce below.
+    const finish = (size: { cols: number; rows: number }): void => {
+      if (this.#disposed) return;
+      if (this.#attachGeneration !== generation || this.#attachment !== attachment) {
+        if (this.#attachment === attachment) this.#teardownAttachment();
+        this.#fail(
+          request,
+          this.#attachGeneration !== generation
+            ? `superseded by a newer attach: ${params.surfaceId}`
+            : `surface closed while attaching: ${params.surfaceId}`,
+        );
+        return;
+      }
+      const result: TerminalAttachResult = { cols: size.cols, rows: size.rows };
+      this.#ok(request, result);
+      streaming = true;
+      for (const event of pendingEvents) {
+        this.#event(subId, event.event, event.data);
+      }
+    };
+
     if (!sameSize) {
-      void handle.resize(cols, rows);
+      // The result promises the size the PTY now has, so do not acknowledge the
+      // attach until the owner has actually applied it. Rejection is a normal
+      // protocol error, not an unhandled promise rejection in the Host process.
+      void handle.resize(cols, rows).then(finish, (error) => {
+        const current = this.#attachment === attachment;
+        if (current) this.#teardownAttachment();
+        if (this.#disposed) return;
+        this.#fail(
+          request,
+          this.#attachGeneration !== generation
+            ? `superseded by a newer attach: ${params.surfaceId}`
+            : `surface attach failed: ${errorMessage(error)}`,
+        );
+      });
     } else {
       // Same size: force one repaint with a quick rows bounce on the PTY only,
       // leaving the already-correct local xterm buffer untouched. Bounce away
@@ -329,13 +402,7 @@ export class RemoteApiSession {
         if (this.#attachment !== attachment) return;
         this.#provider.resizePty(ptyId, cols, rows);
       }, FORCE_REPAINT_BOUNCE_MS);
-    }
-
-    const result: TerminalAttachResult = { cols: handle.cols, rows: handle.rows };
-    this.#ok(request, result);
-    streaming = true;
-    for (const event of pendingEvents) {
-      this.#event(subId, event.event, event.data);
+      finish({ cols: handle.cols, rows: handle.rows });
     }
   }
 
@@ -367,9 +434,20 @@ export class RemoteApiSession {
     const cols = clampTerminalDimension(params.cols, handle.cols);
     const rows = clampTerminalDimension(params.rows, handle.rows);
 
-    void handle.resize(cols, rows).then((size) => {
-      this.#ok(request, { cols: size.cols, rows: size.rows } satisfies TerminalAttachResult);
-    });
+    void handle.resize(cols, rows).then(
+      (size) => {
+        if (this.#disposed) return;
+        if (this.#attachment !== attachment) {
+          this.#fail(request, `surface is no longer attached: ${params.surfaceId}`);
+          return;
+        }
+        this.#ok(request, { cols: size.cols, rows: size.rows } satisfies TerminalAttachResult);
+      },
+      (error) => {
+        if (this.#disposed) return;
+        this.#fail(request, `terminal resize failed: ${errorMessage(error)}`);
+      },
+    );
   }
 
   #teardownAttachment(): void {
@@ -384,4 +462,8 @@ export class RemoteApiSession {
     this.#attachment.handle.release();
     this.#attachment = null;
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'internal error';
 }
