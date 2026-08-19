@@ -662,15 +662,16 @@ export class PocketClient {
   }
 
   #onClose(ws: PocketSocket): void {
+    // Generation guard, and the whole test for "was this close intentional?":
+    // `close()` tears down and nulls #ws *before* calling `ws.close()`, and a
+    // reconnect overwrites #ws with the new socket, so neither an intentional
+    // close nor a superseded socket's late close gets past this line. Anything
+    // that does is the socket dying on us (server restart, network drop).
     if (this.#ws !== ws) return;
-    // `close()` tears down and nulls #ws before the event fires, so a non-null
-    // #ws here means the socket died on us (server restart, network drop) rather
-    // than an intentional close. An unexpected drop of an established session is
-    // still host loss — the app must leave the wall instead of idling on a dead
-    // stream — even without a `host-gone` frame.
-    const unexpected = this.#ws !== null;
-    const hadSession = this.#connectedHostId !== null;
-    this.#teardown('relay socket closed', { notifyGone: unexpected && hadSession });
+    // An unexpected drop of an established session is still host loss — the app
+    // must leave the wall instead of idling on a dead stream — even without a
+    // `host-gone` frame.
+    this.#teardown('relay socket closed', { notifyGone: this.#connectedHostId !== null });
   }
 
   /**
