@@ -156,7 +156,9 @@ Inspect and report:
   that field specifically rather than `engines`.
 - The host OS and architecture. If this is not macOS, stop; see Prerequisites.
 - Whether `tailscale` is installed, signed in, and on `PATH`; on macOS also
-  check the known application-bundle CLI paths.
+  check the known application-bundle CLI paths. When invoking the bundled
+  macOS app executable from a script, set `TAILSCALE_BE_CLI=1` so it cannot
+  launch the GUI instead of acting as the CLI.
 - Whether HTTPS and MagicDNS are enabled for the tailnet.
 - The laptop's stable Tailscale DNS name.
 - That port 3100 is available on loopback.
@@ -244,7 +246,8 @@ On each invocation it must:
 
 1. Confirm `tailscale` is installed, signed in, and reports a stable DNS name.
    Detect both a CLI on `PATH` and supported macOS application-bundle CLI
-   locations. Do not install or reauthenticate Tailscale without the user.
+   locations. Export `TAILSCALE_BE_CLI=1` for every invocation of the bundled
+   app executable. Do not install or reauthenticate Tailscale without the user.
 2. Derive the external origin from `tailscale status --json`, remove any
    trailing dot, and show it to the user. If an existing installation's origin
    differs, stop and explain the WebAuthn migration consequence rather than
