@@ -57,8 +57,16 @@ async function openWindow(deps: ReturnType<typeof fakeWindow>): Promise<LinkModu
 }
 
 /** Attach to the terminal {@link farWindow} owns, which is what places its route. */
-const attachFar = (broker: LinkModule) =>
-  broker.remoteRequest('surfaceOp', { surfaceId: 'far-1', op: 'attach', cols: 80, rows: 24 });
+const attachFar = async (broker: LinkModule) => {
+  const [result] = (await broker.remoteRequest('surfaceOp', {
+    surfaceId: 'far-1',
+    op: 'attach',
+    cols: 80,
+    rows: 24,
+  })) as Array<{ ptyId: string; cols: number; rows: number }>;
+  if (!result) throw new Error('far surface did not answer');
+  return result;
+};
 
 /** A window owning one terminal, which is what most of these tests need. */
 const farWindow = () =>
@@ -143,20 +151,24 @@ describe('bind-as-lease', () => {
     }
   });
 
-  it('does not route a PTY id this window already owns to the peer that claimed it', async () => {
+  it('keeps a peer PTY distinct when its owner-local id collides with this window', async () => {
     // Pane ids are unique within a window and nothing coordinates them across
     // windows — "Duplicate Workspace in New Window" cold-restores the same ids
     // — so a peer can answer an attach naming a terminal *this* window owns.
-    // Routing on that sends the phone's keystrokes into the other window's
-    // shell instead of the one it attached to.
+    // The provider-local handle must still target the peer surface the caller
+    // selected; its raw owner-local id must not make it fall through to this
+    // window's different shell.
     const brokerSide = fakeWindow({ ownPtyIds: ['pty-far'] });
-    const { broker } = await linkedPair(brokerSide, farWindow());
+    const peerSide = farWindow();
+    const { broker } = await linkedPair(brokerSide, peerSide);
 
-    expect(await attachFar(broker)).toEqual([{ ptyId: 'pty-far', cols: 80, rows: 24 }]);
-    // No route, so writes fall back to this window's own manager.
-    expect(broker.isRemotePty('pty-far')).toBe(false);
-    expect(broker.remoteWrite('pty-far', 'ls\r')).toBe(false);
-    await tick(100);
+    const handle = await attachFar(broker);
+    expect(handle).toMatchObject({ cols: 80, rows: 24 });
+    expect(handle.ptyId).not.toBe('pty-far');
+    expect(broker.isRemotePty(handle.ptyId)).toBe(true);
+    expect(broker.remoteWrite(handle.ptyId, 'ls\r')).toBe(true);
+    await waitFor(() => peerSide.writes.length > 0);
+    expect(peerSide.writes).toEqual([{ ptyId: 'pty-far', data: 'ls\r' }]);
     expect(brokerSide.writes).toEqual([]);
   });
 
@@ -400,12 +412,13 @@ describe('bind-as-lease', () => {
     });
     const { broker } = await linkedPair(fakeWindow(), peerSide);
 
-    const results = await broker.remoteRequest('surfaceOp', {
+    const [result] = (await broker.remoteRequest('surfaceOp', {
       surfaceId: 'far-1', op: 'attach', cols: 100, rows: 30,
-    });
-    expect(results).toEqual([{ ptyId: 'pty-far', cols: 100, rows: 30 }]);
+    })) as Array<{ ptyId: string; cols: number; rows: number }>;
+    expect(result).toMatchObject({ cols: 100, rows: 30 });
+    expect(result!.ptyId).not.toBe('pty-far');
     // Input and resizes have to reach that window afterwards.
-    expect(broker.isRemotePty('pty-far')).toBe(true);
+    expect(broker.isRemotePty(result!.ptyId)).toBe(true);
   });
 
   it('reports a surface nobody owns', async () => {
@@ -420,10 +433,10 @@ describe('bind-as-lease', () => {
   it('streams a subscribed PTY from the owning window', async () => {
     const peerSide = farWindow();
     const { broker } = await linkedPair(fakeWindow(), peerSide);
-    await attachFar(broker);
+    const handle = await attachFar(broker);
 
     const sink = fakeSink();
-    broker.remoteSubscribe('pty-far', sink);
+    broker.remoteSubscribe(handle.ptyId, sink);
     await tick();
     peerSide.emitData('pty-far', 'output from the other window');
 
@@ -434,10 +447,10 @@ describe('bind-as-lease', () => {
   it('does not stream PTYs it never subscribed to', async () => {
     const peerSide = farWindow();
     const { broker } = await linkedPair(fakeWindow(), peerSide);
-    await attachFar(broker);
+    const handle = await attachFar(broker);
 
     const sink = fakeSink();
-    broker.remoteSubscribe('pty-far', sink);
+    broker.remoteSubscribe(handle.ptyId, sink);
     await tick();
     peerSide.emitData('pty-other', 'not subscribed');
     await tick(100);
@@ -447,28 +460,28 @@ describe('bind-as-lease', () => {
   it('forwards a subscribed PTY exit and forgets its route', async () => {
     const peerSide = farWindow();
     const { broker } = await linkedPair(fakeWindow(), peerSide);
-    await attachFar(broker);
+    const handle = await attachFar(broker);
     const sink = fakeSink();
-    broker.remoteSubscribe('pty-far', sink);
+    broker.remoteSubscribe(handle.ptyId, sink);
     await tick();
 
     peerSide.emitExit('pty-far', 17);
 
     await waitFor(() => sink.exits.length > 0);
     expect(sink.exits).toEqual([17]);
-    expect(broker.isRemotePty('pty-far')).toBe(false);
+    expect(broker.isRemotePty(handle.ptyId)).toBe(false);
   });
 
   it('fails closed when the owner route disappears before subscription', async () => {
     const peerSide = farWindow();
     const { broker, peer } = await linkedPair(fakeWindow(), peerSide);
-    await attachFar(broker);
+    const handle = await attachFar(broker);
 
     await peer.disposePeerLink();
-    await waitFor(() => !broker.isRemotePty('pty-far'));
+    await waitFor(() => !broker.isRemotePty(handle.ptyId));
 
     const sink = fakeSink();
-    await broker.remoteSubscribe('pty-far', sink);
+    await broker.remoteSubscribe(handle.ptyId, sink);
     expect(sink.exits).toEqual([0]);
   });
 
@@ -479,11 +492,11 @@ describe('bind-as-lease', () => {
     // The pane remains resolvable after its process exits. No forwarding sink
     // exists yet, so the owner's durable liveness record must bridge the gap.
     peerSide.emitExit('pty-far', 23);
-    await attachFar(broker);
+    const firstHandle = await attachFar(broker);
     const first = fakeSink();
     const firstOrder: string[] = [];
     const firstReady = broker
-      .remoteSubscribe('pty-far', {
+      .remoteSubscribe(firstHandle.ptyId, {
         ...first,
         onExit: (code) => {
           first.exits.push(code);
@@ -498,25 +511,25 @@ describe('bind-as-lease', () => {
     // RemoteApiSession waits on readiness, so this order prevents an attach-ok
     // from overtaking the already-recorded close.
     expect(firstOrder).toEqual(['exit', 'ready']);
-    expect(broker.isRemotePty('pty-far')).toBe(false);
+    expect(broker.isRemotePty(firstHandle.ptyId)).toBe(false);
 
     // A synchronous replay must not leave a spent forwarding entry on the
     // owner, or the next resolve would be routed but its subscribe ignored.
-    await attachFar(broker);
+    const secondHandle = await attachFar(broker);
     const second = fakeSink();
-    await broker.remoteSubscribe('pty-far', second);
+    await broker.remoteSubscribe(secondHandle.ptyId, second);
     expect(second.exits).toEqual([23]);
   });
 
   it('stops the stream on unsubscribe but keeps the route', async () => {
     const peerSide = farWindow();
     const { broker } = await linkedPair(fakeWindow(), peerSide);
-    await attachFar(broker);
+    const handle = await attachFar(broker);
     const sink = fakeSink();
-    broker.remoteSubscribe('pty-far', sink);
+    broker.remoteSubscribe(handle.ptyId, sink);
     await tick();
 
-    broker.remoteUnsubscribe('pty-far', sink);
+    broker.remoteUnsubscribe(handle.ptyId, sink);
     await tick();
     peerSide.emitData('pty-far', 'after unsubscribe');
     await tick(100);
@@ -525,11 +538,11 @@ describe('bind-as-lease', () => {
     // The route stays: "nobody is watching it" is not "it moved". Re-attaching
     // an already-attached surface places the new route *before* the old
     // attachment is torn down, so dropping it here would delete the fresh one.
-    expect(broker.isRemotePty('pty-far')).toBe(true);
+    expect(broker.isRemotePty(handle.ptyId)).toBe(true);
 
     // And a second attach streams again over the route that was never lost.
     const again = fakeSink();
-    broker.remoteSubscribe('pty-far', again);
+    broker.remoteSubscribe(handle.ptyId, again);
     await tick();
     peerSide.emitData('pty-far', 'flowing again');
     await waitFor(() => again.data.length > 0);
@@ -542,23 +555,24 @@ describe('bind-as-lease', () => {
     // that teardown or every later write goes nowhere.
     const peerSide = farWindow();
     const { broker } = await linkedPair(fakeWindow(), peerSide);
-    await attachFar(broker);
+    const firstHandle = await attachFar(broker);
     const first = fakeSink();
-    broker.remoteSubscribe('pty-far', first);
+    broker.remoteSubscribe(firstHandle.ptyId, first);
     await tick();
 
     // The order `RemoteApiSession` actually uses: the resolve re-places the
     // route, then the *old* attachment is torn down, then the new one
     // subscribes. A teardown that dropped the route would leave that last
     // subscribe with nowhere to send.
-    await attachFar(broker);
+    const secondHandle = await attachFar(broker);
     const second = fakeSink();
-    broker.remoteUnsubscribe('pty-far', first);
-    broker.remoteSubscribe('pty-far', second);
+    broker.remoteUnsubscribe(firstHandle.ptyId, first);
+    broker.remoteSubscribe(secondHandle.ptyId, second);
     await tick();
 
-    expect(broker.isRemotePty('pty-far')).toBe(true);
-    expect(broker.remoteWrite('pty-far', 'ls\r')).toBe(true);
+    expect(secondHandle.ptyId).toBe(firstHandle.ptyId);
+    expect(broker.isRemotePty(secondHandle.ptyId)).toBe(true);
+    expect(broker.remoteWrite(secondHandle.ptyId, 'ls\r')).toBe(true);
     peerSide.emitData('pty-far', 'still here');
     await waitFor(() => second.data.length > 0);
     expect(second.data).toEqual(['still here']);
@@ -567,31 +581,31 @@ describe('bind-as-lease', () => {
   it('keeps a second viewer streaming when the first detaches', async () => {
     const peerSide = farWindow();
     const { broker } = await linkedPair(fakeWindow(), peerSide);
-    await attachFar(broker);
+    const handle = await attachFar(broker);
     const first = fakeSink();
     const second = fakeSink();
-    broker.remoteSubscribe('pty-far', first);
-    broker.remoteSubscribe('pty-far', second);
+    broker.remoteSubscribe(handle.ptyId, first);
+    broker.remoteSubscribe(handle.ptyId, second);
     await tick();
 
     // One detach must not stop the shared stream or drop the route.
-    broker.remoteUnsubscribe('pty-far', first);
+    broker.remoteUnsubscribe(handle.ptyId, first);
     await tick();
     peerSide.emitData('pty-far', 'still flowing');
 
     await waitFor(() => second.data.length > 0);
     expect(second.data).toEqual(['still flowing']);
     expect(first.data).toEqual([]);
-    expect(broker.isRemotePty('pty-far')).toBe(true);
+    expect(broker.isRemotePty(handle.ptyId)).toBe(true);
   });
 
   it('routes input and resize to the owning window', async () => {
     const peerSide = farWindow();
     const { broker } = await linkedPair(fakeWindow(), peerSide);
-    await attachFar(broker);
+    const handle = await attachFar(broker);
 
-    expect(broker.remoteWrite('pty-far', 'ls\r')).toBe(true);
-    expect(broker.remoteResize('pty-far', 120, 40)).toBe(true);
+    expect(broker.remoteWrite(handle.ptyId, 'ls\r')).toBe(true);
+    expect(broker.remoteResize(handle.ptyId, 120, 40)).toBe(true);
 
     await waitFor(() => peerSide.writes.length > 0 && peerSide.resizes.length > 0);
     expect(peerSide.writes).toEqual([{ ptyId: 'pty-far', data: 'ls\r' }]);
@@ -608,9 +622,9 @@ describe('bind-as-lease', () => {
   it('reports terminals as exited when their window disconnects', async () => {
     const peerSide = farWindow();
     const { broker, peer } = await linkedPair(fakeWindow(), peerSide);
-    await attachFar(broker);
+    const handle = await attachFar(broker);
     const sink = fakeSink();
-    broker.remoteSubscribe('pty-far', sink);
+    broker.remoteSubscribe(handle.ptyId, sink);
     await tick();
 
     // The window was closed: its terminals are gone, and a later write must not
@@ -619,8 +633,8 @@ describe('bind-as-lease', () => {
 
     await waitFor(() => sink.exits.length > 0);
     expect(sink.exits).toEqual([0]);
-    expect(broker.isRemotePty('pty-far')).toBe(false);
-    expect(broker.remoteWrite('pty-far', 'x')).toBe(false);
+    expect(broker.isRemotePty(handle.ptyId)).toBe(false);
+    expect(broker.remoteWrite(handle.ptyId, 'x')).toBe(false);
   });
 
   it('hands the Host to a surviving window when the broker dies', async () => {

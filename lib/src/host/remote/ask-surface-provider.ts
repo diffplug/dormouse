@@ -21,9 +21,15 @@ import type { PeerSurfaceResult } from '../../remote/host/peer-surfaces';
 /**
  * Fan one operation out to whoever can answer it and collect the answers. Who
  * that is — one webview over a JSON line, every webview of every window over a
- * broker and a socket — is the installation's business.
+ * broker and a socket — is the installation's business. Follow-up operations
+ * carry the selected handle's provider-local PTY key so an installation with
+ * multiple answerers can address only that owner.
  */
-export type SurfaceAsk = (op: string, params: unknown) => Promise<unknown[]>;
+export type SurfaceAsk = (
+  op: string,
+  params: unknown,
+  ownerPtyId?: string,
+) => Promise<unknown[]>;
 
 export interface AskSurfaceProvider {
   provider: HostSurfaceProvider;
@@ -83,12 +89,16 @@ export function createAskSurfaceProvider(
         // what it reported; a resize nobody answered leaves the last known size
         // standing.
         resize: async (nextCols, nextRows) => {
-          const [settled] = (await ask('surfaceOp', {
-            surfaceId,
-            op: 'resize',
-            cols: nextCols,
-            rows: nextRows,
-          })) as PeerSurfaceResult[];
+          const [settled] = (await ask(
+            'surfaceOp',
+            {
+              surfaceId,
+              op: 'resize',
+              cols: nextCols,
+              rows: nextRows,
+            },
+            owner.ptyId,
+          )) as PeerSurfaceResult[];
           if (settled) {
             cols = settled.cols;
             rows = settled.rows;

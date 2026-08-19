@@ -90,6 +90,15 @@ describe('surface responder', () => {
     expect(platform.answer('surfaceOp', { surfaceId: 'elsewhere', op: 'attach' })).toEqual([]);
   });
 
+  it('resolves ownership without resizing the live xterm', () => {
+    const terminal = registerSurface('surface-1', 'pty-1');
+
+    expect(platform.answer('surfaceOp', {
+      surfaceId: 'surface-1', op: 'resolve', cols: 100, rows: 30,
+    })).toEqual([{ ptyId: 'pty-1', cols: 80, rows: 24 }]);
+    expect(terminal.resize).not.toHaveBeenCalled();
+  });
+
   it('resizes the live xterm on attach and reports what it settled at', () => {
     const terminal = registerSurface('surface-1', 'pty-1');
 

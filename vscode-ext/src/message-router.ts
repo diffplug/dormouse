@@ -78,8 +78,9 @@ configurePeerLink({
   streamPty: processedPtyStreams.streamPty,
   writePty: (ptyId, data) => ptyManager.write(ptyId, data),
   resizePty: (ptyId, cols, rows) => ptyManager.resize(ptyId, cols, rows),
-  // Two windows can hold the same pane id — "Duplicate Workspace in New Window"
-  // cold-restores them — so the link asks before it routes one away.
+  // Peer PTYs use generated provider-local route handles. Keep those handles
+  // outside this window's real PTY namespace so local ids always fall through
+  // to the manager that owns them.
   ownsPty: (ptyId) => ptyManager.hasPty(ptyId) || globalOwnedPtyIds.has(ptyId),
   // The Host half: which of these fire depends on which side of the bind this
   // window landed on, and the link is what knows that.

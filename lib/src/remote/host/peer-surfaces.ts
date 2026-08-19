@@ -33,7 +33,7 @@ import { armWhileEnrolled } from './enrolled-gate';
  * detach: the Host stops streaming on its side, and the pane keeps whatever
  * size it was left at — which is what last-attach-wins means.
  */
-export type PeerSurfaceOp = 'attach' | 'resize';
+export type PeerSurfaceOp = 'resolve' | 'attach' | 'resize';
 
 export interface PeerSurfaceParams {
   surfaceId: string;
@@ -75,21 +75,28 @@ function answerPeers<K extends keyof PeerOps>(
 }
 
 /**
- * Drive one of this webview's own surfaces on the Host's behalf.
+ * Resolve or drive one of this webview's own surfaces on the Host's behalf.
  *
- * `attach` and `resize` are the same operation — attach-is-the-resize
+ * `resolve` is the read-only ownership probe that lets a multi-window Host pick
+ * one duplicate claimant before mutating it. `attach` and `resize` are the same
+ * operation — attach-is-the-resize
  * (docs/specs/remote-api.md) — and both go through the live xterm rather than
  * the PTY directly, so the owning pane's own view stays consistent with the
  * size the phone asked for.
  */
-function driveOwnSurface({ surfaceId, cols, rows }: PeerSurfaceParams): PeerSurfaceResult[] {
+function driveOwnSurface({
+  surfaceId,
+  op,
+  cols,
+  rows,
+}: PeerSurfaceParams): PeerSurfaceResult[] {
   const entry = registry.get(surfaceId);
   if (!entry) return [];
 
   const term = entry.terminal;
   const nextCols = clampTerminalDimension(cols, term.cols);
   const nextRows = clampTerminalDimension(rows, term.rows);
-  if (term.cols !== nextCols || term.rows !== nextRows) {
+  if (op !== 'resolve' && (term.cols !== nextCols || term.rows !== nextRows)) {
     term.resize(nextCols, nextRows);
   }
   return [{ ptyId: entry.ptyId, cols: term.cols, rows: term.rows }];

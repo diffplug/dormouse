@@ -81,12 +81,10 @@ export interface PeerLinkDeps {
   /**
    * Whether this window's own PTY manager holds that id.
    *
-   * Pane ids are unique within a window and nothing coordinates them across
-   * windows — "Duplicate Workspace in New Window" cold-restores the *same* ids
-   * into a second window — so a peer answering an op can name an id this
-   * window already owns. Routing on that answer would post the broker's own
-   * keystrokes into the other window's shell, so the local owner wins
-   * ({@link remoteRequest}).
+   * Peer PTYs are exposed through generated route handles rather than their
+   * owner-local ids, because "Duplicate Workspace in New Window" can
+   * cold-restore the same ids in several windows. This check keeps even that
+   * generated provider-local handle out of the local manager's namespace.
    */
   ownsPty(ptyId: string): boolean;
   /** A peer window's answers may have changed, so the directory is stale. */
@@ -281,19 +279,26 @@ let brokerConfirmed = false;
 /** Claimed and cleared with `server`; the two always move together. */
 let serverToken: string | null = null;
 const clients = new Set<PeerLinkClient>();
+/** Provider-local route handle → the peer window that owns it. */
 const routes = new Map<string, PeerLinkClient>();
+/** Provider-local route handle → the id understood inside that peer window. */
+const routePtyIds = new Map<string, string>();
+/** Every opaque peer handle minted in this process, including closed routes. */
+const remotePtyHandles = new Set<string>();
+/** Stable handles for repeated resolves of one PTY on one live peer socket. */
+const peerRouteIds = new WeakMap<PeerLinkClient, Map<string, string>>();
 const remoteSinks = new Map<string, Set<RemotePtySink>>();
 
 interface PendingRemoteSubscription {
   client: PeerLinkClient;
-  ptyId: string;
+  routeId: string;
   promise: Promise<void>;
   settle(): void;
 }
 
-/** Subscribe acknowledgement by frame id, plus its one in-flight id per PTY. */
+/** Subscribe acknowledgement by frame id, plus its one in-flight id per route. */
 const pendingRemoteSubscriptions = new Map<string, PendingRemoteSubscription>();
-const pendingRemoteSubscriptionByPty = new Map<string, string>();
+const pendingRemoteSubscriptionByRoute = new Map<string, string>();
 
 /**
  * One outstanding {@link ask}, and the window it is outstanding against — so a
@@ -343,8 +348,44 @@ function authenticatedClients(): PeerLinkClient[] {
   return [...clients].filter((client) => client.authenticated);
 }
 
-function settleRemoteSubscription(ptyId: string): void {
-  const id = pendingRemoteSubscriptionByPty.get(ptyId);
+/**
+ * Bind an owner-local PTY id to the socket that answered for it.
+ *
+ * The returned string is deliberately opaque to the provider. Two windows can
+ * restore the same PTY id, so returning either owner's raw id would let a later
+ * answer overwrite the selected surface's stream/write route. One stable token
+ * per `(socket, ptyId)` makes the selected answer carry its owner with it.
+ */
+function bindRemotePty(client: PeerLinkClient, ptyId: string): string {
+  let byPty = peerRouteIds.get(client);
+  if (!byPty) {
+    byPty = new Map();
+    peerRouteIds.set(client, byPty);
+  }
+  let routeId = byPty.get(ptyId);
+  if (!routeId) {
+    do {
+      routeId = `peer:${randomUUID()}`;
+    } while (routes.has(routeId) || deps?.ownsPty(routeId));
+    byPty.set(ptyId, routeId);
+  }
+  remotePtyHandles.add(routeId);
+  routes.set(routeId, client);
+  routePtyIds.set(routeId, ptyId);
+  return routeId;
+}
+
+/** Every provider-local handle matching one owner-local PTY on this socket. */
+function matchingRoutes(client: PeerLinkClient, ptyId: string): string[] {
+  const matches: string[] = [];
+  for (const [routeId, owner] of routes) {
+    if (owner === client && routePtyIds.get(routeId) === ptyId) matches.push(routeId);
+  }
+  return matches;
+}
+
+function settleRemoteSubscription(routeId: string): void {
+  const id = pendingRemoteSubscriptionByRoute.get(routeId);
   if (!id) return;
   pendingRemoteSubscriptions.get(id)?.settle();
 }
@@ -354,7 +395,11 @@ function settleRemoteSubscription(ptyId: string): void {
  * A silent peer is treated like a closed PTY, keeping an attach bounded and
  * fail-closed instead of acknowledging a stream that may not exist.
  */
-function beginRemoteSubscription(client: PeerLinkClient, ptyId: string): Promise<void> {
+function beginRemoteSubscription(
+  client: PeerLinkClient,
+  routeId: string,
+  ownerPtyId: string,
+): Promise<void> {
   const id = `s${++nextRequestId}`;
   let resolveReady!: () => void;
   const promise = new Promise<void>((resolve) => {
@@ -366,26 +411,27 @@ function beginRemoteSubscription(client: PeerLinkClient, ptyId: string): Promise
     // The owner may have installed the sink even though its acknowledgement was
     // lost or delayed. Stop it while its route is still known, or timeout would
     // leave that window forwarding an orphaned stream indefinitely.
-    send(client, { kind: 'unsubscribe', ptyId });
-    routes.delete(ptyId);
-    for (const sink of [...(remoteSinks.get(ptyId) ?? [])]) sink.onExit(0);
-    remoteSinks.delete(ptyId);
+    send(client, { kind: 'unsubscribe', ptyId: ownerPtyId });
+    routes.delete(routeId);
+    routePtyIds.delete(routeId);
+    for (const sink of [...(remoteSinks.get(routeId) ?? [])]) sink.onExit(0);
+    remoteSinks.delete(routeId);
     pending.settle();
   }, PEER_REPLY_BUDGET_MS);
   (timer as unknown as { unref?: () => void }).unref?.();
 
   const settle = () => {
-    if (pendingRemoteSubscriptions.get(id)?.ptyId !== ptyId) return;
+    if (pendingRemoteSubscriptions.get(id)?.routeId !== routeId) return;
     clearTimeout(timer);
     pendingRemoteSubscriptions.delete(id);
-    if (pendingRemoteSubscriptionByPty.get(ptyId) === id) {
-      pendingRemoteSubscriptionByPty.delete(ptyId);
+    if (pendingRemoteSubscriptionByRoute.get(routeId) === id) {
+      pendingRemoteSubscriptionByRoute.delete(routeId);
     }
     resolveReady();
   };
-  pendingRemoteSubscriptions.set(id, { client, ptyId, promise, settle });
-  pendingRemoteSubscriptionByPty.set(ptyId, id);
-  send(client, { kind: 'subscribe', id, ptyId });
+  pendingRemoteSubscriptions.set(id, { client, routeId, promise, settle });
+  pendingRemoteSubscriptionByRoute.set(routeId, id);
+  send(client, { kind: 'subscribe', id, ptyId: ownerPtyId });
   return promise;
 }
 
@@ -395,8 +441,9 @@ function isFrameObject(frame: unknown): frame is Record<string, unknown> {
 }
 
 /**
- * Put one peer request to every other window and collect what they answer.
- * Empty when nothing is connected, and when nobody owned what was asked about.
+ * Put one peer request to every other window and collect what they answer, or
+ * address one follow-up to the peer retained by `ownerPtyId`. Empty when
+ * nothing is connected, and when nobody owned what was asked about.
  *
  * All windows at once, not one after another: a window that has gone
  * unresponsive would otherwise make every request behind it wait out its own
@@ -408,8 +455,17 @@ function isFrameObject(frame: unknown): frame is Record<string, unknown> {
  * where that PTY lives, and every later write, resize, and subscribe depends on
  * knowing.
  */
-export async function remoteRequest(op: string, params: unknown): Promise<unknown[]> {
-  const peers = authenticatedClients();
+export async function remoteRequest(
+  op: string,
+  params: unknown,
+  ownerPtyId?: string,
+): Promise<unknown[]> {
+  const selectedPeer = ownerPtyId ? routes.get(ownerPtyId) : undefined;
+  const peers = ownerPtyId
+    ? selectedPeer?.authenticated
+      ? [selectedPeer]
+      : []
+    : authenticatedClients();
   if (peers.length === 0) return [];
   const replies = await Promise.all(
     peers.map(async (client) =>
@@ -422,31 +478,38 @@ export async function remoteRequest(op: string, params: unknown): Promise<unknow
     if (reply?.kind !== 'result') continue;
     for (const result of reply.results) {
       const ptyId = routedPtyId(result);
-      // A route only for a PTY this window does not have itself. Pane ids are
-      // unique within a window and nothing makes them unique across windows —
-      // "Duplicate Workspace in New Window" cold-restores the same ids into a
-      // second window — so a peer can answer with an id that names one of this
-      // window's own terminals. Recording that route would send every later
-      // write for the broker's own PTY over the socket instead, putting the
-      // phone's keystrokes into the other window's shell. Local wins: this
-      // process holds the PTY, and `writePty`/`streamPty` fall back to it when
-      // there is no route.
-      if (ptyId && !deps?.ownsPty(ptyId)) routes.set(ptyId, client);
-      results.push(result);
+      if (!ptyId) {
+        results.push(result);
+        continue;
+      }
+      // The PTY id in a peer's answer is only meaningful inside that window.
+      // Replace it before the result reaches `createAskSurfaceProvider`, so the
+      // selected SurfaceHandle retains the responding socket even when another
+      // peer answered with the exact same restored surface and PTY ids.
+      results.push({
+        ...(result as Record<string, unknown>),
+        ptyId: bindRemotePty(client, ptyId),
+      });
     }
   }
   return results;
 }
 
-/** Whether this PTY is streaming from another window. */
+/** Whether this provider-local PTY key routes to another window. */
 export function isRemotePty(ptyId: string): boolean {
   return routes.get(ptyId) !== undefined;
+}
+
+/** Whether this key originated from a peer, even if that route has since closed. */
+export function isRemotePtyHandle(ptyId: string): boolean {
+  return remotePtyHandles.has(ptyId);
 }
 
 /** Resolve once the owning window has installed the sink and checked liveness. */
 export function remoteSubscribe(ptyId: string, sink: RemotePtySink): Promise<void> {
   const client = routes.get(ptyId);
-  if (!client) {
+  const ownerPtyId = routePtyIds.get(ptyId);
+  if (!client || !ownerPtyId) {
     sink.onExit(0);
     return Promise.resolve();
   }
@@ -459,10 +522,10 @@ export function remoteSubscribe(ptyId: string, sink: RemotePtySink): Promise<voi
     sinks = new Set();
     remoteSinks.set(ptyId, sinks);
     sinks.add(sink);
-    return beginRemoteSubscription(client, ptyId);
+    return beginRemoteSubscription(client, ptyId, ownerPtyId);
   }
   sinks.add(sink);
-  const pendingId = pendingRemoteSubscriptionByPty.get(ptyId);
+  const pendingId = pendingRemoteSubscriptionByRoute.get(ptyId);
   return pendingId
     ? pendingRemoteSubscriptions.get(pendingId)?.promise ?? Promise.resolve()
     : Promise.resolve();
@@ -480,21 +543,24 @@ export function remoteUnsubscribe(ptyId: string, sink: RemotePtySink): void {
   // owning window disconnecting (`forgetPeerRoutes`).
   remoteSinks.delete(ptyId);
   const client = routes.get(ptyId);
-  if (client) send(client, { kind: 'unsubscribe', ptyId });
+  const ownerPtyId = routePtyIds.get(ptyId);
+  if (client && ownerPtyId) send(client, { kind: 'unsubscribe', ptyId: ownerPtyId });
   settleRemoteSubscription(ptyId);
 }
 
 export function remoteWrite(ptyId: string, data: string): boolean {
   const client = routes.get(ptyId);
-  if (!client) return false;
-  send(client, { kind: 'write', ptyId, data });
+  const ownerPtyId = routePtyIds.get(ptyId);
+  if (!client || !ownerPtyId) return false;
+  send(client, { kind: 'write', ptyId: ownerPtyId, data });
   return true;
 }
 
 export function remoteResize(ptyId: string, cols: number, rows: number): boolean {
   const client = routes.get(ptyId);
-  if (!client) return false;
-  send(client, { kind: 'resizePty', ptyId, cols, rows });
+  const ownerPtyId = routePtyIds.get(ptyId);
+  if (!client || !ownerPtyId) return false;
+  send(client, { kind: 'resizePty', ptyId: ownerPtyId, cols, rows });
   return true;
 }
 
@@ -531,10 +597,11 @@ function dropClient(client: PeerLinkClient): void {
   const wasAuthenticated = clients.delete(client) && client.authenticated;
   // A window that went away takes its terminals with it; a later write must not
   // be routed into a dead socket.
-  for (const ptyId of forgetPeerRoutes(routes, client)) {
-    for (const sink of remoteSinks.get(ptyId) ?? []) sink.onExit(0);
-    remoteSinks.delete(ptyId);
-    settleRemoteSubscription(ptyId);
+  for (const routeId of forgetPeerRoutes(routes, client)) {
+    routePtyIds.delete(routeId);
+    for (const sink of remoteSinks.get(routeId) ?? []) sink.onExit(0);
+    remoteSinks.delete(routeId);
+    settleRemoteSubscription(routeId);
   }
   // Anything this window was still being asked can never be answered either,
   // and holding it open to its full reply budget stalls the whole collection it
@@ -600,14 +667,19 @@ function onServerFrame(client: PeerLinkClient, frame: unknown): void {
 
   const response = message as PeerLinkResponse;
   if (response.kind === 'data') {
-    for (const sink of remoteSinks.get(response.ptyId) ?? []) sink.onData(response.data);
+    for (const routeId of matchingRoutes(client, response.ptyId)) {
+      for (const sink of remoteSinks.get(routeId) ?? []) sink.onData(response.data);
+    }
     return;
   }
   if (response.kind === 'exit') {
-    routes.delete(response.ptyId);
-    for (const sink of [...(remoteSinks.get(response.ptyId) ?? [])]) sink.onExit(response.exitCode);
-    remoteSinks.delete(response.ptyId);
-    settleRemoteSubscription(response.ptyId);
+    for (const routeId of matchingRoutes(client, response.ptyId)) {
+      routes.delete(routeId);
+      routePtyIds.delete(routeId);
+      for (const sink of [...(remoteSinks.get(routeId) ?? [])]) sink.onExit(response.exitCode);
+      remoteSinks.delete(routeId);
+      settleRemoteSubscription(routeId);
+    }
     return;
   }
   if (response.kind === 'subscribed') {

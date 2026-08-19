@@ -38,6 +38,10 @@ import {
   type RemoteHostResult,
 } from '../../lib/src/host/remote/service-protocol';
 import type { HostSurfaceProvider } from '../../lib/src/remote/host/host-surface-provider';
+import type {
+  PeerSurfaceParams,
+  PeerSurfaceResult,
+} from '../../lib/src/remote/host/peer-surfaces';
 import type { WebSocketLike } from '../../lib/src/remote/host/remote-host';
 import type { ExtensionMessage } from './message-types';
 import {
@@ -45,7 +49,7 @@ import {
   ensurePeerNet,
   forwardCommand,
   isPeerLinkSettled,
-  isRemotePty,
+  isRemotePtyHandle,
   onPeerLinkSettled,
   remoteRequest,
   remoteResize,
@@ -95,19 +99,39 @@ let askProvider: AskSurfaceProvider | null = null;
 
 /**
  * Ask both tiers at once and concatenate what they answer, this window's
- * webviews first.
+ * webviews first. A follow-up carrying an owner key goes only to the tier (and,
+ * for a peer handle, the exact window) selected during resolution.
  *
  * Both at once rather than the near tier first: whatever is asked about lives
  * in exactly one webview of one window, so asking in series would spend a whole
  * tier's budget before the window that actually owns it is even asked. The
  * results carry no tier marker because nothing downstream needs one — a
- * directory is a concatenation, and a surface id is unique across every window.
+ * directory is a concatenation, and the first surface owner is retained by its
+ * provider-local PTY key.
  */
 async function askBothTiers(
   bound: RemoteHostDeps,
   op: string,
   params: unknown,
+  ownerPtyId?: string,
 ): Promise<unknown[]> {
+  // A mutating attach cannot itself discover its owner: duplicated cold-restored
+  // windows may both answer the same surface id, which would resize both xterms
+  // before the first result was selected. Probe identity read-only, then send
+  // the attach only to the tier/window carried by that provider-local PTY key.
+  const surfaceParams = params as Partial<PeerSurfaceParams> | null;
+  if (!ownerPtyId && op === 'surfaceOp' && surfaceParams?.op === 'attach') {
+    const [owner] = (await askBothTiers(bound, op, {
+      ...surfaceParams,
+      op: 'resolve',
+    })) as PeerSurfaceResult[];
+    return owner ? askBothTiers(bound, op, params, owner.ptyId) : [];
+  }
+  if (ownerPtyId) {
+    return isRemotePtyHandle(ownerPtyId)
+      ? remoteRequest(op, params, ownerPtyId)
+      : bound.brokerRequest(op, params);
+  }
   const [local, remote] = await Promise.all([
     bound.brokerRequest(op, params),
     remoteRequest(op, params),
@@ -126,36 +150,47 @@ async function askBothTiers(
  * terminal on the machine rather than the broker window's alone.
  */
 export function createRemoteHostProvider(bound: RemoteHostDeps): HostSurfaceProvider {
-  askProvider = createAskSurfaceProvider((op, params) => askBothTiers(bound, op, params), {
-    // The link takes only a PTY it has a route for, and a route is placed only
-    // by an attach another window answered — so a PTY of this window's own can
-    // never be taken out from under the manager that owns it.
-    writePty: (ptyId, data) => {
-      if (!remoteWrite(ptyId, data)) bound.writePty(ptyId, data);
-    },
-    resizePty: (ptyId, cols, rows) => {
-      if (!remoteResize(ptyId, cols, rows)) bound.resizePty(ptyId, cols, rows);
-    },
+  askProvider = createAskSurfaceProvider(
+    (op, params, ownerPtyId) => askBothTiers(bound, op, params, ownerPtyId),
+    {
+      // A peer-returned provider handle stays in the link's namespace even
+      // after its route closes; it must never fall through to a local PTY that
+      // later happens to claim the same string.
+      writePty: (ptyId, data) => {
+        if (isRemotePtyHandle(ptyId)) {
+          remoteWrite(ptyId, data);
+          return;
+        }
+        bound.writePty(ptyId, data);
+      },
+      resizePty: (ptyId, cols, rows) => {
+        if (isRemotePtyHandle(ptyId)) {
+          remoteResize(ptyId, cols, rows);
+          return;
+        }
+        bound.resizePty(ptyId, cols, rows);
+      },
 
-    streamPty(ptyId, sink) {
-      if (isRemotePty(ptyId)) {
-        // Another window's terminal: it has already stripped the protocol out
-        // on its side, so what arrives over the link is what its own xterm
-        // renders — the same stream shape as the local branch below.
-        const ready = remoteSubscribe(ptyId, sink);
+      streamPty(ptyId, sink) {
+        if (isRemotePtyHandle(ptyId)) {
+          // Another window's terminal: it has already stripped the protocol out
+          // on its side, so what arrives over the link is what its own xterm
+          // renders — the same stream shape as the local branch below.
+          const ready = remoteSubscribe(ptyId, sink);
+          return {
+            stop: () => remoteUnsubscribe(ptyId, sink),
+            ready,
+          };
+        }
+        // One of this window's own, through the keyed registry every consumer of
+        // the processed stream shares (`processed-pty-streams.ts`).
         return {
-          stop: () => remoteUnsubscribe(ptyId, sink),
-          ready,
+          stop: bound.streamPty(ptyId, sink),
+          ready: Promise.resolve(),
         };
-      }
-      // One of this window's own, through the keyed registry every consumer of
-      // the processed stream shares (`processed-pty-streams.ts`).
-      return {
-        stop: bound.streamPty(ptyId, sink),
-        ready: Promise.resolve(),
-      };
+      },
     },
-  });
+  );
   return askProvider.provider;
 }
 

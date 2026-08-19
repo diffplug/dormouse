@@ -862,16 +862,20 @@ describe('serving the other windows', () => {
 
     // The attach is what teaches the link where that PTY lives; everything
     // after it is routed by that.
-    await waitFor(async () => !!(await provider.resolveSurface('far-1', { cols: 80, rows: 24 })));
+    let handle: Awaited<ReturnType<typeof provider.resolveSurface>> = null;
+    await waitFor(async () => {
+      handle = await provider.resolveSurface('far-1', { cols: 80, rows: 24 });
+      return handle !== null;
+    });
 
     const sink = fakeSink();
-    const stream = provider.streamPty('pty-far', sink);
+    const stream = provider.streamPty(handle!.ptyId, sink);
     await stream.ready;
     far.emitData('pty-far', 'from the other window');
     await waitFor(() => sink.data.length > 0);
 
-    provider.writePty('pty-far', 'ls\r');
-    provider.resizePty('pty-far', 120, 40);
+    provider.writePty(handle!.ptyId, 'ls\r');
+    provider.resizePty(handle!.ptyId, 120, 40);
     await waitFor(() => far.writes.length > 0 && far.resizes.length > 0);
     expect(far.writes).toEqual([{ ptyId: 'pty-far', data: 'ls\r' }]);
     expect(far.resizes).toEqual([{ ptyId: 'pty-far', cols: 120, rows: 40 }]);
@@ -881,6 +885,76 @@ describe('serving the other windows', () => {
     far.emitData('pty-far', 'after the unsubscribe');
     await tick(100);
     expect(sink.data).toEqual(['from the other window']);
+  });
+
+  it('binds a duplicate restored PTY id to the peer whose surface answer was selected', async () => {
+    let firstSurfaceOps = 0;
+    let secondSurfaceOps = 0;
+    const restoredSurface = { ptyId: 'restored-pty', cols: 80, rows: 24 };
+    const first = fakeWindow({
+      entries: [{ surfaceId: 'restored-surface' }],
+      surfaces: new Proxy(
+        { 'restored-surface': restoredSurface },
+        {
+          get: (target, property, receiver) => {
+            if (property === 'restored-surface') firstSurfaceOps += 1;
+            return Reflect.get(target, property, receiver) as typeof restoredSurface;
+          },
+        },
+      ),
+    });
+    const second = fakeWindow({
+      entries: [{ surfaceId: 'restored-surface' }],
+      surfaces: new Proxy(
+        { 'restored-surface': restoredSurface },
+        {
+          get: (target, property, receiver) => {
+            if (property === 'restored-surface') secondSurfaceOps += 1;
+            return Reflect.get(target, property, receiver) as typeof restoredSurface;
+          },
+        },
+      ),
+    });
+    const { mod, bound } = await brokerWith(first);
+    await openFarWindow(second);
+    const localFallbacks: unknown[] = [];
+    const providerDeps = bound.deps();
+    providerDeps.writePty = (ptyId, data) => void localFallbacks.push({ ptyId, data });
+    providerDeps.resizePty = (ptyId, cols, rows) =>
+      void localFallbacks.push({ ptyId, cols, rows });
+    const provider = mod.createRemoteHostProvider(providerDeps);
+
+    const handle = await provider.resolveSurface('restored-surface', { cols: 80, rows: 24 });
+    expect(handle).not.toBeNull();
+    // The key held by SurfaceHandle is provider-local, not the colliding id
+    // understood inside either peer window.
+    expect(handle!.ptyId).not.toBe('restored-pty');
+
+    // The read-only resolve reaches both duplicate claimants; the mutating
+    // attach and every follow-up address only the retained first peer.
+    expect([firstSurfaceOps, secondSurfaceOps]).toEqual([2, 1]);
+    await handle!.resize(100, 30);
+    expect([firstSurfaceOps, secondSurfaceOps]).toEqual([3, 1]);
+
+    const sink = fakeSink();
+    const stream = provider.streamPty(handle!.ptyId, sink);
+    await stream.ready;
+    first.emitData('restored-pty', 'selected peer');
+    second.emitData('restored-pty', 'other peer');
+    await waitFor(() => sink.data.length > 0);
+    expect(sink.data).toEqual(['selected peer']);
+
+    provider.writePty(handle!.ptyId, 'pwd\r');
+    await waitFor(() => first.writes.length > 0);
+    expect(first.writes).toEqual([{ ptyId: 'restored-pty', data: 'pwd\r' }]);
+    expect(second.writes).toEqual([]);
+
+    first.emitExit('restored-pty', 17);
+    await waitFor(() => sink.exits.length > 0);
+    provider.writePty(handle!.ptyId, 'after exit');
+    provider.resizePty(handle!.ptyId, 120, 40);
+    expect(localFallbacks).toEqual([]);
+    stream.stop();
   });
 
   it('tells a joining window whether there is a Host, without waiting for a change', async () => {

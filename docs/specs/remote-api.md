@@ -72,7 +72,10 @@ protocol concept, so every environment-specific answer sits behind
 therefore imports no platform adapter, no store, and no `document`, and both
 installations share the ask-backed half of the provider
 (`lib/src/host/remote/ask-surface-provider.ts`) so an attach cannot be answered
-differently in one host than the other.
+differently in one host than the other. `SurfaceHandle.ptyId` is a
+provider-local routing key, not necessarily the PTY process's own id; the VS
+Code provider uses an opaque per-peer key so a cold-restored id collision cannot
+move an attachment's stream or input to another window.
 
 ## Terminology
 

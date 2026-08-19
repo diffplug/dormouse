@@ -25,6 +25,10 @@ import type { DirectoryEntry } from 'server-lib-common';
 export type { DirectoryEntry };
 
 export interface SurfaceHandle {
+  /**
+   * Provider-local routing key; a peer-backed handle need not expose its
+   * owner's raw PTY id.
+   */
   readonly ptyId: string;
   /** The size the surface stands at now — live for a local pane, last-reported for a peer's. */
   readonly cols: number;
