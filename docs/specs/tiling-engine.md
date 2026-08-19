@@ -140,7 +140,7 @@ token decides where the leaf lands.
 
 ## Parked leaves
 
-Source of truth: `parked` / `doorLeaf` / `forgetLeaf` / `parkedIds` /
+Source of truth: `parked` / `doorLeaf` / `addDoor` / `forgetLeaf` / `parkedIds` /
 `MAX_PARKED_SURFACES` in `lib/src/components/wall/lath-wall-store.ts`;
 `shouldParkOnMinimize` and `leafMetaFromPersistedDoor` in `lath-wall-engine.ts`; the
 parked render branch in `LathHost.tsx`; `minimizePane` in `lib/src/components/Wall.tsx`.
@@ -155,13 +155,20 @@ canvas — where a plain remove destroys the state and the reattach is really a 
   because the store stays the authority for a Doored Surface's live title/params.
   `{ park: true }` additionally keeps the leaf **mounted**, which is the browser-only
   part. `removeLeaf` destroys a leaf and its meta (a kill); `forgetLeaf` destroys a
-  Door, unmounting it if parked.
+  Door, unmounting it if parked. A Surface that is **born minimized** — `dor split`
+  or `dor ensure` targeting another Door, which has no pane to detach — registers its
+  meta through `addDoor`, so the "one map holds every leaf" invariant has no exception
+  for creation path.
 - **One commit.** Parking is atomic: if the id were absent from both the tree and
   `parked` for even one render, React would unmount the leaf and the DOM state would
   be gone. Every op that re-admits a leaf (`addLeaf`, `restoreLeaf`, `insertLeaf`,
   `replaceLeaf`, `seed`) unparks it in that same commit, through the one shared
   `admit` helper that also seeds the enter hint — so an op added later cannot honor
-  half the contract.
+  half the contract. `seed` admits by **tree membership**, not by the metadata it is
+  handed: hydration passes Door rows alongside the tree's leaves, and a parked id that
+  appears only as a Door row is still a Door — unparking it would unmount the DOM the
+  park exists to preserve. That distinction is dormant while `seed` runs once at
+  startup and goes live in the workspaces-rollout switch.
 - **`leafMeta` covers Doors.** One map holds every leaf the Wall owns, laid out or
   Doored; `parked` is pure render state (`Map<id, Rect | null>`) naming the subset
   that keeps its DOM. Detachment is a fact about the *tree*, so metadata needs no

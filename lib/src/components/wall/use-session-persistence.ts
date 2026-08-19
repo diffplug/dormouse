@@ -25,10 +25,10 @@ export function useSessionPersistence({
    *  of the visible-pane projection (`lath.listPanes()`). Stable identity, so the
    *  effect never re-subscribes. */
   lath: LathWallEngine;
-  // The `doors` STATE value, not just `doorsRef`: doors can mutate with no Lath
-  // store commit (e.g. `dor ensure` refreshing a minimized door's params via
-  // setDoors), so the store subscription alone can't signal that the persisted
-  // blob changed.
+  // The `doors` STATE value, not just `doorsRef`. Every door mutation now pairs with
+  // a store commit (minimize `doorLeaf`, reattach `restoreLeaf`/`insertLeaf`, kill
+  // `forgetLeaf`, born-minimized `addDoor`), so this is a correctness net rather than
+  // the only signal — it keeps a future setDoors-only path from going unpersisted.
   doors: DooredItem[];
   doorsRef: RefObject<DooredItem[]>;
   selectedIdRef: RefObject<string | null>;
@@ -100,8 +100,8 @@ export function useSessionPersistence({
     }
   }, [doSave]);
 
-  // Doors mutate without any Lath store commit (setDoors from minimize/reattach or
-  // `dor ensure` param refresh), so mark dirty whenever the state array changes.
+  // Belt and braces: the store commit that accompanies every door mutation already
+  // schedules a save, so this only has to catch a setDoors that somehow stands alone.
   useEffect(() => {
     trackerRef.current.markDirty();
   }, [doors]);

@@ -122,9 +122,15 @@ export type LathWallStore = {
    *  the Door is destroyed. */
   doorLeaf(id: LeafId, opts?: { park?: boolean }): { ok: boolean; token: RestoreToken | null };
 
+  /** Register a leaf that is BORN minimized — meta only, no tree entry — so every
+   *  Door has store metadata regardless of how it was created (`dor split` against
+   *  another Door never has a pane to detach). `doorLeaf` cannot serve: it needs the
+   *  leaf in the tree. No-op if `id` is already a leaf or a Door. */
+  addDoor(id: LeafId, meta: LeafMeta): void;
+
   /** Destroy a Door: drop its retained meta and unmount it if parked. The counterpart
-   *  to `doorLeaf`, called when a minimized Surface is killed rather than reattached.
-   *  No-op if `id` is not a Door. */
+   *  to `doorLeaf`/`addDoor`, called when a minimized Surface is killed rather than
+   *  reattached. No-op if `id` is not a Door. */
   forgetLeaf(id: LeafId): void;
 
   /** Atomically swap `oldId` for `newId` in place, moving meta from the old id to
@@ -340,13 +346,16 @@ export function createLathWallStore(): LathWallStore {
       // switching parks the outgoing Wall and then seeds the incoming one, so dropping
       // their meta here would discard exactly what the switch preserved, and would
       // strand DOM the store no longer knows anything about. Seeded ids win.
+      //
+      // Unparking is keyed off the TREE, not off `meta`: a parked id handed in only as
+      // a Door row is still a Door, and must keep both its DOM and its held rect.
       const next = new Map<string, LeafMeta>();
       for (const id of snapshot.parked.keys()) {
         const held = snapshot.leafMeta.get(id);
         if (held) next.set(id, held);
       }
       for (const [id, m] of meta) next.set(id, m);
-      commit({ tree, leafMeta: next, ...admit(meta.map(([id]) => id)), zoomedId: null });
+      commit({ tree, leafMeta: next, ...admit(leaves(tree)), zoomedId: null });
     },
 
     addLeaf(id, meta, position) {
@@ -389,6 +398,14 @@ export function createLathWallStore(): LathWallStore {
     removeLeaf: (id) => detachLeaf(id, false, false),
 
     doorLeaf: (id, opts) => detachLeaf(id, true, opts?.park === true),
+
+    addDoor(id, meta) {
+      // One check covers both incoherent cases, because `leafMeta` spans panes and
+      // Doors alike: a known id is either already placed in the tree or already a
+      // Door whose live state must not be clobbered.
+      if (snapshot.leafMeta.has(id)) return;
+      commit({ leafMeta: new Map(snapshot.leafMeta).set(id, meta) });
+    },
 
     forgetLeaf(id) {
       if (findLeafPath(snapshot.tree, id) !== null) return; // in the tree — not a Door

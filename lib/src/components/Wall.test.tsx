@@ -16,6 +16,7 @@ import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import type { PlatformAdapter } from '../lib/platform/types';
 import * as terminalRegistry from '../lib/terminal-registry';
+import { UNNAMED_PANEL_TITLE } from '../lib/terminal-registry';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -816,6 +817,48 @@ describe('Wall on the Lath engine', () => {
       await flush();
       const saved = fake.getState() as { doors?: Array<{ id: string }> } | null;
       expect(saved?.doors?.map((door) => door.id)).toEqual(['pane-a', response!.result!.surfaceId]);
+    } finally {
+      getTerminalSpy.mockRestore();
+    }
+  });
+
+  // A Door created by `dor split` against another Door is the one Surface that never
+  // was a pane, so it exercises the store's `addDoor` registration rather than the
+  // meta a minimize retains. Every Door reader goes through `lath.getMeta`, so a
+  // missing entry shows up as a Door with no metadata.
+  it('a Door born from `dor split` against another Door still has store metadata', async () => {
+    const getTerminalSpy = vi
+      .spyOn(terminalRegistry, 'getOrCreateTerminal')
+      .mockImplementation(() => ({}) as ReturnType<typeof terminalRegistry.getOrCreateTerminal>);
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+
+    try {
+      // Minimize pane-a, then split against that Door — the new Surface goes straight
+      // into the baseboard without ever being laid out.
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', bubbles: true }));
+      });
+      await flush();
+      const bornId = await dispatchSplit({ surface: 'surface:1' });
+      expect(leafCount()).toBe(1);
+
+      // The persisted Door row is materialized from the store's meta, so a Door with
+      // no store entry writes `component: undefined` — which `reconnect.ts` keys off
+      // to decide what survives a restart.
+      await act(async () => { window.dispatchEvent(new Event('pagehide')); });
+      await flush();
+      await flush();
+      const saved = fake.getState() as {
+        doors?: Array<{ id: string; title?: string; component?: string; tabComponent?: string }>;
+      } | null;
+      const bornDoor = saved?.doors?.find((door) => door.id === bornId);
+      expect(bornDoor).toBeDefined();
+      expect(bornDoor?.component).toBe('terminal');
+      expect(bornDoor?.tabComponent).toBe('terminal');
+      expect(bornDoor?.title).toBe(UNNAMED_PANEL_TITLE);
     } finally {
       getTerminalSpy.mockRestore();
     }

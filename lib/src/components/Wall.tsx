@@ -772,6 +772,8 @@ export function Wall({
 
     // Restore through the core token (the real payload): exact tier when the
     // captured context survives, else neighbor, else fallback beside a live ref.
+    // Every Door has store meta; the fallback keeps a reattach from being lost if
+    // some future creation path forgets to register one.
     const meta = lath.getMeta(item.id) ?? terminalLeafMeta();
     const token = item.token as RestoreToken | undefined;
     // The enter hint (from the token's edge) is derived inside `restoreLeaf`.
@@ -974,6 +976,10 @@ export function Wall({
         fingerprint: null,
       };
       getOrCreateTerminal(newId);
+      // This Surface is born minimized — it never has a pane to detach — so register
+      // its meta directly, keeping the store the authority for EVERY Door
+      // (docs/specs/tiling-engine.md → "Parked leaves").
+      lath.store.addDoor(newId, terminalLeafMeta());
       addMinimizedSplitDoor(referenceId, { id: newId, token }, !focusNeutral);
       onEventRef.current?.({
         type: 'split',
@@ -1454,8 +1460,10 @@ export function Wall({
     setDoorDrag(null);
     if (!dd || !target) return;
     const item = dd.item;
-    const meta = lath.getMeta(item.id);
-    if (!meta) return;
+    // Every Door has store meta (minimize retains it, `addDoor` registers a
+    // born-minimized one, `seed` restores it); the fallback matches `handleReattach`
+    // so a drop can never be silently swallowed.
+    const meta = lath.getMeta(item.id) ?? terminalLeafMeta();
     const r = lath.store.insertLeaf(item.id, meta, target);
     if (!r.ok) return; // insert failed (unexpected) → the Door stays put
     removeDoorAndSelect(item.id);

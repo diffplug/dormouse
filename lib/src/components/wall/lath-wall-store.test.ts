@@ -508,6 +508,37 @@ describe('doored leaves', () => {
     expect(store.getSnapshot().leafMeta.has('b')).toBe(false);
   });
 
+  it('addDoor registers a leaf that is born minimized, and never clobbers a known id', () => {
+    const store = seeded();
+    store.addDoor('born', leafMeta({ title: 'Born' }));
+    // Meta without a tree entry: a Door that was never a pane.
+    expect(store.getSnapshot().leafMeta.get('born')?.title).toBe('Born');
+    expect(store.has('born')).toBe(false);
+    expect(leaves(store.getSnapshot().tree)).toEqual(['a', 'b']);
+    // It behaves like any other Door from here: writes reach it, and it can be
+    // admitted to the tree.
+    store.setTitle('born', 'renamed');
+    expect(store.getSnapshot().leafMeta.get('born')?.title).toBe('renamed');
+
+    // A live pane and an existing Door are both left alone.
+    const before = store.getSnapshot();
+    store.addDoor('a', leafMeta({ title: 'clobber' }));
+    store.addDoor('born', leafMeta({ title: 'clobber' }));
+    expect(store.getSnapshot()).toBe(before);
+  });
+
+  it('seed unparks by TREE membership, not by the meta it is handed', () => {
+    const store = seeded();
+    store.doorLeaf('b', { park: true });
+    // Hydration hands `seed` the Doors' meta alongside the tree's leaves. A parked id
+    // that appears only as a Door row must STAY parked — unparking it would unmount
+    // the DOM the park exists to preserve, and would queue its held rect as an enter
+    // hint for a leaf that never enters.
+    store.seed({ root: { kind: 'leaf', id: 'z' } }, [['z', leafMeta()], ['b', leafMeta({ component: 'browser' })]]);
+    expect(store.parkedIds()).toEqual(['b']);
+    expect(store.consumeEnterHints().has('b')).toBe(false);
+  });
+
   it('seed keeps parked leaves, minus any it admits to the new tree', () => {
     const store = seeded();
     store.doorLeaf('b', { park: true });
