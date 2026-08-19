@@ -38,7 +38,7 @@
  */
 
 import { chmod, lstat, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -56,13 +56,17 @@ import {
   PEER_SERVER_PROOF_DOMAIN,
   encodeFrame,
   forgetPeerRoutes,
+  freshNonce,
+  proofMatches,
+  proveToken,
   routedPtyId,
   type PeerLinkChallenge,
   type PeerLinkHello,
   type PeerLinkRequest,
   type PeerLinkResponse,
   type PeerLinkWelcome,
-} from '../../lib/src/lib/vscode-peer-link-protocol';
+} from './peer-link-protocol';
+import type { PtySink } from './processed-pty-streams';
 import { log } from './log';
 
 /**
@@ -74,14 +78,13 @@ import { log } from './log';
 export interface PeerLinkDeps {
   /** Fan out to this window's own webviews — never to other windows. */
   brokerRequest(op: string, params: unknown): Promise<unknown[]>;
+  /** A peer window's answers may have changed, so the directory is stale. */
+  invalidateDirectory(): void;
   /**
-   * A peer window's answers may have changed, so the directory is stale.
-   * `topic` is the webview's own word for what changed where there is one; a
-   * membership change carries none, and is always the directory's business.
+   * Watch one PTY this window owns, through the window's shared keyed registry
+   * (`processed-pty-streams.ts`) rather than a listener pair of this link's own.
    */
-  invalidateDirectory(topic?: string | null): void;
-  onProcessedPtyData(listener: (id: string, data: string) => void): () => void;
-  onProcessedPtyExit(listener: (id: string, exitCode: number) => void): () => void;
+  streamPty(ptyId: string, sink: PtySink): () => void;
   writePty(ptyId: string, data: string): void;
   resizePty(ptyId: string, cols: number, rows: number): void;
   /**
@@ -122,40 +125,6 @@ const RETRY_MS = 1_000;
  * contention loop open forever, because the loop awaits this rather than polls.
  */
 const HANDSHAKE_BUDGET_MS = 5_000;
-
-/**
- * One side's proof that it holds the token, computed over the *other* side's
- * fresh nonce.
- *
- * The token never crosses the socket, so a process that guessed the path and
- * captured the whole exchange has an HMAC over a nonce that will never be used
- * again, and nothing it can replay. `domain` is what keeps the two directions
- * from being the same function of the same key — without it a fake server could
- * reflect the client's own proof back as its welcome and pass for a broker.
- */
-function proveToken(token: string, domain: string, nonce: string): string {
-  return createHmac('sha256', token).update(domain + nonce).digest('base64url');
-}
-
-/**
- * Constant-time proof compare, with the same property the `dor` control socket's
- * `tokenMatches` has and for the same reason: `!==` on a secret-derived value
- * leaks it byte-by-byte to a co-resident local process that can time the
- * response, which is precisely the attacker this handshake exists to stop.
- * (That module is CommonJS and the shared protocol module must stay Node-free
- * for the webview, so the compare is a deliberate second copy.)
- */
-function proofMatches(provided: unknown, expected: string): boolean {
-  if (typeof provided !== 'string') return false;
-  const a = createHash('sha256').update(provided).digest();
-  const b = createHash('sha256').update(expected).digest();
-  return timingSafeEqual(a, b);
-}
-
-/** 128 bits, so no connection ever reuses another's challenge. */
-function freshNonce(): string {
-  return randomBytes(16).toString('base64url');
-}
 
 let context: vscode.ExtensionContext | null = null;
 
@@ -302,9 +271,10 @@ function send(
 /** Ask one peer and resolve when it answers, or when the budget expires. */
 function ask(
   client: PeerLinkClient,
-  // Only the correlated frames can be awaited; `commandResult` and `uiEvent`
-  // carry no frame id because nothing waits on them here.
-  frame: Extract<PeerLinkRequest, { id: string }>,
+  // `request` is the only frame anything waits on, and so the only one that
+  // carries an id; everything else is one-way and correlated by `ptyId` or by
+  // the `rhId` already inside it.
+  frame: Extract<PeerLinkRequest, { kind: 'request' }>,
 ): Promise<PeerLinkResponse | null> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
@@ -375,7 +345,7 @@ export function remoteSubscribe(ptyId: string, sink: RemotePtySink): void {
   if (!sinks) {
     sinks = new Set();
     remoteSinks.set(ptyId, sinks);
-    send(client, { kind: 'subscribe', id: `r${++nextRequestId}`, ptyId });
+    send(client, { kind: 'subscribe', ptyId });
   }
   sinks.add(sink);
 }
@@ -393,20 +363,20 @@ export function remoteUnsubscribe(ptyId: string, sink: RemotePtySink): void {
   remoteSinks.delete(ptyId);
   const client = routes.get(ptyId);
   if (!client) return;
-  send(client, { kind: 'unsubscribe', id: `r${++nextRequestId}`, ptyId });
+  send(client, { kind: 'unsubscribe', ptyId });
 }
 
 export function remoteWrite(ptyId: string, data: string): boolean {
   const client = routes.get(ptyId);
   if (!client) return false;
-  send(client, { kind: 'write', id: `r${++nextRequestId}`, ptyId, data });
+  send(client, { kind: 'write', ptyId, data });
   return true;
 }
 
 export function remoteResize(ptyId: string, cols: number, rows: number): boolean {
   const client = routes.get(ptyId);
   if (!client) return false;
-  send(client, { kind: 'resizePty', id: `r${++nextRequestId}`, ptyId, cols, rows });
+  send(client, { kind: 'resizePty', ptyId, cols, rows });
   return true;
 }
 
@@ -502,7 +472,7 @@ function onServerFrame(client: PeerLinkClient, frame: unknown): void {
     return;
   }
   if (response.kind === 'notify') {
-    deps?.invalidateDirectory(response.topic);
+    deps?.invalidateDirectory();
     return;
   }
   if (response.kind === 'command') {
@@ -568,7 +538,8 @@ async function tryBind(path: string, token: string): Promise<boolean> {
 // ---------------------------------------------------------------- client side
 
 let client: Socket | null = null;
-const pendingNotifications = new Set<string | null>();
+/** A change this window made while it had no broker to tell; sent on connect. */
+let pendingNotify = false;
 /** PTYs this window is streaming to the broker, and how to stop. */
 const forwarding = new Map<string, () => void>();
 
@@ -576,14 +547,14 @@ function respond(frame: PeerLinkResponse): void {
   client?.write(encodeFrame(frame));
 }
 
-export function remoteNotifyPeerChange(topic: string | null): void {
+export function remoteNotifyPeerChange(): void {
   // The broker is the destination; its own window was notified directly.
   if (server) return;
   if (!client || client.destroyed) {
-    pendingNotifications.add(topic);
+    pendingNotify = true;
     return;
   }
-  respond({ kind: 'notify', topic });
+  respond({ kind: 'notify' });
 }
 
 /**
@@ -613,20 +584,17 @@ async function onClientFrame(frame: unknown): Promise<void> {
     case 'subscribe': {
       if (forwarding.has(request.ptyId)) break;
       if (!deps) break;
-      const stops: Array<() => void> = [];
-      const stop = () => {
-        for (const dispose of stops) dispose();
-      };
-      stops.push(deps.onProcessedPtyData((id, data) => {
-        if (id === request.ptyId) respond({ kind: 'data', ptyId: id, data });
-      }));
-      stops.push(deps.onProcessedPtyExit((id, exitCode) => {
-        if (id !== request.ptyId) return;
-        respond({ kind: 'exit', ptyId: id, exitCode });
-        stop();
-        forwarding.delete(request.ptyId);
-      }));
-      forwarding.set(request.ptyId, stop);
+      const { ptyId } = request;
+      const stop = deps.streamPty(ptyId, {
+        onData: (data) => respond({ kind: 'data', ptyId, data }),
+        onExit: (exitCode) => {
+          respond({ kind: 'exit', ptyId, exitCode });
+          // The registry has already dropped this attachment, so the stored
+          // unsubscribe is spent; what is left is to stop claiming the PTY.
+          forwarding.delete(ptyId);
+        },
+      });
+      forwarding.set(ptyId, stop);
       break;
     }
     case 'unsubscribe':
@@ -732,8 +700,8 @@ function tryConnect(path: string, token: string): Promise<'connected' | 'refused
       }
       // Proved in both directions: from here it is the broker.
       client = socket;
-      for (const topic of pendingNotifications) socket.write(encodeFrame({ kind: 'notify', topic }));
-      pendingNotifications.clear();
+      if (pendingNotify) socket.write(encodeFrame({ kind: 'notify' }));
+      pendingNotify = false;
       socket.removeAllListeners('error');
       socket.on('error', drop);
       socket.on('close', drop);
@@ -775,8 +743,7 @@ let contending = false;
 let refused = false;
 let nextAttemptAt = 0;
 let announceRole: ((broker: boolean) => void) | null = null;
-let settledOnce: Promise<void> | null = null;
-let markSettled: (() => void) | null = null;
+const settleListeners = new Set<() => void>();
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -796,12 +763,16 @@ export function ensurePeerNet(onRole: (broker: boolean) => void): Promise<void> 
   }
   // No storage location means no socket to contend for, and no amount of
   // retrying would produce one; neither would an unsafe socket directory.
-  if (!context || disposed || refused) return Promise.resolve();
-  settledOnce ??= new Promise<void>((resolve) => {
-    markSettled = resolve;
+  if (!context || disposed) return Promise.resolve();
+  if (isPeerLinkSettled()) return Promise.resolve();
+  const settled = new Promise<void>((resolve) => {
+    const stop = onPeerLinkSettled(() => {
+      stop();
+      resolve();
+    });
   });
   void contend();
-  return settledOnce;
+  return settled;
 }
 
 /** Whether this window holds the Host. */
@@ -809,10 +780,33 @@ export function isPeerBroker(): boolean {
   return server !== null;
 }
 
+/**
+ * Whether this window has a role right now: it brokers, it is connected to a
+ * broker, or the link stood down for good. Not a latch — a broker dying takes
+ * its clients back to unsettled while they race for the bind, which is exactly
+ * the window in which a command has something to wait for rather than nothing
+ * to reach (`remote-host.ts`).
+ */
+export function isPeerLinkSettled(): boolean {
+  return server !== null || client !== null || refused;
+}
+
+/**
+ * Be told whenever a role settles — the first one and every one after a
+ * re-contention. Returns the unsubscribe.
+ */
+export function onPeerLinkSettled(listener: () => void): () => void {
+  settleListeners.add(listener);
+  return () => {
+    settleListeners.delete(listener);
+  };
+}
+
 function settle(broker: boolean): void {
+  // Before the listeners: whoever is waiting on a settle is waiting to route
+  // somewhere, and a broker has to be serving by the time they do.
   if (broker) announceRole?.(true);
-  markSettled?.();
-  markSettled = null;
+  for (const listener of [...settleListeners]) listener();
 }
 
 /**

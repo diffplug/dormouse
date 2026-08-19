@@ -10,9 +10,10 @@ import { createServer, type Server, type Socket } from 'node:net';
 import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-import { FrameDecoder, encodeFrame } from '../../lib/src/lib/vscode-peer-link-protocol';
 import { ENROLLMENT_KEY } from '../../lib/src/remote/host/store';
 import type { ExtensionMessage } from '../src/message-types';
+import { FrameDecoder, encodeFrame } from '../src/peer-link-protocol';
+import { createProcessedPtyStreams } from '../src/processed-pty-streams';
 import {
   derivedSocketPath as socketPathFor,
   fakeSink,
@@ -93,6 +94,16 @@ function fakeDeps() {
   const asked: Array<{ op: string; params: unknown }> = [];
   const dataListeners = new Set<(id: string, data: string) => void>();
   const exitListeners = new Set<(id: string, exitCode: number) => void>();
+  const streams = createProcessedPtyStreams(
+    (listener) => {
+      dataListeners.add(listener);
+      return () => void dataListeners.delete(listener);
+    },
+    (listener) => {
+      exitListeners.add(listener);
+      return () => void exitListeners.delete(listener);
+    },
+  );
   return {
     posted,
     asked,
@@ -112,14 +123,7 @@ function fakeDeps() {
         broadcastToWebviews: (message) => void posted.push(message),
         writePty: () => {},
         resizePty: () => {},
-        onProcessedPtyData: (listener) => {
-          dataListeners.add(listener);
-          return () => dataListeners.delete(listener);
-        },
-        onProcessedPtyExit: (listener) => {
-          exitListeners.add(listener);
-          return () => exitListeners.delete(listener);
-        },
+        streamPty: streams.streamPty,
       };
     },
   };
@@ -149,8 +153,7 @@ function bridgeLinkToHost(
   link.configurePeerLink({
     brokerRequest: local.brokerRequest,
     invalidateDirectory: mod.notifyDirectoryChanged,
-    onProcessedPtyData: local.onProcessedPtyData,
-    onProcessedPtyExit: local.onProcessedPtyExit,
+    streamPty: local.streamPty,
     writePty: local.writePty,
     resizePty: local.resizePty,
     handleForwardedCommand: mod.handleForwardedCommand,

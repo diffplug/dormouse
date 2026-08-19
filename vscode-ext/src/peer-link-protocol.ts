@@ -6,19 +6,22 @@
  * function call. Across windows there is no shared process at all — one
  * extension host per window — so the window holding the Host lease listens on a
  * local socket and the others connect to it. This module is the part with no
- * sockets in it: the frame shapes, the newline-delimited framing, and the table
- * that remembers which window a streaming PTY came from.
+ * sockets in it: the frame shapes, the newline-delimited framing, the table that
+ * remembers which window a streaming PTY came from, and the handshake
+ * primitives the two ends prove the shared token with.
  *
- * Kept free of sockets — and of Node imports, so the webview side can share
- * its types and budgets — meaning the protocol's edge cases (a split frame, a peer
- * that vanishes mid-attach) are testable without spawning processes.
+ * Kept free of sockets, so the protocol's edge cases (a split frame, a peer that
+ * vanishes mid-attach, a proof over the wrong nonce) are testable without
+ * spawning processes. `peer-link.ts` is the I/O and the lifecycle on top.
  */
+
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 import {
   ASK_BUDGET_MS,
   type RemoteHostCommand,
   type RemoteHostResult,
-} from '../host/remote/service-protocol';
+} from '../../lib/src/host/remote/service-protocol';
 
 /**
  * How long the broker waits for another window to answer before giving up on it.
@@ -39,13 +42,17 @@ export const PEER_REPLY_BUDGET_MS = ASK_BUDGET_MS + 2_000;
  * operation map and its real types live in `lib/src/remote/host/peer-surfaces.ts`
  * and this layer only moves the bytes. Adding an operation touches neither this
  * file nor the socket code.
+ *
+ * Only `request` carries a frame id, because only `request` is awaited. The
+ * four PTY frames are one-way instructions to the owning window: nothing waits
+ * on them, and the stream they start is correlated by `ptyId`.
  */
 export type PeerLinkRequest =
   | { kind: 'request'; id: string; op: string; params: unknown }
-  | { kind: 'subscribe'; id: string; ptyId: string }
-  | { kind: 'unsubscribe'; id: string; ptyId: string }
-  | { kind: 'write'; id: string; ptyId: string; data: string }
-  | { kind: 'resizePty'; id: string; ptyId: string; cols: number; rows: number }
+  | { kind: 'subscribe'; ptyId: string }
+  | { kind: 'unsubscribe'; ptyId: string }
+  | { kind: 'write'; ptyId: string; data: string }
+  | { kind: 'resizePty'; ptyId: string; cols: number; rows: number }
   /**
    * What the Host service made of a {@link PeerLinkResponse} `command`, sent
    * back to the one window that forwarded it and to no other. There is no frame
@@ -73,8 +80,8 @@ export type PeerLinkResponse =
   | { kind: 'data'; ptyId: string; data: string }
   /** Unsolicited: that PTY ended. */
   | { kind: 'exit'; ptyId: string; exitCode: number }
-  /** Unsolicited: future peer-query answers for this topic may differ. */
-  | { kind: 'notify'; topic: string | null }
+  /** Unsolicited: future peer-query answers may differ, so re-collect. */
+  | { kind: 'notify' }
   /**
    * Unsolicited: a webview command from a window with no Host of its own. Only
    * the broker runs a service, so a losing window's console hook, pairing
@@ -99,9 +106,6 @@ export type PeerLinkFrame = PeerLinkRequest | PeerLinkResponse;
  * useless rather than merely expensive — a fake server never proves knowledge of
  * the token, so a client hands it no directory, no PTY stream, and no commands
  * (`vscode-ext/src/peer-link.ts`).
- *
- * The HMAC itself is computed in the socket module, which may import
- * `node:crypto`; this one stays Node-free so the webview can share its types.
  */
 export interface PeerLinkChallenge {
   kind: 'challenge';
@@ -132,6 +136,40 @@ export const PEER_CLIENT_PROOF_DOMAIN = 'client:';
 export const PEER_SERVER_PROOF_DOMAIN = 'server:';
 
 export type PeerLinkHandshake = PeerLinkChallenge | PeerLinkHello | PeerLinkWelcome;
+
+/**
+ * One side's proof that it holds the token, computed over the *other* side's
+ * fresh nonce.
+ *
+ * The token never crosses the socket, so a process that guessed the path and
+ * captured the whole exchange has an HMAC over a nonce that will never be used
+ * again, and nothing it can replay. `domain` is what keeps the two directions
+ * from being the same function of the same key — without it a fake server could
+ * reflect the client's own proof back as its welcome and pass for a broker.
+ */
+export function proveToken(token: string, domain: string, nonce: string): string {
+  return createHmac('sha256', token).update(domain + nonce).digest('base64url');
+}
+
+/**
+ * Constant-time proof compare, with the same property the `dor` control socket's
+ * `tokenMatches` has and for the same reason: `!==` on a secret-derived value
+ * leaks it byte-by-byte to a co-resident local process that can time the
+ * response, which is precisely the attacker this handshake exists to stop.
+ * (That module is CommonJS and cannot import this one, so it keeps a deliberate
+ * second copy; this is the one copy for the peer link.)
+ */
+export function proofMatches(provided: unknown, expected: string): boolean {
+  if (typeof provided !== 'string') return false;
+  const a = createHash('sha256').update(provided).digest();
+  const b = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(a, b);
+}
+
+/** 128 bits, so no connection ever reuses another's challenge. */
+export function freshNonce(): string {
+  return randomBytes(16).toString('base64url');
+}
 
 export function encodeFrame(frame: PeerLinkFrame | PeerLinkHandshake): string {
   return `${JSON.stringify(frame)}\n`;

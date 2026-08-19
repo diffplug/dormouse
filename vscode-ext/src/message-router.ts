@@ -23,6 +23,7 @@ import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runA
 import { createIframeProxyUrl } from './iframe-proxy-host';
 import { ASK_BUDGET_MS } from '../../lib/src/host/remote/service-protocol';
 import { configurePeerLink, remoteNotifyPeerChange } from './peer-link';
+import { createProcessedPtyStreams } from './processed-pty-streams';
 import {
   configureRemoteHost,
   deliverCommandResult,
@@ -63,14 +64,14 @@ interface PendingRequest {
   timer: ReturnType<typeof setTimeout>;
 }
 const peerRequests = new Map<string, PendingRequest>();
+const processedPtyStreams = createProcessedPtyStreams(onProcessedPtyData, onProcessedPtyExit);
 
 // The link reaches other windows; it must never call back into a fan-out that
 // would reach them again, so it only ever gets the in-window broker.
 configurePeerLink({
   brokerRequest,
   invalidateDirectory: notifyDirectoryChanged,
-  onProcessedPtyData,
-  onProcessedPtyExit,
+  streamPty: processedPtyStreams.streamPty,
   writePty: (ptyId, data) => ptyManager.write(ptyId, data),
   resizePty: (ptyId, cols, rows) => ptyManager.resize(ptyId, cols, rows),
   // The Host half: which of these fire depends on which side of the bind this
@@ -85,8 +86,7 @@ configurePeerLink({
 configureRemoteHost({
   brokerRequest,
   broadcastToWebviews,
-  onProcessedPtyData,
-  onProcessedPtyExit,
+  streamPty: processedPtyStreams.streamPty,
   writePty: (ptyId, data) => ptyManager.write(ptyId, data),
   resizePty: (ptyId, cols, rows) => ptyManager.resize(ptyId, cols, rows),
 });
@@ -618,10 +618,10 @@ export function attachRouter(
       }
       case 'peer:notify':
         if (typeof msg.topic !== 'string') break;
-        // The topic travels: what a webview announced is what the broker's
-        // watchers filter on, here and at the far end of the link alike.
-        notifyDirectoryChanged(msg.topic);
-        remoteNotifyPeerChange(msg.topic);
+        // Directory is the only peer-query topic today; the transport only
+        // needs to carry the fact that its snapshot may have changed.
+        notifyDirectoryChanged();
+        remoteNotifyPeerChange();
         break;
       case 'remoteHost:command':
         handleRemoteHostCommand(msg.payload);
@@ -805,7 +805,7 @@ export function attachRouter(
       // One fewer webview to ask means the directory's answer changed, even if
       // no surface did.
       notifyDirectoryChanged();
-      remoteNotifyPeerChange(null);
+      remoteNotifyPeerChange();
       // A webview that goes away mid-fan-out must not hold the answer open.
       for (const request of peerRequests.values()) {
         if (!request.pending.delete(router)) continue;
@@ -830,6 +830,6 @@ export function attachRouter(
 
   activeRouters.add(router);
   notifyDirectoryChanged();
-  remoteNotifyPeerChange(null);
+  remoteNotifyPeerChange();
   return router;
 }

@@ -1,12 +1,23 @@
+/**
+ * The socket-free half of the peer link: frame shapes, framing, the PTY routing
+ * table, and the handshake primitives. `peer-link.test.ts` covers what only
+ * exists once there is a real socket.
+ */
+
 import { describe, expect, it } from 'vitest';
-import { ASK_BUDGET_MS } from '../host/remote/service-protocol';
+import { ASK_BUDGET_MS } from '../../lib/src/host/remote/service-protocol';
 import {
   FrameDecoder,
+  PEER_CLIENT_PROOF_DOMAIN,
   PEER_REPLY_BUDGET_MS,
+  PEER_SERVER_PROOF_DOMAIN,
   encodeFrame,
   forgetPeerRoutes,
+  freshNonce,
+  proofMatches,
+  proveToken,
   routedPtyId,
-} from './vscode-peer-link-protocol';
+} from '../src/peer-link-protocol';
 
 describe('reply budgets', () => {
   it('gives the cross-window wait more room than the fan-out it contains', () => {
@@ -63,6 +74,25 @@ describe('FrameDecoder', () => {
   it('ignores blank lines', () => {
     const decoder = new FrameDecoder();
     expect(decoder.push('\n\n')).toEqual([]);
+  });
+
+  it('carries the one-way PTY frames, which have no id of their own', () => {
+    // Nothing awaits them — the stream they start is correlated by `ptyId` —
+    // so a frame id would be a field nobody ever reads.
+    const decoder = new FrameDecoder();
+    expect(
+      decoder.push(
+        encodeFrame({ kind: 'subscribe', ptyId: 'pty-1' }) +
+          encodeFrame({ kind: 'write', ptyId: 'pty-1', data: 'ls\r' }) +
+          encodeFrame({ kind: 'resizePty', ptyId: 'pty-1', cols: 120, rows: 40 }) +
+          encodeFrame({ kind: 'unsubscribe', ptyId: 'pty-1' }),
+      ),
+    ).toEqual([
+      { kind: 'subscribe', ptyId: 'pty-1' },
+      { kind: 'write', ptyId: 'pty-1', data: 'ls\r' },
+      { kind: 'resizePty', ptyId: 'pty-1', cols: 120, rows: 40 },
+      { kind: 'unsubscribe', ptyId: 'pty-1' },
+    ]);
   });
 
   it('carries a forwarded command and its answer', () => {
@@ -155,5 +185,35 @@ describe('forgetPeerRoutes', () => {
     const routes = new Map<string, string>([['pty-1', 'window-a']]);
     expect(forgetPeerRoutes(routes, 'window-b')).toEqual([]);
     expect(routes.size).toBe(1);
+  });
+});
+
+describe('handshake proofs', () => {
+  it('binds a proof to the token, the domain, and the nonce', () => {
+    const proof = proveToken('token', PEER_CLIENT_PROOF_DOMAIN, 'nonce-1');
+    expect(proofMatches(proof, proveToken('token', PEER_CLIENT_PROOF_DOMAIN, 'nonce-1'))).toBe(true);
+    // A different token, a different nonce, or the other direction's domain all
+    // produce something that cannot pass for this one.
+    expect(proofMatches(proof, proveToken('other', PEER_CLIENT_PROOF_DOMAIN, 'nonce-1'))).toBe(false);
+    expect(proofMatches(proof, proveToken('token', PEER_CLIENT_PROOF_DOMAIN, 'nonce-2'))).toBe(false);
+    expect(proofMatches(proof, proveToken('token', PEER_SERVER_PROOF_DOMAIN, 'nonce-1'))).toBe(false);
+  });
+
+  it('never leaks the token into the proof', () => {
+    expect(proveToken('sup3r-s3cret', PEER_SERVER_PROOF_DOMAIN, 'n')).not.toContain('sup3r-s3cret');
+  });
+
+  it('refuses anything that is not a string, rather than throwing', () => {
+    // The compare runs on a frame a squatter wrote, so every shape has to be a
+    // plain `false` — including one whose length would otherwise throw.
+    const expected = proveToken('token', PEER_SERVER_PROOF_DOMAIN, 'n');
+    expect(proofMatches(undefined, expected)).toBe(false);
+    expect(proofMatches({ length: 43 }, expected)).toBe(false);
+    expect(proofMatches('short', expected)).toBe(false);
+  });
+
+  it('mints a fresh nonce every time', () => {
+    const nonces = new Set(Array.from({ length: 32 }, () => freshNonce()));
+    expect(nonces.size).toBe(32);
   });
 });

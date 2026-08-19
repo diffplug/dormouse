@@ -2,7 +2,7 @@
  * Bind-as-lease, driven end to end: two independent module instances standing
  * in for two VS Code windows, contending for one socket in a temp directory.
  * The frames and the routing table are unit-tested in
- * `lib/src/lib/vscode-peer-link-protocol.test.ts`; this covers the parts that
+ * `peer-link-protocol.test.ts`; this covers the parts that
  * only exist once there is a socket — who wins the bind, what a loser does when
  * the winner dies, PTY routing, and the token.
  */
@@ -18,7 +18,7 @@ import {
   PEER_CLIENT_PROOF_DOMAIN,
   PEER_SERVER_PROOF_DOMAIN,
   encodeFrame,
-} from '../../lib/src/lib/vscode-peer-link-protocol';
+} from '../src/peer-link-protocol';
 import {
   derivedSocketPath as socketPathFor,
   fakeContext,
@@ -243,7 +243,7 @@ describe('bind-as-lease', () => {
     const { brokerSide, peer } = await linkedPair();
     const before = brokerSide.invalidations;
 
-    peer.remoteNotifyPeerChange('directory');
+    peer.remoteNotifyPeerChange();
 
     await waitFor(() => brokerSide.invalidations > before);
   });

@@ -30,6 +30,7 @@ import type { HostStateStore } from './host-state-store';
 import {
   REMOTE_HOST_EVENT_EVENT,
   REMOTE_HOST_RESULT_EVENT,
+  isRemoteHostCommand,
   type AdoptParams,
   type AdoptResult,
   type ApproveParams,
@@ -41,7 +42,6 @@ import {
   type PairingQueueItem,
   type PushDevicesResult,
   type PushParams,
-  type RemoteHostCommand,
   type RemoteHostConsoleStatus,
 } from './service-protocol';
 
@@ -137,8 +137,8 @@ export class RemoteHostService {
   }
 
   async handleCommand(raw: unknown): Promise<void> {
-    const command = raw as RemoteHostCommand | null;
-    if (!command || typeof command.rhId !== 'string' || typeof command.cmd !== 'string') return;
+    if (!isRemoteHostCommand(raw)) return;
+    const command = raw;
     try {
       const result = await this.#run(command.cmd, command.params);
       this.#sendToUi(REMOTE_HOST_RESULT_EVENT, { rhId: command.rhId, result });

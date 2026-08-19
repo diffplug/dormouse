@@ -15,6 +15,7 @@ import type {
   RemoteHostResult,
 } from '../../lib/src/host/remote/service-protocol';
 import type { PeerLinkClient, PeerLinkDeps } from '../src/peer-link';
+import { createProcessedPtyStreams } from '../src/processed-pty-streams';
 
 export async function tempStorageDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), 'dormouse-ext-'));
@@ -92,6 +93,16 @@ export function fakeWindow(
 ) {
   const dataListeners = new Set<(id: string, data: string) => void>();
   const exitListeners = new Set<(id: string, exitCode: number) => void>();
+  const streams = createProcessedPtyStreams(
+    (listener) => {
+      dataListeners.add(listener);
+      return () => void dataListeners.delete(listener);
+    },
+    (listener) => {
+      exitListeners.add(listener);
+      return () => void exitListeners.delete(listener);
+    },
+  );
   return {
     entries: options.entries ?? [],
     surfaces: options.surfaces ?? {},
@@ -126,14 +137,7 @@ export function fakeWindow(
         invalidateDirectory: () => {
           this.invalidations += 1;
         },
-        onProcessedPtyData: (listener) => {
-          dataListeners.add(listener);
-          return () => dataListeners.delete(listener);
-        },
-        onProcessedPtyExit: (listener) => {
-          exitListeners.add(listener);
-          return () => exitListeners.delete(listener);
-        },
+        streamPty: streams.streamPty,
         writePty: (ptyId, data) => void this.writes.push({ ptyId, data }),
         resizePty: (ptyId, cols, rows) => void this.resizes.push({ ptyId, cols, rows }),
         handleForwardedCommand: (payload, from) => void this.forwarded.push({ payload, from }),

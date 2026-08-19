@@ -44,6 +44,13 @@ export interface RemoteHostCommand {
   params?: unknown;
 }
 
+/** Validate the untrusted edge of either Host bridge before routing a command. */
+export function isRemoteHostCommand(value: unknown): value is RemoteHostCommand {
+  if (!value || typeof value !== 'object') return false;
+  const command = value as Partial<RemoteHostCommand>;
+  return typeof command.rhId === 'string' && typeof command.cmd === 'string';
+}
+
 /** service → webview, in reply to a command that has a result. */
 export interface RemoteHostResult {
   rhId: string;

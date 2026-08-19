@@ -47,7 +47,7 @@ export interface PeerSurfaceParams {
  * which is also what lets every field be required.
  *
  * `ptyId` is read by the cross-window link as the routing hint that says which
- * window this PTY lives in (`routedPtyId` in `lib/src/lib/vscode-peer-link-protocol.ts`).
+ * window this PTY lives in (`routedPtyId` in `vscode-ext/src/peer-link-protocol.ts`).
  */
 export interface PeerSurfaceResult {
   ptyId: string;

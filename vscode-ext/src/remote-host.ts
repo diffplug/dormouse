@@ -30,17 +30,20 @@ import { RemoteHostService } from '../../lib/src/host/remote/service';
 import {
   REMOTE_HOST_EVENT_EVENT,
   REMOTE_HOST_RESULT_EVENT,
+  isRemoteHostCommand,
   type RemoteHostCommand,
   type RemoteHostResult,
 } from '../../lib/src/host/remote/service-protocol';
-import type { HostSurfaceProvider, PtySink } from '../../lib/src/remote/host/host-surface-provider';
+import type { HostSurfaceProvider } from '../../lib/src/remote/host/host-surface-provider';
 import type { WebSocketLike } from '../../lib/src/remote/host/remote-host';
 import type { ExtensionMessage } from './message-types';
 import {
   broadcastUiEvent,
   ensurePeerNet,
   forwardCommand,
+  isPeerLinkSettled,
   isRemotePty,
+  onPeerLinkSettled,
   remoteRequest,
   remoteResize,
   remoteSubscribe,
@@ -50,6 +53,7 @@ import {
   sendUiEvent,
   type PeerLinkClient,
 } from './peer-link';
+import type { PtySink } from './processed-pty-streams';
 import { VsCodeHostStateStore } from './remote-host-store';
 import { log } from './log';
 
@@ -64,8 +68,11 @@ export interface RemoteHostDeps {
   broadcastToWebviews(message: ExtensionMessage): void;
   writePty(ptyId: string, data: string): void;
   resizePty(ptyId: string, cols: number, rows: number): void;
-  onProcessedPtyData(listener: (id: string, data: string) => void): () => void;
-  onProcessedPtyExit(listener: (id: string, exitCode: number) => void): () => void;
+  /**
+   * Watch one PTY this window owns, through the window's shared keyed registry
+   * (`processed-pty-streams.ts`) rather than a listener pair per attachment.
+   */
+  streamPty(ptyId: string, sink: PtySink): () => void;
 }
 
 let deps: RemoteHostDeps | null = null;
@@ -135,73 +142,20 @@ export function createRemoteHostProvider(bound: RemoteHostDeps): HostSurfaceProv
         remoteSubscribe(ptyId, sink);
         return () => remoteUnsubscribe(ptyId, sink);
       }
-      return streamLocalPty(bound, ptyId, sink);
+      // One of this window's own, through the keyed registry every consumer of
+      // the processed stream shares (`processed-pty-streams.ts`).
+      return bound.streamPty(ptyId, sink);
     },
   });
   return askProvider.provider;
 }
 
-/** Sinks on this window's own PTYs, keyed by the id they are watching. */
-const localStreams = new Map<string, Set<PtySink>>();
-let stopLocalListeners: (() => void) | null = null;
-
-/**
- * Stream a PTY this window owns, through one listener pair for the whole window
- * rather than one per attachment: these run on every chunk of every terminal in
- * the window, so a listener per attachment would tax every keystroke of every
- * PTY once per attached surface.
- *
- * No strip parser here, unlike the sidecar: this process already runs the
- * terminal-protocol parser once per chunk and answers its queries, and
- * `onProcessedPtyData` is what comes out the other side. A second parser would
- * answer every query twice and corrupt the PTY.
- */
-function streamLocalPty(bound: RemoteHostDeps, ptyId: string, sink: PtySink): () => void {
-  let sinks = localStreams.get(ptyId);
-  if (!sinks) {
-    sinks = new Set();
-    localStreams.set(ptyId, sinks);
-  }
-  const subscribed = sinks;
-  subscribed.add(sink);
-
-  if (!stopLocalListeners) {
-    const offData = bound.onProcessedPtyData((id, data) => {
-      const targets = localStreams.get(id);
-      if (!targets) return;
-      for (const target of targets) target.onData(data);
-    });
-    const offExit = bound.onProcessedPtyExit((id, exitCode) => {
-      const targets = localStreams.get(id);
-      if (!targets) return;
-      // Iterated live rather than copied: an exit tears its own attachment
-      // down, which a Set tolerates mid-iteration.
-      for (const target of targets) target.onExit(exitCode);
-    });
-    stopLocalListeners = () => {
-      offData();
-      offExit();
-    };
-  }
-
-  return () => {
-    subscribed.delete(sink);
-    if (subscribed.size > 0) return;
-    localStreams.delete(ptyId);
-    // Nothing attached: back to costing this window's terminals nothing.
-    if (localStreams.size > 0) return;
-    stopLocalListeners?.();
-    stopLocalListeners = null;
-  };
-}
-
 /**
  * Something a future directory answer could depend on changed: a pane, an
- * alert, a webview, a peer window. `topic` is a webview's own word for what
- * changed; a change with no topic is always the directory's business.
+ * alert, a webview, a peer window.
  */
-export function notifyDirectoryChanged(topic?: string | null): void {
-  askProvider?.notifyDirectoryChanged(topic);
+export function notifyDirectoryChanged(): void {
+  askProvider?.notifyDirectoryChanged();
 }
 
 /**
@@ -249,33 +203,33 @@ function startService(): void {
 }
 
 /**
- * Whether a contention is running right now. While it is, this window is
- * neither a broker nor a client: {@link handleRemoteHostCommand} holds commands
- * instead of refusing them, because a refusal here is indistinguishable to the
- * caller from "this machine has no Host at all".
+ * Whether this window has joined the contention at all. Until it has there is
+ * no role coming and nothing for a command to wait for, so
+ * {@link handleRemoteHostCommand} refuses rather than holds — which is the
+ * honest answer on a machine that never enrolled.
  */
-let settling: Promise<void> | null = null;
+let contending = false;
 
 /**
  * Join the contention for the Host and start serving if this window wins it.
- * Idempotent; resolves once a role is settled.
+ * Idempotent.
  */
-function contendForHost(): Promise<void> {
-  settling ??= ensurePeerNet((broker) => {
+function contendForHost(): void {
+  contending = true;
+  void ensurePeerNet((broker) => {
     if (broker) startService();
-  }).then(
-    () => {
-      settling = null;
-      drainQueuedCommands();
-    },
-    (error: unknown) => {
-      settling = null;
-      log.error(`[remote-host] contention failed: ${String(error)}`);
-      drainQueuedCommands();
-    },
-  );
-  return settling;
+  });
+  // A role that was already held (or a link that stood down for good) sends no
+  // settle notification, so anything queued has to be drained here instead.
+  if (isPeerLinkSettled()) drainQueuedCommands();
 }
+
+/**
+ * Every settle drains, not just the first: a broker window closing sends every
+ * survivor back into the contention, and the second or third role this window
+ * takes has to pick up whatever arrived during that race.
+ */
+onPeerLinkSettled(() => drainQueuedCommands());
 
 /**
  * Which window is owed each in-flight answer, for the commands that came over
@@ -352,19 +306,21 @@ function drainQueuedCommands(): void {
  * The broker runs it; every other window forwards it over the link and gets the
  * broker's answer back as a `remoteHost:result` like any other.
  *
- * A window that is still contending has neither yet, and the contention takes
- * as long as a bind and a handshake — so the command is held and drained when a
- * role settles rather than refused. Refusing then would tell an enrolled
- * machine's webview that it has no Host, seconds before it gets one, and the
- * gates that arm on that answer would stay down.
+ * One rule covers the rest: while this window is contending and unsettled it
+ * has neither, so the command is held and drained on the next settle rather
+ * than refused. That is the state at activation, when the contention costs a
+ * bind and a handshake, *and* the second or two after a broker window closes
+ * and every survivor races for the socket — and refusing in either would tell
+ * an enrolled machine's webview it has no Host moments before it gets one,
+ * leaving the gates that arm on that answer down.
  *
  * `enroll` is the one command that may start the contention: it is how an
  * installation with no Host at all bootstraps. Everything else refuses only
- * where there is genuinely nothing to reach — nothing contending, no service,
- * no broker.
+ * where there is genuinely nothing to reach — never contending, or settled with
+ * no service and no broker.
  */
 export function handleRemoteHostCommand(payload: RemoteHostCommand | undefined): void {
-  if (!isCommand(payload)) return;
+  if (!isRemoteHostCommand(payload)) return;
   if (service) {
     void service.handleCommand(payload);
     return;
@@ -375,10 +331,10 @@ export function handleRemoteHostCommand(payload: RemoteHostCommand | undefined):
     // window enrolled first, this window is a client and the command belongs
     // on the link, which is exactly what the drain does.
     enqueueCommand(payload);
-    void contendForHost();
+    contendForHost();
     return;
   }
-  if (settling) {
+  if (contending && !isPeerLinkSettled()) {
     enqueueCommand(payload);
     return;
   }
@@ -397,7 +353,7 @@ export function handleForwardedCommand(
   payload: RemoteHostCommand | undefined,
   from: PeerLinkClient,
 ): void {
-  if (!isCommand(payload)) return;
+  if (!isRemoteHostCommand(payload)) return;
   commandRoutes.set(payload.rhId, from);
   // Only a window that bound the socket is sent one of these, and binding is
   // what starts the service — but if there is somehow none, say so rather than
@@ -438,10 +394,6 @@ export function greetPeerWindow(client: PeerLinkClient): void {
   sendUiEvent(client, service.statusEvent());
 }
 
-function isCommand(payload: RemoteHostCommand | undefined): payload is RemoteHostCommand {
-  return !!payload && typeof payload.rhId === 'string' && typeof payload.cmd === 'string';
-}
-
 function refuse(rhId: string): void {
   deps?.broadcastToWebviews({ type: 'remoteHost:result', payload: { rhId, error: NO_HOST } });
 }
@@ -459,6 +411,7 @@ export function initRemoteHost(ctx: vscode.ExtensionContext): vscode.Disposable 
       service?.dispose();
       service = null;
       askProvider = null;
+      contending = false;
       commandRoutes.clear();
       for (const { timer } of queued.splice(0)) clearTimeout(timer);
       store?.dispose();
@@ -472,7 +425,7 @@ function contendIfEnrolled(ctx: vscode.ExtensionContext): Promise<void> {
   return hostStateStore(ctx)
     .loadEnrollment()
     .then((enrollment) => {
-      if (enrollment) return contendForHost();
+      if (enrollment) contendForHost();
     })
     .catch((error: unknown) => {
       log.error(`[remote-host] could not read the enrollment: ${String(error)}`);

@@ -22,9 +22,9 @@ import { RemoteHostService } from './service';
 import {
   ASK_BUDGET_MS,
   REMOTE_HOST_ASK_EVENT,
+  isRemoteHostCommand,
   type AnswerParams,
   type NotifyParams,
-  type RemoteHostCommand,
 } from './service-protocol';
 
 /** The slice of `pty-core`'s manager the Host drives. */
@@ -202,8 +202,8 @@ export function createSidecarRemoteHost(options: SidecarRemoteHostOptions): Side
 
   return {
     handleCommand(data) {
-      const command = data as RemoteHostCommand | null;
-      if (!command || typeof command.cmd !== 'string') return;
+      if (!isRemoteHostCommand(data)) return;
+      const command = data;
       // Both of these feed something already waiting on this side, so they
       // answer nothing and never reach the service's dispatch.
       if (command.cmd === 'answer') return bridge.onAnswer(command.params as AnswerParams);
