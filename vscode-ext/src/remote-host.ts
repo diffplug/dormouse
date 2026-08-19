@@ -20,7 +20,11 @@
 
 import type * as vscode from 'vscode';
 
-import { DEFAULT_REMOTE_CONNECT_SRC } from '../../lib/src/host/remote/connect-src';
+import {
+  createAskSurfaceProvider,
+  type AskSurfaceProvider,
+} from '../../lib/src/host/remote/ask-surface-provider';
+import { bakedConnectSrc } from '../../lib/src/host/remote/connect-src';
 import { RemoteHostService } from '../../lib/src/host/remote/service';
 import {
   REMOTE_HOST_EVENT_EVENT,
@@ -28,12 +32,7 @@ import {
   type RemoteHostCommand,
   type RemoteHostResult,
 } from '../../lib/src/host/remote/service-protocol';
-import type {
-  DirectoryEntry,
-  HostSurfaceProvider,
-  SurfaceHandle,
-} from '../../lib/src/remote/host/host-surface-provider';
-import type { PeerSurfaceResult } from '../../lib/src/remote/host/peer-surfaces';
+import type { HostSurfaceProvider, PtySink } from '../../lib/src/remote/host/host-surface-provider';
 import type { ExtensionMessage } from './message-types';
 import {
   broadcastUiEvent,
@@ -50,14 +49,6 @@ import {
 } from './peer-link';
 import { VsCodeHostStateStore } from './remote-host-store';
 import { log } from './log';
-
-/**
- * Remote-server `connect-src` sources, substituted by esbuild at build time
- * (`scripts/esbuild.mjs`). Declared rather than imported so the value is a
- * literal in the bundle and cannot be changed at runtime. The service refuses
- * to enroll with, or connect to, anything outside it.
- */
-declare const __DORMOUSE_REMOTE_CONNECT_SRC__: string;
 
 /**
  * What this module needs from the router, injected rather than imported: the
@@ -81,8 +72,13 @@ export function configureRemoteHost(next: RemoteHostDeps): void {
 }
 
 let context: vscode.ExtensionContext | null = null;
+/**
+ * One store for the window: `SecretStorage` is a keychain round trip, and the
+ * activation probe and the service would otherwise each pay for their own.
+ */
+let store: VsCodeHostStateStore | null = null;
 let service: RemoteHostService | null = null;
-const directoryWatchers = new Set<() => void>();
+let askProvider: AskSurfaceProvider | null = null;
 
 /**
  * Ask both tiers at once and concatenate what they answer, this window's
@@ -117,65 +113,7 @@ async function askBothTiers(
  * terminal on the machine rather than the broker window's alone.
  */
 export function createRemoteHostProvider(bound: RemoteHostDeps): HostSurfaceProvider {
-  return {
-    async collectDirectory(): Promise<DirectoryEntry[]> {
-      // Each webview answers with its whole snapshot, so the results *are* the
-      // entries — no per-webview merging to do on this side.
-      return (await askBothTiers(bound, 'directory', {})) as DirectoryEntry[];
-    },
-
-    watchDirectory(onChange) {
-      directoryWatchers.add(onChange);
-      return () => {
-        directoryWatchers.delete(onChange);
-      };
-    },
-
-    async resolveSurface(surfaceId, size): Promise<SurfaceHandle | null> {
-      // Attach-is-the-resize: the owner applies the size inside this round trip,
-      // because there is no way to reach into its xterm afterwards without a
-      // second one (docs/specs/remote-api.md). One surface has one owner, so the
-      // first answer out of both tiers is the answer.
-      const [owner] = (await askBothTiers(bound, 'surfaceOp', {
-        surfaceId,
-        op: 'attach',
-        cols: size.cols,
-        rows: size.rows,
-      })) as PeerSurfaceResult[];
-      if (!owner) return null;
-
-      let cols = owner.cols;
-      let rows = owner.rows;
-      return {
-        ptyId: owner.ptyId,
-        get cols() {
-          return cols;
-        },
-        get rows() {
-          return rows;
-        },
-        // The owner is the only one that can read the pane back, so remember
-        // what it reported; a resize nobody answered leaves the last known size
-        // standing.
-        resize: async (nextCols, nextRows) => {
-          const [settled] = (await askBothTiers(bound, 'surfaceOp', {
-            surfaceId,
-            op: 'resize',
-            cols: nextCols,
-            rows: nextRows,
-          })) as PeerSurfaceResult[];
-          if (settled) {
-            cols = settled.cols;
-            rows = settled.rows;
-          }
-          return { cols, rows };
-        },
-        // Nothing to unwind: the stream is owned by the `streamPty`
-        // subscription, not by holding the surface.
-        release: () => {},
-      };
-    },
-
+  askProvider = createAskSurfaceProvider((op, params) => askBothTiers(bound, op, params), {
     // The link takes only a PTY it has a route for, and a route is placed only
     // by an attach another window answered — so a PTY of this window's own can
     // never be taken out from under the manager that owns it.
@@ -194,34 +132,80 @@ export function createRemoteHostProvider(bound: RemoteHostDeps): HostSurfaceProv
         remoteSubscribe(ptyId, sink);
         return () => remoteUnsubscribe(ptyId, sink);
       }
-      // No strip parser here, unlike the sidecar: this process already runs the
-      // terminal-protocol parser once per chunk and answers its queries, and
-      // `onProcessedPtyData` is what comes out the other side. A second parser
-      // would answer every query twice and corrupt the PTY.
-      const offData = bound.onProcessedPtyData((id, data) => {
-        if (id === ptyId) sink.onData(data);
-      });
-      const offExit = bound.onProcessedPtyExit((id, exitCode) => {
-        if (id === ptyId) sink.onExit(exitCode);
-      });
-      return () => {
-        offData();
-        offExit();
-      };
+      return streamLocalPty(bound, ptyId, sink);
     },
+  });
+  return askProvider.provider;
+}
+
+/** Sinks on this window's own PTYs, keyed by the id they are watching. */
+const localStreams = new Map<string, Set<PtySink>>();
+let stopLocalListeners: (() => void) | null = null;
+
+/**
+ * Stream a PTY this window owns, through one listener pair for the whole window
+ * rather than one per attachment: these run on every chunk of every terminal in
+ * the window, so a listener per attachment would tax every keystroke of every
+ * PTY once per attached surface.
+ *
+ * No strip parser here, unlike the sidecar: this process already runs the
+ * terminal-protocol parser once per chunk and answers its queries, and
+ * `onProcessedPtyData` is what comes out the other side. A second parser would
+ * answer every query twice and corrupt the PTY.
+ */
+function streamLocalPty(bound: RemoteHostDeps, ptyId: string, sink: PtySink): () => void {
+  let sinks = localStreams.get(ptyId);
+  if (!sinks) {
+    sinks = new Set();
+    localStreams.set(ptyId, sinks);
+  }
+  const subscribed = sinks;
+  subscribed.add(sink);
+
+  if (!stopLocalListeners) {
+    const offData = bound.onProcessedPtyData((id, data) => {
+      const targets = localStreams.get(id);
+      if (!targets) return;
+      for (const target of targets) target.onData(data);
+    });
+    const offExit = bound.onProcessedPtyExit((id, exitCode) => {
+      const targets = localStreams.get(id);
+      if (!targets) return;
+      // Iterated live rather than copied: an exit tears its own attachment
+      // down, which a Set tolerates mid-iteration.
+      for (const target of targets) target.onExit(exitCode);
+    });
+    stopLocalListeners = () => {
+      offData();
+      offExit();
+    };
+  }
+
+  return () => {
+    subscribed.delete(sink);
+    if (subscribed.size > 0) return;
+    localStreams.delete(ptyId);
+    // Nothing attached: back to costing this window's terminals nothing.
+    if (localStreams.size > 0) return;
+    stopLocalListeners?.();
+    stopLocalListeners = null;
   };
 }
 
-/** Something the directory depends on changed: a pane, an alert, a webview. */
-export function notifyDirectoryChanged(): void {
-  for (const watcher of [...directoryWatchers]) watcher();
+/**
+ * Something a future directory answer could depend on changed: a pane, an
+ * alert, a webview, a peer window. `topic` is a webview's own word for what
+ * changed; a change with no topic is always the directory's business.
+ */
+export function notifyDirectoryChanged(topic?: string | null): void {
+  askProvider?.notifyDirectoryChanged(topic);
 }
 
 function startService(): void {
   if (service || !context || !deps) return;
   const bound = deps;
   service = new RemoteHostService({
-    store: new VsCodeHostStateStore(context),
+    store: hostStateStore(context),
     provider: createRemoteHostProvider(bound),
     sendToUi: (event, data) => {
       if (event === REMOTE_HOST_RESULT_EVENT) {
@@ -234,12 +218,7 @@ function startService(): void {
         broadcastUiEvent(data);
       }
     },
-    // The `typeof` guard is for the test runner, which has no esbuild define;
-    // a real build substitutes both halves with the baked literal.
-    connectSrc:
-      typeof __DORMOUSE_REMOTE_CONNECT_SRC__ === 'string'
-        ? __DORMOUSE_REMOTE_CONNECT_SRC__
-        : DEFAULT_REMOTE_CONNECT_SRC,
+    connectSrc: bakedConnectSrc(),
   });
   void service.start().catch((error: unknown) => {
     log.error(`[remote-host] failed to start: ${String(error)}`);
@@ -368,7 +347,7 @@ function refuse(rhId: string): void {
  */
 export function initRemoteHost(ctx: vscode.ExtensionContext): vscode.Disposable {
   context = ctx;
-  void new VsCodeHostStateStore(ctx)
+  void hostStateStore(ctx)
     .loadEnrollment()
     .then((enrollment) => {
       if (enrollment) return contendForHost();
@@ -381,9 +360,16 @@ export function initRemoteHost(ctx: vscode.ExtensionContext): vscode.Disposable 
     dispose() {
       service?.dispose();
       service = null;
-      directoryWatchers.clear();
+      askProvider = null;
       commandRoutes.clear();
+      store = null;
       context = null;
     },
   };
+}
+
+/** The window's one store, made on first use. */
+function hostStateStore(ctx: vscode.ExtensionContext): VsCodeHostStateStore {
+  store ??= new VsCodeHostStateStore(ctx);
+  return store;
 }

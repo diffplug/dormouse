@@ -6,10 +6,13 @@
 //   - lib/src/host/remote/sidecar-entry.ts → sidecar/remote-host.cjs
 // See docs/specs/dor-browser.md and docs/specs/remote-api.md.
 import { build } from 'esbuild';
-import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { resolveRemoteConnectSrc } from '../../scripts/csp-defaults.mjs';
+import {
+  assertConnectSrcBaked,
+  CONNECT_SRC_PLACEHOLDER,
+  resolveRemoteConnectSrc,
+} from '../../scripts/csp-defaults.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const libHost = path.resolve(here, '../../lib/src/host');
@@ -18,7 +21,6 @@ const sidecar = path.resolve(here, '../sidecar');
 // Where the remote Host may reach a relay server. The Host runs in the sidecar,
 // so this is the enforcement point — there is no webview CSP in front of it.
 const remoteSrc = resolveRemoteConnectSrc(process.env, 'sidecar');
-const CONNECT_SRC_PLACEHOLDER = '__DORMOUSE_REMOTE_CONNECT_SRC__';
 
 const bundles = [
   { entry: 'iframe-proxy.ts', out: 'iframe-proxy.cjs' },
@@ -43,20 +45,6 @@ for (const { entry, out, define, assertBaked } of bundles) {
     logLevel: 'warning',
     ...(define ? { define } : {}),
   });
-  // The source reads the placeholder as a `declare const`, so a lost define
-  // compiles fine and only fails at runtime — as a Host that silently falls back
-  // to the shipped default allowlist. Fail the build instead, like the VS Code
-  // side does (vscode-ext/scripts/esbuild.mjs).
-  if (assertBaked) {
-    const bundled = readFileSync(outfile, 'utf8');
-    if (bundled.includes(CONNECT_SRC_PLACEHOLDER)) {
-      throw new Error(
-        `connect-src: ${CONNECT_SRC_PLACEHOLDER} survived into ${out} — the esbuild define did not apply.`,
-      );
-    }
-    if (!bundled.includes(remoteSrc)) {
-      throw new Error(`connect-src: ${out} does not contain the resolved sources (${remoteSrc}).`);
-    }
-  }
+  if (assertBaked) assertConnectSrcBaked(outfile, remoteSrc);
   console.log(`[sidecar] built ${path.relative(process.cwd(), outfile)}`);
 }

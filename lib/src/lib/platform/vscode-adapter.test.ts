@@ -385,6 +385,11 @@ describe('VSCodeAdapter PTY exit handling', () => {
 // The remote Host lives in the extension host, in whichever VS Code window won
 // the bind (vscode-ext/src/remote-host.ts). This is the webview's end of that
 // bridge; the contract is lib/src/host/remote/service-protocol.ts.
+//
+// Only what this transport adds is covered here: which message carries what,
+// and the host-token guard in front of all of it. The correlation, timeout,
+// always-answer, and dispose rules are the shared client's
+// (lib/src/host/remote/link-client.test.ts).
 describe('VSCodeAdapter remote host link', () => {
   beforeEach(stubWebviewEnv);
 
@@ -405,57 +410,15 @@ describe('VSCodeAdapter remote host link', () => {
     windowTarget.dispatchEvent(hostMessage(data));
   }
 
-  it('resolves a command by its rhId', async () => {
+  it('posts a command and settles it from the result message', async () => {
     const adapter = new VSCodeAdapter();
     const pending = adapter.remoteHost.command('status');
 
     const payload = sent()[0]!;
     expect(payload.cmd).toBe('status');
-    // A result for someone else's rhId must not resolve this one.
-    deliver({ type: 'remoteHost:result', payload: { rhId: 'other', result: { enrolled: false } } });
     deliver({ type: 'remoteHost:result', payload: { rhId: payload.rhId, result: { enrolled: true } } });
 
     expect(await pending).toEqual({ enrolled: true });
-  });
-
-  it('mints rhIds no sibling webview can collide with', () => {
-    // Results are broadcast to every webview in the window, so two adapters
-    // counting from 1 would settle each other's commands.
-    const a = new VSCodeAdapter();
-    const b = new VSCodeAdapter();
-    void a.remoteHost.command('status');
-    void b.remoteHost.command('status');
-
-    const ids = sent().map((payload) => payload.rhId);
-    expect(ids).toHaveLength(2);
-    expect(new Set(ids).size).toBe(2);
-  });
-
-  it('rejects with the error the service reported', async () => {
-    const adapter = new VSCodeAdapter();
-    const pending = adapter.remoteHost.command('enroll', { serverUrl: 'https://nope' });
-    deliver({
-      type: 'remoteHost:result',
-      payload: { rhId: sent()[0]!.rhId, error: 'no remote Host is reachable' },
-    });
-    await expect(pending).rejects.toThrow('no remote Host is reachable');
-  });
-
-  it('rejects when the extension host never answers', async () => {
-    const adapter = new VSCodeAdapter();
-    vi.useFakeTimers();
-    try {
-      const pending = adapter.remoteHost.command('status');
-      const rejected = expect(pending).rejects.toThrow(/timed out/);
-      await vi.advanceTimersByTimeAsync(20_000);
-      await rejected;
-      // The late answer finds nothing to settle.
-      expect(() =>
-        deliver({ type: 'remoteHost:result', payload: { rhId: sent()[0]!.rhId, result: {} } }),
-      ).not.toThrow();
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it('answers an ask from the registered responder', () => {
@@ -473,44 +436,28 @@ describe('VSCodeAdapter remote host link', () => {
     });
   });
 
-  it('answers with nothing rather than leaving an ask open', () => {
-    const adapter = new VSCodeAdapter();
-    // Nobody responds to this op, and a handler that throws is the same case:
-    // the broker would otherwise hold the fan-out for its whole budget.
-    deliver({ type: 'peer:ask', requestId: 'ask-1', op: 'directory', params: {} });
-    adapter.remoteHost.respond('directory', () => {
-      throw new Error('registry blew up');
-    });
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    deliver({ type: 'peer:ask', requestId: 'ask-2', op: 'directory', params: {} });
-
-    const answers = postMessage.mock.calls
-      .map((call) => call[0])
-      .filter((message) => message.type === 'peer:answer');
-    expect(answers).toEqual([
-      { type: 'peer:answer', requestId: 'ask-1', results: [] },
-      { type: 'peer:answer', requestId: 'ask-2', results: [] },
-    ]);
-  });
-
-  it('fans events out by name, and stops after unsubscribe', () => {
+  it('fans an extension-host event out by name', () => {
     const adapter = new VSCodeAdapter();
     const seen: unknown[] = [];
-    const unsubscribe = adapter.remoteHost.on('pairing-queue', (data) => void seen.push(data));
+    adapter.remoteHost.on('pairing-queue', (data) => void seen.push(data));
 
     deliver({ type: 'remoteHost:event', payload: { name: 'pairing-queue', queue: [{ clientId: 'c1' }] } });
-    deliver({ type: 'remoteHost:event', payload: { name: 'something-else', queue: [] } });
     expect(seen).toEqual([{ name: 'pairing-queue', queue: [{ clientId: 'c1' }] }]);
-
-    unsubscribe();
-    deliver({ type: 'remoteHost:event', payload: { name: 'pairing-queue', queue: [] } });
-    expect(seen).toHaveLength(1);
   });
 
   it('notifies without waiting for anything', () => {
     const adapter = new VSCodeAdapter();
     adapter.remoteHost.notify('directory');
     expect(postMessage).toHaveBeenCalledWith({ type: 'peer:notify', topic: 'directory' });
+  });
+
+  it('rejects what is still in flight when the webview shuts down', async () => {
+    // The extension host cleans up the PTYs, but nothing there will ever answer
+    // a command this webview is still holding.
+    const adapter = new VSCodeAdapter();
+    const pending = adapter.remoteHost.command('status');
+    adapter.shutdown();
+    await expect(pending).rejects.toThrow('remote host bridge closed');
   });
 
   it('ignores an unauthenticated result, so framed content cannot settle a command', async () => {

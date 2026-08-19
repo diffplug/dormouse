@@ -103,6 +103,11 @@ describe("TauriAdapter legacy session cleanup", () => {
 // (lib/src/host/remote/service-protocol.ts). Correlation is `rhId`, never
 // `requestId` — Rust swallows any sidecar line carrying the latter to resolve
 // its own pending invokes.
+//
+// Only what this transport adds is covered here: one invoke carries everything,
+// so an answer and a notify ride it as ordinary commands. The correlation,
+// timeout, always-answer, and dispose rules are the shared client's
+// (lib/src/host/remote/link-client.test.ts).
 describe("TauriAdapter remote host link", () => {
   type Payload = { rhId: string; cmd: string; params?: unknown };
 
@@ -146,28 +151,6 @@ describe("TauriAdapter remote host link", () => {
     expect(await pending).toEqual({ enrolled: true });
   });
 
-  it("rejects with the error the service reported", async () => {
-    const { adapter, sent, deliver } = await bridged();
-    const pending = adapter.remoteHost.command("enroll", { serverUrl: "https://nope" });
-    deliver("remoteHost:result", { rhId: sent()[0]!.rhId, error: "outside the allowed sources" });
-    await expect(pending).rejects.toThrow("outside the allowed sources");
-  });
-
-  it("rejects when the sidecar never answers", async () => {
-    const { adapter, deliver } = await bridged();
-    vi.useFakeTimers();
-    try {
-      const pending = adapter.remoteHost.command("status");
-      const rejected = expect(pending).rejects.toThrow(/timed out/);
-      await vi.advanceTimersByTimeAsync(20_000);
-      await rejected;
-      // The late answer finds nothing to settle.
-      expect(() => deliver("remoteHost:result", { rhId: "rh-1", result: {} })).not.toThrow();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it("answers an ask from the registered responder", async () => {
     const { adapter, sent, deliver } = await bridged();
     adapter.remoteHost.respond("surfaceOp", (params) => [
@@ -182,34 +165,13 @@ describe("TauriAdapter remote host link", () => {
     });
   });
 
-  it("answers with nothing rather than leaving an ask open", async () => {
-    const { adapter, sent, deliver } = await bridged();
-    // Nobody responds to this op, and a handler that throws is the same case:
-    // the service would otherwise hold the ask for its whole budget.
-    deliver("remoteHost:ask", { rhId: "ask-1", op: "directory", params: {} });
-    adapter.remoteHost.respond("directory", () => {
-      throw new Error("registry blew up");
-    });
-    deliver("remoteHost:ask", { rhId: "ask-2", op: "directory", params: {} });
-
-    expect(sent().map((p) => p.params)).toEqual([
-      { rhId: "ask-1", results: [] },
-      { rhId: "ask-2", results: [] },
-    ]);
-  });
-
-  it("fans events out by name, and stops after unsubscribe", async () => {
+  it("fans a sidecar event out by name", async () => {
     const { adapter, deliver } = await bridged();
     const seen: unknown[] = [];
-    const unsubscribe = adapter.remoteHost.on("pairing-queue", (data) => void seen.push(data));
+    adapter.remoteHost.on("pairing-queue", (data) => void seen.push(data));
 
     deliver("remoteHost:event", { name: "pairing-queue", queue: [{ clientId: "c1" }] });
-    deliver("remoteHost:event", { name: "something-else", queue: [] });
     expect(seen).toEqual([{ name: "pairing-queue", queue: [{ clientId: "c1" }] }]);
-
-    unsubscribe();
-    deliver("remoteHost:event", { name: "pairing-queue", queue: [] });
-    expect(seen).toHaveLength(1);
   });
 
   it("notifies without waiting for anything", async () => {
@@ -218,7 +180,7 @@ describe("TauriAdapter remote host link", () => {
     expect(sent()[0]).toMatchObject({ cmd: "notify", params: { topic: "directory" } });
   });
 
-  it("rejects what is still in flight when the bridge closes", async () => {
+  it("rejects what is still in flight when the sidecar is killed", async () => {
     const { adapter } = await bridged();
     const pending = adapter.remoteHost.command("status");
     adapter.shutdown();

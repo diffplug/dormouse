@@ -30,6 +30,7 @@ import { setPushDevicesRefresher } from '../../lib/push-devices';
 import { clearAclRecords, loadAclRecords } from './acl';
 import { commitPushDevices, watchPushRings } from './alert-push';
 import { clearEnrollment, getEnrollment } from './enrollment';
+import { armWhileEnrolled } from './enrolled-gate';
 import {
   enqueuePairingApproval,
   getPairingApprovalSnapshot,
@@ -77,20 +78,25 @@ function installBridgeMode(link: RemoteHostLink): void {
       .catch(() => {});
   });
 
-  // Rings are detected here — the activity store and the pane labels are
-  // webview state — and delivered there, where the ACL is.
-  watchPushRings((sessionId, title) => {
-    void link.command('push', { sessionId, title }).catch(() => {});
-  });
-
   const refresh = (): void => {
     void commitPushDevices(async () => {
       const result = (await link.command('pushDevices')) as PushDevicesResult;
       return result ? result.devices : null;
     });
   };
+  // Installed unconditionally: the dialog may open on an un-enrolled machine,
+  // and asking then is one command that answers `no-host`.
   setPushDevicesRefresher(refresh);
-  refresh();
+
+  armWhileEnrolled(link, () => {
+    // Rings are detected here — the activity store and the pane labels are
+    // webview state — and delivered there, where the ACL is.
+    const stopRings = watchPushRings((sessionId, title) => {
+      void link.command('push', { sessionId, title }).catch(() => {});
+    });
+    refresh();
+    return stopRings;
+  });
 
   const target = globalThis as unknown as { dormouseRemoteHost?: unknown };
   if (target.dormouseRemoteHost) return;

@@ -16,32 +16,39 @@
 import type * as vscode from 'vscode';
 
 import type { HostAclRecord, HostStateStore } from '../../lib/src/host/remote/host-state-store';
-import { ACL_KEY_PREFIX } from '../../lib/src/remote/host/acl';
-import type { HostEnrollment } from '../../lib/src/remote/host/enrollment';
+import { ACL_KEY_PREFIX, filterAclRecords } from '../../lib/src/remote/host/acl';
+import { isEnrollment, type HostEnrollment } from '../../lib/src/remote/host/enrollment';
 // Imported, not mirrored: a key that drifted between the two sides would strand
 // an enrollment that is still on disk.
 import { ENROLLMENT_KEY } from '../../lib/src/remote/host/store';
 
-function isEnrollment(value: unknown): value is HostEnrollment {
-  if (!value || typeof value !== 'object') return false;
-  const v = value as Record<string, unknown>;
-  return (
-    typeof v.serverUrl === 'string' &&
-    typeof v.hostId === 'string' &&
-    typeof v.hostToken === 'string' &&
-    typeof v.origin === 'string' &&
-    typeof v.rpId === 'string'
-  );
-}
-
 export class VsCodeHostStateStore implements HostStateStore {
   readonly #context: vscode.ExtensionContext;
+  #enrollment: Promise<HostEnrollment | null> | null = null;
 
   constructor(context: vscode.ExtensionContext) {
     this.#context = context;
   }
 
   async loadEnrollment(): Promise<HostEnrollment | null> {
+    // Read once and keep it, like `FileHostStateStore`: `SecretStorage` is a
+    // keychain round trip, this extension host is the only writer of the key,
+    // and the activation probe and the service both want the same answer.
+    this.#enrollment ??= this.#readEnrollment();
+    return this.#enrollment;
+  }
+
+  async saveEnrollment(enrollment: HostEnrollment): Promise<void> {
+    await this.#context.secrets.store(ENROLLMENT_KEY, JSON.stringify(enrollment));
+    this.#enrollment = Promise.resolve(enrollment);
+  }
+
+  async clearEnrollment(): Promise<void> {
+    await this.#context.secrets.delete(ENROLLMENT_KEY);
+    this.#enrollment = Promise.resolve(null);
+  }
+
+  async #readEnrollment(): Promise<HostEnrollment | null> {
     const raw = await this.#context.secrets.get(ENROLLMENT_KEY);
     if (raw === undefined) return null;
     try {
@@ -54,14 +61,6 @@ export class VsCodeHostStateStore implements HostStateStore {
     }
   }
 
-  async saveEnrollment(enrollment: HostEnrollment): Promise<void> {
-    await this.#context.secrets.store(ENROLLMENT_KEY, JSON.stringify(enrollment));
-  }
-
-  async clearEnrollment(): Promise<void> {
-    await this.#context.secrets.delete(ENROLLMENT_KEY);
-  }
-
   async loadAcl(hostId: string): Promise<HostAclRecord[]> {
     const raw = this.#context.globalState.get<string>(aclKey(hostId));
     if (typeof raw !== 'string') return [];
@@ -72,12 +71,7 @@ export class VsCodeHostStateStore implements HostStateStore {
       return [];
     }
     if (!Array.isArray(parsed)) return [];
-    // `HostAcl.fromRecords` rejects a mismatched hostId, so drop foreign rows
-    // rather than fail the whole load over one.
-    return parsed.filter(
-      (record): record is HostAclRecord =>
-        !!record && typeof record === 'object' && (record as HostAclRecord).hostId === hostId,
-    );
+    return filterAclRecords(hostId, parsed);
   }
 
   async saveAcl(hostId: string, records: readonly HostAclRecord[]): Promise<void> {

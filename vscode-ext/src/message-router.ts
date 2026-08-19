@@ -614,7 +614,9 @@ export function attachRouter(
       }
       case 'peer:notify':
         if (typeof msg.topic !== 'string') break;
-        notifyDirectoryChanged();
+        // The topic travels: what a webview announced is what the broker's
+        // watchers filter on, here and at the far end of the link alike.
+        notifyDirectoryChanged(msg.topic);
         remoteNotifyPeerChange(msg.topic);
         break;
       case 'remoteHost:command':

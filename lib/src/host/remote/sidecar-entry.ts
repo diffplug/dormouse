@@ -13,14 +13,9 @@
  * All logging goes to stderr: stdout is the JSON-lines protocol channel.
  */
 
-import type { DirectoryEntry } from 'server-lib-common';
-import type {
-  HostSurfaceProvider,
-  PtySink,
-  SurfaceHandle,
-} from '../../remote/host/host-surface-provider';
-import type { PeerSurfaceResult } from '../../remote/host/peer-surfaces';
-import { DEFAULT_REMOTE_CONNECT_SRC } from './connect-src';
+import type { HostSurfaceProvider, PtySink } from '../../remote/host/host-surface-provider';
+import { createAskSurfaceProvider } from './ask-surface-provider';
+import { bakedConnectSrc } from './connect-src';
 import { createEphemeralHostStateStore, FileHostStateStore } from './host-state-store';
 import { createPtyStrip } from './pty-strip';
 import { RemoteHostService } from './service';
@@ -31,9 +26,6 @@ import {
   type NotifyParams,
   type RemoteHostCommand,
 } from './service-protocol';
-
-/** Substituted by esbuild at build time; see `scripts/csp-defaults.mjs`. */
-declare const __DORMOUSE_REMOTE_CONNECT_SRC__: string;
 
 /** The slice of `pty-core`'s manager the Host drives. */
 export interface SidecarPtyManager {
@@ -95,89 +87,38 @@ export function createSidecarSurfaceBridge(
     });
   }
 
-  const directoryWatchers = new Set<() => void>();
-
-  interface Subscription {
-    sink: PtySink;
+  interface Stream {
+    /**
+     * One parser per PTY, not per subscription: what an incomplete escape
+     * sequence leaves behind belongs to *this* PTY's byte boundaries and must
+     * never be mixed with another's. A late joiner inherits the state from
+     * before it joined, which beats a fresh parser starting mid-sequence.
+     */
     strip: (data: string) => string;
+    sinks: Set<PtySink>;
   }
-  const streams = new Map<string, Set<Subscription>>();
+  const streams = new Map<string, Stream>();
 
-  const provider: HostSurfaceProvider = {
-    async collectDirectory(): Promise<DirectoryEntry[]> {
-      // The responder answers with its whole snapshot, so the results *are* the
-      // entries — no per-webview merging to do on this side.
-      return (await ask('directory', {})) as DirectoryEntry[];
-    },
-
-    watchDirectory(onChange) {
-      directoryWatchers.add(onChange);
-      return () => {
-        directoryWatchers.delete(onChange);
-      };
-    },
-
-    async resolveSurface(surfaceId, size): Promise<SurfaceHandle | null> {
-      // Attach-is-the-resize: the owner applies the size inside this round trip,
-      // because there is no way to reach into its xterm afterwards without a
-      // second one (docs/specs/remote-api.md).
-      const [owner] = (await ask('surfaceOp', {
-        surfaceId,
-        op: 'attach',
-        cols: size.cols,
-        rows: size.rows,
-      })) as PeerSurfaceResult[];
-      if (!owner) return null;
-
-      let cols = owner.cols;
-      let rows = owner.rows;
-      return {
-        ptyId: owner.ptyId,
-        get cols() {
-          return cols;
-        },
-        get rows() {
-          return rows;
-        },
-        // The owner is the only one that can read the pane back, so remember
-        // what it reported; a resize nobody answered leaves the last known size
-        // standing.
-        resize: async (nextCols, nextRows) => {
-          const [settled] = (await ask('surfaceOp', {
-            surfaceId,
-            op: 'resize',
-            cols: nextCols,
-            rows: nextRows,
-          })) as PeerSurfaceResult[];
-          if (settled) {
-            cols = settled.cols;
-            rows = settled.rows;
-          }
-          return { cols, rows };
-        },
-        // Nothing to unwind: the stream is owned by the `streamPty`
-        // subscription, not by holding the surface.
-        release: () => {},
-      };
-    },
-
+  const { provider, notifyDirectoryChanged } = createAskSurfaceProvider(ask, {
     writePty: (ptyId, data) => options.mgr.write(ptyId, data),
     resizePty: (ptyId, cols, rows) => options.mgr.resize(ptyId, cols, rows),
 
     streamPty(ptyId, sink) {
-      const subscription: Subscription = { sink, strip: createPtyStrip() };
-      let subscriptions = streams.get(ptyId);
-      if (!subscriptions) {
-        subscriptions = new Set();
-        streams.set(ptyId, subscriptions);
+      let stream = streams.get(ptyId);
+      if (!stream) {
+        stream = { strip: createPtyStrip(), sinks: new Set() };
+        streams.set(ptyId, stream);
       }
-      subscriptions.add(subscription);
+      const subscribed = stream;
+      subscribed.sinks.add(sink);
       return () => {
-        subscriptions.delete(subscription);
-        if (subscriptions.size === 0) streams.delete(ptyId);
+        subscribed.sinks.delete(sink);
+        // The parser goes with the last attachment: keeping it would carry a
+        // half-read sequence into a stream that starts over.
+        if (subscribed.sinks.size === 0) streams.delete(ptyId);
       };
     },
-  };
+  });
 
   return {
     provider,
@@ -194,38 +135,37 @@ export function createSidecarSurfaceBridge(
     },
 
     onNotify(params) {
-      if (params?.topic !== 'directory') return;
-      for (const watcher of [...directoryWatchers]) watcher();
+      notifyDirectoryChanged(params?.topic);
     },
 
     onPtyEvent(event, data) {
+      // Nothing is attached: this runs on every chunk of every PTY, and the
+      // usual state of a machine with no phone on it is exactly this.
+      if (streams.size === 0) return;
       const detail = data as { id?: unknown } | null;
       if (!detail || typeof detail.id !== 'string') return;
-      const subscriptions = streams.get(detail.id);
-      if (!subscriptions || subscriptions.size === 0) return;
+      const stream = streams.get(detail.id);
+      if (!stream) return;
       if (event === 'data') {
         const chunk = (detail as { data?: unknown }).data;
         if (typeof chunk !== 'string') return;
-        for (const subscription of [...subscriptions]) {
-          // Each attachment strips on its own parser: the state an incomplete
-          // OSC leaves behind belongs to one stream's byte boundaries, not
-          // another's.
-          const visible = subscription.strip(chunk);
-          if (visible !== '') subscription.sink.onData(visible);
-        }
+        const visible = stream.strip(chunk);
+        if (visible === '') return;
+        // Iterated live rather than copied: a sink can only unsubscribe itself
+        // from here, which a Set tolerates mid-iteration.
+        for (const sink of stream.sinks) sink.onData(visible);
         return;
       }
       if (event === 'exit') {
         const exitCode = (detail as { exitCode?: unknown }).exitCode;
         const code = typeof exitCode === 'number' ? exitCode : 0;
-        for (const subscription of [...subscriptions]) subscription.sink.onExit(code);
+        for (const sink of stream.sinks) sink.onExit(code);
       }
     },
 
     dispose() {
       for (const pending of [...asks.values()]) pending.settle([]);
       asks.clear();
-      directoryWatchers.clear();
       streams.clear();
     },
   };
@@ -244,11 +184,6 @@ export interface SidecarRemoteHost {
 }
 
 export function createSidecarRemoteHost(options: SidecarRemoteHostOptions): SidecarRemoteHost {
-  const connectSrc =
-    typeof __DORMOUSE_REMOTE_CONNECT_SRC__ === 'string'
-      ? __DORMOUSE_REMOTE_CONNECT_SRC__
-      : DEFAULT_REMOTE_CONNECT_SRC;
-
   const store = options.stateDir
     ? new FileHostStateStore(options.stateDir)
     : createEphemeralHostStateStore((message) => console.error(message));
@@ -259,7 +194,7 @@ export function createSidecarRemoteHost(options: SidecarRemoteHostOptions): Side
     store,
     provider: bridge.provider,
     sendToUi: options.send,
-    connectSrc,
+    connectSrc: bakedConnectSrc(),
   });
   void service.start().catch((error: unknown) => {
     console.error(`[remote-host] failed to start: ${String(error)}`);

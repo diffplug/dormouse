@@ -1,17 +1,14 @@
 /**
- * The one key prefix every Host-side persisted value lives under
- * (`enrollment.ts` → `ENROLLMENT_KEY`, `acl.ts` → `ACL_KEY_PREFIX`).
+ * The persisted-key names for the Host's own state, kept apart from the code
+ * that reads them because three places have to agree on them: the webview's
+ * legacy `localStorage` copy (`enrollment.ts`, `acl.ts` → `ACL_KEY_PREFIX`),
+ * the one-shot adoption that hands that copy to the service, and the VS Code
+ * extension host's store (`vscode-ext/src/remote-host-store.ts`), which writes
+ * the same names into `SecretStorage`.
  *
- * One prefix rather than a scatter of keys so a host can name the whole Host
- * store at once — which is what lets a Node-resident Host adopt what a webview
- * persisted before it existed, and what keys the VS Code extension host writes
- * its own copy under (`vscode-ext/src/remote-host-store.ts`).
+ * `ENROLLMENT_KEY` lives here rather than in `enrollment.ts` so the extension
+ * host can import it without pulling `server-lib-common` into its bundle. A key
+ * that drifted between any two of them would strand an enrollment that is still
+ * on disk.
  */
-export const REMOTE_HOST_STORE_PREFIX = 'dormouse.remote-host.';
-
-/**
- * The enrollment blob's key. It lives here rather than in `enrollment.ts` so
- * the extension host can import it without pulling `server-lib-common` into the
- * extension bundle; `enrollment.ts` re-exports it for its own callers.
- */
-export const ENROLLMENT_KEY = `${REMOTE_HOST_STORE_PREFIX}enrollment`;
+export const ENROLLMENT_KEY = 'dormouse.remote-host.enrollment';

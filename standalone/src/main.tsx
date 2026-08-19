@@ -84,12 +84,17 @@ async function createPlatform(): Promise<PlatformAdapter> {
 async function bootstrap() {
   const platform = await createPlatform();
   setPlatform(platform);
+  await platform.init();
   // The remote Host runs in the sidecar, which owns the PTYs but not this
   // webview's view of them: what a pane is called, and how big its xterm is.
   // Installing the responder is what makes those answerable
   // (docs/specs/remote-api.md).
+  //
+  // After `init()`, not before: the responder asks the Host whether there is
+  // one at all, and nothing could carry the answer back until the adapter has
+  // its listeners. An ask that arrives in the gap goes unanswered, which is
+  // what the Host's budget is for.
   installPeerSurfaceResponder();
-  await platform.init();
   // Quit orchestrator (docs/specs/standalone.md §Quit flow). Tauri-only: the
   // browser-dev harness has no Rust quit interception, and quit.ts pulls the
   // Tauri APIs. !BROWSER_DEV_HOST is exactly the createPlatform branch that

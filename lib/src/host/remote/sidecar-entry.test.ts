@@ -101,9 +101,13 @@ describe('directory invalidation', () => {
     bridge.onNotify({ topic: 'something-else' });
     expect(changes).toHaveBeenCalledTimes(1);
 
+    // A notify with no topic at all names no other business, so it is ours.
+    bridge.onNotify(undefined);
+    expect(changes).toHaveBeenCalledTimes(2);
+
     unsubscribe();
     bridge.onNotify({ topic: 'directory' });
-    expect(changes).toHaveBeenCalledTimes(1);
+    expect(changes).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -187,19 +191,33 @@ describe('PTYs', () => {
     expect(one.data).toEqual([]);
   });
 
-  it('gives each subscription its own parser state', () => {
+  it('parses each PTY once, so a late joiner inherits the byte boundaries', () => {
     const one = sink();
     const two = sink();
     bridge.provider.streamPty('pty-1', one);
-    // A second attachment starts mid-stream, after the OSC introducer.
+    // A second attachment starts mid-stream, after the OSC introducer. It
+    // inherits the parser rather than starting a fresh one mid-sequence, so it
+    // sees the same stripped output as the attachment that was there first.
     bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]133;' });
     bridge.provider.streamPty('pty-1', two);
     bridge.onPtyEvent('data', { id: 'pty-1', data: 'A\x07hi' });
 
     expect(one.data).toEqual(['hi']);
-    // The newcomer never saw the introducer, so it reads the tail as ordinary
-    // output (its lone BEL stripped as a bell, which is the parser's own rule).
-    expect(two.data).toEqual(['Ahi']);
+    expect(two.data).toEqual(['hi']);
+  });
+
+  it('keeps one PTY’s half-read sequence out of another’s', () => {
+    const one = sink();
+    const two = sink();
+    bridge.provider.streamPty('pty-1', one);
+    bridge.provider.streamPty('pty-2', two);
+
+    bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]133;' });
+    bridge.onPtyEvent('data', { id: 'pty-2', data: 'plain' });
+    bridge.onPtyEvent('data', { id: 'pty-1', data: 'A\x07hi' });
+
+    expect(one.data).toEqual(['hi']);
+    expect(two.data).toEqual(['plain']);
   });
 
   it('reports an exit, defaulting a missing code to 0', () => {

@@ -17,15 +17,27 @@ function aclKey(hostId: string): string {
   return `${ACL_KEY_PREFIX}${hostId}`;
 }
 
-/** Load the persisted records for a host, dropping anything malformed. */
-export function loadAclRecords(hostId: string): HostAclRecord[] {
-  // Missing key / malformed JSON / non-array all collapse to `[]`.
-  const parsed = loadJson<unknown[]>(aclKey(hostId), [], Array.isArray);
-  // Only keep records for this host; fromRecords rejects a mismatched hostId.
-  return parsed.filter(
+/**
+ * Keep only the records that belong to `hostId`, dropping anything that is not
+ * a record at all.
+ *
+ * Exported because every store that reads an ACL back — this one, the sidecar's
+ * file, VS Code's `globalState`, an `adopt` a webview sent — reads it as
+ * `unknown[]`, and `HostAcl.fromRecords` rejects a mismatched hostId outright.
+ * Dropping foreign rows beats failing the whole load over one of them, and
+ * doing it in one place keeps a store from quietly being the lenient one.
+ */
+export function filterAclRecords(hostId: string, records: readonly unknown[]): HostAclRecord[] {
+  return records.filter(
     (record): record is HostAclRecord =>
       !!record && typeof record === 'object' && (record as HostAclRecord).hostId === hostId,
   );
+}
+
+/** Load the persisted records for a host, dropping anything malformed. */
+export function loadAclRecords(hostId: string): HostAclRecord[] {
+  // Missing key / malformed JSON / non-array all collapse to `[]`.
+  return filterAclRecords(hostId, loadJson<unknown[]>(aclKey(hostId), [], Array.isArray));
 }
 
 export function saveAclRecords(hostId: string, records: readonly HostAclRecord[]): void {

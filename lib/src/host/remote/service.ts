@@ -8,8 +8,9 @@
  * are called and how big they are. Nothing a webview says can widen access.
  *
  * Every dependency is injected, so this module is environment-free: it runs in
- * the Tauri sidecar today (`sidecar-entry.ts`) and in the VS Code extension host
- * next, and its tests drive it with a fake socket and an in-memory store.
+ * the Tauri sidecar (`sidecar-entry.ts`) and in the VS Code extension host
+ * (`vscode-ext/src/remote-host.ts`), and its tests drive it with a fake socket
+ * and an in-memory store.
  *
  * Commands arrive from the webview over the bridge in `service-protocol.ts` and
  * are dispatched in {@link RemoteHostService.handleCommand}. The two that carry
@@ -17,8 +18,8 @@
  * are settled there (`sidecar-entry.ts`), so they never reach this dispatch.
  */
 
-import type { HostAclRecord } from 'server-lib-common';
-import { performEnrollment, type HostEnrollment } from '../../remote/host/enrollment';
+import { filterAclRecords } from '../../remote/host/acl';
+import { isEnrollment, performEnrollment, type HostEnrollment } from '../../remote/host/enrollment';
 import type { HostSurfaceProvider } from '../../remote/host/host-surface-provider';
 import type { PendingPairing } from '../../remote/host/pairing-approval';
 import { loadPushDevices, sendPush, type AlertPushDeps } from '../../remote/host/push-delivery';
@@ -30,11 +31,11 @@ import {
   REMOTE_HOST_EVENT_EVENT,
   REMOTE_HOST_RESULT_EVENT,
   type AdoptParams,
-  type AdoptResult,
   type ApproveParams,
   type DenyParams,
   type EnrollParams,
   type EnrollResult,
+  type HostStatusEvent,
   type PairingQueueEvent,
   type PairingQueueItem,
   type PushDevicesResult,
@@ -191,6 +192,7 @@ export class RemoteHostService {
     // enrollment naming that host, and keeping them means a re-enrollment onto
     // the same hostId does not silently de-pair every device.
     await this.#store.clearEnrollment();
+    this.#emitStatus();
     return {};
   }
 
@@ -223,24 +225,22 @@ export class RemoteHostService {
     return { devices: await loadPushDevices(deps) };
   }
 
-  async #adopt(params: AdoptParams): Promise<AdoptResult> {
+  async #adopt(params: AdoptParams): Promise<Record<string, never>> {
     const existing = await this.#store.loadEnrollment();
-    let adopted = false;
     if (!existing && isEnrollment(params.enrollment)) {
       const enrollment = params.enrollment;
       await this.#store.saveEnrollment(enrollment);
-      const records = (params.aclRecords ?? []).filter(
-        (record): record is HostAclRecord =>
-          !!record && typeof record === 'object' && (record as HostAclRecord).hostId === enrollment.hostId,
-      );
+      const records = filterAclRecords(enrollment.hostId, params.aclRecords ?? []);
       if (records.length > 0) await this.#store.saveAcl(enrollment.hostId, records);
-      adopted = true;
     }
     // Either way there may now be a Host to run: an adoption just supplied one,
     // and a rejected adoption means the store already had one this service may
     // not have started yet (a webview that reloads before `start()` lands).
+    //
+    // The webview is told nothing about which happened: it clears its copy
+    // regardless, because a second copy of the same hostId is a second ACL.
     if (!this.#host) await this.start();
-    return { adopted };
+    return {};
   }
 
   // --- Host lifecycle ---
@@ -280,6 +280,24 @@ export class RemoteHostService {
       now: this.#now,
     });
     this.#host.start();
+    this.#emitStatus();
+  }
+
+  /**
+   * Tell the webviews whether there is a Host at all. Everything they do *for*
+   * one — announcing that the directory may have changed on every pane-state,
+   * activity, and focus change, watching for unattended rings — costs a
+   * crossing per event on a machine that may never enroll, so they arm on this
+   * and idle without it (`lib/src/remote/host/enrolled-gate.ts`).
+   *
+   * `enrolled` means the same thing as the `status` command's field of that
+   * name, which is how a webview seeds before any event arrives.
+   */
+  #emitStatus(): void {
+    this.#sendToUi(REMOTE_HOST_EVENT_EVENT, {
+      name: 'status',
+      enrolled: !!this.#enrollment,
+    } satisfies HostStatusEvent);
   }
 
   #stopHost(): void {
@@ -332,16 +350,4 @@ export class RemoteHostService {
       fetch: this.#fetch,
     };
   }
-}
-
-function isEnrollment(value: unknown): value is HostEnrollment {
-  if (!value || typeof value !== 'object') return false;
-  const v = value as Record<string, unknown>;
-  return (
-    typeof v.serverUrl === 'string' &&
-    typeof v.hostId === 'string' &&
-    typeof v.hostToken === 'string' &&
-    typeof v.origin === 'string' &&
-    typeof v.rpId === 'string'
-  );
 }

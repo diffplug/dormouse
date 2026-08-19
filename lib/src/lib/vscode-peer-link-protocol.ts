@@ -14,10 +14,18 @@
  * that vanishes mid-attach) are testable without spawning processes.
  */
 
-import type { RemoteHostCommand, RemoteHostResult } from '../host/remote/service-protocol';
+import {
+  ASK_BUDGET_MS,
+  type RemoteHostCommand,
+  type RemoteHostResult,
+} from '../host/remote/service-protocol';
 
-/** How long the broker waits for a window to answer before giving up on it. */
-export const PEER_REPLY_BUDGET_MS = 1_000;
+/**
+ * How long the broker waits for a window to answer before giving up on it. The
+ * same budget as the service's own ask, because it is the same wait seen one
+ * layer down: the webview that has to answer is at the far end of both.
+ */
+export const PEER_REPLY_BUDGET_MS = ASK_BUDGET_MS;
 
 /**
  * Broker → peer window.

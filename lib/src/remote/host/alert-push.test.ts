@@ -5,10 +5,10 @@ vi.mock('../../lib/platform', () => ({
 }));
 
 import type { HostAclRecord } from 'server-lib-common';
-import { commitPushDevices, watchPushRings, type AlertPushDeps } from './alert-push';
+import { commitPushDevices, watchPushRings } from './alert-push';
 // Delivery — the Server calls, the recipient rule, the title bounds — runs in
 // the Host's process, so it lives beside neither webview nor sidecar.
-import { loadPushDevices, sendPush, toPushText } from './push-delivery';
+import { loadPushDevices, sendPush, toPushText, type AlertPushDeps } from './push-delivery';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from '../../lib/alert-settings';
 import { getPushDevices, resetPushDevices } from '../../lib/push-devices';
 import { clearPrimedActivity, primeActivity } from '../../lib/session-activity-store';
@@ -322,30 +322,6 @@ describe('push device list', () => {
       fetch: (async () => ({ ok: false, status: 500 })) as unknown as typeof globalThis.fetch,
     });
     expect(getPushDevices()).toEqual({ status: 'error', devices: [] });
-  });
-
-  it('discards a refresh that resolves after the Host stopped', async () => {
-    // Without the generation fence, the resolving fetch would overwrite the
-    // reset's `no-host` with a `ready` list naming devices nothing can reach —
-    // and since the reset cleared the refresher, it would stick all session.
-    let resolveFetch: (response: Response) => void = () => {};
-    const pending = refreshPushDevices({
-      enrollment: ENROLLMENT,
-      activeRecords: () => records,
-      fetch: (() =>
-        new Promise((resolve) => {
-          resolveFetch = resolve;
-        })) as unknown as typeof globalThis.fetch,
-    });
-
-    resetPushDevices();
-    resolveFetch({
-      ok: true,
-      json: async () => ({ devices: [{ devicePublicKey: 'device-phone', subscribedAt: 1 }] }),
-    } as Response);
-    await pending;
-
-    expect(getPushDevices()).toEqual({ status: 'no-host', devices: [] });
   });
 
   it('keeps a newer refresh when an older request resolves last', async () => {

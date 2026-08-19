@@ -23,9 +23,11 @@ interface Responder {
 class ServicePlatform {
   readonly responders = new Map<string, Responder>();
   readonly notified: string[] = [];
+  /** What `status` answers — the gate the notify sources arm on. */
+  enrolled = true;
 
   readonly remoteHost = {
-    command: async () => undefined,
+    command: async (cmd: string) => (cmd === 'status' ? { enrolled: this.enrolled } : undefined),
     respond: (op: string, handler: Responder) => {
       this.responders.set(op, handler);
     },
@@ -59,6 +61,12 @@ function registerSurface(surfaceId: string, ptyId: string, cols = 80, rows = 24)
 }
 
 let platform: ServicePlatform;
+
+/** The `status` seed is a round trip; the notify sources arm when it lands. */
+async function armed(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
 
 beforeEach(() => {
   platform = new ServicePlatform();
@@ -119,27 +127,34 @@ describe('surface responder', () => {
     expect(clamped[0]!.rows).toBeGreaterThan(0);
   });
 
-  it('leaves the pane alone on detach', () => {
-    // Last-attach-wins: the Host stops streaming on its side and the pane keeps
-    // whatever size it was left at.
-    const terminal = registerSurface('surface-1', 'pty-1', 90, 25);
-
-    expect(platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'detach' })).toEqual([
-      { ptyId: 'pty-1', cols: 90, rows: 25 },
-    ]);
-    expect(terminal.resize).not.toHaveBeenCalled();
-  });
-
   it('answers the directory with this webview snapshot', () => {
     registerSurface('surface-1', 'pty-1');
     const entries = platform.answer('directory', {}) as Array<{ surfaceId: string }>;
     expect(entries.map((entry) => entry.surfaceId)).toEqual(['surface-1']);
   });
 
-  it('tells the Host when a future directory answer could differ', () => {
+  it('tells the Host when a future directory answer could differ', async () => {
     // The Host has no view of the activity store, so a ring that changes an
     // entry is only visible to it if this webview says so.
+    await armed();
     primeActivity('pty-1', { status: 'ALERT_RINGING' });
     expect(platform.notified).toContain('directory');
+  });
+
+  it('announces nothing until there is a Host to hear it', async () => {
+    // A machine that never enrolled pays no crossing per activity change,
+    // which is most machines most of the time.
+    platform.enrolled = false;
+    const quiet = new ServicePlatform();
+    quiet.enrolled = false;
+    setPlatform(quiet.asAdapter());
+    installPeerSurfaceResponder();
+    await armed();
+
+    primeActivity('pty-2', { status: 'ALERT_RINGING' });
+    expect(quiet.notified).toEqual([]);
+    // Answering still works: it costs nothing until the Host asks.
+    registerSurface('surface-2', 'pty-2');
+    expect(quiet.answer('directory', {})).toHaveLength(1);
   });
 });

@@ -12,7 +12,11 @@ import type { HostSurfaceProvider } from '../../remote/host/host-surface-provide
 import type { WebSocketLike } from '../../remote/host/remote-host';
 import type { HostStateStore } from './host-state-store';
 import { RemoteHostService } from './service';
-import type { PairingQueueEvent, RemoteHostConsoleStatus } from './service-protocol';
+import type {
+  HostStatusEvent,
+  PairingQueueEvent,
+  RemoteHostConsoleStatus,
+} from './service-protocol';
 
 const CONNECT_SRC = 'https://*.dormouse.sh wss://*.dormouse.sh';
 
@@ -188,9 +192,20 @@ async function command(cmd: string, params?: unknown): Promise<Record<string, un
 }
 
 function queueEvents(): PairingQueueEvent[] {
+  return uiEvents().filter((event): event is PairingQueueEvent => event.name === 'pairing-queue');
+}
+
+function uiEvents(): Array<PairingQueueEvent | HostStatusEvent> {
   return sent
     .filter((message) => message.event === 'remoteHost:event')
-    .map((message) => message.data as unknown as PairingQueueEvent);
+    .map((message) => message.data as unknown as PairingQueueEvent | HostStatusEvent);
+}
+
+/** What the webviews were told about whether there is a Host, in order. */
+function statusEvents(): boolean[] {
+  return uiEvents()
+    .filter((event): event is HostStatusEvent => event.name === 'status')
+    .map((event) => event.enrolled);
 }
 
 beforeEach(() => {
@@ -321,7 +336,9 @@ describe('adopt', () => {
       aclRecords: [aclRecord('device-1')],
     });
 
-    expect(result.result).toEqual({ adopted: true });
+    // Nothing to report: the webview clears its copy either way, because a
+    // second copy of one hostId is a second ACL.
+    expect(result.result).toEqual({});
     expect(store.enrollment).toEqual(ENROLLMENT);
     expect(store.acl['host-1']).toHaveLength(1);
     expect(sockets).toHaveLength(1);
@@ -332,9 +349,8 @@ describe('adopt', () => {
     await service.start();
 
     const other = { ...ENROLLMENT, hostId: 'host-2', hostToken: 'other' };
-    const result = await command('adopt', { enrollment: other, aclRecords: [] });
+    await command('adopt', { enrollment: other, aclRecords: [] });
 
-    expect(result.result).toEqual({ adopted: false });
     expect(store.enrollment).toEqual(ENROLLMENT);
     expect(sockets).toHaveLength(1);
   });
@@ -350,9 +366,44 @@ describe('adopt', () => {
 
   it('ignores an enrollment that does not have the shape', async () => {
     createService();
-    const result = await command('adopt', { enrollment: { hostId: 'x' }, aclRecords: [] });
-    expect(result.result).toEqual({ adopted: false });
+    await command('adopt', { enrollment: { hostId: 'x' }, aclRecords: [] });
     expect(store.enrollment).toBeNull();
+    expect(sockets).toEqual([]);
+  });
+});
+
+describe('status events', () => {
+  it('announces a Host that started, and one that was cleared', async () => {
+    // What every webview arms its outbound work on: an installation that never
+    // enrolls is told nothing and does nothing (`enrolled-gate.ts`).
+    createService({ enrollment: ENROLLMENT });
+    await service.start();
+    expect(statusEvents()).toEqual([true]);
+
+    await command('clearEnrollment');
+    expect(statusEvents()).toEqual([true, false]);
+  });
+
+  it('says nothing at all when there is no Host to run', async () => {
+    createService();
+    await service.start();
+    await command('status');
+    expect(statusEvents()).toEqual([]);
+  });
+
+  it('announces the Host an enroll and an adopt each started', async () => {
+    createService();
+    await command('enroll', {
+      serverUrl: 'https://relay.dormouse.sh',
+      password: 'setup',
+      label: 'Laptop',
+    });
+    expect(statusEvents()).toEqual([true]);
+
+    createService();
+    sent.length = 0;
+    await command('adopt', { enrollment: ENROLLMENT, aclRecords: [] });
+    expect(statusEvents()).toEqual([true]);
   });
 });
 

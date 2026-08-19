@@ -14,6 +14,11 @@ import type {
   RemoteHostLink,
 } from "dormouse-lib/lib/platform/types";
 import {
+  answerAskCommand,
+  createRemoteHostLinkClient,
+  notifyCommand,
+} from "dormouse-lib/host/remote/link-client";
+import {
   REMOTE_HOST_ASK_EVENT,
   REMOTE_HOST_EVENT_EVENT,
   REMOTE_HOST_RESULT_EVENT,
@@ -38,15 +43,6 @@ import { BrowserSidecarHost } from "./browser-sidecar-host";
 
 const errMessage = (err: unknown): string => err instanceof Error ? err.message : String(err);
 
-/** Mirrors the Tauri adapter's bound; `enroll` makes an HTTP round trip. */
-const REMOTE_HOST_COMMAND_TIMEOUT_MS = 15_000;
-
-/** See TauriAdapter: `rhId`s must be unique across every webview, not per adapter. */
-function randomTag(): string {
-  const uuid = globalThis.crypto?.randomUUID?.();
-  return uuid ? uuid.slice(0, 8) : Math.random().toString(36).slice(2, 10);
-}
-
 function decodeBase64Bytes(base64: string): Uint8Array {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -66,18 +62,13 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private unlistenHost: (() => void) | null = null;
   // Remote-host bridge, identical in shape to TauriAdapter's — the dev harness
   // forwards the same `remoteHost:*` messages over its own transport.
-  private remoteHostPending = new Map<
-    string,
-    {
-      resolve: (value: unknown) => void;
-      reject: (error: Error) => void;
-      timer: ReturnType<typeof setTimeout>;
-    }
-  >();
-  private remoteHostResponders = new Map<string, (params: unknown) => unknown[]>();
-  private remoteHostListeners = new Map<string, Set<(data: unknown) => void>>();
-  private readonly rhTag = randomTag();
-  private nextRemoteHostId = 0;
+  private readonly remoteHostClient = createRemoteHostLinkClient({
+    sendCommand: (command) => this.sendRemoteHostCommand(command),
+    answerAsk: (askId, results) => this.sendRemoteHostCommand(answerAskCommand(askId, results)),
+    notify: (topic) => this.sendRemoteHostCommand(notifyCommand(topic)),
+  });
+
+  readonly remoteHost: RemoteHostLink = this.remoteHostClient.link;
 
   constructor(private readonly host: BrowserSidecarHost) {
     this.alertManager.onStateChange((id, state) => {
@@ -109,80 +100,13 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.protocolParsers.clear();
     this.unlistenHost?.();
     this.unlistenHost = null;
-    for (const pending of this.remoteHostPending.values()) {
-      clearTimeout(pending.timer);
-      pending.reject(new Error("remote host bridge closed"));
-    }
-    this.remoteHostPending.clear();
+    this.remoteHostClient.dispose();
     this.host.send("kill_sidecar_now");
     this.host.close();
   }
 
-  // --- Remote host bridge (see TauriAdapter for the contract) ---
-
-  readonly remoteHost: RemoteHostLink = {
-    command: (cmd, params) => this.remoteHostCommand(cmd, params),
-    respond: (op, handler) => {
-      this.remoteHostResponders.set(op, handler);
-    },
-    notify: (topic) => {
-      this.sendRemoteHostCommand({ rhId: this.nextRhId(), cmd: "notify", params: { topic } });
-    },
-    on: (name, listener) => {
-      let listeners = this.remoteHostListeners.get(name);
-      if (!listeners) {
-        listeners = new Set();
-        this.remoteHostListeners.set(name, listeners);
-      }
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
-  };
-
-  private nextRhId(): string {
-    return `rh-${this.rhTag}-${++this.nextRemoteHostId}`;
-  }
-
   private sendRemoteHostCommand(command: RemoteHostCommand): void {
     this.host.send("remote_host_command", { payload: command });
-  }
-
-  private remoteHostCommand(cmd: string, params?: unknown): Promise<unknown> {
-    const rhId = this.nextRhId();
-    return new Promise<unknown>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.remoteHostPending.delete(rhId);
-        reject(new Error(`remote host command timed out: ${cmd}`));
-      }, REMOTE_HOST_COMMAND_TIMEOUT_MS);
-      this.remoteHostPending.set(rhId, { resolve, reject, timer });
-      this.sendRemoteHostCommand({ rhId, cmd, params });
-    });
-  }
-
-  private settleRemoteHostCommand(result: RemoteHostResult): void {
-    const pending = this.remoteHostPending.get(result?.rhId);
-    if (!pending) return;
-    this.remoteHostPending.delete(result.rhId);
-    clearTimeout(pending.timer);
-    if (typeof result.error === "string") pending.reject(new Error(result.error));
-    else pending.resolve(result.result);
-  }
-
-  private answerRemoteHostAsk(ask: RemoteHostAsk): void {
-    const handler = this.remoteHostResponders.get(ask?.op);
-    let results: unknown[] = [];
-    try {
-      results = handler ? handler(ask.params) : [];
-    } catch (err) {
-      console.error(`[browser-sidecar] remote host ask ${ask?.op} failed:`, err);
-    }
-    this.sendRemoteHostCommand({
-      rhId: this.nextRhId(),
-      cmd: "answer",
-      params: { rhId: ask.rhId, results },
-    });
   }
 
   async getAvailableShells(): Promise<{ name: string; path: string; args?: string[] }[]> {
@@ -364,14 +288,12 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       applyTerminalSemanticEventsByPtyId(id, collectTerminalSemanticEvents(parsed.events));
       for (const handler of this.replayHandlers) handler({ id, data: parsed.visibleData });
     } else if (event === REMOTE_HOST_RESULT_EVENT) {
-      this.settleRemoteHostCommand(data as RemoteHostResult);
+      this.remoteHostClient.onResult(data as RemoteHostResult);
     } else if (event === REMOTE_HOST_ASK_EVENT) {
-      this.answerRemoteHostAsk(data as RemoteHostAsk);
+      const ask = data as RemoteHostAsk;
+      this.remoteHostClient.onAsk(ask.rhId, ask.op, ask.params);
     } else if (event === REMOTE_HOST_EVENT_EVENT) {
-      const name = (data as { name?: string } | null)?.name;
-      if (typeof name === "string") {
-        for (const listener of this.remoteHostListeners.get(name) ?? []) listener(data);
-      }
+      this.remoteHostClient.onEvent(data);
     } else if (event === "dor:controlRequest") {
       const payload = data as DorControlRequestPayload;
       const respond = (response: DorControlResult) => {

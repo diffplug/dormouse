@@ -24,8 +24,7 @@
 import type { PairingRequest } from 'server-lib-common';
 import type { RemoteHostStatus } from '../../remote/host/remote-host';
 
-/** Transport event names. The command travels under the first, the rest come back. */
-export const REMOTE_HOST_COMMAND_EVENT = 'remoteHost:command';
+/** Transport event names for what the service sends back. */
 export const REMOTE_HOST_RESULT_EVENT = 'remoteHost:result';
 export const REMOTE_HOST_ASK_EVENT = 'remoteHost:ask';
 export const REMOTE_HOST_EVENT_EVENT = 'remoteHost:event';
@@ -75,7 +74,16 @@ export interface PairingQueueEvent {
   queue: PairingQueueItem[];
 }
 
-export type RemoteHostEvent = PairingQueueEvent;
+/**
+ * service → webview, whenever the Host's lifecycle changes whether there is one
+ * at all. What a webview does for the Host costs a crossing per pane-state,
+ * activity, and focus change, so an installation that never enrolled must pay
+ * none of it (`lib/src/remote/host/enrolled-gate.ts`).
+ */
+export interface HostStatusEvent {
+  name: 'status';
+  enrolled: boolean;
+}
 
 // --- Command parameter shapes ---
 
@@ -140,10 +148,6 @@ export interface RemoteHostConsoleStatus {
    */
   connection: RemoteHostStatus;
   pairedClients: number;
-}
-
-export interface AdoptResult {
-  adopted: boolean;
 }
 
 /**

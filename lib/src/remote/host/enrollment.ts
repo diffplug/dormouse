@@ -6,16 +6,16 @@
  * Host's `ConnectionPolicy` — the Server tells the Host what it must enforce,
  * and the Host enforces it as final authority regardless.
  *
- * Persisted through `local-json-store` (browser-only, no platform adapter
- * dependency) so the standalone app can rehydrate and reconnect on the next
- * launch. The VS Code webview claims the `dormouse.remote-host.` prefix and
- * backs it with the extension host's `SecretStorage` — `hostToken` is a bearer
- * credential, and webview `localStorage` is not the VS Code persistence story
- * (docs/specs/vscode.md).
+ * The Host that holds the socket is a service in the process that owns the
+ * PTYs, and it persists this through its own store (a 0600 file in the sidecar,
+ * `SecretStorage` in VS Code — `lib/src/host/remote/host-state-store.ts`).
+ * What is left here of the browser's `localStorage` copy is the read path: a
+ * webview that enrolled before the service existed still has one, and hands it
+ * over once (`activation.ts` → adoption).
  */
 
 import { API_ROUTES, type HostEnrollResponse } from 'server-lib-common';
-import { loadJson, removeJson, saveJson } from '../../lib/local-json-store';
+import { loadJson, removeJson } from '../../lib/local-json-store';
 import { ENROLLMENT_KEY } from './store';
 
 export interface HostEnrollment {
@@ -30,9 +30,13 @@ export interface HostEnrollment {
   rpId: string;
 }
 
-export { ENROLLMENT_KEY } from './store';
-
-function isEnrollment(value: unknown): value is HostEnrollment {
+/**
+ * The shape guard, exported because everywhere an enrollment is *read* — a
+ * keychain entry, a JSON file, an `adopt` a webview sent — it arrives as
+ * `unknown` and has to be checked. One copy, so a field added here cannot be
+ * silently accepted by a store that never learned about it.
+ */
+export function isEnrollment(value: unknown): value is HostEnrollment {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
   return (
@@ -53,18 +57,13 @@ export function clearEnrollment(): void {
   removeJson(ENROLLMENT_KEY);
 }
 
-function saveEnrollment(enrollment: HostEnrollment): void {
-  saveJson(ENROLLMENT_KEY, enrollment);
-}
-
 /**
  * `POST /api/host/enroll` with the setup password and map the response to an
  * enrollment. Throws with the server's status text on failure so the caller
  * (console hook / settings UI) can surface it.
  *
- * Persists nothing: where the credentials live differs by Host — `localStorage`
- * for the webview-resident one below, a 0600 file for the Node-resident service
- * (`lib/src/host/remote/host-state-store.ts`) — while the exchange itself is one
+ * Persists nothing: the service that ran it decides where the credentials live
+ * (`lib/src/host/remote/host-state-store.ts`), while the exchange itself is one
  * exchange, and a second copy of it could drift from the Server's contract.
  */
 export async function performEnrollment(
@@ -90,15 +89,4 @@ export async function performEnrollment(
     origin: body.origin,
     rpId: body.rpId,
   };
-}
-
-/** {@link performEnrollment}, persisted to the webview's own store. */
-export async function enrollHost(
-  serverUrl: string,
-  password: string,
-  label: string,
-): Promise<HostEnrollment> {
-  const enrollment = await performEnrollment(serverUrl, password, label);
-  saveEnrollment(enrollment);
-  return enrollment;
 }

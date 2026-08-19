@@ -1,6 +1,6 @@
 import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo, RemoteHostLink } from './types';
 import { OPEN_PORT_TIMEOUT_MS } from './types';
-import type { RemoteHostCommand, RemoteHostResult } from '../../host/remote/service-protocol';
+import { createRemoteHostLinkClient } from '../../host/remote/link-client';
 import type { AlertSettings } from '../alert-settings';
 import { readInjectedRecoveryCommands } from '../vscode-recovery-global';
 import { setDefaultShellOpts } from '../shell-defaults';
@@ -15,24 +15,6 @@ import { getTerminalTheme, onTerminalThemeChange } from '../terminal-theme';
 import { isHostMessage, readHostMessageToken } from '../vscode-message-token';
 import type { DorControlResult } from 'dor/protocol';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
-
-/**
- * How long a remote-host command may wait for the extension host. Generous —
- * `enroll` makes an HTTP round trip to the relay server — but finite, so a
- * broker window that went away surfaces as a rejected promise instead of a hung
- * console call. Mirrors the standalone adapters' bound.
- */
-const REMOTE_HOST_COMMAND_TIMEOUT_MS = 15_000;
-
-/**
- * A short random component for this adapter's `rhId`s. Every webview in the
- * window sees every `remoteHost:result`, so a plain counter would let two of
- * them mint the same id and settle each other's commands.
- */
-function randomTag(): string {
-  const uuid = globalThis.crypto?.randomUUID?.();
-  return uuid ? uuid.slice(0, 8) : Math.random().toString(36).slice(2, 10);
-}
 
 export class VSCodeAdapter implements PlatformAdapter {
   // VS Code owns the theme here: it provides --vscode-* itself and has its own
@@ -52,17 +34,23 @@ export class VSCodeAdapter implements PlatformAdapter {
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   private watchedCommandHandlers = new Set<(names: string[]) => void>();
   private alertSettingsHandlers = new Set<(settings: AlertSettings) => void>();
-  // Remote-host bridge state (the contract is
-  // lib/src/host/remote/service-protocol.ts). Results are broadcast to every
-  // webview, so `rhId` carries a per-adapter tag — see `nextRhId`.
-  private remoteHostPending = new Map<
-    string,
-    { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
-  >();
-  private remoteHostResponders = new Map<string, (params: unknown) => unknown[]>();
-  private remoteHostListeners = new Map<string, Set<(data: unknown) => void>>();
-  private readonly rhTag = randomTag();
-  private nextRemoteHostId = 0;
+  // --- Remote host bridge (docs/specs/remote-api.md) ---
+  //
+  // The Host lives in the extension host, next to the PTYs, in whichever VS
+  // Code window won the bind-as-lease. This webview forwards its console
+  // commands, answers what only it knows (pane names, xterm sizes), and mirrors
+  // the pairing queue. Everything but the three postMessage shapes below is the
+  // shared client's (lib/src/host/remote/link-client.ts).
+  private readonly remoteHostClient = createRemoteHostLinkClient({
+    sendCommand: (payload) => this.vscode.postMessage({ type: 'remoteHost:command', payload }),
+    // An ask arrives as `peer:ask` and is answered on the same pair, which the
+    // extension host's fan-out settles by `requestId`.
+    answerAsk: (requestId, results) =>
+      this.vscode.postMessage({ type: 'peer:answer', requestId, results }),
+    notify: (topic) => this.vscode.postMessage({ type: 'peer:notify', topic }),
+  });
+
+  readonly remoteHost: RemoteHostLink = this.remoteHostClient.link;
 
   constructor() {
     this.vscode = acquireVsCodeApi();
@@ -185,14 +173,11 @@ export class VSCodeAdapter implements PlatformAdapter {
           },
         }));
       } else if (msg.type === 'peer:ask') {
-        this.answerRemoteHostAsk(msg.requestId, msg.op, msg.params);
+        this.remoteHostClient.onAsk(msg.requestId, msg.op, msg.params);
       } else if (msg.type === 'remoteHost:result') {
-        this.settleRemoteHostCommand(msg.payload);
+        this.remoteHostClient.onResult(msg.payload);
       } else if (msg.type === 'remoteHost:event') {
-        const name = (msg.payload as { name?: unknown } | null)?.name;
-        if (typeof name === 'string') {
-          for (const listener of this.remoteHostListeners.get(name) ?? []) listener(msg.payload);
-        }
+        this.remoteHostClient.onEvent(msg.payload);
       }
     });
   }
@@ -232,82 +217,10 @@ export class VSCodeAdapter implements PlatformAdapter {
     // No initialization needed — the webview is already running
   }
 
-  // --- Remote host bridge (docs/specs/remote-api.md) ---
-  //
-  // The Host lives in the extension host, next to the PTYs, in whichever VS
-  // Code window won the bind-as-lease. This webview forwards its console
-  // commands, answers what only it knows (pane names, xterm sizes), and mirrors
-  // the pairing queue.
-
-  readonly remoteHost: RemoteHostLink = {
-    command: (cmd, params) => this.remoteHostCommand(cmd, params),
-    respond: (op, handler) => {
-      this.remoteHostResponders.set(op, handler);
-    },
-    notify: (topic) => {
-      this.vscode.postMessage({ type: 'peer:notify', topic });
-    },
-    on: (name, listener) => {
-      let listeners = this.remoteHostListeners.get(name);
-      if (!listeners) {
-        listeners = new Set();
-        this.remoteHostListeners.set(name, listeners);
-      }
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
-  };
-
-  private nextRhId(): string {
-    return `rh-${this.rhTag}-${++this.nextRemoteHostId}`;
-  }
-
-  private remoteHostCommand(cmd: string, params?: unknown): Promise<unknown> {
-    const rhId = this.nextRhId();
-    return new Promise<unknown>((resolve, reject) => {
-      // Bounded: a broker window that closed mid-command must reject rather
-      // than leave the console hook (or the device dialog) waiting forever.
-      const timer = setTimeout(() => {
-        this.remoteHostPending.delete(rhId);
-        reject(new Error(`remote host command timed out: ${cmd}`));
-      }, REMOTE_HOST_COMMAND_TIMEOUT_MS);
-      this.remoteHostPending.set(rhId, { resolve, reject, timer });
-      this.vscode.postMessage({ type: 'remoteHost:command', payload: { rhId, cmd, params } satisfies RemoteHostCommand });
-    });
-  }
-
-  private settleRemoteHostCommand(result: RemoteHostResult | undefined): void {
-    const pending = result ? this.remoteHostPending.get(result.rhId) : undefined;
-    if (!pending || !result) return;
-    this.remoteHostPending.delete(result.rhId);
-    clearTimeout(pending.timer);
-    if (typeof result.error === 'string') pending.reject(new Error(result.error));
-    else pending.resolve(result.result);
-  }
-
-  /**
-   * Answer what this webview's own panes are called and how big they are.
-   *
-   * Always answer, even with no responder installed and even to say nothing:
-   * the broker settles once every webview has replied, so silence would make it
-   * wait out the full budget on what is usually a miss. An empty answer claims
-   * nothing, so it can never beat the real owner.
-   */
-  private answerRemoteHostAsk(requestId: string, op: string, params: unknown): void {
-    const handler = this.remoteHostResponders.get(op);
-    let results: unknown[] = [];
-    try {
-      results = handler ? handler(params) : [];
-    } catch (err) {
-      console.error(`[dormouse] remote host ask ${op} failed:`, err);
-    }
-    this.vscode.postMessage({ type: 'peer:answer', requestId, results });
-  }
-
   shutdown(): void {
-    // No-op — the extension host handles cleanup
+    // The extension host handles PTY cleanup, but nothing there will answer a
+    // command this webview is still holding once it goes away.
+    this.remoteHostClient.dispose();
   }
 
   async getAvailableShells(): Promise<{ name: string; path: string; args?: string[] }[]> {

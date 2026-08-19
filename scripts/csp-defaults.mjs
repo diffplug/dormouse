@@ -1,15 +1,18 @@
 // The one definition of where a Host may reach a relay server, shared by both
 // Hosts' build scripts.
 //
-// The two Hosts bake it in at different places, because their Hosts run in
-// different processes: standalone's runs in the sidecar, so esbuild substitutes
-// it into that bundle (`standalone/scripts/build-sidecar-proxy.mjs`) and the
-// service refuses any origin outside it; the VS Code extension still hosts the
-// Host in its webview, so esbuild substitutes it into the webview's CSP
-// (`vscode-ext/scripts/esbuild.mjs`) until that Host migrates too. Either way
-// the *fact* is one fact — duplicating it meant a change to the SaaS origin
-// could ship one Host pointed at the old one. See docs/specs/server.md →
-// "Host webview CSP".
+// Both Hosts now run outside any webview — standalone's in the sidecar, VS
+// Code's in the extension host — so neither is fenced by a CSP and both bake
+// this list into their bundle instead (`standalone/scripts/build-sidecar-proxy.mjs`,
+// `vscode-ext/scripts/esbuild.mjs`), where the service refuses any origin
+// outside it. The *fact* is one fact — duplicating it meant a change to the
+// SaaS origin could ship one Host pointed at the old one. See
+// docs/specs/server.md → "Host webview CSP".
+
+import { readFileSync } from 'node:fs';
+
+/** The identifier esbuild substitutes; read by `lib/src/host/remote/connect-src.ts`. */
+export const CONNECT_SRC_PLACEHOLDER = '__DORMOUSE_REMOTE_CONNECT_SRC__';
 
 /** The remote-server `connect-src` sources baked into the published builds. */
 export const DEFAULT_REMOTE_CONNECT_SRC = 'https://*.dormouse.sh wss://*.dormouse.sh';
@@ -24,4 +27,29 @@ export function resolveRemoteConnectSrc(env = process.env, label = 'build') {
   if (!override) return DEFAULT_REMOTE_CONNECT_SRC;
   console.error(`[${label}] connect-src remote sources overridden: ${override}`);
   return override;
+}
+
+/**
+ * Fail the build if the `define` did not reach `bundlePath`.
+ *
+ * The source reads the placeholder as a `declare const`, so a lost define
+ * compiles fine and only shows up at runtime — as a Host that silently uses the
+ * shipped default allowlist instead of the selfhoster's origins. Both bundles
+ * bake the same variable, so both fail on the same class of drift: someone
+ * re-inlines the esbuild call, or adds an entry point that pulls in the Host
+ * without the define.
+ */
+export function assertConnectSrcBaked(bundlePath, remoteSrc) {
+  const bundle = readFileSync(bundlePath, 'utf8');
+  if (bundle.includes(CONNECT_SRC_PLACEHOLDER)) {
+    throw new Error(
+      `connect-src: ${CONNECT_SRC_PLACEHOLDER} survived into ${bundlePath} — the esbuild define ` +
+        'did not apply, and the remote Host would use the built-in default sources.',
+    );
+  }
+  if (!bundle.includes(remoteSrc)) {
+    throw new Error(
+      `connect-src: ${bundlePath} does not contain the resolved sources (${remoteSrc}).`,
+    );
+  }
 }

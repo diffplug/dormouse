@@ -18,20 +18,12 @@
 import { getAlertSettings } from '../../lib/alert-settings';
 import { watchUnattendedRings } from '../../lib/alert-ring-watch';
 import { deriveSessionLabel } from '../../lib/session-label';
-import {
-  getPushDevicesGeneration,
-  setPushDevices,
-  type PushDevice,
-  type PushDevicesState,
-} from '../../lib/push-devices';
-import type { AlertPushDeps } from './push-delivery';
-
-export type { AlertPushDeps };
+import { setPushDevices, type PushDevice, type PushDevicesState } from '../../lib/push-devices';
 
 let pushDevicesRefreshSequence = 0;
 
 /**
- * Run `load` and publish its result to the dialog's store with the fences below.
+ * Run `load` and publish its result to the dialog's store, fenced as below.
  * `load` goes over the service bridge (`activation.ts`), because the ACL the
  * list is joined against is the Host's — and it answers `null` when no Host is
  * running, which is "nowhere to push", not an empty list. Failure is reported
@@ -41,19 +33,14 @@ let pushDevicesRefreshSequence = 0;
 export async function commitPushDevices(
   load: () => Promise<PushDevice[] | null>,
 ): Promise<void> {
-  // Writes are fenced on both Host generation and request order. Generation
-  // discards a request that outlives stop/re-enrollment; sequence makes
-  // overlapping requests for the same Host latest-request-wins, so a slow
-  // startup refresh cannot overwrite a newer dialog refresh.
-  const generation = getPushDevicesGeneration();
+  // Writes are fenced on request order: overlapping requests are
+  // latest-request-wins, so a slow startup refresh cannot overwrite a newer
+  // dialog refresh. Which Host answered needs no fence of its own — the service
+  // reads its own ACL at request time, and a Host that stopped answers
+  // `no-host` like any other state.
   const sequence = ++pushDevicesRefreshSequence;
   const commit = (next: PushDevicesState) => {
-    if (
-      getPushDevicesGeneration() === generation &&
-      pushDevicesRefreshSequence === sequence
-    ) {
-      setPushDevices(next);
-    }
+    if (pushDevicesRefreshSequence === sequence) setPushDevices(next);
   };
   commit({ status: 'loading', devices: [] });
   try {

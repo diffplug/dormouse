@@ -61,8 +61,12 @@ import { log } from './log';
 export interface PeerLinkDeps {
   /** Fan out to this window's own webviews — never to other windows. */
   brokerRequest(op: string, params: unknown): Promise<unknown[]>;
-  /** A peer window's answers may have changed, so the directory is stale. */
-  invalidateDirectory(): void;
+  /**
+   * A peer window's answers may have changed, so the directory is stale.
+   * `topic` is the webview's own word for what changed where there is one; a
+   * membership change carries none, and is always the directory's business.
+   */
+  invalidateDirectory(topic?: string | null): void;
   onProcessedPtyData(listener: (id: string, data: string) => void): () => void;
   onProcessedPtyExit(listener: (id: string, exitCode: number) => void): () => void;
   writePty(ptyId: string, data: string): void;
@@ -367,7 +371,7 @@ function onServerFrame(client: PeerLinkClient, frame: unknown): void {
     return;
   }
   if (response.kind === 'notify') {
-    deps?.invalidateDirectory();
+    deps?.invalidateDirectory(response.topic);
     return;
   }
   if (response.kind === 'command') {

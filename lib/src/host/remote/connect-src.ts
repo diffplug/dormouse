@@ -21,6 +21,26 @@
  */
 export const DEFAULT_REMOTE_CONNECT_SRC = 'https://*.dormouse.sh wss://*.dormouse.sh';
 
+/** Substituted by esbuild at build time; see `scripts/csp-defaults.mjs`. */
+declare const __DORMOUSE_REMOTE_CONNECT_SRC__: string;
+
+/**
+ * The allowlist this build was compiled with — the one place the baked value is
+ * read, whichever process holds the socket.
+ *
+ * A `define` substitutes the identifier wherever it appears in the bundle,
+ * imported lib modules included, and both host bundles pass it
+ * (`standalone/scripts/build-sidecar-proxy.mjs`, `vscode-ext/scripts/esbuild.mjs`),
+ * so declaring it here rather than at each entry point keeps the value a literal
+ * in the bundle with no second copy of the fallback to drift. The `typeof` guard
+ * is for the test runners, which have no define.
+ */
+export function bakedConnectSrc(): string {
+  return typeof __DORMOUSE_REMOTE_CONNECT_SRC__ === 'string'
+    ? __DORMOUSE_REMOTE_CONNECT_SRC__
+    : DEFAULT_REMOTE_CONNECT_SRC;
+}
+
 /** https and wss are one scheme to a Host: the relay is reached over both. */
 function schemeClass(scheme: string): 'secure' | 'insecure' | null {
   if (scheme === 'https:' || scheme === 'wss:') return 'secure';

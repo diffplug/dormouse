@@ -28,12 +28,16 @@ const enrollmentState = vi.hoisted(() => ({
 
 const pushWatch = vi.hoisted(() => ({
   fire: undefined as ((sessionId: string, title: string) => void) | undefined,
+  stopped: 0,
   loads: [] as Array<() => Promise<unknown>>,
 }));
 vi.mock('./alert-push', () => ({
   watchPushRings: (fire: (sessionId: string, title: string) => void) => {
     pushWatch.fire = fire;
-    return () => {};
+    return () => {
+      pushWatch.fire = undefined;
+      pushWatch.stopped += 1;
+    };
   },
   commitPushDevices: async (load: () => Promise<unknown>) => {
     pushWatch.loads.push(load);
@@ -69,6 +73,7 @@ vi.mock('../../lib/platform', () => ({
 beforeEach(() => {
   remoteHostLink = undefined;
   pushWatch.fire = undefined;
+  pushWatch.stopped = 0;
   pushWatch.loads.length = 0;
   pushRefreshers.current.length = 0;
   aclState.records = [];
@@ -129,17 +134,27 @@ function fakeLink(): FakeLink {
   return link;
 }
 
-/** Install in bridge mode and hand back the module's fresh pairing store. */
+/**
+ * Install in bridge mode and hand back the module's fresh pairing store.
+ * Enrolled unless a test says otherwise: that is the state everything but the
+ * gate's own cases is about.
+ */
 async function installBridge(link: FakeLink) {
+  link.results.status ??= { enrolled: true };
   remoteHostLink = link;
   vi.resetModules();
   const mod = await import('./activation');
   const pairing = await import('./pairing-approval');
   mod.installRemoteHostConsoleHook();
-  // The adoption round trip gates the queue seed.
-  await Promise.resolve();
-  await Promise.resolve();
+  // The adoption round trip gates the queue seed, and the `status` seed gates
+  // the ring watch.
+  await settle();
   return { mod, pairing };
+}
+
+/** Let the boot round trips land. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 4; i++) await Promise.resolve();
 }
 
 function consoleHook() {
@@ -295,6 +310,35 @@ describe('remote host bridge mode', () => {
     pushRefreshers.current.at(-1)!();
     await Promise.resolve();
     expect(link.commands.map((c) => c.cmd)).toEqual(['pushDevices']);
+  });
+
+  it('arms nothing at all on a host that never enrolled', async () => {
+    // The common case: no ring watch, no device fetch, and no crossing per
+    // activity change — only the one `status` that says so.
+    const link = fakeLink();
+    link.results.status = { enrolled: false };
+    await installBridge(link);
+
+    expect(pushWatch.fire).toBeUndefined();
+    expect(link.commands.some((c) => c.cmd === 'pushDevices')).toBe(false);
+    expect(link.commands.some((c) => c.cmd === 'status')).toBe(true);
+  });
+
+  it('arms when the service announces a Host, and disarms when it goes', async () => {
+    const link = fakeLink();
+    link.results.status = { enrolled: false };
+    await installBridge(link);
+
+    // An enroll from any webview reaches every webview as this event.
+    link.emit('status', { name: 'status', enrolled: true });
+    await settle();
+    expect(pushWatch.fire).toBeDefined();
+    expect(link.commands.some((c) => c.cmd === 'pushDevices')).toBe(true);
+
+    // `clearEnrollment` announces the same way.
+    link.emit('status', { name: 'status', enrolled: false });
+    expect(pushWatch.fire).toBeUndefined();
+    expect(pushWatch.stopped).toBe(1);
   });
 
   it('is idempotent under a StrictMode double mount', async () => {

@@ -12,7 +12,8 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { HostAclRecord } from 'server-lib-common';
-import type { HostEnrollment } from '../../remote/host/enrollment';
+import { filterAclRecords } from '../../remote/host/acl';
+import { isEnrollment, type HostEnrollment } from '../../remote/host/enrollment';
 
 // Re-exported so an implementor can name the record type without depending on
 // `server-lib-common` itself; vscode-ext's project does not resolve it.
@@ -37,18 +38,6 @@ interface HostStateFile {
 
 function emptyState(): HostStateFile {
   return { version: 1, enrollment: null, acl: {} };
-}
-
-function isEnrollment(value: unknown): value is HostEnrollment {
-  if (!value || typeof value !== 'object') return false;
-  const v = value as Record<string, unknown>;
-  return (
-    typeof v.serverUrl === 'string' &&
-    typeof v.hostId === 'string' &&
-    typeof v.hostToken === 'string' &&
-    typeof v.origin === 'string' &&
-    typeof v.rpId === 'string'
-  );
 }
 
 function parseState(raw: string): HostStateFile {
@@ -97,10 +86,7 @@ export class FileHostStateStore implements HostStateStore {
   }
 
   async loadAcl(hostId: string): Promise<HostAclRecord[]> {
-    const records = (await this.#read()).acl[hostId] ?? [];
-    // `HostAcl.fromRecords` rejects a mismatched hostId, so drop foreign rows
-    // rather than fail the whole load over one.
-    return records.filter((record) => !!record && record.hostId === hostId);
+    return filterAclRecords(hostId, (await this.#read()).acl[hostId] ?? []);
   }
 
   async saveAcl(hostId: string, records: readonly HostAclRecord[]): Promise<void> {
