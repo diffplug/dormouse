@@ -1,12 +1,12 @@
 import { copyRaw, copyRewrapped, doPaste } from '../../../lib/clipboard';
-import { isEditableTarget } from '../../../lib/dom';
-import { IS_MAC } from '../../../lib/platform';
+import { isEditableTarget, isTerminalInputProxy } from '../../../lib/dom';
 import {
   extendSelectionToToken,
   flashCopy,
   getMouseSelectionState,
   setSelection as setMouseSelection,
 } from '../../../lib/mouse-selection';
+import { hasCopyModifier, hasPasteModifier } from './chords';
 import type { WallKeyboardCtx } from './types';
 
 /**
@@ -19,7 +19,7 @@ export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx)
   // copy/paste there. Xterm's hidden helper textarea is the input proxy
   // for the terminal itself, so we keep intercepting its keydowns.
   const tgt = e.target as HTMLElement | null;
-  if (isEditableTarget(tgt) && !tgt?.classList.contains('xterm-helper-textarea')) {
+  if (isEditableTarget(tgt) && !isTerminalInputProxy(tgt)) {
     return false;
   }
 
@@ -57,8 +57,7 @@ export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx)
   }
 
   const keyLower = e.key.toLowerCase();
-  const mod = IS_MAC ? e.metaKey : e.ctrlKey;
-  if (sel && !sel.dragging && mod && keyLower === 'c') {
+  if (sel && !sel.dragging && hasCopyModifier(e) && keyLower === 'c') {
     e.preventDefault();
     e.stopImmediatePropagation();
     const rewrapped = e.shiftKey;
@@ -67,11 +66,10 @@ export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx)
     });
     return true;
   }
-  // Accept either Ctrl+V or Cmd+V for paste on all platforms — matches VSCode's
-  // terminal paste behavior and the muscle memory of users coming from Linux/Windows.
+  // Paste takes either modifier on every platform (see `hasPasteModifier`).
   // Trade-off: shadows readline's ^V verbatim-insert; not worth surfacing as a
   // setting until someone asks for it.
-  if ((e.metaKey || e.ctrlKey) && keyLower === 'v') {
+  if (hasPasteModifier(e) && keyLower === 'v') {
     e.preventDefault();
     e.stopImmediatePropagation();
     void doPaste(sid);
@@ -80,10 +78,9 @@ export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx)
   return false;
 }
 
+/** `paneParams` reads the store, which holds a Surface's params whether it is a pane
+ *  or a Door, so a minimized Surface needs no separate lookup. */
 function surfaceTypeForId(ctx: WallKeyboardCtx, id: string): string {
-  const panelParams = ctx.nav.paneParams(id) as { surfaceType?: unknown } | undefined;
-  if (typeof panelParams?.surfaceType === 'string') return panelParams.surfaceType;
-  const door = ctx.doorsRef?.current?.find((candidate) => candidate.id === id);
-  const doorType = (door?.params as { surfaceType?: unknown } | undefined)?.surfaceType;
-  return typeof doorType === 'string' ? doorType : 'terminal';
+  const params = ctx.nav.paneParams(id) as { surfaceType?: unknown } | undefined;
+  return typeof params?.surfaceType === 'string' ? params.surfaceType : 'terminal';
 }

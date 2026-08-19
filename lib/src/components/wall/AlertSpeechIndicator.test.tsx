@@ -34,6 +34,10 @@ function ringLayer(): HTMLElement | null {
   return container.querySelector<HTMLElement>(':scope > div:not([data-alert-speech-state])');
 }
 
+function washLayer(): HTMLElement | null {
+  return container.querySelector<HTMLElement>('[data-alert-speech-wash]');
+}
+
 describe('AlertSpeechIndicator', () => {
   it('renders a loud animated SPEAKING state over the whole Pane', () => {
     act(() => setAlertSpeechState('pty-1', 'speaking'));
@@ -69,24 +73,31 @@ describe('AlertSpeechIndicator', () => {
   it('keeps the wash below the header and the ring above it', () => {
     act(() => setAlertSpeechState('pty-1', 'speaking'));
 
-    const wash = container.querySelector<HTMLElement>('[data-alert-speech-state="speaking"]');
-    expect(wash?.className).toContain('z-[19]');
-    expect(wash?.className).toContain('bg-alarm-vs-terminal/20');
+    const indicator = container.querySelector<HTMLElement>('[data-alert-speech-state="speaking"]');
+    expect(indicator?.className).toContain('z-[19]');
+    expect(washLayer()?.className).toContain('bg-alarm-vs-terminal');
+    expect(washLayer()?.className).toContain('opacity-20');
+    expect(washLayer()?.className).toContain('rounded-t-lg');
+    expect(washLayer()?.className).toContain('rounded-b-lg');
+    // Tailwind's color-opacity modifiers require color-mix(), which is absent
+    // from the standalone Safari 15 / Chrome 105 targets.
+    expect(washLayer()?.className).not.toContain('bg-alarm-vs-terminal/');
     expect(ringLayer()?.className).toContain('z-[25]');
     // The ring tints nothing — it is an inset border, not a fill.
     expect(ringLayer()?.className).not.toContain('bg-alarm-vs-terminal/');
   });
 
   /**
-   * `spoken` lasts until the ring is attended, which is unbounded. A wash
-   * degrading terminal-text contrast for that whole window is the same mistake
-   * the Door's badge cluster avoids, so only the ring persists.
+   * `spoken` lasts until the ring is attended, which is unbounded, so its wash
+   * is lighter than the speaking one — present enough to read as an unhandled
+   * alarm, light enough not to fight terminal text for that whole window.
    */
-  it('does not wash the terminal body for the unbounded SPOKEN window', () => {
+  it('keeps a lighter wash for the unbounded SPOKEN window', () => {
     act(() => setAlertSpeechState('pty-1', 'spoken'));
 
-    const wash = container.querySelector<HTMLElement>('[data-alert-speech-state="spoken"]');
-    expect(wash?.className).not.toContain('bg-alarm-vs-terminal/');
+    expect(washLayer()?.className).toContain('bg-alarm-vs-terminal');
+    expect(washLayer()?.className).toContain('opacity-10');
+    expect(washLayer()?.className).not.toContain('bg-alarm-vs-terminal/');
     expect(ringLayer()?.className).toContain('inset_0_0_0_3px');
   });
 

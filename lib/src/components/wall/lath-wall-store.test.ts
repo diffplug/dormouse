@@ -1,6 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createLathWallStore, type LathWallStore, LATH_LAYOUT_OPTS } from './lath-wall-store';
+import {
+  createLathWallStore,
+  type LathWallStore,
+  LATH_LAYOUT_OPTS,
+  MAX_PARKED_SURFACES,
+} from './lath-wall-store';
 import { leaves, oppositeEdge, type LathNode, type LathTree } from '../../lib/lath/model';
+import { layout } from '../../lib/lath/layout';
 import { leaf, split, tree } from '../../lib/lath/test-util';
 import { leafMeta } from '../../lib/lath/test-fixtures';
 
@@ -265,6 +271,34 @@ describe('enter hints (derived inside the mutators)', () => {
     expect(store.consumeEnterHints().size).toBe(0); // consume clears the map
   });
 
+  it('restoreLeaf and insertLeaf start parked ids from their held rect', () => {
+    for (const reattach of ['restore', 'insert'] as const) {
+      const store = seeded();
+      store.setLayoutGeometry(RECT, LATH_LAYOUT_OPTS);
+      const held = layout(twoLeafRow(), RECT, LATH_LAYOUT_OPTS).get('b')!;
+      const { token } = store.doorLeaf('b', { park: true });
+
+      if (reattach === 'restore') {
+        store.restoreLeaf(leafMeta({ component: 'browser' }), token!, { fallbackRef: 'a' });
+      } else {
+        store.insertLeaf('b', leafMeta({ component: 'browser' }), {
+          kind: 'edge',
+          edge: 'right',
+          path: [],
+        });
+      }
+
+      expect(store.consumeEnterHints().get('b')).toEqual(held);
+    }
+  });
+
+  it('suppresses a collapsed entry when a parked id has no measured rect', () => {
+    const store = seeded();
+    const { token } = store.doorLeaf('b', { park: true });
+    store.restoreLeaf(leafMeta({ component: 'browser' }), token!, { fallbackRef: 'a' });
+    expect(store.consumeEnterHints().has('b')).toBe(false);
+  });
+
   it('insertLeaf derives the hint from an edge target', () => {
     const store = seeded();
     store.insertLeaf('c', leafMeta(), { kind: 'edge', path: [1], edge: 'right' });
@@ -339,6 +373,185 @@ describe('meta writes', () => {
     const before = store.getSnapshot();
     store.updateParams('missing', { x: 1 });
     expect(store.getSnapshot()).toBe(before);
+  });
+});
+
+describe('doored leaves', () => {
+  it('doorLeaf detaches like removeLeaf but KEEPS the meta, in one commit', () => {
+    const store = seeded();
+    const r = store.doorLeaf('b');
+    expect(r.ok).toBe(true);
+    expect(r.token).not.toBeNull();
+    const s = store.getSnapshot();
+    expect(leaves(s.tree)).toEqual(['a']);
+    // Detachment is a TREE fact: the meta stays put, because the store remains the
+    // authority for a minimized Surface's title/params.
+    expect(s.leafMeta.get('b')?.title).toBe('B');
+    // ...but an unparked Door keeps no DOM.
+    expect(store.parkedIds()).toEqual([]);
+  });
+
+  it('doorLeaf({ park: true }) additionally holds the DOM at its last rect', () => {
+    const store = seeded();
+    store.setLayoutGeometry({ x: 0, y: 0, width: 100, height: 100 }, LATH_LAYOUT_OPTS);
+    store.doorLeaf('b', { park: true });
+    const s = store.getSnapshot();
+    expect(s.leafMeta.get('b')?.title).toBe('B');
+    expect(store.parkedIds()).toEqual(['b']);
+    expect(s.parked.get('b')).toMatchObject({ width: expect.any(Number), height: expect.any(Number) });
+  });
+
+  it('doorLeaf clears zoom and rejects an absent id without committing', () => {
+    const store = seeded();
+    store.setZoomed('b');
+    store.doorLeaf('b', { park: true });
+    expect(store.getSnapshot().zoomedId).toBeNull();
+    const before = store.getSnapshot();
+    expect(store.doorLeaf('missing', { park: true })).toEqual({ ok: false, token: null });
+    expect(store.getSnapshot()).toBe(before);
+  });
+
+  it('removeLeaf still deletes the meta outright', () => {
+    const store = seeded();
+    store.removeLeaf('b');
+    const s = store.getSnapshot();
+    expect(s.leafMeta.has('b')).toBe(false);
+    expect(s.parked.size).toBe(0);
+  });
+
+  it('restoreLeaf unparks in the SAME commit that re-admits the leaf', () => {
+    const store = seeded();
+    const { token } = store.doorLeaf('b', { park: true });
+    const revisions: number[] = [];
+    store.subscribe(() => revisions.push(store.getSnapshot().revision));
+    const r = store.restoreLeaf(leafMeta({ component: 'browser', title: 'B' }), token!, { fallbackRef: 'a' });
+    expect(r.ok).toBe(true);
+    // Exactly one notification: a parked leaf must never be absent from both the tree
+    // and `parked`, or the adapter would unmount it for a frame and the DOM would go.
+    expect(revisions).toHaveLength(1);
+    const s = store.getSnapshot();
+    expect(leaves(s.tree)).toContain('b');
+    expect(s.parked.size).toBe(0);
+  });
+
+  it('addLeaf, insertLeaf, and replaceLeaf also unpark the id they admit', () => {
+    const store = seeded();
+    store.doorLeaf('b', { park: true });
+    store.addLeaf('b', leafMeta(), { refId: 'a', edge: 'right' });
+    expect(store.getSnapshot().parked.size).toBe(0);
+
+    store.doorLeaf('b', { park: true });
+    store.insertLeaf('b', leafMeta(), { kind: 'edge', leafId: 'a', edge: 'bottom', path: [] });
+    expect(store.getSnapshot().parked.size).toBe(0);
+
+    store.doorLeaf('b', { park: true });
+    store.replaceLeaf('a', 'b', leafMeta());
+    expect(store.getSnapshot().parked.size).toBe(0);
+  });
+
+  it('forgetLeaf destroys a Door, and is a no-op for anything else', () => {
+    const store = seeded();
+    store.doorLeaf('b', { park: true });
+    store.forgetLeaf('b');
+    const s = store.getSnapshot();
+    expect(s.parked.size).toBe(0);
+    expect(s.leafMeta.has('b')).toBe(false);
+    const before = store.getSnapshot();
+    store.forgetLeaf('b'); // already gone
+    store.forgetLeaf('a'); // laid out — not a Door
+    expect(store.getSnapshot()).toBe(before);
+    expect(store.getSnapshot().leafMeta.has('a')).toBe(true);
+  });
+
+  it('meta writes reach a Doored leaf, parked or not', () => {
+    const store = seeded();
+    store.doorLeaf('b', { park: true });
+    store.setTitle('b', 'navigated');
+    store.updateParams('b', { url: 'https://example.com' });
+    expect(store.getSnapshot().leafMeta.get('b')).toMatchObject({
+      title: 'navigated',
+      params: { url: 'https://example.com' },
+    });
+  });
+
+  it('parkedIds exposes the store cap\'s oldest-first park order', () => {
+    const store = seeded();
+    store.addLeaf('c', leafMeta({ component: 'browser' }), { refId: 'a', edge: 'right' });
+    store.doorLeaf('b', { park: true });
+    store.doorLeaf('c', { park: true });
+    expect(store.parkedIds()).toEqual(['b', 'c']);
+  });
+
+  it('the cap drops the oldest DOM but never its metadata', () => {
+    const store = seeded();
+    store.doorLeaf('b', { park: true });
+    store.updateParams('b', { url: 'https://after-park.example' });
+
+    for (let i = 0; i < MAX_PARKED_SURFACES; i++) {
+      const id = `browser-${i}`;
+      store.addLeaf(id, leafMeta({ component: 'browser' }), { refId: 'a', edge: 'right' });
+      store.doorLeaf(id, { park: true });
+    }
+
+    // Evicted from the DOM cap...
+    expect(store.getSnapshot().parked.has('b')).toBe(false);
+    // ...but still a Door with live meta, so it reattaches by reloading its latest url.
+    expect(store.getSnapshot().leafMeta.get('b')?.params).toEqual({ url: 'https://after-park.example' });
+
+    store.updateParams('b', { session: 'acquired-late' });
+    expect(store.getSnapshot().leafMeta.get('b')?.params).toEqual({
+      url: 'https://after-park.example',
+      session: 'acquired-late',
+    });
+
+    store.forgetLeaf('b');
+    expect(store.getSnapshot().leafMeta.has('b')).toBe(false);
+  });
+
+  it('addDoor registers a leaf that is born minimized, and never clobbers a known id', () => {
+    const store = seeded();
+    store.addDoor('born', leafMeta({ title: 'Born' }));
+    // Meta without a tree entry: a Door that was never a pane.
+    expect(store.getSnapshot().leafMeta.get('born')?.title).toBe('Born');
+    expect(store.has('born')).toBe(false);
+    expect(leaves(store.getSnapshot().tree)).toEqual(['a', 'b']);
+    // It behaves like any other Door from here: writes reach it, and it can be
+    // admitted to the tree.
+    store.setTitle('born', 'renamed');
+    expect(store.getSnapshot().leafMeta.get('born')?.title).toBe('renamed');
+
+    // A live pane and an existing Door are both left alone.
+    const before = store.getSnapshot();
+    store.addDoor('a', leafMeta({ title: 'clobber' }));
+    store.addDoor('born', leafMeta({ title: 'clobber' }));
+    expect(store.getSnapshot()).toBe(before);
+  });
+
+  it('seed unparks by TREE membership, not by the meta it is handed', () => {
+    const store = seeded();
+    store.doorLeaf('b', { park: true });
+    // Hydration hands `seed` the Doors' meta alongside the tree's leaves. A parked id
+    // that appears only as a Door row must STAY parked — unparking it would unmount
+    // the DOM the park exists to preserve, and would queue its held rect as an enter
+    // hint for a leaf that never enters.
+    store.seed({ root: { kind: 'leaf', id: 'z' } }, [['z', leafMeta()], ['b', leafMeta({ component: 'browser' })]]);
+    expect(store.parkedIds()).toEqual(['b']);
+    expect(store.consumeEnterHints().has('b')).toBe(false);
+  });
+
+  it('seed keeps parked leaves, minus any it admits to the new tree', () => {
+    const store = seeded();
+    store.doorLeaf('b', { park: true });
+    // The workspaces-rollout switch parks the outgoing Workspace, then seeds the
+    // incoming one — clearing here would unmount exactly what parking preserved.
+    store.seed({ root: { kind: 'leaf', id: 'z' } }, [['z', leafMeta()]]);
+    expect(store.parkedIds()).toEqual(['b']);
+    // The park's meta has to survive with it, or the store would be holding DOM it
+    // knows nothing about.
+    expect(store.getSnapshot().leafMeta.get('b')?.title).toBe('B');
+    // ...and switching back re-admits it rather than leaving a duplicate.
+    store.seed({ root: { kind: 'leaf', id: 'b' } }, [['b', leafMeta({ component: 'browser' })]]);
+    expect(store.parkedIds()).toEqual([]);
   });
 });
 

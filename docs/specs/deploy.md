@@ -64,6 +64,10 @@ Jobs, matrix targets, pnpm/Node versions, and step ordering are defined in [.git
 
 The workflow defaults `GITHUB_TOKEN` to read-only repository access (`contents: read`). The build jobs request provenance permissions (`id-token: write` + `attestations: write`), and the `security-audit` job requests `actions: write` so it can dispatch the audit workflow. The publish job stays on the workflow read-only default and is separately gated by the `vscode-extension-publish` environment.
 
+Both build jobs run in the `release-attest` environment, whose deployment policy admits `v*` tags and nothing else. That bounds the ref a provenance OIDC token can be minted from: the `Tag operations` ruleset restricts tag `creation` and `update` to admins across `~ALL` tag refs, so an environment scoped to `v*` is a ref no non-admin can produce. The environment carries **no secrets and no required reviewer** — a reviewer would stall every release on manual approval at its first jobs, and the build jobs have no business seeing credentials. This is also why neither existing `v*` environment is reused: `vscode-extension-publish` requires reviewers, and `security-audit` holds `AUDIT_PAT` and `CLAUDE_CODE_OAUTH_TOKEN`.
+
+The environment must exist **before** the `environment:` keys reference it. A workflow naming an environment that does not exist auto-creates an unprotected one on the next `v*` push, which would leave the OIDC token ungated and add a no-policy environment to clean up.
+
 **Note:** We do NOT use `tauri-action`'s built-in GitHub Release creation. We create the release locally after signing.
 
 The `build-standalone` artifact upload sets `include-hidden-files: true` — `actions/upload-artifact` v4.4+ silently drops dotfiles by default, but the zsh shell integration ships as ZDOTDIR dotfiles (`standalone/sidecar/shell-integration/zsh/.zshenv` etc.). Without the flag, the artifact is missing files that `artifact-manifest.sha256` hashed (the manifest is generated from the runner's disk, before upload), and Stage 2 hash verification fails. The `vscode-extension` upload keeps the safer default since it only contains `*.vsix` and the manifest.

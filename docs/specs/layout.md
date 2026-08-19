@@ -11,7 +11,7 @@ A **Session** is a single PTY instance — a running shell process with its scro
 A Surface's **View** state places it in one of two containers:
 
 - **Pane** — a visible container in the content area. A terminal Surface renders its output via xterm.js; a browser surface renders through `BrowserPanel`. The pane has a header with controls and acts as the drag handle for layout rearrangement.
-- **Door** — a minimized container in the baseboard. The Surface is still alive (a terminal's PTY keeps running and buffering output; a browser surface's backing session or proxy grant stays alive) but not visible. The door shows the Surface's title plus alert and TODO indicators, and looks like a mouse hole cut into the baseboard.
+- **Door** — a minimized container in the baseboard. The Surface is still alive (a terminal's PTY keeps running and buffering output; a browser surface's backing session or proxy grant stays alive, and its DOM stays mounted-but-hidden — see Minimize and reattach) but not visible. The door shows the Surface's title plus alert and TODO indicators, and looks like a mouse hole cut into the baseboard.
 
 Transitioning between Pane and Door does not alter the Surface in any way.
 Minimizing a pane creates a door; reattaching a door creates a pane. Terminal
@@ -116,8 +116,8 @@ A terminal Session with transient speech-delivery state gets a pointer-transpare
 
 It renders as **two layers straddling the header's stacking context** (`.lath-leaf-header` is `position: relative; z-index: 20`):
 
-- **Wash + label at `z-index: 19`** — below the header, so the wash never tints the header band, where `--color-alarm-vs-terminal` (picked against the *terminal body*) carries no contrast guarantee; above terminal content; below the `z-index: 20` pane-corner mouse-override banner, which therefore stays untinted. Only `SPEAKING` washes, at 20%: `SPOKEN` persists until the ring is attended, which is unbounded, and a tint degrading terminal-text contrast for that whole window is the same mistake the Door's badge cluster avoids. The label sits `PANE_HEADER_HEIGHT_PX + 4` from the Pane top, centered, in both states.
-- **Perimeter ring at `z-index: 25`** — above the header so the treatment still reads as one rounded rectangle around the whole Pane, below the `z-index: 30` sashes. An inset border at the leaf's edge covers nothing. 5px for `SPEAKING`, 3px for `SPOKEN`; it is what carries `SPOKEN` on its own.
+- **Wash + label at `z-index: 19`** — below the header, so the wash never tints the header band, where `--color-alarm-vs-terminal` (picked against the *terminal body*) carries no contrast guarantee; above terminal content; below the `z-index: 20` pane-corner mouse-override banner, which therefore stays untinted. Both states wash, `SPEAKING` at 20% and `SPOKEN` at half that: `SPOKEN` persists until the ring is attended, which is unbounded, so it keeps a light haze that still reads as an unhandled alarm without degrading terminal-text contrast the way a full-strength tint would for that whole window. The solid alarm color lives on a dedicated child whose element opacity supplies those strengths; color-alpha utilities are not used because their emitted `color-mix()` path is unsupported by the standalone Safari 15 / Chrome 105 targets. A Door has no equivalent (Doors, below): a haze across a 24px chip reads as a color shift rather than an alarm, so there `SPOKEN` rides on a badge-cluster speaker icon plus a 2px inset instead. The label sits `PANE_HEADER_HEIGHT_PX + 4` from the Pane top, centered, in both states.
+- **Perimeter ring at `z-index: 25`** — above the header so the treatment still reads as one rounded rectangle around the whole Pane, below the `z-index: 30` sashes. An inset border at the leaf's edge covers nothing. 5px for `SPEAKING`, 3px for `SPOKEN`.
 
 Header popovers are not a factor in this layering: every one of them (pane context menu, title candidates, notification preview, rename warning) portals to `document.body` with `position: fixed`, so they render in the root stacking context above the whole wall regardless of leaf z-indices.
 
@@ -301,10 +301,26 @@ Swaps session **content** between two panes — the layout shape is unchanged. A
 ## Minimize and reattach
 
 ### Minimize (`m` key or minimize header button)
-1. `lath.removeLeaf(id)` removes the leaf and returns a JSON-serializable **restore token** capturing the leaf's ancestry (sibling id, split-sibling leaf set/fingerprint when needed, edge, weight, child index, and a structure-only fingerprint of the parent split post-removal — `docs/specs/tiling-engine.md` → "Restore tokens").
-2. Add to `doors` state → door appears in baseboard, carrying the `token`. The door stores only the stable component/title for persistence; its visible label is derived from live terminal semantic state at render time. (A pane dragged onto the baseboard minimizes the same way — the drag proposes `onProposeMinimize`, which calls the same `minimizePane`.)
+1. `lath.store.doorLeaf(id, { park })` detaches the leaf — keeping its meta in the store, and for a browser Surface (see below) its DOM as well — and returns a JSON-serializable **restore token** capturing the leaf's ancestry (sibling id, split-sibling leaf set/fingerprint when needed, edge, weight, child index, and a structure-only fingerprint of the parent split post-removal — `docs/specs/tiling-engine.md` → "Restore tokens").
+2. Add to `doors` state → door appears in baseboard, carrying the `token` and nothing else; its label is derived from live terminal semantic state over the store's fallback title at render time. (A pane dragged onto the baseboard minimizes the same way — the drag proposes `onProposeMinimize`, which calls the same `minimizePane`.)
 3. Session stays in registry (not disposed).
 4. Selection moves to the new door (stays in command mode). If this was the *last* pane, the auto-spawn effect fills the emptied Wall while the door keeps selection.
+
+**A minimized browser Surface parks rather than unmounting.** Its state lives in the
+DOM — an `<iframe>`'s document, a screencast canvas — so removing the leaf would
+destroy it and the reattach would be a reload. `minimizePane` passes `{ park: true }` for browser
+Surfaces, which keeps the leaf mounted and invisible while it is Doored; reattach reveals the same live document, scroll position, form state and all
+(`docs/specs/tiling-engine.md` → "Parked leaves" owns the mechanism, the
+`MAX_PARKED_SURFACES` cap, and the visibility contract). Terminals do not park: their
+state is in the PTY and the registry replays it, so the plain remove already loses
+nothing. Parking spans the minimize only — a restart still cold-loads every browser
+Surface from its persisted URL. Because a parked Surface keeps running while Doored,
+the store — not the Door record — holds its current title/params. A runtime Door is
+`{ id, token }` and carries no metadata at all, so there is no copy to go stale and no
+seam to remember: reattach (click or drag-out), `dor` param matching, kill/session
+teardown, `dor list`, the baseboard chip's label and the session save all read
+`lath.getMeta(id)`, and the persisted `PersistedDoor` row is materialized from the
+store at save time (`docs/specs/tiling-engine.md` → "Parked leaves").
 
 ### Reattach (click door, Enter/d on door)
 
@@ -314,7 +330,7 @@ Swaps session **content** between two panes — the layout shape is unchanged. A
 - **Neighbor** — the sibling still exists: split beside it on the original edge (at 50/50).
 - **Fallback** — split beside a caller-supplied live reference (the selected pane, else the first pane) via `autoEdge`; into an empty tree the leaf becomes the root.
 
-A door dragged out of the baseboard skips the token entirely and inserts at the hit-tested drop position the user chose (`onExternalDrop` → `lath.insertLeaf`).
+A door dragged out of the baseboard skips the token entirely and inserts at the hit-tested drop position the user chose (`onExternalDrop` → `lath.insertLeaf`). Either path unparks a parked Surface in the same commit that re-admits it, so the DOM is never momentarily unmounted.
 
 ### Splitting from a Door
 
@@ -332,12 +348,16 @@ is no visible pane geometry to inspect.
 
 Triggered by pressing `,` in command mode or clicking the session name in the pane header.
 
-The name `<span>` is replaced by an `<input>` with:
+The name `<span>` is replaced by an `InlineEditInput` (`lib/src/components/wall/InlineEditInput.tsx`, shared with the browser URL editor in `docs/specs/dor-browser.md`) with:
 - Same font (`font-mono font-medium`), `bg-transparent`, no border
-- Text pre-selected on mount
-- `Enter` confirms, `Escape` cancels, `blur` confirms
+- Text pre-selected once, on mount
+- `Enter` confirms, `Escape` cancels, `blur` confirms — whichever lands first settles the edit, so the blur that follows an Enter/Escape unmount cannot submit a second time
 - `stopPropagation` on `mousedown`/`click`/`keydown` to prevent panel click or drag
 - All command-mode shortcuts are bypassed while renaming
+
+The field is **controlled by its own draft state**, seeded from the header label at mount and untouched by later prop changes. Pane headers re-render on every activity, terminal-state, and palette change, and an editor that re-derived its value (or re-ran `select()`) on those renders would fight the user mid-word — one re-render between two keystrokes and the second keystroke replaces everything typed so far. Mounting is the reset: the editor exists only while the pane is being renamed, so each rename starts from the current label.
+
+Clipboard chords inside the field are the wall's job on hosts whose webview has no native Edit menu — see `docs/specs/mouse-and-clipboard.md` §8.9.
 
 Submitted values are rejected when empty or when they fail the `setTerminalUserTitle` validation that also guards title seeding — no titles starting with the `<idle>` sentinel (`docs/specs/transport.md`). `<unnamed>` is the default panel placeholder but is otherwise allowed as a deliberate user pin. When the user submits a rejected value, the input still closes (so it is not a blocking dialog) and a small auto-dismissing warning popover anchored under the input names the offending value. The popover dismisses on the next pointerdown, scroll, resize, `Escape`, or after 3s.
 
@@ -350,7 +370,7 @@ For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getO
 - **Restore**: `restoreTerminal` creates xterm entry and spawns a new PTY with the saved cwd. It replays no transcript — scrollback is not persisted (`docs/specs/transport.md` → "What is persisted"). Used on cold start from a saved Snapshot (Link: Cold → Live).
 - **Agent resume**: a restored pane the host captured a resume invocation for re-runs it automatically. See "Agent resume on cold restore" below.
 - **Untouched**: new `getOrCreateTerminal` sessions start untouched. `isUntouched(id)` exposes the flag, and user-originated PTY input clears it via the registry input paths. Resume/restore seed the persisted flag; missing legacy snapshot data defaults to touched (`false`) so close confirmation remains conservative.
-- **Shell selection replacement**: the standalone shell dropdown and VS Code shell picker send `dormouse:new-terminal` with `replaceUntouched` when the selected shell type changes. `Wall` always creates a new session id and a fresh `surface:N` ref for that request. If the currently selected pane or door is untouched, the new terminal takes over the same leaf via a Lath `replace` op (an atomic identity swap; doors first reattach through the normal restore path), the old untouched session is disposed, and the replaced Surface's ref is retired. If the selected terminal is touched or no terminal is selected, the request spawns a new pane beside the selected one. Announced shell-selection spawns show a transient pane-anchored notice such as `Switched to zsh` or `Opened bash`.
+- **Shell selection replacement**: the standalone Settings dialog's Shell row and the VS Code shell picker send `dormouse:new-terminal` with `replaceUntouched` when the selected shell type changes. The standalone picker identifies a shell by its executable path plus ordered arguments, so WSL distributions and Windows Developer shells that share an executable remain distinct. `Wall` always creates a new session id and a fresh `surface:N` ref for that request. If the currently selected pane or door is untouched, the new terminal takes over the same leaf via a Lath `replace` op (an atomic identity swap; doors first reattach through the normal restore path), the old untouched session is disposed, and the replaced Surface's ref is retired. If the selected terminal is touched or no terminal is selected, the request spawns a new pane beside the selected one. Announced shell-selection spawns show a transient pane-anchored notice such as `Switched to zsh` or `Opened bash`.
 - During **resume** replay, xterm.js may emit terminal-generated replies for OSC/CSI/DCS queries that were embedded in buffered output. The registry drops those replay-time replies before they reach the new shell. This filter is limited to query/focus reports, and must not swallow user keyboard escape sequences such as arrows, function keys, or bracketed paste.
 - **mount / unmount (DOM)**: `mountElement` reparents the persistent DOM element into a container; `unmountElement` removes it. The Registry entry survives.
 - **Dispose**: `disposeSession` kills the PTY, disposes xterm, removes the registry entry. Only called on explicit kill (`x`).
@@ -504,7 +524,7 @@ Selection tail: at removal time, selection moves to a survivor (`lath.listPanes(
 
 ### Auto-spawn refill
 
-A store commit that empties the tree (last pane killed or minimized) triggers the "always keep one pane visible" auto-spawn: a Wall effect subscribed to the store spawns one leaf into the emptied tree (`lib/src/components/Wall.tsx`). It fires re-entrantly on the same commit chain, so the refill appears without a separate delay; the killed pane's fade already sequenced the removal. The refill spawns with the current default shell selection, matching manual splits and the standalone `[+]` action.
+A store commit that empties the tree (last pane killed or minimized) triggers the "always keep one pane visible" auto-spawn: a Wall effect subscribed to the store spawns one leaf into the emptied tree (`lib/src/components/Wall.tsx`). It fires re-entrantly on the same commit chain, so the refill appears without a separate delay; the killed pane's fade already sequenced the removal. The refill spawns with the current default shell selection, matching manual splits.
 
 The refill adopts the replacement (`selectPane`) only when the current selection no longer points at anything real: null (the kill tail cleared it after a selected last-pane kill) or dangling (selection still names the just-removed pane). A *valid* selection is left alone — the just-created door on the minimize path (so the door keeps selection across the refill) or a live pane after an unselected kill — because the auto-spawn exists to keep a pane visible, not to steal selection.
 
@@ -527,6 +547,7 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/components/wall/AlertSpeechIndicator.tsx` | Pointer-transparent whole-Pane `SPEAKING` / `SPOKEN` overlay |
 | `lib/src/components/wall/TerminalPanel.tsx` | Pane body wrapper; registers the pane's DOM element (`usePaneChrome`) |
 | `lib/src/components/wall/TerminalPaneHeader.tsx` | Pane header with rename, alert/TODO, mouse override, split/zoom/minimize/kill controls, and the right-click context menu |
+| `lib/src/components/wall/InlineEditInput.tsx` | The inline title/URL editor: draft-owning controlled input, pre-selected once on mount |
 | `lib/src/components/wall/PaneHeaderContextMenu.tsx` | Pane-header right-click menu: the `surface:N` handle plus the pane's bound TCP ports; a port click connects it to the default browser (`docs/specs/dor-browser.md`) |
 | `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` | Pane/door focus ring: the JS travel tween + rAF loop; re-measures on Lath store commits + animator frames; computes the directional motion-blur velocity |
 | `lib/src/components/wall/SelectionRing.tsx` | The SVG shell: one ring path (`solid` passthrough / `ants` command) plus the eight-piece smear group, all driven imperatively |
@@ -583,7 +604,19 @@ Concrete switch/create/close/rename keyboard shortcuts are chosen alongside the 
 
 ### Stage 4 — real switching and multi-Workspace activation
 
-Activating another Workspace (`switchWorkspace`) mounts the target Workspace's Surfaces into the Wall — rebuilding its Lath layout and reattaching its doors — and unmounts the previously active Workspace's Surfaces. For a terminal Surface this reuses the `mount` / `unmount` registry ops: the Registry entry and PTY survive `unmount`, so Process stays `Live`. A browser surface's backing agent-browser session or proxy grant likewise survives while its viewer resources are released. Because a terminal's Activity keeps flowing while unmounted, an inactive Workspace's tab can begin ringing or showing TODO while the user is elsewhere. Mounting must not fire a fresh ring (glossary I8, mirroring the minimize/reattach rule I3).
+Activating another Workspace (`switchWorkspace`) mounts the target Workspace's Surfaces into the Wall — rebuilding its Lath layout and reattaching its doors — and unmounts the previously active Workspace's Surfaces. For a terminal Surface this reuses the `mount` / `unmount` registry ops: the Registry entry and PTY survive `unmount`, so Process stays `Live`. A browser surface's backing agent-browser session or proxy grant likewise survives while its viewer resources are released.
+
+Switching **parks** the outgoing Workspace's browser Surfaces rather than unmounting
+them, on exactly the terms minimize already does (`docs/specs/tiling-engine.md` →
+"Parked leaves"): the switch parks each one and then seeds the incoming Workspace's
+tree, which `seed` is already written to survive — it keeps parked leaves except any
+the seed itself admits. That is what makes an iframe survive a round trip through
+another Workspace, and it is why the parked set is capped: a switch parks a whole
+Workspace at a time, so `MAX_PARKED_SURFACES` may need raising (or becoming a
+per-Workspace budget) once Stage 4 lands. Terminals keep the `mount` / `unmount` +
+replay path. VS Code is out of reach either way — it maps each Workspace to its own
+webview (see [Workspaces](#workspaces)), so cross-Workspace DOM survival there is
+bounded by webview lifetime, not by anything the Wall does. Because a terminal's Activity keeps flowing while unmounted, an inactive Workspace's tab can begin ringing or showing TODO while the user is elsewhere. Mounting must not fire a fresh ring (glossary I8, mirroring the minimize/reattach rule I3).
 
 Stage 4 also lifts the single-Workspace cap and wires the lifecycle UX:
 

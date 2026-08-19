@@ -145,14 +145,18 @@ export const ManyRules: Story = {
   },
 };
 
-/** Storybook's `play` runs before the snapshot, but the menu positions itself
+/** Opens the picker whose trigger matches `name`.
+ *
+ *  Storybook's `play` runs before the snapshot, but the menu positions itself
  *  from a measured trigger rect — one commit later. Settle before returning so
  *  Chromatic never captures the pre-measurement frame. The dialog renders in a
  *  portal-less overlay above `canvasElement`, so scope to the document body. */
-async function openThemeMenu({ canvasElement }: { canvasElement: HTMLElement }) {
-  const body = within(canvasElement.ownerDocument.body);
-  await userEvent.click(body.getByRole('button', { name: /^Theme:/ }));
-  await new Promise((resolve) => setTimeout(resolve, 100));
+function openPickerMenu(name: RegExp) {
+  return async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+    const body = within(canvasElement.ownerDocument.body);
+    await userEvent.click(body.getByRole('button', { name }));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  };
 }
 
 /**
@@ -165,7 +169,7 @@ export const ThemeMenuOpen: Story = {
     primedWatchedCommands: [],
     primedAlertSettings: {},
   },
-  play: openThemeMenu,
+  play: openPickerMenu(/^Theme:/),
 };
 
 /**
@@ -191,7 +195,7 @@ export const ThemeMenuOpenWithInstalledThemes: Story = {
       },
     })),
   },
-  play: openThemeMenu,
+  play: openPickerMenu(/^Theme:/),
 };
 
 /**
@@ -203,6 +207,54 @@ export const ThemeMenuOpenWithInstalledThemes: Story = {
 export const HostOwnsTheme: Story = {
   parameters: {
     hostOwnsTheme: true,
+    primedWatchedCommands: ['claude'],
+    primedAlertSettings: {},
+  },
+};
+
+/** The shells a standalone host detects, seeded into the shell store the way
+ *  `main.tsx` does at boot. */
+const DEFAULT_SHELLS = [
+  { name: 'zsh', path: '/bin/zsh' },
+  { name: 'bash', path: '/bin/bash' },
+  { name: 'fish', path: '/opt/homebrew/bin/fish' },
+];
+
+/**
+ * Standalone with several shells detected: the Shell row joins the Theme row,
+ * grouped with it rather than divided from it. Below two shells there is
+ * nothing to switch between and the row is absent, which is why every other
+ * story here has no Shell row.
+ */
+export const ShellRow: Story = {
+  parameters: {
+    primedShells: DEFAULT_SHELLS,
+    primedWatchedCommands: ['claude'],
+    primedAlertSettings: {},
+  },
+};
+
+/**
+ * The shell dropdown open, with the selected row's check. Positioned `fixed`
+ * off the trigger rect for the same reason the theme menu is.
+ */
+export const ShellMenuOpen: Story = {
+  parameters: {
+    primedShells: DEFAULT_SHELLS,
+    primedWatchedCommands: [],
+    primedAlertSettings: {},
+  },
+  play: openPickerMenu(/^Shell:/),
+};
+
+/**
+ * The VS Code host again: its native `dormouse.selectShell` QuickPick owns the
+ * shell, so the row is absent despite shells being seeded (`hostOwnsShells`).
+ */
+export const HostOwnsShells: Story = {
+  parameters: {
+    hostOwnsShells: true,
+    primedShells: DEFAULT_SHELLS,
     primedWatchedCommands: ['claude'],
     primedAlertSettings: {},
   },

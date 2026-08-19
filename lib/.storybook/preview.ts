@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, StrictMode } from 'react';
 import { createElement } from 'react';
 import '../src/theme.css';
 import '../src/index.css';
-import { initPlatform, type FakePtyAdapter, type FakeScenario } from '../src/lib/platform';
+import { initPlatform, type FakeScenario } from '../src/lib/platform';
 import {
   applyAlertSettingsFromHost,
   clearPrimedActivity,
@@ -31,6 +31,8 @@ import {
 import { VSCODE_THEMES, VSCODE_THEME_TYPES } from './themes';
 import { cfg } from '../src/cfg';
 import type { DormouseTheme } from '../src/lib/themes';
+import { clearPersistedShellSelection, seedShellStore } from '../src/lib/shell-store';
+import type { ShellEntry } from '../src/lib/shell-defaults';
 
 // Initialize fake platform once at module scope
 const fakePlatform = initPlatform('fake');
@@ -218,7 +220,7 @@ const preview: Preview = {
       const primedAlertSpeech = context.parameters?.primedAlertSpeech as
         | Record<string, AlertSpeechState>
         | undefined;
-      const platform = fakePlatform as FakePtyAdapter & { hostOwnsTheme?: boolean };
+      const platform = fakePlatform;
 
       if (scenario) platform.setDefaultScenario(scenario);
       else platform.clearDefaultScenario();
@@ -230,6 +232,10 @@ const preview: Preview = {
       // decides to hide its Theme row (docs/specs/theme.md). Absent resets to
       // undefined so it cannot leak into the next story.
       platform.hostOwnsTheme = context.parameters?.hostOwnsTheme === true || undefined;
+
+      // Likewise for shell selection: VS Code's native QuickPick owns it, which
+      // is how the Settings dialog decides to hide its Shell row.
+      platform.hostOwnsShells = context.parameters?.hostOwnsShells === true || undefined;
 
       // Installed themes normally arrive from OpenVSX and live in localStorage,
       // which every story shares — so a story that wants them names them, and
@@ -245,6 +251,18 @@ const preview: Preview = {
       } else {
         window.localStorage.removeItem('dormouse:installed-themes');
       }
+
+      // Shells are detected by the host at boot and seeded into a module store,
+      // which no story runs — so a story that wants the Shell row names its
+      // shells, and every other story empties the store (seeding nothing is what
+      // emptying it is). Clear the persisted choice because localStorage is
+      // shared like the themes above. An unchanged shell list intentionally
+      // preserves the live choice across re-renders (and same-list stories) so
+      // the render-time seed does not notify subscribers; `shell-store.ts`
+      // documents that tradeoff.
+      const primedShells = context.parameters?.primedShells as ShellEntry[] | undefined;
+      clearPersistedShellSelection();
+      seedShellStore(primedShells ?? []);
 
       useEffect(() => {
         let raf2 = 0;

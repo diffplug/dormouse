@@ -53,10 +53,6 @@ function isTerminalParams(params: unknown): boolean {
   return !isBrowserParams(params);
 }
 
-function isTerminalDoor(door: DooredItem): boolean {
-  return (door.component ?? 'terminal') === 'terminal';
-}
-
 // requestIdleCallback isn't universal (absent in WKWebView / Tauri on macOS),
 // so fall back to a short timer. Handles are plain numbers in both paths.
 function scheduleIdle(cb: () => void): number {
@@ -123,10 +119,13 @@ export function useDevServerPortCorrelation({
           candidates.push(panel.id);
           titles.set(panel.id, panel.title ?? null);
         }
+        // A Door's component/title live in the store, which stays their authority
+        // while the Surface is minimized.
         for (const door of doors) {
-          if (!isTerminalDoor(door)) continue;
+          const meta = lath.getMeta(door.id);
+          if ((meta?.component ?? 'terminal') !== 'terminal') continue;
           if (!candidates.includes(door.id)) candidates.push(door.id);
-          titles.set(door.id, door.title ?? null);
+          titles.set(door.id, meta?.title ?? null);
         }
 
         // port → the pane ids that listen on it (loopback-reachable binds only).

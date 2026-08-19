@@ -68,6 +68,18 @@ function ring(id: string): void {
   setStatus(id, 'ALERT_RINGING');
 }
 
+/**
+ * Two Sessions ring inside one speak window: the first is being read aloud, the
+ * second waits in the engine's queue behind it.
+ */
+function ringTwoWithFirstSpeaking(): void {
+  start();
+  ring('pty-1');
+  ring('pty-2');
+  vi.advanceTimersByTime(SPEAK_DELAY_MS);
+  utterances[0].onstart?.();
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   stubSpeechSynthesis();
@@ -241,7 +253,7 @@ describe('spoken alarms', () => {
     expect(getAlertSpeechState('pty-1')).toBe('spoken');
   });
 
-  it('clears delivery state when attention or another deliberate action resolves the ring', () => {
+  it('cuts the utterance off and clears delivery state when the ring is attended', () => {
     start();
     ring('pty-1');
     vi.advanceTimersByTime(SPEAK_DELAY_MS);
@@ -249,12 +261,70 @@ describe('spoken alarms', () => {
     expect(getAlertSpeechState('pty-1')).toBe('speaking');
 
     setStatus('pty-1', 'NOTHING_TO_SHOW');
+    // The announcement exists to summon the user, who is now here — the engine
+    // is silenced, not merely un-rendered.
+    expect(cancelCount).toBe(1);
     expect(getAlertSpeechState('pty-1')).toBeNull();
 
-    // The engine can finish after the user attends. Its stale callback must not
-    // resurrect HAS SPOKEN after the resolution.
+    // The engine reports the cut, and can also finish an utterance after the
+    // user attends. Either stale callback must not resurrect HAS SPOKEN.
     utterances[0].onend?.();
     expect(getAlertSpeechState('pty-1')).toBeNull();
+  });
+
+  /**
+   * Web Speech has no per-utterance stop, so cutting one Session off empties the
+   * whole queue. Attending one Pane must not silence another Pane's alarm.
+   */
+  it('re-speaks the still-ringing Sessions the cut collaterally silenced', () => {
+    ringTwoWithFirstSpeaking();
+    expect(spoken).toHaveLength(2);
+
+    setStatus('pty-1', 'NOTHING_TO_SHOW');
+
+    expect(cancelCount).toBe(1);
+    expect(spoken).toHaveLength(3);
+    utterances[2].onstart?.();
+    expect(getAlertSpeechState('pty-2')).toBe('speaking');
+  });
+
+  it('does not re-dispatch a queued utterance from an earlier ring', () => {
+    ringTwoWithFirstSpeaking();
+
+    // Resolve pty-2 while its first utterance is still queued, then ring it
+    // again. The new ring must serve its own delay rather than inheriting the
+    // old queued entry when pty-1 is cut off.
+    setStatus('pty-2', 'NOTHING_TO_SHOW');
+    ring('pty-2');
+    setStatus('pty-1', 'NOTHING_TO_SHOW');
+
+    expect(cancelCount).toBe(1);
+    expect(spoken).toHaveLength(2);
+    vi.advanceTimersByTime(SPEAK_DELAY_MS - 1);
+    expect(spoken).toHaveLength(2);
+    vi.advanceTimersByTime(1);
+    expect(spoken).toHaveLength(3);
+  });
+
+  /** A re-dispatch is a fresh decision to speak, held to the same gate as the first. */
+  it('does not re-speak the queue when the setting went off mid-utterance', () => {
+    ringTwoWithFirstSpeaking();
+    applyAlertSettingsFromHost({ ...DEFAULT_ALERT_SETTINGS, speakEnabled: false });
+
+    setStatus('pty-1', 'NOTHING_TO_SHOW');
+
+    expect(cancelCount).toBe(1);
+    expect(spoken).toHaveLength(2);
+  });
+
+  /** Only the Session being read aloud is cut; a queued one has nothing to stop. */
+  it('keeps a talking Pane talking when a different, queued ring is resolved', () => {
+    ringTwoWithFirstSpeaking();
+
+    setStatus('pty-2', 'NOTHING_TO_SHOW');
+
+    expect(cancelCount).toBe(0);
+    expect(getAlertSpeechState('pty-1')).toBe('speaking');
   });
 
   it('does not publish a queued utterance that starts after the ring was resolved', () => {
@@ -346,5 +416,23 @@ describe('spoken alarms', () => {
     // Dispose detaches exactly what was still tracked — the bounded tail. The
     // evicted remainder is inert regardless: its generation token is gone.
     expect(utterances.filter(u => u.onend === null)).toEqual(utterances.slice(-8));
+  });
+
+  it('bounds the queued Session index when the engine silently drops utterances', () => {
+    start();
+    for (let i = 0; i < 20; i++) {
+      ring(`pty-${i}`);
+      vi.advanceTimersByTime(SPEAK_DELAY_MS);
+    }
+
+    // Make the newest utterance audible, then attend it. cancel() drops the
+    // engine's entire queue, so interrupt re-dispatches every Session retained in
+    // its own queued index. Only the bounded tail (8 total minus the one that just
+    // started) may come back; an unbounded map would re-dispatch all other 19.
+    utterances[19].onstart?.();
+    setStatus('pty-19', 'NOTHING_TO_SHOW');
+
+    expect(cancelCount).toBe(1);
+    expect(spoken).toHaveLength(20 + 7);
   });
 });

@@ -66,13 +66,14 @@ An attacker who lands a prompt injection in tend's harness can reach three secre
 
 - FAIL IF either admin-gating ruleset is missing or weakened. `Merge access` must target `~DEFAULT_BRANCH`, block nothing beyond `update`, and carry admin (`RepositoryRole` actor `5`) as its sole bypass actor; `Tag operations` must target `~ALL` tags, block both `creation` and `update`, and carry the same admin-only bypass.
 - FAIL IF `dormouse-bot` holds a permission higher than `push` on this repository.
-- FAIL IF any GitHub environment's deployment-branch-policies admit a ref that is not admin-gated by the `Tag operations` or `Merge access` rulesets. Today this covers `vscode-extension-publish` (`v*` tag, admin-only via `Tag operations`), `security-audit` (`main` admin-only via `Merge access`, plus `v*` tag), and `tend` (`main` only, admin-only via `Merge access`).
+- FAIL IF any GitHub environment's deployment-branch-policies admit a ref that is not admin-gated by the `Tag operations` or `Merge access` rulesets. Today this covers `vscode-extension-publish` (`v*` tag, admin-only via `Tag operations`), `security-audit` (`main` admin-only via `Merge access`, plus `v*` tag), `release-attest` (`v*` tag, admin-only via `Tag operations`), and `tend` (`main` only, admin-only via `Merge access`).
 - FAIL IF the secret inventory departs from this placement. Env-scoping is what stops a workflow pushed to an excluded branch from reading a secret, so a repo-level copy reopens exactly what the environment gate closes. One pass over `actions/secrets`, `actions/organization-secrets`, and each environment's secret listing answers every line:
   - `AUDIT_PAT` — in `security-audit`, absent at repo level.
   - `TEND_BOT_TOKEN` — in `tend`, absent at repo level.
   - `CLAUDE_CODE_OAUTH_TOKEN` — in **both** `tend` and `security-audit`, absent at repo level. Environments do not inherit each other's secrets, so a rotation must set both.
   - `OVSX_PAT`, `VSCE_PAT` — in `vscode-extension-publish` only, absent at repo level.
   - `ANTHROPIC_API_KEY` — absent at repo *and* org level, for as long as `tend-*.yaml` passes `anthropic_api_key` to `max-sixty/tend/claude` (see "Inert secret plumbing" above).
+  - `release-attest` holds no secrets in any scope. The environment exists only to bound the ref a provenance OIDC token can be minted from (`release.yml`'s two build jobs); an empty environment is what keeps `id-token: write` the only credential those jobs can reach.
   - No org-level secret visible to this repository at all (see "Org-level secrets" above).
 - FAIL IF `CHROMATIC_PROJECT_TOKEN` is missing from `secrets.allowed` in `.config/tend.yaml`. The allowlist entry is an explicit acknowledgment that the bot can read this token.
 - FAIL IF `.github/workflows/workflow-audit.yaml` is missing, disabled, or has not produced a successful run in the last 48 hours.

@@ -8,7 +8,7 @@
 Tauri app process (Rust — standalone/src-tauri/src/lib.rs)
 ├── WebView (Vite frontend — standalone/src/)
 │   ├── main.tsx           — bootstrap: platform init, theme restore, resumeOrRestore, updater
-│   ├── AppBar.tsx         — draggable titlebar: shell dropdown, window controls
+│   ├── AppBar.tsx         — draggable titlebar: New workspace placeholder, window controls
 │   ├── tauri-adapter.ts   — TauriAdapter (PlatformAdapter over Tauri invoke/events)
 │   ├── updater.ts         — auto-update state machine (docs/specs/auto-update.md)
 │   └── browser-sidecar-{host,adapter}.ts — browser-dev harness (docs/specs/transport.md)
@@ -46,9 +46,13 @@ Source of truth: `standalone/src/main.tsx` (`bootstrap()`).
    `status` command, and nothing could carry the answer back until the adapter
    has its listeners.
 4. `initAlertStateReceiver()`, `restoreActiveTheme()` (`docs/specs/theme.md`).
-5. `getAvailableShells()` seeds the AppBar dropdown and
-   `setDefaultShellOpts` (the default-shell slot used by split/spawn/restore
-   paths, `docs/specs/layout.md`).
+5. `getAvailableShells()` seeds the shell store (`lib/src/lib/shell-store.ts`),
+   which restores the persisted selection (`dormouse:selected-shell`) and
+   publishes it via `setDefaultShellOpts` (the default-shell slot used by
+   split/spawn/restore paths, `docs/specs/layout.md`). The call is *started*
+   right after `init()` so its webview → Rust → sidecar round trip overlaps
+   steps 3–4, and awaited here: seeding must complete before the Wall mounts,
+   so the first restored pane already spawns with that shell.
 6. `resumeOrRestore(platform)` runs the priority-based recovery from
    `docs/specs/transport.md`.
 7. `startUpdateCheck()` (`docs/specs/auto-update.md`), then render `AppBar` +
@@ -269,25 +273,52 @@ backstop (harmless post-teardown — the PTY map is already empty, so the sideca
 
 Source of truth: `standalone/src/AppBar.tsx`.
 
-The AppBar is the draggable titlebar region and carries, left to right: the
-shell controls and the window controls (minimize / maximize / close via
-`@tauri-apps/api/window`, with window-focus tracking dimming the bar). It
-carries no theme picker: theme selection lives in the Settings dialog at the
-bottom-right of the window (`docs/specs/theme.md`). The shell controls are:
+The AppBar is the draggable titlebar region and carries, left to right: a
+`[New workspace]` button and the window controls (minimize / maximize / close
+via `@tauri-apps/api/window`, with window-focus tracking dimming the bar). It
+carries neither a theme picker nor a shell picker: both live in the Settings
+dialog at the bottom-right of the window (`docs/specs/theme.md`).
 
-- **`[+]`** — spawns a new terminal with the currently selected shell, selects it,
-  and enters passthrough immediately
-  (dispatches the `dormouse:new-terminal` CustomEvent that `Wall` listens
-  for; the VS Code equivalent is the `dormouse:newTerminal` postMessage in
-  `docs/specs/transport.md`).
-- **Shell dropdown** — lists `getAvailableShells()`; picking a different
-  shell updates `setDefaultShellOpts` and dispatches `dormouse:new-terminal`
-  with `replaceUntouched: true, announce: true`, so an untouched selected
-  terminal is replaced in place (`docs/specs/layout.md`, Shell selection
-  replacement).
+`[New workspace]` is a placeholder holding the spot the workspace strip will
+take. It creates nothing — it calls `openExternal` on
+https://github.com/diffplug/dormouse/issues/406, the tracking issue.
+
+Shell selection lives in the Settings dialog's **Shell** row
+(`lib/src/components/ShellPicker.tsx` over `lib/src/lib/shell-store.ts`),
+hidden when fewer than two shells were detected or when the host owns shell
+selection itself (`hostOwnsShells`, VS Code). Picking a shell persists the
+choice in `localStorage`, keyed by executable path plus ordered arguments (WSL
+distributions and Windows Developer shells can share a path), updates
+`setDefaultShellOpts`, and dispatches
+`dormouse:new-terminal` with `replaceUntouched: true, announce: true`, so an
+untouched selected terminal is replaced in place (`docs/specs/layout.md`, Shell
+selection replacement). Legacy path-only selections restore the first matching
+entry and gain the full identity on the next choice. Re-picking the visible
+fallback records that explicit choice without spawning a redundant terminal.
+Re-seeding an unchanged detected list is a no-op, preserving an interactive
+selection without notifying subscribers during render. It consequently does
+not re-read the persisted key, so clearing that key alone does not reset a
+same-list Storybook story. The choice dismisses the Settings dialog before its
+replacement takes keyboard focus on the next animation frame.
 
 The workspace strip lands here when the workspaces rollout reaches stage 3 —
 `docs/specs/layout.md` `## Future` (workspaces-rollout).
+
+### Application menu
+
+Source of truth: the `.menu(...)` builder in `standalone/src-tauri/src/lib.rs`.
+
+The app replaces Tauri's default menu with an App submenu (about / services /
+hide / quit) and a Window submenu (minimize / maximize / close) — deliberately
+**no Edit submenu**, because its predefined Paste item binds Cmd+V natively and
+would fire alongside the terminal's own DOM-level Cmd+V handling
+(`docs/specs/mouse-and-clipboard.md` §8.2).
+
+The consequence is that macOS delivers Cmd+C/X/V to the webview as plain
+keydowns and WKWebView performs no native edit, in Dormouse's own text fields
+too (pane rename, the browser URL editor, dialogs). Those fields get their
+clipboard from the wall's keyboard chain instead — `docs/specs/mouse-and-clipboard.md`
+§8.9. Any future menu item must not claim a chord the webview already handles.
 
 ## Persistence
 
@@ -570,7 +601,7 @@ root `package.json` for the `dev:standalone*` orchestration.
 | `standalone/src/main.tsx` | Webview bootstrap (boot sequence above); initializes the quit orchestrator and installs the confirmation gate on the Tauri branch, mounts `<QuitConfirmModalHost>` via Wall's `dialogHost` prop |
 | `standalone/src/quit.ts` | Quit orchestrator: listens for `dormouse://quit-requested`, runs the graceful teardown, calls `quit_ack` / `quit_progress` / `quit_proceed` / `quit_cancel` (§Quit flow) |
 | `standalone/src/quit-confirm-store.ts`, `QuitConfirmModal.tsx` | Quit-confirmation dialog: the running-work gate + module store, and the modal mounted via Wall's `dialogHost` prop (§Quit flow, "Confirmation dialog") |
-| `standalone/src/AppBar.tsx` | Titlebar: shell dropdown, window controls |
+| `standalone/src/AppBar.tsx` | Titlebar: New workspace placeholder, window controls |
 | `standalone/src/tauri-adapter.ts` | `TauriAdapter`: PlatformAdapter over Tauri invoke/events, session persistence via the Rust store, control-request dispatch |
 | `standalone/src/tauri-session-store.ts` | `TauriSessionStore`: Rust-backed `SessionKeyValueStore` — boot-seeded write-through cache over `load_session` / `save_session` (§Persistence) |
 | `standalone/src/updater.ts`, `UpdateBanner.tsx`, `UpdateDebugModal.tsx` | Auto-update (owned by `docs/specs/auto-update.md`) |

@@ -16,6 +16,7 @@ import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import type { PlatformAdapter } from '../lib/platform/types';
 import * as terminalRegistry from '../lib/terminal-registry';
+import { UNNAMED_PANEL_TITLE } from '../lib/terminal-registry';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -292,6 +293,228 @@ describe('Wall on the Lath engine', () => {
     } finally {
       untouchedSpy.mockRestore();
     }
+  });
+
+  it('parks a minimized browser surface so its DOM survives, and unparks it on kill', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation((id) => id === 'pane-a');
+
+    try {
+      let response: { result?: { surfaceId: string } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.iframe,
+            params: { url: 'http://localhost:5173/' },
+            respond: (r: typeof response) => { response = r; },
+          },
+        }));
+      });
+      await flush();
+      const surfaceId = response!.result!.surfaceId;
+      const leaf0 = container.querySelector(`[data-lath-leaf="${surfaceId}"]`);
+      expect(leaf0).toBeTruthy();
+
+      const minimize = leaf0!.querySelector<HTMLElement>('[aria-label="Minimize"]');
+      expect(minimize).toBeTruthy();
+      await act(async () => { minimize!.click(); });
+      await flush();
+
+      // Minimized, but NOT unmounted: the same node stays in place with its document
+      // (an <iframe>'s state) intact, which is the whole reason browser Surfaces park
+      // instead of being removed (docs/specs/tiling-engine.md → "Parked leaves").
+      const parked = container.querySelector(`[data-lath-leaf="${surfaceId}"]`);
+      expect(parked).toBe(leaf0);
+      expect((parked as HTMLElement).dataset.lathParked).toBe('');
+      // It is a door now, so it is not a visible pane.
+      expect(container.querySelectorAll('[data-lath-leaf]:not([data-lath-parked])').length).toBe(1);
+
+      // Killing the door releases the Surface for real — the parked DOM goes with it.
+      expect((await dispatchKill(surfaceId))?.ok).toBe(true);
+      expect(container.querySelector(`[data-lath-leaf="${surfaceId}"]`)).toBeNull();
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it('reuses and closes a parked browser that gains its session after minimization', async () => {
+    const defaultSession = sessionForKey('default');
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    let resolveOpen!: (result: { exitCode: number; stdout: string; stderr: string }) => void;
+    const openResult = new Promise<{ exitCode: number; stdout: string; stderr: string }>((resolve) => {
+      resolveOpen = resolve;
+    });
+    const agentBrowserCommand = vi.fn(async (_session: string, args: string[]) => {
+      if (args[0] === 'open') return openResult;
+      return { exitCode: 0, stdout: '', stderr: '' };
+    });
+    (fake as PlatformAdapter).agentBrowserCommand = agentBrowserCommand;
+    (fake as PlatformAdapter).agentBrowserStreamStatus = vi.fn(async () => ({ ok: true, wsPort: 4321 }));
+
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      });
+      await flush();
+      if (!fake.hasPty('pane-a')) fake.spawnPty('pane-a');
+      fake.setOpenPorts('pane-a', [{
+        protocol: 'tcp',
+        family: 'IPv4',
+        address: '127.0.0.1',
+        port: 5173,
+        pid: 100,
+        processName: 'vite',
+      }]);
+
+      // The context-menu path creates an eager, session-less browser before its
+      // asynchronous daemon boot completes.
+      const header = container.querySelector<HTMLElement>('[data-pane-header-for="pane-a"]')!;
+      await act(async () => {
+        header.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 10,
+          clientY: 10,
+        }));
+      });
+      await flush();
+      const portRow = document.querySelector<HTMLButtonElement>(
+        '[data-pane-context-menu-for="pane-a"] button[data-port-entry="5173"]',
+      )!;
+      await act(async () => { portRow.click(); });
+      await flush();
+
+      const browserLeaf = Array.from(container.querySelectorAll<HTMLElement>('[data-lath-leaf]'))
+        .find((leaf) => leaf.dataset.lathLeaf !== 'pane-a')!;
+      const browserId = browserLeaf.dataset.lathLeaf!;
+      await act(async () => {
+        browserLeaf.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click();
+      });
+      await flush();
+      expect(container.querySelector(`[data-lath-leaf="${browserId}"]`)?.hasAttribute('data-lath-parked')).toBe(true);
+
+      // Boot completion writes `session` only to live parked metadata. The Door
+      // record is intentionally still the session-less minimize-time snapshot.
+      await act(async () => {
+        resolveOpen({ exitCode: 0, stdout: '', stderr: '' });
+        await openResult;
+      });
+      await flush();
+
+      let reused: { ok: boolean; result?: { status: string; surfaceId: string } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.agentBrowser,
+            params: { session: defaultSession, surface: 'surface:1' },
+            respond: (r: typeof reused) => { reused = r; },
+          },
+        }));
+      });
+      await flush();
+      expect(reused).toMatchObject({ ok: true, result: { status: 'existing', surfaceId: browserId } });
+      expect(container.querySelectorAll('[data-door-id]')).toHaveLength(1);
+
+      expect((await dispatchKill(browserId))?.ok).toBe(true);
+      expect(agentBrowserCommand).toHaveBeenCalledWith(defaultSession, ['close'], undefined);
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it('drags a parked browser out with its current metadata', async () => {
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = () => ({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 800,
+      bottom: 600,
+      width: 800,
+      height: 600,
+      toJSON() {},
+    }) as DOMRect;
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    const agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    (fake as PlatformAdapter).agentBrowserCommand = agentBrowserCommand;
+
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      });
+      await flush();
+      const browserId = await dispatchAgentBrowser({
+        session: 'browser-session',
+        binaryPath: '/old/agent-browser',
+        surface: 'surface:1',
+      });
+      const browserLeaf = container.querySelector<HTMLElement>(`[data-lath-leaf="${browserId}"]`)!;
+      await act(async () => {
+        browserLeaf.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click();
+      });
+      await flush();
+
+      // Refresh only the live parked metadata; the Door snapshot retains the old
+      // binary path, making teardown after drag-out expose which copy was restored.
+      expect(await dispatchAgentBrowser({
+        session: 'browser-session',
+        binaryPath: '/new/agent-browser',
+        surface: 'surface:1',
+      })).toBe(browserId);
+
+      const door = container.querySelector<HTMLElement>(`[data-door-id="${browserId}"]`)!;
+      await act(async () => {
+        door.dispatchEvent(new MouseEvent('pointerdown', {
+          bubbles: true,
+          button: 0,
+          clientX: 100,
+          clientY: 650,
+        }));
+      });
+      act(() => {
+        window.dispatchEvent(new MouseEvent('pointermove', { clientX: 5, clientY: 300 }));
+      });
+      await flushFrame();
+      act(() => {
+        window.dispatchEvent(new MouseEvent('pointerup'));
+      });
+      await flush();
+      expect(container.querySelector(`[data-door-id="${browserId}"]`)).toBeNull();
+      expect(container.querySelector(`[data-lath-leaf="${browserId}"]`)?.hasAttribute('data-lath-parked')).toBe(false);
+
+      await dispatchKill(browserId);
+      expect(agentBrowserCommand).toHaveBeenCalledWith(
+        'browser-session',
+        ['close'],
+        '/new/agent-browser',
+      );
+    } finally {
+      untouchedSpy.mockRestore();
+      HTMLElement.prototype.getBoundingClientRect = originalRect;
+    }
+  });
+
+  it('removes a minimized terminal outright — only DOM-resident surfaces park', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+    expect(leafCount()).toBe(2);
+
+    const leafA = container.querySelector('[data-lath-leaf="pane-a"]')!;
+    const minimize = leafA.querySelector<HTMLElement>('[aria-label="Minimize"]');
+    expect(minimize).toBeTruthy();
+    await act(async () => { minimize!.click(); });
+    await flush();
+
+    // A terminal's state lives in the PTY and replays on reattach, so parking it
+    // would only cost memory.
+    expect(container.querySelector('[data-lath-leaf="pane-a"]')).toBeNull();
+    expect(leafCount()).toBe(1);
   });
 
   it('retires the old ref when shell selection replaces an untouched pane', async () => {
@@ -599,6 +822,48 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  // A Door created by `dor split` against another Door is the one Surface that never
+  // was a pane, so it exercises the store's `addDoor` registration rather than the
+  // meta a minimize retains. Every Door reader goes through `lath.getMeta`, so a
+  // missing entry shows up as a Door with no metadata.
+  it('a Door born from `dor split` against another Door still has store metadata', async () => {
+    const getTerminalSpy = vi
+      .spyOn(terminalRegistry, 'getOrCreateTerminal')
+      .mockImplementation(() => ({}) as ReturnType<typeof terminalRegistry.getOrCreateTerminal>);
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+
+    try {
+      // Minimize pane-a, then split against that Door — the new Surface goes straight
+      // into the baseboard without ever being laid out.
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', bubbles: true }));
+      });
+      await flush();
+      const bornId = await dispatchSplit({ surface: 'surface:1' });
+      expect(leafCount()).toBe(1);
+
+      // The persisted Door row is materialized from the store's meta, so a Door with
+      // no store entry writes `component: undefined` — which `reconnect.ts` keys off
+      // to decide what survives a restart.
+      await act(async () => { window.dispatchEvent(new Event('pagehide')); });
+      await flush();
+      await flush();
+      const saved = fake.getState() as {
+        doors?: Array<{ id: string; title?: string; component?: string; tabComponent?: string }>;
+      } | null;
+      const bornDoor = saved?.doors?.find((door) => door.id === bornId);
+      expect(bornDoor).toBeDefined();
+      expect(bornDoor?.component).toBe('terminal');
+      expect(bornDoor?.tabComponent).toBe('terminal');
+      expect(bornDoor?.title).toBe(UNNAMED_PANEL_TITLE);
+    } finally {
+      getTerminalSpy.mockRestore();
+    }
+  });
+
   it('dor action targets reject bare numeric refs', async () => {
     let response: { ok: boolean; error?: string } | undefined;
     await act(async () => {
@@ -706,6 +971,22 @@ describe('Wall on the Lath engine', () => {
     await flush();
     expect(response?.ok).toBe(true);
     return response!.result!.surfaceId!;
+  }
+
+  /** `dor kill --dangerously` on one surface; returns the control response. */
+  async function dispatchKill(surface: string): Promise<{ ok: boolean } | undefined> {
+    let response: { ok: boolean } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.kill,
+          params: { surface, confirmation: { mode: 'dangerously' } },
+          respond: (r: typeof response) => { response = r; },
+        },
+      }));
+    });
+    await flush();
+    return response;
   }
 
   async function dispatchAgentBrowser(params: Record<string, unknown>): Promise<string> {

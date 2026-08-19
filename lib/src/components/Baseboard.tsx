@@ -11,7 +11,7 @@ import {
 import { SettingsDialog } from './SettingsDialog';
 import { Door } from './Door';
 import { DialogKeyboardContext, DoorElementsContext } from './wall/wall-context';
-import type { DooredItem } from './wall/wall-types';
+import type { DoorChip, DooredItem } from './wall/wall-types';
 import { IS_MAC } from '../lib/platform';
 import {
   buildAppTitleResolver,
@@ -32,7 +32,7 @@ const BASEBOARD_BUTTON_CLASS =
   'flex h-6 min-w-6 shrink-0 items-center justify-center gap-1 rounded px-1.5 pb-px text-sm font-medium font-mono text-muted transition-colors hover:bg-surface-raised hover:text-foreground';
 
 export interface BaseboardProps {
-  items: DooredItem[];
+  items: DoorChip[];
   onReattach: (item: DooredItem) => void;
   notice?: ReactNode;
   /** A visible Door received a primary-button press (drag-out): the item + the press

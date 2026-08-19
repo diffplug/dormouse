@@ -5,7 +5,10 @@ import { getPlatform } from './platform';
 import { shellEscapePath } from './shell-escape';
 import { getTerminalInstance, markSessionTouched } from './terminal-registry';
 
-async function writeText(text: string): Promise<void> {
+/** Write plain text to the system clipboard, swallowing the failures a webview
+ *  raises when the document lacks focus or the Permissions API said no — the
+ *  user sees nothing was copied and retries. */
+export async function writeTextToClipboard(text: string): Promise<void> {
   if (!text) return;
   try {
     if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
@@ -26,7 +29,7 @@ export async function copyRaw(terminalId: string): Promise<void> {
   const terminal = getTerminalInstance(terminalId);
   const sel = getMouseSelectionState(terminalId).selection;
   if (!terminal || !sel) return;
-  await writeText(extractSelectionText(terminal, sel));
+  await writeTextToClipboard(extractSelectionText(terminal, sel));
 }
 
 /**
@@ -40,7 +43,7 @@ export async function copyRewrapped(terminalId: string): Promise<void> {
   if (!terminal || !sel) return;
   const raw = extractSelectionText(terminal, sel);
   const out = sel.shape === 'block' ? raw : rewrap(raw);
-  await writeText(out);
+  await writeTextToClipboard(out);
 }
 
 function writePasteToPty(terminalId: string, text: string): void {
