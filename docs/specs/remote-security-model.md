@@ -144,8 +144,9 @@ Each Host maintains a local authorization list. **The ACL is authoritative**;
 the Server cannot unilaterally grant access.
 
 The record schema (source of truth: `HostAclRecord` / `HostAcl` in
-`server-lib-common/src/security/acl.ts`; persisted on the Host in webview
-`localStorage` via `lib/src/lib/local-json-store.ts`, `docs/specs/server.md`):
+`server-lib-common/src/security/acl.ts`; persisted by the Host service through
+its `HostStateStore` — a 0600 file in standalone, `globalState` in VS Code —
+never in a webview realm, `docs/specs/server.md`):
 
 ```ts
 interface HostAclRecord {

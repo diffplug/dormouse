@@ -53,6 +53,27 @@ Everything else — including browser-surface remoting — is staged in
 optional field — so nothing in the shipped protocol changes shape when it
 lands.
 
+### Where the Host runs
+
+The Host is a **Node-side service in the process that owns the PTYs**, never a
+webview: `RemoteHostService` in `lib/src/host/remote/service.ts`, installed in
+the Tauri sidecar (`docs/specs/standalone.md`) and in the VS Code extension host
+(`docs/specs/vscode.md`). It holds everything an access decision depends on —
+the relay socket, the enrollment, the ACL, the pairing ceremony — so nothing a
+webview says can widen access (`docs/specs/remote-security-model.md`).
+
+`RemoteApiSession` speaks this protocol and nothing else: surface ids, PTY ids,
+sizes, and bytes. *Where* a named surface lives — this window's webviews,
+another window's, another process's — is a deployment fact rather than a
+protocol concept, so every environment-specific answer sits behind
+`HostSurfaceProvider` (`lib/src/remote/host/host-surface-provider.ts`):
+`collectDirectory` / `watchDirectory`, `resolveSurface` returning a
+`SurfaceHandle`, and `writePty` / `resizePty` / `streamPty`. The session
+therefore imports no platform adapter, no store, and no `document`, and both
+installations share the ask-backed half of the provider
+(`lib/src/host/remote/ask-surface-provider.ts`) so an attach cannot be answered
+differently in one host than the other.
+
 ## Terminology
 
 `docs/specs/glossary.md` is canonical for **Pane** and **Surface**; the wire
@@ -164,10 +185,17 @@ any change the Host coalesces (150ms window, `DIRECTORY_DEBOUNCE_MS`) and
 resends the whole thing. Delta events are a future optimization there is no
 current reason to pay for.
 
-In VS Code, peer webviews and windows signal directory invalidation whenever
-their pane state, activity, focus, or membership changes. The Host feeds that
-signal through the same coalescer and re-queries all peers before sending the
-replacement snapshot.
+**One snapshot per collect.** The provider answers for every surface the Host
+can reach, so there is no subset that is known sooner than the rest and the
+session emits exactly one `directory.snapshot` per collect. A collect that
+finishes after its subscription was replaced or torn down is dropped rather than
+sent.
+
+Invalidation reaches the session through `watchDirectory`: webviews announce
+that their pane state, activity, or focus changed, and membership changes (a
+webview attaching or disposing, a peer window joining or dropping) invalidate
+unconditionally. Both feed the same coalescer, which re-collects from every
+answerer before sending the replacement snapshot.
 
 The picker renders from titles, activity, and the `ringing`/`hasTODO` badges;
 thumbnails are staged (see [Future](#future)). Browser panes are not listed;
