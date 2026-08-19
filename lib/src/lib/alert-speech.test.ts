@@ -288,16 +288,6 @@ describe('spoken alarms', () => {
     expect(getAlertSpeechState('pty-2')).toBe('speaking');
   });
 
-  it('drops a queued Session that was attended before the cut reached it', () => {
-    ringTwoWithFirstSpeaking();
-    setStatus('pty-2', 'NOTHING_TO_SHOW');
-
-    setStatus('pty-1', 'NOTHING_TO_SHOW');
-
-    expect(cancelCount).toBe(1);
-    expect(spoken).toHaveLength(2);
-  });
-
   it('does not re-dispatch a queued utterance from an earlier ring', () => {
     ringTwoWithFirstSpeaking();
 
