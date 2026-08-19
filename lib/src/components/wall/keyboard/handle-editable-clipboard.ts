@@ -13,9 +13,11 @@ type TextField = HTMLInputElement | HTMLTextAreaElement;
  * stops fighting the terminal's DOM-level Cmd+V (`standalone/src-tauri/src/lib.rs`),
  * and WKWebView routes clipboard chords through that menu — so with it gone,
  * copy/cut/paste do nothing in any DOM input there. This restores them in JS.
- * Hosts whose webview still has native chords (VS Code, browsers, Pocket) are
- * left alone: `readClipboardText` is implemented only by the menu-less
- * standalone adapters (`docs/specs/mouse-and-clipboard.md` §8.9).
+ * The gate is the adapter's optional `readClipboardText`, today the two
+ * standalone adapters — the menu-less macOS build this is written for, plus the
+ * Chrome dev harness, where the JS path simply replaces a working native one.
+ * Everywhere else (VS Code, the website, Pocket) the native chords are left
+ * alone (`docs/specs/mouse-and-clipboard.md` §8.9).
  *
  * Alone among the `handle-*` dispatch modules it takes no `WallKeyboardCtx`: a
  * focused text field owns these chords whatever mode the wall is in, and xterm's
@@ -57,6 +59,12 @@ async function copyFromField(el: TextField, cut: boolean): Promise<void> {
 }
 
 function replaceSelection(el: TextField, text: string): void {
+  // Both callers await the clipboard first — an IPC roundtrip on the standalone
+  // host — and the field can unmount in that window (Escape, or the blur that
+  // commits a rename). `execCommand` edits whatever is focused *now*, which by
+  // then is often xterm's helper textarea, so an unguarded edit would type the
+  // clipboard into the shell.
+  if (!el.isConnected) return;
   el.focus();
   // `insertText` is the only edit that also lands in the native undo stack, but
   // it is deprecated and absent in some environments — fall through to the

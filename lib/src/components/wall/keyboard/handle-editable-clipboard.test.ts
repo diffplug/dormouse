@@ -46,6 +46,8 @@ beforeEach(() => {
 
 afterEach(() => {
   document.body.innerHTML = '';
+  // jsdom ships no execCommand; the cases that stub one must not leak it.
+  delete (document as Partial<Document>).execCommand;
   platform.reset();
 });
 
@@ -98,6 +100,44 @@ describe('handleEditableClipboard', () => {
 
     handleEditableClipboard(chord(input, 'x', 'ctrl'));
     await vi.waitFor(() => expect(input.value).toBe('one '));
+  });
+
+  it('drops the edit when the field unmounts during the clipboard read', async () => {
+    // Escape, or the blur that commits a rename, can retire the field while the
+    // host's clipboard IPC is still in flight. `execCommand` would then edit
+    // whatever holds focus — usually the terminal — so nothing must land.
+    let deliverClipboard!: (text: string) => void;
+    (platform as PlatformAdapter).readClipboardText = () =>
+      new Promise<string>((resolve) => { deliverClipboard = resolve; });
+    const input = field('old-title', [0, 'old-title'.length]);
+    const survivor = field('elsewhere', [0, 0]);
+    const insertText = vi.fn(() => true);
+    document.execCommand = insertText as unknown as typeof document.execCommand;
+
+    handleEditableClipboard(chord(input, 'v', 'meta'));
+    input.remove();
+    deliverClipboard('pasted');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(insertText).not.toHaveBeenCalled();
+    expect(input.value).toBe('old-title');
+    expect(survivor.value).toBe('elsewhere');
+  });
+
+  it('prefers execCommand insertText when the webview provides it', async () => {
+    // jsdom has no execCommand, so every other case here exercises the manual
+    // fallback; this pins the branch that actually runs in production, cut's
+    // empty-string delete included.
+    withNativeClipboardRead('pasted');
+    const insertText = vi.fn(() => true);
+    document.execCommand = insertText as unknown as typeof document.execCommand;
+    const input = field('one two', [4, 7]);
+
+    handleEditableClipboard(chord(input, 'v', 'meta'));
+    await vi.waitFor(() => expect(insertText).toHaveBeenCalledWith('insertText', false, 'pasted'));
+
+    handleEditableClipboard(chord(input, 'x', 'ctrl'));
+    await vi.waitFor(() => expect(insertText).toHaveBeenCalledWith('insertText', false, ''));
   });
 
   it('copies nothing when the selection is collapsed', () => {
