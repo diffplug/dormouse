@@ -11,6 +11,13 @@ permissions:
 jobs:
   build-standalone:
     name: Build Standalone (${{ matrix.target }})
+    # Gates the `id-token: write` below on an admin-only ref: the
+    # release-attest environment admits `v*` tags and nothing else, and the
+    # `Tag operations` ruleset restricts tag creation/update to admins. The
+    # environment holds no secrets — it exists solely to bound where a
+    # provenance OIDC token can be minted from.
+    environment:
+      name: release-attest
     permissions:
       contents: read
       id-token: write
@@ -159,6 +166,10 @@ jobs:
   build-vscode:
     name: Build VSCode Extension
     runs-on: ubuntu-latest
+    # Same rationale as build-standalone: bound the provenance OIDC token to
+    # the admin-gated `v*` tag refs. No secrets live in this environment.
+    environment:
+      name: release-attest
     permissions:
       contents: read
       id-token: write
