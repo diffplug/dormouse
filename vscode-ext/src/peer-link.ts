@@ -243,6 +243,8 @@ export interface PeerLinkClient {
   authenticated: boolean;
   /** The nonce this window challenged it with; its proof must be over exactly this. */
   challenge: string;
+  /** Bounds a connection that accepts the challenge and then says nothing. */
+  handshakeTimer: ReturnType<typeof setTimeout> | null;
 }
 
 /** Where bytes from another window's PTY go, once something asks for them. */
@@ -292,6 +294,11 @@ function ask(
 
 function authenticatedClients(): PeerLinkClient[] {
   return [...clients].filter((client) => client.authenticated);
+}
+
+/** JSON primitives and arrays are parseable, but no peer frame can be one. */
+function isFrameObject(frame: unknown): frame is Record<string, unknown> {
+  return typeof frame === 'object' && frame !== null && !Array.isArray(frame);
 }
 
 /**
@@ -408,6 +415,8 @@ export function sendUiEvent(client: PeerLinkClient, payload: unknown): void {
 }
 
 function dropClient(client: PeerLinkClient): void {
+  if (client.handshakeTimer) clearTimeout(client.handshakeTimer);
+  client.handshakeTimer = null;
   const wasAuthenticated = clients.delete(client) && client.authenticated;
   // A window that went away takes its terminals with it; a later write must not
   // be routed into a dead socket.
@@ -424,6 +433,11 @@ function dropClient(client: PeerLinkClient): void {
 }
 
 function onServerFrame(client: PeerLinkClient, frame: unknown): void {
+  if (!isFrameObject(frame)) {
+    log.error('[peer-link] rejected a client frame that is not an object');
+    dropClient(client);
+    return;
+  }
   const message = frame as (PeerLinkResponse | PeerLinkHello) & { kind: string };
   if (!client.authenticated) {
     // First frame must be the hello, answering the challenge this window sent
@@ -443,6 +457,8 @@ function onServerFrame(client: PeerLinkClient, frame: unknown): void {
       dropClient(client);
       return;
     }
+    if (client.handshakeTimer) clearTimeout(client.handshakeTimer);
+    client.handshakeTimer = null;
     client.authenticated = true;
     // Our half, over the nonce *it* chose: a client has no other way to tell
     // this window's broker from something that merely bound the path first, and
@@ -509,8 +525,14 @@ async function tryBind(path: string, token: string): Promise<boolean> {
       decoder: new FrameDecoder(),
       authenticated: false,
       challenge: freshNonce(),
+      handshakeTimer: null,
     };
     clients.add(client);
+    client.handshakeTimer = setTimeout(() => {
+      log.error('[peer-link] dropped a client that did not finish the handshake');
+      dropClient(client);
+    }, HANDSHAKE_BUDGET_MS);
+    client.handshakeTimer.unref();
     socket.setEncoding('utf8');
     socket.on('data', (chunk: string) => {
       for (const frame of client.decoder.push(chunk)) onServerFrame(client, frame);
@@ -586,6 +608,10 @@ export function forwardCommand(payload: RemoteHostCommand): boolean {
 }
 
 async function onClientFrame(socket: Socket, frame: unknown): Promise<void> {
+  if (!isFrameObject(frame)) {
+    log.error('[peer-link] ignored a broker frame that is not an object');
+    return;
+  }
   const request = frame as PeerLinkRequest;
   switch (request.kind) {
     case 'request': {
@@ -693,6 +719,11 @@ function tryConnect(path: string, token: string): Promise<'connected' | 'refused
       }
       // The two handshake frames, read loosely: nothing here is trusted enough
       // yet to be typed as one of them.
+      if (!isFrameObject(frame)) {
+        log.error('[peer-link] the process holding the socket sent a non-object handshake frame');
+        finish('failed');
+        return;
+      }
       const message = frame as { kind?: string; nonce?: unknown; proof?: unknown };
       if (!helloSent) {
         if (message.kind !== 'challenge' || typeof message.nonce !== 'string' || !message.nonce) {

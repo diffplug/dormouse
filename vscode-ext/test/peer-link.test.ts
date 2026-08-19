@@ -740,6 +740,24 @@ describe('peer handshake', () => {
     socket.destroy();
   });
 
+  it('drops a parseable JSON value that is not a client frame', async () => {
+    const brokerSide = fakeWindow();
+    const broker = await openWindow(brokerSide);
+    await broker.ensurePeerNet(() => {});
+
+    const socket = createConnection({ path: derivedSocketPath() });
+    const reader = frameReader(socket);
+    await new Promise((resolve) => socket.on('connect', resolve));
+    expect((await reader.next()).kind).toBe('challenge');
+
+    const closed = new Promise((resolve) => socket.on('close', resolve));
+    socket.write('null\n');
+    await closed;
+
+    expect(reader.frames).toEqual([]);
+    expect(brokerSide.joined).toEqual([]);
+  });
+
   it('rejects a proof replayed from another connection', async () => {
     const broker = await openWindow(fakeWindow());
     await broker.ensurePeerNet(() => {});
@@ -815,6 +833,39 @@ describe('peer handshake', () => {
       expect(roles).toEqual([]);
       expect(side.writes).toEqual([]);
     } finally {
+      squatterSocket?.destroy();
+      await new Promise((resolve) => squatter.close(resolve));
+    }
+  });
+
+  it('rejects a non-object frame from the process holding the socket', async () => {
+    let squatterSocket: import('node:net').Socket | null = null;
+    let window: LinkModule | null = null;
+    let closed = false;
+    const squatter: Server = createServer((socket) => {
+      squatterSocket = socket;
+      socket.on('close', () => {
+        closed = true;
+      });
+      socket.write('null\n');
+    });
+    const path = derivedSocketPath();
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    await new Promise<void>((resolve) => squatter.listen(path, resolve));
+
+    try {
+      const side = fakeWindow({ entries: [{ surfaceId: 'secret-1' }] });
+      window = await openWindow(side);
+      const roles: boolean[] = [];
+      void window.ensurePeerNet((held) => roles.push(held));
+
+      await waitFor(() => closed);
+      expect(window.isPeerBroker()).toBe(false);
+      expect(window.forwardCommand({ rhId: 'rh-1', cmd: 'status' })).toBe(false);
+      expect(roles).toEqual([]);
+      expect(side.writes).toEqual([]);
+    } finally {
+      await window?.disposePeerLink();
       squatterSocket?.destroy();
       await new Promise((resolve) => squatter.close(resolve));
     }
