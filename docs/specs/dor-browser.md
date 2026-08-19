@@ -63,10 +63,14 @@ Invariants:
   navigations initiated by Dormouse chrome.
 - Agent-browser session state is flat (`session`, `wsPort`, `binaryPath`,
   `syncEngaged`, `key`), not nested.
-- The browser DOM is never moved: Lath's leaf div is never re-parented, so an
-  embedded `<iframe>` never reloads and the screencast canvas never moves
-  mid-click (which would break click synthesis). This replaces the old dockview
+- The browser DOM is never moved *and never unmounted by a minimize*: Lath's leaf div
+  is never re-parented, so an embedded `<iframe>` never reloads and the screencast
+  canvas never moves mid-click (which would break click synthesis); minimizing
+  **parks** the leaf instead of removing it, so the same document comes back on
+  reattach with its scroll, form, and script state intact
+  (`docs/specs/tiling-engine.md` → "Parked leaves"). This replaces the old dockview
   `renderer: 'always'` workaround — the constraint is gone at the root, not healed.
+  A restart is still a cold load: only `url` persists.
 
 Source of truth: `BrowserPanel.tsx`, `browser-surface.ts`, `Wall.tsx`
 (`rendererForParams`, `replaceSurface`), `agent-browser-surface-controller.ts`
@@ -91,6 +95,10 @@ leaves the user's selection, including a door selection, untouched.
 
 Surface lifetime owns backing resources:
 
+- Minimizing a browser pane parks it: the pane stays mounted and connected but
+  invisible, and `useSurfaceVisibility` reports it hidden, so a doored
+  `ab-screencast` stops pulling frames while its daemon and socket stay up. Killing a
+  doored browser pane unparks it, so the parked DOM dies with the Surface.
 - Killing an agent-browser-rendered pane marks the session closed and runs
   `agent-browser close` through `closeAgentBrowserSession`.
 - Swapping away from an agent-browser renderer closes the old session through

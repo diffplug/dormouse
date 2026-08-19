@@ -5,7 +5,7 @@
 // (`session-restore.ts`). The engine (`lath-wall-engine.ts`) owns
 // `serializeLayout`/`seed`, which call through here.
 
-import type { LathTree } from './model';
+import { type LathTree, leaves } from './model';
 
 /** Per-leaf presentation metadata, keyed by leaf id — the Pane props contract's
  *  "read side", owned live by the wall store's `leafMeta` map and serialized
@@ -35,7 +35,15 @@ export function lathLayoutFromStore(snapshot: {
   tree: LathTree;
   leafMeta: ReadonlyMap<string, LeafMeta>;
 }): LathPersistedLayout {
-  return { version: 1, tree: snapshot.tree, leafMeta: Object.fromEntries(snapshot.leafMeta) };
+  // `leafMeta` also covers Doored leaves (the store stays their authority while they
+  // are minimized), but the LAYOUT is the tree — a Door persists as its own row, so
+  // keep only the leaves the tree actually places.
+  const meta: Record<string, LeafMeta> = {};
+  for (const id of leaves(snapshot.tree)) {
+    const m = snapshot.leafMeta.get(id);
+    if (m) meta[id] = m;
+  }
+  return { version: 1, tree: snapshot.tree, leafMeta: meta };
 }
 
 /** Whether a restored blob is a well-formed Lath persisted layout (the tree's own

@@ -1,17 +1,17 @@
 import type { ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Baseboard } from '../components/Baseboard';
-import type { DooredItem } from '../components/Wall';
+import type { DoorChip } from '../components/Wall';
 import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
 
 const BASE_TIME = 1_700_000_000_000;
 
-const makeItem = (id: string, title: string): DooredItem => ({
+const makeItem = (id: string, title: string): DoorChip => ({
   id,
   title,
 });
 
-function withState(items: DooredItem[], byId: Record<string, Record<string, unknown>>) {
+function withState(items: DoorChip[], byId: Record<string, Record<string, unknown>>) {
   return {
     primedSessionState: {
       byId,
@@ -32,7 +32,7 @@ function userTitleState(title: string, index: number): TerminalPaneState {
   });
 }
 
-function BaseboardStory({ items, notice }: { items: DooredItem[]; notice?: ReactNode }) {
+function BaseboardStory({ items, notice }: { items: DoorChip[]; notice?: ReactNode }) {
   return (
     <div className="bg-app-bg" style={{ width: '100%' }}>
       <Baseboard

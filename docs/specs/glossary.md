@@ -143,7 +143,7 @@ A **Session** is the tuple of its `SessionId` plus one state per layer. `Session
 |---|---|
 | `Paned` | Rendered as a pane in the content area (a Lath leaf) |
 | `Zoomed` | Subset of `Paned` — the passthrough-focused pane is maximized; acquiring zoom gives it focus, and losing that focus returns it to `Paned` |
-| `Doored` | Rendered as a door on the baseboard |
+| `Doored` | Rendered as a door on the baseboard. Whether the Surface's DOM survives is a rendering decision, not part of this state: browser Surfaces stay mounted-but-hidden (**parked**, `docs/specs/tiling-engine.md` → "Parked leaves") so an `<iframe>` does not reload on reattach, while terminal Surfaces unmount and replay |
 | `Hidden` | In neither pane nor door — the webview is closed, the Surface belongs to an inactive Workspace (standalone), or the Surface is mid-transition. Process and Activity are unaffected. |
 
 ### Link
@@ -198,7 +198,7 @@ A system verb is a lifecycle transition driven by the runtime.
 | Verb | Effect |
 |---|---|
 | `register` / `dispose` | Create / destroy a Registry entry |
-| `mount` / `unmount` | Attach / detach the persistent DOM element from a container (low-level op; the Registry entry survives `unmount`) |
+| `mount` / `unmount` | Attach / detach the persistent DOM element from a container (low-level op; the Registry entry survives `unmount`). A **parked** leaf is deliberately left mounted while `Doored` or `Hidden` — see `docs/specs/tiling-engine.md` → "Parked leaves" |
 | `exit` | Host observes process death (Process: Live → Exited) |
 | `resume` | Webview reopens over live PTYs (Link: Severed → Resuming → Live; Registry rebuilt from replay data; Process stays Live) |
 | `restore` | Cold start from Snapshot (Link: Cold → Live; Process: Absent → Live with saved cwd; Registry rebuilt from saved scrollback) |

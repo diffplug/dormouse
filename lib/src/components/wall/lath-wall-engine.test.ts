@@ -4,9 +4,11 @@ import {
   edgeForDorDirection,
   dorDirectionForEdge,
   directionForArrow,
-  leafMetaFromDoor,
+  leafMetaFromPersistedDoor,
+  shouldParkOnMinimize,
 } from './lath-wall-engine';
-import type { DooredItem } from './wall-types';
+import { MAX_PARKED_SURFACES } from './lath-wall-store';
+import type { PersistedDoor } from '../../lib/session-types';
 import { leaves } from '../../lib/lath/model';
 
 describe('lath-wall-engine seed', () => {
@@ -70,13 +72,39 @@ describe('lath-wall-engine edge/direction maps', () => {
   });
 });
 
-describe('leafMetaFromDoor', () => {
-  const base: DooredItem = { id: 'door-1', title: 'Door' } as DooredItem;
+describe('leafMetaFromPersistedDoor', () => {
+  const base: PersistedDoor = { id: 'door-1', title: 'Door' };
 
   it('passes browser/terminal through and defaults an absent component to terminal', () => {
-    expect(leafMetaFromDoor({ ...base, component: 'browser' }).component).toBe('browser');
-    expect(leafMetaFromDoor({ ...base, component: 'terminal' }).component).toBe('terminal');
-    expect(leafMetaFromDoor(base).component).toBe('terminal');
+    expect(leafMetaFromPersistedDoor({ ...base, component: 'browser' }).component).toBe('browser');
+    expect(leafMetaFromPersistedDoor({ ...base, component: 'terminal' }).component).toBe('terminal');
+    expect(leafMetaFromPersistedDoor(base).component).toBe('terminal');
+  });
+});
+
+describe('lath-wall-engine door hydration', () => {
+  it('seeds a restored Door\'s meta into the store, so nothing reads the wire row again', () => {
+    const engine = createLathWallEngine();
+    engine.seed(null, ['anchor'], () => 'gen', [
+      { id: 'door-1', title: 'Restored', component: 'browser', tabComponent: 'surface', params: { url: 'https://restored.example' } },
+    ]);
+    // A Door is a detached leaf: it has meta, but it is not a pane...
+    expect(engine.getMeta('door-1')).toMatchObject({ component: 'browser', params: { url: 'https://restored.example' } });
+    expect(engine.listPanes().map((p) => p.id)).toEqual(['anchor']);
+    // ...and it stays out of the persisted LAYOUT, which is the tree.
+    expect(Object.keys(engine.serializeLayout().leafMeta)).toEqual(['anchor']);
+  });
+
+  it('seeds Doors alongside a restored Lath layout too', () => {
+    const engine = createLathWallEngine();
+    engine.seed(
+      { version: 1, tree: { root: { kind: 'leaf', id: 'p1' } }, leafMeta: { p1: { component: 'terminal', tabComponent: 'terminal', title: 'P1' } } },
+      undefined,
+      () => 'gen',
+      [{ id: 'door-1', title: 'Restored' }],
+    );
+    expect(engine.getMeta('p1')?.title).toBe('P1');
+    expect(engine.getMeta('door-1')?.title).toBe('Restored');
   });
 });
 
@@ -97,5 +125,86 @@ describe('lath-wall-engine listPanes projection', () => {
     const { ok } = engine.store.restoreLeaf(meta, token!, { fallbackRef: 'p1' });
     expect(ok).toBe(true);
     expect(engine.store.has('p2')).toBe(true);
+  });
+});
+
+describe('lath-wall-engine parking policy', () => {
+  const browser = { component: 'browser', tabComponent: 'surface', title: 'B' };
+  const terminal = { component: 'terminal', tabComponent: 'terminal', title: 'T' };
+
+  it('parks Surfaces whose state lives in the DOM, and only those', () => {
+    expect(shouldParkOnMinimize(browser)).toBe(true);
+    // A terminal's state is in the PTY and replays on reattach, so parking it would
+    // only cost memory.
+    expect(shouldParkOnMinimize(terminal)).toBe(false);
+  });
+
+  it('doorLeaf caps the parked DOM itself, evicting oldest-first', () => {
+    const engine = createLathWallEngine();
+    engine.seed(null, ['anchor'], () => 'gen');
+    const ids: string[] = [];
+    for (let i = 0; i < MAX_PARKED_SURFACES + 2; i++) {
+      const id = `b${i}`;
+      ids.push(id);
+      engine.store.addLeaf(id, browser, { refId: 'anchor', edge: 'right' });
+      engine.store.doorLeaf(id, { park: true }); // no companion eviction call to forget
+    }
+    const parked = engine.store.parkedIds();
+    expect(parked).toHaveLength(MAX_PARKED_SURFACES);
+    // The two oldest lost only their live DOM: they stay minimized and retain their
+    // latest metadata, but reattach by reloading rather than revealing preserved DOM.
+    expect(parked).toEqual(ids.slice(2));
+    expect(engine.getMeta(ids[0])).toBeDefined();
+  });
+
+  it('keeps a Door\'s metadata live after the parked DOM is evicted', () => {
+    const engine = createLathWallEngine();
+    engine.seed(null, ['anchor'], () => 'gen');
+    engine.store.addLeaf('oldest', browser, { refId: 'anchor', edge: 'right' });
+    const { token } = engine.store.doorLeaf('oldest', { park: true });
+    engine.store.updateParams('oldest', { url: 'https://after-park.example' });
+
+    for (let i = 0; i < MAX_PARKED_SURFACES; i++) {
+      const id = `newer-${i}`;
+      engine.store.addLeaf(id, browser, { refId: 'anchor', edge: 'right' });
+      engine.store.doorLeaf(id, { park: true });
+    }
+
+    expect(engine.getMeta('oldest')?.params).toEqual({ url: 'https://after-park.example' });
+
+    // An async agent-browser acquisition may finish after the cap unmounted the DOM.
+    engine.store.updateParams('oldest', { session: 'acquired-late' });
+    expect(engine.getMeta('oldest')?.params).toEqual({
+      url: 'https://after-park.example',
+      session: 'acquired-late',
+    });
+
+    engine.store.restoreLeaf(engine.getMeta('oldest')!, token!, { fallbackRef: 'anchor' });
+    expect(engine.getMeta('oldest')?.params).toEqual({
+      url: 'https://after-park.example',
+      session: 'acquired-late',
+    });
+  });
+
+  it('getMeta resolves a Doored leaf, so a reattach restores its CURRENT meta', () => {
+    const engine = createLathWallEngine();
+    engine.seed(null, ['anchor'], () => 'gen');
+    engine.store.addLeaf('b', browser, { refId: 'anchor', edge: 'right' });
+    engine.store.doorLeaf('b', { park: true });
+    engine.store.updateParams('b', { url: 'http://localhost:3000/deep' });
+    expect(engine.getMeta('b')?.params).toEqual({ url: 'http://localhost:3000/deep' });
+    // ...but a parked leaf is not a visible pane.
+    expect(engine.listPanes().map((p) => p.id)).toEqual(['anchor']);
+  });
+
+  it('leaves Doored meta out of the persisted layout', () => {
+    const engine = createLathWallEngine();
+    engine.seed(null, ['anchor'], () => 'gen');
+    engine.store.addLeaf('b', browser, { refId: 'anchor', edge: 'right' });
+    engine.store.doorLeaf('b', { park: true });
+    engine.store.addLeaf('t', terminal, { refId: 'anchor', edge: 'bottom' });
+    engine.store.doorLeaf('t'); // unparked Door — same rule
+    const layout = engine.serializeLayout();
+    expect(Object.keys(layout.leafMeta)).toEqual(['anchor']);
   });
 });

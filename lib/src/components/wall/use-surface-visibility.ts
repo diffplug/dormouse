@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react';
 
 /**
- * Whether a Surface is actually on screen: under Lath a mounted leaf is always
- * engine-visible, so this reduces to whether the document isn't hidden (backgrounded
- * window). Callers gate streaming work on it so a hidden pane stops consuming
- * resources while its daemon/session stays alive.
+ * Whether a Surface is actually on screen. Two things can hide one: the window is
+ * backgrounded, or the leaf is **parked** — mounted but out of the tree, so its DOM
+ * survives while it paints nothing (docs/specs/tiling-engine.md → "Parked leaves").
+ * Callers gate streaming work on it so a hidden pane stops consuming resources while
+ * its daemon/session stays alive.
+ *
+ * Pass the pane's `parked` prop; omitting it means "never parked", which is right for
+ * any surface rendered outside LathHost.
  */
-export function useSurfaceVisibility(): boolean {
+export function useSurfaceVisibility(parked = false): boolean {
   const [docVisible, setDocVisible] = useState<boolean>(() => document.visibilityState !== 'hidden');
 
   useEffect(() => {
@@ -15,5 +19,5 @@ export function useSurfaceVisibility(): boolean {
     return () => document.removeEventListener('visibilitychange', onChange);
   }, []);
 
-  return docVisible;
+  return docVisible && !parked;
 }

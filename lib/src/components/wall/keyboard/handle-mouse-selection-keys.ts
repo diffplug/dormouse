@@ -78,10 +78,9 @@ export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx)
   return false;
 }
 
+/** `paneParams` reads the store, which holds a Surface's params whether it is a pane
+ *  or a Door, so a minimized Surface needs no separate lookup. */
 function surfaceTypeForId(ctx: WallKeyboardCtx, id: string): string {
-  const panelParams = ctx.nav.paneParams(id) as { surfaceType?: unknown } | undefined;
-  if (typeof panelParams?.surfaceType === 'string') return panelParams.surfaceType;
-  const door = ctx.doorsRef?.current?.find((candidate) => candidate.id === id);
-  const doorType = (door?.params as { surfaceType?: unknown } | undefined)?.surfaceType;
-  return typeof doorType === 'string' ? doorType : 'terminal';
+  const params = ctx.nav.paneParams(id) as { surfaceType?: unknown } | undefined;
+  return typeof params?.surfaceType === 'string' ? params.surfaceType : 'terminal';
 }
