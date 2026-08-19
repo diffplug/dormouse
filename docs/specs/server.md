@@ -459,7 +459,9 @@ away.
   `displaced` in the UI yet; `window.dormouseRemoteHost.status()` reports it as
   `connection`, distinct from the retrying `disconnected`. A close event from a
   socket the controller no longer owns is ignored, so a dead socket's late
-  eviction cannot stand down the live one. Source of truth:
+  eviction cannot stand down the live one. Disposing the service is terminal:
+  an enrollment or ACL read already in flight cannot construct a relay socket
+  after its owning sidecar/extension instance has torn down. Source of truth:
   `lib/src/remote/host/remote-host.ts`, `lib/src/host/remote/service.ts`
   (lifecycle + the console commands), `lib/src/remote/host/activation.ts` (the
   webview's client half).

@@ -79,6 +79,8 @@ export class RemoteHostService {
    * other on the server forever.
    */
   #lifecycle: Promise<unknown> = Promise.resolve();
+  /** Disposal is terminal: no in-flight store read may resurrect the Host. */
+  #disposed = false;
   /**
    * Pairings awaiting local approval, service-side. The webview mirrors a
    * serializable projection of this and answers by clientId; the approve/deny
@@ -113,6 +115,7 @@ export class RemoteHostService {
 
   /** Start from a persisted enrollment, if there is one this build may reach. */
   start(): Promise<void> {
+    if (this.#disposed) return Promise.resolve();
     return this.#serialize(() => this.#start());
   }
 
@@ -133,16 +136,20 @@ export class RemoteHostService {
 
   /** Stop the Host and forget the connection-scoped state. */
   dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
     this.#stopHost();
   }
 
   async handleCommand(raw: unknown): Promise<void> {
-    if (!isRemoteHostCommand(raw)) return;
+    if (this.#disposed || !isRemoteHostCommand(raw)) return;
     const command = raw;
     try {
       const result = await this.#run(command.cmd, command.params);
+      if (this.#disposed) return;
       this.#sendToUi(REMOTE_HOST_RESULT_EVENT, { rhId: command.rhId, result });
     } catch (error) {
+      if (this.#disposed) return;
       this.#sendToUi(REMOTE_HOST_RESULT_EVENT, {
         rhId: command.rhId,
         error: error instanceof Error ? error.message : String(error),
@@ -304,6 +311,7 @@ export class RemoteHostService {
   }
 
   async #startHost(enrollment: HostEnrollment): Promise<void> {
+    if (this.#disposed) return;
     // Never two. Callers are serialized (see `#lifecycle`), but a Host left in
     // `#host` here would be dropped without its socket being closed, so the
     // replacement is explicit rather than implied by the assignment below.
@@ -313,6 +321,10 @@ export class RemoteHostService {
     // in the background — a failed write must not fail the pairing that is
     // already approved and already on the wire.
     const records = await this.#store.loadAcl(enrollment.hostId);
+    // Deactivation can land during that store round trip. Disposal is terminal:
+    // constructing here would leave a relay socket alive after its owner had
+    // dropped the service and could no longer stop it.
+    if (this.#disposed) return;
     this.#enrollment = enrollment;
     this.#host = new RemoteHost({
       enrollment,
@@ -348,6 +360,7 @@ export class RemoteHostService {
    * name, which is how a webview seeds before any event arrives.
    */
   #emitStatus(): void {
+    if (this.#disposed) return;
     this.#sendToUi(REMOTE_HOST_EVENT_EVENT, this.statusEvent());
   }
 
@@ -393,6 +406,7 @@ export class RemoteHostService {
   }
 
   #emitQueue(): void {
+    if (this.#disposed) return;
     this.#sendToUi(REMOTE_HOST_EVENT_EVENT, {
       name: 'pairing-queue',
       queue: this.#queueSnapshot(),

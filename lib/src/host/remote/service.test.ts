@@ -342,6 +342,33 @@ describe('start', () => {
     expect(sockets[0]!.readyState).toBe(3);
   });
 
+  it('does not resurrect a Host when disposal lands during startup', async () => {
+    createService({ enrollment: ENROLLMENT });
+    let releaseAcl: () => void = () => {};
+    let enteredAcl: () => void = () => {};
+    const entered = new Promise<void>((resolve) => {
+      enteredAcl = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      releaseAcl = resolve;
+    });
+    const seeded = store.loadAcl;
+    store.loadAcl = async (hostId) => {
+      enteredAcl();
+      await gate;
+      return seeded(hostId);
+    };
+
+    const starting = service.start();
+    await entered;
+    service.dispose();
+    releaseAcl();
+    await starting;
+
+    expect(sockets).toEqual([]);
+    expect(sent).toEqual([]);
+  });
+
   it('clearEnrollment stops the Host and forgets it, keeping the records', async () => {
     createService({ enrollment: ENROLLMENT, acl: { 'host-1': [aclRecord('device-1')] } });
     await service.start();
