@@ -138,7 +138,14 @@ Tightening a directory Rust already created is best-effort: where POSIX modes do
 not exist the file's own 0600 is the protection that matters, and failing the
 save over the directory would lose the Host instead. The in-memory view advances
 only after that rename succeeds, so a failed save cannot be mistaken for durable
-state by a later adoption. One file rather than
+state by a later adoption. **Reads fail closed.** Only `ENOENT` — nothing
+written yet — and a file that was read but cannot be parsed answer empty; the
+parse failure warns, because an empty ACL silently de-pairs every device. Any
+other read error (EACCES, EIO, a held handle on Windows) says nothing about what
+the file holds, so it is neither answered nor memoized: the load rejects, and
+because every change is a read-modify-write of the whole file, the save behind it
+rejects too rather than overwriting state it could not see with nothing. A later
+read of the same file still recovers. One file rather than
 one per value, so a write is one atomic rename and the
 enrollment can never end up describing a different Host than the records
 approved under it. `hostToken` is a bearer credential and never enters a webview
@@ -178,6 +185,13 @@ seam where a multi-window standalone would instead collect until the budget
 (`ASK_BUDGET_MS`, 1s), which otherwise only bounds a webview that is reloading —
 an attach must not hang on one, and a directory that missed a pane re-collects
 on the next change.
+
+An answer for an ask the bridge no longer holds **invalidates the directory**
+rather than being dropped. The ask settled empty, so the snapshot the Host
+already rendered is missing whatever that answer names — an empty picker on a
+machine that does have terminals — and nothing re-opens a settled ask, so the
+next collect is the only repair and an idle machine has no other reason to run
+one. VS Code's in-window fan-out does the same (`docs/specs/vscode.md`).
 
 **Stripping.** Unlike VS Code's extension host, the sidecar hands the webview
 *raw* PTY bytes and the webview's own parser strips them for its xterm

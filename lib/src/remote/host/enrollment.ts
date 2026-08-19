@@ -57,6 +57,8 @@ export function clearEnrollment(): void {
   removeJson(ENROLLMENT_KEY);
 }
 
+const ENROLL_TIMEOUT_MS = 10_000;
+
 /**
  * `POST /api/host/enroll` with the setup password and map the response to an
  * enrollment. Throws with the server's status text on failure so the caller
@@ -74,6 +76,13 @@ export async function performEnrollment(
   const base = serverUrl.replace(/\/+$/, '');
   const response = await fetch(`${base}${API_ROUTES.hostEnroll}`, {
     method: 'POST',
+    // This runs on the Host service's lifecycle chain, where everything that
+    // starts or stops the Host queues behind it — so a relay that accepts the
+    // connection and then answers nothing would wedge every later command for
+    // as long as the platform's default socket timeout, which is minutes. Below
+    // the webview's own 15 s command budget (`link-client.ts`) on purpose: the
+    // console then sees "the server did not answer" rather than a bare timeout.
+    signal: AbortSignal.timeout(ENROLL_TIMEOUT_MS),
     // The Node-resident Host has no browser CSP to check each redirect hop.
     // Failing here keeps an allowed origin's open redirect from forwarding the
     // setup password to a server outside the build-time allowlist.

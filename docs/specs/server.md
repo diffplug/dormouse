@@ -33,7 +33,7 @@ UI lives in `lib`/`standalone`.
 | `DORMOUSE_SETUP_PASSWORD` | Required. Gates account creation and host enrollment.      |
 | `DORMOUSE_ORIGIN`         | External origin, e.g. `https://dormouse.tailnet.ts.net`. Source of the WebAuthn `rpId`/`origin` and the Host's `ConnectionPolicy`. Defaults to `http://localhost:<port>` for dev. |
 | `DORMOUSE_STATE_DIR`      | Where the JSON state files live. Default `./data`.         |
-| `PORT`                    | Default 3000.                                              |
+| `PORT`                    | Default 3000. Blank is unset — `Number('')` is 0, which would ask the OS for an ephemeral port and move the server out from under whatever proxy is pointed at it. An explicit `PORT=0` is a `ConfigError` for the same reason: nothing can be pointed at a port that changes every restart. |
 | `DORMOUSE_BIND_HOST`      | Interface to listen on. Unset binds every interface (what a container wants); set `127.0.0.1` when a TLS proxy on the same machine is the front door. |
 | `DORMOUSE_VAPID_PUBLIC_KEY` / `DORMOUSE_VAPID_PRIVATE_KEY` | Web Push signing keypair. Set both or neither. At startup the Server decodes both, derives the P-256 public point from the private key, and exits on a missing, malformed, or mismatched pair. Unset, the server mints a pair on first boot and persists it to `vapid.json`. |
 | `DORMOUSE_VAPID_SUBJECT`  | `mailto:`/`https:` contact for push-service operators (RFC 8292). Defaults to `DORMOUSE_ORIGIN` when that origin is https and not loopback; otherwise there is no default and push stays off. The Server parses and validates it at startup and exits on an invalid value — including a loopback contact, which Apple rejects. |
@@ -93,6 +93,14 @@ override rule; `standalone/scripts/build-sidecar-proxy.mjs` and
 define compiles fine and would only show up as a Host silently using the shipped
 default instead of the selfhoster's origins. `bakedConnectSrc()` in
 `lib/src/host/remote/connect-src.ts` is the single place the value is read.
+
+`resolveRemoteConnectSrc` also **fails the build on an override the matcher
+could never read** — a trailing slash, a path, a bare host with no scheme. The
+runtime fails closed on a source it cannot parse, so without this such a build
+succeeds and then refuses to enroll against the very server it was built for.
+The grammar is one regex duplicated into the build script, since an `.mjs` build
+script cannot import TypeScript; `connect-src.test.ts` asserts the two pattern
+strings are identical, the same way it pins the two copies of the default.
 
 **Enforcement is `originAllowedByConnectSrc`, at two points:** the service
 refuses `enroll` for an origin outside the list — before the setup password
@@ -450,6 +458,23 @@ away.
   and maintains `GET /ws/host`. `hostToken` is a bearer credential and never
   enters a webview realm. Enrollment is refused outright for a server outside
   this build's allowlist (above), before the password leaves the machine.
+  **Order matters, and the store goes first.** The `hostToken` this exchange
+  mints exists nowhere else and cannot be minted again from the same password
+  exchange, so the save is awaited before any Host is stopped: a failed write
+  then leaves the old Host running and every answer it gives still true, instead
+  of stranding the machine with no Host, a status that says otherwise, and a
+  credential lost to the failure. Replacing a *running* Host emits
+  `{ name: 'status', enrolled: false }` between the two, because the webview gate
+  that arms on it is edge-triggered and everything it holds — the mirrored
+  pairing queue, the push device list — belongs to the server being left
+  (`lib/src/remote/host/enrolled-gate.ts`). `clearEnrollment` is the same rule
+  read backwards: the delete is awaited first and nothing else happens unless it
+  succeeded, since reporting un-enrolled over a delete that failed would leave
+  the credential on disk for the next launch to read back. The enroll request
+  itself carries a 10 s `AbortSignal.timeout` — under the webview's own 15 s
+  command budget, so the console sees the real error — because it runs on the
+  service's lifecycle chain, where every later start/stop command queues behind
+  it and a black-holed relay would otherwise wedge them all.
 * **Relay socket policy**: one socket at a time, reconnected with exponential
   backoff (1s, doubling to 30s) after any close — except a close carrying
   `WS_CLOSE_HOST_REPLACED`, which is **terminal**. That code means another

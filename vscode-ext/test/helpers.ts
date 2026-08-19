@@ -89,6 +89,8 @@ export function fakeWindow(
   options: {
     entries?: unknown[];
     surfaces?: Record<string, { ptyId: string; cols: number; rows: number }>;
+    /** PTY ids this window's own manager holds — what `ownsPty` answers. */
+    ownPtyIds?: string[];
   } = {},
 ) {
   const dataListeners = new Set<(id: string, data: string) => void>();
@@ -106,6 +108,7 @@ export function fakeWindow(
   return {
     entries: options.entries ?? [],
     surfaces: options.surfaces ?? {},
+    ownPtyIds: new Set(options.ownPtyIds ?? []),
     writes: [] as Array<{ ptyId: string; data: string }>,
     resizes: [] as Array<{ ptyId: string; cols: number; rows: number }>,
     invalidations: 0,
@@ -137,6 +140,7 @@ export function fakeWindow(
         invalidateDirectory: () => {
           this.invalidations += 1;
         },
+        ownsPty: (ptyId) => this.ownPtyIds.has(ptyId),
         streamPty: streams.streamPty,
         writePty: (ptyId, data) => void this.writes.push({ ptyId, data }),
         resizePty: (ptyId, cols, rows) => void this.resizes.push({ ptyId, cols, rows }),

@@ -111,10 +111,17 @@ export function createSidecarSurfaceBridge(
       const subscribed = stream;
       subscribed.sinks.add(sink);
       return () => {
+        // Only while the map still holds the very stream this subscription
+        // joined. Once the last sink leaves, the entry goes and a later
+        // attachment to the same id gets a fresh one — so an unsubscribe run
+        // twice would delete *that* one and silence a stream still flowing.
+        // Same guard, same reason, as `vscode-ext/src/processed-pty-streams.ts`.
+        if (streams.get(ptyId) !== subscribed) return;
         subscribed.sinks.delete(sink);
+        if (subscribed.sinks.size > 0) return;
         // The parser goes with the last attachment: keeping it would carry a
         // half-read sequence into a stream that starts over.
-        if (subscribed.sinks.size === 0) streams.delete(ptyId);
+        streams.delete(ptyId);
       };
     },
   });
@@ -130,7 +137,18 @@ export function createSidecarSurfaceBridge(
      */
     onAnswer(params) {
       if (!params || typeof params.rhId !== 'string') return;
-      asks.get(params.rhId)?.settle(Array.isArray(params.results) ? params.results : []);
+      const pending = asks.get(params.rhId);
+      if (!pending) {
+        // The budget expired before this answer arrived, so the snapshot the
+        // Host already rendered is missing whatever it names — an empty
+        // directory on a machine that does have terminals. Nothing re-opens a
+        // settled ask, so mark the directory stale and let the next collect
+        // repair it; otherwise an idle machine has no other reason to
+        // re-collect and the phone's picker stays wrong indefinitely.
+        notifyDirectoryChanged();
+        return;
+      }
+      pending.settle(Array.isArray(params.results) ? params.results : []);
     },
 
     onNotify() {

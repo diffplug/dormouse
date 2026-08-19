@@ -119,6 +119,145 @@ describe('bind-as-lease', () => {
       .rejects.toHaveProperty('code');
   });
 
+  it('logs an accept-time server error instead of taking the extension host down', async () => {
+    // Past `listen`, an EMFILE or a pipe error arrives as an `'error'` event on
+    // the server. An EventEmitter with no listener for that *throws*, out of a
+    // libuv callback with nothing to catch it.
+    const mod = await openWindow(fakeWindow());
+    const server = createServer();
+    const path = join(dir, 'accept-error.sock');
+    await mod.listenServer(server, path);
+    try {
+      expect(() => server.emit('error', Object.assign(new Error('EMFILE'), { code: 'EMFILE' })))
+        .not.toThrow();
+      // And it is still listening: connections already accepted, and the ones
+      // still to come, are unaffected.
+      const socket = createConnection({ path });
+      await new Promise<void>((resolve, reject) => {
+        socket.once('connect', () => resolve());
+        socket.once('error', reject);
+      });
+      socket.destroy();
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it('does not route a PTY id this window already owns to the peer that claimed it', async () => {
+    // Pane ids are unique within a window and nothing coordinates them across
+    // windows — "Duplicate Workspace in New Window" cold-restores the same ids
+    // — so a peer can answer an attach naming a terminal *this* window owns.
+    // Routing on that sends the phone's keystrokes into the other window's
+    // shell instead of the one it attached to.
+    const brokerSide = fakeWindow({ ownPtyIds: ['pty-far'] });
+    const { broker } = await linkedPair(brokerSide, farWindow());
+
+    expect(await attachFar(broker)).toEqual([{ ptyId: 'pty-far', cols: 80, rows: 24 }]);
+    // No route, so writes fall back to this window's own manager.
+    expect(broker.isRemotePty('pty-far')).toBe(false);
+    expect(broker.remoteWrite('pty-far', 'ls\r')).toBe(false);
+    await tick(100);
+    expect(brokerSide.writes).toEqual([]);
+  });
+
+  it('settles what a dropping window was asked rather than holding the whole collection', async () => {
+    // A directory or an attach every surviving window already answered must not
+    // wait out `PEER_REPLY_BUDGET_MS` behind a window that is already gone.
+    const stuckSide = fakeWindow({ entries: [{ surfaceId: 'stuck-1' }] });
+    let releaseStuck: () => void = () => {};
+    const stuck = new Promise<void>((resolve) => {
+      releaseStuck = resolve;
+    });
+    const stuckDeps = stuckSide.deps();
+    stuckDeps.brokerRequest = async () => {
+      await stuck;
+      return stuckSide.entries;
+    };
+
+    const broker = await openWindow(fakeWindow());
+    await broker.ensurePeerNet(() => {});
+    const answering = await openWindow(fakeWindow({ entries: [{ surfaceId: 'live-1' }] }));
+    await answering.ensurePeerNet(() => {});
+    const stuckLink = await freshModule<LinkModule>(() => import('../src/peer-link'));
+    stuckLink.initPeerLink(fakeContext(dir));
+    stuckLink.configurePeerLink(stuckDeps);
+    opened.push(stuckLink);
+    await stuckLink.ensurePeerNet(() => {});
+
+    const started = Date.now();
+    const collecting = broker.remoteRequest('directory', {});
+    await tick();
+    await stuckLink.disposePeerLink();
+
+    expect(await collecting).toEqual([{ surfaceId: 'live-1' }]);
+    // Well inside `PEER_REPLY_BUDGET_MS`, which is what it used to spend.
+    expect(Date.now() - started).toBeLessThan(2_000);
+    releaseStuck();
+  }, 15_000);
+
+  it('does not answer broker while a reclaimed bind is still unverified', async () => {
+    // `stillOurs` spends 250 ms watching for a window that cleared the same
+    // corpse and bound after us. An enroll landing inside that window used to
+    // see a bound socket, start a service, and the stand-down path
+    // (`closeServer(false)`) never tears one down — two Hosts under one hostId.
+    const path = derivedSocketPath();
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    const corpse = spawn(process.execPath, [
+      '-e',
+      `require('node:net').createServer().listen(${JSON.stringify(path)})`,
+    ]);
+    await waitForFile(path);
+    corpse.kill('SIGKILL');
+    await new Promise((resolve) => corpse.on('exit', resolve));
+    const dead = (await stat(path)).ino;
+
+    const mod = await openWindow(fakeWindow());
+    const roles: boolean[] = [];
+    const settled = mod.ensurePeerNet((held) => roles.push(held));
+
+    // The instant the path names a new inode this window has bound it — and is
+    // still deciding whether it may keep it.
+    const during: boolean[] = [];
+    let brokerDuring = true;
+    let settledDuring = true;
+    await waitFor(async () => {
+      const now = await stat(path).catch(() => null);
+      if (!now || now.ino === dead) return false;
+      void mod.ensurePeerNet((held) => during.push(held));
+      brokerDuring = mod.isPeerBroker();
+      settledDuring = mod.isPeerLinkSettled();
+      return true;
+    }, 15_000);
+
+    expect(during).toEqual([]);
+    expect(brokerDuring).toBe(false);
+    // So a command arriving now is held for the verdict rather than refused.
+    expect(settledDuring).toBe(false);
+
+    await settled;
+    expect(mod.isPeerBroker()).toBe(true);
+    // Announced exactly once, to whoever asked last.
+    expect(roles.concat(during)).toEqual([true]);
+  }, 30_000);
+
+  it('stands down for good when the shared token can be neither read nor written', async () => {
+    // An unwritable `globalStorageUri` is not transient. Retrying at 1 Hz
+    // forever leaves every command waiting out its whole queue budget on every
+    // attempt instead of being told there is nothing to reach.
+    await mkdir(join(dir, 'remote-host.peer-token'), { recursive: true });
+
+    const mod = await openWindow(fakeWindow());
+    const roles: boolean[] = [];
+    await mod.ensurePeerNet((held) => roles.push(held));
+
+    expect(roles).toEqual([]);
+    expect(mod.isPeerBroker()).toBe(false);
+    // Latched: a later caller is answered immediately rather than restarting it.
+    expect(mod.isPeerLinkSettled()).toBe(true);
+    await mod.ensurePeerNet(() => {});
+    expect(mod.isPeerBroker()).toBe(false);
+  });
+
   it('makes the first window to bind the broker and the second a client', async () => {
     const { broker, peer } = await linkedPair();
     expect(broker.isPeerBroker()).toBe(true);

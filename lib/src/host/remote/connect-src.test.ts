@@ -1,8 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 // The build scripts read the `.mjs` and the Host service reads the `.ts`; the
-// last test here is what keeps them one fact.
-import { DEFAULT_REMOTE_CONNECT_SRC as BUILD_DEFAULT } from '../../../../scripts/csp-defaults.mjs';
-import { DEFAULT_REMOTE_CONNECT_SRC, originAllowedByConnectSrc } from './connect-src';
+// last describe here is what keeps them one fact.
+import {
+  CONNECT_SRC_SOURCE_PATTERN as BUILD_PATTERN,
+  DEFAULT_REMOTE_CONNECT_SRC as BUILD_DEFAULT,
+  resolveRemoteConnectSrc,
+} from '../../../../scripts/csp-defaults.mjs';
+import {
+  CONNECT_SRC_SOURCE_PATTERN,
+  DEFAULT_REMOTE_CONNECT_SRC,
+  originAllowedByConnectSrc,
+} from './connect-src';
 
 const SAAS = DEFAULT_REMOTE_CONNECT_SRC;
 
@@ -73,5 +81,44 @@ describe('originAllowedByConnectSrc', () => {
 
   it('is the same default the build scripts bake in', () => {
     expect(DEFAULT_REMOTE_CONNECT_SRC).toBe(BUILD_DEFAULT);
+  });
+});
+
+describe('the build-time check on a self-hoster’s override', () => {
+  it('reads a source with exactly the grammar the matcher does', () => {
+    // `scripts/csp-defaults.mjs` is a build script and cannot import this file,
+    // so it keeps a copy. A copy that drifted would either fail a build over a
+    // source the Host accepts, or pass one it silently never matches.
+    expect(BUILD_PATTERN.source).toBe(CONNECT_SRC_SOURCE_PATTERN.source);
+    expect(BUILD_PATTERN.flags).toBe(CONNECT_SRC_SOURCE_PATTERN.flags);
+  });
+
+  it('fails the build on an override the Host could never match', () => {
+    // Both silently match nothing at runtime, so the binary builds green and
+    // then refuses to enroll against the server it was built for.
+    for (const bad of ['https://relay.example.ts.net/', 'relay.example.ts.net']) {
+      expect(() =>
+        resolveRemoteConnectSrc({ DORMOUSE_REMOTE_CONNECT_SRC: bad }, 'test'),
+      ).toThrow(/DORMOUSE_REMOTE_CONNECT_SRC/);
+      expect(originAllowedByConnectSrc('https://relay.example.ts.net', bad)).toBe(false);
+    }
+    // And one entry of a list is enough to fail it.
+    expect(() =>
+      resolveRemoteConnectSrc(
+        { DORMOUSE_REMOTE_CONNECT_SRC: 'https://a.example wss://b.example/' },
+        'test',
+      ),
+    ).toThrow();
+  });
+
+  it('passes a well-formed override through, and an unset one to the default', () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const custom = 'https://relay.example.ts.net wss://relay.example.ts.net';
+    expect(resolveRemoteConnectSrc({ DORMOUSE_REMOTE_CONNECT_SRC: custom }, 'test')).toBe(custom);
+    expect(resolveRemoteConnectSrc({}, 'test')).toBe(DEFAULT_REMOTE_CONNECT_SRC);
+    expect(resolveRemoteConnectSrc({ DORMOUSE_REMOTE_CONNECT_SRC: '  ' }, 'test')).toBe(
+      DEFAULT_REMOTE_CONNECT_SRC,
+    );
+    log.mockRestore();
   });
 });

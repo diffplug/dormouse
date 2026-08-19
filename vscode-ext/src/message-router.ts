@@ -74,6 +74,9 @@ configurePeerLink({
   streamPty: processedPtyStreams.streamPty,
   writePty: (ptyId, data) => ptyManager.write(ptyId, data),
   resizePty: (ptyId, cols, rows) => ptyManager.resize(ptyId, cols, rows),
+  // Two windows can hold the same pane id — "Duplicate Workspace in New Window"
+  // cold-restores them — so the link asks before it routes one away.
+  ownsPty: (ptyId) => ptyManager.hasPty(ptyId) || globalOwnedPtyIds.has(ptyId),
   // The Host half: which of these fire depends on which side of the bind this
   // window landed on, and the link is what knows that.
   handleForwardedCommand,
@@ -610,9 +613,19 @@ export function attachRouter(
         // instead of waiting out the budget — which is the common case when
         // what was asked about actually lives in another window.
         const request = peerRequests.get(msg.requestId);
-        if (!request) break;
+        if (!request) {
+          // Late: the budget already expired and the Host rendered a snapshot
+          // without whatever this webview owns. Nothing can re-open a settled
+          // request, so mark the directory stale instead — the next collect
+          // asks again and repairs it. Without this an idle machine never
+          // re-collects and the phone's picker stays wrong indefinitely.
+          notifyDirectoryChanged();
+          break;
+        }
+        // Deleted before the results are taken, so a duplicate answer from the
+        // same webview cannot contribute its panes twice.
+        if (!request.pending.delete(router)) break;
         if (Array.isArray(msg.results)) request.results.push(...msg.results);
-        request.pending.delete(router);
         if (request.pending.size === 0) request.settle();
         break;
       }

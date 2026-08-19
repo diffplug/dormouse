@@ -116,6 +116,10 @@ export class FileHostStateStore implements HostStateStore {
   /** Apply one change to the in-memory state and flush it, one at a time. */
   #mutate(change: (state: HostStateFile) => void): Promise<void> {
     return this.#serialize(async () => {
+      // A read that failed rejects here and takes the whole save with it: every
+      // change is a read-modify-write of the whole file, so writing without
+      // having read it would replace state we could not see with state we
+      // invented (`#read`).
       const current = await this.#read();
       // Do not expose a mutation through later reads until its atomic rename
       // has succeeded. In particular, a failed enrollment save must not make a
@@ -132,19 +136,40 @@ export class FileHostStateStore implements HostStateStore {
   #read(): Promise<HostStateFile> {
     // Read once and keep it: this process is the only writer, so the in-memory
     // copy is the file, and a save is a full rewrite of what we already hold.
-    this.#state ??= (async () => {
-      try {
-        return parseState(await readFile(this.#path, 'utf8'));
-      } catch (error) {
-        if ((error as { code?: string } | null)?.code !== 'ENOENT') {
-          // Fail closed but loudly, like `loadHostAcl`: starting empty silently
-          // de-pairs every device, so it must at least be explicable from a log.
-          console.warn(`[remote-host] could not read ${this.#path}; starting empty`, error);
-        }
-        return emptyState();
-      }
-    })();
+    this.#state ??= this.#readOnce().catch((error: unknown) => {
+      // A read that failed for a reason other than "there is no file yet" says
+      // nothing about what the file holds — EACCES, EIO, an open handle on
+      // Windows. Memoizing empty for it would make the very next `#mutate`
+      // read-modify-write from nothing and durably overwrite the enrollment and
+      // every ACL record with it, de-pairing every device for good. So forget
+      // the attempt instead: the caller fails closed, `#mutate` refuses to
+      // write because it never got a state to modify, and a later read of the
+      // same file can still recover.
+      this.#state = null;
+      throw error;
+    });
     return this.#state;
+  }
+
+  async #readOnce(): Promise<HostStateFile> {
+    let raw: string;
+    try {
+      raw = await readFile(this.#path, 'utf8');
+    } catch (error) {
+      // Nothing written yet is the ordinary state of a machine that never
+      // enrolled, and it is the one failure that genuinely means "empty".
+      if ((error as { code?: string } | null)?.code === 'ENOENT') return emptyState();
+      throw error;
+    }
+    try {
+      return parseState(raw);
+    } catch (error) {
+      // We did read the file and there is nothing in it to preserve. Start
+      // empty but loudly, like `loadHostAcl`: an empty ACL silently de-pairs
+      // every device, so it must at least be explicable from a log.
+      console.warn(`[remote-host] could not read ${this.#path}; starting empty`, error);
+      return emptyState();
+    }
   }
 
   async #write(state: HostStateFile): Promise<void> {

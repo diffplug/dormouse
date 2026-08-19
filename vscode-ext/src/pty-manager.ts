@@ -99,6 +99,16 @@ export function getBufferedPtys(): Map<string, { alive: boolean; exitCode?: numb
   return result;
 }
 
+/**
+ * Whether this extension host holds a PTY under that id — alive or exited, but
+ * not killed. Pane ids are unique within a window and nothing coordinates them
+ * across windows, so this is how the peer link tells one of its own terminals
+ * from a sibling window's that happens to share the id (`peer-link.ts`).
+ */
+export function hasPty(id: string): boolean {
+  return ptyBuffers.has(id);
+}
+
 export function getReplayData(id: string): string | null {
   const entry = ptyBuffers.get(id);
   if (!entry || entry.replayChunks.length === 0) return null;

@@ -163,6 +163,23 @@ describe('surface responder', () => {
     expect(platform.notified).toBe(2);
   });
 
+  it('installs its announcing half once, however often it is called', async () => {
+    // `RemotePairingModalHost` mounts twice under StrictMode. A second install
+    // adds a second set of pane-state, activity, and focus listeners with no
+    // handle left to remove them, so every change would cross into the Host's
+    // process twice for the rest of the session.
+    installPeerSurfaceResponder();
+    installPeerSurfaceResponder();
+    await armed();
+
+    primeActivity('pty-1', { status: 'ALERT_RINGING' });
+    await Promise.resolve();
+    expect(platform.notified).toBe(1);
+    // And answering still works after the extra calls.
+    registerSurface('surface-1', 'pty-1');
+    expect(platform.answer('directory', {})).toHaveLength(1);
+  });
+
   it('announces nothing until there is a Host to hear it', async () => {
     // A machine that never enrolled pays no crossing per activity change,
     // which is most machines most of the time.

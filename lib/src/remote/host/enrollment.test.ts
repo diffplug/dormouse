@@ -52,6 +52,35 @@ describe('remote-host enrollment', () => {
     expect(store.size).toBe(0);
   });
 
+  it('gives up on a relay that accepts the connection and never answers', async () => {
+    // This exchange runs on the Host service's lifecycle chain, where every
+    // start/stop command queues behind it, so a black-holed relay must not be
+    // allowed to wedge them for the platform's default socket timeout.
+    stubLocalStorage();
+    const controller = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
+    let seen: AbortSignal | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        seen = init.signal ?? undefined;
+        return new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        });
+      }),
+    );
+
+    const pending = performEnrollment('https://dormouse.example', 'hunter2', 'x');
+    // Below the webview's own 15 s command budget, so the console that asked
+    // sees the real error rather than a bare timeout.
+    expect(timeout).toHaveBeenCalledWith(10_000);
+    expect(seen).toBe(controller.signal);
+
+    controller.abort();
+    await expect(pending).rejects.toThrow(/abort/i);
+    timeout.mockRestore();
+  });
+
   it('throws on a non-ok response', async () => {
     stubLocalStorage();
     vi.stubGlobal('fetch', vi.fn(async () => new Response('bad password', { status: 401 })));

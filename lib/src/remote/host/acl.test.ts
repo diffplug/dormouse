@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HostAcl } from 'server-lib-common';
-import { ACL_KEY_PREFIX, loadAclRecords, loadHostAcl, saveAclRecords } from './acl';
+import { ACL_KEY_PREFIX, clearAclRecords, loadAclRecords, loadHostAcl } from './acl';
 
 function stubLocalStorage(): Map<string, string> {
   const store = new Map<string, string>();
@@ -25,15 +25,20 @@ function makeRecord(hostId: string) {
   return acl.records();
 }
 
+/** What a webview-resident Host left behind, which is all this module reads now. */
+function seed(store: Map<string, string>, hostId: string): ReturnType<typeof makeRecord> {
+  const records = makeRecord(hostId);
+  store.set(`${ACL_KEY_PREFIX}${hostId}`, JSON.stringify(records));
+  return records;
+}
+
 describe('remote-host acl persistence', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it('round-trips records through localStorage', () => {
+  it('reads back what a webview-resident Host persisted', () => {
     const store = stubLocalStorage();
-    const records = makeRecord('host-1');
-    saveAclRecords('host-1', records);
+    const records = seed(store, 'host-1');
 
-    expect(store.get(`${ACL_KEY_PREFIX}host-1`)).toBe(JSON.stringify(records));
     expect(loadAclRecords('host-1')).toEqual(records);
 
     const acl = loadHostAcl('host-1', loadAclRecords);
@@ -44,8 +49,8 @@ describe('remote-host acl persistence', () => {
   });
 
   it('drops records belonging to a different host', () => {
-    stubLocalStorage();
-    saveAclRecords('host-1', makeRecord('host-1'));
+    const store = stubLocalStorage();
+    seed(store, 'host-1');
     // A different host must not inherit host-1's ACL.
     expect(loadAclRecords('host-2')).toEqual([]);
     expect(loadHostAcl('host-2', loadAclRecords).activeRecords()).toEqual([]);
@@ -58,9 +63,17 @@ describe('remote-host acl persistence', () => {
     expect(loadHostAcl('host-1', loadAclRecords).activeRecords()).toEqual([]);
   });
 
+  it('clears the copy once the service has taken custody of it', () => {
+    // Left behind it would be a second, diverging ACL for the same hostId.
+    const store = stubLocalStorage();
+    seed(store, 'host-1');
+    clearAclRecords('host-1');
+    expect(loadAclRecords('host-1')).toEqual([]);
+  });
+
   it('treats a missing localStorage as an empty ACL', () => {
     vi.stubGlobal('localStorage', undefined);
     expect(loadAclRecords('host-1')).toEqual([]);
-    expect(() => saveAclRecords('host-1', [])).not.toThrow();
+    expect(() => clearAclRecords('host-1')).not.toThrow();
   });
 });

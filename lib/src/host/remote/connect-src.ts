@@ -59,8 +59,21 @@ interface ParsedSource {
   port: string;
 }
 
+/**
+ * The grammar one source must have: `scheme://host`, optionally `:port` or
+ * `:*`. Anything else is silently no match here, which for a self-hoster's
+ * `DORMOUSE_REMOTE_CONNECT_SRC` means a build that succeeds and then refuses
+ * every origin at enrollment — a trailing slash or a bare host is enough.
+ *
+ * Exported because `scripts/csp-defaults.mjs` checks the override against it at
+ * build time and fails the build instead. A build script cannot import
+ * TypeScript, so it keeps a copy, and `connect-src.test.ts` asserts the two
+ * patterns are the same string.
+ */
+export const CONNECT_SRC_SOURCE_PATTERN = /^([a-z][a-z0-9+.-]*:)\/\/([^/:]+)(?::(\*|\d+))?$/i;
+
 function parseSource(source: string): ParsedSource | null {
-  const match = /^([a-z][a-z0-9+.-]*:)\/\/([^/:]+)(?::(\*|\d+))?$/i.exec(source);
+  const match = CONNECT_SRC_SOURCE_PATTERN.exec(source);
   if (!match) return null;
   const group = schemeClass(match[1]!.toLowerCase());
   if (!group) return null;

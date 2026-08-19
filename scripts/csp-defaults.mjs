@@ -18,13 +18,36 @@ export const CONNECT_SRC_PLACEHOLDER = '__DORMOUSE_REMOTE_CONNECT_SRC__';
 export const DEFAULT_REMOTE_CONNECT_SRC = 'https://*.dormouse.sh wss://*.dormouse.sh';
 
 /**
+ * The grammar one source must have, duplicated from
+ * `lib/src/host/remote/connect-src.ts` — a build script cannot import
+ * TypeScript, and `lib/src/host/remote/connect-src.test.ts` asserts the two
+ * patterns are the same string.
+ */
+export const CONNECT_SRC_SOURCE_PATTERN = /^([a-z][a-z0-9+.-]*:)\/\/([^/:]+)(?::(\*|\d+))?$/i;
+
+/**
  * The sources this build should use: the selfhoster's `DORMOUSE_REMOTE_CONNECT_SRC`
  * if set and non-empty, otherwise the shipped default. Logs to stderr when it
  * overrides, so a custom build says so in its output.
+ *
+ * An override the runtime matcher cannot parse fails the build. Silently it
+ * matches nothing — `originAllowedByConnectSrc` fails closed on a source it
+ * cannot read — so a trailing slash or a missing scheme produces a binary that
+ * builds green and then refuses to enroll against the very server it was built
+ * for, with an error naming the list it was already given.
  */
 export function resolveRemoteConnectSrc(env = process.env, label = 'build') {
   const override = env.DORMOUSE_REMOTE_CONNECT_SRC?.trim();
   if (!override) return DEFAULT_REMOTE_CONNECT_SRC;
+  for (const source of override.split(/\s+/)) {
+    if (!source || CONNECT_SRC_SOURCE_PATTERN.test(source)) continue;
+    throw new Error(
+      `[${label}] DORMOUSE_REMOTE_CONNECT_SRC: "${source}" is not a source the remote Host can ` +
+        'match. Each entry must be scheme://host with an optional :port or :* — ' +
+        'no trailing slash, no path, and the scheme is required ' +
+        `(e.g. "${DEFAULT_REMOTE_CONNECT_SRC}").`,
+    );
+  }
   console.error(`[${label}] connect-src remote sources overridden: ${override}`);
   return override;
 }

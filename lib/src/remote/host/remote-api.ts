@@ -154,6 +154,33 @@ export class RemoteApiSession {
     return null;
   }
 
+  /**
+   * Answer one failed attach — and only when there is anyone to answer.
+   *
+   * Every failure on the attach path reads the same way: a disposed session has
+   * no transport left, and a generation that moved on means a newer attach owns
+   * the surface, which is what the client is told regardless of what actually
+   * went wrong, because that is the fact it has to act on. `reason` is the rest,
+   * for the paths where this attach is still the current one; omitted where
+   * being superseded is the only way to get there. Failing rather than dropping
+   * is load-bearing: the client holds the request pending, and its event
+   * subscription with it.
+   */
+  #failAttach(
+    request: RemoteRequest,
+    surfaceId: string,
+    generation: number,
+    reason?: string,
+  ): void {
+    if (this.#disposed) return;
+    this.#fail(
+      request,
+      reason !== undefined && this.#attachGeneration === generation
+        ? reason
+        : `superseded by a newer attach: ${surfaceId}`,
+    );
+  }
+
   #attachedParams<P extends { surfaceId: string }>(
     request: RemoteRequest,
   ): { params: P; attachment: Attachment } | null {
@@ -256,12 +283,7 @@ export class RemoteApiSession {
           // the session died or a newer attach superseded this one during that
           // round trip, unwind it immediately.
           handle?.release();
-          // The client holds a request pending until it is answered, so a
-          // superseded attach is failed rather than dropped — that also drops its
-          // event subscription. A disposed session has no transport to answer on.
-          if (!this.#disposed) {
-            this.#fail(request, `superseded by a newer attach: ${params.surfaceId}`);
-          }
+          this.#failAttach(request, params.surfaceId, generation);
           return;
         }
         if (!handle) {
@@ -275,16 +297,21 @@ export class RemoteApiSession {
           // throw before an attachment is fully installed.
           if (this.#attachment?.handle === handle) this.#teardownAttachment();
           else handle.release();
-          this.#fail(request, `surface attach failed: ${errorMessage(error)}`);
+          this.#failAttach(
+            request,
+            params.surfaceId,
+            generation,
+            `surface attach failed: ${errorMessage(error)}`,
+          );
         }
       },
       (error) => {
-        if (this.#disposed) return;
-        if (this.#attachGeneration !== generation) {
-          this.#fail(request, `superseded by a newer attach: ${params.surfaceId}`);
-          return;
-        }
-        this.#fail(request, `surface attach failed: ${errorMessage(error)}`);
+        this.#failAttach(
+          request,
+          params.surfaceId,
+          generation,
+          `surface attach failed: ${errorMessage(error)}`,
+        );
       },
     );
   }
@@ -353,11 +380,11 @@ export class RemoteApiSession {
       if (this.#disposed) return;
       if (this.#attachGeneration !== generation || this.#attachment !== attachment) {
         if (this.#attachment === attachment) this.#teardownAttachment();
-        this.#fail(
+        this.#failAttach(
           request,
-          this.#attachGeneration !== generation
-            ? `superseded by a newer attach: ${params.surfaceId}`
-            : `surface closed while attaching: ${params.surfaceId}`,
+          params.surfaceId,
+          generation,
+          `surface closed while attaching: ${params.surfaceId}`,
         );
         return;
       }
@@ -374,14 +401,12 @@ export class RemoteApiSession {
       // attach until the owner has actually applied it. Rejection is a normal
       // protocol error, not an unhandled promise rejection in the Host process.
       void handle.resize(cols, rows).then(finish, (error) => {
-        const current = this.#attachment === attachment;
-        if (current) this.#teardownAttachment();
-        if (this.#disposed) return;
-        this.#fail(
+        if (this.#attachment === attachment) this.#teardownAttachment();
+        this.#failAttach(
           request,
-          this.#attachGeneration !== generation
-            ? `superseded by a newer attach: ${params.surfaceId}`
-            : `surface attach failed: ${errorMessage(error)}`,
+          params.surfaceId,
+          generation,
+          `surface attach failed: ${errorMessage(error)}`,
         );
       });
     } else {

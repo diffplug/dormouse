@@ -42,9 +42,16 @@ export class ConfigError extends Error {}
 type Env = Record<string, string | undefined>;
 
 export function readConfig(env: Env = process.env): ServerConfig {
-  const port = Number(env.PORT ?? 3000);
-  if (!Number.isInteger(port) || port < 0 || port > 65535) {
-    throw new ConfigError(`PORT must be an integer between 0 and 65535, got ${env.PORT}`);
+  // Blank is unset, the way `DORMOUSE_BIND_HOST` reads it below. `Number('')` is
+  // 0, which passes the range check and asks the OS for an ephemeral port — so
+  // a `PORT=` left empty in a `.env` would silently move the server off 3000
+  // and out from under the proxy in front of it. An explicit `PORT=0` is
+  // refused for the same reason rather than honoured: nothing can be pointed at
+  // a port that changes every restart.
+  const rawPort = env.PORT?.trim() || undefined;
+  const port = Number(rawPort ?? 3000);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new ConfigError(`PORT must be an integer between 1 and 65535, got ${env.PORT}`);
   }
 
   const setupPassword = env.DORMOUSE_SETUP_PASSWORD;

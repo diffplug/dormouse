@@ -1,15 +1,19 @@
 /**
  * Host ACL persistence. The ACL is the authorization primitive (see
  * `server-lib-common/security/acl.ts`) and — per the security model — it lives
- * on the Host, never the Server. Here it is persisted to `localStorage` as the
- * record array `HostAcl.records()` produces, restored via `HostAcl.fromRecords`.
+ * on the Host, never the Server.
  *
- * Keyed per host so a browser profile that re-enrolls under a new hostId does
- * not inherit a stale ACL.
+ * The Host runs in the process that owns the PTYs now, and writes its records
+ * through its own store (`lib/src/host/remote/host-state-store.ts`). What is
+ * left here is `localStorage` as the *read* side: a webview that paired devices
+ * before the service existed still holds the record array `HostAcl.records()`
+ * produced, and hands it over once (`activation.ts` → adoption) before clearing
+ * it. Keyed per host, so a profile that re-enrolls under a new hostId does not
+ * inherit a stale ACL.
  */
 
 import { HostAcl, type HostAclRecord } from 'server-lib-common';
-import { loadJson, removeJson, saveJson } from '../../lib/local-json-store';
+import { loadJson, removeJson } from '../../lib/local-json-store';
 
 export const ACL_KEY_PREFIX = 'dormouse.remote-host.acl.';
 
@@ -38,10 +42,6 @@ export function filterAclRecords(hostId: string, records: readonly unknown[]): H
 export function loadAclRecords(hostId: string): HostAclRecord[] {
   // Missing key / malformed JSON / non-array all collapse to `[]`.
   return filterAclRecords(hostId, loadJson<unknown[]>(aclKey(hostId), [], Array.isArray));
-}
-
-export function saveAclRecords(hostId: string, records: readonly HostAclRecord[]): void {
-  saveJson(aclKey(hostId), records);
 }
 
 /**

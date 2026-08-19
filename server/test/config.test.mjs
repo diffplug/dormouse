@@ -46,6 +46,19 @@ test('an unusable PORT is a ConfigError', () => {
   assert.throws(() => readConfig({ ...MINIMAL, PORT: '70000' }), ConfigError);
 });
 
+test('a blank PORT is treated as unset, not as port 0', () => {
+  // `Number('')` is 0, which asks the OS for an ephemeral port — so a `PORT=`
+  // left empty in a `.env` would move the server off 3000 and out from under
+  // whatever proxy is pointed at it.
+  assert.equal(readConfig({ ...MINIMAL, PORT: '' }).port, 3000);
+  assert.equal(readConfig({ ...MINIMAL, PORT: '   ' }).port, 3000);
+});
+
+test('an explicit PORT=0 is refused rather than randomized', () => {
+  // Nothing can be pointed at a port that changes on every restart.
+  assert.throws(() => readConfig({ ...MINIMAL, PORT: '0' }), ConfigError);
+});
+
 test('state and pocket dirs are overridable, with a cwd-independent pocket default', () => {
   const config = readConfig({ ...MINIMAL, DORMOUSE_STATE_DIR: '/var/lib/dormouse' });
   assert.equal(config.stateDir, '/var/lib/dormouse');

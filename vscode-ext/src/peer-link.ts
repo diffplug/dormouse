@@ -78,6 +78,17 @@ import { log } from './log';
 export interface PeerLinkDeps {
   /** Fan out to this window's own webviews — never to other windows. */
   brokerRequest(op: string, params: unknown): Promise<unknown[]>;
+  /**
+   * Whether this window's own PTY manager holds that id.
+   *
+   * Pane ids are unique within a window and nothing coordinates them across
+   * windows — "Duplicate Workspace in New Window" cold-restores the *same* ids
+   * into a second window — so a peer answering an op can name an id this
+   * window already owns. Routing on that answer would post the broker's own
+   * keystrokes into the other window's shell, so the local owner wins
+   * ({@link remoteRequest}).
+   */
+  ownsPty(ptyId: string): boolean;
   /** A peer window's answers may have changed, so the directory is stale. */
   invalidateDirectory(): void;
   /**
@@ -254,12 +265,34 @@ export interface RemotePtySink {
 }
 
 let server: Server | null = null;
+/**
+ * Whether the bind in `server` has been *believed*.
+ *
+ * A reclaimed bind is provisional: `stillOurs` spends 250 ms watching for a
+ * competing window that cleared the same corpse and bound after us, and the
+ * loser stands down through `closeServer(false)`. Between the bind and that
+ * verdict `server !== null` is true while this window may be about to give the
+ * socket up, so every *role* answer reads this instead — otherwise an enroll or
+ * a secrets-change landing inside that window is told it is the broker, starts
+ * a service, and the stand-down never tears it down: two Hosts under one hostId,
+ * displacing each other on the relay forever.
+ */
+let brokerConfirmed = false;
 /** Claimed and cleared with `server`; the two always move together. */
 let serverToken: string | null = null;
 const clients = new Set<PeerLinkClient>();
 const routes = new Map<string, PeerLinkClient>();
 const remoteSinks = new Map<string, Set<RemotePtySink>>();
-const pendingRequests = new Map<string, (frame: PeerLinkResponse) => void>();
+
+/**
+ * One outstanding {@link ask}, and the window it is outstanding against — so a
+ * window that disconnects can settle its own without touching anyone else's.
+ */
+interface PendingPeerRequest {
+  client: PeerLinkClient;
+  settle(response: PeerLinkResponse | null): void;
+}
+const pendingRequests = new Map<string, PendingPeerRequest>();
 let nextRequestId = 0;
 
 function send(
@@ -283,10 +316,13 @@ function ask(
       pendingRequests.delete(frame.id);
       resolve(null);
     }, PEER_REPLY_BUDGET_MS);
-    pendingRequests.set(frame.id, (response) => {
-      clearTimeout(timer);
-      pendingRequests.delete(frame.id);
-      resolve(response);
+    pendingRequests.set(frame.id, {
+      client,
+      settle: (response) => {
+        clearTimeout(timer);
+        pendingRequests.delete(frame.id);
+        resolve(response);
+      },
     });
     send(client, frame);
   });
@@ -329,7 +365,16 @@ export async function remoteRequest(op: string, params: unknown): Promise<unknow
     if (reply?.kind !== 'result') continue;
     for (const result of reply.results) {
       const ptyId = routedPtyId(result);
-      if (ptyId) routes.set(ptyId, client);
+      // A route only for a PTY this window does not have itself. Pane ids are
+      // unique within a window and nothing makes them unique across windows —
+      // "Duplicate Workspace in New Window" cold-restores the same ids into a
+      // second window — so a peer can answer with an id that names one of this
+      // window's own terminals. Recording that route would send every later
+      // write for the broker's own PTY over the socket instead, putting the
+      // phone's keystrokes into the other window's shell. Local wins: this
+      // process holds the PTY, and `writePty`/`streamPty` fall back to it when
+      // there is no route.
+      if (ptyId && !deps?.ownsPty(ptyId)) routes.set(ptyId, client);
       results.push(result);
     }
   }
@@ -424,6 +469,16 @@ function dropClient(client: PeerLinkClient): void {
     for (const sink of remoteSinks.get(ptyId) ?? []) sink.onExit(0);
     remoteSinks.delete(ptyId);
   }
+  // Anything this window was still being asked can never be answered either,
+  // and holding it open to its full reply budget stalls the whole collection it
+  // belongs to — a directory or an attach that every surviving window already
+  // answered. Settle them empty now: "gone" and "owns nothing" look the same to
+  // the caller, which is exactly right.
+  for (const [id, pending] of [...pendingRequests]) {
+    if (pending.client !== client) continue;
+    pendingRequests.delete(id);
+    pending.settle(null);
+  }
   // Its in-flight commands can never be answered: the socket that would carry
   // the answer is the one that closed. The asking webview's own timeout is the
   // backstop, and that window is on its way to becoming a broker anyway.
@@ -497,7 +552,13 @@ function onServerFrame(client: PeerLinkClient, frame: unknown): void {
     deps?.handleForwardedCommand(response.payload, client);
     return;
   }
-  if ('id' in response) pendingRequests.get(response.id)?.(response);
+  if ('id' in response) {
+    // Only from the window it was put to: request ids are minted per broker, so
+    // a window answering another's id would settle a collection it was never
+    // asked to contribute to.
+    const pending = pendingRequests.get(response.id);
+    if (pending?.client === client) pending.settle(response);
+  }
 }
 
 /** Turn Server.listen's event-based bind failure into a rejecting promise. */
@@ -508,6 +569,17 @@ export function listenServer(nextServer: Server, path: string): Promise<void> {
     try {
       nextServer.listen(path, () => {
         nextServer.off('error', onError);
+        // Past `listen` the only `'error'` this server can emit is an
+        // accept-time one — EMFILE, a pipe error on Windows — and an
+        // EventEmitter with no listener for `'error'` *throws*, which would
+        // take the whole extension host down over one refused connection. So
+        // there is always one from here on. Logging is all it does: the
+        // connections already accepted are unaffected, and a listener that has
+        // genuinely died is noticed by the windows that can no longer reach it,
+        // which re-contend. Deeper recovery is the contention loop's job.
+        nextServer.on('error', (error: Error) => {
+          log.error(`[peer-link] peer server error: ${String(error)}`);
+        });
         resolve();
       });
     } catch (error) {
@@ -553,6 +625,9 @@ async function tryBind(path: string, token: string): Promise<boolean> {
     return false;
   }
   server = nextServer;
+  // Provisional until the caller settles it: a reclaimed bind may still be
+  // displaced (see {@link brokerConfirmed}).
+  brokerConfirmed = false;
   serverToken = token;
   return true;
 }
@@ -584,8 +659,10 @@ function respondTo(socket: Socket, frame: PeerLinkResponse): void {
 }
 
 export function remoteNotifyPeerChange(): void {
-  // The broker is the destination; its own window was notified directly.
-  if (server) return;
+  // The broker is the destination; its own window was notified directly. An
+  // unverified bind is not that yet, so the change is held as pending and sent
+  // if this window turns out to be a client ({@link brokerConfirmed}).
+  if (isPeerBroker()) return;
   if (!client || client.destroyed) {
     pendingNotify = true;
     return;
@@ -814,7 +891,11 @@ const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
  */
 export function ensurePeerNet(onRole: (broker: boolean) => void): Promise<void> {
   announceRole = onRole;
-  if (server) {
+  // `isPeerBroker()` rather than `server !== null`: a bind that has not been
+  // verified yet may still be stood down, and answering `true` for it starts a
+  // service the stand-down cannot reach ({@link brokerConfirmed}). Unverified
+  // falls through and waits for the settle, which answers either way.
+  if (isPeerBroker()) {
     onRole(true);
     return Promise.resolve();
   }
@@ -832,9 +913,9 @@ export function ensurePeerNet(onRole: (broker: boolean) => void): Promise<void> 
   return settled;
 }
 
-/** Whether this window holds the Host. */
+/** Whether this window holds the Host — verified, not merely bound. */
 export function isPeerBroker(): boolean {
-  return server !== null;
+  return server !== null && brokerConfirmed;
 }
 
 /**
@@ -847,8 +928,9 @@ export function isPeerBroker(): boolean {
 export function isPeerLinkSettled(): boolean {
   // A destroyed socket is not a role: `close` is a later tick, and until it
   // lands and re-contends there is nothing to forward to — which is exactly
-  // what {@link forwardCommand} reports, so the two must agree.
-  return server !== null || (client !== null && !client.destroyed) || refused;
+  // what {@link forwardCommand} reports, so the two must agree. Nor is an
+  // unverified bind, for the same reason ({@link brokerConfirmed}).
+  return isPeerBroker() || (client !== null && !client.destroyed) || refused;
 }
 
 /**
@@ -889,7 +971,21 @@ async function attempt(): Promise<boolean> {
     settle(false);
     return true;
   }
-  const token = await ensureToken();
+  let token: string;
+  try {
+    token = await ensureToken();
+  } catch (error) {
+    // The same shape as the unsafe-directory branch above, for the same reason:
+    // an unwritable `globalStorageUri` is not a transient failure, and retrying
+    // at 1 Hz forever leaves every command waiting out its whole queue budget
+    // on every attempt rather than being told there is nothing to reach.
+    log.error(
+      `[peer-link] could not read or create the shared token; the peer link is off: ${String(error)}`,
+    );
+    refused = true;
+    settle(false);
+    return true;
+  }
 
   if (await tryBind(path, token)) {
     // Disposal can land inside any of the awaits above; a socket bound after it
@@ -899,6 +995,8 @@ async function attempt(): Promise<boolean> {
       return true;
     }
     log.info('[peer-link] serving peers');
+    // Nothing can displace an uncontested bind, so it is believed immediately.
+    brokerConfirmed = true;
     settle(true);
     return true;
   }
@@ -925,6 +1023,9 @@ async function attempt(): Promise<boolean> {
         }
         if (await stillOurs(path)) {
           log.info('[peer-link] took over a socket its broker left behind');
+          // Only now: until the verification returns, this window may still be
+          // the one that stands down ({@link brokerConfirmed}).
+          brokerConfirmed = true;
           settle(true);
           return true;
         }
@@ -1004,6 +1105,7 @@ async function contend(): Promise<void> {
 async function closeServer(unlink: boolean): Promise<void> {
   const closing = server;
   server = null;
+  brokerConfirmed = false;
   serverToken = null;
   for (const peer of [...clients]) dropClient(peer);
   if (!closing) return;

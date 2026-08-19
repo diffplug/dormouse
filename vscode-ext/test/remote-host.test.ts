@@ -175,6 +175,7 @@ function bridgeLinkToHost(
   link.configurePeerLink({
     brokerRequest: local.brokerRequest,
     invalidateDirectory: mod.notifyDirectoryChanged,
+    ownsPty: () => false,
     streamPty: local.streamPty,
     writePty: local.writePty,
     resizePty: local.resizePty,
@@ -432,11 +433,21 @@ describe('remote host service glue', () => {
     mod.initRemoteHost(fakeContext().context);
 
     // Nothing has contended yet, so there is no Host here and no socket to
-    // reach one through. Refusing beats a silent drop: the console hook would
-    // otherwise hang for its whole timeout.
+    // reach one through. `status` is answered as an idle service would rather
+    // than refused: this window sees no enrollment, which is what "not enrolled"
+    // *is*, and an error there tells `enrolled-gate.ts` nothing it can act on.
     mod.handleRemoteHostCommand({ rhId: 'rh-1', cmd: 'status' });
     expect(results(bound.posted)).toEqual([
-      { rhId: 'rh-1', error: 'no remote Host is reachable' },
+      {
+        rhId: 'rh-1',
+        result: {
+          enrolled: false,
+          serverUrl: null,
+          hostId: null,
+          connection: 'stopped',
+          pairedClients: 0,
+        },
+      },
     ]);
 
     // `enroll` bootstraps the contention, which this window loses — so even the
@@ -536,6 +547,64 @@ describe('remote host service glue', () => {
 
     await tick(0);
     expect(results(bound.posted)).toEqual([{ rhId: 'rh-1', error: 'no remote Host is reachable' }]);
+  });
+
+  it('answers the read-only commands like an idle service when there is no Host at all', async () => {
+    // A window that never enrolled is the ordinary state, not a failure — it
+    // contends the moment an enrollment exists anywhere, so reaching the
+    // refusal means there genuinely is none. Erroring there broke each
+    // caller's contract: `pushDevices` answers `null` for "nowhere to push"
+    // and rejects only when the server could not be asked, so the Settings
+    // dialog was reporting an unreachable server on an un-enrolled machine.
+    const mod = await freshHost();
+    const bound = fakeDeps();
+    mod.configureRemoteHost(bound.deps());
+    mod.initRemoteHost(fakeContext().context);
+    await tick();
+
+    mod.handleRemoteHostCommand({ rhId: 'rh-status', cmd: 'status' });
+    mod.handleRemoteHostCommand({ rhId: 'rh-pushDevices', cmd: 'pushDevices' });
+    mod.handleRemoteHostCommand({ rhId: 'rh-pairingQueue', cmd: 'pairingQueue' });
+    // Everything else still says there is nothing to reach.
+    mod.handleRemoteHostCommand({ rhId: 'rh-clear', cmd: 'clearEnrollment' });
+    expect(results(bound.posted).find((r) => r.rhId === 'rh-clear')).toEqual({
+      rhId: 'rh-clear',
+      error: 'no remote Host is reachable',
+    });
+
+    // And they are exactly what a real service with nothing in its store says,
+    // which is the answer the sidecar's webviews get for the same commands.
+    const { RemoteHostService } = await import('../../lib/src/host/remote/service');
+    const { createEphemeralHostStateStore } = await import(
+      '../../lib/src/host/remote/host-state-store'
+    );
+    const sent: Array<{ event: string; data: { rhId: string; result?: unknown } }> = [];
+    const idle = new RemoteHostService({
+      store: createEphemeralHostStateStore(() => {}),
+      provider: {
+        collectDirectory: async () => [],
+        watchDirectory: () => () => {},
+        resolveSurface: async () => null,
+        writePty: () => {},
+        resizePty: () => {},
+        streamPty: () => () => {},
+      },
+      sendToUi: (event, data) => void sent.push({ event, data: data as never }),
+      connectSrc: 'https://*.dormouse.sh wss://*.dormouse.sh',
+    });
+    await idle.start();
+    for (const cmd of ['status', 'pushDevices', 'pairingQueue']) {
+      await idle.handleCommand({ rhId: `rh-${cmd}`, cmd });
+    }
+    idle.dispose();
+
+    const byId = (entries: Array<{ rhId: string; result?: unknown }>) =>
+      Object.fromEntries(
+        entries.filter((entry) => entry.rhId !== 'rh-clear').map((entry) => [entry.rhId, entry.result]),
+      );
+    expect(byId(results(bound.posted))).toEqual(
+      byId(sent.filter((message) => message.event === 'remoteHost:result').map((m) => m.data)),
+    );
   });
 
   it('contends when another window enrolls, without a reload', async () => {

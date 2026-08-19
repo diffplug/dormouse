@@ -184,8 +184,25 @@ export class RemoteHostService {
       );
     }
     const enrollment = await performEnrollment(params.serverUrl, params.password, params.label);
-    this.#stopHost();
+    // Persist before touching the running Host. The credential we just minted
+    // exists nowhere else and cannot be minted again from the same password
+    // exchange, so a save that fails after the old Host had been stopped would
+    // strand the machine with no Host, a status that says otherwise, and a
+    // brand-new `hostToken` lost to the failure. Failing here instead leaves
+    // the old Host running and everything it reports still true.
     await this.#store.saveEnrollment(enrollment);
+    if (this.#host) {
+      // Swapping one running Host for another. The gate the webviews arm their
+      // outbound work on is edge-triggered (`enrolled-gate.ts`), and everything
+      // it holds — the mirrored pairing queue, the push device list — belongs
+      // to the server we are leaving. Without a `false` between the two Hosts
+      // the gate never cycles: the Settings dialog keeps naming the old
+      // server's devices, and a device fetch already on the wire can land after
+      // the swap and put them back.
+      this.#stopHost();
+      this.#enrollment = null;
+      this.#emitStatus();
+    }
     await this.#startHost(enrollment);
     return { hostId: enrollment.hostId, serverUrl: enrollment.serverUrl };
   }
@@ -212,12 +229,18 @@ export class RemoteHostService {
   }
 
   async #clearEnrollment(): Promise<Record<string, never>> {
-    this.#stopHost();
-    this.#enrollment = null;
+    // The delete first, and nothing else unless it succeeded. Stopping and
+    // forgetting the Host ahead of it would report un-enrolled while the
+    // credential was still on disk, and the next launch would read it back and
+    // let every paired device in again — an un-enrollment the user believes
+    // happened is the one thing this command must not get wrong.
+    //
     // ACL records stay keyed by their hostId. They are unreachable without an
     // enrollment naming that host, and keeping them means a re-enrollment onto
     // the same hostId does not silently de-pair every device.
     await this.#store.clearEnrollment();
+    this.#stopHost();
+    this.#enrollment = null;
     this.#emitStatus();
     return {};
   }

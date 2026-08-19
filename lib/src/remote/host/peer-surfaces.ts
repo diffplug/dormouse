@@ -21,6 +21,7 @@
 
 import { clampTerminalDimension, type DirectoryEntry } from 'server-lib-common';
 import { getPlatform } from '../../lib/platform';
+import type { RemoteHostLink } from '../../lib/platform/types';
 import { subscribeToActivity } from '../../lib/session-activity-store';
 import { registry } from '../../lib/terminal-store';
 import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
@@ -95,6 +96,19 @@ function driveOwnSurface({ surfaceId, cols, rows }: PeerSurfaceParams): PeerSurf
 }
 
 /**
+ * The link the announcing half is already installed against.
+ *
+ * Answering is idempotent on its own — a responder replaces the one before it —
+ * but the announcing half is not: every call adds a `status` subscription, and
+ * every arming under it adds pane-state, activity, and focus listeners with no
+ * handle left to remove them. A second install would then cross into the Host's
+ * process twice per change, forever. Keyed by link rather than a bare flag
+ * because the platform is what owns one: a different adapter is a different
+ * Host to announce to.
+ */
+let announcingFor: RemoteHostLink | null = null;
+
+/**
  * Make this webview's terminals reachable from the Host service in the process
  * that owns the PTYs. Idempotent, and a no-op on a host with no service behind
  * it (the website).
@@ -106,7 +120,8 @@ export function installPeerSurfaceResponder(): void {
   answerPeers('surfaceOp', driveOwnSurface);
 
   const link = getPlatform().remoteHost;
-  if (!link) return;
+  if (!link || link === announcingFor) return;
+  announcingFor = link;
   // Announcing is not free — one crossing per pane-state change, activity
   // change, and focus move — so it is armed only while a Host exists to hear it
   // (`enrolled-gate.ts`).

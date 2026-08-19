@@ -267,7 +267,9 @@ Alert-specific robustness requirements: multiple Sessions ring independently; mi
 | `lib/src/lib/alert-ring-watch.ts` | The shared unattended-ring machine: fresh-ring detection, the delay, the re-check, cancellation |
 | `lib/src/lib/alert-speech.ts` | The speech sink and `toSpokenText` |
 | `lib/src/lib/alert-speech-state.ts` | Transient per-Session `speaking` / `spoken` delivery state |
-| `lib/src/remote/host/alert-push.ts` | The push sink, `toPushText`, and the ACL-intersected target list |
+| `lib/src/remote/host/alert-push.ts` | Webview half: `watchPushRings` ring detection, `toPushText`, and the device-list commit |
+| `lib/src/remote/host/push-delivery.ts` | Service half: `sendPush` / `loadPushDevices`, the ACL-intersected recipients, and `boundedPushText` |
+| `lib/src/remote/host/enrolled-gate.ts` | `armWhileEnrolled`: the edge-triggered gate that arms ring watching only while the service reports an enrollment |
 | `lib/src/remote/host/activation.ts` | Arms the push sink for the lifetime of the remote Host (start, stop, re-enroll) |
 | `lib/src/lib/push-devices.ts` | Renderer-only store of the devices a push would reach, read by the settings dialog |
 | `lib/src/lib/session-label.ts` | `deriveSessionLabel`: the id-keyed Surface label over the live stores |

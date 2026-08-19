@@ -185,16 +185,30 @@ function mirrorPairingQueue(link: RemoteHostLink, queue: readonly PairingQueueIt
 }
 
 /**
+ * Every field of a {@link PairingRequest}, as a compile-time checklist.
+ *
+ * `satisfies` is the whole point: {@link sameRequest} decides whether the modal
+ * is already showing this exact device, and approving one authorizes the *pair*
+ * — so a field added to the wire type and forgotten in a hand-written compare
+ * would silently leave the user approving a device they were never shown
+ * (docs/specs/remote-security-model.md). Naming the keys here makes that a
+ * compile error rather than a silent security regression.
+ */
+const PAIRING_REQUEST_FIELDS = {
+  accountId: true,
+  passkeyCredentialId: true,
+  passkeyPublicKeyHash: true,
+  devicePublicKey: true,
+  requestedLabel: true,
+} satisfies Record<keyof PairingRequest, true>;
+
+/**
  * Whether the mirror already shows exactly this request. Field by field rather
  * than by identity: every snapshot arrives as fresh JSON off the bridge, so
  * identity always differs and would re-render the modal on every event.
  */
 function sameRequest(a: PairingRequest, b: PairingRequest): boolean {
-  return (
-    a.accountId === b.accountId &&
-    a.passkeyCredentialId === b.passkeyCredentialId &&
-    a.passkeyPublicKeyHash === b.passkeyPublicKeyHash &&
-    a.devicePublicKey === b.devicePublicKey &&
-    a.requestedLabel === b.requestedLabel
+  return (Object.keys(PAIRING_REQUEST_FIELDS) as Array<keyof PairingRequest>).every(
+    (field) => a[field] === b[field],
   );
 }

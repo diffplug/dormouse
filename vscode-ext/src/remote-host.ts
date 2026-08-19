@@ -31,7 +31,10 @@ import {
   REMOTE_HOST_EVENT_EVENT,
   REMOTE_HOST_RESULT_EVENT,
   isRemoteHostCommand,
+  type PairingQueueItem,
+  type PushDevicesResult,
   type RemoteHostCommand,
+  type RemoteHostConsoleStatus,
   type RemoteHostResult,
 } from '../../lib/src/host/remote/service-protocol';
 import type { HostSurfaceProvider } from '../../lib/src/remote/host/host-surface-provider';
@@ -297,7 +300,7 @@ function drainQueuedCommands(): void {
   for (const { payload, timer } of pending) {
     clearTimeout(timer);
     if (service) void service.handleCommand(payload);
-    else if (!forwardCommand(payload)) refuse(payload.rhId);
+    else if (!forwardCommand(payload)) refuseCommand(payload);
   }
 }
 
@@ -339,7 +342,7 @@ export function handleRemoteHostCommand(payload: RemoteHostCommand | undefined):
     enqueueCommand(payload);
     return;
   }
-  refuse(payload.rhId);
+  refuseCommand(payload);
 }
 
 /**
@@ -397,6 +400,55 @@ export function greetPeerWindow(client: PeerLinkClient): void {
 
 function refuse(rhId: string): void {
   deps?.broadcastToWebviews({ type: 'remoteHost:result', payload: { rhId, error: NO_HOST } });
+}
+
+/**
+ * What an idle service answers, for the read-only commands a window with no
+ * Host at all is still asked.
+ *
+ * Reaching the refusal below means this window sees no enrollment — it contends
+ * at activation when there is one, and again the moment another window writes
+ * one (`hostStateStore`) — so "there is no Host" is the ordinary un-enrolled
+ * state, not a failure. Erroring for it broke the contract each caller reads:
+ * `pushDevices` answers `null` for "nowhere to push" and a rejection for "the
+ * server could not be asked", so the Settings dialog was reporting an
+ * unreachable server on a machine that had simply never enrolled
+ * (`lib/src/lib/push-devices.ts`), and `enrolled-gate.ts` seeds from `status`.
+ * The sidecar has no such path — it always has a service — so these are exactly
+ * what one with no enrollment returns (`lib/src/host/remote/service.ts`).
+ */
+function idleAnswer(cmd: string): { result: unknown } | null {
+  switch (cmd) {
+    case 'status':
+      return {
+        result: {
+          enrolled: false,
+          serverUrl: null,
+          hostId: null,
+          connection: 'stopped',
+          pairedClients: 0,
+        } satisfies RemoteHostConsoleStatus,
+      };
+    case 'pushDevices':
+      return { result: null satisfies PushDevicesResult };
+    case 'pairingQueue':
+      return { result: [] satisfies PairingQueueItem[] };
+    default:
+      return null;
+  }
+}
+
+/** Refuse one command — or answer it as an idle service would ({@link idleAnswer}). */
+function refuseCommand(payload: RemoteHostCommand): void {
+  const idle = idleAnswer(payload.cmd);
+  if (!idle) {
+    refuse(payload.rhId);
+    return;
+  }
+  deps?.broadcastToWebviews({
+    type: 'remoteHost:result',
+    payload: { rhId: payload.rhId, result: idle.result },
+  });
 }
 
 /**

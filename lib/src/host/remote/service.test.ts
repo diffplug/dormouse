@@ -263,6 +263,52 @@ describe('enroll', () => {
     expect(sockets).toHaveLength(2);
     expect(sockets[0]!.readyState).toBe(3);
   });
+
+  it('keeps the old Host when the new enrollment cannot be persisted', async () => {
+    // The `hostToken` this exchange just minted exists nowhere else and cannot
+    // be minted again, so stopping the old Host before the save is what turns
+    // one failed write into a machine with no Host and a status that lies.
+    createService({ enrollment: ENROLLMENT });
+    await service.start();
+    sockets[0]!.open();
+    store.saveEnrollment = async () => {
+      throw new Error('keychain is locked');
+    };
+
+    const result = await command('enroll', {
+      serverUrl: 'https://other.dormouse.sh',
+      password: 'setup',
+      label: 'Laptop',
+    });
+
+    expect(result.error).toContain('keychain is locked');
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]!.readyState).toBe(1);
+    expect((await command('status')).result).toMatchObject({
+      enrolled: true,
+      serverUrl: ENROLLMENT.serverUrl,
+      connection: 'connected',
+    });
+  });
+
+  it('cycles the enrolled gate when it swaps one running Host for another', async () => {
+    // The webviews' gate is edge-triggered (`enrolled-gate.ts`), and what it
+    // holds — the mirrored pairing queue, the push device list — belongs to the
+    // server being left. With no `false` between the two Hosts the gate never
+    // cycles and the Settings dialog keeps naming the old server's devices.
+    createService({ enrollment: ENROLLMENT });
+    await service.start();
+    sockets[0]!.open();
+    expect(statusEvents()).toEqual([true]);
+
+    await command('enroll', {
+      serverUrl: 'https://other.dormouse.sh',
+      password: 'setup',
+      label: 'Laptop',
+    });
+
+    expect(statusEvents()).toEqual([true, false, true]);
+  });
 });
 
 describe('start', () => {
@@ -348,6 +394,29 @@ describe('start', () => {
     // host must not silently de-pair every device.
     expect(store.acl['host-1']).toHaveLength(1);
     expect((await command('status')).result).toMatchObject({ enrolled: false, connection: 'stopped' });
+  });
+
+  it('stays enrolled — and running — when the enrollment cannot be deleted', async () => {
+    // Reporting un-enrolled over a delete that failed is the worst outcome
+    // available: the credential is still on disk, so the next launch reads it
+    // back and every paired device is let in again by a Host the user believes
+    // they removed.
+    createService({ enrollment: ENROLLMENT });
+    await service.start();
+    sockets[0]!.open();
+    store.clearEnrollment = async () => {
+      throw new Error('keychain is locked');
+    };
+
+    expect((await command('clearEnrollment')).error).toContain('keychain is locked');
+    expect(store.enrollment).toEqual(ENROLLMENT);
+    expect(sockets[0]!.readyState).toBe(1);
+    expect((await command('status')).result).toMatchObject({
+      enrolled: true,
+      serverUrl: ENROLLMENT.serverUrl,
+      connection: 'connected',
+    });
+    expect(statusEvents()).toEqual([true]);
   });
 });
 

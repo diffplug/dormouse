@@ -13,6 +13,8 @@ const fsProbe = vi.hoisted(() => ({
   tmpWriteDelayMs: 0,
   /** Stand in for a filesystem with no POSIX modes. */
   chmodFails: false,
+  /** Stand in for a read that fails for a reason other than "no file yet". */
+  readFileError: null as (Error & { code?: string }) | null,
 }));
 
 vi.mock('node:fs/promises', async (importOriginal) => {
@@ -22,6 +24,10 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     chmod: async (path: string, mode: number) => {
       if (fsProbe.chmodFails) throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
       return real.chmod(path, mode);
+    },
+    readFile: async (path: string, options: never) => {
+      if (fsProbe.readFileError) throw fsProbe.readFileError;
+      return real.readFile(path, options);
     },
     writeFile: async (path: string, data: never, options: never) => {
       if (String(path).endsWith('.tmp')) {
@@ -72,6 +78,7 @@ beforeEach(async () => {
   fsProbe.steps.length = 0;
   fsProbe.tmpWriteDelayMs = 0;
   fsProbe.chmodFails = false;
+  fsProbe.readFileError = null;
 });
 
 afterEach(async () => {
@@ -194,6 +201,10 @@ describe('FileHostStateStore', () => {
     // The chain must not wedge on a single unwritable moment, and the caller
     // still has to see the failure.
     const store = new FileHostStateStore(dir);
+    // Read the (absent) file first, so what fails below is the write: a read
+    // that fails for a reason other than ENOENT refuses to save at all, which
+    // is the case above rather than this one.
+    expect(await store.loadEnrollment()).toBeNull();
     await rm(dir, { recursive: true, force: true });
     const blocker = join(dir);
     await writeFile(blocker, 'not a directory');
@@ -205,6 +216,33 @@ describe('FileHostStateStore', () => {
     await rm(blocker, { force: true });
     await expect(store.saveEnrollment(ENROLLMENT)).resolves.toBeUndefined();
     expect(await store.loadEnrollment()).toEqual(ENROLLMENT);
+  });
+
+  it('refuses to answer — or to write — from a read it could not explain', async () => {
+    // EACCES/EIO says nothing about what the file holds. Answering empty would
+    // be memoized, and the next save is a read-modify-write of the whole file:
+    // it would durably overwrite the enrollment and every ACL record with the
+    // nothing we invented, de-pairing every device for good.
+    const seeded = new FileHostStateStore(dir);
+    await seeded.saveEnrollment(ENROLLMENT);
+    await seeded.saveAcl('host-1', [aclRecord('host-1', 'device-1')]);
+    const before = await readFile(file(), 'utf8');
+
+    const store = new FileHostStateStore(dir);
+    fsProbe.readFileError = Object.assign(new Error('EACCES'), { code: 'EACCES' });
+    await expect(store.loadEnrollment()).rejects.toMatchObject({ code: 'EACCES' });
+    await expect(store.loadAcl('host-1')).rejects.toMatchObject({ code: 'EACCES' });
+    await expect(store.saveEnrollment({ ...ENROLLMENT, hostId: 'host-2' })).rejects.toMatchObject({
+      code: 'EACCES',
+    });
+    await expect(store.clearEnrollment()).rejects.toMatchObject({ code: 'EACCES' });
+
+    // Nothing reached the disk while the state could not be read.
+    fsProbe.readFileError = null;
+    expect(await readFile(file(), 'utf8')).toBe(before);
+    // And the failure was not memoized: the same store recovers on the next read.
+    expect(await store.loadEnrollment()).toEqual(ENROLLMENT);
+    expect(await store.loadAcl('host-1')).toHaveLength(1);
   });
 
   it('starts empty and warns on a malformed file', async () => {

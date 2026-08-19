@@ -54,19 +54,27 @@ async function startServer(extraEnv) {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('server did not report listening')), 15_000);
-    child.stdout.on('data', (chunk) => {
-      if (String(chunk).includes('server listening')) {
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('server did not report listening')), 15_000);
+      child.stdout.on('data', (chunk) => {
+        if (String(chunk).includes('server listening')) {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+      child.on('exit', (code) => {
         clearTimeout(timer);
-        resolve();
-      }
+        reject(new Error(`server exited early with code ${code}`));
+      });
     });
-    child.on('exit', (code) => {
-      clearTimeout(timer);
-      reject(new Error(`server exited early with code ${code}`));
-    });
-  });
+  } catch (error) {
+    // Nobody else has a handle on this child yet — the caller registers
+    // `t.after(stop)` only once this resolves — so a rejection here would leave
+    // a server holding `port` for the rest of the run.
+    child.kill();
+    throw error;
+  }
 
   return { port, stop: () => child.kill() };
 }

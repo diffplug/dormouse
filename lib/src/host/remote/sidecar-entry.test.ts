@@ -82,6 +82,23 @@ describe('asking the webview', () => {
     expect(() => bridge.onAnswer(undefined)).not.toThrow();
   });
 
+  it('marks the directory stale when an answer lands after the budget', async () => {
+    // The snapshot the Host already rendered is missing whatever this answer
+    // names — an empty picker on a machine that does have terminals. Nothing
+    // re-opens a settled ask, so the next collect is the only repair, and an
+    // idle machine has no other reason to run one.
+    vi.useFakeTimers();
+    const changes = vi.fn();
+    bridge.provider.watchDirectory(changes);
+    const pending = bridge.provider.collectDirectory();
+    const ask = asks()[0]!;
+    await vi.advanceTimersByTimeAsync(ASK_BUDGET_MS);
+    expect(await pending).toEqual([]);
+
+    answer(ask, [{ surfaceId: 's1' }]);
+    expect(changes).toHaveBeenCalledTimes(1);
+  });
+
   it('resolves everything outstanding when disposed', async () => {
     const pending = bridge.provider.collectDirectory();
     bridge.dispose();
@@ -226,6 +243,22 @@ describe('PTYs', () => {
     unsubscribe();
     bridge.onPtyEvent('data', { id: 'pty-1', data: 'x' });
     expect(one.data).toEqual([]);
+  });
+
+  it('does not let a spent unsubscribe silence the attachment that replaced it', () => {
+    const first = sink();
+    const unsubscribe = bridge.provider.streamPty('pty-1', first);
+    unsubscribe();
+
+    // A new attachment to the same id gets a fresh stream, which the previous
+    // subscription's unsubscribe has no claim on.
+    const second = sink();
+    bridge.provider.streamPty('pty-1', second);
+    unsubscribe();
+
+    bridge.onPtyEvent('data', { id: 'pty-1', data: 'still flowing' });
+    expect(second.data).toEqual(['still flowing']);
+    expect(first.data).toEqual([]);
   });
 
   it('ignores events with no id', () => {
