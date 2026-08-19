@@ -134,7 +134,9 @@ own panes. Nothing it says can widen access
 **State.** Rust creates the app-data directory and passes it as
 `DORMOUSE_STATE_DIR`; the sidecar keeps enrollment and ACL there as one
 `remote-host.json`, written 0600 into a 0700 directory via temp-then-rename.
-One file rather than one per value, so a write is one atomic rename and the
+The in-memory view advances only after that rename succeeds, so a failed save
+cannot be mistaken for durable state by a later adoption. One file rather than
+one per value, so a write is one atomic rename and the
 enrollment can never end up describing a different Host than the records
 approved under it. `hostToken` is a bearer credential and never enters a webview
 realm. If the directory cannot be created, Rust passes an empty value and the

@@ -10,7 +10,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { HostAclRecord } from 'server-lib-common';
 import { filterAclRecords } from '../../remote/host/acl';
@@ -114,9 +114,16 @@ export class FileHostStateStore implements HostStateStore {
   /** Apply one change to the in-memory state and flush it, one at a time. */
   #mutate(change: (state: HostStateFile) => Promise<void>): Promise<void> {
     const run = async (): Promise<void> => {
-      const state = await this.#read();
-      await change(state);
-      await this.#write(state);
+      const current = await this.#read();
+      // Do not expose a mutation through later reads until its atomic rename
+      // has succeeded. In particular, a failed enrollment save must not make a
+      // later adoption believe the Host is durable and discard the webview's
+      // only surviving copy. Changes replace top-level enrollment / ACL slots,
+      // so a shallow copy of the map is the required transaction boundary.
+      const next: HostStateFile = { ...current, acl: { ...current.acl } };
+      await change(next);
+      await this.#write(next);
+      this.#state = Promise.resolve(next);
     };
     const result = this.#tail.then(run, run);
     // The chain survives a failed write — one unwritable moment must not stop
@@ -156,8 +163,15 @@ export class FileHostStateStore implements HostStateStore {
     // process's saves apart, and a second Dormouse sharing the state directory
     // would otherwise rename a file the first one is still writing.
     const tmp = `${this.#path}.${randomUUID()}.tmp`;
-    await writeFile(tmp, JSON.stringify(state), { mode: 0o600 });
-    await rename(tmp, this.#path);
+    let renamed = false;
+    try {
+      await writeFile(tmp, JSON.stringify(state), { mode: 0o600 });
+      await rename(tmp, this.#path);
+      renamed = true;
+    } finally {
+      // A failed rename must not accumulate bearer-credential temp files.
+      if (!renamed) await rm(tmp, { force: true }).catch(() => {});
+    }
   }
 }
 

@@ -165,8 +165,12 @@ describe('FileHostStateStore', () => {
     await writeFile(blocker, 'not a directory');
 
     await expect(store.saveEnrollment(ENROLLMENT)).rejects.toBeTruthy();
+    // A failed flush is not a successful in-memory save. Adoption reads this
+    // value to decide whether the webview may discard its legacy copy.
+    expect(await store.loadEnrollment()).toBeNull();
     await rm(blocker, { force: true });
     await expect(store.saveEnrollment(ENROLLMENT)).resolves.toBeUndefined();
+    expect(await store.loadEnrollment()).toEqual(ENROLLMENT);
   });
 
   it('starts empty and warns on a malformed file', async () => {
