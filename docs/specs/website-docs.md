@@ -99,6 +99,22 @@ verified:
 | Marketplace / Open VSX | `vsce --baseImagesUrl https://dormouse.sh` rewrites both Markdown images **and** raw `<img src>` attributes at package time |
 | `/docs` | The generator copies `vscode-ext/media/` to `website/public/media/` and rewrites sources to `/media/` |
 
+Links back to this site take the same shape of treatment. The guide spells them
+absolutely (`https://dormouse.sh/docs/dor`) because the Marketplace, Open VSX,
+and GitHub all render it away from this origin, where a root-relative path
+resolves against the wrong host or not at all. On the site those same URLs must
+be root-relative: an absolute one leaves the origin on every click, so a link
+followed from a dev server or a preview build lands on production instead of
+the page next to it. The generator therefore strips its own origin and keeps
+path, query, and fragment, so `/docs/dor#agent-browser` survives as a deep
+link. Only exact-origin matches are rewritten; every other host is untouched.
+
+Reserved: because the generator guarantees it, same-site hrefs reach
+`MarkdownDocument` root-relative, and the renderer's external-link test is a
+bare scheme check. A new documentation source rendered through that component
+must run through `localizeSiteLinks` too, or its site links will open in a new
+tab pointed at production.
+
 `--baseImagesUrl` is passed explicitly in `vscode-ext/package.json` and in the
 release workflow rather than letting `vsce` infer a base, because inference
 uses the repository root and this extension lives in a subdirectory.
@@ -150,12 +166,16 @@ delta is structural:
    and breadcrumb.
 2. Generate an on-page table of contents from the remaining headings.
 3. Assign stable, unique heading ids with one checked slugger.
-4. Render the subset using the marketing website's typography, spacing, links,
+4. Rewrite links pointing back at this site to root-relative paths, dropping
+   only the origin.
+5. Render the subset using the marketing website's typography, spacing, links,
    code blocks, tables, and responsive raster-media treatment.
-5. Add the shared site header, docs breadcrumb, and footer.
-6. Mark same-site and external navigation appropriately.
+6. Add the shared site header, docs breadcrumb, and footer.
+7. Mark same-site and external navigation appropriately.
 
-Operations 1–3 live in the generator; 4–6 live in the page components.
+Operations 1–4 live in the generator; 5–7 live in the page components.
+Operation 4 also runs over `dor/skill.md`, before `/docs/dor` lifts its
+introduction out of those same blocks, so all three pages inherit one rewrite.
 
 The website does not use regular expressions to turn VS Code prose into generic
 prose. Channel-specific differences are explicit entries in one fixed delta
@@ -170,7 +190,8 @@ horizontal overflow. No HTML string is ever injected —
 `dangerouslySetInnerHTML` is deliberately absent.
 
 Source of truth: `website/scripts/generate-docs.js` (`DOCS_DELTA`,
-`buildGuide`), `website/src/components/MarkdownDocument.tsx`,
+`buildGuide`, `localizeSiteLinks`),
+`website/src/components/MarkdownDocument.tsx`,
 `website/src/pages/Docs.tsx`.
 
 ## `/docs/dor` reference

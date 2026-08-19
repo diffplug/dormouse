@@ -1,7 +1,21 @@
 import { describe, it, expect } from 'vitest';
 import { generateDocs } from './generate-docs.js';
+import { visit } from './docs-parser.js';
 
 const data = await generateDocs();
+
+/** Every link href the browser will actually render, from all three pages. */
+function renderedHrefs() {
+  const hrefs = [];
+  const collect = (blocks) =>
+    visit(blocks, (node) => {
+      if (node.type === 'link' && node.href) hrefs.push(node.href);
+    });
+  collect(data.guide.blocks);
+  collect(data.skill.blocks);
+  for (const section of data.cli.intro) collect(section.blocks);
+  return hrefs;
+}
 
 describe('product guide', () => {
   it('drops exactly the document title and records the delta', () => {
@@ -84,5 +98,37 @@ describe('agent skill', () => {
   it('anchors each reference to a real skill heading id', () => {
     const ids = new Set(data.skill.headings.map((h) => h.id));
     for (const id of Object.keys(data.skill.references)) expect(ids).toContain(id);
+  });
+});
+
+describe('same-site links', () => {
+  it('rewrites the guide\'s absolute site links to root-relative paths', () => {
+    // The guide has to spell these absolutely for the Marketplace, so if this
+    // ever finds nothing the rewrite has silently stopped matching.
+    expect(data.guide.localizedLinks.length).toBeGreaterThan(0);
+    expect(data.guide.localizedLinks).toContainEqual({
+      from: 'https://dormouse.sh/docs/dor',
+      to: '/docs/dor',
+    });
+  });
+
+  it('keeps the fragment on a localized deep link', () => {
+    expect(data.guide.localizedLinks).toContainEqual({
+      from: 'https://dormouse.sh/docs/dor#agent-browser',
+      to: '/docs/dor#agent-browser',
+    });
+    // A bare origin still has to address the homepage, not the empty string.
+    for (const { to } of data.guide.localizedLinks) expect(to.startsWith('/')).toBe(true);
+  });
+
+  it('leaves no absolute site link on any rendered page', () => {
+    const offenders = renderedHrefs().filter((href) => href.startsWith('https://dormouse.sh'));
+    expect(offenders, 'these would navigate off the current origin').toEqual([]);
+  });
+
+  it('does not touch links to other origins', () => {
+    const external = renderedHrefs().filter((href) => /^https?:\/\//i.test(href));
+    expect(external.length).toBeGreaterThan(0);
+    for (const href of external) expect(href).not.toContain('dormouse.sh');
   });
 });

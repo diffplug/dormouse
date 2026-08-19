@@ -37,6 +37,8 @@ const mediaSrcDir = join(repoRoot, 'vscode-ext', 'media');
 const mediaOutDir = join(__dirname, '..', 'public', 'media');
 const MEDIA_URL_BASE = '/media/';
 const MEDIA_SRC_PREFIX = 'media/';
+/** This site's own origin, as the canonical sources are forced to spell it. */
+const SITE_ORIGIN = 'https://dormouse.sh';
 
 /**
  * The complete `/docs` delta, per docs/specs/website-docs.md.
@@ -169,6 +171,34 @@ function resolveGuideMedia(blocks, available) {
   return { used: [...used], unused: available.filter((f) => !used.has(f)) };
 }
 
+/**
+ * Rewrite links that point back at this site to root-relative paths.
+ *
+ * The canonical sources spell these absolutely on purpose: the Marketplace,
+ * Open VSX, and GitHub all render them away from this origin, where a relative
+ * path means nothing (see docs/specs/website-docs.md -> Marketplace and Open
+ * VSX constraints). On the site itself the same URL is a bug — every click
+ * leaves the origin, so a link followed from a dev server lands on production.
+ *
+ * Only the origin is dropped; path, query, and fragment survive verbatim, so
+ * `.../docs/dor#agent-browser` keeps its deep link.
+ */
+function localizeSiteLinks(blocks) {
+  const localized = [];
+  visit(blocks, (node) => {
+    if (node.type !== 'link' || !node.href) return;
+    // Relative hrefs and bare fragments are already local; a non-HTTP scheme
+    // (mailto:, vscode:) has no origin to compare and must be left alone.
+    if (!/^https?:\/\//i.test(node.href)) return;
+    const url = new URL(node.href);
+    if (url.origin !== SITE_ORIGIN) return;
+    const from = node.href;
+    node.href = `${url.pathname}${url.search}${url.hash}`;
+    localized.push({ from, to: node.href });
+  });
+  return localized;
+}
+
 /** Copy the guide's media next to the site. Only `main()` should call this. */
 async function syncGuideMedia(files) {
   await rm(mediaOutDir, { recursive: true, force: true });
@@ -191,6 +221,7 @@ async function buildGuide() {
 
   const available = (await readdir(mediaSrcDir)).sort();
   const media = resolveGuideMedia(blocks, available);
+  const localizedLinks = localizeSiteLinks(blocks);
 
   return {
     source: 'vscode-ext/README.md',
@@ -200,6 +231,7 @@ async function buildGuide() {
     toc: buildToc(headings),
     delta: applied,
     media: { available, ...media },
+    localizedLinks,
   };
 }
 
@@ -299,7 +331,10 @@ async function buildCli(skill) {
 async function buildSkill() {
   const markdown = await readFile(join(repoRoot, 'dor', 'skill.md'), 'utf8');
   const parsed = parseMarkdown(markdown, { slug: createSlugger() });
-  return { source: 'dor/skill.md', blocks: parsed.blocks, headings: parsed.headings };
+  // Before buildCli lifts its intro sections out of these same block objects,
+  // so /docs/dor inherits the rewrite rather than needing its own.
+  const localizedLinks = localizeSiteLinks(parsed.blocks);
+  return { source: 'dor/skill.md', blocks: parsed.blocks, headings: parsed.headings, localizedLinks };
 }
 
 /** Attach a CLI reference link to each mapped skill heading. */
@@ -339,6 +374,7 @@ export async function generateDocs() {
       source: skill.source,
       blocks: skill.blocks,
       headings: skill.headings,
+      localizedLinks: skill.localizedLinks,
       toc: buildToc(skill.headings.filter((h) => h.depth > 1)),
       references,
     },
@@ -361,7 +397,8 @@ async function main() {
     `Wrote docs data: guide ${guide.headings.length} headings, ` +
       `cli ${cli.commands.length} commands + ${cli.intro.length} intro sections, ` +
       `skill ${Object.keys(skill.references).length} reference links, ` +
-      `${guide.media.available.length} media file(s)`,
+      `${guide.media.available.length} media file(s), ` +
+      `${guide.localizedLinks.length + skill.localizedLinks.length} link(s) localized`,
   );
 }
 

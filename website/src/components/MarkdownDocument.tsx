@@ -9,7 +9,7 @@
  * See docs/specs/website-docs.md -> /docs rendering contract.
  */
 import { Fragment, type ReactNode } from "react";
-import { CODE_CLASS, LINK_CLASS, SITE_ORIGIN } from "./docs-tokens";
+import { CODE_CLASS, LINK_CLASS } from "./docs-tokens";
 
 export type InlineNode =
   | { type: "text"; value: string }
@@ -28,9 +28,15 @@ export type BlockNode =
   | { type: "blockquote"; children: BlockNode[] }
   | { type: "thematicBreak" };
 
-/** Same-origin links stay in the tab; anything else opens safely in a new one. */
+/**
+ * Same-site links stay in the tab; anything else opens safely in a new one.
+ *
+ * A scheme is the whole test because same-site links reach here root-relative:
+ * the generator localizes the absolute URLs the canonical sources are required
+ * to use (`localizeSiteLinks` in website/scripts/generate-docs.js).
+ */
 function isExternal(href: string): boolean {
-  return /^[a-z][a-z0-9+.-]*:/i.test(href) && !href.startsWith(SITE_ORIGIN);
+  return /^[a-z][a-z0-9+.-]*:/i.test(href);
 }
 
 function Inline({ nodes }: { nodes: InlineNode[] }): ReactNode {
