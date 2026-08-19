@@ -144,16 +144,17 @@ type LeafCallbacks = {
 };
 
 /** A leaf's content: the header band atop a filling body. Memoized on its content
- *  identity (id / meta / resolved components / the stable header-press handler), so a
- *  geometry-only frame — a sash-drag preview or a resize commit re-renders the
- *  positioned wrapper — never re-renders the header or body. Returned as a fragment so
- *  the header/body and the whole-leaf overlay stay direct children of
- *  `.lath-leaf`. A mounted leaf is always
- *  engine-visible, so the pane props carry no visibility flag (docs/specs/
- *  tiling-engine.md → "Pane props contract"). */
+ *  identity (id / meta / parked / resolved components / the stable header-press
+ *  handler), so a geometry-only frame — a sash-drag preview or a resize commit
+ *  re-renders the positioned wrapper — never re-renders the header or body. Returned
+ *  as a fragment so the header/body and the whole-leaf overlay stay direct children
+ *  of `.lath-leaf`. `parked` is the one non-meta pane prop: a parked leaf stays
+ *  mounted while showing nothing, so a body streaming pixels needs to know
+ *  (docs/specs/tiling-engine.md → "Pane props contract"). */
 const LathLeafContent = memo(function LathLeafContent({
   id,
   meta,
+  parked,
   Body,
   Tab,
   Overlay,
@@ -161,13 +162,14 @@ const LathLeafContent = memo(function LathLeafContent({
 }: {
   id: string;
   meta: LeafMeta | undefined;
+  parked: boolean;
   Body: ComponentType<PaneProps> | undefined;
   Tab: ComponentType<PaneProps> | undefined;
   Overlay: ComponentType<PaneProps> | undefined;
   /** Header-press → maybe a pane drag (threshold-gated in the drag controller). Stable. */
   onHeaderPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
 }) {
-  const paneProps: PaneProps = { id, title: meta?.title, params: meta?.params };
+  const paneProps: PaneProps = { id, title: meta?.title, params: meta?.params, parked };
   return (
     <>
       <div className="lath-leaf-header" style={PANE_HEADER_STYLE} onPointerDown={onHeaderPointerDown}>
@@ -197,6 +199,7 @@ const LathLeaf = memo(function LathLeaf({
   height,
   zIndex,
   hidden,
+  parked,
   registerEl,
   onHeaderPointerDown,
   onLeafFocused,
@@ -213,15 +216,38 @@ const LathLeaf = memo(function LathLeaf({
   zIndex: number;
   /** A leaf with no frame (not laid out and not zoomed) hides rather than tiling. */
   hidden: boolean;
+  /** Parked: mounted but out of the tree, holding its last rect so the guest's
+   *  viewport survives (docs/specs/tiling-engine.md → "Parked leaves"). */
+  parked: boolean;
   registerEl: (el: HTMLDivElement | null) => void;
   /** Header-press → maybe a pane drag (threshold-gated in the drag controller). Stable. */
   onHeaderPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
   onLeafFocused?: (id: string) => void;
 }) {
-  const style: CSSProperties = hidden ? { display: 'none' } : { left, top, width, height, zIndex };
+  // A parked leaf paints nothing and takes no input, but KEEPS its rect: sizing it
+  // to zero (or `display: none`) would report a 0×0 viewport to the guest document
+  // and make it reflow on the way out and back. `opacity`/`boxShadow` are restated
+  // because `applyFrames` may have written them imperatively — React only clears
+  // the style keys it set itself.
+  const style: CSSProperties = hidden
+    ? { display: 'none' }
+    : parked
+      ? {
+          left,
+          top,
+          width,
+          height,
+          zIndex: Z_TILED,
+          opacity: 1,
+          boxShadow: 'none',
+          visibility: 'hidden',
+          pointerEvents: 'none',
+        }
+      : { left, top, width, height, zIndex };
   return (
     <div
       data-lath-leaf={id}
+      data-lath-parked={parked ? '' : undefined}
       className="lath-leaf"
       style={style}
       ref={registerEl}
@@ -230,6 +256,7 @@ const LathLeaf = memo(function LathLeaf({
       <LathLeafContent
         id={id}
         meta={meta}
+        parked={parked}
         Body={Body}
         Tab={Tab}
         Overlay={Overlay}
@@ -416,9 +443,11 @@ export function LathHost({
   const sashList = sashes(activeTree, rect, LATH_LAYOUT_OPTS);
 
   // DOM order is sorted-by-id and STABLE across layout changes; z-index (not DOM
-  // order) lifts the zoomed leaf, so keyed siblings never reorder. `leaves()`
-  // already returns a fresh array, so sort it in place.
-  const sortedIds = leaves(snapshot.tree).sort();
+  // order) lifts the zoomed leaf, so keyed siblings never reorder. Parked leaves
+  // join the same sorted list — they left the TREE, not the DOM, and parking is one
+  // store commit, so a leaf never blinks out of the child list on its way to being
+  // parked (docs/specs/tiling-engine.md → "Parked leaves").
+  const sortedIds = [...leaves(snapshot.tree), ...snapshot.parked.keys()].sort();
 
   // Create-once-per-id callback bundle so the memoized LathLeaf sees a stable
   // `registerEl` identity across commits.
@@ -431,8 +460,13 @@ export function LathHost({
           if (el) {
             leafElsRef.current.set(id, el);
           } else {
-            // Leaf unmounted (removed from the tree) — drop both its div and its cached
-            // callbacks so the maps don't accumulate dead ids.
+            // Ref DETACHED — which is NOT the same as "the leaf is gone": React also
+            // detaches and re-attaches whenever the callback's identity changes (which
+            // this very cache eviction causes, and which StrictMode does on every
+            // commit). Only bookkeeping that is re-established on the matching attach
+            // may be dropped here; anything a leaf must REMEMBER across a detach — a
+            // parked leaf's rect, say — belongs in the store, not in a ref pruned from
+            // this branch.
             leafElsRef.current.delete(id);
             leafCallbacksRef.current.delete(id);
           }
@@ -576,23 +610,26 @@ export function LathHost({
   return (
     <div ref={containerRef} className="lath-host">
       {sortedIds.map((id) => {
-        const meta = snapshot.leafMeta.get(id);
-        const f = frames.get(id);
-        // Geometry passed as primitives so the memoized leaf can shallow-compare.
-        // Zoomed → inset wall rect on top; laid-out → its frame at z 0; neither → hidden.
         const cb = leafCallbacks(id);
+        const parkedLeaf = snapshot.parked.get(id);
+        const meta = snapshot.leafMeta.get(id) ?? parkedLeaf?.meta;
+        // A laid-out leaf tiles at its frame; a parked one holds the rect the store
+        // captured when it left the tree (falling back to the whole wall if it was
+        // parked before it ever laid out); anything else has nowhere to be and hides.
         // Stacking comes from the same layer bands the animator tweens, so this
         // pre-tween frame agrees with every frame applyFrames writes afterward.
+        const f = frames.get(id) ?? (parkedLeaf ? parkedLeaf.rect ?? rect : undefined);
         const geom = f
           ? {
               left: f.x,
               top: f.y,
               width: f.width,
               height: f.height,
-              zIndex: zIndexForLayer(layers.get(id) ?? LATH_LAYER_TILED),
+              zIndex: parkedLeaf ? Z_TILED : zIndexForLayer(layers.get(id) ?? LATH_LAYER_TILED),
               hidden: false,
+              parked: !!parkedLeaf,
             }
-          : { left: 0, top: 0, width: 0, height: 0, zIndex: Z_TILED, hidden: true };
+          : { left: 0, top: 0, width: 0, height: 0, zIndex: Z_TILED, hidden: true, parked: false };
         return (
           <LathLeaf
             key={id}

@@ -47,7 +47,9 @@ export function useSessionPersistence({
       title: p.title ?? UNNAMED_PANEL_TITLE,
       surfaceType: isBrowserParams(p.params) ? ('browser' as const) : ('terminal' as const),
     }));
-    const doors = doorsRef.current ?? [];
+    // `doorMeta`, so a parked Surface persists where it navigated to rather than
+    // where it was minimized, and a restart cold-loads it there.
+    const doors = (doorsRef.current ?? []).map((door) => ({ ...door, ...lath.doorMeta(door) }));
     const surfaceRefs = surfaceRefsForSave?.();
     // The Lath tree is the sole persisted layout; doors ride through with their tokens.
     return saveSession(getPlatform(), panes, doors, lath.serializeLayout(), surfaceRefs?.refs, surfaceRefs?.next);

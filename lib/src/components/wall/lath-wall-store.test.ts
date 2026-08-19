@@ -342,6 +342,111 @@ describe('meta writes', () => {
   });
 });
 
+describe('parked leaves', () => {
+  it('parkLeaf detaches like removeLeaf but keeps the meta, in one commit', () => {
+    const store = seeded();
+    const r = store.parkLeaf('b');
+    expect(r.ok).toBe(true);
+    expect(r.token).not.toBeNull();
+    const s = store.getSnapshot();
+    expect(leaves(s.tree)).toEqual(['a']);
+    // Out of the tree's meta, into `parked` — the two maps stay disjoint, which is
+    // what keeps parked meta out of the persisted layout.
+    expect(s.leafMeta.has('b')).toBe(false);
+    expect(s.parked.get('b')?.meta.title).toBe('B');
+    expect(store.parkedIds()).toEqual(['b']);
+  });
+
+  it('parkLeaf clears zoom and rejects an absent id without committing', () => {
+    const store = seeded();
+    store.setZoomed('b');
+    store.parkLeaf('b');
+    expect(store.getSnapshot().zoomedId).toBeNull();
+    const before = store.getSnapshot();
+    expect(store.parkLeaf('missing')).toEqual({ ok: false, token: null });
+    expect(store.getSnapshot()).toBe(before);
+  });
+
+  it('removeLeaf still deletes the meta outright', () => {
+    const store = seeded();
+    store.removeLeaf('b');
+    const s = store.getSnapshot();
+    expect(s.leafMeta.has('b')).toBe(false);
+    expect(s.parked.size).toBe(0);
+  });
+
+  it('restoreLeaf unparks in the SAME commit that re-admits the leaf', () => {
+    const store = seeded();
+    const { token } = store.parkLeaf('b');
+    const revisions: number[] = [];
+    store.subscribe(() => revisions.push(store.getSnapshot().revision));
+    const r = store.restoreLeaf(leafMeta({ component: 'browser', title: 'B' }), token!, { fallbackRef: 'a' });
+    expect(r.ok).toBe(true);
+    // Exactly one notification: a leaf must never be absent from BOTH maps, or the
+    // adapter would unmount it for a frame and the DOM state would be gone.
+    expect(revisions).toHaveLength(1);
+    const s = store.getSnapshot();
+    expect(leaves(s.tree)).toContain('b');
+    expect(s.parked.size).toBe(0);
+  });
+
+  it('addLeaf, insertLeaf, and replaceLeaf also unpark the id they admit', () => {
+    const store = seeded();
+    store.parkLeaf('b');
+    store.addLeaf('b', leafMeta(), { refId: 'a', edge: 'right' });
+    expect(store.getSnapshot().parked.size).toBe(0);
+
+    store.parkLeaf('b');
+    store.insertLeaf('b', leafMeta(), { kind: 'edge', leafId: 'a', edge: 'bottom', path: [] });
+    expect(store.getSnapshot().parked.size).toBe(0);
+
+    store.parkLeaf('b');
+    store.replaceLeaf('a', 'b', leafMeta());
+    expect(store.getSnapshot().parked.size).toBe(0);
+  });
+
+  it('unparkLeaf drops a parked leaf, and is a no-op for anything else', () => {
+    const store = seeded();
+    store.parkLeaf('b');
+    store.unparkLeaf('b');
+    expect(store.getSnapshot().parked.size).toBe(0);
+    const before = store.getSnapshot();
+    store.unparkLeaf('b'); // already gone
+    store.unparkLeaf('a'); // laid out, not parked
+    expect(store.getSnapshot()).toBe(before);
+  });
+
+  it('meta writes reach a parked leaf without resurrecting it into leafMeta', () => {
+    const store = seeded();
+    store.parkLeaf('b');
+    store.setTitle('b', 'navigated');
+    store.updateParams('b', { url: 'https://example.com' });
+    const s = store.getSnapshot();
+    expect(s.leafMeta.has('b')).toBe(false);
+    expect(s.parked.get('b')?.meta).toMatchObject({ title: 'navigated', params: { url: 'https://example.com' } });
+  });
+
+  it('parkedIds exposes the store cap\'s oldest-first park order', () => {
+    const store = seeded();
+    store.addLeaf('c', leafMeta({ component: 'browser' }), { refId: 'a', edge: 'right' });
+    store.parkLeaf('b');
+    store.parkLeaf('c');
+    expect(store.parkedIds()).toEqual(['b', 'c']);
+  });
+
+  it('seed keeps parked leaves, minus any it admits to the new tree', () => {
+    const store = seeded();
+    store.parkLeaf('b');
+    // The workspaces-rollout switch parks the outgoing Workspace, then seeds the
+    // incoming one — clearing here would unmount exactly what parking preserved.
+    store.seed({ root: { kind: 'leaf', id: 'z' } }, [['z', leafMeta()]]);
+    expect(store.parkedIds()).toEqual(['b']);
+    // ...and switching back re-admits it rather than leaving a duplicate.
+    store.seed({ root: { kind: 'leaf', id: 'b' } }, [['b', leafMeta({ component: 'browser' })]]);
+    expect(store.parkedIds()).toEqual([]);
+  });
+});
+
 describe('setZoomed', () => {
   it('sets and clears the zoom target, ignoring redundant sets', () => {
     const store = seeded();

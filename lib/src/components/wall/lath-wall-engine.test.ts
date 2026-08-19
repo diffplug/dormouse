@@ -5,7 +5,9 @@ import {
   dorDirectionForEdge,
   directionForArrow,
   leafMetaFromDoor,
+  shouldParkOnMinimize,
 } from './lath-wall-engine';
+import { MAX_PARKED_SURFACES } from './lath-wall-store';
 import type { DooredItem } from './wall-types';
 import { leaves } from '../../lib/lath/model';
 
@@ -78,6 +80,29 @@ describe('leafMetaFromDoor', () => {
     expect(leafMetaFromDoor({ ...base, component: 'terminal' }).component).toBe('terminal');
     expect(leafMetaFromDoor(base).component).toBe('terminal');
   });
+
+});
+
+describe('lath-wall-engine doorMeta', () => {
+  const browser = { component: 'browser', tabComponent: 'surface', title: 'B' };
+
+  it('prefers a parked Surface\'s live meta over the Door record snapshot', () => {
+    const engine = createLathWallEngine();
+    engine.seed(null, ['anchor'], () => 'gen');
+    engine.store.addLeaf('b', browser, { refId: 'anchor', edge: 'right' });
+    engine.store.parkLeaf('b');
+    engine.store.updateParams('b', { url: 'https://after.example' });
+
+    const door = { id: 'b', title: 'before', params: { url: 'https://before.example' } } as DooredItem;
+    expect(engine.doorMeta(door).params).toEqual({ url: 'https://after.example' });
+  });
+
+  it('falls back to the Door record for an unparked door', () => {
+    const engine = createLathWallEngine();
+    engine.seed(null, ['anchor'], () => 'gen');
+    const door = { id: 'gone', title: 'Door', params: { url: 'https://door.example' } } as DooredItem;
+    expect(engine.doorMeta(door)).toEqual(leafMetaFromDoor(door));
+  });
 });
 
 describe('lath-wall-engine listPanes projection', () => {
@@ -97,5 +122,54 @@ describe('lath-wall-engine listPanes projection', () => {
     const { ok } = engine.store.restoreLeaf(meta, token!, { fallbackRef: 'p1' });
     expect(ok).toBe(true);
     expect(engine.store.has('p2')).toBe(true);
+  });
+});
+
+describe('lath-wall-engine parking policy', () => {
+  const browser = { component: 'browser', tabComponent: 'surface', title: 'B' };
+  const terminal = { component: 'terminal', tabComponent: 'terminal', title: 'T' };
+
+  it('parks Surfaces whose state lives in the DOM, and only those', () => {
+    expect(shouldParkOnMinimize(browser)).toBe(true);
+    // A terminal's state is in the PTY and replays on reattach, so parking it would
+    // only cost memory.
+    expect(shouldParkOnMinimize(terminal)).toBe(false);
+  });
+
+  it('parkLeaf caps the parked set itself, evicting oldest-first', () => {
+    const engine = createLathWallEngine();
+    engine.seed(null, ['anchor'], () => 'gen');
+    const ids: string[] = [];
+    for (let i = 0; i < MAX_PARKED_SURFACES + 2; i++) {
+      const id = `b${i}`;
+      ids.push(id);
+      engine.store.addLeaf(id, browser, { refId: 'anchor', edge: 'right' });
+      engine.store.parkLeaf(id); // no companion eviction call to forget
+    }
+    const parked = engine.store.parkedIds();
+    expect(parked).toHaveLength(MAX_PARKED_SURFACES);
+    // The two oldest reverted to plain doors: still minimized, but they reattach by
+    // reloading rather than by revealing preserved DOM.
+    expect(parked).toEqual(ids.slice(2));
+  });
+
+  it('getMeta resolves a parked leaf, so a reattach restores its CURRENT meta', () => {
+    const engine = createLathWallEngine();
+    engine.seed(null, ['anchor'], () => 'gen');
+    engine.store.addLeaf('b', browser, { refId: 'anchor', edge: 'right' });
+    engine.store.parkLeaf('b');
+    engine.store.updateParams('b', { url: 'http://localhost:3000/deep' });
+    expect(engine.getMeta('b')?.params).toEqual({ url: 'http://localhost:3000/deep' });
+    // ...but a parked leaf is not a visible pane.
+    expect(engine.listPanes().map((p) => p.id)).toEqual(['anchor']);
+  });
+
+  it('leaves parked meta out of the persisted layout', () => {
+    const engine = createLathWallEngine();
+    engine.seed(null, ['anchor'], () => 'gen');
+    engine.store.addLeaf('b', browser, { refId: 'anchor', edge: 'right' });
+    engine.store.parkLeaf('b');
+    const layout = engine.serializeLayout();
+    expect(Object.keys(layout.leafMeta)).toEqual(['anchor']);
   });
 });

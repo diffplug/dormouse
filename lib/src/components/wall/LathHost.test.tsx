@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LathHost, LATH_ZOOM_MARGIN, LATH_ZOOM_SHADOW } from './LathHost';
@@ -140,6 +140,107 @@ describe('LathHost — node identity (the no-re-parent guarantee)', () => {
     act(() => store.swapLeaves('a', 'b'));
     expect(leafDiv('a')).toBe(a0);
     expect(leafDiv('b')).toBe(b0);
+  });
+});
+
+describe('LathHost — parked leaves', () => {
+  it('keeps a parked leaf as the SAME element, holding its last rect but painting nothing', () => {
+    const tree = rowOf('a', 'b');
+    const store = seeded(tree, [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
+    mount(store);
+
+    const b0 = leafDiv('b')!;
+    const rect = layout(tree, RECT, LATH_LAYOUT_OPTS).get('b')!;
+    const bodyEl = b0.querySelector('[data-body="b"]');
+    expect(bodyEl).toBeTruthy();
+
+    act(() => store.parkLeaf('b'));
+
+    // The whole point: the div — and everything inside it, an <iframe>'s document
+    // included — is the same node, never unmounted and never re-parented.
+    expect(leafDiv('b')).toBe(b0);
+    expect(b0.querySelector('[data-body="b"]')).toBe(bodyEl);
+    expect(b0.dataset.lathParked).toBe('');
+    expect(b0.style.visibility).toBe('hidden');
+    expect(b0.style.pointerEvents).toBe('none');
+    // It holds the rect it had, so the guest never sees a 0x0 viewport.
+    expect(b0.style.width).toBe(`${rect.width}px`);
+    expect(b0.style.height).toBe(`${rect.height}px`);
+    // The survivor reclaims the whole wall.
+    expect(leafDiv('a')!.style.width).toBe(`${W}px`);
+  });
+
+  it('tells the parked body it is parked, and clears it on restore', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
+    mount(store);
+    expect(bodyProps.b.parked).toBe(false);
+
+    let token: ReturnType<LathWallStore['parkLeaf']>['token'] = null;
+    act(() => { token = store.parkLeaf('b').token; });
+    expect(bodyProps.b.parked).toBe(true);
+
+    act(() => { store.restoreLeaf(leafMeta({ title: 'B' }), token!, { fallbackRef: 'a' }); });
+    expect(bodyProps.b.parked).toBe(false);
+  });
+
+  it('keeps a parked leaf rendering its live meta, and unpark returns it to the tiling', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
+    mount(store);
+    const b0 = leafDiv('b')!;
+
+    let token: ReturnType<LathWallStore['parkLeaf']>['token'] = null;
+    act(() => { token = store.parkLeaf('b').token; });
+    // A parked Surface keeps running, so its meta keeps flowing to the mounted body.
+    act(() => store.setTitle('b', 'navigated'));
+    expect(bodyProps.b.title).toBe('navigated');
+
+    act(() => { store.restoreLeaf(leafMeta({ title: 'navigated' }), token!, { fallbackRef: 'a' }); });
+    expect(leafDiv('b')).toBe(b0);
+    expect(b0.dataset.lathParked).toBeUndefined();
+    expect(b0.style.visibility).toBe('');
+    expect(b0.style.pointerEvents).toBe('');
+    expect(b0.style.width).toBe(`${layout(rowOf('a', 'b'), RECT, LATH_LAYOUT_OPTS).get('b')!.width}px`);
+  });
+
+  it('holds its rect under StrictMode, where React detaches and re-attaches every ref', () => {
+    // Regression: `registerEl(null)` used to prune the remembered-rect map. A ref
+    // DETACH is not an unmount — React also detaches when the callback identity
+    // changes, which StrictMode does on every commit — so parking then fell back to
+    // the whole-wall rect and resized the guest document. Caught live, not here.
+    const tree = rowOf('a', 'b');
+    const store = seeded(tree, [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
+    const engine = createLathWallEngine(store, { durationMs: 0 });
+    act(() => {
+      root.render(
+        <StrictMode>
+          <LathHost lath={engine} onCommitResize={vi.fn()} onLeafFocused={vi.fn()} componentsOverride={OVERRIDE} />
+        </StrictMode>,
+      );
+    });
+
+    const rect = layout(tree, RECT, LATH_LAYOUT_OPTS).get('b')!;
+    act(() => { store.parkLeaf('b'); });
+    const el = leafDiv('b')!;
+    expect(el.dataset.lathParked).toBe('');
+    expect(el.style.width).toBe(`${rect.width}px`);
+    expect(el.style.left).toBe(`${rect.x}px`);
+  });
+
+  it('unparkLeaf without a restore unmounts the leaf for real', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
+    mount(store);
+    act(() => { store.parkLeaf('b'); });
+    expect(leafDiv('b')).toBeTruthy();
+    act(() => store.unparkLeaf('b'));
+    expect(leafDiv('b')).toBeNull();
+  });
+
+  it('keeps parked leaves in the sorted DOM order rather than moving siblings', () => {
+    const store = seeded(rowOf('a', 'b', 'c'), [['a', leafMeta()], ['b', leafMeta()], ['c', leafMeta()]]);
+    mount(store);
+    expect(leafOrder()).toEqual(['a', 'b', 'c']);
+    act(() => { store.parkLeaf('b'); });
+    expect(leafOrder()).toEqual(['a', 'b', 'c']);
   });
 });
 

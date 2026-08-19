@@ -62,7 +62,7 @@ import {
   createLathWallEngine,
   terminalLeafMeta,
   browserLeafMeta,
-  leafMetaFromDoor,
+  shouldParkOnMinimize,
   edgeForDorDirection,
   directionForArrow,
 } from './wall/lath-wall-engine';
@@ -484,8 +484,11 @@ export function Wall({
       // teardown lands here: the throwaway was created straight into a door.
       const door = doorsRef.current.find(d => d.id === id);
       if (!door) return;
-      closeAgentBrowserSession(door.params);
+      closeAgentBrowserSession(lath.doorMeta(door).params);
       disposeAgentBrowserSurfaceController(id);
+      // A parked door is still mounted; drop it so its DOM (and any iframe document
+      // still running inside it) goes away with the Surface.
+      lath.store.unparkLeaf(id);
       // Dispose the session/registry entry — this stops the PTY and makes a
       // still-armed typeCommandWhenPromptReady exit via its `!registry.has(id)`
       // check, so a late OSC signal can't type the command into a dead surface.
@@ -575,11 +578,20 @@ export function Wall({
   const enterTerminalModeRef = useRef(enterTerminalMode);
   enterTerminalModeRef.current = enterTerminalMode;
 
-  /** Minimize a pane: remove the leaf (capturing its restore token) and add a Door. */
+  /** Minimize a pane: detach the leaf (capturing its restore token) and add a Door.
+   *
+   *  A browser Surface **parks** instead of being removed: its state lives in the
+   *  DOM (an `<iframe>`'s document, a screencast canvas), which a plain remove would
+   *  destroy — reattaching would then be a reload. Parking keeps the leaf mounted and
+   *  invisible so the document survives intact (docs/specs/tiling-engine.md →
+   *  "Parked leaves"). Terminals do not park: their state lives in the PTY and the
+   *  registry replays it, so the existing remove/restore path already loses nothing. */
   const minimizePane = useCallback((id: string, opts?: { select?: boolean }) => {
     const meta = lath.getMeta(id);
     if (!meta) return;
-    const { token } = lath.store.removeLeaf(id); // may auto-spawn if this was the last leaf
+    const park = shouldParkOnMinimize(meta);
+    // May auto-spawn if this was the last leaf. `parkLeaf` caps the parked set itself.
+    const { token } = park ? lath.store.parkLeaf(id) : lath.store.removeLeaf(id);
     if (!token) return;
     clearSessionAttention(id);
     // The Door's component/tabComponent are the leaf's own canonical meta, so
@@ -747,7 +759,7 @@ export function Wall({
 
     // Restore through the core token (the real payload): exact tier when the
     // captured context survives, else neighbor, else fallback beside a live ref.
-    const meta = leafMetaFromDoor(item);
+    const meta = lath.doorMeta(item);
     const token = item.token as RestoreToken | undefined;
     // The enter hint (from the token's edge) is derived inside `restoreLeaf`.
     const sel = selectedIdRef.current;
@@ -821,7 +833,12 @@ export function Wall({
 
     const sources = [
       ...panels.map((panel) => ({ id: panel.id, params: panel.params, title: panel.title, minimized: false })),
-      ...doors.map((door) => ({ id: door.id, params: door.params, title: door.title, minimized: true })),
+      // `doorMeta`, not the Door record, so `dor list` reports a parked Surface
+      // where it actually is rather than where it was minimized.
+      ...doors.map((door) => {
+        const meta = lath.doorMeta(door);
+        return { id: door.id, params: meta.params, title: meta.title, minimized: true };
+      }),
     ];
     const states = sources.map((source) => terminalStates.get(source.id) ?? createTerminalPaneState());
 
@@ -1433,7 +1450,7 @@ export function Wall({
     setDoorDrag(null);
     if (!dd || !target) return;
     const item = dd.item;
-    const r = lath.store.insertLeaf(item.id, leafMetaFromDoor(item), target);
+    const r = lath.store.insertLeaf(item.id, lath.doorMeta(item), target);
     if (!r.ok) return; // insert failed (unexpected) → the Door stays put
     removeDoorAndSelect(item.id);
   }, [doorDrag, lath, removeDoorAndSelect]);

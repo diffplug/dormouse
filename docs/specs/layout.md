@@ -11,7 +11,7 @@ A **Session** is a single PTY instance — a running shell process with its scro
 A Surface's **View** state places it in one of two containers:
 
 - **Pane** — a visible container in the content area. A terminal Surface renders its output via xterm.js; a browser surface renders through `BrowserPanel`. The pane has a header with controls and acts as the drag handle for layout rearrangement.
-- **Door** — a minimized container in the baseboard. The Surface is still alive (a terminal's PTY keeps running and buffering output; a browser surface's backing session or proxy grant stays alive) but not visible. The door shows the Surface's title plus alert and TODO indicators, and looks like a mouse hole cut into the baseboard.
+- **Door** — a minimized container in the baseboard. The Surface is still alive (a terminal's PTY keeps running and buffering output; a browser surface's backing session or proxy grant stays alive, and its DOM stays mounted-but-hidden — see Minimize and reattach) but not visible. The door shows the Surface's title plus alert and TODO indicators, and looks like a mouse hole cut into the baseboard.
 
 Transitioning between Pane and Door does not alter the Surface in any way.
 Minimizing a pane creates a door; reattaching a door creates a pane. Terminal
@@ -301,10 +301,26 @@ Swaps session **content** between two panes — the layout shape is unchanged. A
 ## Minimize and reattach
 
 ### Minimize (`m` key or minimize header button)
-1. `lath.removeLeaf(id)` removes the leaf and returns a JSON-serializable **restore token** capturing the leaf's ancestry (sibling id, split-sibling leaf set/fingerprint when needed, edge, weight, child index, and a structure-only fingerprint of the parent split post-removal — `docs/specs/tiling-engine.md` → "Restore tokens").
+1. `lath.store.removeLeaf(id)` — or `parkLeaf(id)` for a browser Surface, see below — detaches the leaf and returns a JSON-serializable **restore token** capturing the leaf's ancestry (sibling id, split-sibling leaf set/fingerprint when needed, edge, weight, child index, and a structure-only fingerprint of the parent split post-removal — `docs/specs/tiling-engine.md` → "Restore tokens").
 2. Add to `doors` state → door appears in baseboard, carrying the `token`. The door stores only the stable component/title for persistence; its visible label is derived from live terminal semantic state at render time. (A pane dragged onto the baseboard minimizes the same way — the drag proposes `onProposeMinimize`, which calls the same `minimizePane`.)
 3. Session stays in registry (not disposed).
 4. Selection moves to the new door (stays in command mode). If this was the *last* pane, the auto-spawn effect fills the emptied Wall while the door keeps selection.
+
+**A minimized browser Surface parks rather than unmounting.** Its state lives in the
+DOM — an `<iframe>`'s document, a screencast canvas — so removing the leaf would
+destroy it and the reattach would be a reload. `minimizePane` routes browser Surfaces
+through `lath.store.parkLeaf`, which keeps the leaf mounted and invisible while it is
+Doored; reattach reveals the same live document, scroll position, form state and all
+(`docs/specs/tiling-engine.md` → "Parked leaves" owns the mechanism, the
+`MAX_PARKED_SURFACES` cap, and the visibility contract). Terminals do not park: their
+state is in the PTY and the registry replays it, so the plain remove already loses
+nothing. Parking spans the minimize only — a restart still cold-loads every browser
+Surface from its persisted URL. Because a parked Surface keeps running while Doored,
+the engine (not the Door record frozen at minimize time) holds its current
+title/params, and every Door reader goes through the one `lath.doorMeta(door)` seam —
+reattach (click or drag-out), `dor` param matching, kill/session teardown, `dor list`,
+and the session save. A Door read that skips it silently reverts a parked Surface to
+where it was minimized. The Door chip's own label stays as minimized.
 
 ### Reattach (click door, Enter/d on door)
 
@@ -314,7 +330,7 @@ Swaps session **content** between two panes — the layout shape is unchanged. A
 - **Neighbor** — the sibling still exists: split beside it on the original edge (at 50/50).
 - **Fallback** — split beside a caller-supplied live reference (the selected pane, else the first pane) via `autoEdge`; into an empty tree the leaf becomes the root.
 
-A door dragged out of the baseboard skips the token entirely and inserts at the hit-tested drop position the user chose (`onExternalDrop` → `lath.insertLeaf`).
+A door dragged out of the baseboard skips the token entirely and inserts at the hit-tested drop position the user chose (`onExternalDrop` → `lath.insertLeaf`). Either path unparks a parked Surface in the same commit that re-admits it, so the DOM is never momentarily unmounted.
 
 ### Splitting from a Door
 
@@ -588,7 +604,19 @@ Concrete switch/create/close/rename keyboard shortcuts are chosen alongside the 
 
 ### Stage 4 — real switching and multi-Workspace activation
 
-Activating another Workspace (`switchWorkspace`) mounts the target Workspace's Surfaces into the Wall — rebuilding its Lath layout and reattaching its doors — and unmounts the previously active Workspace's Surfaces. For a terminal Surface this reuses the `mount` / `unmount` registry ops: the Registry entry and PTY survive `unmount`, so Process stays `Live`. A browser surface's backing agent-browser session or proxy grant likewise survives while its viewer resources are released. Because a terminal's Activity keeps flowing while unmounted, an inactive Workspace's tab can begin ringing or showing TODO while the user is elsewhere. Mounting must not fire a fresh ring (glossary I8, mirroring the minimize/reattach rule I3).
+Activating another Workspace (`switchWorkspace`) mounts the target Workspace's Surfaces into the Wall — rebuilding its Lath layout and reattaching its doors — and unmounts the previously active Workspace's Surfaces. For a terminal Surface this reuses the `mount` / `unmount` registry ops: the Registry entry and PTY survive `unmount`, so Process stays `Live`. A browser surface's backing agent-browser session or proxy grant likewise survives while its viewer resources are released.
+
+Switching **parks** the outgoing Workspace's browser Surfaces rather than unmounting
+them, on exactly the terms minimize already does (`docs/specs/tiling-engine.md` →
+"Parked leaves"): the switch parks each one and then seeds the incoming Workspace's
+tree, which `seed` is already written to survive — it keeps parked leaves except any
+the seed itself admits. That is what makes an iframe survive a round trip through
+another Workspace, and it is why the parked set is capped: a switch parks a whole
+Workspace at a time, so `MAX_PARKED_SURFACES` may need raising (or becoming a
+per-Workspace budget) once Stage 4 lands. Terminals keep the `mount` / `unmount` +
+replay path. VS Code is out of reach either way — it maps each Workspace to its own
+webview (see [Workspaces](#workspaces)), so cross-Workspace DOM survival there is
+bounded by webview lifetime, not by anything the Wall does. Because a terminal's Activity keeps flowing while unmounted, an inactive Workspace's tab can begin ringing or showing TODO while the user is elsewhere. Mounting must not fire a fresh ring (glossary I8, mirroring the minimize/reattach rule I3).
 
 Stage 4 also lifts the single-Workspace cap and wires the lifecycle UX:
 

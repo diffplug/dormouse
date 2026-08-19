@@ -439,10 +439,11 @@ describe('AgentBrowserPanel render mode controller', () => {
 });
 
 describe('AgentBrowserPanel visibility parking', () => {
-  // Under Lath a mounted leaf is always engine-visible, so on-screen visibility
-  // reduces to document visibility (`useSurfaceVisibility`). A hidden/shown
-  // transition is a `visibilitychange` event; the harness drives it by overriding
-  // `document.visibilityState` and dispatching.
+  // Two things hide a surface (`useSurfaceVisibility`): a backgrounded window, and a
+  // PARKED leaf — minimized, so mounted but out of the tree
+  // (docs/specs/tiling-engine.md → "Parked leaves"). A window transition is a
+  // `visibilitychange` event, driven here by overriding `document.visibilityState`;
+  // a park transition is the `parked` pane prop, driven by re-rendering.
   function setDocumentHidden(hidden: boolean): void {
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
@@ -452,24 +453,26 @@ describe('AgentBrowserPanel visibility parking', () => {
 
   async function renderVisibilityPanel(
     params: TestPanelParams,
-  ): Promise<{ setVisible: (visible: boolean) => void }> {
+  ): Promise<{ setVisible: (visible: boolean) => void; setParked: (parked: boolean) => void }> {
     setDocumentHidden(false); // mount on-screen
-    await act(async () => {
+    const render = (parked: boolean) => {
       root.render(
         <StrictMode>
           <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
             <WallActionsContext.Provider value={stubActions()}>
-              <AgentBrowserPanel {...paneProps('ab-panel', params)} />
+              <AgentBrowserPanel {...paneProps('ab-panel', params)} parked={parked} />
             </WallActionsContext.Provider>
           </PaneWriteContext.Provider>
         </StrictMode>,
       );
-    });
+    };
+    await act(async () => { render(false); });
     return {
       setVisible: (visible) => {
         setDocumentHidden(!visible);
         document.dispatchEvent(new Event('visibilitychange'));
       },
+      setParked: (parked) => { render(parked); },
     };
   }
 
@@ -498,6 +501,29 @@ describe('AgentBrowserPanel visibility parking', () => {
     // The live socket is torn down and nothing reconnects while hidden.
     expect(socket?.readyState).toBe(3);
     expect(streamSockets(4321).length).toBe(before);
+  });
+
+  it('parks a minimized (parked) panel even while the window stays in the foreground', async () => {
+    const { setParked } = await renderVisibilityPanel({
+      surfaceType: 'browser', session: 'browser-session', wsPort: 4321,
+    });
+
+    const socket = liveStreamSocket(4321);
+    expect(socket?.readyState).toBe(1);
+    const before = streamSockets(4321).length;
+
+    // Minimize: the leaf stays mounted so the screencast canvas survives, but it is
+    // showing nothing, so it must stop pulling frames.
+    await act(async () => { setParked(true); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50); });
+    expect(socket?.readyState).toBe(3);
+    expect(streamSockets(4321).length).toBe(before);
+
+    // Reattach reconnects without the panel ever having unmounted.
+    await act(async () => { setParked(false); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(streamSockets(4321).length).toBeGreaterThan(before);
+    expect(liveStreamSocket(4321)?.readyState).toBe(1);
   });
 
   it('never queries stream status while parked', async () => {

@@ -31,6 +31,7 @@ import {
   type LathWallStore,
   type LeafMeta,
   createLathWallStore,
+  leafMetaIn,
 } from './lath-wall-store';
 import {
   type LathPersistedLayout,
@@ -99,9 +100,10 @@ export function browserLeafMeta(title: string, params: Record<string, unknown>):
   return { component: 'browser', tabComponent: 'surface', title, params };
 }
 
-/** The engine-tracked meta for a Door's surface. Shared by the two reattach paths —
- *  click-reattach (`restore`) and drag-out (`insert`) — so they build the same shape.
- *  Component/tabComponent default to terminal for a door that carries neither. */
+/** The engine-tracked meta a Door carries in its own record — the snapshot frozen at
+ *  minimize time. Component/tabComponent default to terminal for a door that carries
+ *  neither. Readers want `lath.doorMeta(door)`, which prefers a parked Surface's live
+ *  meta over this; reach for this directly only when there is no engine to ask. */
 export function leafMetaFromDoor(item: DooredItem): LeafMeta {
   return {
     component: item.component ?? 'terminal',
@@ -109,6 +111,14 @@ export function leafMetaFromDoor(item: DooredItem): LeafMeta {
     title: item.title,
     params: item.params,
   };
+}
+
+/** Whether minimizing this leaf should park it rather than remove it: true when the
+ *  Surface's state lives in its DOM. Browser Surfaces qualify (an iframe document, a
+ *  screencast canvas); terminals do not — the PTY holds their state and the registry
+ *  replays it (docs/specs/tiling-engine.md → "Parked leaves"). */
+export function shouldParkOnMinimize(meta: LeafMeta): boolean {
+  return meta.component === 'browser';
 }
 
 export type LathWallEngine = {
@@ -138,10 +148,17 @@ export type LathWallEngine = {
   subscribeWake(cb: () => void): () => void;
 
   // --- reads / projections over the store ---
-  /** Visible leaves in tree pre-order, each with its meta title + params. */
+  /** Visible leaves in tree pre-order, each with its meta title + params. Parked
+   *  leaves are not visible and are not listed. */
   listPanes(): VisiblePane[];
-  /** The leaf's metadata, or undefined. */
+  /** The leaf's metadata, or undefined. Resolves parked leaves too. */
   getMeta(id: string): LeafMeta | undefined;
+  /** A Door's meta, by the one precedence rule every Door reader needs: a parked
+   *  Surface keeps running while Doored, so the engine's live meta beats the Door
+   *  record's minimize-time snapshot; an unparked Door has only the snapshot. Used by
+   *  both reattach paths, `dor list`, the session save, and `dor`'s param folding —
+   *  a Door read that skips it silently reverts a parked Surface. */
+  doorMeta(item: DooredItem): LeafMeta;
 
   // --- persistence ---
   serializeLayout(): LathPersistedLayout;
@@ -206,7 +223,8 @@ export function createLathWallEngine(
         return { id, title: m?.title, params: m?.params };
       });
     },
-    getMeta: (id) => snapshot().leafMeta.get(id),
+    getMeta: (id) => leafMetaIn(snapshot(), id),
+    doorMeta: (item) => leafMetaIn(snapshot(), item.id) ?? leafMetaFromDoor(item),
 
     serializeLayout: () => lathLayoutFromStore(snapshot()),
 
