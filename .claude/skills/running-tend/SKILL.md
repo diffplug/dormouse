@@ -19,6 +19,14 @@ When `UI Tests` is the only non-terminal check and every automated check is gree
 
 `ntwigg` is the maintainer's local shell username (it shows up in prompt fixtures like `ntwigg@ntwigg-mac-2025` in [`terminal-prompt-shape.test.ts`](../../../lib/src/lib/terminal-prompt-shape.test.ts)) and also, on GitHub, an unrelated person's account. Writing `@ntwigg` in a comment, PR body, or commit message pings a stranger and subscribes them to the thread, which only they can undo. Use `@nedtwigg`, and don't copy the shorter handle forward from a thread that already contains the typo. ([diffplug/dormouse#389](https://github.com/diffplug/dormouse/pull/389#issuecomment-5319456021))
 
+## `tend check`'s `credential-environments` FAIL is known and maintainer-owned — don't re-file it as drift
+
+`tend check` reports one standing FAIL on this repo: **`credential-environments`**, for the two release jobs that mint `id-token: write` outside any environment (`release.yml:build-standalone`, `release.yml:build-vscode`, for `actions/attest-build-provenance`). Clearing it needs a **new** environment whose deployment policy names only `v*` tags — repo-admin work the bot cannot do, and which must exist *before* any `environment:` key references it, or the next `v*` push auto-creates an unprotected one.
+
+nedtwigg closed the drift issue ([#339](https://github.com/diffplug/dormouse/issues/339)) on 2026-08-18 with this FAIL outstanding and after discussing it in the thread, so the close is a decision, not an oversight. The nightly's step-2 dedup only searches **open** bot-authored issues, so a literal reading files a fresh drift issue every night. Don't: while `credential-environments` is the *only* FAIL, note it in the run summary and move on. File a new drift issue only when a **different** check starts failing — then scope the issue to that check and reference #339 for this one.
+
+The standing offer in #339 still holds: once the environment exists, the workflow half is two `environment:` blocks on the release jobs, and the bot opens that PR on request.
+
 ## Settled upstream rulings — don't re-file
 
 Before a `review-runs`/`review-reviewers` sweep flags a tend behavior as waste or files it upstream, check this list — these were already raised and ruled on, so re-filing burns a session and spams upstream:
