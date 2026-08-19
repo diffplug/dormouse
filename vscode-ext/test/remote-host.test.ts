@@ -43,8 +43,14 @@ interface SecretWatcher {
   (event: { key: string }): void;
 }
 
+interface PendingGlobalWrite {
+  key: string;
+  value: unknown;
+  finish(): void;
+}
+
 /** The slice of `ExtensionContext` the store reads, in memory. */
-function fakeContext() {
+function fakeContext(options: { deferGlobalWrites?: PendingGlobalWrite[] } = {}) {
   const secrets = new Map<string, string>();
   const global = new Map<string, string>();
   const watchers = new Set<SecretWatcher>();
@@ -79,9 +85,25 @@ function fakeContext() {
       },
       globalState: {
         get: (key: string) => global.get(key),
-        update: async (key: string, value: unknown) => {
-          if (value === undefined) global.delete(key);
-          else global.set(key, value as string);
+        update: (key: string, value: unknown) => {
+          const apply = () => {
+            if (value === undefined) global.delete(key);
+            else global.set(key, value as string);
+          };
+          if (!options.deferGlobalWrites) {
+            apply();
+            return Promise.resolve();
+          }
+          return new Promise<void>((resolve) => {
+            options.deferGlobalWrites!.push({
+              key,
+              value,
+              finish: () => {
+                apply();
+                resolve();
+              },
+            });
+          });
         },
         keys: () => [...global.keys()],
       },
@@ -348,6 +370,32 @@ describe('host state store', () => {
     expect(await target.loadEnrollment()).toBeNull();
     store.global.set('dormouse.remote-host.acl.host-9', 'not json');
     expect(await target.loadAcl('host-9')).toEqual([]);
+  });
+
+  it('serializes ACL snapshots so an older approval cannot land last', async () => {
+    const { VsCodeHostStateStore } = await import('../src/remote-host-store');
+    const pending: PendingGlobalWrite[] = [];
+    const { context } = fakeContext({ deferGlobalWrites: pending });
+    const target = new VsCodeHostStateStore(context);
+    const first = [{ hostId: 'host-1', devicePublicKey: 'device-1' }] as never;
+    const second = [
+      { hostId: 'host-1', devicePublicKey: 'device-1' },
+      { hostId: 'host-1', devicePublicKey: 'device-2' },
+    ] as never;
+
+    const firstSave = target.saveAcl('host-1', first);
+    const secondSave = target.saveAcl('host-1', second);
+    await tick();
+    expect(pending).toHaveLength(1);
+
+    pending[0]!.finish();
+    await firstSave;
+    await tick();
+    expect(pending).toHaveLength(2);
+    pending[1]!.finish();
+    await secondSave;
+
+    expect(await target.loadAcl('host-1')).toEqual(second);
   });
 });
 

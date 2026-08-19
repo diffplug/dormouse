@@ -29,6 +29,13 @@ export class VsCodeHostStateStore implements HostStateStore {
   readonly #context: vscode.ExtensionContext;
   #enrollment: Promise<HostEnrollment | null> | null = null;
   #watch: vscode.Disposable | undefined;
+  /**
+   * Preserve call order across asynchronous keychain/Memento writes. The Host
+   * updates its ACL from snapshots, so letting two approvals write together
+   * could allow the older snapshot to finish last and silently de-pair the
+   * newer Client after a restart.
+   */
+  #tail: Promise<unknown> = Promise.resolve();
 
   /**
    * @param onEnrollmentChanged Some window of this extension wrote or cleared
@@ -63,14 +70,18 @@ export class VsCodeHostStateStore implements HostStateStore {
     return this.#enrollment;
   }
 
-  async saveEnrollment(enrollment: HostEnrollment): Promise<void> {
-    await this.#context.secrets.store(ENROLLMENT_KEY, JSON.stringify(enrollment));
-    this.#enrollment = Promise.resolve(enrollment);
+  saveEnrollment(enrollment: HostEnrollment): Promise<void> {
+    return this.#mutate(async () => {
+      await this.#context.secrets.store(ENROLLMENT_KEY, JSON.stringify(enrollment));
+      this.#enrollment = Promise.resolve(enrollment);
+    });
   }
 
-  async clearEnrollment(): Promise<void> {
-    await this.#context.secrets.delete(ENROLLMENT_KEY);
-    this.#enrollment = Promise.resolve(null);
+  clearEnrollment(): Promise<void> {
+    return this.#mutate(async () => {
+      await this.#context.secrets.delete(ENROLLMENT_KEY);
+      this.#enrollment = Promise.resolve(null);
+    });
   }
 
   async #readEnrollment(): Promise<HostEnrollment | null> {
@@ -99,8 +110,20 @@ export class VsCodeHostStateStore implements HostStateStore {
     return filterAclRecords(hostId, parsed);
   }
 
-  async saveAcl(hostId: string, records: readonly HostAclRecord[]): Promise<void> {
-    await this.#context.globalState.update(aclKey(hostId), JSON.stringify(records));
+  saveAcl(hostId: string, records: readonly HostAclRecord[]): Promise<void> {
+    return this.#mutate(() =>
+      this.#context.globalState.update(aclKey(hostId), JSON.stringify(records)),
+    );
+  }
+
+  /** Serialize writes while keeping the queue alive after an individual failure. */
+  #mutate(write: () => PromiseLike<void>): Promise<void> {
+    const result = this.#tail.then(write, write);
+    this.#tail = result.then(
+      () => {},
+      () => {},
+    );
+    return result;
   }
 }
 
