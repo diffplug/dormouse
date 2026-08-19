@@ -317,6 +317,14 @@ Every webview installs the responder (`installPeerSurfaceResponder` in `lib/src/
 
 **Presence is ownership.** A webview that owns nothing the request named answers with no results, so there is no `ok` flag anywhere and every field of a result that does come back is required. Every webview answers regardless — even with no responder installed, even to say nothing — which is what lets a fan-out settle as fast on a miss as on a hit; silence would instead wait out the full budget on what is usually a miss. It settles when all of them have replied or the service's `ASK_BUDGET_MS` (1 s) expires, so a webview mid-reload cannot hang an attach or the phone's picker. That is the *inner* budget, and `PEER_REPLY_BUDGET_MS` — what the broker allows a peer *window* — must stay strictly larger, because it contains a whole run of this plus two socket hops. Equal budgets make a slow sibling look like a timeout on the broker's side and discard results that were on their way, so unifying the two constants is a regression rather than a simplification (a guard test in `vscode-ext/test/peer-link-protocol.test.ts` says so). A webview disposed mid-fan-out is removed from the outstanding set, which can settle the request immediately.
 
+An asynchronous peer answer is bound to the authenticated broker socket that
+issued it. If that broker disappears while a webview fan-out is pending, the
+answer is dropped even when this window has already connected to a replacement;
+request ids restart per broker, so forwarding the old result through the new
+socket could satisfy unrelated work that reused the same id. A rejected fan-out
+is contained in the peer handler and contributes an empty answer rather than an
+unhandled extension-host rejection.
+
 The one field the transport itself reads out of an answer is a reserved `ptyId` (`routedPtyId`): an answer naming a PTY is claiming it, which is how the cross-window broker learns which window that PTY lives in. Nothing else about an answer is interpreted below the Host.
 
 Directory answers are snapshots, so the same seam carries invalidation. A webview announces a change when its pane state, activity, or focus changes; membership changes (a webview attaching or disposing, a peer window joining or dropping) announce one too. `notifyDirectoryChanged` fans that to the service's watchers, which coalesce a fresh collect rather than retaining the old directory.

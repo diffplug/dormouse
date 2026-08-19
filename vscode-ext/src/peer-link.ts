@@ -544,7 +544,21 @@ let pendingNotify = false;
 const forwarding = new Map<string, () => void>();
 
 function respond(frame: PeerLinkResponse): void {
-  client?.write(encodeFrame(frame));
+  if (client) respondTo(client, frame);
+}
+
+/**
+ * Answer only the broker socket that issued the work.
+ *
+ * A webview fan-out is asynchronous. If its broker disconnects while that work
+ * is in flight, this window can connect to a replacement before the old answer
+ * lands. Writing through the module-level `client` then sends broker A's answer
+ * to broker B, whose request ids start over and may correlate it to unrelated
+ * work. Socket identity is the generation fence.
+ */
+function respondTo(socket: Socket, frame: PeerLinkResponse): void {
+  if (client !== socket || socket.destroyed) return;
+  socket.write(encodeFrame(frame));
 }
 
 export function remoteNotifyPeerChange(): void {
@@ -571,24 +585,34 @@ export function forwardCommand(payload: RemoteHostCommand): boolean {
   return true;
 }
 
-async function onClientFrame(frame: unknown): Promise<void> {
+async function onClientFrame(socket: Socket, frame: unknown): Promise<void> {
   const request = frame as PeerLinkRequest;
   switch (request.kind) {
-    case 'request':
-      respond({
+    case 'request': {
+      let results: unknown[] = [];
+      try {
+        results = (await deps?.brokerRequest(request.op, request.params)) ?? [];
+      } catch (error) {
+        // One failed webview fan-out contributes no answer. Contain it here:
+        // this handler is event-driven, so a rejection allowed to escape would
+        // otherwise be unhandled in the extension host.
+        log.error(`[peer-link] peer request ${request.op} failed: ${String(error)}`);
+      }
+      respondTo(socket, {
         kind: 'result',
         id: request.id,
-        results: (await deps?.brokerRequest(request.op, request.params)) ?? [],
+        results,
       });
       break;
+    }
     case 'subscribe': {
       if (forwarding.has(request.ptyId)) break;
       if (!deps) break;
       const { ptyId } = request;
       const stop = deps.streamPty(ptyId, {
-        onData: (data) => respond({ kind: 'data', ptyId, data }),
+        onData: (data) => respondTo(socket, { kind: 'data', ptyId, data }),
         onExit: (exitCode) => {
-          respond({ kind: 'exit', ptyId, exitCode });
+          respondTo(socket, { kind: 'exit', ptyId, exitCode });
           // The registry has already dropped this attachment, so the stored
           // unsubscribe is spent; what is left is to stop claiming the PTY.
           forwarding.delete(ptyId);
@@ -662,7 +686,9 @@ function tryConnect(path: string, token: string): Promise<'connected' | 'refused
       // Past the handshake — `client` is only ever assigned below — so this is
       // ordinary traffic from a broker that has proved itself.
       if (client === socket) {
-        void onClientFrame(frame);
+        void onClientFrame(socket, frame).catch((error: unknown) => {
+          log.error(`[peer-link] broker frame failed: ${String(error)}`);
+        });
         return;
       }
       // The two handshake frames, read loosely: nothing here is trusted enough

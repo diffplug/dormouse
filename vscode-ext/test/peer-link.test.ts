@@ -447,6 +447,120 @@ describe('bind-as-lease', () => {
     expect(peer.isPeerBroker()).toBe(true);
   });
 
+  it('does not send an old broker’s delayed answer to its replacement', async () => {
+    const token = 'test-peer-token';
+    await writeFile(join(dir, 'remote-host.peer-token'), token, { mode: 0o600 });
+
+    async function rawBroker(challenge: string) {
+      let activeSocket: import('node:net').Socket | null = null;
+      let accept!: (socket: import('node:net').Socket) => void;
+      const connected = new Promise<import('node:net').Socket>((resolve) => {
+        accept = resolve;
+      });
+      const frames: Array<Record<string, unknown>> = [];
+      const server = createServer((socket) => {
+        const decoder = new FrameDecoder();
+        let authenticated = false;
+        activeSocket = socket;
+        socket.setEncoding('utf8');
+        socket.write(encodeFrame({ kind: 'challenge', nonce: challenge }));
+        socket.on('data', (chunk: string) => {
+          for (const frame of decoder.push(chunk)) {
+            const message = frame as Record<string, unknown>;
+            if (!authenticated) {
+              expect(message.kind).toBe('hello');
+              authenticated = true;
+              socket.write(
+                encodeFrame({
+                  kind: 'welcome',
+                  proof: proof(token, PEER_SERVER_PROOF_DOMAIN, String(message.nonce)),
+                }),
+              );
+              accept(socket);
+            } else {
+              frames.push(message);
+            }
+          }
+        });
+      });
+      await mkdir(dirname(derivedSocketPath()), { recursive: true, mode: 0o700 });
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(derivedSocketPath(), () => {
+          server.off('error', reject);
+          resolve();
+        });
+      });
+      return {
+        connected,
+        frames,
+        async close() {
+          activeSocket?.destroy();
+          await new Promise<void>((resolve) => server.close(() => resolve()));
+        },
+      };
+    }
+
+    const firstBroker = await rawBroker('broker-a');
+    const peerSide = fakeWindow();
+    const peerDeps = peerSide.deps();
+    let releaseOld: () => void = () => {};
+    let enteredOld: () => void = () => {};
+    const oldGate = new Promise<void>((resolve) => {
+      releaseOld = resolve;
+    });
+    const oldEntered = new Promise<void>((resolve) => {
+      enteredOld = resolve;
+    });
+    let requestCount = 0;
+    peerDeps.brokerRequest = async () => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        enteredOld();
+        await oldGate;
+        return [{ surfaceId: 'from-broker-a' }];
+      }
+      return [{ surfaceId: 'from-broker-b' }];
+    };
+    const peer = await freshModule<LinkModule>(() => import('../src/peer-link'));
+    peer.initPeerLink(fakeContext(dir));
+    peer.configurePeerLink(peerDeps);
+    opened.push(peer);
+    await peer.ensurePeerNet(() => {});
+
+    const firstSocket = await firstBroker.connected;
+    firstSocket.write(
+      encodeFrame({ kind: 'request', id: 'same-id', op: 'directory', params: {} }),
+    );
+    await oldEntered;
+
+    // Broker A dies while its webview fan-out is still pending. The replacement
+    // binds before this client retries, and deliberately reuses the same id.
+    await firstBroker.close();
+    const secondBroker = await rawBroker('broker-b');
+    try {
+      const secondSocket = await secondBroker.connected;
+      secondSocket.write(
+        encodeFrame({ kind: 'request', id: 'same-id', op: 'directory', params: {} }),
+      );
+      await waitFor(() => secondBroker.frames.length === 1);
+      expect(secondBroker.frames[0]).toEqual({
+        kind: 'result',
+        id: 'same-id',
+        results: [{ surfaceId: 'from-broker-b' }],
+      });
+
+      releaseOld();
+      await tick(100);
+      // The late answer belongs to the destroyed first socket. Sending it to
+      // the current socket would let it satisfy an unrelated replacement id.
+      expect(secondBroker.frames).toHaveLength(1);
+    } finally {
+      releaseOld();
+      await secondBroker.close();
+    }
+  });
+
   it('runs a losing window\'s webview command in the broker and answers it there', async () => {
     const { broker, brokerSide, peer, peerSide } = await linkedPair();
 
