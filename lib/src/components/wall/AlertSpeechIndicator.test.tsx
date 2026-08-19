@@ -78,15 +78,15 @@ describe('AlertSpeechIndicator', () => {
   });
 
   /**
-   * `spoken` lasts until the ring is attended, which is unbounded. A wash
-   * degrading terminal-text contrast for that whole window is the same mistake
-   * the Door's badge cluster avoids, so only the ring persists.
+   * `spoken` lasts until the ring is attended, which is unbounded, so its wash
+   * is lighter than the speaking one — present enough to read as an unhandled
+   * alarm, light enough not to fight terminal text for that whole window.
    */
-  it('does not wash the terminal body for the unbounded SPOKEN window', () => {
+  it('keeps a lighter wash for the unbounded SPOKEN window', () => {
     act(() => setAlertSpeechState('pty-1', 'spoken'));
 
     const wash = container.querySelector<HTMLElement>('[data-alert-speech-state="spoken"]');
-    expect(wash?.className).not.toContain('bg-alarm-vs-terminal/');
+    expect(wash?.className).toContain('bg-alarm-vs-terminal/10');
     expect(ringLayer()?.className).toContain('inset_0_0_0_3px');
   });
 

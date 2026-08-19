@@ -27,9 +27,9 @@ import { deriveSessionLabel } from './session-label';
  * persisted Activity: resolving the ring clears it, and a restore never recreates
  * evidence that this renderer spoke.
  *
- * `speak()` is the single seam a future native `PlatformAdapter.speak?()` would
- * slot into for hosts whose webview has no speech backend (Tauri on
- * Linux/WebKitGTK).
+ * `speak()` and `cancelSpeech()` are the only two places this module touches the
+ * engine — the seam a future native `PlatformAdapter.speak?()` would slot into
+ * for hosts whose webview has no speech backend (Tauri on Linux/WebKitGTK).
  */
 
 /** Longest utterance we will produce. A pane title has no useful upper bound. */
@@ -74,7 +74,7 @@ interface SpeechLifecycle {
    *  dispatch so tracking is already in place for an engine that settles inside
    *  `speak()`. */
   readonly onQueued: (utterance: SpeechSynthesisUtterance) => void;
-  readonly onStart: () => void;
+  readonly onStart: (utterance: SpeechSynthesisUtterance) => void;
   /** `end`, `error`, or a refused dispatch — the engine is done with this
    *  utterance either way, and this Session's delivery state resolves. */
   readonly onSettle: (utterance: SpeechSynthesisUtterance) => void;
@@ -105,7 +105,7 @@ function speak(text: string, lifecycle: SpeechLifecycle): void {
     // A speech engine that refuses the utterance must never break the alert path.
     return;
   }
-  utterance.onstart = lifecycle.onStart;
+  utterance.onstart = () => lifecycle.onStart(utterance);
   utterance.onend = () => lifecycle.onSettle(utterance);
   utterance.onerror = () => lifecycle.onSettle(utterance);
   lifecycle.onQueued(utterance);
@@ -116,6 +116,11 @@ function speak(text: string, lifecycle: SpeechLifecycle): void {
     // `speaking` behind an utterance no callback will ever retire.
     lifecycle.onSettle(utterance);
   }
+}
+
+/** Silence the engine, dropping everything it is holding. */
+function cancelSpeech(): void {
+  globalThis.speechSynthesis?.cancel();
 }
 
 /**
@@ -129,6 +134,10 @@ export function startAlertSpeech(): () => void {
   // utterance generation distinct without exposing engine objects to the store.
   const currentToken = new Map<string, object>();
   const utterances = new Set<SpeechSynthesisUtterance>();
+  // Utterances the engine has accepted but not begun, at most one per Session —
+  // exactly what `interrupt` has to put back. This index is capped together with
+  // `utterances`: a silent backend cannot pin one entry per Session forever.
+  const queued = new Map<string, SpeechSynthesisUtterance>();
   clearAllAlertSpeechStates();
 
   const detach = (utterance: SpeechSynthesisUtterance): void => {
@@ -137,19 +146,37 @@ export function startAlertSpeech(): () => void {
     utterance.onerror = null;
   };
 
-  // Only insertion point, one entry per call — so the size can never exceed the
-  // cap and a single eviction is enough.
+  const forgetQueued = (utterance: SpeechSynthesisUtterance): void => {
+    for (const [sessionId, candidate] of queued) {
+      if (candidate !== utterance) continue;
+      queued.delete(sessionId);
+      return;
+    }
+  };
+
+  // Only insertion point, one entry per call — so both retention containers can
+  // never exceed the cap and a single oldest-first eviction is enough. Do not
+  // detach an evicted utterance: if the engine eventually starts or settles it,
+  // its callback still applies the normal generation-token checks.
   const track = (utterance: SpeechSynthesisUtterance): void => {
     if (utterances.size >= MAX_TRACKED_UTTERANCES) {
       const oldest = utterances.values().next().value;
-      if (oldest) utterances.delete(oldest);
+      if (oldest) {
+        utterances.delete(oldest);
+        forgetQueued(oldest);
+      }
     }
     utterances.add(utterance);
   };
 
-  const settle = (sessionId: string, token: object, utterance: SpeechSynthesisUtterance): void => {
+  const retire = (utterance: SpeechSynthesisUtterance): void => {
     utterances.delete(utterance);
     detach(utterance);
+  };
+
+  const settle = (sessionId: string, token: object, utterance: SpeechSynthesisUtterance): void => {
+    retire(utterance);
+    if (queued.get(sessionId) === utterance) queued.delete(sessionId);
     if (currentToken.get(sessionId) !== token) return;
     currentToken.delete(sessionId);
     // An utterance that really started counts as spoken even if the engine later
@@ -161,23 +188,65 @@ export function startAlertSpeech(): () => void {
     }
   };
 
+  const fireSpeech = (sessionId: string): void => {
+    const token = {};
+    speak(deriveSessionLabel(sessionId), {
+      onQueued: (utterance) => {
+        track(utterance);
+        // Refresh insertion order if a newer ring replaces the same Session.
+        queued.delete(sessionId);
+        queued.set(sessionId, utterance);
+      },
+      onStart: (utterance) => {
+        // A late callback from an evicted/older generation must not delete a
+        // newer queued utterance for the same Session.
+        if (queued.get(sessionId) === utterance) queued.delete(sessionId);
+        // The engine can queue several Sessions. Re-check at the actual start,
+        // not merely when `speak()` accepted the queued utterance.
+        if (getActivity(sessionId).status !== 'ALERT_RINGING') return;
+        currentToken.set(sessionId, token);
+        setAlertSpeechState(sessionId, 'speaking');
+      },
+      onSettle: (utterance) => settle(sessionId, token, utterance),
+    });
+  };
+
+  /**
+   * Cut off the utterance the engine is reading aloud, because the ring that
+   * produced it was just resolved. The announcement exists to summon the user,
+   * and the user is here — finishing the sentence is noise.
+   *
+   * Web Speech has no per-utterance stop, so this empties the whole queue. Every
+   * Session that was still waiting is re-dispatched: attending one Pane must not
+   * silence another Pane's alarm. Nothing already started comes back — only the
+   * cut Session had started, and restarting an announcement is worse than losing
+   * it. Mirroring the engine's queue rather than owning one and feeding it a
+   * single utterance at a time is deliberate: an utterance the engine drops
+   * without a callback (see `MAX_TRACKED_UTTERANCES`) would block a self-owned
+   * queue forever.
+   */
+  const interrupt = (): void => {
+    // Same gates as the ring machine's own `fire`: a re-dispatch is a fresh
+    // decision to speak, so a Session attended meanwhile — or the setting being
+    // switched off mid-utterance — drops out here rather than being replayed.
+    const speakable = getAlertSettings().speakEnabled;
+    const activity = getActivitySnapshot();
+    const requeue: string[] = [];
+    // `cancel()` is not obliged to fire a callback per dropped utterance, so the
+    // ones it drops are retired here rather than left in the tracking set.
+    for (const [sessionId, utterance] of queued) {
+      retire(utterance);
+      if (speakable && activity.get(sessionId)?.status === 'ALERT_RINGING') requeue.push(sessionId);
+    }
+    queued.clear();
+    cancelSpeech();
+    for (const sessionId of requeue) fireSpeech(sessionId);
+  };
+
   const stopRingWatch = watchUnattendedRings({
     enabled: () => getAlertSettings().speakEnabled,
     delayMs: () => getAlertSettings().speakDelayMs,
-    fire: (sessionId) => {
-      const token = {};
-      speak(deriveSessionLabel(sessionId), {
-        onQueued: track,
-        onStart: () => {
-          // The engine can queue several Sessions. Re-check at the actual start,
-          // not merely when `speak()` accepted the queued utterance.
-          if (getActivity(sessionId).status !== 'ALERT_RINGING') return;
-          currentToken.set(sessionId, token);
-          setAlertSpeechState(sessionId, 'speaking');
-        },
-        onSettle: (utterance) => settle(sessionId, token, utterance),
-      });
-    },
+    fire: fireSpeech,
   });
 
   const clearResolvedSpeech = (): void => {
@@ -188,11 +257,17 @@ export function startAlertSpeech(): () => void {
     const speech = getAlertSpeechSnapshot();
     if (speech.size === 0) return;
     const activity = getActivitySnapshot();
+    let interrupted = false;
     for (const sessionId of speech.keys()) {
       if (activity.get(sessionId)?.status === 'ALERT_RINGING') continue;
-      currentToken.delete(sessionId);
+      // A live token means the engine is mid-utterance for this Session — the
+      // engine's own record, not the rendered state, decides what to silence.
+      if (currentToken.delete(sessionId)) interrupted = true;
       clearAlertSpeechState(sessionId);
     }
+    // After the state is cleared, so the `cancel()` callback lands on a Session
+    // whose generation token is already gone and cannot revive `spoken`.
+    if (interrupted) interrupt();
   };
   // No seed call: `clearAllAlertSpeechStates()` above already leaves the map
   // empty, and `watchUnattendedRings` cannot fire before this returns.
@@ -204,11 +279,12 @@ export function startAlertSpeech(): () => void {
     currentToken.clear();
     for (const utterance of utterances) detach(utterance);
     utterances.clear();
+    queued.clear();
     // Detaching handlers only stops *our* state from being touched after
     // teardown; the engine still owns its queue. Without this, a webview that
     // unmounts mid-alarm keeps reading Pane names aloud with no visible source
     // and no UI left to stop it.
-    globalThis.speechSynthesis?.cancel();
+    cancelSpeech();
     clearAllAlertSpeechStates();
   };
 }
