@@ -50,7 +50,7 @@ export class VSCodeAdapter implements PlatformAdapter {
     // extension host's fan-out settles by `requestId`.
     answerAsk: (requestId, results) =>
       this.vscode.postMessage({ type: 'peer:answer', requestId, results }),
-    notify: (topic) => this.vscode.postMessage({ type: 'peer:notify', topic }),
+    notify: () => this.vscode.postMessage({ type: 'peer:notify' }),
   });
 
   readonly remoteHost: RemoteHostLink = this.remoteHostClient.link;

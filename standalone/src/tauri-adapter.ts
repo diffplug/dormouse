@@ -97,7 +97,7 @@ export class TauriAdapter implements PlatformAdapter {
   private readonly remoteHostClient = createRemoteHostLinkClient({
     sendCommand: (command) => this.sendRemoteHostCommand(command),
     answerAsk: (askId, results) => this.sendRemoteHostCommand(answerAskCommand(askId, results)),
-    notify: (topic) => this.sendRemoteHostCommand(notifyCommand(topic)),
+    notify: () => this.sendRemoteHostCommand(notifyCommand()),
   });
 
   readonly remoteHost: RemoteHostLink = this.remoteHostClient.link;
@@ -114,8 +114,12 @@ export class TauriAdapter implements PlatformAdapter {
   async init(): Promise<void> {
     // Set up event listeners for PTY events from the Rust backend
     // (The Rust backend manages the Node.js sidecar lifecycle via std::process::Command)
-    this.unlistenFns.push(
-      await listen<{ id: string; data: string }>("pty:data", (event) => {
+    //
+    // Registered together rather than one await after another: every `listen`
+    // is an independent round trip to Rust, and serializing them puts the whole
+    // set in front of the first paint.
+    this.unlistenFns.push(...(await Promise.all([
+      listen<{ id: string; data: string }>("pty:data", (event) => {
         const { id, data } = event.payload;
         const parsed = this.getProtocolParser(id).process(data);
         applyTerminalProtocolEvents(this.alertManager, id, parsed.events);
@@ -132,28 +136,22 @@ export class TauriAdapter implements PlatformAdapter {
           handler({ id, data: parsed.visibleData });
         }
       }),
-    );
 
-    this.unlistenFns.push(
-      await listen<{ id: string; exitCode: number }>("pty:exit", (event) => {
+      listen<{ id: string; exitCode: number }>("pty:exit", (event) => {
         this.alertManager.onExit(event.payload.id, event.payload.exitCode);
         this.protocolParsers.delete(event.payload.id);
         for (const handler of this.exitHandlers) {
           handler(event.payload);
         }
       }),
-    );
 
-    this.unlistenFns.push(
-      await listen<{ ptys: PtyInfo[] }>("pty:list", (event) => {
+      listen<{ ptys: PtyInfo[] }>("pty:list", (event) => {
         for (const handler of this.listHandlers) {
           handler(event.payload);
         }
       }),
-    );
 
-    this.unlistenFns.push(
-      await listen<{ id: string; data: string }>("pty:replay", (event) => {
+      listen<{ id: string; data: string }>("pty:replay", (event) => {
         // Replay arrives as raw buffered output. Run it through the protocol
         // parser so semantic OSCs (CWD, prompt, title) repopulate pane state
         // and are stripped before xterm sees them, mirroring live pty:data.
@@ -164,38 +162,28 @@ export class TauriAdapter implements PlatformAdapter {
           handler({ id, data: parsed.visibleData });
         }
       }),
-    );
 
-    // Inert while dragDropEnabled=false in tauri.conf.json. See diffplug/dormouse#38 and tauri-apps/tauri#14373.
-    this.unlistenFns.push(
-      await listen<{ paths: string[] }>("dormouse://files-dropped", (event) => {
+      // Inert while dragDropEnabled=false in tauri.conf.json. See diffplug/dormouse#38 and tauri-apps/tauri#14373.
+      listen<{ paths: string[] }>("dormouse://files-dropped", (event) => {
         const paths = event.payload.paths ?? [];
         if (paths.length === 0) return;
         for (const handler of this.filesDroppedHandlers) handler(paths);
       }),
-    );
 
-    this.unlistenFns.push(
-      await listen<RemoteHostResult>(REMOTE_HOST_RESULT_EVENT, (event) => {
+      listen<RemoteHostResult>(REMOTE_HOST_RESULT_EVENT, (event) => {
         this.remoteHostClient.onResult(event.payload);
       }),
-    );
 
-    this.unlistenFns.push(
-      await listen<RemoteHostAsk>(REMOTE_HOST_ASK_EVENT, (event) => {
+      listen<RemoteHostAsk>(REMOTE_HOST_ASK_EVENT, (event) => {
         const ask = event.payload;
         this.remoteHostClient.onAsk(ask.rhId, ask.op, ask.params);
       }),
-    );
 
-    this.unlistenFns.push(
-      await listen<{ name?: string }>(REMOTE_HOST_EVENT_EVENT, (event) => {
+      listen<{ name?: string }>(REMOTE_HOST_EVENT_EVENT, (event) => {
         this.remoteHostClient.onEvent(event.payload);
       }),
-    );
 
-    this.unlistenFns.push(
-      await listen<DorControlRequestPayload>("dor:controlRequest", (event) => {
+      listen<DorControlRequestPayload>("dor:controlRequest", (event) => {
         const payload = event.payload;
         const respond = (response: DorControlResult) => {
           rawInvoke("dor_control_response", {
@@ -218,7 +206,7 @@ export class TauriAdapter implements PlatformAdapter {
           },
         }));
       }),
-    );
+    ])));
 
     await this.hydrateSessionStore();
   }

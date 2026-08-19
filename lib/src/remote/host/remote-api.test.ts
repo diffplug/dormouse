@@ -59,6 +59,8 @@ class FakeProvider implements HostSurfaceProvider {
   resolveGate: Promise<void> | null = null;
   /** Hold every directory collect open. */
   collectGate: Promise<void> | null = null;
+  /** Hold every `handle.resize` open — the deferred half of an attach. */
+  resizeGate: Promise<void> | null = null;
 
   readonly #sinks = new Map<string, Set<PtySink>>();
   readonly #onChange = new Set<() => void>();
@@ -147,6 +149,9 @@ class FakeProvider implements HostSurfaceProvider {
       },
       resize: async (cols, rows) => {
         this.handleResizes.push([surface.ptyId, cols, rows]);
+        // Only when gated: an owner applies the size synchronously and answers
+        // a round trip later, which several cases below depend on.
+        if (this.resizeGate) await this.resizeGate;
         if (this.resizeError) throw this.resizeError;
         if (surface.cols !== cols || surface.rows !== rows) {
           surface.cols = cols;
@@ -980,6 +985,42 @@ describe('RemoteApiSession teardown', () => {
         error: 'surface is not attached: surface-1',
       },
     ]);
+  });
+
+  it('fails the attach when the PTY exits while its resize is still in flight', async () => {
+    // The stream is subscribed before the size settles, so an exit can land in
+    // the middle of an attach that asked for a different size. The attachment is
+    // already gone by the time the resize answers, so the attach is failed
+    // rather than acknowledged — the buffered `terminal.closed` would otherwise
+    // be flushed for a subscription the client is never given.
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    const { session, sent } = makeSession(provider);
+    const held = gate();
+    provider.resizeGate = held.promise;
+
+    session.handle({
+      requestId: 'attach-1',
+      method: REMOTE_METHODS.surfaceAttach,
+      params: { surfaceId: 'surface-1', cols: 100, rows: 30 },
+    });
+    await settle();
+    expect(provider.handleResizes).toEqual([['pty-1', 100, 30]]);
+
+    provider.emitExit('pty-1', 0);
+    held.release();
+    await settle();
+
+    expect(reply(sent, 'attach-1')).toEqual({
+      requestId: 'attach-1',
+      ok: false,
+      error: 'surface closed while attaching: surface-1',
+    });
+    expect(sent.some((p) => (p as RemoteEventMsg).event === REMOTE_EVENTS.terminalClosed)).toBe(
+      false,
+    );
+    expect(provider.unstreamed).toEqual(['pty-1']);
+    expect(provider.released).toEqual(['pty-1']);
   });
 
   it('cancels a pending bounce when the attached PTY exits inside the window', async () => {

@@ -90,24 +90,16 @@ describe('asking the webview', () => {
 });
 
 describe('directory invalidation', () => {
-  it('fires watchers on a directory notify, and stops after unsubscribe', () => {
+  it('fires watchers on a notify, and stops after unsubscribe', () => {
     const changes = vi.fn();
     const unsubscribe = bridge.provider.watchDirectory(changes);
 
-    bridge.onNotify({ topic: 'directory' });
+    bridge.onNotify();
     expect(changes).toHaveBeenCalledTimes(1);
-
-    // An unrelated topic is not this watcher's business.
-    bridge.onNotify({ topic: 'something-else' });
-    expect(changes).toHaveBeenCalledTimes(1);
-
-    // A notify with no topic at all names no other business, so it is ours.
-    bridge.onNotify(undefined);
-    expect(changes).toHaveBeenCalledTimes(2);
 
     unsubscribe();
-    bridge.onNotify({ topic: 'directory' });
-    expect(changes).toHaveBeenCalledTimes(2);
+    bridge.onNotify();
+    expect(changes).toHaveBeenCalledTimes(1);
   });
 });
 

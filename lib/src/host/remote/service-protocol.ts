@@ -139,11 +139,6 @@ export interface AnswerParams {
   results: unknown[];
 }
 
-/** Announces that future answers for `topic` may differ. */
-export interface NotifyParams {
-  topic: string;
-}
-
 // --- Command results ---
 
 export interface EnrollResult {

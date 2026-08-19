@@ -55,12 +55,16 @@ export function clearAclRecords(hostId: string): void {
 
 /**
  * Rehydrate a live `HostAcl` from persisted records, falling back to an empty
- * ACL if the stored records cannot be reconciled with `hostId`. `loadRecords`
- * is injectable so callers (and tests) can supply their own source.
+ * ACL if the stored records cannot be reconciled with `hostId`.
+ *
+ * `loadRecords` is required rather than defaulted to {@link loadAclRecords}: the
+ * Host runs in the sidecar and the extension host as well as in a webview, and
+ * a `localStorage` default would be the wrong ACL in both — silently empty
+ * rather than loudly missing.
  */
 export function loadHostAcl(
   hostId: string,
-  loadRecords: (hostId: string) => HostAclRecord[] = loadAclRecords,
+  loadRecords: (hostId: string) => HostAclRecord[],
 ): HostAcl {
   try {
     return HostAcl.fromRecords(hostId, loadRecords(hostId));

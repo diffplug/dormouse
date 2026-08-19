@@ -18,16 +18,16 @@ import type { RemoteHostCommand } from './service-protocol';
 function fakeTransport() {
   const sent: RemoteHostCommand[] = [];
   const answers: Array<{ askId: string; results: unknown[] }> = [];
-  const notified: string[] = [];
+  let notified = 0;
   return {
     sent,
     answers,
-    notified,
+    notified: () => notified,
     client(): RemoteHostLinkClient {
       return createRemoteHostLinkClient({
         sendCommand: (command) => void sent.push(command),
         answerAsk: (askId, results) => void answers.push({ askId, results }),
-        notify: (topic) => void notified.push(topic),
+        notify: () => void (notified += 1),
       });
     },
   };
@@ -148,8 +148,8 @@ describe('events and notifies', () => {
 
   it('sends a notify through the transport, not as a command', () => {
     const transport = fakeTransport();
-    transport.client().link.notify('directory');
-    expect(transport.notified).toEqual(['directory']);
+    transport.client().link.notify();
+    expect(transport.notified()).toBe(1);
     expect(transport.sent).toEqual([]);
   });
 });
@@ -164,9 +164,8 @@ describe('tunnelled envelopes', () => {
       params: { rhId: 'ask-1', results: [{ ptyId: 'pty-1' }] },
     });
     expect(answer.rhId).not.toBe('ask-1');
-    expect(notifyCommand('directory')).toMatchObject({
-      cmd: 'notify',
-      params: { topic: 'directory' },
-    });
+    // A notify names nothing: the directory is the only answer a peer gives.
+    expect(notifyCommand()).toMatchObject({ cmd: 'notify' });
+    expect(notifyCommand().params).toBeUndefined();
   });
 });

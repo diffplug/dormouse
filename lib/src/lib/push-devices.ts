@@ -77,10 +77,18 @@ export function refreshPushDevicesNow(): void {
 }
 
 /**
- * Back to `no-host`: a story or test that finished, and the enrolled gate's
- * disarm when the Host goes away — the dialog must not keep naming devices
- * nothing can reach. It drops the refresher too, so a caller that still wants
- * one installed re-installs it afterwards (`lib/src/remote/host/activation.ts`).
+ * Back to `no-host`, keeping the refresher: the enrolled gate's disarm when the
+ * Host goes away, where the dialog must stop naming devices nothing can reach
+ * but may still be opened and told `no-host` (`lib/src/remote/host/activation.ts`).
+ */
+export function clearPushDevices(): void {
+  setPushDevices(EMPTY);
+}
+
+/**
+ * Full teardown: back to `no-host` *and* no refresher — a story or a test that
+ * finished, where the closure that would answer is going away too. Anything that
+ * only means "the Host is gone" wants {@link clearPushDevices}.
  */
 export function resetPushDevices(): void {
   refresh = null;

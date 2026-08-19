@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostAclRecord, PairingRequest } from 'server-lib-common';
 import type { HostEnrollment } from '../../remote/host/enrollment';
 import type { HostSurfaceProvider } from '../../remote/host/host-surface-provider';
-import type { WebSocketLike } from '../../remote/host/remote-host';
+import { FakeSocket } from '../../remote/test-fake-socket';
 import { createEphemeralHostStateStore, type HostStateStore } from './host-state-store';
 import { RemoteHostService } from './service';
 import type {
@@ -50,50 +50,19 @@ function aclRecord(devicePublicKey: string, label = 'iPhone Safari'): HostAclRec
   };
 }
 
-class FakeSocket implements WebSocketLike {
-  readyState = 1;
-  readonly sent: Array<Record<string, unknown>> = [];
-  readonly #handlers = new Map<string, Array<(ev: unknown) => void>>();
-
-  addEventListener(type: string, handler: (ev: unknown) => void): void {
-    const list = this.#handlers.get(type) ?? [];
-    list.push(handler);
-    this.#handlers.set(type, list);
-  }
-
-  send(data: string): void {
-    this.sent.push(JSON.parse(data) as Record<string, unknown>);
-  }
-
-  close(): void {
-    this.readyState = 3;
-    this.#emit('close', { code: 1000 });
-  }
-
-  open(): void {
-    this.#emit('open', {});
-  }
-
-  receive(frame: unknown): void {
-    this.#emit('message', { data: JSON.stringify(frame) });
-  }
-
-  frames(t: string): Array<Record<string, unknown>> {
-    return this.sent.filter((frame) => frame.t === t);
-  }
-
-  #emit(type: string, ev: unknown): void {
-    for (const handler of this.#handlers.get(type) ?? []) handler(ev);
-  }
-}
-
 interface MemoryStore extends HostStateStore {
   enrollment: HostEnrollment | null;
   acl: Record<string, HostAclRecord[]>;
 }
 
+/**
+ * A durable store whose contents a test can seed and read back — not
+ * `createEphemeralHostStateStore`, whose whole point is `persistent: false`,
+ * which is what the adopt cases turn on.
+ */
 function memoryStore(seed: Partial<Pick<MemoryStore, 'enrollment' | 'acl'>> = {}): MemoryStore {
   const store: MemoryStore = {
+    persistent: true,
     enrollment: seed.enrollment ?? null,
     acl: seed.acl ?? {},
     loadEnrollment: async () => store.enrollment,

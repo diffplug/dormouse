@@ -55,9 +55,12 @@ Source of truth: `server/src/config.ts` (`readConfig`) maps the environment to
 the entrypoint's config and is unit-tested in `server/test/config.test.mjs`;
 `server/test/bind-host.test.mjs` spawns the real entrypoint and asserts the
 plaintext port is unreachable off-loopback when `DORMOUSE_BIND_HOST=127.0.0.1`.
-The `DORMOUSE_VAPID_*` vars stay in `server/src/index.ts` rather than
-`readConfig`, because resolving the keypair reads and may write `vapid.json`
-and `readConfig` is pure.
+`readConfig` also reads the `DORMOUSE_VAPID_*` vars — the both-or-neither
+keypair rule as a `ConfigError`, and the subject with its origin-derived
+fallback — because that part is a pure mapping like the rest. What stays in
+`server/src/index.ts` is only the half that touches disk: with no keypair
+configured it mints one and persists `vapid.json`, then validates the pair and
+the subject before building the app.
 
 `DORMOUSE_ORIGIN` is parsed once and normalized with `URL.origin`; WebAuthn
 clientData checks, passkey assertion verification, and the Host enrollment

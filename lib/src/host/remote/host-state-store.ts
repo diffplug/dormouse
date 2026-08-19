@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import type { HostAclRecord } from 'server-lib-common';
 import { filterAclRecords } from '../../remote/host/acl';
 import { isEnrollment, type HostEnrollment } from '../../remote/host/enrollment';
+import { createSerialQueue } from './serial-queue';
 
 // Re-exported so an implementor can name the record type without depending on
 // `server-lib-common` itself; vscode-ext's project does not resolve it.
@@ -22,12 +23,13 @@ export type { HostAclRecord };
 
 export interface HostStateStore {
   /**
-   * Whether a write survives this process. Absent means yes; only the
-   * dev-harness store (no state directory) says otherwise, and an adopting
-   * webview reads it to decide whether it may drop its own copy of the Host
-   * (`service.ts` → `#adopt`).
+   * Whether a write survives this process. Only the dev-harness store (no state
+   * directory) says `false`, and an adopting webview reads it to decide whether
+   * it may drop its own copy of the Host (`service.ts` → `#adopt`). Required
+   * rather than optional: a store that forgot to answer would be read as durable
+   * and could cost the webview the only copy that outlives the process.
    */
-  readonly persistent?: boolean;
+  readonly persistent: boolean;
   loadEnrollment(): Promise<HostEnrollment | null>;
   saveEnrollment(enrollment: HostEnrollment): Promise<void>;
   clearEnrollment(): Promise<void>;
@@ -78,7 +80,7 @@ export class FileHostStateStore implements HostStateStore {
    * read-modify-write of the whole file, so two of them running together can
    * interleave their writes and renames and land the older one last.
    */
-  #tail: Promise<unknown> = Promise.resolve();
+  readonly #serialize = createSerialQueue();
 
   constructor(stateDir: string) {
     this.#dir = stateDir;
@@ -90,13 +92,13 @@ export class FileHostStateStore implements HostStateStore {
   }
 
   saveEnrollment(enrollment: HostEnrollment): Promise<void> {
-    return this.#mutate(async (state) => {
+    return this.#mutate((state) => {
       state.enrollment = enrollment;
     });
   }
 
   clearEnrollment(): Promise<void> {
-    return this.#mutate(async (state) => {
+    return this.#mutate((state) => {
       state.enrollment = null;
     });
   }
@@ -106,14 +108,14 @@ export class FileHostStateStore implements HostStateStore {
   }
 
   saveAcl(hostId: string, records: readonly HostAclRecord[]): Promise<void> {
-    return this.#mutate(async (state) => {
+    return this.#mutate((state) => {
       state.acl[hostId] = [...records];
     });
   }
 
   /** Apply one change to the in-memory state and flush it, one at a time. */
-  #mutate(change: (state: HostStateFile) => Promise<void>): Promise<void> {
-    const run = async (): Promise<void> => {
+  #mutate(change: (state: HostStateFile) => void): Promise<void> {
+    return this.#serialize(async () => {
       const current = await this.#read();
       // Do not expose a mutation through later reads until its atomic rename
       // has succeeded. In particular, a failed enrollment save must not make a
@@ -121,18 +123,10 @@ export class FileHostStateStore implements HostStateStore {
       // only surviving copy. Changes replace top-level enrollment / ACL slots,
       // so a shallow copy of the map is the required transaction boundary.
       const next: HostStateFile = { ...current, acl: { ...current.acl } };
-      await change(next);
+      change(next);
       await this.#write(next);
       this.#state = Promise.resolve(next);
-    };
-    const result = this.#tail.then(run, run);
-    // The chain survives a failed write — one unwritable moment must not stop
-    // every later save — while the caller still sees the rejection.
-    this.#tail = result.then(
-      () => {},
-      () => {},
-    );
-    return result;
+    });
   }
 
   #read(): Promise<HostStateFile> {
@@ -160,7 +154,10 @@ export class FileHostStateStore implements HostStateStore {
     // `mkdir` applies its mode only when it creates the final component. Tauri
     // creates app_data_dir before spawning us, commonly under a 0755 umask, so
     // tighten an existing directory too. Windows ACLs are not Unix modes.
-    if (process.platform !== 'win32') await chmod(this.#dir, 0o700);
+    // Best-effort, like `peer-link.ts`'s: on a filesystem with no POSIX modes
+    // the 0600 on the file below is the protection that matters, and failing
+    // the whole save over the directory would lose the Host instead.
+    if (process.platform !== 'win32') await chmod(this.#dir, 0o700).catch(() => {});
     // Temp-then-rename in the same directory, so a crash mid-write leaves the
     // previous state intact rather than a truncated file that reads as "no Host".
     // Unique per write rather than per process: `#mutate` already keeps this

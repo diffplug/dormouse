@@ -29,12 +29,11 @@ export interface AskSurfaceProvider {
   provider: HostSurfaceProvider;
   /**
    * Something a future {@link HostSurfaceProvider.collectDirectory} could depend
-   * on changed. `topic` is the webview's own word for what changed; anything but
-   * `directory` is somebody else's business, while no topic at all (a membership
-   * change, a peer joining) is always ours — the cheap direction is to
-   * re-collect.
+   * on changed — a pane, an alert, a focus move, a peer joining. The directory
+   * is the only thing a peer answers, so there is nothing to name: the cheap
+   * direction is always to re-collect.
    */
-  notifyDirectoryChanged(topic?: string | null): void;
+  notifyDirectoryChanged(): void;
 }
 
 export function createAskSurfaceProvider(
@@ -110,8 +109,7 @@ export function createAskSurfaceProvider(
   return {
     provider,
 
-    notifyDirectoryChanged(topic) {
-      if (topic !== undefined && topic !== null && topic !== 'directory') return;
+    notifyDirectoryChanged() {
       // Iterated live: a watcher may unsubscribe itself here, which a Set
       // tolerates mid-iteration, and this runs on every pane-state change.
       for (const watcher of directoryWatchers) watcher();

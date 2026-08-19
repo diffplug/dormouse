@@ -8,12 +8,21 @@ import { join } from 'node:path';
  * two saves interleave. Only the temp writes are timed — the tests' own
  * `writeFile` calls go straight through.
  */
-const fsProbe = vi.hoisted(() => ({ steps: [] as string[], tmpWriteDelayMs: 0 }));
+const fsProbe = vi.hoisted(() => ({
+  steps: [] as string[],
+  tmpWriteDelayMs: 0,
+  /** Stand in for a filesystem with no POSIX modes. */
+  chmodFails: false,
+}));
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const real = await importOriginal<typeof import('node:fs/promises')>();
   return {
     ...real,
+    chmod: async (path: string, mode: number) => {
+      if (fsProbe.chmodFails) throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
+      return real.chmod(path, mode);
+    },
     writeFile: async (path: string, data: never, options: never) => {
       if (String(path).endsWith('.tmp')) {
         fsProbe.steps.push('write');
@@ -62,6 +71,7 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'dormouse-host-state-'));
   fsProbe.steps.length = 0;
   fsProbe.tmpWriteDelayMs = 0;
+  fsProbe.chmodFails = false;
 });
 
 afterEach(async () => {
@@ -132,6 +142,17 @@ describe('FileHostStateStore', () => {
       expect((await stat(dir)).mode & 0o777).toBe(0o700);
     },
   );
+
+  it('still saves where the directory mode cannot be set', async () => {
+    // A filesystem with no POSIX modes (a mounted share, some containers). The
+    // 0600 on the file is the protection that matters, so failing the whole save
+    // over the directory would lose the Host to no benefit.
+    fsProbe.chmodFails = true;
+    const store = new FileHostStateStore(dir);
+
+    await expect(store.saveEnrollment(ENROLLMENT)).resolves.toBeUndefined();
+    expect(await new FileHostStateStore(dir).loadEnrollment()).toEqual(ENROLLMENT);
+  });
 
   it('leaves no temp file behind, and overwrites in place', async () => {
     const store = new FileHostStateStore(dir);

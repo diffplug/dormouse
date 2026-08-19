@@ -28,7 +28,7 @@ import type {
 } from '../../host/remote/service-protocol';
 import { getPlatform } from '../../lib/platform';
 import type { RemoteHostLink } from '../../lib/platform/types';
-import { resetPushDevices, setPushDevicesRefresher } from '../../lib/push-devices';
+import { clearPushDevices, setPushDevicesRefresher } from '../../lib/push-devices';
 import { clearAclRecords, loadAclRecords } from './acl';
 import { commitPushDevices, invalidatePushDeviceRefreshes, watchPushRings } from './alert-push';
 import { clearEnrollment, getEnrollment } from './enrollment';
@@ -71,14 +71,7 @@ function installBridgeMode(link: RemoteHostLink): void {
     mirrorPairingQueue(link, (data as PairingQueueEvent).queue);
   });
 
-  void adoptWebviewHost(link).then(() => {
-    // Seed once: a webview that reloads mid-pairing has an empty mirror and no
-    // event coming, since the service only pushes on change.
-    void link
-      .command('pairingQueue')
-      .then((queue) => mirrorPairingQueue(link, (queue ?? []) as PairingQueueItem[]))
-      .catch(() => {});
-  });
+  void adoptWebviewHost(link);
 
   const refresh = (): void => {
     void commitPushDevices(async () => {
@@ -97,16 +90,23 @@ function installBridgeMode(link: RemoteHostLink): void {
       void link.command('push', { sessionId, title }).catch(() => {});
     });
     refresh();
+    // Seeded on every transition to enrolled, not once at install: the service
+    // pushes the queue only when it changes, so a webview that joins — or a
+    // machine that enrolls — mid-pairing would otherwise show no modal at all
+    // until the next change.
+    void link
+      .command('pairingQueue')
+      .then((queue) => mirrorPairingQueue(link, (queue ?? []) as PairingQueueItem[]))
+      .catch(() => {});
     return () => {
       stopRings();
       // The Host is gone, so the dialog must stop naming devices nothing can
       // reach — including any list still on the wire, which would otherwise put
-      // them back the moment it lands.
+      // them back the moment it lands. The refresher stays installed: the dialog
+      // may still open on an un-enrolled machine, where asking is one command
+      // that answers `no-host`.
       invalidatePushDeviceRefreshes();
-      resetPushDevices();
-      // `resetPushDevices` also drops the refresher, which stays installed on
-      // an un-enrolled machine so the dialog can still ask and be told `no-host`.
-      setPushDevicesRefresher(refresh);
+      clearPushDevices();
     };
   });
 

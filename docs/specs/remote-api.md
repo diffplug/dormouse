@@ -309,7 +309,11 @@ Provider resolution and resize are asynchronous process/window boundaries.
 An attach is not acknowledged until its required resize settles; rejected
 surface resolution, attach resize, and `terminal.resize` are returned as
 protocol errors and are contained inside the session rather than becoming
-unhandled Host-process rejections.
+unhandled Host-process rejections. The stream is subscribed before that resize
+settles, so a PTY that exits inside the window tears the attachment down first:
+the attach is then answered `surface closed while attaching` and the buffered
+`terminal.closed` is dropped rather than flushed, since the client is never
+given the subscription it would arrive on.
 
 #### Size authority: last-attach-wins
 

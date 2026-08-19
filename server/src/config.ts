@@ -7,6 +7,8 @@
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { defaultVapidSubject, type VapidKeys } from './push.js';
+
 /** Everything the entrypoint needs, resolved from the environment. */
 export interface ServerConfig {
   port: number;
@@ -21,6 +23,17 @@ export interface ServerConfig {
   origin: string;
   stateDir: string;
   pocketDir: string;
+  /**
+   * The configured VAPID keypair, or `null` to mint and persist one on disk —
+   * which is the entrypoint's job, not this pure mapping's.
+   */
+  vapidKeys: VapidKeys | null;
+  /**
+   * The operator contact the push JWT is signed with. `null` means push is off:
+   * `web-push` cannot construct a send without a subject, and this server's own
+   * origin is unusable as one on a loopback dev server.
+   */
+  vapidSubject: string | null;
 }
 
 /** Thrown for a missing or unusable environment; the entrypoint exits on it. */
@@ -51,5 +64,34 @@ export function readConfig(env: Env = process.env): ServerConfig {
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
   const pocketDir = env.DORMOUSE_POCKET_DIR ?? join(repoRoot, 'lib', 'dist-pocket');
 
-  return { port, bindHost, setupPassword, origin, stateDir, pocketDir };
+  // VAPID keys sign the push JWT and identify this server to every push service.
+  // Supply both through env to control them; supply neither and the entrypoint
+  // mints a pair once and persists it, so a selfhost POC needs no key ceremony.
+  // Supplying exactly one is a misconfiguration, not a default worth guessing
+  // at: the pair must match or every subscription silently stops working.
+  const publicKey = env.DORMOUSE_VAPID_PUBLIC_KEY;
+  const privateKey = env.DORMOUSE_VAPID_PRIVATE_KEY;
+  if (!!publicKey !== !!privateKey) {
+    throw new ConfigError(
+      'DORMOUSE_VAPID_PUBLIC_KEY and DORMOUSE_VAPID_PRIVATE_KEY must be set together, or neither.',
+    );
+  }
+  const vapidKeys = publicKey && privateKey ? { publicKey, privateKey } : null;
+  // An unset subject falls back to this server's own origin, which
+  // `defaultVapidSubject` refuses for a loopback dev server — there push is
+  // switched off rather than left half-working, because a phone cannot route to
+  // localhost anyway and a subject a push service rejects made every iPhone
+  // delivery fail silently.
+  const vapidSubject = env.DORMOUSE_VAPID_SUBJECT ?? defaultVapidSubject(origin);
+
+  return {
+    port,
+    bindHost,
+    setupPassword,
+    origin,
+    stateDir,
+    pocketDir,
+    vapidKeys,
+    vapidSubject,
+  };
 }

@@ -176,8 +176,9 @@ describe("TauriAdapter remote host link", () => {
 
   it("notifies without waiting for anything", async () => {
     const { adapter, sent } = await bridged();
-    adapter.remoteHost.notify("directory");
-    expect(sent()[0]).toMatchObject({ cmd: "notify", params: { topic: "directory" } });
+    adapter.remoteHost.notify();
+    expect(sent()[0]).toMatchObject({ cmd: "notify" });
+    expect(sent()[0]!.params).toBeUndefined();
   });
 
   it("rejects what is still in flight when the sidecar is killed", async () => {

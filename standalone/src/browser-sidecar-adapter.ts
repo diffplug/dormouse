@@ -65,7 +65,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private readonly remoteHostClient = createRemoteHostLinkClient({
     sendCommand: (command) => this.sendRemoteHostCommand(command),
     answerAsk: (askId, results) => this.sendRemoteHostCommand(answerAskCommand(askId, results)),
-    notify: (topic) => this.sendRemoteHostCommand(notifyCommand(topic)),
+    notify: () => this.sendRemoteHostCommand(notifyCommand()),
   });
 
   readonly remoteHost: RemoteHostLink = this.remoteHostClient.link;

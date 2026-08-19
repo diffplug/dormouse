@@ -16,6 +16,7 @@
 import type * as vscode from 'vscode';
 
 import type { HostAclRecord, HostStateStore } from '../../lib/src/host/remote/host-state-store';
+import { createSerialQueue } from '../../lib/src/host/remote/serial-queue';
 import { ACL_KEY_PREFIX, filterAclRecords } from '../../lib/src/remote/host/acl';
 import { isEnrollment, type HostEnrollment } from '../../lib/src/remote/host/enrollment';
 // Imported, not mirrored: a key that drifted between the two sides would strand
@@ -35,7 +36,7 @@ export class VsCodeHostStateStore implements HostStateStore {
    * could allow the older snapshot to finish last and silently de-pair the
    * newer Client after a restart.
    */
-  #tail: Promise<unknown> = Promise.resolve();
+  readonly #mutate = createSerialQueue();
 
   /**
    * @param onEnrollmentChanged Some window of this extension wrote or cleared
@@ -114,16 +115,6 @@ export class VsCodeHostStateStore implements HostStateStore {
     return this.#mutate(() =>
       this.#context.globalState.update(aclKey(hostId), JSON.stringify(records)),
     );
-  }
-
-  /** Serialize writes while keeping the queue alive after an individual failure. */
-  #mutate(write: () => PromiseLike<void>): Promise<void> {
-    const result = this.#tail.then(write, write);
-    this.#tail = result.then(
-      () => {},
-      () => {},
-    );
-    return result;
   }
 }
 

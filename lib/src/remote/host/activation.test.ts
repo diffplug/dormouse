@@ -48,11 +48,11 @@ vi.mock('./alert-push', () => ({
     pushWatch.invalidated += 1;
   },
 }));
-const pushRefreshers = vi.hoisted(() => ({ current: [] as Array<() => void>, resets: 0 }));
+const pushRefreshers = vi.hoisted(() => ({ current: [] as Array<() => void>, cleared: 0 }));
 vi.mock('../../lib/push-devices', () => ({
   setPushDevicesRefresher: (refresh: () => void) => void pushRefreshers.current.push(refresh),
-  resetPushDevices: () => {
-    pushRefreshers.resets += 1;
+  clearPushDevices: () => {
+    pushRefreshers.cleared += 1;
   },
 }));
 const aclState = vi.hoisted(() => ({
@@ -84,7 +84,7 @@ beforeEach(() => {
   pushWatch.invalidated = 0;
   pushWatch.loads.length = 0;
   pushRefreshers.current.length = 0;
-  pushRefreshers.resets = 0;
+  pushRefreshers.cleared = 0;
   aclState.records = [];
   aclState.cleared.length = 0;
   enrollmentState.current = {
@@ -349,13 +349,35 @@ describe('remote host bridge mode', () => {
     expect(pairing.getPairingApprovalSnapshot()[0]).toBe(first);
   });
 
-  it('seeds the mirror once, for a webview that reloaded mid-pairing', async () => {
+  it('seeds the mirror, for a webview that reloaded mid-pairing', async () => {
     const link = fakeLink();
     link.results.pairingQueue = [{ clientId: 'c1', request: PAIRING_REQUEST, requestedAt: 5 }];
     const { pairing } = await installBridge(link);
 
     expect(link.commands.some((c) => c.cmd === 'pairingQueue')).toBe(true);
     expect(pairing.getPairingApprovalSnapshot()).toHaveLength(1);
+  });
+
+  it('re-seeds the mirror every time a Host appears, not only at install', async () => {
+    // Joining a Host that is already mid-pairing is the case a one-shot seed
+    // misses: the service pushes the queue only when it changes, so the modal
+    // would stay hidden until the pairing was answered somewhere else.
+    const link = fakeLink();
+    link.results.status = { enrolled: false };
+    link.results.pairingQueue = [{ clientId: 'c1', request: PAIRING_REQUEST, requestedAt: 5 }];
+    const { pairing } = await installBridge(link);
+    expect(link.commands.some((c) => c.cmd === 'pairingQueue')).toBe(false);
+
+    link.emit('status', { name: 'status', enrolled: true });
+    await settle();
+    expect(pairing.getPairingApprovalSnapshot()).toHaveLength(1);
+
+    // And again after the Host goes and comes back.
+    link.emit('status', { name: 'status', enrolled: false });
+    link.commands.length = 0;
+    link.emit('status', { name: 'status', enrolled: true });
+    await settle();
+    expect(link.commands.filter((c) => c.cmd === 'pairingQueue')).toHaveLength(1);
   });
 
   it('reports rings with the label the webview derived', async () => {
@@ -411,10 +433,11 @@ describe('remote host bridge mode', () => {
     // The dialog must stop naming devices nothing can push to — including any
     // list still on the wire, which would otherwise put them back on arrival.
     expect(pushWatch.invalidated).toBe(1);
-    expect(pushRefreshers.resets).toBe(1);
-    // And the refresher goes back in: the dialog may still open on an
-    // un-enrolled machine, where asking is one command that answers `no-host`.
-    expect(pushRefreshers.current.at(-1)).toBeDefined();
+    expect(pushRefreshers.cleared).toBe(1);
+    // The refresher stays installed rather than being dropped and put back: the
+    // dialog may still open on an un-enrolled machine, where asking is one
+    // command that answers `no-host`.
+    expect(pushRefreshers.current).toHaveLength(1);
     link.commands.length = 0;
     pushRefreshers.current.at(-1)!();
     await settle();

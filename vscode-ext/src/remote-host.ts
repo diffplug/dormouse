@@ -216,12 +216,13 @@ let contending = false;
  */
 function contendForHost(): void {
   contending = true;
+  // Drained on the settle *and* on a contention that can never settle — no
+  // storage location, or a link already disposed — because neither of those
+  // sends a settle notification. A held command (an `enroll` included) would
+  // otherwise wait out its whole budget for a role that is not coming.
   void ensurePeerNet((broker) => {
     if (broker) startService();
-  });
-  // A role that was already held (or a link that stood down for good) sends no
-  // settle notification, so anything queued has to be drained here instead.
-  if (isPeerLinkSettled()) drainQueuedCommands();
+  }).then(drainQueuedCommands, drainQueuedCommands);
 }
 
 /**

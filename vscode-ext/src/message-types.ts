@@ -35,7 +35,7 @@ export type WebviewMessage =
   // `lib/src/remote/host/peer-surfaces.ts`, so a new peer operation adds no
   // message type here.
   | { type: 'peer:answer'; requestId: string; results: unknown[] }
-  | { type: 'peer:notify'; topic: string }
+  | { type: 'peer:notify' }
   // One command for the Host service (`lib/src/host/remote/service-protocol.ts`).
   | { type: 'remoteHost:command'; payload: RemoteHostCommand }
   | { type: 'dormouse:init' }

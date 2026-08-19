@@ -517,6 +517,27 @@ describe('remote host service glue', () => {
     warn.mockRestore();
   });
 
+  it('refuses at once when the contention can never settle', async () => {
+    // Deactivation, or a window with no storage location: `ensurePeerNet`
+    // returns without a role and no settle notification is coming. A held
+    // command would sit out its whole queue budget before anyone told the
+    // webview there is nothing to reach.
+    const mod = await freshHost();
+    const bound = fakeDeps();
+    mod.configureRemoteHost(bound.deps());
+    mod.initRemoteHost(fakeContext().context);
+    await opened!.disposePeerLink();
+
+    mod.handleRemoteHostCommand({
+      rhId: 'rh-1',
+      cmd: 'enroll',
+      params: { serverUrl: 'https://relay.dormouse.sh', password: 'p', label: 'Laptop' },
+    });
+
+    await tick(0);
+    expect(results(bound.posted)).toEqual([{ rhId: 'rh-1', error: 'no remote Host is reachable' }]);
+  });
+
   it('contends when another window enrolls, without a reload', async () => {
     // This window was un-enrolled at activation, so it never contended and has
     // no socket and no broker to hear from. The shared `SecretStorage` is the

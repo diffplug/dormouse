@@ -111,7 +111,22 @@ export function installPeerSurfaceResponder(): void {
   // change, and focus move — so it is armed only while a Host exists to hear it
   // (`enrolled-gate.ts`).
   armWhileEnrolled(link, () => {
-    const notifyDirectory = () => link.notify('directory');
+    let armed = true;
+    let queued = false;
+    // Trailing-edge coalesce: these sources fire in bursts — a focus move is a
+    // focusout and a focusin, and a pane-state change usually lands with an
+    // activity change — and the Host re-collects the whole directory either way,
+    // so one crossing per burst is the whole message.
+    const notifyDirectory = (): void => {
+      if (queued) return;
+      queued = true;
+      queueMicrotask(() => {
+        queued = false;
+        // A disarm can land inside the coalesce window, and a Host that is gone
+        // must not be told anything.
+        if (armed) link.notify();
+      });
+    };
     const unsubscribePaneState = subscribeToTerminalPaneState(notifyDirectory);
     const unsubscribeActivity = subscribeToActivity(notifyDirectory);
     const hasDocument = typeof document !== 'undefined';
@@ -120,6 +135,7 @@ export function installPeerSurfaceResponder(): void {
       document.addEventListener('focusout', notifyDirectory);
     }
     return () => {
+      armed = false;
       unsubscribePaneState();
       unsubscribeActivity();
       if (!hasDocument) return;

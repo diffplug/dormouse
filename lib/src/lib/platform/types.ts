@@ -135,8 +135,12 @@ export interface RemoteHostLink {
   /** Answer `op` on behalf of this webview's own surfaces; no results = not mine. */
   respond(op: string, handler: (params: unknown) => unknown[]): void;
 
-  /** Announce that future answers for `topic` may differ. */
-  notify(topic: string): void;
+  /**
+   * Announce that future answers may differ. Carries no subject: the directory
+   * is the only thing a peer can be asked to answer, so naming it would be a
+   * field every layer copies and nobody reads.
+   */
+  notify(): void;
 
   /**
    * Subscribe to one of the service's pushed events by name (`pairing-queue`),

@@ -617,9 +617,8 @@ export function attachRouter(
         break;
       }
       case 'peer:notify':
-        if (typeof msg.topic !== 'string') break;
-        // Directory is the only peer-query topic today; the transport only
-        // needs to carry the fact that its snapshot may have changed.
+        // The directory is the only thing a webview is asked to answer, so the
+        // message carries nothing but the fact that its snapshot may differ.
         notifyDirectoryChanged();
         remoteNotifyPeerChange();
         break;

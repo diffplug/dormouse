@@ -22,7 +22,8 @@ interface Responder {
 /** A platform whose `remoteHost` link stands in for the Host service. */
 class ServicePlatform {
   readonly responders = new Map<string, Responder>();
-  readonly notified: string[] = [];
+  /** How many crossings into the Host's process this webview has paid for. */
+  notified = 0;
   /** What `status` answers — the gate the notify sources arm on. */
   enrolled = true;
 
@@ -31,7 +32,9 @@ class ServicePlatform {
     respond: (op: string, handler: Responder) => {
       this.responders.set(op, handler);
     },
-    notify: (topic: string) => void this.notified.push(topic),
+    notify: () => {
+      this.notified += 1;
+    },
     on: () => () => {},
   };
 
@@ -138,7 +141,26 @@ describe('surface responder', () => {
     // entry is only visible to it if this webview says so.
     await armed();
     primeActivity('pty-1', { status: 'ALERT_RINGING' });
-    expect(platform.notified).toContain('directory');
+    await Promise.resolve();
+    expect(platform.notified).toBe(1);
+  });
+
+  it('coalesces a burst of changes into one crossing', async () => {
+    // A focus move alone is two events, and a pane-state change usually lands
+    // with an activity change. The Host re-collects the whole directory either
+    // way, so the burst is worth exactly one notify.
+    await armed();
+    primeActivity('pty-1', { status: 'ALERT_RINGING' });
+    primeActivity('pty-2', { status: 'ALERT_RINGING' });
+    expect(platform.notified).toBe(0);
+
+    await Promise.resolve();
+    expect(platform.notified).toBe(1);
+
+    // And the next burst is announced on its own.
+    primeActivity('pty-3', { status: 'ALERT_RINGING' });
+    await Promise.resolve();
+    expect(platform.notified).toBe(2);
   });
 
   it('announces nothing until there is a Host to hear it', async () => {
@@ -152,7 +174,8 @@ describe('surface responder', () => {
     await armed();
 
     primeActivity('pty-2', { status: 'ALERT_RINGING' });
-    expect(quiet.notified).toEqual([]);
+    await Promise.resolve();
+    expect(quiet.notified).toBe(0);
     // Answering still works: it costs nothing until the Host asks.
     registerSurface('surface-2', 'pty-2');
     expect(quiet.answer('directory', {})).toHaveLength(1);

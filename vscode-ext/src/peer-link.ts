@@ -845,7 +845,10 @@ export function isPeerBroker(): boolean {
  * to reach (`remote-host.ts`).
  */
 export function isPeerLinkSettled(): boolean {
-  return server !== null || client !== null || refused;
+  // A destroyed socket is not a role: `close` is a later tick, and until it
+  // lands and re-contends there is nothing to forward to — which is exactly
+  // what {@link forwardCommand} reports, so the two must agree.
+  return server !== null || (client !== null && !client.destroyed) || refused;
 }
 
 /**

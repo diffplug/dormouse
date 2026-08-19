@@ -447,8 +447,8 @@ describe('VSCodeAdapter remote host link', () => {
 
   it('notifies without waiting for anything', () => {
     const adapter = new VSCodeAdapter();
-    adapter.remoteHost.notify('directory');
-    expect(postMessage).toHaveBeenCalledWith({ type: 'peer:notify', topic: 'directory' });
+    adapter.remoteHost.notify();
+    expect(postMessage).toHaveBeenCalledWith({ type: 'peer:notify' });
   });
 
   it('rejects what is still in flight when the webview shuts down', async () => {

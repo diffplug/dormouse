@@ -31,8 +31,8 @@ export interface RemoteHostLinkTransport {
   sendCommand(cmd: RemoteHostCommand): void;
   /** Answer an outstanding ask. `askId` is the ask's own id, never a new one. */
   answerAsk(askId: string, results: unknown[]): void;
-  /** Announce that future answers for `topic` may differ. */
-  notify(topic: string): void;
+  /** Announce that future answers may differ. */
+  notify(): void;
 }
 
 export interface RemoteHostLinkClient {
@@ -69,9 +69,9 @@ export function answerAskCommand(askId: string, results: unknown[]): RemoteHostC
   return { rhId: `rh-tunnel-${++envelopeSeq}`, cmd: 'answer', params: { rhId: askId, results } };
 }
 
-/** {@link answerAskCommand}, for a notify. */
-export function notifyCommand(topic: string): RemoteHostCommand {
-  return { rhId: `rh-tunnel-${++envelopeSeq}`, cmd: 'notify', params: { topic } };
+/** {@link answerAskCommand}, for a notify — which carries nothing but its name. */
+export function notifyCommand(): RemoteHostCommand {
+  return { rhId: `rh-tunnel-${++envelopeSeq}`, cmd: 'notify' };
 }
 
 export function createRemoteHostLinkClient(
@@ -105,8 +105,8 @@ export function createRemoteHostLinkClient(
       responders.set(op, handler);
     },
 
-    notify(topic) {
-      transport.notify(topic);
+    notify() {
+      transport.notify();
     },
 
     on(name, listener) {

@@ -24,7 +24,6 @@ import {
   REMOTE_HOST_ASK_EVENT,
   isRemoteHostCommand,
   type AnswerParams,
-  type NotifyParams,
 } from './service-protocol';
 
 /** The slice of `pty-core`'s manager the Host drives. */
@@ -44,7 +43,7 @@ export interface SidecarSurfaceBridge {
   /** An `answer` command: settles the ask it names. */
   onAnswer(params: AnswerParams | undefined): void;
   /** A `notify` command: something the directory depends on changed. */
-  onNotify(params: NotifyParams | undefined): void;
+  onNotify(): void;
   /** A `pty-core` event, tapped before it goes to the webview. */
   onPtyEvent(event: string, data: unknown): void;
   dispose(): void;
@@ -134,8 +133,8 @@ export function createSidecarSurfaceBridge(
       asks.get(params.rhId)?.settle(Array.isArray(params.results) ? params.results : []);
     },
 
-    onNotify(params) {
-      notifyDirectoryChanged(params?.topic);
+    onNotify() {
+      notifyDirectoryChanged();
     },
 
     onPtyEvent(event, data) {
@@ -207,7 +206,7 @@ export function createSidecarRemoteHost(options: SidecarRemoteHostOptions): Side
       // Both of these feed something already waiting on this side, so they
       // answer nothing and never reach the service's dispatch.
       if (command.cmd === 'answer') return bridge.onAnswer(command.params as AnswerParams);
-      if (command.cmd === 'notify') return bridge.onNotify(command.params as NotifyParams);
+      if (command.cmd === 'notify') return bridge.onNotify();
       void service.handleCommand(command);
     },
     onPtyEvent: bridge.onPtyEvent,

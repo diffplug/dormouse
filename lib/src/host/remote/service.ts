@@ -27,6 +27,7 @@ import { RemoteApiSession } from '../../remote/host/remote-api';
 import { RemoteHost, type WebSocketLike } from '../../remote/host/remote-host';
 import { originAllowedByConnectSrc } from './connect-src';
 import type { HostStateStore } from './host-state-store';
+import { createSerialQueue } from './serial-queue';
 import {
   REMOTE_HOST_EVENT_EVENT,
   REMOTE_HOST_RESULT_EVENT,
@@ -78,7 +79,7 @@ export class RemoteHostService {
    * has a reference to and could not be stopped, and the two would displace each
    * other on the server forever.
    */
-  #lifecycle: Promise<unknown> = Promise.resolve();
+  readonly #serialize = createSerialQueue();
   /** Disposal is terminal: no in-flight store read may resurrect the Host. */
   #disposed = false;
   /**
@@ -96,21 +97,6 @@ export class RemoteHostService {
     this.#createWebSocket = options.createWebSocket;
     this.#fetch = options.fetch;
     this.#now = options.now ?? (() => Date.now());
-  }
-
-  /**
-   * Append `work` to the lifecycle chain and hand back its result.
-   *
-   * The chain continues through a failure — a refused enroll must not wedge
-   * every later command — so the tail swallows what the caller is still given.
-   */
-  #serialize<T>(work: () => Promise<T>): Promise<T> {
-    const result = this.#lifecycle.then(work, work);
-    this.#lifecycle = result.then(
-      () => {},
-      () => {},
-    );
-    return result;
   }
 
   /** Start from a persisted enrollment, if there is one this build may reach. */
@@ -270,7 +256,7 @@ export class RemoteHostService {
     // A store that keeps nothing across restarts (the dev harness) can run the
     // Host for this session but must not be treated as having taken custody of
     // it: the webview's copy is then the only one that survives.
-    const durable = this.#store.persistent !== false;
+    const durable = this.#store.persistent;
     let persisted = existing ? durable : false;
 
     if (!existing && isEnrollment(params.enrollment)) {

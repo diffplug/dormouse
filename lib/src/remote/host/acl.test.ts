@@ -36,7 +36,7 @@ describe('remote-host acl persistence', () => {
     expect(store.get(`${ACL_KEY_PREFIX}host-1`)).toBe(JSON.stringify(records));
     expect(loadAclRecords('host-1')).toEqual(records);
 
-    const acl = loadHostAcl('host-1');
+    const acl = loadHostAcl('host-1', loadAclRecords);
     const active = acl.activeRecords();
     expect(active).toHaveLength(1);
     expect(active[0]?.label).toBe('iPhone Safari');
@@ -48,14 +48,14 @@ describe('remote-host acl persistence', () => {
     saveAclRecords('host-1', makeRecord('host-1'));
     // A different host must not inherit host-1's ACL.
     expect(loadAclRecords('host-2')).toEqual([]);
-    expect(loadHostAcl('host-2').activeRecords()).toEqual([]);
+    expect(loadHostAcl('host-2', loadAclRecords).activeRecords()).toEqual([]);
   });
 
   it('returns an empty ACL for malformed storage', () => {
     const store = stubLocalStorage();
     store.set(`${ACL_KEY_PREFIX}host-1`, 'not json');
     expect(loadAclRecords('host-1')).toEqual([]);
-    expect(loadHostAcl('host-1').activeRecords()).toEqual([]);
+    expect(loadHostAcl('host-1', loadAclRecords).activeRecords()).toEqual([]);
   });
 
   it('treats a missing localStorage as an empty ACL', () => {

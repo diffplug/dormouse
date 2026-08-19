@@ -134,8 +134,11 @@ own panes. Nothing it says can widen access
 **State.** Rust creates the app-data directory and passes it as
 `DORMOUSE_STATE_DIR`; the sidecar keeps enrollment and ACL there as one
 `remote-host.json`, written 0600 into a 0700 directory via temp-then-rename.
-The in-memory view advances only after that rename succeeds, so a failed save
-cannot be mistaken for durable state by a later adoption. One file rather than
+Tightening a directory Rust already created is best-effort: where POSIX modes do
+not exist the file's own 0600 is the protection that matters, and failing the
+save over the directory would lose the Host instead. The in-memory view advances
+only after that rename succeeds, so a failed save cannot be mistaken for durable
+state by a later adoption. One file rather than
 one per value, so a write is one atomic rename and the
 enrollment can never end up describing a different Host than the records
 approved under it. `hostToken` is a bearer credential and never enters a webview
@@ -147,7 +150,9 @@ moment it was approved, since the ACL a Host authorizes against is the one it
 just wrote. Nothing survives the process, and it warns once. That store reports
 `persistent: false`, which is what an `adopt` answers back to the webview so the
 webview keeps its own copy of the Host rather than clearing the only one that
-outlives the run. The browser dev harness passes a per-run temp directory
+outlives the run. Every `HostStateStore` states that flag outright — a store
+that omitted it would read as durable and could cost the webview its only
+surviving copy. The browser dev harness passes a per-run temp directory
 instead, so a dev enrollment lives and dies with that run.
 
 **The bridge.** Webview → sidecar is one generic passthrough invoke,

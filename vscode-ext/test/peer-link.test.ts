@@ -7,11 +7,11 @@
  * the winner dies, PTY routing, and the token.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import { access, chmod, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { createConnection, createServer, type Server } from 'node:net';
+import { createConnection, createServer, Socket, type Server } from 'node:net';
 import { dirname, join } from 'node:path';
 import {
   FrameDecoder,
@@ -447,6 +447,32 @@ describe('bind-as-lease', () => {
     expect(peer.isPeerBroker()).toBe(true);
   });
 
+  it('is unsettled the instant its broker socket dies, before the close lands', async () => {
+    // `close` is a later tick. In between, this window has a socket it cannot
+    // write to and no contention running — so reporting a role would make
+    // `remote-host.ts` refuse a command it should have held for the re-bind.
+    const connected: Socket[] = [];
+    const connect = Socket.prototype.connect;
+    const spy = vi
+      .spyOn(Socket.prototype, 'connect')
+      .mockImplementation(function (this: Socket, ...args: Parameters<typeof connect>) {
+        connected.push(this);
+        return connect.apply(this, args);
+      });
+    let peer: LinkModule;
+    try {
+      ({ peer } = await linkedPair());
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(peer.isPeerLinkSettled()).toBe(true);
+    connected.at(-1)!.destroy();
+
+    expect(peer.forwardCommand({ rhId: 'rh-1', cmd: 'status' })).toBe(false);
+    expect(peer.isPeerLinkSettled()).toBe(false);
+  });
+
   it('does not send an old broker’s delayed answer to its replacement', async () => {
     const token = 'test-peer-token';
     await writeFile(join(dir, 'remote-host.peer-token'), token, { mode: 0o600 });
@@ -711,7 +737,7 @@ describe('peer handshake', () => {
     expect(JSON.stringify([challenge, welcome])).not.toContain(token);
 
     // And the socket is a working peer afterwards.
-    socket.write(encodeFrame({ kind: 'notify', topic: 'directory' }));
+    socket.write(encodeFrame({ kind: 'notify' }));
     socket.destroy();
   });
 

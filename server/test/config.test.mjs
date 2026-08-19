@@ -52,3 +52,41 @@ test('state and pocket dirs are overridable, with a cwd-independent pocket defau
   assert.match(config.pocketDir, /lib[/\\]dist-pocket$/);
   assert.equal(readConfig({ ...MINIMAL, DORMOUSE_POCKET_DIR: '/app/pocket' }).pocketDir, '/app/pocket');
 });
+
+test('no VAPID keys in the environment leaves them for the entrypoint to mint', () => {
+  assert.equal(readConfig({ ...MINIMAL }).vapidKeys, null);
+});
+
+test('a VAPID keypair is taken from the environment as a pair', () => {
+  const config = readConfig({
+    ...MINIMAL,
+    DORMOUSE_VAPID_PUBLIC_KEY: 'pub',
+    DORMOUSE_VAPID_PRIVATE_KEY: 'priv',
+  });
+  assert.deepEqual(config.vapidKeys, { publicKey: 'pub', privateKey: 'priv' });
+});
+
+test('half a VAPID keypair is a ConfigError, not a guessed default', () => {
+  // A mismatched pair stops every subscription working, silently.
+  assert.throws(() => readConfig({ ...MINIMAL, DORMOUSE_VAPID_PUBLIC_KEY: 'pub' }), ConfigError);
+  assert.throws(() => readConfig({ ...MINIMAL, DORMOUSE_VAPID_PRIVATE_KEY: 'priv' }), ConfigError);
+});
+
+test('DORMOUSE_VAPID_SUBJECT wins over the origin-derived default', () => {
+  const config = readConfig({
+    ...MINIMAL,
+    DORMOUSE_ORIGIN: 'https://dor.example.ts.net',
+    DORMOUSE_VAPID_SUBJECT: 'mailto:admin@example.com',
+  });
+  assert.equal(config.vapidSubject, 'mailto:admin@example.com');
+});
+
+test('the VAPID subject falls back to a routable origin, and to nothing on loopback', () => {
+  assert.equal(
+    readConfig({ ...MINIMAL, DORMOUSE_ORIGIN: 'https://dor.example.ts.net' }).vapidSubject,
+    'https://dor.example.ts.net',
+  );
+  // A loopback dev server: push is off rather than half-working, since Apple
+  // rejects such a JWT and every delivery would fail silently.
+  assert.equal(readConfig({ ...MINIMAL }).vapidSubject, null);
+});
