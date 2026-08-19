@@ -9,7 +9,7 @@
  */
 
 import { HostAcl, type HostAclRecord } from 'server-lib-common';
-import { loadJson, saveJson } from '../../lib/local-json-store';
+import { loadJson, removeJson, saveJson } from '../../lib/local-json-store';
 
 export const ACL_KEY_PREFIX = 'dormouse.remote-host.acl.';
 
@@ -30,6 +30,15 @@ export function loadAclRecords(hostId: string): HostAclRecord[] {
 
 export function saveAclRecords(hostId: string, records: readonly HostAclRecord[]): void {
   saveJson(aclKey(hostId), records);
+}
+
+/**
+ * Drop this browser's copy of a host's records. Used once, when a webview hands
+ * its persisted Host to a Node-resident service (`activation.ts` → adoption):
+ * the copy left behind would be a second, diverging ACL for the same hostId.
+ */
+export function clearAclRecords(hostId: string): void {
+  removeJson(aclKey(hostId));
 }
 
 /**

@@ -165,6 +165,38 @@ export interface PeerBridge {
   streamPty(ptyId: string): () => void;
 }
 
+/**
+ * The webview end of a Node-resident remote Host
+ * (`lib/src/host/remote/service-protocol.ts`).
+ *
+ * When the Host runs in the process that owns the PTYs, the webview stops being
+ * the Host and becomes its UI plus its surface responder: it forwards console
+ * commands, answers what its own panes are called and how big they are, and
+ * mirrors the pairing queue. `respond`/`notify` are deliberately the same shape
+ * as {@link PeerBridge}'s, so one responder implementation serves a webview that
+ * answers a sibling and a webview that answers the service.
+ *
+ * `cmd` and `op` are opaque here for the same reason they are on `PeerBridge`:
+ * *what* the service can be asked belongs to the remote Host, not the platform.
+ */
+export interface RemoteHostLink {
+  /** Run a service command and resolve its result, or reject with its error. */
+  command(cmd: string, params?: unknown): Promise<unknown>;
+
+  /** Answer `op` on behalf of this webview's own surfaces; no results = not mine. */
+  respond(op: string, handler: (params: unknown) => unknown[]): void;
+
+  /** Announce that future answers for `topic` may differ. */
+  notify(topic: string): void;
+
+  /**
+   * Subscribe to one of the service's pushed events by name (`pairing-queue`),
+   * receiving the event object the service sent — its `name` included. Returns
+   * the unsubscribe.
+   */
+  on(name: string, listener: (data: unknown) => void): () => void;
+}
+
 export interface PlatformAdapter {
   // Lifecycle
   init(): Promise<void>;
@@ -188,6 +220,14 @@ export interface PlatformAdapter {
    * role and have nobody to ask.
    */
   peers?: PeerBridge;
+
+  /**
+   * Reach the remote Host service behind this host. Present exactly when the
+   * Host runs outside the webview (standalone's sidecar), which is also exactly
+   * when this webview is a surface responder rather than the Host itself.
+   * Adapters that omit it host the Host in the webview (VS Code, the website).
+   */
+  remoteHost?: RemoteHostLink;
 
   // Shell detection
   getAvailableShells(): Promise<{ name: string; path: string; args?: string[] }[]>;

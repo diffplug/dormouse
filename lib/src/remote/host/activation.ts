@@ -1,12 +1,20 @@
 /**
- * Activation glue: starts a single {@link RemoteHost} from the persisted
- * enrollment on app start, and exposes a `window.dormouseRemoteHost` console
- * hook for enrolling in the POC (no settings UI needed).
+ * Activation glue: brings up the remote Host from the persisted enrollment on
+ * app start, and exposes a `window.dormouseRemoteHost` console hook for
+ * enrolling in the POC (no settings UI needed).
  *
- * This is the one module that binds the DOM-free controller and remote-api
- * session to the terminal bridge — the xterm registry, the platform adapter,
- * and `document` all enter through the surface provider built below — so only
- * the running app imports it, and everything it wires stays DOM-free.
+ * There are two worlds here, chosen by whether the platform adapter has a
+ * {@link RemoteHostLink}:
+ *
+ *   - **Bridge mode** (standalone): the Host is a service in the process that
+ *     owns the PTYs (`lib/src/host/remote/service.ts`). This module is then a
+ *     client of it — it forwards console commands, mirrors the pairing queue,
+ *     and reports rings — and starts no Host of its own.
+ *   - **Legacy mode** (VS Code, the website): the Host runs in this webview,
+ *     and this is the one module that binds the DOM-free controller and
+ *     remote-api session to the terminal bridge — the xterm registry, the
+ *     platform adapter, and `document` all enter through the surface provider
+ *     built below.
  *
  * Enroll from the devtools console:
  *
@@ -16,18 +24,39 @@
  *   window.dormouseRemoteHost.clearEnrollment()
  */
 
+import type {
+  PairingQueueEvent,
+  PairingQueueItem,
+  PushDevicesResult,
+  RemoteHostConsoleStatus,
+} from '../../host/remote/service-protocol';
 import { getPlatform } from '../../lib/platform';
+import type { RemoteHostLink } from '../../lib/platform/types';
 import { resetPushDevices, setPushDevicesRefresher } from '../../lib/push-devices';
 import { subscribeToActivity } from '../../lib/session-activity-store';
 import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
-import { refreshPushDevices, startAlertPush, type AlertPushDeps } from './alert-push';
+import { clearAclRecords, loadAclRecords } from './acl';
+import {
+  commitPushDevices,
+  refreshPushDevices,
+  startAlertPush,
+  watchPushRings,
+  type AlertPushDeps,
+} from './alert-push';
 import { collectDirectorySnapshot } from './directory-collect';
 import { clearEnrollment, enrollHost, getEnrollment, type HostEnrollment } from './enrollment';
 import type { HostSurfaceProvider } from './host-surface-provider';
+import {
+  enqueuePairingApproval,
+  getPairingApprovalSnapshot,
+  resolvePairingApproval,
+} from './pairing-approval';
 import { peerDirectory } from './peer-surfaces';
 import { RemoteApiSession } from './remote-api';
-import { RemoteHost, type RemoteHostStatus } from './remote-host';
+import { RemoteHost } from './remote-host';
 import { resolveSurface } from './surface-resolve';
+
+export type { RemoteHostConsoleStatus };
 
 let current: RemoteHost | null = null;
 let stopPush: (() => void) | null = null;
@@ -178,20 +207,6 @@ export function stopRemoteHost(): void {
   resetPushDevices();
 }
 
-export interface RemoteHostConsoleStatus {
-  enrolled: boolean;
-  serverUrl: string | null;
-  hostId: string | null;
-  /**
-   * The relay socket's state. `displaced` is the one that needs acting on:
-   * another Dormouse instance enrolled with the same `hostId` took the relay
-   * slot, so this one stood down and no timer will bring it back — `reconnect()`
-   * takes the slot back (and displaces the other one in turn).
-   */
-  connection: RemoteHostStatus;
-  pairedClients: number;
-}
-
 function remoteHostStatus(): RemoteHostConsoleStatus {
   const enrollment = getEnrollment();
   return {
@@ -205,6 +220,12 @@ function remoteHostStatus(): RemoteHostConsoleStatus {
 
 /** Install the `window.dormouseRemoteHost` console hook and activate. Idempotent. */
 export function installRemoteHostConsoleHook(): void {
+  const link = getPlatform().remoteHost;
+  if (link) {
+    installBridgeMode(link);
+    return;
+  }
+
   // A host that can show several webviews arbitrates which one is the Host —
   // having peers at all is exactly the condition that needs arbitrating, which
   // is why one member answers both. Start un-owned so two webviews racing to
@@ -250,4 +271,109 @@ export function installRemoteHostConsoleHook(): void {
       clearEnrollment();
     },
   };
+}
+
+// --- Bridge mode: the Host lives in another process ---
+
+let bridgeInstalled = false;
+
+/**
+ * Wire this webview to the Host service behind the adapter. No `RemoteHost`, no
+ * `RemoteApiSession`, no relay socket: those are the service's, and everything
+ * here is either UI or something only a webview knows.
+ *
+ * Idempotent — `RemotePairingModalHost` mounts twice under StrictMode.
+ */
+function installBridgeMode(link: RemoteHostLink): void {
+  if (bridgeInstalled) return;
+  bridgeInstalled = true;
+
+  // The service is authoritative about the queue, so a pushed snapshot replaces
+  // the mirror wholesale rather than merging into it. Subscribed before the
+  // adoption round trip so a pairing that arrives during it is not missed.
+  link.on('pairing-queue', (data) => {
+    mirrorPairingQueue(link, (data as PairingQueueEvent).queue);
+  });
+
+  void adoptWebviewHost(link).then(() => {
+    // Seed once: a webview that reloads mid-pairing has an empty mirror and no
+    // event coming, since the service only pushes on change.
+    void link
+      .command('pairingQueue')
+      .then((queue) => mirrorPairingQueue(link, (queue ?? []) as PairingQueueItem[]))
+      .catch(() => {});
+  });
+
+  // Rings are detected here — the activity store and the pane labels are
+  // webview state — and delivered there, where the ACL is.
+  watchPushRings((sessionId, title) => {
+    void link.command('push', { sessionId, title }).catch(() => {});
+  });
+
+  const refresh = (): void => {
+    void commitPushDevices(async () => {
+      const result = (await link.command('pushDevices')) as PushDevicesResult;
+      return result ? result.devices : null;
+    });
+  };
+  setPushDevicesRefresher(refresh);
+  refresh();
+
+  const target = globalThis as unknown as { dormouseRemoteHost?: unknown };
+  if (target.dormouseRemoteHost) return;
+  // Same method names and result shapes as the legacy hook (SELF_HOST.md), one
+  // round trip further away — so `status()` and `reconnect()` are promises here.
+  target.dormouseRemoteHost = {
+    enroll: (serverUrl: string, password: string, label: string) =>
+      link.command('enroll', { serverUrl, password, label }),
+    status: () => link.command('status'),
+    reconnect: () => link.command('reconnect'),
+    clearEnrollment: () => link.command('clearEnrollment'),
+  };
+}
+
+/**
+ * Hand a Host this webview persisted before the service existed over to it,
+ * once. The service keeps whichever enrollment it already has, so this can only
+ * add; either way the webview's copy is obsolete afterwards and is cleared —
+ * leaving it would be a second ACL for the same hostId, diverging from the
+ * moment the next device pairs.
+ */
+async function adoptWebviewHost(link: RemoteHostLink): Promise<void> {
+  const enrollment = getEnrollment();
+  if (!enrollment) return;
+  try {
+    await link.command('adopt', {
+      enrollment,
+      aclRecords: loadAclRecords(enrollment.hostId),
+    });
+  } catch (error) {
+    // Keep the local copy for the next launch rather than dropping a Host on
+    // the floor because one command failed.
+    console.warn('remote-host: could not hand the persisted Host to the service', error);
+    return;
+  }
+  clearEnrollment();
+  clearAclRecords(enrollment.hostId);
+}
+
+/** Project the service's queue onto the modal's store. */
+function mirrorPairingQueue(link: RemoteHostLink, queue: readonly PairingQueueItem[]): void {
+  const present = new Set(queue.map((item) => item.clientId));
+  for (const pending of getPairingApprovalSnapshot()) {
+    if (!present.has(pending.clientId)) resolvePairingApproval(pending.clientId);
+  }
+  const mirrored = new Set(getPairingApprovalSnapshot().map((pending) => pending.clientId));
+  for (const item of queue) {
+    // Re-enqueuing an unchanged request would reorder the queue and re-render
+    // the modal for nothing; the approve/deny closures only need the clientId.
+    if (mirrored.has(item.clientId)) continue;
+    enqueuePairingApproval({
+      clientId: item.clientId,
+      request: item.request,
+      requestedAt: item.requestedAt,
+      approve: (label) => void link.command('approve', { clientId: item.clientId, label }).catch(() => {}),
+      deny: () => void link.command('deny', { clientId: item.clientId }).catch(() => {}),
+    });
+  }
 }

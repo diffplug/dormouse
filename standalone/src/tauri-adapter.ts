@@ -14,7 +14,16 @@ import type {
   OpenPort,
   PlatformAdapter,
   PtyInfo,
+  RemoteHostLink,
 } from "dormouse-lib/lib/platform/types";
+import {
+  REMOTE_HOST_ASK_EVENT,
+  REMOTE_HOST_EVENT_EVENT,
+  REMOTE_HOST_RESULT_EVENT,
+  type RemoteHostAsk,
+  type RemoteHostCommand,
+  type RemoteHostResult,
+} from "dormouse-lib/host/remote/service-protocol";
 import { AlertManager } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
@@ -41,6 +50,13 @@ function invoke(cmd: string, args?: Record<string, unknown>): void {
 
 const errMessage = (err: unknown): string =>
   err instanceof Error ? err.message : String(err);
+
+/**
+ * How long a remote-host command may wait for the sidecar. Generous — `enroll`
+ * makes an HTTP round trip to the relay server — but finite, so a dead sidecar
+ * surfaces as a rejected promise instead of a hung console call.
+ */
+const REMOTE_HOST_COMMAND_TIMEOUT_MS = 15_000;
 
 /**
  * Platform adapter for the Tauri standalone app.
@@ -72,6 +88,20 @@ export class TauriAdapter implements PlatformAdapter {
   private flushHandlers = new Set<(detail: { requestId: string }) => void>();
   private pendingFlushRequests = new Map<string, () => void>();
   private nextFlushRequestId = 0;
+  // Remote-host bridge state (docs/specs/server.md; the contract is
+  // lib/src/host/remote/service-protocol.ts). Correlation is `rhId`, never
+  // `requestId` — Rust swallows any sidecar line carrying the latter.
+  private remoteHostPending = new Map<
+    string,
+    {
+      resolve: (value: unknown) => void;
+      reject: (error: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
+  private remoteHostResponders = new Map<string, (params: unknown) => unknown[]>();
+  private remoteHostListeners = new Map<string, Set<(data: unknown) => void>>();
+  private nextRemoteHostId = 0;
 
   constructor() {
     // Wire alert manager state changes to handlers
@@ -147,6 +177,26 @@ export class TauriAdapter implements PlatformAdapter {
     );
 
     this.unlistenFns.push(
+      await listen<RemoteHostResult>(REMOTE_HOST_RESULT_EVENT, (event) => {
+        this.settleRemoteHostCommand(event.payload);
+      }),
+    );
+
+    this.unlistenFns.push(
+      await listen<RemoteHostAsk>(REMOTE_HOST_ASK_EVENT, (event) => {
+        this.answerRemoteHostAsk(event.payload);
+      }),
+    );
+
+    this.unlistenFns.push(
+      await listen<{ name?: string }>(REMOTE_HOST_EVENT_EVENT, (event) => {
+        const name = event.payload?.name;
+        if (typeof name !== "string") return;
+        for (const listener of this.remoteHostListeners.get(name) ?? []) listener(event.payload);
+      }),
+    );
+
+    this.unlistenFns.push(
       await listen<DorControlRequestPayload>("dor:controlRequest", (event) => {
         const payload = event.payload;
         const respond = (response: DorControlResult) => {
@@ -197,6 +247,12 @@ export class TauriAdapter implements PlatformAdapter {
       unlisten();
     }
     this.unlistenFns = [];
+    // Nothing will answer these once the sidecar is gone.
+    for (const pending of this.remoteHostPending.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("remote host bridge closed"));
+    }
+    this.remoteHostPending.clear();
     invoke("kill_sidecar_now");
   }
 
@@ -441,6 +497,83 @@ export class TauriAdapter implements PlatformAdapter {
       timeoutMs,
       "[tauri-adapter] drainSessionSaves timed out; proceeding with quit",
     );
+  }
+
+  // --- Remote host bridge (docs/specs/remote-api.md) ---
+  //
+  // The Host lives in the sidecar, next to the PTYs. This webview forwards its
+  // console commands, answers what only it knows (pane names, xterm sizes), and
+  // mirrors the pairing queue.
+
+  readonly remoteHost: RemoteHostLink = {
+    command: (cmd, params) => this.remoteHostCommand(cmd, params),
+    respond: (op, handler) => {
+      this.remoteHostResponders.set(op, handler);
+    },
+    notify: (topic) => {
+      this.sendRemoteHostCommand({ rhId: this.nextRhId(), cmd: "notify", params: { topic } });
+    },
+    on: (name, listener) => {
+      let listeners = this.remoteHostListeners.get(name);
+      if (!listeners) {
+        listeners = new Set();
+        this.remoteHostListeners.set(name, listeners);
+      }
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+
+  private nextRhId(): string {
+    return `rh-${++this.nextRemoteHostId}`;
+  }
+
+  private sendRemoteHostCommand(command: RemoteHostCommand): void {
+    rawInvoke("remote_host_command", { payload: command }).catch((err) =>
+      console.error("[tauri-adapter] remote_host_command failed:", err),
+    );
+  }
+
+  private remoteHostCommand(cmd: string, params?: unknown): Promise<unknown> {
+    const rhId = this.nextRhId();
+    return new Promise<unknown>((resolve, reject) => {
+      // Bounded: a sidecar that died mid-command must reject rather than leave
+      // the console hook (or the device dialog) waiting forever.
+      const timer = setTimeout(() => {
+        this.remoteHostPending.delete(rhId);
+        reject(new Error(`remote host command timed out: ${cmd}`));
+      }, REMOTE_HOST_COMMAND_TIMEOUT_MS);
+      this.remoteHostPending.set(rhId, { resolve, reject, timer });
+      this.sendRemoteHostCommand({ rhId, cmd, params });
+    });
+  }
+
+  private settleRemoteHostCommand(result: RemoteHostResult): void {
+    const pending = this.remoteHostPending.get(result?.rhId);
+    if (!pending) return;
+    this.remoteHostPending.delete(result.rhId);
+    clearTimeout(pending.timer);
+    if (typeof result.error === "string") pending.reject(new Error(result.error));
+    else pending.resolve(result.result);
+  }
+
+  private answerRemoteHostAsk(ask: RemoteHostAsk): void {
+    const handler = this.remoteHostResponders.get(ask?.op);
+    let results: unknown[] = [];
+    try {
+      results = handler ? handler(ask.params) : [];
+    } catch (err) {
+      console.error(`[tauri-adapter] remote host ask ${ask?.op} failed:`, err);
+    }
+    // Always answer, even with nothing: the service holds the ask open for its
+    // whole budget otherwise, and an attach waits on it.
+    this.sendRemoteHostCommand({
+      rhId: this.nextRhId(),
+      cmd: "answer",
+      params: { rhId: ask.rhId, results },
+    });
   }
 
   // --- Alert management (local AlertManager) ---

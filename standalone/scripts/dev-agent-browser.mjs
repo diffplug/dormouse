@@ -28,6 +28,9 @@ const controlSocket = process.platform === 'win32'
   ? `\\\\.\\pipe\\dormouse-${process.pid}-browser-dor`
   : path.join(os.tmpdir(), `dormouse-${process.pid}-browser-dor.sock`);
 const controlToken = Math.random().toString(36).slice(2);
+// The remote Host persists its enrollment + ACL here, under the harness's own
+// temp dir so a dev run never touches the installed app's state.
+const stateDir = path.join(os.tmpdir(), `dormouse-${process.pid}-browser-state`);
 
 const pending = new Map();
 const sseClients = new Set();
@@ -84,6 +87,9 @@ const fireAndForget = {
   pty_kill: ({ id }) => writeSidecar('pty:kill', { id }),
   pty_request_init: () => writeSidecar('pty:requestInit'),
   dor_control_response: ({ response }) => writeSidecar('dor:controlResponse', response),
+  // The remote Host's whole bridge rides one passthrough, exactly as it does
+  // through Rust (`remote_host_command` in src-tauri/src/lib.rs).
+  remote_host_command: ({ payload }) => writeSidecar('remoteHost:command', payload),
   kill_sidecar_now: () => shutdown(),
 };
 
@@ -197,10 +203,12 @@ function startSidecar() {
       DORMOUSE_CLI_JS: dorEntrypoint,
       DORMOUSE_CONTROL_SOCKET: controlSocket,
       DORMOUSE_CONTROL_TOKEN: controlToken,
+      DORMOUSE_STATE_DIR: stateDir,
     },
   });
   log(`sidecar pid=${sidecar.pid}`);
   log(`dor control socket: ${controlSocket}`);
+  log(`remote host state dir: ${stateDir}`);
 
   createInterface({ input: sidecar.stdout }).on('line', (line) => {
     let msg;

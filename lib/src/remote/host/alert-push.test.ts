@@ -5,7 +5,10 @@ vi.mock('../../lib/platform', () => ({
 }));
 
 import type { HostAclRecord } from 'server-lib-common';
-import { refreshPushDevices, startAlertPush, toPushText } from './alert-push';
+import { refreshPushDevices, startAlertPush } from './alert-push';
+// Delivery — the Server calls, the recipient rule, the title bounds — is shared
+// with the Node-resident Host, so it lives beside neither webview nor sidecar.
+import { toPushText } from './push-delivery';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from '../../lib/alert-settings';
 import { getPushDevices, resetPushDevices } from '../../lib/push-devices';
 import { clearPrimedActivity, primeActivity } from '../../lib/session-activity-store';

@@ -58,11 +58,16 @@ function saveEnrollment(enrollment: HostEnrollment): void {
 }
 
 /**
- * `POST /api/host/enroll` with the setup password, persist the returned
- * credentials, and hand the enrollment back. Throws with the server's status
- * text on failure so the caller (console hook / settings UI) can surface it.
+ * `POST /api/host/enroll` with the setup password and map the response to an
+ * enrollment. Throws with the server's status text on failure so the caller
+ * (console hook / settings UI) can surface it.
+ *
+ * Persists nothing: where the credentials live differs by Host — `localStorage`
+ * for the webview-resident one below, a 0600 file for the Node-resident service
+ * (`lib/src/host/remote/host-state-store.ts`) — while the exchange itself is one
+ * exchange, and a second copy of it could drift from the Server's contract.
  */
-export async function enrollHost(
+export async function performEnrollment(
   serverUrl: string,
   password: string,
   label: string,
@@ -78,13 +83,22 @@ export async function enrollHost(
     throw new Error(`host enroll failed (${response.status})${detail ? `: ${detail}` : ''}`);
   }
   const body = (await response.json()) as HostEnrollResponse;
-  const enrollment: HostEnrollment = {
+  return {
     serverUrl: base,
     hostId: body.hostId,
     hostToken: body.hostToken,
     origin: body.origin,
     rpId: body.rpId,
   };
+}
+
+/** {@link performEnrollment}, persisted to the webview's own store. */
+export async function enrollHost(
+  serverUrl: string,
+  password: string,
+  label: string,
+): Promise<HostEnrollment> {
+  const enrollment = await performEnrollment(serverUrl, password, label);
   saveEnrollment(enrollment);
   return enrollment;
 }

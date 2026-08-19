@@ -23,6 +23,7 @@
 
 import { clampTerminalDimension, type DirectoryEntry } from 'server-lib-common';
 import { getPlatform } from '../../lib/platform';
+import type { PeerBridge } from '../../lib/platform/types';
 import { subscribeToActivity } from '../../lib/session-activity-store';
 import { registry } from '../../lib/terminal-store';
 import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
@@ -72,12 +73,25 @@ async function askPeers<K extends keyof PeerOps>(
   return (await peers.request(op, params)) as PeerOps[K]['result'][];
 }
 
-/** Answer `op` for this webview's own surfaces. No-op where there are no peers. */
+/**
+ * Whoever this webview answers to: the Node-resident Host service when one sits
+ * behind the adapter, otherwise its sibling webviews. The two are the same
+ * question asked from different processes — "what do you own, and drive it" —
+ * so they share this responder rather than each getting its own copy of the
+ * registry logic. Only the *asking* side differs, and that stays peers-only
+ * ({@link askPeers}): a webview never asks the service anything.
+ */
+function responderBridge(): Pick<PeerBridge, 'respond' | 'notify'> | undefined {
+  const platform = getPlatform();
+  return platform.remoteHost ?? platform.peers;
+}
+
+/** Answer `op` for this webview's own surfaces. No-op where nobody can ask. */
 function answerPeers<K extends keyof PeerOps>(
   op: K,
   handler: (params: PeerOps[K]['params']) => PeerOps[K]['result'][],
 ): void {
-  getPlatform().peers?.respond(op, (params) => handler(params as PeerOps[K]['params']));
+  responderBridge()?.respond(op, (params) => handler(params as PeerOps[K]['params']));
 }
 
 /** Directory entries contributed by every other webview and window. */
@@ -120,16 +134,17 @@ function driveOwnSurface({ surfaceId, op, cols, rows }: PeerSurfaceParams): Peer
 }
 
 /**
- * Make this webview's terminals reachable from whichever webview is the Host.
- * Idempotent, and a no-op on hosts with no peers (standalone, the website).
+ * Make this webview's terminals reachable from whoever is the Host — a sibling
+ * webview, or the service in the process that owns the PTYs. Idempotent, and a
+ * no-op on hosts that have neither (the website).
  */
 export function installPeerSurfaceResponder(): void {
   answerPeers('directory', () => collectDirectorySnapshot());
   answerPeers('surfaceOp', driveOwnSurface);
 
-  const peers = getPlatform().peers;
-  if (!peers) return;
-  const notifyDirectory = () => peers.notify('directory');
+  const bridge = responderBridge();
+  if (!bridge) return;
+  const notifyDirectory = () => bridge.notify('directory');
   subscribeToTerminalPaneState(notifyDirectory);
   subscribeToActivity(notifyDirectory);
   if (typeof document !== 'undefined') {

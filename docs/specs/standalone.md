@@ -443,11 +443,12 @@ root `package.json` for the `dev:standalone*` orchestration.
 - `stage` = `stage:dor-cli` (build + stage the dor CLI, `docs/specs/dor-cli.md`)
   plus `stage:sidecar-proxy` (`build-sidecar-proxy.mjs` bundles the
   `lib/src/host/` sources into the sidecar `.cjs` files).
-- The `tauri` script runs `standalone/scripts/tauri.mjs`, which rewrites the
-  webview CSP via `standalone/scripts/csp.mjs` when the
-  `DORMOUSE_REMOTE_CONNECT_SRC` build-time override for self-host relay
-  origins is set (`docs/specs/server.md`, Host webview CSP), then delegates
-  to the Tauri CLI.
+- The `tauri` script stages, then runs `standalone/scripts/tauri.mjs`, which
+  delegates to the Tauri CLI. The `DORMOUSE_REMOTE_CONNECT_SRC` build-time
+  override for self-host relay origins is baked into the sidecar's remote-host
+  bundle by `build-sidecar-proxy.mjs` — the Host runs in the sidecar, so the
+  webview CSP has no relay sources at all (`docs/specs/server.md`, Host webview
+  CSP).
 - The Tauri bundle ships the whole sidecar via the `../sidecar/**/*` resources
   glob — including node-pty's prebuilds + bundled ConPTY and the
   shell-integration scripts (`docs/specs/terminal-escapes.md`).
