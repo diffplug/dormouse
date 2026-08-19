@@ -52,9 +52,18 @@ export function AlertSpeechIndicator({ sessionId }: { sessionId: string }) {
         className={clsx(
           layer,
           'z-[19]',
-          speaking ? 'bg-alarm-vs-terminal/20' : 'bg-alarm-vs-terminal/10',
         )}
       >
+        <div
+          data-alert-speech-wash
+          aria-hidden
+          className={clsx(
+            'absolute inset-0 bg-alarm-vs-terminal',
+            TERMINAL_TOP_RADIUS_CLASS,
+            TERMINAL_BOTTOM_RADIUS_CLASS,
+            speaking ? 'opacity-20' : 'opacity-10',
+          )}
+        />
         <div
           className={clsx(
             'absolute left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded',
