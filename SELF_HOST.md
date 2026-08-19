@@ -58,23 +58,18 @@ known:
   the native service manager with the user rather than translating LaunchAgent
   commands blindly.
 - **A Host build that can reach a `*.ts.net` origin.** The shipped standalone
-  binary pins its webview `connect-src` to the SaaS origin, so a self-host relay
-  needs a local build:
+  and VS Code Hosts bake in the SaaS-only relay allowlist, so a self-host relay
+  needs a local build of whichever Host the user runs:
 
   ```sh
   DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:standalone
+  DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:vscode
   ```
 
-  `standalone/scripts/tauri.mjs` reads that variable and overrides the
-  checked-in CSP for that build only.
-
-  The Host must be the standalone app. Remote hosting is standalone-only today:
-  `enableRemoteHost` is passed just by `standalone/src/main.tsx`, so the shared
-  webview entrypoint `lib/src/main.tsx` — the one the VS Code extension renders
-  — never loads the relay, enrollment, or pairing modules at all. That, not the
-  webview CSP in `vscode-ext/src/webview-html.ts`, is why `pnpm dogfood:vscode`
-  cannot produce a Host for a self-host relay. Do not offer the user a CSP
-  override as a fix; supporting a VS Code Host is a feature, not a build flag.
+  `standalone/scripts/build-sidecar-proxy.mjs` and
+  `vscode-ext/scripts/esbuild.mjs` bake that variable into their respective
+  Node Host bundles. The relay socket no longer lives in either webview, so
+  changing a webview CSP does not widen this allowlist.
 
 ## Architecture
 
@@ -101,6 +96,8 @@ https://<laptop>.<tailnet>.ts.net
 ~/Library/Application Support/Dormouse Server/state
   account.json
   hosts.json
+  push-subscriptions.json
+  vapid.json
 ```
 
 The LaunchAgent starts after the user logs in and restarts the process if it
@@ -116,8 +113,9 @@ local Dormouse Host to control.
 - An update is a short intentional restart. Existing Host and Pocket WebSockets
   disconnect and reconnect; do not attempt a zero-downtime swap for this
   protocol.
-- Persist both `account.json` and `hosts.json` outside the installed release.
-  Code replacement must never replace state.
+- Persist the entire state directory outside the installed release, including
+  `account.json`, `hosts.json`, `push-subscriptions.json`, and the generated
+  `vapid.json`. Code replacement must never replace state.
 - Bind the server only to loopback. Do not make plain HTTP port 3100 reachable
   from the LAN or the tailnet. Tailscale terminates HTTPS.
 - Port 3100 is deliberately not 3000: `pnpm dev:server` and
@@ -136,7 +134,7 @@ local Dormouse Host to control.
   and is unreachable when that device leaves the tailnet.
 - The Pocket app is served at the same HTTPS origin.
 - Port 3100 is bound only to `127.0.0.1`.
-- `account.json` and `hosts.json` survive replacement of the running release.
+- Every persistent state file survives replacement of the running release.
 - One installer invocation builds and installs the exact current checkout.
 - The LaunchAgent is loaded, starts at login, and restarts the server after an
   intentional process kill.
@@ -235,6 +233,8 @@ and install only into the current user's home directory:
   state/
     account.json
     hosts.json
+    push-subscriptions.json
+    vapid.json
 
 ~/Library/LaunchAgents/sh.dormouse.server.plist
 ~/Library/Logs/Dormouse Server/
@@ -388,11 +388,13 @@ laptop only if the user approves the interruption; otherwise explain that
 was skipped. After a real login/reboot, verify both the process and background
 Serve mapping return without rerunning the installer.
 
-Complete Pocket passkey setup and Host enrollment using a standalone build
-whose `DORMOUSE_REMOTE_CONNECT_SRC` includes `https://*.ts.net wss://*.ts.net`.
-After `account.json` and `hosts.json` exist:
+Complete Pocket passkey setup and Host enrollment using a standalone or VS Code
+build whose `DORMOUSE_REMOTE_CONNECT_SRC` includes
+`https://*.ts.net wss://*.ts.net`. After `account.json`, `hosts.json`, and
+`vapid.json` exist (and `push-subscriptions.json` too if push was enabled):
 
-1. Record ownership and checksums without printing contents.
+1. Record ownership and checksums of every present state file without printing
+   contents.
 2. Rerun the same installer from the same or a newer checkout.
 3. Confirm the release changed as expected and state/checksums survived.
 4. Exercise the retained-release rollback and return to the desired release.
@@ -440,7 +442,7 @@ Do not print the setup password or any credential in the handoff.
 
 - Dormouse runtime and state contract: `docs/specs/server.md`
 - Dormouse trust model: `docs/specs/remote-security-model.md`
-- Standalone CSP override: `docs/specs/standalone.md`
+- Host installations: `docs/specs/standalone.md`, `docs/specs/vscode.md`
 - [Install Tailscale on macOS](https://tailscale.com/docs/install/mac)
 - [Tailscale variants on macOS](https://tailscale.com/docs/concepts/macos-variants)
 - [Manage scripts with launchd](https://support.apple.com/guide/terminal/script-management-with-launchd-apdc6c1077b/mac)
@@ -467,8 +469,8 @@ Do not print the setup password or any credential in the handoff.
 - **Pocket loads but passkey setup fails:** compare the browser URL byte-for-byte
   with normalized `DORMOUSE_ORIGIN`; confirm HTTPS and the chosen node/Service
   hostname.
-- **Host cannot connect while Pocket can:** the standalone Host likely lacks the
-  `*.ts.net` `connect-src` custom build setting.
+- **Host cannot connect while Pocket can:** that Host build likely lacks the
+  `*.ts.net` `DORMOUSE_REMOTE_CONNECT_SRC` setting.
 - **State disappears:** verify the absolute Application Support state path and
   the installed config. Do not initialize a new account until old state has been
   located or restored.
@@ -514,6 +516,8 @@ ephemeral tag:dormouse-ci node --Tailscale SSH--> tag:dormouse-server Droplet
 /var/lib/dormouse on the Droplet
   account.json
   hosts.json
+  push-subscriptions.json
+  vapid.json
 ```
 
 ### Definition of done
@@ -997,10 +1001,12 @@ Check specifically that:
 - Host port 3000 listens only on `127.0.0.1`.
 - There is exactly one server container.
 
-Complete initial Pocket setup, then enroll a custom self-host standalone build.
-After `account.json` and `hosts.json` exist:
+Complete initial Pocket setup, then enroll a custom self-host standalone or VS
+Code build. After `account.json`, `hosts.json`, and `vapid.json` exist (and
+`push-subscriptions.json` too if push was enabled):
 
-1. Record their ownership and checksums without printing their contents.
+1. Record ownership and checksums of every present state file without printing
+   contents.
 2. Manually dispatch the deployment workflow or restart/replace the container.
 3. Verify the files and registered passkey/Host survive.
 4. Establish a real Host and Pocket WebSocket session through the Service.
