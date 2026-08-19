@@ -113,71 +113,19 @@ export interface AgentBrowserPopResult {
 }
 
 /**
- * Coordination between the several webviews one host backend can show
- * (docs/specs/vscode.md → "Peer surfaces").
- *
- * The remote Host runs in exactly one webview, but a window's terminals are
- * spread across all of them and each webview has its own xterm registry. The
- * Host therefore cannot list or drive a sibling's pane directly; the host
- * process brokers, and this is the webview end of that.
- *
- * Arbitrating a single-holder role and asking a sibling a question are two
- * facets of one precondition — being able to show more than one webview over
- * one backend — so they sit behind one optional member rather than two. A host
- * either has peers to elect among and ask, or it has neither: standalone and
- * the website are one webview per app, so they omit this and callers treat
- * themselves as the only instance.
- *
- * `op` is deliberately opaque here. *What* a peer can be asked is a property of
- * the remote Host, not of the platform, so the operation map and its real types
- * live in `lib/src/remote/host/peer-surfaces.ts`; this layer, the extension-host
- * broker, and the cross-window link only carry the bytes.
- */
-export interface PeerBridge {
-  /**
-   * Claim a named role that at most one webview may hold, and be told whenever
-   * the claim is granted or revoked. The host arbitrates, because it is the
-   * only party that sees every webview and outlives each one.
-   */
-  claimSingleton(name: string, onChange: (held: boolean) => void): void;
-
-  /**
-   * Put `op` to every peer and collect what they answer. Each peer contributes
-   * zero or more results, so an empty array means nobody owned what was asked
-   * about — there is no separate miss signal.
-   */
-  request(op: string, params: unknown): Promise<unknown[]>;
-
-  /** Answer `op` on behalf of this webview's own surfaces; no results = not mine. */
-  respond(op: string, handler: (params: unknown) => unknown[]): void;
-
-  /** Announce that future answers for `topic` may differ. */
-  notify(topic: string): void;
-
-  /** Re-run a peer-backed subscription after another webview announces `topic`. */
-  subscribe(topic: string, listener: () => void): () => void;
-
-  /**
-   * Start receiving `pty:data` / `pty:exit` for a PTY this webview does not
-   * own, and return the unsubscribe. A subscription, not a pair of calls, so
-   * the caller cannot leak one by forgetting the id it used.
-   */
-  streamPty(ptyId: string): () => void;
-}
-
-/**
  * The webview end of a Node-resident remote Host
  * (`lib/src/host/remote/service-protocol.ts`).
  *
- * When the Host runs in the process that owns the PTYs, the webview stops being
- * the Host and becomes its UI plus its surface responder: it forwards console
- * commands, answers what its own panes are called and how big they are, and
- * mirrors the pairing queue. `respond`/`notify` are deliberately the same shape
- * as {@link PeerBridge}'s, so one responder implementation serves a webview that
- * answers a sibling and a webview that answers the service.
+ * The Host runs in the process that owns the PTYs — the Tauri sidecar, the VS
+ * Code extension host — so the webview is its UI plus its surface responder: it
+ * forwards console commands, answers what its own panes are called and how big
+ * they are, and mirrors the pairing queue. Nothing a webview answers can widen
+ * access (docs/specs/remote-security-model.md).
  *
- * `cmd` and `op` are opaque here for the same reason they are on `PeerBridge`:
- * *what* the service can be asked belongs to the remote Host, not the platform.
+ * `cmd` and `op` are deliberately opaque here. *What* the service can be asked
+ * belongs to the remote Host, not to the platform, so the operation map and its
+ * real types live in `lib/src/remote/host/peer-surfaces.ts`; this layer and the
+ * transports under it only carry the bytes.
  */
 export interface RemoteHostLink {
   /** Run a service command and resolve its result, or reject with its error. */
@@ -203,29 +151,10 @@ export interface PlatformAdapter {
   shutdown(): void;
 
   /**
-   * Make every key under `prefix` readable synchronously from a host-owned
-   * store instead of `localStorage`, then keep it written through. Optional:
-   * only hosts whose real storage lives outside the webview implement it (VS
-   * Code, where the extension host holds `SecretStorage`). Callers must await
-   * it before any module reads those keys, because `local-json-store` is
-   * synchronous by contract. Adapters that omit it leave `localStorage` in
-   * charge, which is correct for standalone and the website.
-   */
-  hydrateScopedStore?(prefix: string): Promise<void>;
-
-  /**
-   * Elect among, and reach surfaces owned by, sibling webviews. Optional: only
-   * a host that can show several webviews over one backend has peers at all
-   * (VS Code). Adapters that omit it are single-instance, so callers hold every
-   * role and have nobody to ask.
-   */
-  peers?: PeerBridge;
-
-  /**
-   * Reach the remote Host service behind this host. Present exactly when the
-   * Host runs outside the webview (standalone's sidecar), which is also exactly
-   * when this webview is a surface responder rather than the Host itself.
-   * Adapters that omit it host the Host in the webview (VS Code, the website).
+   * Reach the remote Host service behind this host. Present exactly when a
+   * process behind the webview owns the PTYs and can run the Host (standalone's
+   * sidecar, VS Code's extension host). Adapters that omit it have no Host
+   * anywhere — the website — so the remote modules stay inert.
    */
   remoteHost?: RemoteHostLink;
 

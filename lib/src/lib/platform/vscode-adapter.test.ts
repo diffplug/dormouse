@@ -29,7 +29,6 @@ import {
 } from '../terminal-protocol';
 import { HOST_MESSAGE_TOKEN_FIELD, HOST_MESSAGE_TOKEN_GLOBAL } from '../vscode-message-token';
 import { VSCodeAdapter } from './vscode-adapter';
-import { loadJson, saveJson, setJsonStoreBackend } from '../local-json-store';
 
 /** Stand-in for the per-boot token the extension host injects at webview boot. */
 const HOST_TOKEN = 'test-host-message-token';
@@ -383,149 +382,152 @@ describe('VSCodeAdapter PTY exit handling', () => {
 });
 
 
-describe('VSCodeAdapter host store', () => {
-  const PREFIX = 'dormouse.remote-host.';
-  const KEY = `${PREFIX}acl.host-1`;
-
+// The remote Host lives in the extension host, in whichever VS Code window won
+// the bind (vscode-ext/src/remote-host.ts). This is the webview's end of that
+// bridge; the contract is lib/src/host/remote/service-protocol.ts.
+describe('VSCodeAdapter remote host link', () => {
   beforeEach(stubWebviewEnv);
 
   afterEach(() => {
-    setJsonStoreBackend(PREFIX, null);
     vi.unstubAllGlobals();
     vi.clearAllMocks();
   });
 
-  /** Answer the `store:read` the adapter just posted, as the host would. */
-  function answerRead(entries: Record<string, string>): void {
-    const request = postMessage.mock.calls.map((call) => call[0]).find((m) => m.type === 'store:read');
-    expect(request).toBeTruthy();
-    windowTarget.dispatchEvent(
-      hostMessage({ type: 'store:entries', requestId: request.requestId, entries }),
-    );
+  /** Every `remoteHost:command` this adapter has posted, in order. */
+  function sent(): Array<{ rhId: string; cmd: string; params?: unknown }> {
+    return postMessage.mock.calls
+      .map((call) => call[0])
+      .filter((message) => message.type === 'remoteHost:command')
+      .map((message) => message.payload);
   }
 
-  async function hydrated(entries: Record<string, string>) {
-    const adapter = new VSCodeAdapter();
-    const done = adapter.hydrateScopedStore(PREFIX);
-    answerRead(entries);
-    await done;
-    return adapter;
+  function deliver(data: Record<string, unknown>): void {
+    windowTarget.dispatchEvent(hostMessage(data));
   }
 
-  it('serves reads from the hydrated snapshot', async () => {
-    await hydrated({ [KEY]: JSON.stringify([{ id: 'a' }]) });
-    expect(loadJson<unknown[]>(KEY, [])).toEqual([{ id: 'a' }]);
+  it('resolves a command by its rhId', async () => {
+    const adapter = new VSCodeAdapter();
+    const pending = adapter.remoteHost.command('status');
+
+    const payload = sent()[0]!;
+    expect(payload.cmd).toBe('status');
+    // A result for someone else's rhId must not resolve this one.
+    deliver({ type: 'remoteHost:result', payload: { rhId: 'other', result: { enrolled: false } } });
+    deliver({ type: 'remoteHost:result', payload: { rhId: payload.rhId, result: { enrolled: true } } });
+
+    expect(await pending).toEqual({ enrolled: true });
   });
 
-  it('writes through to the host', async () => {
-    await hydrated({});
-    saveJson(KEY, [{ id: 'b' }]);
-    expect(postMessage).toHaveBeenCalledWith({
-      type: 'store:write',
-      key: KEY,
-      value: JSON.stringify([{ id: 'b' }]),
+  it('mints rhIds no sibling webview can collide with', () => {
+    // Results are broadcast to every webview in the window, so two adapters
+    // counting from 1 would settle each other's commands.
+    const a = new VSCodeAdapter();
+    const b = new VSCodeAdapter();
+    void a.remoteHost.command('status');
+    void b.remoteHost.command('status');
+
+    const ids = sent().map((payload) => payload.rhId);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it('rejects with the error the service reported', async () => {
+    const adapter = new VSCodeAdapter();
+    const pending = adapter.remoteHost.command('enroll', { serverUrl: 'https://nope' });
+    deliver({
+      type: 'remoteHost:result',
+      payload: { rhId: sent()[0]!.rhId, error: 'the remote Host runs in another VS Code window' },
     });
+    await expect(pending).rejects.toThrow('another VS Code window');
   });
 
-  it("applies another webview's committed write, so a later lease grant is not stale", async () => {
-    await hydrated({ [KEY]: JSON.stringify([{ id: 'a' }]) });
-
-    // The webview holding the lease approves a pairing; the host broadcasts it.
-    windowTarget.dispatchEvent(
-      hostMessage({ type: 'store:changed', key: KEY, value: JSON.stringify([{ id: 'a' }, { id: 'b' }]) }),
-    );
-
-    // Without this the next holder would start from the boot snapshot and write
-    // it back, dropping the pairing permanently.
-    expect(loadJson<unknown[]>(KEY, [])).toEqual([{ id: 'a' }, { id: 'b' }]);
-  });
-
-  it('applies a broadcast deletion', async () => {
-    await hydrated({ [KEY]: JSON.stringify([{ id: 'a' }]) });
-
-    windowTarget.dispatchEvent(hostMessage({ type: 'store:changed', key: KEY, value: null }));
-
-    expect(loadJson<unknown[], null>(KEY, null)).toBeNull();
-  });
-
-  it('replaces stale cached keys from a lease-handoff snapshot', async () => {
-    const enrollmentKey = `${PREFIX}enrollment`;
-    await hydrated({
-      [KEY]: JSON.stringify([{ id: 'old' }]),
-      [enrollmentKey]: JSON.stringify({ hostId: 'host-1' }),
-    });
-
-    windowTarget.dispatchEvent(hostMessage({
-      type: 'store:snapshot',
-      prefix: PREFIX,
-      entries: { [KEY]: JSON.stringify([{ id: 'new' }]) },
-    }));
-
-    expect(loadJson<unknown[]>(KEY, [])).toEqual([{ id: 'new' }]);
-    expect(loadJson<unknown, null>(enrollmentKey, null)).toBeNull();
-  });
-
-  it('uses a lease-handoff snapshot that arrives during hydration', async () => {
+  it('rejects when the extension host never answers', async () => {
     const adapter = new VSCodeAdapter();
-    const done = adapter.hydrateScopedStore(PREFIX);
-
-    windowTarget.dispatchEvent(hostMessage({
-      type: 'store:snapshot',
-      prefix: PREFIX,
-      entries: { [KEY]: JSON.stringify([{ id: 'fresh' }]) },
-    }));
-    answerRead({ [KEY]: JSON.stringify([{ id: 'stale' }]) });
-    await done;
-
-    expect(loadJson<unknown[]>(KEY, [])).toEqual([{ id: 'fresh' }]);
-  });
-
-  it('ignores an unauthenticated broadcast', async () => {
-    await hydrated({ [KEY]: JSON.stringify([{ id: 'a' }]) });
-
-    windowTarget.dispatchEvent(
-      hostMessage({ type: 'store:changed', key: KEY, value: JSON.stringify([]) }, 'wrong-token'),
-    );
-
-    expect(loadJson<unknown[]>(KEY, [])).toEqual([{ id: 'a' }]);
-  });
-
-  it('keeps a write committed while the read is still in flight', async () => {
-    const adapter = new VSCodeAdapter();
-    const done = adapter.hydrateScopedStore(PREFIX);
-
-    // The host snapshots globalState before it waits on the keychain, so the
-    // holder can commit a pairing that the in-flight snapshot cannot contain.
-    windowTarget.dispatchEvent(
-      hostMessage({ type: 'store:changed', key: KEY, value: JSON.stringify([{ id: 'a' }, { id: 'b' }]) }),
-    );
-    answerRead({ [KEY]: JSON.stringify([{ id: 'a' }]) });
-    await done;
-
-    expect(loadJson<unknown[]>(KEY, [])).toEqual([{ id: 'a' }, { id: 'b' }]);
-  });
-
-  it('keeps a deletion committed while the read is still in flight', async () => {
-    const adapter = new VSCodeAdapter();
-    const done = adapter.hydrateScopedStore(PREFIX);
-
-    windowTarget.dispatchEvent(hostMessage({ type: 'store:changed', key: KEY, value: null }));
-    answerRead({ [KEY]: JSON.stringify([{ id: 'a' }]) });
-    await done;
-
-    expect(loadJson<unknown[], null>(KEY, null)).toBeNull();
-  });
-
-  it('installs an empty cache when the host never answers', async () => {
     vi.useFakeTimers();
     try {
-      const adapter = new VSCodeAdapter();
-      const done = adapter.hydrateScopedStore(PREFIX);
-      await vi.advanceTimersByTimeAsync(10_000);
-      await done;
+      const pending = adapter.remoteHost.command('status');
+      const rejected = expect(pending).rejects.toThrow(/timed out/);
+      await vi.advanceTimersByTimeAsync(20_000);
+      await rejected;
+      // The late answer finds nothing to settle.
+      expect(() =>
+        deliver({ type: 'remoteHost:result', payload: { rhId: sent()[0]!.rhId, result: {} } }),
+      ).not.toThrow();
     } finally {
       vi.useRealTimers();
     }
-    expect(loadJson<unknown[], null>(KEY, null)).toBeNull();
+  });
+
+  it('answers an ask from the registered responder', () => {
+    const adapter = new VSCodeAdapter();
+    adapter.remoteHost.respond('surfaceOp', (params) => [
+      { ptyId: 'pty-1', ...(params as Record<string, unknown>) },
+    ]);
+
+    deliver({ type: 'peer:ask', requestId: 'ask-1', op: 'surfaceOp', params: { surfaceId: 's1' } });
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'peer:answer',
+      requestId: 'ask-1',
+      results: [{ ptyId: 'pty-1', surfaceId: 's1' }],
+    });
+  });
+
+  it('answers with nothing rather than leaving an ask open', () => {
+    const adapter = new VSCodeAdapter();
+    // Nobody responds to this op, and a handler that throws is the same case:
+    // the broker would otherwise hold the fan-out for its whole budget.
+    deliver({ type: 'peer:ask', requestId: 'ask-1', op: 'directory', params: {} });
+    adapter.remoteHost.respond('directory', () => {
+      throw new Error('registry blew up');
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    deliver({ type: 'peer:ask', requestId: 'ask-2', op: 'directory', params: {} });
+
+    const answers = postMessage.mock.calls
+      .map((call) => call[0])
+      .filter((message) => message.type === 'peer:answer');
+    expect(answers).toEqual([
+      { type: 'peer:answer', requestId: 'ask-1', results: [] },
+      { type: 'peer:answer', requestId: 'ask-2', results: [] },
+    ]);
+  });
+
+  it('fans events out by name, and stops after unsubscribe', () => {
+    const adapter = new VSCodeAdapter();
+    const seen: unknown[] = [];
+    const unsubscribe = adapter.remoteHost.on('pairing-queue', (data) => void seen.push(data));
+
+    deliver({ type: 'remoteHost:event', payload: { name: 'pairing-queue', queue: [{ clientId: 'c1' }] } });
+    deliver({ type: 'remoteHost:event', payload: { name: 'something-else', queue: [] } });
+    expect(seen).toEqual([{ name: 'pairing-queue', queue: [{ clientId: 'c1' }] }]);
+
+    unsubscribe();
+    deliver({ type: 'remoteHost:event', payload: { name: 'pairing-queue', queue: [] } });
+    expect(seen).toHaveLength(1);
+  });
+
+  it('notifies without waiting for anything', () => {
+    const adapter = new VSCodeAdapter();
+    adapter.remoteHost.notify('directory');
+    expect(postMessage).toHaveBeenCalledWith({ type: 'peer:notify', topic: 'directory' });
+  });
+
+  it('ignores an unauthenticated result, so framed content cannot settle a command', async () => {
+    const adapter = new VSCodeAdapter();
+    vi.useFakeTimers();
+    try {
+      const pending = adapter.remoteHost.command('status');
+      const rejected = expect(pending).rejects.toThrow(/timed out/);
+      windowTarget.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'remoteHost:result', payload: { rhId: sent()[0]!.rhId, result: 'forged' } },
+        }),
+      );
+      await vi.advanceTimersByTimeAsync(20_000);
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

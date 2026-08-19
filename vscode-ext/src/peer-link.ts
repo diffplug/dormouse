@@ -1,29 +1,30 @@
 /**
- * Peer surfaces across VS Code windows (docs/specs/vscode.md → "Peer surfaces
- * across windows").
+ * Which VS Code window runs the remote Host, and how the others reach it
+ * (docs/specs/vscode.md → "Peer surfaces across windows").
  *
- * Within a window the extension host sees every webview, so brokering is a
- * function call (`brokerRequest`). Across windows there is no shared process at
- * all — one extension host each — so the window holding the Host lease listens
- * on a local socket and every other window connects to it. Because the webview
- * lease is itself gated on the window lease, the broker window is always the
- * Host window; the broker never has to relay back out to a remote Host, which
- * keeps this one-directional.
+ * One extension host runs per window, so left to themselves every window would
+ * start a Host against the same enrollment, all of them would connect
+ * `/ws/host`, and the server's displacement would turn into an endless
+ * reconnect fight. Arbitration is therefore **bind-as-lease**: the socket every
+ * window would connect to *is* the lease. Its path is fixed — derived from the
+ * extension's storage location — so the window that binds it first is the
+ * broker and everyone else connects to it as a client.
  *
- * Roles follow the lease: acquire it and you become the server, lose it and you
- * become a client. The frame shapes, framing, and PTY routing table are in
- * `lib/src/lib/vscode-peer-link-protocol.ts`, which is where the fiddly parts
- * are tested.
+ * Roles never flip downward while a process lives. A broker stays the broker
+ * until it exits, which is what makes the whole class of mid-transition races a
+ * lease with a TTL had (start serving, lose the lease, tear down, win it back
+ * while tearing down) unrepresentable here. A client only ever changes role
+ * upward, when the broker dies and its socket closes: every client then races
+ * to bind, and exactly one wins because `bind` is the arbiter.
  *
- * Trust: the socket is a user-owned unix socket (or named pipe) whose path is
- * published only in a mode-0600 rendezvous file, and a client must open with a
- * token read from that file. That is the same bar as the `dor` control socket.
+ * Trust: the socket is a user-owned unix socket (or named pipe) and a client
+ * must open with a token from a mode-0600 file in the extension's
+ * `globalStorageUri` — the same bar as the `dor` control socket.
  */
 
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { type FSWatcher } from 'node:fs';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -40,7 +41,6 @@ import {
   type PeerLinkResponse,
 } from '../../lib/src/lib/vscode-peer-link-protocol';
 import { log } from './log';
-import { watchDirFile } from './watch-dir-file';
 
 /**
  * What this module needs from the router, injected rather than imported: the
@@ -50,9 +50,8 @@ import { watchDirFile } from './watch-dir-file';
 export interface PeerLinkDeps {
   /** Fan out to this window's own webviews — never to other windows. */
   brokerRequest(op: string, params: unknown): Promise<unknown[]>;
-  deliverRemotePtyData(ptyId: string, data: string): void;
-  deliverRemotePtyExit(ptyId: string, exitCode: number): void;
-  deliverRemotePeerChange(topic: string | null): void;
+  /** A peer window's answers may have changed, so the directory is stale. */
+  invalidateDirectory(): void;
   onProcessedPtyData(listener: (id: string, data: string) => void): () => void;
   onProcessedPtyExit(listener: (id: string, exitCode: number) => void): () => void;
   writePty(ptyId: string, data: string): void;
@@ -65,7 +64,10 @@ export function configurePeerLink(next: PeerLinkDeps): void {
   deps = next;
 }
 
-const RENDEZVOUS_FILE = 'remote-host.peer.json';
+const TOKEN_FILE = 'remote-host.peer-token';
+
+/** Floor between contention attempts, so a refused hello cannot become a spin. */
+const RETRY_MS = 1_000;
 
 /**
  * Constant-time token compare, mirroring `tokenMatches` in
@@ -81,34 +83,59 @@ function tokenMatches(provided: unknown, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-/** Backoff for a client whose broker went away before a new one took the lease. */
-const RECONNECT_MS = 2_000;
-
-interface Rendezvous {
-  socketPath: string;
-  token: string;
-}
-
 let context: vscode.ExtensionContext | null = null;
 
 export function initPeerLink(ctx: vscode.ExtensionContext): void {
   context = ctx;
 }
 
-function rendezvousPath(): string | null {
-  return context ? join(context.globalStorageUri.fsPath, RENDEZVOUS_FILE) : null;
+function tokenPath(): string | null {
+  return context ? join(context.globalStorageUri.fsPath, TOKEN_FILE) : null;
 }
 
 /**
- * Sockets live in the temp dir, not next to the rendezvous file: macOS caps a
- * unix socket path near 104 bytes and the extension's globalStorage path is
- * most of that on its own.
+ * The one path every window of this installation contends for.
+ *
+ * Hashed rather than joined: macOS caps a unix socket path near 104 bytes and
+ * the extension's globalStorage path is most of that on its own. Derived from
+ * that path rather than random precisely because it must be *the same* in every
+ * window — the bind is the arbitration.
  */
-function newSocketPath(): string {
-  const id = randomBytes(6).toString('hex');
+function socketPath(): string | null {
+  if (!context) return null;
+  const id = createHash('sha256')
+    .update(context.globalStorageUri.fsPath)
+    .digest('hex')
+    .slice(0, 12);
   return process.platform === 'win32'
     ? `\\\\.\\pipe\\dormouse-peer-${id}`
     : join(tmpdir(), `dormouse-peer-${id}.sock`);
+}
+
+/**
+ * The shared secret, created once per installation and reused forever. Written
+ * with an exclusive create rather than a rename, so two windows starting
+ * together end up agreeing: the loser reads the winner's token instead of
+ * overwriting it under a client that already read the old one.
+ */
+async function ensureToken(): Promise<string> {
+  const path = tokenPath();
+  if (!path) throw new Error('peer link has no storage location');
+  try {
+    return (await readFile(path, 'utf8')).trim();
+  } catch {
+    // Missing (the common first run) — fall through and create it.
+  }
+  await mkdir(join(path, '..'), { recursive: true }).catch(() => {});
+  const token = randomUUID();
+  try {
+    // 0600: the token is the only thing between another local process and this
+    // installation's terminals, so it is never briefly world-readable.
+    await writeFile(path, token, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    return token;
+  } catch {
+    return (await readFile(path, 'utf8')).trim();
+  }
 }
 
 // ---------------------------------------------------------------- server side
@@ -119,13 +146,18 @@ interface PeerClient {
   authenticated: boolean;
 }
 
-/** The role the lease last asked for; an in-flight transition re-reads it. */
-let brokerRole = false;
+/** Where bytes from another window's PTY go, once something asks for them. */
+export interface RemotePtySink {
+  onData(data: string): void;
+  onExit(exitCode: number): void;
+}
+
 let server: Server | null = null;
 /** Claimed and cleared with `server`; the two always move together. */
-let rendezvous: Rendezvous | null = null;
+let serverToken: string | null = null;
 const clients = new Set<PeerClient>();
 const routes = new Map<string, PeerClient>();
+const remoteSinks = new Map<string, RemotePtySink>();
 const pendingRequests = new Map<string, (frame: PeerLinkResponse) => void>();
 let nextRequestId = 0;
 
@@ -167,6 +199,9 @@ function authenticatedClients(): PeerClient[] {
  * {@link routedPtyId}: an answer that names a PTY is how this window learns
  * where that PTY lives, and every later write, resize, and subscribe depends on
  * knowing.
+ *
+ * Nothing calls this yet — the broker serves only its own window's surfaces
+ * until phase 3b wires the second tier into the service's provider.
  */
 export async function remoteRequest(op: string, params: unknown): Promise<unknown[]> {
   const peers = authenticatedClients();
@@ -194,12 +229,15 @@ export function isRemotePty(ptyId: string): boolean {
   return routes.get(ptyId) !== undefined;
 }
 
-export function remoteSubscribe(ptyId: string): void {
+export function remoteSubscribe(ptyId: string, sink: RemotePtySink): void {
   const client = routes.get(ptyId);
-  if (client) send(client, { kind: 'subscribe', id: `r${++nextRequestId}`, ptyId });
+  if (!client) return;
+  remoteSinks.set(ptyId, sink);
+  send(client, { kind: 'subscribe', id: `r${++nextRequestId}`, ptyId });
 }
 
 export function remoteUnsubscribe(ptyId: string): void {
+  remoteSinks.delete(ptyId);
   const client = routes.get(ptyId);
   if (!client) return;
   send(client, { kind: 'unsubscribe', id: `r${++nextRequestId}`, ptyId });
@@ -224,8 +262,11 @@ function dropClient(client: PeerClient): void {
   const wasAuthenticated = clients.delete(client) && client.authenticated;
   // A window that went away takes its terminals with it; a later write must not
   // be routed into a dead socket.
-  for (const ptyId of forgetPeerRoutes(routes, client)) deps?.deliverRemotePtyExit(ptyId, 0);
-  if (wasAuthenticated) deps?.deliverRemotePeerChange(null);
+  for (const ptyId of forgetPeerRoutes(routes, client)) {
+    remoteSinks.get(ptyId)?.onExit(0);
+    remoteSinks.delete(ptyId);
+  }
+  if (wasAuthenticated) deps?.invalidateDirectory();
   client.socket.destroy();
 }
 
@@ -236,7 +277,7 @@ function onServerFrame(client: PeerClient, frame: unknown): void {
   if (!client.authenticated) {
     // First frame must be the hello; anything else is not a peer of ours.
     const hello = message as Partial<PeerLinkHello>;
-    if (hello.kind !== 'hello' || !rendezvous || !tokenMatches(hello.token, rendezvous.token)) {
+    if (hello.kind !== 'hello' || !serverToken || !tokenMatches(hello.token, serverToken)) {
       log.error('[peer-link] rejected a client with a bad hello');
       dropClient(client);
       return;
@@ -244,34 +285,35 @@ function onServerFrame(client: PeerClient, frame: unknown): void {
     client.authenticated = true;
     // Joining changes the answer set even if no surface changed while the
     // socket was down, so every peer-backed snapshot must be reconsidered.
-    deps?.deliverRemotePeerChange(null);
+    deps?.invalidateDirectory();
     return;
   }
 
   const response = message as PeerLinkResponse;
   if (response.kind === 'data') {
-    deps?.deliverRemotePtyData(response.ptyId, response.data);
+    remoteSinks.get(response.ptyId)?.onData(response.data);
     return;
   }
   if (response.kind === 'exit') {
     routes.delete(response.ptyId);
-    deps?.deliverRemotePtyExit(response.ptyId, response.exitCode);
+    remoteSinks.get(response.ptyId)?.onExit(response.exitCode);
+    remoteSinks.delete(response.ptyId);
     return;
   }
   if (response.kind === 'notify') {
-    deps?.deliverRemotePeerChange(response.topic);
+    deps?.invalidateDirectory();
     return;
   }
   if ('id' in response) pendingRequests.get(response.id)?.(response);
 }
 
 /** Turn Server.listen's event-based bind failure into a rejecting promise. */
-export function listenServer(nextServer: Server, socketPath: string): Promise<void> {
+export function listenServer(nextServer: Server, path: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const onError = (error: Error) => reject(error);
     nextServer.once('error', onError);
     try {
-      nextServer.listen(socketPath, () => {
+      nextServer.listen(path, () => {
         nextServer.off('error', onError);
         resolve();
       });
@@ -282,18 +324,8 @@ export function listenServer(nextServer: Server, socketPath: string): Promise<vo
   });
 }
 
-/** Close one server and unlink its socket. Touches no module state. */
-async function closeServer(target: Server, socketPath: string): Promise<void> {
-  if (target.listening) target.close();
-  await rm(socketPath, { force: true }).catch(() => {});
-}
-
-async function startServer(): Promise<void> {
-  const path = rendezvousPath();
-  if (!path || server) return;
-
-  const next: Rendezvous = { socketPath: newSocketPath(), token: randomUUID() };
-  const temp = `${path}.${randomUUID()}.tmp`;
+/** Take the socket path, or report that somebody else holds it. */
+async function tryBind(path: string, token: string): Promise<boolean> {
   const nextServer = createServer((socket) => {
     const client: PeerClient = { socket, decoder: new FrameDecoder(), authenticated: false };
     clients.add(client);
@@ -304,76 +336,23 @@ async function startServer(): Promise<void> {
     socket.on('error', () => dropClient(client));
     socket.on('close', () => dropClient(client));
   });
-  // Claimed in the same tick as the guard above, which is what makes
-  // `server === nextServer` a complete staleness test: nothing can slip in
-  // between. Everything below awaits, and the lease can flip back to client
-  // inside any of those gaps.
-  server = nextServer;
-  rendezvous = next;
-
-  /**
-   * Give back what this attempt claimed, leaving whoever holds the role now
-   * alone — `stopServer` would unlink a newer broker's socket and rendezvous
-   * along with this one. Anyone who connected in the meantime is left to the
-   * socket's own 'close' handler.
-   */
-  const abandon = async (): Promise<void> => {
-    await closeServer(nextServer, next.socketPath);
-    await rm(temp, { force: true }).catch(() => {});
-  };
-
   try {
-    // The bind fails hard if anything owns this path. Nothing should — it is
-    // six fresh random bytes — and clearing it first is one fs call on a path
-    // taken once per lease acquisition.
-    await rm(next.socketPath, { force: true }).catch(() => {});
-    if (server !== nextServer) {
-      await abandon();
-      return;
-    }
-    await listenServer(nextServer, next.socketPath);
-    await mkdir(join(path, '..'), { recursive: true }).catch(() => {});
-    // The token is the only thing standing between another local process and
-    // this window's terminals, so it is never briefly world-readable: written
-    // 0600 to a temp file and renamed into place, which also means a reader
-    // never sees a half-written rendezvous and falls into the retry backoff.
-    await writeFile(temp, JSON.stringify(next), { encoding: 'utf8', mode: 0o600 });
-    // Stopped while we were publishing: the socket named in there is already
-    // unlinked, so renaming it into place would leave every peer dialing a
-    // dead path until some later broker rewrote the file.
-    if (server !== nextServer) {
-      await abandon();
-      return;
-    }
-    await rename(temp, path);
-    log.info('[peer-link] serving peers');
-  } catch (err) {
-    // Started fire-and-forget from the lease callback, so a rejection here
-    // would surface as an unhandled one rather than as a broken link. An
-    // unwritable globalStorage means no peers, not a crashed extension host.
-    log.error(`[peer-link] could not start serving: ${String(err)}`);
-    await abandon();
-    if (server === nextServer) await stopServer();
+    await listenServer(nextServer, path);
+  } catch {
+    // Callback form deliberately: closing a server that never listened emits an
+    // `'error'` nobody is listening for, which an EventEmitter rethrows and
+    // would take the extension host down over a lost race.
+    nextServer.close(() => {});
+    return false;
   }
-}
-
-async function stopServer(): Promise<void> {
-  const closing = server;
-  if (!closing) return;
-  const path = rendezvousPath();
-  const socketPath = rendezvous?.socketPath;
-  for (const client of [...clients]) dropClient(client);
-  server = null;
-  rendezvous = null;
-  if (socketPath) await closeServer(closing, socketPath);
-  if (path) await rm(path, { force: true }).catch(() => {});
+  server = nextServer;
+  serverToken = token;
+  return true;
 }
 
 // ---------------------------------------------------------------- client side
 
 let client: Socket | null = null;
-let clientRetry: ReturnType<typeof setTimeout> | null = null;
-let rendezvousWatcher: FSWatcher | null = null;
 const pendingNotifications = new Set<string | null>();
 /** PTYs this window is streaming to the broker, and how to stop. */
 const forwarding = new Map<string, () => void>();
@@ -383,7 +362,7 @@ function respond(frame: PeerLinkResponse): void {
 }
 
 export function remoteNotifyPeerChange(topic: string | null): void {
-  // The broker is the destination; its in-window routers were notified directly.
+  // The broker is the destination; its own window was notified directly.
   if (server) return;
   if (!client || client.destroyed) {
     pendingNotifications.add(topic);
@@ -439,129 +418,212 @@ function stopForwarding(): void {
   forwarding.clear();
 }
 
-async function readRendezvous(): Promise<Rendezvous | null> {
-  const path = rendezvousPath();
-  if (!path) return null;
-  try {
-    const parsed: unknown = JSON.parse(await readFile(path, 'utf8'));
-    const value = parsed as Rendezvous;
-    return typeof value?.socketPath === 'string' && typeof value?.token === 'string'
-      ? value
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-async function connectClient(): Promise<void> {
-  if (client || server) return;
-  const rendezvous = await readRendezvous();
-  if (!rendezvous) {
-    scheduleReconnect();
-    return;
-  }
-
-  const socket = createConnection({ path: rendezvous.socketPath });
-  const decoder = new FrameDecoder();
-  socket.setEncoding('utf8');
-  socket.on('connect', () => {
-    socket.write(encodeFrame({ kind: 'hello', token: rendezvous.token }));
-    for (const topic of pendingNotifications) socket.write(encodeFrame({ kind: 'notify', topic }));
-    pendingNotifications.clear();
-    log.info('[peer-link] connected to the broker window');
+/**
+ * Connect to whoever holds the socket. `'refused'` means the path exists but
+ * nothing is listening on it — a broker that died without unlinking — which is
+ * the caller's cue to clear it and bind.
+ */
+function tryConnect(path: string, token: string): Promise<'connected' | 'refused' | 'failed'> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ path });
+    const decoder = new FrameDecoder();
+    socket.setEncoding('utf8');
+    socket.once('error', (error: NodeJS.ErrnoException) => {
+      socket.destroy();
+      resolve(error.code === 'ECONNREFUSED' || error.code === 'ENOENT' ? 'refused' : 'failed');
+    });
+    socket.once('connect', () => {
+      socket.removeAllListeners('error');
+      socket.write(encodeFrame({ kind: 'hello', token }));
+      for (const topic of pendingNotifications) socket.write(encodeFrame({ kind: 'notify', topic }));
+      pendingNotifications.clear();
+      socket.on('data', (chunk: string) => {
+        for (const frame of decoder.push(chunk)) void onClientFrame(frame);
+      });
+      const drop = () => {
+        if (client !== socket) return;
+        client = null;
+        stopForwarding();
+        // The broker is gone. Every client races for the bind; one wins.
+        if (!disposed) void contend();
+      };
+      socket.on('error', drop);
+      socket.on('close', drop);
+      client = socket;
+      log.info('[peer-link] connected to the broker window');
+      resolve('connected');
+    });
   });
-  socket.on('data', (chunk: string) => {
-    for (const frame of decoder.push(chunk)) void onClientFrame(frame);
-  });
-  const drop = () => {
-    if (client !== socket) return;
-    client = null;
-    stopForwarding();
-    scheduleReconnect();
-  };
-  socket.on('error', drop);
-  socket.on('close', drop);
-  client = socket;
-}
-
-function scheduleReconnect(): void {
-  if (clientRetry || server) return;
-  clientRetry = setTimeout(() => {
-    clientRetry = null;
-    void connectClient();
-  }, RECONNECT_MS);
 }
 
 function disconnectClient(): void {
-  if (clientRetry) {
-    clearTimeout(clientRetry);
-    clientRetry = null;
-  }
   stopForwarding();
   client?.destroy();
   client = null;
 }
 
-// ---------------------------------------------------------------- role switch
+// ------------------------------------------------------------ the contend loop
+
+let disposed = false;
+let contending = false;
+let nextAttemptAt = 0;
+let announceRole: ((broker: boolean) => void) | null = null;
+let settledOnce: Promise<void> | null = null;
+let markSettled: (() => void) | null = null;
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Follow the window lease: the holder serves, everyone else connects to it.
- * Called on every lease change, and idempotent for an unchanged role.
+ * Join the contention for the Host, reporting `true` exactly once if this
+ * window wins it. Idempotent; the returned promise resolves as soon as a role
+ * is settled, so a caller that must know whether to route locally can wait.
  *
- * Either direction takes several awaits to settle and another flip can land
- * inside them, so each branch re-checks the role it is transitioning into
- * rather than assuming it still holds: `brokerRole` on the client side, and
- * `server === nextServer` on the broker side, which additionally tells a later
- * startup that already claimed the slot from this one.
+ * There is deliberately no `onRole(false)` after a `true`: a broker is the
+ * broker for the rest of the process's life.
  */
-export function setPeerLinkRole(isBroker: boolean): void {
-  brokerRole = isBroker;
-  if (isBroker) {
-    disconnectClient();
-    stopWatchingRendezvous();
-    void startServer();
-    return;
+export function ensurePeerNet(onRole: (broker: boolean) => void): Promise<void> {
+  announceRole = onRole;
+  if (server) {
+    onRole(true);
+    return Promise.resolve();
   }
-  void (async () => {
-    await stopServer();
-    // Flipped back to broker while that was tearing down: a broker must not
-    // watch the rendezvous, or it wakes itself on its own writes.
-    if (brokerRole) return;
-    watchRendezvous();
-    await connectClient();
-  })();
+  // No storage location means no socket to contend for, and no amount of
+  // retrying would produce one.
+  if (!context || disposed) return Promise.resolve();
+  settledOnce ??= new Promise<void>((resolve) => {
+    markSettled = resolve;
+  });
+  void contend();
+  return settledOnce;
+}
+
+/** Whether this window holds the Host. */
+export function isPeerBroker(): boolean {
+  return server !== null;
+}
+
+function settle(broker: boolean): void {
+  if (broker) announceRole?.(true);
+  markSettled?.();
+  markSettled = null;
 }
 
 /**
- * Watch the rendezvous rather than only retrying: a new broker publishes a
- * fresh socket path, and polling alone would make every handover wait out the
- * backoff. Only a client needs it — a broker watching would wake on its own
- * writes.
+ * One round of arbitration: bind, or connect to whoever bound, or clear the
+ * corpse a dead broker left behind and bind. Returns whether a role was
+ * settled — anything else is transient (an unwritable storage dir, a broker
+ * mid-startup) and the loop retries.
  */
-function watchRendezvous(): void {
-  if (rendezvousWatcher || !context) return;
-  const watcher = watchDirFile(
-    context.globalStorageUri.fsPath,
-    RENDEZVOUS_FILE,
-    () => {
-      disconnectClient();
-      void connectClient();
-    },
-    (error) => {
-      log.error(`[peer-link] rendezvous watcher failed; the timer converges: ${String(error)}`);
-      if (rendezvousWatcher === watcher) rendezvousWatcher = null;
-    },
-  );
-  rendezvousWatcher = watcher;
+async function attempt(): Promise<boolean> {
+  const path = socketPath();
+  if (!path) return false;
+  const token = await ensureToken();
+
+  if (await tryBind(path, token)) {
+    // Disposal can land inside any of the awaits above; a socket bound after it
+    // would outlive the window that owns it.
+    if (disposed) {
+      await closeServer(true);
+      return true;
+    }
+    log.info('[peer-link] serving peers');
+    settle(true);
+    return true;
+  }
+
+  const outcome = await tryConnect(path, token);
+  if (outcome === 'connected') {
+    // Same as the bind above: a connection opened after disposal has nobody
+    // left to close it.
+    if (disposed) disconnectClient();
+    else settle(false);
+    return true;
+  }
+  if (outcome === 'refused') {
+    // The path exists but nothing answers: a broker that died without running
+    // its disposables. Unlinking is safe because a live broker would have
+    // accepted the connection above.
+    await rm(path, { force: true }).catch(() => {});
+    if (await tryBind(path, token)) {
+      if (disposed) {
+        await closeServer(true);
+        return true;
+      }
+      if (await stillOurs(path)) {
+        log.info('[peer-link] took over a socket its broker left behind');
+        settle(true);
+        return true;
+      }
+      // Another window cleared the same corpse and bound after us, so the path
+      // now names its socket and ours is unreachable. Stand down rather than
+      // run a second Host: `bind` is only the arbiter when nobody unlinks.
+      await closeServer(false);
+    }
+  }
+  return false;
 }
 
-function stopWatchingRendezvous(): void {
-  rendezvousWatcher?.close();
-  rendezvousWatcher = null;
+/** How long to let a competing reclaim land before believing we won it. */
+const RECLAIM_VERIFY_MS = 250;
+
+/**
+ * Whether the socket path still names the inode we just bound.
+ *
+ * Two windows can find the same corpse and both unlink it, and the second bind
+ * silently displaces the first — the loser keeps serving an inode no client can
+ * reach. Nothing on the bind path detects that, so it is checked afterwards.
+ * Windows named pipes cannot get here (a pipe dies with its process) and do not
+ * stat, so an unreadable path is taken as ours.
+ */
+async function stillOurs(path: string): Promise<boolean> {
+  const mine = await stat(path).catch(() => null);
+  if (!mine) return true;
+  await delay(RECLAIM_VERIFY_MS);
+  const now = await stat(path).catch(() => null);
+  return !now || now.ino === mine.ino;
+}
+
+async function contend(): Promise<void> {
+  if (contending || disposed) return;
+  contending = true;
+  try {
+    while (!disposed && !server && !client) {
+      const wait = nextAttemptAt - Date.now();
+      if (wait > 0) await delay(wait);
+      // Spaced rather than immediate on repeat: a broker that refuses this
+      // window's hello would otherwise turn reconnection into a spin.
+      nextAttemptAt = Date.now() + RETRY_MS;
+      try {
+        if (await attempt()) return;
+      } catch (err) {
+        // Started fire-and-forget, so a rejection here would surface as an
+        // unhandled one rather than as a link that keeps trying.
+        log.error(`[peer-link] contention attempt failed: ${String(err)}`);
+      }
+    }
+  } finally {
+    contending = false;
+  }
+}
+
+/**
+ * Give up this window's server. Unlink only when the path still names our
+ * socket: removing a winner's would strand every client dialing it.
+ */
+async function closeServer(unlink: boolean): Promise<void> {
+  const closing = server;
+  server = null;
+  serverToken = null;
+  for (const peer of [...clients]) dropClient(peer);
+  if (!closing) return;
+  if (closing.listening) closing.close();
+  if (!unlink) return;
+  const path = socketPath();
+  if (path) await rm(path, { force: true }).catch(() => {});
 }
 
 export async function disposePeerLink(): Promise<void> {
-  stopWatchingRendezvous();
+  disposed = true;
   disconnectClient();
-  await stopServer();
+  await closeServer(true);
 }

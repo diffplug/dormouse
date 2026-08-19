@@ -9,10 +9,10 @@
  * list. The Server calls themselves are in `push-delivery.ts`, which a
  * Node-resident Host runs without any of this.
  *
- * It lives under `remote/host/` rather than `lib/` because it needs the Host's
- * enrollment and ACL, and because that keeps it inside the lazily-imported
- * `RemotePairingModalHost` chunk — so the website and vscode webviews, which
- * never set `enableRemoteHost`, never fetch it.
+ * It lives under `remote/host/` rather than `lib/` because it is only meaningful
+ * with a Host behind it, and because that keeps it inside the lazily-imported
+ * `RemotePairingModalHost` chunk — so a host that never sets `enableRemoteHost`
+ * never fetches it.
  */
 
 import { getAlertSettings } from '../../lib/alert-settings';
@@ -24,26 +24,19 @@ import {
   type PushDevice,
   type PushDevicesState,
 } from '../../lib/push-devices';
-import { loadPushDevices, sendPush, type AlertPushDeps } from './push-delivery';
+import type { AlertPushDeps } from './push-delivery';
 
 export type { AlertPushDeps };
 
 let pushDevicesRefreshSequence = 0;
 
 /**
- * Refresh the push-device list the Alarm settings dialog reads. Failure is
- * reported as `error` rather than an empty list: "we could not ask" and "no
- * devices are subscribed" are different things to show a user.
- */
-export async function refreshPushDevices(deps: AlertPushDeps): Promise<void> {
-  await commitPushDevices(() => loadPushDevices(deps));
-}
-
-/**
  * Run `load` and publish its result to the dialog's store with the fences below.
- * Shared with the bridge-mode Host, which loads the same list over the service
- * bridge instead of fetching it itself — and answers `null` when no Host is
- * running, which is "nowhere to push", not an empty list.
+ * `load` goes over the service bridge (`activation.ts`), because the ACL the
+ * list is joined against is the Host's — and it answers `null` when no Host is
+ * running, which is "nowhere to push", not an empty list. Failure is reported
+ * as `error` rather than an empty list: "we could not ask" and "no devices are
+ * subscribed" are different things to show a user.
  */
 export async function commitPushDevices(
   load: () => Promise<PushDevice[] | null>,
@@ -85,16 +78,5 @@ export function watchPushRings(fire: (sessionId: string, title: string) => void)
     enabled: () => getAlertSettings().pushEnabled,
     delayMs: () => getAlertSettings().pushDelayMs,
     fire: (id) => fire(id, deriveSessionLabel(id)),
-  });
-}
-
-/** {@link watchPushRings}, delivered by this process's own Host. */
-export function startAlertPush(deps: AlertPushDeps): () => void {
-  return watchPushRings((id, title) => {
-    // A push that fails must never break the alert path, and there is nothing
-    // useful to retry against — the alarm is already stale by the next ring.
-    void sendPush(deps, id, title).catch((error: unknown) => {
-      console.warn('remote-host: push notification failed', error);
-    });
   });
 }

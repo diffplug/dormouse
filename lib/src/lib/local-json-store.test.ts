@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { loadJson, removeJson, saveJson, setJsonStoreBackend } from './local-json-store';
+import { loadJson, removeJson, saveJson } from './local-json-store';
 
-/** A Map-backed `Storage` surface, usable as a stub or as a claimed backend. */
+/** A Map-backed `Storage` surface. */
 function memoryStore() {
   const map = new Map<string, string>();
   return {
@@ -103,71 +103,6 @@ describe('local-json-store', () => {
     it('does not throw when localStorage is absent', () => {
       vi.stubGlobal('localStorage', undefined);
       expect(() => removeJson('k')).not.toThrow();
-    });
-  });
-
-  describe('prefix-claimed backends', () => {
-    afterEach(() => setJsonStoreBackend('a.', null));
-
-    it('routes a claimed prefix to its backend and leaves other keys on localStorage', () => {
-      const local = stubLocalStorage();
-      const backend = memoryStore();
-      setJsonStoreBackend('a.', backend);
-
-      saveJson('a.one', { id: 'w1' });
-      saveJson('other.two', { id: 'w2' });
-
-      expect(backend.map.has('a.one')).toBe(true);
-      // The unrelated key must not be swept into the claimed backend — this is
-      // what keeps alert settings and watched commands on their own storage.
-      expect(backend.map.has('other.two')).toBe(false);
-      expect(local.get('other.two')).toBe(JSON.stringify({ id: 'w2' }));
-      expect(local.has('a.one')).toBe(false);
-
-      expect(loadJson<Widget, null>('a.one', null, isWidget)).toEqual({ id: 'w1' });
-      expect(loadJson<Widget, null>('other.two', null, isWidget)).toEqual({ id: 'w2' });
-    });
-
-    it('releases a claim back to localStorage', () => {
-      const local = stubLocalStorage();
-      const backend = memoryStore();
-      setJsonStoreBackend('a.', backend);
-      setJsonStoreBackend('a.', null);
-
-      saveJson('a.one', { id: 'w1' });
-
-      expect(backend.map.size).toBe(0);
-      expect(local.get('a.one')).toBe(JSON.stringify({ id: 'w1' }));
-    });
-
-    it('removeJson deletes through the claimed backend', () => {
-      stubLocalStorage();
-      const backend = memoryStore();
-      setJsonStoreBackend('a.', backend);
-      saveJson('a.one', { id: 'w1' });
-
-      removeJson('a.one');
-
-      expect(backend.map.has('a.one')).toBe(false);
-    });
-
-    it('a throwing backend never propagates', () => {
-      stubLocalStorage();
-      setJsonStoreBackend('a.', {
-        getItem: () => {
-          throw new Error('nope');
-        },
-        setItem: () => {
-          throw new Error('nope');
-        },
-        removeItem: () => {
-          throw new Error('nope');
-        },
-      });
-
-      expect(() => saveJson('a.one', 1)).not.toThrow();
-      expect(loadJson('a.one', 'fallback')).toBe('fallback');
-      expect(() => removeJson('a.one')).not.toThrow();
     });
   });
 });

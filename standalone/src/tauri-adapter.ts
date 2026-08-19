@@ -59,6 +59,16 @@ const errMessage = (err: unknown): string =>
 const REMOTE_HOST_COMMAND_TIMEOUT_MS = 15_000;
 
 /**
+ * A short random component for this adapter's `rhId`s. Results are broadcast to
+ * every webview the service can reach, so a plain counter would let two of them
+ * mint the same id and settle each other's commands.
+ */
+function randomTag(): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return uuid ? uuid.slice(0, 8) : Math.random().toString(36).slice(2, 10);
+}
+
+/**
  * Platform adapter for the Tauri standalone app.
  *
  * Communication flow:
@@ -101,6 +111,7 @@ export class TauriAdapter implements PlatformAdapter {
   >();
   private remoteHostResponders = new Map<string, (params: unknown) => unknown[]>();
   private remoteHostListeners = new Map<string, Set<(data: unknown) => void>>();
+  private readonly rhTag = randomTag();
   private nextRemoteHostId = 0;
 
   constructor() {
@@ -527,7 +538,7 @@ export class TauriAdapter implements PlatformAdapter {
   };
 
   private nextRhId(): string {
-    return `rh-${++this.nextRemoteHostId}`;
+    return `rh-${this.rhTag}-${++this.nextRemoteHostId}`;
   }
 
   private sendRemoteHostCommand(command: RemoteHostCommand): void {

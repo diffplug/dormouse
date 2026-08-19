@@ -1,21 +1,25 @@
 /**
- * The cross-window link, driven end to end: two independent module instances
- * standing in for two VS Code windows, talking over a real socket in a temp
- * directory. The frames and the routing table are unit-tested in
+ * Bind-as-lease, driven end to end: two independent module instances standing
+ * in for two VS Code windows, contending for one socket in a temp directory.
+ * The frames and the routing table are unit-tested in
  * `lib/src/lib/vscode-peer-link-protocol.test.ts`; this covers the parts that
- * only exist once there is a socket — the rendezvous handshake, role switching,
- * PTY routing, and what happens when a window goes away.
+ * only exist once there is a socket — who wins the bind, what a loser does when
+ * the winner dies, PTY routing, and the token.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readdir } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { access, readFile } from 'node:fs/promises';
+import { createConnection, createServer } from 'node:net';
 import { join } from 'node:path';
-import { createServer } from 'node:net';
 import { fakeContext, freshModule, removeDir, tempStorageDir, tick, waitFor, waitForFile } from './helpers';
 
 type LinkModule = typeof import('../src/peer-link');
 
 let dir: string;
+/** Peer sockets live in the temp dir; point that at this test's own storage. */
+let realTmp: string | undefined;
 const opened: LinkModule[] = [];
 
 /** Records what a window was asked to do on its own terminals. */
@@ -30,9 +34,7 @@ function fakeWindow(options: {
     surfaces: options.surfaces ?? {},
     writes: [] as Array<{ ptyId: string; data: string }>,
     resizes: [] as Array<{ ptyId: string; cols: number; rows: number }>,
-    delivered: [] as Array<{ ptyId: string; data: string }>,
-    exits: [] as Array<{ ptyId: string; exitCode: number }>,
-    peerChanges: [] as Array<string | null>,
+    invalidations: 0,
     emitData(id: string, data: string) {
       for (const listener of dataListeners) listener(id, data);
     },
@@ -49,11 +51,9 @@ function fakeWindow(options: {
           const surface = this.surfaces[surfaceId];
           return surface ? [surface] : [];
         },
-        deliverRemotePtyData: (ptyId: string, data: string) =>
-          void this.delivered.push({ ptyId, data }),
-        deliverRemotePtyExit: (ptyId: string, exitCode: number) =>
-          void this.exits.push({ ptyId, exitCode }),
-        deliverRemotePeerChange: (topic: string | null) => void this.peerChanges.push(topic),
+        invalidateDirectory: () => {
+          this.invalidations += 1;
+        },
         onProcessedPtyData: (listener: (id: string, data: string) => void) => {
           dataListeners.add(listener);
           return () => dataListeners.delete(listener);
@@ -70,6 +70,16 @@ function fakeWindow(options: {
   };
 }
 
+/**
+ * The one path every window of an installation contends for, mirroring
+ * `socketPath()`. Duplicated here on purpose: a derivation that drifted would
+ * silently give each window its own lease and its own Host.
+ */
+function derivedSocketPath(): string {
+  const id = createHash('sha256').update(dir).digest('hex').slice(0, 12);
+  return join(dir, `dormouse-peer-${id}.sock`);
+}
+
 async function openWindow(deps: ReturnType<typeof fakeWindow>): Promise<LinkModule> {
   const mod = await freshModule<LinkModule>(() => import('../src/peer-link'));
   mod.initPeerLink(fakeContext(dir));
@@ -78,8 +88,19 @@ async function openWindow(deps: ReturnType<typeof fakeWindow>): Promise<LinkModu
   return mod;
 }
 
-const rendezvousFile = () => join(dir, 'remote-host.peer.json');
-const waitForRendezvous = () => waitForFile(rendezvousFile());
+/** A sink standing in for whatever the broker streams a routed PTY into. */
+function fakeSink() {
+  return {
+    data: [] as string[],
+    exits: [] as number[],
+    onData(chunk: string) {
+      this.data.push(chunk);
+    },
+    onExit(code: number) {
+      this.exits.push(code);
+    },
+  };
+}
 
 /** Attach to the terminal {@link farWindow} owns, which is what places its route. */
 const attachFar = (broker: LinkModule) =>
@@ -93,7 +114,7 @@ const farWindow = () =>
   });
 
 /**
- * Start a broker and a peer, and wait until they can actually talk. The peer
+ * Start two windows in order and wait until they can actually talk. The second
  * always reports at least one entry, because an answered directory request is
  * how we detect the handshake landed.
  */
@@ -101,34 +122,83 @@ async function linkedPair(
   brokerSide = fakeWindow(),
   peerSide = fakeWindow({ entries: [{ surfaceId: 'far-default' }] }),
 ) {
+  const brokerRoles: boolean[] = [];
   const broker = await openWindow(brokerSide);
-  broker.setPeerLinkRole(true);
-  await waitForRendezvous();
+  await broker.ensurePeerNet((held) => brokerRoles.push(held));
+  expect(brokerRoles).toEqual([true]);
 
+  const peerRoles: boolean[] = [];
   const peer = await openWindow(peerSide);
-  peer.setPeerLinkRole(false);
-  // The handshake is asynchronous; the first answered request proves it landed.
+  await peer.ensurePeerNet((held) => peerRoles.push(held));
+  // The loser is told nothing: a role only ever changes upward.
+  expect(peerRoles).toEqual([]);
+
   await waitFor(async () => (await broker.remoteRequest('directory', {})).length > 0);
-  return { broker, brokerSide, peer, peerSide };
+  return { broker, brokerSide, peer, peerSide, peerRoles };
 }
 
 beforeEach(async () => {
   dir = await tempStorageDir();
+  realTmp = process.env.TMPDIR;
+  process.env.TMPDIR = dir;
 });
 
 afterEach(async () => {
-  for (const mod of opened) await mod.disposePeerLink();
+  // Clients first: disposing the broker while one is still live sends it back
+  // into the contention, which would recreate files under `dir` as it is
+  // removed.
+  for (const mod of [...opened].reverse()) await mod.disposePeerLink();
   opened.length = 0;
+  // Assigning `undefined` would set the literal string, and a Linux runner has
+  // no TMPDIR to put back — which the *next* test's mkdtemp would wear.
+  if (realTmp === undefined) delete process.env.TMPDIR;
+  else process.env.TMPDIR = realTmp;
   await removeDir(dir);
 });
 
-describe('peer link between windows', () => {
+describe('bind-as-lease', () => {
   it('rejects when the peer socket cannot be bound', async () => {
     const mod = await openWindow(fakeWindow());
     const failingServer = createServer();
 
     await expect(mod.listenServer(failingServer, join(dir, 'missing', 'peer.sock')))
       .rejects.toHaveProperty('code');
+  });
+
+  it('makes the first window to bind the broker and the second a client', async () => {
+    const { broker, peer } = await linkedPair();
+    expect(broker.isPeerBroker()).toBe(true);
+    expect(peer.isPeerBroker()).toBe(false);
+  });
+
+  it('is idempotent — a second call re-announces the role it already holds', async () => {
+    const broker = await openWindow(fakeWindow());
+    const roles: boolean[] = [];
+    await broker.ensurePeerNet((held) => roles.push(held));
+    await broker.ensurePeerNet((held) => roles.push(held));
+    expect(roles).toEqual([true, true]);
+  });
+
+  it('takes over a socket whose broker died without unlinking it', async () => {
+    const path = derivedSocketPath();
+    // A killed process leaves the inode behind — `close()` would unlink it, so
+    // the only way to produce this state is to not let the owner close.
+    const corpse = spawn(process.execPath, [
+      '-e',
+      `require('node:net').createServer().listen(${JSON.stringify(path)})`,
+    ]);
+    await waitForFile(path);
+    corpse.kill('SIGKILL');
+    await new Promise((resolve) => corpse.on('exit', resolve));
+    // Still there, and nothing is listening on it.
+    await expect(access(path)).resolves.toBeUndefined();
+
+    const mod = await openWindow(fakeWindow());
+    const roles: boolean[] = [];
+    await mod.ensurePeerNet((held) => roles.push(held));
+
+    expect(roles).toEqual([true]);
+    expect(mod.isPeerBroker()).toBe(true);
   });
 
   it('collects directory entries from the other window', async () => {
@@ -141,20 +211,18 @@ describe('peer link between windows', () => {
     ]);
   });
 
-  it('forwards peer change notifications to the broker window', async () => {
+  it('invalidates the broker directory when a peer announces a change', async () => {
     const { brokerSide, peer } = await linkedPair();
-    brokerSide.peerChanges.length = 0;
+    const before = brokerSide.invalidations;
 
     peer.remoteNotifyPeerChange('directory');
 
-    await waitFor(() => brokerSide.peerChanges.length > 0);
-    expect(brokerSide.peerChanges).toEqual(['directory']);
+    await waitFor(() => brokerSide.invalidations > before);
   });
 
   it('returns nothing when no other window is connected', async () => {
     const broker = await openWindow(fakeWindow());
-    broker.setPeerLinkRole(true);
-    await waitForRendezvous();
+    await broker.ensurePeerNet(() => {});
     expect(await broker.remoteRequest('directory', {})).toEqual([]);
   });
 
@@ -184,46 +252,52 @@ describe('peer link between windows', () => {
 
   it('streams a subscribed PTY from the owning window', async () => {
     const peerSide = farWindow();
-    const { broker, brokerSide } = await linkedPair(fakeWindow(), peerSide);
+    const { broker } = await linkedPair(fakeWindow(), peerSide);
     await attachFar(broker);
 
-    broker.remoteSubscribe('pty-far');
+    const sink = fakeSink();
+    broker.remoteSubscribe('pty-far', sink);
     await tick();
     peerSide.emitData('pty-far', 'output from the other window');
 
-    await waitFor(() => brokerSide.delivered.length > 0);
-    expect(brokerSide.delivered).toEqual([{ ptyId: 'pty-far', data: 'output from the other window' }]);
+    await waitFor(() => sink.data.length > 0);
+    expect(sink.data).toEqual(['output from the other window']);
   });
 
   it('does not stream PTYs it never subscribed to', async () => {
     const peerSide = farWindow();
-    const { broker, brokerSide } = await linkedPair(fakeWindow(), peerSide);
+    const { broker } = await linkedPair(fakeWindow(), peerSide);
     await attachFar(broker);
 
+    const sink = fakeSink();
+    broker.remoteSubscribe('pty-far', sink);
+    await tick();
     peerSide.emitData('pty-other', 'not subscribed');
     await tick(100);
-    expect(brokerSide.delivered).toEqual([]);
+    expect(sink.data).toEqual([]);
   });
 
   it('forwards a subscribed PTY exit and forgets its route', async () => {
     const peerSide = farWindow();
-    const { broker, brokerSide } = await linkedPair(fakeWindow(), peerSide);
+    const { broker } = await linkedPair(fakeWindow(), peerSide);
     await attachFar(broker);
-    broker.remoteSubscribe('pty-far');
+    const sink = fakeSink();
+    broker.remoteSubscribe('pty-far', sink);
     await tick();
 
     peerSide.emitExit('pty-far', 17);
 
-    await waitFor(() => brokerSide.exits.length > 0);
-    expect(brokerSide.exits).toEqual([{ ptyId: 'pty-far', exitCode: 17 }]);
+    await waitFor(() => sink.exits.length > 0);
+    expect(sink.exits).toEqual([17]);
     expect(broker.isRemotePty('pty-far')).toBe(false);
   });
 
   it('stops the stream on unsubscribe', async () => {
     const peerSide = farWindow();
-    const { broker, brokerSide } = await linkedPair(fakeWindow(), peerSide);
+    const { broker } = await linkedPair(fakeWindow(), peerSide);
     await attachFar(broker);
-    broker.remoteSubscribe('pty-far');
+    const sink = fakeSink();
+    broker.remoteSubscribe('pty-far', sink);
     await tick();
 
     broker.remoteUnsubscribe('pty-far');
@@ -231,7 +305,7 @@ describe('peer link between windows', () => {
     peerSide.emitData('pty-far', 'after unsubscribe');
     await tick(100);
 
-    expect(brokerSide.delivered).toEqual([]);
+    expect(sink.data).toEqual([]);
     // Unsubscribing also forgets the route, so a later write is not misrouted.
     expect(broker.isRemotePty('pty-far')).toBe(false);
   });
@@ -258,55 +332,44 @@ describe('peer link between windows', () => {
 
   it('reports terminals as exited when their window disconnects', async () => {
     const peerSide = farWindow();
-    const { broker, brokerSide, peer } = await linkedPair(fakeWindow(), peerSide);
+    const { broker, peer } = await linkedPair(fakeWindow(), peerSide);
     await attachFar(broker);
-    expect(broker.isRemotePty('pty-far')).toBe(true);
+    const sink = fakeSink();
+    broker.remoteSubscribe('pty-far', sink);
+    await tick();
 
     // The window was closed: its terminals are gone, and a later write must not
     // be posted into a dead socket.
     await peer.disposePeerLink();
 
-    await waitFor(() => brokerSide.exits.length > 0);
-    expect(brokerSide.exits).toEqual([{ ptyId: 'pty-far', exitCode: 0 }]);
+    await waitFor(() => sink.exits.length > 0);
+    expect(sink.exits).toEqual([0]);
     expect(broker.isRemotePty('pty-far')).toBe(false);
     expect(broker.remoteWrite('pty-far', 'x')).toBe(false);
   });
 
-  it('leaves nothing behind when the lease flips back mid-startup', async () => {
-    // Peer sockets live in the temp dir; point that at this test's own storage
-    // dir so a server nobody closed is as visible as a file nobody removed.
-    const realTmp = process.env.TMPDIR;
-    process.env.TMPDIR = dir;
-    try {
-      const mod = await openWindow(fakeWindow());
+  it('hands the Host to a surviving window when the broker dies', async () => {
+    const { broker, peer, peerRoles } = await linkedPair();
 
-      // Both calls in one tick, so the flip back lands inside startup's awaits.
-      mod.setPeerLinkRole(true);
-      mod.setPeerLinkRole(false);
-      await tick();
+    // The broker window closed. Its socket closes with it, and every client
+    // races to bind; there is exactly one, so it wins.
+    await broker.disposePeerLink();
 
-      // No rendezvous (peers would dial a socket the teardown already unlinked
-      // and back off until some later broker rewrote the file), no listening
-      // socket, and no temp file from the write that was abandoned.
-      expect(await readdir(dir)).toEqual([]);
-    } finally {
-      // Assigning `undefined` would set the literal string, and a Linux runner
-      // has no TMPDIR to put back — which the *next* test's mkdtemp would wear.
-      if (realTmp === undefined) delete process.env.TMPDIR;
-      else process.env.TMPDIR = realTmp;
-    }
+    await waitFor(() => peerRoles.length > 0, 10_000);
+    expect(peerRoles).toEqual([true]);
+    expect(peer.isPeerBroker()).toBe(true);
   });
 
   it('rejects a client that does not know the token', async () => {
     const brokerSide = fakeWindow();
     const broker = await openWindow(brokerSide);
-    broker.setPeerLinkRole(true);
-    await waitForRendezvous();
+    await broker.ensurePeerNet(() => {});
 
-    const { readFile } = await import('node:fs/promises');
-    const { socketPath } = JSON.parse(await readFile(rendezvousFile(), 'utf8'));
-    const { createConnection } = await import('node:net');
-    const socket = createConnection({ path: socketPath });
+    // The socket path is derived from the storage location, so it is guessable;
+    // the token in the 0600 file beside it is the only secret.
+    expect((await readFile(join(dir, 'remote-host.peer-token'), 'utf8')).trim()).toBeTruthy();
+
+    const socket = createConnection({ path: derivedSocketPath() });
     await new Promise((resolve) => socket.on('connect', resolve));
     socket.write(`${JSON.stringify({ kind: 'hello', token: 'wrong' })}\n`);
 

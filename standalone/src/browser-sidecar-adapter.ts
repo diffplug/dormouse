@@ -41,6 +41,12 @@ const errMessage = (err: unknown): string => err instanceof Error ? err.message 
 /** Mirrors the Tauri adapter's bound; `enroll` makes an HTTP round trip. */
 const REMOTE_HOST_COMMAND_TIMEOUT_MS = 15_000;
 
+/** See TauriAdapter: `rhId`s must be unique across every webview, not per adapter. */
+function randomTag(): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return uuid ? uuid.slice(0, 8) : Math.random().toString(36).slice(2, 10);
+}
+
 function decodeBase64Bytes(base64: string): Uint8Array {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -70,6 +76,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   >();
   private remoteHostResponders = new Map<string, (params: unknown) => unknown[]>();
   private remoteHostListeners = new Map<string, Set<(data: unknown) => void>>();
+  private readonly rhTag = randomTag();
   private nextRemoteHostId = 0;
 
   constructor(private readonly host: BrowserSidecarHost) {
@@ -135,7 +142,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   };
 
   private nextRhId(): string {
-    return `rh-${++this.nextRemoteHostId}`;
+    return `rh-${this.rhTag}-${++this.nextRemoteHostId}`;
   }
 
   private sendRemoteHostCommand(command: RemoteHostCommand): void {

@@ -14,6 +14,10 @@ import { join } from 'node:path';
 import type { HostAclRecord } from 'server-lib-common';
 import type { HostEnrollment } from '../../remote/host/enrollment';
 
+// Re-exported so an implementor can name the record type without depending on
+// `server-lib-common` itself; vscode-ext's project does not resolve it.
+export type { HostAclRecord };
+
 export interface HostStateStore {
   loadEnrollment(): Promise<HostEnrollment | null>;
   saveEnrollment(enrollment: HostEnrollment): Promise<void>;

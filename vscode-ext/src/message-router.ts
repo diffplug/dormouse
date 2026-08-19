@@ -21,22 +21,14 @@ import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
 import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
-import { readStore, REMOTE_HOST_STORE_PREFIX, writeStore } from './remote-host-store';
 import { PEER_REPLY_BUDGET_MS } from '../../lib/src/lib/vscode-peer-link-protocol';
-import { ensureWindowLease } from './window-lease';
+import { configurePeerLink, remoteNotifyPeerChange } from './peer-link';
 import {
-  configurePeerLink,
-  isRemotePty,
-  remoteNotifyPeerChange,
-  remoteRequest,
-  remoteResize,
-  remoteSubscribe,
-  remoteUnsubscribe,
-  remoteWrite,
-  setPeerLinkRole,
-} from './peer-link';
+  configureRemoteHost,
+  handleRemoteHostCommand,
+  notifyDirectoryChanged,
+} from './remote-host';
 import { log } from './log';
-import { PtySubscriptions } from './pty-subscriptions';
 import type { WebviewChannel } from './webview-messaging';
 
 const clipboardOps = require('../../lib/clipboard-ops.cjs') as {
@@ -48,97 +40,11 @@ const clipboardOps = require('../../lib/clipboard-ops.cjs') as {
 // Prevents reconnecting routers from stealing PTYs owned by other webviews.
 const globalOwnedPtyIds = new Set<string>();
 
-/**
- * Arbiter for named single-instance roles across this window's webviews — today
- * only `remote-host`, so exactly one webview holds the `/ws/host` socket and
- * arms alarm push (see `lib/src/remote/host/activation.ts`). The extension host
- * arbitrates because it is the only party that sees every webview and outlives
- * each one. First claimant wins; when the holder is disposed the role is
- * re-offered, so closing the Dormouse view hands the Host to another open one
- * instead of dropping it until a reload.
- */
-interface SingletonClaimant {
-  wants: Set<string>;
-  notify(name: string, held: boolean): void;
-}
-const singletonClaimants = new Set<SingletonClaimant>();
-/** Who currently holds each role — the one place the answer is stored. */
-const singletonHolders = new Map<string, SingletonClaimant>();
-
-/**
- * Whether this *window* may hold single-instance roles at all.
- *
- * One extension host runs per window, so the arbitration above is blind to
- * every other window. Left to itself each window would elect its own Host, all
- * of them would connect `/ws/host` with the same enrollment, and the server's
- * displacement would turn into an endless reconnect fight. `window-lease.ts`
- * arbitrates across windows on shared storage; nothing is granted here until it
- * says this window won.
- */
-let windowLeaseHeld: boolean | null = null;
-let storeReadyForWindowLease = false;
-
-function wantedSingletonNames(): Set<string> {
-  const names = new Set<string>();
-  for (const claimant of singletonClaimants) {
-    for (const name of claimant.wants) names.add(name);
-  }
-  return names;
-}
-
-function onWindowLeaseChange(held: boolean): void {
-  if (windowLeaseHeld === held) return;
-  windowLeaseHeld = held;
-  storeReadyForWindowLease = false;
-  // The holder is the Host, so it is also the window every other one reports to.
-  setPeerLinkRole(held);
-  if (held) {
-    // A different window may have committed ACL/enrollment writes since these
-    // webviews hydrated. Replace their caches before granting the Host role so
-    // the new holder cannot authorize from, or write back, a stale snapshot.
-    void refreshStoreCachesForLease().then(() => {
-      if (windowLeaseHeld !== true) return;
-      storeReadyForWindowLease = true;
-      for (const name of wantedSingletonNames()) electSingleton(name);
-    });
-    return;
-  }
-  // Lost across windows: whoever held it here must stop, not merely stop being
-  // re-offered it.
-  for (const [name, holder] of singletonHolders) holder.notify(name, false);
-  singletonHolders.clear();
-}
-
-function electSingleton(name: string): void {
-  if (windowLeaseHeld !== true || !storeReadyForWindowLease) return;
-  let holder = singletonHolders.get(name);
-  if (!holder) {
-    holder = [...singletonClaimants].find((claimant) => claimant.wants.has(name));
-    if (!holder) return;
-    singletonHolders.set(name, holder);
-  }
-  // Idempotent: re-claiming (a webview remounting) re-answers the holder.
-  holder.notify(name, true);
-}
-
-function releaseSingletons(claimant: SingletonClaimant): void {
-  claimant.wants.clear();
-  singletonClaimants.delete(claimant);
-  for (const [name, holder] of singletonHolders) {
-    if (holder !== claimant) continue;
-    singletonHolders.delete(name);
-    electSingleton(name);
-  }
-}
 interface ActiveRouter {
   flushSessionSave(timeoutMs?: number): Promise<void>;
   ownsPty(id: string): boolean;
   forwardDorControlRequest(request: DorControlRequest): void;
-  notifyStoreChanged(key: string, value: string | null): void;
-  notifyStoreSnapshot(prefix: string, entries: Record<string, string>): Thenable<boolean>;
-  notifyPeerChanged(topic: string | null): void;
-  deliverForeignData(ptyId: string, data: string): void;
-  deliverForeignExit(ptyId: string, exitCode: number): void;
+  send(message: ExtensionMessage): void;
   ask(requestId: string, op: string, params: unknown): void;
 }
 
@@ -157,9 +63,16 @@ const peerRequests = new Map<string, PendingRequest>();
 // would reach them again, so it only ever gets the in-window broker.
 configurePeerLink({
   brokerRequest,
-  deliverRemotePeerChange,
-  deliverRemotePtyData,
-  deliverRemotePtyExit,
+  invalidateDirectory: notifyDirectoryChanged,
+  onProcessedPtyData,
+  onProcessedPtyExit,
+  writePty: (ptyId, data) => ptyManager.write(ptyId, data),
+  resizePty: (ptyId, cols, rows) => ptyManager.resize(ptyId, cols, rows),
+});
+
+configureRemoteHost({
+  brokerRequest,
+  broadcastToWebviews,
   onProcessedPtyData,
   onProcessedPtyExit,
   writePty: (ptyId, data) => ptyManager.write(ptyId, data),
@@ -167,26 +80,25 @@ configurePeerLink({
 });
 
 /**
- * Put one peer request to every webview in this window except `exclude`, and
- * settle with everything they answered.
+ * Put one question to every webview in this window and settle with everything
+ * they answered.
  *
- * The remote Host runs in one webview, but a window's terminals are spread
- * across all of them — each webview has its own xterm registry, so the Host can
- * neither list nor attach to a sibling's pane without asking. The extension
- * host is the only party that can ask, so it brokers. See docs/specs/vscode.md
- * → "Peer surfaces".
+ * The remote Host runs in the extension host, but a window's terminals are
+ * spread across its webviews — each has its own xterm registry, so the Host can
+ * neither list nor attach to a pane without asking. See docs/specs/vscode.md →
+ * "Peer surfaces".
  *
  * `op` and `params` are opaque here on purpose: the operation map lives in
  * `lib/src/remote/host/peer-surfaces.ts`, and one fan-out rule covers all of
  * it — every webview answers with zero or more results, so a webview that owns
  * nothing settles the request as fast as the one that does. The budget is the
  * backstop for a webview with no live content, which must not hang the phone's
- * picker. Callable from a webview request (the Host asking) and from a peer
- * window's socket (tier 2), which is why it is a plain promise rather than
- * message plumbing.
+ * picker. The asker is this window's own Host service, and — after phase 3b —
+ * a peer window's broker over the link, never a webview; that is why it is a
+ * plain promise rather than message plumbing.
  */
-function brokerRequest(op: string, params: unknown, exclude?: ActiveRouter): Promise<unknown[]> {
-  const peers = [...activeRouters].filter((router) => router !== exclude);
+function brokerRequest(op: string, params: unknown): Promise<unknown[]> {
+  const peers = [...activeRouters];
   if (peers.length === 0) return Promise.resolve([]);
 
   const requestId = `broker-${++nextBrokerRequestId}`;
@@ -209,54 +121,14 @@ function brokerRequest(op: string, params: unknown, exclude?: ActiveRouter): Pro
 }
 
 /**
- * Hand a webview bytes from a PTY in another *window*.
+ * Post one message to every live webview in this window.
  *
- * Local PTYs reach a subscriber through `onProcessedPtyData`; a PTY in another
- * window has no such listener here, so the peer link injects it by the same
- * route the subscriber already expects. Only webviews that asked for this PTY
- * receive it, exactly as with a local subscription.
+ * The Host's results ride this rather than a reply to one webview: the service
+ * answers an `rhId`, and only the adapter that minted it holds a pending
+ * command for it (`lib/src/lib/platform/vscode-adapter.ts`).
  */
-function deliverRemotePtyData(ptyId: string, data: string): void {
-  for (const router of activeRouters) router.deliverForeignData(ptyId, data);
-}
-
-/** As {@link deliverRemotePtyData}, for that PTY ending. */
-function deliverRemotePtyExit(ptyId: string, exitCode: number): void {
-  for (const router of activeRouters) router.deliverForeignExit(ptyId, exitCode);
-}
-
-function deliverRemotePeerChange(topic: string | null): void {
-  broadcastPeerChange(topic);
-}
-
-function broadcastPeerChange(topic: string | null, exclude?: ActiveRouter): void {
-  for (const router of activeRouters) {
-    if (router !== exclude) router.notifyPeerChanged(topic);
-  }
-}
-
-/**
- * Tell every webview about a committed Host-store write.
- *
- * Each webview caches the store at boot and serves reads from that cache, so
- * without this a second webview keeps a stale snapshot — and since the lease
- * can hand it the Host later, it would start from that snapshot and write it
- * back, losing every pairing approved by the previous holder. Broadcast to all
- * routers including the writer: re-applying your own write is a no-op, and
- * skipping self would mean identifying it.
- */
-function broadcastStoreChange(key: string, value: string | null): void {
-  for (const router of activeRouters) router.notifyStoreChanged(key, value);
-}
-
-async function refreshStoreCachesForLease(): Promise<void> {
-  const entries = await readStore(REMOTE_HOST_STORE_PREFIX).catch(() => ({}));
-  if (windowLeaseHeld !== true) return;
-  await Promise.all(
-    [...activeRouters].map((router) =>
-      Promise.resolve(router.notifyStoreSnapshot(REMOTE_HOST_STORE_PREFIX, entries)),
-    ),
-  );
+function broadcastToWebviews(message: ExtensionMessage): void {
+  for (const router of activeRouters) router.send(message);
 }
 
 const activeRouters = new Set<ActiveRouter>();
@@ -400,21 +272,6 @@ export function attachRouter(
 
   // Track which PTY IDs were spawned (or reconnected) through this webview
   const ownedPtyIds = new Set<string>();
-  /**
-   * PTYs this webview asked to watch without owning them — the remote Host
-   * streaming a sibling webview's terminal. Kept separate from `ownedPtyIds` so
-   * it never affects Workspace union status, `killOnDispose`, or which webview
-   * the host considers the owner.
-   */
-  const subscribedPtyIds = new PtySubscriptions();
-
-  // This webview's stake in the window-wide single-instance roles.
-  const claimant: SingletonClaimant = {
-    wants: new Set<string>(),
-    notify: (name, held) =>
-      void post({ type: 'singleton:lease', name, held } satisfies ExtensionMessage),
-  };
-  singletonClaimants.add(claimant);
   const pendingFlushRequests = new Map<string, { resolve: () => void; timeout: ReturnType<typeof setTimeout> }>();
   let disposed = false;
 
@@ -527,17 +384,15 @@ export function attachRouter(
    */
   function connectWebview(): () => void {
     const removeProcessedListener = onProcessedPtyData((id, visibleData) => {
-      if (!ownedPtyIds.has(id) && !subscribedPtyIds.has(id)) return;
+      if (!ownedPtyIds.has(id)) return;
       post({ type: 'pty:data', id, data: visibleData } satisfies ExtensionMessage);
     });
     const removeSemanticListener = onTerminalSemanticEvents((id, events) => {
-      // Semantic events drive the *owner's* pane state; a subscriber is
-      // streaming bytes, not maintaining a second copy of that state.
       if (!ownedPtyIds.has(id)) return;
       post({ type: 'terminal:semanticEvents', id, events } satisfies ExtensionMessage);
     });
     const removeExitListener = onProcessedPtyExit((id, exitCode) => {
-      if (!ownedPtyIds.has(id) && !subscribedPtyIds.has(id)) return;
+      if (!ownedPtyIds.has(id)) return;
       post({ type: 'pty:exit', id, exitCode } satisfies ExtensionMessage);
     });
 
@@ -577,11 +432,10 @@ export function attachRouter(
         break;
       }
       case 'pty:input':
-        // `remoteWrite` reports false for anything this window owns.
-        if (!remoteWrite(msg.id, msg.data)) ptyManager.write(msg.id, msg.data);
+        ptyManager.write(msg.id, msg.data);
         break;
       case 'pty:resize':
-        if (!remoteResize(msg.id, msg.cols, msg.rows)) ptyManager.resize(msg.id, msg.cols, msg.rows);
+        ptyManager.resize(msg.id, msg.cols, msg.rows);
         break;
       case 'pty:kill':
         release(msg.id);
@@ -737,33 +591,6 @@ export function attachRouter(
           } satisfies ExtensionMessage),
         );
         break;
-      case 'pty:subscribe':
-        if (typeof msg.id !== 'string') break;
-        if (!subscribedPtyIds.subscribe(msg.id)) break;
-        // A PTY in another window has no local listener to hook; ask its window
-        // to start sending it.
-        if (isRemotePty(msg.id)) remoteSubscribe(msg.id);
-        break;
-      case 'pty:unsubscribe':
-        if (typeof msg.id !== 'string') break;
-        if (!subscribedPtyIds.unsubscribe(msg.id)) break;
-        if (isRemotePty(msg.id)) remoteUnsubscribe(msg.id);
-        break;
-      case 'peer:request': {
-        // This window's other webviews, plus every window reporting to us. Both
-        // at once rather than falling through: what is asked about lives in
-        // exactly one of them, and asking in series would pay a whole tier's
-        // budget before reaching the tier that owns it.
-        const requestId = msg.requestId;
-        const { op, params } = msg;
-        void Promise.all([brokerRequest(op, params, router), remoteRequest(op, params)]).then(
-          ([here, elsewhere]) =>
-            post({
-              type: 'peer:results', requestId, results: [...here, ...elsewhere],
-            } satisfies ExtensionMessage),
-        );
-        break;
-      }
       case 'peer:answer': {
         // Every webview answers, so "nobody owns it" settles immediately
         // instead of waiting out the budget — which is the common case when
@@ -777,40 +604,12 @@ export function attachRouter(
       }
       case 'peer:notify':
         if (typeof msg.topic !== 'string') break;
-        broadcastPeerChange(msg.topic, router);
+        notifyDirectoryChanged();
         remoteNotifyPeerChange(msg.topic);
         break;
-      case 'singleton:claim':
-        // `WebviewMessage` is a claim about the sender, not a runtime check.
-        if (typeof msg.name !== 'string') break;
-        claimant.wants.add(msg.name);
-        // First claim in this window starts the cross-window arbitration; it
-        // answers asynchronously, and `onWindowLeaseChange` elects when it does.
-        ensureWindowLease(onWindowLeaseChange);
-        electSingleton(msg.name);
+      case 'remoteHost:command':
+        handleRemoteHostCommand(msg.payload);
         break;
-      case 'store:read':
-        // The Host's enrollment + ACL live in extension-host storage, not in
-        // webview localStorage (remote-host-store.ts explains why). Both sides
-        // gate on the key prefix.
-        readStore(typeof msg.prefix === 'string' ? msg.prefix : '')
-          .catch(() => ({}))
-          .then((entries) => post({
-            type: 'store:entries', requestId: msg.requestId, entries,
-          } satisfies ExtensionMessage));
-        break;
-      case 'store:write': {
-        // Same bar as `store:read` above: a non-string key would throw inside
-        // `allowed()` as an unhandled rejection rather than a refused write.
-        const key = msg.key;
-        const value = msg.value;
-        if (typeof key !== 'string') break;
-        if (typeof value !== 'string' && value !== null) break;
-        void writeStore(key, value).then((written) => {
-          if (written) broadcastStoreChange(key, value);
-        });
-        break;
-      }
       case 'dormouse:themeColors':
         // Webview reports its resolved terminal theme; cache for OSC color replies.
         latestThemeColors = { foreground: msg.foreground, background: msg.background, cursor: msg.cursor };
@@ -975,44 +774,27 @@ export function attachRouter(
     flushSessionSave,
     ownsPty,
     forwardDorControlRequest,
-    notifyStoreChanged(key: string, value: string | null) {
+    send(message: ExtensionMessage) {
       if (disposed) return;
-      void post({ type: 'store:changed', key, value } satisfies ExtensionMessage);
-    },
-    notifyStoreSnapshot(prefix: string, entries: Record<string, string>) {
-      return post({ type: 'store:snapshot', prefix, entries } satisfies ExtensionMessage);
-    },
-    notifyPeerChanged(topic: string | null) {
-      if (disposed) return;
-      void post({ type: 'peer:changed', topic } satisfies ExtensionMessage);
+      void post(message);
     },
     ask(requestId: string, op: string, params: unknown) {
       if (disposed) return;
       void post({ type: 'peer:ask', requestId, op, params } satisfies ExtensionMessage);
     },
-    deliverForeignData(ptyId: string, data: string) {
-      if (disposed || !subscribedPtyIds.has(ptyId)) return;
-      void post({ type: 'pty:data', id: ptyId, data } satisfies ExtensionMessage);
-    },
-    deliverForeignExit(ptyId: string, exitCode: number) {
-      if (disposed || !subscribedPtyIds.has(ptyId)) return;
-      void post({ type: 'pty:exit', id: ptyId, exitCode } satisfies ExtensionMessage);
-    },
     dispose() {
       if (disposed) return;
       disposed = true;
       activeRouters.delete(router);
-      broadcastPeerChange(null);
+      // One fewer webview to ask means the directory's answer changed, even if
+      // no surface did.
+      notifyDirectoryChanged();
       remoteNotifyPeerChange(null);
       // A webview that goes away mid-fan-out must not hold the answer open.
       for (const request of peerRequests.values()) {
         if (!request.pending.delete(router)) continue;
         if (request.pending.size === 0) request.settle();
       }
-      subscribedPtyIds.releaseAll((ptyId) => {
-        if (isRemotePty(ptyId)) remoteUnsubscribe(ptyId);
-      });
-      releaseSingletons(claimant);
       removeWatchedCommandListener();
       removeAlertSettingsListener();
       resolveAllFlushRequests();
@@ -1031,7 +813,7 @@ export function attachRouter(
   };
 
   activeRouters.add(router);
-  broadcastPeerChange(null, router);
+  notifyDirectoryChanged();
   remoteNotifyPeerChange(null);
   return router;
 }

@@ -1,9 +1,9 @@
 // Bundles the extension host and the PTY host, and is the single place that
-// bakes the webview's remote-server `connect-src` into the build.
+// bakes the remote Host's allowed relay origins into the build.
 //
-// The published extension is scoped to the SaaS origin only, so a compromised
-// webview cannot exfiltrate to an arbitrary host. A selfhoster whose relay is
-// on their own domain or tailnet widens it for their own build:
+// The published extension is scoped to the SaaS origin only, so the Host will
+// not enroll with, or connect to, an arbitrary server. A selfhoster whose relay
+// is on their own domain or tailnet widens it for their own build:
 //
 //   DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:vscode
 //
@@ -56,20 +56,20 @@ if (watch) {
 /**
  * Fail the build if the `define` did not reach the bundle.
  *
- * `webview-html.ts` reads `__DORMOUSE_REMOTE_CONNECT_SRC__` as a `declare const`,
+ * `remote-host.ts` reads `__DORMOUSE_REMOTE_CONNECT_SRC__` as a `declare const`,
  * so if the substitution is ever lost — someone re-inlines the esbuild call, or
  * adds a bundle entry that pulls in that module without the define — TypeScript
- * still compiles and the failure only appears at runtime, as a ReferenceError
- * inside `getWebviewHtml` that renders an empty webview. The standalone side
- * fails loudly on the same class of drift (`standalone/scripts/csp.mjs`), so
- * this side should too.
+ * still compiles and the failure only appears at runtime, where the Host would
+ * silently fall back to the built-in default instead of the selfhoster's
+ * origins. The standalone sidecar bakes the same variable, so this side should
+ * fail on the same class of drift.
  */
 function assertConnectSrcBaked() {
   const bundle = readFileSync('dist/extension.js', 'utf8');
   if (bundle.includes('__DORMOUSE_REMOTE_CONNECT_SRC__')) {
     throw new Error(
       'CSP: __DORMOUSE_REMOTE_CONNECT_SRC__ survived into dist/extension.js — the esbuild ' +
-        'define did not apply, and the webview would throw a ReferenceError at render.',
+        'define did not apply, and the remote Host would use the built-in default sources.',
     );
   }
   if (!bundle.includes(remoteSrc)) {

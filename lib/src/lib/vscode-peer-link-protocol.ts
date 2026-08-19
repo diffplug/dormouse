@@ -18,13 +18,6 @@
 export const PEER_REPLY_BUDGET_MS = 1_000;
 
 /**
- * The webview's budget for a round trip through the broker. Must exceed
- * {@link PEER_REPLY_BUDGET_MS}, or a slow sibling shows up as a timeout on the
- * asking side instead of as an incomplete answer.
- */
-export const PEER_REQUEST_TIMEOUT_MS = 3_000;
-
-/**
  * Broker → peer window.
  *
  * `request` carries one peer operation, and `op` is opaque here: what a peer

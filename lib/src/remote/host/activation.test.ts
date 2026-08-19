@@ -1,18 +1,15 @@
 /**
- * Legacy mode: the single-Host lease. VS Code can show several Dormouse webviews
- * over one extension host; without this gate each would start its own
- * `RemoteHost` against the same enrollment, fight over the one `/ws/host`
- * socket, and arm its own alarm push.
- *
- * Bridge mode (bottom): the Host runs in another process, so this module starts
- * none of that and is a client of the service instead.
+ * The webview's end of the Host service (`lib/src/host/remote/service.ts`): it
+ * forwards console commands, mirrors the pairing queue, reports rings, and
+ * hands over a Host it persisted before the service existed. It starts no
+ * `RemoteHost` of its own — there is no webview-resident mode left to fall back
+ * to, so a host with no service behind it gets nothing at all.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PairingRequest } from 'server-lib-common';
 import type { RemoteHostLink } from '../../lib/platform/types';
 
-const started: Array<{ stopped: boolean }> = [];
 const enrollmentState = vi.hoisted(() => ({
   current: {
     serverUrl: 'https://relay.example.ts.net',
@@ -29,28 +26,11 @@ const enrollmentState = vi.hoisted(() => ({
   } | null,
 }));
 
-vi.mock('./remote-host', () => ({
-  RemoteHost: class {
-    activeRecords: never[] = [];
-    status = 'connecting';
-    #self = { stopped: false };
-    constructor() {
-      started.push(this.#self);
-    }
-    start() {}
-    stop() {
-      this.#self.stopped = true;
-    }
-  },
-}));
-vi.mock('./remote-api', () => ({ RemoteApiSession: class {} }));
 const pushWatch = vi.hoisted(() => ({
   fire: undefined as ((sessionId: string, title: string) => void) | undefined,
   loads: [] as Array<() => Promise<unknown>>,
 }));
 vi.mock('./alert-push', () => ({
-  startAlertPush: () => () => {},
-  refreshPushDevices: async () => {},
   watchPushRings: (fire: (sessionId: string, title: string) => void) => {
     pushWatch.fire = fire;
     return () => {};
@@ -62,7 +42,6 @@ vi.mock('./alert-push', () => ({
 }));
 const pushRefreshers = vi.hoisted(() => ({ current: [] as Array<() => void> }));
 vi.mock('../../lib/push-devices', () => ({
-  resetPushDevices: () => {},
   setPushDevicesRefresher: (refresh: () => void) => void pushRefreshers.current.push(refresh),
 }));
 const aclState = vi.hoisted(() => ({
@@ -78,38 +57,16 @@ vi.mock('./enrollment', () => ({
   clearEnrollment: () => {
     enrollmentState.current = null;
   },
-  enrollHost: async (serverUrl: string) => {
-    enrollmentState.current = {
-      serverUrl,
-      hostId: 'host-1',
-      hostToken: 'token',
-      origin: serverUrl,
-      rpId: new URL(serverUrl).hostname,
-    };
-    return enrollmentState.current;
-  },
 }));
 
-let claimSingleton: ((name: string, onChange: (held: boolean) => void) => void) | undefined;
 let remoteHostLink: RemoteHostLink | undefined;
-// A host with peers is exactly a host that arbitrates the role, so the lease
-// arrives through the same optional member (`PeerBridge`); no peers means
-// single-instance. A host with `remoteHost` runs the Host elsewhere entirely.
+// A host with `remoteHost` has a Host service behind it; without one (the
+// website) there is no Host anywhere.
 vi.mock('../../lib/platform', () => ({
-  getPlatform: () => ({
-    peers: claimSingleton ? { claimSingleton } : undefined,
-    remoteHost: remoteHostLink,
-  }),
+  getPlatform: () => ({ remoteHost: remoteHostLink }),
 }));
-
-async function freshModule() {
-  vi.resetModules();
-  return import('./activation');
-}
 
 beforeEach(() => {
-  started.length = 0;
-  claimSingleton = undefined;
   remoteHostLink = undefined;
   pushWatch.fire = undefined;
   pushWatch.loads.length = 0;
@@ -130,108 +87,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-});
-
-async function installWithLease() {
-  let grant!: (held: boolean) => void;
-  claimSingleton = (_name, onChange) => {
-    grant = onChange;
-  };
-  const mod = await freshModule();
-  mod.installRemoteHostConsoleHook();
-  return { mod, grant: (held: boolean) => grant(held) };
-}
-
-describe('remote host activation lease', () => {
-  it('activates immediately on a host with no lease (standalone)', async () => {
-    const mod = await freshModule();
-    mod.installRemoteHostConsoleHook();
-    expect(started).toHaveLength(1);
-  });
-
-  it('waits for the lease on a host that arbitrates', async () => {
-    const { grant } = await installWithLease();
-
-    // Mount alone must not start a Host — the answer has not arrived yet.
-    expect(started).toHaveLength(0);
-
-    grant(true);
-    expect(started).toHaveLength(1);
-    expect(started[0].stopped).toBe(false);
-  });
-
-  it('stops when the lease is revoked and restarts when re-granted', async () => {
-    const { grant } = await installWithLease();
-    grant(true);
-    expect(started).toHaveLength(1);
-
-    grant(false);
-    expect(started[0].stopped).toBe(true);
-
-    grant(true);
-    expect(started).toHaveLength(2);
-  });
-
-  it('a repeated grant does not start a second Host', async () => {
-    const { grant } = await installWithLease();
-    grant(true);
-    grant(true);
-    expect(started).toHaveLength(1);
-  });
-
-  it('claims under the shared role name', async () => {
-    const names: string[] = [];
-    claimSingleton = (name) => void names.push(name);
-
-    const mod = await freshModule();
-    mod.installRemoteHostConsoleHook();
-
-    expect(names).toEqual(['remote-host']);
-  });
-
-  it('does not claim the lease before an enrollment exists', async () => {
-    enrollmentState.current = null;
-    const names: string[] = [];
-    claimSingleton = (name) => void names.push(name);
-
-    const mod = await freshModule();
-    mod.installRemoteHostConsoleHook();
-
-    expect(names).toEqual([]);
-    expect(started).toHaveLength(0);
-  });
-
-  it('claims after a successful first enrollment', async () => {
-    enrollmentState.current = null;
-    const names: string[] = [];
-    let grant!: (held: boolean) => void;
-    claimSingleton = (name, onChange) => {
-      names.push(name);
-      grant = onChange;
-    };
-    const mod = await freshModule();
-    mod.installRemoteHostConsoleHook();
-    const hook = (globalThis as {
-      dormouseRemoteHost?: { enroll: (a: string, b: string, c: string) => Promise<unknown> };
-    }).dormouseRemoteHost!;
-
-    await hook.enroll('https://relay.example.ts.net', 'password', 'Laptop');
-    expect(names).toEqual(['remote-host']);
-    expect(started).toHaveLength(0);
-
-    grant(true);
-    expect(started).toHaveLength(1);
-  });
-
-  it('enrolling from a non-holder does not start a competing Host', async () => {
-    await installWithLease();
-    const hook = (globalThis as { dormouseRemoteHost?: { enroll: (a: string, b: string, c: string) => Promise<unknown> } })
-      .dormouseRemoteHost!;
-
-    await hook.enroll('https://relay.example.ts.net', 'password', 'Laptop');
-
-    expect(started).toHaveLength(0);
-  });
 });
 
 // --- Bridge mode ---
@@ -299,9 +154,14 @@ function consoleHook() {
 }
 
 describe('remote host bridge mode', () => {
-  it('starts no Host of its own', async () => {
-    await installBridge(fakeLink());
-    expect(started).toHaveLength(0);
+  it('does nothing at all with no service behind the host', async () => {
+    // The website: no `remoteHost`, so no console hook and no commands. There
+    // is no webview-resident Host to fall back to.
+    remoteHostLink = undefined;
+    vi.resetModules();
+    const mod = await import('./activation');
+    mod.installRemoteHostConsoleHook();
+    expect((globalThis as { dormouseRemoteHost?: unknown }).dormouseRemoteHost).toBeUndefined();
   });
 
   it('forwards every console method to the service', async () => {

@@ -1,5 +1,6 @@
-import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo } from './types';
+import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo, RemoteHostLink } from './types';
 import { OPEN_PORT_TIMEOUT_MS } from './types';
+import type { RemoteHostCommand, RemoteHostResult } from '../../host/remote/service-protocol';
 import type { AlertSettings } from '../alert-settings';
 import { readInjectedRecoveryCommands } from '../vscode-recovery-global';
 import { setDefaultShellOpts } from '../shell-defaults';
@@ -14,18 +15,24 @@ import { getTerminalTheme, onTerminalThemeChange } from '../terminal-theme';
 import { isHostMessage, readHostMessageToken } from '../vscode-message-token';
 import type { DorControlResult } from 'dor/protocol';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
-import type { PeerBridge } from './types';
-import { PEER_REQUEST_TIMEOUT_MS } from '../vscode-peer-link-protocol';
-import { setJsonStoreBackend } from '../local-json-store';
 
 /**
- * Budget for the boot-time host-store read. Generous because it is gated on an
- * OS keychain unlock, and a miss degrades the Host to "un-enrolled" rather than
- * failing loudly.
+ * How long a remote-host command may wait for the extension host. Generous —
+ * `enroll` makes an HTTP round trip to the relay server — but finite, so a
+ * broker window that went away surfaces as a rejected promise instead of a hung
+ * console call. Mirrors the standalone adapters' bound.
  */
-const HOST_STORE_READ_TIMEOUT_MS = 10_000;
+const REMOTE_HOST_COMMAND_TIMEOUT_MS = 15_000;
 
-
+/**
+ * A short random component for this adapter's `rhId`s. Every webview in the
+ * window sees every `remoteHost:result`, so a plain counter would let two of
+ * them mint the same id and settle each other's commands.
+ */
+function randomTag(): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return uuid ? uuid.slice(0, 8) : Math.random().toString(36).slice(2, 10);
+}
 
 export class VSCodeAdapter implements PlatformAdapter {
   // VS Code owns the theme here: it provides --vscode-* itself and has its own
@@ -45,20 +52,17 @@ export class VSCodeAdapter implements PlatformAdapter {
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   private watchedCommandHandlers = new Set<(names: string[]) => void>();
   private alertSettingsHandlers = new Set<(settings: AlertSettings) => void>();
-  private singletonHandlers = new Map<string, (held: boolean) => void>();
-  private peerChangeHandlers = new Map<string, Set<() => void>>();
-  /** Hydrated host-store caches, by claimed prefix — see `hydrateScopedStore`. */
-  private scopedCaches = new Map<string, Map<string, string>>();
-  /**
-   * Broadcasts that landed before their prefix finished hydrating. The read is
-   * gated on a keychain unlock, so this window is wide enough to matter: the
-   * host snapshots `globalState` before that wait, so another webview can
-   * commit a change that the in-flight snapshot will not contain. Carries the
-   * value, not just the key, because a deletion has to survive too.
-   */
-  private pendingStoreChanges = new Map<string, string | null>();
-  /** Fresh lease-handoff snapshots that arrived before boot hydration finished. */
-  private pendingStoreSnapshots = new Map<string, Record<string, string>>();
+  // Remote-host bridge state (the contract is
+  // lib/src/host/remote/service-protocol.ts). Results are broadcast to every
+  // webview, so `rhId` carries a per-adapter tag — see `nextRhId`.
+  private remoteHostPending = new Map<
+    string,
+    { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
+  >();
+  private remoteHostResponders = new Map<string, (params: unknown) => unknown[]>();
+  private remoteHostListeners = new Map<string, Set<(data: unknown) => void>>();
+  private readonly rhTag = randomTag();
+  private nextRemoteHostId = 0;
 
   constructor() {
     this.vscode = acquireVsCodeApi();
@@ -180,29 +184,14 @@ export class VSCodeAdapter implements PlatformAdapter {
             respond,
           },
         }));
-      } else if (msg.type === 'singleton:lease') {
-        this.singletonHandlers.get(msg.name)?.(!!msg.held);
-      } else if (msg.type === 'store:changed') {
-        this.applyStoreChange(msg.key, msg.value ?? null);
-      } else if (msg.type === 'store:snapshot') {
-        this.applyStoreSnapshot(msg.prefix, msg.entries ?? {});
       } else if (msg.type === 'peer:ask') {
-        // Answer even with no responder installed, and even to say nothing: the
-        // broker settles once every webview has replied, so silence would make
-        // it wait out the full budget on what is usually a miss. An empty
-        // answer claims nothing, so it can never beat the real owner.
-        this.vscode.postMessage({
-          type: 'peer:answer',
-          requestId: msg.requestId,
-          results: this.peerResponders.get(msg.op)?.(msg.params) ?? [],
-        });
-      } else if (msg.type === 'peer:changed') {
-        if (msg.topic === null) {
-          for (const handlers of this.peerChangeHandlers.values()) {
-            for (const handler of handlers) handler();
-          }
-        } else {
-          for (const handler of this.peerChangeHandlers.get(msg.topic) ?? []) handler();
+        this.answerRemoteHostAsk(msg.requestId, msg.op, msg.params);
+      } else if (msg.type === 'remoteHost:result') {
+        this.settleRemoteHostCommand(msg.payload);
+      } else if (msg.type === 'remoteHost:event') {
+        const name = (msg.payload as { name?: unknown } | null)?.name;
+        if (typeof name === 'string') {
+          for (const listener of this.remoteHostListeners.get(name) ?? []) listener(msg.payload);
         }
       }
     });
@@ -243,158 +232,78 @@ export class VSCodeAdapter implements PlatformAdapter {
     // No initialization needed — the webview is already running
   }
 
-  /**
-   * Elect among, and reach terminals owned by, sibling webviews — both brokered
-   * by the extension host (docs/specs/vscode.md → "Peer surfaces"). Present
-   * unconditionally: every webview both asks (when it is the Host) and answers
-   * (for its own panes).
-   */
-  readonly peers: PeerBridge = {
-    /**
-     * Ask the extension host for a named single-instance role and report every
-     * grant/revoke. The extension host is the arbiter because it is the only
-     * thing that outlives and sees all of this window's webviews; it re-offers
-     * the role when the holder is disposed, so closing the Dormouse view hands
-     * the Host to another open one rather than dropping it until reload.
-     */
-    claimSingleton: (name, onChange) => {
-      // One entry per role, dispatched from the constructor's authenticated
-      // listener: re-claiming (a React effect remounting, StrictMode's double
-      // mount) replaces the handler instead of stacking another listener on the
-      // busiest message path in the app.
-      this.singletonHandlers.set(name, onChange);
-      this.vscode.postMessage({ type: 'singleton:claim', name });
-    },
-    request: async (op, params) => {
-      const results = await this.requestResponse(
-        'peer:request',
-        'peer:results',
-        { op, params },
-        (msg) => msg.results as unknown[],
-        PEER_REQUEST_TIMEOUT_MS,
-      );
-      // A timeout reads as "nobody answered", which is what a miss looks like
-      // anyway — the caller has no repair to make either way.
-      return results ?? [];
-    },
+  // --- Remote host bridge (docs/specs/remote-api.md) ---
+  //
+  // The Host lives in the extension host, next to the PTYs, in whichever VS
+  // Code window won the bind-as-lease. This webview forwards its console
+  // commands, answers what only it knows (pane names, xterm sizes), and mirrors
+  // the pairing queue.
+
+  readonly remoteHost: RemoteHostLink = {
+    command: (cmd, params) => this.remoteHostCommand(cmd, params),
     respond: (op, handler) => {
-      this.peerResponders.set(op, handler);
+      this.remoteHostResponders.set(op, handler);
     },
     notify: (topic) => {
       this.vscode.postMessage({ type: 'peer:notify', topic });
     },
-    subscribe: (topic, listener) => {
-      let handlers = this.peerChangeHandlers.get(topic);
-      if (!handlers) {
-        handlers = new Set();
-        this.peerChangeHandlers.set(topic, handlers);
+    on: (name, listener) => {
+      let listeners = this.remoteHostListeners.get(name);
+      if (!listeners) {
+        listeners = new Set();
+        this.remoteHostListeners.set(name, listeners);
       }
-      handlers.add(listener);
+      listeners.add(listener);
       return () => {
-        handlers!.delete(listener);
-        if (handlers!.size === 0) this.peerChangeHandlers.delete(topic);
-      };
-    },
-    streamPty: (ptyId) => {
-      this.vscode.postMessage({ type: 'pty:subscribe', id: ptyId });
-      let live = true;
-      return () => {
-        if (!live) return;
-        live = false;
-        this.vscode.postMessage({ type: 'pty:unsubscribe', id: ptyId });
+        listeners.delete(listener);
       };
     },
   };
 
-  private peerResponders = new Map<string, (params: unknown) => unknown[]>();
+  private nextRhId(): string {
+    return `rh-${this.rhTag}-${++this.nextRemoteHostId}`;
+  }
 
-  /**
-   * Pull every `prefix`-scoped value out of extension-host storage and install
-   * a synchronous, write-through backend over it (docs/specs/vscode.md →
-   * "Remote Host: store and lease"). Webview `localStorage` is not the VS Code persistence story, and
-   * the remote Host's enrollment carries a bearer credential that belongs in
-   * `SecretStorage`, so the store has to live on the other side of the message
-   * boundary. A failed read installs an empty cache rather than throwing: the
-   * Host then behaves as un-enrolled instead of blocking webview boot.
-   */
-  async hydrateScopedStore(prefix: string): Promise<void> {
-    // The host answers only after reading `SecretStorage`, which on a cold OS
-    // keychain (or a locked libsecret) can take well over the default second.
-    // `requestResponse` resolves `null` on timeout rather than rejecting, so a
-    // too-short budget silently installs an empty cache and the Host reads as
-    // un-enrolled — indistinguishable from never having enrolled.
-    const entries = await this.requestResponse(
-      'store:read',
-      'store:entries',
-      { prefix },
-      (msg) => msg.entries as Record<string, string>,
-      HOST_STORE_READ_TIMEOUT_MS,
-    );
-    if (entries === null) {
-      console.warn(
-        `[dormouse] host store "${prefix}" did not answer in ${HOST_STORE_READ_TIMEOUT_MS}ms; ` +
-          'continuing without it. A remote Host enrollment will read as absent.',
-      );
-    }
-    const refreshed = this.pendingStoreSnapshots.get(prefix);
-    this.pendingStoreSnapshots.delete(prefix);
-    const cache = new Map(Object.entries(refreshed ?? entries ?? {}));
-    // Anything committed while the read was in flight is newer than the
-    // snapshot, so it is applied on top of it before the cache goes live.
-    for (const [key, pending] of this.pendingStoreChanges) {
-      if (!key.startsWith(prefix)) continue;
-      if (pending === null) cache.delete(key);
-      else cache.set(key, pending);
-      this.pendingStoreChanges.delete(key);
-    }
-    this.scopedCaches.set(prefix, cache);
-    setJsonStoreBackend(prefix, {
-      getItem: (key) => cache.get(key) ?? null,
-      setItem: (key, value) => {
-        cache.set(key, value);
-        this.vscode.postMessage({ type: 'store:write', key, value });
-      },
-      removeItem: (key) => {
-        cache.delete(key);
-        this.vscode.postMessage({ type: 'store:write', key, value: null });
-      },
+  private remoteHostCommand(cmd: string, params?: unknown): Promise<unknown> {
+    const rhId = this.nextRhId();
+    return new Promise<unknown>((resolve, reject) => {
+      // Bounded: a broker window that closed mid-command must reject rather
+      // than leave the console hook (or the device dialog) waiting forever.
+      const timer = setTimeout(() => {
+        this.remoteHostPending.delete(rhId);
+        reject(new Error(`remote host command timed out: ${cmd}`));
+      }, REMOTE_HOST_COMMAND_TIMEOUT_MS);
+      this.remoteHostPending.set(rhId, { resolve, reject, timer });
+      this.vscode.postMessage({ type: 'remoteHost:command', payload: { rhId, cmd, params } satisfies RemoteHostCommand });
     });
   }
 
-  /**
-   * Apply another webview's committed write to this one's cache. Without it a
-   * webview serves reads from its boot-time snapshot forever, and — because the
-   * lease can hand it the Host later — would start from that snapshot and write
-   * it back, dropping every pairing the previous holder approved.
-   */
-  private applyStoreChange(key: string, value: string | null): void {
-    for (const [prefix, cache] of this.scopedCaches) {
-      if (!key.startsWith(prefix)) continue;
-      if (value === null) cache.delete(key);
-      else cache.set(key, value);
-      return;
-    }
-    // No cache holds this key yet: either its prefix is still hydrating (buffer
-    // it — `hydrateScopedStore` drains it) or nothing here claimed the prefix,
-    // in which case the entry is inert.
-    this.pendingStoreChanges.set(key, value);
+  private settleRemoteHostCommand(result: RemoteHostResult | undefined): void {
+    const pending = result ? this.remoteHostPending.get(result.rhId) : undefined;
+    if (!pending || !result) return;
+    this.remoteHostPending.delete(result.rhId);
+    clearTimeout(pending.timer);
+    if (typeof result.error === 'string') pending.reject(new Error(result.error));
+    else pending.resolve(result.result);
   }
 
-  /** Replace a whole prefix before a newly elected window starts its Host. */
-  private applyStoreSnapshot(prefix: string, entries: Record<string, string>): void {
-    const cache = this.scopedCaches.get(prefix);
-    if (cache) {
-      cache.clear();
-      for (const [key, value] of Object.entries(entries)) cache.set(key, value);
-      return;
+  /**
+   * Answer what this webview's own panes are called and how big they are.
+   *
+   * Always answer, even with no responder installed and even to say nothing:
+   * the broker settles once every webview has replied, so silence would make it
+   * wait out the full budget on what is usually a miss. An empty answer claims
+   * nothing, so it can never beat the real owner.
+   */
+  private answerRemoteHostAsk(requestId: string, op: string, params: unknown): void {
+    const handler = this.remoteHostResponders.get(op);
+    let results: unknown[] = [];
+    try {
+      results = handler ? handler(params) : [];
+    } catch (err) {
+      console.error(`[dormouse] remote host ask ${op} failed:`, err);
     }
-
-    // The snapshot is newer than any earlier per-key broadcast. Later changes
-    // remain buffered and are applied on top when hydration completes.
-    for (const key of this.pendingStoreChanges.keys()) {
-      if (key.startsWith(prefix)) this.pendingStoreChanges.delete(key);
-    }
-    this.pendingStoreSnapshots.set(prefix, entries);
+    this.vscode.postMessage({ type: 'peer:answer', requestId, results });
   }
 
   shutdown(): void {

@@ -280,7 +280,7 @@ a first enrollment succeeds and initiates the claim. A user who never enrolls
 a Host therefore gets no heartbeat file, timer, or peer socket merely by
 opening Dormouse.
 
-Source of truth: the rules and the cycle in `lib/src/lib/vscode-window-lease.ts` (tested in `lib/src/lib/vscode-window-lease.test.ts`), the filesystem and timers around them in `vscode-ext/src/window-lease.ts`, and `windowLeaseHeld` gating `electSingleton` in `vscode-ext/src/message-router.ts`.
+Source of truth: `ensurePeerNet` in `vscode-ext/src/peer-link.ts` (tested in `vscode-ext/test/peer-link.test.ts`), and the service it gates in `vscode-ext/src/remote-host.ts`.
 
 Source of truth: the `SingletonClaimant` arbiter in `vscode-ext/src/message-router.ts`, `PeerBridge.claimSingleton` in `lib/src/lib/platform/types.ts`, `setRemoteHostOwnership` in `lib/src/remote/host/activation.ts`, tested in `lib/src/remote/host/activation.test.ts`.
 
@@ -352,7 +352,7 @@ host error.
 
 Source of truth: `vscode-ext/src/peer-link.ts` for the sockets and roles, `lib/src/lib/vscode-peer-link-protocol.ts` for the frames, framing, and PTY routing table (tested in `lib/src/lib/vscode-peer-link-protocol.test.ts`), and the `remote*` calls in `vscode-ext/src/message-router.ts`.
 
-Source of truth: the broker in `vscode-ext/src/message-router.ts` (`brokerRequest`, the `peer:*` cases, `subscribedPtyIds`), `PeerBridge` in `lib/src/lib/platform/types.ts` with its VS Code implementation in `vscode-adapter.ts`, the operation map and responder in `lib/src/remote/host/peer-surfaces.ts`, the resolver in `lib/src/remote/host/surface-resolve.ts`, and the attachment it backs in `lib/src/remote/host/remote-api.ts`, tested in `lib/src/remote/host/peer-surfaces.test.ts`.
+Source of truth: the broker in `vscode-ext/src/message-router.ts` (`brokerRequest`, the `peer:*` cases, `subscribedPtyIds`), `PeerBridge` in `lib/src/lib/platform/types.ts` with its VS Code implementation in `vscode-adapter.ts`, the operation map and responder in `lib/src/remote/host/peer-surfaces.ts`, the resolver in `vscode-ext/src/remote-host.ts`, and the attachment it backs in `lib/src/remote/host/remote-api.ts`, tested in `lib/src/remote/host/peer-surfaces.test.ts`.
 
 ### Testing the extension host
 

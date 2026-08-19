@@ -1,29 +1,26 @@
 /**
- * What one webview may ask its peers, and the answers it gives back
+ * What the Host may ask a webview, and the answers it gives back
  * (docs/specs/vscode.md → "Peer surfaces").
  *
- * The remote Host runs in one webview, but a window's terminals are spread
- * across all of them and each webview has its own xterm registry. So *every*
- * webview installs the responder here, not just the Host's: it answers the
- * broker's questions about the panes this webview owns, and drives them when
- * the Host asks.
+ * The Host runs in the process that owns the PTYs, but a window's terminals are
+ * spread across its webviews and each webview has its own xterm registry. So
+ * *every* webview installs the responder here: it answers what the panes this
+ * webview owns are called, and drives them when the Host asks.
  *
- * This is also the one place the peer operations have real types. The platform
+ * This is also the one place the operations have real types. The platform
  * adapter, the extension-host broker, and the cross-window socket all treat
- * `op` as opaque, because *what* a peer can be asked belongs to the remote Host
- * and not to any of them — {@link PeerOps} is the whole vocabulary, and adding
- * an operation means one entry here plus its caller, not a parallel ladder of
- * message types at every layer.
+ * `op` as opaque, because *what* a webview can be asked belongs to the remote
+ * Host and not to any of them — {@link PeerOps} is the whole vocabulary, and
+ * adding an operation means one entry here plus its caller, not a parallel
+ * ladder of message types at every layer.
  *
  * Deliberately light — the registry, the directory collector, and a resize. It
  * carries none of the relay, enrollment, or pairing machinery, so a webview
- * that will never be the Host pays almost nothing to make its terminals
- * reachable from one that is.
+ * pays almost nothing to make its terminals reachable from the Host.
  */
 
 import { clampTerminalDimension, type DirectoryEntry } from 'server-lib-common';
 import { getPlatform } from '../../lib/platform';
-import type { PeerBridge } from '../../lib/platform/types';
 import { subscribeToActivity } from '../../lib/session-activity-store';
 import { registry } from '../../lib/terminal-store';
 import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
@@ -63,47 +60,12 @@ export interface PeerOps {
   surfaceOp: { params: PeerSurfaceParams; result: PeerSurfaceResult };
 }
 
-/** Put `op` to every peer and collect their answers; empty means nobody owns it. */
-async function askPeers<K extends keyof PeerOps>(
-  op: K,
-  params: PeerOps[K]['params'],
-): Promise<PeerOps[K]['result'][]> {
-  const peers = getPlatform().peers;
-  if (!peers) return [];
-  return (await peers.request(op, params)) as PeerOps[K]['result'][];
-}
-
-/**
- * Whoever this webview answers to: the Node-resident Host service when one sits
- * behind the adapter, otherwise its sibling webviews. The two are the same
- * question asked from different processes — "what do you own, and drive it" —
- * so they share this responder rather than each getting its own copy of the
- * registry logic. Only the *asking* side differs, and that stays peers-only
- * ({@link askPeers}): a webview never asks the service anything.
- */
-function responderBridge(): Pick<PeerBridge, 'respond' | 'notify'> | undefined {
-  const platform = getPlatform();
-  return platform.remoteHost ?? platform.peers;
-}
-
 /** Answer `op` for this webview's own surfaces. No-op where nobody can ask. */
 function answerPeers<K extends keyof PeerOps>(
   op: K,
   handler: (params: PeerOps[K]['params']) => PeerOps[K]['result'][],
 ): void {
-  responderBridge()?.respond(op, (params) => handler(params as PeerOps[K]['params']));
-}
-
-/** Directory entries contributed by every other webview and window. */
-export function peerDirectory(): Promise<DirectoryEntry[]> {
-  return askPeers('directory', {});
-}
-
-/** Drive a surface someone else owns; `null` if nobody does. */
-export async function peerSurfaceOp(params: PeerSurfaceParams): Promise<PeerSurfaceResult | null> {
-  // Surface ids are unique across webviews, so at most one peer answers.
-  const [owner] = await askPeers('surfaceOp', params);
-  return owner ?? null;
+  getPlatform().remoteHost?.respond(op, (params) => handler(params as PeerOps[K]['params']));
 }
 
 /**
@@ -134,17 +96,17 @@ function driveOwnSurface({ surfaceId, op, cols, rows }: PeerSurfaceParams): Peer
 }
 
 /**
- * Make this webview's terminals reachable from whoever is the Host — a sibling
- * webview, or the service in the process that owns the PTYs. Idempotent, and a
- * no-op on hosts that have neither (the website).
+ * Make this webview's terminals reachable from the Host service in the process
+ * that owns the PTYs. Idempotent, and a no-op on a host with no service behind
+ * it (the website).
  */
 export function installPeerSurfaceResponder(): void {
   answerPeers('directory', () => collectDirectorySnapshot());
   answerPeers('surfaceOp', driveOwnSurface);
 
-  const bridge = responderBridge();
-  if (!bridge) return;
-  const notifyDirectory = () => bridge.notify('directory');
+  const link = getPlatform().remoteHost;
+  if (!link) return;
+  const notifyDirectory = () => link.notify('directory');
   subscribeToTerminalPaneState(notifyDirectory);
   subscribeToActivity(notifyDirectory);
   if (typeof document !== 'undefined') {

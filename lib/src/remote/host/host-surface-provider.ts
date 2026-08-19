@@ -9,16 +9,20 @@
  * interface and the session never imports the platform adapter, the stores, or
  * `document`.
  *
- * Today the only implementation is the webview-backed one assembled in
- * `activation.ts` (registry + peer bridge). The Node-resident host service
- * answers the same interface from the process that owns the PTYs, with the
- * webviews demoted to surface responders.
+ * Both implementations are Node-side: the Tauri sidecar's
+ * (`lib/src/host/remote/sidecar-entry.ts`) and the VS Code extension host's
+ * (`vscode-ext/src/remote-host.ts`), each answering from the process that owns
+ * the PTYs with the webviews demoted to surface responders.
  *
  * Types only — this module must stay environment-free so the session and its
  * tests can be imported anywhere.
  */
 
 import type { DirectoryEntry } from 'server-lib-common';
+
+// Re-exported so an implementor can name the entry type without depending on
+// `server-lib-common` itself; vscode-ext's project does not resolve it.
+export type { DirectoryEntry };
 
 export interface SurfaceHandle {
   readonly ptyId: string;

@@ -7,13 +7,6 @@ import { randomBytes } from 'crypto';
 import { HOST_MESSAGE_TOKEN_GLOBAL } from '../../lib/src/lib/vscode-message-token';
 import { RECOVERY_COMMANDS_GLOBAL } from '../../lib/src/lib/vscode-recovery-global';
 
-/**
- * Remote-server `connect-src` sources, substituted by esbuild at build time
- * (`scripts/esbuild.mjs`). Declared rather than imported so the value is a
- * literal in the bundle and cannot be changed at runtime.
- */
-declare const __DORMOUSE_REMOTE_CONNECT_SRC__: string;
-
 function serializeForInlineScript(value: unknown): string {
   return JSON.stringify(value ?? null)
     .replace(/</g, '\\u003c')
@@ -59,12 +52,10 @@ export function getWebviewHtml(
     `font-src ${webview.cspSource}`,
     `img-src ${webview.cspSource} data: blob:`,
     // ws: entries cover the agent-browser stream relay (frames + input for
-    // browser surfaces; see docs/specs/dor-browser.md). The remote sources are
-    // baked in at build time (scripts/esbuild.mjs) — the published extension
-    // reaches the SaaS relay only, and a selfhoster widens it for their own
-    // build with DORMOUSE_REMOTE_CONNECT_SRC, exactly as the standalone binary
-    // does. Without them a VS Code Host cannot hold its `/ws/host` socket.
-    `connect-src ${webview.cspSource} ws://127.0.0.1:* ws://localhost:* ${__DORMOUSE_REMOTE_CONNECT_SRC__}`,
+    // browser surfaces; see docs/specs/dor-browser.md). No relay origin here:
+    // the remote Host holds its `/ws/host` socket from the extension host, so
+    // the origin allowlist is enforced there instead (remote-host.ts).
+    `connect-src ${webview.cspSource} ws://127.0.0.1:* ws://localhost:*`,
     // `dor iframe` frames its target through a loopback transparent proxy that
     // the extension host stands up (iframe-proxy-host.ts), so the only origin we
     // ever embed is 127.0.0.1/localhost on an OS-assigned port. Without a
