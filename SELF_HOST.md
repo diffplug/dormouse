@@ -1045,9 +1045,9 @@ bind mount only protects the data from container replacement.
 
 If the user declines Droplet backups, configure a concrete encrypted backup of
 `/var/lib/dormouse` to storage outside the Droplet and perform a restore test.
-Do not call a second directory on the same Droplet a backup. The two JSON files
-contain Host bearer credentials even though passkey public keys are not secret,
-so protect backup access accordingly.
+Do not call a second directory on the same Droplet a backup. These state files
+include Host bearer credentials and a VAPID private key, so protect backup
+access accordingly.
 
 Document recovery:
 
