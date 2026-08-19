@@ -107,9 +107,17 @@ origin is therefore reached only by a custom build: set
 `DORMOUSE_REMOTE_CONNECT_SRC` when building (e.g.
 `pnpm --filter dormouse-standalone tauri build`) to the sources for your server,
 such as `https://dormouse.example.com wss://dormouse.example.com` or a tailnet
-wildcard `https://*.ts.net wss://*.ts.net`. It replaces the default SaaS
-sources. The default is deliberately not internet-wide — widening it is an
-explicit, per-build opt-in.
+wildcard `https://*.ts.net wss://*.ts.net`. It **replaces** the default SaaS
+sources rather than adding to them. The default is deliberately not
+internet-wide — widening it is an explicit, per-build opt-in.
+
+The default carries **no localhost entry**, and `http`/`ws` are a different
+scheme class from `https`/`wss`, so a Host built with the default refuses to
+enroll against a plaintext `http://localhost:3000` dev server — see
+"Running it" for the override a local loop needs. (This is narrower than the old
+webview CSP, which allowed localhost for the app's own loopback proxies; that
+allowance is still in the webview CSP, where it is about the agent-browser and
+iframe proxies rather than about relays.)
 
 Reserved: the `https://*.dormouse.sh wss://*.dormouse.sh` entries are
 *wildcards* on purpose. The BYOT posture (`## Future`, Scope: saas-multitenant)
@@ -535,8 +543,17 @@ DORMOUSE_SETUP_PASSWORD=hunter2 DORMOUSE_VAPID_SUBJECT=mailto:you@example.com \
   pnpm dev:pocket-server
 ```
 
-**2. Host** (the laptop being controlled): `pnpm dev:standalone`, then enroll
-once from the devtools console of the standalone webview:
+**2. Host** (the laptop being controlled). The Host runs in the sidecar / the
+extension host and refuses any origin outside the allowlist baked into that
+bundle — by default the SaaS origin only, with no localhost and no plaintext
+scheme. A local server therefore needs the override at build time, which
+`dev:standalone` picks up because it re-stages the sidecar bundles on the way:
+
+```sh
+DORMOUSE_REMOTE_CONNECT_SRC='http://localhost:3000 ws://localhost:3000' pnpm dev:standalone
+```
+
+Then enroll once from the devtools console of the standalone webview:
 
 ```js
 await window.dormouseRemoteHost.enroll('http://localhost:3000', 'hunter2', 'My Laptop')

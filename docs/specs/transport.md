@@ -37,7 +37,9 @@ The browser-dev bridge is intentionally a transport shim over the same sidecar p
 - Host → webview events use `GET /__dormouse_dev_host/events` as an SSE stream.
 - Browser console calls are mirrored to `POST /__dormouse_dev_host/console` so a single `pnpm dev:standalone:ab` terminal shows sidecar logs, Vite logs, and in-browser diagnostics.
 
-The harness may omit native-only desktop chrome such as window controls and update checks, but it must preserve the `PlatformAdapter` PTY, control-request, clipboard, iframe-proxy, and agent-browser contracts used by the app. Tauri APIs must not be required at static module-evaluation time when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set, because the page is loaded by a normal browser rather than the Tauri WebView.
+The remote Host rides the same shim: `remote_host_command` is one more invoke that writes `remoteHost:command` to the sidecar, and the sidecar's `remoteHost:*` events arrive on the SSE stream, so the harness runs a real Host against a per-run temp state directory (`docs/specs/standalone.md` → "Remote Host service").
+
+The harness may omit native-only desktop chrome such as window controls and update checks, but it must preserve the `PlatformAdapter` PTY, control-request, clipboard, iframe-proxy, remote-Host, and agent-browser contracts used by the app. Tauri APIs must not be required at static module-evaluation time when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set, because the page is loaded by a normal browser rather than the Tauri WebView.
 
 ## PTY lifecycle
 

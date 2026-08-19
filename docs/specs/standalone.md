@@ -134,8 +134,10 @@ One file rather than one per value, so a write is one atomic rename and the
 enrollment can never end up describing a different Host than the records
 approved under it. `hostToken` is a bearer credential and never enters a webview
 realm. If the directory cannot be created, Rust passes an empty value and the
-sidecar falls back to an ephemeral store — usable for the session, nothing
-survives a restart (the browser dev harness takes the same path).
+sidecar falls back to an ephemeral store — a Host can be enrolled and used for
+the session, but nothing survives a restart, and it warns once when a write is
+dropped. The browser dev harness passes a per-run temp directory instead, so a
+dev enrollment lives and dies with that run.
 
 **The bridge.** Webview → sidecar is one generic passthrough invoke,
 `remote_host_command(payload)`, which writes `{"event":"remoteHost:command",
