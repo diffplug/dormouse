@@ -332,12 +332,16 @@ is no visible pane geometry to inspect.
 
 Triggered by pressing `,` in command mode or clicking the session name in the pane header.
 
-The name `<span>` is replaced by an `<input>` with:
+The name `<span>` is replaced by an `InlineEditInput` (`lib/src/components/wall/InlineEditInput.tsx`, shared with the browser URL editor in `docs/specs/dor-browser.md`) with:
 - Same font (`font-mono font-medium`), `bg-transparent`, no border
-- Text pre-selected on mount
-- `Enter` confirms, `Escape` cancels, `blur` confirms
+- Text pre-selected once, on mount
+- `Enter` confirms, `Escape` cancels, `blur` confirms — whichever lands first settles the edit, so the blur that follows an Enter/Escape unmount cannot submit a second time
 - `stopPropagation` on `mousedown`/`click`/`keydown` to prevent panel click or drag
 - All command-mode shortcuts are bypassed while renaming
+
+The field is **controlled by its own draft state**, seeded from the header label at mount and untouched by later prop changes. Pane headers re-render on every activity, terminal-state, and palette change, and an editor that re-derived its value (or re-ran `select()`) on those renders would fight the user mid-word — one re-render between two keystrokes and the second keystroke replaces everything typed so far. Mounting is the reset: the editor exists only while the pane is being renamed, so each rename starts from the current label.
+
+Clipboard chords inside the field are the wall's job on hosts whose webview has no native Edit menu — see `docs/specs/mouse-and-clipboard.md` §8.9.
 
 Submitted values are rejected when empty or when they fail the `setTerminalUserTitle` validation that also guards title seeding — no titles starting with the `<idle>` sentinel (`docs/specs/transport.md`). `<unnamed>` is the default panel placeholder but is otherwise allowed as a deliberate user pin. When the user submits a rejected value, the input still closes (so it is not a blocking dialog) and a small auto-dismissing warning popover anchored under the input names the offending value. The popover dismisses on the next pointerdown, scroll, resize, `Escape`, or after 3s.
 
@@ -527,6 +531,7 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/components/wall/AlertSpeechIndicator.tsx` | Pointer-transparent whole-Pane `SPEAKING` / `SPOKEN` overlay |
 | `lib/src/components/wall/TerminalPanel.tsx` | Pane body wrapper; registers the pane's DOM element (`usePaneChrome`) |
 | `lib/src/components/wall/TerminalPaneHeader.tsx` | Pane header with rename, alert/TODO, mouse override, split/zoom/minimize/kill controls, and the right-click context menu |
+| `lib/src/components/wall/InlineEditInput.tsx` | The inline title/URL editor: draft-owning controlled input, pre-selected once on mount |
 | `lib/src/components/wall/PaneHeaderContextMenu.tsx` | Pane-header right-click menu: the `surface:N` handle plus the pane's bound TCP ports; a port click connects it to the default browser (`docs/specs/dor-browser.md`) |
 | `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` | Pane/door focus ring: the JS travel tween + rAF loop; re-measures on Lath store commits + animator frames; computes the directional motion-blur velocity |
 | `lib/src/components/wall/SelectionRing.tsx` | The SVG shell: one ring path (`solid` passthrough / `ants` command) plus the eight-piece smear group, all driven imperatively |

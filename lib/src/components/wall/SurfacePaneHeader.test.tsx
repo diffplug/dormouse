@@ -21,6 +21,7 @@ import {
   type WallActions,
 } from './wall-context';
 import { stubWallActions as stubActions } from './wall-test-utils';
+import { setNativeFieldValue } from '../../lib/dom';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -185,7 +186,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
     expect(input!.value).toBe('http://localhost:5173/app');
 
     act(() => {
-      input!.value = 'localhost:3000/x';
+      setNativeFieldValue(input!, 'localhost:3000/x');
       input!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
     expect(navigate).toHaveBeenCalledWith('http://localhost:3000/x');
@@ -214,7 +215,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
     expect(input).not.toBeNull();
 
     act(() => {
-      input!.value = 'example.com';
+      setNativeFieldValue(input!, 'example.com');
       input!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
     expect(navigate).not.toHaveBeenCalled();

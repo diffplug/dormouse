@@ -281,6 +281,16 @@ Drag-to-paste is **not supported in the VSCode build**: VSCode's `WebviewView` (
 
 Right-click and OS Edit-menu paste are not currently implemented; users paste via the keyboard shortcuts in §8.2.
 
+### 8.9 Clipboard Chords Inside Dormouse's Own Text Fields
+
+Everything above is about the terminal. Dormouse also renders real `<input>`s — pane rename, the browser URL editor, dialog fields — and the standalone build gives them no *native* clipboard chords: the app replaces macOS's default menu so its native Paste item stops fighting the terminal's DOM-level Cmd+V (`standalone/src-tauri/src/lib.rs`), and WKWebView routes Cmd+C/X/V through exactly that menu. `handleEditableClipboard` (`lib/src/components/wall/keyboard/handle-editable-clipboard.ts`) supplies them in JS instead, first in the wall's keydown chain so a focused field wins over the mode and rename gates:
+
+- **Paste** reads text through `readTextFromClipboard` (the same native-read preference as §8.6 tier 2, so no "Paste from <App>" popup) and replaces the field's selection. **Copy** and **cut** write the selected substring with `navigator.clipboard.writeText`; a collapsed selection copies nothing. Only text — the file-reference and image tiers stay terminal-only.
+- The edit goes through `document.execCommand('insertText')` when the webview allows it (native undo), otherwise through the prototype `value` setter plus a synthetic `input` event, which is what keeps a React-controlled field's state in sync.
+- The chord table is §8.2's: paste takes either modifier on every platform, copy/cut take `⌘` on macOS and `Ctrl` elsewhere.
+- Scope is deliberately narrow. xterm's `.xterm-helper-textarea` is excluded (the terminal owns its chords), as are read-only and disabled fields, and the handler runs only where the adapter implements the optional `readClipboardText` — today the two standalone adapters. That is the menu-less macOS build it is written for; it also takes in `standalone/src/browser-sidecar-adapter.ts`, whose Chrome webview *does* have native chords, so there the JS path replaces a working native one rather than standing down. Everywhere else — VS Code, the website, Pocket — the handler never fires and the webview's own chords are untouched.
+- Because the clipboard read is asynchronous (an IPC roundtrip on the standalone host), the field can unmount before the edit lands — Escape, or the blur that commits a rename. The edit is skipped when that happens: `execCommand` acts on whatever is focused at the time, which is usually the terminal by then, so an unguarded write would type the clipboard into the shell.
+
 ---
 
 ## Files
@@ -291,6 +301,8 @@ Right-click and OS Edit-menu paste are not currently implemented; users paste vi
 | `lib/src/lib/mouse-mode-observer.ts` | DECSET/DECRST parser hook; syncs mouse-reporting and bracketed-paste modes |
 | `lib/src/lib/terminal-mouse-router.ts` | Drag routing, smart-token hinting, Alt shape toggle |
 | `lib/src/lib/clipboard.ts` | Copy/paste entry points and the tiered paste chain |
+| `lib/src/components/wall/keyboard/handle-editable-clipboard.ts` | Copy/cut/paste inside Dormouse's own text fields (§8.9) |
+| `lib/src/components/wall/keyboard/chords.ts` | The copy vs. paste modifier convention (§8.2), shared by both keyboard handlers |
 | `lib/src/lib/rewrap.ts` | Copy Rewrapped transformations |
 | `lib/src/lib/selection-text.ts` | Selected-cell text extraction |
 | `lib/src/lib/smart-token.ts` | URL / path / error-location patterns (`PATTERNS`) |

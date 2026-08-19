@@ -18,6 +18,7 @@ vi.mock('../../lib/themes', () => ({
 
 import { searchThemes } from '../../lib/themes';
 import { ThemeStoreDialog } from './ThemeStoreDialog';
+import { setNativeFieldValue } from '../../lib/dom';
 
 const searchThemesMock = vi.mocked(searchThemes);
 
@@ -57,11 +58,7 @@ function render(open: boolean) {
 function typeQuery(value: string) {
   const input = container.querySelector('input');
   if (!input) throw new Error('search input not rendered');
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
-  act(() => {
-    setter.call(input, value);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
+  act(() => { setNativeFieldValue(input, value); });
 }
 
 describe('ThemeStoreDialog', () => {
