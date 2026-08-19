@@ -332,18 +332,7 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelectorAll('[data-lath-leaf]:not([data-lath-parked])').length).toBe(1);
 
       // Killing the door releases the Surface for real — the parked DOM goes with it.
-      let killed: { ok: boolean } | undefined;
-      await act(async () => {
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
-          detail: {
-            method: SURFACE_CONTROL_METHODS.kill,
-            params: { surface: surfaceId, confirmation: { mode: 'dangerously' } },
-            respond: (r: typeof killed) => { killed = r; },
-          },
-        }));
-      });
-      await flush();
-      expect(killed?.ok).toBe(true);
+      expect((await dispatchKill(surfaceId))?.ok).toBe(true);
       expect(container.querySelector(`[data-lath-leaf="${surfaceId}"]`)).toBeNull();
     } finally {
       untouchedSpy.mockRestore();
@@ -428,18 +417,7 @@ describe('Wall on the Lath engine', () => {
       expect(reused).toMatchObject({ ok: true, result: { status: 'existing', surfaceId: browserId } });
       expect(container.querySelectorAll('[data-door-id]')).toHaveLength(1);
 
-      let killed: { ok: boolean } | undefined;
-      await act(async () => {
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
-          detail: {
-            method: SURFACE_CONTROL_METHODS.kill,
-            params: { surface: browserId, confirmation: { mode: 'dangerously' } },
-            respond: (r: typeof killed) => { killed = r; },
-          },
-        }));
-      });
-      await flush();
-      expect(killed?.ok).toBe(true);
+      expect((await dispatchKill(browserId))?.ok).toBe(true);
       expect(agentBrowserCommand).toHaveBeenCalledWith(defaultSession, ['close'], undefined);
     } finally {
       untouchedSpy.mockRestore();
@@ -507,16 +485,7 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelector(`[data-door-id="${browserId}"]`)).toBeNull();
       expect(container.querySelector(`[data-lath-leaf="${browserId}"]`)?.hasAttribute('data-lath-parked')).toBe(false);
 
-      await act(async () => {
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
-          detail: {
-            method: SURFACE_CONTROL_METHODS.kill,
-            params: { surface: browserId, confirmation: { mode: 'dangerously' } },
-            respond: () => {},
-          },
-        }));
-      });
-      await flush();
+      await dispatchKill(browserId);
       expect(agentBrowserCommand).toHaveBeenCalledWith(
         'browser-session',
         ['close'],
@@ -959,6 +928,22 @@ describe('Wall on the Lath engine', () => {
     await flush();
     expect(response?.ok).toBe(true);
     return response!.result!.surfaceId!;
+  }
+
+  /** `dor kill --dangerously` on one surface; returns the control response. */
+  async function dispatchKill(surface: string): Promise<{ ok: boolean } | undefined> {
+    let response: { ok: boolean } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.kill,
+          params: { surface, confirmation: { mode: 'dangerously' } },
+          respond: (r: typeof response) => { response = r; },
+        },
+      }));
+    });
+    await flush();
+    return response;
   }
 
   async function dispatchAgentBrowser(params: Record<string, unknown>): Promise<string> {

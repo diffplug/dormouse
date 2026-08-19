@@ -154,8 +154,10 @@ canvas — where a plain remove destroys the state and the reattach is really a 
   map instead of deleted, in **one commit**. Atomicity is the whole contract: if the id
   were absent from both the tree and `parked` for even one render, React would unmount
   the leaf and the DOM state would be gone. Every op that re-admits a leaf (`addLeaf`,
-  `restoreLeaf`, `insertLeaf`, `replaceLeaf`, `seed`) unparks it in that same commit.
-  `unparkLeaf` drops a leaf without restoring it — the deliberate unmount.
+  `restoreLeaf`, `insertLeaf`, `replaceLeaf`, `seed`) unparks it in that same commit,
+  through the one shared `admit` helper that also seeds the enter hint — so an op added
+  later cannot honor half the contract. `unparkLeaf` drops a leaf without restoring
+  it — the deliberate unmount.
 - **The metadata maps are disjoint**: a leaf is laid out (`leafMeta`), parked with
   live DOM (`parked`), or cap-evicted into an unmounted Door (`evictedMeta`), never
   more than one. That keeps all minimized meta out of the persisted layout with no
@@ -178,9 +180,9 @@ canvas — where a plain remove destroys the state and the reattach is really a 
   Keeping the rect in the store is load-bearing: `registerEl(null)` is a ref detach,
   not an unmount, and React detaches when a callback identity changes and on every
   StrictMode commit. Adapter-local pruning on detach silently lost every parked rect.
-  On re-admission, `restoreLeaf` / `insertLeaf` (and the other admitting ops) seed the
-  animator from this held rect at full opacity; if no rect was measured, they suppress
-  the collapsed enter hint. A still-mounted guest therefore never sees a zero-width or
+  On re-admission, `admit` seeds the animator from this held rect at full opacity for
+  every admitting op and every drop target; if no rect was measured, it suppresses the
+  collapsed enter hint. A still-mounted guest therefore never sees a zero-width or
   zero-height viewport during reattach.
 - **Visibility is now a real signal.** A parked leaf is on screen only in the DOM
   sense, so `PaneProps.parked` carries it to the body and `useSurfaceVisibility(parked)`

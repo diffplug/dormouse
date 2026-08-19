@@ -137,11 +137,9 @@ export interface LathAnimator {
 /** One leaf's motion segment: interpolate `from → to` over `[start, start+duration]`. */
 type Segment = { from: Frame; to: Frame; start: number };
 
-type CollapsedEnterFrom = Edge | 'top-left';
-
 /** The entering rect: collapsed against `edge` of `to` (zero extent along that axis),
  *  so the leaf grows from that boundary. `'top-left'` collapses both dims. */
-function collapsedRect(to: Rect, edge: CollapsedEnterFrom): Rect {
+function collapsedRect(to: Rect, edge: Exclude<EnterFrom, Rect>): Rect {
   switch (edge) {
     case 'left':
       return { x: to.x, y: to.y, width: 0, height: to.height };
@@ -223,11 +221,11 @@ export function createAnimator(opts: { durationMs: number; easing?: (t: number) 
           from = current.get(id) ?? to;
         } else {
           const enter = enters?.get(id);
-          from = enter
-            ? typeof enter === 'string'
-              ? { rect: collapsedRect(toRect, enter), opacity: 0, layer: to.layer }
-              : { rect: enter, opacity: 1, layer: to.layer }
-            : to;
+          if (!enter) from = to;
+          // An edge grows the leaf out of that boundary from nothing; an explicit rect
+          // is a still-mounted parked leaf resuming from the viewport it held.
+          else if (typeof enter === 'string') from = { rect: collapsedRect(toRect, enter), opacity: 0, layer: to.layer };
+          else from = { rect: enter, opacity: 1, layer: to.layer };
         }
         // Unchanged (or snapped) leaves start already-settled so `settledAt` and the
         // adapter's tick loop don't spin on frames that never move.

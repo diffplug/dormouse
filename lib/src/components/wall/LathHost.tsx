@@ -21,6 +21,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -35,7 +36,7 @@ import { type DropTarget, resize } from '../../lib/lath/ops';
 import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
 import { PANE_HEADER_HEIGHT_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import type { PaneProps } from './pane-props';
-import { type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
+import { type LeafMeta, LATH_LAYOUT_OPTS, leafMetaIn } from './lath-wall-store';
 import { nowMs, type LathWallEngine } from './lath-wall-engine';
 import { type DragController, createDragController } from './lath-drag-controller';
 import { TerminalPanel } from './TerminalPanel';
@@ -226,24 +227,21 @@ const LathLeaf = memo(function LathLeaf({
 }) {
   // A parked leaf paints nothing and takes no input, but KEEPS its rect: sizing it
   // to zero (or `display: none`) would report a 0×0 viewport to the guest document
-  // and make it reflow on the way out and back. `opacity`/`boxShadow` are restated
-  // because `applyFrames` may have written them imperatively — React only clears
-  // the style keys it set itself.
+  // and make it reflow on the way out and back. `opacity`/`boxShadow`/`pointerEvents`
+  // are restated because `applyFrames` may have written them imperatively — React
+  // only clears the style keys it set itself.
   const style: CSSProperties = hidden
     ? { display: 'none' }
-    : parked
-      ? {
-          left,
-          top,
-          width,
-          height,
-          zIndex: Z_TILED,
-          opacity: 1,
-          boxShadow: 'none',
-          visibility: 'hidden',
-          pointerEvents: 'none',
-        }
-      : { left, top, width, height, zIndex };
+    : {
+        left,
+        top,
+        width,
+        height,
+        zIndex,
+        ...(parked
+          ? { opacity: 1, boxShadow: 'none', pointerEvents: 'none', visibility: 'hidden' as const }
+          : {}),
+      };
   return (
     <div
       data-lath-leaf={id}
@@ -447,7 +445,13 @@ export function LathHost({
   // join the same sorted list — they left the TREE, not the DOM, and parking is one
   // store commit, so a leaf never blinks out of the child list on its way to being
   // parked (docs/specs/tiling-engine.md → "Parked leaves").
-  const sortedIds = [...leaves(snapshot.tree), ...snapshot.parked.keys()].sort();
+  // Memoized on the two snapshot fields it reads: `commit` reuses both by identity
+  // when untouched, so this recomputes only when the id set can actually change —
+  // not on every geometry-only render (a sash drag re-renders per rAF).
+  const sortedIds = useMemo(
+    () => [...leaves(snapshot.tree), ...snapshot.parked.keys()].sort(),
+    [snapshot.tree, snapshot.parked],
+  );
 
   // Create-once-per-id callback bundle so the memoized LathLeaf sees a stable
   // `registerEl` identity across commits.
@@ -612,7 +616,7 @@ export function LathHost({
       {sortedIds.map((id) => {
         const cb = leafCallbacks(id);
         const parkedLeaf = snapshot.parked.get(id);
-        const meta = snapshot.leafMeta.get(id) ?? parkedLeaf?.meta;
+        const meta = leafMetaIn(snapshot, id);
         // A laid-out leaf tiles at its frame; a parked one holds the rect the store
         // captured when it left the tree (falling back to the whole wall if it was
         // parked before it ever laid out); anything else has nowhere to be and hides.
@@ -625,7 +629,9 @@ export function LathHost({
               top: f.y,
               width: f.width,
               height: f.height,
-              zIndex: parkedLeaf ? Z_TILED : zIndexForLayer(layers.get(id) ?? LATH_LAYER_TILED),
+              // A parked leaf is never in `layers` (it left the tree) and never zoomed
+              // (`detachLeaf` clears `zoomedId`), so this already resolves to `Z_TILED`.
+              zIndex: zIndexForLayer(layers.get(id) ?? LATH_LAYER_TILED),
               hidden: false,
               parked: !!parkedLeaf,
             }
