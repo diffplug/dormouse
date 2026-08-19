@@ -459,6 +459,55 @@ describe('bind-as-lease', () => {
     expect(broker.isRemotePty('pty-far')).toBe(false);
   });
 
+  it('fails closed when the owner route disappears before subscription', async () => {
+    const peerSide = farWindow();
+    const { broker, peer } = await linkedPair(fakeWindow(), peerSide);
+    await attachFar(broker);
+
+    await peer.disposePeerLink();
+    await waitFor(() => !broker.isRemotePty('pty-far'));
+
+    const sink = fakeSink();
+    await broker.remoteSubscribe('pty-far', sink);
+    expect(sink.exits).toEqual([0]);
+  });
+
+  it('replays an exit that preceded the cross-window subscription', async () => {
+    const peerSide = farWindow();
+    const { broker } = await linkedPair(fakeWindow(), peerSide);
+
+    // The pane remains resolvable after its process exits. No forwarding sink
+    // exists yet, so the owner's durable liveness record must bridge the gap.
+    peerSide.emitExit('pty-far', 23);
+    await attachFar(broker);
+    const first = fakeSink();
+    const firstOrder: string[] = [];
+    const firstReady = broker
+      .remoteSubscribe('pty-far', {
+        ...first,
+        onExit: (code) => {
+          first.exits.push(code);
+          firstOrder.push('exit');
+        },
+      })
+      .then(() => void firstOrder.push('ready'));
+
+    await firstReady;
+    expect(first.exits).toEqual([23]);
+    // The owner writes replay before acknowledgement on one ordered socket.
+    // RemoteApiSession waits on readiness, so this order prevents an attach-ok
+    // from overtaking the already-recorded close.
+    expect(firstOrder).toEqual(['exit', 'ready']);
+    expect(broker.isRemotePty('pty-far')).toBe(false);
+
+    // A synchronous replay must not leave a spent forwarding entry on the
+    // owner, or the next resolve would be routed but its subscribe ignored.
+    await attachFar(broker);
+    const second = fakeSink();
+    await broker.remoteSubscribe('pty-far', second);
+    expect(second.exits).toEqual([23]);
+  });
+
   it('stops the stream on unsubscribe but keeps the route', async () => {
     const peerSide = farWindow();
     const { broker } = await linkedPair(fakeWindow(), peerSide);

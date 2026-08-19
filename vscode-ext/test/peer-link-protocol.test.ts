@@ -76,19 +76,19 @@ describe('FrameDecoder', () => {
     expect(decoder.push('\n\n')).toEqual([]);
   });
 
-  it('carries the one-way PTY frames, which have no id of their own', () => {
-    // Nothing awaits them — the stream they start is correlated by `ptyId` —
-    // so a frame id would be a field nobody ever reads.
+  it('correlates stream readiness while leaving later PTY frames one-way', () => {
     const decoder = new FrameDecoder();
     expect(
       decoder.push(
-        encodeFrame({ kind: 'subscribe', ptyId: 'pty-1' }) +
+        encodeFrame({ kind: 'subscribe', id: 'sub-1', ptyId: 'pty-1' }) +
+          encodeFrame({ kind: 'subscribed', id: 'sub-1', ptyId: 'pty-1' }) +
           encodeFrame({ kind: 'write', ptyId: 'pty-1', data: 'ls\r' }) +
           encodeFrame({ kind: 'resizePty', ptyId: 'pty-1', cols: 120, rows: 40 }) +
           encodeFrame({ kind: 'unsubscribe', ptyId: 'pty-1' }),
       ),
     ).toEqual([
-      { kind: 'subscribe', ptyId: 'pty-1' },
+      { kind: 'subscribe', id: 'sub-1', ptyId: 'pty-1' },
+      { kind: 'subscribed', id: 'sub-1', ptyId: 'pty-1' },
       { kind: 'write', ptyId: 'pty-1', data: 'ls\r' },
       { kind: 'resizePty', ptyId: 'pty-1', cols: 120, rows: 40 },
       { kind: 'unsubscribe', ptyId: 'pty-1' },

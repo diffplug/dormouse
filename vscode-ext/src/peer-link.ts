@@ -284,6 +284,17 @@ const clients = new Set<PeerLinkClient>();
 const routes = new Map<string, PeerLinkClient>();
 const remoteSinks = new Map<string, Set<RemotePtySink>>();
 
+interface PendingRemoteSubscription {
+  client: PeerLinkClient;
+  ptyId: string;
+  promise: Promise<void>;
+  settle(): void;
+}
+
+/** Subscribe acknowledgement by frame id, plus its one in-flight id per PTY. */
+const pendingRemoteSubscriptions = new Map<string, PendingRemoteSubscription>();
+const pendingRemoteSubscriptionByPty = new Map<string, string>();
+
 /**
  * One outstanding {@link ask}, and the window it is outstanding against — so a
  * window that disconnects can settle its own without touching anyone else's.
@@ -306,9 +317,9 @@ function send(
 /** Ask one peer and resolve when it answers, or when the budget expires. */
 function ask(
   client: PeerLinkClient,
-  // `request` is the only frame anything waits on, and so the only one that
-  // carries an id; everything else is one-way and correlated by `ptyId` or by
-  // the `rhId` already inside it.
+  // Surface/directory requests use this response table. Stream readiness has
+  // its own subscribe table below; everything after readiness is one-way and
+  // correlated by `ptyId` or by the `rhId` already inside it.
   frame: Extract<PeerLinkRequest, { kind: 'request' }>,
 ): Promise<PeerLinkResponse | null> {
   return new Promise((resolve) => {
@@ -330,6 +341,52 @@ function ask(
 
 function authenticatedClients(): PeerLinkClient[] {
   return [...clients].filter((client) => client.authenticated);
+}
+
+function settleRemoteSubscription(ptyId: string): void {
+  const id = pendingRemoteSubscriptionByPty.get(ptyId);
+  if (!id) return;
+  pendingRemoteSubscriptions.get(id)?.settle();
+}
+
+/**
+ * Wait until the owner has installed its sink and checked durable PTY liveness.
+ * A silent peer is treated like a closed PTY, keeping an attach bounded and
+ * fail-closed instead of acknowledging a stream that may not exist.
+ */
+function beginRemoteSubscription(client: PeerLinkClient, ptyId: string): Promise<void> {
+  const id = `s${++nextRequestId}`;
+  let resolveReady!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    resolveReady = resolve;
+  });
+  const timer = setTimeout(() => {
+    const pending = pendingRemoteSubscriptions.get(id);
+    if (!pending) return;
+    // The owner may have installed the sink even though its acknowledgement was
+    // lost or delayed. Stop it while its route is still known, or timeout would
+    // leave that window forwarding an orphaned stream indefinitely.
+    send(client, { kind: 'unsubscribe', ptyId });
+    routes.delete(ptyId);
+    for (const sink of [...(remoteSinks.get(ptyId) ?? [])]) sink.onExit(0);
+    remoteSinks.delete(ptyId);
+    pending.settle();
+  }, PEER_REPLY_BUDGET_MS);
+  (timer as unknown as { unref?: () => void }).unref?.();
+
+  const settle = () => {
+    if (pendingRemoteSubscriptions.get(id)?.ptyId !== ptyId) return;
+    clearTimeout(timer);
+    pendingRemoteSubscriptions.delete(id);
+    if (pendingRemoteSubscriptionByPty.get(ptyId) === id) {
+      pendingRemoteSubscriptionByPty.delete(ptyId);
+    }
+    resolveReady();
+  };
+  pendingRemoteSubscriptions.set(id, { client, ptyId, promise, settle });
+  pendingRemoteSubscriptionByPty.set(ptyId, id);
+  send(client, { kind: 'subscribe', id, ptyId });
+  return promise;
 }
 
 /** JSON primitives and arrays are parseable, but no peer frame can be one. */
@@ -386,9 +443,13 @@ export function isRemotePty(ptyId: string): boolean {
   return routes.get(ptyId) !== undefined;
 }
 
-export function remoteSubscribe(ptyId: string, sink: RemotePtySink): void {
+/** Resolve once the owning window has installed the sink and checked liveness. */
+export function remoteSubscribe(ptyId: string, sink: RemotePtySink): Promise<void> {
   const client = routes.get(ptyId);
-  if (!client) return;
+  if (!client) {
+    sink.onExit(0);
+    return Promise.resolve();
+  }
   // Reference-counted per PTY: two attachments to the same foreign surface
   // share one stream over the link, and only zero-to-one starts the owner
   // forwarding — so a second viewer never restarts a stream that is already
@@ -397,9 +458,14 @@ export function remoteSubscribe(ptyId: string, sink: RemotePtySink): void {
   if (!sinks) {
     sinks = new Set();
     remoteSinks.set(ptyId, sinks);
-    send(client, { kind: 'subscribe', ptyId });
+    sinks.add(sink);
+    return beginRemoteSubscription(client, ptyId);
   }
   sinks.add(sink);
+  const pendingId = pendingRemoteSubscriptionByPty.get(ptyId);
+  return pendingId
+    ? pendingRemoteSubscriptions.get(pendingId)?.promise ?? Promise.resolve()
+    : Promise.resolve();
 }
 
 export function remoteUnsubscribe(ptyId: string, sink: RemotePtySink): void {
@@ -414,8 +480,8 @@ export function remoteUnsubscribe(ptyId: string, sink: RemotePtySink): void {
   // owning window disconnecting (`forgetPeerRoutes`).
   remoteSinks.delete(ptyId);
   const client = routes.get(ptyId);
-  if (!client) return;
-  send(client, { kind: 'unsubscribe', ptyId });
+  if (client) send(client, { kind: 'unsubscribe', ptyId });
+  settleRemoteSubscription(ptyId);
 }
 
 export function remoteWrite(ptyId: string, data: string): boolean {
@@ -468,6 +534,7 @@ function dropClient(client: PeerLinkClient): void {
   for (const ptyId of forgetPeerRoutes(routes, client)) {
     for (const sink of remoteSinks.get(ptyId) ?? []) sink.onExit(0);
     remoteSinks.delete(ptyId);
+    settleRemoteSubscription(ptyId);
   }
   // Anything this window was still being asked can never be answered either,
   // and holding it open to its full reply budget stalls the whole collection it
@@ -540,6 +607,12 @@ function onServerFrame(client: PeerLinkClient, frame: unknown): void {
     routes.delete(response.ptyId);
     for (const sink of [...(remoteSinks.get(response.ptyId) ?? [])]) sink.onExit(response.exitCode);
     remoteSinks.delete(response.ptyId);
+    settleRemoteSubscription(response.ptyId);
+    return;
+  }
+  if (response.kind === 'subscribed') {
+    const pending = pendingRemoteSubscriptions.get(response.id);
+    if (pending?.client === client) pending.settle();
     return;
   }
   if (response.kind === 'notify') {
@@ -709,19 +782,30 @@ async function onClientFrame(socket: Socket, frame: unknown): Promise<void> {
       break;
     }
     case 'subscribe': {
-      if (forwarding.has(request.ptyId)) break;
+      if (forwarding.has(request.ptyId)) {
+        respondTo(socket, { kind: 'subscribed', id: request.id, ptyId: request.ptyId });
+        break;
+      }
       if (!deps) break;
       const { ptyId } = request;
+      let exitedWhileSubscribing = false;
       const stop = deps.streamPty(ptyId, {
         onData: (data) => respondTo(socket, { kind: 'data', ptyId, data }),
         onExit: (exitCode) => {
+          exitedWhileSubscribing = true;
           respondTo(socket, { kind: 'exit', ptyId, exitCode });
           // The registry has already dropped this attachment, so the stored
           // unsubscribe is spent; what is left is to stop claiming the PTY.
           forwarding.delete(ptyId);
         },
       });
-      forwarding.set(ptyId, stop);
+      // `streamPty` synchronously replays an exit that predates this request.
+      // Do not install its already-spent unsubscribe after the callback removed
+      // the forwarding entry: a later resolve must be able to replay again.
+      if (!exitedWhileSubscribing) forwarding.set(ptyId, stop);
+      // Ordered after a synchronous exit replay on this same socket. The broker
+      // cannot settle stream readiness until it has observed that close.
+      respondTo(socket, { kind: 'subscribed', id: request.id, ptyId });
       break;
     }
     case 'unsubscribe':

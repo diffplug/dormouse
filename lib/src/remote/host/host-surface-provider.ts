@@ -45,6 +45,17 @@ export interface PtySink {
   onExit(exitCode: number): void;
 }
 
+export interface PtyStream {
+  /** Stop this sink's stream. Idempotent after exit. */
+  stop(): void;
+  /**
+   * Settles only after the sink is installed at the PTY owner. For an in-process
+   * owner this is already resolved; a cross-window provider waits for the peer's
+   * subscription acknowledgement.
+   */
+  readonly ready: Promise<void>;
+}
+
 export interface HostSurfaceProvider {
   /**
    * Every surface the Host can reach right now, from wherever they live —
@@ -88,9 +99,17 @@ export interface HostSurfaceProvider {
   resizePty(ptyId: string, cols: number, rows: number): void;
 
   /**
-   * Subscribe to one PTY's output and exit; returns the unsubscribe. Per-PTY
-   * rather than a global stream the caller filters, so an attachment cannot
-   * leak another attachment's bytes and unsubscribing cannot outlive its id.
+   * Subscribe to one PTY's output and exit. Subscription and liveness observation
+   * are atomic at the owner: if this PTY already exited, call `sink.onExit`
+   * before `ready` settles. In-process providers replay synchronously; a
+   * cross-window provider waits for the owner's acknowledgement, ordered after
+   * any replay on the same socket. That closes the asynchronous
+   * `resolveSurface` -> subscription gap without making the protocol session
+   * know how either Host records PTY lifetime.
+   *
+   * Per-PTY rather than a global stream the caller filters, so an attachment
+   * cannot leak another attachment's bytes and unsubscribing cannot outlive its
+   * id.
    */
-  streamPty(ptyId: string, sink: PtySink): () => void;
+  streamPty(ptyId: string, sink: PtySink): PtyStream;
 }

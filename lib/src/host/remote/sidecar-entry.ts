@@ -30,6 +30,8 @@ import {
 export interface SidecarPtyManager {
   write(id: string, data: string): void;
   resize(id: string, cols: number, rows: number): void;
+  /** Whether the current PTY generation still has a live process. */
+  hasPty(id: string): boolean;
 }
 
 export interface SidecarSurfaceBridgeOptions {
@@ -97,6 +99,8 @@ export function createSidecarSurfaceBridge(
     sinks: Set<PtySink>;
   }
   const streams = new Map<string, Stream>();
+  /** Natural exits outlive their process so a late subscription can replay one. */
+  const exits = new Map<string, number>();
 
   const { provider, notifyDirectoryChanged } = createAskSurfaceProvider(ask, {
     writePty: (ptyId, data) => options.mgr.write(ptyId, data),
@@ -110,7 +114,7 @@ export function createSidecarSurfaceBridge(
       }
       const subscribed = stream;
       subscribed.sinks.add(sink);
-      return () => {
+      const unsubscribe = () => {
         // Only while the map still holds the very stream this subscription
         // joined. Once the last sink leaves, the entry goes and a later
         // attachment to the same id gets a fresh one — so an unsubscribe run
@@ -123,6 +127,27 @@ export function createSidecarSurfaceBridge(
         // half-read sequence into a stream that starts over.
         streams.delete(ptyId);
       };
+
+      // Subscribe first, then inspect the manager on the same event-loop turn.
+      // An earlier exit is in `exits`; a later one reaches the sink above. A
+      // live result also identifies a new PTY generation that reused this id,
+      // so its predecessor's recorded exit can be forgotten safely.
+      let alive: boolean;
+      try {
+        alive = options.mgr.hasPty(ptyId);
+      } catch (error) {
+        unsubscribe();
+        throw error;
+      }
+      if (alive) {
+        exits.delete(ptyId);
+      } else {
+        const exitCode = exits.get(ptyId) ?? 0;
+        unsubscribe();
+        sink.onExit(exitCode);
+      }
+
+      return { stop: unsubscribe, ready: Promise.resolve() };
     },
   });
 
@@ -156,11 +181,15 @@ export function createSidecarSurfaceBridge(
     },
 
     onPtyEvent(event, data) {
-      // Nothing is attached: this runs on every chunk of every PTY, and the
-      // usual state of a machine with no phone on it is exactly this.
-      if (streams.size === 0) return;
       const detail = data as { id?: unknown } | null;
       if (!detail || typeof detail.id !== 'string') return;
+      if (event === 'exit') {
+        const exitCode = (detail as { exitCode?: unknown }).exitCode;
+        exits.set(detail.id, typeof exitCode === 'number' ? exitCode : 0);
+      }
+      // Nothing is attached: data can stay cheap, but exits above are durable
+      // because a surface resolution may already be in flight without a sink.
+      if (streams.size === 0) return;
       const stream = streams.get(detail.id);
       if (!stream) return;
       if (event === 'data') {
@@ -174,8 +203,7 @@ export function createSidecarSurfaceBridge(
         return;
       }
       if (event === 'exit') {
-        const exitCode = (detail as { exitCode?: unknown }).exitCode;
-        const code = typeof exitCode === 'number' ? exitCode : 0;
+        const code = exits.get(detail.id) ?? 0;
         for (const sink of stream.sinks) sink.onExit(code);
       }
     },
@@ -184,6 +212,7 @@ export function createSidecarSurfaceBridge(
       for (const pending of [...asks.values()]) pending.settle([]);
       asks.clear();
       streams.clear();
+      exits.clear();
     },
   };
 }

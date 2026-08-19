@@ -61,8 +61,11 @@ class FakeProvider implements HostSurfaceProvider {
   collectGate: Promise<void> | null = null;
   /** Hold every `handle.resize` open — the deferred half of an attach. */
   resizeGate: Promise<void> | null = null;
+  /** Hold stream readiness, as a cross-window subscribe acknowledgement does. */
+  streamReadyGate: Promise<void> | null = null;
 
   readonly #sinks = new Map<string, Set<PtySink>>();
+  readonly #exits = new Map<string, number>();
   readonly #onChange = new Set<() => void>();
 
   // --- HostSurfaceProvider ---
@@ -100,7 +103,7 @@ class FakeProvider implements HostSurfaceProvider {
     this.emitData(ptyId, `pty-resize:${cols}x${rows}`);
   };
 
-  streamPty = (ptyId: string, sink: PtySink): (() => void) => {
+  streamPty = (ptyId: string, sink: PtySink) => {
     this.streamed.push(ptyId);
     let sinks = this.#sinks.get(ptyId);
     if (!sinks) {
@@ -108,16 +111,23 @@ class FakeProvider implements HostSurfaceProvider {
       this.#sinks.set(ptyId, sinks);
     }
     sinks.add(sink);
-    return () => {
+    const stop = () => {
       this.unstreamed.push(ptyId);
       sinks.delete(sink);
     };
+    // The production providers bridge the resolve -> subscribe gap this way:
+    // subscription replays an exit that landed before there was a sink.
+    if (this.#exits.has(ptyId)) sink.onExit(this.#exits.get(ptyId)!);
+    return { stop, ready: this.streamReadyGate ?? Promise.resolve() };
   };
 
   // --- Test drivers ---
 
   addSurface(surfaceId: string, ptyId: string, cols = 80, rows = 24): FakeSurface {
     const surface: FakeSurface = { ptyId, cols, rows };
+    // A new PTY generation may reuse a pane id; its predecessor's exit does not
+    // belong to it.
+    this.#exits.delete(ptyId);
     this.surfaces.set(surfaceId, surface);
     return surface;
   }
@@ -128,6 +138,7 @@ class FakeProvider implements HostSurfaceProvider {
   }
 
   emitExit(ptyId: string, exitCode: number): void {
+    this.#exits.set(ptyId, exitCode);
     for (const sink of [...(this.#sinks.get(ptyId) ?? [])]) sink.onExit(exitCode);
   }
 
@@ -935,6 +946,76 @@ describe('RemoteApiSession surface.detach', () => {
 });
 
 describe('RemoteApiSession teardown', () => {
+  it('waits for stream readiness and rejects an exit ordered before it', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    const { session, sent } = makeSession(provider);
+    const ready = gate();
+    provider.streamReadyGate = ready.promise;
+
+    session.handle({
+      requestId: 'attach-1',
+      method: REMOTE_METHODS.surfaceAttach,
+      params: { surfaceId: 'surface-1', cols: 80, rows: 24 },
+    });
+    await settle();
+
+    // A peer subscription is installed in another process. Until its ack
+    // crosses back, even a same-size attach must not bounce or acknowledge.
+    expect(sent).toEqual([]);
+    expect(provider.ptyResizes).toEqual([]);
+
+    provider.emitExit('pty-1', 23);
+    ready.release();
+    await settle();
+
+    expect(reply(sent, 'attach-1')).toEqual({
+      requestId: 'attach-1',
+      ok: false,
+      error: 'surface closed while attaching: surface-1',
+    });
+    expect(sent.some((p) => (p as RemoteEventMsg).event === REMOTE_EVENTS.terminalClosed)).toBe(
+      false,
+    );
+    expect(provider.ptyResizes).toEqual([]);
+  });
+
+  it('fails the attach when the PTY exits while surface resolution is in flight', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    const { session, sent } = makeSession(provider);
+    const held = gate();
+    provider.resolveGate = held.promise;
+
+    session.handle({
+      requestId: 'attach-1',
+      method: REMOTE_METHODS.surfaceAttach,
+      params: { surfaceId: 'surface-1', cols: 80, rows: 24 },
+    });
+    await settle();
+
+    // There is no sink until resolution finishes. The provider records this
+    // exit and replays it synchronously when the session tries to subscribe.
+    provider.emitExit('pty-1', 23);
+    held.release();
+    await settle();
+
+    expect(reply(sent, 'attach-1')).toEqual({
+      requestId: 'attach-1',
+      ok: false,
+      error: 'surface closed while attaching: surface-1',
+    });
+    expect(sent.some((p) => (p as RemoteEventMsg).event === REMOTE_EVENTS.terminalClosed)).toBe(
+      false,
+    );
+    expect(provider.streamed).toEqual(['pty-1']);
+    expect(provider.unstreamed).toEqual(['pty-1']);
+    expect(provider.released).toEqual(['pty-1']);
+    // A dead PTY is never bounced or otherwise resized after the replay.
+    expect(provider.ptyResizes).toEqual([]);
+    expect(provider.handleResizes).toEqual([]);
+  });
+
   it('tears down the attachment when the attached PTY exits', async () => {
     const provider = new FakeProvider();
     provider.addSurface('surface-1', 'pty-1', 80, 24);

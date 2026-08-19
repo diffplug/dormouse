@@ -64,7 +64,11 @@ interface PendingRequest {
   timer: ReturnType<typeof setTimeout>;
 }
 const peerRequests = new Map<string, PendingRequest>();
-const processedPtyStreams = createProcessedPtyStreams(onProcessedPtyData, onProcessedPtyExit);
+const processedPtyStreams = createProcessedPtyStreams(
+  onProcessedPtyData,
+  onProcessedPtyExit,
+  ptyManager.getPtyStatus,
+);
 
 // The link reaches other windows; it must never call back into a fan-out that
 // would reach them again, so it only ever gets the in-window broker.

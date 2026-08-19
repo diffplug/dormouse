@@ -217,8 +217,9 @@ be consumed, and its generated response is thrown away with every other event.
 The tap is inside `pty-core`'s event callback in `main.js`, ahead of the send to
 the webview, and is wrapped: **a remote listener must never break the local
 pipe**, so a throw is logged to stderr and the webview's `pty:*` event is sent
-either way. With nothing attached the tap returns on the first line — the usual
-state of a machine with no phone on it.
+either way. With nothing attached, data still returns after cheap id/map checks;
+exit codes are retained so a stream installed after surface resolution can
+replay liveness before attach acknowledgement.
 
 Source of truth: `standalone/sidecar/main.js` (the tap and the
 `remoteHost:command` case), `remote_host_command` / `remote_host_state_dir` in

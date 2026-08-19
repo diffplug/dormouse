@@ -95,6 +95,7 @@ export function fakeWindow(
 ) {
   const dataListeners = new Set<(id: string, data: string) => void>();
   const exitListeners = new Set<(id: string, exitCode: number) => void>();
+  const ptyStatuses = new Map<string, { alive: boolean; exitCode?: number }>();
   const streams = createProcessedPtyStreams(
     (listener) => {
       dataListeners.add(listener);
@@ -104,6 +105,7 @@ export function fakeWindow(
       exitListeners.add(listener);
       return () => void exitListeners.delete(listener);
     },
+    (id) => ptyStatuses.get(id) ?? { alive: true },
   );
   return {
     entries: options.entries ?? [],
@@ -122,9 +124,11 @@ export function fakeWindow(
     /** Windows that finished the handshake with this one as the broker. */
     joined: [] as PeerLinkClient[],
     emitData(id: string, data: string) {
+      ptyStatuses.set(id, { alive: true });
       for (const listener of dataListeners) listener(id, data);
     },
     emitExit(id: string, exitCode: number) {
+      ptyStatuses.set(id, { alive: false, exitCode });
       for (const listener of exitListeners) listener(id, exitCode);
     },
     deps(): PeerLinkDeps {

@@ -12,16 +12,24 @@ import { createProcessedPtyStreams } from '../src/processed-pty-streams';
 function fakeSource() {
   const data = new Set<(id: string, chunk: string) => void>();
   const exit = new Set<(id: string, exitCode: number) => void>();
+  const statuses = new Map<string, { alive: boolean; exitCode?: number }>();
   return {
     /** How many listener pairs are installed right now. */
     get installed(): number {
       return data.size + exit.size;
     },
     emitData(id: string, chunk: string): void {
+      statuses.set(id, { alive: true });
       for (const listener of [...data]) listener(id, chunk);
     },
     emitExit(id: string, exitCode: number): void {
+      // The real manager records liveness before it fans out the processed
+      // exit, so a listener installed later sees the same ordering.
+      statuses.set(id, { alive: false, exitCode });
       for (const listener of [...exit]) listener(id, exitCode);
+    },
+    spawn(id: string): void {
+      statuses.set(id, { alive: true });
     },
     streams: () =>
       createProcessedPtyStreams(
@@ -33,6 +41,7 @@ function fakeSource() {
           exit.add(listener);
           return () => void exit.delete(listener);
         },
+        (id) => statuses.get(id) ?? { alive: true },
       ),
   };
 }
@@ -142,6 +151,19 @@ describe('processed pty streams', () => {
     expect(first.data).toEqual([]);
   });
 
+  it('replays an exit that landed before the stream was installed', () => {
+    const source = fakeSource();
+    const streams = source.streams();
+    source.emitExit('pty-1', 23);
+
+    const late = sink();
+    const stop = streams.streamPty('pty-1', late);
+
+    expect(late.exits).toEqual([23]);
+    expect(source.installed).toBe(0);
+    expect(() => stop()).not.toThrow();
+  });
+
   it('survives a sink that unsubscribes itself from inside its own exit', () => {
     // Which is exactly what an attachment does: the exit is what tells it to
     // let go, and it lets go by calling the unsubscribe it is holding.
@@ -169,6 +191,7 @@ describe('processed pty streams', () => {
     const stopBefore = streams.streamPty('pty-1', before);
     source.emitExit('pty-1', 0);
 
+    source.spawn('pty-1');
     const after = sink();
     streams.streamPty('pty-1', after);
     // The dead attachment's unsubscribe must not reach into the live one.

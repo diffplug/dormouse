@@ -142,12 +142,18 @@ export function createRemoteHostProvider(bound: RemoteHostDeps): HostSurfaceProv
         // Another window's terminal: it has already stripped the protocol out
         // on its side, so what arrives over the link is what its own xterm
         // renders — the same stream shape as the local branch below.
-        remoteSubscribe(ptyId, sink);
-        return () => remoteUnsubscribe(ptyId, sink);
+        const ready = remoteSubscribe(ptyId, sink);
+        return {
+          stop: () => remoteUnsubscribe(ptyId, sink),
+          ready,
+        };
       }
       // One of this window's own, through the keyed registry every consumer of
       // the processed stream shares (`processed-pty-streams.ts`).
-      return bound.streamPty(ptyId, sink);
+      return {
+        stop: bound.streamPty(ptyId, sink),
+        ready: Promise.resolve(),
+      };
     },
   });
   return askProvider.provider;

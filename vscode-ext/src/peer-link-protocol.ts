@@ -43,13 +43,13 @@ export const PEER_REPLY_BUDGET_MS = ASK_BUDGET_MS + 2_000;
  * and this layer only moves the bytes. Adding an operation touches neither this
  * file nor the socket code.
  *
- * Only `request` carries a frame id, because only `request` is awaited. The
- * four PTY frames are one-way instructions to the owning window: nothing waits
- * on them, and the stream they start is correlated by `ptyId`.
+ * `request` and `subscribe` carry frame ids because both are awaited. A stream
+ * is not ready until the owner acknowledges that its sink (and atomic liveness
+ * check) are installed; output after that remains correlated by `ptyId`.
  */
 export type PeerLinkRequest =
   | { kind: 'request'; id: string; op: string; params: unknown }
-  | { kind: 'subscribe'; ptyId: string }
+  | { kind: 'subscribe'; id: string; ptyId: string }
   | { kind: 'unsubscribe'; ptyId: string }
   | { kind: 'write'; ptyId: string; data: string }
   | { kind: 'resizePty'; ptyId: string; cols: number; rows: number }
@@ -76,6 +76,8 @@ export type PeerLinkResponse =
    * "not mine" arrives.
    */
   | { kind: 'result'; id: string; results: unknown[] }
+  /** The requested PTY sink and its liveness observation are installed. */
+  | { kind: 'subscribed'; id: string; ptyId: string }
   /** Unsolicited: bytes from a PTY the broker subscribed to. */
   | { kind: 'data'; ptyId: string; data: string }
   /** Unsolicited: that PTY ended. */

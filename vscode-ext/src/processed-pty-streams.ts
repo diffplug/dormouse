@@ -28,9 +28,15 @@ export interface ProcessedPtyStreams {
   streamPty(ptyId: string, sink: PtySink): () => void;
 }
 
+export interface PtyStatus {
+  alive: boolean;
+  exitCode?: number;
+}
+
 export function createProcessedPtyStreams(
   onProcessedPtyData: (listener: (id: string, data: string) => void) => () => void,
   onProcessedPtyExit: (listener: (id: string, exitCode: number) => void) => () => void,
+  getPtyStatus: (id: string) => PtyStatus | undefined,
 ): ProcessedPtyStreams {
   const streams = new Map<string, Set<PtySink>>();
   let stopListeners: (() => void) | null = null;
@@ -78,7 +84,7 @@ export function createProcessedPtyStreams(
       subscribed.add(sink);
       install();
 
-      return () => {
+      const unsubscribe = () => {
         // Only if the map still holds the very set this subscription joined: an
         // exit replaces nothing but does remove it, and a later attachment to
         // the same id gets a fresh one that this unsubscribe has no claim on.
@@ -88,6 +94,26 @@ export function createProcessedPtyStreams(
         streams.delete(ptyId);
         uninstallIfIdle();
       };
+
+      // Install first, then inspect the host's durable liveness record. If the
+      // exit happened before installation the record closes the gap; if it
+      // happens after the inspection, the listener above receives it. These
+      // synchronous steps cannot interleave on the extension-host event loop.
+      // Missing means the manager has no live generation under this id, which
+      // is also dead from a resolved pane's point of view.
+      let status: PtyStatus | undefined;
+      try {
+        status = getPtyStatus(ptyId);
+      } catch (error) {
+        unsubscribe();
+        throw error;
+      }
+      if (status?.alive !== true) {
+        unsubscribe();
+        sink.onExit(status?.exitCode ?? 0);
+      }
+
+      return unsubscribe;
     },
   };
 }

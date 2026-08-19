@@ -116,6 +116,7 @@ function fakeDeps() {
   const asked: Array<{ op: string; params: unknown }> = [];
   const dataListeners = new Set<(id: string, data: string) => void>();
   const exitListeners = new Set<(id: string, exitCode: number) => void>();
+  const ptyStatuses = new Map<string, { alive: boolean; exitCode?: number }>();
   const streams = createProcessedPtyStreams(
     (listener) => {
       dataListeners.add(listener);
@@ -125,14 +126,17 @@ function fakeDeps() {
       exitListeners.add(listener);
       return () => void exitListeners.delete(listener);
     },
+    (id) => ptyStatuses.get(id) ?? { alive: true },
   );
   return {
     posted,
     asked,
     emitData: (id: string, data: string) => {
+      ptyStatuses.set(id, { alive: true });
       for (const listener of dataListeners) listener(id, data);
     },
     emitExit: (id: string, exitCode: number) => {
+      ptyStatuses.set(id, { alive: false, exitCode });
       for (const listener of exitListeners) listener(id, exitCode);
     },
     answers: new Map<string, unknown[]>(),
@@ -707,10 +711,11 @@ describe('remote host provider', () => {
     const provider = mod.createRemoteHostProvider(bound.deps());
     const seen: string[] = [];
     const exits: number[] = [];
-    const stop = provider.streamPty('pty-1', {
+    const stream = provider.streamPty('pty-1', {
       onData: (data) => void seen.push(data),
       onExit: (code) => void exits.push(code),
     });
+    await stream.ready;
 
     bound.emitData('pty-1', 'hello\x1b]0;title\x07');
     bound.emitData('pty-other', 'not mine');
@@ -720,9 +725,23 @@ describe('remote host provider', () => {
     expect(seen).toEqual(['hello\x1b]0;title\x07']);
     expect(exits).toEqual([7]);
 
-    stop();
+    stream.stop();
     bound.emitData('pty-1', 'after');
     expect(seen).toHaveLength(1);
+  });
+
+  it('replays a local PTY exit that preceded provider subscription', async () => {
+    const mod = await freshHost();
+    const bound = fakeDeps();
+    const provider = mod.createRemoteHostProvider(bound.deps());
+    bound.emitExit('pty-1', 23);
+
+    const sink = fakeSink();
+    const stream = provider.streamPty('pty-1', sink);
+    await stream.ready;
+
+    expect(sink.exits).toEqual([23]);
+    stream.stop();
   });
 
   it('asks the webviews for the directory and for an attach', async () => {
@@ -846,8 +865,8 @@ describe('serving the other windows', () => {
     await waitFor(async () => !!(await provider.resolveSurface('far-1', { cols: 80, rows: 24 })));
 
     const sink = fakeSink();
-    const stop = provider.streamPty('pty-far', sink);
-    await tick();
+    const stream = provider.streamPty('pty-far', sink);
+    await stream.ready;
     far.emitData('pty-far', 'from the other window');
     await waitFor(() => sink.data.length > 0);
 
@@ -857,7 +876,7 @@ describe('serving the other windows', () => {
     expect(far.writes).toEqual([{ ptyId: 'pty-far', data: 'ls\r' }]);
     expect(far.resizes).toEqual([{ ptyId: 'pty-far', cols: 120, rows: 40 }]);
 
-    stop();
+    stream.stop();
     await tick();
     far.emitData('pty-far', 'after the unsubscribe');
     await tick(100);

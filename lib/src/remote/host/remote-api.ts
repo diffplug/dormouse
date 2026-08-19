@@ -332,6 +332,13 @@ export class RemoteApiSession {
     const subId = request.requestId;
     const pendingEvents: Array<{ event: string; data: unknown }> = [];
     let streaming = false;
+    // A production provider replays an exit that happened before this
+    // subscription was installed (the surface resolve is a process/window round
+    // trip). Local replay is synchronous, so keep that callback safe before
+    // `attachment` exists and fail rather than installing a dead PTY. Peer
+    // replay is ordered before `stream.ready` and follows the installed path.
+    let attachment: Attachment | null = null;
+    let closedWhileSubscribing = false;
     const emitOrBuffer = (event: string, data: unknown): void => {
       if (streaming) {
         this.#event(subId, event, data);
@@ -339,7 +346,7 @@ export class RemoteApiSession {
         pendingEvents.push({ event, data });
       }
     };
-    const stopStream = this.#provider.streamPty(ptyId, {
+    const stream = this.#provider.streamPty(ptyId, {
       onData: (data) => {
         // The PTY delivers strings on this path; be defensive about the
         // Uint8Array path some adapters use. Either way it goes out as
@@ -358,28 +365,46 @@ export class RemoteApiSession {
         // and nulls #attachment so #requireAttached fails and the bounce timer
         // is cleared.
         emitOrBuffer(REMOTE_EVENTS.terminalClosed, { exitCode });
-        this.#teardownAttachment();
+        if (attachment && this.#attachment === attachment) {
+          this.#teardownAttachment();
+        } else {
+          closedWhileSubscribing = true;
+        }
       },
     });
-    const attachment: Attachment = {
+    if (closedWhileSubscribing) {
+      stream.stop();
+      handle.release();
+      this.#failAttach(
+        request,
+        params.surfaceId,
+        generation,
+        `surface closed while attaching: ${params.surfaceId}`,
+      );
+      return;
+    }
+    attachment = {
       surfaceId: params.surfaceId,
       handle,
       subId,
-      stopStream,
+      stopStream: stream.stop,
       bounceTimer: null,
     };
     this.#attachment = attachment;
+    const installedAttachment = attachment;
 
     // Attach-is-the-resize: resizing the real xterm fires its onResize handler,
     // which drives resizePty → SIGWINCH → the TUI/shell repaints, and that
     // repaint is what fills the client's screen (no snapshot transfer). The
-    // stream is subscribed first because some PTYs repaint synchronously.
-    // A sibling's owner already applied the size inside the attach round trip,
+    // stream is subscribed first because some PTYs repaint synchronously. For a
+    // sibling window, `ready` waits for the owner's subscription acknowledgement
+    // so an exit replay sent before that acknowledgement wins the race here.
+    // A sibling's owner already applied the size inside the resolve round trip,
     // so its handle resolves at the requested size and takes the bounce below.
     const finish = (size: { cols: number; rows: number }): void => {
       if (this.#disposed) return;
-      if (this.#attachGeneration !== generation || this.#attachment !== attachment) {
-        if (this.#attachment === attachment) this.#teardownAttachment();
+      if (this.#attachGeneration !== generation || this.#attachment !== installedAttachment) {
+        if (this.#attachment === installedAttachment) this.#teardownAttachment();
         this.#failAttach(
           request,
           params.surfaceId,
@@ -396,20 +421,35 @@ export class RemoteApiSession {
       }
     };
 
-    if (!sameSize) {
-      // The result promises the size the PTY now has, so do not acknowledge the
-      // attach until the owner has actually applied it. Rejection is a normal
-      // protocol error, not an unhandled promise rejection in the Host process.
-      void handle.resize(cols, rows).then(finish, (error) => {
-        if (this.#attachment === attachment) this.#teardownAttachment();
+    const beginResize = (): void => {
+      if (this.#disposed) return;
+      if (this.#attachGeneration !== generation || this.#attachment !== installedAttachment) {
+        if (this.#attachment === installedAttachment) this.#teardownAttachment();
         this.#failAttach(
           request,
           params.surfaceId,
           generation,
-          `surface attach failed: ${errorMessage(error)}`,
+          `surface closed while attaching: ${params.surfaceId}`,
         );
-      });
-    } else {
+        return;
+      }
+
+      if (!sameSize) {
+        // The result promises the size the PTY now has, so do not acknowledge
+        // the attach until the owner has actually applied it. Rejection is a
+        // normal protocol error, not an unhandled Host-process rejection.
+        void handle.resize(cols, rows).then(finish, (error) => {
+          if (this.#attachment === installedAttachment) this.#teardownAttachment();
+          this.#failAttach(
+            request,
+            params.surfaceId,
+            generation,
+            `surface attach failed: ${errorMessage(error)}`,
+          );
+        });
+        return;
+      }
+
       // Same size: force one repaint with a quick rows bounce on the PTY only,
       // leaving the already-correct local xterm buffer untouched. Bounce away
       // from `rows` in whichever direction stays >= 1 (a 1-row surface must
@@ -422,13 +462,27 @@ export class RemoteApiSession {
       // as a backstop, re-check this is still the current attachment before
       // touching the PTY — a stale restore would clobber the newer size owner
       // (last-attach-wins) or resize a detached/exited PTY.
-      attachment.bounceTimer = setTimeout(() => {
-        attachment.bounceTimer = null;
-        if (this.#attachment !== attachment) return;
+      installedAttachment.bounceTimer = setTimeout(() => {
+        installedAttachment.bounceTimer = null;
+        if (this.#attachment !== installedAttachment) return;
         this.#provider.resizePty(ptyId, cols, rows);
       }, FORCE_REPAINT_BOUNCE_MS);
       finish({ cols: handle.cols, rows: handle.rows });
-    }
+    };
+
+    void stream.ready.then(beginResize, (error) => {
+      if (this.#disposed) return;
+      const closed = this.#attachment !== installedAttachment;
+      if (this.#attachment === installedAttachment) this.#teardownAttachment();
+      this.#failAttach(
+        request,
+        params.surfaceId,
+        generation,
+        closed
+          ? `surface closed while attaching: ${params.surfaceId}`
+          : `surface attach failed: ${errorMessage(error)}`,
+      );
+    });
   }
 
   #detach(request: RemoteRequest): void {

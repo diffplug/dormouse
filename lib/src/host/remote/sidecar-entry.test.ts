@@ -11,6 +11,7 @@ import { ASK_BUDGET_MS, type RemoteHostAsk } from './service-protocol';
 let sent: Array<{ event: string; data: RemoteHostAsk }>;
 let written: Array<{ id: string; data: string }>;
 let resized: Array<{ id: string; cols: number; rows: number }>;
+let livePtys: Set<string>;
 let bridge: SidecarSurfaceBridge;
 
 /** The ask the bridge is waiting on, most recent last. */
@@ -36,11 +37,13 @@ beforeEach(() => {
   sent = [];
   written = [];
   resized = [];
+  livePtys = new Set(['pty-1', 'pty-2']);
   bridge = createSidecarSurfaceBridge({
     send: (event, data) => sent.push({ event, data: data as RemoteHostAsk }),
     mgr: {
       write: (id, data) => void written.push({ id, data }),
       resize: (id, cols, rows) => void resized.push({ id, cols, rows }),
+      hasPty: (id) => livePtys.has(id),
     },
   });
 });
@@ -237,24 +240,49 @@ describe('PTYs', () => {
     expect(one.exits).toEqual([3, 0]);
   });
 
+  it('replays an exit that landed before the stream was installed', () => {
+    // pty-core emits before removing the generation from its live map.
+    bridge.onPtyEvent('exit', { id: 'pty-1', exitCode: 23 });
+    livePtys.delete('pty-1');
+
+    const late = sink();
+    const subscription = bridge.provider.streamPty('pty-1', late);
+
+    expect(late.exits).toEqual([23]);
+    expect(() => subscription.stop()).not.toThrow();
+  });
+
+  it('does not replay an old exit after the PTY id is reused', () => {
+    bridge.onPtyEvent('exit', { id: 'pty-1', exitCode: 23 });
+    // The manager has already installed a fresh generation under the id.
+    expect(livePtys.has('pty-1')).toBe(true);
+
+    const replacement = sink();
+    bridge.provider.streamPty('pty-1', replacement);
+    bridge.onPtyEvent('data', { id: 'pty-1', data: 'new generation' });
+
+    expect(replacement.exits).toEqual([]);
+    expect(replacement.data).toEqual(['new generation']);
+  });
+
   it('stops delivering after unsubscribe', () => {
     const one = sink();
-    const unsubscribe = bridge.provider.streamPty('pty-1', one);
-    unsubscribe();
+    const subscription = bridge.provider.streamPty('pty-1', one);
+    subscription.stop();
     bridge.onPtyEvent('data', { id: 'pty-1', data: 'x' });
     expect(one.data).toEqual([]);
   });
 
   it('does not let a spent unsubscribe silence the attachment that replaced it', () => {
     const first = sink();
-    const unsubscribe = bridge.provider.streamPty('pty-1', first);
-    unsubscribe();
+    const subscription = bridge.provider.streamPty('pty-1', first);
+    subscription.stop();
 
     // A new attachment to the same id gets a fresh stream, which the previous
     // subscription's unsubscribe has no claim on.
     const second = sink();
     bridge.provider.streamPty('pty-1', second);
-    unsubscribe();
+    subscription.stop();
 
     bridge.onPtyEvent('data', { id: 'pty-1', data: 'still flowing' });
     expect(second.data).toEqual(['still flowing']);

@@ -310,10 +310,18 @@ An attach is not acknowledged until its required resize settles; rejected
 surface resolution, attach resize, and `terminal.resize` are returned as
 protocol errors and are contained inside the session rather than becoming
 unhandled Host-process rejections. The stream is subscribed before that resize
-settles, so a PTY that exits inside the window tears the attachment down first:
-the attach is then answered `surface closed while attaching` and the buffered
-`terminal.closed` is dropped rather than flushed, since the client is never
-given the subscription it would arrive on.
+settles. Subscription also observes liveness atomically: each production
+provider replays a recorded exit when the PTY died while `resolveSurface` was in
+flight, before the session had its sink. Local providers do that synchronously;
+a VS Code peer sends a subscription acknowledgement after installing the sink
+and checking liveness, on the same ordered socket and after any replay. The
+session waits for that readiness before resizing or acknowledging. Either kind
+of exit therefore tears the attachment down first, so the attach is answered
+`surface closed while attaching` and the buffered `terminal.closed` is dropped
+rather than flushed, since the client is never given the subscription it would
+arrive on. Source of truth: `HostSurfaceProvider.streamPty`,
+`RemoteApiSession.#beginAttach`, and the peer `subscribe` / `subscribed` frames
+in `vscode-ext/src/peer-link.ts`.
 
 #### Size authority: last-attach-wins
 
