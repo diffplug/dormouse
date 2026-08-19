@@ -10,6 +10,7 @@ import {
   resetShellStore,
   seedShellStore,
   selectShell,
+  subscribeToShells,
 } from './shell-store';
 
 /** The one place the storage key is spelled out: it is a persistence contract,
@@ -137,15 +138,39 @@ describe('shell store', () => {
     expect(getDefaultShellOpts()).toBeNull();
   });
 
-  it('ignores re-selecting the shell already in use', () => {
+  it('persists an explicit re-pick of a fallback without spawning a terminal', () => {
+    localStorage.setItem(SELECTED_KEY, JSON.stringify({ path: FISH.path, args: [] }));
     seedShellStore(SHELLS);
-    clearPersistedShellSelection();
 
     // Same path and arguments, different object: reference identity must not
     // be the test.
     selectShell({ ...ZSH });
 
     expect(spawns).toEqual([]);
-    expect(localStorage.getItem(SELECTED_KEY)).toBeNull();
+    expect(JSON.parse(localStorage.getItem(SELECTED_KEY)!)).toEqual({
+      path: ZSH.path,
+      args: [],
+    });
+
+    seedShellStore([ZSH, FISH]);
+    expect(getShellsSnapshot().selected).toEqual(ZSH);
+  });
+
+  it('does not notify or reset selection when re-seeded with the same shells', () => {
+    seedShellStore(SHELLS);
+    selectShell(BASH);
+    clearPersistedShellSelection();
+    const listener = vi.fn();
+    const unsubscribe = subscribeToShells(listener);
+
+    seedShellStore([
+      { ...ZSH },
+      { ...BASH, args: [...BASH.args] },
+    ]);
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(getShellsSnapshot().selected).toEqual(BASH);
+    expect(getDefaultShellOpts()).toEqual({ shell: BASH.path, args: BASH.args });
+    unsubscribe();
   });
 });

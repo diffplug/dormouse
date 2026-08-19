@@ -196,8 +196,11 @@ distributions and Windows Developer shells can share a path), updates
 `dormouse:new-terminal` with `replaceUntouched: true, announce: true`, so an
 untouched selected terminal is replaced in place (`docs/specs/layout.md`, Shell
 selection replacement). Legacy path-only selections restore the first matching
-entry and gain the full identity on the next choice. The choice dismisses the
-Settings dialog before that replacement takes keyboard focus on the next
+entry and gain the full identity on the next choice. Re-picking the visible
+fallback records that explicit choice without spawning a redundant terminal.
+Re-seeding an unchanged detected list is a no-op, preserving an interactive
+selection without notifying subscribers during render. The choice dismisses
+the Settings dialog before its replacement takes keyboard focus on the next
 animation frame.
 
 The workspace strip lands here when the workspaces rollout reaches stage 3 —

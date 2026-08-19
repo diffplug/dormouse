@@ -58,6 +58,10 @@ export function shellIdentityKey(shell: ShellIdentity): string {
   return JSON.stringify([shell.path, shell.args ?? []]);
 }
 
+function shellEntryEquals(left: ShellEntry, right: ShellEntry): boolean {
+  return left.name === right.name && shellIdentityEquals(left, right);
+}
+
 export interface ShellsState {
   shells: ShellEntry[];
   selected: ShellEntry | undefined;
@@ -111,6 +115,14 @@ export function seedShellStore(shells: ShellEntry[]): void {
     emit({ shells: [], selected: undefined });
     return;
   }
+  // Storybook seeds during render so the first frame has the right host data.
+  // Its theme toolbar re-renders the decorator without changing that data;
+  // preserving the snapshot avoids notifying subscribers during render and
+  // keeps an interactively chosen shell selected.
+  if (
+    shells.length === state.shells.length
+    && shells.every((shell, index) => shellEntryEquals(shell, state.shells[index]))
+  ) return;
   const saved = loadJson<StoredShellSelection, null>(
     SELECTED_KEY,
     null,
@@ -135,8 +147,11 @@ export function seedShellStore(shells: ShellEntry[]): void {
  * without a rendered dialog.
  */
 export function selectShell(shell: ShellEntry): void {
-  if (shellIdentityEquals(shell, state.selected)) return;
+  const alreadySelected = shellIdentityEquals(shell, state.selected);
   saveJson(SELECTED_KEY, { path: shell.path, args: shell.args ?? [] });
+  // An explicit re-pick can turn a temporary fallback into the durable choice,
+  // but it must not spawn a redundant replacement terminal.
+  if (alreadySelected) return;
   publishSelected(shell);
   emit({ ...state, selected: shell });
   window.dispatchEvent(
