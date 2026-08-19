@@ -10,7 +10,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { HostAclRecord } from 'server-lib-common';
 import { filterAclRecords } from '../../remote/host/acl';
@@ -157,6 +157,10 @@ export class FileHostStateStore implements HostStateStore {
     // 0700 dir + 0600 file: the enrollment is a bearer credential, and the app
     // data directory is not otherwise private on a shared machine.
     await mkdir(this.#dir, { recursive: true, mode: 0o700 });
+    // `mkdir` applies its mode only when it creates the final component. Tauri
+    // creates app_data_dir before spawning us, commonly under a 0755 umask, so
+    // tighten an existing directory too. Windows ACLs are not Unix modes.
+    if (process.platform !== 'win32') await chmod(this.#dir, 0o700);
     // Temp-then-rename in the same directory, so a crash mid-write leaves the
     // previous state intact rather than a truncated file that reads as "no Host".
     // Unique per write rather than per process: `#mutate` already keeps this

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -119,6 +119,19 @@ describe('FileHostStateStore', () => {
     expect((await stat(join(nested, 'remote-host.json'))).mode & 0o777).toBe(0o600);
     expect((await stat(nested)).mode & 0o777).toBe(0o700);
   });
+
+  it.runIf(process.platform !== 'win32')(
+    'tightens a state directory the host created first',
+    async () => {
+      // Production Tauri creates app_data_dir before spawning the sidecar, so
+      // mkdir's creation mode alone cannot make this directory private.
+      await chmod(dir, 0o755);
+      const store = new FileHostStateStore(dir);
+      await store.saveEnrollment(ENROLLMENT);
+
+      expect((await stat(dir)).mode & 0o777).toBe(0o700);
+    },
+  );
 
   it('leaves no temp file behind, and overwrites in place', async () => {
     const store = new FileHostStateStore(dir);
