@@ -572,9 +572,11 @@ export class PocketClient {
 
   close(): void {
     const ws = this.#ws;
-    // Tear down BEFORE closing the socket: #onClose reads `#ws === null` as an
-    // intentional close (no host-gone), and while real sockets emit their close
-    // event asynchronously, test fakes may emit it synchronously from close().
+    // Tear down BEFORE closing the socket: nulling #ws is what makes #onClose's
+    // generation guard reject the close that follows, which is the only thing
+    // keeping an intentional close from firing `host-gone`. Real sockets emit
+    // that event asynchronously, but test fakes may emit it synchronously from
+    // close(), so the ordering has to hold rather than merely usually hold.
     this.#teardown('relay socket closed', { notifyGone: false });
     try {
       ws?.close();
