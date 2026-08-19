@@ -2,7 +2,7 @@ import { clsx } from 'clsx';
 import { tv, type VariantProps } from 'tailwind-variants';
 import { XIcon } from '@phosphor-icons/react';
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, RefObject } from 'react';
+import type { ButtonHTMLAttributes, ComponentProps, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, RefObject } from 'react';
 import { stepFocus } from './focus-step';
 
 // App-wide type scale, color strategy, and chrome conventions: see
@@ -79,10 +79,13 @@ export const ALERT_SPEECH_TRACKING_CLASS = 'tracking-[0.12em]';
 // stay at the call site; the surface recipe is shared so they can't drift.
 export const POPUP_SURFACE_CLASS = 'z-[1000] rounded border border-border bg-surface-raised font-mono text-foreground shadow-md';
 
+// `ComponentProps<'div'>` rather than `HTMLAttributes<HTMLDivElement>` so `ref`
+// is among the props (React 19 ref-as-prop): an anchored menu needs the row
+// itself measured, not a wrapper around it.
 export function PopupButtonRow({
   className,
   ...props
-}: HTMLAttributes<HTMLDivElement>) {
+}: ComponentProps<'div'>) {
   return (
     <div
       className={clsx(

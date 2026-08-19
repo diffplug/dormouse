@@ -3,14 +3,14 @@ import { createRoot } from "react-dom/client";
 import { setPlatform } from "dormouse-lib/lib/platform";
 import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
 import { resumeOrRestore } from "dormouse-lib/lib/reconnect";
-import { setDefaultShellOpts } from "dormouse-lib/lib/shell-defaults";
+import { seedShellStore } from "dormouse-lib/lib/shell-store";
 import { restoreActiveTheme } from "dormouse-lib/lib/themes";
 import App from "dormouse-lib/App";
 import "dormouse-lib/index.css";
 import { UpdateBanner } from "./UpdateBanner";
 import { UpdateDebugModal } from "./UpdateDebugModal";
 import { QuitConfirmModalHost } from "./QuitConfirmModal";
-import { AppBar, type ShellEntry } from "./AppBar";
+import { AppBar } from "./AppBar";
 import {
   startUpdateCheck,
   useUpdateState,
@@ -84,6 +84,10 @@ async function bootstrap() {
   const platform = await createPlatform();
   setPlatform(platform);
   await platform.init();
+  // Shell detection is a webview -> Rust -> sidecar round trip, so start it now
+  // and await it below: it overlaps the dynamic imports and theme restore
+  // rather than adding its latency to cold boot.
+  const shellsPromise = platform.getAvailableShells();
   // Quit orchestrator (docs/specs/standalone.md §Quit flow). Tauri-only: the
   // browser-dev harness has no Rust quit interception, and quit.ts pulls the
   // Tauri APIs. !BROWSER_DEV_HOST is exactly the createPlatform branch that
@@ -101,11 +105,13 @@ async function bootstrap() {
   initAlertStateReceiver();
   restoreActiveTheme();
 
-  // Fetch app bar data from the active host backend.
-  const detectedShells = await platform.getAvailableShells();
-  const shells: ShellEntry[] = detectedShells.length > 0 ? detectedShells : [{ name: 'shell', path: '' }];
-  const initialShell = shells[0];
-  setDefaultShellOpts(initialShell ? { shell: initialShell.path, args: initialShell.args } : null);
+  // Seed the shell store from the active host backend: it restores the
+  // persisted selection and publishes it as the default shell, and it feeds the
+  // Settings dialog's Shell row. Must complete before resumeOrRestore/render so
+  // the first restored pane already spawns with the selected shell. Detecting
+  // nothing seeds nothing, which publishes no default — every spawn path then
+  // omits `shell` and the sidecar resolves the OS default itself.
+  seedShellStore(await shellsPromise);
 
   const result = await resumeOrRestore(platform);
 
@@ -113,7 +119,7 @@ async function bootstrap() {
 
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <AppBar shells={shells} />
+      <AppBar />
       <App
         initialPaneIds={result.paneIds}
         restoredLathLayout={result.lathLayout}

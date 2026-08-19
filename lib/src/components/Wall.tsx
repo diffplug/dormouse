@@ -1162,7 +1162,7 @@ export function Wall({
     const newId = generatePaneId();
     surfaceRefForId(newId);
     const ref = id && nav.hasPane(id) ? id : null;
-    // Carry the currently-selected shell into the split, same as [+].
+    // Carry the currently selected shell into every manual split.
     const defaults = getDefaultShellOpts();
     // Remote cwds (OSC 7 over ssh) name a path on the remote host, not one the local shell can chdir to.
     const sourceCwd = ref ? getTerminalPaneState(ref).cwd : null;

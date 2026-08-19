@@ -12,10 +12,9 @@ import {
 import { ThemeDebuggerDialog } from './ThemeDebugger';
 import { ThemeSwatch } from './theme-picker/ThemeSwatch';
 import { ThemeStoreDialog } from './theme-picker/ThemeStoreDialog';
-import { useCloseOnOutsideAndEscape } from './theme-picker/use-close-on-outside';
+import { useAnchoredMenu, useCloseOnOutsideAndEscape } from './use-anchored-menu';
 import { themePickerStyles as styles } from './theme-picker/styles';
-import { chromeButton, modalIconButton, OVERLAY_MAX_HEIGHT, useMeasuredElementRect } from './design';
-import { clampOverlayPosition } from '../lib/ui-geometry';
+import { chromeButton, modalIconButton, OVERLAY_MAX_HEIGHT } from './design';
 
 /**
  * `compact` is the free-floating trigger used by the website's Pocket
@@ -62,8 +61,6 @@ export function ThemePicker({
   const [storeOpen, setStoreOpen] = useState(false);
   const [debuggerOpen, setDebuggerOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const [triggerEl, setTriggerEl] = useState<HTMLButtonElement | null>(null);
-  const [menuEl, setMenuEl] = useState<HTMLDivElement | null>(null);
 
   const open = controlledOpen ?? uncontrolledOpen;
   const setOpen = useCallback(
@@ -76,6 +73,10 @@ export function ThemePicker({
 
   const inDialog = variant === 'settings-dialog';
   const activeTheme = themes.find((theme) => theme.id === activeId) ?? themes[0];
+
+  // Only the dialog variant anchors off its trigger; `compact` floats free and
+  // positions itself with the absolute classes below.
+  const { setTriggerEl, setMenuEl, menuStyle } = useAnchoredMenu(inDialog && open, MENU_WIDTH_PX);
 
   // React Router document hydration can reconcile render-time theme
   // application away; repeat once after commit so xterm sees real colors.
@@ -110,30 +111,7 @@ export function ThemePicker({
     refreshThemes();
   };
 
-  // Anchor the dialog menu off the measured trigger rect: the Settings dialog
-  // surface is `overflow-y-auto`, which would clip an absolutely-positioned
-  // menu. A fixed descendant escapes ancestor overflow because no modal
-  // ancestor sets `transform`. The menu's own rect feeds the viewport clamp, so
-  // a long theme list can't run off the bottom of a short window; it is 0 on
-  // the first pass, which is why the menu stays hidden until measured. The
-  // height cap is `OVERLAY_MAX_HEIGHT.popover` on the panel below, not part of
-  // this style.
-  const triggerRect = useMeasuredElementRect(inDialog && open ? triggerEl : null);
-  const menuRect = useMeasuredElementRect(inDialog && open ? menuEl : null);
-  const menuStyle: CSSProperties = inDialog
-    ? {
-        ...styles.panel,
-        width: MENU_WIDTH_PX,
-        ...(triggerRect
-          ? clampOverlayPosition({
-              left: triggerRect.left,
-              top: triggerRect.top + triggerRect.height + 4,
-              width: MENU_WIDTH_PX,
-              height: menuRect?.height ?? 0,
-            })
-          : { position: 'fixed', visibility: 'hidden' }),
-      }
-    : styles.panel;
+  const panelStyle: CSSProperties = inDialog ? { ...styles.panel, ...menuStyle } : styles.panel;
 
   return (
     <div ref={rootRef} className="relative flex items-center">
@@ -153,9 +131,9 @@ export function ThemePicker({
         <CaretDownIcon size={10} weight="bold" className="shrink-0 opacity-65" aria-hidden="true" />
       </button>
 
-      {/* z-50 earns its keep in both variants. Inside the dialog the alarm
-          sections' `opacity-50` wrappers are stacking contexts too, and being
-          later in tree order they would otherwise paint through this menu. */}
+      {/* z-50 is here for `compact`, which ignores `menuStyle` and so gets no
+          stacking from `useAnchoredMenu` (the dialog variant takes it from
+          there, and the class is a harmless restatement). */}
       {open ? (
         <div
           ref={setMenuEl}
@@ -164,7 +142,7 @@ export function ThemePicker({
           className={`z-50 flex flex-col overflow-hidden rounded border font-mono shadow-2xl ${OVERLAY_MAX_HEIGHT.popover} ${
             inDialog ? '' : 'absolute right-0 top-full mt-1 w-[280px]'
           }`}
-          style={menuStyle}
+          style={panelStyle}
         >
           {/* max-h-80 is a ceiling on a tall screen, never a floor: the
               panel's own viewport cap shrinks this further on a short one. */}

@@ -49,6 +49,12 @@ export class FakePtyAdapter implements PlatformAdapter {
   private openPortsMap = new Map<string, OpenPort[]>();
   private alertManager = new AlertManager();
 
+  // Host-capability flags: mutable and public because the Storybook preview
+  // decorator toggles them per story to simulate a host (VS Code) that owns the
+  // theme or shell selection, which is what hides the Settings dialog's rows.
+  hostOwnsTheme?: boolean;
+  hostOwnsShells?: boolean;
+
   constructor() {
     this.alertManager.onStateChange((id, state) => {
       for (const handler of this.alertStateHandlers) {

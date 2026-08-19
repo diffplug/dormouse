@@ -1,6 +1,7 @@
 import type { AlertState } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
+import type { ShellEntry } from '../shell-defaults';
 // Defined in its own dependency-free file so the Node proxy in lib/src/host can
 // share it without pulling this browser-typed module into a Node tsconfig.
 import type { IframeProxyResult } from './iframe-proxy-types';
@@ -118,7 +119,7 @@ export interface PlatformAdapter {
   shutdown(): void;
 
   // Shell detection
-  getAvailableShells(): Promise<{ name: string; path: string; args?: string[] }[]>;
+  getAvailableShells(): Promise<ShellEntry[]>;
 
   // PTY operations
   spawnPty(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[] }): void;
@@ -147,6 +148,16 @@ export interface PlatformAdapter {
    * hides its Theme row (docs/specs/theme.md).
    */
   hostOwnsTheme?: boolean;
+
+  /**
+   * Whether the host owns shell selection, so Dormouse must not offer a shell
+   * picker of its own. Absent reads as `false`.
+   *
+   * `VSCodeAdapter` sets it `true`: the native `dormouse.selectShell` QuickPick
+   * (with its own workspaceState persistence) is the only correct control
+   * there, so the Settings dialog hides its Shell row (docs/specs/vscode.md).
+   */
+  hostOwnsShells?: boolean;
 
   /**
    * Agent resume invocations the host captured when it last tore down, keyed by

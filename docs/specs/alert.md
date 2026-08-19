@@ -276,6 +276,6 @@ Alert-specific robustness requirements: multiple Sessions ring independently; mi
 | `lib/src/components/wall/TerminalPaneHeader.tsx` | Bell button, TODO pill, notification preview |
 | `lib/src/components/wall/AlertSpeechIndicator.tsx` | Whole-Pane `SPEAKING` / `SPOKEN` treatment |
 | `lib/src/components/TodoAlertDialog.tsx` | TODO + WATCHING-rule switches, notification detail, watched-command list |
-| `lib/src/components/SettingsDialog.tsx` | App-global Settings dialog: theme row (see [theme.md](./theme.md)), rule list, inactivity timeout, spoken alarms, push notifications |
+| `lib/src/components/SettingsDialog.tsx` | App-global Settings dialog: theme row (see [theme.md](./theme.md)), shell row (standalone, see [standalone.md](./standalone.md)), rule list, inactivity timeout, spoken alarms, push notifications |
 | `lib/src/components/WatchedCommandList.tsx` | The WATCHING rule set with per-rule remove, shared by both dialogs |
 | `lib/src/components/Door.tsx` | Door bell + TODO display |

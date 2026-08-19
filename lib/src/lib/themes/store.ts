@@ -1,22 +1,11 @@
 import type { DormouseTheme } from './types';
+import { getStorage } from '../local-json-store';
 // JSON import types are inferred too narrowly — cast at the boundary.
 import _bundledThemes from './bundled.json';
 const bundledThemes = _bundledThemes as unknown as DormouseTheme[];
 
 const INSTALLED_KEY = 'dormouse:installed-themes';
 const ACTIVE_KEY = 'dormouse:active-theme';
-
-function getStorage(): Storage | null {
-  const storage = globalThis.localStorage;
-  if (
-    typeof storage?.getItem !== 'function' ||
-    typeof storage?.setItem !== 'function' ||
-    typeof storage?.removeItem !== 'function'
-  ) {
-    return null;
-  }
-  return storage;
-}
 
 export function getBundledThemes(): DormouseTheme[] {
   return bundledThemes;
