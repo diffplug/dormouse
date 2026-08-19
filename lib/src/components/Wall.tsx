@@ -87,7 +87,7 @@ import {
   type PaneWriteActions,
   type WallActions,
 } from './wall/wall-context';
-import type { DoorAfterRestoreAction, DooredItem, WallEvent, WallMode, WallSelectionKind } from './wall/wall-types';
+import type { DoorAfterRestoreAction, DoorChip, DooredItem, WallEvent, WallMode, WallSelectionKind } from './wall/wall-types';
 
 type ShellSpawnRequest = {
   shell?: string;
@@ -103,7 +103,7 @@ type ShellSpawnNoticeState = {
   nonce: number;
 };
 
-export type { DoorAfterRestoreAction, DooredItem, WallEvent, WallMode, WallSelectionKind } from './wall/wall-types';
+export type { DoorAfterRestoreAction, DoorChip, DooredItem, WallEvent, WallMode, WallSelectionKind } from './wall/wall-types';
 export {
   DialogKeyboardContext,
   DoorElementsContext,
@@ -344,7 +344,12 @@ export function Wall({
   // UI state
   const [confirmKill, setConfirmKill] = useState<ConfirmKill | null>(null);
   const [renamingPaneId, setRenamingPaneId] = useState<string | null>(null);
-  const [doors, setDoors] = useState<DooredItem[]>(() => (initialDoors ?? []) as DooredItem[]);
+  // Runtime Doors carry id + token only; the restored rows' metadata goes into the
+  // store via the seed effect below.
+  const initialDoorsRef = useRef(initialDoors);
+  const [doors, setDoors] = useState<DooredItem[]>(
+    () => (initialDoors ?? []).map((door) => ({ id: door.id, token: door.token })),
+  );
   // The Door being dragged out of the baseboard: the item + the press point LathHost
   // starts its threshold-gated external drag from. Non-null feeds LathHost's
   // external-drag hit-testing; the chip stays in `doors` until it lands on a target.
@@ -367,6 +372,21 @@ export function Wall({
   selectedTypeRef.current = selectedType;
   const doorsRef = useRef(doors);
   doorsRef.current = doors;
+  // Door chip labels live in the store, so Wall has to re-render when one changes —
+  // but only then. Subscribing to the joined titles (rather than to `revision`) keeps
+  // a Doored Surface that keeps running — a parked iframe navigating — from leaving a
+  // stale label, without waking Wall on every unrelated commit.
+  const doorTitles = useSyncExternalStore(lath.store.subscribe, () => {
+    const meta = lath.store.getSnapshot().leafMeta;
+    return doorsRef.current.map((door) => meta.get(door.id)?.title ?? '').join('\u0000');
+  });
+  // The Baseboard's chips: the runtime Doors plus the store's current fallback title
+  // for each, projected per render rather than stored, so no copy can go stale.
+  const doorChips = useMemo<DoorChip[]>(
+    () => doors.map((door) => ({ ...door, title: persistedPanelTitle(lath.getMeta(door.id)?.title) })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `doorTitles` is the store read
+    [doors, lath, doorTitles],
+  );
   const confirmKillRef = useRef(confirmKill);
   confirmKillRef.current = confirmKill;
 
@@ -484,11 +504,11 @@ export function Wall({
       // teardown lands here: the throwaway was created straight into a door.
       const door = doorsRef.current.find(d => d.id === id);
       if (!door) return;
-      closeAgentBrowserSession(lath.doorMeta(door).params);
+      closeAgentBrowserSession(lath.getMeta(id)?.params);
       disposeAgentBrowserSurfaceController(id);
-      // A parked door is still mounted; drop it so its DOM (and any iframe document
-      // still running inside it) goes away with the Surface.
-      lath.store.unparkLeaf(id);
+      // Destroy the Door: drop the meta the store kept for it and, if it was parked,
+      // unmount the DOM (and any iframe document still running inside it) with it.
+      lath.store.forgetLeaf(id);
       // Dispose the session/registry entry — this stops the PTY and makes a
       // still-armed typeCommandWhenPromptReady exit via its `!registry.has(id)`
       // check, so a late OSC signal can't type the command into a dead surface.
@@ -589,22 +609,15 @@ export function Wall({
   const minimizePane = useCallback((id: string, opts?: { select?: boolean }) => {
     const meta = lath.getMeta(id);
     if (!meta) return;
-    const park = shouldParkOnMinimize(meta);
-    // May auto-spawn if this was the last leaf. `parkLeaf` caps the parked set itself.
-    const { token } = park ? lath.store.parkLeaf(id) : lath.store.removeLeaf(id);
+    // May auto-spawn if this was the last leaf. `doorLeaf` retains the leaf's meta in
+    // the store (it keeps changing while minimized) and caps the parked set itself.
+    const { token } = lath.store.doorLeaf(id, { park: shouldParkOnMinimize(meta) });
     if (!token) return;
     clearSessionAttention(id);
-    // The Door's component/tabComponent are the leaf's own canonical meta, so
-    // `reconnect.ts`'s `component === 'browser'` filter keys off them. The core token
-    // is the restore payload (docs/specs/tiling-engine.md → "Restore tokens").
-    const door: DooredItem = {
-      id,
-      title: persistedPanelTitle(meta.title),
-      component: meta.component,
-      tabComponent: meta.tabComponent,
-      params: meta.params,
-      token,
-    };
+    // The runtime Door is identity + the core restore payload only
+    // (docs/specs/tiling-engine.md → "Restore tokens"); its metadata stays in the
+    // store, and the persisted row is materialized from there at save time.
+    const door: DooredItem = { id, token };
 
     const nextDoors = [...doorsRef.current, door];
     doorsRef.current = nextDoors;
@@ -671,14 +684,14 @@ export function Wall({
     if (lathSeededRef.current) return;
     lathSeededRef.current = true;
 
-    // Doors are already seeded from `initialDoors` by the `doors` useState initializer
-    // (and `doorsRef` mirrors it every render), so there is nothing to restore here.
-
-    // Hydrate: the restored Lath layout when usable, else fresh panes.
+    // Hydrate: the restored Lath layout when usable, else fresh panes. The restored
+    // Door rows ride along so their meta lands in the store, which owns it from here
+    // — the runtime `doors` state keeps only id + token.
     const { paneIds, fresh } = lath.seed(
       restoredLathLayoutRef.current,
       initialPaneIdsRef.current,
       generatePaneId,
+      initialDoorsRef.current,
     );
     for (const id of paneIds) surfaceRefForId(id);
     for (const door of doorsRef.current) surfaceRefForId(door.id);
@@ -759,7 +772,7 @@ export function Wall({
 
     // Restore through the core token (the real payload): exact tier when the
     // captured context survives, else neighbor, else fallback beside a live ref.
-    const meta = lath.doorMeta(item);
+    const meta = lath.getMeta(item.id) ?? terminalLeafMeta();
     const token = item.token as RestoreToken | undefined;
     // The enter hint (from the token's edge) is derived inside `restoreLeaf`.
     const sel = selectedIdRef.current;
@@ -833,11 +846,9 @@ export function Wall({
 
     const sources = [
       ...panels.map((panel) => ({ id: panel.id, params: panel.params, title: panel.title, minimized: false })),
-      // `doorMeta`, not the Door record, so `dor list` reports a parked Surface
-      // where it actually is rather than where it was minimized.
       ...doors.map((door) => {
-        const meta = lath.doorMeta(door);
-        return { id: door.id, params: meta.params, title: meta.title, minimized: true };
+        const meta = lath.getMeta(door.id);
+        return { id: door.id, params: meta?.params, title: meta?.title, minimized: true };
       }),
     ];
     const states = sources.map((source) => terminalStates.get(source.id) ?? createTerminalPaneState());
@@ -963,13 +974,7 @@ export function Wall({
         fingerprint: null,
       };
       getOrCreateTerminal(newId);
-      addMinimizedSplitDoor(referenceId, {
-        id: newId,
-        title: UNNAMED_PANEL_TITLE,
-        component: 'terminal',
-        tabComponent: 'terminal',
-        token,
-      }, !focusNeutral);
+      addMinimizedSplitDoor(referenceId, { id: newId, token }, !focusNeutral);
       onEventRef.current?.({
         type: 'split',
         direction: direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical',
@@ -1159,7 +1164,6 @@ export function Wall({
     lath,
     nav,
     doorsRef,
-    setDoors,
     buildDorSurfaces,
     buildDorSurfaceList,
     surfaceRefForId,
@@ -1450,7 +1454,9 @@ export function Wall({
     setDoorDrag(null);
     if (!dd || !target) return;
     const item = dd.item;
-    const r = lath.store.insertLeaf(item.id, lath.doorMeta(item), target);
+    const meta = lath.getMeta(item.id);
+    if (!meta) return;
+    const r = lath.store.insertLeaf(item.id, meta, target);
     if (!r.ok) return; // insert failed (unexpected) → the Door stays put
     removeDoorAndSelect(item.id);
   }, [doorDrag, lath, removeDoorAndSelect]);
@@ -1490,7 +1496,7 @@ export function Wall({
             {/* Baseboard — always visible in the main shell; embedders may suppress it for constrained mobile prototypes. */}
             {showBaseboard ? (
               <Baseboard
-                items={doors}
+                items={doorChips}
                 onReattach={handleReattach}
                 notice={baseboardNotice}
                 onDoorDragStart={onDoorDragStart}

@@ -1,8 +1,16 @@
-import type { PersistedDoor } from '../../lib/session-types';
+/** A minimized Surface's baseboard chip, at RUNTIME: an identity plus the Lath
+ *  restore `token` that says where it goes back. Deliberately carries no
+ *  title/params/component — the store owns a Doored Surface's metadata, which keeps
+ *  changing while it is minimized, so a copy here could only go stale
+ *  (docs/specs/layout.md → "Minimize and reattach"). `PersistedDoor` is the wire
+ *  form, materialized from the store at save time. */
+export type DooredItem = { id: string; token?: unknown };
 
-/** A minimized surface's baseboard chip. Identical to its persisted form; each door
- *  carries a Lath restore `token`. */
-export type DooredItem = PersistedDoor;
+/** A Door as the Baseboard draws it: the runtime record plus the engine-tracked
+ *  fallback title, projected fresh from the store on each render rather than stored.
+ *  Structurally a `DooredItem`, so it passes straight back to the reattach/drag
+ *  callbacks. */
+export type DoorChip = DooredItem & { title: string };
 
 /** The visible-pane projection (`lath.listPanes()`). Shared by the Wall helpers,
  *  dev-server correlation, and session persistence. */

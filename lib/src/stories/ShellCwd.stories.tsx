@@ -6,7 +6,7 @@ import {
   SelectedIdContext,
   TerminalPaneHeader,
   WallActionsContext,
-  type DooredItem,
+  type DoorChip,
   type WallActions,
 } from '../components/Wall';
 import {
@@ -405,7 +405,7 @@ async function openHeaderContextMenu() {
   await wait(100);
 }
 
-function makeDoorItem(id: string, title: string): DooredItem {
+function makeDoorItem(id: string, title: string): DoorChip {
   return {
     id,
     title,

@@ -11,7 +11,7 @@ import {
 import { isBrowserParams } from './browser-surface';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem, WallSelectionKind } from './wall-types';
-import type { PersistedSurfaceRefs } from '../../lib/session-types';
+import type { PersistedDoor, PersistedSurfaceRefs } from '../../lib/session-types';
 
 export function useSessionPersistence({
   lath,
@@ -47,9 +47,20 @@ export function useSessionPersistence({
       title: p.title ?? UNNAMED_PANEL_TITLE,
       surfaceType: isBrowserParams(p.params) ? ('browser' as const) : ('terminal' as const),
     }));
-    // `doorMeta`, so a parked Surface persists where it navigated to rather than
-    // where it was minimized, and a restart cold-loads it there.
-    const doors = (doorsRef.current ?? []).map((door) => ({ ...door, ...lath.doorMeta(door) }));
+    // The runtime Door is id + token; its metadata is materialized HERE, from the
+    // store that owned it all along, so a Surface persists where it navigated to
+    // rather than where it was minimized and a restart cold-loads it there.
+    const doors: PersistedDoor[] = (doorsRef.current ?? []).map((door) => {
+      const meta = lath.getMeta(door.id);
+      return {
+        id: door.id,
+        title: meta?.title?.trim() || UNNAMED_PANEL_TITLE,
+        component: meta?.component,
+        tabComponent: meta?.tabComponent,
+        params: meta?.params,
+        token: door.token,
+      };
+    });
     const surfaceRefs = surfaceRefsForSave?.();
     // The Lath tree is the sole persisted layout; doors ride through with their tokens.
     return saveSession(getPlatform(), panes, doors, lath.serializeLayout(), surfaceRefs?.refs, surfaceRefs?.next);

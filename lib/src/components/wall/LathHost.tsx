@@ -36,7 +36,7 @@ import { type DropTarget, resize } from '../../lib/lath/ops';
 import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
 import { PANE_HEADER_HEIGHT_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import type { PaneProps } from './pane-props';
-import { type LeafMeta, LATH_LAYOUT_OPTS, leafMetaIn } from './lath-wall-store';
+import { type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { nowMs, type LathWallEngine } from './lath-wall-engine';
 import { type DragController, createDragController } from './lath-drag-controller';
 import { TerminalPanel } from './TerminalPanel';
@@ -615,14 +615,16 @@ export function LathHost({
     <div ref={containerRef} className="lath-host">
       {sortedIds.map((id) => {
         const cb = leafCallbacks(id);
-        const parkedLeaf = snapshot.parked.get(id);
-        const meta = leafMetaIn(snapshot, id);
+        // `parked` is keyed by leaf id with the held rect as its value, so `has`
+        // distinguishes "parked, rect unknown" from "not parked".
+        const isParked = snapshot.parked.has(id);
+        const meta = snapshot.leafMeta.get(id);
         // A laid-out leaf tiles at its frame; a parked one holds the rect the store
         // captured when it left the tree (falling back to the whole wall if it was
         // parked before it ever laid out); anything else has nowhere to be and hides.
         // Stacking comes from the same layer bands the animator tweens, so this
         // pre-tween frame agrees with every frame applyFrames writes afterward.
-        const f = frames.get(id) ?? (parkedLeaf ? parkedLeaf.rect ?? rect : undefined);
+        const f = frames.get(id) ?? (isParked ? snapshot.parked.get(id) ?? rect : undefined);
         const geom = f
           ? {
               left: f.x,
@@ -633,7 +635,7 @@ export function LathHost({
               // (`detachLeaf` clears `zoomedId`), so this already resolves to `Z_TILED`.
               zIndex: zIndexForLayer(layers.get(id) ?? LATH_LAYER_TILED),
               hidden: false,
-              parked: !!parkedLeaf,
+              parked: isParked,
             }
           : { left: 0, top: 0, width: 0, height: 0, zIndex: Z_TILED, hidden: true, parked: false };
         return (

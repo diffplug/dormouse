@@ -154,7 +154,7 @@ describe('LathHost — parked leaves', () => {
     const bodyEl = b0.querySelector('[data-body="b"]');
     expect(bodyEl).toBeTruthy();
 
-    act(() => store.parkLeaf('b'));
+    act(() => store.doorLeaf('b', { park: true }));
 
     // The whole point: the div — and everything inside it, an <iframe>'s document
     // included — is the same node, never unmounted and never re-parented.
@@ -175,8 +175,8 @@ describe('LathHost — parked leaves', () => {
     mount(store);
     expect(bodyProps.b.parked).toBe(false);
 
-    let token: ReturnType<LathWallStore['parkLeaf']>['token'] = null;
-    act(() => { token = store.parkLeaf('b').token; });
+    let token: ReturnType<LathWallStore['doorLeaf']>['token'] = null;
+    act(() => { token = store.doorLeaf('b', { park: true }).token; });
     expect(bodyProps.b.parked).toBe(true);
 
     act(() => { store.restoreLeaf(leafMeta({ title: 'B' }), token!, { fallbackRef: 'a' }); });
@@ -188,8 +188,8 @@ describe('LathHost — parked leaves', () => {
     mount(store);
     const b0 = leafDiv('b')!;
 
-    let token: ReturnType<LathWallStore['parkLeaf']>['token'] = null;
-    act(() => { token = store.parkLeaf('b').token; });
+    let token: ReturnType<LathWallStore['doorLeaf']>['token'] = null;
+    act(() => { token = store.doorLeaf('b', { park: true }).token; });
     // A parked Surface keeps running, so its meta keeps flowing to the mounted body.
     act(() => store.setTitle('b', 'navigated'));
     expect(bodyProps.b.title).toBe('navigated');
@@ -219,19 +219,19 @@ describe('LathHost — parked leaves', () => {
     });
 
     const rect = layout(tree, RECT, LATH_LAYOUT_OPTS).get('b')!;
-    act(() => { store.parkLeaf('b'); });
+    act(() => { store.doorLeaf('b', { park: true }); });
     const el = leafDiv('b')!;
     expect(el.dataset.lathParked).toBe('');
     expect(el.style.width).toBe(`${rect.width}px`);
     expect(el.style.left).toBe(`${rect.x}px`);
   });
 
-  it('unparkLeaf without a restore unmounts the leaf for real', () => {
+  it('forgetLeaf without a restore unmounts the leaf for real', () => {
     const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     mount(store);
-    act(() => { store.parkLeaf('b'); });
+    act(() => { store.doorLeaf('b', { park: true }); });
     expect(leafDiv('b')).toBeTruthy();
-    act(() => store.unparkLeaf('b'));
+    act(() => store.forgetLeaf('b'));
     expect(leafDiv('b')).toBeNull();
   });
 
@@ -239,7 +239,7 @@ describe('LathHost — parked leaves', () => {
     const store = seeded(rowOf('a', 'b', 'c'), [['a', leafMeta()], ['b', leafMeta()], ['c', leafMeta()]]);
     mount(store);
     expect(leafOrder()).toEqual(['a', 'b', 'c']);
-    act(() => { store.parkLeaf('b'); });
+    act(() => { store.doorLeaf('b', { park: true }); });
     expect(leafOrder()).toEqual(['a', 'b', 'c']);
   });
 });
@@ -497,8 +497,8 @@ describe('LathHost — imperative animation frames', () => {
     mount(store, vi.fn(), vi.fn(), DUR);
     const held = layout(initialTree, RECT, LATH_LAYOUT_OPTS).get('b')!;
 
-    let token: ReturnType<LathWallStore['parkLeaf']>['token'] = null;
-    act(() => { token = store.parkLeaf('b').token; });
+    let token: ReturnType<LathWallStore['doorLeaf']>['token'] = null;
+    act(() => { token = store.doorLeaf('b', { park: true }).token; });
     act(() => store.addLeaf('c', leafMeta({ title: 'C' }), { refId: 'a', edge: 'right' }));
     act(() => store.restoreLeaf(leafMeta({ title: 'B' }), token!, { fallbackRef: 'a' }));
 

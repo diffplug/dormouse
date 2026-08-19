@@ -301,26 +301,26 @@ Swaps session **content** between two panes — the layout shape is unchanged. A
 ## Minimize and reattach
 
 ### Minimize (`m` key or minimize header button)
-1. `lath.store.removeLeaf(id)` — or `parkLeaf(id)` for a browser Surface, see below — detaches the leaf and returns a JSON-serializable **restore token** capturing the leaf's ancestry (sibling id, split-sibling leaf set/fingerprint when needed, edge, weight, child index, and a structure-only fingerprint of the parent split post-removal — `docs/specs/tiling-engine.md` → "Restore tokens").
-2. Add to `doors` state → door appears in baseboard, carrying the `token`. The door stores only the stable component/title for persistence; its visible label is derived from live terminal semantic state at render time. (A pane dragged onto the baseboard minimizes the same way — the drag proposes `onProposeMinimize`, which calls the same `minimizePane`.)
+1. `lath.store.doorLeaf(id, { park })` detaches the leaf — keeping its meta in the store, and for a browser Surface (see below) its DOM as well — and returns a JSON-serializable **restore token** capturing the leaf's ancestry (sibling id, split-sibling leaf set/fingerprint when needed, edge, weight, child index, and a structure-only fingerprint of the parent split post-removal — `docs/specs/tiling-engine.md` → "Restore tokens").
+2. Add to `doors` state → door appears in baseboard, carrying the `token` and nothing else; its label is derived from live terminal semantic state over the store's fallback title at render time. (A pane dragged onto the baseboard minimizes the same way — the drag proposes `onProposeMinimize`, which calls the same `minimizePane`.)
 3. Session stays in registry (not disposed).
 4. Selection moves to the new door (stays in command mode). If this was the *last* pane, the auto-spawn effect fills the emptied Wall while the door keeps selection.
 
 **A minimized browser Surface parks rather than unmounting.** Its state lives in the
 DOM — an `<iframe>`'s document, a screencast canvas — so removing the leaf would
-destroy it and the reattach would be a reload. `minimizePane` routes browser Surfaces
-through `lath.store.parkLeaf`, which keeps the leaf mounted and invisible while it is
-Doored; reattach reveals the same live document, scroll position, form state and all
+destroy it and the reattach would be a reload. `minimizePane` passes `{ park: true }` for browser
+Surfaces, which keeps the leaf mounted and invisible while it is Doored; reattach reveals the same live document, scroll position, form state and all
 (`docs/specs/tiling-engine.md` → "Parked leaves" owns the mechanism, the
 `MAX_PARKED_SURFACES` cap, and the visibility contract). Terminals do not park: their
 state is in the PTY and the registry replays it, so the plain remove already loses
 nothing. Parking spans the minimize only — a restart still cold-loads every browser
 Surface from its persisted URL. Because a parked Surface keeps running while Doored,
-the engine (not the Door record frozen at minimize time) holds its current
-title/params, and every Door reader goes through the one `lath.doorMeta(door)` seam —
-reattach (click or drag-out), `dor` param matching, kill/session teardown, `dor list`,
-and the session save. A Door read that skips it silently reverts a parked Surface to
-where it was minimized. The Door chip's own label stays as minimized.
+the store — not the Door record — holds its current title/params. A runtime Door is
+`{ id, token }` and carries no metadata at all, so there is no copy to go stale and no
+seam to remember: reattach (click or drag-out), `dor` param matching, kill/session
+teardown, `dor list`, the baseboard chip's label and the session save all read
+`lath.getMeta(id)`, and the persisted `PersistedDoor` row is materialized from the
+store at save time (`docs/specs/tiling-engine.md` → "Parked leaves").
 
 ### Reattach (click door, Enter/d on door)
 

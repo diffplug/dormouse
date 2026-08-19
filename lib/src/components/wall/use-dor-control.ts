@@ -334,7 +334,6 @@ export function useDorControl({
   lath,
   nav,
   doorsRef,
-  setDoors,
   buildDorSurfaces,
   buildDorSurfaceList,
   surfaceRefForId,
@@ -350,7 +349,6 @@ export function useDorControl({
   /** The navigation/query seam; the handler only needs `hasPane`. */
   nav: WallNav;
   doorsRef: MutableRefObject<DooredItem[]>;
-  setDoors: (doors: DooredItem[]) => void;
   /** The visible panes + active surface projection, shared with wallActions. */
   buildDorSurfaces: () => DorSurface[];
   /** Like `buildDorSurfaces` but also includes minimized (doored) Surfaces —
@@ -444,7 +442,7 @@ export function useDorControl({
   const findSurfaceByParams = useCallback((isMatch: (params: unknown) => boolean): { id: string; minimized: boolean } | null => {
     const panel = lath.listPanes().find((candidate) => isMatch(candidate.params));
     if (panel) return { id: panel.id, minimized: false };
-    const door = doorsRef.current.find((candidate) => isMatch(lath.doorMeta(candidate).params));
+    const door = doorsRef.current.find((candidate) => isMatch(lath.getMeta(candidate.id)?.params));
     if (door) return { id: door.id, minimized: true };
     return null;
   }, [lath]);
@@ -455,26 +453,13 @@ export function useDorControl({
     isAgentBrowserParams(params) && (params as { session?: unknown }).session === session,
   ), [findSurfaceByParams]);
 
-  // Fold a params patch onto a surface whether it's a visible pane, a PARKED door
-  // (both engine metadata — `updateParams` reaches either), or a plain door (the
-  // doorsRef map) — the reuse/refresh mechanics shared by
-  // `ensureAgentBrowserSurface`'s reuse arm and the connect-port refresh seam. The
-  // engine owns a parked door's meta, so writing the door record instead would be
-  // the stale copy the reattach then loses to. A no-op on an empty patch.
+  // Fold a params patch onto a surface, pane or door alike — the store holds both,
+  // so there is one write path. Shared by `ensureAgentBrowserSurface`'s reuse arm and
+  // the connect-port refresh seam. A no-op on an empty patch.
   const updateSurfaceParams = useCallback((id: string, patch: Record<string, unknown>) => {
     if (Object.keys(patch).length === 0) return;
-    if (lath.getMeta(id)) {
-      lath.store.updateParams(id, patch);
-      return;
-    }
-    const door = doorsRef.current.find((candidate) => candidate.id === id);
-    if (!door) return;
-    const nextDoors = doorsRef.current.map((d) => d.id === id
-      ? { ...d, params: { ...d.params, ...patch } }
-      : d);
-    doorsRef.current = nextDoors;
-    setDoors(nextDoors);
-  }, [doorsRef, lath, setDoors]);
+    lath.store.updateParams(id, patch);
+  }, [lath]);
 
   const ensureAgentBrowserSurface = useCallback<EnsureAgentBrowserSurface>(({
     key,
