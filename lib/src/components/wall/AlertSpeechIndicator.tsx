@@ -47,12 +47,9 @@ export function AlertSpeechIndicator({ sessionId }: { sessionId: string }) {
         aria-live="polite"
         aria-atomic="true"
         aria-label={`Terminal ${speaking ? 'is speaking' : 'has spoken'}`}
-        // Half strength for `spoken`: it lasts until the ring is attended,
-        // which is unbounded — see `docs/specs/layout.md` -> Spoken-alarm overlay.
-        className={clsx(
-          layer,
-          'z-[19]',
-        )}
+        // Stacking context and geometry only; the wash strengths live on the
+        // child below — see `docs/specs/layout.md` -> Spoken-alarm overlay.
+        className={clsx(layer, 'z-[19]')}
       >
         <div
           data-alert-speech-wash

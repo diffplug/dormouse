@@ -255,8 +255,18 @@ export function startAlertSpeech(): () => void {
     // (`getActivitySnapshot()` memoizes, so this is an early-out, not a saving:
     // Baseboard's own subscriber rebuilds that Map in the same notification.)
     const speech = getAlertSpeechSnapshot();
-    if (speech.size === 0) return;
+    if (speech.size === 0 && queued.size === 0) return;
     const activity = getActivitySnapshot();
+    // A queued-only Session has no rendered delivery state, so it is absent from
+    // `speech`. Prune its old ring here anyway: if the Session rings again before
+    // an unrelated interrupt, that stale entry must not bypass the new ring's
+    // delay by being re-dispatched. The engine may still own the utterance, so
+    // leave it tracked and its guarded callbacks attached.
+    for (const sessionId of queued.keys()) {
+      if (activity.get(sessionId)?.status === 'ALERT_RINGING') continue;
+      queued.delete(sessionId);
+    }
+    if (speech.size === 0) return;
     let interrupted = false;
     for (const sessionId of speech.keys()) {
       if (activity.get(sessionId)?.status === 'ALERT_RINGING') continue;

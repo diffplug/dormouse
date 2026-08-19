@@ -298,6 +298,24 @@ describe('spoken alarms', () => {
     expect(spoken).toHaveLength(2);
   });
 
+  it('does not re-dispatch a queued utterance from an earlier ring', () => {
+    ringTwoWithFirstSpeaking();
+
+    // Resolve pty-2 while its first utterance is still queued, then ring it
+    // again. The new ring must serve its own delay rather than inheriting the
+    // old queued entry when pty-1 is cut off.
+    setStatus('pty-2', 'NOTHING_TO_SHOW');
+    ring('pty-2');
+    setStatus('pty-1', 'NOTHING_TO_SHOW');
+
+    expect(cancelCount).toBe(1);
+    expect(spoken).toHaveLength(2);
+    vi.advanceTimersByTime(SPEAK_DELAY_MS - 1);
+    expect(spoken).toHaveLength(2);
+    vi.advanceTimersByTime(1);
+    expect(spoken).toHaveLength(3);
+  });
+
   /** A re-dispatch is a fresh decision to speak, held to the same gate as the first. */
   it('does not re-speak the queue when the setting went off mid-utterance', () => {
     ringTwoWithFirstSpeaking();
