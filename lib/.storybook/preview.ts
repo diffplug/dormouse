@@ -255,8 +255,11 @@ const preview: Preview = {
       // Shells are detected by the host at boot and seeded into a module store,
       // which no story runs — so a story that wants the Shell row names its
       // shells, and every other story empties the store (seeding nothing is what
-      // emptying it is). The persisted selection goes with it: it is shared
-      // localStorage like the themes above.
+      // emptying it is). Clear the persisted choice because localStorage is
+      // shared like the themes above. An unchanged shell list intentionally
+      // preserves the live choice across re-renders (and same-list stories) so
+      // the render-time seed does not notify subscribers; `shell-store.ts`
+      // documents that tradeoff.
       const primedShells = context.parameters?.primedShells as ShellEntry[] | undefined;
       clearPersistedShellSelection();
       seedShellStore(primedShells ?? []);

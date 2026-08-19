@@ -118,7 +118,9 @@ export function seedShellStore(shells: ShellEntry[]): void {
   // Storybook seeds during render so the first frame has the right host data.
   // Its theme toolbar re-renders the decorator without changing that data;
   // preserving the snapshot avoids notifying subscribers during render and
-  // keeps an interactively chosen shell selected.
+  // keeps an interactively chosen shell selected. The tradeoff is deliberate:
+  // an unchanged re-seed does not re-read persistence, so clearing the key
+  // alone cannot return a same-list Storybook story to its seeded default.
   if (
     shells.length === state.shells.length
     && shells.every((shell, index) => shellEntryEquals(shell, state.shells[index]))
@@ -179,11 +181,14 @@ export function resetShellStore(): void {
 }
 
 /**
- * Forget the persisted selection, so the next seed starts from nothing.
+ * Forget the persisted selection. The next seed starts from nothing when its
+ * detected list differs; an unchanged list is deliberately a no-op above and
+ * preserves the live selection without consulting storage.
  *
  * Storybook's only caller: `localStorage` is shared by every story, so a story
- * that names its shells would otherwise inherit whichever one an earlier story
- * selected. Emptying the store (above) deliberately leaves the key alone.
+ * that names a different shell list would otherwise inherit whichever one an
+ * earlier story selected. Emptying the store (above) deliberately leaves the
+ * key alone.
  */
 export function clearPersistedShellSelection(): void {
   getStorage()?.removeItem(SELECTED_KEY);

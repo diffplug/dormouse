@@ -199,9 +199,10 @@ selection replacement). Legacy path-only selections restore the first matching
 entry and gain the full identity on the next choice. Re-picking the visible
 fallback records that explicit choice without spawning a redundant terminal.
 Re-seeding an unchanged detected list is a no-op, preserving an interactive
-selection without notifying subscribers during render. The choice dismisses
-the Settings dialog before its replacement takes keyboard focus on the next
-animation frame.
+selection without notifying subscribers during render. It consequently does
+not re-read the persisted key, so clearing that key alone does not reset a
+same-list Storybook story. The choice dismisses the Settings dialog before its
+replacement takes keyboard focus on the next animation frame.
 
 The workspace strip lands here when the workspaces rollout reaches stage 3 —
 `docs/specs/layout.md` `## Future` (workspaces-rollout).
