@@ -102,8 +102,9 @@ export function browserLeafMeta(title: string, params: Record<string, unknown>):
 
 /** The engine-tracked meta a Door carries in its own record — the snapshot frozen at
  *  minimize time. Component/tabComponent default to terminal for a door that carries
- *  neither. Readers want `lath.doorMeta(door)`, which prefers a parked Surface's live
- *  meta over this; reach for this directly only when there is no engine to ask. */
+ *  neither. Readers want `lath.doorMeta(door)`, which prefers the store's retained
+ *  live meta (parked or cap-evicted) over this; reach for this directly only when
+ *  there is no engine to ask. */
 export function leafMetaFromDoor(item: DooredItem): LeafMeta {
   return {
     component: item.component ?? 'terminal',

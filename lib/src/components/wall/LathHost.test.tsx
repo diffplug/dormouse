@@ -491,6 +491,28 @@ describe('LathHost — imperative animation frames', () => {
     expect(widthOf('a')).toBeCloseTo(midWidth, 1);
   });
 
+  it('reattaches a parked leaf from its held rect instead of a collapsed viewport', () => {
+    const initialTree = rowOf('a', 'b');
+    const store = seeded(initialTree, [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
+    mount(store, vi.fn(), vi.fn(), DUR);
+    const held = layout(initialTree, RECT, LATH_LAYOUT_OPTS).get('b')!;
+
+    let token: ReturnType<LathWallStore['parkLeaf']>['token'] = null;
+    act(() => { token = store.parkLeaf('b').token; });
+    act(() => store.addLeaf('c', leafMeta({ title: 'C' }), { refId: 'a', edge: 'right' }));
+    act(() => store.restoreLeaf(leafMeta({ title: 'B' }), token!, { fallbackRef: 'a' }));
+
+    const target = layout(store.getSnapshot().tree, RECT, LATH_LAYOUT_OPTS).get('b')!;
+    expect(target.width).not.toBeCloseTo(held.width, 1); // prove there is a real tween
+    expect(parseFloat(leafDiv('b')!.style.left)).toBeCloseTo(held.x, 1);
+    expect(widthOf('b')).toBeCloseTo(held.width, 1);
+    expect(widthOf('b')).toBeGreaterThan(0);
+
+    clock += DUR / 2;
+    flushRaf();
+    expect(widthOf('b')).toBeCloseTo(held.width + (target.width - held.width) * LATH_EASING(0.5), 0);
+  });
+
   it('animates zoom above the tiled panes and stays elevated until unzoom settles', () => {
     const tree = rowOf('a', 'b');
     const store = seeded(tree, [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);

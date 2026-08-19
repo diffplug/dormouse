@@ -101,6 +101,18 @@ describe('animator retarget + framesAt', () => {
     expect(a.settledAt(T0)).toBe(true);
   });
 
+  it('enters from an explicit held rect at full opacity', () => {
+    const a = make();
+    a.retarget(new Map([['x', B]]), T0, new Map([['x', A]]));
+    const start = a.framesAt(T0).get('x')!;
+    expect(start.rect).toEqual(A);
+    expect(start.opacity).toBe(1);
+
+    const mid = a.framesAt(T0 + DUR / 2).get('x')!;
+    expect(mid.rect.width).toBeCloseTo(A.width + (B.width - A.width) * LATH_EASING(0.5), 5);
+    expect(mid.opacity).toBe(1);
+  });
+
   it('interpolates rect + opacity through the eased midpoint', () => {
     const a = make();
     // Seed at A (instant), then retarget to B.

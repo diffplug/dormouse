@@ -1,6 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createLathWallStore, type LathWallStore, LATH_LAYOUT_OPTS } from './lath-wall-store';
+import {
+  createLathWallStore,
+  type LathWallStore,
+  LATH_LAYOUT_OPTS,
+  MAX_PARKED_SURFACES,
+} from './lath-wall-store';
 import { leaves, oppositeEdge, type LathNode, type LathTree } from '../../lib/lath/model';
+import { layout } from '../../lib/lath/layout';
 import { leaf, split, tree } from '../../lib/lath/test-util';
 import { leafMeta } from '../../lib/lath/test-fixtures';
 
@@ -265,6 +271,34 @@ describe('enter hints (derived inside the mutators)', () => {
     expect(store.consumeEnterHints().size).toBe(0); // consume clears the map
   });
 
+  it('restoreLeaf and insertLeaf start parked ids from their held rect', () => {
+    for (const reattach of ['restore', 'insert'] as const) {
+      const store = seeded();
+      store.setLayoutGeometry(RECT, LATH_LAYOUT_OPTS);
+      const held = layout(twoLeafRow(), RECT, LATH_LAYOUT_OPTS).get('b')!;
+      const { token } = store.parkLeaf('b');
+
+      if (reattach === 'restore') {
+        store.restoreLeaf(leafMeta({ component: 'browser' }), token!, { fallbackRef: 'a' });
+      } else {
+        store.insertLeaf('b', leafMeta({ component: 'browser' }), {
+          kind: 'edge',
+          edge: 'right',
+          path: [],
+        });
+      }
+
+      expect(store.consumeEnterHints().get('b')).toEqual(held);
+    }
+  });
+
+  it('suppresses a collapsed entry when a parked id has no measured rect', () => {
+    const store = seeded();
+    const { token } = store.parkLeaf('b');
+    store.restoreLeaf(leafMeta({ component: 'browser' }), token!, { fallbackRef: 'a' });
+    expect(store.consumeEnterHints().has('b')).toBe(false);
+  });
+
   it('insertLeaf derives the hint from an edge target', () => {
     const store = seeded();
     store.insertLeaf('c', leafMeta(), { kind: 'edge', path: [1], edge: 'right' });
@@ -432,6 +466,31 @@ describe('parked leaves', () => {
     store.parkLeaf('b');
     store.parkLeaf('c');
     expect(store.parkedIds()).toEqual(['b', 'c']);
+  });
+
+  it('moves an evicted park\'s live meta aside and accepts later writes', () => {
+    const store = seeded();
+    store.parkLeaf('b');
+    store.updateParams('b', { url: 'https://after-park.example' });
+
+    for (let i = 0; i < MAX_PARKED_SURFACES; i++) {
+      const id = `browser-${i}`;
+      store.addLeaf(id, leafMeta({ component: 'browser' }), { refId: 'a', edge: 'right' });
+      store.parkLeaf(id);
+    }
+
+    const afterEviction = store.getSnapshot();
+    expect(afterEviction.parked.has('b')).toBe(false);
+    expect(afterEviction.evictedMeta.get('b')?.params).toEqual({ url: 'https://after-park.example' });
+
+    store.updateParams('b', { session: 'acquired-late' });
+    expect(store.getSnapshot().evictedMeta.get('b')?.params).toEqual({
+      url: 'https://after-park.example',
+      session: 'acquired-late',
+    });
+
+    store.unparkLeaf('b');
+    expect(store.getSnapshot().evictedMeta.has('b')).toBe(false);
   });
 
   it('seed keeps parked leaves, minus any it admits to the new tree', () => {

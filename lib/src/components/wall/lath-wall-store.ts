@@ -61,10 +61,15 @@ export type LathWallSnapshot = {
   /** Parked leaves: mounted by the adapter but absent from the tree, so they keep
    *  their DOM (an `<iframe>` never reloads) while showing nothing
    *  (docs/specs/tiling-engine.md → "Parked leaves"). Insertion-ordered, so the cap
-   *  evicts the oldest. Disjoint from `leafMeta` by construction — a leaf is either
-   *  laid out or parked, never both — which is what keeps parked meta out of the
-   *  persisted layout without a filter. */
+   *  evicts the oldest. Disjoint from `leafMeta` and `evictedMeta` by construction —
+   *  which is what keeps minimized meta out of the persisted layout without a
+   *  filter. */
   parked: ReadonlyMap<string, ParkedLeaf>;
+  /** Metadata retained after the parked-DOM cap evicts a leaf. These ids are still
+   *  Doors, so they render nowhere, but live-first Door reads and late metadata
+   *  writes must not fall back to the stale minimize-time snapshot. Disjoint from
+   *  both `leafMeta` and `parked`. */
+  evictedMeta: ReadonlyMap<string, LeafMeta>;
   zoomedId: string | null;
   /** Monotonic; bumps on every commit (meta writes and zoom included) so effects
    *  can key off "something committed" without diffing the tree. */
@@ -81,17 +86,17 @@ export type ParkedLeaf = { meta: LeafMeta; rect: Rect | null };
 /** How many Surfaces may stay parked at once. Each parked leaf is a live document —
  *  an iframe still running its scripts, timers, and sockets — so "preserve state" has
  *  to stop somewhere. `parkLeaf` enforces this itself, in the same commit, so no
- *  caller can forget; past the cap the oldest park is dropped and that Surface reverts
- *  to reattaching by reload. Generous enough that a normal baseboard never hits it;
- *  the workspaces-rollout switch (which parks a whole Workspace at a time) is what
- *  makes a bound necessary at all. */
+ *  caller can forget; past the cap the oldest DOM is dropped, its latest meta is
+ *  retained, and that Surface reverts to reattaching by reload. Generous enough that
+ *  a normal baseboard never hits it; the workspaces-rollout switch (which parks a
+ *  whole Workspace at a time) is what makes a bound necessary at all. */
 export const MAX_PARKED_SURFACES = 8;
 
-/** A leaf's meta wherever it lives — laid out or parked. The two maps are disjoint,
- *  so the lookup order is arbitrary. The single reader of that disjointness: the
- *  store, the engine's `getMeta`, and the adapter all resolve meta through here. */
+/** A leaf's meta wherever it lives — laid out, parked, or cap-evicted into a Door.
+ *  The three maps are disjoint, so the lookup order is arbitrary. Store and engine
+ *  readers resolve metadata through this one seam. */
 export function leafMetaIn(snapshot: LathWallSnapshot, id: LeafId): LeafMeta | undefined {
-  return snapshot.leafMeta.get(id) ?? snapshot.parked.get(id)?.meta;
+  return snapshot.leafMeta.get(id) ?? snapshot.parked.get(id)?.meta ?? snapshot.evictedMeta.get(id);
 }
 
 /** Where a new leaf lands: beside `refId` on `edge`. `null` (or a `refId` that is
@@ -119,15 +124,15 @@ export type LathWallStore = {
 
   /** `removeLeaf`, except the leaf's meta and last rect move into `parked` instead
    *  of being deleted — one commit, so the adapter never sees a frame where the id
-   *  is in neither map and would unmount its DOM. Trims the oldest parks past
-   *  `MAX_PARKED_SURFACES` in that same commit. The Wall picks this over
-   *  `removeLeaf` for Surfaces whose state lives in the DOM
+   *  is in neither render map and would unmount its DOM. Trims the oldest parks past
+   *  `MAX_PARKED_SURFACES` in that same commit, retaining evicted metadata. The Wall
+   *  picks this over `removeLeaf` for Surfaces whose state lives in the DOM
    *  (docs/specs/tiling-engine.md → "Parked leaves"). */
   parkLeaf(id: LeafId): { ok: boolean; token: RestoreToken | null };
 
-  /** Drop a parked leaf without restoring it — the adapter unmounts it and its
-   *  DOM state is gone. Used when a parked Surface is killed outright. No-op if
-   *  `id` is not parked. */
+  /** Drop a parked or cap-evicted leaf without restoring it. The adapter unmounts a
+   *  still-parked leaf; either way the retained metadata is gone. Used when a
+   *  minimized Surface is killed outright. No-op if `id` is neither. */
   unparkLeaf(id: LeafId): void;
 
   /** Atomically swap `oldId` for `newId` in place, moving meta from the old id to
@@ -163,11 +168,11 @@ export type LathWallStore = {
   resizeBoundary(splitPath: number[], boundary: number, deltaPx: number): { ok: boolean };
 
   /** Meta write: set a leaf's fallback title. No-op if unchanged or absent.
-   *  Reaches parked leaves too — a parked Surface keeps running and keeps
-   *  reporting. */
+   *  Reaches parked and cap-evicted leaves too — async browser metadata can arrive
+   *  after either transition. */
   setTitle(id: LeafId, title: string): void;
   /** Meta write: merge `patch` into a leaf's params. No-op if the leaf is absent.
-   *  Reaches parked leaves too. */
+   *  Reaches parked and cap-evicted leaves too. */
   updateParams(id: LeafId, patch: Record<string, unknown>): void;
 
   /** Presentation-only zoom target (the tree is untouched). No-op if unchanged. */
@@ -179,10 +184,10 @@ export type LathWallStore = {
    *  it never notifies. */
   setLayoutGeometry(rect: Rect, opts: LayoutOpts): void;
 
-  /** Record the edge a soon-to-be-added leaf should enter from (drained at the next
-   *  retarget). An explicit call always wins — the mutators derive a hint internally
-   *  from the edge they commit, but only when none was pre-set for that id (e.g. the
-   *  auto-spawn `'top-left'` policy override). Side state, never in the snapshot. */
+  /** Record where a soon-to-be-added leaf should enter from (drained at the next
+   *  retarget). An explicit call wins over edge derivation (e.g. the auto-spawn
+   *  `'top-left'` policy override); a parked leaf's held-viewport rect overrides both.
+   *  Side state, never in the snapshot. */
   setEnterHint(id: LeafId, enterFrom: EnterFrom): void;
   /** Drain and return every pending enter hint (LathHost consumes these when it
    *  ingests a committed layout). */
@@ -209,6 +214,7 @@ export function createLathWallStore(): LathWallStore {
     tree: EMPTY_TREE,
     leafMeta: new Map<string, LeafMeta>(),
     parked: new Map<string, ParkedLeaf>(),
+    evictedMeta: new Map<string, LeafMeta>(),
     zoomedId: null,
     revision: 0,
   });
@@ -218,10 +224,11 @@ export function createLathWallStore(): LathWallStore {
   const enterHints = new Map<string, EnterFrom>();
   const listeners = new Set<() => void>();
 
-  /** Derive an enter hint from the edge a mutator actually committed, unless an
-   *  explicit `setEnterHint` already named this leaf (a policy override wins). The
+  /** Derive an enter hint from the edge a mutator actually committed. A parked held
+   *  rect wins first, then an explicit `setEnterHint` policy override; otherwise the
    *  leaf grows FROM the boundary it shares with its reference — the opposite edge. */
   function deriveEnterHint(id: LeafId, placementEdge: Edge): void {
+    if (deriveParkedEnter(id)) return;
     if (enterHints.has(id)) return;
     enterHints.set(id, oppositeEdge(placementEdge));
   }
@@ -237,12 +244,14 @@ export function createLathWallStore(): LathWallStore {
     tree?: LathTree;
     leafMeta?: ReadonlyMap<string, LeafMeta>;
     parked?: ReadonlyMap<string, ParkedLeaf>;
+    evictedMeta?: ReadonlyMap<string, LeafMeta>;
     zoomedId?: string | null;
   }): void {
     snapshot = Object.freeze({
       tree: next.tree ?? snapshot.tree,
       leafMeta: next.leafMeta ?? snapshot.leafMeta,
       parked: next.parked ?? snapshot.parked,
+      evictedMeta: next.evictedMeta ?? snapshot.evictedMeta,
       zoomedId: next.zoomedId !== undefined ? next.zoomedId : snapshot.zoomedId,
       revision: snapshot.revision + 1,
     });
@@ -255,11 +264,16 @@ export function createLathWallStore(): LathWallStore {
 
   /** Write a leaf's meta back into whichever map holds it. A parked Surface keeps
    *  running while hidden (an iframe navigating, an agent-browser mirroring its
-   *  URL), so its meta must stay live or a reattach would show stale params. */
+   *  URL), and async writes can land after cap eviction, so both hidden states retain
+   *  live metadata rather than falling back to the Door snapshot. */
   function writeMeta(id: LeafId, meta: LeafMeta): void {
     const cur = snapshot.parked.get(id);
     if (cur) {
       commit({ parked: new Map(snapshot.parked).set(id, { ...cur, meta }) });
+      return;
+    }
+    if (snapshot.evictedMeta.has(id)) {
+      commit({ evictedMeta: new Map(snapshot.evictedMeta).set(id, meta) });
       return;
     }
     const m = cloneMeta();
@@ -267,26 +281,58 @@ export function createLathWallStore(): LathWallStore {
     commit({ leafMeta: m });
   }
 
-  /** A leaf re-entering the tree stops being parked, in the SAME commit as the op
-   *  that admits it — the adapter must never see it in neither map. Returns the
-   *  new parked map, or the existing one untouched when `id` was not parked. */
-  function unparked(id: LeafId): ReadonlyMap<string, ParkedLeaf> {
-    if (!snapshot.parked.has(id)) return snapshot.parked;
-    const p = new Map(snapshot.parked);
-    p.delete(id);
-    return p;
+  /** A leaf re-entering the tree leaves both hidden-meta maps in the SAME commit as
+   *  the op that admits it. A parked id must never be absent from both render maps
+   *  for an intermediate commit; an evicted id is already unmounted but follows the
+   *  same single-authority rule. */
+  function readmitted(id: LeafId): {
+    parked: ReadonlyMap<string, ParkedLeaf>;
+    evictedMeta: ReadonlyMap<string, LeafMeta>;
+  } {
+    let parked: ReadonlyMap<string, ParkedLeaf> = snapshot.parked;
+    if (snapshot.parked.has(id)) {
+      const nextParked = new Map(snapshot.parked);
+      nextParked.delete(id);
+      parked = nextParked;
+    }
+    let evictedMeta: ReadonlyMap<string, LeafMeta> = snapshot.evictedMeta;
+    if (snapshot.evictedMeta.has(id)) {
+      const nextEvictedMeta = new Map(snapshot.evictedMeta);
+      nextEvictedMeta.delete(id);
+      evictedMeta = nextEvictedMeta;
+    }
+    return { parked, evictedMeta };
   }
 
-  /** Park order, oldest first, trimmed to the cap. A leaf in the tree is never also
-   *  parked (the maps are disjoint), so the new entry always appends — which is why
-   *  trimming from the front can never evict the park that just happened. */
-  function parkedWith(id: LeafId, entry: ParkedLeaf): ReadonlyMap<string, ParkedLeaf> {
+  /** Park order, oldest first, trimmed to the cap. Eviction moves the last live meta
+   *  into the non-rendered map before dropping the parked entry, so the DOM cap does
+   *  not turn later Door reads back into minimize-time snapshots. */
+  function parkedWith(id: LeafId, entry: ParkedLeaf): {
+    parked: ReadonlyMap<string, ParkedLeaf>;
+    evictedMeta: ReadonlyMap<string, LeafMeta>;
+  } {
     const p = new Map(snapshot.parked).set(id, entry);
+    const evictedMeta = new Map(snapshot.evictedMeta);
+    evictedMeta.delete(id);
     for (const oldest of p.keys()) {
       if (p.size <= MAX_PARKED_SURFACES) break;
+      const evicted = p.get(oldest);
       p.delete(oldest);
+      if (evicted) evictedMeta.set(oldest, evicted.meta);
     }
-    return p;
+    return { parked: p, evictedMeta };
+  }
+
+  /** Prefer a parked leaf's held rect over a collapsed edge entry. A null rect means
+   *  it was parked before geometry existed; suppressing the edge hint still avoids a
+   *  0×N guest viewport. Viewport safety overrides any stale cosmetic hint already
+   *  queued for the id. Returns true whenever `id` is parked, including that case. */
+  function deriveParkedEnter(id: LeafId): boolean {
+    const parked = snapshot.parked.get(id);
+    if (!parked) return false;
+    if (parked.rect) enterHints.set(id, parked.rect);
+    else enterHints.delete(id);
+    return true;
   }
 
   /** The shared body of `removeLeaf` / `parkLeaf`: one core `remove`, differing only
@@ -298,18 +344,18 @@ export function createLathWallStore(): LathWallStore {
     const cur = snapshot.leafMeta.get(id);
     const m = cloneMeta();
     m.delete(id);
-    const p = park && cur
+    const hidden = park && cur
       ? parkedWith(id, {
           meta: cur,
           rect: geometry ? layout(snapshot.tree, geometry.rect, geometry.opts).get(id) ?? null : null,
         })
-      : snapshot.parked;
+      : { parked: snapshot.parked, evictedMeta: snapshot.evictedMeta };
     // `zoomedId` always names a live leaf (a store invariant, like meta): clear it
     // when the leaf it named departs.
     commit({
       tree: r.tree,
       leafMeta: m,
-      parked: p,
+      ...hidden,
       ...(snapshot.zoomedId === id ? { zoomedId: null } : {}),
     });
     return { ok: true, token: r.token };
@@ -323,13 +369,18 @@ export function createLathWallStore(): LathWallStore {
     },
 
     seed(tree, meta) {
-      // Parked leaves survive a seed, minus any the seed itself admits to the tree:
-      // hydration starts with none parked, and the workspaces-rollout switch parks
-      // the outgoing Workspace's Surfaces and then seeds the incoming one, so
-      // clearing here would unmount exactly what parking just preserved.
+      // Parked and cap-evicted metadata survive a seed, minus any ids the seed itself
+      // admits to the tree. Hydration starts with neither, while Workspace switching
+      // parks the outgoing Surfaces and then seeds the incoming one; clearing hidden
+      // state here would discard exactly what the switch preserved.
       const p = new Map(snapshot.parked);
-      for (const [id] of meta) p.delete(id);
-      commit({ tree, leafMeta: new Map(meta), parked: p, zoomedId: null });
+      const evictedMeta = new Map(snapshot.evictedMeta);
+      for (const [id] of meta) {
+        deriveParkedEnter(id);
+        p.delete(id);
+        evictedMeta.delete(id);
+      }
+      commit({ tree, leafMeta: new Map(meta), parked: p, evictedMeta, zoomedId: null });
     },
 
     addLeaf(id, meta, position) {
@@ -338,9 +389,10 @@ export function createLathWallStore(): LathWallStore {
       // Empty tree: the new leaf becomes the root (there is no core op for
       // inserting into an empty tree — the Wall seeds it here).
       if (tree.root === null) {
+        deriveParkedEnter(id);
         const m = cloneMeta();
         m.set(id, meta);
-        commit({ tree: leafTree(id), leafMeta: m, parked: unparked(id) });
+        commit({ tree: leafTree(id), leafMeta: m, ...readmitted(id) });
         return { ok: true };
       }
 
@@ -365,7 +417,7 @@ export function createLathWallStore(): LathWallStore {
       deriveEnterHint(id, edge);
       const m = cloneMeta();
       m.set(id, meta);
-      commit({ tree: r.tree, leafMeta: m, parked: unparked(id) });
+      commit({ tree: r.tree, leafMeta: m, ...readmitted(id) });
       return { ok: true };
     },
 
@@ -374,9 +426,9 @@ export function createLathWallStore(): LathWallStore {
     parkLeaf: (id) => detachLeaf(id, true),
 
     unparkLeaf(id) {
-      const p = unparked(id);
-      if (p === snapshot.parked) return;
-      commit({ parked: p });
+      const hidden = readmitted(id);
+      if (hidden.parked === snapshot.parked && hidden.evictedMeta === snapshot.evictedMeta) return;
+      commit(hidden);
     },
 
     replaceLeaf(oldId, newId, meta) {
@@ -385,11 +437,12 @@ export function createLathWallStore(): LathWallStore {
       const m = cloneMeta();
       m.delete(oldId);
       m.set(newId, meta);
+      deriveParkedEnter(newId);
       // A replace preserves the slot, so retarget a zoom that named the old leaf.
       commit({
         tree: r.tree,
         leafMeta: m,
-        parked: unparked(newId),
+        ...readmitted(newId),
         ...(snapshot.zoomedId === oldId ? { zoomedId: newId } : {}),
       });
       return { ok: true };
@@ -407,7 +460,7 @@ export function createLathWallStore(): LathWallStore {
       deriveEnterHint(token.leafId, token.edge);
       const m = cloneMeta();
       m.set(token.leafId, meta);
-      commit({ tree: r.tree, leafMeta: m, parked: unparked(token.leafId) });
+      commit({ tree: r.tree, leafMeta: m, ...readmitted(token.leafId) });
       return { ok: true, tier: r.tier };
     },
 
@@ -434,7 +487,7 @@ export function createLathWallStore(): LathWallStore {
       if (target.kind === 'edge') deriveEnterHint(id, target.edge);
       const m = cloneMeta();
       m.set(id, meta);
-      commit({ tree: r.tree, leafMeta: m, parked: unparked(id) });
+      commit({ tree: r.tree, leafMeta: m, ...readmitted(id) });
       return { ok: true };
     },
 

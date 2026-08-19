@@ -148,9 +148,44 @@ describe('lath-wall-engine parking policy', () => {
     }
     const parked = engine.store.parkedIds();
     expect(parked).toHaveLength(MAX_PARKED_SURFACES);
-    // The two oldest reverted to plain doors: still minimized, but they reattach by
-    // reloading rather than by revealing preserved DOM.
+    // The two oldest lost only their live DOM: they stay minimized and retain their
+    // latest metadata, but reattach by reloading rather than revealing preserved DOM.
     expect(parked).toEqual(ids.slice(2));
+  });
+
+  it('doorMeta keeps using live metadata after the parked DOM is evicted', () => {
+    const engine = createLathWallEngine();
+    engine.seed(null, ['anchor'], () => 'gen');
+    engine.store.addLeaf('oldest', browser, { refId: 'anchor', edge: 'right' });
+    const { token } = engine.store.parkLeaf('oldest');
+    engine.store.updateParams('oldest', { url: 'https://after-park.example' });
+
+    for (let i = 0; i < MAX_PARKED_SURFACES; i++) {
+      const id = `newer-${i}`;
+      engine.store.addLeaf(id, browser, { refId: 'anchor', edge: 'right' });
+      engine.store.parkLeaf(id);
+    }
+
+    const staleDoor = {
+      id: 'oldest',
+      title: 'before',
+      params: { url: 'https://before.example' },
+    } as DooredItem;
+    expect(engine.doorMeta(staleDoor).params).toEqual({ url: 'https://after-park.example' });
+
+    // An async agent-browser acquisition may finish after the cap unmounted the DOM.
+    engine.store.updateParams('oldest', { session: 'acquired-late' });
+    expect(engine.doorMeta(staleDoor).params).toEqual({
+      url: 'https://after-park.example',
+      session: 'acquired-late',
+    });
+
+    engine.store.restoreLeaf(engine.doorMeta(staleDoor), token!, { fallbackRef: 'anchor' });
+    expect(engine.getMeta('oldest')?.params).toEqual({
+      url: 'https://after-park.example',
+      session: 'acquired-late',
+    });
+    expect(engine.store.getSnapshot().evictedMeta.has('oldest')).toBe(false);
   });
 
   it('getMeta resolves a parked leaf, so a reattach restores its CURRENT meta', () => {

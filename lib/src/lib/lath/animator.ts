@@ -18,9 +18,11 @@ export const LATH_LAYER_ELEVATED = 2;
 export type Frame = { rect: Rect; opacity: number; layer: number };
 
 /** Where an entering leaf's frames begin: collapsed against one `Edge` of its target
- *  (zero extent along that edge's axis), or `'top-left'` (both dims zero at the
- *  target's top-left — the auto-spawn refill). */
-export type EnterFrom = Edge | 'top-left';
+ *  (zero extent along that edge's axis), `'top-left'` (both dims zero at the target's
+ *  top-left — the auto-spawn refill), or an explicit full-opacity rect. The explicit
+ *  rect lets a still-mounted parked leaf resume from the viewport it held rather than
+ *  passing through a collapsed viewport on reattach. */
+export type EnterFrom = Edge | 'top-left' | Rect;
 
 /** House motion, matched to the pre-Lath CSS constants. */
 export const LATH_MOTION_MS = 440;
@@ -104,10 +106,11 @@ export const LATH_EASING = cubicBezier(0.22, 1, 0.36, 1);
 export interface LathAnimator {
   /** Ingest a committed layout. Every existing (non-dying) leaf retargets FROM its
    *  current interpolated frame at `now` (interruptible by construction). A leaf new
-   *  to the animator starts from `enters.get(id)` when provided — its rect collapsed
-   *  against that edge of the target with opacity 0 — else it appears instantly at
-   *  its target. A leaf currently dying is left dying if still in `targets`, dropped
-   *  otherwise. Leaves absent from `targets` (and not dying) are dropped immediately.
+   *  to the animator starts from `enters.get(id)` when provided — an edge collapses
+   *  the target rect at opacity 0, while an explicit rect starts at full opacity —
+   *  else it appears instantly at its target. A leaf currently dying is left dying
+   *  if still in `targets`, dropped otherwise. Leaves absent from `targets` (and not
+   *  dying) are dropped immediately.
    *  `opts.snap` starts every leaf already at its target (no tween) — used when the
    *  user placed the geometry by hand (sash-drag commit) or on a container resize.
    *  `opts.layers` supplies presentation stacking independently of geometry. */
@@ -134,9 +137,11 @@ export interface LathAnimator {
 /** One leaf's motion segment: interpolate `from → to` over `[start, start+duration]`. */
 type Segment = { from: Frame; to: Frame; start: number };
 
+type CollapsedEnterFrom = Edge | 'top-left';
+
 /** The entering rect: collapsed against `edge` of `to` (zero extent along that axis),
  *  so the leaf grows from that boundary. `'top-left'` collapses both dims. */
-function collapsedRect(to: Rect, edge: EnterFrom): Rect {
+function collapsedRect(to: Rect, edge: CollapsedEnterFrom): Rect {
   switch (edge) {
     case 'left':
       return { x: to.x, y: to.y, width: 0, height: to.height };
@@ -218,7 +223,11 @@ export function createAnimator(opts: { durationMs: number; easing?: (t: number) 
           from = current.get(id) ?? to;
         } else {
           const enter = enters?.get(id);
-          from = enter ? { rect: collapsedRect(toRect, enter), opacity: 0, layer: to.layer } : to;
+          from = enter
+            ? typeof enter === 'string'
+              ? { rect: collapsedRect(toRect, enter), opacity: 0, layer: to.layer }
+              : { rect: enter, opacity: 1, layer: to.layer }
+            : to;
         }
         // Unchanged (or snapped) leaves start already-settled so `settledAt` and the
         // adapter's tick loop don't spin on frames that never move.
