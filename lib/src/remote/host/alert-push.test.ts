@@ -225,6 +225,15 @@ describe('alarm push', () => {
     expect(requests[0]!.url).toContain('/api/push/send');
   });
 
+  it('refuses redirects instead of sending Host data outside the allowlist', async () => {
+    await loadPushDevices(deps());
+    expect(requests[0]!.init?.redirect).toBe('error');
+
+    requests.length = 0;
+    await sendPush(deps(), 'pty-1', 'build');
+    expect(requests[0]!.init?.redirect).toBe('error');
+  });
+
   it('warns when the server accepted the send but no phone got it', async () => {
     // The send route answers 200 with counts even when every delivery failed —
     // a rotated VAPID key or a wedged push service must not be silent.

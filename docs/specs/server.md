@@ -99,7 +99,11 @@ from a custom build, or a server that moved). Matching is deliberately narrower
 than a browser's: `https`/`wss` are one scheme class and `http`/`ws` the other,
 host matches exactly or by a leading `*.` wildcard covering any depth of
 sub-domain but never the bare domain, ports must match unless the source says
-`*`, and anything unparseable fails closed.
+`*`, and anything unparseable fails closed. Enrollment and Host-authenticated
+push fetches use `redirect: 'error'`: unlike the former webview CSP, a Node
+process does not re-check a redirect target, so following one could carry the
+setup password, Host bearer token, or notification metadata outside the baked
+allowlist.
 
 The shipped binary is scoped to the SaaS origin only
 (`https://*.dormouse.sh wss://*.dormouse.sh`). A self-host server on a different

@@ -35,7 +35,7 @@ describe('remote-host enrollment', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       'https://dormouse.example/api/host/enroll',
-      expect.objectContaining({ method: 'POST' }),
+      expect.objectContaining({ method: 'POST', redirect: 'error' }),
     );
     const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
     expect(body).toEqual({ password: 'hunter2', label: 'My Laptop' });

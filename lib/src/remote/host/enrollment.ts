@@ -74,6 +74,10 @@ export async function performEnrollment(
   const base = serverUrl.replace(/\/+$/, '');
   const response = await fetch(`${base}${API_ROUTES.hostEnroll}`, {
     method: 'POST',
+    // The Node-resident Host has no browser CSP to check each redirect hop.
+    // Failing here keeps an allowed origin's open redirect from forwarding the
+    // setup password to a server outside the build-time allowlist.
+    redirect: 'error',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ password, label }),
   });

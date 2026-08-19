@@ -63,6 +63,10 @@ async function hostFetch(
     ...(body === undefined
       ? {}
       : { method: 'POST', body: JSON.stringify(body) }),
+    // The service replaced a webview whose CSP checked every redirect target.
+    // Do not let an allowed relay bounce the bearer token or notification
+    // metadata to a destination outside the baked allowlist.
+    redirect: 'error',
     headers: {
       authorization: `Bearer ${deps.enrollment.hostToken}`,
       ...(body === undefined ? {} : { 'content-type': 'application/json' }),
