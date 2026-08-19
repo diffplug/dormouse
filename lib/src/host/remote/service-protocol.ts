@@ -68,6 +68,8 @@ export interface RemoteHostAsk {
 /** One pairing awaiting local approval, as the webview mirrors it. */
 export interface PairingQueueItem {
   clientId: string;
+  /** Immutable ceremony ticket id, echoed by approve/deny. */
+  pairingId: string;
   request: PairingRequest;
   requestedAt: number;
 }
@@ -102,11 +104,13 @@ export interface EnrollParams {
 
 export interface ApproveParams {
   clientId: string;
+  pairingId: string;
   label?: string;
 }
 
 export interface DenyParams {
   clientId: string;
+  pairingId: string;
 }
 
 /** The webview names the Session and what to call it; recipients are never its call. */

@@ -181,6 +181,13 @@ side); the user approves locally on the Host; the Host writes the
 `HostAclRecord` binding the passkey credential identity to the device public
 key. The Client is now trusted by that Host and no other.
 
+Each displayed approval is bound to the ceremony ticket's immutable
+`pairingId`. If a Client replaces its pending request while the old modal or
+its click command is still in flight, the Host rejects that stale action; it
+never selects a request by mutable `clientId` alone. Source of truth:
+`RemoteHostService.#pendingPairing` in `lib/src/host/remote/service.ts` and the
+service/webview contract in `lib/src/host/remote/service-protocol.ts`.
+
 **Presence for pairing is server-attested plus Host-approved.** The Server
 relays a pairing request only while the session's last server-verified
 passkey assertion is within `PAIRING_PRESENCE_WINDOW_MS` (30 seconds;

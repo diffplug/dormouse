@@ -32,11 +32,11 @@ export function RemotePairingModalHost({
 
   return (
     <RemotePairingModal
-      // Keyed on the request's timestamp as well as the client: the Host
-      // coalesces a re-sent pair under the same clientId by replacing its
-      // contents, so the same id can name a different device — which has to
-      // remount rather than re-render into whatever the previous one left.
-      key={`${head.clientId}:${head.requestedAt}`}
+      // Keyed on the immutable ceremony ticket: the Host coalesces a re-sent
+      // pair under the same clientId by replacing its contents, so the same
+      // client can name a different device — which has to remount rather than
+      // re-render into whatever the previous one left.
+      key={head.pairingId}
       request={head.request}
       onApprove={() => head.approve()}
       onDeny={() => head.deny()}

@@ -212,6 +212,38 @@ describe('RemoteHost frame handling', () => {
     expect(savedRecords).toEqual([]);
   });
 
+  it('ignores approval callbacks superseded under the same client id', () => {
+    makeHost();
+    const first = {
+      accountId: 'owner',
+      passkeyCredentialId: 'cred-1',
+      passkeyPublicKeyHash: 'hash-1',
+      devicePublicKey: 'device-1',
+      requestedLabel: 'iPhone Safari',
+    } satisfies PairingRequest;
+    socket.receive({ t: 'pair', clientId: 'c1', request: first });
+    const stale = approvals[0]!;
+
+    const replacement = {
+      ...first,
+      devicePublicKey: 'device-2',
+      requestedLabel: 'Android Chrome',
+    };
+    socket.receive({ t: 'pair', clientId: 'c1', request: replacement });
+    expect(approvals[1]!.pairingId).not.toBe(stale.pairingId);
+
+    stale.approve();
+    stale.deny();
+    expect(socket.frames('pair-result')).toEqual([]);
+    expect(savedRecords).toEqual([]);
+
+    approvals[1]!.approve();
+    expect(socket.frames('pair-result')[0]).toMatchObject({
+      approved: true,
+      record: { devicePublicKey: 'device-2' },
+    });
+  });
+
   it('expired approval → pair-result approved:false, ACL untouched', () => {
     let now = 1_000;
     makeHost(() => [], () => now);

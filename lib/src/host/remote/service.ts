@@ -84,8 +84,9 @@ export class RemoteHostService {
   #disposed = false;
   /**
    * Pairings awaiting local approval, service-side. The webview mirrors a
-   * serializable projection of this and answers by clientId; the approve/deny
-   * closures the `RemoteHost` handed us never leave this process.
+   * serializable projection of this and answers with its immutable pairing id;
+   * the approve/deny closures the `RemoteHost` handed us never leave this
+   * process.
    */
   readonly #pairings = new Map<string, PendingPairing>();
 
@@ -246,13 +247,22 @@ export class RemoteHostService {
   }
 
   #approve(params: ApproveParams): Record<string, never> {
-    this.#pairings.get(params.clientId)?.approve(params.label);
+    this.#pendingPairing(params.clientId, params.pairingId).approve(params.label);
     return {};
   }
 
   #deny(params: DenyParams): Record<string, never> {
-    this.#pairings.get(params.clientId)?.deny();
+    this.#pendingPairing(params.clientId, params.pairingId).deny();
     return {};
+  }
+
+  /** Resolve an action only against the exact request its modal displayed. */
+  #pendingPairing(clientId: string, pairingId: string): PendingPairing {
+    const pending = this.#pairings.get(clientId);
+    if (!pending || pending.pairingId !== pairingId) {
+      throw new Error('pairing request is no longer pending');
+    }
+    return pending;
   }
 
   async #push(params: PushParams): Promise<Record<string, never>> {
@@ -407,8 +417,9 @@ export class RemoteHostService {
   }
 
   #queueSnapshot(): PairingQueueItem[] {
-    return [...this.#pairings.values()].map(({ clientId, request, requestedAt }) => ({
+    return [...this.#pairings.values()].map(({ clientId, pairingId, request, requestedAt }) => ({
       clientId,
+      pairingId,
       request,
       requestedAt,
     }));

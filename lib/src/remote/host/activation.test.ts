@@ -271,19 +271,27 @@ describe('remote host bridge mode', () => {
 
     link.emit('pairing-queue', {
       name: 'pairing-queue',
-      queue: [{ clientId: 'c1', request: PAIRING_REQUEST, requestedAt: 5 }],
+      queue: [{ clientId: 'c1', pairingId: 'p1', request: PAIRING_REQUEST, requestedAt: 5 }],
     });
 
     const head = pairing.getPairingApprovalSnapshot()[0]!;
-    expect(head).toMatchObject({ clientId: 'c1', request: PAIRING_REQUEST, requestedAt: 5 });
+    expect(head).toMatchObject({
+      clientId: 'c1',
+      pairingId: 'p1',
+      request: PAIRING_REQUEST,
+      requestedAt: 5,
+    });
 
     head.approve('Ned iPhone');
     expect(link.commands.at(-1)).toEqual({
       cmd: 'approve',
-      params: { clientId: 'c1', label: 'Ned iPhone' },
+      params: { clientId: 'c1', pairingId: 'p1', label: 'Ned iPhone' },
     });
     head.deny();
-    expect(link.commands.at(-1)).toEqual({ cmd: 'deny', params: { clientId: 'c1' } });
+    expect(link.commands.at(-1)).toEqual({
+      cmd: 'deny',
+      params: { clientId: 'c1', pairingId: 'p1' },
+    });
   });
 
   it('replaces the mirror wholesale — the service is authoritative', async () => {
@@ -291,7 +299,12 @@ describe('remote host bridge mode', () => {
     const { pairing } = await installBridge(link);
     const queue = (ids: string[]) => ({
       name: 'pairing-queue',
-      queue: ids.map((clientId) => ({ clientId, request: PAIRING_REQUEST, requestedAt: 5 })),
+      queue: ids.map((clientId) => ({
+        clientId,
+        pairingId: `pairing-${clientId}`,
+        request: PAIRING_REQUEST,
+        requestedAt: 5,
+      })),
     });
 
     link.emit('pairing-queue', queue(['c1', 'c2']));
@@ -321,16 +334,30 @@ describe('remote host bridge mode', () => {
 
     link.emit('pairing-queue', {
       name: 'pairing-queue',
-      queue: [{ clientId: 'c1', request: PAIRING_REQUEST, requestedAt: 5 }],
+      queue: [{ clientId: 'c1', pairingId: 'p1', request: PAIRING_REQUEST, requestedAt: 5 }],
     });
+    const stale = pairing.getPairingApprovalSnapshot()[0]!;
     link.emit('pairing-queue', {
       name: 'pairing-queue',
-      queue: [{ clientId: 'c1', request: second, requestedAt: 9 }],
+      queue: [{ clientId: 'c1', pairingId: 'p2', request: second, requestedAt: 9 }],
     });
 
     const head = pairing.getPairingApprovalSnapshot();
     expect(head).toHaveLength(1);
-    expect(head[0]).toMatchObject({ clientId: 'c1', request: second, requestedAt: 9 });
+    expect(head[0]).toMatchObject({
+      clientId: 'c1',
+      pairingId: 'p2',
+      request: second,
+      requestedAt: 9,
+    });
+
+    // A click already queued from the old modal stays bound to the old ticket;
+    // the service can reject it instead of applying it to the replacement.
+    stale.approve();
+    expect(link.commands.at(-1)).toEqual({
+      cmd: 'approve',
+      params: { clientId: 'c1', pairingId: 'p1', label: undefined },
+    });
   });
 
   it('leaves an unchanged request alone, so the modal does not churn', async () => {
@@ -340,18 +367,43 @@ describe('remote host bridge mode', () => {
     const { pairing } = await installBridge(link);
     const snapshot = () => ({
       name: 'pairing-queue',
-      queue: [{ clientId: 'c1', request: { ...PAIRING_REQUEST }, requestedAt: 5 }],
+      queue: [
+        {
+          clientId: 'c1',
+          pairingId: 'p1',
+          request: { ...PAIRING_REQUEST },
+          requestedAt: 5,
+        },
+      ],
     });
 
     link.emit('pairing-queue', snapshot());
     const first = pairing.getPairingApprovalSnapshot()[0];
     link.emit('pairing-queue', snapshot());
     expect(pairing.getPairingApprovalSnapshot()[0]).toBe(first);
+
+    // A distinct ceremony can look identical and land in the same millisecond;
+    // its ticket still has to replace the closures that answer the old one.
+    link.emit('pairing-queue', {
+      name: 'pairing-queue',
+      queue: [
+        {
+          clientId: 'c1',
+          pairingId: 'p2',
+          request: { ...PAIRING_REQUEST },
+          requestedAt: 5,
+        },
+      ],
+    });
+    expect(pairing.getPairingApprovalSnapshot()[0]).not.toBe(first);
+    expect(pairing.getPairingApprovalSnapshot()[0]!.pairingId).toBe('p2');
   });
 
   it('seeds the mirror, for a webview that reloaded mid-pairing', async () => {
     const link = fakeLink();
-    link.results.pairingQueue = [{ clientId: 'c1', request: PAIRING_REQUEST, requestedAt: 5 }];
+    link.results.pairingQueue = [
+      { clientId: 'c1', pairingId: 'p1', request: PAIRING_REQUEST, requestedAt: 5 },
+    ];
     const { pairing } = await installBridge(link);
 
     expect(link.commands.some((c) => c.cmd === 'pairingQueue')).toBe(true);
@@ -364,7 +416,9 @@ describe('remote host bridge mode', () => {
     // would stay hidden until the pairing was answered somewhere else.
     const link = fakeLink();
     link.results.status = { enrolled: false };
-    link.results.pairingQueue = [{ clientId: 'c1', request: PAIRING_REQUEST, requestedAt: 5 }];
+    link.results.pairingQueue = [
+      { clientId: 'c1', pairingId: 'p1', request: PAIRING_REQUEST, requestedAt: 5 },
+    ];
     const { pairing } = await installBridge(link);
     expect(link.commands.some((c) => c.cmd === 'pairingQueue')).toBe(false);
 

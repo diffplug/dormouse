@@ -580,6 +580,7 @@ describe('pairing queue', () => {
     expect(event.name).toBe('pairing-queue');
     expect(event.queue).toHaveLength(1);
     expect(event.queue[0]).toMatchObject({ clientId: 'c1', request: PAIRING });
+    expect(typeof event.queue[0]!.pairingId).toBe('string');
     expect(typeof event.queue[0]!.requestedAt).toBe('number');
 
     // A webview that reloaded mid-pairing seeds from the same snapshot.
@@ -589,8 +590,9 @@ describe('pairing queue', () => {
   it('approve runs the real ceremony, persists, and empties the queue', async () => {
     const socket = await running();
     socket.receive({ t: 'pair', clientId: 'c1', request: PAIRING });
+    const pairingId = queueEvents().at(-1)!.queue[0]!.pairingId;
 
-    await command('approve', { clientId: 'c1', label: 'Ned iPhone' });
+    await command('approve', { clientId: 'c1', pairingId, label: 'Ned iPhone' });
 
     const result = socket.frames('pair-result')[0]!;
     expect(result).toMatchObject({ clientId: 'c1', approved: true });
@@ -602,8 +604,9 @@ describe('pairing queue', () => {
   it('deny answers the client and writes no ACL', async () => {
     const socket = await running();
     socket.receive({ t: 'pair', clientId: 'c1', request: PAIRING });
+    const pairingId = queueEvents().at(-1)!.queue[0]!.pairingId;
 
-    await command('deny', { clientId: 'c1' });
+    await command('deny', { clientId: 'c1', pairingId });
 
     expect(socket.frames('pair-result')[0]).toMatchObject({ approved: false });
     expect(store.acl['host-1']).toBeUndefined();
@@ -622,12 +625,49 @@ describe('pairing queue', () => {
     expect(queueEvents().at(-1)!.queue).toEqual([]);
   });
 
-  it('approving something already resolved is a no-op', async () => {
+  it('rejects approval for something already resolved', async () => {
     const socket = await running();
     socket.receive({ t: 'pair', clientId: 'c1', request: PAIRING });
-    await command('approve', { clientId: 'c1' });
-    await command('approve', { clientId: 'c1' });
+    const pairingId = queueEvents().at(-1)!.queue[0]!.pairingId;
+    await command('approve', { clientId: 'c1', pairingId });
+    expect((await command('approve', { clientId: 'c1', pairingId })).error).toContain(
+      'no longer pending',
+    );
     expect(socket.frames('pair-result')).toHaveLength(1);
+  });
+
+  it('rejects stale modal actions after the client replaces its pairing request', async () => {
+    const socket = await running();
+    socket.receive({ t: 'pair', clientId: 'c1', request: PAIRING });
+    const firstId = queueEvents().at(-1)!.queue[0]!.pairingId;
+
+    const replacement = {
+      ...PAIRING,
+      devicePublicKey: 'device-2',
+      requestedLabel: 'Android Chrome',
+    };
+    socket.receive({ t: 'pair', clientId: 'c1', request: replacement });
+    const replacementItem = queueEvents().at(-1)!.queue[0]!;
+    expect(replacementItem.pairingId).not.toBe(firstId);
+
+    // Both buttons from the still-rendered first modal are now stale. Neither
+    // may resolve or authorize the replacement request before it is shown.
+    expect((await command('approve', { clientId: 'c1', pairingId: firstId })).error).toContain(
+      'no longer pending',
+    );
+    expect((await command('deny', { clientId: 'c1', pairingId: firstId })).error).toContain(
+      'no longer pending',
+    );
+    expect(socket.frames('pair-result')).toEqual([]);
+    expect(store.acl['host-1']).toBeUndefined();
+    expect(queueEvents().at(-1)!.queue).toEqual([replacementItem]);
+
+    await command('approve', { clientId: 'c1', pairingId: replacementItem.pairingId });
+    expect(socket.frames('pair-result')[0]).toMatchObject({
+      clientId: 'c1',
+      approved: true,
+      record: { devicePublicKey: 'device-2' },
+    });
   });
 });
 

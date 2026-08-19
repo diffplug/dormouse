@@ -164,8 +164,14 @@ function mirrorPairingQueue(link: RemoteHostLink, queue: readonly PairingQueueIt
   for (const item of queue) {
     const showing = mirrored.get(item.clientId);
     // Re-enqueuing an unchanged request would reorder the queue and re-render
-    // the modal for nothing; the approve/deny closures only need the clientId.
-    if (showing && showing.requestedAt === item.requestedAt && sameRequest(showing.request, item.request)) {
+    // the modal for nothing. The ticket id is part of "unchanged": timestamps
+    // can collide, and each approve/deny must echo the exact ticket displayed.
+    if (
+      showing &&
+      showing.pairingId === item.pairingId &&
+      showing.requestedAt === item.requestedAt &&
+      sameRequest(showing.request, item.request)
+    ) {
       continue;
     }
     // Changed under the same id. The service coalesces a re-sent pair by
@@ -176,10 +182,17 @@ function mirrorPairingQueue(link: RemoteHostLink, queue: readonly PairingQueueIt
     if (showing) resolvePairingApproval(item.clientId);
     enqueuePairingApproval({
       clientId: item.clientId,
+      pairingId: item.pairingId,
       request: item.request,
       requestedAt: item.requestedAt,
-      approve: (label) => void link.command('approve', { clientId: item.clientId, label }).catch(() => {}),
-      deny: () => void link.command('deny', { clientId: item.clientId }).catch(() => {}),
+      approve: (label) =>
+        void link
+          .command('approve', { clientId: item.clientId, pairingId: item.pairingId, label })
+          .catch(() => {}),
+      deny: () =>
+        void link
+          .command('deny', { clientId: item.clientId, pairingId: item.pairingId })
+          .catch(() => {}),
     });
   }
 }

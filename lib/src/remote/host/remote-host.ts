@@ -329,8 +329,9 @@ export class RemoteHost {
     const ticket = this.#ceremony.begin(request);
     const pending: PendingPairing = {
       clientId,
+      pairingId: ticket.pairingId,
       request,
-      requestedAt: this.#now(),
+      requestedAt: ticket.requestedAt,
       approve: (label) => this.#approvePairing(clientId, ticket.pairingId, label),
       deny: (error) => this.#denyPairing(clientId, ticket.pairingId, error),
     };
@@ -341,7 +342,10 @@ export class RemoteHost {
   /** The local approval — the ONLY path that writes the ACL. */
   #approvePairing(clientId: string, pairingId: string, label?: string): void {
     const state = this.#clients.get(clientId);
-    if (!state?.pending) return; // already resolved
+    // The service checks this at its bridge boundary too; keep the controller's
+    // ACL write bound to its own current ticket even if another caller retains
+    // an older callback.
+    if (!state?.pending || state.pending.pairingId !== pairingId) return;
     state.pending = undefined;
     let record: HostAclRecord;
     try {
@@ -363,7 +367,7 @@ export class RemoteHost {
 
   #denyPairing(clientId: string, pairingId: string, error = 'pairing denied by host'): void {
     const state = this.#clients.get(clientId);
-    if (!state?.pending) return;
+    if (!state?.pending || state.pending.pairingId !== pairingId) return;
     state.pending = undefined;
     try {
       this.#ceremony.deny(pairingId);
