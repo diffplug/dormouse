@@ -12,7 +12,6 @@ export default {
       "/playground/pocket",
       "/pocket",
       "/changelog",
-      "/docs",
       "/docs/dor",
       "/docs/agent-skill",
       "/supply-chain",

@@ -52,7 +52,6 @@ export default function AgentSkillDocs() {
     <DocsLayout
       activePath="/docs/agent-skill"
       title="Agent skill"
-      breadcrumb={[{ href: "/docs", label: "Documentation" }]}
       intro="The operating guide Dormouse bundles for coding agents, rendered exactly as the CLI prints it."
       toc={skill.toc}
     >

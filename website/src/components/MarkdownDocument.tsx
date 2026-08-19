@@ -6,7 +6,7 @@
  * allowlist — so nothing here needs to sanitize, and no HTML string is ever
  * injected (`dangerouslySetInnerHTML` is deliberately absent).
  *
- * See docs/specs/website-docs.md -> /docs rendering contract.
+ * See docs/specs/website-docs.md -> Markdown rendering contract.
  */
 import { Fragment, type ReactNode } from "react";
 import { CODE_CLASS, LINK_CLASS } from "./docs-tokens";

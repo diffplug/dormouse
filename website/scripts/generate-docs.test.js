@@ -4,8 +4,11 @@ import { visit } from './docs-parser.js';
 
 const data = await generateDocs();
 
-/** Every link href the browser will actually render, from all three pages. */
-function renderedHrefs() {
+/**
+ * Every link href in the generated data: both published pages, plus the guide
+ * data, which has no page today but is generated and must stay correct.
+ */
+function generatedHrefs() {
   const hrefs = [];
   const collect = (blocks) =>
     visit(blocks, (node) => {
@@ -121,13 +124,13 @@ describe('same-site links', () => {
     for (const { to } of data.guide.localizedLinks) expect(to.startsWith('/')).toBe(true);
   });
 
-  it('leaves no absolute site link on any rendered page', () => {
-    const offenders = renderedHrefs().filter((href) => href.startsWith('https://dormouse.sh'));
+  it('leaves no absolute site link in the generated data', () => {
+    const offenders = generatedHrefs().filter((href) => href.startsWith('https://dormouse.sh'));
     expect(offenders, 'these would navigate off the current origin').toEqual([]);
   });
 
   it('does not touch links to other origins', () => {
-    const external = renderedHrefs().filter((href) => /^https?:\/\//i.test(href));
+    const external = generatedHrefs().filter((href) => /^https?:\/\//i.test(href));
     expect(external.length).toBeGreaterThan(0);
     for (const href of external) expect(href).not.toContain('dormouse.sh');
   });

@@ -1,8 +1,8 @@
 /**
- * Shared chrome for the three public docs pages: site header, breadcrumb,
- * sticky table of contents, and footer.
+ * Shared chrome for the public reference pages: site header, sticky table of
+ * contents, and footer.
  *
- * See docs/specs/website-docs.md -> /docs rendering contract, items 2 and 5.
+ * See docs/specs/website-docs.md -> reference page chrome.
  */
 import type { ReactNode } from "react";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "./SiteHeader";
@@ -32,15 +32,12 @@ export default function DocsLayout({
   activePath,
   title,
   intro,
-  breadcrumb,
   toc,
   children,
 }: {
   activePath: string;
   title: string;
   intro?: ReactNode;
-  /** Trail above the title, e.g. Docs / CLI reference. Omit on /docs itself. */
-  breadcrumb?: { href: string; label: string }[];
   toc: TocEntry[];
   children: ReactNode;
 }) {
@@ -50,19 +47,6 @@ export default function DocsLayout({
 
       <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)] pt-24 pb-16">
         <div className="mx-auto max-w-6xl px-4 md:px-6">
-          {breadcrumb && breadcrumb.length > 0 && (
-            <nav aria-label="Breadcrumb" className="mb-3 text-sm opacity-60">
-              {breadcrumb.map((crumb, i) => (
-                <span key={crumb.href}>
-                  {i > 0 && <span className="mx-2">/</span>}
-                  <a href={crumb.href} className="hover:text-[var(--color-caramel)] hover:underline underline-offset-2">
-                    {crumb.label}
-                  </a>
-                </span>
-              ))}
-            </nav>
-          )}
-
           <h1 className="font-display text-[clamp(1.75rem,3vw+0.5rem,2.5rem)] mb-2">{title}</h1>
           {intro && <div className="mb-8 text-lg opacity-70">{intro}</div>}
 
@@ -81,7 +65,6 @@ export default function DocsLayout({
 
           <footer className="mt-16 border-t border-[var(--color-text)]/20 pt-8 text-sm opacity-60">
             <div className="flex flex-wrap gap-x-6 gap-y-2">
-              <a href="/docs" className="hover:underline">Documentation</a>
               <a href="/docs/dor" className="hover:underline">CLI reference</a>
               <a href="/docs/agent-skill" className="hover:underline">Agent skill</a>
               <a

@@ -3,27 +3,32 @@
 > See `docs/specs/glossary.md` for canonical Surface / Session / Pane
 > vocabulary used by the public product guide and browser workflow.
 
-Dormouse has one general user guide and two specialized references, all served
-from the marketing site and all generated from sources that live next to the
-code they describe.
+Dormouse publishes two specialized references on the marketing site, both
+generated from sources that live next to the code they describe.
 
 ```text
-/docs                 product guide
-  /docs/dor           dor CLI reference
-  /docs/agent-skill   exact bundled agent skill
+/docs/dor           dor CLI reference
+/docs/agent-skill   exact bundled agent skill
 ```
 
-The global website **Docs** link points to `/docs`.
+`/docs` is deliberately not a page, and the site header carries no **Docs**
+link. The general product guide is `vscode-ext/README.md`, published through
+the Marketplace, Open VSX, and GitHub rather than through this site; the
+machinery that once rendered it at `/docs` is retained and still runs (see
+[Canonical product guide](#canonical-product-guide)). Nothing public may link
+to a bare `/docs`.
 Source of truth: `website/src/routes.ts`, `website/src/components/SiteHeader.tsx`.
 
 | Surface | Purpose | Canonical content |
 | --- | --- | --- |
 | Homepage | Product marketing, visual proof, playground and download conversion | `website/src/pages/Home.tsx` |
 | Marketplace and Open VSX | Extension discovery, evaluation, and basic onboarding | `vscode-ext/README.md` plus public metadata in `vscode-ext/package.json` |
-| `/docs` | General guide for VS Code and standalone | Fixed-delta web rendering of `vscode-ext/README.md` |
 | `/docs/dor` | Complete CLI reference | Help snapshots in `dor/test/snapshots/help/`, verified against the built CLI |
 | `/docs/agent-skill` | Agent-facing operating guide | Exact `dor/skill.md` |
 | GitHub root | Repository overview and contributor entry point | Root `README.md` |
+
+The guide reaches readers through the Marketplace, Open VSX, and GitHub rows of
+that table. It has no row of its own on this site.
 
 Internal specs remain maintainer references. Public docs are written from
 shipped behavior above each spec's fold and do not expose host plumbing,
@@ -32,8 +37,17 @@ internal state shapes, or staged `## Future` material.
 ## Canonical product guide
 
 `vscode-ext/README.md` is the single authored source for the general product
-guide. It works without prose forks in three renderers: the VS Code
-Marketplace, Open VSX, and `https://dormouse.sh/docs`.
+guide. It works without prose forks in the VS Code Marketplace, Open VSX, and
+GitHub.
+
+The guide is not served by this site. It was rendered at `/docs`; that page and
+every link to it were removed, and the guide is now read where it is published.
+The generator still parses it on every build, for two reasons that outlive the
+page: the media sync is what puts `vscode-ext/media/` on `dormouse.sh`, which
+the packaged listing depends on (see below), and the parsed guide is what a
+replacement page would render. Its data file is generated and unconsumed. The
+lint's guide checks still run, because they constrain the guide as a
+*Marketplace listing*, not as a website page.
 
 The guide is host-neutral at the top level; VS Code and standalone instructions
 live under explicit subsections rather than relying on the website to rewrite
@@ -67,7 +81,8 @@ checkable and by review otherwise:
   future renderers.
 - VS Code command names in getting started exist in `vscode-ext/package.json`.
 - Detailed CLI behavior links to `/docs/dor`; the complete agent operating guide
-  links to `/docs/agent-skill`.
+  links to `/docs/agent-skill`. Those two are the only site pages the guide may
+  send a reader to for documentation.
 - The guide contains no `TODO:` placeholders and no copied internal future
   design.
 
@@ -97,7 +112,7 @@ verified:
 | GitHub | Natively, relative to `vscode-ext/` |
 | Packaged extension pane | From `media/` inside the VSIX, retained by `!media/**` in `.vscodeignore` |
 | Marketplace / Open VSX | `vsce --baseImagesUrl https://dormouse.sh` rewrites both Markdown images **and** raw `<img src>` attributes at package time |
-| `/docs` | The generator copies `vscode-ext/media/` to `website/public/media/` and rewrites sources to `/media/` |
+| `dormouse.sh` | The generator copies `vscode-ext/media/` to `website/public/media/`, which is what `--baseImagesUrl` above resolves against |
 
 Links back to this site take the same shape of treatment. The guide spells them
 absolutely (`https://dormouse.sh/docs/dor`) because the Marketplace, Open VSX,
@@ -156,26 +171,28 @@ anchor on GitHub.
 Source of truth: `website/scripts/docs-parser.js`,
 `website/scripts/docs-parser.test.js`.
 
-## `/docs` rendering contract
+## Markdown rendering contract
 
-The website build reads `vscode-ext/README.md` and retains its headings,
+The website build reads each Markdown source and retains its headings,
 paragraphs, lists, links, tables, code, and images in source order. The website
 delta is structural:
 
-1. Omit the README's top-level `# Dormouse`; the page shell supplies its title
-   and breadcrumb.
+1. Omit the README's top-level `# Dormouse`; a page shell supplies its own
+   title.
 2. Generate an on-page table of contents from the remaining headings.
 3. Assign stable, unique heading ids with one checked slugger.
 4. Rewrite links pointing back at this site to root-relative paths, dropping
    only the origin.
 5. Render the subset using the marketing website's typography, spacing, links,
    code blocks, tables, and responsive raster-media treatment.
-6. Add the shared site header, docs breadcrumb, and footer.
+6. Add the shared site header and footer.
 7. Mark same-site and external navigation appropriately.
 
 Operations 1–4 live in the generator; 5–7 live in the page components.
-Operation 4 also runs over `dor/skill.md`, before `/docs/dor` lifts its
-introduction out of those same blocks, so all three pages inherit one rewrite.
+Operations 1–3 apply to the guide, which has no page today; operation 4 runs
+over the guide and over `dor/skill.md`, the latter before `/docs/dor` lifts its
+introduction out of those same blocks, so both published pages inherit one
+rewrite.
 
 The website does not use regular expressions to turn VS Code prose into generic
 prose. Channel-specific differences are explicit entries in one fixed delta
@@ -191,8 +208,16 @@ horizontal overflow. No HTML string is ever injected —
 
 Source of truth: `website/scripts/generate-docs.js` (`DOCS_DELTA`,
 `buildGuide`, `localizeSiteLinks`),
-`website/src/components/MarkdownDocument.tsx`,
-`website/src/pages/Docs.tsx`.
+`website/src/components/MarkdownDocument.tsx`.
+
+## Reference page chrome
+
+Both published pages share `DocsLayout`: the site header, an `h1` and intro, a
+sticky on-page table of contents, and a footer linking the CLI reference, the
+agent skill, the issue tracker, and the supply chain. There is no breadcrumb —
+with no `/docs` above them, the two pages are siblings, not children.
+
+Source of truth: `website/src/components/DocsLayout.tsx`.
 
 ## `/docs/dor` reference
 
@@ -284,8 +309,13 @@ website data module:
 website/scripts/generate-docs.js
 website/scripts/docs-parser.js
 website/scripts/help-parser.js
-website/src/data/docs.json
+website/src/data/docs.guide.json    generated, no page consumes it today
+website/src/data/docs.cli.json
+website/src/data/docs.skill.json
 ```
+
+One file per document rather than one combined module: a shared import made
+every docs route pull the others' content into one chunk.
 
 Inputs:
 
@@ -296,9 +326,14 @@ dor/skill.md
 ```
 
 The generated data contains the canonical product-guide blocks and heading
-inventory, the explicit fixed delta applied to `/docs`, ordered semantic CLI
-nodes plus exact raw help, and the exact skill Markdown plus validated
-heading-to-reference links.
+inventory with the explicit fixed delta applied, ordered semantic CLI nodes
+plus exact raw help, and the skill blocks plus validated heading-to-reference
+links. The raw skill Markdown is deliberately not emitted.
+
+Generating the guide is not dead work even with no page consuming it: the same
+pass validates the guide's media against the Marketplace rules and copies
+`vscode-ext/media/` to `website/public/media/`, which the packaged listing
+resolves its images against.
 
 Website `predev`, `pretest`, and `prebuild` run the generator, mirroring
 `generate-changelog.js`. Browser code consumes generated data rather than
@@ -309,8 +344,8 @@ output stays out of version control and is reproducible from a clean checkout.
 
 The **Browsers for you (and your agents)** section in
 `website/src/pages/Home.tsx` shows a terminal-to-browser transcript followed by
-a browser Surface preview, and links to the browser section of `/docs`,
-`/docs/dor#agent-browser`, and `/docs/agent-skill`.
+a browser Surface preview, and links to `/docs/dor#agent-browser` and
+`/docs/agent-skill`.
 
 The transcript is **authored literals in `Home.tsx`, not generated or tested.**
 Proving it end to end would need a live Host and a real `agent-browser` in CI,
@@ -332,9 +367,9 @@ legible, selectable, and accessible without requiring animation.
 
 Root `README.md` is shorter than the canonical product guide and does not
 duplicate it. It carries a product image and one-sentence cross-platform
-description, playground/Marketplace/Open VSX/standalone links, a prominent link
-to `https://dormouse.sh/docs` with the CLI and agent links subordinate, a
-concise current feature summary, contributor setup and repository structure
+description, playground/Marketplace/Open VSX/standalone links, links to the two
+published references, a concise current feature summary, contributor setup and
+repository structure
 with links to `AGENTS.md` and the internal specs, and license and supply-chain
 links.
 
@@ -355,11 +390,11 @@ verifies:
   with no remote URLs and no SVG, and every file there is referenced;
 - VS Code commands named by the guide exist in `vscode-ext/package.json`, and
   the listing metadata fields are present;
-- `/docs` heading ids are stable and unique;
+- guide heading ids are stable and unique;
 - every agent-skill reference target exists in `/docs/dor`;
 - generated command inventory matches the snapshot set exactly;
-- generated skill Markdown equals `dor/skill.md` byte for byte;
-- both READMEs route durable user documentation to `/docs`;
+- both READMEs link to `/docs/dor` and `/docs/agent-skill`, checked as exact
+  URLs so a link to the non-existent `/docs` cannot satisfy a prefix test;
 - public copy does not present staged WebRTC as shipped.
 
 Each check is isolated, so one malformed source reports its own failure instead
@@ -373,19 +408,18 @@ spec.
 
 | File | Role |
 | --- | --- |
-| `vscode-ext/README.md` | The canonical product guide |
+| `vscode-ext/README.md` | The canonical product guide; published off-site, parsed here |
 | `vscode-ext/package.json` | Listing metadata and VS Code command inventory |
 | `README.md` | Repository and contributor entry point |
-| `vscode-ext/media/` | Guide media; the generator copies it to `website/public/media/` |
+| `vscode-ext/media/` | Guide media; the generator copies it to `website/public/media/`, which the Marketplace listing loads from |
 | `dor/skill.md` | The bundled agent skill, rendered exactly at `/docs/agent-skill` |
 | `dor/test/snapshots/help/` | Tested CLI help, the source for `/docs/dor` |
 | `website/scripts/docs-parser.js` | Markdown subset parser, slugger, `<img>` allowlist |
 | `website/scripts/help-parser.js` | Narrow CLI-help parser with losslessness |
 | `website/scripts/generate-docs.js` | Codegen, `DOCS_DELTA`, `SKILL_REFERENCES` |
 | `website/src/components/MarkdownDocument.tsx` | Renders parsed Markdown blocks |
-| `website/src/components/DocsLayout.tsx` | Docs chrome: breadcrumb, TOC, footer |
+| `website/src/components/DocsLayout.tsx` | Reference page chrome: header, TOC, footer |
 | `website/src/components/DorCommandReference.tsx` | One CLI command section |
-| `website/src/pages/Docs.tsx` | `/docs` |
 | `website/src/pages/DorDocs.tsx` | `/docs/dor` |
 | `website/src/pages/AgentSkillDocs.tsx` | `/docs/agent-skill` |
 | `scripts/public-docs-lint.mjs` | Public-doc validation |
@@ -409,3 +443,20 @@ Remaining work, in staged order:
    [vscode.md](vscode.md), so a change there sees the public-doc consequence
    without reading this spec. Public wording alone does not change a behavior
    spec when it accurately describes already-shipped behavior.
+
+**Scope: guide-page-return**
+
+A hosted rendering of the general product guide was built, shipped at `/docs`,
+and then withdrawn — the guide reads well enough where it is already published,
+and the page did not earn its place in the site's navigation. What remains is
+deliberately not a stub: the generator still parses the guide, applies the
+delta, resolves its media, and localizes its links, and `docs.guide.json` is
+written on every build with no consumer.
+
+Reviving it needs a page component, a route, a prerender entry, and a way in
+from the header or the homepage — not new pipeline work. Whoever does it should
+first answer the question that removed the page: what this rendering gives a
+reader that the Marketplace and GitHub renderings do not.
+
+Until then, `/docs` must stay a 404. A link to it from public copy is a bug,
+which is why the lint checks reference URLs exactly rather than by prefix.

@@ -30,7 +30,6 @@ export default function DorDocs() {
     <DocsLayout
       activePath="/docs/dor"
       title="dor CLI reference"
-      breadcrumb={[{ href: "/docs", label: "Documentation" }]}
       intro="dor is on the PATH of every terminal Dormouse launches. This page is generated from the CLI's own help output."
       toc={TOC}
     >

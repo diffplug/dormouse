@@ -931,8 +931,6 @@ export default function Home() {
               you already have installed — it doesn't ship a browser of its own.
             </p>
             <p className="text-base leading-relaxed opacity-60">
-              <a href="/docs#browsers-for-you-and-your-agents" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">How it works</a>
-              {" · "}
               <a href="/docs/dor#agent-browser" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">CLI reference</a>
               {" · "}
               <a href="/docs/agent-skill" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">Agent skill</a>

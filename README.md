@@ -12,8 +12,6 @@ A multitasking terminal for VS Code and the desktop — a real tiling layout, tm
 
 ## Documentation
 
-**[dormouse.sh/docs](https://dormouse.sh/docs)** is the user guide — layout, alerts, browsers, copy/paste, shortcuts, and getting started.
-
 - [CLI reference](https://dormouse.sh/docs/dor) — every `dor` command
 - [Agent skill](https://dormouse.sh/docs/agent-skill) — the operating guide Dormouse bundles for coding agents
 

@@ -141,7 +141,6 @@ Dormouse also bundles an agent skill describing all of this in the form agents e
 
 ## Help and project links
 
-- [Documentation](https://dormouse.sh/docs)
 - [Browser playground](https://dormouse.sh/playground) — no install required
 - [Report an issue](https://github.com/diffplug/dormouse/issues)
 - [Source on GitHub](https://github.com/diffplug/dormouse)

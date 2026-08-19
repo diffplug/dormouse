@@ -145,11 +145,19 @@ async function checkVsCodeCommands() {
   }
 }
 
-/** Both READMEs must route durable user documentation to /docs. */
-async function checkRoutesToDocs() {
+/**
+ * Both READMEs must route to the published references.
+ *
+ * Checked as exact URLs rather than a `/docs` prefix: `/docs` itself is not a
+ * page, so a prefix test would pass on a link to it and ship a 404.
+ */
+const REFERENCE_URLS = ['https://dormouse.sh/docs/dor', 'https://dormouse.sh/docs/agent-skill'];
+
+async function checkRoutesToReferences() {
   for (const rel of [GUIDE, ROOT_README]) {
-    const text = await read(rel);
-    if (!text.includes('https://dormouse.sh/docs')) fail(`${rel}: does not link to https://dormouse.sh/docs`);
+    for (const url of REFERENCE_URLS) {
+      if (!src[rel].includes(url)) fail(`${rel}: does not link to ${url}`);
+    }
   }
 }
 
@@ -189,7 +197,7 @@ const checks = [
   checkImages,
   checkLinks,
   checkVsCodeCommands,
-  checkRoutesToDocs,
+  checkRoutesToReferences,
   checkGenerated,
   checkNoStagedClaims,
 ];

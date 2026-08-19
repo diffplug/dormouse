@@ -2,10 +2,17 @@
  * Build-time codegen for the public documentation pages.
  *
  * Reads the canonical sources, parses them with the in-repo Markdown parser,
- * and writes one gitignored data file per page. Browser code never imports Dor
- * implementation modules (they use Node APIs) or reads Markdown at runtime —
- * everything it needs is in the generated JSON, split per page so /docs does
- * not ship the CLI reference and the agent skill along with it.
+ * and writes one gitignored data file per document. Browser code never imports
+ * Dor implementation modules (they use Node APIs) or reads Markdown at runtime
+ * — everything it needs is in the generated JSON, split per document so
+ * /docs/dor does not ship the agent skill along with it.
+ *
+ * The guide half of this pipeline has no page of its own right now (see
+ * docs/specs/website-docs.md -> Canonical product guide). It is kept whole and
+ * still runs on every build, because the guide's media sync is what puts
+ * vscode-ext/media/ on dormouse.sh, where the packaged Marketplace listing
+ * loads its images from, and because the guide data is what a future page
+ * would render.
  *
  * Wired into website `predev` / `pretest` / `prebuild`, mirroring
  * generate-changelog.js.
@@ -32,7 +39,14 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..', '..');
 const dataDir = join(__dirname, '..', 'src', 'data');
-/** Guide media lives next to the guide; the site serves a copy at /media/. */
+/**
+ * Guide media lives next to the guide; the site serves a copy at /media/.
+ *
+ * Load-bearing beyond this repo: `vsce --baseImagesUrl https://dormouse.sh`
+ * turns the guide's `media/hero.jpg` into `https://dormouse.sh/media/hero.jpg`
+ * on the Marketplace and Open VSX, so the listing's images 404 if the site
+ * stops serving these.
+ */
 const mediaSrcDir = join(repoRoot, 'vscode-ext', 'media');
 const mediaOutDir = join(__dirname, '..', 'public', 'media');
 const MEDIA_URL_BASE = '/media/';
@@ -41,7 +55,7 @@ const MEDIA_SRC_PREFIX = 'media/';
 const SITE_ORIGIN = 'https://dormouse.sh';
 
 /**
- * The complete `/docs` delta, per docs/specs/website-docs.md.
+ * The complete guide delta, per docs/specs/website-docs.md.
  *
  * The website applies only structural operations to the canonical README. Each
  * entry names exactly one target and fails the build when that target is absent
@@ -199,7 +213,11 @@ function localizeSiteLinks(blocks) {
   return localized;
 }
 
-/** Copy the guide's media next to the site. Only `main()` should call this. */
+/**
+ * Copy the guide's media next to the site. Only `main()` should call this.
+ *
+ * Required by the Marketplace listing, not by any page here — see mediaSrcDir.
+ */
 async function syncGuideMedia(files) {
   await rm(mediaOutDir, { recursive: true, force: true });
   await mkdir(mediaOutDir, { recursive: true });
