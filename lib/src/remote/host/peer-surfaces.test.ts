@@ -3,6 +3,11 @@
  * VS Code window is the remote Host, but the window's terminals are spread
  * across all of them, so the Host has to reach the others through the peer
  * bridge (docs/specs/vscode.md → "Peer surfaces").
+ *
+ * This is the webview-backed {@link createWebviewSurfaceProvider} under test as
+ * much as the session: the session itself knows nothing about registries or
+ * peers (`host-surface-provider.ts`), so the local-vs-sibling distinction only
+ * exists here.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -18,6 +23,7 @@ import {
 } from 'server-lib-common';
 import { FakePtyAdapter, setPlatform, type PlatformAdapter } from '../../lib/platform';
 import { registry, type TerminalEntry } from '../../lib/terminal-store';
+import { createWebviewSurfaceProvider } from './activation';
 import { RemoteApiSession } from './remote-api';
 
 type SentPayload = RemoteResponse | RemoteEventMsg;
@@ -132,10 +138,16 @@ describe('remote-api peer surfaces', () => {
 
   function session(platform: PeerPlatform) {
     const sent: SentPayload[] = [];
+    // The provider reads `getPlatform()` lazily, so it has to be built after
+    // this platform is installed for its peer bridge to be the one under test.
     setPlatform(platform.asAdapter());
     return {
       sent,
-      api: new RemoteApiSession({ hostId: 'host-1', send: (payload) => sent.push(payload) }),
+      api: new RemoteApiSession({
+        hostId: 'host-1',
+        send: (payload) => sent.push(payload),
+        provider: createWebviewSurfaceProvider(),
+      }),
     };
   }
 
@@ -333,9 +345,10 @@ describe('remote-api peer surfaces', () => {
     expect(platform.subscribed).toEqual([]);
   });
 
-  it('emits local entries first, then a merged snapshot including peers', async () => {
+  it('emits one snapshot merging this webview with its peers', async () => {
     const platform = new PeerPlatform();
     platform.peerEntries = [{ surfaceId: 'surface-far', title: 'other webview' }];
+    registerLocalSurface('surface-near', 'pty-near');
     const { api, sent } = session(platform);
 
     api.handle({ requestId: 'dir-1', method: REMOTE_METHODS.directoryWatch, params: {} });
@@ -343,10 +356,11 @@ describe('remote-api peer surfaces', () => {
 
     const snapshots = sent
       .filter((p) => (p as RemoteEventMsg).event === REMOTE_EVENTS.directorySnapshot)
-      .map((p) => ((p as RemoteEventMsg).data as { entries: unknown[] }).entries);
-    // The phone should not wait on a round trip to see this window's own panes.
-    expect(snapshots.length).toBe(2);
-    expect(snapshots[1]).toEqual([{ surfaceId: 'surface-far', title: 'other webview' }]);
+      .map((p) => ((p as RemoteEventMsg).data as { entries: Array<{ surfaceId: string }> }).entries);
+    // The peer round trip is the provider's business now, so the phone gets one
+    // snapshot per collect instead of local-then-merged (`remote-api.ts`).
+    expect(snapshots.length).toBe(1);
+    expect(snapshots[0]!.map((e) => e.surfaceId)).toEqual(['surface-near', 'surface-far']);
   });
 
   it('resnapshots when a peer directory changes', async () => {

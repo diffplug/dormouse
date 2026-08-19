@@ -3,9 +3,10 @@
  * enrollment on app start, and exposes a `window.dormouseRemoteHost` console
  * hook for enrolling in the POC (no settings UI needed).
  *
- * This is the one module that binds the DOM-free controller to the terminal
- * bridge (`RemoteApiSession` touches xterm / the platform adapter), so only the
- * running app imports it — the controller and its tests stay DOM-free.
+ * This is the one module that binds the DOM-free controller and remote-api
+ * session to the terminal bridge — the xterm registry, the platform adapter,
+ * and `document` all enter through the surface provider built below — so only
+ * the running app imports it, and everything it wires stays DOM-free.
  *
  * Enroll from the devtools console:
  *
@@ -17,10 +18,16 @@
 
 import { getPlatform } from '../../lib/platform';
 import { resetPushDevices, setPushDevicesRefresher } from '../../lib/push-devices';
+import { subscribeToActivity } from '../../lib/session-activity-store';
+import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
 import { refreshPushDevices, startAlertPush, type AlertPushDeps } from './alert-push';
+import { collectDirectorySnapshot } from './directory-collect';
 import { clearEnrollment, enrollHost, getEnrollment, type HostEnrollment } from './enrollment';
+import type { HostSurfaceProvider } from './host-surface-provider';
+import { peerDirectory } from './peer-surfaces';
 import { RemoteApiSession } from './remote-api';
 import { RemoteHost, type RemoteHostStatus } from './remote-host';
+import { resolveSurface } from './surface-resolve';
 
 let current: RemoteHost | null = null;
 let stopPush: (() => void) | null = null;
@@ -40,6 +47,74 @@ let leaseClaimRequested = false;
  */
 let owned = true;
 
+/**
+ * The webview-resident answer to "where do the surfaces live": this webview's
+ * xterm registry, plus whatever its peers own
+ * (`host-surface-provider.ts`, docs/specs/vscode.md → "Peer surfaces").
+ *
+ * Assembled here rather than in a module of its own because it is exactly the
+ * part that a Node-resident Host replaces: the seam is the durable thing, this
+ * binding of it is not.
+ */
+export function createWebviewSurfaceProvider(): HostSurfaceProvider {
+  return {
+    async collectDirectory() {
+      // A window's terminals may be spread across several webviews with only
+      // this one as the Host, so the rest have to be asked; a host with no
+      // peers (standalone, the website) answers with nothing. The local panes
+      // are read after the round trip, not before, so they are as current as
+      // the answers they are merged with.
+      const remote = await peerDirectory();
+      return [...collectDirectorySnapshot(), ...remote];
+    },
+
+    watchDirectory(onChange) {
+      const unsubPane = subscribeToTerminalPaneState(onChange);
+      const unsubActivity = subscribeToActivity(onChange);
+      const unsubPeers = getPlatform().peers?.subscribe('directory', onChange);
+      const hasDocument = typeof document !== 'undefined';
+      if (hasDocument) {
+        document.addEventListener('focusin', onChange);
+        document.addEventListener('focusout', onChange);
+      }
+      return () => {
+        unsubPane();
+        unsubActivity();
+        unsubPeers?.();
+        if (hasDocument) {
+          document.removeEventListener('focusin', onChange);
+          document.removeEventListener('focusout', onChange);
+        }
+      };
+    },
+
+    resolveSurface,
+
+    writePty: (ptyId, data) => getPlatform().writePty(ptyId, data),
+    resizePty: (ptyId, cols, rows) => getPlatform().resizePty(ptyId, cols, rows),
+
+    streamPty(ptyId, sink) {
+      // The adapter delivers every PTY this webview owns or subscribed to on
+      // one stream, so the id filter is the subscription. Pin the adapter the
+      // pair was registered on: removing a handler from a different one would
+      // leave this attachment streaming forever.
+      const platform = getPlatform();
+      const onData = (detail: { id: string; data: string }): void => {
+        if (detail.id === ptyId) sink.onData(detail.data);
+      };
+      const onExit = (detail: { id: string; exitCode: number }): void => {
+        if (detail.id === ptyId) sink.onExit(detail.exitCode);
+      };
+      platform.onPtyData(onData);
+      platform.onPtyExit(onExit);
+      return () => {
+        platform.offPtyData(onData);
+        platform.offPtyExit(onExit);
+      };
+    },
+  };
+}
+
 function startFromEnrollment(enrollment: HostEnrollment): RemoteHost {
   const host = new RemoteHost({
     enrollment,
@@ -48,6 +123,7 @@ function startFromEnrollment(enrollment: HostEnrollment): RemoteHost {
         hostId: opts.hostId,
         // The controller sends the untyped remote-api payload inside a `msg`.
         send: opts.send,
+        provider: createWebviewSurfaceProvider(),
       }),
   });
   host.start();

@@ -15,18 +15,8 @@
 
 import { getPlatform } from '../../lib/platform';
 import { registry } from '../../lib/terminal-store';
+import type { SurfaceHandle } from './host-surface-provider';
 import { peerSurfaceOp } from './peer-surfaces';
-
-export interface SurfaceHandle {
-  readonly ptyId: string;
-  /** The size the surface stands at now — live for a local pane, last-reported for a peer's. */
-  readonly cols: number;
-  readonly rows: number;
-  /** Resize through the owner's live xterm, and report what it settled at. */
-  resize(cols: number, rows: number): Promise<{ cols: number; rows: number }>;
-  /** Let go: stops a peer's stream, nothing to undo for a local pane. */
-  release(): void;
-}
 
 /**
  * Resolve `surfaceId` at the size the client asked for, or `null` if nobody

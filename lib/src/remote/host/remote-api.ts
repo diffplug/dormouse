@@ -5,7 +5,7 @@
  *
  *   - `hello`           → capabilities (input yes, layout no).
  *   - `directory.watch` → an immediate snapshot plus coalesced re-snapshots
- *                         whenever pane state / activity / focus changes.
+ *                         whenever the provider says the directory could differ.
  *   - `surface.attach`  → resize the real PTY through the existing xterm resize
  *                         path (attach-is-the-resize) and stream its output as
  *                         `terminal.data`; `terminal.closed` on PTY exit.
@@ -15,6 +15,12 @@
  *
  * The bytes on the wire are base64url PTY bytes; xterm on the Client renders
  * them, exactly as the Host's own xterm renders the same stream locally.
+ *
+ * Everything below the protocol — where a surface lives, how a PTY is read and
+ * written — is a {@link HostSurfaceProvider} call, so this module is
+ * environment-free: it never reaches for the platform adapter, the stores, or
+ * `document`, and runs unchanged in a webview or in the process that owns the
+ * PTYs (`host-surface-provider.ts`).
  */
 
 import {
@@ -34,12 +40,7 @@ import {
   type TerminalResizeParams,
   type TerminalWriteParams,
 } from 'server-lib-common';
-import { getPlatform } from '../../lib/platform';
-import { subscribeToActivity } from '../../lib/session-activity-store';
-import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
-import { collectDirectorySnapshot } from './directory-collect';
-import { peerDirectory } from './peer-surfaces';
-import { resolveSurface, type SurfaceHandle } from './surface-resolve';
+import type { HostSurfaceProvider, SurfaceHandle } from './host-surface-provider';
 
 /** Coalesce window for directory re-snapshots (remote-api.md: "Host coalesces"). */
 const DIRECTORY_DEBOUNCE_MS = 150;
@@ -54,13 +55,12 @@ interface Attachment {
   /**
    * The resolved surface. Pinned at attach — a pane swap must not move the
    * attachment onto a different terminal — and it is the only thing here that
-   * knows whether the pane is this webview's or a sibling's
-   * (`surface-resolve.ts`).
+   * knows where the pane actually lives (`host-surface-provider.ts`).
    */
   handle: SurfaceHandle;
   subId: string;
-  onData: (detail: { id: string; data: string }) => void;
-  onExit: (detail: { id: string; exitCode: number }) => void;
+  /** Unsubscribes this attachment's PTY stream; nobody else holds it. */
+  stopStream: () => void;
   /** Pending same-size repaint bounce (see FORCE_REPAINT_BOUNCE_MS), if any. */
   bounceTimer: ReturnType<typeof setTimeout> | null;
 }
@@ -69,11 +69,14 @@ export interface RemoteApiSessionOptions {
   hostId: string;
   /** Sends a remote-api response/event; the caller wraps it in a `msg` frame. */
   send: (payload: RemoteResponse | RemoteEventMsg) => void;
+  /** Everything below the protocol: where surfaces live, and how PTYs are driven. */
+  provider: HostSurfaceProvider;
 }
 
 export class RemoteApiSession {
   readonly #hostId: string;
   readonly #send: (payload: RemoteResponse | RemoteEventMsg) => void;
+  readonly #provider: HostSurfaceProvider;
 
   #directorySubId: string | null = null;
   #unsubDirectory: (() => void) | null = null;
@@ -85,6 +88,7 @@ export class RemoteApiSession {
   constructor(options: RemoteApiSessionOptions) {
     this.#hostId = options.hostId;
     this.#send = options.send;
+    this.#provider = options.provider;
   }
 
   handle(data: unknown): void {
@@ -176,55 +180,31 @@ export class RemoteApiSession {
     // The subscription id the client correlates snapshots by is this request id.
     this.#directorySubId = request.requestId;
     this.#ok(request, { subId: request.requestId });
-    this.#emitDirectory();
+    void this.#emitDirectory();
 
     if (this.#unsubDirectory) return;
-    const trigger = () => this.#scheduleDirectory();
-    const unsubPane = subscribeToTerminalPaneState(trigger);
-    const unsubActivity = subscribeToActivity(trigger);
-    const unsubPeers = getPlatform().peers?.subscribe('directory', trigger);
-    const hasDocument = typeof document !== 'undefined';
-    if (hasDocument) {
-      document.addEventListener('focusin', trigger);
-      document.addEventListener('focusout', trigger);
-    }
-    this.#unsubDirectory = () => {
-      unsubPane();
-      unsubActivity();
-      unsubPeers?.();
-      if (hasDocument) {
-        document.removeEventListener('focusin', trigger);
-        document.removeEventListener('focusout', trigger);
-      }
-    };
+    this.#unsubDirectory = this.#provider.watchDirectory(() => this.#scheduleDirectory());
   }
 
   #scheduleDirectory(): void {
     if (this.#directorySubId === null || this.#directoryTimer) return;
     this.#directoryTimer = setTimeout(() => {
       this.#directoryTimer = null;
-      this.#emitDirectory();
+      void this.#emitDirectory();
     }, DIRECTORY_DEBOUNCE_MS);
   }
 
-  #emitDirectory(): void {
+  async #emitDirectory(): Promise<void> {
     if (this.#directorySubId === null) return;
     const subId = this.#directorySubId;
-    // A window's terminals may be spread across several webviews with only this
-    // one as the Host, so the rest have to be asked (docs/specs/vscode.md →
-    // "Peer surfaces"). Emit twice rather than delaying the local panes behind
-    // a round trip: the phone renders what is here immediately, then fills in.
-    this.#event(subId, REMOTE_EVENTS.directorySnapshot, {
-      entries: collectDirectorySnapshot(),
-    });
-    void peerDirectory().then((remote) => {
-      // Nothing to fill in on a host with no peers, and the subscription may
-      // have been replaced or torn down while we waited.
-      if (this.#directorySubId !== subId || remote.length === 0) return;
-      this.#event(subId, REMOTE_EVENTS.directorySnapshot, {
-        entries: [...collectDirectorySnapshot(), ...remote],
-      });
-    });
+    // One snapshot per collect. The provider answers for every surface the Host
+    // can reach, so there is no longer a subset that is known sooner than the
+    // rest — this replaces the old local-then-merged double emit, which existed
+    // only because the peer round trip was visible from here.
+    const entries = await this.#provider.collectDirectory();
+    // The subscription may have been replaced or torn down while we waited.
+    if (this.#directorySubId !== subId) return;
+    this.#event(subId, REMOTE_EVENTS.directorySnapshot, { entries });
   }
 
   #attach(request: RemoteRequest): void {
@@ -234,9 +214,9 @@ export class RemoteApiSession {
       return;
     }
 
-    // Where the pane lives — this webview's registry or a sibling's — is a fact
-    // about VS Code webview hosting, not a protocol concept, so it is settled
-    // below this line and never seen here (`surface-resolve.ts`).
+    // Where the pane lives — a registry here or an owner a round trip away — is
+    // a deployment fact, not a protocol concept, so it is settled below this
+    // line and never seen here (`host-surface-provider.ts`).
     //
     // Per attach, not per session: last-attach-wins has to hold while a
     // resolve is in flight, and the two paths are wildly different lengths — a
@@ -244,7 +224,7 @@ export class RemoteApiSession {
     // microtask, so one shared epoch would let the older, slower attach land
     // last and take the attachment.
     const generation = ++this.#attachGeneration;
-    void resolveSurface(params.surfaceId, params).then((handle) => {
+    void this.#provider.resolveSurface(params.surfaceId, params).then((handle) => {
       if (this.#disposed || this.#attachGeneration !== generation) {
         // A foreign resolve starts its stream before returning the handle. If
         // the session died or a newer attach superseded this one during that
@@ -274,7 +254,6 @@ export class RemoteApiSession {
     const cols = clampTerminalDimension(params.cols, handle.cols);
     const rows = clampTerminalDimension(params.rows, handle.rows);
     const sameSize = handle.cols === cols && handle.rows === rows;
-    const platform = getPlatform();
     const subId = request.requestId;
     const pendingEvents: Array<{ event: string; data: unknown }> = [];
     let streaming = false;
@@ -285,34 +264,33 @@ export class RemoteApiSession {
         pendingEvents.push({ event, data });
       }
     };
-    const onData = (detail: { id: string; data: string }): void => {
-      if (detail.id !== ptyId) return;
-      // The PTY delivers strings on this path; be defensive about the Uint8Array
-      // path some adapters use. Either way it goes out as base64url PTY bytes.
-      const raw: unknown = detail.data;
-      const bytes = typeof raw === 'string' ? utf8Encode(raw) : (raw as Uint8Array);
-      emitOrBuffer(REMOTE_EVENTS.terminalData, { bytes: toBase64Url(bytes) });
-    };
-    const onExit = (detail: { id: string; exitCode: number }): void => {
-      if (detail.id !== ptyId) return;
-      // Deliver the close to the client first, then drop the attachment so a
-      // later write/resize for this surface fails safe with "not attached"
-      // instead of touching the now-dead PTY / disposed xterm (the pre-pin code
-      // re-resolved via the registry and got that fail-safe for free). Teardown
-      // offPtyExit(onExit)s mid-callback, which is safe — this handler, having
-      // filtered to its own ptyId, won't fire again — and nulls #attachment so
-      // #requireAttached fails and the bounce timer + PTY listeners are cleaned.
-      emitOrBuffer(REMOTE_EVENTS.terminalClosed, { exitCode: detail.exitCode });
-      this.#teardownAttachment();
-    };
-    platform.onPtyData(onData);
-    platform.onPtyExit(onExit);
+    const stopStream = this.#provider.streamPty(ptyId, {
+      onData: (data) => {
+        // The PTY delivers strings on this path; be defensive about the
+        // Uint8Array path some adapters use. Either way it goes out as
+        // base64url PTY bytes.
+        const raw: unknown = data;
+        const bytes = typeof raw === 'string' ? utf8Encode(raw) : (raw as Uint8Array);
+        emitOrBuffer(REMOTE_EVENTS.terminalData, { bytes: toBase64Url(bytes) });
+      },
+      onExit: (exitCode) => {
+        // Deliver the close to the client first, then drop the attachment so a
+        // later write/resize for this surface fails safe with "not attached"
+        // instead of touching the now-dead PTY / disposed xterm (the pre-pin
+        // code re-resolved via the registry and got that fail-safe for free).
+        // Teardown unsubscribes this stream mid-callback, which is safe — the
+        // subscription is this attachment's alone, so nothing is left to fire —
+        // and nulls #attachment so #requireAttached fails and the bounce timer
+        // is cleared.
+        emitOrBuffer(REMOTE_EVENTS.terminalClosed, { exitCode });
+        this.#teardownAttachment();
+      },
+    });
     const attachment: Attachment = {
       surfaceId: params.surfaceId,
       handle,
       subId,
-      onData,
-      onExit,
+      stopStream,
       bounceTimer: null,
     };
     this.#attachment = attachment;
@@ -332,7 +310,7 @@ export class RemoteApiSession {
       // bounce up, since rows-1 would be an identical no-op that fires no
       // SIGWINCH and so never repaints).
       const bounced = rows > 1 ? rows - 1 : rows + 1;
-      platform.resizePty(ptyId, cols, bounced);
+      this.#provider.resizePty(ptyId, cols, bounced);
       // The restore runs ~60ms later, so the client may detach, re-attach at a
       // different size, or dispose the session first. Cancel on teardown and,
       // as a backstop, re-check this is still the current attachment before
@@ -341,7 +319,7 @@ export class RemoteApiSession {
       attachment.bounceTimer = setTimeout(() => {
         attachment.bounceTimer = null;
         if (this.#attachment !== attachment) return;
-        platform.resizePty(ptyId, cols, rows);
+        this.#provider.resizePty(ptyId, cols, rows);
       }, FORCE_REPAINT_BOUNCE_MS);
     }
 
@@ -368,8 +346,8 @@ export class RemoteApiSession {
     const resolved = this.#attachedParams<TerminalWriteParams>(request);
     if (!resolved) return;
     const { params, attachment } = resolved;
-    // Feed the existing PTY input path; the local echo returns via onPtyData.
-    getPlatform().writePty(attachment.handle.ptyId, utf8Decode(fromBase64Url(params.bytes)));
+    // Feed the existing PTY input path; the local echo returns via the stream.
+    this.#provider.writePty(attachment.handle.ptyId, utf8Decode(fromBase64Url(params.bytes)));
     this.#ok(request, {});
   }
 
@@ -392,11 +370,9 @@ export class RemoteApiSession {
       clearTimeout(this.#attachment.bounceTimer);
       this.#attachment.bounceTimer = null;
     }
-    const platform = getPlatform();
-    platform.offPtyData(this.#attachment.onData);
-    platform.offPtyExit(this.#attachment.onExit);
-    // Stops the host forwarding a PTY this webview never owned; nothing to undo
-    // for one it does.
+    this.#attachment.stopStream();
+    // Unwinds whatever holding the surface cost — a forwarded stream for an
+    // owner elsewhere, nothing at all for one the provider drives directly.
     this.#attachment.handle.release();
     this.#attachment = null;
   }
