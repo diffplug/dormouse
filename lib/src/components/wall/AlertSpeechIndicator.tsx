@@ -47,11 +47,20 @@ export function AlertSpeechIndicator({ sessionId }: { sessionId: string }) {
         aria-live="polite"
         aria-atomic="true"
         aria-label={`Terminal ${speaking ? 'is speaking' : 'has spoken'}`}
-        // No wash for `spoken`: it persists until the ring is attended, which is
-        // unbounded, and a tint degrading terminal-text contrast indefinitely is
-        // the same mistake the Door's badge cluster avoids. The ring carries it.
-        className={clsx(layer, 'z-[19]', speaking && 'bg-alarm-vs-terminal/20')}
+        // Stacking context and geometry only; the wash strengths live on the
+        // child below — see `docs/specs/layout.md` -> Spoken-alarm overlay.
+        className={clsx(layer, 'z-[19]')}
       >
+        <div
+          data-alert-speech-wash
+          aria-hidden
+          className={clsx(
+            'absolute inset-0 bg-alarm-vs-terminal',
+            TERMINAL_TOP_RADIUS_CLASS,
+            TERMINAL_BOTTOM_RADIUS_CLASS,
+            speaking ? 'opacity-20' : 'opacity-10',
+          )}
+        />
         <div
           className={clsx(
             'absolute left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded',
