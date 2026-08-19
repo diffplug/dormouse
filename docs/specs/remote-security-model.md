@@ -218,6 +218,12 @@ device signature, and the ACL against the Host's `ConnectionPolicy`
 Server claims to have already checked. Host challenges are 32-byte,
 single-use, TTL-bounded values from `HostChallengeIssuer`
 (`server-lib-common/src/security/challenge.ts`, default 2-minute TTL).
+Every new `connect` / `connect2` closes that Client's established message gate
+and disposes its prior control session before this evaluation. A structurally
+malformed request from the relay is contained as a denied decision rather than
+an async failure in the Node Host process. Source of truth:
+`RemoteHost.#onConnect` / `RemoteHost.#onConnect2` in
+`lib/src/remote/host/remote-host.ts`.
 
 One host challenge feeds both the passkey assertion and the device-key
 signature, so connecting costs the user a single biometric prompt per

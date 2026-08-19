@@ -283,6 +283,21 @@ describe('RemoteHost frame handling', () => {
     );
   });
 
+  it('contains and denies a malformed connect2 from the relay', async () => {
+    makeHost();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    socket.receive({ t: 'connect2', clientId: 'c1', request: {} });
+
+    const decision = await flushUntil(() => socket.frames('decision')[0]);
+    expect(decision).toMatchObject({ clientId: 'c1', allowed: false });
+    expect(decision.failures).toEqual(
+      expect.arrayContaining(['passkey-assertion-invalid', 'device-signature-invalid']),
+    );
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it('pair then connect2 allows and omits failures', async () => {
     makeHost();
     const authenticator = await createAuthenticator(ENROLLMENT.rpId);
@@ -383,10 +398,24 @@ describe('RemoteHost frame handling', () => {
     socket.receive({ t: 'msg', clientId: 'c1', data: { requestId: 'r', method: 'hello' } });
     expect(handled).toHaveLength(1);
 
+    // A new, malformed authorization attempt fails closed and revokes this
+    // connection's message gate. The relay is not an authority merely because
+    // this clientId was allowed once.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    socket.sent.length = 0;
+    socket.receive({ t: 'connect2', clientId: 'c1', request: {} });
+    await flushUntil(() => socket.frames('decision')[0]);
+    socket.receive({ t: 'msg', clientId: 'c1', data: { requestId: 'r2', method: 'hello' } });
+    expect(handled).toHaveLength(1);
+    expect(disposed).toBe(1);
+    warn.mockRestore();
+
     // client-gone disposes the session and re-gates.
     socket.receive({ t: 'client-gone', clientId: 'c1' });
+    // The failed re-authorization already disposed it; client-gone is
+    // idempotent rather than disposing the old session twice.
     expect(disposed).toBe(1);
-    socket.receive({ t: 'msg', clientId: 'c1', data: { requestId: 'r2', method: 'hello' } });
+    socket.receive({ t: 'msg', clientId: 'c1', data: { requestId: 'r3', method: 'hello' } });
     expect(handled).toHaveLength(1);
   });
 });

@@ -32,6 +32,7 @@ import {
   WS_ROUTES,
   WS_TOKEN_PARAM,
   authorizeConnection,
+  type ConnectionDecision,
   type ConnectionPolicy,
   type ConnectionRequest,
   type HostAclRecord,
@@ -365,21 +366,42 @@ export class RemoteHost {
   }
 
   #onConnect(clientId: string): void {
+    this.#resetAuthorization(clientId);
     const { challenge, expiresAt } = this.#challenges.issue();
     this.#send({ t: 'challenge', clientId, challenge, expiresAt });
   }
 
   async #onConnect2(clientId: string, request: ConnectionRequest): Promise<void> {
-    const decision = await authorizeConnection(
-      {
-        hostId: this.#enrollment.hostId,
-        acl: this.#acl,
-        challenges: this.#challenges,
-        policy: this.#policy,
-      },
-      request,
-    );
-    if (decision.allowed) this.#clientState(clientId).established = true;
+    // A new authorization attempt closes the old gate first. The relay is not
+    // an authority and may be compromised, so it cannot keep a once-authorized
+    // client established by following it with a malformed attempt.
+    const state = this.#resetAuthorization(clientId);
+    let decision: ConnectionDecision;
+    try {
+      decision = await authorizeConnection(
+        {
+          hostId: this.#enrollment.hostId,
+          acl: this.#acl,
+          challenges: this.#challenges,
+          policy: this.#policy,
+        },
+        request,
+      );
+    } catch (error) {
+      // `connect2` came from the relay, not a trusted typed caller. Structural
+      // failures must be an ordinary denial: this Host now runs in Node, where
+      // letting the async handler reject can terminate the sidecar or extension
+      // host rather than merely logging in a webview.
+      console.warn('remote-host: malformed connection request', error);
+      this.#send({
+        t: 'decision',
+        clientId,
+        allowed: false,
+        failures: ['passkey-assertion-invalid', 'device-signature-invalid'],
+      });
+      return;
+    }
+    if (decision.allowed) state.established = true;
     // `failures` is optional on the wire; omit it on an allowed decision.
     this.#send({
       t: 'decision',
@@ -402,6 +424,15 @@ export class RemoteHost {
       state.session = session;
     }
     session.handle(data);
+  }
+
+  /** A fresh authorization attempt replaces any prior control session. */
+  #resetAuthorization(clientId: string): ClientState {
+    const state = this.#clientState(clientId);
+    state.established = false;
+    state.session?.dispose();
+    state.session = undefined;
+    return state;
   }
 
   #onClientGone(clientId: string): void {
