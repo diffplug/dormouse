@@ -1164,7 +1164,7 @@ async function attempt(): Promise<boolean> {
     //
     // Every client of that broker reaches this line at the same instant, so the
     // unlink is jittered — otherwise they clear the corpse in lockstep, several
-    // bind, and all but one end up serving an inode nobody can reach.
+    // bind, and all but one end up serving a socket nobody can reach.
     await delay(Math.floor(Math.random() * RECLAIM_JITTER_MS));
     // And one of them may have rebound it while we waited. Unlinking a live
     // broker's socket would strand every window dialing it, so ask again: a
@@ -1210,25 +1210,45 @@ const RECLAIM_VERIFY_MS = 250;
 const RECLAIM_JITTER_MS = 250;
 
 /**
- * Whether the socket path still names the inode we just bound.
+ * Whether the socket path still names the filesystem object we just bound.
  *
  * Two windows can find the same corpse and both unlink it, and the second bind
- * silently displaces the first — the loser keeps serving an inode no client can
+ * silently displaces the first — the loser keeps serving a socket no client can
  * reach. Nothing on the bind path detects that, so it is checked afterwards.
+ * Inode alone is not an identity: Linux may immediately recycle the corpse's
+ * inode for a replacement socket. The inode's change timestamp distinguishes
+ * those generations, while the device keeps the tuple complete.
  *
  * A path that has *gone* is the same failure on unix: somebody unlinked it after
  * our bind, so every window dialing it will miss us. Only Windows may read that
  * as ours — named pipes are not filesystem objects, cannot be stat-ed, and die
  * with the process that made them, so nothing there can displace us.
  */
+interface SocketFileIdentity {
+  dev: bigint;
+  ino: bigint;
+  ctimeNs: bigint;
+}
+
+async function socketFileIdentity(path: string): Promise<SocketFileIdentity | null> {
+  const value = await stat(path, { bigint: true }).catch(() => null);
+  return value
+    ? { dev: value.dev, ino: value.ino, ctimeNs: value.ctimeNs }
+    : null;
+}
+
+function sameSocketFile(left: SocketFileIdentity, right: SocketFileIdentity): boolean {
+  return left.dev === right.dev && left.ino === right.ino && left.ctimeNs === right.ctimeNs;
+}
+
 async function stillOurs(path: string): Promise<boolean> {
   const unstattable = process.platform === 'win32';
-  const mine = await stat(path).catch(() => null);
+  const mine = await socketFileIdentity(path);
   if (!mine) return unstattable;
   await delay(RECLAIM_VERIFY_MS);
-  const now = await stat(path).catch(() => null);
+  const now = await socketFileIdentity(path);
   if (!now) return unstattable;
-  return now.ino === mine.ino;
+  return sameSocketFile(now, mine);
 }
 
 async function contend(): Promise<void> {

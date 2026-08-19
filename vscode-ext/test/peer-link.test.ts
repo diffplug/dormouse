@@ -41,6 +41,21 @@ const opened: LinkModule[] = [];
 
 const derivedSocketPath = (): string => socketPathFor(dir);
 
+interface SocketFileIdentity {
+  dev: bigint;
+  ino: bigint;
+  ctimeNs: bigint;
+}
+
+async function socketFileIdentity(path: string): Promise<SocketFileIdentity> {
+  const value = await stat(path, { bigint: true });
+  return { dev: value.dev, ino: value.ino, ctimeNs: value.ctimeNs };
+}
+
+function sameSocketFile(left: SocketFileIdentity, right: SocketFileIdentity): boolean {
+  return left.dev === right.dev && left.ino === right.ino && left.ctimeNs === right.ctimeNs;
+}
+
 /** The token the whole installation shares, as it sits on disk. */
 const readToken = async (): Promise<string> =>
   (await readFile(join(dir, 'remote-host.peer-token'), 'utf8')).trim();
@@ -221,20 +236,21 @@ describe('bind-as-lease', () => {
     await waitForFile(path);
     corpse.kill('SIGKILL');
     await new Promise((resolve) => corpse.on('exit', resolve));
-    const dead = (await stat(path)).ino;
+    const dead = await socketFileIdentity(path);
 
     const mod = await openWindow(fakeWindow());
     const roles: boolean[] = [];
     const settled = mod.ensurePeerNet((held) => roles.push(held));
 
-    // The instant the path names a new inode this window has bound it — and is
-    // still deciding whether it may keep it.
+    // The instant the path names a new socket generation this window has bound
+    // it — and is still deciding whether it may keep it. Linux can immediately
+    // recycle the corpse's inode, so inode alone cannot identify that change.
     const during: boolean[] = [];
     let brokerDuring = true;
     let settledDuring = true;
     await waitFor(async () => {
-      const now = await stat(path).catch(() => null);
-      if (!now || now.ino === dead) return false;
+      const now = await socketFileIdentity(path).catch(() => null);
+      if (!now || sameSocketFile(now, dead)) return false;
       void mod.ensurePeerNet((held) => during.push(held));
       brokerDuring = mod.isPeerBroker();
       settledDuring = mod.isPeerLinkSettled();
@@ -321,7 +337,7 @@ describe('bind-as-lease', () => {
     await waitForFile(path);
     corpse.kill('SIGKILL');
     await new Promise((resolve) => corpse.on('exit', resolve));
-    const dead = (await stat(path)).ino;
+    const dead = await socketFileIdentity(path);
 
     const mod = await openWindow(fakeWindow());
     const settled = mod.ensurePeerNet(() => {});
@@ -329,8 +345,8 @@ describe('bind-as-lease', () => {
     // window has bound it, inside its own verification window.
     void (async () => {
       for (let i = 0; i < 2000; i++) {
-        const now = await stat(path).catch(() => null);
-        if (now && now.ino !== dead) {
+        const now = await socketFileIdentity(path).catch(() => null);
+        if (now && !sameSocketFile(now, dead)) {
           await rm(path, { force: true });
           return;
         }
