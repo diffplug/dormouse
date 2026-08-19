@@ -572,9 +572,11 @@ export class PocketClient {
 
   close(): void {
     const ws = this.#ws;
-    // Tear down BEFORE closing the socket: #onClose reads `#ws === null` as an
-    // intentional close (no host-gone), and while real sockets emit their close
-    // event asynchronously, test fakes may emit it synchronously from close().
+    // Tear down BEFORE closing the socket: nulling #ws is what makes #onClose's
+    // generation guard reject the close that follows, which is the only thing
+    // keeping an intentional close from firing `host-gone`. Real sockets emit
+    // that event asynchronously, but test fakes may emit it synchronously from
+    // close(), so the ordering has to hold rather than merely usually hold.
     this.#teardown('relay socket closed', { notifyGone: false });
     try {
       ws?.close();
@@ -662,15 +664,16 @@ export class PocketClient {
   }
 
   #onClose(ws: PocketSocket): void {
+    // Generation guard, and the whole test for "was this close intentional?":
+    // `close()` tears down and nulls #ws *before* calling `ws.close()`, and a
+    // reconnect overwrites #ws with the new socket, so neither an intentional
+    // close nor a superseded socket's late close gets past this line. Anything
+    // that does is the socket dying on us (server restart, network drop).
     if (this.#ws !== ws) return;
-    // `close()` tears down and nulls #ws before the event fires, so a non-null
-    // #ws here means the socket died on us (server restart, network drop) rather
-    // than an intentional close. An unexpected drop of an established session is
-    // still host loss — the app must leave the wall instead of idling on a dead
-    // stream — even without a `host-gone` frame.
-    const unexpected = this.#ws !== null;
-    const hadSession = this.#connectedHostId !== null;
-    this.#teardown('relay socket closed', { notifyGone: unexpected && hadSession });
+    // An unexpected drop of an established session is still host loss — the app
+    // must leave the wall instead of idling on a dead stream — even without a
+    // `host-gone` frame.
+    this.#teardown('relay socket closed', { notifyGone: this.#connectedHostId !== null });
   }
 
   /**
