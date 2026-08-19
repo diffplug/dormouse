@@ -70,17 +70,30 @@ interface ParsedSource {
  * TypeScript, so it keeps a copy, and `connect-src.test.ts` asserts the two
  * patterns are the same string.
  */
-export const CONNECT_SRC_SOURCE_PATTERN = /^([a-z][a-z0-9+.-]*:)\/\/([^/:]+)(?::(\*|\d+))?$/i;
+export const CONNECT_SRC_SOURCE_PATTERN = /^((?:https?|wss?):)\/\/([^/:]+)(?::(\*|\d+))?$/i;
 
 function parseSource(source: string): ParsedSource | null {
   const match = CONNECT_SRC_SOURCE_PATTERN.exec(source);
   if (!match) return null;
   const group = schemeClass(match[1]!.toLowerCase());
   if (!group) return null;
+  const rawPort = match[3];
+  let port = defaultPort(group);
+  if (rawPort === '*') {
+    port = '*';
+  } else if (rawPort !== undefined) {
+    const numericPort = Number(rawPort);
+    if (!Number.isInteger(numericPort) || numericPort < 1 || numericPort > 65_535) {
+      return null;
+    }
+    // URL canonicalizes numeric ports, including leading zeroes, before the
+    // origin reaches this matcher. Canonicalize the source the same way.
+    port = String(numericPort);
+  }
   return {
     group,
     host: match[2]!.toLowerCase(),
-    port: match[3] ?? defaultPort(group),
+    port,
   };
 }
 

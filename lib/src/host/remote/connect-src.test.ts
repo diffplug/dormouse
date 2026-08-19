@@ -94,14 +94,32 @@ describe('the build-time check on a self-hoster’s override', () => {
   });
 
   it('fails the build on an override the Host could never match', () => {
-    // Both silently match nothing at runtime, so the binary builds green and
+    // Each silently matches nothing at runtime, so the binary builds green and
     // then refuses to enroll against the server it was built for.
-    for (const bad of ['https://relay.example.ts.net/', 'relay.example.ts.net']) {
+    for (const bad of [
+      'https://relay.example.ts.net/',
+      'relay.example.ts.net',
+      'ftp://relay.example.ts.net',
+      'htps://relay.example.ts.net',
+      'https://relay.example.ts.net:0',
+      'https://relay.example.ts.net:65536',
+    ]) {
       expect(() =>
         resolveRemoteConnectSrc({ DORMOUSE_REMOTE_CONNECT_SRC: bad }, 'test'),
       ).toThrow(/DORMOUSE_REMOTE_CONNECT_SRC/);
-      expect(originAllowedByConnectSrc('https://relay.example.ts.net', bad)).toBe(false);
     }
+    expect(
+      originAllowedByConnectSrc('https://relay.example.ts.net', 'ftp://relay.example.ts.net'),
+    ).toBe(false);
+    expect(
+      originAllowedByConnectSrc('https://relay.example.ts.net', 'htps://relay.example.ts.net'),
+    ).toBe(false);
+    expect(
+      originAllowedByConnectSrc(
+        'https://relay.example.ts.net:65535',
+        'https://relay.example.ts.net:65536',
+      ),
+    ).toBe(false);
     // And one entry of a list is enough to fail it.
     expect(() =>
       resolveRemoteConnectSrc(
@@ -119,6 +137,15 @@ describe('the build-time check on a self-hoster’s override', () => {
     expect(resolveRemoteConnectSrc({ DORMOUSE_REMOTE_CONNECT_SRC: '  ' }, 'test')).toBe(
       DEFAULT_REMOTE_CONNECT_SRC,
     );
+    expect(
+      resolveRemoteConnectSrc(
+        { DORMOUSE_REMOTE_CONNECT_SRC: 'http://localhost:1 wss://relay.example:*' },
+        'test',
+      ),
+    ).toBe('http://localhost:1 wss://relay.example:*');
+    expect(
+      originAllowedByConnectSrc('https://relay.example', 'wss://relay.example:00443'),
+    ).toBe(true);
     log.mockRestore();
   });
 });

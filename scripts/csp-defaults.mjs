@@ -23,7 +23,16 @@ export const DEFAULT_REMOTE_CONNECT_SRC = 'https://*.dormouse.sh wss://*.dormous
  * TypeScript, and `lib/src/host/remote/connect-src.test.ts` asserts the two
  * patterns are the same string.
  */
-export const CONNECT_SRC_SOURCE_PATTERN = /^([a-z][a-z0-9+.-]*:)\/\/([^/:]+)(?::(\*|\d+))?$/i;
+export const CONNECT_SRC_SOURCE_PATTERN = /^((?:https?|wss?):)\/\/([^/:]+)(?::(\*|\d+))?$/i;
+
+function isSupportedSource(source) {
+  const match = CONNECT_SRC_SOURCE_PATTERN.exec(source);
+  if (!match) return false;
+  const rawPort = match[3];
+  if (rawPort === undefined || rawPort === '*') return true;
+  const port = Number(rawPort);
+  return Number.isInteger(port) && port >= 1 && port <= 65_535;
+}
 
 /**
  * The sources this build should use: the selfhoster's `DORMOUSE_REMOTE_CONNECT_SRC`
@@ -40,11 +49,11 @@ export function resolveRemoteConnectSrc(env = process.env, label = 'build') {
   const override = env.DORMOUSE_REMOTE_CONNECT_SRC?.trim();
   if (!override) return DEFAULT_REMOTE_CONNECT_SRC;
   for (const source of override.split(/\s+/)) {
-    if (!source || CONNECT_SRC_SOURCE_PATTERN.test(source)) continue;
+    if (!source || isSupportedSource(source)) continue;
     throw new Error(
       `[${label}] DORMOUSE_REMOTE_CONNECT_SRC: "${source}" is not a source the remote Host can ` +
-        'match. Each entry must be scheme://host with an optional :port or :* — ' +
-        'no trailing slash, no path, and the scheme is required ' +
+        'match. Each entry must use http, https, ws, or wss with a host and an optional ' +
+        ':port (1–65535) or :* — no trailing slash or path ' +
         `(e.g. "${DEFAULT_REMOTE_CONNECT_SRC}").`,
     );
   }

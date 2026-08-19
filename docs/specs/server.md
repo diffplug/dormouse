@@ -95,12 +95,13 @@ default instead of the selfhoster's origins. `bakedConnectSrc()` in
 `lib/src/host/remote/connect-src.ts` is the single place the value is read.
 
 `resolveRemoteConnectSrc` also **fails the build on an override the matcher
-could never read** — a trailing slash, a path, a bare host with no scheme. The
-runtime fails closed on a source it cannot parse, so without this such a build
-succeeds and then refuses to enroll against the very server it was built for.
-The grammar is one regex duplicated into the build script, since an `.mjs` build
-script cannot import TypeScript; `connect-src.test.ts` asserts the two pattern
-strings are identical, the same way it pins the two copies of the default.
+could never read** — a trailing slash, a path, a bare host with no scheme, a
+scheme outside `http`/`https`/`ws`/`wss`, or a numeric port outside 1–65535.
+Numeric ports are canonicalized the same way as `URL` (so leading zeroes do not
+turn a valid source into a silent miss). The grammar is one regex duplicated
+into the build script, since an `.mjs` build script cannot import TypeScript;
+`connect-src.test.ts` asserts the two pattern strings are identical, the same
+way it pins the two copies of the default.
 
 **Enforcement is `originAllowedByConnectSrc`, at two points:** the service
 refuses `enroll` for an origin outside the list — before the setup password
