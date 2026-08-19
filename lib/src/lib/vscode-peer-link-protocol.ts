@@ -14,6 +14,8 @@
  * that vanishes mid-attach) are testable without spawning processes.
  */
 
+import type { RemoteHostCommand, RemoteHostResult } from '../host/remote/service-protocol';
+
 /** How long the broker waits for a window to answer before giving up on it. */
 export const PEER_REPLY_BUDGET_MS = 1_000;
 
@@ -31,7 +33,21 @@ export type PeerLinkRequest =
   | { kind: 'subscribe'; id: string; ptyId: string }
   | { kind: 'unsubscribe'; id: string; ptyId: string }
   | { kind: 'write'; id: string; ptyId: string; data: string }
-  | { kind: 'resizePty'; id: string; ptyId: string; cols: number; rows: number };
+  | { kind: 'resizePty'; id: string; ptyId: string; cols: number; rows: number }
+  /**
+   * What the Host service made of a {@link PeerLinkResponse} `command`, sent
+   * back to the one window that forwarded it and to no other. There is no frame
+   * id because `rhId` already is one: every adapter mints it with a random tag
+   * of its own, so it is unique across every window and is exactly what the
+   * asking webview correlates by (`lib/src/lib/platform/vscode-adapter.ts`).
+   */
+  | { kind: 'commandResult'; payload: RemoteHostResult }
+  /**
+   * A Host UI event, broadcast to every authenticated window. Unsolicited and
+   * unaddressed: the pairing queue has to reach whatever webviews exist, since
+   * any of them may be the one in front of the user (docs/specs/vscode.md).
+   */
+  | { kind: 'uiEvent'; payload: unknown };
 
 /** Peer window → broker. */
 export type PeerLinkResponse =
@@ -46,7 +62,13 @@ export type PeerLinkResponse =
   /** Unsolicited: that PTY ended. */
   | { kind: 'exit'; ptyId: string; exitCode: number }
   /** Unsolicited: future peer-query answers for this topic may differ. */
-  | { kind: 'notify'; topic: string | null };
+  | { kind: 'notify'; topic: string | null }
+  /**
+   * Unsolicited: a webview command from a window with no Host of its own. Only
+   * the broker runs a service, so a losing window's console hook, pairing
+   * answer, and push all travel this way and come back as `commandResult`.
+   */
+  | { kind: 'command'; payload: RemoteHostCommand };
 
 export type PeerLinkFrame = PeerLinkRequest | PeerLinkResponse;
 

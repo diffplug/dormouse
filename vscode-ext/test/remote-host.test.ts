@@ -10,14 +10,25 @@ import { createServer, type Server, type Socket } from 'node:net';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
+import { FrameDecoder } from '../../lib/src/lib/vscode-peer-link-protocol';
 import type { ExtensionMessage } from '../src/message-types';
-import { removeDir, tempStorageDir, waitFor } from './helpers';
+import {
+  fakeSink,
+  fakeWindow,
+  freshModule,
+  removeDir,
+  tempStorageDir,
+  tick,
+  waitFor,
+} from './helpers';
 
 type HostModule = typeof import('../src/remote-host');
 type LinkModule = typeof import('../src/peer-link');
 
 let dir: string;
 let realTmp: string | undefined;
+/** Every link this test opened; the last one belongs to the module under test. */
+const links: LinkModule[] = [];
 let opened: LinkModule | null = null;
 let squatter: Server | null = null;
 const squatted: Socket[] = [];
@@ -97,16 +108,61 @@ async function freshHost() {
   const mod = (await import('../src/remote-host')) as HostModule;
   opened = (await import('../src/peer-link')) as LinkModule;
   opened.initPeerLink(fakeContext().context);
+  links.push(opened);
   return mod;
 }
 
+/**
+ * The wiring `message-router.ts` does at module load. Without it a forwarded
+ * command reaches the link and stops there, which is the bug this shape exists
+ * to make visible.
+ */
+function bridgeLinkToHost(
+  mod: HostModule,
+  link: LinkModule,
+  bound: ReturnType<typeof fakeDeps>,
+): void {
+  const local = bound.deps();
+  link.configurePeerLink({
+    brokerRequest: local.brokerRequest,
+    invalidateDirectory: mod.notifyDirectoryChanged,
+    onProcessedPtyData: local.onProcessedPtyData,
+    onProcessedPtyExit: local.onProcessedPtyExit,
+    writePty: local.writePty,
+    resizePty: local.resizePty,
+    handleForwardedCommand: mod.handleForwardedCommand,
+    dropForwardedCommands: mod.dropForwardedCommands,
+    deliverCommandResult: mod.deliverCommandResult,
+    deliverUiEvent: mod.deliverUiEvent,
+  });
+}
+
+/** Another window on the same socket — the link half of one, which is all the far tier is. */
+async function openFarWindow(side: ReturnType<typeof fakeWindow>): Promise<LinkModule> {
+  const link = await freshModule<LinkModule>(() => import('../src/peer-link'));
+  link.initPeerLink(fakeContext().context);
+  link.configurePeerLink(side.deps());
+  links.push(link);
+  await link.ensurePeerNet(() => {});
+  return link;
+}
+
 /** Occupy the socket, so the module under test can only ever be a client. */
-async function otherWindowHoldsTheHost(): Promise<void> {
+async function otherWindowHoldsTheHost(): Promise<{ frames: Array<{ kind: string }> }> {
+  const frames: Array<{ kind: string }> = [];
   // Sockets are kept so cleanup can drop them: `close()` waits for every live
   // connection, and this stand-in has no lifecycle of its own to end them.
-  const server = createServer((socket) => void squatted.push(socket));
+  const server = createServer((socket) => {
+    squatted.push(socket);
+    const decoder = new FrameDecoder();
+    socket.setEncoding('utf8');
+    socket.on('data', (chunk: string) => {
+      for (const frame of decoder.push(chunk)) frames.push(frame as { kind: string });
+    });
+  });
   await new Promise<void>((resolve) => server.listen(derivedSocketPath(), resolve));
   squatter = server;
+  return { frames };
 }
 
 function results(posted: ExtensionMessage[]) {
@@ -122,7 +178,11 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await opened?.disposePeerLink();
+  // Clients before the broker: disposing the broker first sends every client
+  // back into the contention, which recreates files under `dir` as it is
+  // removed.
+  for (const link of [...links].reverse()) await link.disposePeerLink();
+  links.length = 0;
   opened = null;
   for (const socket of squatted) socket.destroy();
   squatted.length = 0;
@@ -220,31 +280,50 @@ describe('remote host service glue', () => {
     });
   });
 
-  it('refuses a command while another window holds the Host', async () => {
-    await otherWindowHoldsTheHost();
+  it('forwards a command to the window that holds the Host', async () => {
+    const squat = await otherWindowHoldsTheHost();
     const mod = await freshHost();
     const bound = fakeDeps();
     mod.configureRemoteHost(bound.deps());
     mod.initRemoteHost(fakeContext().context);
 
+    // Nothing has contended yet, so there is no Host here and no socket to
+    // reach one through. Refusing beats a silent drop: the console hook would
+    // otherwise hang for its whole timeout.
     mod.handleRemoteHostCommand({ rhId: 'rh-1', cmd: 'status' });
     expect(results(bound.posted)).toEqual([
-      { rhId: 'rh-1', error: 'the remote Host runs in another VS Code window' },
+      { rhId: 'rh-1', error: 'no remote Host is reachable' },
     ]);
 
-    // Even `enroll`, once the contention has answered: the bootstrap exception
-    // is about there being no Host anywhere, not about outranking one.
-    mod.handleRemoteHostCommand({
-      rhId: 'rh-2',
-      cmd: 'enroll',
-      params: { serverUrl: 'https://relay.dormouse.sh', password: 'p', label: 'Laptop' },
-    });
-    await waitFor(() => results(bound.posted).length > 1);
-    expect(results(bound.posted)[1]).toEqual({
-      rhId: 'rh-2',
-      error: 'the remote Host runs in another VS Code window',
+    // `enroll` bootstraps the contention, which this window loses — so even the
+    // bootstrap ends up forwarded rather than starting a second Host.
+    const params = { serverUrl: 'https://relay.dormouse.sh', password: 'p', label: 'Laptop' };
+    mod.handleRemoteHostCommand({ rhId: 'rh-2', cmd: 'enroll', params });
+
+    await waitFor(() => squat.frames.some((frame) => frame.kind === 'command'));
+    expect(squat.frames.find((frame) => frame.kind === 'command')).toEqual({
+      kind: 'command',
+      payload: { rhId: 'rh-2', cmd: 'enroll', params },
     });
     expect(opened!.isPeerBroker()).toBe(false);
+    // The broker answers it; this window must not answer it too.
+    expect(results(bound.posted)).toHaveLength(1);
+  });
+
+  it('hands the broker\'s answers and events to its own webviews', async () => {
+    const mod = await freshHost();
+    const bound = fakeDeps();
+    mod.configureRemoteHost(bound.deps());
+
+    mod.deliverCommandResult({ rhId: 'rh-1', result: { enrolled: true } });
+    mod.deliverUiEvent({ name: 'pairing-queue', queue: [] });
+
+    // Broadcast, like a local result: only the adapter that minted the `rhId`
+    // holds a pending command for it, and any webview may show the modal.
+    expect(bound.posted).toEqual([
+      { type: 'remoteHost:result', payload: { rhId: 'rh-1', result: { enrolled: true } } },
+      { type: 'remoteHost:event', payload: { name: 'pairing-queue', queue: [] } },
+    ]);
   });
 
   it('ignores a malformed command rather than answering one', async () => {
@@ -323,6 +402,26 @@ describe('remote host provider', () => {
     expect(handle.cols).toBe(100);
   });
 
+  it('drives a PTY of its own through the pty manager', async () => {
+    const mod = await freshHost();
+    const bound = fakeDeps();
+    const drove: unknown[] = [];
+    const provider = mod.createRemoteHostProvider({
+      ...bound.deps(),
+      writePty: (id, data) => void drove.push({ id, data }),
+      resizePty: (id, cols, rows) => void drove.push({ id, cols, rows }),
+    });
+
+    // The link only claims a PTY an attach routed to another window, so a local
+    // one can never be taken from under the manager that owns it.
+    provider.writePty('pty-1', 'ls\r');
+    provider.resizePty('pty-1', 120, 40);
+    expect(drove).toEqual([
+      { id: 'pty-1', data: 'ls\r' },
+      { id: 'pty-1', cols: 120, rows: 40 },
+    ]);
+  });
+
   it('fires every directory watcher on an invalidation, and stops after unsubscribe', async () => {
     const mod = await freshHost();
     const bound = fakeDeps();
@@ -338,5 +437,96 @@ describe('remote host provider', () => {
     stop();
     mod.notifyDirectoryChanged();
     expect(fired).toBe(1);
+  });
+});
+
+/**
+ * The second tier, over a real socket: this module as the broker window and a
+ * link-only stand-in as the window whose terminals it is serving.
+ */
+describe('serving the other windows', () => {
+  /** Bind the socket, wire the link as the router does, and let a peer join. */
+  async function brokerWith(far: ReturnType<typeof fakeWindow>) {
+    const mod = await freshHost();
+    const bound = fakeDeps();
+    mod.configureRemoteHost(bound.deps());
+    bridgeLinkToHost(mod, opened!, bound);
+    await opened!.ensurePeerNet(() => {});
+    const link = await openFarWindow(far);
+    return { mod, bound, link };
+  }
+
+  it('serves a directory of every window, this one first', async () => {
+    const far = fakeWindow({ entries: [{ surfaceId: 'far-1' }] });
+    const { mod, bound } = await brokerWith(far);
+    bound.answers.set('directory', [{ surfaceId: 'near-1' }]);
+    const provider = mod.createRemoteHostProvider(bound.deps());
+
+    // Both tiers at once: whatever the phone is asking about lives in exactly
+    // one webview of one window, so a serial ask would spend the near tier's
+    // whole budget before the owner is reached.
+    await waitFor(async () => (await provider.collectDirectory()).length === 2);
+    expect(await provider.collectDirectory()).toEqual([
+      { surfaceId: 'near-1' },
+      { surfaceId: 'far-1' },
+    ]);
+  });
+
+  it('attaches, streams, and drives a terminal that lives in another window', async () => {
+    const far = fakeWindow({
+      entries: [{ surfaceId: 'far-1' }],
+      surfaces: { 'far-1': { ptyId: 'pty-far', cols: 80, rows: 24 } },
+    });
+    const { mod, bound } = await brokerWith(far);
+    const provider = mod.createRemoteHostProvider(bound.deps());
+
+    // The attach is what teaches the link where that PTY lives; everything
+    // after it is routed by that.
+    await waitFor(async () => !!(await provider.resolveSurface('far-1', { cols: 80, rows: 24 })));
+
+    const sink = fakeSink();
+    const stop = provider.streamPty('pty-far', sink);
+    await tick();
+    far.emitData('pty-far', 'from the other window');
+    await waitFor(() => sink.data.length > 0);
+
+    provider.writePty('pty-far', 'ls\r');
+    provider.resizePty('pty-far', 120, 40);
+    await waitFor(() => far.writes.length > 0 && far.resizes.length > 0);
+    expect(far.writes).toEqual([{ ptyId: 'pty-far', data: 'ls\r' }]);
+    expect(far.resizes).toEqual([{ ptyId: 'pty-far', cols: 120, rows: 40 }]);
+
+    stop();
+    await tick();
+    far.emitData('pty-far', 'after the unsubscribe');
+    await tick(100);
+    expect(sink.data).toEqual(['from the other window']);
+  });
+
+  it('answers a forwarded command over the link and nowhere else', async () => {
+    const mod = await freshHost();
+    const bound = fakeDeps();
+    mod.configureRemoteHost(bound.deps());
+    bridgeLinkToHost(mod, opened!, bound);
+    mod.initRemoteHost(fakeContext().context);
+    // The enroll bootstrap is the shortest way to a bound socket with a running
+    // service; the origin is refused, which does not stop it running.
+    mod.handleRemoteHostCommand({
+      rhId: 'rh-0',
+      cmd: 'enroll',
+      params: { serverUrl: 'https://evil.example', password: 'p', label: 'Laptop' },
+    });
+    await waitFor(() => opened!.isPeerBroker());
+
+    const far = fakeWindow();
+    const link = await openFarWindow(far);
+    expect(link.forwardCommand({ rhId: 'rh-9', cmd: 'status' })).toBe(true);
+
+    await waitFor(() => far.results.length > 0);
+    expect(far.results[0]).toMatchObject({ rhId: 'rh-9', result: { enrolled: false } });
+    // Not broadcast here as well: an `rhId` belongs to one window's adapter, so
+    // a copy would settle nothing and would show that window's Host state to
+    // webviews that never asked.
+    expect(results(bound.posted).some((result) => result.rhId === 'rh-9')).toBe(false);
   });
 });

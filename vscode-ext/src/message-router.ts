@@ -25,6 +25,10 @@ import { PEER_REPLY_BUDGET_MS } from '../../lib/src/lib/vscode-peer-link-protoco
 import { configurePeerLink, remoteNotifyPeerChange } from './peer-link';
 import {
   configureRemoteHost,
+  deliverCommandResult,
+  deliverUiEvent,
+  dropForwardedCommands,
+  handleForwardedCommand,
   handleRemoteHostCommand,
   notifyDirectoryChanged,
 } from './remote-host';
@@ -68,6 +72,12 @@ configurePeerLink({
   onProcessedPtyExit,
   writePty: (ptyId, data) => ptyManager.write(ptyId, data),
   resizePty: (ptyId, cols, rows) => ptyManager.resize(ptyId, cols, rows),
+  // The Host half: which of these fire depends on which side of the bind this
+  // window landed on, and the link is what knows that.
+  handleForwardedCommand,
+  dropForwardedCommands,
+  deliverCommandResult,
+  deliverUiEvent,
 });
 
 configureRemoteHost({
@@ -93,9 +103,9 @@ configureRemoteHost({
  * it — every webview answers with zero or more results, so a webview that owns
  * nothing settles the request as fast as the one that does. The budget is the
  * backstop for a webview with no live content, which must not hang the phone's
- * picker. The asker is this window's own Host service, and — after phase 3b —
- * a peer window's broker over the link, never a webview; that is why it is a
- * plain promise rather than message plumbing.
+ * picker. The asker is this window's own Host service, or the broker window's
+ * over the link, never a webview; that is why it is a plain promise rather than
+ * message plumbing.
  */
 function brokerRequest(op: string, params: unknown): Promise<unknown[]> {
   const peers = [...activeRouters];

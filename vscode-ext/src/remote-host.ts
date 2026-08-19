@@ -8,8 +8,10 @@
  *
  * One extension host runs per window, so exactly one window may hold it. That
  * arbitration is `peer-link.ts`'s bind-as-lease; this module starts the service
- * only in the window that won, and answers a losing window's webviews with an
- * error rather than a second Host.
+ * only in the window that won. A losing window runs no service at all: its
+ * webviews' commands are forwarded over the link and the broker's answers come
+ * back the same way, so the Host behaves identically in every window while
+ * existing in exactly one.
  *
  * Nothing here runs until there is a Host to run: contention starts when an
  * enrollment already exists, or on the first `enroll` command. A user who never
@@ -33,7 +35,19 @@ import type {
 } from '../../lib/src/remote/host/host-surface-provider';
 import type { PeerSurfaceResult } from '../../lib/src/remote/host/peer-surfaces';
 import type { ExtensionMessage } from './message-types';
-import { ensurePeerNet } from './peer-link';
+import {
+  broadcastUiEvent,
+  ensurePeerNet,
+  forwardCommand,
+  isRemotePty,
+  remoteRequest,
+  remoteResize,
+  remoteSubscribe,
+  remoteUnsubscribe,
+  remoteWrite,
+  sendCommandResult,
+  type PeerLinkClient,
+} from './peer-link';
 import { VsCodeHostStateStore } from './remote-host-store';
 import { log } from './log';
 
@@ -71,19 +85,43 @@ let service: RemoteHostService | null = null;
 const directoryWatchers = new Set<() => void>();
 
 /**
+ * Ask both tiers at once and concatenate what they answer, this window's
+ * webviews first.
+ *
+ * Both at once rather than the near tier first: whatever is asked about lives
+ * in exactly one webview of one window, so asking in series would spend a whole
+ * tier's budget before the window that actually owns it is even asked. The
+ * results carry no tier marker because nothing downstream needs one — a
+ * directory is a concatenation, and a surface id is unique across every window.
+ */
+async function askBothTiers(
+  bound: RemoteHostDeps,
+  op: string,
+  params: unknown,
+): Promise<unknown[]> {
+  const [local, remote] = await Promise.all([
+    bound.brokerRequest(op, params),
+    remoteRequest(op, params),
+  ]);
+  return [...local, ...remote];
+}
+
+/**
  * Build the provider the service serves remote-api v1 through.
  *
- * PTYs are answered locally — this process owns them — while everything about
- * the *view* of them is asked of the webviews, because a window's terminals are
- * spread across however many Dormouse views are open and only they hold an
- * xterm registry.
+ * PTYs owned by this window are answered locally — this process owns them —
+ * while everything about the *view* of them is asked of the webviews, because a
+ * window's terminals are spread across however many Dormouse views are open and
+ * only they hold an xterm registry. Every one of those questions also goes to
+ * the other windows over the link, so the phone sees one directory of every
+ * terminal on the machine rather than the broker window's alone.
  */
 export function createRemoteHostProvider(bound: RemoteHostDeps): HostSurfaceProvider {
   return {
     async collectDirectory(): Promise<DirectoryEntry[]> {
       // Each webview answers with its whole snapshot, so the results *are* the
       // entries — no per-webview merging to do on this side.
-      return (await bound.brokerRequest('directory', {})) as DirectoryEntry[];
+      return (await askBothTiers(bound, 'directory', {})) as DirectoryEntry[];
     },
 
     watchDirectory(onChange) {
@@ -96,8 +134,9 @@ export function createRemoteHostProvider(bound: RemoteHostDeps): HostSurfaceProv
     async resolveSurface(surfaceId, size): Promise<SurfaceHandle | null> {
       // Attach-is-the-resize: the owner applies the size inside this round trip,
       // because there is no way to reach into its xterm afterwards without a
-      // second one (docs/specs/remote-api.md).
-      const [owner] = (await bound.brokerRequest('surfaceOp', {
+      // second one (docs/specs/remote-api.md). One surface has one owner, so the
+      // first answer out of both tiers is the answer.
+      const [owner] = (await askBothTiers(bound, 'surfaceOp', {
         surfaceId,
         op: 'attach',
         cols: size.cols,
@@ -119,7 +158,7 @@ export function createRemoteHostProvider(bound: RemoteHostDeps): HostSurfaceProv
         // what it reported; a resize nobody answered leaves the last known size
         // standing.
         resize: async (nextCols, nextRows) => {
-          const [settled] = (await bound.brokerRequest('surfaceOp', {
+          const [settled] = (await askBothTiers(bound, 'surfaceOp', {
             surfaceId,
             op: 'resize',
             cols: nextCols,
@@ -137,10 +176,24 @@ export function createRemoteHostProvider(bound: RemoteHostDeps): HostSurfaceProv
       };
     },
 
-    writePty: (ptyId, data) => bound.writePty(ptyId, data),
-    resizePty: (ptyId, cols, rows) => bound.resizePty(ptyId, cols, rows),
+    // The link takes only a PTY it has a route for, and a route is placed only
+    // by an attach another window answered — so a PTY of this window's own can
+    // never be taken out from under the manager that owns it.
+    writePty: (ptyId, data) => {
+      if (!remoteWrite(ptyId, data)) bound.writePty(ptyId, data);
+    },
+    resizePty: (ptyId, cols, rows) => {
+      if (!remoteResize(ptyId, cols, rows)) bound.resizePty(ptyId, cols, rows);
+    },
 
     streamPty(ptyId, sink) {
+      if (isRemotePty(ptyId)) {
+        // Another window's terminal: it has already stripped the protocol out
+        // on its side, so what arrives over the link is what its own xterm
+        // renders — the same stream shape as the local branch below.
+        remoteSubscribe(ptyId, sink);
+        return () => remoteUnsubscribe(ptyId, sink);
+      }
       // No strip parser here, unlike the sidecar: this process already runs the
       // terminal-protocol parser once per chunk and answers its queries, and
       // `onProcessedPtyData` is what comes out the other side. A second parser
@@ -171,12 +224,14 @@ function startService(): void {
     store: new VsCodeHostStateStore(context),
     provider: createRemoteHostProvider(bound),
     sendToUi: (event, data) => {
-      // Broadcast rather than reply to one webview: `rhId`s carry a per-adapter
-      // tag, so only the webview that asked finds a pending command to settle.
       if (event === REMOTE_HOST_RESULT_EVENT) {
-        bound.broadcastToWebviews({ type: 'remoteHost:result', payload: data as RemoteHostResult });
+        answer(data as RemoteHostResult);
       } else if (event === REMOTE_HOST_EVENT_EVENT) {
+        // Every window, not just this one: the pairing modal can be answered
+        // from whichever webview the user happens to be looking at, and only
+        // the windows that see the queue can show one.
         bound.broadcastToWebviews({ type: 'remoteHost:event', payload: data });
+        broadcastUiEvent(data);
       }
     },
     // The `typeof` guard is for the test runner, which has no esbuild define;
@@ -202,35 +257,109 @@ function contendForHost(): Promise<void> {
 }
 
 /**
- * Hand one webview command to the Host.
+ * Which window is owed each in-flight answer, for the commands that came over
+ * the link. An `rhId` is minted with a per-adapter random tag, so it is unique
+ * across every window and needs no second correlation id of its own.
  *
- * A window that lost the bind has no service to run it. Until phase 3b forwards
- * it over the link, say so rather than answering from a Host that is not there
- * — a silent drop would leave the console hook hanging for its whole timeout.
+ * Only the broker ever has entries: a client window forwards rather than runs.
+ */
+const commandRoutes = new Map<string, PeerLinkClient>();
+
+const NO_HOST = 'no remote Host is reachable';
+
+/**
+ * Deliver one result to whoever is owed it — the one window that forwarded the
+ * command, or this window's webviews when nothing forwarded it.
+ *
+ * A result is never sent both ways. `rhId`s are globally unique, so a broadcast
+ * of another window's answer would settle nothing anywhere and would put that
+ * window's Host state in front of webviews that never asked.
+ */
+function answer(payload: RemoteHostResult): void {
+  const from = commandRoutes.get(payload.rhId);
+  if (from) {
+    commandRoutes.delete(payload.rhId);
+    sendCommandResult(from, payload);
+    return;
+  }
+  deps?.broadcastToWebviews({ type: 'remoteHost:result', payload });
+}
+
+/**
+ * Hand one of this window's webview commands to the Host.
+ *
+ * The broker runs it; every other window forwards it over the link and gets the
+ * broker's answer back as a `remoteHost:result` like any other. Only a window
+ * with neither — no service and no broker to dial — refuses, and it says so
+ * rather than dropping the command silently, which would leave the console hook
+ * hanging for its whole timeout.
+ *
  * `enroll` is the exception: it is how an installation with no Host at all
- * bootstraps, so it starts the contention first and re-checks.
+ * bootstraps, so it starts the contention first and re-checks. If that
+ * contention settles as a client, some other window enrolled first and the
+ * command belongs to it.
  */
 export function handleRemoteHostCommand(payload: RemoteHostCommand | undefined): void {
-  if (!payload || typeof payload.rhId !== 'string' || typeof payload.cmd !== 'string') return;
+  if (!isCommand(payload)) return;
   if (service) {
     void service.handleCommand(payload);
     return;
   }
+  if (forwardCommand(payload)) return;
   if (payload.cmd === 'enroll') {
     void contendForHost().then(() => {
       if (service) void service.handleCommand(payload);
-      else refuse(payload.rhId);
+      else if (!forwardCommand(payload)) refuse(payload.rhId);
     });
     return;
   }
   refuse(payload.rhId);
 }
 
+/**
+ * Run a command another window forwarded, and remember to answer it there.
+ *
+ * The route is dropped by {@link dropForwardedCommands} if that window
+ * disconnects first, which leaves the command unanswered on purpose: the socket
+ * that would carry the answer is gone, and the asking adapter's own timeout is
+ * the backstop.
+ */
+export function handleForwardedCommand(
+  payload: RemoteHostCommand | undefined,
+  from: PeerLinkClient,
+): void {
+  if (!isCommand(payload)) return;
+  commandRoutes.set(payload.rhId, from);
+  // Only a window that bound the socket is sent one of these, and binding is
+  // what starts the service — but if there is somehow none, say so rather than
+  // leave the asking webview to wait out its timeout.
+  if (service) void service.handleCommand(payload);
+  else answer({ rhId: payload.rhId, error: NO_HOST });
+}
+
+/** That window is gone; its outstanding commands can never be answered. */
+export function dropForwardedCommands(from: PeerLinkClient): void {
+  for (const [rhId, owner] of commandRoutes) {
+    if (owner === from) commandRoutes.delete(rhId);
+  }
+}
+
+/** The broker answered a command this window forwarded. */
+export function deliverCommandResult(payload: RemoteHostResult): void {
+  deps?.broadcastToWebviews({ type: 'remoteHost:result', payload });
+}
+
+/** A Host UI event from the broker, for this window's webviews. */
+export function deliverUiEvent(payload: unknown): void {
+  deps?.broadcastToWebviews({ type: 'remoteHost:event', payload });
+}
+
+function isCommand(payload: RemoteHostCommand | undefined): payload is RemoteHostCommand {
+  return !!payload && typeof payload.rhId === 'string' && typeof payload.cmd === 'string';
+}
+
 function refuse(rhId: string): void {
-  deps?.broadcastToWebviews({
-    type: 'remoteHost:result',
-    payload: { rhId, error: 'the remote Host runs in another VS Code window' },
-  });
+  deps?.broadcastToWebviews({ type: 'remoteHost:result', payload: { rhId, error: NO_HOST } });
 }
 
 /**
@@ -253,6 +382,7 @@ export function initRemoteHost(ctx: vscode.ExtensionContext): vscode.Disposable 
       service?.dispose();
       service = null;
       directoryWatchers.clear();
+      commandRoutes.clear();
       context = null;
     },
   };

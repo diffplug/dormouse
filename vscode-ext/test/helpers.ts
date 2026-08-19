@@ -9,6 +9,12 @@ import { access, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import type {
+  RemoteHostCommand,
+  RemoteHostResult,
+} from '../../lib/src/host/remote/service-protocol';
+import type { PeerLinkClient, PeerLinkDeps } from '../src/peer-link';
+
 export async function tempStorageDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), 'dormouse-ext-'));
 }
@@ -58,4 +64,82 @@ export async function freshModule<T>(loader: () => Promise<T>): Promise<T> {
 /** The context shape these modules read: a storage location and disposables. */
 export function fakeContext(dir: string): never {
   return { globalStorageUri: { fsPath: dir }, subscriptions: [] } as never;
+}
+
+/**
+ * One window as the link sees it: what its webviews would answer, what it was
+ * asked to do to its own terminals, and what the broker sent it. Shared by both
+ * suites, which each need a window on the far end of a real socket.
+ */
+export function fakeWindow(
+  options: {
+    entries?: unknown[];
+    surfaces?: Record<string, { ptyId: string; cols: number; rows: number }>;
+  } = {},
+) {
+  const dataListeners = new Set<(id: string, data: string) => void>();
+  const exitListeners = new Set<(id: string, exitCode: number) => void>();
+  return {
+    entries: options.entries ?? [],
+    surfaces: options.surfaces ?? {},
+    writes: [] as Array<{ ptyId: string; data: string }>,
+    resizes: [] as Array<{ ptyId: string; cols: number; rows: number }>,
+    invalidations: 0,
+    /** Commands this window was asked to run for another one, and who asked. */
+    forwarded: [] as Array<{ payload: RemoteHostCommand; from: PeerLinkClient }>,
+    /** Windows whose sockets closed with commands still outstanding. */
+    dropped: [] as PeerLinkClient[],
+    /** What came back for commands this window forwarded to its broker. */
+    results: [] as RemoteHostResult[],
+    uiEvents: [] as unknown[],
+    emitData(id: string, data: string) {
+      for (const listener of dataListeners) listener(id, data);
+    },
+    emitExit(id: string, exitCode: number) {
+      for (const listener of exitListeners) listener(id, exitCode);
+    },
+    deps(): PeerLinkDeps {
+      return {
+        // One generic fan-out covers every peer operation; `op` is opaque to
+        // the link, so the window answers zero or more results per request.
+        brokerRequest: async (op, params) => {
+          if (op === 'directory') return this.entries;
+          const { surfaceId } = params as { surfaceId: string };
+          const surface = this.surfaces[surfaceId];
+          return surface ? [surface] : [];
+        },
+        invalidateDirectory: () => {
+          this.invalidations += 1;
+        },
+        onProcessedPtyData: (listener) => {
+          dataListeners.add(listener);
+          return () => dataListeners.delete(listener);
+        },
+        onProcessedPtyExit: (listener) => {
+          exitListeners.add(listener);
+          return () => exitListeners.delete(listener);
+        },
+        writePty: (ptyId, data) => void this.writes.push({ ptyId, data }),
+        resizePty: (ptyId, cols, rows) => void this.resizes.push({ ptyId, cols, rows }),
+        handleForwardedCommand: (payload, from) => void this.forwarded.push({ payload, from }),
+        dropForwardedCommands: (from) => void this.dropped.push(from),
+        deliverCommandResult: (payload) => void this.results.push(payload),
+        deliverUiEvent: (payload) => void this.uiEvents.push(payload),
+      };
+    },
+  };
+}
+
+/** A sink standing in for whatever a routed PTY is streamed into. */
+export function fakeSink() {
+  return {
+    data: [] as string[],
+    exits: [] as number[],
+    onData(chunk: string) {
+      this.data.push(chunk);
+    },
+    onExit(code: number) {
+      this.exits.push(code);
+    },
+  };
 }

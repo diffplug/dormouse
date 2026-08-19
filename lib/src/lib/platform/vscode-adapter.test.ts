@@ -436,9 +436,9 @@ describe('VSCodeAdapter remote host link', () => {
     const pending = adapter.remoteHost.command('enroll', { serverUrl: 'https://nope' });
     deliver({
       type: 'remoteHost:result',
-      payload: { rhId: sent()[0]!.rhId, error: 'the remote Host runs in another VS Code window' },
+      payload: { rhId: sent()[0]!.rhId, error: 'no remote Host is reachable' },
     });
-    await expect(pending).rejects.toThrow('another VS Code window');
+    await expect(pending).rejects.toThrow('no remote Host is reachable');
   });
 
   it('rejects when the extension host never answers', async () => {

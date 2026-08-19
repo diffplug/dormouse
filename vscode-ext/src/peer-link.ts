@@ -17,6 +17,12 @@
  * upward, when the broker dies and its socket closes: every client then races
  * to bind, and exactly one wins because `bind` is the arbiter.
  *
+ * Traffic runs both ways over that socket, and each direction is the half its
+ * end alone can do: the broker asks client windows for their directory and
+ * their surfaces and streams their PTYs, and client windows forward their
+ * webviews' Host commands to the broker, which is the only process running a
+ * service, and take back its results and UI events.
+ *
  * Trust: the socket is a user-owned unix socket (or named pipe) and a client
  * must open with a token from a mode-0600 file in the extension's
  * `globalStorageUri` — the same bar as the `dor` control socket.
@@ -30,6 +36,10 @@ import { join } from 'node:path';
 
 import type * as vscode from 'vscode';
 
+import type {
+  RemoteHostCommand,
+  RemoteHostResult,
+} from '../../lib/src/host/remote/service-protocol';
 import {
   FrameDecoder,
   PEER_REPLY_BUDGET_MS,
@@ -45,7 +55,8 @@ import { log } from './log';
 /**
  * What this module needs from the router, injected rather than imported: the
  * router calls into the link to reach other windows, so importing back would be
- * a cycle.
+ * a cycle. The four command members reach `remote-host.ts`, which imports this
+ * module for the sending half and so cannot be imported back either.
  */
 export interface PeerLinkDeps {
   /** Fan out to this window's own webviews — never to other windows. */
@@ -56,6 +67,18 @@ export interface PeerLinkDeps {
   onProcessedPtyExit(listener: (id: string, exitCode: number) => void): () => void;
   writePty(ptyId: string, data: string): void;
   resizePty(ptyId: string, cols: number, rows: number): void;
+  /**
+   * Broker side: run a webview command from `from` on this window's service.
+   * The answer goes back through {@link sendCommandResult}, so the answering
+   * module is the one that remembers which window is owed it.
+   */
+  handleForwardedCommand(payload: RemoteHostCommand, from: PeerLinkClient): void;
+  /** Broker side: that window is gone, so nothing it asked can be answered. */
+  dropForwardedCommands(from: PeerLinkClient): void;
+  /** Client side: the broker answered a command this window forwarded. */
+  deliverCommandResult(payload: RemoteHostResult): void;
+  /** Client side: a Host UI event, for this window's webviews to render. */
+  deliverUiEvent(payload: unknown): void;
 }
 
 let deps: PeerLinkDeps | null = null;
@@ -140,7 +163,13 @@ async function ensureToken(): Promise<string> {
 
 // ---------------------------------------------------------------- server side
 
-interface PeerClient {
+/**
+ * One connected window, from the broker's side. Exported because a forwarded
+ * command is answered by a different module — it holds this as the identity of
+ * the window that is owed the answer, and hands it back to
+ * {@link sendCommandResult}.
+ */
+export interface PeerLinkClient {
   socket: Socket;
   decoder: FrameDecoder;
   authenticated: boolean;
@@ -155,19 +184,24 @@ export interface RemotePtySink {
 let server: Server | null = null;
 /** Claimed and cleared with `server`; the two always move together. */
 let serverToken: string | null = null;
-const clients = new Set<PeerClient>();
-const routes = new Map<string, PeerClient>();
-const remoteSinks = new Map<string, RemotePtySink>();
+const clients = new Set<PeerLinkClient>();
+const routes = new Map<string, PeerLinkClient>();
+const remoteSinks = new Map<string, Set<RemotePtySink>>();
 const pendingRequests = new Map<string, (frame: PeerLinkResponse) => void>();
 let nextRequestId = 0;
 
-function send(client: PeerClient, frame: PeerLinkRequest): void {
+function send(client: PeerLinkClient, frame: PeerLinkRequest): void {
   if (client.socket.destroyed) return;
   client.socket.write(encodeFrame(frame));
 }
 
 /** Ask one peer and resolve when it answers, or when the budget expires. */
-function ask(client: PeerClient, frame: PeerLinkRequest): Promise<PeerLinkResponse | null> {
+function ask(
+  client: PeerLinkClient,
+  // Only the correlated frames can be awaited; `commandResult` and `uiEvent`
+  // carry no frame id because nothing waits on them here.
+  frame: Extract<PeerLinkRequest, { id: string }>,
+): Promise<PeerLinkResponse | null> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       pendingRequests.delete(frame.id);
@@ -182,7 +216,7 @@ function ask(client: PeerClient, frame: PeerLinkRequest): Promise<PeerLinkRespon
   });
 }
 
-function authenticatedClients(): PeerClient[] {
+function authenticatedClients(): PeerLinkClient[] {
   return [...clients].filter((client) => client.authenticated);
 }
 
@@ -199,9 +233,6 @@ function authenticatedClients(): PeerClient[] {
  * {@link routedPtyId}: an answer that names a PTY is how this window learns
  * where that PTY lives, and every later write, resize, and subscribe depends on
  * knowing.
- *
- * Nothing calls this yet — the broker serves only its own window's surfaces
- * until phase 3b wires the second tier into the service's provider.
  */
 export async function remoteRequest(op: string, params: unknown): Promise<unknown[]> {
   const peers = authenticatedClients();
@@ -232,11 +263,24 @@ export function isRemotePty(ptyId: string): boolean {
 export function remoteSubscribe(ptyId: string, sink: RemotePtySink): void {
   const client = routes.get(ptyId);
   if (!client) return;
-  remoteSinks.set(ptyId, sink);
-  send(client, { kind: 'subscribe', id: `r${++nextRequestId}`, ptyId });
+  // Reference-counted per PTY: two attachments to the same foreign surface
+  // share one stream over the link, and only zero-to-one starts the owner
+  // forwarding — so a second viewer never restarts a stream that is already
+  // flowing, and one viewer detaching cannot silence the other.
+  let sinks = remoteSinks.get(ptyId);
+  if (!sinks) {
+    sinks = new Set();
+    remoteSinks.set(ptyId, sinks);
+    send(client, { kind: 'subscribe', id: `r${++nextRequestId}`, ptyId });
+  }
+  sinks.add(sink);
 }
 
-export function remoteUnsubscribe(ptyId: string): void {
+export function remoteUnsubscribe(ptyId: string, sink: RemotePtySink): void {
+  const sinks = remoteSinks.get(ptyId);
+  if (!sinks?.delete(sink) || sinks.size > 0) return;
+  // Last viewer gone: stop the owner forwarding and drop the route — a later
+  // attach re-places it from the owner's answer.
   remoteSinks.delete(ptyId);
   const client = routes.get(ptyId);
   if (!client) return;
@@ -258,19 +302,41 @@ export function remoteResize(ptyId: string, cols: number, rows: number): boolean
   return true;
 }
 
-function dropClient(client: PeerClient): void {
+/**
+ * Answer one forwarded command, to the window that forwarded it and to nobody
+ * else. A result posted to every window would settle nothing anywhere else —
+ * only the adapter that minted the `rhId` holds a pending command for it — and
+ * would put one window's enrollment secrets in front of another's webviews.
+ */
+export function sendCommandResult(client: PeerLinkClient, payload: RemoteHostResult): void {
+  send(client, { kind: 'commandResult', payload });
+}
+
+/**
+ * Put a Host UI event in front of every window's webviews. The pairing modal
+ * may be answered from any of them, so the queue cannot be addressed.
+ */
+export function broadcastUiEvent(payload: unknown): void {
+  for (const peer of authenticatedClients()) send(peer, { kind: 'uiEvent', payload });
+}
+
+function dropClient(client: PeerLinkClient): void {
   const wasAuthenticated = clients.delete(client) && client.authenticated;
   // A window that went away takes its terminals with it; a later write must not
   // be routed into a dead socket.
   for (const ptyId of forgetPeerRoutes(routes, client)) {
-    remoteSinks.get(ptyId)?.onExit(0);
+    for (const sink of remoteSinks.get(ptyId) ?? []) sink.onExit(0);
     remoteSinks.delete(ptyId);
   }
+  // Its in-flight commands can never be answered: the socket that would carry
+  // the answer is the one that closed. The asking webview's own timeout is the
+  // backstop, and that window is on its way to becoming a broker anyway.
+  deps?.dropForwardedCommands(client);
   if (wasAuthenticated) deps?.invalidateDirectory();
   client.socket.destroy();
 }
 
-function onServerFrame(client: PeerClient, frame: unknown): void {
+function onServerFrame(client: PeerLinkClient, frame: unknown): void {
   const message = frame as (PeerLinkResponse | { kind: 'hello'; token: string }) & {
     kind: string;
   };
@@ -291,17 +357,23 @@ function onServerFrame(client: PeerClient, frame: unknown): void {
 
   const response = message as PeerLinkResponse;
   if (response.kind === 'data') {
-    remoteSinks.get(response.ptyId)?.onData(response.data);
+    for (const sink of remoteSinks.get(response.ptyId) ?? []) sink.onData(response.data);
     return;
   }
   if (response.kind === 'exit') {
     routes.delete(response.ptyId);
-    remoteSinks.get(response.ptyId)?.onExit(response.exitCode);
+    for (const sink of [...(remoteSinks.get(response.ptyId) ?? [])]) sink.onExit(response.exitCode);
     remoteSinks.delete(response.ptyId);
     return;
   }
   if (response.kind === 'notify') {
     deps?.invalidateDirectory();
+    return;
+  }
+  if (response.kind === 'command') {
+    // Only this window runs a service, so a losing window's webview commands
+    // are run here on its behalf and answered back over this same socket.
+    deps?.handleForwardedCommand(response.payload, client);
     return;
   }
   if ('id' in response) pendingRequests.get(response.id)?.(response);
@@ -327,7 +399,7 @@ export function listenServer(nextServer: Server, path: string): Promise<void> {
 /** Take the socket path, or report that somebody else holds it. */
 async function tryBind(path: string, token: string): Promise<boolean> {
   const nextServer = createServer((socket) => {
-    const client: PeerClient = { socket, decoder: new FrameDecoder(), authenticated: false };
+    const client: PeerLinkClient = { socket, decoder: new FrameDecoder(), authenticated: false };
     clients.add(client);
     socket.setEncoding('utf8');
     socket.on('data', (chunk: string) => {
@@ -371,6 +443,20 @@ export function remoteNotifyPeerChange(topic: string | null): void {
   respond({ kind: 'notify', topic });
 }
 
+/**
+ * Hand one of this window's webview commands to the broker, reporting whether
+ * there was a broker to hand it to.
+ *
+ * Not queued when there is none: a command is a user action with a timeout
+ * behind it, and holding it until some window binds would answer it long after
+ * the console call or the dialog that asked gave up.
+ */
+export function forwardCommand(payload: RemoteHostCommand): boolean {
+  if (!client || client.destroyed) return false;
+  respond({ kind: 'command', payload });
+  return true;
+}
+
 async function onClientFrame(frame: unknown): Promise<void> {
   const request = frame as PeerLinkRequest;
   switch (request.kind) {
@@ -409,6 +495,12 @@ async function onClientFrame(frame: unknown): Promise<void> {
       break;
     case 'resizePty':
       deps?.resizePty(request.ptyId, request.cols, request.rows);
+      break;
+    case 'commandResult':
+      deps?.deliverCommandResult(request.payload);
+      break;
+    case 'uiEvent':
+      deps?.deliverUiEvent(request.payload);
       break;
   }
 }

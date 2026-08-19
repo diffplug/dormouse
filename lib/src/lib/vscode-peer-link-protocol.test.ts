@@ -47,6 +47,32 @@ describe('FrameDecoder', () => {
     expect(decoder.push('\n\n')).toEqual([]);
   });
 
+  it('carries a forwarded command and its answer', () => {
+    // The Host command bridge rides the same framing, so a window with no
+    // service of its own reaches the one that has it.
+    const decoder = new FrameDecoder();
+    expect(
+      decoder.push(
+        encodeFrame({ kind: 'command', payload: { rhId: 'rh-1', cmd: 'status' } }) +
+          encodeFrame({ kind: 'commandResult', payload: { rhId: 'rh-1', result: { enrolled: true } } }) +
+          encodeFrame({ kind: 'commandResult', payload: { rhId: 'rh-2', error: 'nope' } }),
+      ),
+    ).toEqual([
+      { kind: 'command', payload: { rhId: 'rh-1', cmd: 'status' } },
+      { kind: 'commandResult', payload: { rhId: 'rh-1', result: { enrolled: true } } },
+      { kind: 'commandResult', payload: { rhId: 'rh-2', error: 'nope' } },
+    ]);
+  });
+
+  it('carries a UI event with no correlation of its own', () => {
+    // Broadcast, not addressed: any window's webview may answer the pairing.
+    const decoder = new FrameDecoder();
+    const event = { name: 'pairing-queue', queue: [{ clientId: 'c1' }] };
+    expect(decoder.push(encodeFrame({ kind: 'uiEvent', payload: event }))).toEqual([
+      { kind: 'uiEvent', payload: event },
+    ]);
+  });
+
   it('drops a peer that never terminates a frame', () => {
     const decoder = new FrameDecoder(64);
     expect(decoder.push('x'.repeat(100))).toEqual([]);
