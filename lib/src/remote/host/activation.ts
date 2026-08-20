@@ -112,8 +112,9 @@ function installBridgeMode(link: RemoteHostLink): void {
 
   const target = globalThis as unknown as { dormouseRemoteHost?: unknown };
   if (target.dormouseRemoteHost) return;
-  // Same method names and result shapes as the legacy hook (SELF_HOST.md), one
-  // round trip further away — so `status()` and `reconnect()` are promises here.
+  // Same method names and result shapes as the legacy hook (docs/specs/server.md
+  // → "Running it"), one round trip further away — so `status()` and
+  // `reconnect()` are promises here.
   target.dormouseRemoteHost = {
     enroll: (serverUrl: string, password: string, label: string) =>
       link.command('enroll', { serverUrl, password, label }),

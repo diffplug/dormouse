@@ -151,8 +151,8 @@ export interface EnrollResult {
 }
 
 /**
- * What `window.dormouseRemoteHost.status()` prints. SELF_HOST.md documents these
- * field names, so they are part of the user-facing surface.
+ * What `window.dormouseRemoteHost.status()` prints. `docs/specs/server.md`
+ * documents the console hook, so these field names are user-facing surface.
  */
 export interface RemoteHostConsoleStatus {
   enrolled: boolean;

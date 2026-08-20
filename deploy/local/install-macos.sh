@@ -16,8 +16,8 @@
 # Environment:
 #   DORMOUSE_INSTALL_TEST=1   Build, stage, health-check and switch releases,
 #                             but do not touch launchd or the Serve config.
-#                             Honors an overridden HOME, so a throwaway install
-#                             root can be exercised end to end.
+#   DORMOUSE_INSTALL_ROOT     A throwaway install root (requires the above), so
+#                             path quoting and release switching can be tested.
 
 set -euo pipefail
 
@@ -28,7 +28,6 @@ INSTALL_ROOT="$HOME/Library/Application Support/Dormouse Server"
 LOG_DIR="$HOME/Library/Logs/Dormouse Server"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOOPBACK_PORT=3100
-RELEASES_TO_KEEP=2
 
 ASSUME_YES=0
 [ "${DORMOUSE_INSTALL_ASSUME_YES:-0}" = "1" ] && ASSUME_YES=1
@@ -54,7 +53,7 @@ fi
 for arg in "$@"; do
   case "$arg" in
     --yes|-y) ASSUME_YES=1 ;;
-    --help|-h) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --help|-h) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $arg" >&2; exit 64 ;;
   esac
 done
@@ -623,9 +622,10 @@ cmd_status() {
   fi
   printf '\nLaunchAgent\n'
   if launchctl print "gui/$UID/$LABEL" >/dev/null 2>&1; then
+    # Only the top-level fields: launchctl indents them with a single tab, and
+    # the nested endpoint dictionaries carry their own `state =` lines.
     launchctl print "gui/$UID/$LABEL" 2>/dev/null \
-      | sed -n 's/^[[:space:]]*\(state\|pid\|last exit code\) = /  &/p' \
-      | sed 's/^  [[:space:]]*/  /'
+      | awk -F ' = ' '$1 ~ /^\t(state|pid|last exit code)$/ { printf "  %s = %s\n", substr($1, 2), $2 }'
   else
     printf '  %snot loaded%s\n' "$C_RED" "$C_OFF"
   fi
@@ -822,8 +822,10 @@ cmd_rollback() {
     if [ -x "$candidate" ]; then node_bin="$candidate"; break; fi
   done
   [ -n "$node_bin" ] || { printf 'no usable runtime found to swap the symlinks\n' >&2; return 1; }
-  atomic_symlink "$prev" "$ROOT/current" "$node_bin"
+  # `previous` first: node_bin can be "$ROOT/current/runtime/node", and moving
+  # `current` to $prev would repoint it at the runtime that was just rejected.
   if [ -n "$cur" ]; then atomic_symlink "$cur" "$ROOT/previous" "$node_bin"; fi
+  atomic_symlink "$prev" "$ROOT/current" "$node_bin"
   if [ "$(readlink "$ROOT/current")" != "$prev" ]; then
     printf 'current did not advance to %s\n' "$prev" >&2
     return 1
@@ -843,18 +845,23 @@ cmd_uninstall() {
   printf '  config : %s\n' "$ROOT/config"
   printf '  state  : %s\n' "$STATE_DIR"
   printf '\nUse "manage purge" separately to delete those irreversibly.\n\n'
-  if [ -t 0 ]; then
-    printf 'Uninstall? [y/N] '
-    local reply=""
-    read -r reply || true
-    case "$reply" in y|Y|yes|YES) ;; *) printf 'aborted\n'; return 1 ;; esac
+  if [ ! -t 0 ]; then
+    printf 'refusing to uninstall with no terminal to confirm at\n' >&2
+    return 1
   fi
+  printf 'Uninstall? [y/N] '
+  local reply=""
+  read -r reply || true
+  case "$reply" in y|Y|yes|YES) ;; *) printf 'aborted\n'; return 1 ;; esac
   launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
   rm -f "$PLIST"
   # Turn off only the mapping this installer owns.
   if ts serve status 2>/dev/null | grep -q "127.0.0.1:$PORT"; then
-    ts serve --bg off 2>/dev/null || ts serve reset 2>/dev/null || true
-    printf 'turned off the Serve mapping to 127.0.0.1:%s\n' "$PORT"
+    if ts serve --bg off 2>/dev/null; then
+      printf 'turned off the Serve mapping to 127.0.0.1:%s\n' "$PORT"
+    else
+      printf 'could not turn off the Serve mapping; check "tailscale serve status" and remove it by hand\n' >&2
+    fi
   else
     printf 'left the Serve config alone (it does not point at 127.0.0.1:%s)\n' "$PORT"
   fi
@@ -1027,7 +1034,9 @@ rollback_release() {
     warn "there is no previous release to restore (this was a first install)."
     return 1
   fi
-  atomic_symlink "$OLD_RELEASE" "$CURRENT_LINK" "$OLD_RELEASE/runtime/node"
+  # $STAGE/runtime/node was verified executable and version/arch-matched earlier
+  # in this run; $OLD_RELEASE/runtime/node has not been checked at all.
+  atomic_symlink "$OLD_RELEASE" "$CURRENT_LINK" "$STAGE/runtime/node"
   if [ "$TEST_MODE" != "1" ]; then
     launchctl kickstart -k "gui/$UID/$LABEL" >/dev/null 2>&1 || true
   fi

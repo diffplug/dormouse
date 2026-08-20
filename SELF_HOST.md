@@ -8,31 +8,48 @@ only from their tailnet at `https://<laptop>.<tailnet>.ts.net`. That is the
 whole self-host story today. An always-on cloud relay is designed but not
 built; it lives under `## Future`.
 
+The installer already exists: `deploy/local/install-macos.sh`, one idempotent
+command that ships in this repository. This runbook is about running it and
+finishing the parts it cannot do on its own — the passkey, the Host build, the
+backup. Nobody following it should have to write or edit code.
+
 ## Instructions to the assistant
 
 Your job is to guide the user through this runbook one checkpoint at a time,
-performing the repository and command-line work you safely can and pausing only
-for browser-console actions, secrets, or explicit approval of external or
-destructive changes. Do not dump the entire runbook back at the user.
+performing the command-line work you safely can and pausing only for browser
+consent flows, secrets, or explicit approval of external or destructive
+changes. Do not dump the entire runbook back at the user.
+
+The installer is shipped, reviewed code. Run it — do not reimplement it, and do
+not paper over it with hand-run `launchctl` or `tailscale serve` commands. If it
+does the wrong thing, that is a bug in `deploy/local/install-macos.sh`: say so
+plainly and offer to fix it as an ordinary reviewed code change, which is a
+different task from this one. Its contract lives in `docs/specs/server.md`
+under "Installing it (macOS, behind Tailscale)"; a change to one is a change to
+both.
 
 Before acting:
 
-1. Read `AGENTS.md`, `SECURITY.md`, `docs/specs/server.md`,
-   `docs/specs/remote-security-model.md`, and the CSP section of
-   `docs/specs/standalone.md` completely.
-2. Inspect the worktree and preserve unrelated user changes. Determine whether
-   any files from this runbook already exist; resume and verify rather than
-   overwriting a partial setup.
-3. Recheck the linked official documentation. This runbook was updated on
-   2026-08-17; dashboards and CLI syntax can change.
-4. Explain the current checkpoint, carry it out, verify it, and only then move
+1. Read `docs/specs/server.md` — "Configuration", "Where a Host may reach a
+   relay server (self-host builds)", and "Installing it (macOS, behind
+   Tailscale)" — plus `docs/specs/remote-security-model.md` for the trust model
+   you are about to set up.
+2. Run `./deploy/local/install-macos.sh --help` and skim the script. Its errors
+   are written to be read by whoever is standing here; quote them rather than
+   paraphrasing.
+3. Check whether `~/Library/Application Support/Dormouse Server` already exists.
+   If it does, this is an update or a repair, not a first install: read
+   `bin/manage status` before changing anything.
+4. Recheck the linked official documentation. This runbook was updated on
+   2026-08-20; dashboards and CLI syntax change.
+5. Explain the current checkpoint, carry it out, verify it, and only then move
    to the next checkpoint.
-5. Never ask the user to paste the setup password or any other bearer
-   credential into chat. Generate the setup password on the laptop and leave it
-   in the installer-owned mode-`0600` config file.
-6. Do not commit, push, merge, or delete installed state without first showing
+6. Never ask the user to paste the setup password or any other bearer credential
+   into chat. The installer generates it on the laptop and leaves it in a
+   mode-`0600` file; `manage show-password` prints it in their terminal.
+7. Do not commit, push, merge, or delete installed state without first showing
    the exact change and obtaining the user's approval.
-7. If the user needs a relay that stays up while this laptop is asleep, stop and
+8. If the user needs a relay that stays up while this laptop is asleep, stop and
    read `## Future` with them rather than improvising cloud infrastructure.
 
 Keep a small worksheet in the conversation and fill it in as values become
@@ -41,12 +58,13 @@ known:
 | Value | Default / example |
 | --- | --- |
 | Laptop OS | must be macOS |
-| Laptop Tailscale DNS name | derive from `tailscale status --json` |
+| Laptop Tailscale DNS name | the installer derives it from `tailscale status --json` |
 | External origin | `https://<laptop-name>.<tailnet-dns-suffix>` |
 | Install root | `~/Library/Application Support/Dormouse Server` |
 | State directory | `~/Library/Application Support/Dormouse Server/state` |
 | LaunchAgent | `~/Library/LaunchAgents/sh.dormouse.server.plist` |
 | Loopback port | `3100` |
+| Installed release | printed by the installer and by `manage status` |
 
 ## Prerequisites
 
@@ -54,9 +72,9 @@ known:
   certificates enabled, Tailscale running on this Mac, and Tailscale on the
   phone that will run Pocket. A tailnet-only origin is not reachable merely
   because the laptop is on the tailnet.
-- **macOS.** The installer below is macOS-only. On another OS, stop and design
-  the native service manager with the user rather than translating LaunchAgent
-  commands blindly.
+- **macOS.** The installer is macOS-only and refuses to run anywhere else. On
+  another OS, stop and design the native service manager with the user rather
+  than translating LaunchAgent commands blindly.
 - **A Host build that can reach a `*.ts.net` origin.** The shipped standalone
   and VS Code Hosts bake in the SaaS-only relay allowlist, so a self-host relay
   needs a local build of whichever Host the user runs:
@@ -71,9 +89,7 @@ known:
   Node Host bundles. The relay socket no longer lives in either webview, so
   changing a webview CSP does not widen this allowlist.
 
-## Architecture
-
-### What gets installed
+## What the installer does
 
 ```text
 user runs ./deploy/local/install-macos.sh
@@ -92,130 +108,9 @@ tailscale serve --bg terminates private HTTPS
         |
         v
 https://<laptop>.<tailnet>.ts.net
-
-~/Library/Application Support/Dormouse Server/state
-  account.json
-  hosts.json
-  push-subscriptions.json
-  vapid.json
 ```
 
-The LaunchAgent starts after the user logs in and restarts the process if it
-crashes. Tailscale's background Serve configuration survives Tailscale and
-machine restarts. The service is unavailable while the laptop sleeps, is shut
-down, or has no logged-in user; that is normally fine because there is then no
-local Dormouse Host to control.
-
-### Invariants
-
-- Run exactly one server replica. Challenges, sessions, WebSocket bindings, and
-  relay state are in memory. Multiple uncoordinated replicas are incorrect.
-- An update is a short intentional restart. Existing Host and Pocket WebSockets
-  disconnect and reconnect; do not attempt a zero-downtime swap for this
-  protocol.
-- Persist the entire state directory outside the installed release, including
-  `account.json`, `hosts.json`, `push-subscriptions.json`, and the generated
-  `vapid.json`. Code replacement must never replace state.
-- Bind the server only to loopback. Do not make plain HTTP port 3100 reachable
-  from the LAN or the tailnet. Tailscale terminates HTTPS.
-- Port 3100 is deliberately not 3000: `pnpm dev:server` and
-  `pnpm dev:pocket-server` both run the server on 3000, and the installed
-  service shares this laptop with that dev loop.
-- Treat `DORMOUSE_ORIGIN` as durable WebAuthn identity. It is the laptop's
-  Tailscale DNS name; renaming or re-registering that node can require passkey
-  and Host re-enrollment.
-- The installed release must contain both `server/dist` and `lib/dist-pocket`.
-  Building the `server` package alone is insufficient.
-- The setup password remains only in a mode-`0600` local configuration file.
-
-## Definition of done
-
-- `https://<laptop>.<tailnet>.ts.net/api/hello` succeeds from a tailnet device
-  and is unreachable when that device leaves the tailnet.
-- The Pocket app is served at the same HTTPS origin.
-- Port 3100 is bound only to `127.0.0.1`.
-- Every persistent state file survives replacement of the running release.
-- One installer invocation builds and installs the exact current checkout.
-- The LaunchAgent is loaded, starts at login, and restarts the server after an
-  intentional process kill.
-- `tailscale serve --bg` is configured for the laptop's HTTPS name.
-- Rerunning the installer updates the release and preserves state; a failed
-  update restores the prior release.
-- `manage verify` exits zero and reports every check above that it can observe
-  locally.
-- The repository specs describe the installed behavior.
-
-## Phase 0: preflight
-
-Inspect and report:
-
-- `git status --short`, current branch, and origin.
-- The exact Node version in root `package.json` under
-  `devEngines.runtime.version`, and the pnpm version in `packageManager`.
-  `SECURITY.md` keys a mechanical `FAIL IF` to the `devEngines` field, so read
-  that field specifically rather than `engines`.
-- The host OS and architecture. If this is not macOS, stop; see Prerequisites.
-- Whether `tailscale` is installed, signed in, and on `PATH`; on macOS also
-  check the known application-bundle CLI paths. When invoking the bundled
-  macOS app executable from a script, set `TAILSCALE_BE_CLI=1` so it cannot
-  launch the GUI instead of acting as the CLI.
-- Whether HTTPS and MagicDNS are enabled for the tailnet.
-- The laptop's stable Tailscale DNS name.
-- That port 3100 is available on loopback.
-- That the user wants the currently checked-out worktree installed. Report the
-  Git SHA and whether it is dirty; do not silently switch or pull branches.
-
-Confirm that the user's phone runs Tailscale.
-
-## Install on this Mac
-
-This runbook is intentionally independent of GitHub and cloud hosting. Its only
-remote dependency is the user's existing Tailscale account. The current checkout is
-the release source; rerunning the installer is the update mechanism.
-
-### 1: author the local installer
-
-Create and review:
-
-```text
-deploy/local/install-macos.sh
-```
-
-The installer may generate stable helper files inside its install root, but do
-not require the user to maintain hand-edited plists or shell wrappers. The
-normal command is exactly:
-
-```sh
-./deploy/local/install-macos.sh
-```
-
-Running that command a second time updates the installed release from the
-current checkout. It must not run `git pull`, switch branches, fetch a release,
-or install a scheduled updater.
-
-The server already supports an explicit loopback bind: `DORMOUSE_BIND_HOST` is
-read by `server/src/config.ts` and passed through the `@hono/node-server` listen
-option, with the unset default still binding every interface. The local
-configuration must set:
-
-```dotenv
-DORMOUSE_BIND_HOST=127.0.0.1
-```
-
-Do not reintroduce a generic `HOST` variable for this, and do not change the
-unset default — `server/test/bind-host.test.mjs` asserts both halves.
-
-Update `docs/specs/server.md` above the fold with the installation behavior,
-using `Source of truth:` pointers. Add `deploy/local/install-macos.sh` to that
-spec's exhaustive Files/Code Map if it has one. Update `SECURITY.md` only if the
-installer changes an invariant it audits; this path adds no GitHub workflow or
-deployment secret.
-
-### 2: installer contract
-
-The script must be idempotent, strict Bash and safe with spaces in paths. It
-must refuse non-macOS hosts with a clear message. It should require no `sudo`
-and install only into the current user's home directory:
+It installs only under the current user's home, needs no `sudo`, and lays out:
 
 ```text
 ~/Library/Application Support/Dormouse Server/
@@ -242,186 +137,208 @@ and install only into the current user's home directory:
 ~/Library/Logs/Dormouse Server/
 ```
 
-On each invocation it must:
+It deliberately will **not**: run `git pull`, fetch, or switch branches; install
+a scheduled updater; ask for `sudo`; install or re-authenticate Tailscale;
+rewrite an origin that no longer matches the node's DNS name; or touch `config/`
+and `state/`, which survive every update, prune, and uninstall.
 
-1. Confirm `tailscale` is installed, signed in, and reports a stable DNS name.
-   Detect both a CLI on `PATH` and supported macOS application-bundle CLI
-   locations. Export `TAILSCALE_BE_CLI=1` for every invocation of the bundled
-   app executable. Do not install or reauthenticate Tailscale without the user.
-2. Derive the external origin from `tailscale status --json`, remove any
-   trailing dot, and show it to the user. If an existing installation's origin
-   differs, stop and explain the WebAuthn migration consequence rather than
-   silently rewriting it.
-3. Report the current Git SHA, branch, architecture, and dirty/clean status.
-   Ask for confirmation before installing a dirty worktree, but allow it: the
-   whole point is to install exactly what is currently checked out.
-4. Read the exact Node version from root `package.json` under
-   `devEngines.runtime.version` and the pnpm version from `packageManager`; use
-   Corepack and the repository versions rather than global floating versions.
-5. Install with `pnpm install --frozen-lockfile`, build `lib/dist-pocket`,
-   `server-lib-common`, and `server`, then create a production-only server tree.
-   With the current workspace, use the verified `pnpm deploy --prod --legacy`
-   flow unless injected workspace packages are intentionally adopted.
-6. Copy the exact `process.execPath` Node executable used for the build into the
-   release. The LaunchAgent must not depend on Homebrew, nvm, Volta, pnpm's
-   cache, the source checkout, or the user's interactive shell `PATH` after
-   installation. Verify the copied runtime's version and macOS architecture.
-7. Copy `lib/dist-pocket` into the layout expected by `server/src/config.ts`
-   (or point `DORMOUSE_POCKET_DIR` at it).
-8. Write a `RELEASE` metadata file containing at least Git SHA, dirty status,
-   build timestamp, Node version, and source checkout path. Do not claim a dirty
-   build is reproducibly identified by its SHA alone.
-9. On first install, generate a high-entropy hexadecimal setup password on the
-   Mac and create mode-`0600` `config/server.env` containing:
+The invariants it exists to hold — one replica, state outlives code, loopback
+only, `DORMOUSE_ORIGIN` as durable WebAuthn identity, and a failed update being
+a failure rather than a rollback dressed as success — are documented in
+`docs/specs/server.md`. Two of them shape what the user should expect day to
+day:
 
-   ```dotenv
-   DORMOUSE_SETUP_PASSWORD=<generated-locally>
-   DORMOUSE_ORIGIN=https://<laptop-name>.<tailnet-dns-suffix>
-   DORMOUSE_STATE_DIR="<absolute-install-root>/state"
-   DORMOUSE_BIND_HOST=127.0.0.1
-   PORT=3100
-   NODE_ENV=production
-   ```
+- An update is a short intentional restart. Existing Host and Pocket WebSockets
+  disconnect and reconnect; there is no zero-downtime swap to attempt.
+- A LaunchAgent is a per-login agent, so the service is unavailable while the
+  laptop sleeps, is shut down, or has no logged-in user. That is normally fine,
+  because there is then no local Dormouse Host to control either.
 
-   Preserve this file byte-for-byte on updates. Do not print the password
-   during routine install/update. Provide an explicit `manage show-password`
-   operation that warns before displaying it locally for setup or enrollment.
-   Keep the `config` and `state` directories mode `0700`; they contain the setup
-   password and Host bearer credentials.
-10. Install a stable mode-`0700` `bin/run-server` wrapper outside the release.
-    It must safely load only the installer-owned env file and `exec` the copied
-    Node runtime with `current/server/dist/index.js`. It must not invoke a
-    shell-dependent package manager at service startup.
-11. Install `~/Library/LaunchAgents/sh.dormouse.server.plist` with absolute
-    paths and `RunAtLoad` plus `KeepAlive`. Use `ProgramArguments`, a valid
-    `WorkingDirectory`, bounded restart throttling, and stdout/stderr paths
-    under `~/Library/Logs/Dormouse Server`. Do not embed the setup password in
-    the plist. Validate it with `plutil -lint`.
-12. Stage the new release without touching `current`, run a disposable
-    loopback health check against the candidate, and only then switch the
-    symlink atomically.
-13. Use modern `launchctl bootout`, `bootstrap`, and `kickstart` commands in the
-    current `gui/$UID` domain. Treat “not currently loaded” during a first
-    install as benign; treat other launchd errors as failures.
-14. Wait for `http://127.0.0.1:3100/api/hello` and the Pocket index. If the new
-    release fails, restore `current` to `previous`, restart it, verify it is
-    healthy, and exit nonzero. Never report an update successful merely because
-    rollback worked.
-15. Retain the current and previous releases and remove older releases only
-    after success. Never remove `state` or `config` during cleanup.
-16. Inspect the node's existing Serve configuration, then configure the current
-    equivalent of `tailscale serve --bg 3100`. This is a node-scoped Serve
-    endpoint, not a Tailscale Service. Do not reset or overwrite unrelated Serve
-    paths; if another app already owns the root HTTPS mapping, stop and resolve
-    the hostname/path conflict with the user. Allow Tailscale's HTTPS consent
-    flow to open if the tailnet has not enabled certificates.
-17. Verify Serve reports the same HTTPS origin written to `server.env`.
+## Definition of done
 
-The installed `bin/manage` helper should support at least:
+`manage verify` checks all of these locally and exits nonzero on any failure:
 
-```text
-status          show LaunchAgent, process, health, Serve origin, and release
-verify          run the Definition of done checks and exit nonzero on any failure
-logs            tail the local server logs
-restart         kickstart the LaunchAgent and wait for health
-show-password   warn, then display the setup password locally
-rollback        switch to the retained previous release, preserving state
-uninstall       remove LaunchAgent and installed code only after confirmation
-```
+- The LaunchAgent is loaded in `gui/$UID`, its plist lints, declares `RunAtLoad`
+  and `KeepAlive`, and carries no credential.
+- Loopback `/api/hello` responds and the Pocket app is served.
+- Port 3100 is bound only to `127.0.0.1`, and the plaintext port is unreachable
+  on the laptop's Tailscale IP.
+- `tailscale serve` proxies to `127.0.0.1:3100` at the same origin recorded in
+  `config/server.env`.
+- `config/` and `state/` are mode `0700`, `config/server.env` is mode `0600`.
+- `current` resolves to a release with `RELEASE` metadata, a `previous` release
+  is retained for rollback, and neither the plist nor `bin/run-server` refers to
+  the source checkout.
 
-Uninstall must default to preserving `config` and `state`, explicitly report
-their locations, and turn off only the Serve mapping owned by this installer.
-Provide a separate explicit purge operation for irreversible state deletion;
-require the user to type a confirmation phrase. Never make purge part of a
-normal reinstall or uninstall.
+These cannot be proven from the laptop, and are the checkpoints below:
 
-### 3: test before installing
+- The HTTPS origin answers from a second tailnet device, and stops answering
+  when that device leaves the tailnet.
+- launchd restarts the server after a real kill.
+- State survives a reinstall from a newer checkout, and rollback returns the
+  previous release.
+- Pocket passkey setup and Host enrollment complete against this origin.
+- The install root is backed up somewhere off this laptop.
 
-Before the user runs the installer against their real state:
+## Checkpoint 1: preflight
 
-1. Run `bash -n` and a shell linter if one is already available.
-2. Run `pnpm lint:specs` and the server tests.
-3. Exercise installation with a temporary `HOME` or an installer test mode so
-   path quoting, plist generation, release switching, and cleanup can be tested
-   without loading a real LaunchAgent. Do not fake the final live validation.
-4. Confirm the release starts without the repository or package-manager paths
-   on `PATH`.
-5. Confirm plain HTTP is reachable at `127.0.0.1:3100` and not at the laptop's
-   LAN or Tailscale IP on port 3100.
+The installer performs its own preflight and stops with a specific error rather
+than proceeding, so do not re-run these by hand: macOS and non-root, the
+Tailscale CLI (on `PATH` or in the app bundle, invoked with
+`TAILSCALE_BE_CLI=1`), backend state `Running`, the node's MagicDNS name and
+derived origin, tailnet HTTPS certificates, an origin that disagrees with an
+existing installation, the Git SHA and dirty status (it asks before installing a
+dirty worktree), and the Node and pnpm versions pinned in root `package.json`.
 
-Show the exact repository diff and test results. Ask before committing; installing the
-current checkout does not require a commit.
+Establish with the user what the script cannot:
 
-### 4: install and validate
+- **This checkout is the one they want installed.** Show `git status --short`,
+  the branch, and the SHA. Do not pull or switch branches on their behalf; the
+  installer intentionally installs exactly what is checked out.
+- **Their phone runs Tailscale** and is signed in to the same tailnet.
+- **Port 3100 is free.** The installer does not check this before installing.
+  `pnpm dev:server` and `pnpm dev:pocket-server` use 3000, not 3100, but a stale
+  process of any kind on 3100 would let the post-install health check pass
+  against the wrong server:
 
-With the user's approval, run:
+  ```sh
+  lsof -nP -iTCP:3100 -sTCP:LISTEN
+  ```
+
+## Checkpoint 2: install
+
+With the user's approval:
 
 ```sh
 ./deploy/local/install-macos.sh
 ```
 
-The script may require the user to approve Tailscale HTTPS in a browser. It
-must otherwise finish without a checklist of manual service-manager commands.
+It prints each step. Read the output with the user rather than summarizing it —
+the confirmations it asks for (a dirty worktree, a mismatched pnpm, repointing
+an already-claimed Serve root path) are decisions, and it refuses to assume an
+answer when there is no terminal. Tailscale may open a browser consent flow the
+first time Serve requests a certificate; that one is the user's to click.
 
-Verify:
+On a first install it finishes by pointing at `manage show-password`. Do not run
+that yet.
+
+## Checkpoint 3: verify
 
 ```sh
 "$HOME/Library/Application Support/Dormouse Server/bin/manage" verify
 ```
 
-That command must perform, at minimum, the equivalent of:
-
-```sh
-launchctl print "gui/$UID/sh.dormouse.server"
-curl --fail http://127.0.0.1:3100/api/hello
-tailscale serve status
-lsof -nP -iTCP:3100 -sTCP:LISTEN
-```
+Expect every check to pass and the command to exit 0. `manage status` gives the
+same picture without the pass/fail framing.
 
 Then, from another tailnet-connected device:
 
-1. Request the HTTPS `/api/hello` endpoint.
+1. Request `https://<laptop>.<tailnet>.ts.net/api/hello`.
 2. Open the Pocket application at the same origin.
-3. Temporarily leave Tailscale on that test device and verify it becomes
+3. Temporarily leave Tailscale on that device and confirm the origin becomes
    unreachable.
 
-Kill the server process once and verify LaunchAgent restarts it. Restart the
-laptop only if the user approves the interruption; otherwise explain that
-`RunAtLoad` plus the loaded LaunchAgent has been verified but the reboot test
-was skipped. After a real login/reboot, verify both the process and background
-Serve mapping return without rerunning the installer.
+Kill the server process once and confirm launchd restarts it within a second or
+two:
 
-Complete Pocket passkey setup and Host enrollment using a standalone or VS Code
-build whose `DORMOUSE_REMOTE_CONNECT_SRC` includes
-`https://*.ts.net wss://*.ts.net`. After `account.json`, `hosts.json`, and
-`vapid.json` exist (and `push-subscriptions.json` too if push was enabled):
+```sh
+pkill -f 'Dormouse Server/current/server/dist/index.js'
+"$HOME/Library/Application Support/Dormouse Server/bin/manage" status
+```
 
-1. Record ownership and checksums of every present state file without printing
-   contents.
-2. Rerun the same installer from the same or a newer checkout.
-3. Confirm the release changed as expected and state/checksums survived.
-4. Exercise the retained-release rollback and return to the desired release.
+Restart the laptop only if the user approves the interruption; otherwise say
+plainly that `RunAtLoad` plus the loaded LaunchAgent has been verified but the
+reboot test was skipped. After a real login or reboot, confirm both the process
+and the background Serve mapping return without rerunning the installer.
 
-### 5: operational expectations and backup
+## Checkpoint 4: first-run setup
 
-Make these limitations explicit:
+The server is running but has no account, no passkey, and no enrolled Host. The
+same sequence is documented against the dev loop in `docs/specs/server.md`
+→ "Running it"; here it runs against the tailnet origin instead of
+`localhost:3000`, and the password comes from the installer rather than the
+command line.
 
-- The relay is unavailable while the Mac sleeps, is shut down, Tailscale is
-  disconnected, or the user is logged out. A LaunchAgent is a per-login agent,
-  not a pre-login system daemon.
-- The installer does not follow `main`. To update: choose the checkout, inspect
-  it, and rerun `./deploy/local/install-macos.sh`.
-- The HTTPS origin is tied to the laptop's Tailscale node name. Do not rename or
-  delete/re-enroll the node casually after registering passkeys.
+1. **The setup password.** Have the user run `manage show-password` in their own
+   terminal when they are ready. It warns before printing. Do not ask for the
+   value, and do not print it into the conversation.
+
+2. **The passkey.** On the phone, open `https://<laptop>.<tailnet>.ts.net` in
+   Safari → First-time setup (password + label) creates the passkey and signs
+   them in. The passkey is bound to this exact origin. If they want push
+   notifications, add Pocket to the Home Screen *before* signing in and do all
+   of this inside the installed app — iOS delivers Web Push only there, and the
+   install is a separate storage partition that would otherwise need its own
+   pairing (`docs/specs/pocket-app.md` → Installable web app).
+
+3. **The Host.** Launch the standalone or VS Code build made with
+   `DORMOUSE_REMOTE_CONNECT_SRC` (see Prerequisites) and enroll once from that
+   webview's devtools console:
+
+   ```js
+   await window.dormouseRemoteHost.enroll('https://<laptop>.<tailnet>.ts.net', '<setup password>', 'My Laptop')
+   ```
+
+   Enrollment persists in the Host service's own store — a mode-`0600` file
+   under the app-data dir in standalone, `SecretStorage` in VS Code — so later
+   launches connect on their own. `status()`, `reconnect()` and
+   `clearEnrollment()` live on the same object and are promises.
+
+   A build without the `*.ts.net` allowlist refuses this outright, before the
+   password leaves the machine. That is the expected symptom of a stock build,
+   not a server problem.
+
+4. **A real session.** On the phone: Hosts → **Pair** → approve the modal that
+   appears on the laptop → **Connect** (one biometric prompt) → pick a pane and
+   type. Only now have HTTPS proxying, the WebSocket upgrade, and the security
+   flow been exercised together.
+
+5. **State.** Confirm `account.json`, `hosts.json`, and `vapid.json` now exist
+   in `state/` (plus `push-subscriptions.json` if push was enabled). Record
+   ownership and checksums without printing contents — checkpoint 5 checks them
+   against a reinstall.
+
+## Checkpoint 5: updating, rollback, uninstall
+
+Updating is choosing a checkout and rerunning the same command:
+
+```sh
+git -C <checkout> log --oneline -1     # decide deliberately what to install
+./deploy/local/install-macos.sh
+```
+
+Prove it once, while the user is watching:
+
+1. Rerun the installer from the same or a newer checkout.
+2. Confirm the release changed as expected and that the `state/` checksums from
+   checkpoint 4 and `config/server.env` are unchanged.
+3. Run `manage rollback`, confirm the previous release comes back healthy, then
+   return to the desired release.
+
+`manage uninstall` removes the LaunchAgent and installed code and keeps `config`
+and `state`, reporting where they are. `manage purge` is the separate,
+irreversible operation that deletes them; it requires typing a confirmation
+phrase and is never part of a reinstall.
+
+## Checkpoint 6: limits and backup
+
+Make these explicit:
+
+- The relay is down while the Mac sleeps, is shut down, Tailscale is
+  disconnected, or the user is logged out.
+- The installer does not follow `main`. Updates happen only when the user
+  reruns it.
+- The HTTPS origin is tied to the laptop's Tailscale node name. Renaming or
+  re-enrolling that node means redoing the passkey and Host enrollment, and the
+  installer will stop rather than rewrite the origin for you.
 - Tailscale network policy still controls which tailnet members can reach the
   laptop. Review existing grants if the tailnet contains other users.
 
 Confirm that the install root, especially `config` and `state`, is covered by
 Time Machine or another encrypted backup outside the laptop. A second directory
-on the same disk is not a backup. Perform a small restore rehearsal without
-overwriting live state.
-
-Give the handoff and stop.
+on the same disk is not a backup. These files include Host bearer credentials
+and a VAPID private key. Perform a small restore rehearsal without overwriting
+live state.
 
 ## Final handoff
 
@@ -443,7 +360,8 @@ Do not print the setup password or any credential in the handoff.
 
 ## Official references
 
-- Dormouse runtime and state contract: `docs/specs/server.md`
+- Dormouse runtime, state contract, and what the installer guarantees:
+  `docs/specs/server.md`
 - Dormouse trust model: `docs/specs/remote-security-model.md`
 - Host installations: `docs/specs/standalone.md`, `docs/specs/vscode.md`
 - [Install Tailscale on macOS](https://tailscale.com/docs/install/mac)
@@ -453,30 +371,33 @@ Do not print the setup password or any credential in the handoff.
 
 ## Troubleshooting boundaries
 
-- **Local install works only while the source checkout exists:** the LaunchAgent
-  was pointed into the repository instead of the self-contained install root.
-  Fix the installer; do not paper over it with a permanent checkout path.
-- **Local LaunchAgent loops or will not load:** run `plutil -lint`, inspect
-  `launchctl print gui/$UID/sh.dormouse.server`, and read the configured stdout
-  and stderr files. Check absolute paths and permissions; launchd does not run
-  the user's interactive shell startup files.
-- **Local HTTPS URL returns 502:** first check the loopback health endpoint,
-  then `tailscale serve status`. The LaunchAgent and Serve configuration have
-  separate lifecycles.
-- **Port 3100 is visible on LAN or the Tailscale IP:** stop and fix
-  `DORMOUSE_BIND_HOST=127.0.0.1` before continuing. Tailscale access control is
-  not a reason to expose the plaintext backend.
-- **Local origin changed:** do not overwrite the stored origin and continue.
-  Determine whether the Tailscale node was renamed/re-enrolled and plan passkey
-  and Host re-enrollment explicitly.
-- **Pocket loads but passkey setup fails:** compare the browser URL byte-for-byte
-  with normalized `DORMOUSE_ORIGIN`; confirm HTTPS and the chosen node/Service
-  hostname.
-- **Host cannot connect while Pocket can:** that Host build likely lacks the
-  `*.ts.net` `DORMOUSE_REMOTE_CONNECT_SRC` setting.
+- **The service works only while the source checkout exists:** the release is
+  supposed to be self-contained, so this is a bug in the installer rather than
+  something to work around with a permanent checkout path. `manage verify`
+  checks for it directly.
+- **The LaunchAgent loops or will not load:** run `plutil -lint` on the plist,
+  inspect `launchctl print gui/$UID/sh.dormouse.server`, and read
+  `~/Library/Logs/Dormouse Server`. launchd does not run the user's interactive
+  shell startup files, so a `PATH` that works in Terminal proves nothing here.
+- **The HTTPS URL returns 502:** check the loopback health endpoint first, then
+  `tailscale serve status`. The LaunchAgent and the Serve configuration have
+  separate lifecycles; `manage serve` re-applies the mapping if a dev session
+  repointed it.
+- **Port 3100 is visible on the LAN or the Tailscale IP:** stop. Confirm
+  `DORMOUSE_BIND_HOST=127.0.0.1` in `config/server.env`. Tailscale access
+  control is not a reason to expose the plaintext backend.
+- **The installer stops on an origin mismatch:** it is refusing to invalidate
+  the registered passkey and every enrolled Host. Determine whether the
+  Tailscale node was renamed or re-enrolled, then either restore the old node
+  name or plan the re-enrollment explicitly.
+- **Pocket loads but passkey setup fails:** compare the browser URL
+  byte-for-byte with the `DORMOUSE_ORIGIN` in `config/server.env`; confirm HTTPS
+  and the node hostname.
+- **A Host cannot connect while Pocket can:** that Host build almost certainly
+  lacks the `*.ts.net` `DORMOUSE_REMOTE_CONNECT_SRC` setting.
 - **State disappears:** verify the absolute Application Support state path and
-  the installed config. Do not initialize a new account until old state has been
-  located or restored.
+  the installed config. Do not initialize a new account until the old state has
+  been located or restored.
 
 ## Future
 
