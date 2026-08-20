@@ -331,7 +331,7 @@ export class RemoteHostService {
 
   async #startHost(enrollment: HostEnrollment): Promise<void> {
     if (this.#disposed) return;
-    // Never two. Callers are serialized (see `#lifecycle`), but a Host left in
+    // Never two. Callers are serialized (see `#serialize`), but a Host left in
     // `#host` here would be dropped without its socket being closed, so the
     // replacement is explicit rather than implied by the assignment below.
     this.#stopHost();
