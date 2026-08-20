@@ -76,7 +76,7 @@ answers it directly:
 | At await time | Behavior |
 |---|---|
 | A foreground command is running | There is something to wait for. Park. Resolves on settle or exit, whichever comes first. A command that never animates — a silent build — therefore resolves correctly on its exit rather than being guessed at. |
-| No foreground command | Park for one **grace window** waiting for output. Output arrives → wait for the settle. No output → resolve `cause: idle`. |
+| No foreground command | Park for one **grace window**. Under `--until quiet` the test is *output*; under `--until exit` it is a *command start*. Whichever arrives → carry on and wait for the real signal. Neither → resolve `cause: idle`. |
 | No shell integration | "Is a command running" is unanswerable, so fall back to the grace window on output alone. Same degradation as every other integration-dependent feature. |
 
 `cause: idle` **exits 0**: a caller that asked for quiet and found quiet got
@@ -183,26 +183,63 @@ Exit codes — `dor` today uses only 0 and 1, so this widening is a proposal:
 
 ### Output and errors
 
-**Success** prints the bare `cause` on stdout and nothing else, so
-`CAUSE=$(dor await surface:5 --until quiet)` is the whole idiom:
+`await` writes to both channels on success, splitting the machine contract from
+the human one. **stdout is the bare `cause` and nothing else**, so
+`CAUSE=$(dor await surface:5 --until quiet)` stays the whole idiom. **stderr
+carries a one-line narrative** naming the cause and how long the wait took:
 
 ```
 $ dor await surface:5 --until quiet
-quiet
+quiet                                        # stdout
+quiet: output stopped after 10m 15s          # stderr
 ```
 
-`--json` gives the same fact in `dor`'s object shape:
+Writing diagnostics to stderr on a *successful* run is deliberate and
+conventional (git does it constantly): stderr is the explain-what-happened
+channel regardless of exit status, and it is already where this command's
+failures go. Keeping it off stdout is what lets the cause stay machine-clean.
+
+Representative narratives:
+
+| Outcome | stderr |
+|---|---|
+| `quiet` | `quiet: output stopped after 10m 15s` |
+| `exit` | `exit: command exited after 3m 02s` |
+| `bell` | `bell: surface rang after 45s` |
+| `idle` under `--until quiet` | `idle: no output within 2s, nothing was running` |
+| `idle` under `--until exit` | `idle: no command started within 2s` |
+| timeout (exit 2) | `Error: timed out after 600s waiting for surface:5 to go quiet` |
+| death (exit 3) | `Error: surface:5 exited after 3m 20s` |
+
+**Duration is the await's own wall time**, from invocation to resolution — the
+only span the command actually knows. It is *not* a claim about how long the
+peer worked, which would require knowing when the turn began. Note this means a
+`quiet` can never report less than the settle window: a resolution at `5s` says
+the Surface was silent for essentially the whole wait.
+
+**Vocabulary:** the narratives say *output*, never *animation*. A silent build
+has no animation but plenty of activity, and the detector watches PTY bytes, not
+motion — same reason `--until quiet` is not `--until-animation-stops`.
+
+`--json` carries both contracts plus the raw number:
 
 ```json
 { "workspace_ref": "workspace:1", "surface_id": "…", "surface_ref": "surface:5",
-  "cause": "quiet" }
+  "cause": "quiet", "waited_ms": 615000,
+  "detail": "output stopped after 10m 15s" }
 ```
 
+`detail` is redundant with `cause` + `waited_ms` on purpose: an agent relaying
+the outcome to its own user gets a ready-made phrase instead of inventing one.
+
 **Failure** follows `dor`'s existing convention
-(`dor/src/commands/shared.ts`): an `Error: <message>` line on **stderr**, empty
-stdout, non-zero exit. Because stdout carries only the cause and stderr only
-errors, a caller distinguishes every outcome without parsing terminal text —
-which is the practical payoff of the split.
+(`dor/src/commands/shared.ts`): an `Error: <message>` line on stderr, empty
+stdout, non-zero exit — with the same duration folded in, since "timed out" and
+"timed out after ten minutes" are different facts to a reader.
+
+Because stdout carries only the cause and stderr only the narrative, a caller
+distinguishes every outcome without parsing terminal text — the practical payoff
+of the [D4](#d4-await-does-not-print-the-screen-settled) split.
 
 ### Help text
 
@@ -225,14 +262,18 @@ Prints no terminal text. Follow with `dor read` to see the screen.
 
 Waiting absorbs the alert. A surface that finishes while awaited does not ring the bell, speak an alarm, or notify a paired phone, and is not marked TODO — the wait already delivered the news.
 
-Text mode prints the cause alone: quiet, exit, bell, or idle. An idle result means nothing was running and nothing started, so there was never anything to wait for.
+Text mode prints the cause alone on stdout: quiet, exit, bell, or idle. An idle result means nothing was running and nothing started, so there was never anything to wait for.
+
+A one-line summary naming the cause and how long the wait took goes to stderr, so it stays out of the captured value: `quiet: output stopped after 10m 15s`. The duration is how long this command blocked, not how long the surface had been working.
 
 JSON output:
   {
     "workspace_ref": "workspace:1",
     "surface_id": "...",
     "surface_ref": "surface:3",
-    "cause": "quiet"
+    "cause": "quiet",
+    "waited_ms": 615000,
+    "detail": "output stopped after 10m 15s"
   }
 
 Exits 0 on any resolution, 2 on timeout, and 3 if the surface died before finishing.
