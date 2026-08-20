@@ -26,13 +26,19 @@ Long-running work here gets rewritten and reopened rather than pushed onto one b
 When the PR body names a predecessor, fetch the bot's own comments and reviews on it before reading the diff, and treat any finding that is still true of this diff as a finding of this review:
 
 ```bash
-gh api "repos/$GITHUB_REPOSITORY/issues/<N>/comments" \
+gh api "repos/$GITHUB_REPOSITORY/issues/<N>/comments" --paginate \
   --jq '.[] | select(.user.login == "dormouse-bot") | .body'
-gh api "repos/$GITHUB_REPOSITORY/pulls/<N>/reviews" \
+gh api "repos/$GITHUB_REPOSITORY/pulls/<N>/reviews" --paginate \
   --jq '.[] | select(.user.login == "dormouse-bot") | .body'
+# Inline comments are a separate endpoint — the two above return bodies only,
+# and inline is where the review skill puts every concrete fix. No login filter
+# here: a maintainer reply on a thread means that finding was answered on #N,
+# not missed, so it should not be carried forward.
+gh api "repos/$GITHUB_REPOSITORY/pulls/<N>/comments" --paginate \
+  --jq '.[] | {user: .user.login, path, line, body}'
 ```
 
-Check each one against the current code rather than assuming it carried over — the maintainer often takes some and not others. Say which ones you re-checked, so "nothing else surfaced" means the predecessor was read, not that it was skipped. (Observed on #398 → #416: three findings written up as #398 closed mid-review, one adopted by the maintainer, one silently merged to `main` (#420), one re-derived from scratch by nightly ten hours later (#418).)
+All three, not a subset — on #398 the two body endpoints return 1 comment and 0 reviews between them, while 7 findings sit inline. Check each one against the current code rather than assuming it carried over — the maintainer often takes some and not others. Say which ones you re-checked, so "nothing else surfaced" means the predecessor was read, not that it was skipped. (Observed on #398 → #416: three findings written up as #398 closed mid-review, one adopted by the maintainer, one silently merged to `main` (#420), one re-derived from scratch by nightly ten hours later (#418).)
 
 ## Settled upstream rulings — don't re-file
 
