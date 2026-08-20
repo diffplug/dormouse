@@ -35,6 +35,16 @@ const PUSH_TITLE_LIMIT = 100;
 const PUSH_BODY = 'Needs attention';
 
 /**
+ * The Settings dialog's test push. The title says plainly that nothing is
+ * actually waiting, so a test that arrives on a phone hours later — or on
+ * someone else's phone — cannot be mistaken for a real alarm.
+ */
+export const PUSH_TEST_TITLE = 'Dormouse test — nothing needs attention';
+
+/** Collapse key for the test, so repeated presses replace rather than stack. */
+export const PUSH_TEST_TAG = 'dormouse-push-test';
+
+/**
  * Apply this sink's bounds to a Pane label. The rule itself is
  * `boundedPushText` in `server-lib-common`, shared with the Server so the
  * sanitization has one implementation rather than a strong copy here and a
@@ -101,6 +111,21 @@ export async function loadPushDevices(deps: AlertPushDeps): Promise<PushDevice[]
 }
 
 /**
+ * What one send actually did. The ring path ignores it — a push that fails must
+ * never break the alert path — but the Settings dialog's test button exists
+ * *only* to report this, and "sent" over a fan-out that reached nobody would be
+ * worse than no button at all.
+ *
+ * `targeted` is 0 when the ACL authorized no device, which is a distinct answer
+ * from a send that was attempted and refused: nothing was even tried.
+ */
+export interface PushSendSummary {
+  targeted: number;
+  delivered: number;
+  failed: number;
+}
+
+/**
  * Push `title` for one Session to every device the ACL still authorizes.
  *
  * The label is passed in rather than derived: it comes from the pane stores,
@@ -111,7 +136,7 @@ export async function sendPush(
   deps: AlertPushDeps,
   sessionId: string,
   title: string,
-): Promise<void> {
+): Promise<PushSendSummary> {
   // Read straight from the ACL, which is local and in-memory, rather than
   // asking the Server which devices are subscribed: the Server intersects the
   // names it is given with its own subscriptions anyway, so the target set is
@@ -124,7 +149,7 @@ export async function sendPush(
   // recipients would keep pushing Pane labels to a de-authorized phone. Read at
   // send time, so a revocation during the delay takes effect.
   const devicePublicKeys = deps.activeRecords().map((record) => record.devicePublicKey);
-  if (devicePublicKeys.length === 0) return;
+  if (devicePublicKeys.length === 0) return { targeted: 0, delivered: 0, failed: 0 };
 
   const response = await hostFetch(deps, API_ROUTES.pushSend, {
     devicePublicKeys,
@@ -143,4 +168,5 @@ export async function sendPush(
   if (result.failed > 0 || result.delivered === 0) {
     console.warn('remote-host: push was not delivered to every device', result);
   }
+  return { targeted: devicePublicKeys.length, delivered: result.delivered, failed: result.failed };
 }
