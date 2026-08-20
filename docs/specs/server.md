@@ -458,7 +458,14 @@ away.
   under the app-data dir in standalone, `SecretStorage` in VS Code — then opens
   and maintains `GET /ws/host`. `hostToken` is a bearer credential and never
   enters a webview realm. Enrollment is refused outright for a server outside
-  this build's allowlist (above), before the password leaves the machine.
+  this build's allowlist (above), before the password leaves the machine. A 200
+  that is not an enrollment fails the exchange: the response goes through the
+  same `isEnrollment` guard every *read* of an enrollment uses, and a body that
+  misses a field or sends one with the wrong type throws naming those fields
+  rather than minting a record with an `undefined` in the `ConnectionPolicy` the
+  Host authenticates passkeys against — one the store would reject on the next
+  read, un-enrolling the machine at the next launch. Source of truth:
+  `lib/src/remote/host/enrollment.ts`.
   **Order matters, and the store goes first.** The `hostToken` this exchange
   mints exists nowhere else and cannot be minted again from the same password
   exchange, so the save is awaited before any Host is stopped: a failed write
