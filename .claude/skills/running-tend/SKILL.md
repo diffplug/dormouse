@@ -38,7 +38,7 @@ gh api "repos/$GITHUB_REPOSITORY/pulls/<N>/comments" --paginate \
   --jq '.[] | {user: .user.login, path, line, body}'
 ```
 
-All three, not a subset — on #398 the two body endpoints return 1 comment and 0 reviews between them, while 7 findings sit inline. Check each one against the current code rather than assuming it carried over — the maintainer often takes some and not others. Say which ones you re-checked, so "nothing else surfaced" means the predecessor was read, not that it was skipped. (Observed on #398 → #416: three findings written up as #398 closed mid-review, one adopted by the maintainer, one silently merged to `main` (#420), one re-derived from scratch by nightly ten hours later (#418).)
+All three, not a subset — on #398 the body endpoints return 1 conversation comment and 2 review bodies between them, while a further 7 findings sit inline and appear in neither. Check each one against the current code rather than assuming it carried over — the maintainer often takes some and not others. Say which ones you re-checked, so "nothing else surfaced" means the predecessor was read, not that it was skipped. (Observed on #398 → #416: three findings written up as #398 closed mid-review, one adopted by the maintainer, one silently merged to `main` (#420), one re-derived from scratch by nightly ten hours later (#418).)
 
 ## Settled upstream rulings — don't re-file
 
