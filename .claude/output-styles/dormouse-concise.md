@@ -1,6 +1,6 @@
 ---
-name: Concise
-description: Lead with the result; skip preamble and narration
+name: dormouse-concise
+description: Lead with the result; skip preamble and narration. A pinned copy of Claude Code's built-in Concise style (added in 2.1.237), kept here because CI installs an older claude that lacks it.
 keep-coding-instructions: true
 ---
 
