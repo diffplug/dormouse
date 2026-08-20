@@ -51,8 +51,19 @@ export function createAskSurfaceProvider(
   const provider: HostSurfaceProvider = {
     async collectDirectory(): Promise<DirectoryEntry[]> {
       // Each answerer replies with its whole snapshot, so the results *are* the
-      // entries — no per-webview merging to do on this side.
-      return (await ask('directory', {})) as DirectoryEntry[];
+      // entries — with one exception: duplicated cold-restored windows can hold
+      // panes with identical ids, and two identical rows would make the phone's
+      // picker (keyed by surfaceId) a lottery over which window an attach
+      // reaches. Keep the first — answerers arrive local-tier-first, which is
+      // the same owner the mutating attach's read-only resolve probe selects,
+      // so the row shown is the surface attached.
+      const entries = (await ask('directory', {})) as DirectoryEntry[];
+      const seen = new Set<string>();
+      return entries.filter((entry) => {
+        if (seen.has(entry.surfaceId)) return false;
+        seen.add(entry.surfaceId);
+        return true;
+      });
     },
 
     watchDirectory(onChange) {

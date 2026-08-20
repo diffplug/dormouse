@@ -322,6 +322,33 @@ describe('host state store', () => {
     ]);
   });
 
+  it('forgets a failed keychain read instead of memoizing it', async () => {
+    // A locked or keyring-less keychain rejects `secrets.get`; that says
+    // nothing about what the store holds. A memoized rejection would leave an
+    // enrolled window silently Host-less until reload — `onDidChange` only
+    // fires on a write, so nothing else ever retries the read.
+    const { VsCodeHostStateStore } = await import('../src/remote-host-store');
+    const { context, store } = fakeContext();
+    const enrollment = {
+      serverUrl: 'https://relay.dormouse.sh',
+      hostId: 'host-1',
+      hostToken: 'token',
+      origin: 'https://relay.dormouse.sh',
+      rpId: 'relay.dormouse.sh',
+    };
+    store.secrets.set('dormouse.remote-host.enrollment', JSON.stringify(enrollment));
+    const workingGet = context.secrets.get;
+    context.secrets.get = async () => {
+      throw new Error('keychain is locked');
+    };
+
+    const target = new VsCodeHostStateStore(context);
+    await expect(target.loadEnrollment()).rejects.toThrow('keychain is locked');
+
+    context.secrets.get = workingGet;
+    expect(await target.loadEnrollment()).toEqual(enrollment);
+  });
+
   it('re-reads the enrollment after another window changed it', async () => {
     // The memo is a keychain round trip saved, but `SecretStorage` is shared by
     // every window of the extension: without invalidation a window that read it

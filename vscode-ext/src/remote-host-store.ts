@@ -67,7 +67,17 @@ export class VsCodeHostStateStore implements HostStateStore {
     // keychain round trip, and the activation probe and the service both want
     // the same answer. The memo is only safe because a write from any window
     // invalidates it — see the constructor.
-    this.#enrollment ??= this.#readEnrollment();
+    //
+    // A read that *failed* says nothing about what the keychain holds, so it is
+    // forgotten rather than memoized (the same fail-closed guard as
+    // `FileHostStateStore#read`). A locked or keyring-less keychain rejects
+    // here, and a memoized rejection would leave an enrolled window silently
+    // Host-less for its whole life — `onDidChange` only fires on a write, so
+    // nothing else would ever retry the read.
+    this.#enrollment ??= this.#readEnrollment().catch((error: unknown) => {
+      this.#enrollment = null;
+      throw error;
+    });
     return this.#enrollment;
   }
 
