@@ -61,8 +61,11 @@ const ENROLL_TIMEOUT_MS = 10_000;
 
 /**
  * `POST /api/host/enroll` with the setup password and map the response to an
- * enrollment. Throws with the server's status text on failure so the caller
- * (console hook / settings UI) can surface it.
+ * enrollment. Throws with the server's status text on failure — or with what the
+ * response was missing when it answered 200 with something that is not one — so
+ * the caller (console hook / settings UI) can surface it. What this returns has
+ * passed {@link isEnrollment}, so the mint site and every read agree on what an
+ * enrollment is.
  *
  * Persists nothing: the service that ran it decides where the credentials live
  * (`lib/src/host/remote/host-state-store.ts`), while the exchange itself is one
@@ -94,12 +97,48 @@ export async function performEnrollment(
     const detail = await response.text().catch(() => '');
     throw new Error(`host enroll failed (${response.status})${detail ? `: ${detail}` : ''}`);
   }
-  const body = (await response.json()) as HostEnrollResponse;
-  return {
+  // The response body is untrusted like any other, so it goes through the same
+  // guard every *read* of an enrollment uses. Without it a server that answers
+  // 200 with a field missing — a version skew, a reverse proxy that rewrote the
+  // body — mints an enrollment that is accepted here and rejected by
+  // `isEnrollment` on the next read: the Host runs for this session with an
+  // `undefined` in the `ConnectionPolicy` it authenticates passkeys against, and
+  // the machine silently un-enrolls itself at the next launch with nothing in
+  // the log to explain it. Failing the exchange instead keeps the old Host
+  // running and names what the server got wrong.
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch (error) {
+    throw new Error(`host enroll failed: the server did not answer JSON (${errorMessage(error)})`);
+  }
+  const enrolled = body as Partial<HostEnrollResponse> | null;
+  const enrollment = {
     serverUrl: base,
-    hostId: body.hostId,
-    hostToken: body.hostToken,
-    origin: body.origin,
-    rpId: body.rpId,
+    hostId: enrolled?.hostId,
+    hostToken: enrolled?.hostToken,
+    origin: enrolled?.origin,
+    rpId: enrolled?.rpId,
   };
+  if (!isEnrollment(enrollment)) {
+    throw new Error(
+      `host enroll failed: the server's response is missing or invalid: ${missingEnrollmentFields(enrollment).join(', ')}`,
+    );
+  }
+  return enrollment;
+}
+
+/**
+ * Which `HostEnrollResponse` fields the server left out or sent with the wrong
+ * type, for the error above. The list mirrors {@link isEnrollment} minus
+ * `serverUrl`, which is set locally and can never be the one at fault.
+ */
+function missingEnrollmentFields(enrollment: Record<string, unknown>): string[] {
+  return (['hostId', 'hostToken', 'origin', 'rpId'] as const).filter(
+    (field) => typeof enrollment[field] !== 'string',
+  );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
