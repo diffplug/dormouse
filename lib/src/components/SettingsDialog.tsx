@@ -13,6 +13,7 @@ import { ThemePicker } from './ThemePicker';
 import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
 import { RemoteControlSection } from './RemoteControlSection';
+import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
 import { getPlatform } from '../lib/platform';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
 import {
@@ -173,6 +174,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         delayMs={settings.speakDelayMs}
         onToggle={(speakEnabled) => updateAlertSettings({ speakEnabled })}
         onCommitDelay={(speakDelayMs) => updateAlertSettings({ speakDelayMs })}
+        action={<SpeakTestButton />}
       />
 
       <AlarmSinkSection
@@ -182,6 +184,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         delayMs={settings.pushDelayMs}
         onToggle={(pushEnabled) => updateAlertSettings({ pushEnabled })}
         onCommitDelay={(pushDelayMs) => updateAlertSettings({ pushDelayMs })}
+        action={<PushTestButton />}
       >
         {describePushTargets(push)}
       </AlarmSinkSection>
@@ -207,6 +210,7 @@ function AlarmSinkSection({
   onToggle,
   onCommitDelay,
   children,
+  action,
 }: {
   switchLabel: string;
   delayLabel: string;
@@ -215,20 +219,30 @@ function AlarmSinkSection({
   onToggle: (next: boolean) => void;
   onCommitDelay: (ms: number) => void;
   children?: React.ReactNode;
+  /**
+   * A "try it now" control. Rendered *outside* the dimming below, and never
+   * disabled by the switch: checking that the speakers work — or that the phone
+   * buzzes — is most useful before committing to the alarm, and an alarm you
+   * cannot observe until 3am is one you cannot trust.
+   */
+  action?: React.ReactNode;
 }) {
   return (
     <section className={SECTION}>
       <SwitchRow label={switchLabel} on={enabled} onChange={onToggle} />
-      <div className={`mt-2 ${UNDER_SWITCH_INDENT} ${enabled ? '' : 'opacity-50'}`}>
-        <SecondsField
-          label={delayLabel}
-          valueMs={delayMs}
-          disabled={!enabled}
-          onCommit={onCommitDelay}
-        />
-        {children ? (
-          <div className="mt-1 text-sm leading-relaxed text-muted">{children}</div>
-        ) : null}
+      <div className={UNDER_SWITCH_INDENT}>
+        <div className={`mt-2 ${enabled ? '' : 'opacity-50'}`}>
+          <SecondsField
+            label={delayLabel}
+            valueMs={delayMs}
+            disabled={!enabled}
+            onCommit={onCommitDelay}
+          />
+          {children ? (
+            <div className="mt-1 text-sm leading-relaxed text-muted">{children}</div>
+          ) : null}
+        </div>
+        {action ? <div className="mt-2">{action}</div> : null}
       </div>
     </section>
   );

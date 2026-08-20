@@ -171,6 +171,39 @@ export async function clearRemoteHostEnrollment(): Promise<void> {
   await refreshRemoteHostStatus();
 }
 
+/**
+ * What "Send test push" reports back.
+ *
+ * `targeted: 0` is the ordinary answer on a freshly enrolled machine — the Host
+ * is fine, no phone has enabled alerts yet — so it is a distinct outcome rather
+ * than an error. Anything the user could act on differently deserves its own
+ * answer, and "no devices" and "the server refused" are not the same problem.
+ */
+export interface PushTestOutcome {
+  targeted: number;
+  delivered: number;
+  failed: number;
+}
+
+/**
+ * Ask the Host service to send a test push and report what happened.
+ *
+ * Rejects when there is no service, no enrollment, or the server refused —
+ * unlike the ring path, which swallows everything so a failed push can never
+ * break an alarm (`docs/specs/server.md` -> Web Push). A test button is the one
+ * caller that needs the failure.
+ *
+ * Lives here rather than beside the ring watcher in `alert-push.ts`: that
+ * module is deliberately inside the lazily-imported `RemotePairingModalHost`
+ * chunk, and importing it from the Settings dialog would pull the whole
+ * remote-host stack into the main bundle on every host.
+ */
+export async function sendTestPush(): Promise<PushTestOutcome> {
+  const active = link();
+  if (!active) throw new Error('This build has no remote Host service.');
+  return (await active.command('pushTest')) as PushTestOutcome;
+}
+
 function describeError(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === 'string' && error) return error;
