@@ -87,12 +87,23 @@ there, and you may have wanted `--until exit`".
 
 On resolution `await` prints the Surface's screen and the `cause`, then exits 0.
 
-Resolution performs **the attending semantics without the attention**: it clears
-any active ring and sets `todo = true`, but does not set `attentionSessionId` — a
-program waiting on a peer is not a human looking at it. The Surface is left
-carrying a TODO that the caller owns and clears with a follow-up
-`dor send … --key enter`, which `docs/specs/alert.md` already defines as
-human-equivalent input.
+Resolution consumes the ring it resolved on and **touches nothing else**: no
+TODO is set, no existing TODO is cleared, and `attentionSessionId` is not set — a
+program waiting on a peer is not a human looking at it.
+
+Setting a TODO was considered and rejected. TODO means *a human owes this pane
+attention*, and after a successful await no human owes anything: a program asked
+to be told, was told, and acted. It would also leak. The caller only clears a
+TODO if it happens to send a follow-up, so the last await of every orchestration
+strands a marker for an event that was fully handled, which the human then clears
+by hand — worse than never setting it. And because TODO propagates into the
+Workspace union status, an orchestration awaiting across several panes lights up
+the whole Workspace as needing attention, degrading exactly the at-a-glance
+signal R4 sets out to protect.
+
+Not clearing a *pre-existing* TODO matters for the same reason in reverse: one
+left by an unrelated earlier event is still owed to the human, and an await
+resolving on a different signal has no business wiping it.
 
 ### Absorption
 
@@ -100,10 +111,10 @@ R4, stated precisely: **absorb the summons, keep the receipt.**
 
 - **Absorbed:** the bell ring, the spoken alarm, the phone push. These are all
   ways of summoning a human who is not needed, because a program is already on it.
-- **Kept:** the TODO. The Pane keeps a quiet marker saying "something completed
-  here and a program took it". Absorption with no trace is a debugging
-  nightmare — when an orchestration goes wrong, the human needs to find the pane
-  where it went wrong.
+- **Not substituted:** no TODO, and no quieter marker standing in for the ring.
+  A receipt the human has to clear by hand is the same noise in a smaller font.
+  Forensics after a failure come from the pane's own scrollback and `dor list`,
+  which cost the human nothing.
 - **A failed await absorbs nothing.** If the await times out, its socket drops,
   or the caller dies, the completion must ring normally. Otherwise a crashed
   orchestration silently eats the one signal that would have told the human the
@@ -167,6 +178,16 @@ Exit codes — `dor` today uses only 0 and 1, so this widening is a proposal:
 | 2 | Timed out. |
 | 3 | The Surface died before completing — the PTY exited, so there is no screen left to print. |
 
+### Output and errors
+
+Failures follow `dor`'s existing convention (`dor/src/commands/shared.ts`):
+an `Error: <message>` line on **stderr**, empty stdout, non-zero exit. That covers
+usage errors, the timeout, and Surface death, so a caller can distinguish "it did
+not happen" from any successful resolution without parsing stdout.
+
+**Open:** how `cause` reaches a caller in text mode, which depends on whether
+`await` prints the screen at all — see [D4](#d4-does-await-print-the-screen-open).
+
 ## Behavior
 
 | Situation | Outcome |
@@ -176,7 +197,7 @@ Exit codes — `dor` today uses only 0 and 1, so this widening is a proposal:
 | `--until quiet`, agent already delivered its final response | No command running, no output within the grace window → `cause: idle`, exit 0. |
 | `--until quiet`, silent build running | A command *is* running, so the grace window does not apply. Parks, resolves `cause: exit` when it exits. |
 | `--until exit`, command hangs on an interactive prompt | Blocks to `--timeout`, exit 2. `--until quiet` is the answer for callers who want to be woken when a build stalls. |
-| Peer emits `OSC 9` "needs input" | `--until quiet` resolves `cause: bell`. The await claims an explicitly human-directed request on the human's behalf; the TODO receipt is what keeps that honest. `--until exit` ignores it. |
+| Peer emits `OSC 9` "needs input" | `--until quiet` resolves `cause: bell`. The await claims an explicitly human-directed request on the human's behalf, on the grounds that the caller is the one positioned to answer it. `--until exit` ignores it. |
 | PTY exits / Surface killed | Exits 3. A command-exit ring, if armed, fires just before the PTY event, so a peer that rings on completion still resolves normally first. |
 | `--timeout` expires | Exits 2. Absorbs nothing. |
 | `dor` client disconnects | The host cancels the parked request and disarms whatever it armed. Absorbs nothing. |
@@ -220,8 +241,8 @@ permissive value.
 
 ### D3: absorption scope — open
 
-Settled: absorb the summons, keep the receipt; a failed await absorbs nothing.
-Still open:
+Settled: absorb the summons and leave no substitute marker (see Resolution); a
+failed await absorbs nothing. Still open:
 
 - Should `--no-absorb` exist, for a caller that wants to observe without
   claiming? Probably yes eventually; not in the first cut.
@@ -230,6 +251,19 @@ Still open:
   have. The answer is that absorption is safe precisely because a failed or
   timed-out await un-absorbs — the human still gets the phone buzz when the
   orchestration actually stalls.
+
+### D4: does `await` print the screen? — open
+
+Today's draft bundles `dor read`'s output shape into `await`. The alternative is
+that `await` prints only its `cause` and the caller composes:
+`dor await surface:5 --until quiet && dor read surface:5`.
+
+Bundling is more ergonomic for the overwhelmingly common case ("wait, then see
+what it said") and captures the screen *at the moment of resolution*. Splitting
+is more UNIX, removes the need to mirror every `read` flag onto `await` forever,
+lets a caller that only needs the fact of completion skip 40 lines of terminal it
+would discard, and makes `cause` the entire stdout — which resolves the text-mode
+question above for free.
 
 ## Dissolution
 
