@@ -5,7 +5,10 @@ vi.mock('../../lib/platform', () => ({
 }));
 
 import type { HostAclRecord } from 'server-lib-common';
-import { refreshPushDevices, startAlertPush, toPushText } from './alert-push';
+import { commitPushDevices, invalidatePushDeviceRefreshes, watchPushRings } from './alert-push';
+// Delivery — the Server calls, the recipient rule, the title bounds — runs in
+// the Host's process, so it lives beside neither webview nor sidecar.
+import { loadPushDevices, sendPush, toPushText, type AlertPushDeps } from './push-delivery';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from '../../lib/alert-settings';
 import { getPushDevices, resetPushDevices } from '../../lib/push-devices';
 import { clearPrimedActivity, primeActivity } from '../../lib/session-activity-store';
@@ -55,6 +58,26 @@ function fakeFetch(): typeof globalThis.fetch {
 
 function deps() {
   return { enrollment: ENROLLMENT, activeRecords: () => records, fetch: fakeFetch() };
+}
+
+/**
+ * The two shipped halves joined: the webview watches for rings and names the
+ * Session (`watchPushRings`, in `activation.ts`), and the Host delivers with
+ * its own ACL and swallows failures so a dead push never breaks the alert path
+ * (`RemoteHostService.#push`). Wired here because they only meet across a
+ * process boundary.
+ */
+function startPush(pushDeps: AlertPushDeps): () => void {
+  return watchPushRings((id, title) => {
+    void sendPush(pushDeps, id, title).catch((error: unknown) => {
+      console.warn('remote-host: push notification failed', error);
+    });
+  });
+}
+
+/** As the settings dialog asks for it, over the bridge (`activation.ts`). */
+function refreshPushDevices(pushDeps: AlertPushDeps): Promise<void> {
+  return commitPushDevices(() => loadPushDevices(pushDeps));
 }
 
 function ring(id: string): void {
@@ -141,7 +164,7 @@ describe('toPushText', () => {
 
 describe('alarm push', () => {
   it('sends the pane label after the delay, tagged per Session', async () => {
-    stop = startAlertPush(deps());
+    stop = startPush(deps());
     ring('pty-1');
 
     await vi.advanceTimersByTimeAsync(PUSH_DELAY_MS - 1);
@@ -157,7 +180,7 @@ describe('alarm push', () => {
 
   it('sends nothing while pushEnabled is off', async () => {
     applyAlertSettingsFromHost({ ...DEFAULT_ALERT_SETTINGS, pushEnabled: false });
-    stop = startAlertPush(deps());
+    stop = startPush(deps());
     ring('pty-1');
 
     await vi.advanceTimersByTimeAsync(60_000);
@@ -170,7 +193,7 @@ describe('alarm push', () => {
       pushEnabled: true,
       pushDelayMs: 5_000,
     });
-    stop = startAlertPush(deps());
+    stop = startPush(deps());
     ring('pty-1');
 
     await vi.advanceTimersByTimeAsync(5_000);
@@ -183,7 +206,7 @@ describe('alarm push', () => {
     // of the request because the ACL, not the server's list, chooses targets.
     subscribed = ['device-phone', 'device-revoked'];
     records = [aclRecord('device-phone', 'iPhone Safari')];
-    stop = startAlertPush(deps());
+    stop = startPush(deps());
     ring('pty-1');
 
     await vi.advanceTimersByTimeAsync(PUSH_DELAY_MS);
@@ -194,7 +217,7 @@ describe('alarm push', () => {
     // The ACL is local, and the Server intersects the names it is given with
     // its own subscriptions anyway — so asking it first would only add a round
     // trip to the one path whose whole value is timeliness.
-    stop = startAlertPush(deps());
+    stop = startPush(deps());
     ring('pty-1');
 
     await vi.advanceTimersByTimeAsync(PUSH_DELAY_MS);
@@ -202,11 +225,20 @@ describe('alarm push', () => {
     expect(requests[0]!.url).toContain('/api/push/send');
   });
 
+  it('refuses redirects instead of sending Host data outside the allowlist', async () => {
+    await loadPushDevices(deps());
+    expect(requests[0]!.init?.redirect).toBe('error');
+
+    requests.length = 0;
+    await sendPush(deps(), 'pty-1', 'build');
+    expect(requests[0]!.init?.redirect).toBe('error');
+  });
+
   it('warns when the server accepted the send but no phone got it', async () => {
     // The send route answers 200 with counts even when every delivery failed —
     // a rotated VAPID key or a wedged push service must not be silent.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    stop = startAlertPush({
+    stop = startPush({
       enrollment: ENROLLMENT,
       activeRecords: () => records,
       fetch: (async () => ({
@@ -225,7 +257,7 @@ describe('alarm push', () => {
     // A 401 from a revoked host token would otherwise resolve normally and
     // leave push permanently broken with nothing in the console.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    stop = startAlertPush({
+    stop = startPush({
       enrollment: ENROLLMENT,
       activeRecords: () => records,
       fetch: (async () => ({ ok: false, status: 401 })) as unknown as typeof globalThis.fetch,
@@ -239,7 +271,7 @@ describe('alarm push', () => {
 
   it('sends nothing when no subscribed device is still authorized', async () => {
     records = [];
-    stop = startAlertPush(deps());
+    stop = startPush(deps());
     ring('pty-1');
 
     await vi.advanceTimersByTimeAsync(PUSH_DELAY_MS);
@@ -247,7 +279,7 @@ describe('alarm push', () => {
   });
 
   it('re-reads the target list at send time, not at schedule time', async () => {
-    stop = startAlertPush(deps());
+    stop = startPush(deps());
     ring('pty-1');
     // Revoked during the delay.
     records = [];
@@ -265,7 +297,7 @@ describe('alarm push', () => {
       }) as unknown as typeof globalThis.fetch,
     };
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    stop = startAlertPush(failing);
+    stop = startPush(failing);
     ring('pty-1');
 
     await expect(vi.advanceTimersByTimeAsync(60_000)).resolves.not.toThrow();
@@ -301,26 +333,28 @@ describe('push device list', () => {
     expect(getPushDevices()).toEqual({ status: 'error', devices: [] });
   });
 
-  it('discards a refresh that resolves after the Host stopped', async () => {
-    // Without the generation fence, the resolving fetch would overwrite the
-    // reset's `no-host` with a `ready` list naming devices nothing can reach —
-    // and since the reset cleared the refresher, it would stick all session.
-    let resolveFetch: (response: Response) => void = () => {};
-    const pending = refreshPushDevices({
+  it('discards a refresh that lands after the Host went away', async () => {
+    // The enrolled gate disarms on `clearEnrollment` and resets the store to
+    // `no-host`. A request already on the wire resolves afterwards and would
+    // otherwise repopulate the dialog with phones there is nothing to push to.
+    let land: (response: Response) => void = () => {};
+    const inFlight = refreshPushDevices({
       enrollment: ENROLLMENT,
       activeRecords: () => records,
       fetch: (() =>
         new Promise((resolve) => {
-          resolveFetch = resolve;
+          land = resolve;
         })) as unknown as typeof globalThis.fetch,
     });
 
+    invalidatePushDeviceRefreshes();
     resetPushDevices();
-    resolveFetch({
+
+    land({
       ok: true,
       json: async () => ({ devices: [{ devicePublicKey: 'device-phone', subscribedAt: 1 }] }),
     } as Response);
-    await pending;
+    await inFlight;
 
     expect(getPushDevices()).toEqual({ status: 'no-host', devices: [] });
   });

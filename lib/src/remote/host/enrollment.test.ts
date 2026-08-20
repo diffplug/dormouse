@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  ENROLLMENT_KEY,
-  clearEnrollment,
-  enrollHost,
-  getEnrollment,
-} from './enrollment';
+import { clearEnrollment, getEnrollment, performEnrollment } from './enrollment';
+import { ENROLLMENT_KEY } from './store';
 
 function stubLocalStorage(): Map<string, string> {
   const store = new Map<string, string>();
@@ -19,7 +15,7 @@ function stubLocalStorage(): Map<string, string> {
 describe('remote-host enrollment', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it('posts to /api/host/enroll, normalizes the url, and persists', async () => {
+  it('posts to /api/host/enroll, normalizes the url, and persists nothing', async () => {
     const store = stubLocalStorage();
     const fetchMock = vi.fn(async () =>
       new Response(
@@ -35,11 +31,11 @@ describe('remote-host enrollment', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     // Trailing slash should be stripped before appending the route.
-    const enrollment = await enrollHost('https://dormouse.example/', 'hunter2', 'My Laptop');
+    const enrollment = await performEnrollment('https://dormouse.example/', 'hunter2', 'My Laptop');
 
     expect(fetchMock).toHaveBeenCalledWith(
       'https://dormouse.example/api/host/enroll',
-      expect.objectContaining({ method: 'POST' }),
+      expect.objectContaining({ method: 'POST', redirect: 'error' }),
     );
     const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
     expect(body).toEqual({ password: 'hunter2', label: 'My Laptop' });
@@ -51,17 +47,49 @@ describe('remote-host enrollment', () => {
       origin: 'https://dormouse.example',
       rpId: 'dormouse.example',
     });
-    expect(JSON.parse(store.get(ENROLLMENT_KEY)!)).toEqual(enrollment);
-    expect(getEnrollment()).toEqual(enrollment);
+    // The service that asked decides where the credentials live; the exchange
+    // itself writes nowhere.
+    expect(store.size).toBe(0);
+  });
+
+  it('gives up on a relay that accepts the connection and never answers', async () => {
+    // This exchange runs on the Host service's lifecycle chain, where every
+    // start/stop command queues behind it, so a black-holed relay must not be
+    // allowed to wedge them for the platform's default socket timeout.
+    stubLocalStorage();
+    const controller = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
+    let seen: AbortSignal | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        seen = init.signal ?? undefined;
+        return new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        });
+      }),
+    );
+
+    const pending = performEnrollment('https://dormouse.example', 'hunter2', 'x');
+    // Below the webview's own 15 s command budget, so the console that asked
+    // sees the real error rather than a bare timeout.
+    expect(timeout).toHaveBeenCalledWith(10_000);
+    expect(seen).toBe(controller.signal);
+
+    controller.abort();
+    await expect(pending).rejects.toThrow(/abort/i);
+    timeout.mockRestore();
   });
 
   it('throws on a non-ok response', async () => {
     stubLocalStorage();
     vi.stubGlobal('fetch', vi.fn(async () => new Response('bad password', { status: 401 })));
-    await expect(enrollHost('https://dormouse.example', 'wrong', 'x')).rejects.toThrow(/401/);
+    await expect(performEnrollment('https://dormouse.example', 'wrong', 'x')).rejects.toThrow(/401/);
   });
 
   it('clears and rejects malformed persisted enrollment', () => {
+    // What a webview that enrolled before the service existed still holds, and
+    // hands over once (`activation.ts` → adoption).
     const store = stubLocalStorage();
     expect(getEnrollment()).toBeNull();
 

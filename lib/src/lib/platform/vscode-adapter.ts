@@ -1,5 +1,6 @@
-import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo } from './types';
+import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo, RemoteHostLink } from './types';
 import { OPEN_PORT_TIMEOUT_MS } from './types';
+import { createRemoteHostLinkClient } from '../../host/remote/link-client';
 import type { AlertSettings } from '../alert-settings';
 import { readInjectedRecoveryCommands } from '../vscode-recovery-global';
 import { setDefaultShellOpts } from '../shell-defaults';
@@ -36,6 +37,23 @@ export class VSCodeAdapter implements PlatformAdapter {
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   private watchedCommandHandlers = new Set<(names: string[]) => void>();
   private alertSettingsHandlers = new Set<(settings: AlertSettings) => void>();
+  // --- Remote host bridge (docs/specs/remote-api.md) ---
+  //
+  // The Host lives in the extension host, next to the PTYs, in whichever VS
+  // Code window won the bind-as-lease. This webview forwards its console
+  // commands, answers what only it knows (pane names, xterm sizes), and mirrors
+  // the pairing queue. Everything but the three postMessage shapes below is the
+  // shared client's (lib/src/host/remote/link-client.ts).
+  private readonly remoteHostClient = createRemoteHostLinkClient({
+    sendCommand: (payload) => this.vscode.postMessage({ type: 'remoteHost:command', payload }),
+    // An ask arrives as `peer:ask` and is answered on the same pair, which the
+    // extension host's fan-out settles by `requestId`.
+    answerAsk: (requestId, results) =>
+      this.vscode.postMessage({ type: 'peer:answer', requestId, results }),
+    notify: () => this.vscode.postMessage({ type: 'peer:notify' }),
+  });
+
+  readonly remoteHost: RemoteHostLink = this.remoteHostClient.link;
 
   constructor() {
     this.vscode = acquireVsCodeApi();
@@ -157,6 +175,12 @@ export class VSCodeAdapter implements PlatformAdapter {
             respond,
           },
         }));
+      } else if (msg.type === 'peer:ask') {
+        this.remoteHostClient.onAsk(msg.requestId, msg.op, msg.params);
+      } else if (msg.type === 'remoteHost:result') {
+        this.remoteHostClient.onResult(msg.payload);
+      } else if (msg.type === 'remoteHost:event') {
+        this.remoteHostClient.onEvent(msg.payload);
       }
     });
   }
@@ -197,7 +221,9 @@ export class VSCodeAdapter implements PlatformAdapter {
   }
 
   shutdown(): void {
-    // No-op — the extension host handles cleanup
+    // The extension host handles PTY cleanup, but nothing there will answer a
+    // command this webview is still holding once it goes away.
+    this.remoteHostClient.dispose();
   }
 
   async getAvailableShells(): Promise<{ name: string; path: string; args?: string[] }[]> {

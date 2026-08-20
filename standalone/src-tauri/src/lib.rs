@@ -417,6 +417,19 @@ fn pty_request_init(state: tauri::State<'_, SidecarState>) {
     send_to_sidecar(&state, msg.to_string());
 }
 
+// One passthrough for the whole remote-host bridge: the webview and the sidecar
+// service share a contract (lib/src/host/remote/service-protocol.ts) that Rust
+// has no reason to know, so the payload rides through opaquely. Replies come
+// back on the sidecar's own stdout events, not from this invoke.
+#[tauri::command]
+fn remote_host_command(state: tauri::State<'_, SidecarState>, payload: JsonValue) {
+    let msg = serde_json::json!({
+        "event": "remoteHost:command",
+        "data": payload,
+    });
+    send_to_sidecar(&state, msg.to_string());
+}
+
 #[tauri::command]
 fn dor_control_response(state: tauri::State<'_, SidecarState>, response: DorControlResponse) {
     let msg = serde_json::json!({
@@ -1133,6 +1146,26 @@ fn resolve_dor_cli_paths(sidecar_path: &Path, manifest_dir: &Path) -> DorCliPath
     dor_cli_paths_from_root(manifest_dir.join("..").join("..").join("dor"))
 }
 
+// Where the sidecar's remote Host persists its enrollment (a bearer credential)
+// and its ACL, as one 0600 file it writes itself
+// (lib/src/host/remote/host-state-store.ts). Created here so a first launch
+// hands the sidecar a directory that exists; if it can't be made, the sidecar is
+// told nothing and runs without persistence rather than not at all.
+fn remote_host_state_dir(app: &AppHandle) -> Option<String> {
+    let dir = match app.path().app_data_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            append_log(format!("[sidecar] app_data_dir unavailable: {e}"));
+            return None;
+        }
+    };
+    if let Err(e) = create_dir_all(&dir) {
+        append_log(format!("[sidecar] create state dir: {e}"));
+        return None;
+    }
+    Some(dir.to_string_lossy().into_owned())
+}
+
 fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sidecar_path = resolve_sidecar_path(app.path().resource_dir().ok(), manifest_dir);
@@ -1141,6 +1174,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     let dor_node_path = resolve_dor_node_path(&node_path, app);
     let dor_control_socket = dor_control_socket_path();
     let dor_control_token = dor_control_token();
+    let state_dir = remote_host_state_dir(app);
     append_log(format!(
         "[sidecar] resolved script: {}",
         sidecar_path.display()
@@ -1156,6 +1190,10 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
         dor_cli_paths.entrypoint.display()
     ));
     append_log(format!("[dor] control socket: {dor_control_socket}"));
+    append_log(format!(
+        "[remote-host] state dir: {}",
+        state_dir.as_deref().unwrap_or("(none)")
+    ));
 
     let mut wrap = CommandWrap::with_new(&node_path, |c| {
         c.arg(&sidecar_path)
@@ -1165,6 +1203,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
             .env("DORMOUSE_CLI_JS", &dor_cli_paths.entrypoint)
             .env("DORMOUSE_CONTROL_SOCKET", &dor_control_socket)
             .env("DORMOUSE_CONTROL_TOKEN", &dor_control_token)
+            .env("DORMOUSE_STATE_DIR", state_dir.as_deref().unwrap_or(""))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -1411,6 +1450,7 @@ pub fn run() {
             iframe_create_proxy_url,
             pty_request_init,
             dor_control_response,
+            remote_host_command,
             kill_sidecar_now,
             quit_ack,
             quit_progress,

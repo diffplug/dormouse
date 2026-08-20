@@ -33,7 +33,8 @@ UI lives in `lib`/`standalone`.
 | `DORMOUSE_SETUP_PASSWORD` | Required. Gates account creation and host enrollment.      |
 | `DORMOUSE_ORIGIN`         | External origin, e.g. `https://dormouse.tailnet.ts.net`. Source of the WebAuthn `rpId`/`origin` and the Host's `ConnectionPolicy`. Defaults to `http://localhost:<port>` for dev. |
 | `DORMOUSE_STATE_DIR`      | Where the JSON state files live. Default `./data`.         |
-| `PORT`                    | Default 3000.                                              |
+| `PORT`                    | Default 3000. Blank is unset — `Number('')` is 0, which would ask the OS for an ephemeral port and move the server out from under whatever proxy is pointed at it. An explicit `PORT=0` is a `ConfigError` for the same reason: nothing can be pointed at a port that changes every restart. |
+| `DORMOUSE_BIND_HOST`      | Interface to listen on. Unset binds every interface (what a container wants); set `127.0.0.1` when a TLS proxy on the same machine is the front door. |
 | `DORMOUSE_VAPID_PUBLIC_KEY` / `DORMOUSE_VAPID_PRIVATE_KEY` | Web Push signing keypair. Set both or neither. At startup the Server decodes both, derives the P-256 public point from the private key, and exits on a missing, malformed, or mismatched pair. Unset, the server mints a pair on first boot and persists it to `vapid.json`. |
 | `DORMOUSE_VAPID_SUBJECT`  | `mailto:`/`https:` contact for push-service operators (RFC 8292). Defaults to `DORMOUSE_ORIGIN` when that origin is https and not loopback; otherwise there is no default and push stays off. The Server parses and validates it at startup and exits on an invalid value — including a loopback contact, which Apple rejects. |
 
@@ -42,24 +43,97 @@ real phone, put the server behind TLS (`tailscale serve` is the intended
 selfhost path, any reverse proxy works). The server itself always speaks
 plain HTTP.
 
+Because the server always speaks plain HTTP, the listen interface is a security
+boundary whenever the TLS proxy is local: `tailscale serve` reaches the app over
+loopback, so leaving the socket on every interface would also publish the
+plaintext port to the LAN and to the tailnet itself. `DORMOUSE_BIND_HOST` exists
+to close that, and the selfhost install sets it. The default stays unbound so a
+container — where the namespace is the boundary and the port is published
+explicitly — keeps working unchanged.
+
+Source of truth: `server/src/config.ts` (`readConfig`) maps the environment to
+the entrypoint's config and is unit-tested in `server/test/config.test.mjs`;
+`server/test/bind-host.test.mjs` spawns the real entrypoint and asserts the
+plaintext port is unreachable off-loopback when `DORMOUSE_BIND_HOST=127.0.0.1`.
+`readConfig` also reads the `DORMOUSE_VAPID_*` vars — the both-or-neither
+keypair rule as a `ConfigError`, and the subject with its origin-derived
+fallback — because that part is a pure mapping like the rest. What stays in
+`server/src/index.ts` is only the half that touches disk: with no keypair
+configured it mints one and persists `vapid.json`, then validates the pair and
+the subject before building the app.
+
 `DORMOUSE_ORIGIN` is parsed once and normalized with `URL.origin`; WebAuthn
 clientData checks, passkey assertion verification, and the Host enrollment
 policy all use that normalized origin.
 
-## Host webview CSP (self-host builds)
+## Where a Host may reach a relay server (self-host builds)
 
-The standalone Host is a Tauri app, and its webview `connect-src` bounds where
-the Host can reach a relay server. The shipped binary is scoped to the SaaS
-origin only (`https://*.dormouse.sh wss://*.dormouse.sh`, plus localhost for
-dev), so a compromised webview cannot exfiltrate to an arbitrary host. A
-self-host server on a different origin is therefore reached only by a custom
-build: set `DORMOUSE_REMOTE_CONNECT_SRC` when building
-(`pnpm --filter dormouse-standalone tauri build`) to the CSP sources for your
-server, e.g. `https://dormouse.example.com wss://dormouse.example.com` (or a
-tailnet wildcard `https://*.ts.net wss://*.ts.net`). It replaces the default
-SaaS sources; localhost and the rest of the policy are untouched. The default
-is deliberately not internet-wide — widening it is an explicit, per-build
-opt-in.
+> Code comments and older specs call this section "Host webview CSP", from when
+> the allowlist was a webview CSP directive.
+
+Neither Host renders the relay socket in a webview any more: standalone's runs
+in the Node sidecar and VS Code's in the extension host, so no CSP fences either
+of them. The same CSP-shaped source list is therefore **baked into the Node
+bundle** and enforced there — one syntax, one build-time variable
+(`DORMOUSE_REMOTE_CONNECT_SRC`), whichever process ends up holding the socket.
+The webview CSPs carry no relay sources at all (`docs/specs/vscode.md` → "CSP
+policy"; `standalone/scripts/tauri-conf.test.mjs` asserts the standalone one).
+
+Both bundles default to the SaaS origin only and take the same override:
+
+```sh
+DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:standalone
+DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:vscode
+```
+
+`scripts/csp-defaults.mjs` holds the one definition of the default and the
+override rule; `standalone/scripts/build-sidecar-proxy.mjs` and
+`vscode-ext/scripts/esbuild.mjs` each esbuild-`define` it into their bundle, and
+`assertConnectSrcBaked` fails the build if the define did not reach it — a lost
+define compiles fine and would only show up as a Host silently using the shipped
+default instead of the selfhoster's origins. `bakedConnectSrc()` in
+`lib/src/host/remote/connect-src.ts` is the single place the value is read.
+
+`resolveRemoteConnectSrc` also **fails the build on an override the matcher
+could never read** — a trailing slash, a path, a bare host with no scheme, a
+scheme outside `http`/`https`/`ws`/`wss`, or a numeric port outside 1–65535.
+Numeric ports are canonicalized the same way as `URL` (so leading zeroes do not
+turn a valid source into a silent miss). The grammar is one regex duplicated
+into the build script, since an `.mjs` build script cannot import TypeScript;
+`connect-src.test.ts` asserts the two pattern strings are identical, the same
+way it pins the two copies of the default.
+
+**Enforcement is `originAllowedByConnectSrc`, at two points:** the service
+refuses `enroll` for an origin outside the list — before the setup password
+leaves the machine — and refuses to *start* from a persisted enrollment naming
+one, staying idle with a warning rather than connecting (a binary downgraded
+from a custom build, or a server that moved). Matching is deliberately narrower
+than a browser's: `https`/`wss` are one scheme class and `http`/`ws` the other,
+host matches exactly or by a leading `*.` wildcard covering any depth of
+sub-domain but never the bare domain, ports must match unless the source says
+`*`, and anything unparseable fails closed. Enrollment and Host-authenticated
+push fetches use `redirect: 'error'`: unlike the former webview CSP, a Node
+process does not re-check a redirect target, so following one could carry the
+setup password, Host bearer token, or notification metadata outside the baked
+allowlist.
+
+The shipped binary is scoped to the SaaS origin only
+(`https://*.dormouse.sh wss://*.dormouse.sh`). A self-host server on a different
+origin is therefore reached only by a custom build: set
+`DORMOUSE_REMOTE_CONNECT_SRC` when building (e.g.
+`pnpm --filter dormouse-standalone tauri build`) to the sources for your server,
+such as `https://dormouse.example.com wss://dormouse.example.com` or a tailnet
+wildcard `https://*.ts.net wss://*.ts.net`. It **replaces** the default SaaS
+sources rather than adding to them. The default is deliberately not
+internet-wide — widening it is an explicit, per-build opt-in.
+
+The default carries **no localhost entry**, and `http`/`ws` are a different
+scheme class from `https`/`wss`, so a Host built with the default refuses to
+enroll against a plaintext `http://localhost:3000` dev server — see
+"Running it" for the override a local loop needs. (This is narrower than the old
+webview CSP, which allowed localhost for the app's own loopback proxies; that
+allowance is still in the webview CSP, where it is about the agent-browser and
+iframe proxies rather than about relays.)
 
 Reserved: the `https://*.dormouse.sh wss://*.dormouse.sh` entries are
 *wildcards* on purpose. The BYOT posture (`## Future`, Scope: saas-multitenant)
@@ -82,8 +156,9 @@ $DORMOUSE_STATE_DIR/
 ```
 
 That is the entire persistent state. The Host's ACL is not here — it lives on
-the Host, in webview `localStorage` (`lib/src/lib/local-json-store.ts`),
-which is the whole point of the security model.
+the Host, in the process that owns the PTYs
+(`lib/src/host/remote/host-state-store.ts`), which is the whole point of the
+security model.
 
 `push-subscriptions.json` is the one store that deletes rather than appends: a
 push service reports a dead subscription with 404/410, and a browser that
@@ -286,7 +361,7 @@ sessions are cleared, and the old socket is closed with
 `WS_CLOSE_HOST_REPLACED` (4000) / `WS_CLOSE_HOST_REPLACED_REASON`. Both
 constants live in `server-lib-common` rather than in `server` because the code
 is a contract, not a log line: the evicted Host keys its stand-down on it (see
-[Host side](#host-side-lib--standalone)), and if the two sides disagreed on the
+[Host side](#host-side-lib--the-two-node-hosts)), and if the two sides disagreed on the
 number the two Hosts would evict each other forever. Source of truth:
 `server/src/relay.ts` (`registerHost`).
 
@@ -365,14 +440,42 @@ Exactly the protocol-v1 scope of [remote-api.md](./remote-api.md)
 out, `terminal.write`/`terminal.resize` in. (Host→client size-authority and
 semantic events are staged in remote-api.md `## Future`.)
 
-## Host side (`lib` + `standalone`)
+## Host side (`lib` + the two Node hosts)
 
-A `remote-host` module in `lib`, active in standalone:
+The Host is a service in the process that owns the PTYs — never a webview:
+`RemoteHostService` in `lib/src/host/remote/service.ts`, installed in the Tauri
+sidecar (`docs/specs/standalone.md` → "Remote Host service") and in the VS Code
+extension host (`docs/specs/vscode.md` → "Remote Host: a service in the
+extension host"). The webview holds only UI — the pairing modal, the
+`window.dormouseRemoteHost` console hook, and answering what its own panes are
+called — and reaches the service over the `remoteHost:*` bridge, so the console
+API's shape is unchanged and its calls are now promises one round trip further
+away.
 
-* **Enrollment** (settings UI, once): server URL + setup password →
-  `POST /api/host/enroll` → persist `{ serverUrl, hostId, hostToken, origin,
-  rpId }` in webview `localStorage` (`local-json-store.ts` — deliberately no
-  platform-adapter dependency); open and maintain `GET /ws/host`.
+* **Enrollment** (console hook, once): server URL + setup password →
+  `POST /api/host/enroll` → the service persists `{ serverUrl, hostId,
+  hostToken, origin, rpId }` through its `HostStateStore` — a 0600 JSON file
+  under the app-data dir in standalone, `SecretStorage` in VS Code — then opens
+  and maintains `GET /ws/host`. `hostToken` is a bearer credential and never
+  enters a webview realm. Enrollment is refused outright for a server outside
+  this build's allowlist (above), before the password leaves the machine.
+  **Order matters, and the store goes first.** The `hostToken` this exchange
+  mints exists nowhere else and cannot be minted again from the same password
+  exchange, so the save is awaited before any Host is stopped: a failed write
+  then leaves the old Host running and every answer it gives still true, instead
+  of stranding the machine with no Host, a status that says otherwise, and a
+  credential lost to the failure. Replacing a *running* Host emits
+  `{ name: 'status', enrolled: false }` between the two, because the webview gate
+  that arms on it is edge-triggered and everything it holds — the mirrored
+  pairing queue, the push device list — belongs to the server being left
+  (`lib/src/remote/host/enrolled-gate.ts`). `clearEnrollment` is the same rule
+  read backwards: the delete is awaited first and nothing else happens unless it
+  succeeded, since reporting un-enrolled over a delete that failed would leave
+  the credential on disk for the next launch to read back. The enroll request
+  itself carries a 10 s `AbortSignal.timeout` — under the webview's own 15 s
+  command budget, so the console sees the real error — because it runs on the
+  service's lifecycle chain, where every later start/stop command queues behind
+  it and a black-holed relay would otherwise wedge them all.
 * **Relay socket policy**: one socket at a time, reconnected with exponential
   backoff (1s, doubling to 30s) after any close — except a close carrying
   `WS_CLOSE_HOST_REPLACED`, which is **terminal**. That code means another
@@ -385,20 +488,40 @@ A `remote-host` module in `lib`, active in standalone:
   `displaced` in the UI yet; `window.dormouseRemoteHost.status()` reports it as
   `connection`, distinct from the retrying `disconnected`. A close event from a
   socket the controller no longer owns is ignored, so a dead socket's late
-  eviction cannot stand down the live one. Source of truth:
-  `lib/src/remote/host/remote-host.ts`, `lib/src/remote/host/activation.ts`.
-* **Security**: `HostAcl` (persisted to `localStorage` as
-  `records()`/`fromRecords`), `HostChallengeIssuer`, `PairingCeremony`, and
-  `authorizeConnection` — all straight from `server-lib-common`, running in
-  the webview.
-* **Pairing approval modal**: shows the requested label + account; Approve /
-  Deny. (Same modal pattern as KillConfirm.) If the Host user approves after
-  the pairing ticket expires, the Host sends `pair-result approved:false` with
-  an error and dismisses the modal; the ACL is untouched.
-* **Terminal bridge**: `directory.watch` snapshots come from the existing
-  terminal registry/state store (title, activity, cwd, exitCode, ringing,
-  hasTODO — all already tracked); `surface.attach` resizes the PTY through
-  the existing resize path and subscribes to its data stream;
+  eviction cannot stand down the live one. Disposing the service is terminal:
+  an enrollment or ACL read already in flight cannot construct a relay socket
+  after its owning sidecar/extension instance has torn down. Source of truth:
+  `lib/src/remote/host/remote-host.ts`, `lib/src/host/remote/service.ts`
+  (lifecycle + the console commands), `lib/src/remote/host/activation.ts` (the
+  webview's client half).
+* **Security**: `HostAcl` (persisted through the `HostStateStore` as
+  `records()`/`fromRecords`, keyed per `hostId` so a re-enrollment cannot
+  inherit a stale ACL), `HostChallengeIssuer`, `PairingCeremony`, and
+  `authorizeConnection` — all straight from `server-lib-common`, running in the
+  service's process. Nothing a webview says can widen access.
+* **Pairing approval modal**: the queue is service-side; webviews mirror a
+  serializable projection of it
+  (`{ clientId, pairingId, request, requestedAt }[]`, pushed whole on every
+  change) and echo both ids on Approve / Deny, so the approve/deny closures
+  never leave the Host's process. **Approval is bound to the displayed
+  `pairingId`, not whichever request currently occupies `clientId`.** The
+  service coalesces a re-sent pair under one `clientId` by *replacing* what it
+  holds, but rejects an old modal action whose immutable ticket id no longer
+  matches. The mirror likewise includes `pairingId` in its content comparison,
+  replaces the old item, and remounts the modal keyed by that id. An unchanged
+  item is left alone: every snapshot arrives as fresh JSON, so identity
+  comparison would re-render the modal on every event. The modal shows the
+  requested label + account;
+  Approve / Deny. (Same modal pattern as KillConfirm.) If the Host user approves
+  after the pairing ticket expires, the Host sends `pair-result approved:false`
+  with an error and dismisses the modal; the ACL is untouched. In VS Code the
+  queue is broadcast to every window, since any of them may be the one in front
+  of the user.
+* **Terminal bridge**: served through a `HostSurfaceProvider`
+  (`docs/specs/remote-api.md`). `directory.watch` snapshots are collected from
+  the webviews that own the panes (title, activity, cwd, exitCode, ringing,
+  hasTODO — all already tracked there); `surface.attach` resizes through the
+  owning webview's live xterm and streams the PTY from the process that owns it;
   `terminal.write` feeds the existing input path.
 * **Size authority**: last-attach-wins holds at the PTY level through the
   existing resize path. The "tethering to \<label\>" grey-out display on the
@@ -464,15 +587,26 @@ DORMOUSE_SETUP_PASSWORD=hunter2 DORMOUSE_VAPID_SUBJECT=mailto:you@example.com \
   pnpm dev:pocket-server
 ```
 
-**2. Host** (the laptop being controlled): `pnpm dev:standalone`, then enroll
-once from the devtools console of the standalone webview:
+**2. Host** (the laptop being controlled). The Host runs in the sidecar / the
+extension host and refuses any origin outside the allowlist baked into that
+bundle — by default the SaaS origin only, with no localhost and no plaintext
+scheme. A local server therefore needs the override at build time, which
+`dev:standalone` picks up because it re-stages the sidecar bundles on the way:
+
+```sh
+DORMOUSE_REMOTE_CONNECT_SRC='http://localhost:3000 ws://localhost:3000' pnpm dev:standalone
+```
+
+Then enroll once from the devtools console of the standalone webview:
 
 ```js
 await window.dormouseRemoteHost.enroll('http://localhost:3000', 'hunter2', 'My Laptop')
 ```
 
-Enrollment persists in localStorage; on later launches the host connects by
-itself. (`status()` / `clearEnrollment()` on the same object.) For a headless
+The console hook forwards to the Host service, so these are promises; enrollment
+persists in the service's own store (a 0600 file under the app-data dir in
+standalone) and on later launches the Host connects by itself. (`status()` /
+`reconnect()` / `clearEnrollment()` on the same object.) For a headless
 stand-in host instead:
 `DORMOUSE_SETUP_PASSWORD=hunter2 node server/scripts/fake-host.mjs http://localhost:3000`
 (auto-approves pairing and serves the same synthetic echo terminals as the
@@ -552,16 +686,16 @@ liftable:
 
 ### The `*.dormouse.sh` pin — the constraint everything obeys
 
-The shipped signed client scopes its webview CSP `connect-src` to
-`https://*.dormouse.sh wss://*.dormouse.sh` (Host webview CSP, above), and
+The shipped signed client bakes `https://*.dormouse.sh wss://*.dormouse.sh` into
+its Host bundle as the only origins that Host may reach (above), and
 passkeys bind to the served origin (`DORMOUSE_ORIGIN` → `rpId`/`origin`) with
 Pocket served same-origin ([pocket-app.md](./pocket-app.md)). This is why a
 selfhoster must produce a custom build (`DORMOUSE_REMOTE_CONNECT_SRC`) — the
 stock client refuses any other origin — and it is the hard constraint on BYOT:
 whatever a stock client connects to must present a `*.dormouse.sh` origin over
 TLS. A raw `100.x` tailnet IP or a `*.ts.net` MagicDNS name is a different
-origin and breaks both the CSP and the passkey binding, so BYOT cannot simply
-point the client at the tailnet node.
+origin and breaks both the allowlist and the passkey binding, so BYOT cannot
+simply point the client at the tailnet node.
 
 ### BYOT — a per-tenant tailnet node
 

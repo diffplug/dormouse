@@ -53,6 +53,30 @@ Everything else — including browser-surface remoting — is staged in
 optional field — so nothing in the shipped protocol changes shape when it
 lands.
 
+### Where the Host runs
+
+The Host is a **Node-side service in the process that owns the PTYs**, never a
+webview: `RemoteHostService` in `lib/src/host/remote/service.ts`, installed in
+the Tauri sidecar (`docs/specs/standalone.md`) and in the VS Code extension host
+(`docs/specs/vscode.md`). It holds everything an access decision depends on —
+the relay socket, the enrollment, the ACL, the pairing ceremony — so nothing a
+webview says can widen access (`docs/specs/remote-security-model.md`).
+
+`RemoteApiSession` speaks this protocol and nothing else: surface ids, PTY ids,
+sizes, and bytes. *Where* a named surface lives — this window's webviews,
+another window's, another process's — is a deployment fact rather than a
+protocol concept, so every environment-specific answer sits behind
+`HostSurfaceProvider` (`lib/src/remote/host/host-surface-provider.ts`):
+`collectDirectory` / `watchDirectory`, `resolveSurface` returning a
+`SurfaceHandle`, and `writePty` / `resizePty` / `streamPty`. The session
+therefore imports no platform adapter, no store, and no `document`, and both
+installations share the ask-backed half of the provider
+(`lib/src/host/remote/ask-surface-provider.ts`) so an attach cannot be answered
+differently in one host than the other. `SurfaceHandle.ptyId` is a
+provider-local routing key, not necessarily the PTY process's own id; the VS
+Code provider uses an opaque per-peer key so a cold-restored id collision cannot
+move an attachment's stream or input to another window.
+
 ## Terminology
 
 `docs/specs/glossary.md` is canonical for **Pane** and **Surface**; the wire
@@ -164,6 +188,25 @@ any change the Host coalesces (150ms window, `DIRECTORY_DEBOUNCE_MS`) and
 resends the whole thing. Delta events are a future optimization there is no
 current reason to pay for.
 
+**One snapshot per collect.** The provider answers for every surface the Host
+can reach, so there is no subset that is known sooner than the rest and the
+session emits exactly one `directory.snapshot` per collect. A collect that
+finishes after its subscription was replaced or torn down is dropped rather than
+sent, and so is one that is no longer the newest: collects overlap whenever
+something changes during a slow round trip and can settle in either order, so a
+per-collect generation (the same shape as the per-attach one) keeps a stale
+answer — including one that timed out to an empty list — from landing on top of
+a fresh snapshot and blanking the picker until the next change.
+A provider collection that rejects emits nothing and leaves the last good
+snapshot standing. The rejection is contained inside the session, and the next
+invalidation or `directory.watch` retries the collection.
+
+Invalidation reaches the session through `watchDirectory`: webviews announce
+that their pane state, activity, or focus changed, and membership changes (a
+webview attaching or disposing, a peer window joining or dropping) invalidate
+unconditionally. Both feed the same coalescer, which re-collects from every
+answerer before sending the replacement snapshot.
+
 The picker renders from titles, activity, and the `ringing`/`hasTODO` badges;
 thumbnails are staged (see [Future](#future)). Browser panes are not listed;
 iframe surfaces additionally refuse attachment by design (see
@@ -256,6 +299,32 @@ rather than re-resolving the old `surfaceId` through the current registry slot.
 When that PTY exits, the Host emits `terminal.closed` and then drops the
 attachment, so a later `terminal.write`/`terminal.resize` for the surface is
 rejected ("surface is not attached") instead of acting on the disposed terminal.
+Disposing the Viewer, and any newer `surface.attach`, invalidate an in-flight
+peer surface resolution: a handle that resolves late is released immediately and
+never becomes an attachment. That is what keeps last-attach-wins true when the
+two resolutions take different lengths of time — a sibling window's pane is a
+round trip away while a local one resolves immediately, so without it the older,
+slower attach would land last and take the attachment. A superseded attach is
+answered with an error rather than left pending, since the client holds a
+request open until it is answered; a disposed session has no transport left to
+answer on.
+Provider resolution and resize are asynchronous process/window boundaries.
+An attach is not acknowledged until its required resize settles; rejected
+surface resolution, attach resize, and `terminal.resize` are returned as
+protocol errors and are contained inside the session rather than becoming
+unhandled Host-process rejections. The stream is subscribed before that resize
+settles. Subscription also observes liveness atomically: each production
+provider replays a recorded exit when the PTY died while `resolveSurface` was in
+flight, before the session had its sink. Local providers do that synchronously;
+a VS Code peer sends a subscription acknowledgement after installing the sink
+and checking liveness, on the same ordered socket and after any replay. The
+session waits for that readiness before resizing or acknowledging. Either kind
+of exit therefore tears the attachment down first, so the attach is answered
+`surface closed while attaching` and the buffered `terminal.closed` is dropped
+rather than flushed, since the client is never given the subscription it would
+arrive on. Source of truth: `HostSurfaceProvider.streamPty`,
+`RemoteApiSession.#beginAttach`, and the peer `subscribe` / `subscribed` frames
+in `vscode-ext/src/peer-link.ts`.
 
 #### Size authority: last-attach-wins
 

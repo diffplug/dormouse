@@ -44,36 +44,39 @@ function hostMessage(data: Record<string, unknown>, token: unknown = HOST_TOKEN)
   });
 }
 
-describe('VSCodeAdapter PTY exit handling', () => {
-  let windowTarget: EventTarget;
-  let postMessage: ReturnType<typeof vi.fn>;
+let windowTarget: EventTarget;
+let postMessage: ReturnType<typeof vi.fn>;
 
-  beforeEach(() => {
-    windowTarget = new EventTarget();
-    postMessage = vi.fn();
-    terminalThemeMocks.listeners.clear();
-    terminalThemeMocks.getTerminalTheme.mockReturnValue({ foreground: '#eeeeee', background: '#111111', cursor: '#abcabc' });
-    class TestCustomEvent<T = unknown> extends Event {
-      readonly detail: T;
+/** The globals the adapter captures at construction. Shared by the suites below. */
+function stubWebviewEnv(): void {
+  windowTarget = new EventTarget();
+  postMessage = vi.fn();
+  terminalThemeMocks.listeners.clear();
+  terminalThemeMocks.getTerminalTheme.mockReturnValue({ foreground: '#eeeeee', background: '#111111', cursor: '#abcabc' });
+  class TestCustomEvent<T = unknown> extends Event {
+    readonly detail: T;
 
-      constructor(type: string, eventInitDict?: CustomEventInit<T>) {
-        super(type, eventInitDict);
-        this.detail = eventInitDict?.detail as T;
-      }
-
-      initCustomEvent(): void {}
+    constructor(type: string, eventInitDict?: CustomEventInit<T>) {
+      super(type, eventInitDict);
+      this.detail = eventInitDict?.detail as T;
     }
-    vi.stubGlobal('window', windowTarget);
-    vi.stubGlobal('CustomEvent', TestCustomEvent);
-    // The adapter captures this at construction, so it must be stubbed before
-    // any `new VSCodeAdapter()` below.
-    vi.stubGlobal(HOST_MESSAGE_TOKEN_GLOBAL, HOST_TOKEN);
-    vi.stubGlobal('acquireVsCodeApi', () => ({
-      postMessage,
-      getState: vi.fn(),
-      setState: vi.fn(),
-    }));
-  });
+
+    initCustomEvent(): void {}
+  }
+  vi.stubGlobal('window', windowTarget);
+  vi.stubGlobal('CustomEvent', TestCustomEvent);
+  // The adapter captures this at construction, so it must be stubbed before
+  // any `new VSCodeAdapter()`.
+  vi.stubGlobal(HOST_MESSAGE_TOKEN_GLOBAL, HOST_TOKEN);
+  vi.stubGlobal('acquireVsCodeApi', () => ({
+    postMessage,
+    getState: vi.fn(),
+    setState: vi.fn(),
+  }));
+}
+
+describe('VSCodeAdapter PTY exit handling', () => {
+  beforeEach(stubWebviewEnv);
 
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -375,5 +378,103 @@ describe('VSCodeAdapter PTY exit handling', () => {
 
       expect(exits).toEqual([]);
     });
+  });
+});
+
+
+// The remote Host lives in the extension host, in whichever VS Code window won
+// the bind (vscode-ext/src/remote-host.ts). This is the webview's end of that
+// bridge; the contract is lib/src/host/remote/service-protocol.ts.
+//
+// Only what this transport adds is covered here: which message carries what,
+// and the host-token guard in front of all of it. The correlation, timeout,
+// always-answer, and dispose rules are the shared client's
+// (lib/src/host/remote/link-client.test.ts).
+describe('VSCodeAdapter remote host link', () => {
+  beforeEach(stubWebviewEnv);
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  /** Every `remoteHost:command` this adapter has posted, in order. */
+  function sent(): Array<{ rhId: string; cmd: string; params?: unknown }> {
+    return postMessage.mock.calls
+      .map((call) => call[0])
+      .filter((message) => message.type === 'remoteHost:command')
+      .map((message) => message.payload);
+  }
+
+  function deliver(data: Record<string, unknown>): void {
+    windowTarget.dispatchEvent(hostMessage(data));
+  }
+
+  it('posts a command and settles it from the result message', async () => {
+    const adapter = new VSCodeAdapter();
+    const pending = adapter.remoteHost.command('status');
+
+    const payload = sent()[0]!;
+    expect(payload.cmd).toBe('status');
+    deliver({ type: 'remoteHost:result', payload: { rhId: payload.rhId, result: { enrolled: true } } });
+
+    expect(await pending).toEqual({ enrolled: true });
+  });
+
+  it('answers an ask from the registered responder', () => {
+    const adapter = new VSCodeAdapter();
+    adapter.remoteHost.respond('surfaceOp', (params) => [
+      { ptyId: 'pty-1', ...(params as Record<string, unknown>) },
+    ]);
+
+    deliver({ type: 'peer:ask', requestId: 'ask-1', op: 'surfaceOp', params: { surfaceId: 's1' } });
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'peer:answer',
+      requestId: 'ask-1',
+      results: [{ ptyId: 'pty-1', surfaceId: 's1' }],
+    });
+  });
+
+  it('fans an extension-host event out by name', () => {
+    const adapter = new VSCodeAdapter();
+    const seen: unknown[] = [];
+    adapter.remoteHost.on('pairing-queue', (data) => void seen.push(data));
+
+    deliver({ type: 'remoteHost:event', payload: { name: 'pairing-queue', queue: [{ clientId: 'c1' }] } });
+    expect(seen).toEqual([{ name: 'pairing-queue', queue: [{ clientId: 'c1' }] }]);
+  });
+
+  it('notifies without waiting for anything', () => {
+    const adapter = new VSCodeAdapter();
+    adapter.remoteHost.notify();
+    expect(postMessage).toHaveBeenCalledWith({ type: 'peer:notify' });
+  });
+
+  it('rejects what is still in flight when the webview shuts down', async () => {
+    // The extension host cleans up the PTYs, but nothing there will ever answer
+    // a command this webview is still holding.
+    const adapter = new VSCodeAdapter();
+    const pending = adapter.remoteHost.command('status');
+    adapter.shutdown();
+    await expect(pending).rejects.toThrow('remote host bridge closed');
+  });
+
+  it('ignores an unauthenticated result, so framed content cannot settle a command', async () => {
+    const adapter = new VSCodeAdapter();
+    vi.useFakeTimers();
+    try {
+      const pending = adapter.remoteHost.command('status');
+      const rejected = expect(pending).rejects.toThrow(/timed out/);
+      windowTarget.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'remoteHost:result', payload: { rhId: sent()[0]!.rhId, result: 'forged' } },
+        }),
+      );
+      await vi.advanceTimersByTimeAsync(20_000);
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -1,16 +1,23 @@
 /**
  * The pairing-approval queue: an external store (same shape as
- * `external-link-confirmation.ts`) that bridges the {@link RemoteHost}'s frame
- * loop to the React approval modal. A `pair` frame enqueues a request; the modal
- * renders the head of the queue and calls `approve`/`deny`, which run the real
- * `PairingCeremony` on the Host (the only path that writes the ACL).
+ * `external-link-confirmation.ts`) that backs the React approval modal.
+ *
+ * The ceremony itself runs in the Host service, which is where the ACL is
+ * (`lib/src/host/remote/service.ts`). This is the webview's mirror of its
+ * queue: the service pushes a snapshot, `activation.ts` projects it here, and
+ * `approve`/`deny` send a command back keyed by both `clientId` and the
+ * immutable `pairingId` the modal displayed — so the closures that can
+ * actually write the ACL never leave that process, and a stale modal cannot
+ * answer a replacement request under the same client id.
  */
 
 import type { PairingRequest } from 'server-lib-common';
 
 export interface PendingPairing {
-  /** Server-assigned client socket id; the approve/deny reply is keyed by it. */
+  /** Server-assigned client socket id. */
   clientId: string;
+  /** Immutable ceremony ticket id; approve/deny must name this exact request. */
+  pairingId: string;
   request: PairingRequest;
   requestedAt: number;
   /** Approve locally on the Host — writes the ACL and replies `pair-result`. */

@@ -40,7 +40,9 @@ The browser-dev bridge is intentionally a transport shim over the same sidecar p
 - Host → webview events use `GET /__dormouse_dev_host/events` as an SSE stream.
 - Browser console calls are mirrored to `POST /__dormouse_dev_host/console` so a single `pnpm dev:standalone:ab` terminal shows sidecar logs, Vite logs, and in-browser diagnostics.
 
-The harness may omit native-only desktop chrome such as window controls and update checks, but it must preserve the `PlatformAdapter` PTY, control-request, clipboard, iframe-proxy, and agent-browser contracts used by the app. Tauri APIs must not be required at static module-evaluation time when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set, because the page is loaded by a normal browser rather than the Tauri WebView.
+The remote Host rides the same shim: `remote_host_command` is one more invoke that writes `remoteHost:command` to the sidecar, and the sidecar's `remoteHost:*` events arrive on the SSE stream, so the harness runs a real Host against a per-run temp state directory (`docs/specs/standalone.md` → "Remote Host service").
+
+The harness may omit native-only desktop chrome such as window controls and update checks, but it must preserve the `PlatformAdapter` PTY, control-request, clipboard, iframe-proxy, remote-Host, and agent-browser contracts used by the app. Tauri APIs must not be required at static module-evaluation time when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set, because the page is loaded by a normal browser rather than the Tauri WebView.
 
 ## PTY lifecycle
 
@@ -108,6 +110,17 @@ Non-obvious message contracts:
 **Sender authenticity is the adapter's job, not the protocol's.** The schema below says what a message means, never that it came from the host. Each adapter must establish that on its own transport before dispatching: the Tauri and browser-dev adapters inherit it from a private IPC channel and a host-owned socket, while the VS Code adapter shares its `window` inbox with framed surfaces and so requires a per-boot token on every host message (`docs/specs/vscode.md` → "Webview message authentication"). An adapter whose transport is reachable by page content must authenticate before it branches on `type`.
 
 VS Code-only workbench chord mirroring uses `dormouse:runWorkbenchCommand` from webview to host. The host validates the requested command against the allowlist in `lib/src/lib/vscode-keybindings.ts` (see [the VS Code host spec](vscode.md)) before calling `vscode.commands.executeCommand`; generic command execution over the webview boundary is not allowed.
+
+**Reaching the remote Host is one optional adapter member.** The Host is a service in the process that owns the PTYs, so a webview only talks to it: `remoteHost?: RemoteHostLink` (`lib/src/lib/platform/types.ts`) is present exactly when there is such a process behind the webview — standalone's sidecar, VS Code's extension host — and absent on the website, where the remote modules stay inert. Its four calls are `command` (run a service command, resolve its result), `respond` (answer one op for this webview's own surfaces), `notify` (announce that future answers may differ — argless, because the directory is the only thing a peer answers), and `on` (subscribe to a pushed service event). The webview half of it — command correlation, the 15s timeout, and the rule that an ask is *always* answered even when nothing matches — is `lib/src/host/remote/link-client.ts`, shared by all three adapters so no host settles a command differently. The wire contract both ends compile against is `lib/src/host/remote/service-protocol.ts`. Nothing crossing this seam carries authority: the service asks a webview only what its own panes are called and how big its terminals are (`docs/specs/remote-security-model.md`).
+
+Each host maps those calls onto its own transport, and the message names differ:
+
+| Host | command out | result / event in | ask in | answer / notify out |
+| --- | --- | --- | --- | --- |
+| VS Code | `remoteHost:command { rhId, cmd, params }` | `remoteHost:result { rhId, result \| error }`, `remoteHost:event { name, … }` (both broadcast to every webview in the window) | `peer:ask { requestId, op, params }` | `peer:answer { requestId, results }`, `peer:notify` |
+| Standalone (Tauri, and the browser-dev harness) | `remote_host_command(payload)` invoke → sidecar stdin `remoteHost:command` | sidecar stdout `remoteHost:result` / `remoteHost:event` | sidecar stdout `remoteHost:ask { rhId, op, params }` | the same command channel, as `cmd: 'answer' \| 'notify'` |
+
+Two rules the table encodes. VS Code broadcasts results because an `rhId` is minted with a per-adapter random tag and is therefore globally unique, so only the adapter that asked can settle one — which is also what lets a losing window forward a command to the broker window and get its answer back (`docs/specs/vscode.md` → "Peer surfaces across windows"). Standalone's correlation field is `rhId` and **never** `requestId`, because Rust swallows any sidecar line whose `data.requestId` matches a pending invoke (`docs/specs/standalone.md` → "Remote Host service").
 
 Workspace union status (`docs/specs/alert.md`) adds no new message. Standalone computes it in-webview — the app bar's workspace strip and the Walls share one webview, so the strip reads the activity store and browser-surface state directly. VS Code computes only the host-visible native-chrome projection from the module-level `AlertManager` filtered to each router's `ownedPtyIds`, then writes it onto native chrome; the host already receives every PTY's alert state, but it does not receive browser-surface TODO (the webview→host Surface-state message is staged — see `docs/specs/vscode.md` `## Future`).
 

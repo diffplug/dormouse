@@ -6,12 +6,17 @@
  * Host's `ConnectionPolicy` — the Server tells the Host what it must enforce,
  * and the Host enforces it as final authority regardless.
  *
- * Persisted in `localStorage` (browser-only, no platform adapter dependency) so
- * the standalone app can rehydrate and reconnect on the next launch.
+ * The Host that holds the socket is a service in the process that owns the
+ * PTYs, and it persists this through its own store (a 0600 file in the sidecar,
+ * `SecretStorage` in VS Code — `lib/src/host/remote/host-state-store.ts`).
+ * What is left here of the browser's `localStorage` copy is the read path: a
+ * webview that enrolled before the service existed still has one, and hands it
+ * over once (`activation.ts` → adoption).
  */
 
 import { API_ROUTES, type HostEnrollResponse } from 'server-lib-common';
-import { loadJson, saveJson } from '../../lib/local-json-store';
+import { loadJson, removeJson } from '../../lib/local-json-store';
+import { ENROLLMENT_KEY } from './store';
 
 export interface HostEnrollment {
   /** Origin the Server is reachable at, e.g. `https://dormouse.tailnet.ts.net`. */
@@ -25,10 +30,13 @@ export interface HostEnrollment {
   rpId: string;
 }
 
-/** Single localStorage key holding the whole enrollment blob. */
-export const ENROLLMENT_KEY = 'dormouse.remote-host.enrollment';
-
-function isEnrollment(value: unknown): value is HostEnrollment {
+/**
+ * The shape guard, exported because everywhere an enrollment is *read* — a
+ * keychain entry, a JSON file, an `adopt` a webview sent — it arrives as
+ * `unknown` and has to be checked. One copy, so a field added here cannot be
+ * silently accepted by a store that never learned about it.
+ */
+export function isEnrollment(value: unknown): value is HostEnrollment {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
   return (
@@ -46,23 +54,21 @@ export function getEnrollment(): HostEnrollment | null {
 }
 
 export function clearEnrollment(): void {
-  try {
-    globalThis.localStorage?.removeItem(ENROLLMENT_KEY);
-  } catch {
-    // No localStorage (some host/test contexts): nothing to clear.
-  }
+  removeJson(ENROLLMENT_KEY);
 }
 
-function saveEnrollment(enrollment: HostEnrollment): void {
-  saveJson(ENROLLMENT_KEY, enrollment);
-}
+const ENROLL_TIMEOUT_MS = 10_000;
 
 /**
- * `POST /api/host/enroll` with the setup password, persist the returned
- * credentials, and hand the enrollment back. Throws with the server's status
- * text on failure so the caller (console hook / settings UI) can surface it.
+ * `POST /api/host/enroll` with the setup password and map the response to an
+ * enrollment. Throws with the server's status text on failure so the caller
+ * (console hook / settings UI) can surface it.
+ *
+ * Persists nothing: the service that ran it decides where the credentials live
+ * (`lib/src/host/remote/host-state-store.ts`), while the exchange itself is one
+ * exchange, and a second copy of it could drift from the Server's contract.
  */
-export async function enrollHost(
+export async function performEnrollment(
   serverUrl: string,
   password: string,
   label: string,
@@ -70,6 +76,17 @@ export async function enrollHost(
   const base = serverUrl.replace(/\/+$/, '');
   const response = await fetch(`${base}${API_ROUTES.hostEnroll}`, {
     method: 'POST',
+    // This runs on the Host service's lifecycle chain, where everything that
+    // starts or stops the Host queues behind it — so a relay that accepts the
+    // connection and then answers nothing would wedge every later command for
+    // as long as the platform's default socket timeout, which is minutes. Below
+    // the webview's own 15 s command budget (`link-client.ts`) on purpose: the
+    // console then sees "the server did not answer" rather than a bare timeout.
+    signal: AbortSignal.timeout(ENROLL_TIMEOUT_MS),
+    // The Node-resident Host has no browser CSP to check each redirect hop.
+    // Failing here keeps an allowed origin's open redirect from forwarding the
+    // setup password to a server outside the build-time allowlist.
+    redirect: 'error',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ password, label }),
   });
@@ -78,13 +95,11 @@ export async function enrollHost(
     throw new Error(`host enroll failed (${response.status})${detail ? `: ${detail}` : ''}`);
   }
   const body = (await response.json()) as HostEnrollResponse;
-  const enrollment: HostEnrollment = {
+  return {
     serverUrl: base,
     hostId: body.hostId,
     hostToken: body.hostToken,
     origin: body.origin,
     rpId: body.rpId,
   };
-  saveEnrollment(enrollment);
-  return enrollment;
 }

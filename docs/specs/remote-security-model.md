@@ -144,8 +144,9 @@ Each Host maintains a local authorization list. **The ACL is authoritative**;
 the Server cannot unilaterally grant access.
 
 The record schema (source of truth: `HostAclRecord` / `HostAcl` in
-`server-lib-common/src/security/acl.ts`; persisted on the Host in webview
-`localStorage` via `lib/src/lib/local-json-store.ts`, `docs/specs/server.md`):
+`server-lib-common/src/security/acl.ts`; persisted by the Host service through
+its `HostStateStore` — a 0600 file in standalone, `globalState` in VS Code —
+never in a webview realm, `docs/specs/server.md`):
 
 ```ts
 interface HostAclRecord {
@@ -179,6 +180,13 @@ pairing modal, same pattern as KillConfirm — `docs/specs/server.md`, Host
 side); the user approves locally on the Host; the Host writes the
 `HostAclRecord` binding the passkey credential identity to the device public
 key. The Client is now trusted by that Host and no other.
+
+Each displayed approval is bound to the ceremony ticket's immutable
+`pairingId`. If a Client replaces its pending request while the old modal or
+its click command is still in flight, the Host rejects that stale action; it
+never selects a request by mutable `clientId` alone. Source of truth:
+`RemoteHostService.#pendingPairing` in `lib/src/host/remote/service.ts` and the
+service/webview contract in `lib/src/host/remote/service-protocol.ts`.
 
 **Presence for pairing is server-attested plus Host-approved.** The Server
 relays a pairing request only while the session's last server-verified
@@ -217,6 +225,15 @@ device signature, and the ACL against the Host's `ConnectionPolicy`
 Server claims to have already checked. Host challenges are 32-byte,
 single-use, TTL-bounded values from `HostChallengeIssuer`
 (`server-lib-common/src/security/challenge.ts`, default 2-minute TTL).
+Every new `connect` / `connect2` closes that Client's established message gate
+and disposes its prior control session before this evaluation, and only the
+newest evaluation may re-open that gate: each attempt carries an authorization
+generation, and one that has been superseded while it awaited verification sends
+no decision at all — otherwise an older `allowed` landing last would re-open the
+gate its successor had just closed. A structurally malformed request from the
+relay is contained as a denied decision rather than an async failure in the Node
+Host process. Source of truth: `RemoteHost.#onConnect` / `RemoteHost.#onConnect2`
+in `lib/src/remote/host/remote-host.ts`.
 
 One host challenge feeds both the passkey assertion and the device-key
 signature, so connecting costs the user a single biometric prompt per

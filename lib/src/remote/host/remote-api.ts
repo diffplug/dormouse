@@ -5,7 +5,7 @@
  *
  *   - `hello`           → capabilities (input yes, layout no).
  *   - `directory.watch` → an immediate snapshot plus coalesced re-snapshots
- *                         whenever pane state / activity / focus changes.
+ *                         whenever the provider says the directory could differ.
  *   - `surface.attach`  → resize the real PTY through the existing xterm resize
  *                         path (attach-is-the-resize) and stream its output as
  *                         `terminal.data`; `terminal.closed` on PTY exit.
@@ -15,6 +15,12 @@
  *
  * The bytes on the wire are base64url PTY bytes; xterm on the Client renders
  * them, exactly as the Host's own xterm renders the same stream locally.
+ *
+ * Everything below the protocol — where a surface lives, how a PTY is read and
+ * written — is a {@link HostSurfaceProvider} call, so this module is
+ * environment-free: it never reaches for the platform adapter, the stores, or
+ * `document`, and runs unchanged in a webview or in the process that owns the
+ * PTYs (`host-surface-provider.ts`).
  */
 
 import {
@@ -26,6 +32,7 @@ import {
   utf8Decode,
   utf8Encode,
   type AttachParams,
+  type DirectoryEntry,
   type HelloResult,
   type RemoteEventMsg,
   type RemoteRequest,
@@ -34,12 +41,7 @@ import {
   type TerminalResizeParams,
   type TerminalWriteParams,
 } from 'server-lib-common';
-import { getPlatform } from '../../lib/platform';
-import { registry } from '../../lib/terminal-store';
-import type { TerminalEntry } from '../../lib/terminal-store';
-import { subscribeToActivity } from '../../lib/session-activity-store';
-import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
-import { collectDirectorySnapshot } from './directory-collect';
+import type { HostSurfaceProvider, SurfaceHandle } from './host-surface-provider';
 
 /** Coalesce window for directory re-snapshots (remote-api.md: "Host coalesces"). */
 const DIRECTORY_DEBOUNCE_MS = 150;
@@ -51,11 +53,15 @@ const FORCE_REPAINT_BOUNCE_MS = 60;
 
 interface Attachment {
   surfaceId: string;
-  ptyId: string;
-  entry: TerminalEntry;
+  /**
+   * The resolved surface. Pinned at attach — a pane swap must not move the
+   * attachment onto a different terminal — and it is the only thing here that
+   * knows where the pane actually lives (`host-surface-provider.ts`).
+   */
+  handle: SurfaceHandle;
   subId: string;
-  onData: (detail: { id: string; data: string }) => void;
-  onExit: (detail: { id: string; exitCode: number }) => void;
+  /** Unsubscribes this attachment's PTY stream; nobody else holds it. */
+  stopStream: () => void;
   /** Pending same-size repaint bounce (see FORCE_REPAINT_BOUNCE_MS), if any. */
   bounceTimer: ReturnType<typeof setTimeout> | null;
 }
@@ -64,23 +70,31 @@ export interface RemoteApiSessionOptions {
   hostId: string;
   /** Sends a remote-api response/event; the caller wraps it in a `msg` frame. */
   send: (payload: RemoteResponse | RemoteEventMsg) => void;
+  /** Everything below the protocol: where surfaces live, and how PTYs are driven. */
+  provider: HostSurfaceProvider;
 }
 
 export class RemoteApiSession {
   readonly #hostId: string;
   readonly #send: (payload: RemoteResponse | RemoteEventMsg) => void;
+  readonly #provider: HostSurfaceProvider;
 
   #directorySubId: string | null = null;
   #unsubDirectory: (() => void) | null = null;
   #directoryTimer: ReturnType<typeof setTimeout> | null = null;
+  #directoryGeneration = 0;
   #attachment: Attachment | null = null;
+  #attachGeneration = 0;
+  #disposed = false;
 
   constructor(options: RemoteApiSessionOptions) {
     this.#hostId = options.hostId;
     this.#send = options.send;
+    this.#provider = options.provider;
   }
 
   handle(data: unknown): void {
+    if (this.#disposed) return;
     const request = data as RemoteRequest;
     if (!request || typeof request.requestId !== 'string' || typeof request.method !== 'string') {
       return;
@@ -108,6 +122,8 @@ export class RemoteApiSession {
   }
 
   dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
     this.#directorySubId = null;
     if (this.#directoryTimer) {
       clearTimeout(this.#directoryTimer);
@@ -132,27 +148,37 @@ export class RemoteApiSession {
     this.#send({ subId, event, data });
   }
 
-  /**
-   * Resolve the live terminal a `surface.*` request targets, or fail the request
-   * (and return null) if the params or the surface are missing. Shared by
-   * attach/write/resize so the not-found contract lives in one place.
-   */
-  #resolveSurface<P extends { surfaceId: string }>(
-    request: RemoteRequest,
-  ): { params: P; entry: TerminalEntry } | null {
-    const params = request.params as P | undefined;
-    const entry = params ? registry.get(params.surfaceId) : undefined;
-    if (!params || !entry) {
-      this.#fail(request, `no such surface: ${params?.surfaceId ?? '(none)'}`);
-      return null;
-    }
-    return { params, entry };
-  }
-
   #requireAttached(request: RemoteRequest, surfaceId: string): Attachment | null {
     if (this.#attachment?.surfaceId === surfaceId) return this.#attachment;
     this.#fail(request, `surface is not attached: ${surfaceId}`);
     return null;
+  }
+
+  /**
+   * Answer one failed attach — and only when there is anyone to answer.
+   *
+   * Every failure on the attach path reads the same way: a disposed session has
+   * no transport left, and a generation that moved on means a newer attach owns
+   * the surface, which is what the client is told regardless of what actually
+   * went wrong, because that is the fact it has to act on. `reason` is the rest,
+   * for the paths where this attach is still the current one; omitted where
+   * being superseded is the only way to get there. Failing rather than dropping
+   * is load-bearing: the client holds the request pending, and its event
+   * subscription with it.
+   */
+  #failAttach(
+    request: RemoteRequest,
+    surfaceId: string,
+    generation: number,
+    reason?: string,
+  ): void {
+    if (this.#disposed) return;
+    this.#fail(
+      request,
+      reason !== undefined && this.#attachGeneration === generation
+        ? reason
+        : `superseded by a newer attach: ${surfaceId}`,
+    );
   }
 
   #attachedParams<P extends { surfaceId: string }>(
@@ -183,57 +209,136 @@ export class RemoteApiSession {
     // The subscription id the client correlates snapshots by is this request id.
     this.#directorySubId = request.requestId;
     this.#ok(request, { subId: request.requestId });
-    this.#emitDirectory();
+    void this.#emitDirectory();
 
     if (this.#unsubDirectory) return;
-    const trigger = () => this.#scheduleDirectory();
-    const unsubPane = subscribeToTerminalPaneState(trigger);
-    const unsubActivity = subscribeToActivity(trigger);
-    const hasDocument = typeof document !== 'undefined';
-    if (hasDocument) {
-      document.addEventListener('focusin', trigger);
-      document.addEventListener('focusout', trigger);
-    }
-    this.#unsubDirectory = () => {
-      unsubPane();
-      unsubActivity();
-      if (hasDocument) {
-        document.removeEventListener('focusin', trigger);
-        document.removeEventListener('focusout', trigger);
-      }
-    };
+    this.#unsubDirectory = this.#provider.watchDirectory(() => this.#scheduleDirectory());
   }
 
   #scheduleDirectory(): void {
     if (this.#directorySubId === null || this.#directoryTimer) return;
     this.#directoryTimer = setTimeout(() => {
       this.#directoryTimer = null;
-      this.#emitDirectory();
+      void this.#emitDirectory();
     }, DIRECTORY_DEBOUNCE_MS);
   }
 
-  #emitDirectory(): void {
+  async #emitDirectory(): Promise<void> {
     if (this.#directorySubId === null) return;
-    this.#event(this.#directorySubId, REMOTE_EVENTS.directorySnapshot, {
-      entries: collectDirectorySnapshot(),
-    });
+    const subId = this.#directorySubId;
+    // Per collect, like the attach generation below and for the same reason:
+    // two collects overlap whenever something changes during a slow round trip,
+    // and they can settle in either order. Only the newest may emit, or a stale
+    // one — including a collect that timed out to an empty answer — lands on
+    // the client after a fresh snapshot and blanks its picker until the next
+    // change.
+    const generation = ++this.#directoryGeneration;
+    // One snapshot per collect. The provider answers for every surface the Host
+    // can reach, so there is no longer a subset that is known sooner than the
+    // rest — this replaces the old local-then-merged double emit, which existed
+    // only because the peer round trip was visible from here.
+    let entries: DirectoryEntry[];
+    try {
+      entries = await this.#provider.collectDirectory();
+    } catch (error) {
+      // This provider crosses a process/window boundary. A failed collection
+      // leaves the last good snapshot standing and a later invalidation (or
+      // re-watch) retries; it must not become an unhandled rejection that can
+      // take down the Node Host process.
+      if (
+        this.#directorySubId === subId &&
+        this.#directoryGeneration === generation &&
+        !this.#disposed
+      ) {
+        console.warn('remote-host: directory collection failed', error);
+      }
+      return;
+    }
+    // The subscription may have been replaced or torn down while we waited.
+    if (this.#directorySubId !== subId || this.#directoryGeneration !== generation) return;
+    this.#event(subId, REMOTE_EVENTS.directorySnapshot, { entries });
   }
 
   #attach(request: RemoteRequest): void {
-    const resolved = this.#resolveSurface<AttachParams>(request);
-    if (!resolved) return;
-    const { params, entry } = resolved;
+    const params = request.params as AttachParams | undefined;
+    if (!params?.surfaceId) {
+      this.#fail(request, `no such surface: ${params?.surfaceId ?? '(none)'}`);
+      return;
+    }
+
+    // Where the pane lives — a registry here or an owner a round trip away — is
+    // a deployment fact, not a protocol concept, so it is settled below this
+    // line and never seen here (`host-surface-provider.ts`).
+    //
+    // Per attach, not per session: last-attach-wins has to hold while a
+    // resolve is in flight, and the two paths are wildly different lengths — a
+    // sibling's pane is a round trip away while a local one settles on the next
+    // microtask, so one shared epoch would let the older, slower attach land
+    // last and take the attachment.
+    const generation = ++this.#attachGeneration;
+    void this.#provider.resolveSurface(params.surfaceId, params).then(
+      (handle) => {
+        if (this.#disposed || this.#attachGeneration !== generation) {
+          // A foreign resolve starts its stream before returning the handle. If
+          // the session died or a newer attach superseded this one during that
+          // round trip, unwind it immediately.
+          handle?.release();
+          this.#failAttach(request, params.surfaceId, generation);
+          return;
+        }
+        if (!handle) {
+          this.#fail(request, `no such surface: ${params.surfaceId}`);
+          return;
+        }
+        try {
+          this.#beginAttach(request, params, handle, generation);
+        } catch (error) {
+          // `streamPty` / the repaint bounce are provider calls too, and may
+          // throw before an attachment is fully installed.
+          if (this.#attachment?.handle === handle) this.#teardownAttachment();
+          else handle.release();
+          this.#failAttach(
+            request,
+            params.surfaceId,
+            generation,
+            `surface attach failed: ${errorMessage(error)}`,
+          );
+        }
+      },
+      (error) => {
+        this.#failAttach(
+          request,
+          params.surfaceId,
+          generation,
+          `surface attach failed: ${errorMessage(error)}`,
+        );
+      },
+    );
+  }
+
+  #beginAttach(
+    request: RemoteRequest,
+    params: AttachParams,
+    handle: SurfaceHandle,
+    generation: number,
+  ): void {
     // v1: one attachment per session — replace any prior stream.
     this.#teardownAttachment();
 
-    const ptyId = entry.ptyId;
-    const term = entry.terminal;
-    const cols = clampTerminalDimension(params.cols, term.cols);
-    const rows = clampTerminalDimension(params.rows, term.rows);
-    const platform = getPlatform();
+    const ptyId = handle.ptyId;
+    const cols = clampTerminalDimension(params.cols, handle.cols);
+    const rows = clampTerminalDimension(params.rows, handle.rows);
+    const sameSize = handle.cols === cols && handle.rows === rows;
     const subId = request.requestId;
     const pendingEvents: Array<{ event: string; data: unknown }> = [];
     let streaming = false;
+    // A production provider replays an exit that happened before this
+    // subscription was installed (the surface resolve is a process/window round
+    // trip). Local replay is synchronous, so keep that callback safe before
+    // `attachment` exists and fail rather than installing a dead PTY. Peer
+    // replay is ordered before `stream.ready` and follows the installed path.
+    let attachment: Attachment | null = null;
+    let closedWhileSubscribing = false;
     const emitOrBuffer = (event: string, data: unknown): void => {
       if (streaming) {
         this.#event(subId, event, data);
@@ -241,71 +346,143 @@ export class RemoteApiSession {
         pendingEvents.push({ event, data });
       }
     };
-    const onData = (detail: { id: string; data: string }): void => {
-      if (detail.id !== ptyId) return;
-      // The PTY delivers strings on this path; be defensive about the Uint8Array
-      // path some adapters use. Either way it goes out as base64url PTY bytes.
-      const raw: unknown = detail.data;
-      const bytes = typeof raw === 'string' ? utf8Encode(raw) : (raw as Uint8Array);
-      emitOrBuffer(REMOTE_EVENTS.terminalData, { bytes: toBase64Url(bytes) });
-    };
-    const onExit = (detail: { id: string; exitCode: number }): void => {
-      if (detail.id !== ptyId) return;
-      // Deliver the close to the client first, then drop the attachment so a
-      // later write/resize for this surface fails safe with "not attached"
-      // instead of touching the now-dead PTY / disposed xterm (the pre-pin code
-      // re-resolved via the registry and got that fail-safe for free). Teardown
-      // offPtyExit(onExit)s mid-callback, which is safe — this handler, having
-      // filtered to its own ptyId, won't fire again — and nulls #attachment so
-      // #requireAttached fails and the bounce timer + PTY listeners are cleaned.
-      emitOrBuffer(REMOTE_EVENTS.terminalClosed, { exitCode: detail.exitCode });
-      this.#teardownAttachment();
-    };
-    platform.onPtyData(onData);
-    platform.onPtyExit(onExit);
-    const attachment: Attachment = {
+    const stream = this.#provider.streamPty(ptyId, {
+      onData: (data) => {
+        // The PTY delivers strings on this path; be defensive about the
+        // Uint8Array path some adapters use. Either way it goes out as
+        // base64url PTY bytes.
+        const raw: unknown = data;
+        const bytes = typeof raw === 'string' ? utf8Encode(raw) : (raw as Uint8Array);
+        emitOrBuffer(REMOTE_EVENTS.terminalData, { bytes: toBase64Url(bytes) });
+      },
+      onExit: (exitCode) => {
+        // Deliver the close to the client first, then drop the attachment so a
+        // later write/resize for this surface fails safe with "not attached"
+        // instead of touching the now-dead PTY / disposed xterm (the pre-pin
+        // code re-resolved via the registry and got that fail-safe for free).
+        // Teardown unsubscribes this stream mid-callback, which is safe — the
+        // subscription is this attachment's alone, so nothing is left to fire —
+        // and nulls #attachment so #requireAttached fails and the bounce timer
+        // is cleared.
+        emitOrBuffer(REMOTE_EVENTS.terminalClosed, { exitCode });
+        if (attachment && this.#attachment === attachment) {
+          this.#teardownAttachment();
+        } else {
+          closedWhileSubscribing = true;
+        }
+      },
+    });
+    if (closedWhileSubscribing) {
+      stream.stop();
+      handle.release();
+      this.#failAttach(
+        request,
+        params.surfaceId,
+        generation,
+        `surface closed while attaching: ${params.surfaceId}`,
+      );
+      return;
+    }
+    attachment = {
       surfaceId: params.surfaceId,
-      ptyId,
-      entry,
+      handle,
       subId,
-      onData,
-      onExit,
+      stopStream: stream.stop,
       bounceTimer: null,
     };
     this.#attachment = attachment;
+    const installedAttachment = attachment;
 
     // Attach-is-the-resize: resizing the real xterm fires its onResize handler,
     // which drives resizePty → SIGWINCH → the TUI/shell repaints, and that
     // repaint is what fills the client's screen (no snapshot transfer). The
-    // stream is subscribed first because some PTYs repaint synchronously.
-    if (term.cols !== cols || term.rows !== rows) {
-      term.resize(cols, rows);
-    } else {
+    // stream is subscribed first because some PTYs repaint synchronously. For a
+    // sibling window, `ready` waits for the owner's subscription acknowledgement
+    // so an exit replay sent before that acknowledgement wins the race here.
+    // A sibling's owner already applied the size inside the resolve round trip,
+    // so its handle resolves at the requested size and takes the bounce below.
+    const finish = (size: { cols: number; rows: number }): void => {
+      if (this.#disposed) return;
+      if (this.#attachGeneration !== generation || this.#attachment !== installedAttachment) {
+        if (this.#attachment === installedAttachment) this.#teardownAttachment();
+        this.#failAttach(
+          request,
+          params.surfaceId,
+          generation,
+          `surface closed while attaching: ${params.surfaceId}`,
+        );
+        return;
+      }
+      const result: TerminalAttachResult = { cols: size.cols, rows: size.rows };
+      this.#ok(request, result);
+      streaming = true;
+      for (const event of pendingEvents) {
+        this.#event(subId, event.event, event.data);
+      }
+    };
+
+    const beginResize = (): void => {
+      if (this.#disposed) return;
+      if (this.#attachGeneration !== generation || this.#attachment !== installedAttachment) {
+        if (this.#attachment === installedAttachment) this.#teardownAttachment();
+        this.#failAttach(
+          request,
+          params.surfaceId,
+          generation,
+          `surface closed while attaching: ${params.surfaceId}`,
+        );
+        return;
+      }
+
+      if (!sameSize) {
+        // The result promises the size the PTY now has, so do not acknowledge
+        // the attach until the owner has actually applied it. Rejection is a
+        // normal protocol error, not an unhandled Host-process rejection.
+        void handle.resize(cols, rows).then(finish, (error) => {
+          if (this.#attachment === installedAttachment) this.#teardownAttachment();
+          this.#failAttach(
+            request,
+            params.surfaceId,
+            generation,
+            `surface attach failed: ${errorMessage(error)}`,
+          );
+        });
+        return;
+      }
+
       // Same size: force one repaint with a quick rows bounce on the PTY only,
       // leaving the already-correct local xterm buffer untouched. Bounce away
       // from `rows` in whichever direction stays >= 1 (a 1-row surface must
       // bounce up, since rows-1 would be an identical no-op that fires no
       // SIGWINCH and so never repaints).
       const bounced = rows > 1 ? rows - 1 : rows + 1;
-      platform.resizePty(ptyId, cols, bounced);
+      this.#provider.resizePty(ptyId, cols, bounced);
       // The restore runs ~60ms later, so the client may detach, re-attach at a
       // different size, or dispose the session first. Cancel on teardown and,
       // as a backstop, re-check this is still the current attachment before
       // touching the PTY — a stale restore would clobber the newer size owner
       // (last-attach-wins) or resize a detached/exited PTY.
-      attachment.bounceTimer = setTimeout(() => {
-        attachment.bounceTimer = null;
-        if (this.#attachment !== attachment) return;
-        platform.resizePty(ptyId, cols, rows);
+      installedAttachment.bounceTimer = setTimeout(() => {
+        installedAttachment.bounceTimer = null;
+        if (this.#attachment !== installedAttachment) return;
+        this.#provider.resizePty(ptyId, cols, rows);
       }, FORCE_REPAINT_BOUNCE_MS);
-    }
+      finish({ cols: handle.cols, rows: handle.rows });
+    };
 
-    const result: TerminalAttachResult = { cols: term.cols, rows: term.rows };
-    this.#ok(request, result);
-    streaming = true;
-    for (const event of pendingEvents) {
-      this.#event(subId, event.event, event.data);
-    }
+    void stream.ready.then(beginResize, (error) => {
+      if (this.#disposed) return;
+      const closed = this.#attachment !== installedAttachment;
+      if (this.#attachment === installedAttachment) this.#teardownAttachment();
+      this.#failAttach(
+        request,
+        params.surfaceId,
+        generation,
+        closed
+          ? `surface closed while attaching: ${params.surfaceId}`
+          : `surface attach failed: ${errorMessage(error)}`,
+      );
+    });
   }
 
   #detach(request: RemoteRequest): void {
@@ -323,8 +500,8 @@ export class RemoteApiSession {
     const resolved = this.#attachedParams<TerminalWriteParams>(request);
     if (!resolved) return;
     const { params, attachment } = resolved;
-    // Feed the existing PTY input path; the local echo returns via onPtyData.
-    getPlatform().writePty(attachment.ptyId, utf8Decode(fromBase64Url(params.bytes)));
+    // Feed the existing PTY input path; the local echo returns via the stream.
+    this.#provider.writePty(attachment.handle.ptyId, utf8Decode(fromBase64Url(params.bytes)));
     this.#ok(request, {});
   }
 
@@ -332,13 +509,24 @@ export class RemoteApiSession {
     const resolved = this.#attachedParams<TerminalResizeParams>(request);
     if (!resolved) return;
     const { params, attachment } = resolved;
-    const entry = attachment.entry;
-    const term = entry.terminal;
-    const cols = clampTerminalDimension(params.cols, term.cols);
-    const rows = clampTerminalDimension(params.rows, term.rows);
-    if (term.cols !== cols || term.rows !== rows) term.resize(cols, rows);
-    const result: TerminalAttachResult = { cols: term.cols, rows: term.rows };
-    this.#ok(request, result);
+    const handle = attachment.handle;
+    const cols = clampTerminalDimension(params.cols, handle.cols);
+    const rows = clampTerminalDimension(params.rows, handle.rows);
+
+    void handle.resize(cols, rows).then(
+      (size) => {
+        if (this.#disposed) return;
+        if (this.#attachment !== attachment) {
+          this.#fail(request, `surface is no longer attached: ${params.surfaceId}`);
+          return;
+        }
+        this.#ok(request, { cols: size.cols, rows: size.rows } satisfies TerminalAttachResult);
+      },
+      (error) => {
+        if (this.#disposed) return;
+        this.#fail(request, `terminal resize failed: ${errorMessage(error)}`);
+      },
+    );
   }
 
   #teardownAttachment(): void {
@@ -347,9 +535,14 @@ export class RemoteApiSession {
       clearTimeout(this.#attachment.bounceTimer);
       this.#attachment.bounceTimer = null;
     }
-    const platform = getPlatform();
-    platform.offPtyData(this.#attachment.onData);
-    platform.offPtyExit(this.#attachment.onExit);
+    this.#attachment.stopStream();
+    // Unwinds whatever holding the surface cost — a forwarded stream for an
+    // owner elsewhere, nothing at all for one the provider drives directly.
+    this.#attachment.handle.release();
     this.#attachment = null;
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'internal error';
 }

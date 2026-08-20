@@ -99,6 +99,27 @@ export function getBufferedPtys(): Map<string, { alive: boolean; exitCode?: numb
   return result;
 }
 
+/**
+ * The current lifetime record for one PTY, without copying every buffer entry.
+ * Natural exits remain recorded until the pane is disposed or a new generation
+ * is spawned under the id, so a late stream subscription can close the
+ * resolve-to-subscribe race in the remote Host.
+ */
+export function getPtyStatus(id: string): { alive: boolean; exitCode?: number } | undefined {
+  const entry = ptyBuffers.get(id);
+  return entry ? { alive: entry.alive, exitCode: entry.exitCode } : undefined;
+}
+
+/**
+ * Whether this extension host holds a PTY under that id — alive or exited, but
+ * not killed. Pane ids are unique within a window and nothing coordinates them
+ * across windows, so this is how the peer link tells one of its own terminals
+ * from a sibling window's that happens to share the id (`peer-link.ts`).
+ */
+export function hasPty(id: string): boolean {
+  return ptyBuffers.has(id);
+}
+
 export function getReplayData(id: string): string | null {
   const entry = ptyBuffers.get(id);
   if (!entry || entry.replayChunks.length === 0) return null;

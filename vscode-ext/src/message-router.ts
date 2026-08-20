@@ -21,6 +21,19 @@ import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
 import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
+import { ASK_BUDGET_MS } from '../../lib/src/host/remote/service-protocol';
+import { configurePeerLink, remoteNotifyPeerChange } from './peer-link';
+import { createProcessedPtyStreams } from './processed-pty-streams';
+import {
+  configureRemoteHost,
+  deliverCommandResult,
+  deliverUiEvent,
+  dropForwardedCommands,
+  greetPeerWindow,
+  handleForwardedCommand,
+  handleRemoteHostCommand,
+  notifyDirectoryChanged,
+} from './remote-host';
 import { log } from './log';
 import type { WebviewChannel } from './webview-messaging';
 
@@ -32,10 +45,112 @@ const clipboardOps = require('../../lib/clipboard-ops.cjs') as {
 // Global set of PTY IDs claimed by any router instance.
 // Prevents reconnecting routers from stealing PTYs owned by other webviews.
 const globalOwnedPtyIds = new Set<string>();
+
 interface ActiveRouter {
   flushSessionSave(timeoutMs?: number): Promise<void>;
   ownsPty(id: string): boolean;
   forwardDorControlRequest(request: DorControlRequest): void;
+  send(message: ExtensionMessage): void;
+  ask(requestId: string, op: string, params: unknown): void;
+}
+
+let nextBrokerRequestId = 0;
+
+interface PendingRequest {
+  /** Answers still outstanding, so a miss settles as fast as a hit. */
+  pending: Set<ActiveRouter>;
+  results: unknown[];
+  settle: () => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+const peerRequests = new Map<string, PendingRequest>();
+const processedPtyStreams = createProcessedPtyStreams(
+  onProcessedPtyData,
+  onProcessedPtyExit,
+  ptyManager.getPtyStatus,
+);
+
+// The link reaches other windows; it must never call back into a fan-out that
+// would reach them again, so it only ever gets the in-window broker.
+configurePeerLink({
+  brokerRequest,
+  invalidateDirectory: notifyDirectoryChanged,
+  streamPty: processedPtyStreams.streamPty,
+  writePty: (ptyId, data) => ptyManager.write(ptyId, data),
+  resizePty: (ptyId, cols, rows) => ptyManager.resize(ptyId, cols, rows),
+  // Peer PTYs use generated provider-local route handles. Keep those handles
+  // outside this window's real PTY namespace so local ids always fall through
+  // to the manager that owns them.
+  ownsPty: (ptyId) => ptyManager.hasPty(ptyId) || globalOwnedPtyIds.has(ptyId),
+  // The Host half: which of these fire depends on which side of the bind this
+  // window landed on, and the link is what knows that.
+  handleForwardedCommand,
+  dropForwardedCommands,
+  deliverCommandResult,
+  deliverUiEvent,
+  onClientAuthenticated: greetPeerWindow,
+});
+
+configureRemoteHost({
+  brokerRequest,
+  broadcastToWebviews,
+  streamPty: processedPtyStreams.streamPty,
+  writePty: (ptyId, data) => ptyManager.write(ptyId, data),
+  resizePty: (ptyId, cols, rows) => ptyManager.resize(ptyId, cols, rows),
+});
+
+/**
+ * Put one question to every webview in this window and settle with everything
+ * they answered.
+ *
+ * The remote Host runs in the extension host, but a window's terminals are
+ * spread across its webviews — each has its own xterm registry, so the Host can
+ * neither list nor attach to a pane without asking. See docs/specs/vscode.md →
+ * "Peer surfaces".
+ *
+ * `op` and `params` are opaque here on purpose: the operation map lives in
+ * `lib/src/remote/host/peer-surfaces.ts`, and one fan-out rule covers all of
+ * it — every webview answers with zero or more results, so a webview that owns
+ * nothing settles the request as fast as the one that does. The budget is the
+ * backstop for a webview with no live content, which must not hang the phone's
+ * picker; it is the *inner* one, deliberately shorter than the broker's
+ * cross-window `PEER_REPLY_BUDGET_MS`, which has to contain a whole run of this
+ * plus two socket hops. The asker is this window's own Host service, or the
+ * broker window's over the link, never a webview; that is why it is a plain
+ * promise rather than message plumbing.
+ */
+function brokerRequest(op: string, params: unknown): Promise<unknown[]> {
+  const peers = [...activeRouters];
+  if (peers.length === 0) return Promise.resolve([]);
+
+  const requestId = `broker-${++nextBrokerRequestId}`;
+  return new Promise((resolve) => {
+    const settle = () => {
+      const request = peerRequests.get(requestId);
+      if (!request) return;
+      peerRequests.delete(requestId);
+      clearTimeout(request.timer);
+      resolve(request.results);
+    };
+    peerRequests.set(requestId, {
+      pending: new Set(peers),
+      results: [],
+      settle,
+      timer: setTimeout(settle, ASK_BUDGET_MS),
+    });
+    for (const peer of peers) peer.ask(requestId, op, params);
+  });
+}
+
+/**
+ * Post one message to every live webview in this window.
+ *
+ * The Host's results ride this rather than a reply to one webview: the service
+ * answers an `rhId`, and only the adapter that minted it holds a pending
+ * command for it (`lib/src/lib/platform/vscode-adapter.ts`).
+ */
+function broadcastToWebviews(message: ExtensionMessage): void {
+  for (const router of activeRouters) router.send(message);
 }
 
 const activeRouters = new Set<ActiveRouter>();
@@ -61,12 +176,19 @@ const themeColorProvider: TerminalColorProvider = (target) => latestThemeColors?
 // the protocol parser once per chunk regardless of webview count.
 type ProcessedDataListener = (id: string, visibleData: string) => void;
 const processedDataListeners = new Set<ProcessedDataListener>();
+type ProcessedExitListener = (id: string, exitCode: number) => void;
+const processedExitListeners = new Set<ProcessedExitListener>();
 type SemanticEventsListener = (id: string, events: TerminalSemanticEvent[]) => void;
 const semanticEventsListeners = new Set<SemanticEventsListener>();
 
-function onProcessedPtyData(listener: ProcessedDataListener): () => void {
+export function onProcessedPtyData(listener: ProcessedDataListener): () => void {
   processedDataListeners.add(listener);
   return () => { processedDataListeners.delete(listener); };
+}
+
+export function onProcessedPtyExit(listener: ProcessedExitListener): () => void {
+  processedExitListeners.add(listener);
+  return () => { processedExitListeners.delete(listener); };
 }
 
 function onTerminalSemanticEvents(listener: SemanticEventsListener): () => void {
@@ -107,6 +229,7 @@ ptyManager.addCallbacks({
     log.info(`[alert-feed] ${id}: PTY exited`);
     alertManager.onExit(id, exitCode);
     alertProtocolParsers.delete(id);
+    for (const listener of processedExitListeners) listener(id, exitCode);
   },
 });
 
@@ -290,12 +413,9 @@ export function attachRouter(
       if (!ownedPtyIds.has(id)) return;
       post({ type: 'terminal:semanticEvents', id, events } satisfies ExtensionMessage);
     });
-    const removePtyCallbacks = ptyManager.addCallbacks({
-      onData() {},
-      onExit(id: string, exitCode: number) {
-        if (!ownedPtyIds.has(id)) return;
-        post({ type: 'pty:exit', id, exitCode } satisfies ExtensionMessage);
-      },
+    const removeExitListener = onProcessedPtyExit((id, exitCode) => {
+      if (!ownedPtyIds.has(id)) return;
+      post({ type: 'pty:exit', id, exitCode } satisfies ExtensionMessage);
     });
 
     const removeAlertListener = alertManager.onStateChange((id, state) => {
@@ -315,7 +435,7 @@ export function attachRouter(
     return () => {
       removeProcessedListener();
       removeSemanticListener();
-      removePtyCallbacks();
+      removeExitListener();
       removeAlertListener();
     };
   }
@@ -493,6 +613,36 @@ export function attachRouter(
           } satisfies ExtensionMessage),
         );
         break;
+      case 'peer:answer': {
+        // Every webview answers, so "nobody owns it" settles immediately
+        // instead of waiting out the budget — which is the common case when
+        // what was asked about actually lives in another window.
+        const request = peerRequests.get(msg.requestId);
+        if (!request) {
+          // Late: the budget already expired and the Host rendered a snapshot
+          // without whatever this webview owns. Nothing can re-open a settled
+          // request, so mark the directory stale instead — the next collect
+          // asks again and repairs it. Without this an idle machine never
+          // re-collects and the phone's picker stays wrong indefinitely.
+          notifyDirectoryChanged();
+          break;
+        }
+        // Deleted before the results are taken, so a duplicate answer from the
+        // same webview cannot contribute its panes twice.
+        if (!request.pending.delete(router)) break;
+        if (Array.isArray(msg.results)) request.results.push(...msg.results);
+        if (request.pending.size === 0) request.settle();
+        break;
+      }
+      case 'peer:notify':
+        // The directory is the only thing a webview is asked to answer, so the
+        // message carries nothing but the fact that its snapshot may differ.
+        notifyDirectoryChanged();
+        remoteNotifyPeerChange();
+        break;
+      case 'remoteHost:command':
+        handleRemoteHostCommand(msg.payload);
+        break;
       case 'dormouse:themeColors':
         // Webview reports its resolved terminal theme; cache for OSC color replies.
         latestThemeColors = { foreground: msg.foreground, background: msg.background, cursor: msg.cursor };
@@ -657,10 +807,27 @@ export function attachRouter(
     flushSessionSave,
     ownsPty,
     forwardDorControlRequest,
+    send(message: ExtensionMessage) {
+      if (disposed) return;
+      void post(message);
+    },
+    ask(requestId: string, op: string, params: unknown) {
+      if (disposed) return;
+      void post({ type: 'peer:ask', requestId, op, params } satisfies ExtensionMessage);
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
       activeRouters.delete(router);
+      // One fewer webview to ask means the directory's answer changed, even if
+      // no surface did.
+      notifyDirectoryChanged();
+      remoteNotifyPeerChange();
+      // A webview that goes away mid-fan-out must not hold the answer open.
+      for (const request of peerRequests.values()) {
+        if (!request.pending.delete(router)) continue;
+        if (request.pending.size === 0) request.settle();
+      }
       removeWatchedCommandListener();
       removeAlertSettingsListener();
       resolveAllFlushRequests();
@@ -679,5 +846,7 @@ export function attachRouter(
   };
 
   activeRouters.add(router);
+  notifyDirectoryChanged();
+  remoteNotifyPeerChange();
   return router;
 }

@@ -11,7 +11,21 @@ import type {
   OpenPort,
   PlatformAdapter,
   PtyInfo,
+  RemoteHostLink,
 } from "dormouse-lib/lib/platform/types";
+import {
+  answerAskCommand,
+  createRemoteHostLinkClient,
+  notifyCommand,
+} from "dormouse-lib/host/remote/link-client";
+import {
+  REMOTE_HOST_ASK_EVENT,
+  REMOTE_HOST_EVENT_EVENT,
+  REMOTE_HOST_RESULT_EVENT,
+  type RemoteHostAsk,
+  type RemoteHostCommand,
+  type RemoteHostResult,
+} from "dormouse-lib/host/remote/service-protocol";
 import { AlertManager } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
@@ -46,6 +60,15 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private protocolParsers = new Map<string, TerminalProtocolParser>();
   private alertManager = new AlertManager();
   private unlistenHost: (() => void) | null = null;
+  // Remote-host bridge, identical in shape to TauriAdapter's — the dev harness
+  // forwards the same `remoteHost:*` messages over its own transport.
+  private readonly remoteHostClient = createRemoteHostLinkClient({
+    sendCommand: (command) => this.sendRemoteHostCommand(command),
+    answerAsk: (askId, results) => this.sendRemoteHostCommand(answerAskCommand(askId, results)),
+    notify: () => this.sendRemoteHostCommand(notifyCommand()),
+  });
+
+  readonly remoteHost: RemoteHostLink = this.remoteHostClient.link;
 
   constructor(private readonly host: BrowserSidecarHost) {
     this.alertManager.onStateChange((id, state) => {
@@ -77,8 +100,13 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.protocolParsers.clear();
     this.unlistenHost?.();
     this.unlistenHost = null;
+    this.remoteHostClient.dispose();
     this.host.send("kill_sidecar_now");
     this.host.close();
+  }
+
+  private sendRemoteHostCommand(command: RemoteHostCommand): void {
+    this.host.send("remote_host_command", { payload: command });
   }
 
   async getAvailableShells(): Promise<{ name: string; path: string; args?: string[] }[]> {
@@ -259,6 +287,13 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       const parsed = this.getProtocolParser(id).process(text);
       applyTerminalSemanticEventsByPtyId(id, collectTerminalSemanticEvents(parsed.events));
       for (const handler of this.replayHandlers) handler({ id, data: parsed.visibleData });
+    } else if (event === REMOTE_HOST_RESULT_EVENT) {
+      this.remoteHostClient.onResult(data as RemoteHostResult);
+    } else if (event === REMOTE_HOST_ASK_EVENT) {
+      const ask = data as RemoteHostAsk;
+      this.remoteHostClient.onAsk(ask.rhId, ask.op, ask.params);
+    } else if (event === REMOTE_HOST_EVENT_EVENT) {
+      this.remoteHostClient.onEvent(data);
     } else if (event === "dor:controlRequest") {
       const payload = data as DorControlRequestPayload;
       const respond = (response: DorControlResult) => {

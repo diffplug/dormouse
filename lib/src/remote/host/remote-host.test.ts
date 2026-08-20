@@ -1,4 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+/**
+ * Holds one `authorizeConnection` call open per queued gate, in call order, so a
+ * test can make an *older* evaluation finish last. Everything else about the
+ * module is the real thing — the decision itself is never faked.
+ */
+const authProbe = vi.hoisted(() => ({ gates: [] as Array<Promise<void> | undefined>, calls: 0 }));
+vi.mock('server-lib-common', async (importOriginal) => {
+  const real = await importOriginal<typeof import('server-lib-common')>();
+  return {
+    ...real,
+    authorizeConnection: async (context: never, request: never) => {
+      const gate = authProbe.gates[authProbe.calls++];
+      const decision = await real.authorizeConnection(context, request);
+      await gate;
+      return decision;
+    },
+  };
+});
+
 import {
   DEFAULT_PAIRING_TTL_MS,
   WS_CLOSE_HOST_REPLACED,
@@ -13,54 +33,10 @@ import {
   type HostAclRecord,
   type PairingRequest,
 } from 'server-lib-common';
-import { RemoteHost, type WebSocketLike } from './remote-host';
+import { RemoteHost } from './remote-host';
 import type { HostEnrollment } from './enrollment';
 import type { PendingPairing } from './pairing-approval';
-
-// --- A fake `/ws/host` socket the test drives directly ---
-
-class FakeSocket implements WebSocketLike {
-  readyState = 1;
-  readonly sent: Array<Record<string, unknown>> = [];
-  readonly #handlers = new Map<string, Array<(ev: unknown) => void>>();
-
-  addEventListener(type: string, handler: (ev: unknown) => void): void {
-    const list = this.#handlers.get(type) ?? [];
-    list.push(handler);
-    this.#handlers.set(type, list);
-  }
-
-  send(data: string): void {
-    this.sent.push(JSON.parse(data));
-  }
-
-  close(): void {
-    this.closeWith(1000);
-  }
-
-  /** Emit a close event with a specific code, as the relay or the network would. */
-  closeWith(code: number): void {
-    this.readyState = 3;
-    this.#emit('close', { code });
-  }
-
-  #emit(type: string, ev: unknown): void {
-    for (const handler of this.#handlers.get(type) ?? []) handler(ev);
-  }
-
-  open(): void {
-    this.#emit('open', {});
-  }
-
-  /** Deliver a server→host frame. */
-  receive(frame: unknown): void {
-    this.#emit('message', { data: JSON.stringify(frame) });
-  }
-
-  frames(t: string): Array<Record<string, unknown>> {
-    return this.sent.filter((frame) => frame.t === t);
-  }
-}
+import { FakeSocket } from '../test-fake-socket';
 
 const ENROLLMENT: HostEnrollment = {
   serverUrl: 'https://host.example',
@@ -141,6 +117,20 @@ async function runConnect(
   return flushUntil(() => socket.frames('decision')[0]);
 }
 
+/** A promise a test releases by hand. */
+function gate(): { promise: Promise<void>; release: () => void } {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+
+/** Let every already-queued microtask run. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 8; i += 1) await Promise.resolve();
+}
+
 describe('RemoteHost frame handling', () => {
   let socket: FakeSocket;
   let savedRecords: HostAclRecord[] = [];
@@ -171,6 +161,8 @@ describe('RemoteHost frame handling', () => {
 
   beforeEach(() => {
     socket = new FakeSocket();
+    authProbe.gates.length = 0;
+    authProbe.calls = 0;
   });
 
   it('pair → local approval → pair-result with the ACL record, and persists', () => {
@@ -218,6 +210,38 @@ describe('RemoteHost frame handling', () => {
     expect(result).toMatchObject({ clientId: 'c1', approved: false });
     expect(result.record).toBeUndefined();
     expect(savedRecords).toEqual([]);
+  });
+
+  it('ignores approval callbacks superseded under the same client id', () => {
+    makeHost();
+    const first = {
+      accountId: 'owner',
+      passkeyCredentialId: 'cred-1',
+      passkeyPublicKeyHash: 'hash-1',
+      devicePublicKey: 'device-1',
+      requestedLabel: 'iPhone Safari',
+    } satisfies PairingRequest;
+    socket.receive({ t: 'pair', clientId: 'c1', request: first });
+    const stale = approvals[0]!;
+
+    const replacement = {
+      ...first,
+      devicePublicKey: 'device-2',
+      requestedLabel: 'Android Chrome',
+    };
+    socket.receive({ t: 'pair', clientId: 'c1', request: replacement });
+    expect(approvals[1]!.pairingId).not.toBe(stale.pairingId);
+
+    stale.approve();
+    stale.deny();
+    expect(socket.frames('pair-result')).toEqual([]);
+    expect(savedRecords).toEqual([]);
+
+    approvals[1]!.approve();
+    expect(socket.frames('pair-result')[0]).toMatchObject({
+      approved: true,
+      record: { devicePublicKey: 'device-2' },
+    });
   });
 
   it('expired approval → pair-result approved:false, ACL untouched', () => {
@@ -283,6 +307,21 @@ describe('RemoteHost frame handling', () => {
     );
   });
 
+  it('contains and denies a malformed connect2 from the relay', async () => {
+    makeHost();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    socket.receive({ t: 'connect2', clientId: 'c1', request: {} });
+
+    const decision = await flushUntil(() => socket.frames('decision')[0]);
+    expect(decision).toMatchObject({ clientId: 'c1', allowed: false });
+    expect(decision.failures).toEqual(
+      expect.arrayContaining(['passkey-assertion-invalid', 'device-signature-invalid']),
+    );
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it('pair then connect2 allows and omits failures', async () => {
     makeHost();
     const authenticator = await createAuthenticator(ENROLLMENT.rpId);
@@ -334,6 +373,7 @@ describe('RemoteHost frame handling', () => {
       reconnect: false,
       createWebSocket: () => (socket = new FakeSocket()),
       loadAcl: () => [],
+      saveAcl: () => {},
       requestApproval: (pending) => pending.approve(),
       dismissApproval: () => {},
       createSession: () => ({
@@ -383,11 +423,105 @@ describe('RemoteHost frame handling', () => {
     socket.receive({ t: 'msg', clientId: 'c1', data: { requestId: 'r', method: 'hello' } });
     expect(handled).toHaveLength(1);
 
-    // client-gone disposes the session and re-gates.
-    socket.receive({ t: 'client-gone', clientId: 'c1' });
-    expect(disposed).toBe(1);
+    // A new, malformed authorization attempt fails closed and revokes this
+    // connection's message gate. The relay is not an authority merely because
+    // this clientId was allowed once.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    socket.sent.length = 0;
+    socket.receive({ t: 'connect2', clientId: 'c1', request: {} });
+    await flushUntil(() => socket.frames('decision')[0]);
     socket.receive({ t: 'msg', clientId: 'c1', data: { requestId: 'r2', method: 'hello' } });
     expect(handled).toHaveLength(1);
+    expect(disposed).toBe(1);
+    warn.mockRestore();
+
+    // client-gone disposes the session and re-gates.
+    socket.receive({ t: 'client-gone', clientId: 'c1' });
+    // The failed re-authorization already disposed it; client-gone is
+    // idempotent rather than disposing the old session twice.
+    expect(disposed).toBe(1);
+    socket.receive({ t: 'msg', clientId: 'c1', data: { requestId: 'r3', method: 'hello' } });
+    expect(handled).toHaveLength(1);
+  });
+
+  it('lets only the newest connect2 answer, even when an older one lands last', async () => {
+    // Verification is async and the relay can start a second attempt while the
+    // first is still running. An older `allowed` landing last would re-open the
+    // gate the newer attempt closed — the relay would then have talked this Host
+    // into establishing a client it had just denied.
+    const handled: unknown[] = [];
+    savedRecords = [];
+    approvals = [];
+    const host = new RemoteHost({
+      enrollment: ENROLLMENT,
+      reconnect: false,
+      createWebSocket: () => (socket = new FakeSocket()),
+      loadAcl: () => [],
+      saveAcl: () => {},
+      requestApproval: (pending) => pending.approve(),
+      dismissApproval: () => {},
+      createSession: () => ({ handle: (data) => handled.push(data), dispose: () => {} }),
+    });
+    host.start();
+    socket.open();
+
+    const authenticator = await createAuthenticator(ENROLLMENT.rpId);
+    const deviceKey = await generateDeviceKeyPair();
+    const passkeyPublicKeyHash = await hashPasskeyPublicKey(authenticator.publicKey);
+    socket.receive({
+      t: 'pair',
+      clientId: 'c1',
+      request: {
+        accountId: 'owner',
+        passkeyCredentialId: authenticator.credentialId,
+        passkeyPublicKeyHash,
+        devicePublicKey: deviceKey.devicePublicKey,
+        requestedLabel: 'x',
+      } satisfies PairingRequest,
+    });
+
+    // The older attempt would be allowed — and is held open until after the
+    // newer one has been answered.
+    const held = gate();
+    authProbe.gates[authProbe.calls] = held.promise;
+    socket.sent.length = 0;
+    socket.receive({ t: 'connect', clientId: 'c1' });
+    const challenge = socket.frames('challenge')[0]!.challenge as string;
+    socket.receive({
+      t: 'connect2',
+      clientId: 'c1',
+      request: {
+        accountId: 'owner',
+        devicePublicKey: deviceKey.devicePublicKey,
+        challenge,
+        deviceSignature: await signDeviceChallenge(deviceKey.privateKey, {
+          hostId: ENROLLMENT.hostId,
+          challenge,
+          devicePublicKey: deviceKey.devicePublicKey,
+        }),
+        passkey: {
+          publicKey: authenticator.publicKey,
+          assertion: await authenticator.assert(challenge, ENROLLMENT.origin),
+        },
+      } satisfies ConnectionRequest,
+    });
+    await settle();
+    expect(socket.frames('decision')).toHaveLength(0);
+
+    // The newer attempt is malformed, so it denies and closes the gate.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    socket.receive({ t: 'connect2', clientId: 'c1', request: {} });
+    expect(await flushUntil(() => socket.frames('decision')[0])).toMatchObject({ allowed: false });
+
+    held.release();
+    await settle();
+
+    // The superseded evaluation answers nothing at all — a second `decision`
+    // would settle a request the client is no longer waiting on.
+    expect(socket.frames('decision')).toHaveLength(1);
+    socket.receive({ t: 'msg', clientId: 'c1', data: { requestId: 'r', method: 'hello' } });
+    expect(handled).toHaveLength(0);
+    warn.mockRestore();
   });
 });
 

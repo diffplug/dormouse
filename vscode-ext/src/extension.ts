@@ -11,6 +11,8 @@ import { readPersistedSession } from '../../lib/src/lib/session-types';
 import { workspaceTitle } from './workspace-chrome';
 import { resolveSelectedShell, setSelectedShellPath, getSelectedShellPath } from './shell-selection';
 import type { ExtensionMessage } from './message-types';
+import { initRemoteHost } from './remote-host';
+import { disposePeerLink, initPeerLink } from './peer-link';
 
 type NewTerminalMessage = Extract<ExtensionMessage, { type: 'dormouse:newTerminal' }>;
 
@@ -73,6 +75,13 @@ function setupPanel(
 }
 
 export function activate(context: vscode.ExtensionContext) {
+  // Storage location only; nothing binds a socket until there is a Host to run
+  // (remote-host.ts).
+  initPeerLink(context);
+  context.subscriptions.push({ dispose: () => void disposePeerLink() });
+  // The remote Host runs here, in the extension host that owns the PTYs — in
+  // whichever window wins the bind (remote-host.ts).
+  context.subscriptions.push(initRemoteHost(context));
   log.init();
   extensionContext = context;
   ptyManager.setExtensionPath(context.extensionPath);

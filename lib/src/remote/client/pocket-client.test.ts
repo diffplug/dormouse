@@ -25,10 +25,10 @@ import {
   PASSKEY_UNAVAILABLE_MESSAGE,
   PocketClient,
   SessionExpiredError,
-  type PocketSocket,
   type PocketStorage,
   type PocketClientDeps,
 } from './pocket-client';
+import { FakeSocket } from '../test-fake-socket';
 import { getOrCreateDeviceKey, type DeviceKeyStore } from './device-key';
 import type { PasskeyRegistration, WebAuthnClient } from './webauthn';
 
@@ -133,58 +133,6 @@ function recordingWebAuthn(): {
   };
 }
 
-class FakeSocket implements PocketSocket {
-  readyState = 0;
-  closeEmits = true;
-  readonly sent: Array<Record<string, unknown>> = [];
-  readonly #handlers = new Map<string, Array<(ev: unknown) => void>>();
-
-  addEventListener(type: string, handler: (ev: unknown) => void): void {
-    const list = this.#handlers.get(type) ?? [];
-    list.push(handler);
-    this.#handlers.set(type, list);
-  }
-
-  send(data: string): void {
-    this.sent.push(JSON.parse(data));
-  }
-
-  close(): void {
-    this.readyState = 3;
-    if (this.closeEmits) this.emitClose(1000);
-  }
-
-  /** Simulate the server/network dropping the connection (no client `close()`). */
-  drop(): void {
-    this.readyState = 3;
-    this.emitClose(1006);
-  }
-
-  fireOpen(): void {
-    this.readyState = 1;
-    this.#emit('open', {});
-  }
-
-  /** A rejected upgrade: the browser fires `error` with no status, never `open`. */
-  fireError(): void {
-    this.readyState = 3;
-    this.#emit('error', {});
-  }
-
-  /** Simulate the server sending a frame to this client. */
-  server(frame: unknown): void {
-    this.#emit('message', { data: JSON.stringify(frame) });
-  }
-
-  emitClose(code = 1000): void {
-    this.#emit('close', { code });
-  }
-
-  #emit(type: string, ev: unknown): void {
-    for (const handler of this.#handlers.get(type) ?? []) handler(ev);
-  }
-}
-
 /** Poll `sent` for the first frame matching `predicate`. */
 async function nextSent(
   socket: FakeSocket,
@@ -250,7 +198,7 @@ async function signedIn(overrides: Partial<PocketClientDeps> = {}): Promise<Harn
   await harness.client.setup('pw', 'My Phone');
   await harness.client.signin();
   const open = harness.client.openSocket();
-  harness.socket.fireOpen();
+  harness.socket.open();
   await open;
   return harness;
 }
@@ -258,7 +206,7 @@ async function signedIn(overrides: Partial<PocketClientDeps> = {}): Promise<Harn
 async function pairApproved(client: PocketClient, socket: FakeSocket): Promise<void> {
   const pairing = client.pair('h1', 'iPhone');
   await nextSent(socket, (f) => f.t === 'pair');
-  socket.server({ t: 'pair-result', approved: true, record: { hostId: 'h1' } });
+  socket.receive({ t: 'pair-result', approved: true, record: { hostId: 'h1' } });
   await pairing;
 }
 
@@ -297,12 +245,12 @@ describe('setup + signin', () => {
     await harness.client.signin();
 
     const open = harness.client.openSocket();
-    harness.socket.fireOpen();
+    harness.socket.open();
     await open;
 
     const pairing = harness.client.pair('h1', 'iPhone (Home Screen)');
     const frame = await nextSent(harness.socket, (f) => f.t === 'pair');
-    harness.socket.server({ t: 'pair-result', approved: true, record: { hostId: 'h1' } });
+    harness.socket.receive({ t: 'pair-result', approved: true, record: { hostId: 'h1' } });
     await pairing;
 
     // The request carries the hash of the key sign-in handed back.
@@ -426,7 +374,7 @@ describe('pair', () => {
     expect(typeof request.devicePublicKey).toBe('string');
 
     const record = { hostId: 'h1', label: 'iPhone Safari' };
-    socket.server({ t: 'pair-result', approved: true, record });
+    socket.receive({ t: 'pair-result', approved: true, record });
     const result = await pairing;
     expect(result.approved).toBe(true);
     expect(result.record).toEqual(record);
@@ -437,7 +385,7 @@ describe('pair', () => {
     const { client, socket } = await signedIn();
     const pairing = client.pair('h1', 'iPhone');
     await nextSent(socket, (f) => f.t === 'pair');
-    socket.server({ t: 'pair-result', approved: false, error: 'denied by host' });
+    socket.receive({ t: 'pair-result', approved: false, error: 'denied by host' });
     const result = await pairing;
     expect(result.approved).toBe(false);
     expect(result.error).toBe('denied by host');
@@ -454,12 +402,12 @@ describe('pair', () => {
     await client.setup('pw', 'My Phone');
     await client.signin();
     const open = client.openSocket();
-    socket.fireOpen();
+    socket.open();
     await open;
 
     const pairing = client.pair('h1', 'iPhone');
     await nextSent(socket, (f) => f.t === 'pair');
-    socket.server({ t: 'pair-result', approved: false, error: PAIRING_STALE_PRESENCE_ERROR });
+    socket.receive({ t: 'pair-result', approved: false, error: PAIRING_STALE_PRESENCE_ERROR });
 
     // The client re-auths (bearer-authorized begin + finish) and re-sends the
     // SAME pairing request; approve the retry.
@@ -473,7 +421,7 @@ describe('pair', () => {
     })();
     const first = socket.sent.find((f) => f.t === 'pair')!;
     expect(retry.request).toEqual(first.request);
-    socket.server({ t: 'pair-result', approved: true, record: { hostId: 'h1' } });
+    socket.receive({ t: 'pair-result', approved: true, record: { hostId: 'h1' } });
 
     const result = await pairing;
     expect(result.approved).toBe(true);
@@ -499,7 +447,7 @@ describe('connect', () => {
     const connecting = client.connect('h1');
 
     await nextSent(socket, (f) => f.t === 'connect');
-    socket.server({ t: 'challenge', hostId: 'h1', challenge: b64uChallenge(7), expiresAt: 9e15 });
+    socket.receive({ t: 'challenge', hostId: 'h1', challenge: b64uChallenge(7), expiresAt: 9e15 });
 
     const connect2 = await nextSent(socket, (f) => f.t === 'connect2');
     const request = connect2.request as Record<string, unknown>;
@@ -512,7 +460,7 @@ describe('connect', () => {
       CREDENTIAL_ID,
     );
 
-    socket.server({ t: 'decision', allowed: true });
+    socket.receive({ t: 'decision', allowed: true });
     const decision = await connecting;
     expect(decision.allowed).toBe(true);
     expect(client.connectedHostId).toBe('h1');
@@ -524,9 +472,9 @@ describe('connect', () => {
 
     const connecting = client.connect('h1');
     await nextSent(socket, (f) => f.t === 'connect');
-    socket.server({ t: 'challenge', hostId: 'h1', challenge: b64uChallenge(7), expiresAt: 9e15 });
+    socket.receive({ t: 'challenge', hostId: 'h1', challenge: b64uChallenge(7), expiresAt: 9e15 });
     const connect2 = await nextSent(socket, (f) => f.t === 'connect2');
-    socket.server({ t: 'decision', allowed: true });
+    socket.receive({ t: 'decision', allowed: true });
 
     const decision = await connecting;
     expect(decision.allowed).toBe(true);
@@ -546,9 +494,9 @@ describe('connect', () => {
     await expect(client.connect('h1')).rejects.toThrow(/already awaiting/);
 
     // The first handshake still completes normally.
-    socket.server({ t: 'challenge', hostId: 'h1', challenge: b64uChallenge(7), expiresAt: 9e15 });
+    socket.receive({ t: 'challenge', hostId: 'h1', challenge: b64uChallenge(7), expiresAt: 9e15 });
     await nextSent(socket, (f) => f.t === 'connect2');
-    socket.server({ t: 'decision', allowed: true });
+    socket.receive({ t: 'decision', allowed: true });
     expect((await first).allowed).toBe(true);
   });
 
@@ -559,9 +507,9 @@ describe('connect', () => {
 
     const connecting = client.connect('h1');
     await nextSent(socket, (f) => f.t === 'connect');
-    socket.server({ t: 'challenge', hostId: 'h1', challenge: b64uChallenge(3), expiresAt: 9e15 });
+    socket.receive({ t: 'challenge', hostId: 'h1', challenge: b64uChallenge(3), expiresAt: 9e15 });
     await nextSent(socket, (f) => f.t === 'connect2');
-    socket.server({ t: 'decision', allowed: false, failures: ['device-not-paired'] });
+    socket.receive({ t: 'decision', allowed: false, failures: ['device-not-paired'] });
     const decision = await connecting;
     expect(decision.allowed).toBe(false);
     expect(decision.failures).toEqual(['device-not-paired']);
@@ -576,9 +524,9 @@ describe('connect', () => {
 
     const connecting = client.connect('h1');
     await nextSent(socket, (f) => f.t === 'connect');
-    socket.server({ t: 'challenge', hostId: 'h1', challenge: b64uChallenge(4), expiresAt: 9e15 });
+    socket.receive({ t: 'challenge', hostId: 'h1', challenge: b64uChallenge(4), expiresAt: 9e15 });
     await nextSent(socket, (f) => f.t === 'connect2');
-    socket.server({ t: 'decision', allowed: false, failures: ['challenge-invalid'] });
+    socket.receive({ t: 'decision', allowed: false, failures: ['challenge-invalid'] });
 
     const decision = await connecting;
     expect(decision.allowed).toBe(false);
@@ -592,9 +540,9 @@ async function connectEstablished(harness: Harness): Promise<void> {
   const { client, socket } = harness;
   const connecting = client.connect('h1');
   await nextSent(socket, (f) => f.t === 'connect');
-  socket.server({ t: 'challenge', hostId: 'h1', challenge: b64uChallenge(7), expiresAt: 9e15 });
+  socket.receive({ t: 'challenge', hostId: 'h1', challenge: b64uChallenge(7), expiresAt: 9e15 });
   await nextSent(socket, (f) => f.t === 'connect2');
-  socket.server({ t: 'decision', allowed: true });
+  socket.receive({ t: 'decision', allowed: true });
   await connecting;
 }
 
@@ -642,7 +590,7 @@ describe('session expiry', () => {
 
     live = false;
     const opening = harness.client.openSocket();
-    harness.socket.fireError();
+    harness.socket.emitError();
     await expect(opening).rejects.toBeInstanceOf(SessionExpiredError);
     expect(harness.client.sessionToken).toBeNull();
   });
@@ -651,7 +599,7 @@ describe('session expiry', () => {
     const harness = await withHostsRoute(() => ({ json: { hosts: [] } }));
 
     const opening = harness.client.openSocket();
-    harness.socket.fireError();
+    harness.socket.emitError();
     await expect(opening).rejects.toThrow('relay socket error');
     expect(harness.client.sessionToken).toBe('tok-abc');
   });
@@ -687,7 +635,7 @@ describe('socket lifecycle', () => {
     let hostGone = 0;
     harness.client.setOnHostGone(() => hostGone++);
 
-    harness.socket.server({ t: 'host-gone' });
+    harness.socket.receive({ t: 'host-gone' });
     expect(hostGone).toBe(1);
     expect(harness.client.connectedHostId).toBeNull();
     harness.socket.drop();
@@ -717,7 +665,7 @@ describe('socket lifecycle', () => {
     await harness.client.signin();
 
     const firstOpen = harness.client.openSocket();
-    first.fireOpen();
+    first.open();
     await firstOpen;
     await connectEstablished({ ...harness, socket: first });
 
@@ -725,19 +673,19 @@ describe('socket lifecycle', () => {
     harness.client.close();
 
     const secondOpen = harness.client.openSocket();
-    second.fireOpen();
+    second.open();
     await secondOpen;
     await connectEstablished({ ...harness, socket: second });
 
     let hostGone = 0;
     harness.client.setOnHostGone(() => hostGone++);
 
-    first.server({ t: 'host-gone' });
+    first.receive({ t: 'host-gone' });
     expect(hostGone).toBe(0);
     expect(harness.client.connectedHostId).toBe('h1');
     expect(harness.client.socketOpen).toBe(true);
 
-    first.emitClose();
+    first.closeWith(1000);
     expect(hostGone).toBe(0);
     expect(harness.client.connectedHostId).toBe('h1');
     expect(harness.client.socketOpen).toBe(true);
@@ -751,7 +699,7 @@ describe('remote-api correlation', () => {
     const frame = await nextSent(socket, (f) => f.t === 'msg');
     const data = frame.data as { requestId: string; method: string };
     expect(data.method).toBe('hello');
-    socket.server({
+    socket.receive({
       t: 'msg',
       data: { requestId: data.requestId, ok: true, result: { protocolVersion: 1, hostId: 'h1' } },
     });
@@ -764,7 +712,7 @@ describe('remote-api correlation', () => {
     const req = client.request('bogus');
     const frame = await nextSent(socket, (f) => f.t === 'msg');
     const data = frame.data as { requestId: string };
-    socket.server({ t: 'msg', data: { requestId: data.requestId, ok: false, error: 'nope' } });
+    socket.receive({ t: 'msg', data: { requestId: data.requestId, ok: false, error: 'nope' } });
     await expect(req).rejects.toThrow('nope');
   });
 
@@ -777,17 +725,17 @@ describe('remote-api correlation', () => {
     const data = frame.data as { requestId: string; method: string };
     expect(data.method).toBe('directory.watch');
     // Host convention: the subId is the request's own requestId.
-    socket.server({ t: 'msg', data: { requestId: data.requestId, ok: true, result: { subId: data.requestId } } });
+    socket.receive({ t: 'msg', data: { requestId: data.requestId, ok: true, result: { subId: data.requestId } } });
     const subId = await watching;
     expect(subId).toBe(data.requestId);
 
     // A snapshot for our subId is delivered...
-    socket.server({
+    socket.receive({
       t: 'msg',
       data: { subId, event: 'directory.snapshot', data: { entries: [{ title: 'zsh' }] } },
     });
     // ...one for an unrelated subId is not.
-    socket.server({
+    socket.receive({
       t: 'msg',
       data: { subId: 'other', event: 'directory.snapshot', data: { entries: [{ title: 'nope' }] } },
     });

@@ -18,6 +18,10 @@ const { createIframeProxyUrl } = require('./iframe-proxy.cjs');
 // for the agent-browser host capabilities, run here exactly as the VS Code
 // extension host runs it. See docs/specs/dor-browser.md → "Agent-Browser Host Capabilities".
 const { createAgentBrowserHost } = require('./agent-browser-host.cjs');
+// Same pattern again: lib/src/host/remote/sidecar-entry.ts is the remote Host —
+// the relay socket, the enrollment, the ACL, and remote-api v1 — running next to
+// the PTYs it serves. See docs/specs/remote-api.md.
+const { createSidecarRemoteHost } = require('./remote-host.cjs');
 
 const agentBrowser = createAgentBrowserHost({
   writeClipboardText: (text) => clipboard.writeClipboardText(text),
@@ -29,8 +33,22 @@ function send(event, data) {
 }
 
 const mgr = create((event, data) => {
+  // Tap output and exits for the remote Host before they go to the webview. A
+  // remote listener must never be able to break the local pipe, so its failure
+  // is logged and the send happens either way.
+  try {
+    remoteHost.onPtyEvent(event, data);
+  } catch (err) {
+    console.error(`[sidecar] remote host ${event} tap failed:`, err && err.message || err);
+  }
   send(`pty:${event}`, data);
 }, nodePty);
+
+const remoteHost = createSidecarRemoteHost({
+  send,
+  stateDir: process.env.DORMOUSE_STATE_DIR,
+  mgr,
+});
 
 const dorControl = createDorControlServer({
   socketPath: process.env.DORMOUSE_CONTROL_SOCKET,
@@ -70,6 +88,7 @@ rl.on('line', (line) => {
       case 'pty:gracefulKillAll': mgr.gracefulKillAll(data.timeout, data.requestId); break;
       case 'sidecar:shutdown': shutdown(); break;
       case 'dor:controlResponse': dorControl?.respond(data); break;
+      case 'remoteHost:command': remoteHost.handleCommand(data); break;
       case 'iframe:createProxyUrl':
         // Log to stderr — stdout is the JSON-lines protocol channel.
         respondAsync('iframe:proxyUrl', data.requestId, async () => ({
@@ -155,6 +174,7 @@ async function shutdown() {
     ]);
   } catch {}
   dorControl?.close();
+  remoteHost.dispose();
   mgr.killAll();
   process.exit(0);
 }

@@ -32,6 +32,7 @@ import {
   WS_ROUTES,
   WS_TOKEN_PARAM,
   authorizeConnection,
+  type ConnectionDecision,
   type ConnectionPolicy,
   type ConnectionRequest,
   type HostAclRecord,
@@ -41,12 +42,8 @@ import {
 } from 'server-lib-common';
 import type { HostEnrollment } from './enrollment';
 import type { RemoteWebSocket } from '../ws';
-import { loadHostAcl, saveAclRecords } from './acl';
-import {
-  enqueuePairingApproval,
-  resolvePairingApproval,
-  type PendingPairing,
-} from './pairing-approval';
+import { loadHostAcl } from './acl';
+import type { PendingPairing } from './pairing-approval';
 
 /** The remote-api handler this controller drives per authorized client. */
 export interface RemoteApiSessionLike {
@@ -61,6 +58,12 @@ export type WebSocketLike = RemoteWebSocket;
 interface ClientState {
   /** True once the Host allowed this client's connection — the `msg` gate. */
   established: boolean;
+  /**
+   * Bumped by every authorization attempt (see {@link RemoteHost.#resetAuthorization}).
+   * `authorizeConnection` is async, so two attempts for one client can be in
+   * flight at once; only the newest may answer or re-open the gate.
+   */
+  authGeneration: number;
   /** The in-flight pairing awaiting local approval, if any. */
   pending?: PendingPairing;
   /** The remote-api handler, created on the first authorized `msg`. */
@@ -88,12 +91,19 @@ export interface RemoteHostOptions {
     hostId: string;
     send: (payload: unknown) => void;
   }) => RemoteApiSessionLike;
-  loadAcl?: (hostId: string) => HostAclRecord[];
-  saveAcl?: (hostId: string, records: readonly HostAclRecord[]) => void;
-  /** Surface a pairing request for local approval (default: the modal queue). */
-  requestApproval?: (pending: PendingPairing) => void;
-  /** Dismiss a surfaced request once resolved (default: the modal queue). */
-  dismissApproval?: (clientId: string) => void;
+  /**
+   * Where the ACL comes from and goes. Required, with no webview-store default:
+   * this controller runs in the Tauri sidecar and the VS Code extension host as
+   * well as in a webview, so a default would drag `localStorage` into both Node
+   * bundles — and a forgotten `saveAcl` has to be a type error rather than an
+   * approval that is lost at the next restart.
+   */
+  loadAcl: (hostId: string) => HostAclRecord[];
+  saveAcl: (hostId: string, records: readonly HostAclRecord[]) => void;
+  /** Surface a pairing request for local approval. */
+  requestApproval: (pending: PendingPairing) => void;
+  /** Dismiss a surfaced request once resolved. */
+  dismissApproval: (clientId: string) => void;
   now?: () => number;
   /** Auto-reconnect with backoff (default true; tests pass false). */
   reconnect?: boolean;
@@ -144,9 +154,9 @@ export class RemoteHost {
     this.#createWebSocket =
       options.createWebSocket ?? ((url) => new WebSocket(url) as unknown as WebSocketLike);
     this.#createSession = options.createSession;
-    this.#saveAcl = options.saveAcl ?? saveAclRecords;
-    this.#requestApproval = options.requestApproval ?? enqueuePairingApproval;
-    this.#dismissApproval = options.dismissApproval ?? resolvePairingApproval;
+    this.#saveAcl = options.saveAcl;
+    this.#requestApproval = options.requestApproval;
+    this.#dismissApproval = options.dismissApproval;
     this.#reconnect = options.reconnect ?? true;
   }
 
@@ -267,7 +277,7 @@ export class RemoteHost {
   #clientState(clientId: string): ClientState {
     let state = this.#clients.get(clientId);
     if (!state) {
-      state = { established: false };
+      state = { established: false, authGeneration: 0 };
       this.#clients.set(clientId, state);
     }
     return state;
@@ -319,8 +329,9 @@ export class RemoteHost {
     const ticket = this.#ceremony.begin(request);
     const pending: PendingPairing = {
       clientId,
+      pairingId: ticket.pairingId,
       request,
-      requestedAt: this.#now(),
+      requestedAt: ticket.requestedAt,
       approve: (label) => this.#approvePairing(clientId, ticket.pairingId, label),
       deny: (error) => this.#denyPairing(clientId, ticket.pairingId, error),
     };
@@ -331,7 +342,10 @@ export class RemoteHost {
   /** The local approval — the ONLY path that writes the ACL. */
   #approvePairing(clientId: string, pairingId: string, label?: string): void {
     const state = this.#clients.get(clientId);
-    if (!state?.pending) return; // already resolved
+    // The service checks this at its bridge boundary too; keep the controller's
+    // ACL write bound to its own current ticket even if another caller retains
+    // an older callback.
+    if (!state?.pending || state.pending.pairingId !== pairingId) return;
     state.pending = undefined;
     let record: HostAclRecord;
     try {
@@ -353,7 +367,7 @@ export class RemoteHost {
 
   #denyPairing(clientId: string, pairingId: string, error = 'pairing denied by host'): void {
     const state = this.#clients.get(clientId);
-    if (!state?.pending) return;
+    if (!state?.pending || state.pending.pairingId !== pairingId) return;
     state.pending = undefined;
     try {
       this.#ceremony.deny(pairingId);
@@ -365,21 +379,52 @@ export class RemoteHost {
   }
 
   #onConnect(clientId: string): void {
+    this.#resetAuthorization(clientId);
     const { challenge, expiresAt } = this.#challenges.issue();
     this.#send({ t: 'challenge', clientId, challenge, expiresAt });
   }
 
   async #onConnect2(clientId: string, request: ConnectionRequest): Promise<void> {
-    const decision = await authorizeConnection(
-      {
-        hostId: this.#enrollment.hostId,
-        acl: this.#acl,
-        challenges: this.#challenges,
-        policy: this.#policy,
-      },
-      request,
-    );
-    if (decision.allowed) this.#clientState(clientId).established = true;
+    // A new authorization attempt closes the old gate first. The relay is not
+    // an authority and may be compromised, so it cannot keep a once-authorized
+    // client established by following it with a malformed attempt.
+    const state = this.#resetAuthorization(clientId);
+    const generation = state.authGeneration;
+    // Verification is async, so the relay can start a second attempt while this
+    // one is still running. Whichever finishes last would otherwise win, and an
+    // older `allowed` landing after a newer attempt would re-open the gate that
+    // attempt just closed. A superseded evaluation answers nothing at all — its
+    // replacement is what the client is waiting on.
+    const superseded = (): boolean =>
+      this.#clients.get(clientId) !== state || state.authGeneration !== generation;
+    let decision: ConnectionDecision;
+    try {
+      decision = await authorizeConnection(
+        {
+          hostId: this.#enrollment.hostId,
+          acl: this.#acl,
+          challenges: this.#challenges,
+          policy: this.#policy,
+        },
+        request,
+      );
+    } catch (error) {
+      // `connect2` came from the relay, not a trusted typed caller. Structural
+      // failures must be an ordinary denial: this Host now runs in Node, where
+      // letting the async handler reject can terminate the sidecar or extension
+      // host rather than merely logging in a webview.
+      console.warn('remote-host: malformed connection request', error);
+      if (superseded()) return;
+      this.#send({
+        t: 'decision',
+        clientId,
+        allowed: false,
+        failures: ['passkey-assertion-invalid', 'device-signature-invalid'],
+      });
+      return;
+    }
+    if (superseded()) return;
+    if (decision.allowed) state.established = true;
     // `failures` is optional on the wire; omit it on an allowed decision.
     this.#send({
       t: 'decision',
@@ -402,6 +447,16 @@ export class RemoteHost {
       state.session = session;
     }
     session.handle(data);
+  }
+
+  /** A fresh authorization attempt replaces any prior control session. */
+  #resetAuthorization(clientId: string): ClientState {
+    const state = this.#clientState(clientId);
+    state.established = false;
+    state.authGeneration += 1;
+    state.session?.dispose();
+    state.session = undefined;
+    return state;
   }
 
   #onClientGone(clientId: string): void {

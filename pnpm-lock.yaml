@@ -287,6 +287,9 @@ importers:
       node-pty:
         specifier: 1.2.0-beta.15
         version: 1.2.0-beta.15
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.3
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.3.0
@@ -297,6 +300,9 @@ importers:
       '@types/vscode':
         specifier: 1.85.0
         version: 1.85.0
+      '@types/ws':
+        specifier: ^8.5.0
+        version: 8.18.1
       '@vitejs/plugin-react':
         specifier: ^6.0.2
         version: 6.0.5(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0))
@@ -318,6 +324,9 @@ importers:
       vite:
         specifier: ^8.0.14
         version: 8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)
+      vitest:
+        specifier: ^4.1.6
+        version: 4.1.10(@types/node@24.13.3)(jsdom@29.1.1)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0))
 
   website:
     dependencies:
@@ -2253,6 +2262,9 @@ packages:
 
   '@types/web-push@3.6.4':
     resolution: {integrity: sha512-GnJmSr40H3RAnj0s34FNTcJi1hmWFV5KXugE0mYWnYhgTAHLJ/dJKAwDmvPJYMke0RplY2XE9LnM4hqSqKIjhQ==}
+
+  '@types/ws@8.18.1':
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
   '@typespec/ts-http-runtime@0.3.6':
     resolution: {integrity: sha512-jIXhD0eWQ1JA6ln/5Dltyx22UxWNrw0hZmhy2rlv6m6KgF7kplHx3g0fzi09lNmTJQRR91OlemYp3xFnvDK9og==}
@@ -4430,18 +4442,6 @@ packages:
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
 
-  ws@8.21.0:
-    resolution: {integrity: sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==}
-    engines: {node: '>=10.0.0'}
-    peerDependencies:
-      bufferutil: ^4.0.1
-      utf-8-validate: '>=5.0.2'
-    peerDependenciesMeta:
-      bufferutil:
-        optional: true
-      utf-8-validate:
-        optional: true
-
   ws@8.21.3:
     resolution: {integrity: sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw==}
     engines: {node: '>=10.0.0'}
@@ -4984,7 +4984,7 @@ snapshots:
     dependencies:
       '@hono/node-server': 2.1.1(hono@4.13.2)
       hono: 4.13.2
-      ws: 8.21.0
+      ws: 8.21.3
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -6080,6 +6080,10 @@ snapshots:
   '@types/vscode@1.85.0': {}
 
   '@types/web-push@3.6.4':
+    dependencies:
+      '@types/node': 24.13.3
+
+  '@types/ws@8.18.1':
     dependencies:
       '@types/node': 24.13.3
 
@@ -8171,8 +8175,6 @@ snapshots:
 
   wrappy@1.0.2:
     optional: true
-
-  ws@8.21.0: {}
 
   ws@8.21.3: {}
 

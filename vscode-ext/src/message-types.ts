@@ -5,6 +5,7 @@ import type { TerminalColors } from '../../lib/src/lib/terminal-protocol';
 import type { DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
 import type { AgentBrowserStreamStatusResult, IframeProxyResult, OpenPort } from '../../lib/src/lib/platform/types';
 import type { VSCodeWorkbenchCommand } from '../../lib/src/lib/vscode-keybindings';
+import type { RemoteHostCommand, RemoteHostResult } from '../../lib/src/host/remote/service-protocol';
 
 // Messages from webview → extension host
 export type WebviewMessage =
@@ -28,6 +29,15 @@ export type WebviewMessage =
   | { type: 'agentBrowser:popOut'; session: string; url?: string; rect?: { x: number; y: number; width: number; height: number }; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:popIn'; session: string; url?: string; binaryPath?: string; requestId: string }
   | { type: 'iframe:createProxyUrl'; url: string; requestId: string }
+  // Peer surfaces: the remote Host runs in the extension host, but the terminals
+  // live in whichever webview opened them. See docs/specs/vscode.md → "Peer
+  // surfaces". `op` is opaque to the router: the operation map lives in
+  // `lib/src/remote/host/peer-surfaces.ts`, so a new peer operation adds no
+  // message type here.
+  | { type: 'peer:answer'; requestId: string; results: unknown[] }
+  | { type: 'peer:notify' }
+  // One command for the Host service (`lib/src/host/remote/service-protocol.ts`).
+  | { type: 'remoteHost:command'; payload: RemoteHostCommand }
   | { type: 'dormouse:init' }
   | ({ type: 'dormouse:themeColors' } & TerminalColors)
   | { type: 'dormouse:saveState'; state: unknown }
@@ -73,6 +83,11 @@ export type ExtensionMessage =
   | { type: 'agentBrowser:openResult'; requestId: string; ok: boolean; session?: string; wsPort?: number; binaryPath?: string; error?: string }
   | { type: 'agentBrowser:popResult'; requestId: string; ok: boolean; wsPort?: number; error?: string }
   | { type: 'iframe:proxyUrl'; requestId: string; result: IframeProxyResult }
+  | { type: 'peer:ask'; requestId: string; op: string; params: unknown }
+  // Broadcast to every webview: `rhId` carries a per-adapter tag, so only the
+  // one that asked finds a pending command to settle.
+  | { type: 'remoteHost:result'; payload: RemoteHostResult }
+  | { type: 'remoteHost:event'; payload: unknown }
   | {
       type: 'dormouse:newTerminal';
       shell?: string;

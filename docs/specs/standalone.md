@@ -17,6 +17,7 @@ Tauri app process (Rust — standalone/src-tauri/src/lib.rs)
     ├── dor-control-server.js  — dor CLI control socket (docs/specs/dor-cli.md)
     ├── iframe-proxy.cjs       — bundled from lib/src/host/iframe-proxy.ts (docs/specs/dor-browser.md)
     ├── agent-browser-host.cjs — bundled from lib/src/host/agent-browser-host.ts (docs/specs/dor-browser.md)
+    ├── remote-host.cjs        — bundled from lib/src/host/remote/sidecar-entry.ts: the remote Host service (§Remote Host service)
     ├── clipboard-ops.js       — OS clipboard: paste-read tiers for macOS/Linux (Windows reads go native in Rust); agent-browser clipboard writes on all platforms (docs/specs/mouse-and-clipboard.md §8.6, docs/specs/dor-browser.md)
     └── shell-integration/     — injected shell hook scripts (docs/specs/terminal-escapes.md)
 ```
@@ -24,8 +25,8 @@ Tauri app process (Rust — standalone/src-tauri/src/lib.rs)
 The Rust layer is deliberately thin: it spawns and supervises the sidecar,
 bridges the webview to it, and owns the OS-integration edges (window events,
 file drop, dock icon, logging). Everything with real logic — PTYs, the dor
-control server, the iframe proxy, the agent-browser host — runs in the Node
-sidecar, sharing the same modules the VS Code host runs
+control server, the iframe proxy, the agent-browser host, the remote Host —
+runs in the Node sidecar, sharing the same modules the VS Code host runs
 (`build-sidecar-proxy.mjs` bundles the `lib/src/host/` sources into the
 sidecar's `.cjs` copies, so the two hosts cannot drift).
 
@@ -39,20 +40,27 @@ Source of truth: `standalone/src/main.tsx` (`bootstrap()`).
 2. `setPlatform(platform)` then `await platform.init()` **before**
    `resumeOrRestore` — init registers the event listeners that resume replay
    arrives on.
-3. `initAlertStateReceiver()`, `restoreActiveTheme()` (`docs/specs/theme.md`).
-4. `getAvailableShells()` seeds the shell store (`lib/src/lib/shell-store.ts`),
+3. `installPeerSurfaceResponder()`, so the sidecar's Host can ask this webview
+   what its panes are called and how big their xterms are (§Remote Host
+   service). **After `init()`, not before:** the responder seeds itself with a
+   `status` command, and nothing could carry the answer back until the adapter
+   has its listeners.
+4. `initAlertStateReceiver()`, `restoreActiveTheme()` (`docs/specs/theme.md`).
+5. `getAvailableShells()` seeds the shell store (`lib/src/lib/shell-store.ts`),
    which restores the persisted selection (`dormouse:selected-shell`) and
    publishes it via `setDefaultShellOpts` (the default-shell slot used by
    split/spawn/restore paths, `docs/specs/layout.md`). The call is *started*
    right after `init()` so its webview → Rust → sidecar round trip overlaps
-   step 3, and awaited here: seeding must complete before the Wall mounts, so
-   the first restored pane already spawns with that shell.
-5. `resumeOrRestore(platform)` runs the priority-based recovery from
+   steps 3–4, and awaited here: seeding must complete before the Wall mounts,
+   so the first restored pane already spawns with that shell.
+6. `resumeOrRestore(platform)` runs the priority-based recovery from
    `docs/specs/transport.md`.
-6. `startUpdateCheck()` (`docs/specs/auto-update.md`), then render `AppBar` +
-   `App` with `enableRemoteHost` (activating the remote Host module —
-   enrollment, pairing modal, relay socket; `docs/specs/server.md` Host side),
-   threading `<ConnectedUpdateBanner />` through the `baseboardNotice` slot.
+7. `startUpdateCheck()` (`docs/specs/auto-update.md`), then render `AppBar` +
+   `App` with `enableRemoteHost` — the mount gate for the lazily-imported
+   remote-Host UI chunk: the pairing modal, the console hook, and ring
+   detection for push (`docs/specs/server.md` Host side). The Host itself is
+   already running in the sidecar, independent of this. Threads
+   `<ConnectedUpdateBanner />` through the `baseboardNotice` slot.
 
 ## Rust ↔ sidecar bridge
 
@@ -67,7 +75,8 @@ stderr, which Rust appends to the log file). Webview → Rust is the Tauri
 `pty_request_init` / `pty_get_cwd` / `pty_get_open_ports` /
 `pty_get_scrollback` / `pty_graceful_kill_all` / `get_available_shells`,
 `dor_control_response`, `iframe_create_proxy_url`, the `agent_browser_*` family,
-the `clipboard` readers, `read_update_log`, and `kill_sidecar_now` — each a thin
+the `clipboard` readers, `read_update_log`, `remote_host_command`
+(§Remote Host service), and `kill_sidecar_now` — each a thin
 forwarder to the corresponding sidecar message. `load_session` / `save_session` /
 `clear_session` are the exception that is *not* forwarded: they read, write, and
 delete the per-window session file directly in Rust (§Persistence). Two further carve-outs: on Windows the
@@ -108,6 +117,114 @@ the webview, where `TauriAdapter` converts dor control requests into the
 `resolve_sidecar_path` strips Windows `\\?\` verbatim prefixes from
 `resource_dir()` once at the boundary so every derived path is plain — the
 reasons live in `docs/specs/dor-cli.md` (Bundling And PATH).
+
+### Remote Host service
+
+The remote Host — the relay socket, the enrollment, the ACL, the pairing
+ceremony, remote-api v1 — runs **in the sidecar**, the process that owns the
+PTYs. It is the same `RemoteHostService` the VS Code extension host runs
+(`lib/src/host/remote/service.ts`, bound here by
+`lib/src/host/remote/sidecar-entry.ts` and bundled to `sidecar/remote-host.cjs`
+by `build-sidecar-proxy.mjs`, which bakes the relay-origin allowlist into it —
+`docs/specs/server.md`). The webview keeps only what a webview is for: the
+pairing modal, the console hook, ring detection for push, and answering for its
+own panes. Nothing it says can widen access
+(`docs/specs/remote-security-model.md`).
+
+**State.** Rust creates the app-data directory and passes it as
+`DORMOUSE_STATE_DIR`; the sidecar keeps enrollment and ACL there as one
+`remote-host.json`, written 0600 into a 0700 directory via temp-then-rename.
+Tightening a directory Rust already created is best-effort: where POSIX modes do
+not exist the file's own 0600 is the protection that matters, and failing the
+save over the directory would lose the Host instead. The in-memory view advances
+only after that rename succeeds, so a failed save cannot be mistaken for durable
+state by a later adoption. **Reads fail closed.** Only `ENOENT` — nothing
+written yet — and a file that was read but cannot be parsed answer empty; the
+parse failure warns, because an empty ACL silently de-pairs every device. Any
+other read error (EACCES, EIO, a held handle on Windows) says nothing about what
+the file holds, so it is neither answered nor memoized: the load rejects, and
+because every change is a read-modify-write of the whole file, the save behind it
+rejects too rather than overwriting state it could not see with nothing. A later
+read of the same file still recovers. One file rather than
+one per value, so a write is one atomic rename and the
+enrollment can never end up describing a different Host than the records
+approved under it. `hostToken` is a bearer credential and never enters a webview
+realm. If the directory cannot be created, Rust passes an empty value and the
+sidecar falls back to an ephemeral store — a Host can be enrolled and used for
+the session, because the store holds both values **in memory** rather than
+dropping the writes: reads that answered empty would de-pair each device the
+moment it was approved, since the ACL a Host authorizes against is the one it
+just wrote. Nothing survives the process, and it warns once. That store reports
+`persistent: false`, which is what an `adopt` answers back to the webview so the
+webview keeps its own copy of the Host rather than clearing the only one that
+outlives the run. Every `HostStateStore` states that flag outright — a store
+that omitted it would read as durable and could cost the webview its only
+surviving copy. The browser dev harness passes a per-run temp directory
+instead, so a dev enrollment lives and dies with that run.
+
+**The bridge.** Webview → sidecar is one generic passthrough invoke,
+`remote_host_command(payload)`, which writes `{"event":"remoteHost:command",
+"data":payload}` to stdin; the sidecar's dispatch table hands it to
+`handleCommand`. Sidecar → webview is three ordinary stdout events —
+`remoteHost:result`, `remoteHost:ask`, `remoteHost:event` — forwarded by Rust's
+generic `handle.emit`. **The correlation field is `rhId`, never `requestId`:**
+Rust swallows any sidecar line whose `data.requestId` matches a pending invoke
+in order to resolve it, so a `requestId` here would make results vanish at
+random. The contract is shared by both ends
+(`lib/src/host/remote/service-protocol.ts`), and the webview half of it — the
+pending-command table, the 15s timeout, the always-answer rule for asks — is
+`lib/src/host/remote/link-client.ts`, shared with VS Code and the browser dev
+harness so no host settles a command differently.
+
+**Asks and answers.** What the sidecar cannot know — what a pane is called,
+whether it is focused, how big its xterm is — it asks over `remoteHost:ask`, and
+the responder in `lib/src/remote/host/peer-surfaces.ts` answers as an ordinary
+`answer` command naming the ask's own `rhId`. The **first answer settles** the
+ask: standalone ships one window, so there is exactly one answerer. That is the
+seam where a multi-window standalone would instead collect until the budget
+(`ASK_BUDGET_MS`, 1s), which otherwise only bounds a webview that is reloading —
+an attach must not hang on one, and a directory that missed a pane re-collects
+on the next change.
+
+An answer for an ask the bridge no longer holds **invalidates the directory**
+rather than being dropped. The ask settled empty, so the snapshot the Host
+already rendered is missing whatever that answer names — an empty picker on a
+machine that does have terminals — and nothing re-opens a settled ask, so the
+next collect is the only repair and an idle machine has no other reason to run
+one. VS Code's in-window fan-out does the same (`docs/specs/vscode.md`).
+
+**Stripping.** Unlike VS Code's extension host, the sidecar hands the webview
+*raw* PTY bytes and the webview's own parser strips them for its xterm
+(`docs/specs/terminal-escapes.md` → the `pty:data` strip semantics). The phone
+must see the same stream the laptop's xterm renders, so the service runs its own
+strip-only `TerminalProtocolParser` over each PTY it streams — one parser per
+PTY rather than per attachment, because what an incomplete escape sequence
+leaves behind belongs to that PTY's byte boundaries, and a late joiner inheriting
+that state beats a fresh parser starting mid-sequence. **Every event the parser
+produces is discarded, responses included:** the webview that owns the terminal
+already answers its queries, and a second answer from this process would write
+duplicate bytes into the PTY's input and corrupt whatever the program was
+parsing. Semantic events (cwd, prompt, title) stay the webview's for the same
+reason.
+
+"Discarded" and "not parsed" are different things, and the difference is the one
+place the parser needs a colour: with no colour provider it *declines* an OSC
+10/11/12 `?` query, which leaves it in `visibleData`, reaches the phone's xterm,
+and gets answered a second time. So the strip parser is built with a constant
+provider whose value is never sent anywhere — it exists only to make the query
+be consumed, and its generated response is thrown away with every other event.
+
+The tap is inside `pty-core`'s event callback in `main.js`, ahead of the send to
+the webview, and is wrapped: **a remote listener must never break the local
+pipe**, so a throw is logged to stderr and the webview's `pty:*` event is sent
+either way. With nothing attached, data still returns after cheap id/map checks;
+exit codes are retained so a stream installed after surface resolution can
+replay liveness before attach acknowledgement.
+
+Source of truth: `standalone/sidecar/main.js` (the tap and the
+`remoteHost:command` case), `remote_host_command` / `remote_host_state_dir` in
+`standalone/src-tauri/src/lib.rs`, `lib/src/host/remote/sidecar-entry.ts`, and
+`lib/src/host/remote/pty-strip.ts`.
 
 ### Windows node subsystem
 
@@ -158,7 +275,9 @@ ordered:
    orphans a headed Chrome window and a hung agent-browser cannot wedge the
    exit (mirrors the VS Code host's `deactivate()`; `docs/specs/dor-browser.md`).
 2. Close the dor control socket.
-3. `mgr.killAll()` (all PTYs), then `process.exit(0)`.
+3. Dispose the remote Host service (drops the relay socket and settles every
+   outstanding ask, so nothing is left waiting on a webview that is going away).
+4. `mgr.killAll()` (all PTYs), then `process.exit(0)`.
 
 A parent-PID watchdog polls every 2s and self-triggers shutdown if the Tauri
 process disappears: stdin EOF is not always delivered when the host is
@@ -474,11 +593,13 @@ root `package.json` for the `dev:standalone*` orchestration.
 - `stage` = `stage:dor-cli` (build + stage the dor CLI, `docs/specs/dor-cli.md`)
   plus `stage:sidecar-proxy` (`build-sidecar-proxy.mjs` bundles the
   `lib/src/host/` sources into the sidecar `.cjs` files).
-- The `tauri` script runs `standalone/scripts/tauri.mjs`, which rewrites the
-  webview CSP via `standalone/scripts/csp.mjs` when the
-  `DORMOUSE_REMOTE_CONNECT_SRC` build-time override for self-host relay
-  origins is set (`docs/specs/server.md`, Host webview CSP), then delegates
-  to the Tauri CLI.
+- The `tauri` script stages, then runs `standalone/scripts/tauri.mjs`, which
+  delegates to the Tauri CLI. The `DORMOUSE_REMOTE_CONNECT_SRC` build-time
+  override for self-host relay origins is baked into the sidecar's remote-host
+  bundle by `build-sidecar-proxy.mjs` — the Host runs in the sidecar, so the
+  webview CSP has no relay sources at all, which
+  `standalone/scripts/tauri-conf.test.mjs` asserts against `tauri.conf.json`
+  (`docs/specs/server.md`, "Where a Host may reach a relay server").
 - The Tauri bundle ships the whole sidecar via the `../sidecar/**/*` resources
   glob — including node-pty's prebuilds + bundled ConPTY and the
   shell-integration scripts (`docs/specs/terminal-escapes.md`).
@@ -497,7 +618,7 @@ root `package.json` for the `dev:standalone*` orchestration.
 | `standalone/src-tauri/src/lib.rs` | Rust backend: sidecar spawn/supervision, invoke commands, event forwarding, per-window session file store (`save_session` / `load_session`), quit interception (`QuitState`, `request_quit`, `quit_ack` / `quit_progress` / `quit_cancel` / `quit_proceed`, §Quit flow), file drop, logging, dock icon, exit teardown |
 | `standalone/src-tauri/src/clipboard_win.rs` | Native Win32 clipboard reads on Windows (owned by `docs/specs/mouse-and-clipboard.md`) |
 | `standalone/src-tauri/src/pe_subsystem.rs` | Shared PE-subsystem byte-flip (offset lookup + read/set) used by `build.rs` (GUI-patch the bundled sidecar node) and `lib.rs` (derive the console-subsystem `dor` node) — §Windows node subsystem |
-| `standalone/scripts/tauri.mjs`, `csp.mjs` | Tauri CLI wrapper assembling the webview CSP (`DORMOUSE_REMOTE_CONNECT_SRC`) |
+| `standalone/scripts/tauri.mjs` | Tauri CLI wrapper; stages the sidecar bundles first (the relay allowlist is baked there, not into the webview CSP) |
 | `standalone/src-tauri/tauri.conf.json` | Window config, dev/build commands, sidecar resources glob, updater config |
 | `standalone/src/main.tsx` | Webview bootstrap (boot sequence above); initializes the quit orchestrator and installs the confirmation gate on the Tauri branch, mounts `<QuitConfirmModalHost>` via Wall's `dialogHost` prop |
 | `standalone/src/quit.ts` | Quit orchestrator: listens for `dormouse://quit-requested`, runs the graceful teardown, calls `quit_ack` / `quit_progress` / `quit_proceed` / `quit_cancel` (§Quit flow) |
@@ -511,5 +632,6 @@ root `package.json` for the `dev:standalone*` orchestration.
 | `standalone/sidecar/pty-core.js` | Shared PTY manager (owned by `docs/specs/transport.md`) |
 | `standalone/sidecar/dor-control-server.js` | dor CLI control socket (owned by `docs/specs/dor-cli.md`) |
 | `standalone/sidecar/clipboard-ops.js` | OS clipboard tiers (owned by `docs/specs/mouse-and-clipboard.md`) |
+| `lib/src/host/remote/sidecar-entry.ts` | Sidecar binding of the remote Host service, bundled to `sidecar/remote-host.cjs` (§Remote Host service; protocol owned by `docs/specs/remote-api.md`) |
 | `standalone/scripts/build-sidecar-proxy.mjs` | Bundles `lib/src/host/` into the sidecar `.cjs` copies |
 | `standalone/scripts/dev-agent-browser.mjs` | `dev:standalone:ab` entry (owned by `docs/specs/transport.md`) |

@@ -1,6 +1,7 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { setPlatform } from "dormouse-lib/lib/platform";
+import { installPeerSurfaceResponder } from "dormouse-lib/remote/host/peer-surfaces";
 import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
 import { resumeOrRestore } from "dormouse-lib/lib/reconnect";
 import { seedShellStore } from "dormouse-lib/lib/shell-store";
@@ -84,6 +85,16 @@ async function bootstrap() {
   const platform = await createPlatform();
   setPlatform(platform);
   await platform.init();
+  // The remote Host runs in the sidecar, which owns the PTYs but not this
+  // webview's view of them: what a pane is called, and how big its xterm is.
+  // Installing the responder is what makes those answerable
+  // (docs/specs/remote-api.md).
+  //
+  // After `init()`, not before: the responder asks the Host whether there is
+  // one at all, and nothing could carry the answer back until the adapter has
+  // its listeners. An ask that arrives in the gap goes unanswered, which is
+  // what the Host's budget is for.
+  installPeerSurfaceResponder();
   // Shell detection is a webview -> Rust -> sidecar round trip, so start it now
   // and await it below: it overlaps the dynamic imports and theme restore
   // rather than adding its latency to cold boot.

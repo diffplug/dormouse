@@ -70,3 +70,12 @@ export function saveJson(key: string, value: unknown): void {
     // No localStorage / quota exceeded: the in-memory value still works.
   }
 }
+
+/** Delete the value at `key`, swallowing any failure. */
+export function removeJson(key: string): void {
+  try {
+    globalThis.localStorage?.removeItem(key);
+  } catch {
+    // No storage: nothing to clear.
+  }
+}

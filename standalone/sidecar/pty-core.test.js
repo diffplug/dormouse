@@ -349,9 +349,13 @@ test('create buffers scrollback for getScrollback requests', () => {
     },
   });
 
+  assert.equal(mgr.hasPty('pane-1'), false);
   mgr.spawn('pane-1');
+  assert.equal(mgr.hasPty('pane-1'), true);
   listeners.data?.('hello');
   listeners.data?.(' world');
+  listeners.exit?.({ exitCode: 0, signal: undefined });
+  assert.equal(mgr.hasPty('pane-1'), false);
   mgr.getScrollback('pane-1', 'req-1');
 
   assert.deepEqual(events.at(-1), {

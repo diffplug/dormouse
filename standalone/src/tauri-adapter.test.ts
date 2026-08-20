@@ -15,6 +15,7 @@ vi.mock("@tauri-apps/plugin-shell", () => ({
 }));
 
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { TauriAdapter } from "./tauri-adapter";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -95,5 +96,95 @@ describe("TauriAdapter legacy session cleanup", () => {
     expect(invoke).toHaveBeenNthCalledWith(1, "load_session");
     expect(invoke).toHaveBeenNthCalledWith(2, "clear_session");
     adapter.shutdown();
+  });
+});
+
+// The remote Host lives in the sidecar; this is the webview's end of the bridge
+// (lib/src/host/remote/service-protocol.ts). Correlation is `rhId`, never
+// `requestId` — Rust swallows any sidecar line carrying the latter to resolve
+// its own pending invokes.
+//
+// Only what this transport adds is covered here: one invoke carries everything,
+// so an answer and a notify ride it as ordinary commands. The correlation,
+// timeout, always-answer, and dispose rules are the shared client's
+// (lib/src/host/remote/link-client.test.ts).
+describe("TauriAdapter remote host link", () => {
+  type Payload = { rhId: string; cmd: string; params?: unknown };
+
+  async function bridged() {
+    const handlers = new Map<string, (event: { payload: unknown }) => void>();
+    vi.mocked(listen).mockImplementation((async (
+      event: string,
+      handler: (e: { payload: unknown }) => void,
+    ) => {
+      handlers.set(event, handler);
+      return () => {};
+    }) as unknown as typeof listen);
+    const invoke = vi.mocked(rawInvoke);
+    invoke.mockClear();
+    invoke.mockResolvedValue(undefined);
+
+    const adapter = new TauriAdapter();
+    await adapter.init();
+    invoke.mockClear();
+
+    const sent = (): Payload[] =>
+      invoke.mock.calls
+        .filter(([cmd]) => cmd === "remote_host_command")
+        .map(([, args]) => (args as { payload: Payload }).payload);
+    const deliver = (event: string, payload: unknown): void => {
+      handlers.get(event)?.({ payload });
+    };
+    return { adapter, sent, deliver };
+  }
+
+  it("resolves a command by its rhId", async () => {
+    const { adapter, sent, deliver } = await bridged();
+    const pending = adapter.remoteHost.command("status");
+
+    const payload = sent()[0]!;
+    expect(payload.cmd).toBe("status");
+    // A result for someone else's rhId must not resolve this one.
+    deliver("remoteHost:result", { rhId: "other", result: { enrolled: false } });
+    deliver("remoteHost:result", { rhId: payload.rhId, result: { enrolled: true } });
+
+    expect(await pending).toEqual({ enrolled: true });
+  });
+
+  it("answers an ask from the registered responder", async () => {
+    const { adapter, sent, deliver } = await bridged();
+    adapter.remoteHost.respond("surfaceOp", (params) => [
+      { ptyId: "pty-1", ...(params as Record<string, unknown>) },
+    ]);
+
+    deliver("remoteHost:ask", { rhId: "ask-1", op: "surfaceOp", params: { surfaceId: "s1" } });
+
+    expect(sent()[0]).toMatchObject({
+      cmd: "answer",
+      params: { rhId: "ask-1", results: [{ ptyId: "pty-1", surfaceId: "s1" }] },
+    });
+  });
+
+  it("fans a sidecar event out by name", async () => {
+    const { adapter, deliver } = await bridged();
+    const seen: unknown[] = [];
+    adapter.remoteHost.on("pairing-queue", (data) => void seen.push(data));
+
+    deliver("remoteHost:event", { name: "pairing-queue", queue: [{ clientId: "c1" }] });
+    expect(seen).toEqual([{ name: "pairing-queue", queue: [{ clientId: "c1" }] }]);
+  });
+
+  it("notifies without waiting for anything", async () => {
+    const { adapter, sent } = await bridged();
+    adapter.remoteHost.notify();
+    expect(sent()[0]).toMatchObject({ cmd: "notify" });
+    expect(sent()[0]!.params).toBeUndefined();
+  });
+
+  it("rejects what is still in flight when the sidecar is killed", async () => {
+    const { adapter } = await bridged();
+    const pending = adapter.remoteHost.command("status");
+    adapter.shutdown();
+    await expect(pending).rejects.toThrow("remote host bridge closed");
   });
 });
