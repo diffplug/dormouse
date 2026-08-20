@@ -393,8 +393,13 @@ Serve mapping return without rerunning the installer.
 
 Complete Pocket passkey setup and Host enrollment using a standalone or VS Code
 build whose `DORMOUSE_REMOTE_CONNECT_SRC` includes
-`https://*.ts.net wss://*.ts.net`. After `account.json`, `hosts.json`, and
-`vapid.json` exist (and `push-subscriptions.json` too if push was enabled):
+`https://*.ts.net wss://*.ts.net`. Enroll in **Settings → Remote control**
+(the sliders icon at the far right of the baseboard): the server origin, the
+setup password from `manage show-password`, and a name for this machine. The
+`window.dormouseRemoteHost` console hook is the scripting equivalent
+(`docs/specs/server.md`, "Remote control, in the Settings dialog"). After
+`account.json`, `hosts.json`, and `vapid.json` exist (and
+`push-subscriptions.json` too if push was enabled):
 
 1. Record ownership and checksums of every present state file without printing
    contents.

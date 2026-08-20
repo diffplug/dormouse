@@ -12,6 +12,7 @@ import {
 import { ThemePicker } from './ThemePicker';
 import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
+import { RemoteControlSection } from './RemoteControlSection';
 import { getPlatform } from '../lib/platform';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
 import {
@@ -45,7 +46,7 @@ const SECTION = 'mt-4 border-t border-border pt-3';
 function describePushTargets(push: PushDevicesState): string {
   if (push.status === 'loading') return 'Looking for devices…';
   if (push.status === 'error') return 'Could not reach the server to list devices.';
-  if (push.status === 'no-host') return 'Connect this machine to a Dormouse server to send push.';
+  if (push.status === 'no-host') return 'Connect this machine to a Dormouse server below to send push.';
   if (push.devices.length === 0) {
     return 'No device paired with this machine has enabled alerts in Dormouse Pocket yet.';
   }
@@ -184,6 +185,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       >
         {describePushTargets(push)}
       </AlarmSinkSection>
+
+      {/* Last, and directly under the push section that points at it: push is
+          the feature that makes a reader care, and "no Host" is the reason it
+          has nowhere to go. Renders nothing on a build with no Host service. */}
+      <RemoteControlSection />
     </ModalFrame>
   );
 }
