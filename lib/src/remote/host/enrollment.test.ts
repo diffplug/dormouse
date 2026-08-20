@@ -105,13 +105,14 @@ describe('remote-host enrollment', () => {
     );
 
     await expect(performEnrollment('https://dormouse.example', 'hunter2', 'x')).rejects.toThrow(
-      /missing origin, rpId/,
+      /missing or invalid: origin, rpId/,
     );
   });
 
   it('refuses a 200 whose fields are the wrong type', async () => {
     // `hostId: null` type-checks as `HostEnrollResponse` only because the body
-    // is cast, not parsed; the guard is what actually rejects it.
+    // is cast, not parsed; the guard is what actually rejects it. It is present
+    // in the body, so the error says "missing or invalid" rather than "missing".
     stubLocalStorage();
     vi.stubGlobal(
       'fetch',
@@ -124,7 +125,7 @@ describe('remote-host enrollment', () => {
     );
 
     await expect(performEnrollment('https://dormouse.example', 'hunter2', 'x')).rejects.toThrow(
-      /missing hostId/,
+      /missing or invalid: hostId/,
     );
   });
 

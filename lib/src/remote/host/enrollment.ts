@@ -122,13 +122,17 @@ export async function performEnrollment(
   };
   if (!isEnrollment(enrollment)) {
     throw new Error(
-      `host enroll failed: the server's response is missing ${missingEnrollmentFields(enrollment).join(', ')}`,
+      `host enroll failed: the server's response is missing or invalid: ${missingEnrollmentFields(enrollment).join(', ')}`,
     );
   }
   return enrollment;
 }
 
-/** Which `HostEnrollResponse` fields the server left out, for the error above. */
+/**
+ * Which `HostEnrollResponse` fields the server left out or sent with the wrong
+ * type, for the error above. The list mirrors {@link isEnrollment} minus
+ * `serverUrl`, which is set locally and can never be the one at fault.
+ */
 function missingEnrollmentFields(enrollment: Record<string, unknown>): string[] {
   return (['hostId', 'hostToken', 'origin', 'rpId'] as const).filter(
     (field) => typeof enrollment[field] !== 'string',
