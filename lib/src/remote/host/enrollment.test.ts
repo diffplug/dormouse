@@ -87,6 +87,60 @@ describe('remote-host enrollment', () => {
     await expect(performEnrollment('https://dormouse.example', 'wrong', 'x')).rejects.toThrow(/401/);
   });
 
+  it('refuses a 200 whose body is not an enrollment', async () => {
+    // A version skew or a proxy that rewrote the body. Minting from it would
+    // hand the Host an `undefined` in the `ConnectionPolicy` it authenticates
+    // passkeys against, and persist a record that `isEnrollment` rejects on the
+    // next read — the machine un-enrolls itself at the next launch with nothing
+    // in the log to explain it. Name the missing fields instead.
+    stubLocalStorage();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ hostId: 'host-abc', hostToken: 'tok-xyz' }), // no origin/rpId
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      ),
+    );
+
+    await expect(performEnrollment('https://dormouse.example', 'hunter2', 'x')).rejects.toThrow(
+      /missing origin, rpId/,
+    );
+  });
+
+  it('refuses a 200 whose fields are the wrong type', async () => {
+    // `hostId: null` type-checks as `HostEnrollResponse` only because the body
+    // is cast, not parsed; the guard is what actually rejects it.
+    stubLocalStorage();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ hostId: null, hostToken: 'tok-xyz', origin: 'o', rpId: 'r' }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      ),
+    );
+
+    await expect(performEnrollment('https://dormouse.example', 'hunter2', 'x')).rejects.toThrow(
+      /missing hostId/,
+    );
+  });
+
+  it('refuses a 200 that is not JSON at all', async () => {
+    // A captive portal or a proxy error page served with a 200.
+    stubLocalStorage();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('<html>not your server</html>', { status: 200 })),
+    );
+
+    await expect(performEnrollment('https://dormouse.example', 'hunter2', 'x')).rejects.toThrow(
+      /did not answer JSON/,
+    );
+  });
+
   it('clears and rejects malformed persisted enrollment', () => {
     // What a webview that enrolled before the service existed still holds, and
     // hands over once (`activation.ts` → adoption).
