@@ -129,8 +129,8 @@ R4, stated precisely: **absorb the summons, keep the receipt.**
 
 Mechanically this needs the alert system to expose a completion event *before*
 attention suppression and *before* the ring latches, so a waiter can claim it.
-That seam does not exist on `main` today — it is the main gap, and the subject of
-the next pass.
+That seam does not exist today; see [G1](#g1-no-pre-suppression-completion-event)
+and [G3](#g3-absorption-has-no-claim-concept).
 
 ## Timing
 
@@ -386,6 +386,135 @@ The cost accepted: the screen can move between `await` returning and `read`
 landing. Under `--until quiet` the peer is settled by definition, so this is
 near-theoretical; under `--until exit` a prompt redraw may scroll a line.
 
+## Implementation gaps
+
+What `main`'s alert model cannot express today, measured against the design
+above. Two gaps are structural; the rest is plumbing. **This section is
+scaffolding — it is deleted on landing, not promoted into a spec.**
+
+### G1: no pre-suppression completion event
+
+**The keystone gap.** Every completion path bakes attention suppression in at the
+decision point and emits nothing beforehand, so a waiter has nothing to subscribe
+to:
+
+- **Quiesce** — `createMonitor`'s `onChange` in `lib/src/lib/alert-manager.ts`:
+  on attention it calls `entry.monitor?.attend()` and returns. A silent reset; a
+  waiting await never learns the Session settled.
+- **Command exit** — `finishCommandExitWatch` in the same file has two silent
+  returns: one for `this.hasAttention(id)`, and one for
+  `Date.now() - watch.startedAt < this.inactivityTimeoutMs`.
+
+The second is the sharp edge: **a command that ran for less than the inactivity
+timeout produces no event at all**, so `--until exit` on a three-second
+`npm test` could never resolve. The most ordinary case in this design is the one
+the current model cannot express.
+
+The fix is not exposing the ring earlier. The event must sit **upstream of both
+the suppression checks and the qualification rules** — firing on every settle,
+every command finish, and every protocol notification, whether or not a ring
+follows. All existing ring logic stays downstream and unchanged.
+
+### G2: the quiesce detector is welded to the watched-commands set
+
+`applyWatchingRule` is the only path to a monitor:
+
+```ts
+return this.setWatching(id, entry, argv0 !== null && this.watchedCommands.has(argv0));
+```
+
+No watched command, no detector — so `--until quiet` on an unwatched Session can
+never fire, and the only workaround is adding the command to the watched set,
+which is precisely the coupling [D1](#d1-the-caller-states-intent-settled)
+rejects.
+
+Needs `armQuiesceWatch(id, { ownerId })` / `disarmQuiesceWatch(id, ownerId)` with
+an owner set, and the monitor living while *either* the watched rule matches or
+the owner set is nonempty. `setWatching`'s `if (enabled === !!entry.monitor)
+return false` guard has to become a refcount: with two independent owners,
+"should exist" and "does exist" stop being the same question.
+
+This gap is independent of G1 and can land first. It also retires `main`'s
+awkward "WATCHING outranks `COMMAND_EXIT_ARMED`" projection rule, since the
+detector stops being synonymous with the watched set.
+
+### G3: absorption has no claim concept
+
+`lib/src/lib/alert-ring-watch.ts` — the shared trigger behind both spoken alarms
+and push — detects rings by diffing statuses out of the activity store. By the
+time it observes `ALERT_RINGING`, the ring has already latched.
+
+Partial good news: speech and push both re-check at fire time, so an await that
+clears the ring within `speakDelayMs` / `pushDelayMs` cancels them almost for
+free. **The bell is the problem** — it latches instantly with no delay, so the
+human sees a flash of exactly the summons absorption exists to prevent.
+
+True absorption means the ring never latches, which means claiming at the G1
+event. And [Absorption](#absorption)'s "a failed await absorbs nothing" makes the
+claim two-phase: **claim → deliver**, or **claim → release** and let it ring
+normally. The release path is what keeps a crashed orchestration from eating the
+signal.
+
+### G4: no adapter surface for any of it
+
+`PlatformAdapter` (`lib/src/lib/platform/types.ts`) carries `alertRemove` /
+`alertDismiss` / `alertAttend` / `alertMarkTodo` and friends, but nothing for
+arming a watch or subscribing to completions.
+
+In VS Code the `AlertManager` lives in the extension host while the `dor` control
+handler lives in the webview, so this crosses the process boundary: new entries
+in `vscode-ext/src/message-types.ts`, new router cases in
+`vscode-ext/src/message-router.ts`, and the corresponding methods on all three
+adapters.
+
+### G5: no long-lived control requests
+
+| Layer | Today | Needed |
+|---|---|---|
+| `standalone/sidecar/dor-control-server.js` | `timeoutMs = 65000`, global | Per-request deadline carried on the wire |
+| `dor/src/control-client.ts` | `options.timeoutMs ?? 5000` | Deadline matching `--timeout` |
+| Socket close | Reaps the server's pending entry | Must also notify the webview |
+
+A `--timeout 600` await blows through both fixed ceilings. Worse, the existing
+socket-close handler releases the server's own bookkeeping but tells the webview
+nothing, so a disconnected client would leak the await's subscription **and its
+armed quiesce watch** for the life of the session.
+
+Two server implementations need the change: `standalone/sidecar/dor-control-server.js`
+and `vscode-ext/src/pty-host.js`.
+
+### G6: grace-window inputs
+
+`--until quiet` needs "is a command running?" and `--until exit` needs "did one
+start?". `entry.commandExitWatch` answers both but is private to the
+`AlertManager`.
+
+Cheaper path: the webview's terminal-state store already carries
+`activity: { kind: 'running' }` (`lib/src/lib/terminal-state.ts`), so both
+questions are answerable renderer-side without touching the alert model at all.
+
+### G7: PTY exit
+
+Exit code 3 needs the awaited Surface's PTY exit. Adapters already surface it to
+the renderer per `docs/specs/transport.md`; this is wiring, not a new capability.
+
+### G8: command surface plumbing
+
+- `await` added to `SURFACE_CONTROL_METHODS` in `dor/src/protocol.ts`, with
+  request/response types in `dor/src/commands/types.ts`.
+- A handler branch in `lib/src/components/wall/use-dor-control.ts`, which also
+  owns the in-flight map and the elapsed-time measurement.
+- `awaited` added beside `ringing` / `todo` on `Surface` in
+  `dor/src/commands/types.ts`, for the `dor list` tag.
+- Snapshot-tested help, like every `dor` command.
+
+### Dependency order
+
+G1 unblocks G3, and both are prerequisites for the `--until quiet` and `--until
+exit` resolution paths. G2 is self-contained and is the natural first landing.
+G4 and G5 are the transport prerequisites and can proceed in parallel with G1.
+G6 through G8 are leaves.
+
 ## Dissolution
 
 On landing, this file is deleted and its contents move:
@@ -395,6 +524,7 @@ On landing, this file is deleted and its contents move:
 | Purpose, Command surface, Output and errors, Behavior, Timing, exit codes | `docs/specs/dor-cli.md` — promote the staged `dor await` bullet out of `## Future` into the implemented command list. |
 | The signals, Is there anything to wait for, Resolution, Absorption | `docs/specs/alert.md` — a new Await section, plus whatever seam the absorption rule requires in the Public State / Clearing And TODO sections. |
 | Decisions | Deleted. The settled parts land as prose in the destination specs; the rejected alternatives stay in this branch's git history. |
+| Implementation gaps | Deleted. It describes a `main` that will no longer exist once the work lands. |
 | `[awaited]` tag | `docs/specs/dor-cli.md`, `dor list` output. |
 
 Per `AGENTS.md`, promotion is not done until the text reads as present tense with
