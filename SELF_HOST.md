@@ -166,9 +166,10 @@ day:
 - `tailscale serve` proxies to `127.0.0.1:3100` at the same origin recorded in
   `config/server.env`.
 - `config/` and `state/` are mode `0700`, `config/server.env` is mode `0600`.
-- `current` resolves to a release with `RELEASE` metadata, a `previous` release
-  is retained for rollback, and neither the plist nor `bin/run-server` refers to
-  the source checkout.
+- `current` resolves to a release with `RELEASE` metadata, and neither the plist
+  nor `bin/run-server` refers to the source checkout. A retained `previous`
+  release is checked too, but a first install has none, so `verify` warns there
+  rather than failing.
 
 These cannot be proven from the laptop, and are the checkpoints below:
 

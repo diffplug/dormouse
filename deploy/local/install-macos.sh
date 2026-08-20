@@ -794,12 +794,14 @@ cmd_show_password() {
   printf '\n%sWARNING%s the setup password gates account creation and Host enrollment.\n' "$C_YEL" "$C_OFF"
   printf 'It is about to be printed to this terminal. Make sure nobody is looking\n'
   printf 'over your shoulder and that this session is not being recorded or shared.\n\n'
-  if [ -t 0 ]; then
-    printf 'Print it? [y/N] '
-    local reply=""
-    read -r reply || true
-    case "$reply" in y|Y|yes|YES) ;; *) printf 'aborted\n'; return 1 ;; esac
+  if [ ! -t 0 ]; then
+    printf 'refusing to print the setup password with no terminal to confirm at\n' >&2
+    return 1
   fi
+  printf 'Print it? [y/N] '
+  local reply=""
+  read -r reply || true
+  case "$reply" in y|Y|yes|YES) ;; *) printf 'aborted\n'; return 1 ;; esac
   printf '\n  %s\n\n' "$(env_value DORMOUSE_SETUP_PASSWORD)"
 }
 
