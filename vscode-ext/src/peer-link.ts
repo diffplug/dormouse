@@ -264,7 +264,15 @@ async function ensureToken(): Promise<string> {
       if (written) return written;
       await delay(TOKEN_WRITE_POLL_MS);
     }
-    throw new Error('peer link token file is empty');
+    // Not only the crash-left empty file: `open(O_CREAT|O_EXCL)` on a token
+    // path that is a directory — or that we cannot read — is `EEXIST` too, so
+    // those land here as well. The caller's log line is the only diagnosis any
+    // of them gets, so re-derive which it was rather than asserting one.
+    const why = await readFile(path, 'utf8').then(
+      () => 'is empty',
+      (error: unknown) => `could not be read: ${String(error)}`,
+    );
+    throw new Error(`peer link token file ${path} ${why}`);
   }
 }
 
