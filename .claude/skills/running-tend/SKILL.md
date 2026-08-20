@@ -19,6 +19,21 @@ When `UI Tests` is the only non-terminal check and every automated check is gree
 
 `ntwigg` is the maintainer's local shell username (it shows up in prompt fixtures like `ntwigg@ntwigg-mac-2025` in [`terminal-prompt-shape.test.ts`](../../../lib/src/lib/terminal-prompt-shape.test.ts)) and also, on GitHub, an unrelated person's account. Writing `@ntwigg` in a comment, PR body, or commit message pings a stranger and subscribes them to the thread, which only they can undo. Use `@nedtwigg`, and don't copy the shorter handle forward from a thread that already contains the typo. ([diffplug/dormouse#389](https://github.com/diffplug/dormouse/pull/389#issuecomment-5319456021))
 
+## Reviewing a PR that supersedes another — carry the prior PR's findings forward
+
+Long-running work here gets rewritten and reopened rather than pushed onto one branch, so a PR body saying **"Supersedes #N"** (or "replaces", "redo of") is common. The successor's review reads only the successor: `bot-review-state.sh <n>` and the review skill's prior-review machinery are scoped to the PR under review, so findings the bot published on #N — including a review it was forced to post as a plain comment because #N closed mid-session — are not in context, and nothing else will re-raise them.
+
+When the PR body names a predecessor, fetch the bot's own comments and reviews on it before reading the diff, and treat any finding that is still true of this diff as a finding of this review:
+
+```bash
+gh api "repos/$GITHUB_REPOSITORY/issues/<N>/comments" \
+  --jq '.[] | select(.user.login == "dormouse-bot") | .body'
+gh api "repos/$GITHUB_REPOSITORY/pulls/<N>/reviews" \
+  --jq '.[] | select(.user.login == "dormouse-bot") | .body'
+```
+
+Check each one against the current code rather than assuming it carried over — the maintainer often takes some and not others. Say which ones you re-checked, so "nothing else surfaced" means the predecessor was read, not that it was skipped. (Observed on #398 → #416: three findings written up as #398 closed mid-review, one adopted by the maintainer, one silently merged to `main` (#420), one re-derived from scratch by nightly ten hours later (#418).)
+
 ## Settled upstream rulings — don't re-file
 
 Before a `review-runs`/`review-reviewers` sweep flags a tend behavior as waste or files it upstream, check this list — these were already raised and ruled on, so re-filing burns a session and spams upstream:
