@@ -253,7 +253,7 @@ async function ensureToken(): Promise<string> {
     // installation's terminals, so it is never briefly world-readable.
     await writeFile(path, token, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
     return token;
-  } catch {
+  } catch (writeError) {
     // `EEXIST` — another window created it, and the empty read above may have
     // been that same window mid-write, so wait the bytes out. Bounded, because
     // a token file left zero-length by a crash never fills in: throwing hands
@@ -270,7 +270,11 @@ async function ensureToken(): Promise<string> {
     // of them gets, so re-derive which it was rather than asserting one.
     const why = await readFile(path, 'utf8').then(
       () => 'is empty',
-      (error: unknown) => `could not be read: ${String(error)}`,
+      // The create error rides along only here: an unwritable `globalStorageUri`
+      // fails the create with `EACCES` and then the read with `ENOENT`, and the
+      // read alone would name the missing file rather than why it is missing.
+      (error: unknown) =>
+        `could not be read: ${String(error)}; creating it failed with ${String(writeError)}`,
     );
     throw new Error(`peer link token file ${path} ${why}`);
   }

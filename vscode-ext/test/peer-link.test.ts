@@ -34,6 +34,20 @@ import {
 
 type LinkModule = typeof import('../src/peer-link');
 
+/**
+ * The output channel is the only diagnosis a permanent stand-down gets, so the
+ * tests below read it. Hoisted, because `freshModule` resets the registry and
+ * the factory re-runs — the array has to outlive that.
+ */
+const logged = vi.hoisted(() => [] as string[]);
+vi.mock('../src/log', () => ({
+  log: {
+    init() {},
+    info: (...args: unknown[]) => void logged.push(`[info] ${args.map(String).join(' ')}`),
+    error: (...args: unknown[]) => void logged.push(`[error] ${args.map(String).join(' ')}`),
+  },
+}));
+
 let dir: string;
 /** Peer sockets live in the temp dir; point that at this test's own storage. */
 let realTmp: string | undefined;
@@ -118,6 +132,7 @@ beforeEach(async () => {
   dir = await tempStorageDir();
   realTmp = process.env.TMPDIR;
   process.env.TMPDIR = dir;
+  logged.length = 0;
 });
 
 afterEach(async () => {
@@ -284,6 +299,11 @@ describe('bind-as-lease', () => {
     expect(mod.isPeerLinkSettled()).toBe(true);
     await mod.ensurePeerNet(() => {});
     expect(mod.isPeerBroker()).toBe(false);
+    // A directory fails the exclusive create with `EEXIST`, same as a window
+    // that got there first, so this arrives by way of the mid-write wait. The
+    // reason still has to name what is actually wrong with the path rather
+    // than the empty-file case that shares the branch.
+    expect(logged.join('\n')).toContain('EISDIR');
   });
 
   it('waits for the winner’s bytes rather than reading a half-created token as empty', async () => {
@@ -322,6 +342,9 @@ describe('bind-as-lease', () => {
     expect(roles).toEqual([]);
     expect(mod.isPeerBroker()).toBe(false);
     expect(mod.isPeerLinkSettled()).toBe(true);
+    // The readable-but-empty case is the one that really is empty, and it says
+    // so — the two arrivals at this branch are told apart in the log.
+    expect(logged.join('\n')).toContain('is empty');
   }, 30_000);
 
   it('makes the first window to bind the broker and the second a client', async () => {
