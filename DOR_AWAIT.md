@@ -9,10 +9,10 @@
 
 ## Purpose
 
-`dor await <surface>` blocks until a Surface finishes what it was doing, prints
-its screen, and exits. It turns the alert system into an agent synchronization
-primitive: an agent launches a peer with `dor split -- claude`, sends it work,
-and parks on `dor await` instead of polling `dor list` in a loop.
+`dor await <surface> --until <signal>` blocks until a Surface finishes what it
+was doing, prints its screen, and exits. It turns the alert system into an agent
+synchronization primitive: an agent launches a peer with `dor split -- claude`,
+sends it work, and parks on `dor await` instead of polling `dor list` in a loop.
 
 **The caller is a program, not a human.** That single fact drives every decision
 below. A human has a bell, a Pane header, and peripheral vision; a program has
@@ -24,33 +24,64 @@ things, `dor await` serves the program and leaves the human's channels alone.
 | | Requirement |
 |---|---|
 | **R1** | **Await always works.** On any live terminal Surface it parks and eventually resolves, or fails with a stated reason. It never refuses because the Surface is "in the wrong state", and never blocks forever. |
-| **R2** | **It resolves on the right signal for what is running.** A command that never exits (`claude`) must resolve when it settles. A build must resolve when it exits. |
-| **R3** | **A flag may select the wake condition.** Whether it is required, and what it is called, is [D2](#d2-flag-shape). |
+| **R2** | **The caller states the wake condition.** `--until` is required. Nothing global — least of all the user's watched-commands set — is consulted; see [D1](#d1-the-caller-states-intent-settled). |
+| **R3** | **One new number.** Every window below derives from the battle-tested `cfg.alert` constants. The sole addition is `--timeout`, and it exists for a different reason than the rest; see [Timing](#timing). |
 | **R4** | **The await absorbs the alert.** A completion a waiting `dor await` consumes must not ring the bell, speak an alarm, or push to a phone. The program is already handling it; summoning the human too is noise. |
 
 ## Model
 
-### Completion signals
+### The signals
 
-Three kinds of thing can mean "done". They already exist in `docs/specs/alert.md`
-as the three alert tracks; `await` consumes them as one stream.
+`--until` names how much evidence of completion the caller will accept. The two
+values form a permissiveness ladder rather than orthogonal modes.
 
-| `cause` | Source | Available when |
+| `--until` | Resolves on | Use for |
 |---|---|---|
-| `bell` | An explicit terminal report: `BEL`, `OSC 9`, `OSC 777`, `OSC 99`, or an `OSC 9;4` completion/error. | Always. Pure output parsing. |
-| `exit` | The foreground command finished, or the PTY exited. | Only with shell integration (`OSC 133` / `OSC 633`). |
-| `quiet` | The output/silence detector confirmed the Session settled: it became busy, then stayed silent for the settle window. | Always. Pure output timing. |
+| `quiet` | The Session **settled**, **or** the foreground command exited, **or** the Surface emitted an explicit bell. | Agents that never exit — `claude`, `codex`. |
+| `exit` | The foreground command exited. Nothing else. | Builds, test runs, migrations. |
 
-Two properties of `quiet` are load-bearing rather than incidental:
+Rationale for each edge of that table:
 
-- **It must go busy before it can go quiet.** A Surface sitting at a prompt is
-  silent, but silent is not settled. Without the two-stage detector,
-  `dor send … && dor await` races: the await would resolve on the quiet that
-  precedes the peer's first byte of output. This is the difference between a
-  usable primitive and one that returns wrong answers intermittently.
+- **`quiet` includes exit** because there is no caller who wants "wake me when it
+  settles" and also wants to keep blocking after the thing died. Without this,
+  a peer that crashes hangs the caller until `--timeout`.
+- **`quiet` includes bell** because an explicit `OSC 9` / `BEL` is strictly
+  stronger evidence than inferred silence. Ignoring the peer explicitly saying
+  "I need input" while waiting for it to go quiet would be perverse.
+- **`exit` excludes bell** deliberately. Plenty of build tools `BEL` on a
+  warning; `exit`'s entire job is being the strict one, so a mid-run bell must
+  not wake it.
+
+Settling is detected by the existing output/silence machine (`ActivityMonitor`),
+which has two properties `await` depends on:
+
+- **It must go busy before it can go quiet.** A Surface at a prompt is silent,
+  but silent is not settled. `enterBusy` is the only thing that arms the settle
+  timers, so a Session that never sustained output can never fire a settle. This
+  is what stops `dor send … && dor await --until quiet` from racing on the
+  silence that precedes the peer's first byte.
 - **It needs no shell integration.** On `fish`, `cmd.exe`, or any shell where
-  injection did not take, `quiet` is the only signal that still works. This is
-  why `await` degrades rather than errors there (R1).
+  injection did not take, settling is the only signal that still works — it is
+  pure output timing. `exit` is unavailable there.
+
+### Is there anything to wait for?
+
+The one case `--until quiet` cannot infer from output alone is an empty
+Session — a peer that already delivered its final response and is sitting idle.
+Silence there means "done long ago", not "working quietly". Shell integration
+answers it directly:
+
+| At await time | Behavior |
+|---|---|
+| A foreground command is running | There is something to wait for. Park. Resolves on settle or exit, whichever comes first. A command that never animates — a silent build — therefore resolves correctly on its exit rather than being guessed at. |
+| No foreground command | Park for one **grace window** waiting for output. Output arrives → wait for the settle. No output → resolve `cause: idle`. |
+| No shell integration | "Is a command running" is unanswerable, so fall back to the grace window on output alone. Same degradation as every other integration-dependent feature. |
+
+`cause: idle` **exits 0**: a caller that asked for quiet and found quiet got
+what it asked for. It is a distinct `cause` rather than a distinct exit code so
+that simple callers can treat 0 as 0, while a careful caller — or a human
+debugging at 2am — can still tell "it settled" from "there was never anything
+there, and you may have wanted `--until exit`".
 
 ### Resolution
 
@@ -87,18 +118,40 @@ attention suppression and *before* the ring latches, so a waiter can claim it.
 That seam does not exist on `main` today — it is the main gap, and the subject of
 the next pass.
 
+## Timing
+
+Every window is derived from `cfg.alert`, so `await` inherits the tuning the
+bell has already had in the field and adds no second set of numbers to keep in
+sync.
+
+| Window | Value | Source |
+|---|---|---|
+| Grace — "did anything start?" | 2000ms | `busyCandidateGap` (1500) + `busyConfirmGap` (500) — the detector's actual floor for reaching BUSY. A shorter window would time out before the machine it is watching could possibly have reported. |
+| Settle — "has it stopped?" | 5000ms | `mightNeedAttention` (2000) + `needsAttentionConfirm` (3000). |
+| Ceiling | `--timeout`, default 600s | **The one new number.** |
+
+`--timeout` is not an alert-tuning knob and is not derived from `cfg.alert`: it
+is the safety rail on a blocking RPC inside an agent loop. Without a ceiling a
+wedged peer hangs its caller forever. It is enforced **host-side**, so no
+intermediate hop can reap a parked await early and no caller can park forever by
+lying about its own deadline.
+
+**Accepted risk:** the 5000ms settle assumes an agent animates continuously
+across a whole turn. A turn is not only token generation — if a peer shells out
+to a 20s test run and its indicator goes quiet during it, `--until quiet`
+resolves mid-turn. A per-call settle override would fix it and was deliberately
+not added; if this bites in practice, adding one is purely additive.
+
 ## Command surface
 
 ```
-dor await <surface> [--until <signal>…] [--timeout <seconds>]
+dor await <surface> --until <quiet|exit> [--timeout <seconds>]
                     [--json] [--lines <count>] [--scrollback]
 ```
 
+- `--until` is **required**. See [D1](#d1-the-caller-states-intent-settled).
 - Reuses `dor read`'s `--lines` / `--scrollback` / `--json` output shape, plus a
   `cause` field.
-- `--timeout <seconds>` is a ceiling, **enforced host-side** — the host is the
-  authority, so no intermediate hop can reap a parked await early and no caller
-  can park forever by lying. Default: 600.
 - Targets terminal Surfaces only. A browser Surface has no Session and can never
   complete; `dor await surface:browser` fails immediately with that reason rather
   than blocking (R1 means "fails with a stated reason", not "blocks politely").
@@ -109,106 +162,74 @@ Exit codes — `dor` today uses only 0 and 1, so this widening is a proposal:
 
 | Code | Meaning |
 |---|---|
-| 0 | Resolved. `cause` says how. |
-| 1 | Usage or target error (unknown Surface, browser Surface, bad flag). |
+| 0 | Resolved. `cause` is one of `quiet` · `exit` · `bell` · `idle`. |
+| 1 | Usage or target error (unknown Surface, browser Surface, bad or missing `--until`). |
 | 2 | Timed out. |
-| 3 | The Surface died before completing. |
+| 3 | The Surface died before completing — the PTY exited, so there is no screen left to print. |
 
 ## Behavior
 
 | Situation | Outcome |
 |---|---|
-| Surface is already ringing when `await` is called | Resolves immediately, `cause: bell`. |
-| Surface is at a bare prompt, nothing running | Parks. Resolves on the next command's completion. Does **not** resolve on the pre-existing silence. |
-| Peer emits `OSC 9` "needs input" | Resolves, `cause: bell`. The await claims an explicitly human-directed request on the human's behalf; the TODO receipt is what keeps that honest. |
-| Foreground command exits | Resolves, `cause: exit`. |
-| PTY exits / Surface killed | Exits 3. A command-exit ring, if armed, fires just before the PTY event, so a peer that rings on completion still resolves as a normal `bell`. |
+| Surface is already ringing when `await` is called | Resolves immediately, `cause: bell` (under `--until quiet`). |
+| `--until quiet`, agent is mid-turn and animating | Detector is already BUSY. Parks, resolves on the settle. |
+| `--until quiet`, agent already delivered its final response | No command running, no output within the grace window → `cause: idle`, exit 0. |
+| `--until quiet`, silent build running | A command *is* running, so the grace window does not apply. Parks, resolves `cause: exit` when it exits. |
+| `--until exit`, command hangs on an interactive prompt | Blocks to `--timeout`, exit 2. `--until quiet` is the answer for callers who want to be woken when a build stalls. |
+| Peer emits `OSC 9` "needs input" | `--until quiet` resolves `cause: bell`. The await claims an explicitly human-directed request on the human's behalf; the TODO receipt is what keeps that honest. `--until exit` ignores it. |
+| PTY exits / Surface killed | Exits 3. A command-exit ring, if armed, fires just before the PTY event, so a peer that rings on completion still resolves normally first. |
 | `--timeout` expires | Exits 2. Absorbs nothing. |
 | `dor` client disconnects | The host cancels the parked request and disarms whatever it armed. Absorbs nothing. |
-| Several awaits on one Surface | Each resolves on the first signal after it started. All are tagged `[awaited]`. |
-| Shell without integration | `exit` is unavailable; `bell` and `quiet` still work. `--until exit` there is a stated error, not a silent hang. |
+| Several awaits on one Surface | Each resolves on the first qualifying signal after it started. All are tagged `[awaited]`. |
+| `--until exit` on a shell without integration | There are no command boundaries to observe. Stated error, not a silent hang. |
 
-## Contested
+## Decisions
 
-Three decisions the requirements leave open. Recorded here rather than settled
-silently, because each changes what callers have to know.
+### D1: the caller states intent — settled
 
-### D1: how the wake condition is chosen
+`--until` is required, and the watched-commands set is never consulted.
 
-**As commissioned (R2):** `await` consults the user's watched-commands set. A
-watched command (`claude`) waits for quiet; anything else waits for exit.
+The rejected alternative was inferring the wake condition from that set: a
+watched command (`claude`) waits for quiet, anything else waits for exit. It was
+rejected because the watched set is a *human notification preference* — app-global,
+persisted in a webview's `localStorage`, edited from a dialog — and binding it to
+a program's control flow means removing `claude` from the set to quiet the bell
+silently flips every `dor await` on a claude pane from "wait until it settles" to
+"wait until the process exits", which for an agent that never exits is a hang
+with no error and nothing in the output to explain it. It is also the process
+heuristic `alert.md`'s first non-goal forbids, one level removed: the caller of
+`dor await` inherits a declaration it never made.
 
-**Concern — this couples a human notification preference to a program's
-control flow.** The watched set is a UI setting, app-global and persisted in a
-webview's `localStorage`. Three consequences:
+A union default (`await` resolves on any signal, `--until` narrows) was also
+rejected: an early resolve *consumes* the wait, so a caller that does not loop
+proceeds on a half-finished screen and the true completion is never observed.
+Requiring the caller to state intent costs one flag and removes both failure
+modes.
 
-1. **Silent, non-local semantic change.** Remove `claude` from the watched set
-   because the bell got annoying, and every script doing `dor await` on a claude
-   pane flips from "wait until it settles" to "wait until the process exits" —
-   which for an interactive agent means *hang until timeout*. A working
-   orchestration breaks from an unrelated toggle in a dialog, with no error and
-   nothing in the output to explain it.
-2. **It is the process heuristic `alert.md` forbids, one level removed.** The
-   first non-goal is "no process heuristics". The user declaring `claude` for
-   *notification* purposes is an explicit request; a *different* caller
-   inheriting that declaration as control flow is not — it never declared
-   anything.
-3. **The caller already knows.** Whoever writes `dor await` knows whether it
-   spawned a build or an agent. Inferring it from global state replaces good
-   information with worse.
+### D2: flag shape — settled
 
-**Alternative — union default, narrowing filters.** `await` resolves on the
-**first completion signal of any kind** and reports which one in `cause`. The
-watched set is never consulted. `--until` narrows:
+`--until <signal>` over `--until-exit` / `--until-animation-stops`. One flag with
+a value beats N booleans that can contradict each other, and the values reuse the
+`cause` vocabulary — the flag you pass and the field you read back are the same
+word. "Animation" is UI vocabulary (the bell's tilt); the thing being detected is
+output going quiet, so `quiet` names it directly.
 
-```
-dor await surface:5                    # any signal — bell, exit, or quiet
-dor await surface:5 --until exit       # only a command exit
-dor await surface:5 --until quiet      # only a settle
-dor await surface:5 --until bell,exit  # either
-```
+Single-valued, not a list: `quiet` already subsumes `exit`, so the only
+combination a list could express is the one that is already the default of the
+permissive value.
 
-This satisfies R1 and R2 better than auto-adapt: `claude` settles → `quiet`
-fires → resolved; a build exits → `exit` fires → resolved; a build that *hangs
-on a prompt* goes quiet → resolved, which is exactly when you want to be woken
-and is the case auto-adapt gets wrong. No configuration, no coupling, identical
-behavior on every machine.
+### D3: absorption scope — open
 
-**Cost, stated honestly:** the union can wake early. A build that emits a `BEL`
-mid-run, or completes an `OSC 9;4` progress cycle before exiting, resolves the
-await before the build is done. The caller sees `cause` and can loop; a caller
-that needs precision uses `--until exit`. Auto-adapt does not have this problem
-for the build case, and that is the real argument in its favor.
-
-**Recommendation:** union default. The failure mode of the union is an early
-wake the caller can see and retry; the failure mode of auto-adapt is a hang the
-caller cannot see at all.
-
-### D2: flag shape
-
-**Optional, not required.** A blocking primitive is written in the middle of
-quick orchestration; a required flag is friction at exactly the wrong moment,
-and under D1's union default there is a genuinely correct default to have.
-
-**Naming:** `--until <signal>` over `--until-exit` / `--until-animation-stops`.
-One flag with a value beats N boolean flags that can contradict each other, and
-the values reuse the `cause` vocabulary — the flag you pass and the field you
-read back are the same word. "Animation" is UI vocabulary (the bell's tilt); the
-thing being detected is output going quiet, so `quiet` names it directly.
-
-### D3: absorption scope
-
-R4 says a consumed alert must not ring, speak, or push. Settled above as
-"absorb the summons, keep the receipt", with a failed await absorbing nothing.
-The parts still open:
+Settled: absorb the summons, keep the receipt; a failed await absorbs nothing.
+Still open:
 
 - Should `--no-absorb` exist, for a caller that wants to observe without
   claiming? Probably yes eventually; not in the first cut.
-- Push is the one channel where absorption is arguable: push exists to reach a
-  user who *walked away*, and a long orchestration is exactly when they have. The
-  answer here is that absorption is fine precisely because a failed or timed-out
-  await un-absorbs — the human still gets the phone buzz when the orchestration
-  actually stalls.
+- Push is the one channel where absorption is arguable, since push exists to
+  reach a user who *walked away* and a long orchestration is exactly when they
+  have. The answer is that absorption is safe precisely because a failed or
+  timed-out await un-absorbs — the human still gets the phone buzz when the
+  orchestration actually stalls.
 
 ## Dissolution
 
@@ -216,9 +237,9 @@ On landing, this file is deleted and its contents move:
 
 | Section | Destination |
 |---|---|
-| Purpose, Command surface, Behavior, exit codes | `docs/specs/dor-cli.md` — promote the staged `dor await` bullet out of `## Future` into the implemented command list. |
-| Completion signals, Resolution, Absorption | `docs/specs/alert.md` — a new Await section, plus whatever seam the absorption rule requires in the Public State / Clearing And TODO sections. |
-| Contested | Deleted. Decisions land as prose in the destination specs; the rejected alternatives stay in this branch's git history. |
+| Purpose, Command surface, Behavior, Timing, exit codes | `docs/specs/dor-cli.md` — promote the staged `dor await` bullet out of `## Future` into the implemented command list. |
+| The signals, Is there anything to wait for, Resolution, Absorption | `docs/specs/alert.md` — a new Await section, plus whatever seam the absorption rule requires in the Public State / Clearing And TODO sections. |
+| Decisions | Deleted. The settled parts land as prose in the destination specs; the rejected alternatives stay in this branch's git history. |
 | `[awaited]` tag | `docs/specs/dor-cli.md`, `dor list` output. |
 
 Per `AGENTS.md`, promotion is not done until the text reads as present tense with
