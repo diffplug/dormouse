@@ -286,6 +286,44 @@ describe('bind-as-lease', () => {
     expect(mod.isPeerBroker()).toBe(false);
   });
 
+  it('waits for the winner’s bytes rather than reading a half-created token as empty', async () => {
+    // `writeFile(..., { flag: 'wx' })` creates the file before it writes the
+    // bytes. A window reading in that gap used to take `''` as the token, and
+    // an empty `serverToken` rejects every hello for the life of that broker —
+    // which never re-reads it, so the installation does not recover.
+    const path = join(dir, 'remote-host.peer-token');
+    await writeFile(path, '', { mode: 0o600 });
+
+    const mod = await openWindow(fakeWindow());
+    const settled = mod.ensurePeerNet(() => {});
+    // Not yet decided, so the bytes below land inside the wait rather than
+    // before the read — without which this would pass vacuously.
+    await tick();
+    expect(mod.isPeerLinkSettled()).toBe(false);
+    await writeFile(path, 'the-winners-token', { mode: 0o600 });
+    await settled;
+
+    expect(mod.isPeerBroker()).toBe(true);
+    // The broker serves over the token that was actually written, so a hello
+    // proved with it is accepted.
+    expect(await readToken()).toBe('the-winners-token');
+  }, 30_000);
+
+  it('stands down rather than brokering on a token file that stays empty', async () => {
+    // A zero-length token left by a crash never fills in. Binding anyway makes
+    // this window the broker every other one dials, and it then refuses all of
+    // them silently; the stand-down at least names the reason in the log.
+    await writeFile(join(dir, 'remote-host.peer-token'), '', { mode: 0o600 });
+
+    const mod = await openWindow(fakeWindow());
+    const roles: boolean[] = [];
+    await mod.ensurePeerNet((held) => roles.push(held));
+
+    expect(roles).toEqual([]);
+    expect(mod.isPeerBroker()).toBe(false);
+    expect(mod.isPeerLinkSettled()).toBe(true);
+  }, 30_000);
+
   it('makes the first window to bind the broker and the second a client', async () => {
     const { broker, peer } = await linkedPair();
     expect(broker.isPeerBroker()).toBe(true);
