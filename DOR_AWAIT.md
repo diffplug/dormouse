@@ -10,9 +10,11 @@
 ## Purpose
 
 `dor await <surface> --until <signal>` blocks until a Surface finishes what it
-was doing, prints its screen, and exits. It turns the alert system into an agent
-synchronization primitive: an agent launches a peer with `dor split -- claude`,
-sends it work, and parks on `dor await` instead of polling `dor list` in a loop.
+was doing, reports why it stopped, and exits. It turns the alert system into an
+agent synchronization primitive: an agent launches a peer with
+`dor split -- claude`, sends it work, and parks on `dor await` instead of polling
+`dor list` in a loop. Reading the result is `dor read`'s job — see
+[D4](#d4-await-does-not-print-the-screen-settled).
 
 **The caller is a program, not a human.** That single fact drives every decision
 below. A human has a bell, a Pane header, and peripheral vision; a program has
@@ -85,7 +87,8 @@ there, and you may have wanted `--until exit`".
 
 ### Resolution
 
-On resolution `await` prints the Surface's screen and the `cause`, then exits 0.
+On resolution `await` prints its `cause` and exits 0. It prints no terminal
+text; the caller composes `dor read` when it wants the screen.
 
 Resolution consumes the ring it resolved on and **touches nothing else**: no
 TODO is set, no existing TODO is cleared, and `attentionSessionId` is not set — a
@@ -156,13 +159,13 @@ not added; if this bites in practice, adding one is purely additive.
 ## Command surface
 
 ```
-dor await <surface> --until <quiet|exit> [--timeout <seconds>]
-                    [--json] [--lines <count>] [--scrollback]
+dor await <surface> --until <quiet|exit> [--timeout <seconds>] [--json]
 ```
 
 - `--until` is **required**. See [D1](#d1-the-caller-states-intent-settled).
-- Reuses `dor read`'s `--lines` / `--scrollback` / `--json` output shape, plus a
-  `cause` field.
+- No `--lines` / `--scrollback`: `await` never prints terminal text, so it
+  carries none of `dor read`'s output flags. See
+  [D4](#d4-await-does-not-print-the-screen-settled).
 - Targets terminal Surfaces only. A browser Surface has no Session and can never
   complete; `dor await surface:browser` fails immediately with that reason rather
   than blocking (R1 means "fails with a stated reason", not "blocks politely").
@@ -176,17 +179,80 @@ Exit codes — `dor` today uses only 0 and 1, so this widening is a proposal:
 | 0 | Resolved. `cause` is one of `quiet` · `exit` · `bell` · `idle`. |
 | 1 | Usage or target error (unknown Surface, browser Surface, bad or missing `--until`). |
 | 2 | Timed out. |
-| 3 | The Surface died before completing — the PTY exited, so there is no screen left to print. |
+| 3 | The Surface died before completing — its PTY exited, so the thing being waited on is gone rather than late. Distinct from 2 so a caller can tell "it is still out there and slow" from "it will never answer". |
 
 ### Output and errors
 
-Failures follow `dor`'s existing convention (`dor/src/commands/shared.ts`):
-an `Error: <message>` line on **stderr**, empty stdout, non-zero exit. That covers
-usage errors, the timeout, and Surface death, so a caller can distinguish "it did
-not happen" from any successful resolution without parsing stdout.
+**Success** prints the bare `cause` on stdout and nothing else, so
+`CAUSE=$(dor await surface:5 --until quiet)` is the whole idiom:
 
-**Open:** how `cause` reaches a caller in text mode, which depends on whether
-`await` prints the screen at all — see [D4](#d4-does-await-print-the-screen-open).
+```
+$ dor await surface:5 --until quiet
+quiet
+```
+
+`--json` gives the same fact in `dor`'s object shape:
+
+```json
+{ "workspace_ref": "workspace:1", "surface_id": "…", "surface_ref": "surface:5",
+  "cause": "quiet" }
+```
+
+**Failure** follows `dor`'s existing convention
+(`dor/src/commands/shared.ts`): an `Error: <message>` line on **stderr**, empty
+stdout, non-zero exit. Because stdout carries only the cause and stderr only
+errors, a caller distinguishes every outcome without parsing terminal text —
+which is the practical payoff of the split.
+
+### Help text
+
+The user-facing contract, in the shape `dor/test/snapshots/help/*.md` records.
+Prose is unwrapped because stricli owns the wrapping, and flag order/rendering
+is stricli's to decide.
+
+```text
+USAGE
+  dor await <surface> --until condition [--json] [--timeout seconds]
+  dor await --help
+
+Waits until a terminal surface finishes what it is doing, then reports why the wait ended. Lets an agent block on a peer it launched with `dor split` instead of polling `dor list` in a loop.
+
+Prints no terminal text. Follow with `dor read` to see the screen.
+
+--until says what counts as finished:
+  quiet  The surface settled, the running command exited, or the surface rang the bell. Use for agents that keep running, such as claude or codex.
+  exit   The running command exited, and nothing else. Use for builds and test runs, which can fall silent mid-run without being finished.
+
+Waiting absorbs the alert. A surface that finishes while awaited does not ring the bell, speak an alarm, or notify a paired phone, and is not marked TODO — the wait already delivered the news.
+
+Text mode prints the cause alone: quiet, exit, bell, or idle. An idle result means nothing was running and nothing started, so there was never anything to wait for.
+
+JSON output:
+  {
+    "workspace_ref": "workspace:1",
+    "surface_id": "...",
+    "surface_ref": "surface:3",
+    "cause": "quiet"
+  }
+
+Exits 0 on any resolution, 2 on timeout, and 3 if the surface died before finishing.
+
+Examples:
+  dor await surface:3 --until quiet
+  dor await surface:3 --until quiet && dor read surface:3
+  dor await surface:3 --until exit --timeout 1800
+  CAUSE=$(dor await surface:3 --until quiet)
+
+FLAGS
+     [--json]     Print JSON output.
+     [--timeout]  Seconds to wait before giving up. Default 600.
+      --until     What to wait for: quiet or exit.
+  -h  --help      Print help information and exit
+      --          All subsequent inputs should be interpreted as arguments
+
+ARGUMENTS
+  surface  Surface to wait on.
+```
 
 ## Behavior
 
@@ -252,18 +318,32 @@ failed await absorbs nothing. Still open:
   timed-out await un-absorbs — the human still gets the phone buzz when the
   orchestration actually stalls.
 
-### D4: does `await` print the screen? — open
+### D4: `await` does not print the screen — settled
 
-Today's draft bundles `dor read`'s output shape into `await`. The alternative is
-that `await` prints only its `cause` and the caller composes:
-`dor await surface:5 --until quiet && dor read surface:5`.
+`await` reports only why the wait ended. The caller composes:
 
-Bundling is more ergonomic for the overwhelmingly common case ("wait, then see
-what it said") and captures the screen *at the moment of resolution*. Splitting
-is more UNIX, removes the need to mirror every `read` flag onto `await` forever,
-lets a caller that only needs the fact of completion skip 40 lines of terminal it
-would discard, and makes `cause` the entire stdout — which resolves the text-mode
-question above for free.
+```
+dor await surface:5 --until quiet && dor read surface:5
+```
+
+The rejected alternative bundled `dor read`'s output shape into `await`, which is
+more ergonomic for the common case ("wait, then see what it said") and captures
+the screen at the exact moment of resolution. It lost on three counts:
+
+- **Mirroring cost compounds.** Bundling obliges `await` to carry `--lines`,
+  `--scrollback`, `--json`, and every output flag `dor read` grows afterwards
+  (`docs/specs/dor-cli.md` → Future already stages more), as a second
+  implementation with a second help snapshot and a standing chance to drift.
+- **It makes `cause` free.** With no terminal text on stdout, the cause *is*
+  stdout — no header line to design, no format that has to survive being mixed
+  with arbitrary screen content, and text mode gets the cause without `--json`.
+- **Not every caller wants the screen.** An orchestrator awaiting several peers
+  in sequence often needs only the fact of completion, and would otherwise
+  receive and discard a screenful of terminal each time.
+
+The cost accepted: the screen can move between `await` returning and `read`
+landing. Under `--until quiet` the peer is settled by definition, so this is
+near-theoretical; under `--until exit` a prompt redraw may scroll a line.
 
 ## Dissolution
 
@@ -271,7 +351,7 @@ On landing, this file is deleted and its contents move:
 
 | Section | Destination |
 |---|---|
-| Purpose, Command surface, Behavior, Timing, exit codes | `docs/specs/dor-cli.md` — promote the staged `dor await` bullet out of `## Future` into the implemented command list. |
+| Purpose, Command surface, Output and errors, Behavior, Timing, exit codes | `docs/specs/dor-cli.md` — promote the staged `dor await` bullet out of `## Future` into the implemented command list. |
 | The signals, Is there anything to wait for, Resolution, Absorption | `docs/specs/alert.md` — a new Await section, plus whatever seam the absorption rule requires in the Public State / Clearing And TODO sections. |
 | Decisions | Deleted. The settled parts land as prose in the destination specs; the rejected alternatives stay in this branch's git history. |
 | `[awaited]` tag | `docs/specs/dor-cli.md`, `dor list` output. |
