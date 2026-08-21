@@ -21,6 +21,8 @@ Text mode prints the cause alone on stdout: quiet, exit, bell, or idle. An idle 
 
 A one-line summary naming the cause and how long the wait took goes to stderr, so it stays out of the captured value: `quiet: output stopped after 10m 15s`. The duration is how long this command blocked, not how long the surface had been working.
 
+--timeout accepts whole seconds up to 86400 (24h). The default is 600.
+
 JSON output:
   {
     "workspace_ref": "workspace:1",
@@ -41,7 +43,7 @@ Examples:
 
 FLAGS
      [--json]     Print JSON output.
-     [--timeout]  Seconds to wait before giving up. Default 600.
+     [--timeout]  Seconds to wait before giving up. Default 600; max 86400.
       --until     What to wait for: quiet or exit.
   -h  --help      Print help information and exit
       --          All subsequent inputs should be interpreted as arguments

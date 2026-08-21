@@ -26,12 +26,20 @@ function tokenMatches(provided, expected) {
 // In practice socket close reaps pending entries the instant the client gives up;
 // this timer only releases a pending entry if the webview never answers at all.
 const SERVER_TIMEOUT_MARGIN_MS = 10000;
-// A parked request is cheap, but not free: cap the ceiling so a client that asks
-// for a nonsense-but-finite deadline cannot pin an entry for the session's life.
-const MAX_REQUEST_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+// `dor await` accepts a host ceiling of at most 24h and gives its client socket
+// another 5s. The server accepts that largest legitimate client deadline, then
+// keeps its reaper another 10s above it. Larger hints are nonsense: a parked
+// request is cheap, but not free, so they fall back to the bounded default.
+const MAX_CLIENT_TIMEOUT_MS = (24 * 60 * 60 * 1000) + 5000;
+const MAX_REQUEST_TIMEOUT_MS = MAX_CLIENT_TIMEOUT_MS + SERVER_TIMEOUT_MARGIN_MS;
 
 function serverTimeoutFor(clientTimeoutMs, fallbackMs) {
-  if (typeof clientTimeoutMs !== 'number' || !Number.isFinite(clientTimeoutMs) || clientTimeoutMs <= 0) {
+  if (
+    typeof clientTimeoutMs !== 'number' ||
+    !Number.isFinite(clientTimeoutMs) ||
+    clientTimeoutMs <= 0 ||
+    clientTimeoutMs > MAX_CLIENT_TIMEOUT_MS
+  ) {
     return fallbackMs;
   }
   return Math.min(clientTimeoutMs + SERVER_TIMEOUT_MARGIN_MS, MAX_REQUEST_TIMEOUT_MS);
@@ -194,4 +202,4 @@ function writeResponse(socket, response) {
   }
 }
 
-module.exports = { createDorControlServer };
+module.exports = { createDorControlServer, serverTimeoutFor };

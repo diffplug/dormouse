@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const net = require('node:net');
 const path = require('node:path');
 
-const { createDorControlServer } = require('./dor-control-server');
+const { createDorControlServer, serverTimeoutFor } = require('./dor-control-server');
 
 function testSocketPath(name) {
   const suffix = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -62,6 +62,17 @@ function waitFor(predicate, label, timeoutMs = 2000) {
 }
 
 const delay = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+test('server deadline outlasts the maximum accepted await timeout', () => {
+  const hostTimeoutMs = 24 * 60 * 60 * 1000;
+  const clientTimeoutMs = hostTimeoutMs + 5000;
+  const serverTimeoutMs = serverTimeoutFor(clientTimeoutMs, 65000);
+
+  assert.equal(serverTimeoutMs, clientTimeoutMs + 10000);
+  assert.ok(hostTimeoutMs < clientTimeoutMs);
+  assert.ok(clientTimeoutMs < serverTimeoutMs);
+  assert.equal(serverTimeoutFor(clientTimeoutMs + 1, 65000), 65000);
+});
 
 test('dor control server forwards valid requests and writes responses', async () => {
   const socketPath = testSocketPath('control');

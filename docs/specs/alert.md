@@ -109,7 +109,7 @@ Claiming is delivery. Once a completion has been handed to an await the wait is 
 | Settle — "has it stopped?" | 5000ms | `mightNeedAttention` + `needsAttentionConfirm` |
 | Ceiling | `timeoutMs` | `dor await`'s `--timeout` (seconds, default 600), and the only number not derived from `cfg.alert` |
 
-`timeoutMs` is not an alert-tuning knob: it is the safety rail on a blocking call inside an agent loop, so a wedged peer cannot hang its caller forever. It is enforced **host-side**, alongside the grace and settle windows, so no intermediate hop can reap a parked await early and no caller can park forever by lying about its own deadline. Like the inactivity timeout it originates a process away and ends up in `setTimeout`, so a non-finite or non-positive value is rejected — the request settles `cancelled`, having absorbed nothing.
+`timeoutMs` is not an alert-tuning knob: it is the safety rail on a blocking call inside an agent loop, so a wedged peer cannot hang its caller forever. It is enforced **host-side**, alongside the grace and settle windows, so no intermediate hop can reap a parked await early and no caller can park forever by lying about its own deadline. The CLI accepts whole-second ceilings from 1 through 86400 (24h). Like the inactivity timeout it originates a process away and ends up in `setTimeout`, so a non-finite or non-positive host request is rejected — the request settles `cancelled`, having absorbed nothing.
 
 Several awaits may park on one Session. They share a single claimant, so one completion is delivered to every await whose condition it satisfies rather than only to whoever registered first, and each resolves on the first qualifying signal after it registered.
 

@@ -34,6 +34,9 @@ interface AwaitFlags {
 /** The ceiling on a blocking call inside an agent loop — not an alert-tuning
  *  knob, and the one number `await` does not inherit from `cfg.alert`. */
 const DEFAULT_TIMEOUT_SECONDS = 600;
+/** Largest host-side await ceiling that keeps every control-layer timer within
+ *  the server's bounded deadline ordering. */
+const MAX_TIMEOUT_SECONDS = 24 * 60 * 60;
 
 /** Exit code for a wait that ran out its `--timeout`. */
 const EXIT_TIMED_OUT = 2;
@@ -60,6 +63,8 @@ Waiting absorbs the alert. A surface that finishes while awaited does not ring t
 Text mode prints the cause alone on stdout: quiet, exit, bell, or idle. An idle result means nothing was running and nothing started, so there was never anything to wait for.
 
 A one-line summary naming the cause and how long the wait took goes to stderr, so it stays out of the captured value: \`quiet: output stopped after 10m 15s\`. The duration is how long this command blocked, not how long the surface had been working.
+
+--timeout accepts whole seconds up to 86400 (24h). The default is 600.
 
 JSON output:
   {
@@ -99,7 +104,7 @@ export const awaitCommand: Command = {
     parameters: {
       flags: {
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
-        timeout: { kind: 'parsed', parse: parseTimeoutSeconds, brief: 'Seconds to wait before giving up. Default 600.', optional: true, placeholder: 'seconds' },
+        timeout: { kind: 'parsed', parse: parseTimeoutSeconds, brief: 'Seconds to wait before giving up. Default 600; max 86400.', optional: true, placeholder: 'seconds' },
         until: { kind: 'parsed', parse: parseUntil, brief: 'What to wait for: quiet or exit.', optional: false, placeholder: 'condition' },
       },
       positional: {
@@ -202,5 +207,5 @@ function parseUntil(input: string): AwaitUntil {
 }
 
 function parseTimeoutSeconds(input: string): number {
-  return parsePositiveInt(input, '--timeout');
+  return parsePositiveInt(input, '--timeout', MAX_TIMEOUT_SECONDS);
 }

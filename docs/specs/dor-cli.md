@@ -211,12 +211,13 @@ that owns that surface when one is available.
 
 Each request carries the client's own `timeoutMs` on the wire. The control
 server treats it as a hint and sets a timer that deliberately outlasts it — the
-client's deadline plus 10s, capped at 24h; absent or nonsense (non-finite, ≤ 0)
-falls back to the server default of 65s, which clears the longest fixed client
-deadline (`dor ensure --restart` at 60s). The server never firing first is the
-point: a server timeout would answer the client with a spurious "timed out
-waiting for …" while the webview was still legitimately working, so the client
-is always the side that decides the outcome. *Source of truth:*
+client's deadline plus 10s. `dor await` accepts a host ceiling of at most 24h;
+its socket deadline is 5s later, and the maximum server deadline is therefore
+24h + 15s. Absent or nonsense hints (non-finite, ≤ 0, or above 24h + 5s) fall
+back to the server default of 65s, which clears the longest fixed client
+deadline (`dor ensure --restart` at 60s). Thus every valid request preserves
+host ceiling < client socket < server reaper: a server timeout cannot turn the
+host's normal timeout result into a transport error. *Source of truth:*
 `standalone/sidecar/dor-control-server.js` (used verbatim by both hosts) and
 `dor/src/control-client.ts`.
 
@@ -378,7 +379,8 @@ from `command-detail`.
 - `dor await <surface> --until quiet|exit [--timeout seconds] [--json]` —
   blocks until a terminal Surface finishes what it is doing, then reports why
   the wait ended. `--until` is required and is never inferred or defaulted: it
-  is the one flag `await` has no fallback for. The host owns the wake
+  is the one flag `await` has no fallback for. `--timeout` accepts whole seconds
+  from 1 through 86400 (24h), defaulting to 600. The host owns the wake
   condition, the grace window, and the `--timeout` ceiling — see
   `docs/specs/alert.md` → Await for the wake conditions, grace window,
   absorption rule, and the full per-situation Behavior table.

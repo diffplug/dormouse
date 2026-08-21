@@ -797,6 +797,23 @@ test('await rejects a non-positive --timeout', async () => {
   }));
 });
 
+test('await accepts at most a 24-hour --timeout', async () => {
+  const acceptedClient = awaitClient({ outcome: 'resolved', cause: 'quiet', waitedMs: 0 });
+  const accepted = await runCli(['await', 'surface:1', '--until', 'quiet', '--timeout', '86400'], {
+    client: acceptedClient,
+  });
+  assert.equal(accepted.exitCode, 0);
+  assert.equal(acceptedClient.requests[0].request.timeoutMs, 86_400_000);
+
+  const rejectedClient = awaitClient({});
+  const rejected = await runCli(['await', 'surface:1', '--until', 'quiet', '--timeout', '86401'], {
+    client: rejectedClient,
+  });
+  assert.equal(rejected.exitCode, 1);
+  assert.match(rejected.stderr, /invalid --timeout '86401'/);
+  assert.deepEqual(rejectedClient.requests, []);
+});
+
 test('kill text output', async () => {
   await snapshot(
     'kill-text',
