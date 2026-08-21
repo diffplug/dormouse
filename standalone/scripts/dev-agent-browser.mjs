@@ -4,6 +4,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 // cross-spawn, not node:child_process: this script spawns `pnpm` and
 // `agent-browser`, which are `.cmd` shims on Windows that a bare-name spawn
@@ -27,7 +28,12 @@ const browserSession = process.env.DORMOUSE_BROWSER_DEV_AB_SESSION || 'dormouse-
 const controlSocket = process.platform === 'win32'
   ? `\\\\.\\pipe\\dormouse-${process.pid}-browser-dor`
   : path.join(os.tmpdir(), `dormouse-${process.pid}-browser-dor.sock`);
-const controlToken = Math.random().toString(36).slice(2);
+// A real bearer credential: it goes into the environment of every shell this
+// harness spawns, and holding it is full access to the `dor` control API
+// (spawn panes, inject keystrokes, read scrollback). `Math.random()` is a
+// predictable PRNG and was never appropriate for it. Same construction as the
+// production hosts (`vscode-ext/src/pty-manager.ts`).
+const controlToken = randomBytes(24).toString('hex');
 // The remote Host persists its enrollment + ACL here, under the harness's own
 // temp dir so a dev run never touches the installed app's state.
 const stateDir = path.join(os.tmpdir(), `dormouse-${process.pid}-browser-state`);
