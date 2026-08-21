@@ -16,12 +16,27 @@ function tokenMatches(provided, expected) {
 }
 
 // The server timeout must outlast the dor client's own deadline so the client
-// always controls the outcome — its longest is `dor ensure --restart` at 60s, so
-// 65s clears it. (A shorter server timeout would fire first and send the client a
-// spurious "timed out waiting for surface.ensure" while the webview was still
-// legitimately working, e.g. waiting on shell integration or a server restart.)
+// always controls the outcome. (A shorter server timeout would fire first and
+// send the client a spurious "timed out waiting for surface.ensure" while the
+// webview was still legitimately working, e.g. waiting on shell integration or a
+// server restart.) A request that carries its own `timeoutMs` — `dor await
+// --timeout` can ask for many minutes — gets that plus a margin; anything else
+// falls back to the `timeoutMs` option, whose 65s default clears the longest
+// fixed client deadline (`dor ensure --restart` at 60s).
 // In practice socket close reaps pending entries the instant the client gives up;
 // this timer only releases a pending entry if the webview never answers at all.
+const SERVER_TIMEOUT_MARGIN_MS = 10000;
+// A parked request is cheap, but not free: cap the ceiling so a client that asks
+// for a nonsense-but-finite deadline cannot pin an entry for the session's life.
+const MAX_REQUEST_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+
+function serverTimeoutFor(clientTimeoutMs, fallbackMs) {
+  if (typeof clientTimeoutMs !== 'number' || !Number.isFinite(clientTimeoutMs) || clientTimeoutMs <= 0) {
+    return fallbackMs;
+  }
+  return Math.min(clientTimeoutMs + SERVER_TIMEOUT_MARGIN_MS, MAX_REQUEST_TIMEOUT_MS);
+}
+
 function createDorControlServer({ socketPath, token, send, timeoutMs = 65000 }) {
   if (!socketPath || !token) return null;
 
@@ -43,12 +58,16 @@ function createDorControlServer({ socketPath, token, send, timeoutMs = 65000 }) 
 
     // If the client disconnects (timeout/Ctrl-C) before the webview answers,
     // release any entries owned by this socket right away rather than letting
-    // them linger until their own timeout fires against a dead socket.
+    // them linger until their own timeout fires against a dead socket. The
+    // webview has to hear about it too: a long-running handler (a parked
+    // `dor await`) holds state — a subscription, an armed watch, a completion
+    // claim — that only a cancel releases.
     socket.on('close', () => {
       for (const [requestId, entry] of pending) {
         if (entry.socket !== socket) continue;
         if (entry.timeout) clearTimeout(entry.timeout);
         pending.delete(requestId);
+        send('dor:controlCancel', { requestId });
       }
     });
 
@@ -84,7 +103,8 @@ function createDorControlServer({ socketPath, token, send, timeoutMs = 65000 }) 
     const timeout = setTimeout(() => {
       pending.delete(request.requestId);
       writeResponse(socket, { requestId: request.requestId, ok: false, error: `timed out waiting for ${request.method}` });
-    }, timeoutMs);
+      send('dor:controlCancel', { requestId: request.requestId });
+    }, serverTimeoutFor(request.timeoutMs, timeoutMs));
 
     pending.set(request.requestId, { socket, timeout });
     send('dor:controlRequest', {
@@ -99,12 +119,17 @@ function createDorControlServer({ socketPath, token, send, timeoutMs = 65000 }) 
     const requestId = response?.requestId;
     if (typeof requestId !== 'string') return;
     const entry = pending.get(requestId);
+    // Unknown id: the entry was already reaped by a disconnect or a timeout and
+    // the webview was told so. A late answer to a cancelled request is expected,
+    // not an error — drop it silently.
     if (!entry) return;
     pending.delete(requestId);
     clearTimeout(entry.timeout);
     writeResponse(entry.socket, response);
   }
 
+  // No `dor:controlCancel` here: close() runs on host shutdown, so the webview
+  // that would act on it is going away too.
   function close() {
     for (const [requestId, entry] of pending) {
       clearTimeout(entry.timeout);

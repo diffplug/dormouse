@@ -85,8 +85,17 @@ export class SocketControlClient implements ControlClient {
     return this.request<ResolveOpenTargetResponse>(SURFACE_CONTROL_METHODS.resolveOpen, request);
   }
 
-  private request<T>(method: SurfaceControlMethod, params: unknown): Promise<T> {
+  // `timeoutMs` overrides the client's configured deadline for one call. It also
+  // travels on the wire so the control server can set a timer that outlasts it —
+  // otherwise a long request (a parked `dor await`) would be killed by the
+  // server's default long before the client gave up.
+  private request<T>(
+    method: SurfaceControlMethod,
+    params: unknown,
+    options?: { timeoutMs?: number },
+  ): Promise<T> {
     const requestId = `dor-${this.idBase}-${++this.nextRequestId}`;
+    const timeoutMs = options?.timeoutMs ?? this.timeoutMs;
     return new Promise((resolve, reject) => {
       const socket = createConnection({ path: this.socketPath });
       let responseBuffer = '';
@@ -102,7 +111,7 @@ export class SocketControlClient implements ControlClient {
 
       const timeout = setTimeout(() => {
         settle(() => reject(new Error(`timed out waiting for ${method}`)));
-      }, this.timeoutMs);
+      }, timeoutMs);
 
       socket.setEncoding('utf8');
       socket.on('connect', () => {
@@ -112,6 +121,7 @@ export class SocketControlClient implements ControlClient {
           surfaceId: this.surfaceId,
           method,
           params,
+          timeoutMs,
         })}\n`);
       });
       socket.on('data', (chunk) => {

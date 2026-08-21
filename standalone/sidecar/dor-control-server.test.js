@@ -36,6 +36,33 @@ function sendSocketRequest(socketPath, payload) {
   });
 }
 
+/** Write a request and hand back the live socket, so a test can hang up on it. */
+function openSocketRequest(socketPath, payload) {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection({ path: socketPath });
+    socket.setEncoding('utf8');
+    socket.on('error', reject);
+    socket.on('connect', () => {
+      socket.write(`${JSON.stringify(payload)}\n`);
+      resolve(socket);
+    });
+  });
+}
+
+function waitFor(predicate, label, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve, reject) => {
+    const tick = () => {
+      if (predicate()) return resolve();
+      if (Date.now() > deadline) return reject(new Error(`timed out waiting for ${label}`));
+      setTimeout(tick, 5);
+    };
+    tick();
+  });
+}
+
+const delay = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+
 test('dor control server forwards valid requests and writes responses', async () => {
   const socketPath = testSocketPath('control');
   const sent = [];
@@ -154,3 +181,154 @@ test('dor control server rejects a missing (non-string) token', async () => {
     server.close();
   }
 });
+
+test('dor control server cancels a pending request when the client disconnects', async () => {
+  const socketPath = testSocketPath('cancel-close');
+  const sent = [];
+  const server = createDorControlServer({
+    socketPath,
+    token: 'secret',
+    send(event, data) {
+      sent.push({ event, data });
+    },
+  });
+
+  assert.ok(server);
+  await server.ready;
+
+  try {
+    const socket = await openSocketRequest(socketPath, {
+      requestId: 'request-1',
+      token: 'secret',
+      method: 'surface.await',
+    });
+    await waitFor(() => sent.some((entry) => entry.event === 'dor:controlRequest'), 'the forwarded request');
+
+    // The client gives up (timeout / Ctrl-C) before the webview ever answers.
+    socket.destroy();
+
+    await waitFor(() => sent.some((entry) => entry.event === 'dor:controlCancel'), 'the cancel');
+    assert.deepEqual(
+      sent.filter((entry) => entry.event === 'dor:controlCancel'),
+      [{ event: 'dor:controlCancel', data: { requestId: 'request-1' } }],
+    );
+
+    // The entry is gone, so a late webview answer is a silent no-op.
+    server.respond({ requestId: 'request-1', ok: true, result: {} });
+  } finally {
+    server.close();
+  }
+});
+
+test('dor control server cancels a pending request when its own timeout fires', async () => {
+  const socketPath = testSocketPath('cancel-timeout');
+  const sent = [];
+  const server = createDorControlServer({
+    socketPath,
+    token: 'secret',
+    timeoutMs: 30,
+    send(event, data) {
+      sent.push({ event, data });
+    },
+  });
+
+  assert.ok(server);
+  await server.ready;
+
+  try {
+    const response = await sendSocketRequest(socketPath, {
+      requestId: 'request-1',
+      token: 'secret',
+      method: 'surface.list',
+    });
+
+    assert.deepEqual(response, {
+      requestId: 'request-1',
+      ok: false,
+      error: 'timed out waiting for surface.list',
+    });
+
+    await waitFor(() => sent.some((entry) => entry.event === 'dor:controlCancel'), 'the cancel');
+    // The socket close that follows the timeout response must not cancel twice.
+    await delay(30);
+    assert.deepEqual(
+      sent.filter((entry) => entry.event === 'dor:controlCancel'),
+      [{ event: 'dor:controlCancel', data: { requestId: 'request-1' } }],
+    );
+  } finally {
+    server.close();
+  }
+});
+
+test('a request timeoutMs stretches the server deadline past the option default', async () => {
+  const socketPath = testSocketPath('deadline-stretch');
+  const sent = [];
+  const server = createDorControlServer({
+    socketPath,
+    token: 'secret',
+    timeoutMs: 50,
+    send(event, data) {
+      sent.push({ event, data });
+    },
+  });
+
+  assert.ok(server);
+  await server.ready;
+
+  try {
+    const socket = await openSocketRequest(socketPath, {
+      requestId: 'request-1',
+      token: 'secret',
+      method: 'surface.await',
+      timeoutMs: 200,
+    });
+    await waitFor(() => sent.some((entry) => entry.event === 'dor:controlRequest'), 'the forwarded request');
+
+    // Well past the 50ms option default. The real timer is 200 + 10_000, so the
+    // only thing worth asserting is that it has not fired.
+    await delay(100);
+    assert.deepEqual(sent.filter((entry) => entry.event === 'dor:controlCancel'), []);
+    assert.ok(!socket.destroyed, 'server must not have answered or hung up');
+
+    socket.destroy();
+    await waitFor(() => sent.some((entry) => entry.event === 'dor:controlCancel'), 'the cancel');
+  } finally {
+    server.close();
+  }
+});
+
+for (const bogus of ['soon', -1, 0, Infinity, NaN, null]) {
+  test(`a nonsense request timeoutMs (${String(bogus)}) falls back to the default deadline`, async () => {
+    const socketPath = testSocketPath('deadline-bogus');
+    const sent = [];
+    const server = createDorControlServer({
+      socketPath,
+      token: 'secret',
+      timeoutMs: 30,
+      send(event, data) {
+        sent.push({ event, data });
+      },
+    });
+
+    assert.ok(server);
+    await server.ready;
+
+    try {
+      const response = await sendSocketRequest(socketPath, {
+        requestId: 'request-1',
+        token: 'secret',
+        method: 'surface.list',
+        timeoutMs: bogus,
+      });
+
+      assert.deepEqual(response, {
+        requestId: 'request-1',
+        ok: false,
+        error: 'timed out waiting for surface.list',
+      });
+      await waitFor(() => sent.some((entry) => entry.event === 'dor:controlCancel'), 'the cancel');
+    } finally {
+      server.close();
+    }
+  });
+}

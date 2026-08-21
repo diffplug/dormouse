@@ -39,7 +39,11 @@ import {
 } from "dormouse-lib/lib/terminal-protocol";
 import { themeColorProvider } from "dormouse-lib/lib/terminal-theme";
 import { applyTerminalSemanticEventsByPtyId } from "dormouse-lib/lib/terminal-state-store";
-import type { DorControlRequestPayload, DorControlResult } from "dor/protocol";
+import type { DorControlCancelPayload, DorControlRequestPayload } from "dor/protocol";
+import {
+  cancelDorControlRequest,
+  dispatchDorControlRequest,
+} from "dormouse-lib/lib/platform/dor-control-dispatch";
 import { BrowserSidecarHost } from "./browser-sidecar-host";
 
 const errMessage = (err: unknown): string => err instanceof Error ? err.message : String(err);
@@ -298,18 +302,13 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       this.remoteHostClient.onEvent(data);
     } else if (event === "dor:controlRequest") {
       const payload = data as DorControlRequestPayload;
-      const respond = (response: DorControlResult) => {
+      dispatchDorControlRequest(payload, (response) => {
         this.host.send("dor_control_response", { response: { requestId: payload.requestId, ...response } });
-      };
-      window.dispatchEvent(new CustomEvent("dormouse:control-request", {
-        detail: {
-          requestId: payload.requestId,
-          surfaceId: payload.surfaceId,
-          method: payload.method,
-          params: payload.params ?? {},
-          respond,
-        },
-      }));
+      });
+    } else if (event === "dor:controlCancel") {
+      // The sidecar's control server gave up on the request: the `dor` client
+      // hung up, or its own deadline fired.
+      cancelDorControlRequest((data as DorControlCancelPayload).requestId);
     }
   }
 

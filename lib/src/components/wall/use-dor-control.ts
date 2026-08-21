@@ -53,11 +53,16 @@ type DorControlParams = {
 };
 
 // The webview view of a control request: the shared wire payload, but with
-// semantically-typed params and a `respond` callback the transport layer wires
-// back to the request's `requestId`.
+// semantically-typed params, a `respond` callback the transport layer wires back
+// to the request's `requestId`, and a `signal` that fires when the request is
+// cancelled — the `dor` client hung up, or the control server's deadline passed.
+// A handler that parks (a long `dor await`) must listen to it and release
+// whatever it armed; nothing it responds with afterwards can reach the client.
+// Both are supplied by `lib/src/lib/platform/dor-control-dispatch.ts`.
 type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
   params?: DorControlParams;
   respond: (response: DorControlResult) => void;
+  signal: AbortSignal;
 };
 
 /** Outcome of {@link EnsureAgentBrowserSurface}: the fields the caller maps onto

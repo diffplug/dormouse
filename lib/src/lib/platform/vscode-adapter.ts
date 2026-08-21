@@ -14,7 +14,7 @@ import {
 } from '../terminal-state-store';
 import { getTerminalTheme, onTerminalThemeChange } from '../terminal-theme';
 import { isHostMessage, readHostMessageToken } from '../vscode-message-token';
-import type { DorControlResult } from 'dor/protocol';
+import { cancelDorControlRequest, dispatchDorControlRequest } from './dor-control-dispatch';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 
 export class VSCodeAdapter implements PlatformAdapter {
@@ -160,23 +160,15 @@ export class VSCodeAdapter implements PlatformAdapter {
       } else if (msg.type === 'dormouse:openThemeDebugger') {
         window.dispatchEvent(new CustomEvent('dormouse:openThemeDebugger'));
       } else if (msg.type === 'dor:controlRequest') {
-        const respond = (response: DorControlResult) => {
+        dispatchDorControlRequest(msg, (response) => {
           this.vscode.postMessage({
             type: 'dor:controlResponse',
             requestId: msg.requestId,
             ...response,
           });
-        };
-
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
-          detail: {
-            requestId: msg.requestId,
-            surfaceId: msg.surfaceId,
-            method: msg.method,
-            params: msg.params ?? {},
-            respond,
-          },
-        }));
+        });
+      } else if (msg.type === 'dor:controlCancel') {
+        cancelDorControlRequest(msg.requestId);
       } else if (msg.type === 'peer:ask') {
         this.remoteHostClient.onAsk(msg.requestId, msg.op, msg.params);
       } else if (msg.type === 'remoteHost:result') {

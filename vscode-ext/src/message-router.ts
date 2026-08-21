@@ -253,6 +253,15 @@ ptyManager.onDorControlRequest((request) => {
   router.forwardDorControlRequest(request);
 });
 
+// Broadcast rather than route: only the webview actually holding this requestId
+// has anything to abort, and it recognizes its own id. Tracking which router got
+// which request would buy nothing a no-op lookup does not already give us.
+ptyManager.onDorControlCancel((cancel) => {
+  for (const router of activeRouters) {
+    router.send({ type: 'dor:controlCancel', requestId: cancel.requestId });
+  }
+});
+
 function getAlertProtocolParser(id: string): TerminalProtocolParser {
   let parser = alertProtocolParsers.get(id);
   if (!parser) {

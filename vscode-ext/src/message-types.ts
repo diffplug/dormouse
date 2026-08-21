@@ -8,7 +8,7 @@ import type {
 import type { AlertSettings } from '../../lib/src/lib/alert-settings';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { TerminalColors } from '../../lib/src/lib/terminal-protocol';
-import type { DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
+import type { DorControlCancelPayload, DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
 import type { AgentBrowserStreamStatusResult, IframeProxyResult, OpenPort } from '../../lib/src/lib/platform/types';
 import type { VSCodeWorkbenchCommand } from '../../lib/src/lib/vscode-keybindings';
 import type { RemoteHostCommand, RemoteHostResult } from '../../lib/src/host/remote/service-protocol';
@@ -110,6 +110,7 @@ export type ExtensionMessage =
   | { type: 'dormouse:openThemeDebugger' }
   | { type: 'dormouse:flushSessionSave'; requestId: string }
   | ({ type: 'dor:controlRequest' } & DorControlRequestPayload)
+  | ({ type: 'dor:controlCancel' } & DorControlCancelPayload)
   // Alert state updates
   | {
     type: 'alert:state';

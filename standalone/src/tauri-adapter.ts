@@ -46,7 +46,11 @@ import { themeColorProvider } from "dormouse-lib/lib/terminal-theme";
 import {
   applyTerminalSemanticEventsByPtyId,
 } from "dormouse-lib/lib/terminal-state-store";
-import type { DorControlRequestPayload, DorControlResult } from "dor/protocol";
+import type { DorControlCancelPayload, DorControlRequestPayload } from "dor/protocol";
+import {
+  cancelDorControlRequest,
+  dispatchDorControlRequest,
+} from "dormouse-lib/lib/platform/dor-control-dispatch";
 
 function invoke(cmd: string, args?: Record<string, unknown>): void {
   rawInvoke(cmd, args).catch((err) =>
@@ -186,7 +190,7 @@ export class TauriAdapter implements PlatformAdapter {
 
       listen<DorControlRequestPayload>("dor:controlRequest", (event) => {
         const payload = event.payload;
-        const respond = (response: DorControlResult) => {
+        dispatchDorControlRequest(payload, (response) => {
           rawInvoke("dor_control_response", {
             response: {
               requestId: payload.requestId,
@@ -195,17 +199,15 @@ export class TauriAdapter implements PlatformAdapter {
           }).catch((err) =>
             console.error("[tauri-adapter] dor_control_response failed:", err),
           );
-        };
+        });
+      }),
 
-        window.dispatchEvent(new CustomEvent("dormouse:control-request", {
-          detail: {
-            requestId: payload.requestId,
-            surfaceId: payload.surfaceId,
-            method: payload.method,
-            params: payload.params ?? {},
-            respond,
-          },
-        }));
+      // The sidecar's control server gave up on a request (the `dor` client hung
+      // up, or its own deadline fired). Rust forwards it verbatim: `dor-*`
+      // request ids never collide with its own `req-*` invoke ids, so the
+      // pending-invoke lookup misses and the event reaches us.
+      listen<DorControlCancelPayload>("dor:controlCancel", (event) => {
+        cancelDorControlRequest(event.payload.requestId);
       }),
     ])));
 

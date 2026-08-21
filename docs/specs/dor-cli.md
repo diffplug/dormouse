@@ -207,6 +207,38 @@ Because VS Code can host multiple Dormouse webviews in one extension host, the
 request includes `DORMOUSE_SURFACE_ID`; `message-router.ts` routes to the webview
 that owns that surface when one is available.
 
+### Deadlines And Cancellation
+
+Each request carries the client's own `timeoutMs` on the wire. The control
+server treats it as a hint and sets a timer that deliberately outlasts it — the
+client's deadline plus 10s, capped at 24h; absent or nonsense (non-finite, ≤ 0)
+falls back to the server default of 65s, which clears the longest fixed client
+deadline (`dor ensure --restart` at 60s). The server never firing first is the
+point: a server timeout would answer the client with a spurious "timed out
+waiting for …" while the webview was still legitimately working, so the client
+is always the side that decides the outcome. *Source of truth:*
+`standalone/sidecar/dor-control-server.js` (used verbatim by both hosts) and
+`dor/src/control-client.ts`.
+
+Some requests outlive their client. When a socket closes with entries still
+pending, or when the server's own timer fires, the server drops the entry and
+emits `dor:controlCancel { requestId }` — the cancellation counterpart of
+`dor:controlRequest` / `dor:controlResponse`. Standalone carries it over the same
+sidecar → Rust → adapter hop as the request (`dor-*` request ids never collide
+with Rust's own `req-*` invoke ids, so the forwarder's pending-invoke lookup
+misses and the event is emitted to the webview); VS Code carries it over
+child-process IPC to `ptyManager.onDorControlCancel`, which broadcasts it to
+every active router since only the webview holding that id has anything to abort.
+In the webview each adapter keeps one `requestId → AbortController` map: the
+request's handler receives that controller's `signal`, a cancel aborts it, and
+responding forgets it. A handler that parks must release whatever it armed when
+the signal fires, because nothing it responds with afterwards can reach the
+client. A late response for a reaped id is a silent no-op on the server. *Source
+of truth:* `lib/src/lib/platform/dor-control-dispatch.ts`, plus each host's hop
+in `standalone/src/tauri-adapter.ts`, `standalone/src/browser-sidecar-adapter.ts`,
+`lib/src/lib/platform/vscode-adapter.ts`, `vscode-ext/src/pty-manager.ts`, and
+`vscode-ext/src/message-router.ts`.
+
 ## Handle Model
 
 Dormouse supports multiple Workspaces within one Window (`docs/specs/glossary.md`):
