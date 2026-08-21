@@ -71,7 +71,7 @@ An **await** parks on one Session until it finishes what it is doing, then repor
 
 Source of truth: `awaitCompletion` in `lib/src/lib/alert-manager.ts`, reached through `PlatformAdapter.alertAwait`.
 
-**The signals.** `until` names how much evidence of completion the caller will accept. The two values are a permissiveness ladder, not orthogonal modes.
+**The signals.** `until` — `dor await`'s required `--until` flag — names how much evidence of completion the caller will accept. The two values are a permissiveness ladder, not orthogonal modes.
 
 | `until` | Resolves on | `cause` | For |
 |---|---|---|---|
@@ -80,7 +80,9 @@ Source of truth: `awaitCompletion` in `lib/src/lib/alert-manager.ts`, reached th
 
 `quiet` includes exit because no caller wants "wake me when it settles" and also wants to keep blocking after the thing died — without it, a peer that crashes hangs its caller until the timeout. It includes the bell because an explicit `OSC 9` / `BEL` is stronger evidence than inferred silence: ignoring the peer saying "I need input" while waiting for it to go quiet would be perverse. `exit` excludes the bell deliberately — plenty of build tools ring on a warning, and being the strict one is `exit`'s whole job.
 
-Settling comes from the always-on detector, which needs no shell integration and cannot fire until it has been BUSY. A Session at a prompt is silent, but silent is not settled, which is what stops `dor send` followed immediately by an await from racing on the silence before the peer's first byte.
+`--until` has no default and is never inferred from the WATCHING rule set. That rule set is a human notification preference — app-global, edited from a dialog — and binding a program's wake condition to it would mean an unrelated edit (removing a command from the watched set to quiet the bell) silently changes what every `await` on that Session is waiting for. The caller states its own intent instead.
+
+Settling comes from the always-on detector, which needs no shell integration, runs for every Session regardless of the WATCHING rule set (WATCHING Track below), and cannot fire until it has been BUSY. A Session at a prompt is silent, but silent is not settled, which is what stops `dor send` followed immediately by an await from racing on the silence before the peer's first byte.
 
 **Is there anything to wait for?** The one thing silence cannot distinguish is a peer that delivered its final answer long ago from one working quietly.
 
@@ -105,9 +107,9 @@ Claiming is delivery. Once a completion has been handed to an await the wait is 
 |---|---|---|
 | Grace — "did anything start?" | 2000ms | `AWAIT_GRACE_MS` = `busyCandidateGap` + `busyConfirmGap`, the detector's actual floor for reaching BUSY |
 | Settle — "has it stopped?" | 5000ms | `mightNeedAttention` + `needsAttentionConfirm` |
-| Ceiling | `timeoutMs` | The caller's, and the only number not derived from `cfg.alert` |
+| Ceiling | `timeoutMs` | `dor await`'s `--timeout` (seconds, default 600), and the only number not derived from `cfg.alert` |
 
-`timeoutMs` is not an alert-tuning knob: it is the safety rail on a blocking call inside an agent loop, so a wedged peer cannot hang its caller forever. It is enforced **host-side**, alongside the grace and settle windows, so no intermediate hop can reap a parked await early and no caller can park forever. Like the inactivity timeout it originates a process away and ends up in `setTimeout`, so a non-finite or non-positive value is rejected — the request settles `cancelled`, having absorbed nothing.
+`timeoutMs` is not an alert-tuning knob: it is the safety rail on a blocking call inside an agent loop, so a wedged peer cannot hang its caller forever. It is enforced **host-side**, alongside the grace and settle windows, so no intermediate hop can reap a parked await early and no caller can park forever by lying about its own deadline. Like the inactivity timeout it originates a process away and ends up in `setTimeout`, so a non-finite or non-positive value is rejected — the request settles `cancelled`, having absorbed nothing.
 
 Several awaits may park on one Session. They share a single claimant, so one completion is delivered to every await whose condition it satisfies rather than only to whoever registered first, and each resolves on the first qualifying signal after it registered.
 

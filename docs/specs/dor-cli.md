@@ -375,16 +375,38 @@ from `command-detail`.
   [impl](../../dor/src/commands/skill.ts) [docs](../../dor/test/snapshots/help/skill.md)
 - `dor send` [impl](../../dor/src/commands/send.ts) [docs](../../dor/test/snapshots/help/send.md)
 - `dor read` [impl](../../dor/src/commands/read.ts) [docs](../../dor/test/snapshots/help/read.md)
-- `dor await` — blocks until a terminal Surface finishes what it is doing, then
-  reports why the wait ended. `--until quiet|exit` is required; the host owns the
-  wake condition, the grace window, and the `--timeout` ceiling
-  (`docs/specs/alert.md` → Await). stdout is the bare cause (`quiet` / `exit` /
-  `bell` / `idle`) so `CAUSE=$(dor await …)` stays the idiom; the one-line
-  narrative goes to stderr even on success. It prints no terminal text — compose
-  `dor await surface:N --until quiet && dor read surface:N`. Exit 0 on any
-  resolution, 2 on timeout, 3 if the Surface died first; `dor`'s other commands
-  still use only 0 and 1, so `normalizeExitCode` in `dor/src/cli.ts` passes a
-  command-set code through rather than collapsing it.
+- `dor await <surface> --until quiet|exit [--timeout seconds] [--json]` —
+  blocks until a terminal Surface finishes what it is doing, then reports why
+  the wait ended. `--until` is required and is never inferred or defaulted: it
+  is the one flag `await` has no fallback for. The host owns the wake
+  condition, the grace window, and the `--timeout` ceiling — see
+  `docs/specs/alert.md` → Await for the wake conditions, grace window,
+  absorption rule, and the full per-situation Behavior table.
+
+  `await` never prints terminal text — compose
+  `dor await surface:N --until quiet && dor read surface:N` to see the screen,
+  which keeps `await` from having to mirror `dor read`'s output flags and lets
+  its whole stdout be the bare `cause`. Text mode writes only the cause
+  (`quiet` / `exit` / `bell` / `idle`) to stdout, so
+  `CAUSE=$(dor await surface:5 --until quiet)` stays the whole idiom. stderr
+  carries a one-line narrative on every outcome, success included — naming the
+  cause and how long the wait took, e.g. `quiet: output stopped after 10m 15s`
+  or `idle: no output within 2s, nothing was running`. That duration is the
+  await's own wall time, from invocation to resolution, not a claim about how
+  long the peer worked, and the narrative says *output*, never *animation*:
+  the detector watches PTY bytes, not motion. `--json` adds `waited_ms` and a
+  `detail` string that mirrors the stderr narrative, alongside the usual
+  `surface_id` / `surface_ref` / `workspace_ref` handles.
+
+  Exit codes: 0 on any resolution; 1 on a usage or target error (unknown
+  Surface, a browser Surface, a bad or missing `--until`) — `dor`'s existing
+  convention; 2 on timeout; 3 if the Surface died before completing. 3 is kept
+  distinct from 2 so a caller can tell "still out there and slow" from "will
+  never answer" — a distinction a single nonzero code can't carry. `dor`'s
+  other commands use only 0 and 1, so this is the first real use of the wider
+  exit-code space; `normalizeExitCode` in `dor/src/cli.ts` now passes a
+  command-set positive code through instead of collapsing everything nonzero
+  to 1.
   [impl](../../dor/src/commands/await.ts) [docs](../../dor/test/snapshots/help/await.md)
 - `dor kill` [impl](../../dor/src/commands/kill.ts) [docs](../../dor/test/snapshots/help/kill.md)
 - `dor iframe` — **provisional**; high-fidelity URL embed with structural
@@ -505,7 +527,7 @@ their session is held externally by `agent-browser`.
 | --- | --- |
 | Share a dev server | `dor ensure -- npm dev` reuses the command already live in the same resolved cwd (`--restart` re-runs it in place, preserving layout and minimized/visible state). `dor ab open surface:N` (or `dor iframe surface:N`) resolves the terminal's dev-server port and opens it in one step — see [Browser Open Target Resolution](#browser-open-target-resolution). The explicit two-step form still works: `dor list --command "npm dev" --cwd . --ports`, then `dor ab open http://localhost:<port>`. |
 | Launch a sub-agent | `dor split -- codex` returns `surface:N`; drive it with `dor send surface:N --text "/review" --key enter` (or `--sequence` for arbitrary ordering), then read it back with `dor read surface:N`. |
-| Wait on a sub-agent | `dor split -- otheragent` returns `surface:5`; the caller watches `dor list` for that Surface's `[ringing]` tag and calls `dor read surface:5` once the peer rings the Dormouse bell to signal it is done. Blocking on the bell directly with `dor await surface:5` (which prints the screen the moment it rings) is staged — see [Future](#future). |
+| Wait on a sub-agent | `dor split -- otheragent` returns `surface:5`; `dor await surface:5 --until quiet && dor read surface:5` blocks until the peer settles, exits, or rings, then shows the result — no polling `dor list` in a loop. `--until exit` is the strict form for a build or test run that must not be mistaken for done on a mid-run bell. The wait absorbs the bell, so it does not also ring for a human watching the same Surface. |
 | Client / server browser testing | `dor ab --key client open <client-url>` and `dor ab --key server open <server-url>` create or reuse two independent browser Surfaces. |
 | Multi-worktree, same command | Two worktrees each run `dor ensure -- npm dev`; the resolved cwd keeps them distinct, and `dor list --command "npm dev" --cwd <worktree>` selects the intended one. |
 | Long-running background job | `dor ensure --minimize -- npm test -- --watch` keeps a watcher out of the layout; `dor list --command "npm test -- --watch"` rediscovers the minimized Surface after churn, and `read` / `send` / `kill` target it by ref. |
@@ -563,29 +585,6 @@ in `dor/test/cli-output.test.mjs`.
   marketplaces, npm) distributes the bootstrap stub, never a copy of the
   content. A user-level `--global` install variant waits until a story needs
   it.
-
-- **`dor await <surface>`** — block until a Surface rings the Dormouse bell, then
-  print its screen (like `dor read`) and exit — turning the alert system
-  (`docs/specs/alert.md`) into an agent synchronization primitive. An agent
-  launches a peer with `dor split -- otheragent`, then `dor await surface:5` parks
-  until that peer signals completion by ringing (the `BEL` / `OSC 9` / `9;4` /
-  `99` / `777` events that already drive the `ringing` flag in `dor list`), so the
-  caller stops polling `dor list` in a loop. A Surface already ringing when
-  `await` is called returns immediately. Resolving is exactly a human attending the
-  ringing Session (`docs/specs/alert.md` → Clearing And TODO): it clears the active
-  ring and sets `todo = true`, so the bell goes quiet and the Surface now carries a
-  TODO the caller owns. Writing back with `dor send surface:5 --text "…" --key
-  enter` then clears that TODO just as a human's passthrough `Enter` does — `dor`
-  input is a first-class, human-equivalent interaction in the attention/TODO
-  lifecycle, so the send path must drive the same clear. A fresh ring re-arms the
-  cycle, so a later `await` blocks again. Only terminal Surfaces ring, so `await`
-  targets terminals like `read` / `send`.
-  It reuses `dor read`'s `--lines` / `--scrollback` / `--json` output shape, needs
-  an extended request timeout with a `--timeout <seconds>` ceiling that exits
-  non-zero on expiry, and fails cleanly if the awaited Surface is killed rather
-  than blocking forever. Backed by a `surface.await` control method subscribing to
-  the host alert state (`docs/specs/alert.md`); like every command it ships with
-  its snapshot-tested help.
 
 - **Additional `dor list` filters** — activity/state filters are deliberately
   deferred: `--running` as shorthand for `--activity running`, full `--activity
