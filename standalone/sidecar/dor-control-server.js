@@ -58,6 +58,11 @@ function lstatOrNull(target) {
  * possibly on purpose, and no amount of retrying makes it ours — so the caller
  * stands the control channel down rather than binding inside it. Returns the
  * directory when it is safe, `null` when it is not.
+ *
+ * The same predicate as `peerDirIsSafe()` in vscode-ext/src/peer-link.ts, which
+ * carries the matching pointer back here: sync-vs-async fs and the return type
+ * are the only differences, so a correction to the hardening rule belongs in
+ * both copies.
  */
 function ensureControlDir(dir = controlDirPath()) {
   try {
@@ -280,10 +285,13 @@ function createDorControlServer({ socketPath, socketDir, token, send, timeoutMs 
     }
   }
 
-  // Clear a socket file left behind by a crash. A failure here means somebody
-  // else's file is sitting on the path — which is fatal to the control channel
-  // but, like a lost `listen`, must not be fatal to the host: throwing from this
-  // constructor would take the sidecar (and every PTY in it) down with it.
+  // Clear whatever is sitting on the path. In production the name is freshly
+  // random, so this only ever finds nothing; it is the `socketPath` test seam
+  // that reaches the failure branch. A failure means somebody else's file is on
+  // the path — fatal to the control channel but, like a lost `listen`, never to
+  // the host: throwing from this constructor would take the sidecar (and every
+  // PTY in it) down with it. Crash leftovers are *not* reclaimed here; they sit
+  // in the control dir under their own random names until the OS sweeps tmp.
   if (process.platform !== 'win32') {
     try {
       fs.unlinkSync(effectiveSocketPath);
