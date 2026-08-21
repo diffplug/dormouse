@@ -1,4 +1,6 @@
-import { IS_MAC, IS_WINDOWS } from './platform';
+import { quotePowerShellArg, shellCommandKind, type ShellCommandKind } from 'dor/commands/shell-quote';
+import { IS_MAC, IS_WINDOWS, PLATFORM_STRING } from './platform';
+import { getDefaultShellOpts } from './shell-defaults';
 
 // Matches macOS Terminal's drag-and-drop format: backslash-escape each shell
 // metacharacter instead of wrapping in quotes. TUIs like `claude` recognize
@@ -20,10 +22,42 @@ export function shellEscapePosix(input: string): string {
   return input.replace(POSIX_UNSAFE, '\\$1');
 }
 
+// cmd.exe only: it performs no expansion inside double quotes, so wrapping is
+// enough. PowerShell's double-quoted strings *are* expandable, which is why it
+// gets `quotePowerShellArg` instead — see `shellEscapePath`.
 export function shellEscapeWindows(input: string): string {
   return `"${input.replace(/"/g, '""')}"`;
 }
 
+/**
+ * Which parser will read the staged line. The selected shell decides — the host
+ * platform is only the fallback for when nothing has been selected yet, because
+ * a Windows host runs PowerShell, Git Bash, and WSL panes as readily as cmd.
+ *
+ * This mirrors `dor`'s quoting (docs/specs/dor-cli.md): the app-global default
+ * shell stands in for the pane's shell, which is not tracked per-session.
+ */
+function paneShellKind(): ShellCommandKind {
+  const shell = getDefaultShellOpts()?.shell;
+  if (!shell) return !IS_MAC && IS_WINDOWS ? 'cmd' : 'posix';
+  return shellCommandKind(shell, PLATFORM_STRING);
+}
+
+/**
+ * Escape a filesystem path for the pane's shell, for the drop/paste path.
+ *
+ * Quoting for the wrong parser is a code-execution bug, not a cosmetic one: a
+ * cmd-style `"$(calc.exe).txt"` staged in a PowerShell pane runs the
+ * subexpression the moment the user presses Enter, and pressing Enter is the
+ * whole reason they dropped the file in (dormouse#430).
+ */
 export function shellEscapePath(input: string): string {
-  return !IS_MAC && IS_WINDOWS ? shellEscapeWindows(input) : shellEscapePosix(input);
+  switch (paneShellKind()) {
+    case 'powershell':
+      return quotePowerShellArg(input);
+    case 'cmd':
+      return shellEscapeWindows(input);
+    case 'posix':
+      return shellEscapePosix(input);
+  }
 }

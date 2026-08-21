@@ -87,7 +87,7 @@ describe('shellEscapeWindows', () => {
   });
 });
 
-describe('shellEscapePath OS dispatch', () => {
+describe('shellEscapePath shell dispatch', () => {
   beforeEach(() => {
     vi.resetModules();
   });
@@ -95,10 +95,23 @@ describe('shellEscapePath OS dispatch', () => {
   afterEach(() => {
     vi.resetModules();
     vi.doUnmock('./platform');
+    vi.doUnmock('./shell-defaults');
   });
 
-  async function importShellEscape(opts: { isMac: boolean; isWindows: boolean }) {
-    vi.doMock('./platform', () => ({ IS_MAC: opts.isMac, IS_WINDOWS: opts.isWindows }));
+  async function importShellEscape(opts: {
+    isMac: boolean;
+    isWindows: boolean;
+    platformString?: string;
+    shell?: string;
+  }) {
+    vi.doMock('./platform', () => ({
+      IS_MAC: opts.isMac,
+      IS_WINDOWS: opts.isWindows,
+      PLATFORM_STRING: opts.platformString ?? (opts.isWindows ? 'Windows' : opts.isMac ? 'macOS' : 'Linux'),
+    }));
+    vi.doMock('./shell-defaults', () => ({
+      getDefaultShellOpts: () => (opts.shell === undefined ? null : { shell: opts.shell }),
+    }));
     return import('./shell-escape');
   }
 
@@ -112,8 +125,66 @@ describe('shellEscapePath OS dispatch', () => {
     expect(shellEscapePath('a b.png')).toBe('a\\ b.png');
   });
 
-  it('uses windows escape on Windows', async () => {
+  it('uses cmd escape on Windows when no shell has been selected', async () => {
     const { shellEscapePath } = await importShellEscape({ isMac: false, isWindows: true });
     expect(shellEscapePath('a b.png')).toBe(`"a b.png"`);
+  });
+
+  it('uses cmd escape when the selected shell is cmd.exe', async () => {
+    const { shellEscapePath } = await importShellEscape({
+      isMac: false,
+      isWindows: true,
+      shell: 'C:\\Windows\\System32\\cmd.exe',
+    });
+    expect(shellEscapePath('a b.png')).toBe(`"a b.png"`);
+  });
+
+  // A PowerShell double-quoted string is expandable: `"$(calc.exe).txt"` runs
+  // the subexpression. Quote for the pane's shell, not the host platform.
+  it('does not leave a subexpression live in a PowerShell pane', async () => {
+    const { shellEscapePath } = await importShellEscape({
+      isMac: false,
+      isWindows: true,
+      shell: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+    });
+    expect(shellEscapePath('$(calc.exe).txt')).toBe(`'$(calc.exe).txt'`);
+  });
+
+  it('does not leave a variable interpolation live in a PowerShell pane', async () => {
+    const { shellEscapePath } = await importShellEscape({
+      isMac: false,
+      isWindows: true,
+      shell: 'pwsh.exe',
+    });
+    expect(shellEscapePath('$env:USERNAME.txt')).toBe(`'$env:USERNAME.txt'`);
+  });
+
+  it('doubles embedded single quotes for PowerShell', async () => {
+    const { shellEscapePath } = await importShellEscape({
+      isMac: false,
+      isWindows: true,
+      shell: 'pwsh',
+    });
+    expect(shellEscapePath(`it's.png`)).toBe(`'it''s.png'`);
+  });
+
+  it('leaves a quote-free path bare in a PowerShell pane', async () => {
+    const { shellEscapePath } = await importShellEscape({
+      isMac: false,
+      isWindows: true,
+      shell: 'powershell.exe',
+    });
+    expect(shellEscapePath('C:\\Users\\a.png')).toBe('C:\\Users\\a.png');
+    expect(shellEscapePath('C:\\Users\\a b.png')).toBe(`'C:\\Users\\a b.png'`);
+  });
+
+  // Git Bash / WSL panes on Windows parse posix quoting, not cmd quoting.
+  it('uses posix escape for a bash pane on Windows', async () => {
+    const { shellEscapePath } = await importShellEscape({
+      isMac: false,
+      isWindows: true,
+      shell: 'C:\\Program Files\\Git\\bin\\bash.exe',
+    });
+    expect(shellEscapePath('$(calc.exe).txt')).toBe('\\$\\(calc.exe\\).txt');
   });
 });

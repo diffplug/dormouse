@@ -269,6 +269,14 @@ Paste reads the clipboard in three tiers, falling through in order:
 
 Each tier is implemented by one of two backends. The **VSCode build** (all platforms) and the **standalone/Tauri build on macOS and Linux** use a shared Node module (`standalone/sidecar/clipboard-ops.js`) that shells out to the OS-native clipboard tool: `osascript` on macOS, `Get-Clipboard` on Windows, `wl-paste`/`xclip` on Linux — reached through the sidecar (Tauri) or the extension host (VSCode). The **standalone/Tauri build on Windows** instead reads the Win32 clipboard directly in Rust (`standalone/src-tauri/src/clipboard_win.rs`: `CF_HDROP` for file paths, `CF_UNICODETEXT` for text, `CF_DIB` for an image saved as a `.bmp` temp file — note the extension differs from the sidecar path's `.png`), because the sidecar's `Get-Clipboard` spawns a `powershell.exe` child that pops a console window on the windowless GUI process — several per paste. If every tier comes back empty, paste is a silent no-op.
 
+**Path escaping (tiers 1 and 3, and §8.7).** A pasted path is quoted for **the shell that will parse it**, never for the host platform — the two disagree on Windows, where PowerShell, Git Bash, and WSL panes are as common as `cmd.exe`, and quoting for the wrong parser is a code-execution bug rather than a cosmetic one. The pane's shell is not tracked per-session, so the app-global selected shell (`getDefaultShellOpts()`) stands in for it, classified by the same `shellCommandKind` that `dor` uses to quote commands (docs/specs/dor-cli.md); with no shell selected yet the host platform is the fallback (`cmd` on Windows, posix elsewhere). Three rules:
+
+- **posix** — backslash-escape each metacharacter, matching macOS Terminal's drag-and-drop format so TUIs like `claude` recognize the token as a path. Paths containing newline/CR are single-quote-wrapped instead, since bash swallows `\<newline>` as a line continuation.
+- **cmd** — wrap in double quotes, doubling any embedded `"`. Sound only because `cmd.exe` performs no expansion inside double quotes.
+- **powershell** — a quote-free path is left bare; anything else is single-quote-wrapped with embedded `'` doubled, reusing `dor`'s `quotePowerShellArg`. PowerShell's *double*-quoted strings are expandable, so cmd-style quoting there would leave `$(...)` subexpressions and `$name` interpolations live in a filename the user is about to press Enter on (dormouse#430).
+
+Source of truth: `lib/src/lib/shell-escape.ts` (dispatch + posix/cmd rules), `dor/src/commands/shell-quote.ts` (`shellCommandKind`, `quotePowerShellArg`).
+
 Content-aware transformations, paste history, credential warnings, and middle-click (X11 PRIMARY) paste remain out of scope (see §9).
 
 ### 8.7 Drag-to-Paste
