@@ -223,7 +223,18 @@ test('dor control server refuses to start without a token', () => {
 });
 
 test('the chosen socket path is unguessable and, on POSIX, privately owned', { skip: process.platform === 'win32' }, () => {
-  const dir = path.join(os.tmpdir(), `dormouse-dor-test-${process.pid}-${Math.random().toString(36).slice(2)}`);
+  const productionPath = resolveControlSocketPath();
+  assert.ok(productionPath);
+  // macOS caps sun_path near 104 bytes. Check the production spelling: the
+  // isolated test directory below is intentionally different and must not make
+  // this assertion depend on a test-only prefix, the PID, or Math.random's
+  // variable-length rendering.
+  assert.ok(
+    Buffer.byteLength(productionPath) < 104,
+    `${productionPath} is ${Buffer.byteLength(productionPath)} bytes`,
+  );
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dor-test-'));
   try {
     const first = resolveControlSocketPath(dir);
     const second = resolveControlSocketPath(dir);
@@ -232,8 +243,6 @@ test('the chosen socket path is unguessable and, on POSIX, privately owned', { s
     assert.notEqual(first, second);
     assert.equal(path.dirname(first), dir);
     assert.match(path.basename(first), /^[0-9a-f]{16}\.sock$/);
-    // macOS caps sun_path near 104 bytes; a path that overruns it fails to bind.
-    assert.ok(Buffer.byteLength(first) < 104, `${first} is ${Buffer.byteLength(first)} bytes`);
     assert.equal(fs.lstatSync(dir).mode & 0o777, 0o700);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
