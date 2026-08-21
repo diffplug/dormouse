@@ -19,6 +19,7 @@ export const SURFACE_CONTROL_METHODS = {
   ensure: 'surface.ensure',
   send: 'surface.send',
   read: 'surface.read',
+  await: 'surface.await',
   kill: 'surface.kill',
   iframe: 'surface.iframe',
   agentBrowser: 'surface.agentBrowser',

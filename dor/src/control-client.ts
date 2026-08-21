@@ -2,6 +2,8 @@ import { createConnection } from 'node:net';
 import type {
   AgentBrowserSurfaceRequest,
   AgentBrowserSurfaceResponse,
+  AwaitSurfaceRequest,
+  AwaitSurfaceResponse,
   ControlClient,
   EnsureSurfaceRequest,
   EnsureSurfaceResponse,
@@ -67,6 +69,19 @@ export class SocketControlClient implements ControlClient {
 
   readSurface(request: ReadSurfaceRequest): Promise<ReadSurfaceResponse> {
     return this.request<ReadSurfaceResponse>(SURFACE_CONTROL_METHODS.read, request);
+  }
+
+  // The host enforces its own `timeoutMs` ceiling and answers with a `timeout`
+  // outcome, so the client's socket deadline must sit *above* it — otherwise the
+  // socket would time out first and turn an ordinary timeout into a transport
+  // error. The control server's deadline (client's + 10s) then outlasts both, so
+  // the ordering is host ceiling < client socket < server reaper.
+  awaitSurface(request: AwaitSurfaceRequest): Promise<AwaitSurfaceResponse> {
+    return this.request<AwaitSurfaceResponse>(
+      SURFACE_CONTROL_METHODS.await,
+      request,
+      { timeoutMs: request.timeoutMs + 5_000 },
+    );
   }
 
   killSurface(request: KillSurfaceRequest): Promise<KillSurfaceResponse> {

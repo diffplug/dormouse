@@ -15,7 +15,8 @@ stdout:
       "command": "pnpm dev",
       "url": null,
       "ringing": false,
-      "todo": false
+      "todo": false,
+      "awaited": false
     },
     {
       "id": "22222222-2222-4222-8222-222222222222",
@@ -31,7 +32,8 @@ stdout:
       "command": null,
       "url": null,
       "ringing": false,
-      "todo": true
+      "todo": true,
+      "awaited": true
     },
     {
       "id": "33333333-3333-4333-8333-333333333333",
@@ -46,7 +48,8 @@ stdout:
       "command": null,
       "url": "http://localhost:5173/",
       "ringing": false,
-      "todo": false
+      "todo": false,
+      "awaited": false
     },
     {
       "id": "44444444-4444-4444-8444-444444444444",
@@ -61,7 +64,8 @@ stdout:
       "command": null,
       "url": null,
       "ringing": true,
-      "todo": false
+      "todo": false,
+      "awaited": false
     }
   ],
   "caller_surface_ref": null,

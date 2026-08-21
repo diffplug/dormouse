@@ -16,6 +16,7 @@ import {
   getTerminalInstance,
   getTerminalPaneState,
   isPaneOscDriven,
+  resolveTerminalSessionId,
 } from '../../lib/terminal-registry';
 import { surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { hostPathDisplay } from './browser-url';
@@ -39,6 +40,8 @@ type DorControlParams = {
   key?: unknown;
   lines?: unknown;
   minimized?: unknown;
+  timeoutMs?: unknown;
+  until?: unknown;
   restart?: unknown;
   binaryPath?: unknown;
   includePorts?: unknown;
@@ -814,6 +817,51 @@ export function useDorControl({
             surfaceId: target.id,
             surfaceRef: target.ref,
             text,
+          },
+        });
+        return;
+      }
+
+      // `dor await` — park until the Session finishes what it is doing
+      // (`docs/specs/alert.md` → Await). Everything that makes this a *wait* —
+      // the wake condition, the grace window, the `timeoutMs` ceiling, and the
+      // absorption of the completion it consumes — lives in the host's
+      // `AlertManager`; this branch only validates, parks, and reports.
+      if (detail.method === SURFACE_CONTROL_METHODS.await) {
+        const target = requireTerminalSurface(params.surface, detail);
+        if (!target) return;
+        const until = params.until;
+        if (until !== 'quiet' && until !== 'exit') {
+          detail.respond({ ok: false, error: `invalid await condition '${String(until)}'` });
+          return;
+        }
+        const timeoutMs = numberParam(params.timeoutMs);
+        if (timeoutMs === undefined || timeoutMs <= 0) {
+          detail.respond({ ok: false, error: 'timeoutMs must be a positive number' });
+          return;
+        }
+
+        const handle = getPlatform().alertAwait(resolveTerminalSessionId(target.id), { until, timeoutMs });
+        // The client hung up (Ctrl-C) or the control server's deadline passed:
+        // release the wait so it stops absorbing completions nobody can receive.
+        // Guarded because in-process callers may dispatch a request without one.
+        detail.signal?.addEventListener('abort', () => handle.cancel());
+
+        const outcome = await handle.promise;
+        // `cancelled` means nothing is listening any more — responding would be a
+        // no-op on the server, and the CLI has no wire form for it.
+        if (outcome.kind === 'cancelled') return;
+        detail.respond({
+          ok: true,
+          result: {
+            workspaceRef: 'workspace:1',
+            surfaceId: target.id,
+            surfaceRef: target.ref,
+            outcome: outcome.kind,
+            ...(outcome.kind === 'resolved' ? { cause: outcome.cause } : {}),
+            // The host measured the wait; re-measuring here would only add the
+            // transport hop and disagree with what it absorbed.
+            waitedMs: outcome.waitedMs,
           },
         });
         return;

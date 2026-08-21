@@ -8,6 +8,7 @@ import {
   type StricliProcess,
 } from '@stricli/core';
 import { agentBrowserCommand, runAgentBrowserCli } from './commands/agent-browser.js';
+import { awaitCommand } from './commands/await.js';
 import { ensureCommand } from './commands/ensure.js';
 import { iframeCommand } from './commands/iframe.js';
 import { killCommand } from './commands/kill.js';
@@ -32,6 +33,11 @@ export type {
   AgentBrowserExecResult,
   AgentBrowserSurfaceRequest,
   AgentBrowserSurfaceResponse,
+  AwaitCause,
+  AwaitOutcome,
+  AwaitSurfaceRequest,
+  AwaitSurfaceResponse,
+  AwaitUntil,
   CliEnv,
   CliOptions,
   CliResult,
@@ -74,6 +80,7 @@ const COMMANDS = [
   skillCommand,
   sendCommand,
   readCommand,
+  awaitCommand,
   killCommand,
   iframeCommand,
   agentBrowserCommand,
@@ -87,6 +94,7 @@ const ROUTES = {
   skill: skillCommand.command,
   send: sendCommand.command,
   read: readCommand.command,
+  await: awaitCommand.command,
   kill: killCommand.command,
   iframe: iframeCommand.command,
   'agent-browser': agentBrowserCommand.command,
@@ -405,5 +413,12 @@ function normalizeExitCode(exitCode: number | string | null | undefined): number
     : typeof exitCode === 'string'
       ? Number(exitCode)
       : 0;
-  return numeric === 0 || Number.isNaN(numeric) ? 0 : 1;
+  if (numeric === 0) return 0;
+  // Commands that need a verdict richer than pass/fail set `process.exitCode`
+  // themselves and return void — stricli assigns its own with `??=`, so theirs
+  // survives (`dor await`: 2 for a timeout, 3 for a dead surface). Pass such a
+  // code through, and collapse everything else to 1: stricli's own codes are all
+  // negative and all mean "usage or target error", as does any other shape that
+  // could not be a deliberate verdict (NaN, fractional, shell-reserved).
+  return Number.isInteger(numeric) && numeric > 0 && numeric < 126 ? numeric : 1;
 }

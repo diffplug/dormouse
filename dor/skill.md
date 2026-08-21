@@ -189,10 +189,15 @@ dor ab open http://localhost:<port>
 **Launch and drive a sub-agent** (another CLI agent in a sibling pane):
 
 ```sh
-dor split -- codex                  # prints "created surface:N"
+dor split -- codex                          # prints "created surface:N"
 dor send surface:N --text "/review" --key enter
-dor read surface:N                  # poll its screen for progress/results
+dor await surface:N --until quiet && dor read surface:N
 ```
+
+Block on the peer instead of polling. `--until quiet` wakes when it settles,
+exits, or rings — use it for agents that never exit; `--until exit` waits only
+for the command to exit, for builds and test runs that fall silent mid-run.
+Awaiting absorbs the bell, so the human is not summoned for news you received.
 
 **Client/server browser testing.** Two keys, two independent browsers:
 

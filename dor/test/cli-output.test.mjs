@@ -43,6 +43,7 @@ const fixtureSurfaces = [
     url: null,
     ringing: false,
     todo: false,
+    awaited: false,
   },
   {
     id: '22222222-2222-4222-8222-222222222222',
@@ -59,6 +60,7 @@ const fixtureSurfaces = [
     url: null,
     ringing: false,
     todo: true,
+    awaited: true,
   },
   {
     id: '33333333-3333-4333-8333-333333333333',
@@ -74,6 +76,7 @@ const fixtureSurfaces = [
     url: 'http://localhost:5173/',
     ringing: false,
     todo: false,
+    awaited: false,
   },
   {
     id: '44444444-4444-4444-8444-444444444444',
@@ -89,6 +92,7 @@ const fixtureSurfaces = [
     url: null,
     ringing: true,
     todo: false,
+    awaited: false,
   },
 ];
 
@@ -176,6 +180,17 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         text: limited,
       };
     },
+    async awaitSurface(request) {
+      this.requests.push({ method: 'awaitSurface', request });
+      return {
+        workspaceRef: 'workspace:1',
+        surfaceId: '11111111-1111-4111-8111-111111111111',
+        surfaceRef: request.surface,
+        outcome: 'resolved',
+        cause: 'quiet',
+        waitedMs: 615_000,
+      };
+    },
     async killSurface(request) {
       this.requests.push({ method: 'killSurface', request });
       return {
@@ -219,6 +234,25 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         surfaceRef: 'surface:1',
         port: 5173,
         url: 'http://localhost:5173/',
+      };
+    },
+  };
+}
+
+// `dor await` only ever calls awaitSurface, so a canned outcome is the whole fake.
+// The host owns waitedMs, so the CLI's duration rendering is entirely a function
+// of what the fake hands back.
+function awaitClient(outcome) {
+  return {
+    requests: [],
+    async awaitSurface(request) {
+      this.requests.push({ method: 'awaitSurface', request });
+      return {
+        workspaceRef: 'workspace:1',
+        surfaceId: '33333333-3333-4333-8333-333333333333',
+        surfaceRef: request.surface,
+        waitedMs: 0,
+        ...outcome,
       };
     },
   };
@@ -678,6 +712,102 @@ test('read invalid lines output', async () => {
   await snapshot('read-invalid-lines', await runCli(['read', 'surface:1', '--lines', '0'], { client: fixtureClient() }));
 });
 
+test('await prints the bare cause on stdout and the narrative on stderr', async () => {
+  const result = await runCli(['await', 'surface:1', '--until', 'quiet'], {
+    client: awaitClient({ outcome: 'resolved', cause: 'quiet', waitedMs: 615_000 }),
+  });
+  // The whole point of the split: `CAUSE=$(dor await ...)` captures `quiet`, and
+  // nothing else, however chatty stderr gets.
+  assert.equal(result.stdout, 'quiet\n');
+  assert.equal(result.stderr, 'quiet: output stopped after 10m 15s\n');
+  assert.equal(result.exitCode, 0);
+  await snapshot('await-text', result);
+});
+
+test('await json output', async () => {
+  await snapshot('await-json', await runCli(['await', 'surface:3', '--until', 'quiet', '--json'], {
+    client: awaitClient({ outcome: 'resolved', cause: 'quiet', waitedMs: 615_000 }),
+  }));
+});
+
+test('await narrates every cause', async () => {
+  const cases = [
+    ['exit', { outcome: 'resolved', cause: 'exit', waitedMs: 182_000 }, 'exit: command exited after 3m 02s\n'],
+    ['quiet', { outcome: 'resolved', cause: 'bell', waitedMs: 45_000 }, 'bell: surface rang after 45s\n'],
+    ['quiet', { outcome: 'resolved', cause: 'idle', waitedMs: 2_000 }, 'idle: no output within 2s, nothing was running\n'],
+    ['exit', { outcome: 'resolved', cause: 'idle', waitedMs: 2_000 }, 'idle: no command started within 2s\n'],
+  ];
+  for (const [until, outcome, stderr] of cases) {
+    const result = await runCli(['await', 'surface:1', '--until', until], { client: awaitClient(outcome) });
+    assert.equal(result.stdout, `${outcome.cause}\n`);
+    assert.equal(result.stderr, stderr);
+    assert.equal(result.exitCode, 0);
+  }
+});
+
+test('await formats durations', async () => {
+  const cases = [[0, '0s'], [59_999, '59s'], [60_000, '1m 00s'], [615_000, '10m 15s']];
+  for (const [waitedMs, rendered] of cases) {
+    const result = await runCli(['await', 'surface:1', '--until', 'quiet'], {
+      client: awaitClient({ outcome: 'resolved', cause: 'quiet', waitedMs }),
+    });
+    assert.equal(result.stderr, `quiet: output stopped after ${rendered}\n`);
+  }
+});
+
+test('await times out with exit 2 and an empty stdout', async () => {
+  const timedOut = await runCli(['await', 'surface:5', '--until', 'quiet'], {
+    client: awaitClient({ outcome: 'timeout', waitedMs: 600_000 }),
+  });
+  assert.equal(timedOut.exitCode, 2);
+  assert.equal(timedOut.stdout, '');
+  await snapshot('await-timeout', timedOut);
+
+  // --until exit names the condition it gave up on, and the reported seconds are
+  // the --timeout value as given rather than the measured wait.
+  await snapshot('await-timeout-exit', await runCli(['await', 'surface:5', '--until', 'exit', '--timeout', '30'], {
+    client: awaitClient({ outcome: 'timeout', waitedMs: 30_000 }),
+  }));
+
+  // --json changes nothing about a failure: still stderr, still exit 2.
+  await snapshot('await-timeout-json', await runCli(['await', 'surface:5', '--until', 'quiet', '--json'], {
+    client: awaitClient({ outcome: 'timeout', waitedMs: 600_000 }),
+  }));
+});
+
+test('await reports a dead surface with exit 3', async () => {
+  const died = await runCli(['await', 'surface:5', '--until', 'exit'], {
+    client: awaitClient({ outcome: 'died', waitedMs: 200_000 }),
+  });
+  assert.equal(died.exitCode, 3);
+  assert.equal(died.stdout, '');
+  await snapshot('await-died', died);
+});
+
+test('await sends the request to the host', async () => {
+  const client = awaitClient({ outcome: 'resolved', cause: 'quiet', waitedMs: 0 });
+  await runCli(['await', 'surface:2', '--until', 'exit'], { client });
+  assert.deepEqual(client.requests, [{
+    method: 'awaitSurface',
+    request: { surface: 'surface:2', until: 'exit', timeoutMs: 600_000 },
+  }]);
+
+  const custom = awaitClient({ outcome: 'resolved', cause: 'quiet', waitedMs: 0 });
+  await runCli(['await', 'surface:2', '--until', 'quiet', '--timeout', '30'], { client: custom });
+  assert.equal(custom.requests[0].request.timeoutMs, 30_000);
+});
+
+test('await requires a valid --until', async () => {
+  await snapshot('await-missing-until', await runCli(['await', 'surface:1'], { client: awaitClient({}) }));
+  await snapshot('await-invalid-until', await runCli(['await', 'surface:1', '--until', 'soon'], { client: awaitClient({}) }));
+});
+
+test('await rejects a non-positive --timeout', async () => {
+  await snapshot('await-invalid-timeout', await runCli(['await', 'surface:1', '--until', 'quiet', '--timeout', '0'], {
+    client: awaitClient({}),
+  }));
+});
+
 test('kill text output', async () => {
   await snapshot(
     'kill-text',
@@ -1005,6 +1135,19 @@ test('list text output', async () => {
   const result = await runCli(['list'], { client, env: listEnv });
   assert.deepEqual(client.requests, [{ includePorts: false }]);
   await snapshot('list-text', result);
+});
+
+test('list tags an awaited surface after its todo', async () => {
+  const text = await runCli(['list'], { client: fixtureClient(), env: listEnv });
+  const row = text.stdout.split('\n').find((line) => line.includes('surface:2'));
+  assert.match(row, /\[todo\]\s+\[awaited\]$/);
+
+  const json = await runCli(['list', '--json'], { client: fixtureClient(), env: listEnv });
+  const surfaces = JSON.parse(json.stdout).surfaces;
+  assert.deepEqual(
+    surfaces.map((surface) => [surface.ref, surface.awaited]),
+    [['surface:1', false], ['surface:2', true], ['surface:3', false], ['surface:4', false]],
+  );
 });
 
 test('list json output', async () => {

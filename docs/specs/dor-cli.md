@@ -375,6 +375,17 @@ from `command-detail`.
   [impl](../../dor/src/commands/skill.ts) [docs](../../dor/test/snapshots/help/skill.md)
 - `dor send` [impl](../../dor/src/commands/send.ts) [docs](../../dor/test/snapshots/help/send.md)
 - `dor read` [impl](../../dor/src/commands/read.ts) [docs](../../dor/test/snapshots/help/read.md)
+- `dor await` — blocks until a terminal Surface finishes what it is doing, then
+  reports why the wait ended. `--until quiet|exit` is required; the host owns the
+  wake condition, the grace window, and the `--timeout` ceiling
+  (`docs/specs/alert.md` → Await). stdout is the bare cause (`quiet` / `exit` /
+  `bell` / `idle`) so `CAUSE=$(dor await …)` stays the idiom; the one-line
+  narrative goes to stderr even on success. It prints no terminal text — compose
+  `dor await surface:N --until quiet && dor read surface:N`. Exit 0 on any
+  resolution, 2 on timeout, 3 if the Surface died first; `dor`'s other commands
+  still use only 0 and 1, so `normalizeExitCode` in `dor/src/cli.ts` passes a
+  command-set code through rather than collapsing it.
+  [impl](../../dor/src/commands/await.ts) [docs](../../dor/test/snapshots/help/await.md)
 - `dor kill` [impl](../../dor/src/commands/kill.ts) [docs](../../dor/test/snapshots/help/kill.md)
 - `dor iframe` — **provisional**; high-fidelity URL embed with structural
   limitations; the `iframe` renderer of the unified `browser` surface, see
@@ -393,7 +404,8 @@ from `command-detail`.
   per Surface in stable `surface:N` order. Text marks the focused Surface with
   `*` and the calling terminal with `(you)`, and shows kind, render mode (`-` for
   terminals), `view`, location (cwd for terminals, URL for browser Surfaces),
-  title, and `[ringing]` / `[todo]` tags.
+  title, and `[ringing]` / `[todo]` / `[awaited]` tags (`[awaited]` while at
+  least one `dor await` is parked on it).
   Filters are ANDed: `--kind terminal|browser`, `--view
   paned|zoomed|minimized`, exact `--command <text>`, `--cwd <path>` (resolved
   like `dor ensure --cwd`, relative to the invoking shell's `PWD` when

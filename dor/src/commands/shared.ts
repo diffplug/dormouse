@@ -78,6 +78,12 @@ export function writeStdout(context: DorCommandContext, stdout: string): void {
   context.process.stdout.write(stdout);
 }
 
+// stderr is the explain-what-happened channel regardless of exit status, so a
+// command may write it on a *successful* run too (`dor await`'s narrative).
+export function writeStderr(context: DorCommandContext, stderr: string): void {
+  context.process.stderr.write(stderr);
+}
+
 // Git Bash exports PWD as a POSIX path (`/c/Users/...`). On Windows, resolvePath
 // reads the leading `/c` as a folder under the current drive's root and mangles it
 // to `C:\c\Users\...`, which then matches no surface. Fold the MSYS drive form to a

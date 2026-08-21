@@ -295,6 +295,49 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('validates a dor await and parks it on the host alert manager', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+
+    // These hand-built events carry no `signal`, like every other control request
+    // in this file — the await handler has to tolerate that.
+    type AwaitResult = { ok: boolean; error?: string; result?: Record<string, unknown> };
+    const request = (params: Record<string, unknown>): Promise<AwaitResult> => new Promise((resolve) => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.await,
+          params,
+          respond: (r: AwaitResult) => resolve(r),
+        },
+      }));
+    });
+
+    // The wake condition and the ceiling are both rejected before anything parks.
+    let invalidUntil: AwaitResult | undefined;
+    await act(async () => { invalidUntil = await request({ surface: 'surface:1', until: 'soon', timeoutMs: 5 }); });
+    expect(invalidUntil).toEqual({ ok: false, error: "invalid await condition 'soon'" });
+
+    let noCeiling: AwaitResult | undefined;
+    await act(async () => { noCeiling = await request({ surface: 'surface:1', until: 'quiet' }); });
+    expect(noCeiling).toEqual({ ok: false, error: 'timeoutMs must be a positive number' });
+
+    // A real park against the fake adapter's AlertManager. Nothing is running, so
+    // the 5ms ceiling beats the 2s grace window and the host reports `timeout` —
+    // with its own measurement of the wait, which the handler passes through.
+    let timedOut: AwaitResult | undefined;
+    await act(async () => { timedOut = await request({ surface: 'surface:1', until: 'quiet', timeoutMs: 5 }); });
+    expect(timedOut?.ok).toBe(true);
+    expect(timedOut?.result).toMatchObject({
+      workspaceRef: 'workspace:1',
+      surfaceRef: 'surface:1',
+      outcome: 'timeout',
+    });
+    expect(timedOut?.result?.cause).toBeUndefined();
+    expect(typeof timedOut?.result?.waitedMs).toBe('number');
+  });
+
   it('parks a minimized browser surface so its DOM survives, and unparks it on kill', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
