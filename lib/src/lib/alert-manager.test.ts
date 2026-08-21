@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlertManager } from './alert-manager';
+import type { CompletionEvent } from './alert-manager';
 import { applyTerminalProtocolEvents } from './terminal-protocol';
 
 describe('AlertManager in isolation', () => {
@@ -817,6 +818,244 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
       vi.advanceTimersByTime(1);
       expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
+    });
+  });
+
+  // --- Completion events (`docs/specs/alert.md` -> Completion events) ---
+
+  describe('completion events', () => {
+    it('claiming a settle keeps the WATCHING ring from ever latching', () => {
+      const id = 'claim-settle';
+      const seen: CompletionEvent[] = [];
+      manager.registerCompletionClaimant(id, (event) => {
+        seen.push(event);
+        return true;
+      });
+
+      runWatchedCommand(id);
+      manager.clearAttention(id);
+      driveToBusy(id);
+      settle();
+
+      expect(seen).toEqual([{ kind: 'settled' }]);
+      // The detector reported the settle and started over; nothing latched.
+      expect(manager.getState(id)).toMatchObject({
+        status: 'NOTHING_TO_SHOW',
+        watchingEnabled: true,
+        todo: false,
+        notification: null,
+      });
+    });
+
+    it('declining a settle rings exactly as if no claimant existed', () => {
+      const id = 'decline-settle';
+      const seen: CompletionEvent[] = [];
+      manager.registerCompletionClaimant(id, (event) => {
+        seen.push(event);
+        return false;
+      });
+
+      runWatchedCommand(id);
+      manager.clearAttention(id);
+      driveToBusy(id);
+      settle();
+
+      expect(seen).toEqual([{ kind: 'settled' }]);
+      expect(manager.getState(id).status).toBe('ALERT_RINGING');
+    });
+
+    it('reports a short attended command finish that could never ring', () => {
+      const id = 'observe-quick-command';
+      const seen: CompletionEvent[] = [];
+      manager.registerCompletionClaimant(id, (event) => {
+        seen.push(event);
+        return false;
+      });
+
+      manager.attend(id);
+      manager.applyTerminalSemanticEvents(id, [
+        { type: 'commandLine', commandLine: 'npm test' },
+        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+      ]);
+      vi.advanceTimersByTime(1_000);
+      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+
+      expect(seen).toEqual([{
+        kind: 'commandFinished',
+        displayCommand: 'npm test',
+        argv0: 'npm',
+        exitCode: 0,
+        ranMs: 1_000,
+        armed: false,
+      }]);
+      expect(manager.getState(id)).toMatchObject({
+        status: 'WATCHING_DISABLED',
+        todo: false,
+        notification: null,
+      });
+    });
+
+    it('claiming an armed command finish suppresses the COMMAND_EXIT ring', () => {
+      const id = 'claim-command-exit';
+      const seen: CompletionEvent[] = [];
+      manager.registerCompletionClaimant(id, (event) => {
+        seen.push(event);
+        return true;
+      });
+
+      manager.attend(id);
+      manager.applyTerminalSemanticEvents(id, [
+        { type: 'commandLine', commandLine: 'pnpm build' },
+        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+      ]);
+      vi.advanceTimersByTime(15_000);
+      expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
+
+      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+
+      expect(seen).toEqual([{
+        kind: 'commandFinished',
+        displayCommand: 'pnpm build',
+        argv0: 'pnpm',
+        exitCode: 0,
+        ranMs: 15_000,
+        armed: true,
+      }]);
+      expect(manager.getState(id)).toMatchObject({
+        status: 'WATCHING_DISABLED',
+        todo: false,
+        notification: null,
+      });
+    });
+
+    it('claiming a direct notification leaves no ring, TODO, or detail behind', () => {
+      const id = 'claim-notification';
+      const seen: CompletionEvent[] = [];
+      manager.registerCompletionClaimant(id, (event) => {
+        seen.push(event);
+        return true;
+      });
+
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
+
+      expect(seen).toEqual([
+        { kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'Build finished' } },
+      ]);
+      expect(manager.getState(id)).toMatchObject({
+        status: 'WATCHING_DISABLED',
+        todo: false,
+        notification: null,
+      });
+    });
+
+    it('claiming a progress completion still clears the cycle', () => {
+      const id = 'claim-progress';
+      const seen: CompletionEvent[] = [];
+      manager.registerCompletionClaimant(id, (event) => {
+        seen.push(event);
+        return true;
+      });
+
+      manager.updateProtocolProgress(id, { state: 'normal', percent: 25 });
+      expect(manager.getState(id).status).toBe('OSC_NOTIF_BUSY');
+
+      manager.updateProtocolProgress(id, { state: 'normal', percent: 100 });
+
+      expect(seen).toEqual([{
+        kind: 'notification',
+        notification: { source: 'OSC 9;4', title: 'Progress complete', body: 'Progress 100%' },
+      }]);
+      // The cycle is over whether or not anyone claimed it, so OSC_NOTIF_BUSY
+      // must fall back rather than stick.
+      expect(manager.getState(id)).toMatchObject({
+        status: 'WATCHING_DISABLED',
+        todo: false,
+        notification: null,
+      });
+    });
+
+    it('stops delivering after unregister and never crosses Sessions', () => {
+      const a = 'claimant-session-a';
+      const b = 'claimant-session-b';
+      const seen: CompletionEvent[] = [];
+      const unregister = manager.registerCompletionClaimant(a, (event) => {
+        seen.push(event);
+        return true;
+      });
+
+      manager.notifyFromProtocol(b, { source: 'OSC 9', title: null, body: 'not yours' });
+      expect(seen).toEqual([]);
+      expect(manager.getState(b).status).toBe('ALERT_RINGING');
+
+      manager.notifyFromProtocol(a, { source: 'OSC 9', title: null, body: 'yours' });
+      expect(seen).toHaveLength(1);
+      expect(manager.getState(a).status).toBe('WATCHING_DISABLED');
+
+      unregister();
+      manager.notifyFromProtocol(a, { source: 'OSC 9', title: null, body: 'after unregister' });
+      expect(seen).toHaveLength(1);
+      expect(manager.getState(a).status).toBe('ALERT_RINGING');
+    });
+
+    it('offers claimants in registration order and stops at the first claim', () => {
+      const id = 'claimant-order';
+      const calls: string[] = [];
+      manager.registerCompletionClaimant(id, () => {
+        calls.push('first');
+        return false;
+      });
+      manager.registerCompletionClaimant(id, () => {
+        calls.push('second');
+        return true;
+      });
+      manager.registerCompletionClaimant(id, () => {
+        calls.push('third');
+        return true;
+      });
+
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
+
+      expect(calls).toEqual(['first', 'second']);
+      expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
+    });
+
+    it('dispatches the command finish on PTY exit before any ring rule runs', () => {
+      const id = 'pty-exit-dispatch';
+      const seen: Array<{ event: CompletionEvent; ringing: boolean; todo: boolean }> = [];
+      manager.registerCompletionClaimant(id, (event) => {
+        const state = manager.getState(id);
+        seen.push({ event, ringing: state.status === 'ALERT_RINGING', todo: state.todo });
+        return false;
+      });
+
+      manager.attend(id);
+      manager.applyTerminalSemanticEvents(id, [
+        { type: 'commandLine', commandLine: 'pnpm build' },
+        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+      ]);
+      vi.advanceTimersByTime(15_000);
+      expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
+
+      manager.onExit(id, 1);
+
+      expect(seen).toEqual([{
+        event: {
+          kind: 'commandFinished',
+          displayCommand: 'pnpm build',
+          argv0: 'pnpm',
+          exitCode: 1,
+          ranMs: 15_000,
+          armed: true,
+        },
+        ringing: false,
+        todo: false,
+      }]);
+      // Declined, so the ring rule still ran afterwards.
+      expect(manager.getState(id)).toMatchObject({
+        status: 'ALERT_RINGING',
+        todo: true,
+        notification: { source: 'COMMAND_EXIT', title: 'Command finished', body: 'pnpm build exited 1' },
+      });
     });
   });
 });

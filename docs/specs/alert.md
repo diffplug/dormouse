@@ -10,7 +10,7 @@ Dormouse can owe the user attention in three ways:
 - **Terminal report**: the PTY emitted a supported notification or progress protocol (`BEL`, `OSC 9`, `OSC 9;4`, `OSC 99`, or `OSC 777`).
 - **Command exit**: Dormouse saw a foreground command running while the user attended the Session, attention was lost while that same command was still running, and the command exited after at least `T_USER_ATTENTION`.
 
-Terminal-report and command-exit alerts do not require WATCHING. All three share the same attention suppression rule: do not ring if the user is actively attending that Session at the completion moment.
+Terminal-report and command-exit alerts do not require WATCHING. All three share the same attention suppression rule — do not ring if the user is actively attending that Session at the completion moment — applied at the one seam every completion passes through (Completion events below).
 
 Internally these are three independent tracks — `watchingRingingCommand`, `protocolStatus` + `progress`, and `commandExitStatus` + `commandExitWatch`. Each runs IDLE -> busy/armed -> ringing without entangling the others, and each latches its own ring in the entry until it is cleared. The output/silence detector (`QuiesceDetector`) is not a track: it is an always-on observer the WATCHING track reads.
 
@@ -53,6 +53,16 @@ Attention is lost when the attention timer expires, the app loses focus, the att
 
 Source of truth: `cfg.alert` in `lib/src/cfg.ts` defines the shipped default for `T_USER_ATTENTION` and the other timer defaults and their purpose; `AlertManager.setInactivityTimeoutMs` installs the configured override.
 
+## Completion events
+
+Every completion — a detector settle, a command finish, a direct notification, and the end of a protocol progress cycle (completion or error) — is dispatched as a `CompletionEvent` **before** any suppression runs. Nothing is decided at the point of detection, so an observer sees the three-second `npm test` that finishes while the user is watching it and would never have rung anyone.
+
+Claimants are registered per Session and get first refusal, in registration order; the first to return `true` claims the event and the rest are not offered it. A claimed event never rings, never sets TODO, and never stores an `ActivityNotification` — it stops before the ring rules. An unclaimed event falls through to its track's ring rule, which is where the attention suppression above and the command-exit arming and minimum-runtime gates live. With no claimant registered, the three tracks below behave exactly as they always have.
+
+Two ordering rules matter. The progress cycle is cleared *before* dispatch — a completion or error ends the cycle whether or not the event is claimed, so `OSC_NOTIF_BUSY` falls back either way. And a command finish is dispatched for every watch that existed, including the short, unarmed, and attended ones the ring rule then discards.
+
+Source of truth: `registerCompletionClaimant` / `dispatchCompletion` in `lib/src/lib/alert-manager.ts`.
+
 ## WATCHING Track
 
 **WATCHING is a property of the command, not of a Session.** The user maintains a set of watched command names; WATCHING is on for a Session exactly while its foreground command's name is in that set. Turning alerts on while `claude` runs means every Session running `claude` watches — the ones open now and the ones opened later. Turning them off anywhere removes the rule everywhere. There is no per-Session enable, and no per-Session mute.
@@ -78,7 +88,7 @@ Rules:
 | `MIGHT_NEED_ATTENTION` | A busy Session went quiet. Debounce state. |
 | `ALERT_RINGING` | WATCHING observed likely completion while the Session lacked attention. |
 
-Source of truth: `QuiesceDetector` in `lib/src/lib/quiesce-detector.ts` implements the detector's `QuiesceStatus` transitions; `AlertManager.onSettled` in `lib/src/lib/alert-manager.ts` decides whether a settle rings. Meaningful output excludes resize redraw noise during `T_RESIZE_DEBOUNCE`; theme changes, remounts, DOM reparenting, selection, and focus changes are not output. The invariants the implementation must honor:
+Source of truth: `QuiesceDetector` in `lib/src/lib/quiesce-detector.ts` implements the detector's `QuiesceStatus` transitions; `AlertManager.onSettled` in `lib/src/lib/alert-manager.ts` reports every settle into the completion-event seam above, whose `settled` ring rule decides whether it rings. Meaningful output excludes resize redraw noise during `T_RESIZE_DEBOUNCE`; theme changes, remounts, DOM reparenting, selection, and focus changes are not output. The invariants the implementation must honor:
 
 - Output drives the detector up the chain `NOTHING_TO_SHOW` -> `MIGHT_BE_BUSY` -> `BUSY`; silence drives it down `BUSY` -> `MIGHT_NEED_ATTENTION` -> settled. The `MIGHT_*` states are debounce windows in both directions.
 - First output starts candidate tracking without changing status; unconfirmed `MIGHT_BE_BUSY` returns to `NOTHING_TO_SHOW`.
@@ -97,7 +107,7 @@ Sequence syntax for every row below lives in `docs/specs/terminal-escapes.md`; p
 - **`OSC 9`** — the message becomes the body, title null. Empty sanitized messages are ignored. It also feeds title-candidate derivation in `docs/specs/terminal-state.md`, which does not change alert behavior.
 - **`OSC 777`** — only the `notify` subcommand is supported. The first field after `notify` is the title; everything after the next semicolon is body, preserving semicolons there. Unsupported subcommands and empty sanitized notifications are ignored.
 - **`OSC 99`** (kitty) — metadata keys are single ASCII letters separated by `:`; unknown keys are ignored. `i` groups chunks of one pending notification, `d` is the done flag (default `1`), `e` selects plain or base64 payload encoding, and `p` selects the payload type (default `title`). `title`/`body` chunks append to the pending notification; completion rings once if the sanitized title or body is nonempty. Without `i`, only a complete single-sequence notification is meaningful. Management payloads contribute no content: `p=?` sends `OSC99_SUPPORT_PAYLOAD`, and `p=close` / `p=alive` / `p=icon` / `p=buttons` are consumed. Like any chunk, a management chunk carrying the default `d=1` still completes a pending same-`i` notification, which may then ring on its accumulated title/body — kitty's done-flag semantics apply regardless of the final chunk's payload type. The pending-chunk TTL and max-pending-id cap live in `terminal-protocol.ts`.
-- **`OSC 9;4` progress** — progress only: no title, body, urgency, id, app name, or action fields. Active normal, warning, or indeterminate progress sets `protocolStatus = OSC_NOTIF_BUSY` and creates no TODO; it never rings because of silence. `state=1, progress=100` rings as completion and `state=2` rings as error, both only when unattended. A clear rings as completion only if there was an active cycle, otherwise it is ignored. Warning progress does not ring by itself, but completing a warning cycle rings with a generated warning title. Invalid states, missing required percents for states `1` and `4`, and out-of-range percents are ignored. Completion or error while attended clears the progress without TODO or ring. Source of truth for the generated titles/bodies: `ringOrSuppressProtocolProgress` / `completeProtocolProgress` in `lib/src/lib/alert-manager.ts`.
+- **`OSC 9;4` progress** — progress only: no title, body, urgency, id, app name, or action fields. Active normal, warning, or indeterminate progress sets `protocolStatus = OSC_NOTIF_BUSY` and creates no TODO; it never rings because of silence. `state=1, progress=100` rings as completion and `state=2` rings as error, both only when unattended. A clear rings as completion only if there was an active cycle, otherwise it is ignored. Warning progress does not ring by itself, but completing a warning cycle rings with a generated warning title. Invalid states, missing required percents for states `1` and `4`, and out-of-range percents are ignored. Completion or error while attended clears the progress without TODO or ring. Source of truth for the generated titles/bodies: `completeProtocolProgress` / `finishProtocolProgressCycle` in `lib/src/lib/alert-manager.ts`.
 
 ## Command-exit Track
 

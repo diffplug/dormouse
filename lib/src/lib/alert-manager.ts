@@ -78,6 +78,24 @@ function normalizeNotificationTextField(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+/** A Session finished something. Dispatched before any suppression or ring decision. */
+export type CompletionEvent =
+  | { kind: 'settled' }
+  | {
+      kind: 'commandFinished';
+      displayCommand: string;
+      argv0: string | null;
+      exitCode: number | undefined;
+      /** Wall time from commandStart to this finish. */
+      ranMs: number;
+      /** The command-exit track was armed (attention was lost mid-run) when it finished. */
+      armed: boolean;
+    }
+  | { kind: 'notification'; notification: ActivityNotification };
+
+/** Return true to claim the event. A claimed event never reaches the ring rules. */
+export type CompletionClaimant = (event: CompletionEvent) => boolean;
+
 export interface AlertState {
   status: SessionStatus;
   watchingEnabled: boolean;
@@ -127,11 +145,20 @@ interface AlertEntry {
  * Manages the always-on output/silence detectors, attention tracking, the
  * WATCHING rule set, and todo state for PTY sessions.
  *
+ * Every completion runs the same three steps in order: **observe** — a settle,
+ * a command finish, or a notification/progress cycle end becomes a
+ * `CompletionEvent`; **claim** — registered claimants get first refusal in
+ * registration order, and a claimed event stops there; **ring rule** — only an
+ * unclaimed event reaches its track's suppression rules and may latch a ring.
+ * `dispatchCompletion` is the single place those ring rules live, so an
+ * observer (`dor await`) can see completions that never ring a human.
+ *
  * Portable — no DOM dependencies. Can run in the extension host (VSCode),
  * in the webview adapter (Tauri), or in tests.
  */
 export class AlertManager {
   private entries = new Map<string, AlertEntry>();
+  private claimants = new Map<string, Set<CompletionClaimant>>();
   private attentionId: string | null = null;
   private attentionTimer: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<(id: string, state: AlertState) => void>();
@@ -252,18 +279,75 @@ export class AlertManager {
     });
   }
 
-  /**
-   * A busy Session went quiet. Whether that rings is pure policy: only a
-   * watched command rings, and only if the user is not looking at it right now.
-   * The originating command key latches here so the ring outlives the command.
-   */
+  /** A busy Session went quiet. Whether that rings is decided downstream. */
   private onSettled(id: string): void {
     const entry = this.entries.get(id);
     if (!entry) return;
-    if (!this.isWatching(entry)) return;
-    if (this.hasAttention(id)) return;
-    entry.watchingRingingCommand = entry.commandExitWatch?.argv0 ?? null;
-    this.notify(id);
+    this.dispatchCompletion(id, entry, { kind: 'settled' });
+  }
+
+  // --- Completion events ---
+
+  /**
+   * Watch every completion on one Session before any suppression runs — the
+   * seam `dor await` waits on. Claimants are offered events in registration
+   * order and the first to return `true` claims it, so it never rings, never
+   * sets TODO, and never stores a notification. Returns the unregister function.
+   */
+  registerCompletionClaimant(id: string, claimant: CompletionClaimant): () => void {
+    let claimants = this.claimants.get(id);
+    if (!claimants) {
+      claimants = new Set();
+      this.claimants.set(id, claimants);
+    }
+    claimants.add(claimant);
+    return () => {
+      const current = this.claimants.get(id);
+      if (!current) return;
+      current.delete(claimant);
+      if (current.size === 0) this.claimants.delete(id);
+    };
+  }
+
+  /**
+   * Observe -> claim -> ring rule, for all three tracks. Every ring rule lives
+   * here and nowhere else, so a track's emit site only has to describe what
+   * happened; the decision to bother a human is made once, after the claimants
+   * have passed on it.
+   */
+  private dispatchCompletion(id: string, entry: AlertEntry, event: CompletionEvent): void {
+    const claimants = this.claimants.get(id);
+    if (claimants) {
+      // Snapshot: a claimant may unregister itself (or register another) while
+      // being offered this very event.
+      for (const claimant of [...claimants]) {
+        if (claimant(event)) return;
+      }
+    }
+
+    switch (event.kind) {
+      case 'settled':
+        // Only a watched command rings, and only if the user is not looking at
+        // it right now. The originating command key latches here so the ring
+        // outlives the command that raised it.
+        if (!this.isWatching(entry) || this.hasAttention(id)) return;
+        entry.watchingRingingCommand = entry.commandExitWatch?.argv0 ?? null;
+        this.notify(id);
+        return;
+      case 'commandFinished':
+        if (!event.armed || this.hasAttention(id) || event.ranMs < this.inactivityTimeoutMs) return;
+        this.setCommandExitRinging(id, entry, event.displayCommand, event.exitCode);
+        return;
+      case 'notification':
+        if (this.hasAttention(id)) {
+          // A progress cycle was already cleared before dispatch, so publish
+          // that; a plain direct notification changes nothing and dedupes away.
+          this.notify(id);
+          return;
+        }
+        this.setProtocolRinging(id, entry, event.notification);
+        return;
+    }
   }
 
   // --- Terminal-report protocol track ---
@@ -273,9 +357,7 @@ export class AlertManager {
     const normalized = normalizeActivityNotification(notification);
     if (!normalized) return;
 
-    if (this.hasAttention(id)) return;
-
-    this.setProtocolRinging(id, entry, normalized);
+    this.dispatchCompletion(id, entry, { kind: 'notification', notification: normalized });
   }
 
   updateProtocolProgress(id: string, progress: ProtocolProgressUpdate): void {
@@ -288,7 +370,7 @@ export class AlertManager {
     }
 
     if (progress.state === 'error') {
-      this.ringOrSuppressProtocolProgress(id, entry, 'Progress error', progress.percent);
+      this.finishProtocolProgressCycle(id, entry, 'Progress error', progress.percent);
       return;
     }
 
@@ -315,26 +397,35 @@ export class AlertManager {
 
   private completeProtocolProgress(id: string, entry: AlertEntry, progress: ActiveProtocolProgress): void {
     const title = progress.state === 'warning' ? 'Progress warning' : 'Progress complete';
-    this.ringOrSuppressProtocolProgress(id, entry, title, progress.percent);
+    this.finishProtocolProgressCycle(id, entry, title, progress.percent);
   }
 
-  private ringOrSuppressProtocolProgress(
+  /**
+   * End of a progress cycle (completion or error). The cycle is over whether or
+   * not anyone claims the event, so it is cleared *before* dispatch — a
+   * claimant that suppresses the ring must not leave the Session stuck at
+   * `OSC_NOTIF_BUSY`.
+   */
+  private finishProtocolProgressCycle(
     id: string,
     entry: AlertEntry,
     title: string,
     percent: number | null,
   ): void {
-    if (this.hasAttention(id)) {
-      entry.protocolStatus = 'IDLE';
-      entry.progress = null;
-      this.notify(id);
-      return;
-    }
-    this.setProtocolRinging(id, entry, {
-      source: 'OSC 9;4',
-      title,
-      body: percent === null ? null : `Progress ${Math.round(percent)}%`,
+    entry.progress = null;
+    if (entry.protocolStatus === 'OSC_NOTIF_BUSY') entry.protocolStatus = 'IDLE';
+    this.dispatchCompletion(id, entry, {
+      kind: 'notification',
+      notification: {
+        source: 'OSC 9;4',
+        title,
+        body: percent === null ? null : `Progress ${Math.round(percent)}%`,
+      },
     });
+    // Clearing the cycle is publicly visible (`OSC_NOTIF_BUSY` falls back), and
+    // a claim stops the dispatch before any ring rule notifies. Every other path
+    // has already published by now, so `notify` dedupes.
+    this.notify(id);
   }
 
   private setProtocolRinging(id: string, entry: AlertEntry, notification: ActivityNotification): void {
@@ -415,12 +506,17 @@ export class AlertManager {
       entry.commandExitStatus = 'IDLE';
     }
 
-    if (
-      watch && wasArmed
-      && !this.hasAttention(id)
-      && Date.now() - watch.startedAt >= this.inactivityTimeoutMs
-    ) {
-      this.setCommandExitRinging(id, entry, watch, exitCode);
+    // Every finish is observable, including the short, unarmed, and attended
+    // ones that can never ring — the ring rule is what filters them.
+    if (watch !== null) {
+      this.dispatchCompletion(id, entry, {
+        kind: 'commandFinished',
+        displayCommand: watch.displayCommand,
+        argv0: watch.argv0,
+        exitCode,
+        ranMs: Date.now() - watch.startedAt,
+        armed: wasArmed,
+      });
     }
 
     // The command boundary reset, covering commandFinish, promptStart/End, and
@@ -449,10 +545,11 @@ export class AlertManager {
     return true;
   }
 
+  /** The watch record is already gone by the time this runs, so it takes the text it needs. */
   private setCommandExitRinging(
     id: string,
     entry: AlertEntry,
-    watch: CommandExitWatch,
+    displayCommand: string,
     exitCode: number | undefined,
   ): void {
     entry.commandExitStatus = 'ALERT_RINGING';
@@ -462,7 +559,7 @@ export class AlertManager {
       entry.notification = {
         source: 'COMMAND_EXIT',
         title: 'Command finished',
-        body: formatCommandExitBody(watch.displayCommand, exitCode),
+        body: formatCommandExitBody(displayCommand, exitCode),
       };
     }
     this.notify(id);
@@ -612,6 +709,9 @@ export class AlertManager {
 
   /** Completely remove alert state for a PTY (used when PTY is destroyed) */
   remove(id: string): void {
+    // Claimants go with the Session, entry or not — a dead Session dispatches
+    // nothing, so holding their closures would only leak them.
+    this.claimants.delete(id);
     const entry = this.entries.get(id);
     if (!entry) return;
     entry.detector.dispose();
@@ -649,6 +749,7 @@ export class AlertManager {
       entry.detector.dispose();
     }
     this.entries.clear();
+    this.claimants.clear();
     this.listeners.clear();
     this.lastEmitted.clear();
     this.clearAttentionTimer();
