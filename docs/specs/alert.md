@@ -12,7 +12,7 @@ Dormouse can owe the user attention in three ways:
 
 Terminal-report and command-exit alerts do not require WATCHING. All three share the same attention suppression rule: do not ring if the user is actively attending that Session at the completion moment.
 
-Internally these are three independent tracks — `watchingRingingCommand`, `protocolStatus` + `progress`, and `commandExitStatus` + `commandExitWatch`. Each runs IDLE -> busy/armed -> ringing without entangling the others, and each latches its own ring in the entry until it is cleared. The output/silence detector (`ActivityMonitor`) is not a track: it is an always-on observer the WATCHING track reads.
+Internally these are three independent tracks — `watchingRingingCommand`, `protocolStatus` + `progress`, and `commandExitStatus` + `commandExitWatch`. Each runs IDLE -> busy/armed -> ringing without entangling the others, and each latches its own ring in the entry until it is cleared. The output/silence detector (`QuiesceDetector`) is not a track: it is an always-on observer the WATCHING track reads.
 
 ## Non-goals
 
@@ -24,7 +24,7 @@ Internally these are three independent tracks — `watchingRingingCommand`, `pro
 
 ## Public State
 
-Source of truth: `AlertState` / `ActivityNotification` in `lib/src/lib/alert-manager.ts` and `SessionStatus` in `lib/src/lib/activity-monitor.ts`.
+Source of truth: `AlertState` / `ActivityNotification` in `lib/src/lib/alert-manager.ts` and `SessionStatus` in `lib/src/lib/quiesce-detector.ts`.
 
 Public `status` is a projection — first match wins:
 
@@ -57,7 +57,7 @@ Source of truth: `cfg.alert` in `lib/src/cfg.ts` defines the shipped default for
 
 **WATCHING is a property of the command, not of a Session.** The user maintains a set of watched command names; WATCHING is on for a Session exactly while its foreground command's name is in that set. Turning alerts on while `claude` runs means every Session running `claude` watches — the ones open now and the ones opened later. Turning them off anywhere removes the rule everywhere. There is no per-Session enable, and no per-Session mute.
 
-**The output/silence detector is always on.** Every Session runs one `ActivityMonitor` for its whole lifetime, fed by every output chunk and reset at every command boundary. It is a plain observer: it never latches and knows nothing about attention or rules. The rule set decides only whether the detector's state is publicly visible and whether a settle — a busy Session that stayed quiet — is allowed to *ring*.
+**The output/silence detector is always on.** Every Session runs one `QuiesceDetector` for its whole lifetime, fed by every output chunk and reset at every command boundary. It is a plain observer: it never latches and knows nothing about attention or rules. The rule set decides only whether the detector's state is publicly visible and whether a settle — a busy Session that stayed quiet — is allowed to *ring*.
 
 Rules:
 
@@ -78,7 +78,7 @@ Rules:
 | `MIGHT_NEED_ATTENTION` | A busy Session went quiet. Debounce state. |
 | `ALERT_RINGING` | WATCHING observed likely completion while the Session lacked attention. |
 
-Source of truth: `ActivityMonitor` in `lib/src/lib/activity-monitor.ts` implements the detector's `QuiesceStatus` transitions; `AlertManager.onSettled` in `lib/src/lib/alert-manager.ts` decides whether a settle rings. Meaningful output excludes resize redraw noise during `T_RESIZE_DEBOUNCE`; theme changes, remounts, DOM reparenting, selection, and focus changes are not output. The invariants the implementation must honor:
+Source of truth: `QuiesceDetector` in `lib/src/lib/quiesce-detector.ts` implements the detector's `QuiesceStatus` transitions; `AlertManager.onSettled` in `lib/src/lib/alert-manager.ts` decides whether a settle rings. Meaningful output excludes resize redraw noise during `T_RESIZE_DEBOUNCE`; theme changes, remounts, DOM reparenting, selection, and focus changes are not output. The invariants the implementation must honor:
 
 - Output drives the detector up the chain `NOTHING_TO_SHOW` -> `MIGHT_BE_BUSY` -> `BUSY`; silence drives it down `BUSY` -> `MIGHT_NEED_ATTENTION` -> settled. The `MIGHT_*` states are debounce windows in both directions.
 - First output starts candidate tracking without changing status; unconfirmed `MIGHT_BE_BUSY` returns to `NOTHING_TO_SHOW`.
@@ -261,7 +261,7 @@ Alert-specific robustness requirements: multiple Sessions ring independently; mi
 
 | File | Role |
 |------|------|
-| `lib/src/lib/activity-monitor.ts` | The always-on per-Session output/silence detector: `QuiesceStatus` timers, `onSettled`, `reset()` |
+| `lib/src/lib/quiesce-detector.ts` | The always-on per-Session output/silence detector: `QuiesceStatus` timers, `onSettled`, `reset()` |
 | `lib/src/lib/alert-manager.ts` | `AlertManager`: the three tracks, the detectors, the rule set, attention, TODO, notification storage, status projection |
 | `lib/src/lib/watched-commands.ts` | Persisted WATCHING rule set and its push to the host |
 | `lib/src/lib/watched-command-host.ts` | First-seed + mutation/broadcast coordinator for a host shared by multiple renderers |

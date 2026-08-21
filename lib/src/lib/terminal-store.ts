@@ -1,6 +1,6 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import type { SessionStatus } from './activity-monitor';
+import type { SessionStatus } from './alert-manager';
 import type { ActivityNotification, TodoState } from './alert-manager';
 
 export interface ActivityState {

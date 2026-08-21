@@ -80,14 +80,10 @@ describe('AlertManager in isolation', () => {
     runWatchedCommand(id);
     manager.clearAttention(id);
 
-    manager.onData(id);
-    vi.advanceTimersByTime(1_600);
-    manager.onData(id);
-    manager.onData(id);
+    driveToBusy(id);
     expect(manager.getState(id).status).toBe('BUSY');
 
-    vi.advanceTimersByTime(2_000);
-    vi.advanceTimersByTime(3_000);
+    settle();
     expect(manager.getState(id).status).toBe('ALERT_RINGING');
 
     manager.onData(id);
@@ -109,14 +105,10 @@ describe('AlertManager in isolation', () => {
     runWatchedCommand(id);
 
     manager.attend(id);
-    manager.onData(id);
-    vi.advanceTimersByTime(1_600);
-    manager.onData(id);
-    manager.onData(id);
+    driveToBusy(id);
 
     manager.clearAttention(id);
-    vi.advanceTimersByTime(2_000);
-    vi.advanceTimersByTime(3_000);
+    settle();
     expect(manager.getState(id).status).toBe('ALERT_RINGING');
 
     manager.attend(id);
@@ -134,13 +126,9 @@ describe('AlertManager in isolation', () => {
     runWatchedCommand(id);
     manager.clearAttention(id);
 
-    manager.onData(id);
-    vi.advanceTimersByTime(1_600);
-    manager.onData(id);
-    manager.onData(id);
+    driveToBusy(id);
 
-    vi.advanceTimersByTime(2_000);
-    vi.advanceTimersByTime(3_000);
+    settle();
 
     expect(states).toContain('BUSY');
     expect(states).toContain('MIGHT_NEED_ATTENTION');
@@ -151,15 +139,25 @@ describe('AlertManager in isolation', () => {
   // (The previous soft-TODO bucket tests — 4-keypress letter-striking, per-letter
   //  recovery timers — were removed when TODO was simplified to a plain boolean.)
 
-  function driveToRinging(id: string): void {
-    runWatchedCommand(id);
-    manager.clearAttention(id);
+  /** Two output bursts across the busy-candidate gap: NOTHING_TO_SHOW -> BUSY. */
+  function driveToBusy(id: string): void {
     manager.onData(id);
     vi.advanceTimersByTime(1_600);
     manager.onData(id);
     manager.onData(id);
+  }
+
+  /** Silence through both quiet windows: BUSY -> MIGHT_NEED_ATTENTION -> settled. */
+  function settle(): void {
     vi.advanceTimersByTime(2_000);
     vi.advanceTimersByTime(3_000);
+  }
+
+  function driveToRinging(id: string): void {
+    runWatchedCommand(id);
+    manager.clearAttention(id);
+    driveToBusy(id);
+    settle();
     expect(manager.getState(id).status).toBe('ALERT_RINGING');
   }
 
@@ -629,10 +627,7 @@ describe('AlertManager in isolation', () => {
     ]);
     manager.clearAttention(id);
 
-    manager.onData(id);
-    vi.advanceTimersByTime(1_600);
-    manager.onData(id);
-    manager.onData(id);
+    driveToBusy(id);
     // The detector is BUSY underneath, but no rule matches, so nothing shows.
     expect(manager.getState(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
@@ -640,8 +635,7 @@ describe('AlertManager in isolation', () => {
     });
 
     // ... and a settle on an unwatched Session never rings the human.
-    vi.advanceTimersByTime(2_000);
-    vi.advanceTimersByTime(3_000);
+    settle();
     expect(manager.getState(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
       todo: false,
@@ -657,10 +651,7 @@ describe('AlertManager in isolation', () => {
     ]);
     manager.clearAttention(id);
 
-    manager.onData(id);
-    vi.advanceTimersByTime(1_600);
-    manager.onData(id);
-    manager.onData(id);
+    driveToBusy(id);
     expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
 
     // Turning the rule on mid-run reveals what the detector already knows
@@ -677,14 +668,10 @@ describe('AlertManager in isolation', () => {
     runWatchedCommand(id);
     manager.attend(id);
 
-    manager.onData(id);
-    vi.advanceTimersByTime(1_600);
-    manager.onData(id);
-    manager.onData(id);
+    driveToBusy(id);
     expect(manager.getState(id).status).toBe('BUSY');
 
-    vi.advanceTimersByTime(2_000);
-    vi.advanceTimersByTime(3_000);
+    settle();
     // Total elapsed is under the 15s attention window, so the user is still
     // looking: no ring, and the detector simply starts over.
     expect(manager.getState(id)).toMatchObject({
@@ -703,10 +690,7 @@ describe('AlertManager in isolation', () => {
     // The detector keeps running after the command ends, so shell-prompt output
     // can drive a whole extra busy/settle cycle. Neither the output nor the
     // unwatched settle may disturb the ring the watched run already raised.
-    manager.onData(id);
-    vi.advanceTimersByTime(1_600);
-    manager.onData(id);
-    manager.onData(id);
+    driveToBusy(id);
     vi.advanceTimersByTime(5_000);
     expect(manager.getState(id)).toMatchObject({
       status: 'ALERT_RINGING',

@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ActivityMonitor, type QuiesceStatus } from './activity-monitor';
+import { QuiesceDetector, type QuiesceStatus } from './quiesce-detector';
 
 // Timing constants from cfg.alert:
 // busyCandidateGap=1500, busyConfirmGap=500, mightNeedAttention=2000, needsAttentionConfirm=3000, resizeDebounce=500
 
-describe('ActivityMonitor', () => {
+describe('QuiesceDetector', () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -16,14 +16,14 @@ describe('ActivityMonitor', () => {
   function createMonitor() {
     const changes: QuiesceStatus[] = [];
     const settled = vi.fn();
-    const monitor = new ActivityMonitor({
+    const monitor = new QuiesceDetector({
       onChange: (status) => changes.push(status),
       onSettled: settled,
     });
     return { monitor, changes, settled };
   }
 
-  function driveMonitorToBusy(monitor: ActivityMonitor) {
+  function driveMonitorToBusy(monitor: QuiesceDetector) {
     monitor.onData();
     vi.advanceTimersByTime(1_500);
     monitor.onData();
@@ -31,7 +31,7 @@ describe('ActivityMonitor', () => {
     expect(monitor.getStatus()).toBe('BUSY');
   }
 
-  function driveMonitorToMightNeedAttention(monitor: ActivityMonitor) {
+  function driveMonitorToMightNeedAttention(monitor: QuiesceDetector) {
     driveMonitorToBusy(monitor);
     vi.advanceTimersByTime(2_000);
     expect(monitor.getStatus()).toBe('MIGHT_NEED_ATTENTION');
@@ -118,7 +118,7 @@ describe('ActivityMonitor', () => {
     // Order matters: an owner that latches a ring in onSettled must already own
     // the projection by the time subscribers hear about NOTHING_TO_SHOW.
     const order: string[] = [];
-    const monitor = new ActivityMonitor({
+    const monitor = new QuiesceDetector({
       onChange: (status) => order.push(`change:${status}`),
       onSettled: () => order.push('settled'),
     });
@@ -135,8 +135,8 @@ describe('ActivityMonitor', () => {
 
   it('does not double-report NOTHING_TO_SHOW when the settled handler resets it', () => {
     const changes: QuiesceStatus[] = [];
-    let monitor: ActivityMonitor | null = null;
-    monitor = new ActivityMonitor({
+    let monitor: QuiesceDetector | null = null;
+    monitor = new QuiesceDetector({
       onChange: (status) => changes.push(status),
       onSettled: () => monitor?.reset(),
     });
@@ -283,13 +283,13 @@ describe('ActivityMonitor', () => {
 
   it('does not emit changes after dispose', () => {
     const onChange = vi.fn();
-    const monitor = new ActivityMonitor({ onChange });
+    const monitor = new QuiesceDetector({ onChange });
     monitor.onData();
     vi.advanceTimersByTime(1_500);
     monitor.onData();
     monitor.dispose();
     vi.advanceTimersByTime(20_000);
     expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange).toHaveBeenCalledWith('MIGHT_BE_BUSY', 'NOTHING_TO_SHOW');
+    expect(onChange).toHaveBeenCalledWith('MIGHT_BE_BUSY');
   });
 });

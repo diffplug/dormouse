@@ -1,4 +1,4 @@
-import type { SessionStatus } from './activity-monitor';
+import type { SessionStatus } from './alert-manager';
 import type { AlertStateDetail } from './platform/types';
 import { applyAlertSettingsFromHost, publishAlertSettings } from './alert-settings';
 import type { PersistedAlertState, PersistedPane } from './session-types';

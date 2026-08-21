@@ -1,4 +1,4 @@
-export type { SessionStatus } from './activity-monitor';
+export type { SessionStatus } from './alert-manager';
 export type { TodoState } from './alert-manager';
 export type { AlertSpeechState } from './alert-speech-state';
 export type { ActivityState, AlertButtonActionResult } from './session-activity-store';

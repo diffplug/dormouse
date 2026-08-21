@@ -10,15 +10,8 @@ export type QuiesceStatus =
   | 'BUSY'
   | 'MIGHT_NEED_ATTENTION';
 
-export type SessionStatus =
-  | QuiesceStatus
-  | 'WATCHING_DISABLED'
-  | 'ALERT_RINGING'
-  | 'OSC_NOTIF_BUSY'
-  | 'COMMAND_EXIT_ARMED';
-
-export interface ActivityMonitorOptions {
-  onChange?: (status: QuiesceStatus, previousStatus: QuiesceStatus) => void;
+export interface QuiesceDetectorOptions {
+  onChange?: (status: QuiesceStatus) => void;
   /**
    * A busy Session stayed quiet long enough to look finished. Fired once per
    * settle, immediately before the detector returns to `NOTHING_TO_SHOW`, so an
@@ -41,7 +34,7 @@ const T_RESIZE_DEBOUNCE = cfg.alert.resizeDebounce;
  * observer, not an alarm. It never latches: a settle is announced through
  * `onSettled` and the detector immediately starts over.
  */
-export class ActivityMonitor {
+export class QuiesceDetector {
   private status: QuiesceStatus = 'NOTHING_TO_SHOW';
   private resizeGrace = false;
   private busyCandidateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -53,10 +46,10 @@ export class ActivityMonitor {
   private firstOutputAt: number | null = null;
   private lastOutputAt: number | null = null;
   private outputCountSinceReset = 0;
-  private readonly onChange: ((status: QuiesceStatus, previousStatus: QuiesceStatus) => void) | null;
+  private readonly onChange: ((status: QuiesceStatus) => void) | null;
   private readonly onSettled: (() => void) | null;
 
-  constructor(options?: ActivityMonitorOptions) {
+  constructor(options?: QuiesceDetectorOptions) {
     this.onChange = options?.onChange ?? null;
     this.onSettled = options?.onSettled ?? null;
   }
@@ -221,8 +214,7 @@ export class ActivityMonitor {
 
   private setStatus(status: QuiesceStatus): void {
     if (this.status === status) return;
-    const previousStatus = this.status;
     this.status = status;
-    this.onChange?.(status, previousStatus);
+    this.onChange?.(status);
   }
 }

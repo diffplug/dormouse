@@ -57,7 +57,7 @@ Frontend Library (lib/src/)
     ├── session-activity-store.ts — alert/TODO projection and delegates
     ├── reconnect.ts              — resume (live-PTY) + restore (cold-start) entry point
     ├── alert-manager.ts          — alert state machine (portable, no DOM deps)
-    ├── activity-monitor.ts       — silence/output pattern detection for alert
+    ├── quiesce-detector.ts       — silence/output pattern detection for alert
     ├── session-save.ts           — periodic save (debounced 500ms + 30s interval)
     ├── session-restore.ts        — cold-start pane restoration
     ├── session-types.ts          — PersistedSession/PersistedPane/PersistedAlertState types
