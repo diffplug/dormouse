@@ -572,14 +572,30 @@ only on `displaced` — `Reconnect`. Rules the UI exists to honor:
   *connection* moves with no event at all (`connecting -> connected`,
   `-> disconnected`, `-> displaced`), so the store also polls every 2 s **while
   something is subscribed**, which is the seconds the dialog is open rather than
-  a standing timer in every window. Without it a machine that finished
-  connecting a moment after the dialog opened would read as permanently
-  "Connecting…".
+  a standing timer in every window. Status reads are serialized: ticks that
+  arrive during a slow read coalesce behind it, so a 15-second Host-service
+  timeout is allowed to become the visible error instead of being superseded by
+  newer polls. Without the poll a machine that finished connecting a moment
+  after the dialog opened would read as permanently "Connecting…".
+- **Coalescing stops at anything that changes the answer.** `enroll`,
+  `reconnect` and `clearEnrollment` each drop the read in flight and start their
+  own, because a `status` issued before the command answers the question as it
+  stood beforehand — joining it would report the old enrollment as though the
+  command had not run, the inverse of the delete-first ordering the service uses
+  so a failed delete never claims to have succeeded. Losing the last subscriber
+  drops it for the same reason: a reopened dialog must not be answered with a
+  status fetched for the closed one, and would otherwise sit on "Checking…"
+  until that read settled. Source of truth: `dropInFlightRead` in
+  `lib/src/remote/host/host-status-store.ts`.
 
 The `window.dormouseRemoteHost` console hook keeps the same four commands and
 remains the scripting seam. Pairing approval is deliberately *not* here: it is a
 modal, because it must interrupt
 ([remote-security-model.md](./remote-security-model.md), Pairing Ceremony).
+
+`docs/stories/pairing.mdx` walks this section and the pairing modal in sequence
+with the rest of the setup, rendering the real components; it is a narrative
+Storybook page, not a spec, so this section is what it defers to.
 
 ## Pocket side (phone)
 

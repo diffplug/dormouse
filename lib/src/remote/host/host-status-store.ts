@@ -38,6 +38,8 @@ let state: RemoteHostStatusState = LOADING;
 const listeners = new Set<() => void>();
 let unsubscribeFromLink: (() => void) | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+let refreshInFlight: Promise<void> | null = null;
+let refreshAgain = false;
 
 /**
  * The service's `status` event fires only when `enrolled` changes, because that
@@ -49,15 +51,13 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
  * later reads as permanently "Connecting…".
  *
  * Polling only while something is subscribed keeps this to the seconds the
- * dialog is actually open, rather than a standing timer on every window.
+ * dialog is actually open, rather than a standing timer on every window. A
+ * slow read is never overlapped: ticks coalesce behind it, so its timeout can
+ * commit instead of every later tick making the eventual failure stale.
  */
 const POLL_MS = 2000;
 
-/**
- * Guards against a stale answer overwriting a newer one: enroll and disconnect
- * both refresh, and the dialog may refresh on open while one is still in
- * flight. Only the newest read may commit.
- */
+/** Invalidates an in-flight answer when the last subscriber goes away. */
 let generation = 0;
 
 function setState(next: RemoteHostStatusState): void {
@@ -101,15 +101,65 @@ export function subscribeToRemoteHostStatus(listener: () => void): () => void {
       if (pollTimer) clearInterval(pollTimer);
       pollTimer = null;
       // Next mount re-reads rather than showing a snapshot from a previous open,
-      // which may predate an enrollment made in another window.
+      // which may predate an enrollment made in another window. That includes
+      // dropping a read still in flight: keeping it would have the next mount
+      // coalesce onto an answer fetched for a dialog that is already closed,
+      // and sit on "Checking…" until it finally settles.
       state = LOADING;
-      generation++;
+      dropInFlightRead();
     }
   };
 }
 
-/** Re-read the service's status. Safe to call concurrently. */
-export async function refreshRemoteHostStatus(): Promise<void> {
+/** Re-read the service's status, coalescing calls while one read is in flight. */
+export function refreshRemoteHostStatus(): Promise<void> {
+  if (refreshInFlight) {
+    refreshAgain = true;
+    return refreshInFlight;
+  }
+
+  const refresh = readRemoteHostStatus();
+  refreshInFlight = refresh;
+  void refresh.then(() => {
+    if (refreshInFlight !== refresh) return;
+    refreshInFlight = null;
+    if (refreshAgain && listeners.size > 0) {
+      refreshAgain = false;
+      void refreshRemoteHostStatus();
+    }
+  });
+  return refresh;
+}
+
+/**
+ * Stop coalescing onto the read in flight, because its answer is no longer the
+ * one anybody is waiting for.
+ *
+ * Safe to call at any point: the abandoned read is neutralized twice over —
+ * `generation` moves, so it cannot commit, and its completion callback sees a
+ * different in-flight promise, so it cannot clear whatever replaced it.
+ */
+function dropInFlightRead(): void {
+  refreshInFlight = null;
+  refreshAgain = false;
+  generation++;
+}
+
+/**
+ * Re-read *after* a mutation this module just made.
+ *
+ * Coalescing is right for the poll, where any recent answer will do, and wrong
+ * here: a read issued before the enroll/disconnect answers the question as it
+ * stood beforehand, so joining it would report the old enrollment as though the
+ * command had not run — the inverse of the delete-first ordering the service
+ * uses so a failed delete never claims to have succeeded.
+ */
+function refreshAfterMutation(): Promise<void> {
+  dropInFlightRead();
+  return refreshRemoteHostStatus();
+}
+
+async function readRemoteHostStatus(): Promise<void> {
   const active = link();
   if (!active) {
     setState(UNSUPPORTED);
@@ -144,7 +194,7 @@ export async function enrollRemoteHost(
   const active = link();
   if (!active) throw new Error('This build has no remote Host service.');
   await active.command('enroll', { serverUrl, password, label });
-  await refreshRemoteHostStatus();
+  await refreshAfterMutation();
 }
 
 /**
@@ -156,7 +206,7 @@ export async function reconnectRemoteHost(): Promise<void> {
   const active = link();
   if (!active) throw new Error('This build has no remote Host service.');
   await active.command('reconnect');
-  await refreshRemoteHostStatus();
+  await refreshAfterMutation();
 }
 
 /**
@@ -168,7 +218,7 @@ export async function clearRemoteHostEnrollment(): Promise<void> {
   const active = link();
   if (!active) throw new Error('This build has no remote Host service.');
   await active.command('clearEnrollment');
-  await refreshRemoteHostStatus();
+  await refreshAfterMutation();
 }
 
 function describeError(error: unknown): string {
