@@ -110,6 +110,7 @@ import {
   focusSession,
   getOrCreateTerminal,
   getActivity,
+  getTerminalShellKind,
   getTerminalPaneState,
   getWatchedCommands,
   initAlertStateReceiver,
@@ -1141,6 +1142,16 @@ describe('pending shell opts → spawnPty', () => {
       id,
       expect.objectContaining({ shell: '/bin/zsh', args: ['-l'], cwd: '/home/user/project' }),
     );
+    expect(getTerminalShellKind(id)).toBe('posix');
+  });
+
+  it('captures the Session shell family independently of later defaults', () => {
+    const id = 'powershell-session';
+
+    setPendingShellOpts(id, { shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' });
+    getOrCreateTerminal(id);
+
+    expect(getTerminalShellKind(id)).toBe('powershell');
   });
 
   it('omits cwd when no pending opts were set', () => {
@@ -1234,6 +1245,16 @@ describe('resume replay mode-reset tail', () => {
     ) as TestTerminalEntry;
 
     expect(entry.terminal.writes).not.toContain(REPLAY_MODE_RESET);
+  });
+
+  it('resume restores the live PTY shell family', () => {
+    resumeTerminal(
+      'resume-powershell-kind',
+      null,
+      { alive: true, shell: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe' },
+    );
+
+    expect(getTerminalShellKind('resume-powershell-kind')).toBe('powershell');
   });
 
   it('restore with no scrollback writes no reset tail', () => {

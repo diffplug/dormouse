@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   readClipboardImageAsFilePath: vi.fn<() => Promise<string | null>>(),
   writePty: vi.fn<(id: string, data: string) => void>(),
   readText: vi.fn<() => Promise<string>>(),
+  shellKind: 'posix' as 'cmd' | 'posix' | 'powershell',
 }));
 
 vi.mock('./platform', () => ({
@@ -23,6 +24,10 @@ vi.mock('./mouse-selection', () => ({
 }));
 
 vi.mock('./terminal-registry', () => ({
+  // Deliberately posix: the Session-specific value must win over this current
+  // default when the regression case changes shellKind to PowerShell.
+  getDefaultShellOpts: () => ({ shell: '/bin/bash' }),
+  getTerminalShellKind: () => mocks.shellKind,
   getTerminalInstance: () => null,
   markSessionTouched: vi.fn(),
 }));
@@ -32,6 +37,7 @@ import { doPaste } from './clipboard';
 describe('doPaste three-tier fallthrough', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.shellKind = 'posix';
     Object.defineProperty(globalThis, 'navigator', {
       value: { clipboard: { readText: mocks.readText } },
       configurable: true,
@@ -48,6 +54,19 @@ describe('doPaste three-tier fallthrough', () => {
     expect(mocks.readClipboardImageAsFilePath).not.toHaveBeenCalled();
     expect(mocks.writePty).toHaveBeenCalledTimes(1);
     expect(mocks.writePty).toHaveBeenCalledWith('t1', '/tmp/a.png /tmp/b\\ file.png ');
+  });
+
+  it("uses the target Session's shell after the app default changes", async () => {
+    mocks.shellKind = 'powershell';
+    mocks.readClipboardFilePaths.mockResolvedValue(['C:\\Users\\me\\$(calc.exe).txt']);
+    mocks.readText.mockResolvedValue('coexisting text payload');
+
+    await doPaste('powershell-session');
+
+    expect(mocks.writePty).toHaveBeenCalledWith(
+      'powershell-session',
+      "'C:\\Users\\me\\$(calc.exe).txt' ",
+    );
   });
 
   it('falls through to text when no file refs', async () => {

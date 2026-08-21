@@ -286,7 +286,9 @@ test('split json output', async () => {
 });
 
 test('shell command quoting supports shell families', () => {
+  assert.equal(shellCommandKind(undefined, 'Windows'), 'cmd');
   assert.equal(shellCommandKind('/bin/zsh', 'darwin'), 'posix');
+  assert.equal(shellCommandKind('C:\\Program Files\\Git\\bin\\bash.exe', 'win32'), 'posix');
   assert.equal(shellCommandKind('C:\\Windows\\System32\\cmd.exe', 'win32'), 'cmd');
   assert.equal(shellCommandKind('C:\\Program Files\\PowerShell\\7\\pwsh.exe', 'win32'), 'powershell');
   assert.equal(
@@ -296,6 +298,10 @@ test('shell command quoting supports shell families', () => {
   assert.equal(
     buildShellCommandForKind('powershell', ['C:\\Program Files\\nodejs\\node.exe', '-e', 'Write-Output $args[0]', 'hello world', "it's"]),
     "& 'C:\\Program Files\\nodejs\\node.exe' -e 'Write-Output $args[0]' 'hello world' 'it''s'",
+  );
+  assert.equal(
+    buildShellCommandForKind('powershell', ['Write-Output', '@args']),
+    "Write-Output '@args'",
   );
   assert.equal(
     buildShellCommandForKind('cmd', ['C:\\Program Files\\nodejs\\node.exe', '-e', 'console.log(process.argv[1])', 'hello world', 'a&b']),

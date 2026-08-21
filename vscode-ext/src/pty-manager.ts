@@ -36,6 +36,9 @@ interface PtyBufferEntry {
   receivedChars: number;
   alive: boolean;
   exitCode?: number;
+  /** Requested shell executable. An absent value means the shared PTY host's
+   *  platform default, whose parser family is deterministic. */
+  shell?: string;
 }
 
 const MAX_BUFFER_CHARS = 1_000_000;
@@ -50,7 +53,7 @@ function trimChunks(chunks: string[], totalChars: number): number {
   return totalChars;
 }
 
-function createBufferEntry(alive: boolean, exitCode?: number): PtyBufferEntry {
+function createBufferEntry(alive: boolean, exitCode?: number, shell?: string): PtyBufferEntry {
   return {
     replayChunks: [],
     replayChars: 0,
@@ -59,6 +62,7 @@ function createBufferEntry(alive: boolean, exitCode?: number): PtyBufferEntry {
     receivedChars: 0,
     alive,
     exitCode,
+    shell,
   };
 }
 
@@ -91,10 +95,10 @@ function bufferExit(id: string, exitCode: number): void {
   entry.exitCode = exitCode;
 }
 
-export function getBufferedPtys(): Map<string, { alive: boolean; exitCode?: number }> {
-  const result = new Map<string, { alive: boolean; exitCode?: number }>();
+export function getBufferedPtys(): Map<string, { alive: boolean; exitCode?: number; shell?: string }> {
+  const result = new Map<string, { alive: boolean; exitCode?: number; shell?: string }>();
   for (const [id, entry] of ptyBuffers) {
-    result.set(id, { alive: entry.alive, exitCode: entry.exitCode });
+    result.set(id, { alive: entry.alive, exitCode: entry.exitCode, shell: entry.shell });
   }
   return result;
 }
@@ -323,7 +327,7 @@ function sendToChild(msg: any): void {
 
 export function spawn(id: string, options?: PtySpawnOptions): void {
   killedPtyIds.delete(id);
-  ptyBuffers.set(id, createBufferEntry(true));
+  ptyBuffers.set(id, createBufferEntry(true, undefined, options?.shell));
   const dorEnv = getDorRuntimeEnv(extensionPath_);
   sendToChild({
     type: 'spawn',

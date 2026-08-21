@@ -44,6 +44,7 @@ export {
   disposeSession,
   focusSession,
   getOrCreateTerminal,
+  getTerminalShellKind,
   getTerminalInstance,
   getTerminalOverlayDims,
   isUntouched,

@@ -75,10 +75,11 @@ function resumeLiveSessions(platform: PlatformAdapter): Promise<ReconnectResult 
       const savedResumeInfo = getSavedPaneResumeInfo(savedState, ptyList.map((pty) => pty.id));
       const ids: string[] = [];
       for (const pty of ptyList) {
-        const resumeInfo: { alive: boolean; exitCode?: number; title?: string; untouched?: boolean } = {
+        const resumeInfo: { alive: boolean; exitCode?: number; shell?: string; title?: string; untouched?: boolean } = {
           alive: pty.alive,
           exitCode: pty.exitCode,
         };
+        if (pty.shell !== undefined) resumeInfo.shell = pty.shell;
         const savedInfo = savedResumeInfo.get(pty.id);
         if (savedInfo?.title !== undefined) resumeInfo.title = savedInfo.title;
         if (savedInfo?.untouched) resumeInfo.untouched = true;

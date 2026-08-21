@@ -1,6 +1,4 @@
-import { quotePowerShellArg, shellCommandKind, type ShellCommandKind } from 'dor/commands/shell-quote';
-import { PLATFORM_STRING } from './platform';
-import { getDefaultShellOpts } from './shell-defaults';
+import { quotePowerShellArg, type ShellCommandKind } from 'dor/commands/shell-quote';
 
 // Matches macOS Terminal's drag-and-drop format: backslash-escape each shell
 // metacharacter instead of wrapping in quotes. TUIs like `claude` recognize
@@ -22,37 +20,26 @@ export function shellEscapePosix(input: string): string {
   return input.replace(POSIX_UNSAFE, '\\$1');
 }
 
-// cmd.exe only: it performs no expansion inside double quotes, so wrapping is
-// enough. PowerShell's double-quoted strings *are* expandable, which is why it
-// gets `quotePowerShellArg` instead — see `shellEscapePath`.
+// cmd.exe only: wrapping keeps whitespace and command separators in one token,
+// and `$` / `$(...)` are inert in this parser. cmd's own `%NAME%` expansion (and
+// `!NAME!` under delayed expansion) is unchanged. PowerShell's double-quoted
+// strings are expandable in a different, dangerous way, so it gets a literal
+// single-quoted string instead — see `shellEscapePath`.
 export function shellEscapeWindows(input: string): string {
   return `"${input.replace(/"/g, '""')}"`;
 }
 
 /**
- * Which parser will read the staged line. The selected shell decides — the host
- * platform is only the fallback for when nothing has been selected yet, because
- * a Windows host runs PowerShell, Git Bash, and WSL panes as readily as cmd.
- *
- * This mirrors `dor`'s quoting (docs/specs/dor-cli.md): the app-global default
- * shell stands in for the pane's shell, which is not tracked per-session. The
- * platform fallback is `shellCommandKind`'s own — an unset shell classifies as
- * `cmd` on Windows and `posix` everywhere else — so the rule lives in one place.
- */
-function paneShellKind(): ShellCommandKind {
-  return shellCommandKind(getDefaultShellOpts()?.shell, PLATFORM_STRING);
-}
-
-/**
- * Escape a filesystem path for the pane's shell, for the drop/paste path.
+ * Escape a filesystem path for one Session's captured shell parser, for the
+ * drop/paste path.
  *
  * Quoting for the wrong parser is a code-execution bug, not a cosmetic one: a
  * cmd-style `"$(calc.exe).txt"` staged in a PowerShell pane runs the
  * subexpression the moment the user presses Enter, and pressing Enter is the
  * whole reason they dropped the file in (dormouse#430).
  */
-export function shellEscapePath(input: string): string {
-  switch (paneShellKind()) {
+export function shellEscapePath(input: string, shellKind: ShellCommandKind): string {
+  switch (shellKind) {
     case 'powershell':
       return quotePowerShellArg(input);
     case 'cmd':

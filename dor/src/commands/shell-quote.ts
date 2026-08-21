@@ -8,10 +8,11 @@
 export type ShellCommandKind = 'cmd' | 'posix' | 'powershell';
 
 const POSIX_SAFE_ARG = /^[A-Za-z0-9_@%+=:,./-]+$/;
-// No `,`, unlike the posix set: PowerShell's argument mode reads a comma as the
-// array operator (`cat a,b.txt` passes two arguments) and cmd.exe treats it as
-// an argument separator, so a comma-bearing filename must be quoted on both.
-const WINDOWS_SAFE_ARG = /^[A-Za-z0-9_@+=:./\\-]+$/;
+// No `,` or `@`, unlike the posix set: PowerShell's argument mode reads a comma
+// as the array operator (`cat a,b.txt` passes two arguments), while an initial
+// `@` starts splatting / array / hashtable syntax. cmd.exe also treats `,` as an
+// argument separator, so the shared set conservatively quotes both characters.
+const WINDOWS_SAFE_ARG = /^[A-Za-z0-9_+=:./\\-]+$/;
 
 export function shellCommandKind(shell: string | undefined, platformString: string): ShellCommandKind {
   const normalizedShell = (shell ?? '').replace(/\\/g, '/').split('/').pop()?.toLowerCase() ?? '';
