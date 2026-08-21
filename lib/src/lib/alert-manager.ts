@@ -96,6 +96,61 @@ export type CompletionEvent =
 /** Return true to claim the event. A claimed event never reaches the ring rules. */
 export type CompletionClaimant = (event: CompletionEvent) => boolean;
 
+/** How much evidence of completion a parked `dor await` will accept. */
+export type AwaitUntil = 'quiet' | 'exit';
+
+/** Why a resolved await stopped waiting. */
+export type AwaitCause = 'quiet' | 'exit' | 'bell' | 'idle';
+
+export type AwaitOutcome =
+  | { kind: 'resolved'; cause: AwaitCause; waitedMs: number }
+  | { kind: 'timeout'; waitedMs: number }
+  /** The Session's PTY exited, or the Session was removed, before it finished. */
+  | { kind: 'died'; waitedMs: number }
+  /** `cancel()` was called — or the manager was disposed — before anything else settled it. */
+  | { kind: 'cancelled'; waitedMs: number };
+
+export interface AwaitOptions {
+  until: AwaitUntil;
+  /**
+   * Ceiling on the wait. Enforced here, in the host, so no intermediate hop can
+   * reap a parked await early and no caller can park forever.
+   */
+  timeoutMs: number;
+}
+
+export interface AwaitHandle {
+  promise: Promise<AwaitOutcome>;
+  cancel(): void;
+}
+
+/**
+ * Grace window: the detector's own floor for reaching BUSY, so a caller that
+ * arrives before the peer's first byte cannot be told "nothing is happening"
+ * before the machine it is watching could possibly have reported. Derived from
+ * `cfg.alert`, not a new number.
+ */
+export const AWAIT_GRACE_MS = cfg.alert.busyCandidateGap + cfg.alert.busyConfirmGap;
+
+/** One parked await. Owned by the `AlertManager`; see `awaitCompletion`. */
+interface AwaitWaiter {
+  /** Offer one completion. Returns whether this waiter woke on it. */
+  offer(event: CompletionEvent): boolean;
+  /** The Session produced output (cancels a `quiet` grace window). */
+  onOutput(): void;
+  /** A foreground command started (cancels an `exit` grace window). */
+  onCommandStart(): void;
+  /** The Session's PTY exited or the Session was removed. */
+  die(): void;
+  cancel(): void;
+}
+
+/** Every await parked on one Session, plus the single claimant they share. */
+interface AwaitGroup {
+  waiters: Set<AwaitWaiter>;
+  unregister: () => void;
+}
+
 export interface AlertState {
   status: SessionStatus;
   watchingEnabled: boolean;
@@ -103,6 +158,8 @@ export interface AlertState {
   notification: ActivityNotification | null;
   /** Used by the bell transition table to detect a post-attention dismiss */
   attentionDismissedRing: boolean;
+  /** At least one `dor await` is parked on this Session. Never persisted. */
+  awaited: boolean;
 }
 
 export const DEFAULT_ALERT_STATE: AlertState = {
@@ -111,6 +168,7 @@ export const DEFAULT_ALERT_STATE: AlertState = {
   todo: false,
   notification: null,
   attentionDismissedRing: false,
+  awaited: false,
 };
 
 /**
@@ -159,6 +217,7 @@ interface AlertEntry {
 export class AlertManager {
   private entries = new Map<string, AlertEntry>();
   private claimants = new Map<string, Set<CompletionClaimant>>();
+  private awaits = new Map<string, AwaitGroup>();
   private attentionId: string | null = null;
   private attentionTimer: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<(id: string, state: AlertState) => void>();
@@ -202,12 +261,16 @@ export class AlertManager {
     // A chunk that lands after `remove(id)` therefore resurrects it —
     // `notifyFromProtocol` has had that property all along, so this is parity.
     this.getOrCreateEntry(id).detector.onData();
+    this.eachWaiter(id, (waiter) => waiter.onOutput());
   }
 
   onExit(id: string, exitCode?: number): void {
     const entry = this.entries.get(id);
-    if (!entry) return;
-    if (this.finishCommandExitWatch(id, entry, exitCode)) this.notify(id);
+    if (entry && this.finishCommandExitWatch(id, entry, exitCode)) this.notify(id);
+    // The command-exit dispatch above already resolved anything waiting on the
+    // run that just ended; whatever is still parked is waiting on a Session
+    // that no longer exists.
+    this.settleWaiters(id, 'died');
   }
 
   onResize(id: string): void {
@@ -345,6 +408,168 @@ export class AlertManager {
         break;
     }
     return false;
+  }
+
+  // --- Await ---
+
+  /**
+   * Park until this Session finishes what it is doing, then report why the wait
+   * ended (`docs/specs/alert.md` -> Await). The caller is `dor await`: a
+   * program, not a human, so a completion it consumes is delivered to it
+   * instead of ringing anyone.
+   *
+   * Resolves immediately when the Session is already ringing, consuming only
+   * the one latch it resolved on and leaving TODO, notification detail, and
+   * attention exactly as they were.
+   */
+  awaitCompletion(id: string, options: AwaitOptions): AwaitHandle {
+    // The ceiling starts life as a CLI argument a process away and ends up in
+    // `setTimeout`, so nonsense is rejected here rather than trusted from one
+    // caller away. A rejected request settles `cancelled` — it absorbs nothing
+    // and parks nothing.
+    if (!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0) {
+      return settledAwait({ kind: 'cancelled', waitedMs: 0 });
+    }
+
+    const entry = this.getOrCreateEntry(id);
+    const startedAt = Date.now();
+
+    const ringingCause = this.consumeAwaitableRing(entry, options.until);
+    if (ringingCause !== null) {
+      this.notify(id);
+      return settledAwait({ kind: 'resolved', cause: ringingCause, waitedMs: 0 });
+    }
+
+    let settled = false;
+    let resolveOutcome!: (outcome: AwaitOutcome) => void;
+    const promise = new Promise<AwaitOutcome>((resolve) => {
+      resolveOutcome = resolve;
+    });
+    let graceTimer: ReturnType<typeof setTimeout> | null = null;
+    let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearGrace = (): void => {
+      if (graceTimer === null) return;
+      clearTimeout(graceTimer);
+      graceTimer = null;
+    };
+
+    const settle = (outcome: AwaitOutcome): void => {
+      if (settled) return;
+      settled = true;
+      clearGrace();
+      if (timeoutTimer !== null) {
+        clearTimeout(timeoutTimer);
+        timeoutTimer = null;
+      }
+      this.dropWaiter(id, waiter);
+      resolveOutcome(outcome);
+      // `awaited` may have just gone false.
+      this.notify(id);
+    };
+
+    const waiter: AwaitWaiter = {
+      offer: (event) => {
+        const cause = awaitCauseFor(options.until, event);
+        if (cause === null) return false;
+        settle({ kind: 'resolved', cause, waitedMs: Date.now() - startedAt });
+        return true;
+      },
+      onOutput: () => {
+        if (options.until === 'quiet') clearGrace();
+      },
+      onCommandStart: () => {
+        if (options.until === 'exit') clearGrace();
+      },
+      die: () => settle({ kind: 'died', waitedMs: Date.now() - startedAt }),
+      cancel: () => settle({ kind: 'cancelled', waitedMs: Date.now() - startedAt }),
+    };
+
+    this.addWaiter(id, waiter);
+
+    // Is there anything to wait for? A running foreground command answers yes
+    // outright. Otherwise give the Session one grace window to prove it is
+    // doing something, and call it `idle` if nothing arrives.
+    if (entry.commandExitWatch === null) {
+      graceTimer = setTimeout(() => {
+        graceTimer = null;
+        settle({ kind: 'resolved', cause: 'idle', waitedMs: Date.now() - startedAt });
+      }, AWAIT_GRACE_MS);
+    }
+
+    timeoutTimer = setTimeout(() => {
+      timeoutTimer = null;
+      settle({ kind: 'timeout', waitedMs: Date.now() - startedAt });
+    }, options.timeoutMs);
+
+    this.notify(id);
+    return { promise, cancel: () => waiter.cancel() };
+  }
+
+  /**
+   * Consume the ring an await arriving right now would resolve on, if any.
+   * Only that track's latch is released: TODO, its notification detail, and
+   * `attentionDismissedRing` are the human's and stay untouched.
+   */
+  private consumeAwaitableRing(entry: AlertEntry, until: AwaitUntil): AwaitCause | null {
+    if (until === 'quiet' && entry.protocolStatus === 'ALERT_RINGING') {
+      entry.protocolStatus = 'IDLE';
+      entry.progress = null;
+      return 'bell';
+    }
+    if (entry.commandExitStatus === 'ALERT_RINGING') {
+      entry.commandExitStatus = 'IDLE';
+      return 'exit';
+    }
+    if (until === 'quiet' && entry.watchingRingingCommand !== null) {
+      entry.watchingRingingCommand = null;
+      // Same reasoning as `clearAllRingsIfActive`: the tail of the run that
+      // just rang must not immediately settle again.
+      entry.detector.reset();
+      return 'quiet';
+    }
+    return null;
+  }
+
+  private addWaiter(id: string, waiter: AwaitWaiter): void {
+    let group = this.awaits.get(id);
+    if (!group) {
+      // One claimant covers every await on the Session, so a completion is
+      // delivered to all of them rather than only to whoever registered first
+      // — the claimant seam itself stops at the first claim.
+      const waiters = new Set<AwaitWaiter>();
+      group = {
+        waiters,
+        unregister: this.registerCompletionClaimant(id, (event) => {
+          let claimed = false;
+          for (const parked of [...waiters]) {
+            if (parked.offer(event)) claimed = true;
+          }
+          return claimed;
+        }),
+      };
+      this.awaits.set(id, group);
+    }
+    group.waiters.add(waiter);
+  }
+
+  private dropWaiter(id: string, waiter: AwaitWaiter): void {
+    const group = this.awaits.get(id);
+    if (!group || !group.waiters.delete(waiter)) return;
+    if (group.waiters.size > 0) return;
+    this.awaits.delete(id);
+    group.unregister();
+  }
+
+  private eachWaiter(id: string, visit: (waiter: AwaitWaiter) => void): void {
+    const group = this.awaits.get(id);
+    if (!group) return;
+    // Snapshot: settling removes the waiter from the set being walked.
+    for (const waiter of [...group.waiters]) visit(waiter);
+  }
+
+  private settleWaiters(id: string, how: 'died' | 'cancelled'): void {
+    this.eachWaiter(id, (waiter) => (how === 'died' ? waiter.die() : waiter.cancel()));
   }
 
   // --- Terminal-report protocol track ---
@@ -487,6 +712,7 @@ export class AlertManager {
     // Every command boundary starts the detector over, so one command's output
     // history can never leak into the next one's busy/quiet reading.
     entry.detector.reset();
+    this.eachWaiter(id, (waiter) => waiter.onCommandStart());
   }
 
   private finishCommandExitWatch(
@@ -692,6 +918,7 @@ export class AlertManager {
       todo: entry.todo,
       notification: entry.notification,
       attentionDismissedRing: entry.attentionDismissedRing,
+      awaited: (this.awaits.get(id)?.waiters.size ?? 0) > 0,
     };
   }
 
@@ -705,6 +932,8 @@ export class AlertManager {
 
   /** Completely remove alert state for a PTY (used when PTY is destroyed) */
   remove(id: string): void {
+    // Nobody parked here has anything left to wait for.
+    this.settleWaiters(id, 'died');
     // Claimants go with the Session, entry or not — a dead Session dispatches
     // nothing, so holding their closures would only leak them.
     this.claimants.delete(id);
@@ -741,10 +970,14 @@ export class AlertManager {
   }
 
   dispose(): void {
+    // Settled first, while listeners are still attached: a parked caller that
+    // never hears an outcome absorbed a completion it never delivered.
+    for (const id of [...this.awaits.keys()]) this.settleWaiters(id, 'cancelled');
     for (const entry of this.entries.values()) {
       entry.detector.dispose();
     }
     this.entries.clear();
+    this.awaits.clear();
     this.claimants.clear();
     this.listeners.clear();
     this.lastEmitted.clear();
@@ -810,12 +1043,30 @@ function alertStatesEqual(a: AlertState, b: AlertState): boolean {
     || a.watchingEnabled !== b.watchingEnabled
     || a.todo !== b.todo
     || a.attentionDismissedRing !== b.attentionDismissedRing
+    || a.awaited !== b.awaited
   ) return false;
   const an = a.notification;
   const bn = b.notification;
   if (an === bn) return true;
   if (an === null || bn === null) return false;
   return an.source === bn.source && an.title === bn.title && an.body === bn.body;
+}
+
+/**
+ * Which completions each `--until` wakes on, and what it calls the cause.
+ * `quiet` is the permissive rung: a settle, an exit, or an explicit bell.
+ * `exit` takes command exits and nothing else — plenty of build tools ring on a
+ * warning, and being the strict one is `exit`'s whole job.
+ */
+function awaitCauseFor(until: AwaitUntil, event: CompletionEvent): AwaitCause | null {
+  if (event.kind === 'commandFinished') return 'exit';
+  if (until === 'exit') return null;
+  return event.kind === 'settled' ? 'quiet' : 'bell';
+}
+
+/** An await that was over before it parked: nothing to cancel, nothing to clean up. */
+function settledAwait(outcome: AwaitOutcome): AwaitHandle {
+  return { promise: Promise.resolve(outcome), cancel: () => {} };
 }
 
 function formatCommandExitBody(displayCommand: string, exitCode: number | undefined): string {

@@ -8,6 +8,8 @@ export interface ActivityState {
   watchingEnabled: boolean;
   todo: TodoState;
   notification: ActivityNotification | null;
+  /** A `dor await` is parked on this Session (`docs/specs/alert.md` -> Await). */
+  awaited: boolean;
 }
 
 export interface TerminalEntry {
@@ -21,6 +23,7 @@ export interface TerminalEntry {
   todo: TodoState;
   notification: ActivityNotification | null;
   attentionDismissedRing: boolean;
+  awaited: boolean;
   isReplaying: boolean;
   untouched: boolean;
   /**

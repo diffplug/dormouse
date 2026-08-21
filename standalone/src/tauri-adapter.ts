@@ -30,6 +30,7 @@ import {
   type RemoteHostResult,
 } from "dormouse-lib/host/remote/service-protocol";
 import { AlertManager } from "dormouse-lib/lib/alert-manager";
+import type { AwaitHandle, AwaitOptions } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { loadSessionState, saveSessionState } from "dormouse-lib/lib/window-persistence";
@@ -531,6 +532,10 @@ export class TauriAdapter implements PlatformAdapter {
 
   alertClearTodo(id: string): void {
     this.alertManager.clearTodo(id);
+  }
+
+  alertAwait(id: string, options: AwaitOptions): AwaitHandle {
+    return this.alertManager.awaitCompletion(id, options);
   }
 
   onAlertState(handler: (detail: AlertStateDetail) => void): void {

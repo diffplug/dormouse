@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
-import { AlertManager } from '../../lib/src/lib/alert-manager';
+import { AlertManager, type AwaitHandle } from '../../lib/src/lib/alert-manager';
 import { WatchedCommandHost } from '../../lib/src/lib/watched-command-host';
 import { AlertSettingsHost } from '../../lib/src/lib/alert-settings-host';
 import {
@@ -295,6 +295,9 @@ export function attachRouter(
   // Track which PTY IDs were spawned (or reconnected) through this webview
   const ownedPtyIds = new Set<string>();
   const pendingFlushRequests = new Map<string, { resolve: () => void; timeout: ReturnType<typeof setTimeout> }>();
+  // `dor await`s this webview has parked in the shared alert manager, keyed by
+  // the requestId that will carry the outcome back.
+  const pendingAwaits = new Map<string, AwaitHandle>();
   let disposed = false;
 
   // Webview-facing subscriptions — only active when the webview has live content.
@@ -428,6 +431,7 @@ export function attachRouter(
         todo: state.todo,
         notification: state.notification,
         attentionDismissedRing: state.attentionDismissedRing,
+        awaited: state.awaited,
       } satisfies ExtensionMessage);
       notifyUnion();
     });
@@ -742,6 +746,7 @@ export function attachRouter(
             todo: alertState.todo,
             notification: alertState.notification,
             attentionDismissedRing: alertState.attentionDismissedRing,
+            awaited: alertState.awaited,
           } satisfies ExtensionMessage);
         }
         break;
@@ -800,6 +805,30 @@ export function attachRouter(
       case 'alert:clearTodo':
         alertManager.clearTodo(msg.id);
         break;
+      // The wait itself is parked host-side (`docs/specs/alert.md` → Await), so
+      // only the outcome crosses back. `timeoutMs` is revalidated by
+      // `awaitCompletion`, which rejects nonsense rather than installing it.
+      case 'alert:await': {
+        const handle = alertManager.awaitCompletion(msg.id, {
+          until: msg.until,
+          timeoutMs: msg.timeoutMs,
+        });
+        const requestId = msg.requestId;
+        pendingAwaits.set(requestId, handle);
+        void handle.promise.then((outcome) => {
+          pendingAwaits.delete(requestId);
+          // Dispose cancels what is still parked, and those outcomes land here
+          // one microtask later — with no webview left to hear them.
+          if (disposed) return;
+          void post({ type: 'alert:awaitResult', requestId, outcome } satisfies ExtensionMessage);
+        });
+        break;
+      }
+      case 'alert:awaitCancel':
+        // The cancelled outcome comes back through `alert:awaitResult` like any
+        // other, so there is nothing to answer here.
+        pendingAwaits.get(msg.requestId)?.cancel();
+        break;
     }
   });
 
@@ -828,6 +857,10 @@ export function attachRouter(
         if (!request.pending.delete(router)) continue;
         if (request.pending.size === 0) request.settle();
       }
+      // A webview that went away cannot deliver an outcome, and an await that
+      // delivers nothing must not hold a completion claim open.
+      for (const handle of [...pendingAwaits.values()]) handle.cancel();
+      pendingAwaits.clear();
       removeWatchedCommandListener();
       removeAlertSettingsListener();
       resolveAllFlushRequests();

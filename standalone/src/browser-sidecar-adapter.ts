@@ -27,6 +27,7 @@ import {
   type RemoteHostResult,
 } from "dormouse-lib/host/remote/service-protocol";
 import { AlertManager } from "dormouse-lib/lib/alert-manager";
+import type { AwaitHandle, AwaitOptions } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { loadSessionState, saveSessionState } from "dormouse-lib/lib/window-persistence";
@@ -240,6 +241,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   alertToggleTodo(id: string): void { this.alertManager.toggleTodo(id); }
   alertMarkTodo(id: string): void { this.alertManager.markTodo(id); }
   alertClearTodo(id: string): void { this.alertManager.clearTodo(id); }
+  alertAwait(id: string, options: AwaitOptions): AwaitHandle { return this.alertManager.awaitCompletion(id, options); }
   onAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.add(handler); }
   // See TauriAdapter: single webview, so nothing is broadcast back.
   onWatchedCommands(_handler: (names: string[]) => void): void {}

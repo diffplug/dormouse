@@ -34,6 +34,8 @@ Public `status` is a projection — first match wins:
 4. `COMMAND_EXIT_ARMED` if command-exit alerting is armed.
 5. Otherwise `WATCHING_DISABLED`.
 
+`awaited` sits beside `status`: true while at least one `dor await` is parked on the Session (Await below). It is derived from live waiters and is **never persisted** — a wait cannot survive the process that was blocking on it.
+
 Persist only `todo` and the sanitized `notification` (plus `status` for diagnostics). Restore replays those two and nothing else: it must not recreate a ring, protocol progress, or a command-exit arm. WATCHING is not per-Session state and is never persisted per Session — it is re-derived from the rule set below at the next command start. Replay filtering in `docs/specs/terminal-escapes.md` prevents old terminal output from firing notification side effects again.
 
 ## Attention
@@ -62,6 +64,65 @@ Claimants are registered per Session and get first refusal, in registration orde
 Two ordering rules matter. The progress cycle is cleared *before* dispatch — a completion or error ends the cycle whether or not the event is claimed, so `OSC_NOTIF_BUSY` falls back either way. And a command finish is dispatched for every watch that existed, including the short, unarmed, and attended ones the ring rule then discards.
 
 Source of truth: `registerCompletionClaimant` / `dispatchCompletion` in `lib/src/lib/alert-manager.ts`.
+
+## Await
+
+An **await** parks on one Session until it finishes what it is doing, then reports why the wait ended. It is the claimant the seam above exists for, and its caller is `dor await` — a program, not a human. That single fact drives the rules below: where a human and a program want different things, an await serves the program and leaves the human's channels alone.
+
+Source of truth: `awaitCompletion` in `lib/src/lib/alert-manager.ts`, reached through `PlatformAdapter.alertAwait`.
+
+**The signals.** `until` names how much evidence of completion the caller will accept. The two values are a permissiveness ladder, not orthogonal modes.
+
+| `until` | Resolves on | `cause` | For |
+|---|---|---|---|
+| `quiet` | The Session settled, **or** the foreground command exited, **or** the Session emitted a notification | `quiet` / `exit` / `bell` | Agents that never exit — `claude`, `codex` |
+| `exit` | The foreground command exited. Nothing else | `exit` | Builds, test runs, migrations |
+
+`quiet` includes exit because no caller wants "wake me when it settles" and also wants to keep blocking after the thing died — without it, a peer that crashes hangs its caller until the timeout. It includes the bell because an explicit `OSC 9` / `BEL` is stronger evidence than inferred silence: ignoring the peer saying "I need input" while waiting for it to go quiet would be perverse. `exit` excludes the bell deliberately — plenty of build tools ring on a warning, and being the strict one is `exit`'s whole job.
+
+Settling comes from the always-on detector, which needs no shell integration and cannot fire until it has been BUSY. A Session at a prompt is silent, but silent is not settled, which is what stops `dor send` followed immediately by an await from racing on the silence before the peer's first byte.
+
+**Is there anything to wait for?** The one thing silence cannot distinguish is a peer that delivered its final answer long ago from one working quietly.
+
+| At await time | Behavior |
+|---|---|
+| A foreground command is running (`commandExitWatch`) | There is something to wait for. Park, with no grace window. A silent build therefore resolves on its exit rather than being guessed at. |
+| Nothing running | Park for one grace window. Under `quiet` the test is *output*; under `exit` it is a *command start*. Whichever arrives cancels the window and the await goes on waiting for a real signal. Neither → resolve `cause: idle`. |
+
+`idle` is a resolution, not a failure: a caller that asked for quiet and found quiet got what it asked for. It is a distinct `cause` rather than a distinct failure so simple callers can treat success as success, while a careful one can still tell "it settled" from "there was never anything there". Absent shell integration, "is a command running" is unanswerable, so an `exit` await on such a shell falls back to the grace window and resolves `idle` — the host cannot distinguish a shell with no integration from one sitting at a prompt, so it degrades rather than erroring.
+
+**Resolution consumes only the ring it resolved on.** An await that arrives while the Session is already ringing resolves immediately, with the cause named by *that ring's own source*: a protocol ring is `bell`, a command-exit ring is `exit`, a WATCHING ring is `quiet`. Under `exit` only a command-exit ring counts; the others are the human's and the await keeps waiting. Consuming releases that one track's latch and **nothing else** — `todo` is neither set nor cleared, no `ActivityNotification` is dropped, `attentionDismissedRing` is untouched, and `attentionSessionId` is never set.
+
+Setting a TODO after a successful await was considered and rejected. TODO means *a human owes this pane attention*, and after an await nobody does: a program asked to be told, was told, and acted. It would also leak — the last await of an orchestration would strand a marker for an event that was fully handled — and because TODO feeds the Workspace union, an orchestration awaiting across several panes would light the whole Workspace up as needing attention. Not clearing a *pre-existing* TODO is the same rule in reverse: one left by an unrelated earlier event is still owed to the human.
+
+**Absorption: absorb the summons, keep the receipt.** A completion an await consumes never latches a ring, so it does not ring the bell, speak an alarm, or push to a paired phone — the program is already handling it, and summoning the human too is noise. Nothing quieter is substituted: a receipt the human must clear by hand is the same noise in a smaller font, and forensics after a failure come from the pane's own scrollback. Absorption is **per-signal, not per-Session**: an await consumes the signal it resolved on, and if the human independently holds a WATCHING rule on that Session, the next settle rings for them as usual. A failed await absorbs nothing — a timeout, a death, or a cancel claims no completion, so a crashed orchestration cannot silently eat the one signal that would have told the human the build finished.
+
+Claiming is delivery. Once a completion has been handed to an await the wait is settled and a later `cancel()` is a no-op; there is no release-after-claim. The window between claiming and the caller actually reading the outcome is therefore unacknowledged, and that is accepted: closing it would need a two-phase claim on every completion to cover a process that dies in the microseconds after its answer was computed.
+
+**Timing.** Every window derives from `cfg.alert`, so an await inherits the tuning the bell has had in the field:
+
+| Window | Value | Source |
+|---|---|---|
+| Grace — "did anything start?" | 2000ms | `AWAIT_GRACE_MS` = `busyCandidateGap` + `busyConfirmGap`, the detector's actual floor for reaching BUSY |
+| Settle — "has it stopped?" | 5000ms | `mightNeedAttention` + `needsAttentionConfirm` |
+| Ceiling | `timeoutMs` | The caller's, and the only number not derived from `cfg.alert` |
+
+`timeoutMs` is not an alert-tuning knob: it is the safety rail on a blocking call inside an agent loop, so a wedged peer cannot hang its caller forever. It is enforced **host-side**, alongside the grace and settle windows, so no intermediate hop can reap a parked await early and no caller can park forever. Like the inactivity timeout it originates a process away and ends up in `setTimeout`, so a non-finite or non-positive value is rejected — the request settles `cancelled`, having absorbed nothing.
+
+Several awaits may park on one Session. They share a single claimant, so one completion is delivered to every await whose condition it satisfies rather than only to whoever registered first, and each resolves on the first qualifying signal after it registered.
+
+In VS Code the `AlertManager` lives in the extension host while `dor` control requests land in a webview, so an await crosses that boundary: the webview posts `alert:await` and, if it gives up, `alert:awaitCancel`; the host answers exactly one `alert:awaitResult` per request — a cancel included, so a claim is never released twice. The wait itself never leaves the host. A webview that disposes cancels everything it had parked, because a caller that cannot be answered must not go on absorbing. Source of truth: `vscode-ext/src/message-router.ts` and `VSCodeAdapter.alertAwait`; the other hosts run the `AlertManager` in the same process and call `awaitCompletion` directly.
+
+| Situation | Outcome |
+|---|---|
+| Already ringing at call time | Resolves immediately, `waitedMs: 0`, cause = that ring's source. |
+| `quiet`, peer mid-turn and animating | Parks; resolves `quiet` on the settle. |
+| `quiet`, peer already delivered its answer | Nothing running, no output within the grace window → `idle`. |
+| `quiet`, silent build running | A command is running, so no grace window. Resolves `exit` when it exits. |
+| `exit`, command hangs on an interactive prompt | Blocks to the ceiling → `timeout`. `quiet` is the answer for callers who want waking when a build stalls. |
+| Peer emits `OSC 9` "needs input" | `quiet` resolves `bell`; `exit` ignores it. The await claims a human-directed request on the grounds that its caller is the one positioned to answer it. |
+| PTY exits, or the Session is removed | Every await still parked resolves `died`. A command-exit dispatch runs first, so a peer that ends by finishing a command resolves normally instead. |
+| The manager is disposed | Everything parked resolves `cancelled`. |
 
 ## WATCHING Track
 
@@ -272,7 +333,7 @@ Alert-specific robustness requirements: multiple Sessions ring independently; mi
 | File | Role |
 |------|------|
 | `lib/src/lib/quiesce-detector.ts` | The always-on per-Session output/silence detector: `QuiesceStatus` timers, `onSettled`, `reset()` |
-| `lib/src/lib/alert-manager.ts` | `AlertManager`: the three tracks, the detectors, the rule set, attention, TODO, notification storage, status projection |
+| `lib/src/lib/alert-manager.ts` | `AlertManager`: the three tracks, the detectors, the rule set, attention, TODO, notification storage, status projection, the completion-event seam, and `awaitCompletion` |
 | `lib/src/lib/watched-commands.ts` | Persisted WATCHING rule set and its push to the host |
 | `lib/src/lib/watched-command-host.ts` | First-seed + mutation/broadcast coordinator for a host shared by multiple renderers |
 | `lib/src/lib/alert-settings.ts` | Persisted alarm settings, their validation/clamping, and their push to the host |

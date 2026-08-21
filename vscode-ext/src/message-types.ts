@@ -1,4 +1,10 @@
-import type { ActivityNotification, SessionStatus, TodoState } from '../../lib/src/lib/alert-manager';
+import type {
+  ActivityNotification,
+  AwaitOutcome,
+  AwaitUntil,
+  SessionStatus,
+  TodoState,
+} from '../../lib/src/lib/alert-manager';
 import type { AlertSettings } from '../../lib/src/lib/alert-settings';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { TerminalColors } from '../../lib/src/lib/terminal-protocol';
@@ -55,7 +61,11 @@ export type WebviewMessage =
   | { type: 'alert:clearAttention'; id?: string }
   | { type: 'alert:toggleTodo'; id: string }
   | { type: 'alert:markTodo'; id: string }
-  | { type: 'alert:clearTodo'; id: string };
+  | { type: 'alert:clearTodo'; id: string }
+  // `dor await`: the AlertManager lives here, so the wait is parked in the
+  // extension host and only its outcome crosses back (docs/specs/alert.md → Await).
+  | { type: 'alert:await'; requestId: string; id: string; until: AwaitUntil; timeoutMs: number }
+  | { type: 'alert:awaitCancel'; requestId: string };
 
 export interface PtyInfo {
   id: string;
@@ -109,6 +119,8 @@ export type ExtensionMessage =
     todo: TodoState;
     notification: ActivityNotification | null;
     attentionDismissedRing: boolean;
+    awaited: boolean;
   }
+  | { type: 'alert:awaitResult'; requestId: string; outcome: AwaitOutcome }
   | { type: 'alert:watchedCommands'; names: string[] }
   | { type: 'alert:settings'; settings: AlertSettings };

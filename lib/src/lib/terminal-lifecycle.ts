@@ -349,6 +349,7 @@ function setupTerminalEntry(id: string, options: { untouched?: boolean } = {}): 
     todo: false,
     notification: null,
     attentionDismissedRing: false,
+    awaited: false,
     isReplaying: false,
     untouched: options.untouched ?? false,
   };
@@ -359,6 +360,7 @@ function setupTerminalEntry(id: string, options: { untouched?: boolean } = {}): 
     if (primed.watchingEnabled !== undefined) entry.watchingEnabled = primed.watchingEnabled;
     if (primed.todo !== undefined) entry.todo = primed.todo;
     if (primed.notification !== undefined) entry.notification = primed.notification;
+    if (primed.awaited !== undefined) entry.awaited = primed.awaited;
   }
 
   registry.set(id, entry);

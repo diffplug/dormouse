@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AlertManager } from './alert-manager';
-import type { CompletionEvent } from './alert-manager';
+import { AlertManager, AWAIT_GRACE_MS } from './alert-manager';
+import type { AwaitHandle, AwaitOutcome, CompletionEvent } from './alert-manager';
 import { applyTerminalProtocolEvents } from './terminal-protocol';
 
 describe('AlertManager in isolation', () => {
@@ -1042,6 +1042,426 @@ describe('AlertManager in isolation', () => {
         todo: true,
         notification: { source: 'COMMAND_EXIT', title: 'Command finished', body: 'pnpm build exited 1' },
       });
+    });
+  });
+
+  // --- Await (`docs/specs/alert.md` -> Await) ---
+
+  describe('awaitCompletion', () => {
+    /** Long enough that no test below reaches it by accident. */
+    const NEVER = 600_000;
+
+    /**
+     * Watch a parked await without blocking on it: the reader flushes
+     * microtasks and answers `null` while the await is still waiting.
+     */
+    function watch(handle: AwaitHandle): () => Promise<AwaitOutcome | null> {
+      let seen: AwaitOutcome | null = null;
+      void handle.promise.then((outcome) => {
+        seen = outcome;
+      });
+      return async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+        return seen;
+      };
+    }
+
+    /** A command start with no WATCHING rule behind it, so nothing settles into a ring. */
+    function runCommand(id: string, commandLine = 'pnpm build'): void {
+      manager.applyTerminalSemanticEvents(id, [
+        { type: 'commandLine', commandLine },
+        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+      ]);
+    }
+
+    // 1. Already ringing at call time.
+
+    it('resolves on a protocol ring already latched, consuming only that track', async () => {
+      const id = 'await-standing-bell';
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
+      expect(manager.getState(id)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
+
+      const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+
+      expect(await handle.promise).toEqual({ kind: 'resolved', cause: 'bell', waitedMs: 0 });
+      // The ring is gone; the human's TODO and its detail are not the await's to take.
+      expect(manager.getState(id)).toMatchObject({
+        status: 'WATCHING_DISABLED',
+        todo: true,
+        notification: { source: 'OSC 9', title: null, body: 'Build finished' },
+        attentionDismissedRing: false,
+        awaited: false,
+      });
+    });
+
+    it('resolves on a latched WATCHING ring without inventing a TODO', async () => {
+      const id = 'await-standing-quiet';
+      driveToRinging(id);
+      expect(manager.getState(id).todo).toBe(false);
+
+      const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+
+      expect(await handle.promise).toEqual({ kind: 'resolved', cause: 'quiet', waitedMs: 0 });
+      expect(manager.getState(id)).toMatchObject({
+        status: 'NOTHING_TO_SHOW',
+        watchingEnabled: true,
+        todo: false,
+        notification: null,
+      });
+    });
+
+    it('resolves on a latched command-exit ring under either wake condition', async () => {
+      for (const until of ['quiet', 'exit'] as const) {
+        const id = `await-standing-exit-${until}`;
+        manager.attend(id);
+        runCommand(id);
+        vi.advanceTimersByTime(15_000);
+        manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+        expect(manager.getState(id)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
+
+        const handle = manager.awaitCompletion(id, { until, timeoutMs: NEVER });
+
+        expect(await handle.promise).toEqual({ kind: 'resolved', cause: 'exit', waitedMs: 0 });
+        expect(manager.getState(id)).toMatchObject({
+          status: 'WATCHING_DISABLED',
+          todo: true,
+          notification: { source: 'COMMAND_EXIT', title: 'Command finished', body: 'pnpm build exited 0' },
+        });
+      }
+    });
+
+    it('leaves a standing bell alone under --until exit and keeps waiting', async () => {
+      const id = 'await-exit-ignores-standing-bell';
+      runCommand(id);
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'warning' });
+
+      const handle = manager.awaitCompletion(id, { until: 'exit', timeoutMs: NEVER });
+      const outcome = watch(handle);
+
+      expect(await outcome()).toBeNull();
+      // The bell is the human's; only a command exit wakes this caller.
+      expect(manager.getState(id)).toMatchObject({ status: 'ALERT_RINGING', todo: true, awaited: true });
+    });
+
+    it('never sets attention, so the next completion still rings the human', async () => {
+      const id = 'await-does-not-attend';
+      driveToRinging(id);
+
+      const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+      expect(await handle.promise).toMatchObject({ kind: 'resolved', cause: 'quiet' });
+
+      // Attention would suppress this second ring for the whole 15s window.
+      driveToBusy(id);
+      settle();
+      expect(manager.getState(id).status).toBe('ALERT_RINGING');
+    });
+
+    // 2. Claiming the first qualifying completion.
+
+    it('resolves quiet on a settle, claiming it before any ring rule runs', async () => {
+      const id = 'await-quiet-settle';
+      runWatchedCommand(id);
+      manager.clearAttention(id);
+
+      const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+      driveToBusy(id);
+      settle();
+
+      expect(await handle.promise).toEqual({ kind: 'resolved', cause: 'quiet', waitedMs: 6_600 });
+      // The completion went to the program, so it rang nobody and left no marker.
+      expect(manager.getState(id)).toMatchObject({
+        status: 'NOTHING_TO_SHOW',
+        todo: false,
+        notification: null,
+        awaited: false,
+      });
+    });
+
+    it('resolves exit on a command finish under --until quiet', async () => {
+      const id = 'await-quiet-finish';
+      runCommand(id);
+
+      const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+      vi.advanceTimersByTime(4_000);
+      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 2 }]);
+
+      expect(await handle.promise).toEqual({ kind: 'resolved', cause: 'exit', waitedMs: 4_000 });
+    });
+
+    it('resolves bell on an OSC 9 notification under --until quiet', async () => {
+      const id = 'await-quiet-bell';
+      runCommand(id);
+
+      const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'needs input' });
+
+      expect(await handle.promise).toEqual({ kind: 'resolved', cause: 'bell', waitedMs: 0 });
+      expect(manager.getState(id)).toMatchObject({ todo: false, notification: null });
+    });
+
+    it('resolves bell on a progress completion and still clears the cycle', async () => {
+      const id = 'await-quiet-progress';
+      runCommand(id);
+      manager.updateProtocolProgress(id, { state: 'normal', percent: 25 });
+      expect(manager.getState(id).status).toBe('OSC_NOTIF_BUSY');
+
+      const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+      manager.updateProtocolProgress(id, { state: 'normal', percent: 100 });
+
+      expect(await handle.promise).toMatchObject({ kind: 'resolved', cause: 'bell' });
+      expect(manager.getState(id)).toMatchObject({
+        status: 'WATCHING_DISABLED',
+        todo: false,
+        notification: null,
+      });
+    });
+
+    it('ignores a bell and a settle under --until exit, then resolves on the finish', async () => {
+      const id = 'await-exit-strict';
+      runWatchedCommand(id);
+      manager.clearAttention(id);
+
+      const handle = manager.awaitCompletion(id, { until: 'exit', timeoutMs: NEVER });
+      const outcome = watch(handle);
+
+      // A build tool that BELs on a warning must not wake the strict caller...
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'deprecation warning' });
+      expect(await outcome()).toBeNull();
+
+      // ...and neither must falling silent mid-run.
+      driveToBusy(id);
+      settle();
+      expect(await outcome()).toBeNull();
+
+      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      expect(await outcome()).toMatchObject({ kind: 'resolved', cause: 'exit' });
+    });
+
+    // 3. Grace window.
+
+    it('resolves idle when nothing is running and nothing starts', async () => {
+      for (const until of ['quiet', 'exit'] as const) {
+        const id = `await-idle-${until}`;
+        const handle = manager.awaitCompletion(id, { until, timeoutMs: NEVER });
+        const outcome = watch(handle);
+
+        vi.advanceTimersByTime(AWAIT_GRACE_MS - 1);
+        expect(await outcome()).toBeNull();
+
+        vi.advanceTimersByTime(1);
+        expect(await outcome()).toEqual({ kind: 'resolved', cause: 'idle', waitedMs: AWAIT_GRACE_MS });
+      }
+    });
+
+    it('cancels the grace window on output under --until quiet, but not under --until exit', async () => {
+      const quiet = manager.awaitCompletion('await-grace-quiet', { until: 'quiet', timeoutMs: NEVER });
+      const strict = manager.awaitCompletion('await-grace-exit', { until: 'exit', timeoutMs: NEVER });
+      const quietOutcome = watch(quiet);
+      const strictOutcome = watch(strict);
+
+      manager.onData('await-grace-quiet');
+      manager.onData('await-grace-exit');
+      vi.advanceTimersByTime(AWAIT_GRACE_MS);
+
+      // Output is evidence of work for `quiet`; for `exit` only a command start is.
+      expect(await quietOutcome()).toBeNull();
+      expect(await strictOutcome()).toEqual({ kind: 'resolved', cause: 'idle', waitedMs: AWAIT_GRACE_MS });
+    });
+
+    it('cancels the grace window on a command start under --until exit', async () => {
+      const id = 'await-grace-command-start';
+      const handle = manager.awaitCompletion(id, { until: 'exit', timeoutMs: NEVER });
+      const outcome = watch(handle);
+
+      runCommand(id);
+      vi.advanceTimersByTime(AWAIT_GRACE_MS);
+      expect(await outcome()).toBeNull();
+
+      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      expect(await outcome()).toMatchObject({ kind: 'resolved', cause: 'exit' });
+    });
+
+    it('runs no grace window at all while a foreground command is running', async () => {
+      const id = 'await-grace-suppressed';
+      runCommand(id);
+
+      const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+      const outcome = watch(handle);
+
+      vi.advanceTimersByTime(AWAIT_GRACE_MS * 2);
+      expect(await outcome()).toBeNull();
+    });
+
+    it('lets a completion arriving during the grace window resolve normally', async () => {
+      const id = 'await-grace-bell';
+      const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+
+      vi.advanceTimersByTime(500);
+      manager.notifyFromProtocol(id, { source: 'BEL', title: 'Terminal bell', body: null });
+
+      expect(await handle.promise).toEqual({ kind: 'resolved', cause: 'bell', waitedMs: 500 });
+    });
+
+    // 4. Timeout.
+
+    it('times out host-side on the caller ceiling', async () => {
+      const id = 'await-timeout';
+      runCommand(id);
+
+      const handle = manager.awaitCompletion(id, { until: 'exit', timeoutMs: 10_000 });
+      const outcome = watch(handle);
+
+      vi.advanceTimersByTime(9_999);
+      expect(await outcome()).toBeNull();
+
+      vi.advanceTimersByTime(1);
+      expect(await outcome()).toEqual({ kind: 'timeout', waitedMs: 10_000 });
+    });
+
+    it('refuses a nonsensical ceiling instead of installing a broken timer', async () => {
+      const id = 'await-bad-timeout';
+      for (const timeoutMs of [Number.NaN, 0, -1, Number.POSITIVE_INFINITY]) {
+        const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs });
+        expect(await handle.promise).toEqual({ kind: 'cancelled', waitedMs: 0 });
+      }
+      expect(manager.getState(id).awaited).toBe(false);
+    });
+
+    // 5. Death.
+
+    it('reports the command exit first when the PTY dies mid-run', async () => {
+      const id = 'await-pty-exit-running';
+      runCommand(id);
+
+      const handle = manager.awaitCompletion(id, { until: 'exit', timeoutMs: NEVER });
+      vi.advanceTimersByTime(3_000);
+      manager.onExit(id, 1);
+
+      // The peer rang on its way out, so it resolves normally rather than as a death.
+      expect(await handle.promise).toEqual({ kind: 'resolved', cause: 'exit', waitedMs: 3_000 });
+    });
+
+    it('reports death when the PTY exits with nothing running', async () => {
+      const id = 'await-pty-exit-idle';
+      // An entry with no command watch: the detector exists, nothing is running.
+      manager.onData(id);
+
+      const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+      vi.advanceTimersByTime(200);
+      manager.onExit(id, 0);
+
+      expect(await handle.promise).toEqual({ kind: 'died', waitedMs: 200 });
+    });
+
+    it('reports death when the Session is removed', async () => {
+      const id = 'await-removed';
+      runCommand(id);
+
+      const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+      vi.advanceTimersByTime(1_000);
+      manager.remove(id);
+
+      expect(await handle.promise).toEqual({ kind: 'died', waitedMs: 1_000 });
+    });
+
+    it('cancels everything still parked when the manager is disposed', async () => {
+      const id = 'await-disposed';
+      runCommand(id);
+      const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+
+      manager.dispose();
+
+      expect(await handle.promise).toEqual({ kind: 'cancelled', waitedMs: 0 });
+      // afterEach disposes again; a second dispose must stay a no-op.
+    });
+
+    // 6. Cancellation.
+
+    it('cancels a parked await and ignores a cancel after it settled', async () => {
+      const id = 'await-cancel';
+      runCommand(id);
+
+      const cancelled = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+      vi.advanceTimersByTime(750);
+      cancelled.cancel();
+      expect(await cancelled.promise).toEqual({ kind: 'cancelled', waitedMs: 750 });
+
+      // Claiming is delivery: once a completion has been handed over there is
+      // nothing left to release, so a late cancel changes nothing.
+      const delivered = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'done' });
+      delivered.cancel();
+      expect(await delivered.promise).toMatchObject({ kind: 'resolved', cause: 'bell' });
+      expect(manager.getState(id)).toMatchObject({ todo: false, notification: null, awaited: false });
+    });
+
+    // 7. Independence.
+
+    it('delivers one completion to every await parked on the Session', async () => {
+      const id = 'await-two-waiters';
+      runWatchedCommand(id);
+      manager.clearAttention(id);
+
+      const first = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+      vi.advanceTimersByTime(1_000);
+      const second = manager.awaitCompletion(id, { until: 'exit', timeoutMs: NEVER });
+      const secondOutcome = watch(second);
+      expect(manager.getState(id).awaited).toBe(true);
+
+      driveToBusy(id);
+      settle();
+
+      // Each wakes on the first signal that qualifies for *its* condition.
+      expect(await first.promise).toEqual({ kind: 'resolved', cause: 'quiet', waitedMs: 7_600 });
+      expect(await secondOutcome()).toBeNull();
+      expect(manager.getState(id).awaited).toBe(true);
+
+      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      expect(await secondOutcome()).toMatchObject({ kind: 'resolved', cause: 'exit' });
+      expect(manager.getState(id).awaited).toBe(false);
+    });
+
+    it('wakes two identical awaits on the same completion', async () => {
+      const id = 'await-two-identical';
+      runCommand(id);
+
+      const first = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+      const second = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'done' });
+
+      expect(await first.promise).toMatchObject({ kind: 'resolved', cause: 'bell' });
+      expect(await second.promise).toMatchObject({ kind: 'resolved', cause: 'bell' });
+    });
+
+    // 9. The public flag.
+
+    it('publishes awaited on every register and every settlement path', async () => {
+      const id = 'await-flag';
+      const flags: boolean[] = [];
+      manager.onStateChange((_id, state) => {
+        if (_id === id) flags.push(state.awaited);
+      });
+      runCommand(id);
+      expect(flags.at(-1)).toBe(false);
+
+      const timedOut = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: 5_000 });
+      expect(flags.at(-1)).toBe(true);
+      vi.advanceTimersByTime(5_000);
+      expect(await timedOut.promise).toMatchObject({ kind: 'timeout' });
+      expect(flags.at(-1)).toBe(false);
+
+      const cancelled = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+      expect(flags.at(-1)).toBe(true);
+      cancelled.cancel();
+      expect(await cancelled.promise).toMatchObject({ kind: 'cancelled' });
+      expect(flags.at(-1)).toBe(false);
+
+      const resolved = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+      expect(flags.at(-1)).toBe(true);
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'done' });
+      expect(await resolved.promise).toMatchObject({ kind: 'resolved', cause: 'bell' });
+      expect(flags.at(-1)).toBe(false);
     });
   });
 });

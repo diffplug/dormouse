@@ -1,6 +1,7 @@
 import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo, RemoteHostLink } from './types';
 import { OPEN_PORT_TIMEOUT_MS } from './types';
 import { createRemoteHostLinkClient } from '../../host/remote/link-client';
+import type { AwaitHandle, AwaitOptions, AwaitOutcome } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
 import { readInjectedRecoveryCommands } from '../vscode-recovery-global';
 import { setDefaultShellOpts } from '../shell-defaults';
@@ -133,6 +134,7 @@ export class VSCodeAdapter implements PlatformAdapter {
             todo: msg.todo,
             notification: msg.notification ?? null,
             attentionDismissedRing: msg.attentionDismissedRing,
+            awaited: msg.awaited,
           });
         }
       } else if (msg.type === 'alert:watchedCommands') {
@@ -483,6 +485,32 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   alertClearTodo(id: string): void {
     this.vscode.postMessage({ type: 'alert:clearTodo', id });
+  }
+
+  /**
+   * The `AlertManager` lives in the extension host, so the wait parks there and
+   * only its outcome crosses back. Unlike `requestResponse` this has no local
+   * deadline — the ceiling is `timeoutMs`, enforced host-side — and `cancel()`
+   * asks rather than answers: the `cancelled` outcome arrives on the same
+   * result message as every other, so a claim is never released twice.
+   */
+  alertAwait(id: string, options: AwaitOptions): AwaitHandle {
+    const requestId = `req-${++this.nextRequestId}`;
+    const promise = new Promise<AwaitOutcome>((resolve) => {
+      const handler = (event: MessageEvent) => {
+        if (!isHostMessage(event.data, this.hostMessageToken)) return;
+        const msg = event.data;
+        if (msg.type !== 'alert:awaitResult' || msg.requestId !== requestId) return;
+        window.removeEventListener('message', handler);
+        resolve(msg.outcome as AwaitOutcome);
+      };
+      window.addEventListener('message', handler);
+    });
+    this.vscode.postMessage({ type: 'alert:await', requestId, id, until: options.until, timeoutMs: options.timeoutMs });
+    return {
+      promise,
+      cancel: () => this.vscode.postMessage({ type: 'alert:awaitCancel', requestId }),
+    };
   }
 
   onAlertState(handler: (detail: AlertStateDetail) => void): void {
