@@ -848,7 +848,6 @@ export class AlertManager {
       entry.todo = true;
     }
     this.markCommandExitSeen(entry);
-    entry.detector.reset();
     this.notify(id);
   }
 

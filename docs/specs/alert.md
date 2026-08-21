@@ -157,6 +157,7 @@ Source of truth: `QuiesceDetector` in `lib/src/lib/quiesce-detector.ts` implemen
 - First output starts candidate tracking without changing status; unconfirmed `MIGHT_BE_BUSY` returns to `NOTHING_TO_SHOW`.
 - The detector never holds `ALERT_RINGING`. A settle is reported once and the detector immediately returns to `NOTHING_TO_SHOW`; the ring it may raise latches in the Session entry (`watchingRingingCommand`), which is what makes the public status `ALERT_RINGING` and what keeps it there through further output.
 - A settle rings only if a rule matches the foreground command *and* the Session lacks attention at the confirmation moment. Attention at confirmation time suppresses the ring.
+- Attention alone never resets the detector: an in-flight `BUSY` -> `MIGHT_NEED_ATTENTION` -> settled transition continues, so a parked quiet await still receives its completion. Only attending or dismissing an actual WATCHING ring resets it.
 - Attending or dismissing a WATCHING ring resets the detector to `NOTHING_TO_SHOW`.
 - Rings must be caused by a fresh transition — a settle the detector just reported — never by rerender, theme change, remount, minimize, or reattach.
 

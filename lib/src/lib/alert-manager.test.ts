@@ -1185,6 +1185,29 @@ describe('AlertManager in isolation', () => {
       });
     });
 
+    it.each([
+      ['BUSY', 0, 5_000],
+      ['MIGHT_NEED_ATTENTION', 2_000, 3_000],
+    ] as const)('keeps a parked quiet await armed when attention arrives during %s', async (_status, beforeAttendMs, afterAttendMs) => {
+      const id = `await-quiet-attended-${_status}`;
+      runWatchedCommand(id);
+      manager.clearAttention(id);
+
+      const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+      driveToBusy(id);
+      vi.advanceTimersByTime(beforeAttendMs);
+      expect(manager.getState(id).status).toBe(_status);
+
+      manager.attend(id);
+      vi.advanceTimersByTime(afterAttendMs);
+
+      expect(await handle.promise).toEqual({
+        kind: 'resolved',
+        cause: 'quiet',
+        waitedMs: 6_600,
+      });
+    });
+
     it('resolves exit on a command finish under --until quiet', async () => {
       const id = 'await-quiet-finish';
       runCommand(id);
