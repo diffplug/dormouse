@@ -25,6 +25,13 @@ import { boundedPushText } from './push.js';
 export const DEFAULT_PAIRING_TTL_MS = 5 * 60 * 1000;
 
 /**
+ * How many tickets one ceremony will hold. Far above any real use — a human
+ * approves one at a time — and low enough that a hostile relay cannot turn
+ * `pair` frames into unbounded memory in the process that owns the PTYs.
+ */
+const MAX_PENDING_TICKETS = 64;
+
+/**
  * How recent the session's last server-verified passkey assertion must be for
  * the Server to relay a pairing request. Tight on purpose: it covers
  * "sign in, then tap Pair", and anything slower costs exactly one extra
@@ -68,9 +75,23 @@ export const PAIRING_LABEL_LIMIT = 64;
  */
 export const PAIRING_FINGERPRINT_LENGTH = 8;
 
+/**
+ * Where the fingerprint starts, and why it is not zero.
+ *
+ * A device public key is a *raw* P-256 point: the uncompressed-form tag `0x04`
+ * followed by X and Y. Base64url of that always begins `B`, and its second
+ * character only ever takes 16 values (two fixed bits from the tag plus four
+ * from X) — verified empirically over generated keys. Slicing from zero would
+ * therefore spend two of eight displayed characters on ~4 bits, leaving ~40
+ * where the length implies ~48. Since the whole point of the fingerprint is
+ * that a human compares it against another one, every displayed character has
+ * to be doing work.
+ */
+const FINGERPRINT_OFFSET = 2;
+
 /** The fingerprint of a device public key, for display to a human. */
 export function pairingFingerprint(devicePublicKey: string): string {
-  return devicePublicKey.slice(0, PAIRING_FINGERPRINT_LENGTH);
+  return devicePublicKey.slice(FINGERPRINT_OFFSET, FINGERPRINT_OFFSET + PAIRING_FINGERPRINT_LENGTH);
 }
 
 /**
@@ -88,12 +109,28 @@ export function isPairingRequest(request: unknown): request is PairingRequest {
   if (!request || typeof request !== 'object') return false;
   const candidate = request as Record<string, unknown>;
   return (
-    typeof candidate.accountId === 'string' &&
-    typeof candidate.passkeyCredentialId === 'string' &&
-    typeof candidate.passkeyPublicKeyHash === 'string' &&
-    typeof candidate.devicePublicKey === 'string' &&
-    typeof candidate.requestedLabel === 'string'
+    isBoundedString(candidate.accountId) &&
+    isBoundedString(candidate.passkeyCredentialId) &&
+    isBoundedString(candidate.passkeyPublicKeyHash) &&
+    isBoundedString(candidate.devicePublicKey) &&
+    isBoundedString(candidate.requestedLabel)
   );
+}
+
+/**
+ * The longest any single `PairingRequest` field may be.
+ *
+ * Type checks alone bound nothing: a megabyte string is a `string`. Every real
+ * field here is a base64url key, a hash, a credential id, or a device name —
+ * all comfortably under this. The frame itself is not otherwise capped
+ * (`@hono/node-ws` constructs its `WebSocketServer` with `ws`'s 100 MiB
+ * default), so this is where a pairing frame stops being able to cost the Host
+ * process memory proportional to what the relay chose to send.
+ */
+const PAIRING_FIELD_LIMIT = 1024;
+
+function isBoundedString(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= PAIRING_FIELD_LIMIT;
 }
 
 /**
@@ -106,6 +143,18 @@ export function isPairingRequest(request: unknown): request is PairingRequest {
  */
 export function boundedPairingLabel(value: unknown): string {
   return boundedPushText(value, { limit: PAIRING_LABEL_LIMIT, fallback: '(unnamed)' });
+}
+
+/**
+ * The other field the approval modal renders, reduced by the same rule.
+ *
+ * `accountId` is as attacker-chosen as the label is when the relay is hostile,
+ * and bounding one without the other just moves the overflow. The modal has no
+ * max-height, so an unbounded value here pushes Approve and Deny off the
+ * screen — a denial-of-service on the one dialog that must stay usable.
+ */
+export function boundedPairingAccount(value: unknown): string {
+  return boundedPushText(value, { limit: PAIRING_LABEL_LIMIT, fallback: '(unknown)' });
 }
 
 export type PairingState = 'pending' | 'approved' | 'denied' | 'expired';
@@ -227,6 +276,16 @@ export class PairingCeremony {
     const cutoff = this.#now() - this.#ttlMs;
     for (const [pairingId, ticket] of this.#tickets) {
       if (ticket.expiresAt <= cutoff) this.#tickets.delete(pairingId);
+    }
+    // Age alone is rate-bounded, not bounded: a relay that sends pair frames
+    // faster than they expire still grows this map for one whole grace window.
+    // A count cap is the actual bound. Oldest first — `Map` iterates in
+    // insertion order, and the oldest pending request is the one whose human
+    // is least likely to still be looking at the modal.
+    while (this.#tickets.size >= MAX_PENDING_TICKETS) {
+      const oldest = this.#tickets.keys().next();
+      if (oldest.done) break;
+      this.#tickets.delete(oldest.value);
     }
   }
 

@@ -142,15 +142,16 @@ jobs:
 
             --- Subagent 1 -----------------------------------------
             description: supply-chain audit
-            Scope: the `## Dependency Supply Chain` section only.
+            Scope — these sections, and no others:
+              `## Dependency Supply Chain`
             Output file: `audit-supply-chain.md`.
 
             You will need `pnpm install --frozen-lockfile` before the
             generate-deps check; the workspace is already installed by
             an earlier workflow step, so try the check first.
 
-            Qualitative pass — you own the dependency graph and
-            `website/src/data/`'s disclosure snapshots. Look at newly
+            Qualitative pass — you own the dependency graph, the
+            lockfile, and `website/src/`. Look at newly
             added or upgraded runtime dependencies since the last
             audit, anything in the lockfile that resolves outside the
             registry, install scripts in production dependencies, and
@@ -159,10 +160,13 @@ jobs:
 
             --- Subagent 2 -----------------------------------------
             description: CI and secrets audit
-            Scope: the `## GitHub Actions Policies`, `## Automated
-            Maintainer (tend)`, `## VS Code Extension Releases`,
-            `## Desktop Releases`, `## Reporting a Vulnerability`, and
-            `## CI Validation Contract` sections.
+            Scope — these sections, and no others:
+              `## GitHub Actions Policies`
+              `## Automated Maintainer (tend)`
+              `## VS Code Extension Releases`
+              `## Desktop Releases`
+              `## Reporting a Vulnerability`
+              `## CI Validation Contract`
             Output file: `audit-ci-secrets.md`.
 
             The default `$GH_TOKEN` in this environment is a workflow
@@ -180,8 +184,11 @@ jobs:
             record FAIL with the note "PAT scope drifted from
             SECURITY.md".
 
-            Qualitative pass — you own `.github/`, `.config/`, and
-            `scripts/`, plus any code anywhere that touches a secret.
+            Qualitative pass — you own `.github/`, `.config/`,
+            `.claude/`, `scripts/`, and `website/public/` (the Tauri
+            updater manifest shipped apps fetch lives there, so it is a
+            release artifact rather than marketing), plus any code
+            anywhere that touches a secret.
             Check effective `GITHUB_TOKEN` permissions, not just
             declared ones: a job with no `permissions:` block inherits
             the repository default, so read
@@ -190,7 +197,8 @@ jobs:
 
             --- Subagent 3 -----------------------------------------
             description: application security audit
-            Scope: the `## Remote Control` section only.
+            Scope — these sections, and no others:
+              `## Remote Control`
             Output file: `audit-application.md`.
 
             This is a code-and-specs audit of the product's own remote
@@ -235,10 +243,11 @@ jobs:
             not re-report it as a finding — report only if the situation
             has changed or is worse than described.
 
-            You also own the **rest of the product code** qualitatively,
-            so that no part of the repository is outside every domain:
-            `lib/`, `server/`, `server-lib-common/`, `standalone/`,
-            `vscode-ext/`, `dor/`, `dor-lib-common/`, and `deploy/`.
+            You also own the **rest of the repository** qualitatively,
+            so that no top-level path is outside every domain: `lib/`,
+            `server/`, `server-lib-common/`, `standalone/`,
+            `vscode-ext/`, `dor/`, `dor-lib-common/`, `canopy/`,
+            `deploy/`, `docs/`, and the root files.
             Remote control is where the depth goes; the rest is a sweep
             for anything that would be a security hole in a terminal
             that runs local shells — command construction, path

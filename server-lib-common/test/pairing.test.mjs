@@ -1,7 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DEFAULT_PAIRING_TTL_MS, HostAcl, PairingCeremony, PairingError } from '../dist/index.js';
+import {
+  DEFAULT_PAIRING_TTL_MS,
+  HostAcl,
+  PAIRING_FINGERPRINT_LENGTH,
+  PairingCeremony,
+  PairingError,
+  boundedPairingAccount,
+  boundedPairingLabel,
+  isPairingRequest,
+  pairingFingerprint,
+} from '../dist/index.js';
 import { FakeClock } from './harness/actors.mjs';
 
 const REQUEST = {
@@ -112,4 +122,62 @@ test('unknown pairing ids are rejected', () => {
   assertPairingError(() => ceremony.approve('nope', { approvedBy: 'ned' }), 'unknown-pairing');
   assertPairingError(() => ceremony.deny('nope'), 'unknown-pairing');
   assert.equal(ceremony.get('nope'), undefined);
+});
+
+test('isPairingRequest rejects a non-object, a missing field, and a wrong type', () => {
+  assert.equal(isPairingRequest(undefined), false);
+  assert.equal(isPairingRequest('nope'), false);
+  assert.equal(isPairingRequest({ ...REQUEST, devicePublicKey: undefined }), false);
+  assert.equal(isPairingRequest({ ...REQUEST, requestedLabel: { evil: true } }), false);
+  assert.equal(isPairingRequest(REQUEST), true);
+});
+
+test('isPairingRequest bounds field length, not just type', () => {
+  // A megabyte string is a `string`. The frame itself is uncapped (ws defaults
+  // to 100 MiB), so this is the bound that stops a relay choosing how much
+  // memory a pairing costs the Host.
+  assert.equal(isPairingRequest({ ...REQUEST, requestedLabel: 'x'.repeat(1025) }), false);
+  assert.equal(isPairingRequest({ ...REQUEST, accountId: 'x'.repeat(1025) }), false);
+  assert.equal(isPairingRequest({ ...REQUEST, requestedLabel: 'x'.repeat(1024) }), true);
+});
+
+test('boundedPairingLabel and boundedPairingAccount strip bidi and cap length', () => {
+  const hostile = `‮owner${'A'.repeat(500)}`;
+  for (const bounded of [boundedPairingLabel(hostile), boundedPairingAccount(hostile)]) {
+    assert.equal(bounded.includes('‮'), false);
+    assert.ok(Array.from(bounded).length <= 64);
+  }
+  assert.equal(boundedPairingLabel(undefined), '(unnamed)');
+  assert.equal(boundedPairingAccount(undefined), '(unknown)');
+});
+
+test('the fingerprint skips the constant prefix of a raw P-256 point', async () => {
+  // base64url of an uncompressed point always starts `B` (the 0x04 tag), and
+  // its second character only ever takes 16 values. Slicing from zero would
+  // spend two of eight displayed characters on ~4 bits.
+  const { webcrypto } = await import('node:crypto');
+  const pair = await webcrypto.subtle.generateKey(
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['sign', 'verify'],
+  );
+  const raw = Buffer.from(await webcrypto.subtle.exportKey('raw', pair.publicKey));
+  const devicePublicKey = raw.toString('base64url');
+
+  assert.equal(devicePublicKey[0], 'B');
+  const fingerprint = pairingFingerprint(devicePublicKey);
+  assert.equal(fingerprint.length, PAIRING_FINGERPRINT_LENGTH);
+  assert.equal(fingerprint, devicePublicKey.slice(2, 2 + PAIRING_FINGERPRINT_LENGTH));
+});
+
+test('the ticket map is bounded by count, not only by age', () => {
+  // Age alone is rate-bounded: a relay sending faster than the TTL still grows
+  // the map for a whole grace window.
+  const { ceremony } = makeCeremony();
+  const tickets = [];
+  for (let i = 0; i < 500; i++) tickets.push(ceremony.begin(REQUEST));
+
+  // The newest is still live; something far enough back has been evicted.
+  assert.ok(ceremony.get(tickets[tickets.length - 1].pairingId));
+  assert.equal(ceremony.get(tickets[0].pairingId), undefined);
 });

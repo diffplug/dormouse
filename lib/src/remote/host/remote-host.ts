@@ -32,6 +32,7 @@ import {
   WS_ROUTES,
   WS_TOKEN_PARAM,
   authorizeConnection,
+  boundedPairingAccount,
   boundedPairingLabel,
   isPairingRequest,
   type ConnectionDecision,
@@ -346,6 +347,7 @@ export class RemoteHost {
     // sees the same safe value.
     const request: PairingRequest = {
       ...incoming,
+      accountId: boundedPairingAccount(incoming.accountId),
       requestedLabel: boundedPairingLabel(incoming.requestedLabel),
     };
     const ticket = this.#ceremony.begin(request);

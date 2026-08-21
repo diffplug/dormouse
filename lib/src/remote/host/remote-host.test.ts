@@ -218,18 +218,21 @@ describe('RemoteHost frame handling', () => {
       t: 'pair',
       clientId: 'c1',
       request: {
-        accountId: 'owner',
         passkeyCredentialId: 'cred-1',
         passkeyPublicKeyHash: 'hash-1',
         devicePublicKey: 'device-1',
         // A bidi override plus far more text than the modal can show.
         requestedLabel: `\u202eiPhone${'A'.repeat(500)}`,
+        accountId: `\u202eowner${'B'.repeat(500)}`,
       },
     });
 
     const shown = approvals[0]!.request.requestedLabel;
     expect(shown).not.toContain('\u202e');
     expect(Array.from(shown).length).toBeLessThanOrEqual(64);
+    // `accountId` is the modal's other rendered field and is just as
+    // attacker-chosen; bounding one without the other only moves the overflow.
+    expect(Array.from(approvals[0]!.request.accountId).length).toBeLessThanOrEqual(64);
 
     approvals[0]!.approve();
     // The bound applies to what is persisted too, not only to what is shown.
