@@ -257,9 +257,7 @@ ptyManager.onDorControlRequest((request) => {
 // has anything to abort, and it recognizes its own id. Tracking which router got
 // which request would buy nothing a no-op lookup does not already give us.
 ptyManager.onDorControlCancel((cancel) => {
-  for (const router of activeRouters) {
-    router.send({ type: 'dor:controlCancel', requestId: cancel.requestId });
-  }
+  broadcastToWebviews({ type: 'dor:controlCancel', requestId: cancel.requestId });
 });
 
 function getAlertProtocolParser(id: string): TerminalProtocolParser {

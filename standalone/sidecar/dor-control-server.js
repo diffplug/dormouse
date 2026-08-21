@@ -65,8 +65,7 @@ function createDorControlServer({ socketPath, token, send, timeoutMs = 65000 }) 
     socket.on('close', () => {
       for (const [requestId, entry] of pending) {
         if (entry.socket !== socket) continue;
-        if (entry.timeout) clearTimeout(entry.timeout);
-        pending.delete(requestId);
+        reap(requestId);
         send('dor:controlCancel', { requestId });
       }
     });
@@ -101,7 +100,7 @@ function createDorControlServer({ socketPath, token, send, timeoutMs = 65000 }) 
     }
 
     const timeout = setTimeout(() => {
-      pending.delete(request.requestId);
+      reap(request.requestId);
       writeResponse(socket, { requestId: request.requestId, ok: false, error: `timed out waiting for ${request.method}` });
       send('dor:controlCancel', { requestId: request.requestId });
     }, serverTimeoutFor(request.timeoutMs, timeoutMs));
@@ -115,16 +114,24 @@ function createDorControlServer({ socketPath, token, send, timeoutMs = 65000 }) 
     });
   }
 
+  // Forget a pending request and stop its timer. Returns the entry, or
+  // undefined if it was already reaped.
+  function reap(requestId) {
+    const entry = pending.get(requestId);
+    if (!entry) return undefined;
+    pending.delete(requestId);
+    clearTimeout(entry.timeout);
+    return entry;
+  }
+
   function respond(response) {
     const requestId = response?.requestId;
     if (typeof requestId !== 'string') return;
-    const entry = pending.get(requestId);
+    const entry = reap(requestId);
     // Unknown id: the entry was already reaped by a disconnect or a timeout and
     // the webview was told so. A late answer to a cancelled request is expected,
     // not an error — drop it silently.
     if (!entry) return;
-    pending.delete(requestId);
-    clearTimeout(entry.timeout);
     writeResponse(entry.socket, response);
   }
 
