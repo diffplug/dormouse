@@ -512,22 +512,9 @@ export class AlertManager {
    * `attentionDismissedRing` are the human's and stay untouched.
    */
   private consumeAwaitableRing(entry: AlertEntry, until: AwaitUntil): AwaitCause | null {
-    if (until === 'quiet' && entry.protocolStatus === 'ALERT_RINGING') {
-      entry.protocolStatus = 'IDLE';
-      entry.progress = null;
-      return 'bell';
-    }
-    if (entry.commandExitStatus === 'ALERT_RINGING') {
-      entry.commandExitStatus = 'IDLE';
-      return 'exit';
-    }
-    if (until === 'quiet' && entry.watchingRingingCommand !== null) {
-      entry.watchingRingingCommand = null;
-      // Same reasoning as `clearAllRingsIfActive`: the tail of the run that
-      // just rang must not immediately settle again.
-      entry.detector.reset();
-      return 'quiet';
-    }
+    if (until === 'quiet' && this.releaseRing(entry, 'protocol')) return 'bell';
+    if (this.releaseRing(entry, 'commandExit')) return 'exit';
+    if (until === 'quiet' && this.releaseRing(entry, 'watching')) return 'quiet';
     return null;
   }
 
@@ -789,24 +776,35 @@ export class AlertManager {
 
   /** Release every latched ring across the three tracks. Returns whether any was active. */
   private clearAllRingsIfActive(entry: AlertEntry): boolean {
-    let cleared = false;
-    if (entry.protocolStatus === 'ALERT_RINGING') {
-      entry.protocolStatus = 'IDLE';
-      entry.progress = null;
-      cleared = true;
+    // Release all three, no short-circuit.
+    const released = [
+      this.releaseRing(entry, 'protocol'),
+      this.releaseRing(entry, 'commandExit'),
+      this.releaseRing(entry, 'watching'),
+    ];
+    return released.includes(true);
+  }
+
+  /** Release one track's latched ring. Returns whether it was ringing. */
+  private releaseRing(entry: AlertEntry, track: 'protocol' | 'commandExit' | 'watching'): boolean {
+    switch (track) {
+      case 'protocol':
+        if (entry.protocolStatus !== 'ALERT_RINGING') return false;
+        entry.protocolStatus = 'IDLE';
+        entry.progress = null;
+        return true;
+      case 'commandExit':
+        if (entry.commandExitStatus !== 'ALERT_RINGING') return false;
+        entry.commandExitStatus = 'IDLE';
+        return true;
+      case 'watching':
+        if (entry.watchingRingingCommand === null) return false;
+        entry.watchingRingingCommand = null;
+        // Releasing a WATCHING ring starts the detector over, so the tail of
+        // the run that just rang cannot immediately settle again.
+        entry.detector.reset();
+        return true;
     }
-    if (entry.commandExitStatus === 'ALERT_RINGING') {
-      entry.commandExitStatus = 'IDLE';
-      cleared = true;
-    }
-    if (entry.watchingRingingCommand !== null) {
-      entry.watchingRingingCommand = null;
-      cleared = true;
-      // Attending or dismissing a WATCHING ring starts the detector over, so
-      // the tail of the run that just rang cannot immediately settle again.
-      entry.detector.reset();
-    }
-    return cleared;
   }
 
   // --- Attention tracking ---

@@ -196,26 +196,45 @@ export class VSCodeAdapter implements PlatformAdapter {
    */
   private requestResponse<T>(requestType: string, responseType: string, data: Record<string, unknown>, extract: (msg: any) => T, timeoutMs = 1000): Promise<T | null> {
     const requestId = `req-${++this.nextRequestId}`;
+    const reply = this.awaitHostReply(responseType, requestId, extract);
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
-        window.removeEventListener('message', handler);
+        reply.detach();
         resolve(null);
       }, timeoutMs);
-      const handler = (event: MessageEvent) => {
+      void reply.promise.then((value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      });
+      this.vscode.postMessage({ type: requestType, ...data, requestId });
+    });
+  }
+
+  /**
+   * One-shot listener for the host reply correlated by `requestId`. `detach`
+   * stops listening without resolving (a caller's own deadline fired).
+   */
+  private awaitHostReply<T>(responseType: string, requestId: string, extract: (msg: any) => T): { promise: Promise<T>; detach(): void } {
+    let handler: ((event: MessageEvent) => void) | null = null;
+    const detach = (): void => {
+      if (!handler) return;
+      window.removeEventListener('message', handler);
+      handler = null;
+    };
+    const promise = new Promise<T>((resolve) => {
+      handler = (event: MessageEvent) => {
         // Same guard as the main listener: a request/response reply carries
         // host-supplied data (a proxy URL, scrollback, clipboard contents), and
         // a forged one racing the real reply would win on first match.
         if (!isHostMessage(event.data, this.hostMessageToken)) return;
         const msg = event.data;
-        if (msg.type === responseType && msg.requestId === requestId) {
-          clearTimeout(timeout);
-          window.removeEventListener('message', handler);
-          resolve(extract(msg));
-        }
+        if (msg.type !== responseType || msg.requestId !== requestId) return;
+        detach();
+        resolve(extract(msg));
       };
       window.addEventListener('message', handler);
-      this.vscode.postMessage({ type: requestType, ...data, requestId });
     });
+    return { promise, detach };
   }
 
   async init(): Promise<void> {
@@ -496,16 +515,7 @@ export class VSCodeAdapter implements PlatformAdapter {
    */
   alertAwait(id: string, options: AwaitOptions): AwaitHandle {
     const requestId = `req-${++this.nextRequestId}`;
-    const promise = new Promise<AwaitOutcome>((resolve) => {
-      const handler = (event: MessageEvent) => {
-        if (!isHostMessage(event.data, this.hostMessageToken)) return;
-        const msg = event.data;
-        if (msg.type !== 'alert:awaitResult' || msg.requestId !== requestId) return;
-        window.removeEventListener('message', handler);
-        resolve(msg.outcome as AwaitOutcome);
-      };
-      window.addEventListener('message', handler);
-    });
+    const { promise } = this.awaitHostReply('alert:awaitResult', requestId, (msg) => msg.outcome as AwaitOutcome);
     this.vscode.postMessage({ type: 'alert:await', requestId, id, until: options.until, timeoutMs: options.timeoutMs });
     return {
       promise,

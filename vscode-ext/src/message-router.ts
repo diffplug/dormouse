@@ -353,6 +353,13 @@ export function attachRouter(
     }
   }
 
+  // A webview that went away cannot deliver an outcome, and an await that
+  // delivers nothing must not hold a completion claim open.
+  function cancelAllPendingAwaits(): void {
+    for (const handle of [...pendingAwaits.values()]) handle.cancel();
+    pendingAwaits.clear();
+  }
+
   function flushSessionSave(timeoutMs = 1000): Promise<void> {
     if (disposed || !disconnectWebview) return Promise.resolve();
 
@@ -857,10 +864,7 @@ export function attachRouter(
         if (!request.pending.delete(router)) continue;
         if (request.pending.size === 0) request.settle();
       }
-      // A webview that went away cannot deliver an outcome, and an await that
-      // delivers nothing must not hold a completion claim open.
-      for (const handle of [...pendingAwaits.values()]) handle.cancel();
-      pendingAwaits.clear();
+      cancelAllPendingAwaits();
       removeWatchedCommandListener();
       removeAlertSettingsListener();
       resolveAllFlushRequests();
