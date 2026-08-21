@@ -273,7 +273,7 @@ Each tier is implemented by one of two backends. The **VSCode build** (all platf
 
 - **posix** — backslash-escape each metacharacter, matching macOS Terminal's drag-and-drop format so TUIs like `claude` recognize the token as a path. Paths containing newline/CR are single-quote-wrapped instead, since bash swallows `\<newline>` as a line continuation.
 - **cmd** — wrap in double quotes, doubling any embedded `"`. Sound only because `cmd.exe` performs no expansion inside double quotes.
-- **powershell** — a quote-free path is left bare; anything else is single-quote-wrapped with embedded `'` doubled, reusing `dor`'s `quotePowerShellArg`. PowerShell's *double*-quoted strings are expandable, so cmd-style quoting there would leave `$(...)` subexpressions and `$name` interpolations live in a filename the user is about to press Enter on (dormouse#430).
+- **powershell** — a path built only from characters that are inert in argument mode is left bare; anything else is single-quote-wrapped with embedded `'` doubled, reusing `dor`'s `quotePowerShellArg`. PowerShell's *double*-quoted strings are expandable, so cmd-style quoting there would leave `$(...)` subexpressions and `$name` interpolations live in a filename the user is about to press Enter on (dormouse#430). The bare set deliberately excludes `,`, which argument mode reads as the array operator — a bare `C:\a,b.png` would reach the command as two arguments.
 
 Source of truth: `lib/src/lib/shell-escape.ts` (dispatch + posix/cmd rules), `dor/src/commands/shell-quote.ts` (`shellCommandKind`, `quotePowerShellArg`).
 

@@ -178,6 +178,17 @@ describe('shellEscapePath shell dispatch', () => {
     expect(shellEscapePath('C:\\Users\\a b.png')).toBe(`'C:\\Users\\a b.png'`);
   });
 
+  // PowerShell's argument mode reads a bare comma as the array operator, so an
+  // unquoted `C:\a,b.png` would reach the command as two arguments.
+  it('quotes a comma-bearing path in a PowerShell pane', async () => {
+    const { shellEscapePath } = await importShellEscape({
+      isMac: false,
+      isWindows: true,
+      shell: 'powershell.exe',
+    });
+    expect(shellEscapePath('C:\\Users\\a,b.png')).toBe(`'C:\\Users\\a,b.png'`);
+  });
+
   // Git Bash / WSL panes on Windows parse posix quoting, not cmd quoting.
   it('uses posix escape for a bash pane on Windows', async () => {
     const { shellEscapePath } = await importShellEscape({

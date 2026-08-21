@@ -1,5 +1,5 @@
 import { quotePowerShellArg, shellCommandKind, type ShellCommandKind } from 'dor/commands/shell-quote';
-import { IS_MAC, IS_WINDOWS, PLATFORM_STRING } from './platform';
+import { PLATFORM_STRING } from './platform';
 import { getDefaultShellOpts } from './shell-defaults';
 
 // Matches macOS Terminal's drag-and-drop format: backslash-escape each shell
@@ -35,12 +35,12 @@ export function shellEscapeWindows(input: string): string {
  * a Windows host runs PowerShell, Git Bash, and WSL panes as readily as cmd.
  *
  * This mirrors `dor`'s quoting (docs/specs/dor-cli.md): the app-global default
- * shell stands in for the pane's shell, which is not tracked per-session.
+ * shell stands in for the pane's shell, which is not tracked per-session. The
+ * platform fallback is `shellCommandKind`'s own — an unset shell classifies as
+ * `cmd` on Windows and `posix` everywhere else — so the rule lives in one place.
  */
 function paneShellKind(): ShellCommandKind {
-  const shell = getDefaultShellOpts()?.shell;
-  if (!shell) return !IS_MAC && IS_WINDOWS ? 'cmd' : 'posix';
-  return shellCommandKind(shell, PLATFORM_STRING);
+  return shellCommandKind(getDefaultShellOpts()?.shell, PLATFORM_STRING);
 }
 
 /**
