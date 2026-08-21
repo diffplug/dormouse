@@ -18,7 +18,7 @@ import { sendCommand } from './commands/send.js';
 import { skillCommand } from './commands/skill.js';
 import { splitCommand } from './commands/split.js';
 import { versionCommand } from './commands/version.js';
-import { errorMessage, fail } from './commands/shared.js';
+import { errorLine, errorMessage, fail } from './commands/shared.js';
 import type {
   CliEnv,
   CliOptions,
@@ -34,7 +34,7 @@ export type {
   AgentBrowserSurfaceRequest,
   AgentBrowserSurfaceResponse,
   AwaitCause,
-  AwaitOutcome,
+  AwaitSurfaceOutcome,
   AwaitSurfaceRequest,
   AwaitSurfaceResponse,
   AwaitUntil,
@@ -103,7 +103,7 @@ const ROUTES = {
 
 const DOR_TEXT: ApplicationText = {
   ...text_en,
-  commandErrorResult: (error, _ansiColor) => `Error: ${error.message}`,
+  commandErrorResult: (error, _ansiColor) => errorLine(error.message),
   exceptionWhileLoadingCommandContext: (error, _ansiColor) => `Error: ${errorMessage(error)}`,
   exceptionWhileLoadingCommandFunction: (error, _ansiColor) => `Error: ${errorMessage(error)}`,
   exceptionWhileParsingArguments: (error, _ansiColor) => `Error: ${errorMessage(error)}`,

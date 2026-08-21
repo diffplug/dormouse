@@ -180,17 +180,6 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         text: limited,
       };
     },
-    async awaitSurface(request) {
-      this.requests.push({ method: 'awaitSurface', request });
-      return {
-        workspaceRef: 'workspace:1',
-        surfaceId: '11111111-1111-4111-8111-111111111111',
-        surfaceRef: request.surface,
-        outcome: 'resolved',
-        cause: 'quiet',
-        waitedMs: 615_000,
-      };
-    },
     async killSurface(request) {
       this.requests.push({ method: 'killSurface', request });
       return {

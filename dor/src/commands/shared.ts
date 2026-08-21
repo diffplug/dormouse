@@ -16,8 +16,22 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** The one spelling of a `dor` error line, shared by every path that prints one. */
+export function errorLine(message: string): string {
+  return `Error: ${message}`;
+}
+
 export function fail(message: string): CliResult {
-  return { exitCode: 1, stdout: '', stderr: `Error: ${message}\n` };
+  return { exitCode: 1, stdout: '', stderr: `${errorLine(message)}\n` };
+}
+
+/** Flag parser for positive integers (`--lines`, `--port`, `--timeout`). */
+export function parsePositiveInt(input: string, flag: string, max = Number.POSITIVE_INFINITY): number {
+  const value = Number(input);
+  if (!Number.isInteger(value) || value <= 0 || value > max) {
+    throw new SyntaxError(`invalid ${flag} '${input}'`);
+  }
+  return value;
 }
 
 export function renderJson(payload: unknown): string {

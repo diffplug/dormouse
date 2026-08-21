@@ -1048,6 +1048,13 @@ describe('AlertManager in isolation', () => {
   // --- Await (`docs/specs/alert.md` -> Await) ---
 
   describe('awaitCompletion', () => {
+    it('keeps the grace window at the 2s the dor await narrative prints', () => {
+      // `dor/src/commands/await.ts` renders GRACE_WINDOW_TEXT = '2s' as a literal
+      // because the CLI bundle cannot import lib. Moving cfg.alert.busyCandidateGap
+      // or busyConfirmGap must fail here rather than leave that text silently wrong.
+      expect(AWAIT_GRACE_MS).toBe(2_000);
+    });
+
     /** Long enough that no test below reaches it by accident. */
     const NEVER = 600_000;
 

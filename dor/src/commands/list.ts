@@ -23,6 +23,7 @@ import {
   callerWorkingDirectory,
   errorMessage,
   parseIdFormat,
+  parsePositiveInt,
   renderHandle,
   renderJson,
   requireControlClient,
@@ -292,9 +293,5 @@ function parseSurfaceView(value: string): SurfaceView {
 }
 
 function parsePort(value: string): number {
-  const port = Number(value);
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-    throw new SyntaxError(`invalid --port '${value}'`);
-  }
-  return port;
+  return parsePositiveInt(value, '--port', 65535);
 }

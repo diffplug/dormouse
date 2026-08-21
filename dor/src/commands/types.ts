@@ -151,7 +151,7 @@ export type AwaitCause = 'quiet' | 'exit' | 'bell' | 'idle';
 
 /** How an await ended. `cancelled` never reaches a client: it only happens once
  *  the client is already gone, and nothing it responds with could be delivered. */
-export type AwaitOutcome = 'resolved' | 'timeout' | 'died';
+export type AwaitSurfaceOutcome = 'resolved' | 'timeout' | 'died';
 
 export interface AwaitSurfaceRequest {
   surface: string;
@@ -164,7 +164,7 @@ export interface AwaitSurfaceResponse {
   workspaceRef: string;
   surfaceId: string;
   surfaceRef: string;
-  outcome: AwaitOutcome;
+  outcome: AwaitSurfaceOutcome;
   /** Present iff `outcome === 'resolved'`. */
   cause?: AwaitCause;
   /** The host's own measurement of the wait; the CLI never re-measures it. */

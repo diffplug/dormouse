@@ -15,7 +15,9 @@ import type {
   DorCommandContext,
 } from './types.js';
 import {
+  errorLine,
   errorMessage,
+  parsePositiveInt,
   renderJson,
   requireControlClient,
   stringParser,
@@ -162,7 +164,7 @@ async function runAwaitCommand(this: DorCommandContext, flags: AwaitFlags, surfa
  * (that path is hard-wired to 1).
  */
 function failWith(context: DorCommandContext, exitCode: number, message: string): undefined {
-  writeStderr(context, `Error: ${message}\n`);
+  writeStderr(context, `${errorLine(message)}\n`);
   context.process.exitCode = exitCode;
   return undefined;
 }
@@ -200,9 +202,5 @@ function parseUntil(input: string): AwaitUntil {
 }
 
 function parseTimeoutSeconds(input: string): number {
-  const value = Number(input);
-  if (!Number.isInteger(value) || value <= 0) {
-    throw new SyntaxError(`invalid --timeout '${input}'`);
-  }
-  return value;
+  return parsePositiveInt(input, '--timeout');
 }
