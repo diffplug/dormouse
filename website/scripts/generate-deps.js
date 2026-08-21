@@ -11,11 +11,18 @@ const runtimeOutPath = resolve(__dirname, "../src/data/dependencies-runtime.json
 const cargoManifestPath = resolve(repoRoot, "standalone/src-tauri/Cargo.toml");
 const rootPackageJsonPath = resolve(repoRoot, "package.json");
 const themeExtensionsPath = resolve(repoRoot, "lib/src/lib/themes/bundled-extensions.json");
+// The workspace packages whose runtime dependency graphs a user actually runs.
+// `server` is here for the same reason the app packages are: a selfhoster
+// installs and runs that tree (SELF_HOST.md), so its dependencies carry the
+// same supply-chain risk as the app's, and `web-push` in particular signs with
+// a private key and makes outbound requests. See SECURITY.md, "Dependency
+// Supply Chain".
 const productDependencyFilters = [
   "dor",
   "dormouse",
   "dormouse-standalone",
   "dormouse-lib",
+  "server",
 ];
 
 function readJson(path) {
@@ -226,11 +233,15 @@ const missingLicense = {
   "Solarized & Selenized": "MIT",
 };
 const missingAuthor = {
+  "@hono/node-ws": "Hono middleware contributors",
   "@tauri-apps/api": "Tauri Apps Contributors",
   "@tauri-apps/plugin-shell": "Tauri Apps Contributors",
   "@tauri-apps/plugin-updater": "Tauri Apps Contributors",
   "@xterm/xterm": "Christopher Jeffrey, SourceLair Private Company, xterm.js authors",
   "atomically": "Fabio Spampinato",
+  "inherits": "Isaac Z. Schlueter",
+  "minimalistic-assert": "Calvin Metcalf",
+  "ms": "Vercel, Inc.",
   "node-addon-api": "Node.js API collaborators",
   "pngjs": "pngjs contributors",
   "react": "Meta Platforms, Inc. and affiliates",

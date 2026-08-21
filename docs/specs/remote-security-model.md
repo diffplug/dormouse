@@ -17,6 +17,12 @@ access. Adding a new passkey to an account, or compromising the coordinating
 Server, does not authorize a new client: the Host rejects any client that has
 not been locally paired.
 
+`SECURITY.md` -> "Remote Control" is this model's audited face: it names the
+subset of the properties below that are load-bearing enough to be checked
+nightly, and states plainly which risks are accepted (the setup password's
+minimal hardening) and which gaps are open (revocation, the audit trail). This
+spec is the design; that section is what a machine verifies about it.
+
 Everything in this spec is implemented in `server-lib-common/src/security/` —
 runtime-agnostic modules shared verbatim by the Server, the Host module in
 `lib`, and the Pocket client, so the three sides cannot disagree on what a

@@ -1,24 +1,137 @@
 # Security
 
-> **Audited automatically.** This spec is checked against the repository by [`security-audit.yaml`](.github/workflows/security-audit.yaml) on a 24-hour schedule (04:21 UTC) and as a required gate before every VS Code release. Each failure is filed as an issue labeled [`security-audit-failure`](https://github.com/diffplug/dormouse/issues?q=is%3Aissue+label%3Asecurity-audit-failure) — open ones are live, closed ones are the historical record of what tripped past audits and what changed to clear them.
+> **Audited automatically.** This spec is checked against the repository by [`security-audit.yaml`](.github/workflows/security-audit.yaml) on a 24-hour schedule (04:21 UTC) and as a required gate before every VS Code release. The audit runs as three scoped subagents — supply chain, CI and secrets, and application security — merged into one verdict; see [CI Validation Contract](#ci-validation-contract). Each failure is filed as an issue labeled [`security-audit-failure`](https://github.com/diffplug/dormouse/issues?q=is%3Aissue+label%3Asecurity-audit-failure) — open ones are live, closed ones are the historical record of what tripped past audits and what changed to clear them.
 
-Dormouse is a terminal, so users trust it with shells, source trees, credentials, and local files. The dependency graph and release pipeline is part of the product's security boundary.
+Dormouse is a terminal, so users trust it with shells, source trees, credentials, and local files. Two things sit on that security boundary, and this document covers both. The **dependency graph and release pipeline** decide what code reaches a user's machine. **Remote control** — pairing a phone with a laptop — is the one feature that accepts input from the network, and an authorized phone is equivalent to a person at the keyboard.
+
+## Remote Control
+
+Dormouse Pocket lets a phone attach to a terminal running on the user's laptop, so the pairing stack is the one part of the product that takes input from the network. An authorized Client is deliberately equivalent to a person sitting at that laptop's keyboard — `terminal.write` is raw keystroke injection into a live PTY, and protocol-v1 has no notion of a restricted session. The entire trust model therefore exists to make *authorized* hard to reach, and impossible to reach by accident.
+
+The design lives in [`docs/specs/remote-security-model.md`](docs/specs/remote-security-model.md), the deployment in [`docs/specs/server.md`](docs/specs/server.md), and the operator runbook in [`SELF_HOST.md`](SELF_HOST.md). This section does not restate them: it names the properties that are load-bearing enough to audit, and the risks we have accepted rather than closed. Two deployment modes are defined (`docs/specs/remote-api.md` → "Server deployment modes"); everything below is **self-hosted**, the only one that ships today. Cloud-hosted is [staged](#cloud-hosted-mode-staged).
+
+### Trust boundary
+
+Four layers, none sufficient alone: a passkey proves fresh user presence, a non-extractable per-browser device key is long-lived Client identity, the Host's local ACL authorizes the *pair* of those two, and the Host makes the final access decision. What each compromise actually buys:
+
+- **Server compromise** — relay traffic and account state, but **no Host access**. A forged account, a forged presence stamp, and an injected `ConnectionRequest` all still arrive in front of `authorizeConnection` on the Host, which re-verifies the passkey assertion and the device-key signature against its own ACL and its own `ConnectionPolicy` (the origin/rpId recorded at enrollment) regardless of what the Server claims to have checked.
+- **Setup-password compromise** — full account takeover: `/api/setup/*` is gated by the password alone, so re-presenting it registers another passkey, and `/api/host/enroll` mints Host credentials. Still **no Host access**: reaching an already-enrolled Host requires a pairing ceremony that a human approves in a modal on that laptop.
+- **A synced or stolen passkey** — sign-in, and the ability to *ask*. The paired device key is missing, so `HostAcl` answers `device-not-paired` and the Client reaches nothing.
+- **Device-key compromise** — requires a compromised browser or OS, or XSS in the Pocket origin. The key is usable in place but not extractable, and connecting still needs a fresh passkey assertion.
+
+The property to hold on to: **the only path into a Host's ACL is a human clicking Approve on that Host.** The only path back out is [Revocation](#revocation-and-the-audit-trail), which is where this model is weakest.
+
+- FAIL IF the Host stops being the final authority: `authorizeConnection` in `server-lib-common/src/security/connection.ts` must verify the passkey assertion, the device-key signature, and the ACL against the Host's own `ConnectionPolicy` before any session is established, and no code path may let a Server-supplied claim stand in for any of the three.
+- FAIL IF local approval stops being the only writer of the ACL. `PairingCeremony` approval is the sole path to a `HostAclRecord`, and an approval must be matched against the immutable `pairingId` of the request that was displayed, never against a mutable `clientId` alone.
+- FAIL IF the webview can widen access. `hostToken` must not appear anywhere in `lib/src/host/remote/service-protocol.ts` or in the webview's client half (`lib/src/remote/host/activation.ts`), and the one command that carries ACL records inbound — `adopt`, the migration hand-off from builds that persisted the Host in webview `localStorage` — must continue to write them only when the service's own store holds **no** enrollment, and only for a `serverUrl` inside the baked allowlist below.
+- FAIL IF `server-lib-common/src/security/` stops being the shared implementation — the Server, the Host, and the Pocket client must verify assertions, device signatures, and challenges with the same modules, so the three cannot disagree on what a valid credential is.
+
+### Where a Host may reach a relay server
+
+The baked relay-origin allowlist is what stops a Dormouse install from enrolling against, or connecting to, a relay the build was never pointed at. It is a build-time constant (`DORMOUSE_REMOTE_CONNECT_SRC`) compiled into the Node bundle that holds the socket — the Tauri sidecar and the VS Code extension host — and enforced by `originAllowedByConnectSrc` at two points: `enroll` refuses an outside origin *before the setup password leaves the machine*, and a Host refuses to start from a persisted enrollment naming one. Full semantics are in `docs/specs/server.md` → "Where a Host may reach a relay server (self-host builds)".
+
+Three properties carry the weight. The shipped default admits the SaaS origin only — no localhost, no plaintext scheme, and not the bare apex domain — so widening it is a per-build opt-in a self-hoster makes deliberately. The build asserts the define actually reached the bundle, because a lost esbuild define compiles green and shows up only as a Host silently using the shipped default instead of the selfhoster's origins. And the value is duplicated (a `.mjs` build script cannot import TypeScript), so the two copies must stay identical.
+
+- FAIL IF `DEFAULT_REMOTE_CONNECT_SRC` is not exactly `https://*.dormouse.sh wss://*.dormouse.sh` in **both** `scripts/csp-defaults.mjs` and `lib/src/host/remote/connect-src.ts`, or if `CONNECT_SRC_SOURCE_PATTERN` differs between them. Widening the default — a localhost entry, an `http`/`ws` scheme, a bare `*`, or the apex `dormouse.sh` — is a change to what every shipped binary will talk to.
+- FAIL IF `assertConnectSrcBaked` is no longer called on the built bundle by both `standalone/scripts/build-sidecar-proxy.mjs` and `vscode-ext/scripts/esbuild.mjs`, or if `resolveRemoteConnectSrc` stops rejecting an override the runtime matcher cannot parse.
+- FAIL IF `originAllowedByConnectSrc` stops gating both `enroll` and Host start-up in `lib/src/host/remote/service.ts` (including the `adopt` path), or fails open on an unparseable origin or source.
+- FAIL IF the enrollment exchange in `lib/src/remote/host/enrollment.ts` or the Host-authenticated push fetches in `lib/src/remote/host/push-delivery.ts` drop `redirect: 'error'`. A Node process does not re-check a redirect target the way a browser re-applies CSP, so a followed redirect could carry the setup password or the `hostToken` outside the allowlist.
+
+### Credentials at rest
+
+Four credentials outlive a process, and each one is a full bypass of some layer if it leaks to another local account:
+
+| Credential | Where it lives | Protection |
+| --- | --- | --- |
+| Setup password | `config/server.env` in the install root | mode `0600`, generated locally, never printed by a routine install and never in the LaunchAgent plist |
+| `hostToken` (the `/ws/host` bearer) | server `hosts.json`; Host side in the enrollment record | server state dir `0700` + every file `0600`; Host side a `0600` file in standalone, `SecretStorage` (the OS keychain) in VS Code — never a webview realm |
+| VAPID private key | server `vapid.json` | same `0700`/`0600` treatment |
+| Host ACL | `HostStateStore`, keyed per `hostId` | a `0600` file in standalone; VS Code `globalState` — the records are public keys, so what matters here is **integrity**, not confidentiality. Deliberately never on the Server |
+
+Without explicit modes these files inherit the umask and end up world-readable, which hands live host tokens to any other local account on a shared machine. The Client's device key is the exception that needs no file protection: it is a non-extractable `CryptoKey` in IndexedDB and is never exported.
+
+- FAIL IF `server/src/state.ts` stops creating `$DORMOUSE_STATE_DIR` mode `0o700` or stops writing every file through `writeAtomic` at mode `0o600`, or if any new state file is written outside `writeAtomic`.
+- FAIL IF `FileHostStateStore` (`lib/src/host/remote/host-state-store.ts`) stops creating its directory `0o700` and writing `0o600` on non-Windows platforms, or if `VsCodeHostStateStore` stops keeping the **enrollment** in `SecretStorage`. The ACL's home in `globalState` is deliberate and is not a finding; the enrollment's is what carries `hostToken`.
+- FAIL IF `deploy/local/install-macos.sh` stops generating the setup password locally with at least 32 bytes of `/dev/urandom` entropy, stops writing `config/server.env` at mode `0600` under `umask 077`, stops keeping `config/` and `state/` at `0700`, stops preserving an existing `server.env` byte-for-byte across an update, or begins printing the password outside the explicit `manage show-password` path.
+- FAIL IF `manage verify` stops failing when the LaunchAgent plist contains `DORMOUSE_SETUP_PASSWORD`.
+
+### The setup password — accepted risk
+
+One password bootstraps everything the Server can grant: it creates the account, adds passkeys to it, and enrolls Hosts. Its hardening is deliberately minimal and should be read as accepted, not overlooked. The comparison is constant-time over SHA-256 digests and a failure costs a fixed 250 ms, and that is the whole of it — there is no rate limit, no lockout, no attempt counter, and no expiry or rotation after setup completes. `/api/*` also carries `cors({ origin: '*' })`, so any web page open in any browser on the tailnet can drive those routes and read the responses; that is safe from CSRF (there are no cookies, every credential is a header or a body field) but it does mean the guessing surface is not limited to something reachable only by a deliberate client.
+
+We accept this because the origin is tailnet-only, the password is 32 bytes of `/dev/urandom` written by the installer rather than chosen by a human, and the layer it protects still cannot reach a Host without local approval. Two consequences worth stating plainly: **the tailnet is doing real work here**, and a self-host origin that becomes internet-reachable is a materially different risk than the one analyzed.
+
+- FAIL IF the setup password comparison in `server/src/app.ts` stops being constant-time or loses its fixed failure delay.
+- FAIL IF the permissive CORS policy is widened beyond `/api/*`, or if any endpoint begins accepting credentials via cookies — the "no cookies exist for a foreign origin to ride on" argument is the whole basis for `origin: '*'` being acceptable.
+
+### Network posture (self-hosted)
+
+The shipped self-host deployment is a per-login macOS LaunchAgent bound to loopback, with `tailscale serve` terminating HTTPS on the node's own MagicDNS name. Two invariants follow from that shape. The server always speaks plain HTTP, so the listen interface *is* a security boundary when the TLS proxy is local: leaving the socket unbound would publish the plaintext port to the LAN and to the tailnet itself, which is why the install pins `DORMOUSE_BIND_HOST=127.0.0.1` and refuses to proceed without it. And `DORMOUSE_ORIGIN` is durable WebAuthn identity — rewriting it silently invalidates the registered passkey and every enrolled Host, so the installer stops rather than rewriting a mismatch.
+
+Tailscale here is network-layer defense-in-depth *under* the passkey/ACL model, never a substitute for it — but the analysis above does lean on the origin being tailnet-only. `tailscale serve` and `tailscale funnel` share one configuration surface, and a Funnel on this node publishes the same origin to the public internet, where the setup password becomes an internet-facing guessing target with none of the mitigations above.
+
+- FAIL IF `deploy/local/install-macos.sh` stops requiring `DORMOUSE_BIND_HOST=127.0.0.1` in `config/server.env`, or if `manage verify` stops asserting that the plaintext port is unreachable on the node's Tailscale IP.
+- FAIL IF `server/src/config.ts` changes the unset default of `DORMOUSE_BIND_HOST`, or `server/test/bind-host.test.mjs` stops spawning the real entrypoint to prove the plaintext port is unreachable off-loopback.
+- FAIL IF the installer stops refusing to rewrite a `DORMOUSE_ORIGIN` that no longer matches the node's DNS name.
+- FAIL IF `manage verify` does not report a `tailscale funnel` mapping covering the served origin.
+
+### What crosses the boundary
+
+After `authorizeConnection` the relay is a dumb pipe; before it, only an allowlist of handshake frame types is forwarded. Both directions carry untrusted bytes. Inbound, `terminal.write` is keystrokes into a real shell — the ACL is the entire gate, which is what makes the approval modal load-bearing. Outbound, terminal bytes reach a phone, and notification text originates in a renderer and is Pane-derived, so it is bounded and sanitized on the Host and **re-sanitized on the Server** at the push boundary; both sides call the same `boundedPushText` so the two layers cannot enforce different rules.
+
+Web Push is the one path where the Server makes an outbound request to an address a Client supplied, which on a server that sits *inside* a tailnet is a live SSRF concern: `100.64/10` is exactly the range a push endpoint must not be allowed to reach. Registration rejects credentials, localhost, and non-public IP literals, and delivery goes through a dedicated agent whose connection-time DNS lookup rejects loopback, private, CGNAT, link-local, documentation, benchmark, multicast, reserved, IPv4-mapped, unique-local, and site-local ranges — rejecting a hostname wholesale if *any* answer is blocked, and handing the socket the exact address it checked so rebinding cannot create a second unchecked resolution.
+
+- FAIL IF `server/src/push-endpoint.ts` stops rejecting non-public push endpoints at registration, stops applying `createPublicLookup`/`createPublicPushAgent` to delivery, or stops rejecting a hostname whose DNS answers are mixed public and blocked.
+- FAIL IF `/api/push/send` stops taking the `hostId` from the Host's own token, begins selecting recipients when `devicePublicKeys` is absent or empty, or if any read endpoint begins reporting on a `devicePublicKey` supplied by the caller rather than one proven by the presented credential.
+- FAIL IF push text stops being sanitized with the shared `boundedPushText` on both the Host and the Server.
+- FAIL IF the relay forwards non-handshake frames before a session is authorized, or routes a Host-originated frame from a socket that is not the Client's current Host binding.
+
+### Revocation and the audit trail
+
+These are the two real gaps in the shipped model, and they are gaps rather than accepted risks — we intend to close them.
+
+**Revocation has no mechanism.** `HostAcl.revokeDevice` / `revokePasskey` exist and have no callers; no relay frame carries a revocation; there is no management UI. Revoking a lost phone means hand-editing JSON on the Host, and it takes effect at that Client's next `authorizeConnection` — an already-established session survives it, and the operator's only lever is stopping the Host. Server-pushed revocation propagation is staged in `docs/specs/remote-security-model.md` → Future.
+
+**There is no audit trail.** The ACL records `approvedAt` / `approvedBy` for a pairing, and nothing records connects, attaches, denials, or writes. A self-hoster cannot answer "did anyone connect to my laptop last night", which also means an ACL entry added by any of the paths above would be invisible after the fact.
+
+Both are stated here rather than left in a spec's Future list because the audit's qualitative pass should not keep rediscovering them as findings, and because a reader deciding whether to run this needs to know that "revoke a device" is not currently a thing they can do quickly.
+
+### Accepted limitations
+
+Restated from `docs/specs/remote-security-model.md` so this document is self-contained about what is *not* defended:
+
+- **No defense against a compromised browser or OS**, on either end. Active XSS in the Pocket origin can *use* the non-extractable device key without extracting it.
+- **No end-to-end encryption.** The relay terminates TLS and forwards cleartext terminal bytes, so whoever operates the Server can read every keystroke and every byte of output. In self-hosted mode that operator is the user, which is the entire reason self-hosted ships first. The PRF-derived session key that would change this is staged in the security model's Future.
+- **Device-key durability is best-effort.** Clearing site data destroys the key and forces re-pairing; on iOS a browser tab may be evicted after inactivity. This is recoverable, not catastrophic — a lost key authorized nothing on its own.
+- **Availability is not a goal of the self-hosted deployment.** A LaunchAgent is a per-login agent, so the relay is down while the Mac sleeps, is shut off, or has no logged-in user.
+
+### Cloud-hosted mode (staged)
+
+Nothing in this subsection is implemented; it exists so the boundary is stated before the code arrives. When Dormouse operates the coordinating Server, the "Server compromise buys no Host access" property is unchanged — that is the point of putting the ACL on the Host — but two things above change character and must be re-analyzed here rather than inherited:
+
+- **We become the operator** who can read cleartext relay traffic (see Accepted limitations). That is the claim that most needs either an honest disclosure or the PRF-derived end-to-end key.
+- **The tailnet stops carrying load.** Every argument above that leans on "the origin is reachable only from the user's tailnet" — the setup password's minimal hardening most of all — has no cloud equivalent, and the multi-tenant account model replaces the single-owner setup password entirely (`docs/specs/server.md` → Future, Scope: saas-multitenant).
+
+- FAIL IF the Server begins admitting an `accountId` other than `SELFHOST_ACCOUNT_ID` (`server-lib-common/src/remote/wire.ts`), or gains a self-serve signup path, while this subsection is still staged. The cloud boundary has to be analyzed here before the code that needs it ships.
 
 ## Dependency Supply Chain
 
 Dormouse keeps its runtime dependency surface intentionally small. We add dependencies only when they are necessary, and we expect dependency changes to justify their value against their supply-chain risk. We use maturity gating inside our pnpm configuration and also inside our [Renovate configuration](.github/renovate.json).
 
-Every dependency shipped in the end-user application is listed at <https://dormouse.sh/supply-chain>. This includes:
+Every dependency a user actually runs is listed at <https://dormouse.sh/supply-chain>. This includes:
 
 - every npm dependency (direct and transitive)
 - every cargo dependency (direct is listed separately from transitive)
 - the Node.js runtime bundled as a Tauri sidecar in the standalone app
+
+The roots of that graph are the `productDependencyFilters` in `website/scripts/generate-deps.js`, and the **selfhost coordinating server is one of them**. It is not shipped in the app, but a selfhoster installs and runs that tree ([`SELF_HOST.md`](SELF_HOST.md)), so its dependencies carry the same supply-chain risk — `web-push` most of all, which signs with a private key and makes outbound requests on the server's behalf. A dependency reachable from a package a user runs but absent from the disclosure is the failure this list exists to prevent.
 
 Those dependency snapshots are generated from the lockfiles and reviewed as part of release work. If a production dependency is added, removed, or upgraded, the dependency lists must be regenerated and committed.
 
 The standalone app ships a Node.js runtime binary (`standalone/src-tauri/build.rs` copies it into the bundle as a Tauri sidecar). Its version is pinned exactly in the root `package.json` under `devEngines.runtime.version`, and the build is the authority: `build.rs` runs `--version` on the binary it is about to bundle and fails the build unless it matches the pin. On Windows the build then flips one byte of the bundled `node.exe` — the PE Optional Header's `Subsystem` field from `IMAGE_SUBSYSTEM_WINDOWS_CUI` (3) to `IMAGE_SUBSYSTEM_WINDOWS_GUI` (2) — to suppress Windows Terminal's default-terminal handoff, which would otherwise spawn a stray terminal window behind the app. The version check runs before the byte flip and the patch leaves Node.js semantics unchanged (Node reads its stdio handles from `STARTUPINFO`, which is subsystem-agnostic); the bundled `node.exe` is therefore not byte-identical to the upstream archive — it differs at exactly the documented 2-byte field. The supply-chain page reads the same pin, so the version disclosed there provably equals the runtime users receive — it cannot drift to whatever Node happened to be on the build machine's PATH. Locally, pnpm honors `devEngines` (`onFail: "download"`) so scripts run under the pinned Node; CI extracts the same field to drive `actions/setup-node`. The version is a deliberate, manual pin (no automated ecosystem tracks it); the workflows that do not bundle the runtime are free to track the same pinned major.
 
 - FAIL IF `node website/scripts/generate-deps.js` changes `website/src/data/dependencies-npm.json`, `website/src/data/dependencies-cargo.json`, or `website/src/data/dependencies-runtime.json` when run from a clean checkout.
+- FAIL IF `productDependencyFilters` in `website/scripts/generate-deps.js` omits a workspace package whose runtime dependencies a user runs — today `dor`, `dormouse`, `dormouse-standalone`, `dormouse-lib`, and `server`. Regenerating cannot catch a root that was never walked.
 - FAIL IF the root `package.json` is missing `devEngines.runtime.version`, or its value is not an exact Node.js version (a bare major such as `24` is not acceptable; it must be `MAJOR.MINOR.PATCH`).
 - FAIL IF `standalone/src-tauri/build.rs` no longer verifies that the bundled Node.js binary matches `package.json`'s `devEngines.runtime.version` (this verification is what makes the disclosed runtime version provable).
 - FAIL IF the `build-standalone` job in `.github/workflows/release.yml` does not install the pinned runtime by reading `devEngines.runtime.version` from `package.json` and passing it to `actions/setup-node` (other jobs may pin `node-version` inline since their interpreter is never bundled).
@@ -93,9 +206,23 @@ Desktop releases are not fully automated. GitHub Actions builds unsigned artifac
 
 - FAIL IF `scripts/sign-and-deploy.sh` stops doing any of three things: verifying GitHub artifact attestations, verifying artifact SHA-256 manifests, or using PIV-backed Windows signing.
 
+## Reporting a Vulnerability
+
+Report privately through GitHub's **[Report a vulnerability](https://github.com/diffplug/dormouse/security/advisories/new)** form, which is enabled on this repository. That opens a private advisory visible only to you and the maintainers; it is the right channel for anything in this document, and specifically for anything in **Remote Control** — a public issue describing a live path into a Host's ACL is a disclosure, not a report.
+
+Do not open a public issue, and do not send a report to the maintainer's personal email — the advisory form is what gets triaged. Include what you would want if you were fixing it: the version or commit, the deployment mode (self-hosted server, standalone app, VS Code extension), and the shortest sequence that reproduces the problem. We will acknowledge the advisory and tell you what we intend to do about it; there is no bounty program.
+
+This is a small project with one maintainer. Nothing here promises a response time we cannot keep, and a fix that requires a coordinated release will say so in the advisory rather than in a schedule.
+
+- FAIL IF private vulnerability reporting is disabled on the repository (`gh api repos/diffplug/dormouse/private-vulnerability-reporting` must report `enabled: true`) — the advisory link above is the only reporting channel this document offers, and a disabled form sends a reporter to a public issue instead.
+
 ## CI Validation Contract
 
 The `security-audit` workflow at `.github/workflows/security-audit.yaml` enforces this document. It runs nightly and is a required dependency of the VS Code publish job in `release.yml`, so no release ships without a passing audit. The audit reads SECURITY.md, executes each `FAIL IF` as a mechanical check, and also does a qualitative pass for security holes the specs don't cover.
+
+**The audit is fanned out to three subagents with disjoint scopes**, and the orchestrator audits nothing itself — it spawns them concurrently and merges what they return. The domains are `supply-chain` (**Dependency Supply Chain**), `ci-and-secrets` (**GitHub Actions Policies**, **Automated Maintainer (tend)**, both release sections, **Reporting a Vulnerability**, and this one), and `application-security` (**Remote Control**). The split is not about parallelism. These are different subject matters with different evidence — dependency provenance is lockfiles, CI is `gh api` output, and application security is reading the pairing code adversarially — and one context holding all three degrades the third, which is the newest, has the most code behind it, and is the easiest to crowd out with API responses. A useful side effect: the application-security agent needs no admin PAT at all, so the credential that reads secret listings never enters the context that reads product code.
+
+Each subagent writes its own report fragment (`audit-supply-chain.md`, `audit-ci-secrets.md`, `audit-application.md`) before returning its verdict, and the orchestrator concatenates those files rather than retyping them. Fragments are uploaded with the transcript, so an orchestrator that dies mid-merge still ships whatever the domains found — the INCONCLUSIVE shape below, which the archive exists to explain.
 
 `FAIL IF` lines are grouped by the operation that answers them: one bullet may assert several properties when a single API call, file read, or script run establishes all of them. The grouping is presentation only — every clause remains an independent check, and the report records each with its own PASS/FAIL and its own evidence. A bullet is never satisfied in bulk. On any `FAIL IF` violation or BLOCKER-severity finding, the workflow opens (or updates) an issue labeled `security-audit-failure` with the full audit report, and exits non-zero. When a subsequent audit passes, the open failure issue is auto-closed so the tracker matches the live state.
 
@@ -103,7 +230,7 @@ The reporting step distinguishes three outcomes, not two. `PASS` and `FAIL` are 
 
 Every run uploads the agent's SDK transcript as the `audit-transcript` artifact (14-day retention), and failure issues deep-link it. Without it a run that produces no verdict is undiagnosable: `claude-code-action` keeps tool output out of the step log on purpose, and the runner is ephemeral. Because this repository is public the artifact is world-readable, which is consistent with the audit reports already posted to public issues — but note that artifact contents are **not** secret-masked the way logs are, so no step may ever print `$AUDIT_PAT` or `$CLAUDE_CODE_OAUTH_TOKEN`. The prompt passes the PAT only through an unexpanded `GH_TOKEN=` prefix, and `gh api` responses never carry secret values.
 
-The audit job declares `environment: security-audit`, whose deployment-branch-policy admits only `main` and `v*` tags. Both ref classes are admin-only by §3's rulesets, so a write-scoped bot cannot reach the env's secrets (most importantly `AUDIT_PAT`, when provisioned) by pushing a workflow file to a feature branch.
+The audit job declares `environment: security-audit`, whose deployment-branch-policy admits only `main` and `v*` tags. Both ref classes are admin-only by the rulesets in **Automated Maintainer (tend)**, so a write-scoped bot cannot reach the env's secrets (most importantly `AUDIT_PAT`, when provisioned) by pushing a workflow file to a feature branch.
 
 As a consequence of that env-gating, audit changes are iterated on `main` directly. A `workflow_dispatch` from any other ref is rejected by the environment's deployment-policy before any step runs. To experiment on a branch, widen the env's policy temporarily and revert after.
 
@@ -114,4 +241,6 @@ gh secret set AUDIT_PAT --env security-audit --repo diffplug/dormouse --body 'gi
 ```
 
 - FAIL IF `.github/workflows/security-audit.yaml` is missing, disabled, or no longer invoked from `release.yml`'s publish path.
+- FAIL IF the audit stops fanning out to a dedicated application-security subagent scoped to **Remote Control**, or that subagent's scope is merged back into a context that also carries the supply-chain or CI domains. Folding it back in is how that section stops being audited without anyone deciding to stop auditing it.
+- FAIL IF a `## ` section of this document is in no subagent's scope. Every section is owned by exactly one domain; a section owned by none is unaudited, and one owned by two produces contradictory verdicts.
 - FAIL IF the audit has been weakened — e.g. the prompt no longer requires the qualitative pass, a `FAIL IF` can be ignored, the failure-reporting step that opens a `security-audit-failure` issue and exits non-zero has been removed, or the `AUDIT_PAT` pre-check is removed or bypassed.

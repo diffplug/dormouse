@@ -5,7 +5,8 @@
  * Host and nowhere else — docs/specs/remote-security-model.md).
  *
  * The interface is async because the hosts that implement it are: a file the
- * sidecar owns here, VS Code `SecretStorage` later. {@link FileHostStateStore}
+ * sidecar owns here, `VsCodeHostStateStore` there (enrollment in
+ * `SecretStorage`, ACL in `globalState` — `docs/specs/vscode.md`). {@link FileHostStateStore}
  * is the sidecar's: one file, 0600, under a directory the app passes in.
  */
 

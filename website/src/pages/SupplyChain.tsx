@@ -224,7 +224,7 @@ export default function SupplyChain() {
           <DependencySection
             title="npm Dependencies"
             count={npmDeps.length}
-            description="Runtime npm packages used by both the Standalone app and the VS Code extension."
+            description="Runtime npm packages used by the Standalone app, the VS Code extension, and the coordinating server you run yourself to pair a phone with your laptop."
           >
             <PackageTable deps={npmDeps} />
           </DependencySection>

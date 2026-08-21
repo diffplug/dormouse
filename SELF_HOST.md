@@ -164,7 +164,9 @@ day:
 - Port 3100 is bound only to `127.0.0.1`, and the plaintext port is unreachable
   on the laptop's Tailscale IP.
 - `tailscale serve` proxies to `127.0.0.1:3100` at the same origin recorded in
-  `config/server.env`.
+  `config/server.env`, and `tailscale funnel` is **off** — a Funnel would
+  publish this same origin to the public internet, which the setup password's
+  hardening was never sized for (`SECURITY.md` -> "Network posture").
 - `config/` and `state/` are mode `0700`, `config/server.env` is mode `0600`.
 - `current` resolves to a release with `RELEASE` metadata, and neither the plist
   nor `bin/run-server` refers to the source checkout. A retained `previous`

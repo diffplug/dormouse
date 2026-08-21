@@ -20,7 +20,7 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     # The AUDIT_PAT (read-only Administration + Secrets + Environments)
     # lives in this environment, whose deployment-branch-policy admits
     # only `main` and `v*` tags — refs that the §3 rulesets reserve to
@@ -54,6 +54,19 @@ jobs:
           echo "::error::AUDIT_PAT secret is not set."
           exit 1
 
+      # One audit, three subagents with disjoint scopes. The domains are
+      # genuinely different subject matters — dependency provenance, CI
+      # and secret placement, and the product's own remote-control trust
+      # model — and a single agent holding all three loses the thread on
+      # each. Application security suffers worst: it is the newest
+      # section, the one with the most code behind it, and the easiest to
+      # crowd out with `gh api` output. Splitting it into its own context
+      # also means that agent needs no admin PAT at all — it reads code
+      # and specs, nothing else.
+      #
+      # Each subagent writes its own report fragment before returning, so
+      # a run that dies in the orchestrator still leaves evidence in the
+      # transcript artifact rather than nothing.
       - name: Audit against SECURITY.md
         uses: anthropics/claude-code-action@459ad358ae43fea66bfefd0a1f8d840b4b9791fb # v1
         env:
@@ -77,48 +90,171 @@ jobs:
           # restrictive set that excludes Bash and Write, so an
           # auditing prompt that wants to run `gh api` and produce a
           # report file racks up permission denials and exits without
-          # writing audit-status.txt.
-          claude_args: '--allowed-tools "Read,Write,Edit,Bash,Grep,Glob"'
+          # writing audit-status.txt. `Task` is what lets the
+          # orchestrator fan out to the three domain subagents.
+          claude_args: '--allowed-tools "Read,Write,Edit,Bash,Grep,Glob,Task"'
           prompt: |
-            Audit this repository against SECURITY.md. The `FAIL IF`
-            lines are concrete checks; the spec also says the list is
-            not exhaustive, so flag any other security hole you find.
+            You are the orchestrator of this repository's nightly
+            security audit. SECURITY.md is the document you audit
+            against: its `FAIL IF` lines are concrete mechanical checks,
+            and it also says that list is not exhaustive, so each
+            domain gets a qualitative pass too.
 
-            For each `FAIL IF`, run the mechanical check (`gh api`,
-            grep, file presence, or a script) and record PASS or FAIL
-            with concrete evidence — file path and line number, API
-            response excerpt, or command output. Then do a qualitative
-            pass over `.github/workflows/`, `.config/tend.yaml`,
-            `.github/renovate.json`, `scripts/`, and any code that
-            touches secrets.
+            Audit nothing yourself. Fan the work out to three subagents
+            with disjoint scopes, then merge what they return. Spawn all
+            three with the Task tool in a SINGLE message so they run
+            concurrently.
 
-            The default `$GH_TOKEN` in this step is a workflow
+            Give each subagent its whole prompt below verbatim, plus
+            this preamble:
+
+              Read SECURITY.md first. Your scope is exactly the sections
+              named below — ignore every other section, including its
+              `FAIL IF` lines; another agent owns them. For each `FAIL
+              IF` in your scope, run the mechanical check (`gh api`,
+              grep, file read, or a script) and record PASS or FAIL with
+              concrete evidence: file path and line number, API response
+              excerpt, or command output. A `FAIL IF` bullet may assert
+              several properties in one sentence; each clause gets its
+              own verdict and its own evidence. Never satisfy a bullet
+              in bulk.
+
+              Then do the qualitative pass described for your domain,
+              rating findings BLOCKER / WARNING / INFO. Report what you
+              can prove. Reserve `UNVERIFIABLE` for genuinely
+              indeterminable cases (a transient network error, say) and
+              explain why.
+
+              Write your findings to the file named in your prompt, with
+              two sections: `### FAIL IF results` (one line per check)
+              and `### Qualitative findings` (severity-tagged). Write
+              that file BEFORE you return. Then return a single line:
+              `PASS` or `FAIL`, followed by a one-sentence rationale.
+              FAIL if any `FAIL IF` in your scope is violated or any of
+              your qualitative findings is BLOCKER.
+
+              Never print a secret value. `$AUDIT_PAT` is passed only as
+              an unexpanded `GH_TOKEN=` prefix; do not echo it, do not
+              run `printenv` or `set -x`, and do not paste the contents
+              of any credential file into your report — report its mode
+              and location instead. This repository is public and both
+              your report and the SDK transcript are world-readable.
+
+            --- Subagent 1 -----------------------------------------
+            description: supply-chain audit
+            Scope: the `## Dependency Supply Chain` section only.
+            Output file: `audit-supply-chain.md`.
+
+            You will need `pnpm install --frozen-lockfile` before the
+            generate-deps check; the workspace is already installed by
+            an earlier workflow step, so try the check first.
+
+            Qualitative pass: newly added or upgraded runtime
+            dependencies since the last audit, anything in the lockfile
+            that resolves outside the registry, install scripts in
+            production dependencies, and any package a user runs that
+            is reachable but not disclosed.
+
+            --- Subagent 2 -----------------------------------------
+            description: CI and secrets audit
+            Scope: the `## GitHub Actions Policies`, `## Automated
+            Maintainer (tend)`, `## VS Code Extension Releases`,
+            `## Desktop Releases`, `## Reporting a Vulnerability`, and
+            `## CI Validation Contract` sections.
+            Output file: `audit-ci-secrets.md`.
+
+            The default `$GH_TOKEN` in this environment is a workflow
             `GITHUB_TOKEN` and does NOT have admin scope. For checks
-            that need admin access (rulesets bypass actors, repo or
-            environment secret listings, environment policy details),
-            prefix `gh api` with `GH_TOKEN=$AUDIT_PAT`. Example:
+            that need admin access (ruleset bypass actors, repo or
+            environment secret listings, environment policy details,
+            private vulnerability reporting) prefix `gh api` with
+            `GH_TOKEN=$AUDIT_PAT`. Example:
 
               GH_TOKEN=$AUDIT_PAT gh api repos/$GITHUB_REPOSITORY/rulesets/16757376
 
             `$AUDIT_PAT` is a fine-grained, read-only PAT covering
-            Administration + Secrets + Environments, guaranteed
-            present by the previous step. If a prefixed call still
-            returns 403, record FAIL with the note "PAT scope drifted
-            from SECURITY.md". Reserve `UNVERIFIABLE` only for
-            genuinely indeterminable cases (e.g. a transient network
-            error) and explain why.
+            Administration + Secrets + Environments, guaranteed present
+            by an earlier step. If a prefixed call still returns 403,
+            record FAIL with the note "PAT scope drifted from
+            SECURITY.md".
 
-            Write `audit-report.md` with three sections:
-              - `## FAIL IF results` — one line per check with PASS/FAIL
-                and evidence
-              - `## Qualitative findings` — severity BLOCKER / WARNING / INFO
-              - `## Summary` — overall PASS or FAIL with a one-paragraph
-                rationale
+            Qualitative pass: `.github/workflows/`, `.config/tend.yaml`,
+            `.github/renovate.json`, `scripts/`, and any code that
+            touches secrets.
 
-            Write `PASS` or `FAIL` (no other text) to `audit-status.txt`.
-            Status is FAIL if any `FAIL IF` is violated or any
-            qualitative finding is BLOCKER. Do not call `exit` — the
-            workflow inspects the status file.
+            --- Subagent 3 -----------------------------------------
+            description: application security audit
+            Scope: the `## Remote Control` section only.
+            Output file: `audit-application.md`.
+
+            This is a code-and-specs audit of the product's own remote
+            control stack. You need no GitHub API access and no PAT —
+            do not use one.
+
+            Read, at minimum: `docs/specs/remote-security-model.md`,
+            `docs/specs/server.md`, `docs/specs/remote-api.md`,
+            `SELF_HOST.md`, and then the code they point at —
+            `server-lib-common/src/security/`, `server/src/`,
+            `lib/src/remote/host/`, `lib/src/remote/client/`,
+            `lib/src/host/remote/`, `vscode-ext/src/remote-host*.ts`,
+            `scripts/csp-defaults.mjs`, and
+            `deploy/local/install-macos.sh`.
+
+            Qualitative pass — be adversarial, and go past the `FAIL IF`
+            list. Ask specifically:
+
+            * Can anything reach a Host's ACL without a human approving
+              on that Host? Trace every writer, including migration and
+              adopt paths, and including what a compromised webview or a
+              compromised Server could send.
+            * Can a credential (`hostToken`, setup password, VAPID
+              private key, session token, device key) reach a process,
+              a file mode, a log line, or a wire frame it should not?
+            * Does any check that the Server performs stand in for one
+              the Host must perform itself?
+            * Are challenges single-use, TTL-bounded, and
+              domain-separated, and can a signature captured in one
+              protocol context be replayed in another?
+            * Where does untrusted input enter — relay frames, push
+              endpoints, terminal bytes, notification text, state files
+              read back from disk — and what happens on a malformed,
+              oversized, or hostile value?
+            * Does the shipped code still match what the specs and this
+              section claim? Spec drift is a finding; say which side is
+              wrong.
+
+            Where the section says a risk is accepted (the setup
+            password's hardening) or a gap is known (revocation, the
+            audit trail), do not re-report it as a finding — report only
+            if the situation has changed or is worse than described.
+
+            --------------------------------------------------------
+
+            When all three have returned:
+
+            1. Assemble the report with Bash, not by retyping their
+               content:
+
+                 { echo "# Security audit"; echo;
+                   echo "## Supply chain"; echo; cat audit-supply-chain.md; echo;
+                   echo "## CI and secrets"; echo; cat audit-ci-secrets.md; echo;
+                   echo "## Application security"; echo; cat audit-application.md;
+                 } > audit-report.md
+
+               If a subagent left no file, say so in its place in the
+               report — an empty domain is itself a finding about the
+               audit, and must not be silently omitted.
+            2. Append a `## Summary` section: overall PASS or FAIL, a
+               one-paragraph rationale, and one line per domain giving
+               that domain's verdict.
+            3. Write `PASS` or `FAIL` (no other text) to
+               `audit-status.txt`. Status is FAIL if any subagent
+               returned FAIL.
+
+            Write `audit-report.md` before `audit-status.txt`, so a
+            session that dies mid-write leaves the evidence rather than
+            a bare verdict. Do not call `exit` — the workflow inspects
+            the status file.
 
       # The SDK transcript is the only record of what the audit actually
       # did. `claude-code-action` keeps it out of the logs on purpose
@@ -189,14 +325,25 @@ jobs:
               console.log("No literal secret occurrences found.");
             }
           ' "$TRANSCRIPT" audit-report.md \
-            || { rm -f "$TRANSCRIPT" audit-report.md; exit 1; }
+            audit-supply-chain.md audit-ci-secrets.md audit-application.md \
+            || { rm -f "$TRANSCRIPT" audit-report.md \
+                   audit-supply-chain.md audit-ci-secrets.md audit-application.md; exit 1; }
 
       - name: Archive audit transcript
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: audit-transcript
-          path: ${{ runner.temp }}/claude-execution-output.json
+          # The per-domain fragments are uploaded too. Each subagent writes
+          # its own before returning, so a run that dies in the orchestrator
+          # — the INCONCLUSIVE shape this archive exists to explain — still
+          # ships whatever the domains actually found, instead of only a
+          # transcript someone has to reconstruct them from.
+          path: |
+            ${{ runner.temp }}/claude-execution-output.json
+            audit-supply-chain.md
+            audit-ci-secrets.md
+            audit-application.md
           retention-days: 14
           if-no-files-found: warn
 

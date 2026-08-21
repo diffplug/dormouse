@@ -725,6 +725,20 @@ cmd_verify() {
     fi
   fi
 
+  # Serve and Funnel are one configuration surface, and Funnel publishes this
+  # exact origin to the public internet. The whole security analysis of the
+  # selfhost server assumes a tailnet-only origin — most of all the setup
+  # password, whose hardening is a constant-time compare and a 250ms delay
+  # (SECURITY.md, "The setup password"). So this is checked, never assumed.
+  local funnel_out
+  funnel_out="$(ts funnel status 2>/dev/null || true)"
+  if printf '%s\n%s' "$serve_out" "$funnel_out" | grep -qi 'funnel on'; then
+    fail "tailscale funnel is ON — this origin is published to the public internet"
+    printf '%s\n' "$funnel_out" | sed 's/^/      /'
+  else
+    pass "tailscale funnel is off (the origin stays tailnet-only)"
+  fi
+
   local cfg_mode state_mode env_mode
   cfg_mode="$(stat -f '%Lp' "$ROOT/config" 2>/dev/null || echo '???')"
   state_mode="$(stat -f '%Lp' "$STATE_DIR" 2>/dev/null || echo '???')"

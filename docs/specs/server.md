@@ -652,6 +652,10 @@ terminates HTTPS on the node's own MagicDNS name and proxies to the server on
 loopback. There is no cloud relay; that is staged in
 [SELF_HOST.md](../../SELF_HOST.md) `## Future`.
 
+The security properties this deployment is audited against — file modes, the
+loopback bind, the origin-rewrite refusal, the Funnel check — are the
+"Network posture" and "Credentials at rest" `FAIL IF` lines in `SECURITY.md`.
+
 Source of truth: `deploy/local/install-macos.sh`. It is the whole mechanism —
 one idempotent script, no hand-edited plists, no scheduled updater. Running it
 again updates the installed release from the current checkout; it never pulls,
@@ -677,11 +681,16 @@ Invariants the installer exists to hold:
   `config/server.env` is mode `0600`, generated once with a locally generated
   setup password, and preserved byte-for-byte thereafter. Purging state is a
   separate, explicitly confirmed operation.
-* **Loopback only.** The install pins `DORMOUSE_BIND_HOST=127.0.0.1` and
-  refuses to proceed without it — see the Configuration note above on why the
-  listen interface is a security boundary when the TLS proxy is local.
-  Port 3100, deliberately not 3000, so the installed service can coexist with
-  `pnpm dev:server` / `pnpm dev:pocket-server` on the same laptop.
+* **Loopback only, and tailnet-only.** The install pins
+  `DORMOUSE_BIND_HOST=127.0.0.1` and refuses to proceed without it — see the
+  Configuration note above on why the listen interface is a security boundary
+  when the TLS proxy is local. Port 3100, deliberately not 3000, so the
+  installed service can coexist with `pnpm dev:server` /
+  `pnpm dev:pocket-server` on the same laptop. `verify` also fails on an
+  active `tailscale funnel`: Serve and Funnel are one configuration surface,
+  and a Funnel publishes this same origin to the public internet, where the
+  setup password becomes an internet-facing guessing target that nothing in
+  the threat model was sized for (`SECURITY.md` -> "Network posture").
 * **`DORMOUSE_ORIGIN` is durable WebAuthn identity.** It is derived from the
   node's MagicDNS name. If an existing installation records a different origin
   the installer stops rather than rewriting it, because the rewrite silently
