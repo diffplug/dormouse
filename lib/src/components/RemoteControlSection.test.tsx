@@ -18,6 +18,11 @@ vi.mock('../lib/platform', () => ({
 }));
 
 import { RemoteControlSection } from './RemoteControlSection';
+import type { RemoteHostConsoleStatus } from '../host/remote/service-protocol';
+import {
+  enrolledStatus,
+  UNENROLLED_STATUS as NOT_ENROLLED,
+} from '../host/remote/test-remote-host-link';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -41,24 +46,14 @@ function makeLink(command: (cmd: string, params?: unknown) => Promise<unknown>) 
   };
 }
 
-const NOT_ENROLLED = {
-  enrolled: false,
-  serverUrl: null,
-  hostId: null,
-  connection: 'idle',
-  pairedClients: 0,
-};
-
-function enrolled(overrides: Record<string, unknown> = {}) {
-  return {
-    enrolled: true,
+/** The shared fixture, keeping this file's own server/host values. */
+const enrolled = (over: Partial<RemoteHostConsoleStatus> = {}) =>
+  enrolledStatus({
     serverUrl: 'https://laptop.tailnet.ts.net',
     hostId: 'host-1',
-    connection: 'connected',
     pairedClients: 1,
-    ...overrides,
-  };
-}
+    ...over,
+  });
 
 let container: HTMLDivElement;
 let root: Root;

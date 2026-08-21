@@ -58,6 +58,8 @@ Each spec's own `Files` / `Code Map` section is the exhaustive file→spec mappi
 
 When updating code covered by a spec, update the spec to match. When the two specs overlap (e.g. pane header elements appear in both), layout.md documents placement and sizing while alert.md documents behavior and visual states.
 
+**Narrative docs are not specs.** `docs/stories/pairing.mdx` is a Storybook page that walks the self-hosted remote-control setup end to end, embedding the real screens from `lib/src/stories/`. It restates specs for narrative flow rather than owning anything, `scripts/spec-lint.mjs` does not check it, and the `## Future` fold does not apply. When a remote spec changes, check whether it needs the same edit — the specs win where they disagree.
+
 When editing specs, keep them concise but do not replace invariants or edge cases with only a code pointer. Use `Source of truth:` for implementation references, and include direction/scope for protocols, command orchestration, and cross-package boundaries. For docs-only compression, spot-check referenced symbols, message directions, and root-vs-package script ownership against code before committing.
 
 Every spec that uses Session / Pane / Door / baseboard / passthrough vocabulary leads with a `> See \`docs/specs/glossary.md\` for ...` blockquote (see `layout.md`, `alert.md`, `terminal-state.md`). When introducing glossary vocabulary into a spec that lacks the callout, add it in the same edit.

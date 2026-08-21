@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { userEvent, within } from 'storybook/test';
 import type { DormouseTheme } from '../lib/themes';
 import { SettingsDialog } from '../components/SettingsDialog';
+import { enrolledStatus } from '../host/remote/test-remote-host-link';
 
 /**
  * The app-global Settings dialog, normally opened from the far right of the
@@ -257,5 +258,24 @@ export const HostOwnsShells: Story = {
     primedShells: DEFAULT_SHELLS,
     primedWatchedCommands: ['claude'],
     primedAlertSettings: {},
+  },
+};
+
+/**
+ * The Remote control section in place — last, and directly under the push
+ * settings whose `no-host` copy points at it. Every other story here leaves
+ * `primedRemoteHost` unset, which is a build with no Host service behind the
+ * webview: the section renders nothing at all rather than offering a form the
+ * build cannot honor (`docs/specs/server.md`). `RemoteControlSection.stories`
+ * covers its own states.
+ */
+export const WithRemoteControl: Story = {
+  parameters: {
+    primedRemoteHost: { status: enrolledStatus({ pairedClients: 1 }) },
+    primedWatchedCommands: ['claude'],
+    primedAlertSettings: { pushEnabled: true },
+  },
+  play: async ({ canvasElement }) => {
+    await within(canvasElement).findByText('1 paired device.');
   },
 };
