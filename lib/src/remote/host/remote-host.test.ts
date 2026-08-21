@@ -191,6 +191,51 @@ describe('RemoteHost frame handling', () => {
     expect(savedRecords[0]!.passkeyCredentialId).toBe('cred-1');
   });
 
+  it.each([
+    ['a missing request', undefined],
+    ['a non-object request', 'not-an-object'],
+    ['a request missing devicePublicKey', { accountId: 'owner', passkeyCredentialId: 'c', passkeyPublicKeyHash: 'h', requestedLabel: 'x' }],
+    ['a request with a non-string label', { accountId: 'owner', passkeyCredentialId: 'c', passkeyPublicKeyHash: 'h', devicePublicKey: 'd', requestedLabel: { evil: true } }],
+  ])('malformed pair frame (%s) is denied and never reaches the approval UI', (_label, request) => {
+    makeHost();
+    // The relay is not trusted, so the Host runs the same shape guard the
+    // Server does. Unguarded, these reach the modal, where rendering them
+    // throws inside the app-wide ErrorBoundary and takes every terminal down.
+    socket.receive({ t: 'pair', clientId: 'c1', request });
+
+    expect(approvals).toHaveLength(0);
+    expect(socket.frames('pair-result')[0]).toMatchObject({
+      clientId: 'c1',
+      approved: false,
+      error: 'malformed-request',
+    });
+    expect(savedRecords).toHaveLength(0);
+  });
+
+  it('bounds and strips requestedLabel before it reaches the approval UI', () => {
+    makeHost();
+    socket.receive({
+      t: 'pair',
+      clientId: 'c1',
+      request: {
+        accountId: 'owner',
+        passkeyCredentialId: 'cred-1',
+        passkeyPublicKeyHash: 'hash-1',
+        devicePublicKey: 'device-1',
+        // A bidi override plus far more text than the modal can show.
+        requestedLabel: `\u202eiPhone${'A'.repeat(500)}`,
+      },
+    });
+
+    const shown = approvals[0]!.request.requestedLabel;
+    expect(shown).not.toContain('\u202e');
+    expect(Array.from(shown).length).toBeLessThanOrEqual(64);
+
+    approvals[0]!.approve();
+    // The bound applies to what is persisted too, not only to what is shown.
+    expect(Array.from(savedRecords[0]!.label).length).toBeLessThanOrEqual(64);
+  });
+
   it('deny → pair-result approved:false, ACL untouched', () => {
     makeHost();
     socket.receive({

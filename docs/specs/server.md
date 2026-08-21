@@ -24,7 +24,12 @@ UI lives in `lib`/`standalone`.
 * A dropped WebSocket is handled by reloading the page / reconnecting the
   host. No resume protocol.
 * Everything transient (challenges, sessions, relay state) is in memory; a
-  server restart just means everyone reconnects.
+  server restart just means everyone reconnects. In-memory is not unbounded:
+  `HostChallengeIssuer.issue` prunes expired entries on every call, and
+  `PairingCeremony` drops tickets one TTL past expiry. Both matter because the
+  frames that mint them are cheap to send — `POST /api/signin/begin` needs no
+  auth at all, and a `connect` frame needs only a session, not a pairing, yet
+  issues a challenge in the Host process on the user's laptop.
 
 ## Configuration
 
@@ -182,6 +187,14 @@ malformed reads as a missing registration (which Pocket repairs by re-offering
 Enable) instead of a live one nothing can be delivered to. Source of truth:
 `PushSubscriptionStore.list` / `.upsert` in `server/src/state.ts` and the
 subscribe route in `server/src/app.ts`.
+
+`hosts.json` rows are validated as they are read, the same way
+`push-subscriptions.json`'s are and for the same reason: hand-editing this file
+is the *documented* revocation mechanism, so a half-finished edit is an
+expected state. A row that is not a well-formed enrollment is dropped rather
+than carried — unguarded, one with a null `hostToken` makes `findByToken`'s
+digest compare throw, which 500s every `/ws/host` upgrade and every push route
+over a single bad line.
 
 `hosts.json` stores `hostToken` — the host↔server relay bearer secret — in
 plaintext, and `vapid.json` a private key, so both files are written owner-only:
@@ -408,7 +421,16 @@ re-asserts via `/api/reauth/*` (one biometric prompt) and retries
 (`docs/specs/remote-security-model.md`, Pairing Ceremony). The Host runs
 `PairingCeremony` and only local approval writes the ACL. A malformed or
 stale `PairingRequest` is answered locally and is never shown in the Host
-approval UI.
+approval UI. **Both sides run the shape guard**, and deliberately so: the
+server's `isPairingRequest` check is a courtesy that keeps a bad frame off the
+wire, while the Host runs the same `isPairingRequest` from `server-lib-common`
+on arrival because the security model does not trust the relay. A Host that
+relied on the server's check would be taking a relayed object on faith in the
+one place — the approval UI and the record it writes — where that is least
+acceptable. The Host also reduces `requestedLabel` with `boundedPairingLabel`
+before any consumer sees it (same rule as `boundedPushText`): it is
+attacker-chosen text rendered in a security dialog. Source of truth:
+`RemoteHost.#onPair` in `lib/src/remote/host/remote-host.ts`.
 
 ### Connect (every session)
 

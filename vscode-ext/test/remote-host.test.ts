@@ -275,6 +275,25 @@ afterEach(async () => {
   await removeDir(dir);
 });
 
+/**
+ * A complete `HostAclRecord`. The store's read-back guard checks the whole
+ * shape now, not just `hostId` — a partial object is dropped, which is the
+ * point (`SECURITY.md` -> Remote Control), so fixtures have to be real records.
+ */
+function aclRecord(hostId: string, devicePublicKey: string) {
+  return {
+    hostId,
+    accountId: 'owner',
+    passkeyCredentialId: 'cred-1',
+    passkeyPublicKeyHash: 'hash-1',
+    devicePublicKey,
+    approvedAt: 1,
+    approvedBy: 'host-user',
+    label: 'iPhone Safari',
+    revokedAt: null,
+  };
+}
+
 describe('host state store', () => {
   it('round-trips the enrollment through SecretStorage', async () => {
     const { VsCodeHostStateStore } = await import('../src/remote-host-store');
@@ -312,14 +331,12 @@ describe('host state store', () => {
     store.secrets.set('dormouse.remote-host.enrollment', JSON.stringify(enrollment));
     store.global.set(
       'dormouse.remote-host.acl.host-1',
-      JSON.stringify([{ hostId: 'host-1', devicePublicKey: 'device-1' }]),
+      JSON.stringify([aclRecord('host-1', 'device-1')]),
     );
 
     const target = new VsCodeHostStateStore(context);
     expect(await target.loadEnrollment()).toEqual(enrollment);
-    expect(await target.loadAcl('host-1')).toEqual([
-      { hostId: 'host-1', devicePublicKey: 'device-1' },
-    ]);
+    expect(await target.loadAcl('host-1')).toEqual([aclRecord('host-1', 'device-1')]);
   });
 
   it('forgets a failed keychain read instead of memoizing it', async () => {
@@ -395,8 +412,14 @@ describe('host state store', () => {
     const { context, store } = fakeContext();
     const target = new VsCodeHostStateStore(context);
 
-    await target.saveAcl('host-1', [{ hostId: 'host-2' } as never, { hostId: 'host-1' } as never]);
-    expect(await target.loadAcl('host-1')).toEqual([{ hostId: 'host-1' }]);
+    await target.saveAcl('host-1', [
+      aclRecord('host-2', 'device-2') as never,
+      aclRecord('host-1', 'device-1') as never,
+      // Right host, wrong shape: the guard is the whole record, not just the
+      // hostId, because `adopt` can hand this store records it never wrote.
+      { hostId: 'host-1', devicePublicKey: 42 } as never,
+    ]);
+    expect(await target.loadAcl('host-1')).toEqual([aclRecord('host-1', 'device-1')]);
 
     store.secrets.set('dormouse.remote-host.enrollment', 'not json');
     expect(await target.loadEnrollment()).toBeNull();
@@ -409,11 +432,8 @@ describe('host state store', () => {
     const pending: PendingGlobalWrite[] = [];
     const { context } = fakeContext({ deferGlobalWrites: pending });
     const target = new VsCodeHostStateStore(context);
-    const first = [{ hostId: 'host-1', devicePublicKey: 'device-1' }] as never;
-    const second = [
-      { hostId: 'host-1', devicePublicKey: 'device-1' },
-      { hostId: 'host-1', devicePublicKey: 'device-2' },
-    ] as never;
+    const first = [aclRecord('host-1', 'device-1')] as never;
+    const second = [aclRecord('host-1', 'device-1'), aclRecord('host-1', 'device-2')] as never;
 
     const firstSave = target.saveAcl('host-1', first);
     const secondSave = target.saveAcl('host-1', second);

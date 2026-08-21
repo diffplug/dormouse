@@ -149,11 +149,13 @@ jobs:
             generate-deps check; the workspace is already installed by
             an earlier workflow step, so try the check first.
 
-            Qualitative pass: newly added or upgraded runtime
-            dependencies since the last audit, anything in the lockfile
-            that resolves outside the registry, install scripts in
-            production dependencies, and any package a user runs that
-            is reachable but not disclosed.
+            Qualitative pass — you own the dependency graph and
+            `website/src/data/`'s disclosure snapshots. Look at newly
+            added or upgraded runtime dependencies since the last
+            audit, anything in the lockfile that resolves outside the
+            registry, install scripts in production dependencies, and
+            any package a user runs that is reachable but not
+            disclosed.
 
             --- Subagent 2 -----------------------------------------
             description: CI and secrets audit
@@ -178,9 +180,13 @@ jobs:
             record FAIL with the note "PAT scope drifted from
             SECURITY.md".
 
-            Qualitative pass: `.github/workflows/`, `.config/tend.yaml`,
-            `.github/renovate.json`, `scripts/`, and any code that
-            touches secrets.
+            Qualitative pass — you own `.github/`, `.config/`, and
+            `scripts/`, plus any code anywhere that touches a secret.
+            Check effective `GITHUB_TOKEN` permissions, not just
+            declared ones: a job with no `permissions:` block inherits
+            the repository default, so read
+            `actions/permissions/workflow` before judging any
+            permission bullet.
 
             --- Subagent 3 -----------------------------------------
             description: application security audit
@@ -225,8 +231,19 @@ jobs:
 
             Where the section says a risk is accepted (the setup
             password's hardening) or a gap is known (revocation, the
-            audit trail), do not re-report it as a finding — report only
-            if the situation has changed or is worse than described.
+            audit trail, the two `workflow-audit` window evasions), do
+            not re-report it as a finding — report only if the situation
+            has changed or is worse than described.
+
+            You also own the **rest of the product code** qualitatively,
+            so that no part of the repository is outside every domain:
+            `lib/`, `server/`, `server-lib-common/`, `standalone/`,
+            `vscode-ext/`, `dor/`, `dor-lib-common/`, and `deploy/`.
+            Remote control is where the depth goes; the rest is a sweep
+            for anything that would be a security hole in a terminal
+            that runs local shells — command construction, path
+            handling, deserialization of persisted state, IPC that
+            crosses a trust boundary.
 
             --------------------------------------------------------
 
@@ -241,15 +258,18 @@ jobs:
                    echo "## Application security"; echo; cat audit-application.md;
                  } > audit-report.md
 
-               If a subagent left no file, say so in its place in the
-               report — an empty domain is itself a finding about the
-               audit, and must not be silently omitted.
+               If a subagent left no file, write that in its place in
+               the report. A missing fragment is a FAIL, not an
+               omission: it is indistinguishable from a domain that
+               found nothing, and only one of those is safe to publish
+               a release on.
             2. Append a `## Summary` section: overall PASS or FAIL, a
                one-paragraph rationale, and one line per domain giving
                that domain's verdict.
             3. Write `PASS` or `FAIL` (no other text) to
                `audit-status.txt`. Status is FAIL if any subagent
-               returned FAIL.
+               returned FAIL, **or** if any of the three report
+               fragments is missing or empty.
 
             Write `audit-report.md` before `audit-status.txt`, so a
             session that dies mid-write leaves the evidence rather than
@@ -374,6 +394,33 @@ jobs:
             PASS|FAIL) ;;
             *) STATUS=MISSING ;;
           esac
+
+          # A domain that died silently must not be able to ride out on
+          # the orchestrator's PASS. The prompt already says a missing
+          # fragment is a FAIL, but "the model was told to" is not a
+          # control — a dead subagent is exactly the case where the
+          # orchestrator has the least idea what happened. Checked here
+          # so the verdict cannot outrun the evidence.
+          MISSING_FRAGMENTS=""
+          for f in audit-supply-chain.md audit-ci-secrets.md audit-application.md; do
+            [ -s "$f" ] || MISSING_FRAGMENTS="$MISSING_FRAGMENTS $f"
+          done
+          if [ -n "$MISSING_FRAGMENTS" ] && [ "$STATUS" = "PASS" ]; then
+            echo "::error::Audit reported PASS but these domain reports are missing or empty:$MISSING_FRAGMENTS"
+            STATUS=FAIL
+            {
+              echo
+              echo "---"
+              echo
+              echo "**Downgraded to FAIL by the reporting step.** The audit reported"
+              echo "\`PASS\`, but these domain reports are missing or empty:"
+              echo
+              for f in $MISSING_FRAGMENTS; do echo "- \`$f\`"; done
+              echo
+              echo "A domain that produced no report did not pass — it did not run to"
+              echo "completion. See [CI Validation Contract](https://github.com/$GITHUB_REPOSITORY/blob/main/SECURITY.md#ci-validation-contract)."
+            } >> audit-report.md
+          fi
 
           DATE=$(date -u +%Y-%m-%dT%H:%MZ)
           RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

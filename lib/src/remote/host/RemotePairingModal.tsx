@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { ModalFrame, ModalReviewBlock, modalActionButton } from '../../components/design';
-import type { PairingRequest } from 'server-lib-common';
+import { pairingFingerprint, type PairingRequest } from 'server-lib-common';
 
 /**
  * The Host's local pairing-approval modal (server.md → "Pairing approval
@@ -19,7 +19,7 @@ export function RemotePairingModal({
   onDeny: () => void;
 }) {
   const denyButtonRef = useRef<HTMLButtonElement>(null);
-  const fingerprint = request.devicePublicKey.slice(0, 8);
+  const fingerprint = pairingFingerprint(request.devicePublicKey);
 
   return (
     <ModalFrame

@@ -20,6 +20,7 @@
 import { toBase64Url } from './bytes.js';
 import { getWebCrypto, type WebCryptoLike } from './webcrypto.js';
 import { HostAcl, type HostAclRecord } from './acl.js';
+import { boundedPushText } from './push.js';
 
 export const DEFAULT_PAIRING_TTL_MS = 5 * 60 * 1000;
 
@@ -45,6 +46,66 @@ export interface PairingRequest {
   readonly devicePublicKey: string;
   /** Client-suggested label; the approver may override it. */
   readonly requestedLabel: string;
+}
+
+/**
+ * The longest `requestedLabel` the approval modal will render, in code points.
+ * Generous for a device name and far short of anything that can push the
+ * Approve/Deny buttons off a laptop screen.
+ */
+export const PAIRING_LABEL_LIMIT = 64;
+
+/**
+ * The device-key fingerprint shown to a human during pairing: the leading
+ * characters of the base64url device public key.
+ *
+ * Shared, because it is only useful if **both** ends render the same thing.
+ * The Host's approval modal shows the fingerprint of the key that is asking;
+ * Pocket shows the fingerprint of its own key. Comparing them is what turns
+ * the modal from a prompt the user can only accept on faith into one they can
+ * actually check — the pairing ceremony verifies no assertion, so the human is
+ * the control (`docs/specs/remote-security-model.md`, Pairing Ceremony).
+ */
+export const PAIRING_FINGERPRINT_LENGTH = 8;
+
+/** The fingerprint of a device public key, for display to a human. */
+export function pairingFingerprint(devicePublicKey: string): string {
+  return devicePublicKey.slice(0, PAIRING_FINGERPRINT_LENGTH);
+}
+
+/**
+ * Structural validation of a `PairingRequest` off the wire.
+ *
+ * Shared, and used on **both** sides, for the reason the whole security model
+ * exists: the Server relays this frame, and the Host does not trust the
+ * Server. A guard that ran only on the Server would leave the Host — the party
+ * that actually writes the ACL and renders the approval UI — taking a
+ * relay-supplied object on faith. `connect2` has always been defended this way
+ * (`authorizeConnection` contains a malformed request as a denial); this is
+ * the same rule for `pair`.
+ */
+export function isPairingRequest(request: unknown): request is PairingRequest {
+  if (!request || typeof request !== 'object') return false;
+  const candidate = request as Record<string, unknown>;
+  return (
+    typeof candidate.accountId === 'string' &&
+    typeof candidate.passkeyCredentialId === 'string' &&
+    typeof candidate.passkeyPublicKeyHash === 'string' &&
+    typeof candidate.devicePublicKey === 'string' &&
+    typeof candidate.requestedLabel === 'string'
+  );
+}
+
+/**
+ * A `requestedLabel` reduced to something safe to render in the approval
+ * modal. Same rule as `boundedPushText`, and for a stronger reason: the label
+ * is attacker-chosen free text, and this is the one dialog the entire ACL
+ * rests on. An unbounded label can push the buttons out of view, and a bidi
+ * override can make the displayed text read as something other than what it
+ * is.
+ */
+export function boundedPairingLabel(value: unknown): string {
+  return boundedPushText(value, { limit: PAIRING_LABEL_LIMIT, fallback: '(unnamed)' });
 }
 
 export type PairingState = 'pending' | 'approved' | 'denied' | 'expired';
@@ -104,6 +165,7 @@ export class PairingCeremony {
       requestedAt,
       expiresAt: requestedAt + this.#ttlMs,
     };
+    this.#pruneTickets();
     this.#tickets.set(pairingId, ticket);
     return this.#snapshot(ticket);
   }
@@ -148,6 +210,24 @@ export class PairingCeremony {
       throw new PairingError('not-pending', `pairing ${pairingId} is already ${ticket.state}`);
     }
     return ticket;
+  }
+
+  /**
+   * Bound the ticket map. Every `pair` frame the relay forwards mints a
+   * ticket, and nothing else ever removed one — a signed-in account can send
+   * them faster than the 30-second presence window closes, and they accumulate
+   * in the Host process on the user's laptop.
+   *
+   * Resolved and expired tickets are kept for one extra TTL rather than
+   * dropped on resolution, so a second approve on a ticket the user just acted
+   * on still fails as `not-pending` / `expired` — the error the UI and the
+   * spec describe — instead of degrading to `unknown-pairing`.
+   */
+  #pruneTickets(): void {
+    const cutoff = this.#now() - this.#ttlMs;
+    for (const [pairingId, ticket] of this.#tickets) {
+      if (ticket.expiresAt <= cutoff) this.#tickets.delete(pairingId);
+    }
   }
 
   #reapExpiry(ticket: Ticket): void {

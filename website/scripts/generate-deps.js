@@ -12,16 +12,18 @@ const cargoManifestPath = resolve(repoRoot, "standalone/src-tauri/Cargo.toml");
 const rootPackageJsonPath = resolve(repoRoot, "package.json");
 const themeExtensionsPath = resolve(repoRoot, "lib/src/lib/themes/bundled-extensions.json");
 // The workspace packages whose runtime dependency graphs a user actually runs.
-// `server` is here for the same reason the app packages are: a selfhoster
-// installs and runs that tree (SELF_HOST.md), so its dependencies carry the
-// same supply-chain risk as the app's, and `web-push` in particular signs with
-// a private key and makes outbound requests. See SECURITY.md, "Dependency
-// Supply Chain".
+// A package belongs here if its dependencies reach a user's disk, however they
+// get there: `dormouse-sidecar` ships as a Tauri bundle resource
+// (`standalone/src-tauri/tauri.conf.json` -> `bundle.resources`), node_modules
+// and all, and `server` is installed and run by a selfhoster (SELF_HOST.md) —
+// `web-push` in particular signs with a private key and makes outbound
+// requests. See SECURITY.md, "Dependency Supply Chain".
 const productDependencyFilters = [
   "dor",
   "dormouse",
   "dormouse-standalone",
   "dormouse-lib",
+  "dormouse-sidecar",
   "server",
 ];
 

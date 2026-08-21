@@ -40,6 +40,13 @@ export class HostChallengeIssuer {
   }
 
   issue(): IssuedChallenge {
+    // Bound the map. `consume` removes an entry only when the challenge is
+    // presented, so every unredeemed issue used to be permanent: an
+    // unauthenticated `POST /api/signin/begin` on the Server, and a `connect`
+    // frame from any signed-in — not necessarily paired — Client on the user's
+    // laptop. Pruning here rather than on a timer keeps the issuer free of a
+    // lifecycle in the three runtimes that construct it.
+    this.pruneExpired();
     const bytes = this.#crypto.getRandomValues(new Uint8Array(CHALLENGE_BYTE_LENGTH));
     const challenge = toBase64Url(bytes);
     const issuedAt = this.#now();

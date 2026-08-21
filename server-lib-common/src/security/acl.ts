@@ -26,6 +26,37 @@ export interface HostAclRecord {
   readonly revokedAt: number | null;
 }
 
+/**
+ * Structural validation of a `HostAclRecord` off disk or off a bridge.
+ *
+ * Every store reads its ACL back as `unknown[]`, and one path — the webview's
+ * one-shot `adopt` hand-off — supplies records that were never written by this
+ * process. Checking only the `hostId` (which is what `filterAclRecords` used
+ * to do) admits a record with the wrong types in every other field, and the
+ * ACL is the authorization primitive: a malformed row is never useful, so
+ * dropping it is strictly better than carrying it to `authorizeConnection`.
+ *
+ * This is not an authorization check. It cannot be — every field here is
+ * attacker-choosable if something can write the store at all. The local
+ * approval that minted the record is the authorization; this only ensures the
+ * comparisons downstream are comparing strings to strings.
+ */
+export function isHostAclRecord(record: unknown): record is HostAclRecord {
+  if (!record || typeof record !== 'object') return false;
+  const candidate = record as Record<string, unknown>;
+  return (
+    typeof candidate.hostId === 'string' &&
+    typeof candidate.accountId === 'string' &&
+    typeof candidate.passkeyCredentialId === 'string' &&
+    typeof candidate.passkeyPublicKeyHash === 'string' &&
+    typeof candidate.devicePublicKey === 'string' &&
+    typeof candidate.approvedAt === 'number' &&
+    typeof candidate.approvedBy === 'string' &&
+    typeof candidate.label === 'string' &&
+    (candidate.revokedAt === null || typeof candidate.revokedAt === 'number')
+  );
+}
+
 /** Everything the pairing ceremony supplies when approving a Client. */
 export interface ApprovedClient {
   readonly accountId: string;

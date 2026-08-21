@@ -405,6 +405,25 @@ Without this an installed Pocket is stuck — there is no address bar to reload
 from, and the in-app Refresh re-sends the same dead token — leaving force-quitting
 the app as the only way back in.
 
+## The device fingerprint on the Hosts screen
+
+The Hosts screen renders this browser's own device-key fingerprint —
+`pairingFingerprint(devicePublicKey)`, the leading 8 characters of the
+base64url public point — under the header, from a one-shot effect over
+`getOrCreateDeviceKey()`. It is not a status line: it exists so the approval
+modal on the laptop, which shows the fingerprint of the key that is *asking*,
+can be compared against something. The pairing ceremony verifies no assertion
+(`docs/specs/remote-security-model.md`, Pairing Ceremony), so the human is the
+control, and a fingerprint shown on only one end is a value nobody can check.
+
+Both ends call the same helper from `server-lib-common` so they cannot drift
+into showing different slices of the same key. It renders whenever the key
+loads, paired or not, so it reads as a property of this browser rather than a
+step in a flow. A key that fails to load leaves it absent rather than erroring:
+the pair and connect paths already report that failure, and this display is not
+the place to raise it a second time. Source of truth: `HostsScreen` in
+`lib/src/remote/pocket-app/App.tsx`.
+
 ## Deployment: same-origin, always
 
 WebAuthn binds passkeys to the serving origin, and Chrome's Private Network

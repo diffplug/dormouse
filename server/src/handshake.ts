@@ -29,9 +29,10 @@ import {
   PAIRING_STALE_PRESENCE_ERROR,
   SELFHOST_ACCOUNT_ID,
   hashPasskeyPublicKey,
+  isPairingRequest,
   verifyPasskeyAssertion,
 } from 'server-lib-common';
-import type { ConnectionFailure, ConnectionRequest, PairingRequest } from 'server-lib-common';
+import type { ConnectionFailure, ConnectionRequest } from 'server-lib-common';
 
 import type { AccountStore } from './state.js';
 
@@ -224,14 +225,4 @@ export class Handshake implements HandshakeGate {
   }
 }
 
-function isPairingRequest(request: unknown): request is PairingRequest {
-  return (
-    !!request &&
-    typeof request === 'object' &&
-    typeof (request as PairingRequest).accountId === 'string' &&
-    typeof (request as PairingRequest).passkeyCredentialId === 'string' &&
-    typeof (request as PairingRequest).passkeyPublicKeyHash === 'string' &&
-    typeof (request as PairingRequest).devicePublicKey === 'string' &&
-    typeof (request as PairingRequest).requestedLabel === 'string'
-  );
-}
+

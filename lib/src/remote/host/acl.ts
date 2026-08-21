@@ -12,7 +12,7 @@
  * inherit a stale ACL.
  */
 
-import { HostAcl, type HostAclRecord } from 'server-lib-common';
+import { HostAcl, isHostAclRecord, type HostAclRecord } from 'server-lib-common';
 import { loadJson, removeJson } from '../../lib/local-json-store';
 
 export const ACL_KEY_PREFIX = 'dormouse.remote-host.acl.';
@@ -32,9 +32,11 @@ function aclKey(hostId: string): string {
  * doing it in one place keeps a store from quietly being the lenient one.
  */
 export function filterAclRecords(hostId: string, records: readonly unknown[]): HostAclRecord[] {
+  // Shape first, then ownership. The hostId test alone admitted a record whose
+  // every other field was the wrong type — which matters most on the one input
+  // that is not this process's own writing: the webview's `adopt` hand-off.
   return records.filter(
-    (record): record is HostAclRecord =>
-      !!record && typeof record === 'object' && (record as HostAclRecord).hostId === hostId,
+    (record): record is HostAclRecord => isHostAclRecord(record) && record.hostId === hostId,
   );
 }
 

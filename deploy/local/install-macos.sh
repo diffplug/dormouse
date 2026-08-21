@@ -438,7 +438,10 @@ if [ ! -f "$ENV_FILE" ]; then
   else
     die "no way to generate a high-entropy password (need /usr/bin/xxd or /usr/bin/openssl)."
   fi
-  [ ${#SETUP_PASSWORD} -ge 32 ] || die "generated setup password is implausibly short; refusing to install it."
+  # Both generators above produce 32 random bytes, i.e. 64 hex characters. The
+  # guard counts characters, so it must be 64 — checking for 32 would pass a
+  # regression to `-l 16`, which is half the entropy SECURITY.md claims.
+  [ ${#SETUP_PASSWORD} -ge 64 ] || die "generated setup password is implausibly short; refusing to install it."
 
   umask 077
   cat > "$ENV_FILE" <<ENV_EOF
