@@ -1,3 +1,4 @@
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createConnection } from 'node:net';
 import type {
   AgentBrowserSurfaceRequest,
@@ -28,6 +29,30 @@ export interface SocketControlClientOptions {
   token: string;
   surfaceId?: string;
   timeoutMs?: number;
+}
+
+// Must match standalone/sidecar/dor-control-server.js, the other half of this
+// handshake. The two live in different packages (a bundled ESM CLI and a plain
+// CJS module loaded by both hosts) with no shared build, so the constants and
+// the proof construction are duplicated rather than imported.
+const CLIENT_PROOF_DOMAIN = 'dor-control/client';
+const SERVER_PROOF_DOMAIN = 'dor-control/server';
+
+// Deliberately says nothing about which half of the handshake failed: from here
+// a squatter, a torn-down host, and a stale socket file are the same event, and
+// the user's next move is the same for all three.
+const HANDSHAKE_FAILURE =
+  'the process holding the Dormouse control socket could not prove it is Dormouse';
+
+function proveToken(token: string, domain: string, nonce: string): string {
+  return createHmac('sha256', token).update(`${domain} ${nonce}`).digest('hex');
+}
+
+function proofMatches(provided: unknown, expected: string): boolean {
+  if (typeof provided !== 'string') return false;
+  const a = createHash('sha256').update(provided).digest();
+  const b = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(a, b);
 }
 
 export class SocketControlClient implements ControlClient {
@@ -85,12 +110,25 @@ export class SocketControlClient implements ControlClient {
     return this.request<ResolveOpenTargetResponse>(SURFACE_CONTROL_METHODS.resolveOpen, request);
   }
 
+  /**
+   * One request over one socket, preceded by a mutual handshake.
+   *
+   * The token is a bearer credential for the whole surface-control API (`send`
+   * types into any pane, `read` returns its scrollback), so it never goes on the
+   * wire: the peer must first prove it holds the token over a nonce we did not
+   * choose, and we answer over a nonce it did not choose. Whoever merely bound
+   * the socket path learns two nonces and nothing else.
+   */
   private request<T>(method: SurfaceControlMethod, params: unknown): Promise<T> {
     const requestId = `dor-${this.idBase}-${++this.nextRequestId}`;
     return new Promise((resolve, reject) => {
       const socket = createConnection({ path: this.socketPath });
       let responseBuffer = '';
       let settled = false;
+      // 'challenge' → 'welcome' → 'response': the three lines the server sends,
+      // in order, over one connection.
+      let phase: 'challenge' | 'welcome' | 'response' = 'challenge';
+      const nonce = randomBytes(16).toString('hex');
 
       const settle = (callback: () => void) => {
         if (settled) return;
@@ -105,39 +143,78 @@ export class SocketControlClient implements ControlClient {
       }, this.timeoutMs);
 
       socket.setEncoding('utf8');
-      socket.on('connect', () => {
-        socket.write(`${JSON.stringify({
-          requestId,
-          token: this.token,
-          surfaceId: this.surfaceId,
-          method,
-          params,
-        })}\n`);
-      });
+      // Deliberately nothing on 'connect': the server speaks first.
       socket.on('data', (chunk) => {
         responseBuffer += chunk;
-        const newlineIndex = responseBuffer.indexOf('\n');
-        if (newlineIndex === -1) return;
-        const line = responseBuffer.slice(0, newlineIndex);
-        settle(() => {
-          try {
-            const response = JSON.parse(line) as DorControlResult<T>;
-            if (response.ok) {
-              resolve(response.result as T);
-            } else {
-              reject(new Error(response.error || `${method} failed`));
-            }
-          } catch (error) {
-            reject(error instanceof Error ? error : new Error(String(error)));
+        let newlineIndex = responseBuffer.indexOf('\n');
+        while (newlineIndex !== -1 && !settled) {
+          const line = responseBuffer.slice(0, newlineIndex);
+          responseBuffer = responseBuffer.slice(newlineIndex + 1);
+          let frame: { kind?: unknown; nonce?: unknown; proof?: unknown };
+          if (phase === 'response') {
+            settle(() => {
+              try {
+                const response = JSON.parse(line) as DorControlResult<T>;
+                if (response.ok) {
+                  resolve(response.result as T);
+                } else {
+                  reject(new Error(response.error || `${method} failed`));
+                }
+              } catch (error) {
+                reject(error instanceof Error ? error : new Error(String(error)));
+              }
+            });
+            return;
           }
-        });
+          try {
+            frame = JSON.parse(line);
+          } catch {
+            settle(() => reject(new Error(HANDSHAKE_FAILURE)));
+            return;
+          }
+          if (phase === 'challenge') {
+            if (frame?.kind !== 'challenge' || typeof frame.nonce !== 'string' || !frame.nonce) {
+              settle(() => reject(new Error(HANDSHAKE_FAILURE)));
+              return;
+            }
+            // Answering a challenge proves nothing about the challenger, which
+            // is why this is all that is sent until the welcome comes back.
+            socket.write(`${JSON.stringify({
+              kind: 'hello',
+              nonce,
+              proof: proveToken(this.token, CLIENT_PROOF_DOMAIN, frame.nonce),
+            })}\n`);
+            phase = 'welcome';
+          } else {
+            if (
+              frame?.kind !== 'welcome' ||
+              !proofMatches(frame.proof, proveToken(this.token, SERVER_PROOF_DOMAIN, nonce))
+            ) {
+              settle(() => reject(new Error(HANDSHAKE_FAILURE)));
+              return;
+            }
+            socket.write(`${JSON.stringify({
+              requestId,
+              surfaceId: this.surfaceId,
+              method,
+              params,
+            })}\n`);
+            phase = 'response';
+          }
+          newlineIndex = responseBuffer.indexOf('\n');
+        }
       });
       socket.on('error', (error) => {
         settle(() => reject(error));
       });
       socket.on('end', () => {
         if (settled) return;
-        settle(() => reject(new Error(`connection closed before ${method} response`)));
+        // A peer that drops us mid-handshake is the same event as one that
+        // answers it wrongly — the server hangs up on a bad hello rather than
+        // replying — so report it the same way.
+        settle(() =>
+          reject(new Error(phase === 'response' ? `connection closed before ${method} response` : HANDSHAKE_FAILURE)),
+        );
       });
     });
   }

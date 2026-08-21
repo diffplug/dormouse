@@ -66,13 +66,12 @@ Public PTY env:
   folder. Unset under the standalone app (no workspace concept) and for an
   empty VS Code window.
 - `DORMOUSE_CONTROL_SOCKET` and `DORMOUSE_CONTROL_TOKEN` — private control
-  endpoint credentials. The token is the socket's sole authenticator, so it is
-  a CSPRNG value (24 random bytes, hex-encoded — `randomBytes` in the VS Code
-  host, the OS CSPRNG via `getrandom` in the standalone host) and the server
-  compares it in constant time (SHA-256 digests through `timingSafeEqual`),
-  never a short-circuiting string compare. Source of truth:
-  [`dor-control-server.js`](../../standalone/sidecar/dor-control-server.js)
-  (`tokenMatches`).
+  endpoint credentials, set together or not at all (see
+  [Control-channel security](#control-channel-security)). The token is the
+  shared secret both ends of the channel prove knowledge of, so it is a CSPRNG
+  value (24 random bytes, hex-encoded — `randomBytes` in the VS Code host, the
+  OS CSPRNG via `getrandom` in the standalone host). It is never sent on the
+  wire.
 
 `DORMOUSE_CLI_BIN` is host-internal spawn configuration. Terminals should rely
 on `PATH`, not on that variable.
@@ -162,9 +161,14 @@ exports.
 
 `standalone/package.json` runs `pnpm stage:dor-cli` before Tauri dev/build.
 Rust resolves the staged/bundled CLI paths, starts the Node sidecar with
-`DORMOUSE_HOST`, `DORMOUSE_NODE`, `DORMOUSE_CLI_BIN`, `DORMOUSE_CLI_JS`,
-`DORMOUSE_CONTROL_SOCKET`, and `DORMOUSE_CONTROL_TOKEN`, then the shared PTY
-core prepends `DORMOUSE_CLI_BIN` and sets `DORMOUSE_SURFACE_ID` per PTY.
+`DORMOUSE_HOST`, `DORMOUSE_NODE`, `DORMOUSE_CLI_BIN`, `DORMOUSE_CLI_JS`, and
+`DORMOUSE_CONTROL_TOKEN`, then the shared PTY core prepends `DORMOUSE_CLI_BIN`
+and sets `DORMOUSE_SURFACE_ID` per PTY. Rust does **not** set
+`DORMOUSE_CONTROL_SOCKET`: the sidecar chooses the path itself and puts both
+control variables back into its own `process.env` — which is what `pty-core`
+merges into every spawned shell — only once the socket is bound. Until then it
+holds incoming stdin commands, so no PTY can be spawned into the window where
+the channel's fate is undecided.
 
 Control direction:
 
@@ -184,7 +188,13 @@ dor process
 `vscode-ext/package.json` runs `pnpm stage:dor-cli` before bundling the
 extension host and `pty-host.js`. The extension host computes the staged CLI
 paths under `context.extensionPath/dor-cli`, starts `pty-host.js`, and sends the
-same dor env on each PTY spawn.
+same dor env on each PTY spawn. `getDorRuntimeEnv` deliberately omits both
+control variables: the token reaches `pty-host.js` through the fork env alone,
+and the host pairs it with a bound socket path onto each spawn's env itself. The
+`ready` message that releases the extension host's queued messages is held until
+the channel has settled, so no spawn can race the bind. Source of truth:
+[`pty-manager.ts`](../../vscode-ext/src/pty-manager.ts),
+[`pty-host.js`](../../vscode-ext/src/pty-host.js).
 
 `DORMOUSE_NODE` points at VS Code's own runtime (`process.execPath`, re-execed
 as Node by VS Code's extension-host environment), not a user-installed Node.
@@ -206,6 +216,52 @@ dor process
 Because VS Code can host multiple Dormouse webviews in one extension host, the
 request includes `DORMOUSE_SURFACE_ID`; `message-router.ts` routes to the webview
 that owns that surface when one is available.
+
+### Control-channel security
+
+The control channel carries the whole surface API — `dor send` types arbitrary
+keystrokes into any pane, `dor read` returns its screen and scrollback, `dor
+kill` destroys it — so the threat it defends against is another local principal
+(a second account on the box, or any process running as the user) getting
+between `dor` and its host. All three defences live in
+[`dor-control-server.js`](../../standalone/sidecar/dor-control-server.js), which
+both hosts load, and its client half in
+[`control-client.ts`](../../dor/src/control-client.ts).
+
+**The server picks the path, and picks it unguessably.** On POSIX the socket is
+`<tmpdir>/dormouse-dor-<uid>/<8 random bytes>.sock`. The parent directory is
+created `0700` and re-checked on every use — a real directory, not a symlink,
+owned by this uid, at exactly mode `0700`; a directory of ours that is merely
+loose gets tightened, anything else stands the channel down. This mirrors
+`peerDirIsSafe()` in
+[`peer-link.ts`](../../vscode-ext/src/peer-link.ts). 8 random bytes rather than
+16 because macOS caps `sun_path` near 104 bytes and its `os.tmpdir()` spends
+~50 of them. On Windows the name is `\\.\pipe\dormouse-dor-<8 random bytes>`:
+the pipe namespace is machine-wide and has no directory to harden, so
+unpredictability is what is left. Neither spelling derives from the PID, which
+is enumerable and recycled.
+
+**The server proves itself first.** The token is a bearer credential, so it
+never goes on the wire in either direction. The server speaks first with a
+challenge nonce; the client answers with `HMAC-SHA256(token, "dor-control/client
+<nonce>")` and a nonce of its own; the server answers that with
+`HMAC-SHA256(token, "dor-control/server <nonce>")` before the client sends any
+request. A peer that fails its half gets hung up on with no reply — a wrong
+answer and a port scan deserve the same nothing. Whoever merely bound the path
+learns two nonces. Both sides compare proofs in constant time (SHA-256 digests
+through `timingSafeEqual`), never a short-circuiting string compare.
+
+**A lost bind is fatal to the channel, never to the host.** PTY work must
+survive a dead control channel, so neither host exits — but a host that keeps
+handing `DORMOUSE_CONTROL_TOKEN` to every shell it spawns is feeding clients and
+tokens to whoever won the race. So the token stops at the process that owns the
+server: `pty-host.js` and the sidecar delete both control variables from their
+own environment on startup (`pty-core` merges `process.env` into every shell)
+and put them back only when `ready` resolves. When the bind is lost — a squatted
+Windows pipe name, an unsafe socket directory, a socket file that cannot be
+cleared — the variables stay gone and `dor` reports the endpoint as unavailable
+rather than dialling a stranger. Both hosts hold their spawn path until `ready`
+settles (2s ceiling) so the first terminal cannot race the bind.
 
 ## Handle Model
 
@@ -514,6 +570,17 @@ Source of truth: `dor/src/commands/skill.ts`, `scripts/generate-dor-skill.mjs`,
 in `dor/test/cli-output.test.mjs`.
 
 ## Future
+
+- **Surface a dead control channel in the UI.** A lost bind currently leaves one
+  `[dor-control]` line on the host's stderr, and the only thing a user sees is
+  `dor` reporting "Dormouse control endpoint is not available in this terminal
+  yet" — which reads like a startup race rather than a channel that will never
+  come up (and, on Windows, possibly a name somebody else took). It wants a
+  visible notice, but the two hosts have no shared place to put one, so the
+  design question is where: the Baseboard carries the standalone update notice
+  (`docs/specs/auto-update.md`) and has no VS Code counterpart. The plumbing that
+  would feed it exists — both hosts already know the outcome at `ready` (see
+  [Control-channel security](#control-channel-security)).
 
 - **`dor skill` follow-ons** — skill-ecosystem publication (plugin
   marketplaces, npm) distributes the bootstrap stub, never a copy of the

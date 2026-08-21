@@ -1,6 +1,5 @@
 import { fork, ChildProcess, type Serializable } from 'child_process';
 import * as path from 'path';
-import * as os from 'os';
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import { log } from './log';
@@ -178,10 +177,12 @@ let childReady = false;
 let pendingMessages: any[] = [];
 const callbackSet = new Set<PtyCallbacks>();
 const dorControlRequestListeners = new Set<(request: DorControlRequest) => void>();
+// The socket path is chosen by the pty-host, not here: it has to land in a
+// hardened per-user directory (POSIX) or under an unguessable pipe name
+// (Windows), and only the process that binds it knows whether it came up. The
+// host reports it back through the spawn env — see pty-host.js and
+// docs/specs/dor-cli.md.
 const dorControlToken = randomBytes(24).toString('hex');
-const dorControlSocket = process.platform === 'win32'
-  ? `\\\\.\\pipe\\dormouse-vscode-${process.pid}-dor`
-  : path.join(os.tmpdir(), `dormouse-vscode-${process.pid}-dor.sock`);
 
 // Always run the pty host under the editor's own Node — Electron's bundled
 // runtime (process.execPath, re-execed as Node via ELECTRON_RUN_AS_NODE, which
@@ -222,8 +223,6 @@ function getDorRuntimeEnv(extensionPath: string): Record<string, string> {
     // OSC 633 shell-integration scripts, copied next to the bundled pty-host by
     // the build (see package.json `build`). Mirrors how DORMOUSE_CLI_BIN is set.
     DORMOUSE_SHELL_INTEGRATION_DIR: path.join(extensionPath, 'dist', 'shell-integration'),
-    DORMOUSE_CONTROL_SOCKET: dorControlSocket,
-    DORMOUSE_CONTROL_TOKEN: dorControlToken,
   };
   dorRuntimeEnvCache = { path: extensionPath, env };
   return env;
@@ -243,6 +242,10 @@ function ensureChild(extensionPath: string): ChildProcess {
     env: {
       ...process.env,
       ...dorEnv,
+      // Only the fork gets the token; `getDorRuntimeEnv` deliberately omits it,
+      // so it reaches a shell only after pty-host.js has a listening socket to
+      // pair it with.
+      DORMOUSE_CONTROL_TOKEN: dorControlToken,
     },
   });
 
