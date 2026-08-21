@@ -60,9 +60,37 @@ const POLL_MS = 2000;
 /** Invalidates an in-flight answer when the last subscriber goes away. */
 let generation = 0;
 
+/**
+ * Publish a new state, skipping a write that says the same thing.
+ *
+ * The poll re-reads every 2 s and the service answers with a fresh object each
+ * time, so without this the section re-renders twice a minute to paint
+ * identical text. The sibling store this same dialog reads guards the same way
+ * (`setPushDevices` in `lib/src/lib/push-devices.ts`); comparing the five
+ * primitives is the whole of it, because `RemoteHostConsoleStatus` has no
+ * nested value.
+ */
 function setState(next: RemoteHostStatusState): void {
+  if (sameState(state, next)) return;
   state = next;
   for (const listener of listeners) listener();
+}
+
+function sameState(a: RemoteHostStatusState, b: RemoteHostStatusState): boolean {
+  if (a === b) return true;
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'error' && b.kind === 'error') return a.message === b.message;
+  if (a.kind === 'ready' && b.kind === 'ready') {
+    return (
+      a.status.enrolled === b.status.enrolled &&
+      a.status.serverUrl === b.status.serverUrl &&
+      a.status.hostId === b.status.hostId &&
+      a.status.connection === b.status.connection &&
+      a.status.pairedClients === b.status.pairedClients
+    );
+  }
+  // `unsupported` and `loading` are the two singletons, so matching kinds is all.
+  return true;
 }
 
 /**

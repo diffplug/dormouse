@@ -178,3 +178,47 @@ describe('re-subscribing', () => {
   });
 });
 
+describe('publishing', () => {
+  /**
+   * The service answers with a fresh object every poll, so an unguarded write
+   * would re-render the section twice a minute to paint identical text. The
+   * sibling store this same dialog reads guards the same way (`setPushDevices`).
+   */
+  it('does not notify when a poll answers the same status again', async () => {
+    vi.useFakeTimers();
+    const status = {
+      enrolled: true,
+      serverUrl: 'https://laptop.tailnet.ts.net',
+      hostId: 'host-1',
+      connection: 'connected',
+      pairedClients: 1,
+    };
+    // A new object each time, exactly as a round trip through the service gives.
+    const command = vi.fn(async () => ({ ...status }));
+    remoteHostLink = {
+      command,
+      respond: () => {},
+      notify: () => {},
+      on: () => () => {},
+    };
+
+    const listener = vi.fn();
+    const unsubscribe = subscribeToRemoteHostStatus(listener);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(3 * 2000);
+      expect(command.mock.calls.length).toBeGreaterThan(1);
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      // A real change still publishes.
+      status.pairedClients = 2;
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(listener).toHaveBeenCalledTimes(2);
+    } finally {
+      unsubscribe();
+    }
+  });
+});
+

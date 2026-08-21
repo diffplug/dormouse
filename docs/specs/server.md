@@ -546,9 +546,16 @@ of truth: `lib/src/components/RemoteControlSection.tsx` over
 
 It renders **nothing at all** where `getPlatform().remoteHost` is absent — the
 website and the lib dev server have no Host service behind them, and offering
-the form would promise something the build cannot do. That is the same seam the
-push-devices line keys on, which is why its `no-host` copy can point at this
-section.
+the form would promise something the build cannot do.
+
+The push-devices line above it must key on that same seam, and **not** on its
+own `no-host`, which is a superset: `no-host` covers both a Host service that
+has not enrolled *and* a build with no Host service at all
+([alert.md](./alert.md) -> Push notifications). Only the first has a section
+beneath it, so only the first says "below" — otherwise the website points the
+reader at nothing. Source of truth: `describePushTargets` in
+`lib/src/components/SettingsDialog.tsx`, which takes the seam as an argument;
+the `PushNoHost` / `PushNotEnrolled` story pair holds the two apart.
 
 Un-enrolled it is a three-field form (server, setup password, name for this
 machine) calling the service's `enroll`; enrolled it shows the server URL, the
@@ -577,6 +584,11 @@ only on `displaced` — `Reconnect`. Rules the UI exists to honor:
   timeout is allowed to become the visible error instead of being superseded by
   newer polls. Without the poll a machine that finished connecting a moment
   after the dialog opened would read as permanently "Connecting…".
+- **A repeat answer is not published.** The service returns a fresh object every
+  poll, so the state is compared field-wise before it is stored — otherwise the
+  section would re-render twice a minute to paint identical text. This matches
+  the sibling store the same dialog reads (`setPushDevices` in
+  `lib/src/lib/push-devices.ts`).
 - **Coalescing stops at anything that changes the answer.** `enroll`,
   `reconnect` and `clearEnrollment` each drop the read in flight and start their
   own, because a `status` issued before the command answers the question as it
