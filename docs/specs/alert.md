@@ -12,7 +12,7 @@ Dormouse can owe the user attention in three ways:
 
 Terminal-report and command-exit alerts do not require WATCHING. All three share the same attention suppression rule: do not ring if the user is actively attending that Session at the completion moment.
 
-Internally these are three independent tracks — `watchingRingingCommand` + the `ActivityMonitor`, `protocolStatus` + `progress`, and `commandExitStatus` + `commandExitWatch`. Each runs IDLE -> busy/armed -> ringing without entangling the others, and each latches its own ring in the entry until it is cleared.
+Internally these are three independent tracks — `watchingRingingCommand`, `protocolStatus` + `progress`, and `commandExitStatus` + `commandExitWatch`. Each runs IDLE -> busy/armed -> ringing without entangling the others, and each latches its own ring in the entry until it is cleared. The output/silence detector (`ActivityMonitor`) is not a track: it is an always-on observer the WATCHING track reads.
 
 ## Non-goals
 
@@ -30,7 +30,7 @@ Public `status` is a projection — first match wins:
 
 1. `ALERT_RINGING` if any of the three tracks is ringing.
 2. `OSC_NOTIF_BUSY` if protocol progress is active.
-3. The `ActivityMonitor`'s own state if WATCHING is on. WATCHING outranks the command-exit arm deliberately: a watched command is by definition running, so `COMMAND_EXIT_ARMED` would otherwise mask the monitor's busy/quiet states for the whole run, and the monitor is derived from real output.
+3. The output/silence detector's own state if WATCHING is on — that is, if the rule set matches the running command. The detector runs regardless; the rule is what makes its state public. WATCHING outranks the command-exit arm deliberately: a watched command is by definition running, so `COMMAND_EXIT_ARMED` would otherwise mask the detector's busy/quiet states for the whole run, and the detector is derived from real output.
 4. `COMMAND_EXIT_ARMED` if command-exit alerting is armed.
 5. Otherwise `WATCHING_DISABLED`.
 
@@ -55,34 +55,37 @@ Source of truth: `cfg.alert` in `lib/src/cfg.ts` defines the shipped default for
 
 ## WATCHING Track
 
-**WATCHING is a property of the command, not of a Session.** The user maintains a set of watched command names; a Session runs the output/silence monitor exactly while its foreground command's name is in that set. Turning alerts on while `claude` runs means every Session running `claude` watches — the ones open now and the ones opened later. Turning them off anywhere removes the rule everywhere. There is no per-Session enable, and no per-Session mute.
+**WATCHING is a property of the command, not of a Session.** The user maintains a set of watched command names; WATCHING is on for a Session exactly while its foreground command's name is in that set. Turning alerts on while `claude` runs means every Session running `claude` watches — the ones open now and the ones opened later. Turning them off anywhere removes the rule everywhere. There is no per-Session enable, and no per-Session mute.
+
+**The output/silence detector is always on.** Every Session runs one `ActivityMonitor` for its whole lifetime, fed by every output chunk and reset at every command boundary. It is a plain observer: it never latches and knows nothing about attention or rules. The rule set decides only whether the detector's state is publicly visible and whether a settle — a busy Session that stayed quiet — is allowed to *ring*.
 
 Rules:
 
 - The key is `commandArgv0(rawCommandLine)` in `lib/src/lib/terminal-state.ts`: take everything before the first pipeline/compound boundary, skip leading `VAR=value` assignments and a leading `env`, then reduce argv[0] to its basename. `claude`, `/usr/local/bin/claude --resume`, and `FOO=1 env BAR=2 claude` all key on `claude`. `foo | claude` keys on `foo`, matching what bash's `DEBUG` trap reports.
-- A `commandStart` for a watched name starts a **fresh** monitor; `commandFinish`, `promptStart`, and `promptEnd` end the command and dispose it. Editing the rule set re-derives WATCHING across every live Session immediately.
-- A WATCHING ring outlives its monitor. Watching switches off the moment the watched command exits, which is usually the same moment the ring was raised, so the ring and its originating command key are held in the Session entry (`watchingRingingCommand`) rather than in the monitor.
-- Removing a rule is the one thing that *does* silence a WATCHING ring: it is the user saying "stop alerting on this". The latched originating key makes this work after the command has exited and its monitor is gone. A command merely ending never clears the ring.
+- Every command boundary — `commandStart`, `commandFinish`, `promptStart`, `promptEnd`, and PTY exit — resets the detector, so one command's output history can never leak into the next one's reading. Editing the rule set re-derives WATCHING across every live Session immediately, and because the detector kept running underneath, enabling a rule mid-command shows what that command is doing *right now* rather than a fresh `NOTHING_TO_SHOW`.
+- A WATCHING ring outlives the command that raised it. Watching switches off the moment the watched command exits, which is usually the same moment the ring was raised, so the ring and its originating command key are held in the Session entry (`watchingRingingCommand`).
+- Removing a rule is the one thing that *does* silence a WATCHING ring: it is the user saying "stop alerting on this". The latched originating key makes this work after the command has exited and watching is already off. A command merely ending never clears the ring.
 - The rule set is app-global and persisted (`dormouse:watched-commands`). It starts empty, so WATCHING is off everywhere until the user turns it on. Source of truth: `lib/src/lib/watched-commands.ts` (renderer mirror) and `lib/src/lib/watched-command-host.ts` (multi-renderer coordinator). In VS Code the shared extension host is authoritative: the first renderer seeds it from persisted storage, edits cross the boundary as single-command mutations, and the host broadcasts its canonical snapshot to every webview. A stale webview can therefore neither replace unrelated rules nor keep reporting an obsolete rule list.
 
 **Limitation:** WATCHING needs the shell to report command boundaries (`OSC 633` / `OSC 133`). Shells without integration — `cmd.exe`, `fish`, or any shell where injection did not take (`docs/specs/terminal-escapes.md`) — never report a command name, so WATCHING never engages there and the bell reports "nothing is running". Terminal-report and command-exit alerts are unaffected. This is accepted rather than worked around: the keystroke fallback in `docs/specs/terminal-state.md` is renderer-side and lower confidence, and routing it into the manager would buy those shells a worse version of a feature at the cost of a second command-tracking path.
 
 | State | Meaning |
 |---|---|
-| `WATCHING_DISABLED` | No monitor exists. |
-| `NOTHING_TO_SHOW` | Monitor is active, but no reminder is owed. |
+| `WATCHING_DISABLED` | No rule matches the foreground command, so the detector's state is not shown. |
+| `NOTHING_TO_SHOW` | A rule matches, but no reminder is owed. |
 | `MIGHT_BE_BUSY` | Output may be turning into ongoing work. Debounce state. |
 | `BUSY` | Enough output has arrived to treat the Session as doing work. |
 | `MIGHT_NEED_ATTENTION` | A busy Session went quiet. Debounce state. |
 | `ALERT_RINGING` | WATCHING observed likely completion while the Session lacked attention. |
 
-Source of truth: `ActivityMonitor` in `lib/src/lib/activity-monitor.ts` implements the transitions. Meaningful output excludes resize redraw noise during `T_RESIZE_DEBOUNCE`; theme changes, remounts, DOM reparenting, selection, and focus changes are not output. The invariants the implementation must honor:
+Source of truth: `ActivityMonitor` in `lib/src/lib/activity-monitor.ts` implements the detector's `QuiesceStatus` transitions; `AlertManager.onSettled` in `lib/src/lib/alert-manager.ts` decides whether a settle rings. Meaningful output excludes resize redraw noise during `T_RESIZE_DEBOUNCE`; theme changes, remounts, DOM reparenting, selection, and focus changes are not output. The invariants the implementation must honor:
 
-- Output drives the monitor up the chain `NOTHING_TO_SHOW` -> `MIGHT_BE_BUSY` -> `BUSY`; silence drives it down `BUSY` -> `MIGHT_NEED_ATTENTION` -> `ALERT_RINGING`. The `MIGHT_*` states are debounce windows in both directions.
-- First output starts candidate tracking without changing status; unconfirmed `MIGHT_BE_BUSY` returns to `NOTHING_TO_SHOW`; `ALERT_RINGING` ignores new output until the Session has attention.
-- Attention at confirmation time suppresses the ring and resets to `NOTHING_TO_SHOW`. `ALERT_RINGING` otherwise latches; new output with attention starts a fresh `MIGHT_BE_BUSY` cycle.
-- Attending or dismissing a WATCHING ring resets the monitor to `NOTHING_TO_SHOW`.
-- Rings must be caused by a fresh transition into `ALERT_RINGING`, never by rerender, theme change, remount, minimize, or reattach.
+- Output drives the detector up the chain `NOTHING_TO_SHOW` -> `MIGHT_BE_BUSY` -> `BUSY`; silence drives it down `BUSY` -> `MIGHT_NEED_ATTENTION` -> settled. The `MIGHT_*` states are debounce windows in both directions.
+- First output starts candidate tracking without changing status; unconfirmed `MIGHT_BE_BUSY` returns to `NOTHING_TO_SHOW`.
+- The detector never holds `ALERT_RINGING`. A settle is reported once and the detector immediately returns to `NOTHING_TO_SHOW`; the ring it may raise latches in the Session entry (`watchingRingingCommand`), which is what makes the public status `ALERT_RINGING` and what keeps it there through further output.
+- A settle rings only if a rule matches the foreground command *and* the Session lacks attention at the confirmation moment. Attention at confirmation time suppresses the ring.
+- Attending or dismissing a WATCHING ring resets the detector to `NOTHING_TO_SHOW`.
+- Rings must be caused by a fresh transition — a settle the detector just reported — never by rerender, theme change, remount, minimize, or reattach.
 
 ## Terminal reports
 
@@ -124,10 +127,10 @@ Clearing behavior:
 - Marking TODO clears any active ring and leaves the WATCHING rule in place for future cycles.
 - Clearing TODO sets `todo = false`, clears `notification`, and clears active rings.
 - Typing passthrough `Enter` into the Session clears TODO. Command-mode `Enter` that only enters passthrough does not.
-- Removing a WATCHING rule disposes the monitors it owned and silences their WATCHING rings. It does not clear protocol progress, command-exit arms, TODO, or notification detail.
+- Removing a WATCHING rule turns watching off wherever it matched and silences the WATCHING rings it raised. It does not stop the detector, nor clear protocol progress, command-exit arms, TODO, or notification detail.
 - Destroying the Session clears all alert, TODO, notification, attention, protocol, and command-exit state.
 
-`attentionDismissedRing` exists so the next bell click after an attention-based dismissal opens the dialog instead of silently editing a rule. Starting or stopping a WATCHING monitor, or advancing another alarm track, does not consume the flag; only the explicit dismiss path does.
+`attentionDismissedRing` exists so the next bell click after an attention-based dismissal opens the dialog instead of silently editing a rule. Turning WATCHING on or off, or advancing another alarm track, does not consume the flag; only the explicit dismiss path does.
 
 ## Alarm settings
 
@@ -258,8 +261,8 @@ Alert-specific robustness requirements: multiple Sessions ring independently; mi
 
 | File | Role |
 |------|------|
-| `lib/src/lib/activity-monitor.ts` | Per-Session WATCHING state machine (output/silence timers) |
-| `lib/src/lib/alert-manager.ts` | `AlertManager`: the three tracks, the rule set, attention, TODO, notification storage, status projection |
+| `lib/src/lib/activity-monitor.ts` | The always-on per-Session output/silence detector: `QuiesceStatus` timers, `onSettled`, `reset()` |
+| `lib/src/lib/alert-manager.ts` | `AlertManager`: the three tracks, the detectors, the rule set, attention, TODO, notification storage, status projection |
 | `lib/src/lib/watched-commands.ts` | Persisted WATCHING rule set and its push to the host |
 | `lib/src/lib/watched-command-host.ts` | First-seed + mutation/broadcast coordinator for a host shared by multiple renderers |
 | `lib/src/lib/alert-settings.ts` | Persisted alarm settings, their validation/clamping, and their push to the host |

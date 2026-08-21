@@ -256,7 +256,7 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  it('dropping the rule disposes only the monitor, leaving protocol progress armed', () => {
+  it('dropping the rule only turns WATCHING off, leaving protocol progress armed', () => {
     const id = 'osc-progress-drop-rule';
 
     runWatchedCommand(id);
@@ -568,10 +568,10 @@ describe('AlertManager in isolation', () => {
   });
 
   it('keeps a WATCHING ring after the watched command exits and takes watching with it', () => {
-    const id = 'ring-outlives-monitor';
+    const id = 'ring-outlives-command';
     driveToRinging(id);
 
-    // The command exiting disposes the monitor; the ring it already raised is
+    // The command exiting turns WATCHING off; the ring it already raised is
     // the whole point of watching, so it has to survive.
     manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
     expect(manager.getState(id)).toMatchObject({
@@ -605,6 +605,109 @@ describe('AlertManager in isolation', () => {
     driveToRinging(id);
     manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
 
+    expect(manager.getState(id)).toMatchObject({
+      status: 'ALERT_RINGING',
+      watchingEnabled: false,
+    });
+
+    manager.setWatchedCommands([]);
+    expect(manager.getState(id)).toMatchObject({
+      status: 'WATCHING_DISABLED',
+      watchingEnabled: false,
+      todo: false,
+    });
+  });
+
+  // --- The always-on detector vs. the rule set as pure policy ---
+
+  it('drives the detector on an unwatched Session without showing it or ringing', () => {
+    const id = 'unwatched-detector';
+    manager.setWatchedCommands(['claude']);
+    manager.applyTerminalSemanticEvents(id, [
+      { type: 'commandLine', commandLine: 'git log' },
+      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+    ]);
+    manager.clearAttention(id);
+
+    manager.onData(id);
+    vi.advanceTimersByTime(1_600);
+    manager.onData(id);
+    manager.onData(id);
+    // The detector is BUSY underneath, but no rule matches, so nothing shows.
+    expect(manager.getState(id)).toMatchObject({
+      status: 'WATCHING_DISABLED',
+      watchingEnabled: false,
+    });
+
+    // ... and a settle on an unwatched Session never rings the human.
+    vi.advanceTimersByTime(2_000);
+    vi.advanceTimersByTime(3_000);
+    expect(manager.getState(id)).toMatchObject({
+      status: 'WATCHING_DISABLED',
+      todo: false,
+      notification: null,
+    });
+  });
+
+  it('shows the live detector state when a rule is enabled mid-command', () => {
+    const id = 'enable-rule-mid-busy';
+    manager.applyTerminalSemanticEvents(id, [
+      { type: 'commandLine', commandLine: 'claude' },
+      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+    ]);
+    manager.clearAttention(id);
+
+    manager.onData(id);
+    vi.advanceTimersByTime(1_600);
+    manager.onData(id);
+    manager.onData(id);
+    expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
+
+    // Turning the rule on mid-run reveals what the detector already knows
+    // rather than restarting it from NOTHING_TO_SHOW.
+    manager.setWatchedCommands(['claude']);
+    expect(manager.getState(id)).toMatchObject({
+      status: 'BUSY',
+      watchingEnabled: true,
+    });
+  });
+
+  it('suppresses a WATCHING ring when the user is attending at the settle', () => {
+    const id = 'settle-while-attended';
+    runWatchedCommand(id);
+    manager.attend(id);
+
+    manager.onData(id);
+    vi.advanceTimersByTime(1_600);
+    manager.onData(id);
+    manager.onData(id);
+    expect(manager.getState(id).status).toBe('BUSY');
+
+    vi.advanceTimersByTime(2_000);
+    vi.advanceTimersByTime(3_000);
+    // Total elapsed is under the 15s attention window, so the user is still
+    // looking: no ring, and the detector simply starts over.
+    expect(manager.getState(id)).toMatchObject({
+      status: 'NOTHING_TO_SHOW',
+      watchingEnabled: true,
+      todo: false,
+      notification: null,
+    });
+  });
+
+  it('keeps a latched ring through post-exit output and drops it with the rule', () => {
+    const id = 'latched-ring-vs-live-detector';
+    driveToRinging(id);
+    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+
+    // The detector keeps running after the command ends, so shell-prompt output
+    // can drive a whole extra busy/settle cycle. Neither the output nor the
+    // unwatched settle may disturb the ring the watched run already raised.
+    manager.onData(id);
+    vi.advanceTimersByTime(1_600);
+    manager.onData(id);
+    manager.onData(id);
+    vi.advanceTimersByTime(5_000);
     expect(manager.getState(id)).toMatchObject({
       status: 'ALERT_RINGING',
       watchingEnabled: false,

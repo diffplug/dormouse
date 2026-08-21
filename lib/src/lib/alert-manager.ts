@@ -89,13 +89,21 @@ export const DEFAULT_ALERT_STATE: AlertState = {
 /**
  * Three independent alarm tracks per Session, unioned into one public status.
  * Each track is IDLE -> (a busy/armed state) -> ringing, and each ring latches
- * in the entry until it is attended, dismissed, or TODO'd. WATCHING's ring lives
- * here rather than in its `ActivityMonitor` precisely so it can outlive the
- * monitor: watching turns off the moment the watched command exits, which is
- * often the same moment the ring is raised.
+ * in the entry until it is attended, dismissed, or TODO'd.
+ *
+ * The output/silence detector is not one of the tracks: it runs for every
+ * Session for its whole lifetime and never latches anything. `watching` is the
+ * policy gate — whether the watched-commands rule set matches the foreground
+ * command — and it decides both whether the detector's state is publicly
+ * visible and whether a settle is allowed to ring. The ring itself latches in
+ * `watchingRingingCommand`, which is why it survives the command exiting (the
+ * same moment that usually flips `watching` off).
  */
 interface AlertEntry {
-  monitor: ActivityMonitor | null;
+  /** Always-on output/silence detector. Never disposed before the entry is. */
+  monitor: ActivityMonitor;
+  /** The watched-commands rule matches the current foreground command. */
+  watching: boolean;
   /** Command rule that raised the latched WATCHING ring, even after command exit. */
   watchingRingingCommand: string | null;
   protocolStatus: ProtocolStatus;
@@ -109,7 +117,8 @@ interface AlertEntry {
 }
 
 /**
- * Manages ActivityMonitors, attention tracking, and todo state for PTY sessions.
+ * Manages the always-on output/silence detectors, attention tracking, the
+ * WATCHING rule set, and todo state for PTY sessions.
  *
  * Portable — no DOM dependencies. Can run in the extension host (VSCode),
  * in the webview adapter (Tauri), or in tests.
@@ -154,8 +163,11 @@ export class AlertManager {
   // --- Feed PTY events ---
 
   onData(id: string): void {
-    const entry = this.entries.get(id);
-    entry?.monitor?.onData();
+    // The detector runs for every Session, including one that has never
+    // produced a semantic or protocol event, so output creates the entry.
+    // A chunk that lands after `remove(id)` therefore resurrects it —
+    // `notifyFromProtocol` has had that property all along, so this is parity.
+    this.getOrCreateEntry(id).monitor.onData();
   }
 
   onExit(id: string, exitCode?: number): void {
@@ -165,8 +177,9 @@ export class AlertManager {
   }
 
   onResize(id: string): void {
-    const entry = this.entries.get(id);
-    entry?.monitor?.onResize();
+    // Same reasoning as `onData`: the resize grace window is part of the
+    // always-on detector, and a Pane's first fit usually beats any PTY event.
+    this.getOrCreateEntry(id).monitor.onResize();
   }
 
   // --- WATCHING rule set ---
@@ -181,7 +194,7 @@ export class AlertManager {
     if (next.size === this.watchedCommands.size && [...next].every((name) => this.watchedCommands.has(name))) return;
     this.watchedCommands = next;
     for (const [id, entry] of this.entries) {
-      let changed = this.applyWatchingRule(id, entry);
+      let changed = this.applyWatchingRule(entry);
       // Dropping a rule is an explicit "stop alerting on this", so it also
       // silences the ring that rule already raised. The originating key stays
       // latched after command exit precisely so this still works at a prompt.
@@ -213,46 +226,37 @@ export class AlertManager {
 
   /**
    * WATCHING follows the foreground command's name: on while a watched command
-   * runs, off at the prompt. Returns whether the monitor changed.
+   * runs, off at the prompt. The detector keeps running either way; this only
+   * flips whether its state is public and whether a settle rings. Returns
+   * whether the flag changed.
    */
-  private applyWatchingRule(id: string, entry: AlertEntry): boolean {
+  private applyWatchingRule(entry: AlertEntry): boolean {
     const argv0 = entry.commandExitWatch?.argv0 ?? null;
-    return this.setWatching(id, entry, argv0 !== null && this.watchedCommands.has(argv0));
-  }
-
-  private setWatching(id: string, entry: AlertEntry, enabled: boolean): boolean {
-    if (enabled === !!entry.monitor) return false;
-    if (enabled) {
-      entry.monitor = this.createMonitor(id);
-    } else {
-      // The latched WATCHING ring deliberately survives: watching switches off
-      // the moment the watched command exits. Only removing its command rule
-      // clears it.
-      entry.monitor?.dispose();
-      entry.monitor = null;
-    }
+    const next = argv0 !== null && this.watchedCommands.has(argv0);
+    if (next === entry.watching) return false;
+    entry.watching = next;
     return true;
   }
 
   private createMonitor(id: string): ActivityMonitor {
     return new ActivityMonitor({
-      hasAttention: () => this.hasAttention(id),
-      onChange: (status) => {
-        const entry = this.entries.get(id);
-        if (!entry) return;
-
-        if (status === 'ALERT_RINGING') {
-          // The user is looking right at it — suppress by resetting the monitor.
-          if (this.hasAttention(id)) {
-            entry.monitor?.attend();
-            return;
-          }
-          entry.watchingRingingCommand = entry.commandExitWatch?.argv0 ?? null;
-        }
-
-        this.notify(id);
-      },
+      onChange: () => this.notify(id),
+      onSettled: () => this.onSettled(id),
     });
+  }
+
+  /**
+   * A busy Session went quiet. Whether that rings is pure policy: only a
+   * watched command rings, and only if the user is not looking at it right now.
+   * The originating command key latches here so the ring outlives the command.
+   */
+  private onSettled(id: string): void {
+    const entry = this.entries.get(id);
+    if (!entry) return;
+    if (!entry.watching) return;
+    if (this.hasAttention(id)) return;
+    entry.watchingRingingCommand = entry.commandExitWatch?.argv0 ?? null;
+    this.notify(id);
   }
 
   // --- Terminal-report protocol track ---
@@ -386,7 +390,10 @@ export class AlertManager {
       startedAt: resolved.startedAt,
       seenWithAttentionAt: this.hasAttention(id) ? Date.now() : null,
     };
-    this.applyWatchingRule(id, entry);
+    this.applyWatchingRule(entry);
+    // Every command boundary starts the detector over, so one command's output
+    // history can never leak into the next one's busy/quiet reading.
+    entry.monitor.reset();
   }
 
   private finishCommandExitWatch(
@@ -397,24 +404,30 @@ export class AlertManager {
     const watch = entry.commandExitWatch;
     entry.commandExitWatch = null;
     entry.pendingCommandLine = null;
-    // Disposing the WATCHING monitor flips `watchingEnabled`/status, so its
-    // change must propagate even when command-exit never armed — otherwise a
-    // watched command that finishes leaves subscribers on stale WATCHING state
-    // until the next command starts.
-    const watchingChanged = this.applyWatchingRule(id, entry);
+    // Turning WATCHING off flips `watchingEnabled`/status, so its change must
+    // propagate even when command-exit never armed — otherwise a watched
+    // command that finishes leaves subscribers on stale WATCHING state until
+    // the next command starts.
+    const watchingChanged = this.applyWatchingRule(entry);
 
     const wasArmed = entry.commandExitStatus === 'COMMAND_EXIT_ARMED';
     if (entry.commandExitStatus !== 'ALERT_RINGING') {
       entry.commandExitStatus = 'IDLE';
     }
 
-    if (!watch || !wasArmed) return watchingChanged;
-    if (this.hasAttention(id)) return true;
+    let changed = watchingChanged;
+    if (watch && wasArmed) {
+      changed = true;
+      if (!this.hasAttention(id) && Date.now() - watch.startedAt >= this.inactivityTimeoutMs) {
+        this.setCommandExitRinging(id, entry, watch, exitCode);
+      }
+    }
 
-    if (Date.now() - watch.startedAt < this.inactivityTimeoutMs) return true;
-
-    this.setCommandExitRinging(id, entry, watch, exitCode);
-    return true;
+    // The command boundary reset, covering commandFinish, promptStart/End, and
+    // PTY exit. Last, so the reset's own `onChange` cannot publish a
+    // half-finished projection.
+    entry.monitor.reset();
+    return changed;
   }
 
   private markCommandExitSeen(entry: AlertEntry): void {
@@ -467,10 +480,10 @@ export class AlertManager {
     if (entry.watchingRingingCommand !== null) {
       entry.watchingRingingCommand = null;
       cleared = true;
+      // Attending or dismissing a WATCHING ring starts the detector over, so
+      // the tail of the run that just rang cannot immediately settle again.
+      entry.monitor.reset();
     }
-    // A live monitor still latched at ALERT_RINGING would re-ring on its next
-    // output, so release it too.
-    if (entry.monitor?.getStatus() === 'ALERT_RINGING') entry.monitor.attend();
     return cleared;
   }
 
@@ -515,7 +528,7 @@ export class AlertManager {
       entry.todo = true;
     }
     this.markCommandExitSeen(entry);
-    entry.monitor?.attend();
+    entry.monitor.reset();
     this.notify(id);
   }
 
@@ -579,7 +592,7 @@ export class AlertManager {
     if (!entry) return DEFAULT_ALERT_STATE;
     return {
       status: this.getProjectedStatus(entry),
-      watchingEnabled: !!entry.monitor,
+      watchingEnabled: entry.watching,
       todo: entry.todo,
       notification: entry.notification,
       attentionDismissedRing: entry.attentionDismissedRing,
@@ -598,7 +611,7 @@ export class AlertManager {
   remove(id: string): void {
     const entry = this.entries.get(id);
     if (!entry) return;
-    entry.monitor?.dispose();
+    entry.monitor.dispose();
     this.entries.delete(id);
     if (this.attentionId === id) {
       this.attentionId = null;
@@ -623,12 +636,14 @@ export class AlertManager {
     entry.commandExitStatus = 'IDLE';
     entry.commandExitWatch = null;
     entry.pendingCommandLine = null;
+    // Restore must never carry detector state either.
+    entry.monitor.reset();
     this.notify(id);
   }
 
   dispose(): void {
     for (const entry of this.entries.values()) {
-      entry.monitor?.dispose();
+      entry.monitor.dispose();
     }
     this.entries.clear();
     this.listeners.clear();
@@ -647,9 +662,9 @@ export class AlertManager {
     if (entry.protocolStatus === 'OSC_NOTIF_BUSY') return 'OSC_NOTIF_BUSY';
     // WATCHING outranks the command-exit arm: a watched command is by
     // definition running, so COMMAND_EXIT_ARMED would otherwise mask the
-    // monitor's busy/quiet states for the entire run. The monitor is derived
+    // detector's busy/quiet states for the entire run. The detector is derived
     // from real output, so it is the more informative of the two.
-    if (entry.monitor) return entry.monitor.getStatus();
+    if (entry.watching) return entry.monitor.getStatus();
     if (entry.commandExitStatus === 'COMMAND_EXIT_ARMED') return 'COMMAND_EXIT_ARMED';
     return 'WATCHING_DISABLED';
   }
@@ -658,7 +673,8 @@ export class AlertManager {
     let entry = this.entries.get(id);
     if (!entry) {
       entry = {
-        monitor: null,
+        monitor: this.createMonitor(id),
+        watching: false,
         watchingRingingCommand: null,
         protocolStatus: 'IDLE',
         progress: null,
