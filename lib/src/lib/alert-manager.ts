@@ -313,41 +313,38 @@ export class AlertManager {
    * Observe -> claim -> ring rule, for all three tracks. Every ring rule lives
    * here and nowhere else, so a track's emit site only has to describe what
    * happened; the decision to bother a human is made once, after the claimants
-   * have passed on it.
+   * have passed on it. Returns whether a claimant took the event.
    */
-  private dispatchCompletion(id: string, entry: AlertEntry, event: CompletionEvent): void {
-    const claimants = this.claimants.get(id);
-    if (claimants) {
-      // Snapshot: a claimant may unregister itself (or register another) while
-      // being offered this very event.
-      for (const claimant of [...claimants]) {
-        if (claimant(event)) return;
-      }
-    }
+  private dispatchCompletion(id: string, entry: AlertEntry, event: CompletionEvent): boolean {
+    // Snapshot: a claimant may unregister itself (or register another) while
+    // being offered this very event.
+    const claimants = [...(this.claimants.get(id) ?? [])];
+    if (claimants.some((claimant) => claimant(event))) return true;
 
     switch (event.kind) {
       case 'settled':
         // Only a watched command rings, and only if the user is not looking at
         // it right now. The originating command key latches here so the ring
         // outlives the command that raised it.
-        if (!this.isWatching(entry) || this.hasAttention(id)) return;
+        if (!this.isWatching(entry) || this.hasAttention(id)) break;
         entry.watchingRingingCommand = entry.commandExitWatch?.argv0 ?? null;
         this.notify(id);
-        return;
+        break;
       case 'commandFinished':
-        if (!event.armed || this.hasAttention(id) || event.ranMs < this.inactivityTimeoutMs) return;
+        if (!event.armed || this.hasAttention(id) || event.ranMs < this.inactivityTimeoutMs) break;
         this.setCommandExitRinging(id, entry, event.displayCommand, event.exitCode);
-        return;
+        break;
       case 'notification':
         if (this.hasAttention(id)) {
           // A progress cycle was already cleared before dispatch, so publish
           // that; a plain direct notification changes nothing and dedupes away.
           this.notify(id);
-          return;
+          break;
         }
         this.setProtocolRinging(id, entry, event.notification);
-        return;
+        break;
     }
+    return false;
   }
 
   // --- Terminal-report protocol track ---
@@ -414,7 +411,7 @@ export class AlertManager {
   ): void {
     entry.progress = null;
     if (entry.protocolStatus === 'OSC_NOTIF_BUSY') entry.protocolStatus = 'IDLE';
-    this.dispatchCompletion(id, entry, {
+    const claimed = this.dispatchCompletion(id, entry, {
       kind: 'notification',
       notification: {
         source: 'OSC 9;4',
@@ -422,10 +419,9 @@ export class AlertManager {
         body: percent === null ? null : `Progress ${Math.round(percent)}%`,
       },
     });
-    // Clearing the cycle is publicly visible (`OSC_NOTIF_BUSY` falls back), and
-    // a claim stops the dispatch before any ring rule notifies. Every other path
-    // has already published by now, so `notify` dedupes.
-    this.notify(id);
+    // Clearing the cycle is publicly visible (`OSC_NOTIF_BUSY` falls back); the
+    // ring rules publish it themselves, a claim stops before they run.
+    if (claimed) this.notify(id);
   }
 
   private setProtocolRinging(id: string, entry: AlertEntry, notification: ActivityNotification): void {

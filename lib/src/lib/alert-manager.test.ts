@@ -154,6 +154,16 @@ describe('AlertManager in isolation', () => {
     vi.advanceTimersByTime(3_000);
   }
 
+  /** Register a claimant that records every event it is offered and answers `claims`. */
+  function recordingClaimant(id: string, claims: boolean): CompletionEvent[] {
+    const seen: CompletionEvent[] = [];
+    manager.registerCompletionClaimant(id, (event) => {
+      seen.push(event);
+      return claims;
+    });
+    return seen;
+  }
+
   function driveToRinging(id: string): void {
     runWatchedCommand(id);
     manager.clearAttention(id);
@@ -826,11 +836,7 @@ describe('AlertManager in isolation', () => {
   describe('completion events', () => {
     it('claiming a settle keeps the WATCHING ring from ever latching', () => {
       const id = 'claim-settle';
-      const seen: CompletionEvent[] = [];
-      manager.registerCompletionClaimant(id, (event) => {
-        seen.push(event);
-        return true;
-      });
+      const seen = recordingClaimant(id, true);
 
       runWatchedCommand(id);
       manager.clearAttention(id);
@@ -849,11 +855,7 @@ describe('AlertManager in isolation', () => {
 
     it('declining a settle rings exactly as if no claimant existed', () => {
       const id = 'decline-settle';
-      const seen: CompletionEvent[] = [];
-      manager.registerCompletionClaimant(id, (event) => {
-        seen.push(event);
-        return false;
-      });
+      const seen = recordingClaimant(id, false);
 
       runWatchedCommand(id);
       manager.clearAttention(id);
@@ -866,11 +868,7 @@ describe('AlertManager in isolation', () => {
 
     it('reports a short attended command finish that could never ring', () => {
       const id = 'observe-quick-command';
-      const seen: CompletionEvent[] = [];
-      manager.registerCompletionClaimant(id, (event) => {
-        seen.push(event);
-        return false;
-      });
+      const seen = recordingClaimant(id, false);
 
       manager.attend(id);
       manager.applyTerminalSemanticEvents(id, [
@@ -897,11 +895,7 @@ describe('AlertManager in isolation', () => {
 
     it('claiming an armed command finish suppresses the COMMAND_EXIT ring', () => {
       const id = 'claim-command-exit';
-      const seen: CompletionEvent[] = [];
-      manager.registerCompletionClaimant(id, (event) => {
-        seen.push(event);
-        return true;
-      });
+      const seen = recordingClaimant(id, true);
 
       manager.attend(id);
       manager.applyTerminalSemanticEvents(id, [
@@ -930,11 +924,7 @@ describe('AlertManager in isolation', () => {
 
     it('claiming a direct notification leaves no ring, TODO, or detail behind', () => {
       const id = 'claim-notification';
-      const seen: CompletionEvent[] = [];
-      manager.registerCompletionClaimant(id, (event) => {
-        seen.push(event);
-        return true;
-      });
+      const seen = recordingClaimant(id, true);
 
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
 
@@ -950,11 +940,7 @@ describe('AlertManager in isolation', () => {
 
     it('claiming a progress completion still clears the cycle', () => {
       const id = 'claim-progress';
-      const seen: CompletionEvent[] = [];
-      manager.registerCompletionClaimant(id, (event) => {
-        seen.push(event);
-        return true;
-      });
+      const seen = recordingClaimant(id, true);
 
       manager.updateProtocolProgress(id, { state: 'normal', percent: 25 });
       expect(manager.getState(id).status).toBe('OSC_NOTIF_BUSY');
