@@ -57,7 +57,7 @@ let refreshAgain = false;
  */
 const POLL_MS = 2000;
 
-/** Invalidates an in-flight answer when the last subscriber goes away. */
+/** Invalidates an in-flight answer that can no longer be the one anybody wants. */
 let generation = 0;
 
 /**
