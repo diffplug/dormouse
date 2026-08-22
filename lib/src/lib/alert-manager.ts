@@ -199,6 +199,14 @@ interface AlertEntry {
   detector: QuiesceDetector;
   /** Command rule that raised the latched WATCHING ring, even after command exit. */
   watchingRingingCommand: string | null;
+  /**
+   * Has any output arrived since that ring latched? The detector cannot answer
+   * this — it never latches, so it reports how output looks *now*, and it stays
+   * `NOTHING_TO_SHOW` for a full `busyCandidateGap` after output resumes (and
+   * returns there when a burst was too sparse to confirm BUSY). The question is
+   * about the interval since the ring, which is only observable here.
+   */
+  outputSinceWatchingRing: boolean;
   protocolStatus: ProtocolStatus;
   progress: ActiveProtocolProgress | null;
   commandExitStatus: CommandExitStatus;
@@ -287,6 +295,10 @@ export class AlertManager {
     const entry = this.streamEntry(id);
     if (!entry) return;
     entry.detector.onData();
+    // Only meaningful while a ring is latched: `consumeAwaitableRing` reads it
+    // to tell a ring that still describes the present from one whose quiet has
+    // already ended.
+    if (entry.watchingRingingCommand !== null) entry.outputSinceWatchingRing = true;
     this.eachWaiter(id, (waiter) => waiter.onOutput());
   }
 
@@ -325,6 +337,7 @@ export class AlertManager {
         && !this.watchedCommands.has(entry.watchingRingingCommand)
       ) {
         entry.watchingRingingCommand = null;
+        entry.outputSinceWatchingRing = false;
       }
       // WATCHING is derived from the rule set, so every entry may have changed.
       this.notify(id);
@@ -417,6 +430,7 @@ export class AlertManager {
         // outlives the command that raised it.
         if (!this.isWatching(entry) || this.hasAttention(id)) break;
         entry.watchingRingingCommand = entry.commandExitWatch?.argv0 ?? null;
+        entry.outputSinceWatchingRing = false;
         this.notify(id);
         break;
       case 'commandFinished':
@@ -567,8 +581,11 @@ export class AlertManager {
    * output resumes. Consuming a latched ring after a `dor send` restarted the
    * peer would answer "output stopped" about a turn that is mid-flight, and the
    * documented `await && read` idiom would read a half-drawn screen. So it is
-   * consumed only while the detector still agrees nothing is happening; once
-   * output has resumed the await parks for the real settle.
+   * consumed only while `outputSinceWatchingRing` is still false; once output
+   * has resumed the await parks for the real settle. The detector cannot stand
+   * in for that flag — it stays `NOTHING_TO_SHOW` for a full `busyCandidateGap`
+   * after output resumes, which is longer than the two CLI round trips between
+   * a `dor send` and the await that follows it.
    *
    * The protocol ring is ungated: `OSC 9` is a discrete "I need input" that
    * stays true until it is answered, so a peer ringing mid-run still means what
@@ -579,7 +596,7 @@ export class AlertManager {
     if (entry.commandExitWatch === null && this.releaseRing(entry, 'commandExit')) return 'exit';
     if (
       until === 'quiet'
-      && entry.detector.getStatus() === 'NOTHING_TO_SHOW'
+      && !entry.outputSinceWatchingRing
       && this.releaseRing(entry, 'watching')
     ) return 'quiet';
     return null;
@@ -867,6 +884,7 @@ export class AlertManager {
       case 'watching':
         if (entry.watchingRingingCommand === null) return false;
         entry.watchingRingingCommand = null;
+        entry.outputSinceWatchingRing = false;
         // Releasing a WATCHING ring starts the detector over, so the tail of
         // the run that just rang cannot immediately settle again.
         entry.detector.reset();
@@ -1024,6 +1042,7 @@ export class AlertManager {
     entry.todo = state.todo === true;
     entry.notification = entry.todo ? normalizeActivityNotification(state.notification) : null;
     entry.watchingRingingCommand = null;
+    entry.outputSinceWatchingRing = false;
     entry.protocolStatus = 'IDLE';
     entry.progress = null;
     entry.commandExitStatus = 'IDLE';
@@ -1096,6 +1115,7 @@ export class AlertManager {
       entry = {
         detector: this.createDetector(id),
         watchingRingingCommand: null,
+        outputSinceWatchingRing: false,
         protocolStatus: 'IDLE',
         progress: null,
         commandExitStatus: 'IDLE',

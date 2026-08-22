@@ -1161,21 +1161,58 @@ describe('AlertManager in isolation', () => {
       expect(await outcome()).toMatchObject({ kind: 'resolved', cause: 'exit' });
     });
 
-    it('leaves a stale WATCHING ring alone once output has resumed', async () => {
-      const id = 'await-stale-watching-ring';
+    it.each([
+      // The real `dor send … && dor await …` shape: two CLI round trips, so the
+      // await lands a few hundred ms after output resumed — inside the window
+      // where the detector is still NOTHING_TO_SHOW, since it does not leave
+      // that state until busyCandidateGap (1500ms) after the first chunk. That
+      // window is why the gate is a flag on the entry rather than the detector's
+      // own status.
+      ["within the detector's busy-candidate window", 100],
+      // And once the detector has noticed the output for itself.
+      ['after the detector has noticed the output', 800],
+    ] as const)('leaves a stale WATCHING ring alone once output has resumed, %s', async (_label, gapMs) => {
+      const id = `await-stale-watching-ring-${gapMs}`;
       driveToRinging(id);
 
       // The peer was sent another turn and is talking again. Nothing clears the
       // latched ring — it is still the human's — but the quiet it describes is
       // over, so it cannot answer "output stopped" about the turn in flight.
-      driveToBusy(id);
-      expect(manager.getState(id).status).toBe('ALERT_RINGING');
+      manager.onData(id);
+      vi.advanceTimersByTime(gapMs);
+      manager.onData(id);
+      vi.advanceTimersByTime(gapMs);
+      manager.onData(id);
 
       const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
       const outcome = watch(handle);
       expect(await outcome()).toBeNull();
+      // Not consumed either: the stale ring is still the human's.
       expect(manager.getState(id).status).toBe('ALERT_RINGING');
 
+      // The turn finishes for real, and that is what answers the caller.
+      driveToBusy(id);
+      settle();
+      expect(await outcome()).toMatchObject({ kind: 'resolved', cause: 'quiet' });
+    });
+
+    it('leaves a stale WATCHING ring alone after a burst too sparse to confirm BUSY', async () => {
+      const id = 'await-stale-watching-ring-sparse';
+      driveToRinging(id);
+
+      // Output that reaches MIGHT_BE_BUSY and then stops: the confirm timer
+      // returns the detector to NOTHING_TO_SHOW without ever settling, so the
+      // latch is untouched and the detector's status is back where it started.
+      manager.onData(id);
+      vi.advanceTimersByTime(1_600);
+      manager.onData(id);
+      vi.advanceTimersByTime(10_000);
+
+      const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+      const outcome = watch(handle);
+      expect(await outcome()).toBeNull();
+
+      driveToBusy(id);
       settle();
       expect(await outcome()).toMatchObject({ kind: 'resolved', cause: 'quiet' });
     });
