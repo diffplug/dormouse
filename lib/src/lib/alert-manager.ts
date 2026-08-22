@@ -549,23 +549,39 @@ export class AlertManager {
    * Only that track's latch is released: TODO, its notification detail, and
    * `attentionDismissedRing` are the human's and stay untouched.
    *
-   * The command-exit ring is the one exception. It outlives the run that raised
-   * it — `startCommandExitWatch` deliberately preserves `ALERT_RINGING` — so
-   * once a *new* foreground command is running it can only describe a previous
-   * one, and consuming it would answer "the command exited" about the command
-   * still running. That is precisely the misreport `dor send` followed by
-   * `dor await --until exit` would act on, so a running `commandExitWatch`
-   * suppresses it and the await parks for the real exit instead.
+   * Two of the three are gated, because their latches outlive the fact they
+   * describe.
    *
-   * The other two are not gated, because both can legitimately be raised *by*
-   * the command still running: a peer rings mid-run, and a WATCHING ring is a
-   * long-running watched command going quiet — the `claude` case `--until
-   * quiet` exists for.
+   * The command-exit ring outlives the run that raised it —
+   * `startCommandExitWatch` deliberately preserves `ALERT_RINGING` — so once a
+   * *new* foreground command is running it can only describe a previous one,
+   * and consuming it would answer "the command exited" about the command still
+   * running. That is precisely the misreport `dor send` followed by `dor await
+   * --until exit` would act on, so a running `commandExitWatch` suppresses it
+   * and the await parks for the real exit instead.
+   *
+   * The WATCHING ring is the same hazard one level down. It legitimately
+   * describes the command still running — a long-running watched command going
+   * quiet is the `claude` case `--until quiet` exists for — but it is an
+   * *inference from silence*, not a discrete event, and nothing clears it when
+   * output resumes. Consuming a latched ring after a `dor send` restarted the
+   * peer would answer "output stopped" about a turn that is mid-flight, and the
+   * documented `await && read` idiom would read a half-drawn screen. So it is
+   * consumed only while the detector still agrees nothing is happening; once
+   * output has resumed the await parks for the real settle.
+   *
+   * The protocol ring is ungated: `OSC 9` is a discrete "I need input" that
+   * stays true until it is answered, so a peer ringing mid-run still means what
+   * it said whenever the await arrives.
    */
   private consumeAwaitableRing(entry: AlertEntry, until: AwaitUntil): AwaitCause | null {
     if (until === 'quiet' && this.releaseRing(entry, 'protocol')) return 'bell';
     if (entry.commandExitWatch === null && this.releaseRing(entry, 'commandExit')) return 'exit';
-    if (until === 'quiet' && this.releaseRing(entry, 'watching')) return 'quiet';
+    if (
+      until === 'quiet'
+      && entry.detector.getStatus() === 'NOTHING_TO_SHOW'
+      && this.releaseRing(entry, 'watching')
+    ) return 'quiet';
     return null;
   }
 

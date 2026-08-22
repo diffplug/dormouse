@@ -33,7 +33,7 @@ JSON output:
     "detail": "output stopped after 10m 15s"
   }
 
-Exits 0 on any resolution, 2 on timeout, and 3 if the surface died before finishing.
+Exits 0 on any resolution, 2 on timeout, and 3 if the surface died before finishing. The JSON above is printed only on a resolution; a timeout or a death reports itself through the exit code and the stderr line, with nothing on stdout.
 
 Examples:
   dor await surface:3 --until quiet

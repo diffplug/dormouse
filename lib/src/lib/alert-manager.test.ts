@@ -1161,6 +1161,25 @@ describe('AlertManager in isolation', () => {
       expect(await outcome()).toMatchObject({ kind: 'resolved', cause: 'exit' });
     });
 
+    it('leaves a stale WATCHING ring alone once output has resumed', async () => {
+      const id = 'await-stale-watching-ring';
+      driveToRinging(id);
+
+      // The peer was sent another turn and is talking again. Nothing clears the
+      // latched ring — it is still the human's — but the quiet it describes is
+      // over, so it cannot answer "output stopped" about the turn in flight.
+      driveToBusy(id);
+      expect(manager.getState(id).status).toBe('ALERT_RINGING');
+
+      const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+      const outcome = watch(handle);
+      expect(await outcome()).toBeNull();
+      expect(manager.getState(id).status).toBe('ALERT_RINGING');
+
+      settle();
+      expect(await outcome()).toMatchObject({ kind: 'resolved', cause: 'quiet' });
+    });
+
     it('leaves a standing bell alone under --until exit and keeps waiting', async () => {
       const id = 'await-exit-ignores-standing-bell';
       runCommand(id);
