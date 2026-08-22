@@ -225,14 +225,19 @@ test('dor control server refuses to start without a token', () => {
 test('the chosen socket path is unguessable and, on POSIX, privately owned', { skip: process.platform === 'win32' }, () => {
   const productionPath = resolveControlSocketPath();
   assert.ok(productionPath);
-  // macOS caps sun_path near 104 bytes. Check the production spelling: the
-  // isolated test directory below is intentionally different and must not make
-  // this assertion depend on a test-only prefix, the PID, or Math.random's
-  // variable-length rendering.
-  assert.ok(
-    Buffer.byteLength(productionPath) < 104,
-    `${productionPath} is ${Buffer.byteLength(productionPath)} bytes`,
-  );
+  // macOS caps sun_path near 104 bytes, and it is the platform with no slack:
+  // its os.tmpdir() is a ~48-byte per-user path where CI's Linux `/tmp` is 4.
+  // Check the production spelling under both, or a name that grows by 20 bytes
+  // passes here and fails to bind on a Mac. The isolated directory below is
+  // intentionally different and must not make this depend on a test-only
+  // prefix, the PID, or Math.random's variable-length rendering.
+  for (const tmp of [os.tmpdir(), `/var/folders/ab/${'c'.repeat(30)}/T`]) {
+    const candidate = path.join(tmp, path.relative(os.tmpdir(), productionPath));
+    assert.ok(
+      Buffer.byteLength(candidate) < 104,
+      `${candidate} is ${Buffer.byteLength(candidate)} bytes`,
+    );
+  }
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dor-test-'));
   try {
