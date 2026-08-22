@@ -187,5 +187,12 @@
     "license": "ISC",
     "author": "Isaac Z. Schlueter <i@izs.me> (http://blog.izs.me)",
     "homepage": "https://github.com/isaacs/node-which"
+  },
+  {
+    "name": "ws",
+    "version": "8.21.3",
+    "license": "MIT",
+    "author": "Einar Otto Stangvik <einaros@gmail.com> (http://2x.io)",
+    "homepage": "https://github.com/websockets/ws"
   }
 ]
