@@ -1096,28 +1096,18 @@ fn ensure_console_subsystem_node(gui_node: &Path, app: &AppHandle) -> Result<Pat
     Ok(dest)
 }
 
-fn dor_control_socket_path() -> String {
-    let pid = std::process::id();
-    #[cfg(windows)]
-    {
-        format!(r"\\.\pipe\dormouse-{pid}-dor")
-    }
-    #[cfg(not(windows))]
-    {
-        env::temp_dir()
-            .join(format!("dormouse-{pid}-dor.sock"))
-            .to_string_lossy()
-            .into_owned()
-    }
-}
-
 fn dor_control_token() -> String {
-    // Must be unguessable: it is the sole authenticator for the private `dor`
-    // control socket. A PID+timestamp value is locally discoverable (`ps`) and
-    // bounded by the app's launch window, so draw 24 bytes from the OS CSPRNG and
-    // hex-encode them — matching the VS Code host's randomBytes(24).toString('hex')
-    // in pty-manager.ts. Aborting on CSPRNG failure is deliberate: never fall back
-    // to a weak token.
+    // Must be unguessable: it is the shared secret both ends of the private `dor`
+    // control channel prove knowledge of (never sent on the wire — see
+    // standalone/sidecar/dor-control-server.js). A PID+timestamp value is locally
+    // discoverable (`ps`) and bounded by the app's launch window, so draw 24 bytes
+    // from the OS CSPRNG and hex-encode them — matching the VS Code host's
+    // randomBytes(24).toString('hex') in pty-manager.ts. Aborting on CSPRNG failure
+    // is deliberate: never fall back to a weak token.
+    //
+    // The socket path is not set here: the sidecar picks it (hardened per-user
+    // directory on POSIX, unguessable pipe name on Windows) and exports
+    // DORMOUSE_CONTROL_SOCKET into spawned shells itself, only once it is bound.
     let mut bytes = [0u8; 24];
     getrandom::fill(&mut bytes).expect("OS CSPRNG unavailable for dor control token");
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -1172,7 +1162,6 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     let node_path = resolve_node_binary_path()?;
     let dor_cli_paths = resolve_dor_cli_paths(&sidecar_path, manifest_dir);
     let dor_node_path = resolve_dor_node_path(&node_path, app);
-    let dor_control_socket = dor_control_socket_path();
     let dor_control_token = dor_control_token();
     let state_dir = remote_host_state_dir(app);
     append_log(format!(
@@ -1189,7 +1178,6 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
         "[dor] CLI entrypoint: {}",
         dor_cli_paths.entrypoint.display()
     ));
-    append_log(format!("[dor] control socket: {dor_control_socket}"));
     append_log(format!(
         "[remote-host] state dir: {}",
         state_dir.as_deref().unwrap_or("(none)")
@@ -1201,7 +1189,6 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
             .env("DORMOUSE_NODE", &dor_node_path)
             .env("DORMOUSE_CLI_BIN", &dor_cli_paths.bin_dir)
             .env("DORMOUSE_CLI_JS", &dor_cli_paths.entrypoint)
-            .env("DORMOUSE_CONTROL_SOCKET", &dor_control_socket)
             .env("DORMOUSE_CONTROL_TOKEN", &dor_control_token)
             .env("DORMOUSE_STATE_DIR", state_dir.as_deref().unwrap_or(""))
             .stdin(Stdio::piped())
