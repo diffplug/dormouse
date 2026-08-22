@@ -31,7 +31,6 @@ const SERVER_TIMEOUT_MARGIN_MS = 10000;
 // keeps its reaper another 10s above it. Larger hints are nonsense: a parked
 // request is cheap, but not free, so they fall back to the bounded default.
 const MAX_CLIENT_TIMEOUT_MS = (24 * 60 * 60 * 1000) + 5000;
-const MAX_REQUEST_TIMEOUT_MS = MAX_CLIENT_TIMEOUT_MS + SERVER_TIMEOUT_MARGIN_MS;
 
 function serverTimeoutFor(clientTimeoutMs, fallbackMs) {
   if (
@@ -42,7 +41,9 @@ function serverTimeoutFor(clientTimeoutMs, fallbackMs) {
   ) {
     return fallbackMs;
   }
-  return Math.min(clientTimeoutMs + SERVER_TIMEOUT_MARGIN_MS, MAX_REQUEST_TIMEOUT_MS);
+  // No clamp needed: the guard above already rejected everything above
+  // MAX_CLIENT_TIMEOUT_MS, so this sum is bounded by construction.
+  return clientTimeoutMs + SERVER_TIMEOUT_MARGIN_MS;
 }
 
 function createDorControlServer({ socketPath, token, send, timeoutMs = 65000 }) {

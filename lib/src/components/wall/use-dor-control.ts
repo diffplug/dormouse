@@ -9,6 +9,7 @@ import type {
   ParseResult,
   SurfacePort as DorSurfacePort,
 } from 'dor/commands/types';
+import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
 import type { OpenPort } from '../../lib/platform/types';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 import {
@@ -65,7 +66,9 @@ type DorControlParams = {
 type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
   params?: DorControlParams;
   respond: (response: DorControlResult) => void;
-  signal: AbortSignal;
+  /** Absent on the in-process dispatch path (and in tests), which has no
+   *  client to hang up — every consumer must treat it as optional. */
+  signal?: AbortSignal;
 };
 
 /** Outcome of {@link EnsureAgentBrowserSurface}: the fields the caller maps onto
@@ -839,8 +842,8 @@ export function useDorControl({
         // silently (no response ever reaches the caller); rejecting here turns
         // that into a visible error.
         const timeoutMs = numberParam(params.timeoutMs);
-        if (timeoutMs === undefined || timeoutMs <= 0) {
-          detail.respond({ ok: false, error: 'timeoutMs must be a positive number' });
+        if (timeoutMs === undefined || timeoutMs <= 0 || timeoutMs > MAX_AWAIT_TIMEOUT_MS) {
+          detail.respond({ ok: false, error: `timeoutMs must be a positive number no greater than ${MAX_AWAIT_TIMEOUT_MS}` });
           return;
         }
 
@@ -851,9 +854,16 @@ export function useDorControl({
         detail.signal?.addEventListener('abort', () => handle.cancel());
 
         const outcome = await handle.promise;
-        // `cancelled` means nothing is listening any more — responding would be a
-        // no-op on the server, and the CLI has no wire form for it.
-        if (outcome.kind === 'cancelled') return;
+        // `cancelled` has no wire outcome of its own — it means the host tore
+        // the wait down (manager disposed, webview released). Answering with an
+        // error rather than returning silently is what forgets the request:
+        // `respond` is the only thing that clears `dor-control-dispatch`'s
+        // in-flight entry, and a client that is somehow still listening gets an
+        // answer instead of blocking to its own deadline.
+        if (outcome.kind === 'cancelled') {
+          detail.respond({ ok: false, error: `await on '${target.ref}' was cancelled by the host` });
+          return;
+        }
         detail.respond({
           ok: true,
           result: {

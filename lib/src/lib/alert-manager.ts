@@ -132,6 +132,16 @@ export interface AwaitHandle {
  */
 export const AWAIT_GRACE_MS = cfg.alert.busyCandidateGap + cfg.alert.busyConfirmGap;
 
+/**
+ * Ceiling on a parked await, matching `dor await --timeout`'s own 24h cap. It
+ * exists here because the value ends up in `setTimeout`, whose delay is a
+ * *signed 32-bit* millisecond count: anything above ~24.9 days silently
+ * overflows and fires on the next tick, turning a long park into an instant
+ * `timeout`. Rejecting is therefore safer than clamping — a caller asking for
+ * more than a day is confused, not patient.
+ */
+export const MAX_AWAIT_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+
 /** One parked await. Owned by the `AlertManager`; see `awaitCompletion`. */
 interface AwaitWaiter {
   /** Offer one completion. Returns whether this waiter woke on it. */
@@ -216,6 +226,22 @@ interface AlertEntry {
  */
 export class AlertManager {
   private entries = new Map<string, AlertEntry>();
+  /**
+   * Sessions `remove()` has retired, until something proves the id is live
+   * again. `disposeSession` calls `alertRemove` and only *then* kills the PTY,
+   * so output already in flight keeps arriving after the entry is gone — and
+   * every PTY-driven entry point creates the entry it cannot find. Without
+   * this, each killed pane that was still producing output leaves behind a
+   * fresh `AlertEntry` and `QuiesceDetector` that nothing will ever dispose.
+   *
+   * Raw output and resizes cannot lift it: they are exactly what a dying PTY
+   * emits, and they carry no evidence that anyone is home. A semantic or
+   * protocol event does lift it, because an id can be handed to a *new*
+   * Session (a replacement pane reuses it, and the WATCHING rule set is
+   * supposed to apply immediately), and a command start is the first thing
+   * that Session reports.
+   */
+  private removed = new Set<string>();
   private claimants = new Map<string, Set<CompletionClaimant>>();
   private awaits = new Map<string, AwaitGroup>();
   private attentionId: string | null = null;
@@ -258,9 +284,9 @@ export class AlertManager {
   onData(id: string): void {
     // The detector runs for every Session, including one that has never
     // produced a semantic or protocol event, so output creates the entry.
-    // A chunk that lands after `remove(id)` therefore resurrects it —
-    // `notifyFromProtocol` has had that property all along, so this is parity.
-    this.getOrCreateEntry(id).detector.onData();
+    const entry = this.streamEntry(id);
+    if (!entry) return;
+    entry.detector.onData();
     this.eachWaiter(id, (waiter) => waiter.onOutput());
   }
 
@@ -276,7 +302,7 @@ export class AlertManager {
   onResize(id: string): void {
     // Same reasoning as `onData`: the resize grace window is part of the
     // always-on detector, and a Pane's first fit usually beats any PTY event.
-    this.getOrCreateEntry(id).detector.onResize();
+    this.streamEntry(id)?.detector.onResize();
   }
 
   // --- WATCHING rule set ---
@@ -427,9 +453,17 @@ export class AlertManager {
     // `setTimeout`, so nonsense is rejected here rather than trusted from one
     // caller away. A rejected request settles `cancelled` — it absorbs nothing
     // and parks nothing.
-    if (!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0) {
+    if (
+      !Number.isFinite(options.timeoutMs)
+      || options.timeoutMs <= 0
+      || options.timeoutMs > MAX_AWAIT_TIMEOUT_MS
+    ) {
       return settledAwait({ kind: 'cancelled', waitedMs: 0 });
     }
+
+    // Awaiting a Session that has already been removed is the `died` case, not
+    // a reason to recreate its entry and park on a PTY nobody will ever feed.
+    if (this.removed.has(id)) return settledAwait({ kind: 'died', waitedMs: 0 });
 
     const entry = this.getOrCreateEntry(id);
     const startedAt = Date.now();
@@ -478,9 +512,13 @@ export class AlertManager {
       onOutput: () => {
         if (options.until === 'quiet') clearGrace();
       },
-      onCommandStart: () => {
-        if (options.until === 'exit') clearGrace();
-      },
+      // A foreground command is the strongest possible answer to "is there
+      // anything to wait for", so it cancels the grace window under *either*
+      // condition. Under `quiet` the window's usual test is output, but a
+      // command that starts silently is still running — resolving `idle`
+      // ("nothing was running") on it would contradict the rule right above,
+      // which parks with no grace window whenever `commandExitWatch` is set.
+      onCommandStart: () => clearGrace(),
       die: () => settle({ kind: 'died', waitedMs: Date.now() - startedAt }),
       cancel: () => settle({ kind: 'cancelled', waitedMs: Date.now() - startedAt }),
     };
@@ -510,10 +548,23 @@ export class AlertManager {
    * Consume the ring an await arriving right now would resolve on, if any.
    * Only that track's latch is released: TODO, its notification detail, and
    * `attentionDismissedRing` are the human's and stay untouched.
+   *
+   * The command-exit ring is the one exception. It outlives the run that raised
+   * it — `startCommandExitWatch` deliberately preserves `ALERT_RINGING` — so
+   * once a *new* foreground command is running it can only describe a previous
+   * one, and consuming it would answer "the command exited" about the command
+   * still running. That is precisely the misreport `dor send` followed by
+   * `dor await --until exit` would act on, so a running `commandExitWatch`
+   * suppresses it and the await parks for the real exit instead.
+   *
+   * The other two are not gated, because both can legitimately be raised *by*
+   * the command still running: a peer rings mid-run, and a WATCHING ring is a
+   * long-running watched command going quiet — the `claude` case `--until
+   * quiet` exists for.
    */
   private consumeAwaitableRing(entry: AlertEntry, until: AwaitUntil): AwaitCause | null {
     if (until === 'quiet' && this.releaseRing(entry, 'protocol')) return 'bell';
-    if (this.releaseRing(entry, 'commandExit')) return 'exit';
+    if (entry.commandExitWatch === null && this.releaseRing(entry, 'commandExit')) return 'exit';
     if (until === 'quiet' && this.releaseRing(entry, 'watching')) return 'quiet';
     return null;
   }
@@ -562,7 +613,7 @@ export class AlertManager {
   // --- Terminal-report protocol track ---
 
   notifyFromProtocol(id: string, notification: ActivityNotification): void {
-    const entry = this.getOrCreateEntry(id);
+    const entry = this.reportedEntry(id);
     const normalized = normalizeActivityNotification(notification);
     if (!normalized) return;
 
@@ -570,7 +621,7 @@ export class AlertManager {
   }
 
   updateProtocolProgress(id: string, progress: ProtocolProgressUpdate): void {
-    const entry = this.getOrCreateEntry(id);
+    const entry = this.reportedEntry(id);
 
     if (progress.state === 'clear') {
       if (!entry.progress) return;
@@ -648,7 +699,7 @@ export class AlertManager {
 
   applyTerminalSemanticEvents(id: string, events: TerminalSemanticEvent[]): void {
     if (events.length === 0) return;
-    const entry = this.getOrCreateEntry(id);
+    const entry = this.reportedEntry(id);
     let changed = false;
 
     for (const event of events) {
@@ -929,6 +980,7 @@ export class AlertManager {
 
   /** Completely remove alert state for a PTY (used when PTY is destroyed) */
   remove(id: string): void {
+    this.removed.add(id);
     // Nobody parked here has anything left to wait for.
     this.settleWaiters(id, 'died');
     // Claimants go with the Session, entry or not — a dead Session dispatches
@@ -974,6 +1026,7 @@ export class AlertManager {
       entry.detector.dispose();
     }
     this.entries.clear();
+    this.removed.clear();
     this.awaits.clear();
     this.claimants.clear();
     this.listeners.clear();
@@ -982,6 +1035,28 @@ export class AlertManager {
   }
 
   // --- Internals ---
+
+  /**
+   * The entry a raw-output event should feed, or `null` if the Session was
+   * removed and nothing has claimed the id since. Such an event may still be a
+   * live Session's first, so the entry is created on demand — but a retired one
+   * must not be rebuilt by bytes that were already on their way when the pane
+   * was killed (see `removed`).
+   */
+  private streamEntry(id: string): AlertEntry | null {
+    if (this.removed.has(id)) return null;
+    return this.getOrCreateEntry(id);
+  }
+
+  /**
+   * The entry a semantic or protocol event should feed. Unlike raw output, one
+   * of these is evidence that a live Session owns the id — including a
+   * replacement pane that reused it — so it retires the tombstone.
+   */
+  private reportedEntry(id: string): AlertEntry {
+    this.removed.delete(id);
+    return this.getOrCreateEntry(id);
+  }
 
   private getProjectedStatus(entry: AlertEntry): SessionStatus {
     if (

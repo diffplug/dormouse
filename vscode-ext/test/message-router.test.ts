@@ -180,4 +180,23 @@ describe('await requests', () => {
 
     expect(router.getAlertStates().get('pty-2')?.awaited).toBe(false);
   });
+
+  it('still answers an await it cancels on the way out', async () => {
+    const webview = fakeWebview();
+    const disposable = router.attachRouter(webview.channel);
+    webview.send({ type: 'alert:await', requestId: 'await-3', id: 'pty-3', until: 'quiet', timeoutMs: 600_000 });
+
+    // `handle.cancel()`'s outcome lands a microtask later, after the router has
+    // stopped posting — so dispose answers synchronously instead. Without that
+    // the webview's promise never settles and the `dor` client blocks to its
+    // own deadline (docs/specs/alert.md → Await).
+    disposable.dispose();
+    await Promise.resolve();
+
+    expect(outcomes(webview)).toHaveLength(1);
+    expect(outcomes(webview)[0]).toMatchObject({
+      requestId: 'await-3',
+      outcome: { kind: 'cancelled' },
+    });
+  });
 });

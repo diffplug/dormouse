@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AlertManager, AWAIT_GRACE_MS } from './alert-manager';
+import { AlertManager, AWAIT_GRACE_MS, DEFAULT_ALERT_STATE, MAX_AWAIT_TIMEOUT_MS } from './alert-manager';
 import type { AwaitHandle, AwaitOutcome, CompletionEvent } from './alert-manager';
 import { applyTerminalProtocolEvents } from './terminal-protocol';
 
@@ -1138,6 +1138,29 @@ describe('AlertManager in isolation', () => {
       }
     });
 
+    it('leaves a stale command-exit ring alone while a new command is running', async () => {
+      const id = 'await-stale-exit-ring';
+      manager.attend(id);
+      runCommand(id);
+      vi.advanceTimersByTime(15_000);
+      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      expect(manager.getState(id).status).toBe('ALERT_RINGING');
+
+      // A second command starts. The latched ring above belongs to the first —
+      // `startCommandExitWatch` preserves `ALERT_RINGING` on purpose — so it
+      // cannot be an answer about the one now running.
+      runCommand(id, 'npm test');
+
+      const handle = manager.awaitCompletion(id, { until: 'exit', timeoutMs: NEVER });
+      const outcome = watch(handle);
+      expect(await outcome()).toBeNull();
+      // Not consumed either: the ring is still the human's.
+      expect(manager.getState(id).status).toBe('ALERT_RINGING');
+
+      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      expect(await outcome()).toMatchObject({ kind: 'resolved', cause: 'exit' });
+    });
+
     it('leaves a standing bell alone under --until exit and keeps waiting', async () => {
       const id = 'await-exit-ignores-standing-bell';
       runCommand(id);
@@ -1312,6 +1335,22 @@ describe('AlertManager in isolation', () => {
       expect(await outcome()).toMatchObject({ kind: 'resolved', cause: 'exit' });
     });
 
+    it('cancels the grace window on a command start under --until quiet too', async () => {
+      const id = 'await-grace-quiet-command-start';
+      const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
+      const outcome = watch(handle);
+
+      // The window's usual test under `quiet` is output, but a command that
+      // starts silently is still running — `idle` would report "nothing was
+      // running" about a live foreground command.
+      runCommand(id);
+      vi.advanceTimersByTime(AWAIT_GRACE_MS * 2);
+      expect(await outcome()).toBeNull();
+
+      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      expect(await outcome()).toMatchObject({ kind: 'resolved', cause: 'exit' });
+    });
+
     it('runs no grace window at all while a foreground command is running', async () => {
       const id = 'await-grace-suppressed';
       runCommand(id);
@@ -1351,7 +1390,10 @@ describe('AlertManager in isolation', () => {
 
     it('refuses a nonsensical ceiling instead of installing a broken timer', async () => {
       const id = 'await-bad-timeout';
-      for (const timeoutMs of [Number.NaN, 0, -1, Number.POSITIVE_INFINITY]) {
+      // Above the cap the delay would overflow `setTimeout`'s signed 32-bit
+      // millisecond count and fire on the next tick, so a park that looks like
+      // a day would resolve `timeout` instantly.
+      for (const timeoutMs of [Number.NaN, 0, -1, Number.POSITIVE_INFINITY, MAX_AWAIT_TIMEOUT_MS + 1, 3_000_000_000]) {
         const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs });
         expect(await handle.promise).toEqual({ kind: 'cancelled', waitedMs: 0 });
       }
@@ -1382,6 +1424,24 @@ describe('AlertManager in isolation', () => {
       manager.onExit(id, 0);
 
       expect(await handle.promise).toEqual({ kind: 'died', waitedMs: 200 });
+    });
+
+    it('does not rebuild a removed Session from output already in flight', () => {
+      const id = 'removed-then-noisy';
+      runWatchedCommand(id);
+      manager.remove(id);
+
+      // `disposeSession` removes before killing the PTY, so these are the bytes
+      // that were already on their way out. Rebuilding here would strand an
+      // entry and a detector nothing ever disposes.
+      manager.onData(id);
+      manager.onResize(id);
+      expect(manager.getState(id)).toEqual(DEFAULT_ALERT_STATE);
+
+      // A replacement pane may reuse the id; its first reported command is the
+      // evidence that somebody is home, and the rule set applies immediately.
+      runWatchedCommand(id);
+      expect(manager.getState(id).watchingEnabled).toBe(true);
     });
 
     it('reports death when the Session is removed', async () => {

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
-import { AlertManager, type AwaitHandle } from '../../lib/src/lib/alert-manager';
+import { AlertManager, type AwaitHandle, type AwaitOutcome } from '../../lib/src/lib/alert-manager';
 import { WatchedCommandHost } from '../../lib/src/lib/watched-command-host';
 import { AlertSettingsHost } from '../../lib/src/lib/alert-settings-host';
 import {
@@ -304,7 +304,7 @@ export function attachRouter(
   const pendingFlushRequests = new Map<string, { resolve: () => void; timeout: ReturnType<typeof setTimeout> }>();
   // `dor await`s this webview has parked in the shared alert manager, keyed by
   // the requestId that will carry the outcome back.
-  const pendingAwaits = new Map<string, AwaitHandle>();
+  const pendingAwaits = new Map<string, { handle: AwaitHandle; startedAt: number }>();
   let disposed = false;
 
   // Webview-facing subscriptions — only active when the webview has live content.
@@ -362,9 +362,24 @@ export function attachRouter(
 
   // A webview that went away cannot deliver an outcome, and an await that
   // delivers nothing must not hold a completion claim open.
+  //
+  // The result is posted from here rather than left to `handle.promise`: that
+  // callback runs a microtask later, by which time `disposed` suppresses it, and
+  // the contract is exactly one `alert:awaitResult` per request (a cancel
+  // included — `docs/specs/alert.md` -> Await). Deleting the entry first makes
+  // the later callback a no-op, so the answer is still sent exactly once.
   function cancelAllPendingAwaits(): void {
-    for (const handle of [...pendingAwaits.values()]) handle.cancel();
-    pendingAwaits.clear();
+    for (const [requestId, { handle, startedAt }] of [...pendingAwaits]) {
+      pendingAwaits.delete(requestId);
+      handle.cancel();
+      const outcome: AwaitOutcome = { kind: 'cancelled', waitedMs: Date.now() - startedAt };
+      try {
+        void post({ type: 'alert:awaitResult', requestId, outcome } satisfies ExtensionMessage);
+      } catch {
+        // The usual reason to be here is the webview being torn down, which can
+        // make `postMessage` throw. Nothing left to tell — keep cancelling.
+      }
+    }
   }
 
   function flushSessionSave(timeoutMs = 1000): Promise<void> {
@@ -828,12 +843,11 @@ export function attachRouter(
           timeoutMs: msg.timeoutMs,
         });
         const requestId = msg.requestId;
-        pendingAwaits.set(requestId, handle);
+        pendingAwaits.set(requestId, { handle, startedAt: Date.now() });
         void handle.promise.then((outcome) => {
-          pendingAwaits.delete(requestId);
-          // Dispose cancels what is still parked, and those outcomes land here
-          // one microtask later — with no webview left to hear them.
-          if (disposed) return;
+          // Gone from the map means `cancelAllPendingAwaits` already answered
+          // this request synchronously; anything else is the ordinary path.
+          if (!pendingAwaits.delete(requestId)) return;
           void post({ type: 'alert:awaitResult', requestId, outcome } satisfies ExtensionMessage);
         });
         break;
@@ -841,7 +855,7 @@ export function attachRouter(
       case 'alert:awaitCancel':
         // The cancelled outcome comes back through `alert:awaitResult` like any
         // other, so there is nothing to answer here.
-        pendingAwaits.get(msg.requestId)?.cancel();
+        pendingAwaits.get(msg.requestId)?.handle.cancel();
         break;
     }
   });

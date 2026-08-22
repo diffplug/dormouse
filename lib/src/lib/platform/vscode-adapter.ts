@@ -17,6 +17,17 @@ import { isHostMessage, readHostMessageToken } from '../vscode-message-token';
 import { cancelDorControlRequest, dispatchDorControlRequest } from './dor-control-dispatch';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 
+/**
+ * What `awaitHostReply` settles with when its caller's own deadline fired and
+ * the listener was detached. A distinct sentinel rather than `null`, so a host
+ * reply whose extracted value is legitimately `null` stays distinguishable from
+ * "no reply came".
+ */
+const DETACHED = Symbol('detached');
+
+/** The outcome a VS Code await handle reports when it can never be answered. */
+const CANCELLED_AWAIT: AwaitOutcome = { kind: 'cancelled', waitedMs: 0 };
+
 export class VSCodeAdapter implements PlatformAdapter {
   // VS Code owns the theme here: it provides --vscode-* itself and has its own
   // theme UI, so Dormouse hides the Settings dialog's Theme row.
@@ -190,13 +201,10 @@ export class VSCodeAdapter implements PlatformAdapter {
     const requestId = `req-${++this.nextRequestId}`;
     const reply = this.awaitHostReply(responseType, requestId, extract);
     return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        reply.detach();
-        resolve(null);
-      }, timeoutMs);
+      const timeout = setTimeout(() => reply.detach(), timeoutMs);
       void reply.promise.then((value) => {
         clearTimeout(timeout);
-        resolve(value);
+        resolve(value === DETACHED ? null : value);
       });
       this.vscode.postMessage({ type: requestType, ...data, requestId });
     });
@@ -204,16 +212,22 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   /**
    * One-shot listener for the host reply correlated by `requestId`. `detach`
-   * stops listening without resolving (a caller's own deadline fired).
+   * stops listening and settles the promise with `DETACHED` (a caller's own
+   * deadline fired). It settles rather than simply going quiet because a
+   * promise that can never resolve keeps every `.then` closure registered on it
+   * alive for the life of the webview.
    */
-  private awaitHostReply<T>(responseType: string, requestId: string, extract: (msg: any) => T): { promise: Promise<T>; detach(): void } {
+  private awaitHostReply<T>(responseType: string, requestId: string, extract: (msg: any) => T): { promise: Promise<T | typeof DETACHED>; detach(): void } {
     let handler: ((event: MessageEvent) => void) | null = null;
+    let settle: ((value: T | typeof DETACHED) => void) | null = null;
     const detach = (): void => {
       if (!handler) return;
       window.removeEventListener('message', handler);
       handler = null;
+      settle?.(DETACHED);
     };
-    const promise = new Promise<T>((resolve) => {
+    const promise = new Promise<T | typeof DETACHED>((resolve) => {
+      settle = resolve;
       handler = (event: MessageEvent) => {
         // Same guard as the main listener: a request/response reply carries
         // host-supplied data (a proxy URL, scrollback, clipboard contents), and
@@ -221,6 +235,9 @@ export class VSCodeAdapter implements PlatformAdapter {
         if (!isHostMessage(event.data, this.hostMessageToken)) return;
         const msg = event.data;
         if (msg.type !== responseType || msg.requestId !== requestId) return;
+        // The real reply is the answer, so drop the `DETACHED` fallback before
+        // unhooking — otherwise `detach` would settle the promise first and win.
+        settle = null;
         detach();
         resolve(extract(msg));
       };
@@ -510,7 +527,10 @@ export class VSCodeAdapter implements PlatformAdapter {
     const { promise } = this.awaitHostReply('alert:awaitResult', requestId, (msg) => msg.outcome as AwaitOutcome);
     this.vscode.postMessage({ type: 'alert:await', requestId, id, until: options.until, timeoutMs: options.timeoutMs });
     return {
-      promise,
+      // Nothing detaches this reply — the host answers exactly one
+      // `alert:awaitResult` per request, a cancel included — but the mapping
+      // keeps the handle's `AwaitOutcome` contract without a cast.
+      promise: promise.then((outcome) => (outcome === DETACHED ? CANCELLED_AWAIT : outcome)),
       cancel: () => this.vscode.postMessage({ type: 'alert:awaitCancel', requestId }),
     };
   }

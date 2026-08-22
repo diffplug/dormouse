@@ -319,9 +319,17 @@ describe('Wall on the Lath engine', () => {
     await act(async () => { invalidUntil = await request({ surface: 'surface:1', until: 'soon', timeoutMs: 5 }); });
     expect(invalidUntil).toEqual({ ok: false, error: "invalid await condition 'soon'" });
 
+    const ceilingError = 'timeoutMs must be a positive number no greater than 86400000';
+
     let noCeiling: AwaitResult | undefined;
     await act(async () => { noCeiling = await request({ surface: 'surface:1', until: 'quiet' }); });
-    expect(noCeiling).toEqual({ ok: false, error: 'timeoutMs must be a positive number' });
+    expect(noCeiling).toEqual({ ok: false, error: ceilingError });
+
+    // Above the 24h cap the ceiling would overflow `setTimeout`'s signed 32-bit
+    // delay and fire at once, so it is refused rather than silently instant.
+    let hugeCeiling: AwaitResult | undefined;
+    await act(async () => { hugeCeiling = await request({ surface: 'surface:1', until: 'quiet', timeoutMs: 3_000_000_000 }); });
+    expect(hugeCeiling).toEqual({ ok: false, error: ceilingError });
 
     // A real park against the fake adapter's AlertManager. Nothing is running, so
     // the 5ms ceiling beats the 2s grace window and the host reports `timeout` —
