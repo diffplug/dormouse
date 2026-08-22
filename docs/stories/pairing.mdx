@@ -1,0 +1,331 @@
+import { Meta, Canvas } from '@storybook/addon-docs/blocks';
+
+import * as RemoteControl from '../../lib/src/stories/RemoteControlSection.stories';
+import * as Pairing from '../../lib/src/stories/RemotePairingModal.stories';
+import * as SetupOrSignin from '../../lib/src/stories/SetupOrSignin.stories';
+import * as HostsView from '../../lib/src/stories/HostsView.stories';
+import * as PocketWall from '../../lib/src/stories/PocketWall.stories';
+
+<Meta title="Pairing/Self-hosted walkthrough" />
+
+# Pairing a phone with your laptop
+
+Everything it takes to control a laptop's terminals from a phone, in the order
+you meet it: stand up a server, build a Host that is allowed to reach it, enroll
+the laptop, make a passkey on the phone, approve the pairing, connect.
+
+The screens below are the real components, rendered from the same stories
+Chromatic watches. They are static — nothing here is wired to a live server.
+Two of them carry `autoplay` because a docs page does not run a story's `play`
+by default, and their state — an expanded disclosure, a painted terminal — only
+exists after it runs.
+
+> **This is a walkthrough, not a spec.** It lives outside `docs/specs/`, so the
+> fold discipline in `AGENTS.md` does not apply to it and `spec-lint` does not
+> check it. Where it disagrees with a spec, the spec is right. The three it
+> leans on are `server.md` (what the server and the installer do),
+> `remote-security-model.md` (why the ceremony has the shape it has), and
+> `pocket-app.md` (the phone).
+
+---
+
+## 0. Three parties, four layers
+
+| Term | Who that is here |
+| --- | --- |
+| **Client** (Dormouse Pocket) | the phone. Holds a passkey and a device key, and signs Host challenges. |
+| **Host** (Dormouse Terminal) | the laptop being controlled. Holds the ACL. **Final authority for access decisions.** |
+| **Server** | the coordinating service: accounts, passkey registration, challenges, and relay. *Not* the authority for Host access. |
+
+Access is deliberately split across four layers, and a connection needs all of
+them to agree:
+
+| Layer | Responsibility |
+| --- | --- |
+| Passkey | Fresh user presence |
+| Device Key | Long-lived client identity |
+| Host ACL | Authorization |
+| Host | Final access decision |
+
+The consequence that shapes every screen after this one: **adding a passkey to
+your account does not grant a new phone access to any machine.** Passkeys sync;
+authorization does not. Each browser must be approved on each laptop, in person,
+once.
+
+---
+
+## 1. Stand up the server
+
+The whole self-host story today is one coordinating server on your own Mac,
+reachable only from your tailnet. One idempotent command builds the current
+checkout into a self-contained release and installs it:
+
+```sh
+./deploy/local/install-macos.sh
+```
+
+It installs under your home directory, needs no `sudo`, and wires up a
+LaunchAgent plus Tailscale Serve:
+
+```text
+LaunchAgent (RunAtLoad + KeepAlive)
+        |
+        v
+Dormouse Node server on 127.0.0.1:3100
+        |
+        v
+tailscale serve --bg terminates private HTTPS
+        |
+        v
+https://<laptop>.<tailnet>.ts.net
+```
+
+Then check it and read the generated password out in your own terminal:
+
+```sh
+"$HOME/Library/Application Support/Dormouse Server/bin/manage" verify
+"$HOME/Library/Application Support/Dormouse Server/bin/manage" show-password
+```
+
+Two things to carry forward:
+
+- **That origin is durable WebAuthn identity.** The passkey you are about to
+  create is bound to `https://<laptop>.<tailnet>.ts.net` byte for byte.
+  Renaming or re-enrolling the Tailscale node means redoing the passkey and
+  every Host enrollment — which is why the installer stops rather than rewrite
+  a changed origin for you.
+- **HTTPS is not optional.** WebAuthn needs a secure context and only
+  `localhost` is exempt, so a real phone needs the TLS origin. For a
+  desktop-only dev loop, `DORMOUSE_SETUP_PASSWORD=hunter2 pnpm dev:pocket-server`
+  on `localhost:3000` is the shortcut.
+
+The setup password gates exactly two things: creating the one account, and
+enrolling a Host. It never leaves your machine except to those two endpoints.
+
+---
+
+## 2. Build a Host that is allowed to reach it
+
+Shipped Dormouse builds bake in a relay allowlist of
+`https://*.dormouse.sh wss://*.dormouse.sh` and nothing else, enforced inside
+the Node process that holds the relay socket rather than by any webview CSP. A
+self-host origin needs a local build that widens it:
+
+```sh
+DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:standalone
+DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:vscode
+```
+
+Skipping this has a specific, recognizable symptom, and you will see it in the
+next section rather than as a mysterious failure: enrollment is refused
+locally, before the setup password leaves the machine.
+
+---
+
+## 3. Enroll the laptop
+
+**Settings → Remote control**, at the bottom of the app-global Settings dialog
+(the sliders icon at the far right of the baseboard). Three fields.
+
+<Canvas of={RemoteControl.Unenrolled} />
+
+This is UI rather than a console incantation because it is the one step a
+self-hoster cannot skip. Three rules it exists to honor:
+
+- **The password is passed through, never held.** It goes straight to the Host
+  service — the party that actually talks to the server — and is cleared on
+  success only. A failed enroll is usually a typo in one of the other fields,
+  and wiping the password would make every retry a fresh trip to the password
+  manager.
+- **Refusals are shown, not swallowed.** This is section 2's symptom:
+
+<Canvas of={RemoteControl.EnrollRefused} />
+
+  The build refuses the origin before the password is sent anywhere. Saying so
+  in those words is what keeps it from reading as a wrong password.
+
+- **The bearer token never comes back.** Enrollment answers
+  `{ hostId, serverUrl }`; the `hostToken` stays in the Host service and on
+  disk, and never enters the webview.
+
+On success the section flips to the enrolled view. Note the last line —
+enrolling connects the machine to a server; it pairs it with nothing.
+
+<Canvas of={RemoteControl.ConnectedNoDevices} />
+
+---
+
+## 4. Make a passkey on the phone
+
+Open the same origin on a tailnet-connected phone. Pocket loads.
+
+<Canvas of={SetupOrSignin.Welcome} />
+
+There is nothing to sign in with yet, so the first visit goes through the
+disclosure: the setup password from `manage show-password`, plus a label for
+this passkey.
+
+<Canvas of={SetupOrSignin.SetupExpanded} story={{ autoplay: true }} />
+
+That one action creates the account's first passkey and signs in with it. Two
+things you cannot see happen at the same time:
+
+- A **device key** is minted — a non-extractable ECDSA P-256 keypair kept in
+  IndexedDB. This browser can sign with it and can never export it. It is this
+  browser's permanent identity, and it is what the laptop is about to
+  authorize.
+- The session's **presence stamp** is set. Pairing requires a passkey assertion
+  from the last 30 seconds, so signing in is what makes the next step possible.
+
+> **On iOS, install to the Home Screen before you do any of this.** The
+> installed app is a separate storage partition from the Safari tab, so it gets
+> its own device key and needs its own pairing approval. Setting up in the tab
+> first means doing all of it twice. iOS also delivers Web Push only to an
+> installed app.
+
+---
+
+## 5. Pick a machine
+
+<Canvas of={HostsView.MixedList} />
+
+One row per enrolled Host. A row is offline when no Dormouse instance currently
+holds that server's relay slot. **Pair** appears only on an online, unpaired
+Host — everything else is a Connect away.
+
+---
+
+## 6. The pairing ceremony
+
+Tapping **Pair** sends the phone's identity up to the server and across to the
+laptop:
+
+```text
+phone                        server                        host (laptop)
+  |-- signin (passkey) -------->|                              |
+  |   generate device key       |                              |
+  |-- pair -------------------->|-- pair --------------------->|  approval modal
+  |                             |                              |  user clicks Approve
+  |<-- pair-result -------------|<-- pair-result --------------|  ACL record saved
+```
+
+The server checks what it can: that the credential is a registered passkey of
+the account, that its public-key hash matches the stored key, and that the
+session's last verified assertion is within 30 seconds. A malformed or stale
+request is answered there and **never reaches the approval modal** — so what a
+person is asked to look at is always a real, fresh request. (A stale one costs
+the phone one extra biometric prompt and a retry, not a restart.)
+
+Then the laptop interrupts:
+
+<Canvas of={Pairing.Default} />
+
+This modal is the whole security model in one screen, which is why it is a
+modal and not a settings row.
+
+- **Local approval is the only path into the ACL.** Not signing in, not owning
+  the account, not holding a synced passkey. Someone with your account and your
+  passkey still gets no further than this dialog on a machine they are not
+  standing at.
+- **It has to not read as a formality.** Hence *"Approve only if you are the
+  one asking"* rather than a bare Are-you-sure, and hence Deny holding initial
+  focus.
+- **The three rows are the identity being authorized.** Device is the label the
+  phone suggested, Account is who signed in, and Key is the first 8 characters
+  of that browser's device public key — the part that distinguishes two
+  Clients on the same physical phone.
+- **"Adds it to this machine only"** is doing real work. The ACL is per-Host
+  and local; your other laptops are unaffected and will each ask separately.
+
+Approving writes one `HostAclRecord` binding *that passkey credential* to *that
+device key* — a pair, not either one alone. The approval is bound to the
+ceremony's immutable `pairingId`, so a request that changed underneath a
+displayed modal is rejected rather than silently approving a device nobody was
+shown.
+
+Two cases the copy has to survive: a phone that suggested no label, and an
+account and label long enough to wrap.
+
+<Canvas of={Pairing.UnnamedDevice} />
+
+<Canvas of={Pairing.LongValues} />
+
+---
+
+## 7. Connect
+
+Pairing is once. Connecting is every session, and it re-proves everything:
+
+```text
+phone                        server                        host
+  |-- connect {hostId} -------->|-- connect {clientId} ------->|
+  |<-- challenge ---------------|<-- challenge (HostChallengeIssuer)
+  |   ONE biometric prompt:     |                              |
+  |   WebAuthn get({challenge}) |                              |
+  |   + device-key signature    |                              |
+  |-- ConnectionRequest ------->|  server verifies the         |
+  |                             |  assertion itself, then      |
+  |                             |-- ConnectionRequest -------->|  authorizeConnection()
+  |<-- decision ----------------|<-- decision -----------------|  (final authority)
+  |============ opaque remote-api relay from here ============>|
+```
+
+A connection succeeds only if all five hold: the passkey proves fresh presence,
+the Server recognizes the account, the Host recognizes the passkey credential,
+the Host recognizes the device key, and the Client signs a fresh Host challenge
+with that device key. The Host decides last and decides alone, regardless of
+what the Server claims to have already checked.
+
+One host challenge feeds both signatures, so the whole thing costs the user a
+single Face ID prompt.
+
+Then the payoff — the same mobile terminal UI, driven by the laptop's real
+sessions:
+
+<Canvas of={PocketWall.ConnectedShell} story={{ autoplay: true }} />
+
+---
+
+## 8. Living with it
+
+Back on the laptop, the section now counts what is paired:
+
+<Canvas of={RemoteControl.ConnectedOneDevice} />
+
+**Displaced** is the one connection state that needs a person. Another Dormouse
+instance enrolled with the same `hostId` took the relay slot, and this one stood
+down — terminally, on purpose, because two instances fighting over a slot is
+worse than one stopping. Reconnect takes it back, and displaces the other in
+turn.
+
+<Canvas of={RemoteControl.Displaced} />
+
+**Disconnect** asks first, because forgetting the enrollment drops every paired
+phone until each pairs again.
+
+<Canvas of={RemoteControl.ConfirmingDisconnect} />
+
+Two limits worth knowing before they surprise you:
+
+- **Clearing site data destroys the device key.** That is a re-pair, by design:
+  the identity the laptop authorized is gone — and the storage partition the
+  key lives in is per-browser, as §4 warns.
+- **A dropped WebSocket returns the phone to the Hosts view.** Tap Connect
+  again; there is no resume protocol.
+
+---
+
+## 9. What is not built yet
+
+So nothing above reads as a promise:
+
+- **Revocation is editing a JSON file by hand.** There is no management UI and
+  no relay frame carries a revocation; a removed record takes effect at the
+  Host's next authorization check.
+- **Approval is Approve/Deny only.** Choosing a standing grant at pairing time
+  — observe-only versus interactive — is designed but not built. Every paired
+  session today gets full input.
+- **The Host does not show you who is connected.** A viewer list with
+  per-viewer disconnect is staged.
+- **Terminals only.** The shipped protocol carries terminal surfaces and
+  nothing else — no browser surfaces, no thumbnails, no scrollback.

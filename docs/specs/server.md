@@ -452,7 +452,7 @@ called — and reaches the service over the `remoteHost:*` bridge, so the consol
 API's shape is unchanged and its calls are now promises one round trip further
 away.
 
-* **Enrollment** (console hook, once): server URL + setup password →
+* **Enrollment** (Settings dialog, or the console hook, once): server URL + setup password →
   `POST /api/host/enroll` → the service persists `{ serverUrl, hostId,
   hostToken, origin, rpId }` through its `HostStateStore` — a 0600 JSON file
   under the app-data dir in standalone, `SecretStorage` in VS Code — then opens
@@ -491,9 +491,11 @@ away.
   reconnecting on it would evict the newer Host, which would reconnect and
   evict this one, forever. Coming back is an explicit act —
   `window.dormouseRemoteHost.reconnect()` (or `RemoteHost.start()`), which
-  takes the slot back and displaces the other Host in turn. Nothing surfaces
-  `displaced` in the UI yet; `window.dormouseRemoteHost.status()` reports it as
-  `connection`, distinct from the retrying `disconnected`. A close event from a
+  takes the slot back and displaces the other Host in turn. `displaced` is the
+  one connection state the user has to act on, so it is the only one the
+  Settings dialog gives a button (Remote control, below);
+  `window.dormouseRemoteHost.status()` reports it as `connection`, distinct from
+  the retrying `disconnected`. A close event from a
   socket the controller no longer owns is ignored, so a dead socket's late
   eviction cannot stand down the live one. Disposing the service is terminal:
   an enrollment or ACL read already in flight cannot construct a relay socket
@@ -533,6 +535,79 @@ away.
 * **Size authority**: last-attach-wins holds at the PTY level through the
   existing resize path. The "tethering to \<label\>" grey-out display on the
   local pane is staged — see remote-api.md `## Future`.
+
+### Remote control, in the Settings dialog
+
+Enrolling is the one step a self-hoster cannot skip, so it is UI rather than a
+console incantation: a **Remote control** section at the bottom of the
+app-global Settings dialog ([alert.md](./alert.md) -> Settings dialog). Source
+of truth: `lib/src/components/RemoteControlSection.tsx` over
+`lib/src/remote/host/host-status-store.ts`.
+
+It renders **nothing at all** where `getPlatform().remoteHost` is absent — the
+website and the lib dev server have no Host service behind them, and offering
+the form would promise something the build cannot do.
+
+The push-devices line above it must key on that same seam, and **not** on its
+own `no-host`, which is a superset: `no-host` covers both a Host service that
+has not enrolled *and* a build with no Host service at all
+([alert.md](./alert.md) -> Push notifications). Only the first has a section
+beneath it, so only the first says "below" — otherwise the website points the
+reader at nothing. Source of truth: `describePushTargets` in
+`lib/src/components/SettingsDialog.tsx`, which takes the seam as an argument;
+the `PushNoHost` / `PushNotEnrolled` story pair holds the two apart.
+
+Un-enrolled it is a three-field form (server, setup password, name for this
+machine) calling the service's `enroll`; enrolled it shows the server URL, the
+relay connection state, and the paired-device count, with `Disconnect` and —
+only on `displaced` — `Reconnect`. Rules the UI exists to honor:
+
+- **The password is passed through, never held.** It goes straight to the
+  service, which is the party that talks to the server, and is cleared on
+  success. `hostToken` never comes back into the webview realm: `enroll`
+  answers `{ hostId, serverUrl }`.
+- **Refusals are shown, not swallowed.** An origin outside this build's baked
+  allowlist is refused before the password leaves the machine (above), and that
+  error is what the form renders — so the failure reads as "this build will not
+  talk to that server" rather than as a wrong password.
+- **Disconnect asks first**, because clearing the enrollment drops every paired
+  phone until each pairs again.
+- **Status is re-read, not patched, and the connection is polled.** The
+  service's `status` event carries only `{ enrolled }` — the edge its webview
+  gate arms on — so every event triggers a full `status` command, and the dialog
+  re-reads on open since another window may have enrolled meanwhile. The
+  *connection* moves with no event at all (`connecting -> connected`,
+  `-> disconnected`, `-> displaced`), so the store also polls every 2 s **while
+  something is subscribed**, which is the seconds the dialog is open rather than
+  a standing timer in every window. Status reads are serialized: ticks that
+  arrive during a slow read coalesce behind it, so a 15-second Host-service
+  timeout is allowed to become the visible error instead of being superseded by
+  newer polls. Without the poll a machine that finished connecting a moment
+  after the dialog opened would read as permanently "Connecting…".
+- **A repeat answer is not published.** The service returns a fresh object every
+  poll, so the state is compared field-wise before it is stored — otherwise the
+  section would re-render twice a minute to paint identical text. This matches
+  the sibling store the same dialog reads (`setPushDevices` in
+  `lib/src/lib/push-devices.ts`).
+- **Coalescing stops at anything that changes the answer.** `enroll`,
+  `reconnect` and `clearEnrollment` each drop the read in flight and start their
+  own, because a `status` issued before the command answers the question as it
+  stood beforehand — joining it would report the old enrollment as though the
+  command had not run, the inverse of the delete-first ordering the service uses
+  so a failed delete never claims to have succeeded. Losing the last subscriber
+  drops it for the same reason: a reopened dialog must not be answered with a
+  status fetched for the closed one, and would otherwise sit on "Checking…"
+  until that read settled. Source of truth: `dropInFlightRead` in
+  `lib/src/remote/host/host-status-store.ts`.
+
+The `window.dormouseRemoteHost` console hook keeps the same four commands and
+remains the scripting seam. Pairing approval is deliberately *not* here: it is a
+modal, because it must interrupt
+([remote-security-model.md](./remote-security-model.md), Pairing Ceremony).
+
+`docs/stories/pairing.mdx` walks this section and the pairing modal in sequence
+with the rest of the setup, rendering the real components; it is a narrative
+Storybook page, not a spec, so this section is what it defers to.
 
 ## Pocket side (phone)
 
@@ -604,7 +679,10 @@ scheme. A local server therefore needs the override at build time, which
 DORMOUSE_REMOTE_CONNECT_SRC='http://localhost:3000 ws://localhost:3000' pnpm dev:standalone
 ```
 
-Then enroll once from the devtools console of the standalone webview:
+Then enroll once, in **Settings → Remote control** (the sliders icon at the far
+right of the baseboard): server `http://localhost:3000`, the setup password, and
+a name for this machine. The same thing from the devtools console of the
+webview, which is the scripting seam:
 
 ```js
 await window.dormouseRemoteHost.enroll('http://localhost:3000', 'hunter2', 'My Laptop')

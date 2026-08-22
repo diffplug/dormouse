@@ -12,6 +12,7 @@ import {
 import { ThemePicker } from './ThemePicker';
 import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
+import { RemoteControlSection } from './RemoteControlSection';
 import { getPlatform } from '../lib/platform';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
 import {
@@ -42,10 +43,20 @@ const SECTION = 'mt-4 border-t border-border pt-3';
  * (`docs/specs/remote-security-model.md`), so there is no account-wide device
  * list to show and the copy must not imply one.
  */
-function describePushTargets(push: PushDevicesState): string {
+function describePushTargets(push: PushDevicesState, hasHostService: boolean): string {
   if (push.status === 'loading') return 'Looking for devices…';
   if (push.status === 'error') return 'Could not reach the server to list devices.';
-  if (push.status === 'no-host') return 'Connect this machine to a Dormouse server to send push.';
+  // `no-host` covers two builds: one whose Host service simply has not enrolled,
+  // and one with no Host service at all (`push-devices.ts` — the website leaves
+  // it here forever). Only the first has a Remote control section beneath this
+  // line, because the second is exactly where that section renders nothing, so
+  // "below" has to key on the same seam the section gates on rather than on
+  // `no-host`.
+  if (push.status === 'no-host') {
+    return hasHostService
+      ? 'Connect this machine to a Dormouse server below to send push.'
+      : 'Connect this machine to a Dormouse server to send push.';
+  }
   if (push.devices.length === 0) {
     return 'No device paired with this machine has enabled alerts in Dormouse Pocket yet.';
   }
@@ -86,6 +97,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   // to offer. That also covers every host whose adapter detects no shells and
   // every host that never seeds the store (fake = 1, remote = 0).
   const showShell = !getPlatform().hostOwnsShells && shellState.shells.length >= 2;
+  // The same seam `RemoteControlSection` gates on, read here so the push line
+  // above it cannot promise a section this build does not render.
+  const hasHostService = getPlatform().remoteHost !== undefined;
 
   // A phone can enable alerts long after this machine booted, so re-read the
   // list on open rather than showing whatever was true at Host start.
@@ -182,8 +196,13 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         onToggle={(pushEnabled) => updateAlertSettings({ pushEnabled })}
         onCommitDelay={(pushDelayMs) => updateAlertSettings({ pushDelayMs })}
       >
-        {describePushTargets(push)}
+        {describePushTargets(push, hasHostService)}
       </AlarmSinkSection>
+
+      {/* Last, and directly under the push section that points at it: push is
+          the feature that makes a reader care, and "no Host" is the reason it
+          has nowhere to go. Renders nothing on a build with no Host service. */}
+      <RemoteControlSection />
     </ModalFrame>
   );
 }
