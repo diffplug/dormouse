@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
-import { shellEscapePosix, shellEscapeWindows } from './shell-escape';
+import { describe, it, expect } from 'vitest';
+import { shellEscapePath, shellEscapePosix, shellEscapeWindows } from './shell-escape';
 
 describe('shellEscapePosix', () => {
   it('leaves safe paths untouched', () => {
@@ -87,33 +87,46 @@ describe('shellEscapeWindows', () => {
   });
 });
 
-describe('shellEscapePath OS dispatch', () => {
-  beforeEach(() => {
-    vi.resetModules();
+describe('shellEscapePath shell dispatch', () => {
+  it('uses posix escaping for a posix Session', () => {
+    expect(shellEscapePath('a b.png', 'posix')).toBe('a\\ b.png');
   });
 
-  afterEach(() => {
-    vi.resetModules();
-    vi.doUnmock('./platform');
+  it('uses cmd escaping for a cmd Session', () => {
+    expect(shellEscapePath('a b.png', 'cmd')).toBe(`"a b.png"`);
   });
 
-  async function importShellEscape(opts: { isMac: boolean; isWindows: boolean }) {
-    vi.doMock('./platform', () => ({ IS_MAC: opts.isMac, IS_WINDOWS: opts.isWindows }));
-    return import('./shell-escape');
-  }
-
-  it('uses posix escape on macOS', async () => {
-    const { shellEscapePath } = await importShellEscape({ isMac: true, isWindows: false });
-    expect(shellEscapePath('a b.png')).toBe('a\\ b.png');
+  // A PowerShell double-quoted string is expandable: `"$(calc.exe).txt"` runs
+  // the subexpression. Quote for the pane's shell, not the host platform.
+  it('does not leave a subexpression live in a PowerShell Session', () => {
+    expect(shellEscapePath('$(calc.exe).txt', 'powershell')).toBe(`'$(calc.exe).txt'`);
   });
 
-  it('uses posix escape on Linux', async () => {
-    const { shellEscapePath } = await importShellEscape({ isMac: false, isWindows: false });
-    expect(shellEscapePath('a b.png')).toBe('a\\ b.png');
+  it('does not leave a variable interpolation live in a PowerShell Session', () => {
+    expect(shellEscapePath('$env:USERNAME.txt', 'powershell')).toBe(`'$env:USERNAME.txt'`);
   });
 
-  it('uses windows escape on Windows', async () => {
-    const { shellEscapePath } = await importShellEscape({ isMac: false, isWindows: true });
-    expect(shellEscapePath('a b.png')).toBe(`"a b.png"`);
+  it('doubles embedded single quotes for PowerShell', () => {
+    expect(shellEscapePath(`it's.png`, 'powershell')).toBe(`'it''s.png'`);
+  });
+
+  it('leaves an inert path bare in a PowerShell Session', () => {
+    expect(shellEscapePath('C:\\Users\\a.png', 'powershell')).toBe('C:\\Users\\a.png');
+    expect(shellEscapePath('C:\\Users\\a b.png', 'powershell')).toBe(`'C:\\Users\\a b.png'`);
+  });
+
+  // PowerShell's argument mode reads a bare comma as the array operator, so an
+  // unquoted `C:\a,b.png` would reach the command as two arguments.
+  it('quotes a comma-bearing path in a PowerShell Session', () => {
+    expect(shellEscapePath('C:\\Users\\a,b.png', 'powershell')).toBe(`'C:\\Users\\a,b.png'`);
+  });
+
+  it('quotes a leading-at path in a PowerShell Session', () => {
+    expect(shellEscapePath('@args', 'powershell')).toBe(`'@args'`);
+  });
+
+  // Git Bash / WSL Sessions on Windows parse posix quoting, not cmd quoting.
+  it('uses posix escape for a posix Session on Windows', () => {
+    expect(shellEscapePath('$(calc.exe).txt', 'posix')).toBe('\\$\\(calc.exe\\).txt');
   });
 });

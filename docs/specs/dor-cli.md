@@ -295,6 +295,9 @@ target shell, picks a quoting style with
 [`shellCommandKind` / `buildShellCommandForKind`](../../dor/src/commands/shell-quote.ts)
 (`cmd` / `posix` / `powershell`), and renders a single command string used for
 output, JSON responses, default `ensure` titles, and the launched command alike.
+The same module is the shell classifier for clipboard/drop path escaping, which
+faces the identical "which parser reads this line" question — see the path-escaping
+rules in [mouse-and-clipboard.md](mouse-and-clipboard.md) §8.6.
 
 Every first-party command except the `dor agent-browser` / `dor ab` passthrough
 accepts `--json` and emits a stable object with the same handles as its text

@@ -86,9 +86,9 @@ Both are capped at 1M chars per PTY. When the cap is reached, oldest chunks are 
 1. Webview becomes visible (or panel deserializes).
 2. Webview sends: { type: 'dormouse:init' }.
 3. Host responds with:
-   - { type: 'pty:list', ptys: [{ id, alive, exitCode }] }   // all owned PTYs
+   - { type: 'pty:list', ptys: [{ id, alive, exitCode, shell }] } // all owned PTYs
    - { type: 'pty:replay', id, data }                         // buffered output per PTY
-4. Webview restores terminals from replay data, seeds saved pane and door titles back via `setTerminalUserTitle()` (which rejects titles starting with `<idle>`, the sentinel that prefixes the auto-generated finished-pane header). The seed callers in `terminal-lifecycle.ts` additionally skip `<unnamed>` so the default panel placeholder does not get seeded as a real user pin during cold-restore. (Persistence cannot distinguish a deliberate `<unnamed>` pin from the default placeholder, so a user who explicitly pinned `<unnamed>` will see it revert to the derived header on app reload.)
+4. Webview restores terminals from replay data, including each PTY's launch-shell path so the rebuilt terminal registry retains its Session-specific parser family for clipboard/drop escaping. It seeds saved pane and door titles back via `setTerminalUserTitle()` (which rejects titles starting with `<idle>`, the sentinel that prefixes the auto-generated finished-pane header). The seed callers in `terminal-lifecycle.ts` additionally skip `<unnamed>` so the default panel placeholder does not get seeded as a real user pin during cold-restore. (Persistence cannot distinguish a deliberate `<unnamed>` pin from the default placeholder, so a user who explicitly pinned `<unnamed>` will see it revert to the derived header on app reload.)
 5. If the saved session covers those live PTYs, the frontend uses the saved Lath layout when its leaf set matches and reattaches saved minimized doors; minimized PTYs are registered but remain doors instead of visible panes.
 ```
 
@@ -461,5 +461,4 @@ These rules apply to every adapter. Adapter-specific layering (deactivate orderi
 - **Untouched defaults conservatively.** New saved panes include `untouched`; a pane read without the field defaults to `untouched: false`, so it still requires kill confirmation.
 - **PTY ownership.** Each message router tracks the PTY ids it owns. A PTY routed to one webview must not be stolen by another router; new routers attaching to a host must respect existing ownership.
 - **Replay filtering does not re-fire alerts.** `pty:replay` re-injects buffered output into xterm.js but must not re-trigger `AlertManager`, activity-monitor events, or protocol notifications.
-
 

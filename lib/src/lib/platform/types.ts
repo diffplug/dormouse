@@ -10,6 +10,9 @@ export interface PtyInfo {
   id: string;
   alive: boolean;
   exitCode?: number;
+  /** Executable path of the shell this PTY launched. Carried on reconnect so
+   *  shell-sensitive input remains Session-specific after the webview reloads. */
+  shell?: string;
 }
 
 /**

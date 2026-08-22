@@ -1,5 +1,6 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import type { ShellCommandKind } from 'dor/commands/shell-quote';
 import type { SessionStatus } from './activity-monitor';
 import type { ActivityNotification, TodoState } from './alert-manager';
 
@@ -12,6 +13,10 @@ export interface ActivityState {
 
 export interface TerminalEntry {
   ptyId: string;
+  /** Parser family of the shell this Session launched. Unlike the app-global
+   *  default, this remains stable when the user selects a different shell for
+   *  future Sessions. */
+  shellKind: ShellCommandKind;
   terminal: Terminal;
   fit: FitAddon;
   element: HTMLDivElement;
