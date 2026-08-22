@@ -307,6 +307,13 @@ test('shell command quoting supports shell families', () => {
     buildShellCommandForKind('cmd', ['C:\\Program Files\\nodejs\\node.exe', '-e', 'console.log(process.argv[1])', 'hello world', 'a&b']),
     '"C:\\Program Files\\nodejs\\node.exe" -e "console.log^(process.argv[1]^)" "hello world" "a^&b"',
   );
+  // `,` and `@` were dropped from the shared WINDOWS_SAFE_ARG for PowerShell's
+  // array operator and splatting; cmd.exe reads `,` as an argument separator and
+  // a leading `@` as echo suppression, so quoting them here is wanted too.
+  assert.equal(
+    buildShellCommandForKind('cmd', ['type', 'a,b.txt', '@echo.txt']),
+    'type "a,b.txt" "@echo.txt"',
+  );
 });
 
 test('split sends command argv to the host', async () => {
