@@ -71,6 +71,7 @@ export interface PtyInfo {
   id: string;
   alive: boolean;
   exitCode?: number;
+  shell?: string;
 }
 
 // Messages from extension host → webview

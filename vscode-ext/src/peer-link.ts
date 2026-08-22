@@ -125,6 +125,14 @@ export function configurePeerLink(next: PeerLinkDeps): void {
 
 const TOKEN_FILE = 'remote-host.peer-token';
 
+/**
+ * How long a window losing the exclusive create will wait for the winner's
+ * bytes ({@link readSharedToken}). The write is one `writeFile` of a UUID, so
+ * the gap it covers is microseconds — this is sized to be unmissable, not tuned.
+ */
+const TOKEN_WRITE_ATTEMPTS = 10;
+const TOKEN_WRITE_POLL_MS = 20;
+
 /** Floor between contention attempts, so a refused hello cannot become a spin. */
 const RETRY_MS = 1_000;
 
@@ -168,6 +176,11 @@ function peerDirPath(): string {
  *
  * Windows named pipes are not filesystem objects and carry their own ACL, so
  * there is nothing here for them to check.
+ *
+ * The same predicate is duplicated as `ensureControlDir()` in
+ * standalone/sidecar/dor-control-server.js (sync fs, returns the directory
+ * rather than a boolean) for the `dor` control socket. Nothing tests the two
+ * against each other, so a correction to the hardening rule belongs in both.
  */
 async function peerDirIsSafe(): Promise<boolean> {
   if (process.platform === 'win32') return true;
@@ -213,6 +226,21 @@ function socketPath(): string | null {
 }
 
 /**
+ * Read the shared token, treating a file that is present but empty as *not yet
+ * written* rather than as a token.
+ *
+ * `writeFile(..., { flag: 'wx' })` creates the file before it writes the bytes,
+ * so a window reading in that gap sees zero length. Returning `''` from there
+ * would be unrecoverable rather than merely wrong: an empty `serverToken` makes
+ * {@link onServerFrame}'s `!serverToken` reject every hello, and a broker never
+ * re-reads the token, so every other window retries at 1 Hz and is never served.
+ */
+async function readSharedToken(path: string): Promise<string | null> {
+  const raw = await readFile(path, 'utf8').catch(() => null);
+  return raw && raw.trim() ? raw.trim() : null;
+}
+
+/**
  * The shared secret, created once per installation and reused forever. Written
  * with an exclusive create rather than a rename, so two windows starting
  * together end up agreeing: the loser reads the winner's token instead of
@@ -221,11 +249,8 @@ function socketPath(): string | null {
 async function ensureToken(): Promise<string> {
   const path = tokenPath();
   if (!path) throw new Error('peer link has no storage location');
-  try {
-    return (await readFile(path, 'utf8')).trim();
-  } catch {
-    // Missing (the common first run) — fall through and create it.
-  }
+  const existing = await readSharedToken(path);
+  if (existing) return existing;
   await mkdir(join(path, '..'), { recursive: true }).catch(() => {});
   const token = randomUUID();
   try {
@@ -233,8 +258,30 @@ async function ensureToken(): Promise<string> {
     // installation's terminals, so it is never briefly world-readable.
     await writeFile(path, token, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
     return token;
-  } catch {
-    return (await readFile(path, 'utf8')).trim();
+  } catch (writeError) {
+    // `EEXIST` — another window created it, and the empty read above may have
+    // been that same window mid-write, so wait the bytes out. Bounded, because
+    // a token file left zero-length by a crash never fills in: throwing hands
+    // the caller its existing stand-down path, which at least says so in the
+    // log, rather than a broker that silently refuses every peer forever.
+    for (let attempt = 0; attempt < TOKEN_WRITE_ATTEMPTS; attempt++) {
+      const written = await readSharedToken(path);
+      if (written) return written;
+      await delay(TOKEN_WRITE_POLL_MS);
+    }
+    // Not only the crash-left empty file: `open(O_CREAT|O_EXCL)` on a token
+    // path that is a directory — or that we cannot read — is `EEXIST` too, so
+    // those land here as well. The caller's log line is the only diagnosis any
+    // of them gets, so re-derive which it was rather than asserting one.
+    const why = await readFile(path, 'utf8').then(
+      () => 'is empty',
+      // The create error rides along only here: an unwritable `globalStorageUri`
+      // fails the create with `EACCES` and then the read with `ENOENT`, and the
+      // read alone would name the missing file rather than why it is missing.
+      (error: unknown) =>
+        `could not be read: ${String(error)}; creating it failed with ${String(writeError)}`,
+    );
+    throw new Error(`peer link token file ${path} ${why}`);
   }
 }
 

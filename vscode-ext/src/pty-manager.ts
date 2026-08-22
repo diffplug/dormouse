@@ -1,6 +1,5 @@
 import { fork, ChildProcess, type Serializable } from 'child_process';
 import * as path from 'path';
-import * as os from 'os';
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import { log } from './log';
@@ -37,6 +36,9 @@ interface PtyBufferEntry {
   receivedChars: number;
   alive: boolean;
   exitCode?: number;
+  /** Requested shell executable. An absent value means the shared PTY host's
+   *  platform default, whose parser family is deterministic. */
+  shell?: string;
 }
 
 const MAX_BUFFER_CHARS = 1_000_000;
@@ -51,7 +53,7 @@ function trimChunks(chunks: string[], totalChars: number): number {
   return totalChars;
 }
 
-function createBufferEntry(alive: boolean, exitCode?: number): PtyBufferEntry {
+function createBufferEntry(alive: boolean, exitCode?: number, shell?: string): PtyBufferEntry {
   return {
     replayChunks: [],
     replayChars: 0,
@@ -60,6 +62,7 @@ function createBufferEntry(alive: boolean, exitCode?: number): PtyBufferEntry {
     receivedChars: 0,
     alive,
     exitCode,
+    shell,
   };
 }
 
@@ -92,10 +95,10 @@ function bufferExit(id: string, exitCode: number): void {
   entry.exitCode = exitCode;
 }
 
-export function getBufferedPtys(): Map<string, { alive: boolean; exitCode?: number }> {
-  const result = new Map<string, { alive: boolean; exitCode?: number }>();
+export function getBufferedPtys(): Map<string, { alive: boolean; exitCode?: number; shell?: string }> {
+  const result = new Map<string, { alive: boolean; exitCode?: number; shell?: string }>();
   for (const [id, entry] of ptyBuffers) {
-    result.set(id, { alive: entry.alive, exitCode: entry.exitCode });
+    result.set(id, { alive: entry.alive, exitCode: entry.exitCode, shell: entry.shell });
   }
   return result;
 }
@@ -180,10 +183,12 @@ let pendingMessages: any[] = [];
 const callbackSet = new Set<PtyCallbacks>();
 const dorControlRequestListeners = new Set<(request: DorControlRequest) => void>();
 const dorControlCancelListeners = new Set<(cancel: DorControlCancel) => void>();
+// The socket path is chosen by the pty-host, not here: it has to land in a
+// hardened per-user directory (POSIX) or under an unguessable pipe name
+// (Windows), and only the process that binds it knows whether it came up. The
+// host reports it back through the spawn env — see pty-host.js and
+// docs/specs/dor-cli.md.
 const dorControlToken = randomBytes(24).toString('hex');
-const dorControlSocket = process.platform === 'win32'
-  ? `\\\\.\\pipe\\dormouse-vscode-${process.pid}-dor`
-  : path.join(os.tmpdir(), `dormouse-vscode-${process.pid}-dor.sock`);
 
 // Always run the pty host under the editor's own Node — Electron's bundled
 // runtime (process.execPath, re-execed as Node via ELECTRON_RUN_AS_NODE, which
@@ -224,8 +229,6 @@ function getDorRuntimeEnv(extensionPath: string): Record<string, string> {
     // OSC 633 shell-integration scripts, copied next to the bundled pty-host by
     // the build (see package.json `build`). Mirrors how DORMOUSE_CLI_BIN is set.
     DORMOUSE_SHELL_INTEGRATION_DIR: path.join(extensionPath, 'dist', 'shell-integration'),
-    DORMOUSE_CONTROL_SOCKET: dorControlSocket,
-    DORMOUSE_CONTROL_TOKEN: dorControlToken,
   };
   dorRuntimeEnvCache = { path: extensionPath, env };
   return env;
@@ -245,6 +248,10 @@ function ensureChild(extensionPath: string): ChildProcess {
     env: {
       ...process.env,
       ...dorEnv,
+      // Only the fork gets the token; `getDorRuntimeEnv` deliberately omits it,
+      // so it reaches a shell only after pty-host.js has a listening socket to
+      // pair it with.
+      DORMOUSE_CONTROL_TOKEN: dorControlToken,
     },
   });
 
@@ -338,7 +345,7 @@ function sendToChild(msg: any): void {
 
 export function spawn(id: string, options?: PtySpawnOptions): void {
   killedPtyIds.delete(id);
-  ptyBuffers.set(id, createBufferEntry(true));
+  ptyBuffers.set(id, createBufferEntry(true, undefined, options?.shell));
   const dorEnv = getDorRuntimeEnv(extensionPath_);
   sendToChild({
     type: 'spawn',

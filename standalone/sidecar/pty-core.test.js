@@ -364,6 +364,35 @@ test('create buffers scrollback for getScrollback requests', () => {
   });
 });
 
+test('list reports the resolved launch shell for live reconnects', () => {
+  const events = [];
+  const fakePty = {
+    pid: 123,
+    onData() {},
+    onExit() {},
+    resize() {},
+    write() {},
+    kill() {},
+  };
+  const mgr = create((event, data) => events.push({ event, data }), {
+    spawn() { return fakePty; },
+  });
+
+  mgr.spawn('pane-pwsh', { shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' });
+  mgr.list();
+
+  assert.deepEqual(events.at(-1), {
+    event: 'list',
+    data: {
+      ptys: [{
+        id: 'pane-pwsh',
+        alive: true,
+        shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+      }],
+    },
+  });
+});
+
 test('interrupt writes one ^C to every live PTY and leaves scrollback readable', async () => {
   const events = [];
   const writes = [];

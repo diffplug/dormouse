@@ -19,6 +19,12 @@ When `UI Tests` is the only non-terminal check and every automated check is gree
 
 `ntwigg` is the maintainer's local shell username (it shows up in prompt fixtures like `ntwigg@ntwigg-mac-2025` in [`terminal-prompt-shape.test.ts`](../../../lib/src/lib/terminal-prompt-shape.test.ts)) and also, on GitHub, an unrelated person's account. Writing `@ntwigg` in a comment, PR body, or commit message pings a stranger and subscribes them to the thread, which only they can undo. Use `@nedtwigg`, and don't copy the shorter handle forward from a thread that already contains the typo. ([diffplug/dormouse#389](https://github.com/diffplug/dormouse/pull/389#issuecomment-5319456021))
 
+## A restart starts clean — don't carry a superseded PR's findings forward
+
+Long-running work here is often closed and reopened as a fresh PR ("Supersedes #N"), and that restart is deliberate — nedtwigg: *"When I start over, I usually **want** to start over. The original conversation grew too unfocused and out of hand."* So review the successor on its own terms: don't fetch the predecessor's bot comments and reviews in order to re-raise findings from them, and don't treat a finding dropped that way as a gap in the review machinery. Carrying the closed thread's context forward is the thing the restart was for.
+
+Proposed as an overlay note and rejected in [#421](https://github.com/diffplug/dormouse/pull/421#issuecomment-5361239323). The underlying incident (#398 → #416, where three findings written up as #398 closed mid-review went unre-raised) is easy to re-derive from session logs — a `review-runs`/`review-reviewers` sweep that rediscovers it should not re-file it here or upstream at `max-sixty/tend`.
+
 ## Settled upstream rulings — don't re-file
 
 Before a `review-runs`/`review-reviewers` sweep flags a tend behavior as waste or files it upstream, check this list — these were already raised and ruled on, so re-filing burns a session and spams upstream:

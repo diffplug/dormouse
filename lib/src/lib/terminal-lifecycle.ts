@@ -2,7 +2,8 @@ import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { WebglAddon } from '@xterm/addon-webgl';
-import { getPlatform, IS_MAC, IS_WINDOWS } from './platform';
+import { shellCommandKind, type ShellCommandKind } from 'dor/commands/shell-quote';
+import { getPlatform, IS_MAC, IS_WINDOWS, PLATFORM_STRING } from './platform';
 import { DIM, RESET } from './ansi';
 import { cfg } from '../cfg';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
@@ -310,7 +311,7 @@ function wireXtermHandlers(
   };
 }
 
-function setupTerminalEntry(id: string, options: { untouched?: boolean } = {}): TerminalEntry {
+function setupTerminalEntry(id: string, options: { shell?: string; untouched?: boolean } = {}): TerminalEntry {
   const { terminal, fit, element } = createXtermHost();
   const selectionBaselineRef = { current: null as string | null };
 
@@ -340,6 +341,7 @@ function setupTerminalEntry(id: string, options: { untouched?: boolean } = {}): 
 
   const entry: TerminalEntry = {
     ptyId: id,
+    shellKind: shellCommandKind(options.shell, PLATFORM_STRING),
     terminal,
     fit,
     element,
@@ -372,6 +374,11 @@ function setupTerminalEntry(id: string, options: { untouched?: boolean } = {}): 
 
 export function setPendingShellOpts(id: string, opts: PendingShellOpts): void {
   pendingShellOpts.set(id, opts);
+}
+
+/** The parser family captured when this Session's PTY launched. */
+export function getTerminalShellKind(id: string): ShellCommandKind | null {
+  return registry.get(id)?.shellKind ?? null;
 }
 
 const LAUNCH_PROMPT_POLL_MS = 100;
@@ -432,7 +439,10 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
 
   const shellOpts = pendingShellOpts.get(id);
   pendingShellOpts.delete(id);
-  const entry = setupTerminalEntry(id, { untouched: shellOpts?.untouched ?? true });
+  const entry = setupTerminalEntry(id, {
+    shell: shellOpts?.shell,
+    untouched: shellOpts?.untouched ?? true,
+  });
   resetTerminalPaneState(id);
   if (shellOpts?.title) {
     setTerminalUserTitle(id, shellOpts.title);
@@ -458,12 +468,15 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
 export function resumeTerminal(
   id: string,
   replayData: string | null,
-  exitInfo?: { alive: boolean; exitCode?: number; title?: string | null; untouched?: boolean },
+  exitInfo?: { alive: boolean; exitCode?: number; shell?: string; title?: string | null; untouched?: boolean },
 ): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
 
-  const entry = setupTerminalEntry(id, { untouched: exitInfo?.untouched ?? false });
+  const entry = setupTerminalEntry(id, {
+    shell: exitInfo?.shell,
+    untouched: exitInfo?.untouched ?? false,
+  });
   const isDead = exitInfo != null && !exitInfo.alive;
 
   if (replayData) {
@@ -494,7 +507,10 @@ export function restoreTerminal(
   const existing = registry.get(id);
   if (existing) return existing;
 
-  const entry = setupTerminalEntry(id, { untouched: opts.untouched ?? false });
+  const entry = setupTerminalEntry(id, {
+    shell: opts.shell,
+    untouched: opts.untouched ?? false,
+  });
   resetTerminalPaneState(id);
   seedTerminalManualCwd(id, opts.cwd);
   const trimmedTitle = opts.title?.trim();

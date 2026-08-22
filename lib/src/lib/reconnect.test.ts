@@ -156,6 +156,27 @@ describe('resumeOrRestore', () => {
     });
   });
 
+  it('restores the launch shell reported by a live PTY', async () => {
+    const saved: PersistedSession = {
+      version: 3,
+      lathLayout: lathLayoutFor('pane-a'),
+      panes: [
+        { id: 'pane-a', title: 'PowerShell', cwd: null },
+      ],
+    };
+
+    await resumeOrRestore(createPlatform([
+      { id: 'pane-a', alive: true, shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' },
+    ], saved));
+
+    expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('pane-a', 'pane-a-replay', {
+      alive: true,
+      exitCode: undefined,
+      shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+      title: 'PowerShell',
+    });
+  });
+
   it('seeds saved untouched state when resuming live PTYs', async () => {
     const saved: PersistedSession = {
       version: 3,

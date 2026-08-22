@@ -706,7 +706,7 @@ export function attachRouter(
         const previouslyOwned = new Set(ownedPtyIds);
 
         const ptys = ptyManager.getBufferedPtys();
-        const reconnectable = new Map<string, { alive: boolean; exitCode?: number }>();
+        const reconnectable = new Map<string, { alive: boolean; exitCode?: number; shell?: string }>();
 
         // Re-serve PTYs this router already owns (webview content was recreated,
         // e.g. WebviewView collapsed then re-expanded — resolveWebviewView is NOT
@@ -746,7 +746,7 @@ export function attachRouter(
         const list: ExtensionMessage = {
           type: 'pty:list',
           ptys: Array.from(reconnectable.entries()).map(([id, info]) => ({
-            id, alive: info.alive, exitCode: info.exitCode,
+            id, alive: info.alive, exitCode: info.exitCode, shell: info.shell,
           })),
         };
         post(list);
