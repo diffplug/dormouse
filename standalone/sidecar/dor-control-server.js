@@ -119,13 +119,36 @@ function resolveControlSocketPath(dir) {
 }
 
 // The server timeout must outlast the dor client's own deadline so the client
-// always controls the outcome — its longest is `dor ensure --restart` at 60s, so
-// 65s clears it. (A shorter server timeout would fire first and send the client a
-// spurious "timed out waiting for surface.ensure" while the webview was still
-// legitimately working, e.g. waiting on shell integration or a server restart.)
+// always controls the outcome. (A shorter server timeout would fire first and
+// send the client a spurious "timed out waiting for surface.ensure" while the
+// webview was still legitimately working, e.g. waiting on shell integration or a
+// server restart.) A request that carries its own `timeoutMs` — `dor await
+// --timeout` can ask for many minutes — gets that plus a margin; anything else
+// falls back to the `timeoutMs` option, whose 65s default clears the longest
+// fixed client deadline (`dor ensure --restart` at 60s).
 // In practice socket close reaps pending entries the instant the client gives up;
 // this timer only releases a pending entry if the webview never answers at all.
-//
+const SERVER_TIMEOUT_MARGIN_MS = 10000;
+// `dor await` accepts a host ceiling of at most 24h and gives its client socket
+// another 5s. The server accepts that largest legitimate client deadline, then
+// keeps its reaper another 10s above it. Larger hints are nonsense: a parked
+// request is cheap, but not free, so they fall back to the bounded default.
+const MAX_CLIENT_TIMEOUT_MS = (24 * 60 * 60 * 1000) + 5000;
+
+function serverTimeoutFor(clientTimeoutMs, fallbackMs) {
+  if (
+    typeof clientTimeoutMs !== 'number' ||
+    !Number.isFinite(clientTimeoutMs) ||
+    clientTimeoutMs <= 0 ||
+    clientTimeoutMs > MAX_CLIENT_TIMEOUT_MS
+  ) {
+    return fallbackMs;
+  }
+  // No clamp needed: the guard above already rejected everything above
+  // MAX_CLIENT_TIMEOUT_MS, so this sum is bounded by construction.
+  return clientTimeoutMs + SERVER_TIMEOUT_MARGIN_MS;
+}
+
 // `socketPath` and `socketDir` are test seams: production callers leave both
 // unset and take the hardened path this module picks, which they then hand to
 // spawned shells.
@@ -170,13 +193,16 @@ function createDorControlServer({ socketPath, socketDir, token, send, timeoutMs 
 
     // If the client disconnects (timeout/Ctrl-C) before the webview answers,
     // release any entries owned by this socket right away rather than letting
-    // them linger until their own timeout fires against a dead socket.
+    // them linger until their own timeout fires against a dead socket. The
+    // webview has to hear about it too: a long-running handler (a parked
+    // `dor await`) holds state — a subscription, an armed watch, a completion
+    // claim — that only a cancel releases.
     socket.on('close', () => {
       clearTimeout(handshakeTimer);
       for (const [requestId, entry] of pending) {
         if (entry.socket !== socket) continue;
-        if (entry.timeout) clearTimeout(entry.timeout);
-        pending.delete(requestId);
+        reap(requestId);
+        send('dor:controlCancel', { requestId });
       }
     });
 
@@ -240,9 +266,10 @@ function createDorControlServer({ socketPath, socketDir, token, send, timeoutMs 
     }
 
     const timeout = setTimeout(() => {
-      pending.delete(request.requestId);
+      reap(request.requestId);
       writeResponse(socket, { requestId: request.requestId, ok: false, error: `timed out waiting for ${request.method}` });
-    }, timeoutMs);
+      send('dor:controlCancel', { requestId: request.requestId });
+    }, serverTimeoutFor(request.timeoutMs, timeoutMs));
 
     pending.set(request.requestId, { socket, timeout });
     send('dor:controlRequest', {
@@ -253,16 +280,29 @@ function createDorControlServer({ socketPath, socketDir, token, send, timeoutMs 
     });
   }
 
+  // Forget a pending request and stop its timer. Returns the entry, or
+  // undefined if it was already reaped.
+  function reap(requestId) {
+    const entry = pending.get(requestId);
+    if (!entry) return undefined;
+    pending.delete(requestId);
+    clearTimeout(entry.timeout);
+    return entry;
+  }
+
   function respond(response) {
     const requestId = response?.requestId;
     if (typeof requestId !== 'string') return;
-    const entry = pending.get(requestId);
+    const entry = reap(requestId);
+    // Unknown id: the entry was already reaped by a disconnect or a timeout and
+    // the webview was told so. A late answer to a cancelled request is expected,
+    // not an error — drop it silently.
     if (!entry) return;
-    pending.delete(requestId);
-    clearTimeout(entry.timeout);
     writeResponse(entry.socket, response);
   }
 
+  // No `dor:controlCancel` here: close() runs on host shutdown, so the webview
+  // that would act on it is going away too.
   function close() {
     for (const [requestId, entry] of pending) {
       clearTimeout(entry.timeout);
@@ -331,6 +371,7 @@ function writeResponse(socket, response) {
 
 module.exports = {
   createDorControlServer,
+  serverTimeoutFor,
   controlDirPath,
   ensureControlDir,
   resolveControlSocketPath,

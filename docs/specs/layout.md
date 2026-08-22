@@ -571,8 +571,8 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/lib/terminal-report-filter.ts` | Synthetic/replay terminal report detection and replay writer |
 | `lib/src/lib/terminal-mouse-router.ts` | Mouse selection routing, smart-token hinting, Alt shape toggle |
 | `lib/src/components/wall/resolve-pane-element.ts` | `resolvePaneElement` — climbs a registered pane element to its enclosing `[data-lath-leaf]` for overlay/kill measurement |
-| `lib/src/lib/activity-monitor.ts` | Per-session activity state machine: output timing → alert escalation |
-| `lib/src/lib/alert-manager.ts` | Manages ActivityMonitors + attention tracking + TODO state per session |
+| `lib/src/lib/quiesce-detector.ts` | Per-session always-on output/silence detector: output timing → busy/quiet/settled |
+| `lib/src/lib/alert-manager.ts` | Manages the detectors + the WATCHING rule set + attention tracking + TODO state per session |
 | `lib/src/lib/session-types.ts` | Type definitions for persisted sessions (`PersistedPane`, `PersistedDoor`, `PersistedSession`) |
 | `lib/src/lib/session-save.ts` | Serialization: collects layout, cwd, alert state for persistence (never scrollback) |
 | `lib/src/lib/session-restore.ts` | Deserialization: loads saved session, calls `restoreTerminal()` for each pane |

@@ -3,6 +3,8 @@ import { createConnection } from 'node:net';
 import type {
   AgentBrowserSurfaceRequest,
   AgentBrowserSurfaceResponse,
+  AwaitSurfaceRequest,
+  AwaitSurfaceResponse,
   ControlClient,
   EnsureSurfaceRequest,
   EnsureSurfaceResponse,
@@ -94,6 +96,19 @@ export class SocketControlClient implements ControlClient {
     return this.request<ReadSurfaceResponse>(SURFACE_CONTROL_METHODS.read, request);
   }
 
+  // The host enforces its own `timeoutMs` ceiling and answers with a `timeout`
+  // outcome, so the client's socket deadline must sit *above* it — otherwise the
+  // socket would time out first and turn an ordinary timeout into a transport
+  // error. The control server's deadline (client's + 10s) then outlasts both, so
+  // the ordering is host ceiling < client socket < server reaper.
+  awaitSurface(request: AwaitSurfaceRequest): Promise<AwaitSurfaceResponse> {
+    return this.request<AwaitSurfaceResponse>(
+      SURFACE_CONTROL_METHODS.await,
+      request,
+      { timeoutMs: request.timeoutMs + 5_000 },
+    );
+  }
+
   killSurface(request: KillSurfaceRequest): Promise<KillSurfaceResponse> {
     return this.request<KillSurfaceResponse>(SURFACE_CONTROL_METHODS.kill, request);
   }
@@ -118,9 +133,20 @@ export class SocketControlClient implements ControlClient {
    * wire: the peer must first prove it holds the token over a nonce we did not
    * choose, and we answer over a nonce it did not choose. Whoever merely bound
    * the socket path learns two nonces and nothing else.
+   *
+   * `timeoutMs` overrides the client's configured deadline for one call. It also
+   * travels on the wire — in the request frame, after the handshake — so the
+   * control server can set a timer that outlasts it; otherwise a long request (a
+   * parked `dor await`) would be killed by the server's default long before the
+   * client gave up.
    */
-  private request<T>(method: SurfaceControlMethod, params: unknown): Promise<T> {
+  private request<T>(
+    method: SurfaceControlMethod,
+    params: unknown,
+    options?: { timeoutMs?: number },
+  ): Promise<T> {
     const requestId = `dor-${this.idBase}-${++this.nextRequestId}`;
+    const timeoutMs = options?.timeoutMs ?? this.timeoutMs;
     return new Promise((resolve, reject) => {
       const socket = createConnection({ path: this.socketPath });
       let responseBuffer = '';
@@ -140,7 +166,7 @@ export class SocketControlClient implements ControlClient {
 
       const timeout = setTimeout(() => {
         settle(() => reject(new Error(`timed out waiting for ${method}`)));
-      }, this.timeoutMs);
+      }, timeoutMs);
 
       socket.setEncoding('utf8');
       // Deliberately nothing on 'connect': the server speaks first.
@@ -198,6 +224,7 @@ export class SocketControlClient implements ControlClient {
               surfaceId: this.surfaceId,
               method,
               params,
+              timeoutMs,
             })}\n`);
             phase = 'response';
           }

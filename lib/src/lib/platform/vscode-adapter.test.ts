@@ -165,6 +165,48 @@ describe('VSCodeAdapter PTY exit handling', () => {
     });
   });
 
+  // The AlertManager lives in the extension host, so `dor await` parks there
+  // and only the outcome crosses back (docs/specs/alert.md → Await).
+  it('parks an await in the extension host and settles it from the result message', async () => {
+    const adapter = new VSCodeAdapter();
+
+    const handle = adapter.alertAwait('pane-1', { until: 'quiet', timeoutMs: 600_000 });
+    const [request] = postMessage.mock.calls[0] as [{ type: string; requestId: string }];
+    expect(request).toMatchObject({
+      type: 'alert:await',
+      id: 'pane-1',
+      until: 'quiet',
+      timeoutMs: 600_000,
+    });
+
+    windowTarget.dispatchEvent(hostMessage({
+      type: 'alert:awaitResult',
+      requestId: request.requestId,
+      outcome: { kind: 'resolved', cause: 'quiet', waitedMs: 12_345 },
+    }));
+
+    expect(await handle.promise).toEqual({ kind: 'resolved', cause: 'quiet', waitedMs: 12_345 });
+  });
+
+  it('asks the host to cancel and still takes the outcome from the result message', async () => {
+    const adapter = new VSCodeAdapter();
+
+    const handle = adapter.alertAwait('pane-1', { until: 'exit', timeoutMs: 1_000 });
+    const [request] = postMessage.mock.calls[0] as [{ requestId: string }];
+    handle.cancel();
+
+    expect(postMessage).toHaveBeenCalledWith({ type: 'alert:awaitCancel', requestId: request.requestId });
+
+    // The host answers the cancel through the same channel, so a claim is never
+    // released locally and then again remotely.
+    windowTarget.dispatchEvent(hostMessage({
+      type: 'alert:awaitResult',
+      requestId: request.requestId,
+      outcome: { kind: 'cancelled', waitedMs: 40 },
+    }));
+    expect(await handle.promise).toEqual({ kind: 'cancelled', waitedMs: 40 });
+  });
+
   it('forwards the host canonical watched-command snapshot', () => {
     const adapter = new VSCodeAdapter();
     const snapshots: string[][] = [];

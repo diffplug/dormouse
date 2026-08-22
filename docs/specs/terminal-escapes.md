@@ -33,9 +33,9 @@ After parsing, state-driving supported sequences are consumed and not re-emitted
 - `terminal:semanticEvents` — normalized semantic events parsed in the platform (CWD, prompt/command boundaries, titles). Feeds `TerminalPaneState`; command boundaries also feed the command-exit alert track defined in `docs/specs/alert.md`.
 - Notification-derived state is delivered through `AlertManager` calls / `alert:state` messages, not through `pty:data`.
 
-For replay (`pty:replay`), the webview re-parses semantic OSCs from the buffered raw stream during reconstruction. Replay must not re-fire alerts, activity-monitor events, or protocol notifications: saved scrollback may contain raw OSC sequences, but replay filtering suppresses all protocol side effects so a resumed Session does not re-ring on every reload.
+For replay (`pty:replay`), the webview re-parses semantic OSCs from the buffered raw stream during reconstruction. Replay must not re-fire alerts, quiesce-detector events, or protocol notifications: saved scrollback may contain raw OSC sequences, but replay filtering suppresses all protocol side effects so a resumed Session does not re-ring on every reload.
 
-The parser also classifies each PTY data chunk for activity-monitor purposes:
+The parser also classifies each PTY data chunk for quiesce-detector purposes:
 
 - A chunk that contains only notification/progress OSCs after parsing must not be fed to the activity monitor's `onData()` as generic meaningful output.
 - A chunk that contains visible output plus notification/progress OSCs still counts visible output as activity.

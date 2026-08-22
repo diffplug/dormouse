@@ -27,6 +27,7 @@ import {
   type RemoteHostResult,
 } from "dormouse-lib/host/remote/service-protocol";
 import { AlertManager } from "dormouse-lib/lib/alert-manager";
+import type { AwaitHandle, AwaitOptions } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { loadSessionState, saveSessionState } from "dormouse-lib/lib/window-persistence";
@@ -38,7 +39,11 @@ import {
 } from "dormouse-lib/lib/terminal-protocol";
 import { themeColorProvider } from "dormouse-lib/lib/terminal-theme";
 import { applyTerminalSemanticEventsByPtyId } from "dormouse-lib/lib/terminal-state-store";
-import type { DorControlRequestPayload, DorControlResult } from "dor/protocol";
+import type { DorControlCancelPayload, DorControlRequestPayload } from "dor/protocol";
+import {
+  cancelDorControlRequest,
+  dispatchDorControlRequest,
+} from "dormouse-lib/lib/platform/dor-control-dispatch";
 import { BrowserSidecarHost } from "./browser-sidecar-host";
 
 const errMessage = (err: unknown): string => err instanceof Error ? err.message : String(err);
@@ -240,6 +245,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   alertToggleTodo(id: string): void { this.alertManager.toggleTodo(id); }
   alertMarkTodo(id: string): void { this.alertManager.markTodo(id); }
   alertClearTodo(id: string): void { this.alertManager.clearTodo(id); }
+  alertAwait(id: string, options: AwaitOptions): AwaitHandle { return this.alertManager.awaitCompletion(id, options); }
   onAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.add(handler); }
   // See TauriAdapter: single webview, so nothing is broadcast back.
   onWatchedCommands(_handler: (names: string[]) => void): void {}
@@ -296,18 +302,13 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       this.remoteHostClient.onEvent(data);
     } else if (event === "dor:controlRequest") {
       const payload = data as DorControlRequestPayload;
-      const respond = (response: DorControlResult) => {
+      dispatchDorControlRequest(payload, (response) => {
         this.host.send("dor_control_response", { response: { requestId: payload.requestId, ...response } });
-      };
-      window.dispatchEvent(new CustomEvent("dormouse:control-request", {
-        detail: {
-          requestId: payload.requestId,
-          surfaceId: payload.surfaceId,
-          method: payload.method,
-          params: payload.params ?? {},
-          respond,
-        },
-      }));
+      });
+    } else if (event === "dor:controlCancel") {
+      // The sidecar's control server gave up on the request: the `dor` client
+      // hung up, or its own deadline fired.
+      cancelDorControlRequest((data as DorControlCancelPayload).requestId);
     }
   }
 
