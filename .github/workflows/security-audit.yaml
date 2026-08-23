@@ -122,9 +122,10 @@ jobs:
             Administration + Secrets + Environments, guaranteed
             present by the previous step. If a prefixed call still
             returns 403, record FAIL with the note "PAT scope drifted
-            from SECURITY.md". Reserve `UNVERIFIABLE` only for
-            genuinely indeterminable cases (e.g. a transient network
-            error) and explain why.
+            from SECURITY.md". Use `UNVERIFIABLE` only for a check you
+            could not determine — a transient network error, or an area
+            you ran out of room to reach — and explain which it was. It
+            is never a substitute for a check you could have run.
 
             Write `audit-report.md` with three sections:
               - `## FAIL IF results` — one line per check with PASS/FAIL
@@ -143,11 +144,14 @@ jobs:
             check inline: never delegate to a background subagent, and
             never end your turn to wait on work that has not finished —
             that work is discarded and the run produces no verdict at
-            all. Write both files before you finish. If you are running
-            out of room, write them with whatever you established and
-            mark the unfinished areas `UNVERIFIABLE`; a partial report
-            carrying a verdict is worth far more to the release gate
-            than a thorough audit that was never written down.
+            all. Always write `audit-report.md` before you finish: if
+            you are running out of room, write it with whatever you
+            established and mark the unfinished areas `UNVERIFIABLE`.
+            A partial report still reaches a human — the reporting step
+            reproduces it in the INCONCLUSIVE issue. Write
+            `audit-status.txt` only when the verdict covers every check;
+            a `PASS` on a partial audit closes the failure issue and
+            opens the release gate on checks nobody ran.
 
       # The SDK transcript is the only record of what the audit actually
       # did. `claude-code-action` keeps it out of the logs on purpose
