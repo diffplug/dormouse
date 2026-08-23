@@ -78,7 +78,25 @@ jobs:
           # auditing prompt that wants to run `gh api` and produce a
           # report file racks up permission denials and exits without
           # writing audit-status.txt.
-          claude_args: '--allowed-tools "Read,Write,Edit,Bash,Grep,Glob"'
+          #
+          # `--allowed-tools` only auto-approves; it removes nothing, so
+          # the session still carries the delegation tools. Run
+          # 32618922852 passed all 21 mechanical checks, handed the
+          # qualitative pass to two background subagents, then ended its
+          # turn to "wait for the completion notification" — which in a
+          # headless SDK run terminates the session, discarding the
+          # subagents and leaving both `audit-report.md` and
+          # `audit-status.txt` unwritten. The result was an INCONCLUSIVE
+          # issue and a blocked release gate off a run whose checks had
+          # all passed. Deny the delegation tools so that shape is
+          # unavailable rather than merely discouraged; the prompt below
+          # carries the general rule. Both the `Task` and `Agent` spellings
+          # are listed because the SDK reports the subagent tool under
+          # each in different places (`Task` in the session tool list,
+          # `Agent` on the tool_use itself).
+          claude_args: >-
+            --allowed-tools "Read,Write,Edit,Bash,Grep,Glob"
+            --disallowed-tools "Task,Agent,Workflow"
           prompt: |
             Audit this repository against SECURITY.md. The `FAIL IF`
             lines are concrete checks; the spec also says the list is
@@ -119,6 +137,17 @@ jobs:
             Status is FAIL if any `FAIL IF` is violated or any
             qualitative finding is BLOCKER. Do not call `exit` — the
             workflow inspects the status file.
+
+            This is one headless turn, not a conversation. Ending your
+            turn ends the session and nothing resumes it, so do every
+            check inline: never delegate to a background subagent, and
+            never end your turn to wait on work that has not finished —
+            that work is discarded and the run produces no verdict at
+            all. Write both files before you finish. If you are running
+            out of room, write them with whatever you established and
+            mark the unfinished areas `UNVERIFIABLE`; a partial report
+            carrying a verdict is worth far more to the release gate
+            than a thorough audit that was never written down.
 
       # The SDK transcript is the only record of what the audit actually
       # did. `claude-code-action` keeps it out of the logs on purpose
