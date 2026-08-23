@@ -303,10 +303,12 @@ jobs:
               echo "The audit step exited without writing \`audit-status.txt\`."
               if [ -s audit-report.md ]; then
                 echo "It did leave a partial \`audit-report.md\`, reproduced below,"
-                echo "which may itself contain a real finding — read it first. The"
-                echo "prompt writes the report before the status file, so a report"
-                echo "without a verdict is the expected shape of a session that died"
-                echo "mid-write."
+                echo "which may itself contain a real finding — read it first. A"
+                echo "report without a verdict is the expected shape of an audit that"
+                echo "ran short: the prompt asks for the report either way, and for"
+                echo "the status file only once the verdict covers every check. The"
+                echo "areas it never reached are marked \`UNVERIFIABLE\` below — start"
+                echo "there rather than in the transcript."
               else
                 echo "**This is not a security finding** — the audit did not reach"
                 echo "one. Treat it as a failed audit run, not a failed audit."
