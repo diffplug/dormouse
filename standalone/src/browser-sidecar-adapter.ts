@@ -55,7 +55,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private listHandlers = new Set<(detail: { ptys: PtyInfo[] }) => void>();
   private replayHandlers = new Set<(detail: { id: string; data: string }) => void>();
-  private filesDroppedHandlers = new Set<(paths: string[]) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   private protocolParsers = new Map<string, TerminalProtocolParser>();
   private alertManager = new AlertManager();
@@ -211,10 +210,11 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     if (normalized) window.open(normalized, "_blank", "noopener,noreferrer");
   }
 
-  onFilesDropped(handler: (paths: string[]) => void): () => void {
-    this.filesDroppedHandlers.add(handler);
-    return () => { this.filesDroppedHandlers.delete(handler); };
-  }
+  // No `onFilesDropped`: the optional member is a capability probe for adapters
+  // with a native (non-DOM) drag-drop source (PlatformAdapter in
+  // dormouse-lib/lib/platform/types). This harness runs in a plain browser tab,
+  // where a drop yields `File` objects and no host paths, so there is nothing to
+  // report. Implementing it would claim the capability and never fire.
 
   onPtyData(handler: (detail: { id: string; data: string }) => void): void { this.dataHandlers.add(handler); }
   offPtyData(handler: (detail: { id: string; data: string }) => void): void { this.dataHandlers.delete(handler); }
