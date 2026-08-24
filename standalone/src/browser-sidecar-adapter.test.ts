@@ -1,5 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
+
+// Stub the Tauri modules so `./tauri-adapter` imports and constructs outside a
+// Tauri webview — same reason as tauri-adapter.test.ts. Nothing here exercises
+// the SDK; the stubs just keep module-scope imports (including the transitive
+// `tauri-session-store.ts`) from reaching for a Tauri runtime under jsdom.
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => undefined) }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
+vi.mock("@tauri-apps/plugin-shell", () => ({ open: vi.fn(async () => {}) }));
 
 import { BrowserSidecarAdapter } from "./browser-sidecar-adapter";
 import { BrowserSidecarHost } from "./browser-sidecar-host";
