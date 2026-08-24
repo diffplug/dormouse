@@ -25,34 +25,39 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** The Wall's visible shape: how many panes are tiled, how many Doors are docked. */
-const wallShape = () =>
-  `${document.querySelectorAll('[data-pane-header-for]').length}/`
-  + `${document.querySelectorAll('[data-door-id]').length}`;
+const paneCount = () => document.querySelectorAll('[data-pane-header-for]').length;
+const doorCount = () => document.querySelectorAll('[data-door-id]').length;
 
 /**
- * Hold until the Wall's shape has stopped changing.
+ * Wait for a count to reach `want`, and throw if it never does.
  *
  * Every helper below drives the Wall through the UI a user would, and each step
  * lands asynchronously — a split re-lays out the tree, a minimize moves a pane to
  * the baseboard and the Baseboard then measures its Doors. Sleeping a fixed
- * number of milliseconds and continuing regardless is what makes these snapshots
+ * number of milliseconds and continuing regardless is what made these snapshots
  * unstable: on a slow runner the next step drives the pre-update DOM, and the
- * story captures a layout it never meant to build.
- *
- * Deliberately a settle, not an assertion on a specific count: these helpers are
- * shared by stories with different starting shapes, and a wrong expectation would
- * fail the build rather than surface a layout regression.
+ * story captures a layout it never meant to build. Counts are relative to what
+ * was on screen when the step started, so the same helper serves stories that
+ * begin with different shapes.
  */
-async function settleWallShape() {
-  let last = '';
-  let stable = 0;
-  await waitForCondition(() => {
-    const shape = wallShape();
-    stable = shape === last ? stable + 1 : 0;
-    last = shape;
-    return stable >= 2;
-  });
+async function expectCount(count: () => number, want: number, what: string) {
+  await waitForCondition(() => count() === want);
+  if (count() !== want) throw new Error(`expected ${want} ${what}, saw ${count()}`);
+}
+
+/**
+ * Return to command mode with the leader chord — left Shift then right Shift
+ * within 500ms (`keyboard/handle-dual-tap.ts`).
+ *
+ * Required between splits: a split is an intent to use the new terminal, so
+ * `addSplitPanel` enters passthrough, and the wall ignores pane shortcuts there.
+ * Without the chord the second split key is typed into the terminal instead, and
+ * the story quietly builds one pane fewer than it means to.
+ */
+function enterCommandMode() {
+  for (const location of [1, 2]) {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', location, bubbles: true }));
+  }
 }
 
 function withPrimedActivity(byId: Record<string, Partial<ActivityState>>) {
@@ -67,27 +72,31 @@ async function splitPanes() {
   // The Wall must be live before it can act on a keystroke; settling its terminals
   // is the readiness signal (it also covers the primed-state gate).
   await settleTerminals();
+  const panesBefore = paneCount();
   window.dispatchEvent(new KeyboardEvent('keydown', { key: '"', bubbles: true }));
-  await settleWallShape();
+  await expectCount(paneCount, panesBefore + 1, 'panes after the vertical split');
+  enterCommandMode();
   window.dispatchEvent(new KeyboardEvent('keydown', { key: '%', bubbles: true }));
-  await settleWallShape();
-  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-  await settleWallShape();
+  await expectCount(paneCount, panesBefore + 2, 'panes after the horizontal split');
+  // No trailing Enter: the second split already left the wall in passthrough on
+  // the pane it created, which is the resting state these stories capture.
 }
 
 async function minimizeSelectedPane() {
   await settleTerminals();
+  const doorsBefore = doorCount();
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true }));
-  await settleWallShape();
+  await expectCount(doorCount, doorsBefore + 1, 'doors after minimizing');
 }
 
 async function minimizeFirstVisiblePane() {
+  const doorsBefore = doorCount();
   const button = await requireElement<HTMLButtonElement>(
     'button[aria-label="Minimize"]',
     'pane Minimize button',
   );
   button.click();
-  await settleWallShape();
+  await expectCount(doorCount, doorsBefore + 1, 'doors after minimizing');
 }
 
 async function openAlertDialog() {
