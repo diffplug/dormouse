@@ -359,7 +359,7 @@ The field is **controlled by its own draft state**, seeded from the header label
 
 Clipboard chords inside the field are the wall's job on hosts whose webview has no native Edit menu — see `docs/specs/mouse-and-clipboard.md` §8.9.
 
-Submitted values are rejected when empty or when they fail the `setTerminalUserTitle` validation that also guards title seeding — no titles starting with the `<idle>` sentinel (`docs/specs/transport.md`). `<unnamed>` is the default panel placeholder but is otherwise allowed as a deliberate user pin. When the user submits a rejected value, the input still closes (so it is not a blocking dialog) and a small auto-dismissing warning popover anchored under the input names the offending value. The popover dismisses on the next pointerdown, scroll, resize, `Escape`, or after 3s.
+Submitted values are rejected when empty or when they fail the `setTerminalUserTitle` validation that also guards title seeding — no titles starting with the `<idle>` sentinel (`docs/specs/transport.md`). `<unnamed>` is the default panel placeholder but is otherwise allowed as a deliberate user pin. When the user submits a rejected value, the input still closes (so it is not a blocking dialog) and a small auto-dismissing warning popover anchored under the input names the offending value. The popover dismisses on the next pointerdown, scroll, resize, `Escape`, or after `cfg.overlays.warningAutoDismissMs` (3s). `.storybook/preview.ts` sets that to 0 under Chromatic — a popover that removes itself three seconds after the play function ends is present or absent in the capture depending on how loaded the runner is.
 
 ## Session lifecycle and terminal registry
 

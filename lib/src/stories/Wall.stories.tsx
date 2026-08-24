@@ -7,7 +7,7 @@ import {
   SCENARIO_ANSI_COLORS,
 } from '../lib/platform';
 import type { ActivityState } from '../lib/terminal-registry';
-import { settleTerminals } from './settle-terminals';
+import { requireElement, settleTerminals, waitForCondition } from './settle-terminals';
 
 const meta: Meta<typeof Wall> = {
   title: 'App/Wall',
@@ -25,6 +25,36 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** The Wall's visible shape: how many panes are tiled, how many Doors are docked. */
+const wallShape = () =>
+  `${document.querySelectorAll('[data-pane-header-for]').length}/`
+  + `${document.querySelectorAll('[data-door-id]').length}`;
+
+/**
+ * Hold until the Wall's shape has stopped changing.
+ *
+ * Every helper below drives the Wall through the UI a user would, and each step
+ * lands asynchronously — a split re-lays out the tree, a minimize moves a pane to
+ * the baseboard and the Baseboard then measures its Doors. Sleeping a fixed
+ * number of milliseconds and continuing regardless is what makes these snapshots
+ * unstable: on a slow runner the next step drives the pre-update DOM, and the
+ * story captures a layout it never meant to build.
+ *
+ * Deliberately a settle, not an assertion on a specific count: these helpers are
+ * shared by stories with different starting shapes, and a wrong expectation would
+ * fail the build rather than surface a layout regression.
+ */
+async function settleWallShape() {
+  let last = '';
+  let stable = 0;
+  await waitForCondition(() => {
+    const shape = wallShape();
+    stable = shape === last ? stable + 1 : 0;
+    last = shape;
+    return stable >= 2;
+  });
+}
+
 function withPrimedActivity(byId: Record<string, Partial<ActivityState>>) {
   return {
     primedSessionState: {
@@ -34,33 +64,36 @@ function withPrimedActivity(byId: Record<string, Partial<ActivityState>>) {
 }
 
 async function splitPanes() {
-  await wait(200);
+  // The Wall must be live before it can act on a keystroke; settling its terminals
+  // is the readiness signal (it also covers the primed-state gate).
+  await settleTerminals();
   window.dispatchEvent(new KeyboardEvent('keydown', { key: '"', bubbles: true }));
-  await wait(50);
+  await settleWallShape();
   window.dispatchEvent(new KeyboardEvent('keydown', { key: '%', bubbles: true }));
-  await wait(50);
+  await settleWallShape();
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-  await wait(100);
+  await settleWallShape();
 }
 
 async function minimizeSelectedPane() {
-  await wait(200);
+  await settleTerminals();
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true }));
-  await wait(150);
+  await settleWallShape();
 }
 
 async function minimizeFirstVisiblePane() {
-  await wait(100);
-  const button = document.querySelector<HTMLButtonElement>('button[aria-label="Minimize"]');
-  button?.click();
-  await wait(200);
+  const button = await requireElement<HTMLButtonElement>(
+    'button[aria-label="Minimize"]',
+    'pane Minimize button',
+  );
+  button.click();
+  await settleWallShape();
 }
 
 async function openAlertDialog() {
-  await wait(250);
-  const alertButton = document.querySelector<HTMLButtonElement>('[data-alert-button-for]');
-  alertButton?.click();
-  await wait(100);
+  const alertButton = await requireElement<HTMLButtonElement>('[data-alert-button-for]', 'alert bell');
+  alertButton.click();
+  await requireElement('[role="dialog"]', 'TODO and alert dialog');
 }
 
 export const Default: Story = {
@@ -157,8 +190,11 @@ export const AlertModalOpen: Story = {
     }),
   },
   play: async () => {
-    await openAlertDialog();
+    // Settle first: the bell only offers the dialog once the primed ALERT_RINGING
+    // status has landed, so clicking it earlier is a no-op and the story
+    // snapshots a wall with no dialog.
     await settleTerminals();
+    await openAlertDialog();
   },
 };
 
