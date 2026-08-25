@@ -1,9 +1,10 @@
+import { shellCommandKind } from 'dor/commands/shell-quote';
 import { getMouseSelectionState } from './mouse-selection';
 import { rewrap } from './rewrap';
 import { extractSelectionText } from './selection-text';
-import { getPlatform } from './platform';
+import { getPlatform, PLATFORM_STRING } from './platform';
 import { shellEscapePath } from './shell-escape';
-import { getTerminalInstance, markSessionTouched } from './terminal-registry';
+import { getDefaultShellOpts, getTerminalInstance, getTerminalShellKind, markSessionTouched } from './terminal-registry';
 
 /** Write plain text to the system clipboard, swallowing the failures a webview
  *  raises when the document lacks focus or the Permissions API said no — the
@@ -63,7 +64,12 @@ function writePasteToPty(terminalId: string, text: string): void {
  */
 export function pasteFilePaths(terminalId: string, paths: string[]): void {
   if (paths.length === 0) return;
-  const text = paths.map(shellEscapePath).join(' ') + ' ';
+  // A Session keeps the shell family it launched with even after the user picks
+  // a different app-global default for future terminals. The fallback only
+  // serves adapters/tests that have no registered Session entry.
+  const shellKind = getTerminalShellKind(terminalId)
+    ?? shellCommandKind(getDefaultShellOpts()?.shell, PLATFORM_STRING);
+  const text = paths.map((path) => shellEscapePath(path, shellKind)).join(' ') + ' ';
   writePasteToPty(terminalId, text);
 }
 

@@ -55,7 +55,7 @@ jobs:
           exit 1
 
       - name: Audit against SECURITY.md
-        uses: anthropics/claude-code-action@459ad358ae43fea66bfefd0a1f8d840b4b9791fb # v1
+        uses: anthropics/claude-code-action@c81e3bc69d1b18badbb63ba39581218f02421678 # v1
         env:
           # `claude-code-action` resets `GH_TOKEN` to its own internal
           # workflow token, so setting `GH_TOKEN` at this scope is
@@ -78,7 +78,25 @@ jobs:
           # auditing prompt that wants to run `gh api` and produce a
           # report file racks up permission denials and exits without
           # writing audit-status.txt.
-          claude_args: '--allowed-tools "Read,Write,Edit,Bash,Grep,Glob"'
+          #
+          # `--allowed-tools` only auto-approves; it removes nothing, so
+          # the session still carries the delegation tools. Run
+          # 32618922852 passed all 21 mechanical checks, handed the
+          # qualitative pass to two background subagents, then ended its
+          # turn to "wait for the completion notification" — which in a
+          # headless SDK run terminates the session, discarding the
+          # subagents and leaving both `audit-report.md` and
+          # `audit-status.txt` unwritten. The result was an INCONCLUSIVE
+          # issue and a blocked release gate off a run whose checks had
+          # all passed. Deny the delegation tools so that shape is
+          # unavailable rather than merely discouraged; the prompt below
+          # carries the general rule. Both the `Task` and `Agent` spellings
+          # are listed because the SDK reports the subagent tool under
+          # each in different places (`Task` in the session tool list,
+          # `Agent` on the tool_use itself).
+          claude_args: >-
+            --allowed-tools "Read,Write,Edit,Bash,Grep,Glob"
+            --disallowed-tools "Task,Agent,Workflow"
           prompt: |
             Audit this repository against SECURITY.md. The `FAIL IF`
             lines are concrete checks; the spec also says the list is
@@ -104,9 +122,10 @@ jobs:
             Administration + Secrets + Environments, guaranteed
             present by the previous step. If a prefixed call still
             returns 403, record FAIL with the note "PAT scope drifted
-            from SECURITY.md". Reserve `UNVERIFIABLE` only for
-            genuinely indeterminable cases (e.g. a transient network
-            error) and explain why.
+            from SECURITY.md". Use `UNVERIFIABLE` only for a check you
+            could not determine — a transient network error, or an area
+            you ran out of room to reach — and explain which it was. It
+            is never a substitute for a check you could have run.
 
             Write `audit-report.md` with three sections:
               - `## FAIL IF results` — one line per check with PASS/FAIL
@@ -119,6 +138,20 @@ jobs:
             Status is FAIL if any `FAIL IF` is violated or any
             qualitative finding is BLOCKER. Do not call `exit` — the
             workflow inspects the status file.
+
+            This is one headless turn, not a conversation. Ending your
+            turn ends the session and nothing resumes it, so do every
+            check inline: never delegate to a background subagent, and
+            never end your turn to wait on work that has not finished —
+            that work is discarded and the run produces no verdict at
+            all. Always write `audit-report.md` before you finish: if
+            you are running out of room, write it with whatever you
+            established and mark the unfinished areas `UNVERIFIABLE`.
+            A partial report still reaches a human — the reporting step
+            reproduces it in the INCONCLUSIVE issue. Write
+            `audit-status.txt` only when the verdict covers every check;
+            a `PASS` on a partial audit closes the failure issue and
+            opens the release gate on checks nobody ran.
 
       # The SDK transcript is the only record of what the audit actually
       # did. `claude-code-action` keeps it out of the logs on purpose
@@ -270,10 +303,12 @@ jobs:
               echo "The audit step exited without writing \`audit-status.txt\`."
               if [ -s audit-report.md ]; then
                 echo "It did leave a partial \`audit-report.md\`, reproduced below,"
-                echo "which may itself contain a real finding — read it first. The"
-                echo "prompt writes the report before the status file, so a report"
-                echo "without a verdict is the expected shape of a session that died"
-                echo "mid-write."
+                echo "which may itself contain a real finding — read it first. A"
+                echo "report without a verdict is the expected shape of an audit that"
+                echo "ran short: the prompt asks for the report either way, and for"
+                echo "the status file only once the verdict covers every check. The"
+                echo "areas it never reached are marked \`UNVERIFIABLE\` below — start"
+                echo "there rather than in the transcript."
               else
                 echo "**This is not a security finding** — the audit did not reach"
                 echo "one. Treat it as a failed audit run, not a failed audit."

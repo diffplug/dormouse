@@ -1,4 +1,5 @@
 import type { Preview } from '@storybook/react';
+import isChromatic from 'chromatic/isChromatic';
 import { useEffect, useLayoutEffect, StrictMode } from 'react';
 import { createElement } from 'react';
 import '../src/theme.css';
@@ -29,16 +30,33 @@ import {
   type AlertSpeechState,
 } from '../src/lib/alert-speech-state';
 import { VSCODE_THEMES, VSCODE_THEME_TYPES } from './themes';
+import {
+  makeStubRemoteHostLink,
+  type PrimedRemoteHost,
+} from '../src/host/remote/test-remote-host-link';
 import { cfg } from '../src/cfg';
 import type { DormouseTheme } from '../src/lib/themes';
 import { clearPersistedShellSelection, seedShellStore } from '../src/lib/shell-store';
 import type { ShellEntry } from '../src/lib/shell-defaults';
 
+/** Fallback for one frame when the renderer is not painting (see `afterFrame`).
+ *  Matches `paintFrame()` in `settle-terminals.ts`: long enough that a slow-but-real
+ *  frame still wins the race, so the fallback only ever covers a renderer that is
+ *  not painting at all. */
+const FRAME_FALLBACK_MS = 100;
+
 // Initialize fake platform once at module scope
 const fakePlatform = initPlatform('fake');
 
-// Pin animations at T=0 for deterministic Chromatic snapshots
-if (window?.navigator?.userAgent?.includes('Chromatic')) {
+// Pin animations at T=0 for deterministic Chromatic snapshots.
+//
+// Ask `isChromatic()`, never the user agent: Chromatic only rewrites the UA on
+// its Chrome runner, and identifies every other browser (Safari, Firefox, Edge)
+// with a `chromatic=true` query parameter instead. A UA sniff therefore left
+// every guard below OFF in Safari — a bell ringing on an 800ms infinite loop, a
+// blinking cursor, terminals on WebGL, and mid-tween pane geometry — which is
+// what made the Safari snapshots unstable while Chrome's stayed clean.
+if (isChromatic()) {
   cfg.marchingAnts.paused = true;
   cfg.alert.ringingPaused = true;
   // A blinking cursor is captured on-or-off depending on the frame; freeze it to a
@@ -54,6 +72,20 @@ if (window?.navigator?.userAgent?.includes('Chromatic')) {
   // line clipped (`user@dormouse:~$` → `user@do`) even after the layout settles.
   // Instant geometry removes that race at the source.
   cfg.layout.animate = false;
+  // Let the illegal-rename warning stand. It normally removes itself three
+  // seconds after it appears, which a play function cannot outrun: whether it is
+  // still on screen at capture time depends on how loaded the runner is.
+  cfg.overlays.warningAutoDismissMs = 0;
+  // Zero every CSS transition. Unlike the keyframe animations above, each of
+  // which has a static substitute, transitions are started by state that lands
+  // AFTER first paint — the primed-state decorator applies two rAFs in, which
+  // kicks off the bell's `transition-transform` rotation — so a capture can land
+  // mid-tween. Only the duration is overridden, so the resting appearance is
+  // unchanged; it is simply reached on the first frame.
+  const instantTransitions = document.createElement('style');
+  instantTransitions.textContent =
+    '*, *::before, *::after { transition-duration: 0s !important; transition-delay: 0s !important; }';
+  document.head.appendChild(instantTransitions);
 }
 
 // Collect all CSS variable names across all themes for cleanup
@@ -237,6 +269,20 @@ const preview: Preview = {
       // is how the Settings dialog decides to hide its Shell row.
       platform.hostOwnsShells = context.parameters?.hostOwnsShells === true || undefined;
 
+      // And the same seam again for the Settings dialog's Remote control
+      // section, which renders nothing without a Host service behind the
+      // webview (`docs/specs/server.md`). Absent is the honest default for a
+      // fake platform, so only the stories about that section prime a stub.
+      // Read during render like the two above: the store reads `remoteHost`
+      // when the section first subscribes, which is after this decorator's
+      // render body and before any effect.
+      const primedRemoteHost = context.parameters?.primedRemoteHost as
+        | PrimedRemoteHost
+        | undefined;
+      platform.remoteHost = primedRemoteHost
+        ? makeStubRemoteHostLink(primedRemoteHost)
+        : undefined;
+
       // Installed themes normally arrive from OpenVSX and live in localStorage,
       // which every story shares — so a story that wants them names them, and
       // every other story clears them.
@@ -265,7 +311,14 @@ const preview: Preview = {
       seedShellStore(primedShells ?? []);
 
       useEffect(() => {
-        let raf2 = 0;
+        let cancelled = false;
+        let raf = 0;
+        let timer = 0;
+        // Play functions gate on this marker (`waitForPrimedState`). Priming lands
+        // two rAFs after mount, so a play function that acts on a fixed timer can
+        // drive the pre-primed header — clicking a TODO pill that has not rendered
+        // yet, or opening a dialog that then re-measures against different content.
+        delete document.documentElement.dataset.storyPrimed;
 
         const applyPrimedState = () => {
           applyWatchedCommands(primedWatchedCommands ?? []);
@@ -303,15 +356,36 @@ const preview: Preview = {
               primeActivity(id, state);
             }
           });
+
+          document.documentElement.dataset.storyPrimed = 'true';
         };
 
-        const raf1 = window.requestAnimationFrame(() => {
-          raf2 = window.requestAnimationFrame(applyPrimedState);
-        });
+        // Two frames in, so the story's own mount effects (sessions created, panes
+        // laid out) have run before `byIndex` reads the session order.
+        //
+        // Each frame is `rAF` OR a short timer, whichever comes first — never rAF
+        // alone. A renderer that is not painting (a hidden or occluded tab, a
+        // throttled background window) never fires rAF at all, which would leave
+        // every primed story rendering its unprimed default: no TODO pill, no
+        // notification, a bell with nothing to show. `settle-terminals.ts` holds
+        // the same rule for the same reason.
+        const afterFrame = (fn: () => void) => {
+          let done = false;
+          const run = () => {
+            if (done || cancelled) return;
+            done = true;
+            fn();
+          };
+          raf = window.requestAnimationFrame(run);
+          timer = window.setTimeout(run, FRAME_FALLBACK_MS);
+        };
+        afterFrame(() => afterFrame(applyPrimedState));
 
         return () => {
-          window.cancelAnimationFrame(raf1);
-          window.cancelAnimationFrame(raf2);
+          cancelled = true;
+          window.cancelAnimationFrame(raf);
+          window.clearTimeout(timer);
+          delete document.documentElement.dataset.storyPrimed;
           applyWatchedCommands([]);
           applyAlertSettingsFromHost(undefined);
           resetPushDevices();

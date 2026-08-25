@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
-import { AlertManager } from '../../lib/src/lib/alert-manager';
+import { AlertManager, type AwaitHandle, type AwaitOutcome } from '../../lib/src/lib/alert-manager';
 import { WatchedCommandHost } from '../../lib/src/lib/watched-command-host';
 import { AlertSettingsHost } from '../../lib/src/lib/alert-settings-host';
 import {
@@ -253,6 +253,13 @@ ptyManager.onDorControlRequest((request) => {
   router.forwardDorControlRequest(request);
 });
 
+// Broadcast rather than route: only the webview actually holding this requestId
+// has anything to abort, and it recognizes its own id. Tracking which router got
+// which request would buy nothing a no-op lookup does not already give us.
+ptyManager.onDorControlCancel((cancel) => {
+  broadcastToWebviews({ type: 'dor:controlCancel', requestId: cancel.requestId });
+});
+
 function getAlertProtocolParser(id: string): TerminalProtocolParser {
   let parser = alertProtocolParsers.get(id);
   if (!parser) {
@@ -295,6 +302,9 @@ export function attachRouter(
   // Track which PTY IDs were spawned (or reconnected) through this webview
   const ownedPtyIds = new Set<string>();
   const pendingFlushRequests = new Map<string, { resolve: () => void; timeout: ReturnType<typeof setTimeout> }>();
+  // `dor await`s this webview has parked in the shared alert manager, keyed by
+  // the requestId that will carry the outcome back.
+  const pendingAwaits = new Map<string, { handle: AwaitHandle; startedAt: number }>();
   let disposed = false;
 
   // Webview-facing subscriptions — only active when the webview has live content.
@@ -347,6 +357,28 @@ export function attachRouter(
   function resolveAllFlushRequests(): void {
     for (const requestId of [...pendingFlushRequests.keys()]) {
       resolveFlushRequest(requestId);
+    }
+  }
+
+  // A webview that went away cannot deliver an outcome, and an await that
+  // delivers nothing must not hold a completion claim open.
+  //
+  // The result is posted from here rather than left to `handle.promise`: that
+  // callback runs a microtask later, by which time `disposed` suppresses it, and
+  // the contract is exactly one `alert:awaitResult` per request (a cancel
+  // included — `docs/specs/alert.md` -> Await). Deleting the entry first makes
+  // the later callback a no-op, so the answer is still sent exactly once.
+  function cancelAllPendingAwaits(): void {
+    for (const [requestId, { handle, startedAt }] of [...pendingAwaits]) {
+      pendingAwaits.delete(requestId);
+      handle.cancel();
+      const outcome: AwaitOutcome = { kind: 'cancelled', waitedMs: Date.now() - startedAt };
+      try {
+        void post({ type: 'alert:awaitResult', requestId, outcome } satisfies ExtensionMessage);
+      } catch {
+        // The usual reason to be here is the webview being torn down, which can
+        // make `postMessage` throw. Nothing left to tell — keep cancelling.
+      }
     }
   }
 
@@ -428,6 +460,7 @@ export function attachRouter(
         todo: state.todo,
         notification: state.notification,
         attentionDismissedRing: state.attentionDismissedRing,
+        awaited: state.awaited,
       } satisfies ExtensionMessage);
       notifyUnion();
     });
@@ -673,7 +706,7 @@ export function attachRouter(
         const previouslyOwned = new Set(ownedPtyIds);
 
         const ptys = ptyManager.getBufferedPtys();
-        const reconnectable = new Map<string, { alive: boolean; exitCode?: number }>();
+        const reconnectable = new Map<string, { alive: boolean; exitCode?: number; shell?: string }>();
 
         // Re-serve PTYs this router already owns (webview content was recreated,
         // e.g. WebviewView collapsed then re-expanded — resolveWebviewView is NOT
@@ -713,7 +746,7 @@ export function attachRouter(
         const list: ExtensionMessage = {
           type: 'pty:list',
           ptys: Array.from(reconnectable.entries()).map(([id, info]) => ({
-            id, alive: info.alive, exitCode: info.exitCode,
+            id, alive: info.alive, exitCode: info.exitCode, shell: info.shell,
           })),
         };
         post(list);
@@ -742,6 +775,7 @@ export function attachRouter(
             todo: alertState.todo,
             notification: alertState.notification,
             attentionDismissedRing: alertState.attentionDismissedRing,
+            awaited: alertState.awaited,
           } satisfies ExtensionMessage);
         }
         break;
@@ -800,6 +834,29 @@ export function attachRouter(
       case 'alert:clearTodo':
         alertManager.clearTodo(msg.id);
         break;
+      // The wait itself is parked host-side (`docs/specs/alert.md` → Await), so
+      // only the outcome crosses back. `timeoutMs` is revalidated by
+      // `awaitCompletion`, which rejects nonsense rather than installing it.
+      case 'alert:await': {
+        const handle = alertManager.awaitCompletion(msg.id, {
+          until: msg.until,
+          timeoutMs: msg.timeoutMs,
+        });
+        const requestId = msg.requestId;
+        pendingAwaits.set(requestId, { handle, startedAt: Date.now() });
+        void handle.promise.then((outcome) => {
+          // Gone from the map means `cancelAllPendingAwaits` already answered
+          // this request synchronously; anything else is the ordinary path.
+          if (!pendingAwaits.delete(requestId)) return;
+          void post({ type: 'alert:awaitResult', requestId, outcome } satisfies ExtensionMessage);
+        });
+        break;
+      }
+      case 'alert:awaitCancel':
+        // The cancelled outcome comes back through `alert:awaitResult` like any
+        // other, so there is nothing to answer here.
+        pendingAwaits.get(msg.requestId)?.handle.cancel();
+        break;
     }
   });
 
@@ -828,6 +885,7 @@ export function attachRouter(
         if (!request.pending.delete(router)) continue;
         if (request.pending.size === 0) request.settle();
       }
+      cancelAllPendingAwaits();
       removeWatchedCommandListener();
       removeAlertSettingsListener();
       resolveAllFlushRequests();

@@ -10,9 +10,9 @@ Dormouse can owe the user attention in three ways:
 - **Terminal report**: the PTY emitted a supported notification or progress protocol (`BEL`, `OSC 9`, `OSC 9;4`, `OSC 99`, or `OSC 777`).
 - **Command exit**: Dormouse saw a foreground command running while the user attended the Session, attention was lost while that same command was still running, and the command exited after at least `T_USER_ATTENTION`.
 
-Terminal-report and command-exit alerts do not require WATCHING. All three share the same attention suppression rule: do not ring if the user is actively attending that Session at the completion moment.
+Terminal-report and command-exit alerts do not require WATCHING. All three share the same attention suppression rule — do not ring if the user is actively attending that Session at the completion moment — applied at the one seam every completion passes through (Completion events below).
 
-Internally these are three independent tracks — `watchingRingingCommand` + the `ActivityMonitor`, `protocolStatus` + `progress`, and `commandExitStatus` + `commandExitWatch`. Each runs IDLE -> busy/armed -> ringing without entangling the others, and each latches its own ring in the entry until it is cleared.
+Internally these are three independent tracks — `watchingRingingCommand` (+ `outputSinceWatchingRing`), `protocolStatus` + `progress`, and `commandExitStatus` + `commandExitWatch`. Each runs IDLE -> busy/armed -> ringing without entangling the others, and each latches its own ring in the entry until it is cleared. The output/silence detector (`QuiesceDetector`) is not a track: it is an always-on observer the WATCHING track reads.
 
 ## Non-goals
 
@@ -24,15 +24,17 @@ Internally these are three independent tracks — `watchingRingingCommand` + the
 
 ## Public State
 
-Source of truth: `AlertState` / `ActivityNotification` in `lib/src/lib/alert-manager.ts` and `SessionStatus` in `lib/src/lib/activity-monitor.ts`.
+Source of truth: `AlertState` / `ActivityNotification` / `SessionStatus` in `lib/src/lib/alert-manager.ts`; the detector's own `QuiesceStatus`, which `SessionStatus` widens, is in `lib/src/lib/quiesce-detector.ts`.
 
 Public `status` is a projection — first match wins:
 
 1. `ALERT_RINGING` if any of the three tracks is ringing.
 2. `OSC_NOTIF_BUSY` if protocol progress is active.
-3. The `ActivityMonitor`'s own state if WATCHING is on. WATCHING outranks the command-exit arm deliberately: a watched command is by definition running, so `COMMAND_EXIT_ARMED` would otherwise mask the monitor's busy/quiet states for the whole run, and the monitor is derived from real output.
+3. The output/silence detector's own state if WATCHING is on — that is, if the rule set matches the running command. The detector runs regardless; the rule is what makes its state public. WATCHING outranks the command-exit arm deliberately: a watched command is by definition running, so `COMMAND_EXIT_ARMED` would otherwise mask the detector's busy/quiet states for the whole run, and the detector is derived from real output.
 4. `COMMAND_EXIT_ARMED` if command-exit alerting is armed.
 5. Otherwise `WATCHING_DISABLED`.
+
+`awaited` sits beside `status`: true while at least one `dor await` is parked on the Session (Await below). It is derived from live waiters and is **never persisted** — a wait cannot survive the process that was blocking on it.
 
 Persist only `todo` and the sanitized `notification` (plus `status` for diagnostics). Restore replays those two and nothing else: it must not recreate a ring, protocol progress, or a command-exit arm. WATCHING is not per-Session state and is never persisted per Session — it is re-derived from the rule set below at the next command start. Replay filtering in `docs/specs/terminal-escapes.md` prevents old terminal output from firing notification side effects again.
 
@@ -53,36 +55,114 @@ Attention is lost when the attention timer expires, the app loses focus, the att
 
 Source of truth: `cfg.alert` in `lib/src/cfg.ts` defines the shipped default for `T_USER_ATTENTION` and the other timer defaults and their purpose; `AlertManager.setInactivityTimeoutMs` installs the configured override.
 
+## Completion events
+
+Every completion — a detector settle, a command finish, a direct notification, and the end of a protocol progress cycle (completion or error) — is dispatched as a `CompletionEvent` **before** any suppression runs. Nothing is decided at the point of detection, so an observer sees the three-second `npm test` that finishes while the user is watching it and would never have rung anyone.
+
+Claimants are registered per Session and get first refusal, in registration order; the first to return `true` claims the event and the rest are not offered it. A claimed event never rings, never sets TODO, and never stores an `ActivityNotification` — it stops before the ring rules. An unclaimed event falls through to its track's ring rule, which is where the attention suppression above and the command-exit armed and minimum-runtime checks live. With no claimant registered, the three tracks below behave exactly as they always have.
+
+Two ordering rules matter. The progress cycle is cleared *before* dispatch — a completion or error ends the cycle whether or not the event is claimed, so `OSC_NOTIF_BUSY` falls back either way. And a command finish is dispatched for every watch that existed, including the short, unarmed, and attended ones the ring rule then discards.
+
+Source of truth: `registerCompletionClaimant` / `dispatchCompletion` in `lib/src/lib/alert-manager.ts`.
+
+## Await
+
+An **await** parks on one Session until it finishes what it is doing, then reports why the wait ended. It is the claimant the seam above exists for, and its caller is `dor await` — a program, not a human. That single fact drives the rules below: where a human and a program want different things, an await serves the program and leaves the human's channels alone.
+
+Source of truth: `awaitCompletion` in `lib/src/lib/alert-manager.ts`, reached through `PlatformAdapter.alertAwait`.
+
+**The signals.** `until` — `dor await`'s required `--until` flag — names how much evidence of completion the caller will accept. The two values are a permissiveness ladder, not orthogonal modes.
+
+| `until` | Resolves on | `cause` | For |
+|---|---|---|---|
+| `quiet` | The Session settled, **or** the foreground command exited, **or** the Session emitted a notification | `quiet` / `exit` / `bell` | Agents that never exit — `claude`, `codex` |
+| `exit` | The foreground command exited. Nothing else | `exit` | Builds, test runs, migrations |
+
+`quiet` includes exit because no caller wants "wake me when it settles" and also wants to keep blocking after the thing died — without it, a peer that crashes hangs its caller until the timeout. It includes the bell because an explicit `OSC 9` / `BEL` is stronger evidence than inferred silence: ignoring the peer saying "I need input" while waiting for it to go quiet would be perverse. `exit` excludes the bell deliberately — plenty of build tools ring on a warning, and being the strict one is `exit`'s whole job.
+
+`--until` has no default and is never inferred from the WATCHING rule set. That rule set is a human notification preference — app-global, edited from a dialog — and binding a program's wake condition to it would mean an unrelated edit (removing a command from the watched set to quiet the bell) silently changes what every `await` on that Session is waiting for. The caller states its own intent instead.
+
+Settling comes from the always-on detector, which needs no shell integration, runs for every Session regardless of the WATCHING rule set (WATCHING Track below), and cannot fire until it has been BUSY. A Session at a prompt is silent, but silent is not settled, which is what stops `dor send` followed immediately by an await from racing on the silence before the peer's first byte.
+
+**Is there anything to wait for?** The one thing silence cannot distinguish is a peer that delivered its final answer long ago from one working quietly.
+
+| At await time | Behavior |
+|---|---|
+| A foreground command is running (`commandExitWatch`) | There is something to wait for. Park, with no grace window. A silent build therefore resolves on its exit rather than being guessed at. |
+| Nothing running | Park for one grace window. A *command start* cancels it under either condition — it is the same "there is something to wait for" the row above tests, arriving a moment late. Under `quiet` *output* cancels it too; under `exit` output alone does not. Whichever arrives, the await goes on waiting for a real signal. Neither → resolve `cause: idle`. |
+
+`idle` is a resolution, not a failure: a caller that asked for quiet and found quiet got what it asked for. It is a distinct `cause` rather than a distinct failure so simple callers can treat success as success, while a careful one can still tell "it settled" from "there was never anything there". Absent shell integration, "is a command running" is unanswerable, so an `exit` await on such a shell falls back to the grace window and resolves `idle` — the host cannot distinguish a shell with no integration from one sitting at a prompt, so it degrades rather than erroring.
+
+**Resolution consumes only the ring it resolved on.** An await that arrives while the Session is already ringing resolves immediately, with the cause named by *that ring's own source*: a protocol ring is `bell`, a command-exit ring is `exit`, a WATCHING ring is `quiet`. Under `exit` only a command-exit ring counts; the others are the human's and the await keeps waiting. A command-exit ring is skipped while a foreground command is running: it latches past the run that raised it, so once another command has started it can only describe the previous one, and answering "the command exited" about the command still running is exactly the misreport `dor send` followed by `dor await --until exit` would act on. A WATCHING ring is skipped once output has resumed since it latched. It legitimately describes the command still running — a long-running watched command going quiet is what `--until quiet` exists for — but it is an inference from silence rather than a discrete event, and nothing clears it when the peer starts talking again, so the entry records whether any output has arrived since the latch and the ring is consumed only while that is still false; otherwise the await parks for the real settle rather than answering "output stopped" about a turn that is mid-flight, which is what would make the documented `await && read` idiom read a half-drawn screen. The detector cannot stand in for that record — it never latches, so it reports how output looks *now*: it stays `NOTHING_TO_SHOW` for a full `busyCandidateGap` after output resumes, which is longer than the two CLI round trips between a `dor send` and the await that follows it, and it returns there when a burst was too sparse to confirm BUSY. The bell is never skipped: an `OSC 9` is a discrete "I need input" that stays true until it is answered, so a peer ringing mid-run still means what it said whenever the await arrives. Consuming releases that one track's latch and **nothing else** — `todo` is neither set nor cleared, no `ActivityNotification` is dropped, `attentionDismissedRing` is untouched, and `attentionSessionId` is never set.
+
+Setting a TODO after a successful await was considered and rejected. TODO means *a human owes this pane attention*, and after an await nobody does: a program asked to be told, was told, and acted. It would also leak — the last await of an orchestration would strand a marker for an event that was fully handled — and because TODO feeds the Workspace union, an orchestration awaiting across several panes would light the whole Workspace up as needing attention. Not clearing a *pre-existing* TODO is the same rule in reverse: one left by an unrelated earlier event is still owed to the human.
+
+**Absorption: absorb the summons, keep the receipt.** A completion an await consumes never latches a ring, so it does not ring the bell, speak an alarm, or push to a paired phone — the program is already handling it, and summoning the human too is noise. Nothing quieter is substituted: a receipt the human must clear by hand is the same noise in a smaller font, and forensics after a failure come from the pane's own scrollback. Absorption is **per-signal, not per-Session**: an await consumes the signal it resolved on, and if the human independently holds a WATCHING rule on that Session, the next settle rings for them as usual. A failed await absorbs nothing — a timeout, a death, or a cancel claims no completion, so a crashed orchestration cannot silently eat the one signal that would have told the human the build finished.
+
+Claiming is delivery. Once a completion has been handed to an await the wait is settled and a later `cancel()` is a no-op; there is no release-after-claim. The window between claiming and the caller actually reading the outcome is therefore unacknowledged, and that is accepted: closing it would need a two-phase claim on every completion to cover a process that dies in the microseconds after its answer was computed.
+
+**Timing.** Every window derives from `cfg.alert`, so an await inherits the tuning the bell has had in the field:
+
+| Window | Value | Source |
+|---|---|---|
+| Grace — "did anything start?" | 2000ms | `AWAIT_GRACE_MS` = `busyCandidateGap` + `busyConfirmGap`, the detector's actual floor for reaching BUSY |
+| Settle — "has it stopped?" | 5000ms | `mightNeedAttention` + `needsAttentionConfirm` |
+| Ceiling | `timeoutMs` | `dor await`'s `--timeout` (seconds, default 600), and the only number not derived from `cfg.alert` |
+
+`timeoutMs` is not an alert-tuning knob: it is the safety rail on a blocking call inside an agent loop, so a wedged peer cannot hang its caller forever. It is enforced **host-side**, alongside the grace and settle windows, so no intermediate hop can reap a parked await early and no caller can park forever by lying about its own deadline. The CLI accepts whole-second ceilings from 1 through 86400 (24h). Like the inactivity timeout it originates a process away and ends up in `setTimeout`, so a non-finite, non-positive, or over-ceiling host request is rejected — the request settles `cancelled`, having absorbed nothing. The host's ceiling is `MAX_AWAIT_TIMEOUT_MS` (24h), matching the CLI's cap: `setTimeout`'s delay is a signed 32-bit millisecond count, so a larger value would overflow and fire at once, turning a long park into an instant `timeout`. The webview handler rejects the same values with a visible error rather than letting them settle silently.
+
+Several awaits may park on one Session. They share a single claimant, so one completion is delivered to every await whose condition it satisfies rather than only to whoever registered first, and each resolves on the first qualifying signal after it registered.
+
+In VS Code the `AlertManager` lives in the extension host while `dor` control requests land in a webview, so an await crosses that boundary: the webview posts `alert:await` and, if it gives up, `alert:awaitCancel`; the host answers exactly one `alert:awaitResult` per request — a cancel included, so a claim is never released twice. The wait itself never leaves the host. A webview that disposes cancels everything it had parked, because a caller that cannot be answered must not go on absorbing; it answers those requests itself, synchronously, since the cancelled outcome would otherwise arrive a microtask after the router stopped posting. `cancelled` has no wire outcome of its own — the webview reports it to `dor` as an error, which is also what forgets the in-flight control request. Source of truth: `vscode-ext/src/message-router.ts` and `VSCodeAdapter.alertAwait`; the other hosts run the `AlertManager` in the same process and call `awaitCompletion` directly. The Pocket phone adapter (`RemotePtyAdapter`) has no `dor` and protocol-v1 carries no await, so it settles any request `cancelled` at once rather than parking a promise that can never resolve.
+
+| Situation | Outcome |
+|---|---|
+| Already ringing at call time | Resolves immediately, `waitedMs: 0`, cause = that ring's source. |
+| `quiet`, peer mid-turn and animating | Parks; resolves `quiet` on the settle. |
+| `quiet`, WATCHING ring latched but output has resumed | Parks; the stale ring is left for the human and the await resolves `quiet` on the next settle. |
+| `quiet`, peer already delivered its answer | Nothing running, no output within the grace window → `idle`. |
+| `quiet`, silent build running | A command is running, so no grace window. Resolves `exit` when it exits. |
+| `exit`, command hangs on an interactive prompt | Blocks to the ceiling → `timeout`. `quiet` is the answer for callers who want waking when a build stalls. |
+| Peer emits `OSC 9` "needs input" | `quiet` resolves `bell`; `exit` ignores it. The await claims a human-directed request on the grounds that its caller is the one positioned to answer it. |
+| PTY exits, or the Session is removed | Every await still parked resolves `died`. A command-exit dispatch runs first, so a peer that ends by finishing a command resolves normally instead. |
+| The manager is disposed | Everything parked resolves `cancelled`. |
+
 ## WATCHING Track
 
-**WATCHING is a property of the command, not of a Session.** The user maintains a set of watched command names; a Session runs the output/silence monitor exactly while its foreground command's name is in that set. Turning alerts on while `claude` runs means every Session running `claude` watches — the ones open now and the ones opened later. Turning them off anywhere removes the rule everywhere. There is no per-Session enable, and no per-Session mute.
+**WATCHING is a property of the command, not of a Session.** The user maintains a set of watched command names; WATCHING is on for a Session exactly while its foreground command's name is in that set. Turning alerts on while `claude` runs means every Session running `claude` watches — the ones open now and the ones opened later. Turning them off anywhere removes the rule everywhere. There is no per-Session enable, and no per-Session mute.
+
+**The output/silence detector is always on.** Every Session runs one `QuiesceDetector` for its whole lifetime, fed by every output chunk and reset at every command boundary. It is a plain observer: it never latches and knows nothing about attention or rules. The rule set decides only whether the detector's state is publicly visible and whether a settle — a busy Session that stayed quiet — is allowed to *ring*.
+
+Because a chunk creates the Session's entry, `remove(id)` also has to keep it removed: `disposeSession` retires the alert state and only *then* kills the PTY, so output already in flight would otherwise rebuild an entry and a detector that nothing ever disposes. Raw output and resizes therefore cannot revive a retired id — they are exactly what a dying PTY emits. A semantic or protocol event can, because an id may be handed to a replacement pane and its first reported command start is the evidence that somebody is home (the WATCHING rule set is meant to apply to that pane immediately).
 
 Rules:
 
 - The key is `commandArgv0(rawCommandLine)` in `lib/src/lib/terminal-state.ts`: take everything before the first pipeline/compound boundary, skip leading `VAR=value` assignments and a leading `env`, then reduce argv[0] to its basename. `claude`, `/usr/local/bin/claude --resume`, and `FOO=1 env BAR=2 claude` all key on `claude`. `foo | claude` keys on `foo`, matching what bash's `DEBUG` trap reports.
-- A `commandStart` for a watched name starts a **fresh** monitor; `commandFinish`, `promptStart`, and `promptEnd` end the command and dispose it. Editing the rule set re-derives WATCHING across every live Session immediately.
-- A WATCHING ring outlives its monitor. Watching switches off the moment the watched command exits, which is usually the same moment the ring was raised, so the ring and its originating command key are held in the Session entry (`watchingRingingCommand`) rather than in the monitor.
-- Removing a rule is the one thing that *does* silence a WATCHING ring: it is the user saying "stop alerting on this". The latched originating key makes this work after the command has exited and its monitor is gone. A command merely ending never clears the ring.
+- Every command boundary — `commandStart`, `commandFinish`, `promptStart`, `promptEnd`, and PTY exit — resets the detector, so one command's output history can never leak into the next one's reading. Editing the rule set re-derives WATCHING across every live Session immediately, and because the detector kept running underneath, enabling a rule mid-command shows what that command is doing *right now* rather than a fresh `NOTHING_TO_SHOW`.
+- A WATCHING ring outlives the command that raised it. Watching switches off the moment the watched command exits, which is usually the same moment the ring was raised, so the ring and its originating command key are held in the Session entry (`watchingRingingCommand`).
+- Removing a rule is the one thing that *does* silence a WATCHING ring: it is the user saying "stop alerting on this". The latched originating key makes this work after the command has exited and watching is already off. A command merely ending never clears the ring.
 - The rule set is app-global and persisted (`dormouse:watched-commands`). It starts empty, so WATCHING is off everywhere until the user turns it on. Source of truth: `lib/src/lib/watched-commands.ts` (renderer mirror) and `lib/src/lib/watched-command-host.ts` (multi-renderer coordinator). In VS Code the shared extension host is authoritative: the first renderer seeds it from persisted storage, edits cross the boundary as single-command mutations, and the host broadcasts its canonical snapshot to every webview. A stale webview can therefore neither replace unrelated rules nor keep reporting an obsolete rule list.
 
 **Limitation:** WATCHING needs the shell to report command boundaries (`OSC 633` / `OSC 133`). Shells without integration — `cmd.exe`, `fish`, or any shell where injection did not take (`docs/specs/terminal-escapes.md`) — never report a command name, so WATCHING never engages there and the bell reports "nothing is running". Terminal-report and command-exit alerts are unaffected. This is accepted rather than worked around: the keystroke fallback in `docs/specs/terminal-state.md` is renderer-side and lower confidence, and routing it into the manager would buy those shells a worse version of a feature at the cost of a second command-tracking path.
 
 | State | Meaning |
 |---|---|
-| `WATCHING_DISABLED` | No monitor exists. |
-| `NOTHING_TO_SHOW` | Monitor is active, but no reminder is owed. |
+| `WATCHING_DISABLED` | No rule matches the foreground command, so the detector's state is not shown. |
+| `NOTHING_TO_SHOW` | A rule matches, but no reminder is owed. |
 | `MIGHT_BE_BUSY` | Output may be turning into ongoing work. Debounce state. |
 | `BUSY` | Enough output has arrived to treat the Session as doing work. |
 | `MIGHT_NEED_ATTENTION` | A busy Session went quiet. Debounce state. |
 | `ALERT_RINGING` | WATCHING observed likely completion while the Session lacked attention. |
 
-Source of truth: `ActivityMonitor` in `lib/src/lib/activity-monitor.ts` implements the transitions. Meaningful output excludes resize redraw noise during `T_RESIZE_DEBOUNCE`; theme changes, remounts, DOM reparenting, selection, and focus changes are not output. The invariants the implementation must honor:
+Source of truth: `QuiesceDetector` in `lib/src/lib/quiesce-detector.ts` implements the detector's `QuiesceStatus` transitions; `AlertManager.onSettled` in `lib/src/lib/alert-manager.ts` reports every settle into the completion-event seam above, whose `settled` ring rule decides whether it rings. Meaningful output excludes resize redraw noise during `T_RESIZE_DEBOUNCE`; theme changes, remounts, DOM reparenting, selection, and focus changes are not output. The invariants the implementation must honor:
 
-- Output drives the monitor up the chain `NOTHING_TO_SHOW` -> `MIGHT_BE_BUSY` -> `BUSY`; silence drives it down `BUSY` -> `MIGHT_NEED_ATTENTION` -> `ALERT_RINGING`. The `MIGHT_*` states are debounce windows in both directions.
-- First output starts candidate tracking without changing status; unconfirmed `MIGHT_BE_BUSY` returns to `NOTHING_TO_SHOW`; `ALERT_RINGING` ignores new output until the Session has attention.
-- Attention at confirmation time suppresses the ring and resets to `NOTHING_TO_SHOW`. `ALERT_RINGING` otherwise latches; new output with attention starts a fresh `MIGHT_BE_BUSY` cycle.
-- Attending or dismissing a WATCHING ring resets the monitor to `NOTHING_TO_SHOW`.
-- Rings must be caused by a fresh transition into `ALERT_RINGING`, never by rerender, theme change, remount, minimize, or reattach.
+- Output drives the detector up the chain `NOTHING_TO_SHOW` -> `MIGHT_BE_BUSY` -> `BUSY`; silence drives it down `BUSY` -> `MIGHT_NEED_ATTENTION` -> settled. The `MIGHT_*` states are debounce windows in both directions.
+- First output starts candidate tracking without changing status; unconfirmed `MIGHT_BE_BUSY` returns to `NOTHING_TO_SHOW`.
+- The detector never holds `ALERT_RINGING`. A settle is reported once and the detector immediately returns to `NOTHING_TO_SHOW`; the ring it may raise latches in the Session entry (`watchingRingingCommand`), which is what makes the public status `ALERT_RINGING` and what keeps it there through further output.
+- A settle rings only if a rule matches the foreground command *and* the Session lacks attention at the confirmation moment. Attention at confirmation time suppresses the ring.
+- Attention alone never resets the detector: an in-flight `BUSY` -> `MIGHT_NEED_ATTENTION` -> settled transition continues, so a parked quiet await still receives its completion. Only attending or dismissing an actual WATCHING ring resets it.
+- Attending or dismissing a WATCHING ring resets the detector to `NOTHING_TO_SHOW`.
+- Rings must be caused by a fresh transition — a settle the detector just reported — never by rerender, theme change, remount, minimize, or reattach.
 
 ## Terminal reports
 
@@ -94,7 +174,7 @@ Sequence syntax for every row below lives in `docs/specs/terminal-escapes.md`; p
 - **`OSC 9`** — the message becomes the body, title null. Empty sanitized messages are ignored. It also feeds title-candidate derivation in `docs/specs/terminal-state.md`, which does not change alert behavior.
 - **`OSC 777`** — only the `notify` subcommand is supported. The first field after `notify` is the title; everything after the next semicolon is body, preserving semicolons there. Unsupported subcommands and empty sanitized notifications are ignored.
 - **`OSC 99`** (kitty) — metadata keys are single ASCII letters separated by `:`; unknown keys are ignored. `i` groups chunks of one pending notification, `d` is the done flag (default `1`), `e` selects plain or base64 payload encoding, and `p` selects the payload type (default `title`). `title`/`body` chunks append to the pending notification; completion rings once if the sanitized title or body is nonempty. Without `i`, only a complete single-sequence notification is meaningful. Management payloads contribute no content: `p=?` sends `OSC99_SUPPORT_PAYLOAD`, and `p=close` / `p=alive` / `p=icon` / `p=buttons` are consumed. Like any chunk, a management chunk carrying the default `d=1` still completes a pending same-`i` notification, which may then ring on its accumulated title/body — kitty's done-flag semantics apply regardless of the final chunk's payload type. The pending-chunk TTL and max-pending-id cap live in `terminal-protocol.ts`.
-- **`OSC 9;4` progress** — progress only: no title, body, urgency, id, app name, or action fields. Active normal, warning, or indeterminate progress sets `protocolStatus = OSC_NOTIF_BUSY` and creates no TODO; it never rings because of silence. `state=1, progress=100` rings as completion and `state=2` rings as error, both only when unattended. A clear rings as completion only if there was an active cycle, otherwise it is ignored. Warning progress does not ring by itself, but completing a warning cycle rings with a generated warning title. Invalid states, missing required percents for states `1` and `4`, and out-of-range percents are ignored. Completion or error while attended clears the progress without TODO or ring. Source of truth for the generated titles/bodies: `ringOrSuppressProtocolProgress` / `completeProtocolProgress` in `lib/src/lib/alert-manager.ts`.
+- **`OSC 9;4` progress** — progress only: no title, body, urgency, id, app name, or action fields. Active normal, warning, or indeterminate progress sets `protocolStatus = OSC_NOTIF_BUSY` and creates no TODO; it never rings because of silence. `state=1, progress=100` rings as completion and `state=2` rings as error, both only when unattended. A clear rings as completion only if there was an active cycle, otherwise it is ignored. Warning progress does not ring by itself, but completing a warning cycle rings with a generated warning title. Invalid states, missing required percents for states `1` and `4`, and out-of-range percents are ignored. Completion or error while attended clears the progress without TODO or ring. Source of truth for the generated titles/bodies: `completeProtocolProgress` / `finishProtocolProgressCycle` in `lib/src/lib/alert-manager.ts`.
 
 ## Command-exit Track
 
@@ -124,10 +204,10 @@ Clearing behavior:
 - Marking TODO clears any active ring and leaves the WATCHING rule in place for future cycles.
 - Clearing TODO sets `todo = false`, clears `notification`, and clears active rings.
 - Typing passthrough `Enter` into the Session clears TODO. Command-mode `Enter` that only enters passthrough does not.
-- Removing a WATCHING rule disposes the monitors it owned and silences their WATCHING rings. It does not clear protocol progress, command-exit arms, TODO, or notification detail.
+- Removing a WATCHING rule turns watching off wherever it matched and silences the WATCHING rings it raised. It does not stop the detector, nor clear protocol progress, command-exit arms, TODO, or notification detail.
 - Destroying the Session clears all alert, TODO, notification, attention, protocol, and command-exit state.
 
-`attentionDismissedRing` exists so the next bell click after an attention-based dismissal opens the dialog instead of silently editing a rule. Starting or stopping a WATCHING monitor, or advancing another alarm track, does not consume the flag; only the explicit dismiss path does.
+`attentionDismissedRing` exists so the next bell click after an attention-based dismissal opens the dialog instead of silently editing a rule. Turning WATCHING on or off, or advancing another alarm track, does not consume the flag; only the explicit dismiss path does.
 
 ## Alarm settings
 
@@ -261,8 +341,8 @@ Alert-specific robustness requirements: multiple Sessions ring independently; mi
 
 | File | Role |
 |------|------|
-| `lib/src/lib/activity-monitor.ts` | Per-Session WATCHING state machine (output/silence timers) |
-| `lib/src/lib/alert-manager.ts` | `AlertManager`: the three tracks, the rule set, attention, TODO, notification storage, status projection |
+| `lib/src/lib/quiesce-detector.ts` | The always-on per-Session output/silence detector: `QuiesceStatus` timers, `onSettled`, `reset()` |
+| `lib/src/lib/alert-manager.ts` | `AlertManager`: the three tracks, the detectors, the rule set, attention, TODO, notification storage, status projection, the completion-event seam, and `awaitCompletion` |
 | `lib/src/lib/watched-commands.ts` | Persisted WATCHING rule set and its push to the host |
 | `lib/src/lib/watched-command-host.ts` | First-seed + mutation/broadcast coordinator for a host shared by multiple renderers |
 | `lib/src/lib/alert-settings.ts` | Persisted alarm settings, their validation/clamping, and their push to the host |

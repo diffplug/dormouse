@@ -1033,7 +1033,7 @@ module.exports.getOpenPortsForPid = getOpenPortsForPid;
  *   send('data',  { id, data })
  *   send('exit',  { id, exitCode, signal })
  *   send('error', { id, message })
- *   send('list',  { ptys: [{ id, alive }] })
+ *   send('list',  { ptys: [{ id, alive, shell }] })
  *   send('openPorts', { id, ports: [{ protocol, family, address, port, pid, processName }], requestId })
  */
 
@@ -1045,6 +1045,7 @@ module.exports.create = function create(send, ptyModule) {
   const MAX_SCROLLBACK_CHARS = 1_000_000;
   const pty = ptyModule;
   const ptys = new Map(); // id -> pty.IPty
+  const ptyShells = new Map(); // id -> resolved shell executable
   const scrollback = new Map(); // id -> { chunks: string[], totalChars: number }
 
   function bufferScrollback(id, data) {
@@ -1097,6 +1098,7 @@ module.exports.create = function create(send, ptyModule) {
     }
 
     ptys.set(id, p);
+    ptyShells.set(id, config.shell);
     scrollback.set(id, { chunks: [], totalChars: 0 });
 
     p.onData((data) => {
@@ -1108,6 +1110,7 @@ module.exports.create = function create(send, ptyModule) {
       send('exit', { id, exitCode, signal });
       if (ptys.get(id) === p) {
         ptys.delete(id);
+        ptyShells.delete(id);
       }
     });
 
@@ -1140,6 +1143,7 @@ module.exports.create = function create(send, ptyModule) {
     if (p) {
       p.kill();
       ptys.delete(id);
+      ptyShells.delete(id);
     }
     scrollback.delete(id);
   }
@@ -1149,13 +1153,14 @@ module.exports.create = function create(send, ptyModule) {
       p.kill();
     }
     ptys.clear();
+    ptyShells.clear();
     scrollback.clear();
   }
 
   function list() {
     const result = [];
     for (const [id] of ptys) {
-      result.push({ id, alive: true });
+      result.push({ id, alive: true, shell: ptyShells.get(id) });
     }
     send('list', { ptys: result });
   }

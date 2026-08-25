@@ -1,4 +1,4 @@
-import type { SessionStatus } from './activity-monitor';
+import type { SessionStatus } from './alert-manager';
 import { ACTIVITY_NOTIFICATION_SOURCES, type ActivityNotification, type TodoState } from './alert-manager';
 
 /**

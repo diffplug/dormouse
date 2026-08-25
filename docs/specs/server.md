@@ -458,7 +458,14 @@ away.
   under the app-data dir in standalone, `SecretStorage` in VS Code — then opens
   and maintains `GET /ws/host`. `hostToken` is a bearer credential and never
   enters a webview realm. Enrollment is refused outright for a server outside
-  this build's allowlist (above), before the password leaves the machine.
+  this build's allowlist (above), before the password leaves the machine. A 200
+  that is not an enrollment fails the exchange: the response goes through the
+  same `isEnrollment` guard every *read* of an enrollment uses, and a body that
+  misses a field or sends one with the wrong type throws naming those fields
+  rather than minting a record with an `undefined` in the `ConnectionPolicy` the
+  Host authenticates passkeys against — one the store would reject on the next
+  read, un-enrolling the machine at the next launch. Source of truth:
+  `lib/src/remote/host/enrollment.ts`.
   **Order matters, and the store goes first.** The `hostToken` this exchange
   mints exists nowhere else and cannot be minted again from the same password
   exchange, so the save is awaited before any Host is stopped: a failed write
@@ -539,9 +546,16 @@ of truth: `lib/src/components/RemoteControlSection.tsx` over
 
 It renders **nothing at all** where `getPlatform().remoteHost` is absent — the
 website and the lib dev server have no Host service behind them, and offering
-the form would promise something the build cannot do. That is the same seam the
-push-devices line keys on, which is why its `no-host` copy can point at this
-section.
+the form would promise something the build cannot do.
+
+The push-devices line above it must key on that same seam, and **not** on its
+own `no-host`, which is a superset: `no-host` covers both a Host service that
+has not enrolled *and* a build with no Host service at all
+([alert.md](./alert.md) -> Push notifications). Only the first has a section
+beneath it, so only the first says "below" — otherwise the website points the
+reader at nothing. Source of truth: `describePushTargets` in
+`lib/src/components/SettingsDialog.tsx`, which takes the seam as an argument;
+the `PushNoHost` / `PushNotEnrolled` story pair holds the two apart.
 
 Un-enrolled it is a three-field form (server, setup password, name for this
 machine) calling the service's `enroll`; enrolled it shows the server URL, the
@@ -565,14 +579,35 @@ only on `displaced` — `Reconnect`. Rules the UI exists to honor:
   *connection* moves with no event at all (`connecting -> connected`,
   `-> disconnected`, `-> displaced`), so the store also polls every 2 s **while
   something is subscribed**, which is the seconds the dialog is open rather than
-  a standing timer in every window. Without it a machine that finished
-  connecting a moment after the dialog opened would read as permanently
-  "Connecting…".
+  a standing timer in every window. Status reads are serialized: ticks that
+  arrive during a slow read coalesce behind it, so a 15-second Host-service
+  timeout is allowed to become the visible error instead of being superseded by
+  newer polls. Without the poll a machine that finished connecting a moment
+  after the dialog opened would read as permanently "Connecting…".
+- **A repeat answer is not published.** The service returns a fresh object every
+  poll, so the state is compared field-wise before it is stored — otherwise the
+  section would re-render twice a minute to paint identical text. This matches
+  the sibling store the same dialog reads (`setPushDevices` in
+  `lib/src/lib/push-devices.ts`).
+- **Coalescing stops at anything that changes the answer.** `enroll`,
+  `reconnect` and `clearEnrollment` each drop the read in flight and start their
+  own, because a `status` issued before the command answers the question as it
+  stood beforehand — joining it would report the old enrollment as though the
+  command had not run, the inverse of the delete-first ordering the service uses
+  so a failed delete never claims to have succeeded. Losing the last subscriber
+  drops it for the same reason: a reopened dialog must not be answered with a
+  status fetched for the closed one, and would otherwise sit on "Checking…"
+  until that read settled. Source of truth: `dropInFlightRead` in
+  `lib/src/remote/host/host-status-store.ts`.
 
 The `window.dormouseRemoteHost` console hook keeps the same four commands and
 remains the scripting seam. Pairing approval is deliberately *not* here: it is a
 modal, because it must interrupt
 ([remote-security-model.md](./remote-security-model.md), Pairing Ceremony).
+
+`docs/stories/pairing.mdx` walks this section and the pairing modal in sequence
+with the rest of the setup, rendering the real components; it is a narrative
+Storybook page, not a spec, so this section is what it defers to.
 
 ## Pocket side (phone)
 
@@ -686,6 +721,81 @@ tapping Connect again.
 Everything past this loop (browser surfaces, in-flight replay, thumbnails,
 the tethering display, WebRTC) is staged in remote-api.md `## Future` as
 additive follow-ups.
+
+## Installing it (macOS, behind Tailscale)
+
+The selfhost deployment that exists today is a per-login macOS LaunchAgent on
+the user's own Mac, reachable only from their tailnet. `tailscale serve`
+terminates HTTPS on the node's own MagicDNS name and proxies to the server on
+loopback. There is no cloud relay; that is staged in
+[SELF_HOST.md](../../SELF_HOST.md) `## Future`.
+
+Source of truth: `deploy/local/install-macos.sh`. It is the whole mechanism —
+one idempotent script, no hand-edited plists, no scheduled updater. Running it
+again updates the installed release from the current checkout; it never pulls,
+fetches, or switches branches. The operator runbook is
+[SELF_HOST.md](../../SELF_HOST.md).
+
+The install root is `~/Library/Application Support/Dormouse Server`, holding
+`bin/` (the stable `run-server` wrapper and the `manage` helper), `config/`,
+`state/`, and `releases/<id>` with `current`/`previous` symlinks. Each release
+is self-contained: the production server tree, `lib/dist-pocket`, and a **copy
+of the exact Node binary the build ran under**, so the service depends on
+neither the source checkout, nor Homebrew/nvm, nor pnpm's store, nor the user's
+interactive `PATH` — launchd reads none of those.
+
+Invariants the installer exists to hold:
+
+* **One replica, and an update is a short intentional restart.** Challenges,
+  sessions and relay bindings are in memory (Guardrails above), so Hosts and
+  Pocket clients reconnect across a release switch. There is no zero-downtime
+  swap to attempt.
+* **State outlives code.** `config/` and `state/` sit outside `releases/`, are
+  mode `0700`, and are never touched by an update, a prune, or an uninstall.
+  `config/server.env` is mode `0600`, generated once with a locally generated
+  setup password, and preserved byte-for-byte thereafter. Purging state is a
+  separate, explicitly confirmed operation.
+* **Loopback only.** The install pins `DORMOUSE_BIND_HOST=127.0.0.1` and
+  refuses to proceed without it — see the Configuration note above on why the
+  listen interface is a security boundary when the TLS proxy is local.
+  Port 3100, deliberately not 3000, so the installed service can coexist with
+  `pnpm dev:server` / `pnpm dev:pocket-server` on the same laptop.
+* **`DORMOUSE_ORIGIN` is durable WebAuthn identity.** It is derived from the
+  node's MagicDNS name. If an existing installation records a different origin
+  the installer stops rather than rewriting it, because the rewrite silently
+  invalidates the registered passkey and every enrolled Host.
+* **A failed update is a failure.** The candidate release is health-checked on
+  an ephemeral port against a throwaway state dir *before* `current` moves; if
+  the live service then fails to answer, `current` is restored to `previous`
+  and the installer exits nonzero. Rollback succeeding is not success.
+
+Two mechanical traps the script encodes, both of which fail silently otherwise:
+
+* **`pnpm deploy --prod --legacy` poisons the workspace.** It rewrites the root
+  `node_modules/.pnpm-workspace-state-v1.json` to `production: true` /
+  `dev: false`. Every later pnpm command in that checkout then decides the
+  workspace is stale and tries to run `pnpm install --production`, which would
+  strip the developer's devDependencies. The installer snapshots that file and
+  restores it from an `EXIT` trap, so even a failed install leaves the checkout
+  as it found it.
+* **`mv -f tmp link` follows a symlink to a directory.** Used to swap
+  `current`, it deposits the temp link *inside* the old release and leaves
+  `current` pointing where it was — the update becomes a silent no-op, and the
+  prune then deletes the release nothing points at. The switch uses `rename(2)`
+  on the link path instead, and asserts afterwards that `current` advanced.
+
+`bin/manage` carries the operator surface: `status`, `verify` (runs every
+acceptance check and exits nonzero on any failure), `logs`, `restart`,
+`show-password`, `serve` (re-apply the Serve mapping after a dev session
+repointed it), `rollback`, `uninstall`, and the separately-confirmed `purge`.
+
+The Host that connects to such a server needs a build whose baked relay
+allowlist admits the origin — see "Where a Host may reach a relay server"
+above; a `*.ts.net` origin requires `DORMOUSE_REMOTE_CONNECT_SRC` at build time.
+
+Availability follows from what a LaunchAgent is: a per-login agent, so the
+relay is down while the Mac sleeps, is shut off, or has no logged-in user.
+That is usually fine, since there is then no local Host to control either.
 
 ## Future
 

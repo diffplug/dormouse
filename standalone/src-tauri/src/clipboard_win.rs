@@ -95,17 +95,28 @@ fn with_locked_clipboard<T>(
 /// text. Mirrors the sidecar's Get-Clipboard -Raw (no synthesized trailing
 /// newline to strip — CF_UNICODETEXT is the raw string).
 pub fn read_text() -> Option<String> {
-    with_locked_clipboard(CF_UNICODETEXT.0, |ptr, _size| {
-        // SAFETY: ptr is a locked CF_UNICODETEXT block — a NUL-terminated wide string.
-        unsafe {
-            let wide = ptr as *const u16;
-            let mut len = 0usize;
-            while *wide.add(len) != 0 {
-                len += 1;
-            }
-            Some(String::from_utf16_lossy(std::slice::from_raw_parts(wide, len)))
-        }
+    with_locked_clipboard(CF_UNICODETEXT.0, |ptr, size| {
+        // SAFETY: ptr/size describe the locked CF_UNICODETEXT block. The slice is
+        // bounded by GlobalSize rather than by the terminator, so it can never
+        // name memory past the allocation; an odd byte count drops the trailing
+        // half unit instead of reading one byte beyond.
+        let units = unsafe { std::slice::from_raw_parts(ptr as *const u16, size / 2) };
+        Some(utf16_up_to_nul(units))
     })
+}
+
+/// The string a CF_UNICODETEXT block holds: everything up to the first NUL, or
+/// the whole block when the producer wrote one that is not terminated.
+///
+/// The format's contract is a null-terminated wide string, but the block comes
+/// from another process, so the terminator is that process's promise rather than
+/// something this one can rely on. Scanning for a NUL that is not there walks off
+/// the end of the allocation, and whatever heap bytes follow would be pasted into
+/// the user's terminal — so the scan is bounded by the block's own size and the
+/// terminator only shortens the result.
+fn utf16_up_to_nul(units: &[u16]) -> String {
+    let end = units.iter().position(|&unit| unit == 0).unwrap_or(units.len());
+    String::from_utf16_lossy(&units[..end])
 }
 
 /// Read CF_HDROP file paths (files copied in Explorer), or an empty vec when the
@@ -328,5 +339,32 @@ mod tests {
     #[test]
     fn bmp_file_header_rejects_truncated_input() {
         assert!(bmp_file_header(&[0u8; 2]).is_none());
+    }
+
+    fn wide(text: &str) -> Vec<u16> {
+        text.encode_utf16().collect()
+    }
+
+    #[test]
+    fn utf16_up_to_nul_stops_at_the_terminator() {
+        // The well-formed case: GlobalSize rounds the allocation up, so the block
+        // routinely carries slack past the NUL that must not reach the caller.
+        let mut units = wide("hello");
+        units.push(0);
+        units.extend_from_slice(&[0x41, 0x42]);
+        assert_eq!(utf16_up_to_nul(&units), "hello");
+    }
+
+    #[test]
+    fn utf16_up_to_nul_reads_an_unterminated_block_whole() {
+        // A producer that broke the format's contract. Bounded by the block, the
+        // read yields exactly its bytes instead of running into the next allocation.
+        assert_eq!(utf16_up_to_nul(&wide("no terminator")), "no terminator");
+    }
+
+    #[test]
+    fn utf16_up_to_nul_handles_an_empty_block() {
+        assert_eq!(utf16_up_to_nul(&[]), "");
+        assert_eq!(utf16_up_to_nul(&[0]), "");
     }
 }
