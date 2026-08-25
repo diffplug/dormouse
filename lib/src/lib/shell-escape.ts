@@ -1,4 +1,4 @@
-import { IS_MAC, IS_WINDOWS } from './platform';
+import { quotePowerShellArg, type ShellCommandKind } from 'dor/commands/shell-quote';
 
 // Matches macOS Terminal's drag-and-drop format: backslash-escape each shell
 // metacharacter instead of wrapping in quotes. TUIs like `claude` recognize
@@ -20,10 +20,31 @@ export function shellEscapePosix(input: string): string {
   return input.replace(POSIX_UNSAFE, '\\$1');
 }
 
+// cmd.exe only: wrapping keeps whitespace and command separators in one token,
+// and `$` / `$(...)` are inert in this parser. cmd's own `%NAME%` expansion (and
+// `!NAME!` under delayed expansion) is unchanged. PowerShell's double-quoted
+// strings are expandable in a different, dangerous way, so it gets a literal
+// single-quoted string instead — see `shellEscapePath`.
 export function shellEscapeWindows(input: string): string {
   return `"${input.replace(/"/g, '""')}"`;
 }
 
-export function shellEscapePath(input: string): string {
-  return !IS_MAC && IS_WINDOWS ? shellEscapeWindows(input) : shellEscapePosix(input);
+/**
+ * Escape a filesystem path for one Session's captured shell parser, for the
+ * drop/paste path.
+ *
+ * Quoting for the wrong parser is a code-execution bug, not a cosmetic one: a
+ * cmd-style `"$(calc.exe).txt"` staged in a PowerShell pane runs the
+ * subexpression the moment the user presses Enter, and pressing Enter is the
+ * whole reason they dropped the file in (dormouse#430).
+ */
+export function shellEscapePath(input: string, shellKind: ShellCommandKind): string {
+  switch (shellKind) {
+    case 'powershell':
+      return quotePowerShellArg(input);
+    case 'cmd':
+      return shellEscapeWindows(input);
+    case 'posix':
+      return shellEscapePosix(input);
+  }
 }

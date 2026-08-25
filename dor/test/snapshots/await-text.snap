@@ -1,0 +1,6 @@
+exitCode: 0
+stdout:
+quiet
+
+stderr:
+quiet: output stopped after 10m 15s

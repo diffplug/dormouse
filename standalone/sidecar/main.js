@@ -50,9 +50,18 @@ const remoteHost = createSidecarRemoteHost({
   mgr,
 });
 
+// The control token arrives from Rust in our own environment, and `pty-core`
+// merges `process.env` into every shell it spawns — so it has to come out of
+// there and go back only once the channel is actually listening. A lost bind
+// (a squatted Windows pipe name, an unsafe socket directory) is not fatal to
+// PTY work, but it must not leave Dormouse handing the token, and the surface
+// API it opens, to whoever won the path. See docs/specs/dor-cli.md.
+const dorControlToken = process.env.DORMOUSE_CONTROL_TOKEN;
+delete process.env.DORMOUSE_CONTROL_TOKEN;
+delete process.env.DORMOUSE_CONTROL_SOCKET;
+
 const dorControl = createDorControlServer({
-  socketPath: process.env.DORMOUSE_CONTROL_SOCKET,
-  token: process.env.DORMOUSE_CONTROL_TOKEN,
+  token: dorControlToken,
   send,
 });
 
@@ -67,7 +76,42 @@ async function respondAsync(event, requestId, run) {
 
 const rl = readline.createInterface({ input: process.stdin });
 
+// Hold commands until the control channel has settled, so the very first
+// `pty:spawn` cannot race the bind and produce a shell with no `dor` (or, worse,
+// with a token for a channel that never came up). `listen` calls back or errors
+// within a tick or two, and the 2s ceiling means a runtime that somehow does
+// neither costs a short delay rather than a sidecar that never spawns anything.
+let controlSettled = !dorControl;
+const queuedLines = [];
+
+if (dorControl) {
+  dorControl.ready.then(
+    () => {
+      process.env.DORMOUSE_CONTROL_SOCKET = dorControl.socketPath;
+      process.env.DORMOUSE_CONTROL_TOKEN = dorControlToken;
+    },
+    () => {
+      console.error('[dor-control] control channel is off; `dor` will not be available in new terminals');
+    },
+  );
+  Promise.race([
+    dorControl.ready.catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, 2000).unref?.()),
+  ]).then(() => {
+    controlSettled = true;
+    while (queuedLines.length > 0) handleLine(queuedLines.shift());
+  });
+}
+
 rl.on('line', (line) => {
+  if (!controlSettled) {
+    queuedLines.push(line);
+    return;
+  }
+  handleLine(line);
+});
+
+function handleLine(line) {
   try {
     const { event, data } = JSON.parse(line);
     switch (event) {
@@ -158,7 +202,7 @@ rl.on('line', (line) => {
   } catch (err) {
     console.error(`[sidecar] Failed to parse message:`, err.message);
   }
-});
+}
 
 let shuttingDown = false;
 async function shutdown() {

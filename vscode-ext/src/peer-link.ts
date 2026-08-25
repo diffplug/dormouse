@@ -176,6 +176,11 @@ function peerDirPath(): string {
  *
  * Windows named pipes are not filesystem objects and carry their own ACL, so
  * there is nothing here for them to check.
+ *
+ * The same predicate is duplicated as `ensureControlDir()` in
+ * standalone/sidecar/dor-control-server.js (sync fs, returns the directory
+ * rather than a boolean) for the `dor` control socket. Nothing tests the two
+ * against each other, so a correction to the hardening rule belongs in both.
  */
 async function peerDirIsSafe(): Promise<boolean> {
   if (process.platform === 'win32') return true;

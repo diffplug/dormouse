@@ -16,8 +16,22 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** The one spelling of a `dor` error line, shared by every path that prints one. */
+export function errorLine(message: string): string {
+  return `Error: ${message}`;
+}
+
 export function fail(message: string): CliResult {
-  return { exitCode: 1, stdout: '', stderr: `Error: ${message}\n` };
+  return { exitCode: 1, stdout: '', stderr: `${errorLine(message)}\n` };
+}
+
+/** Flag parser for positive integers (`--lines`, `--port`, `--timeout`). */
+export function parsePositiveInt(input: string, flag: string, max = Number.POSITIVE_INFINITY): number {
+  const value = Number(input);
+  if (!Number.isInteger(value) || value <= 0 || value > max) {
+    throw new SyntaxError(`invalid ${flag} '${input}'`);
+  }
+  return value;
 }
 
 export function renderJson(payload: unknown): string {
@@ -76,6 +90,12 @@ export function renderHandle(handle: { ref: string; id: string }, idFormat: IdFo
 
 export function writeStdout(context: DorCommandContext, stdout: string): void {
   context.process.stdout.write(stdout);
+}
+
+// stderr is the explain-what-happened channel regardless of exit status, so a
+// command may write it on a *successful* run too (`dor await`'s narrative).
+export function writeStderr(context: DorCommandContext, stderr: string): void {
+  context.process.stderr.write(stderr);
 }
 
 // Git Bash exports PWD as a POSIX path (`/c/Users/...`). On Windows, resolvePath

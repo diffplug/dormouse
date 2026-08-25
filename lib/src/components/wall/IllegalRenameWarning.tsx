@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { POPUP_SURFACE_CLASS } from '../design';
+import { cfg } from '../../cfg';
 import type { SetTerminalUserTitleResult } from '../../lib/terminal-registry';
 import { useDismissOverlay } from './use-dismiss-overlay';
 
@@ -8,7 +9,6 @@ export type RenameRejection = Extract<SetTerminalUserTitleResult, { accepted: fa
 
 const POPOVER_GAP = 6;
 const POPOVER_MARGIN = 8;
-const AUTO_DISMISS_MS = 3000;
 
 export interface IllegalRenameWarningProps {
   anchorRect: DOMRect;
@@ -41,7 +41,9 @@ export function IllegalRenameWarning({ anchorRect, reason, attemptedValue, onClo
   useDismissOverlay(onClose, ref);
 
   useEffect(() => {
-    const timeout = window.setTimeout(onClose, AUTO_DISMISS_MS);
+    const autoDismissMs = cfg.overlays.warningAutoDismissMs;
+    if (autoDismissMs <= 0) return;
+    const timeout = window.setTimeout(onClose, autoDismissMs);
     return () => window.clearTimeout(timeout);
   }, [onClose]);
 

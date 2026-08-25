@@ -16,10 +16,50 @@ import type { Terminal } from '@xterm/xterm';
  * independent of which renderer (DOM / canvas / WebGL) is painting.
  */
 export async function settleTerminals(opts?: { timeoutMs?: number }): Promise<void> {
+  await waitForPrimedState(opts);
   await waitForCondition(() => {
     const terms = liveTerminals();
     return terms.length > 0 && terms.every(hasContent);
   }, opts);
+}
+
+/**
+ * Hold until the preview's primed-state decorator has applied.
+ *
+ * Priming (activity status, TODO, notification, WATCHING rules) lands two rAFs
+ * after mount, so a play function driving the header on a fixed timer can act on
+ * the pre-primed DOM: focusing a TODO pill that has not rendered yet, or opening
+ * a dialog whose content — and the one-shot viewport clamp measured from it —
+ * then changes underneath it. `preview.ts` marks the document root when the
+ * decorator has run; this is the matching gate.
+ *
+ * Throws rather than proceeding, so a story that would have snapshotted the
+ * pre-primed state fails visibly in the Interactions panel instead.
+ */
+export async function waitForPrimedState(opts?: { timeoutMs?: number }): Promise<void> {
+  const primed = () => document.documentElement.dataset.storyPrimed === 'true';
+  await waitForCondition(primed, opts);
+  if (!primed()) throw new Error('story state was never primed');
+}
+
+/**
+ * Poll until `selector` matches, then return the element.
+ *
+ * The counterpart to a play function's `querySelector(...)?.click()`: an element
+ * that has not rendered yet makes the optional call a silent no-op, and the
+ * story snapshots without whatever the play function was supposed to reveal —
+ * intermittently, which reads as an unstable snapshot rather than a bug. Throws
+ * with `what` in the message so the Interactions panel names the missing piece.
+ */
+export async function requireElement<T extends Element = HTMLElement>(
+  selector: string,
+  what: string,
+  opts?: { timeoutMs?: number },
+): Promise<T> {
+  await waitForCondition(() => !!document.querySelector(selector), opts);
+  const el = document.querySelector<T>(selector);
+  if (!el) throw new Error(`${what} never rendered (${selector})`);
+  return el;
 }
 
 /**

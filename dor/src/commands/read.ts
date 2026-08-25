@@ -8,6 +8,7 @@ import type {
 } from './types.js';
 import {
   errorMessage,
+  parsePositiveInt,
   renderJson,
   requireControlClient,
   stringParser,
@@ -82,11 +83,7 @@ async function runReadCommand(this: DorCommandContext, flags: ReadFlags, surface
 }
 
 function parseLineCount(input: string): number {
-  const value = Number(input);
-  if (!Number.isInteger(value) || value <= 0) {
-    throw new SyntaxError(`invalid --lines '${input}'`);
-  }
-  return value;
+  return parsePositiveInt(input, '--lines');
 }
 
 function renderReadResponse(response: ReadSurfaceResponse, json: boolean): string {
