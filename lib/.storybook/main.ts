@@ -1,6 +1,7 @@
 import type { StorybookConfig } from '@storybook/react-vite';
 import path from 'path';
 import { createRequire } from 'module';
+import remarkGfm from 'remark-gfm';
 import { fileURLToPath } from 'url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -12,7 +13,16 @@ const config: StorybookConfig = {
   // stories from here rather than defining any (MDX has not been able to define
   // a story since Storybook 7).
   stories: ['../src/**/*.stories.@(ts|tsx)', '../../docs/stories/**/*.mdx'],
-  addons: ['@storybook/addon-docs'],
+  addons: [
+    {
+      name: '@storybook/addon-docs',
+      // MDX is CommonMark only out of the box, so a GFM table renders as its own
+      // pipes-and-dashes source text. The walkthrough opens on two of them (the
+      // three parties, the four trust layers), which is the worst place in the
+      // doc to print raw markdown at the reader.
+      options: { mdxPluginOptions: { mdxCompileOptions: { remarkPlugins: [remarkGfm] } } },
+    },
+  ],
   framework: '@storybook/react-vite',
   viteFinal: (config) => {
     const stub = path.resolve(here, 'tauri-stub.ts');
