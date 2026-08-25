@@ -12,10 +12,11 @@
     "build:pocket": "vite build --config vite.pocket.config.ts",
     "preview": "vite preview",
     "pretest": "pnpm --filter dor-lib-common build && pnpm --filter server-lib-common build",
-    "test": "vitest run",
+    "test": "pnpm typecheck && vitest run",
     "test:watch": "vitest",
     "storybook": "storybook dev -p 6006 --no-open --ci",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build",
+    "typecheck": "tsc -b"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
