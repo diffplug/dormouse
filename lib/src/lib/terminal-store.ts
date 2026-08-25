@@ -1,17 +1,23 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import type { SessionStatus } from './activity-monitor';
-import type { ActivityNotification, TodoState } from './alert-manager';
+import type { ShellCommandKind } from 'dor/commands/shell-quote';
+import type { ActivityNotification, SessionStatus, TodoState } from './alert-manager';
 
 export interface ActivityState {
   status: SessionStatus;
   watchingEnabled: boolean;
   todo: TodoState;
   notification: ActivityNotification | null;
+  /** A `dor await` is parked on this Session (`docs/specs/alert.md` -> Await). */
+  awaited: boolean;
 }
 
 export interface TerminalEntry {
   ptyId: string;
+  /** Parser family of the shell this Session launched. Unlike the app-global
+   *  default, this remains stable when the user selects a different shell for
+   *  future Sessions. */
+  shellKind: ShellCommandKind;
   terminal: Terminal;
   fit: FitAddon;
   element: HTMLDivElement;
@@ -21,6 +27,7 @@ export interface TerminalEntry {
   todo: TodoState;
   notification: ActivityNotification | null;
   attentionDismissedRing: boolean;
+  awaited: boolean;
   isReplaying: boolean;
   untouched: boolean;
   /**

@@ -69,7 +69,7 @@ const SPINNER_INTERVAL_MS = 100;
  * Static "your turn" pointer for the active section item. Animating this
  * would feed the activity monitor on whichever pane the runner lives on,
  * so the bell on a pane that hosts the runner could never reach the
- * RINGING state — the activity-monitor only rings after a stretch of
+ * RINGING state — the quiesce detector only rings after a stretch of
  * silence. A static glyph keeps the pane quiet between user actions.
  */
 const ACTIVE_ITEM_GLYPH = "●";

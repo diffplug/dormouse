@@ -1,0 +1,13 @@
+exitCode: 0
+stdout:
+{
+  "workspace_ref": "workspace:1",
+  "surface_id": "33333333-3333-4333-8333-333333333333",
+  "surface_ref": "surface:3",
+  "cause": "quiet",
+  "waited_ms": 615000,
+  "detail": "output stopped after 10m 15s"
+}
+
+stderr:
+quiet: output stopped after 10m 15s

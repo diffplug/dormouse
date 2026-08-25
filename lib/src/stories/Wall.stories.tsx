@@ -7,7 +7,7 @@ import {
   SCENARIO_ANSI_COLORS,
 } from '../lib/platform';
 import type { ActivityState } from '../lib/terminal-registry';
-import { settleTerminals } from './settle-terminals';
+import { requireElement, settleTerminals, waitForCondition } from './settle-terminals';
 
 const meta: Meta<typeof Wall> = {
   title: 'App/Wall',
@@ -25,6 +25,41 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const paneCount = () => document.querySelectorAll('[data-pane-header-for]').length;
+const doorCount = () => document.querySelectorAll('[data-door-id]').length;
+
+/**
+ * Wait for a count to reach `want`, and throw if it never does.
+ *
+ * Every helper below drives the Wall through the UI a user would, and each step
+ * lands asynchronously — a split re-lays out the tree, a minimize moves a pane to
+ * the baseboard and the Baseboard then measures its Doors. Sleeping a fixed
+ * number of milliseconds and continuing regardless is what made these snapshots
+ * unstable: on a slow runner the next step drives the pre-update DOM, and the
+ * story captures a layout it never meant to build. Counts are relative to what
+ * was on screen when the step started, so the same helper serves stories that
+ * begin with different shapes.
+ */
+async function expectCount(count: () => number, want: number, what: string) {
+  await waitForCondition(() => count() === want);
+  if (count() !== want) throw new Error(`expected ${want} ${what}, saw ${count()}`);
+}
+
+/**
+ * Return to command mode with the leader chord — left Shift then right Shift
+ * within 500ms (`keyboard/handle-dual-tap.ts`).
+ *
+ * Required between splits: a split is an intent to use the new terminal, so
+ * `addSplitPanel` enters passthrough, and the wall ignores pane shortcuts there.
+ * Without the chord the second split key is typed into the terminal instead, and
+ * the story quietly builds one pane fewer than it means to.
+ */
+function enterCommandMode() {
+  for (const location of [1, 2]) {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', location, bubbles: true }));
+  }
+}
+
 function withPrimedActivity(byId: Record<string, Partial<ActivityState>>) {
   return {
     primedSessionState: {
@@ -34,33 +69,40 @@ function withPrimedActivity(byId: Record<string, Partial<ActivityState>>) {
 }
 
 async function splitPanes() {
-  await wait(200);
+  // The Wall must be live before it can act on a keystroke; settling its terminals
+  // is the readiness signal (it also covers the primed-state gate).
+  await settleTerminals();
+  const panesBefore = paneCount();
   window.dispatchEvent(new KeyboardEvent('keydown', { key: '"', bubbles: true }));
-  await wait(50);
+  await expectCount(paneCount, panesBefore + 1, 'panes after the vertical split');
+  enterCommandMode();
   window.dispatchEvent(new KeyboardEvent('keydown', { key: '%', bubbles: true }));
-  await wait(50);
-  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-  await wait(100);
+  await expectCount(paneCount, panesBefore + 2, 'panes after the horizontal split');
+  // No trailing Enter: the second split already left the wall in passthrough on
+  // the pane it created, which is the resting state these stories capture.
 }
 
 async function minimizeSelectedPane() {
-  await wait(200);
+  await settleTerminals();
+  const doorsBefore = doorCount();
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true }));
-  await wait(150);
+  await expectCount(doorCount, doorsBefore + 1, 'doors after minimizing');
 }
 
 async function minimizeFirstVisiblePane() {
-  await wait(100);
-  const button = document.querySelector<HTMLButtonElement>('button[aria-label="Minimize"]');
-  button?.click();
-  await wait(200);
+  const doorsBefore = doorCount();
+  const button = await requireElement<HTMLButtonElement>(
+    'button[aria-label="Minimize"]',
+    'pane Minimize button',
+  );
+  button.click();
+  await expectCount(doorCount, doorsBefore + 1, 'doors after minimizing');
 }
 
 async function openAlertDialog() {
-  await wait(250);
-  const alertButton = document.querySelector<HTMLButtonElement>('[data-alert-button-for]');
-  alertButton?.click();
-  await wait(100);
+  const alertButton = await requireElement<HTMLButtonElement>('[data-alert-button-for]', 'alert bell');
+  alertButton.click();
+  await requireElement('[role="dialog"]', 'TODO and alert dialog');
 }
 
 export const Default: Story = {
@@ -157,8 +199,11 @@ export const AlertModalOpen: Story = {
     }),
   },
   play: async () => {
-    await openAlertDialog();
+    // Settle first: the bell only offers the dialog once the primed ALERT_RINGING
+    // status has landed, so clicking it earlier is a no-op and the story
+    // snapshots a wall with no dialog.
     await settleTerminals();
+    await openAlertDialog();
   },
 };
 

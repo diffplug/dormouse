@@ -23,11 +23,11 @@ const dorEntrypoint = path.join(sidecarDir, 'dor-cli', 'dist', 'dor.js');
 const hostPort = Number(process.env.DORMOUSE_BROWSER_DEV_HOST_PORT || 1422);
 const vitePort = Number(process.env.DORMOUSE_BROWSER_DEV_VITE_PORT || 1420);
 const browserSession = process.env.DORMOUSE_BROWSER_DEV_AB_SESSION || 'dormouse-dev-standalone';
-// Windows can't bind an AF_UNIX socket at an arbitrary temp path here (listen
-// fails EACCES); the real standalone host uses a named pipe, so mirror that.
-const controlSocket = process.platform === 'win32'
-  ? `\\\\.\\pipe\\dormouse-${process.pid}-browser-dor`
-  : path.join(os.tmpdir(), `dormouse-${process.pid}-browser-dor.sock`);
+// Only the token: the sidecar picks the control socket path itself (hardened
+// per-user directory on POSIX, unguessable pipe name on Windows) and reports it
+// on its own stderr as `[dor-control] listening on …`, which this harness
+// forwards. See docs/specs/dor-cli.md -> Control-channel security.
+//
 // A real bearer credential: it goes into the environment of every shell this
 // harness spawns, and holding it is full access to the `dor` control API
 // (spawn panes, inject keystrokes, read scrollback). `Math.random()` is a
@@ -207,13 +207,11 @@ function startSidecar() {
       DORMOUSE_NODE: process.execPath,
       DORMOUSE_CLI_BIN: dorBinDir,
       DORMOUSE_CLI_JS: dorEntrypoint,
-      DORMOUSE_CONTROL_SOCKET: controlSocket,
       DORMOUSE_CONTROL_TOKEN: controlToken,
       DORMOUSE_STATE_DIR: stateDir,
     },
   });
   log(`sidecar pid=${sidecar.pid}`);
-  log(`dor control socket: ${controlSocket}`);
   log(`remote host state dir: ${stateDir}`);
 
   createInterface({ input: sidecar.stdout }).on('line', (line) => {

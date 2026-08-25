@@ -885,6 +885,7 @@ export function Wall({
         url: kind === 'terminal' ? null : browserUrlFromParams(source.params),
         ringing: activity?.status === 'ALERT_RINGING',
         todo: activity?.todo === true,
+        awaited: activity?.awaited === true,
       };
     });
   }, [lath, surfaceRefForId]);

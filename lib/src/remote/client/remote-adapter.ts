@@ -55,6 +55,7 @@ import {
   type DirectoryEntry,
   type TerminalAttachResult,
 } from 'server-lib-common';
+import type { AwaitHandle, AwaitOutcome } from '../../lib/alert-manager';
 import type { PlatformAdapter, PtyInfo, OpenPort } from '../../lib/platform/types';
 import type { TerminalHandlers } from './pocket-client';
 
@@ -352,6 +353,14 @@ export class RemotePtyAdapter implements PlatformAdapter {
   alertToggleTodo(): void {}
   alertMarkTodo(): void {}
   alertClearTodo(): void {}
+  /**
+   * There is no `dor` on the phone and protocol-v1 carries no await, so a
+   * request here has nothing to park on: settle it `cancelled` rather than
+   * hand back a promise that never resolves.
+   */
+  alertAwait(): AwaitHandle {
+    return { promise: Promise.resolve<AwaitOutcome>({ kind: 'cancelled', waitedMs: 0 }), cancel: () => {} };
+  }
   onAlertState(): void {}
   onWatchedCommands(): void {}
   onAlertSettings(): void {}
