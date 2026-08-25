@@ -503,15 +503,6 @@ export function SetupOrSignin({
             Sign in with your passkey to reach your enrolled hosts and pick up a terminal session.
           </p>
         </div>
-        {deviceFingerprint ? (
-          // Compare this against the Key line in the approval dialog on the
-          // laptop before approving. Rendered even when nothing is pairable,
-          // so it reads as a property of this browser rather than a step in a
-          // flow.
-          <div className={PK.deviceLine}>
-            This device&rsquo;s key: <span className="font-mono">{deviceFingerprint}…</span>
-          </div>
-        ) : null}
         {error ? <div className={PK.error}>{error}</div> : null}
         <button
           type="button"
@@ -692,6 +683,15 @@ export function HostsView({
         </button>
       </header>
       <div className={PK.body}>
+        {deviceFingerprint ? (
+          // Compare this against the Key line in the approval dialog on the
+          // laptop before approving. Rendered even when nothing is pairable,
+          // so it reads as a property of this browser rather than a step in a
+          // flow.
+          <div className={PK.deviceLine}>
+            This device&rsquo;s key: <span className="font-mono">{deviceFingerprint}…</span>
+          </div>
+        ) : null}
         {error ? <div className={PK.error}>{error}</div> : null}
         {/* Install advice is moot when the server cannot push at all — the
             rows below already say push is disabled, and the ritual the notice
