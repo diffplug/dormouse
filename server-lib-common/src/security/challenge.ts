@@ -74,8 +74,10 @@ export class HostChallengeIssuer {
    * unauthenticated client can grow `#pending` for the process's lifetime just
    * by asking.
    *
-   * A rewinding injected clock only makes this prune less, never wrong: a live
-   * head stops the drain early, and `pruneExpired` remains the full scan.
+   * A rewinding injected clock only makes this reclaim less, never wrong: it
+   * deletes solely entries already past `expiresAt` and stops at the first live
+   * one, so a head that looks live under the rewound clock costs retention, not
+   * correctness.
    */
   #sweepExpiredPrefix(): void {
     const now = this.#now();
@@ -83,19 +85,6 @@ export class HostChallengeIssuer {
       if (now < expiresAt) return;
       this.#pending.delete(challenge);
     }
-  }
-
-  /** Drop expired challenges; returns how many were removed. */
-  pruneExpired(): number {
-    const now = this.#now();
-    let pruned = 0;
-    for (const [challenge, expiresAt] of this.#pending) {
-      if (now >= expiresAt) {
-        this.#pending.delete(challenge);
-        pruned++;
-      }
-    }
-    return pruned;
   }
 
   get pendingCount(): number {
