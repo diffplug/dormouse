@@ -66,9 +66,9 @@ let generation = 0;
  * The poll re-reads every 2 s and the service answers with a fresh object each
  * time, so without this the section re-renders twice a minute to paint
  * identical text. The sibling store this same dialog reads guards the same way
- * (`setPushDevices` in `lib/src/lib/push-devices.ts`); comparing the five
- * primitives is the whole of it, because `RemoteHostConsoleStatus` has no
- * nested value.
+ * (`setPushDevices` in `lib/src/lib/push-devices.ts`); comparing the fields in
+ * {@link STATUS_FIELDS} is the whole of it, because `RemoteHostConsoleStatus`
+ * has no nested value.
  */
 function setState(next: RemoteHostStatusState): void {
   if (sameState(state, next)) return;
@@ -76,17 +76,31 @@ function setState(next: RemoteHostStatusState): void {
   for (const listener of listeners) listener();
 }
 
+/**
+ * Every field of a {@link RemoteHostConsoleStatus}, as a compile-time checklist.
+ *
+ * The same guard `sameRequest` uses in `activation.ts`, for the same reason: a
+ * field added to the interface and forgotten in {@link sameState} would be
+ * polled but never published, so the section would paint that field from
+ * whenever one of the others last changed — stale for as long as the dialog
+ * stays open, and nothing else would catch it. `satisfies` makes the omission a
+ * compile error instead.
+ */
+const STATUS_FIELDS = {
+  enrolled: true,
+  serverUrl: true,
+  hostId: true,
+  connection: true,
+  pairedClients: true,
+} satisfies Record<keyof RemoteHostConsoleStatus, true>;
+
 function sameState(a: RemoteHostStatusState, b: RemoteHostStatusState): boolean {
   if (a === b) return true;
   if (a.kind !== b.kind) return false;
   if (a.kind === 'error' && b.kind === 'error') return a.message === b.message;
   if (a.kind === 'ready' && b.kind === 'ready') {
-    return (
-      a.status.enrolled === b.status.enrolled &&
-      a.status.serverUrl === b.status.serverUrl &&
-      a.status.hostId === b.status.hostId &&
-      a.status.connection === b.status.connection &&
-      a.status.pairedClients === b.status.pairedClients
+    return (Object.keys(STATUS_FIELDS) as Array<keyof RemoteHostConsoleStatus>).every(
+      (field) => a.status[field] === b.status[field],
     );
   }
   // `unsupported` and `loading` are the two singletons, so matching kinds is all.

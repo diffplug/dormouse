@@ -36,7 +36,8 @@ const SECTION = 'mt-4 border-t border-border pt-3';
 /**
  * The "Push will be sent to …" line. Every state names a cause, because a push
  * that silently goes nowhere is indistinguishable from one that is broken.
- * `no-host` is the ordinary case for a build with no remote Host at all.
+ * `no-host` covers two of those causes, which is why `hasHostService` is a
+ * separate argument — see the comment on that branch below.
  *
  * The list is deliberately scoped to *this* machine, not the account: the ACL
  * that authorizes these devices lives on the Host and never on the Server
