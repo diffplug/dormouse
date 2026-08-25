@@ -30,6 +30,10 @@ import {
   type AlertSpeechState,
 } from '../src/lib/alert-speech-state';
 import { VSCODE_THEMES, VSCODE_THEME_TYPES } from './themes';
+import {
+  makeStubRemoteHostLink,
+  type PrimedRemoteHost,
+} from '../src/host/remote/test-remote-host-link';
 import { cfg } from '../src/cfg';
 import type { DormouseTheme } from '../src/lib/themes';
 import { clearPersistedShellSelection, seedShellStore } from '../src/lib/shell-store';
@@ -264,6 +268,20 @@ const preview: Preview = {
       // Likewise for shell selection: VS Code's native QuickPick owns it, which
       // is how the Settings dialog decides to hide its Shell row.
       platform.hostOwnsShells = context.parameters?.hostOwnsShells === true || undefined;
+
+      // And the same seam again for the Settings dialog's Remote control
+      // section, which renders nothing without a Host service behind the
+      // webview (`docs/specs/server.md`). Absent is the honest default for a
+      // fake platform, so only the stories about that section prime a stub.
+      // Read during render like the two above: the store reads `remoteHost`
+      // when the section first subscribes, which is after this decorator's
+      // render body and before any effect.
+      const primedRemoteHost = context.parameters?.primedRemoteHost as
+        | PrimedRemoteHost
+        | undefined;
+      platform.remoteHost = primedRemoteHost
+        ? makeStubRemoteHostLink(primedRemoteHost)
+        : undefined;
 
       // Installed themes normally arrive from OpenVSX and live in localStorage,
       // which every story shares — so a story that wants them names them, and

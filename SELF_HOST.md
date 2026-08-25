@@ -275,21 +275,21 @@ command line.
    pairing (`docs/specs/pocket-app.md` → Installable web app).
 
 3. **The Host.** Launch the standalone or VS Code build made with
-   `DORMOUSE_REMOTE_CONNECT_SRC` (see Prerequisites) and enroll once from that
-   webview's devtools console:
-
-   ```js
-   await window.dormouseRemoteHost.enroll('https://<laptop>.<tailnet>.ts.net', '<setup password>', 'My Laptop')
-   ```
+   `DORMOUSE_REMOTE_CONNECT_SRC` (see Prerequisites) and enroll once in
+   **Settings → Remote control** — the sliders icon at the far right of the
+   baseboard. Three fields: the server origin, the setup password from step 1,
+   and a name for this machine. The `window.dormouseRemoteHost` console hook
+   carries the same four commands and stays as the scripting seam
+   (`docs/specs/server.md`, "Remote control, in the Settings dialog").
 
    Enrollment persists in the Host service's own store — a mode-`0600` file
    under the app-data dir in standalone, `SecretStorage` in VS Code — so later
-   launches connect on their own. `status()`, `reconnect()` and
-   `clearEnrollment()` live on the same object and are promises.
+   launches connect on their own. The section then shows the server, the relay
+   connection, and the paired-device count.
 
    A build without the `*.ts.net` allowlist refuses this outright, before the
-   password leaves the machine. That is the expected symptom of a stock build,
-   not a server problem.
+   password leaves the machine, and the form renders that refusal verbatim.
+   That is the expected symptom of a stock build, not a server problem.
 
 4. **A real session.** On the phone: Hosts → **Pair** → approve the modal that
    appears on the laptop → **Connect** (one biometric prompt) → pick a pane and

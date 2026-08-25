@@ -12,10 +12,10 @@ export default defineConfig({
   resolve: {
     dedupe: ["react", "react-dom"],
   },
-  root: path.resolve(__dirname, "../lib"),
+  root: path.resolve(import.meta.dirname, "../lib"),
   base: "./",
   build: {
-    outDir: path.resolve(__dirname, "media"),
+    outDir: path.resolve(import.meta.dirname, "media"),
     emptyOutDir: true,
   },
 });

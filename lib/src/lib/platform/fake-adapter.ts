@@ -1,4 +1,4 @@
-import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo } from './types';
+import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo, RemoteHostLink } from './types';
 import { AlertManager } from '../alert-manager';
 import type { AwaitHandle, AwaitOptions } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
@@ -55,6 +55,12 @@ export class FakePtyAdapter implements PlatformAdapter {
   // theme or shell selection, which is what hides the Settings dialog's rows.
   hostOwnsTheme?: boolean;
   hostOwnsShells?: boolean;
+
+  // Same reason, one layer up: a fake platform has no Host service behind it, so
+  // this stays undefined and the Settings dialog's Remote control section renders
+  // nothing (`docs/specs/server.md`). The preview decorator installs a stub link
+  // for the stories that are *about* that section.
+  remoteHost?: RemoteHostLink;
 
   constructor() {
     this.alertManager.onStateChange((id, state) => {

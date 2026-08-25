@@ -328,6 +328,34 @@ export const NumericInput = forwardRef<HTMLInputElement, NumericInputProps>(
   },
 );
 
+export type TextInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value'> & {
+  value: string;
+  onChange: (next: string) => void;
+};
+
+/**
+ * A full-width underlined text field — the string counterpart to
+ * {@link NumericInput}, sharing its underline so a dialog mixing the two reads
+ * as one form. Unlike NumericInput it filters nothing and sets no `type`, so a
+ * caller passes `type="password"` for a credential.
+ */
+export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
+  function TextInput({ value, onChange, className, ...props }, ref) {
+    return (
+      <input
+        ref={ref}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={clsx(
+          'w-full border-0 border-b border-border bg-transparent px-0.5 py-0.5 font-mono text-foreground outline-none placeholder:text-muted focus:border-focus-ring',
+          className,
+        )}
+        {...props}
+      />
+    );
+  },
+);
+
 /**
  * Left margin that lines content up under an `OnOffSwitch`'s label rather than
  * its pill: the switch's `w-14` plus the usual `gap-3` between them. Lives here
