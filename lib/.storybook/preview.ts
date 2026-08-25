@@ -35,8 +35,11 @@ import type { DormouseTheme } from '../src/lib/themes';
 import { clearPersistedShellSelection, seedShellStore } from '../src/lib/shell-store';
 import type { ShellEntry } from '../src/lib/shell-defaults';
 
-/** Fallback for one frame when the renderer is not painting (see `afterFrame`). */
-const FRAME_FALLBACK_MS = 32;
+/** Fallback for one frame when the renderer is not painting (see `afterFrame`).
+ *  Matches `paintFrame()` in `settle-terminals.ts`: long enough that a slow-but-real
+ *  frame still wins the race, so the fallback only ever covers a renderer that is
+ *  not painting at all. */
+const FRAME_FALLBACK_MS = 100;
 
 // Initialize fake platform once at module scope
 const fakePlatform = initPlatform('fake');

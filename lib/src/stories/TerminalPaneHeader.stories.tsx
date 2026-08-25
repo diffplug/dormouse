@@ -242,7 +242,7 @@ async function openTodoNotificationPreview() {
 async function submitReservedRename() {
   await waitForPrimedState();
   const input = await requireElement<HTMLInputElement>(
-    `[data-renaming-input-for="${SESSION_ID}"], input`,
+    `[data-renaming-input-for="${SESSION_ID}"]`,
     'rename input',
   );
   input.value = '<idle>';
