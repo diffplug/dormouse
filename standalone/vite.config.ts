@@ -3,9 +3,9 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
-const libDir = path.resolve(__dirname, "../lib");
-const dorDir = path.resolve(__dirname, "../dor");
-const serverLibCommonDir = path.resolve(__dirname, "../server-lib-common");
+const libDir = path.resolve(import.meta.dirname, "../lib");
+const dorDir = path.resolve(import.meta.dirname, "../dor");
+const serverLibCommonDir = path.resolve(import.meta.dirname, "../server-lib-common");
 
 // https://v2.tauri.app/start/frontend/vite/
 const host = process.env.TAURI_DEV_HOST;

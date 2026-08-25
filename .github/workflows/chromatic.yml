@@ -6,9 +6,11 @@ on:
       - main
     paths:
       - 'lib/**'
+      - 'docs/stories/**'
   pull_request:
     paths:
       - 'lib/**'
+      - 'docs/stories/**'
 
 permissions:
   contents: read
