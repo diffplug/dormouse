@@ -225,6 +225,9 @@ device signature, and the ACL against the Host's `ConnectionPolicy`
 Server claims to have already checked. Host challenges are 32-byte,
 single-use, TTL-bounded values from `HostChallengeIssuer`
 (`server-lib-common/src/security/challenge.ts`, default 2-minute TTL).
+Minting one also reclaims the expired challenges ahead of it, so a flow that
+mints before it can authenticate the caller — `POST /api/signin/begin` — cannot
+be used to grow an issuer's pending set without bound.
 Every new `connect` / `connect2` closes that Client's established message gate
 and disposes its prior control session before this evaluation, and only the
 newest evaluation may re-open that gate: each attempt carries an authorization

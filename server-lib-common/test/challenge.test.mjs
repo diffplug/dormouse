@@ -67,6 +67,33 @@ test('the default ttl is two minutes', () => {
   assert.equal(DEFAULT_CHALLENGE_TTL_MS, 120_000);
 });
 
+// Regression: `pruneExpired` existed but no production caller ever invoked it, so
+// challenges that were minted and never redeemed accumulated for the life of the
+// process. `POST /api/signin/begin` mints one per request with no authentication
+// in front of it, which made that an unauthenticated memory-growth vector.
+test('issuing reclaims abandoned challenges instead of accumulating them', () => {
+  const clock = new FakeClock();
+  const issuer = new HostChallengeIssuer({ now: clock.now, ttlMs: 1000 });
+  for (let i = 0; i < 50; i++) issuer.issue(); // minted, never consumed
+  assert.equal(issuer.pendingCount, 50);
+  clock.advance(1000);
+  const fresh = issuer.issue();
+  assert.equal(issuer.pendingCount, 1, 'the abandoned challenges must not survive');
+  assert.equal(issuer.consume(fresh.challenge), true);
+});
+
+test('issuing never reclaims a challenge that is still live', () => {
+  const clock = new FakeClock();
+  const issuer = new HostChallengeIssuer({ now: clock.now, ttlMs: 1000 });
+  const stale = issuer.issue();
+  clock.advance(600);
+  const live = issuer.issue();
+  clock.advance(500); // stale is past ttl; live still has 100ms
+  issuer.issue();
+  assert.equal(issuer.consume(stale.challenge), false);
+  assert.equal(issuer.consume(live.challenge), true, 'a live challenge must survive the sweep');
+});
+
 test('pruneExpired removes only expired challenges', () => {
   const clock = new FakeClock();
   const issuer = new HostChallengeIssuer({ now: clock.now, ttlMs: 1000 });
