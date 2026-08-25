@@ -23,6 +23,7 @@ import {
   callerWorkingDirectory,
   errorMessage,
   parseIdFormat,
+  parsePositiveInt,
   renderHandle,
   renderJson,
   requireControlClient,
@@ -43,7 +44,7 @@ interface ListFlags {
 
 const FULL_DESCRIPTION = `Lists every Surface in the current Workspace — terminals and browser Surfaces, including minimized ones (view "minimized").
 
-Text output prints one row per Surface: a * marks the focused Surface, then the handle, kind, render mode ("-" for terminals), view, location (cwd for terminals, URL for browser Surfaces), and title. Trailing tags: (you) for the calling terminal, [ringing], [todo], and listening ports with --ports.
+Text output prints one row per Surface: a * marks the focused Surface, then the handle, kind, render mode ("-" for terminals), view, location (cwd for terminals, URL for browser Surfaces), and title. Trailing tags: (you) for the calling terminal, [ringing], [todo], [awaited] while a dor await is parked on it, and listening ports with --ports.
 
 --ports adds each terminal's listening TCP ports. The host shells out per pane (lsof / PowerShell), so it is opt-in; remote sessions report none.
 
@@ -206,6 +207,7 @@ function renderListText(
     if (callerId !== undefined && surface.id === callerId) tags.push('(you)');
     if (surface.ringing) tags.push('[ringing]');
     if (surface.todo) tags.push('[todo]');
+    if (surface.awaited) tags.push('[awaited]');
     if (includePorts && surface.ports && surface.ports.length > 0) {
       tags.push(surface.ports.map((port) => `:${port.port}`).join(' '));
     }
@@ -263,6 +265,7 @@ function renderSurfaceJson(
     url: surface.url,
     ringing: surface.ringing,
     todo: surface.todo,
+    awaited: surface.awaited,
     ...(includePorts && surface.kind === 'terminal'
       ? { ports: (surface.ports ?? []).map(renderPortJson) }
       : {}),
@@ -290,9 +293,5 @@ function parseSurfaceView(value: string): SurfaceView {
 }
 
 function parsePort(value: string): number {
-  const port = Number(value);
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-    throw new SyntaxError(`invalid --port '${value}'`);
-  }
-  return port;
+  return parsePositiveInt(value, '--port', 65535);
 }

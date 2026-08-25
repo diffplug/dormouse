@@ -125,3 +125,78 @@ describe('webview fan-out', () => {
     }
   });
 });
+
+/**
+ * `dor await` parks in the shared alert manager, which lives here rather than in
+ * the webview (docs/specs/alert.md → Await). What this side owns is the
+ * requestId bookkeeping: one outcome message per request, and nothing left
+ * holding a completion claim when the webview goes away.
+ */
+describe('await requests', () => {
+  /** Every await outcome this webview was sent, in order. */
+  function outcomes(webview: ReturnType<typeof fakeWebview>) {
+    return webview.posted
+      .filter((message) => message.type === 'alert:awaitResult')
+      .map((message) => message as { requestId: string; outcome: unknown });
+  }
+
+  it('answers a cancelled await once, with the host outcome', async () => {
+    const webview = fakeWebview();
+    const disposable = router.attachRouter(webview.channel);
+    try {
+      webview.send({ type: 'alert:await', requestId: 'await-1', id: 'pty-1', until: 'quiet', timeoutMs: 600_000 });
+      expect(outcomes(webview)).toEqual([]);
+
+      webview.send({ type: 'alert:awaitCancel', requestId: 'await-1' });
+      await Promise.resolve();
+
+      // Real timers here, so `waitedMs` is whatever the clock says; the
+      // measurement itself is the alert manager's own test.
+      expect(outcomes(webview)).toHaveLength(1);
+      expect(outcomes(webview)[0]).toMatchObject({
+        requestId: 'await-1',
+        outcome: { kind: 'cancelled' },
+      });
+
+      // The request is gone, so a repeat cancel finds nothing to answer twice.
+      webview.send({ type: 'alert:awaitCancel', requestId: 'await-1' });
+      await Promise.resolve();
+      expect(outcomes(webview)).toHaveLength(1);
+    } finally {
+      disposable.dispose();
+    }
+  });
+
+  it('cancels what is still parked when the webview goes away', async () => {
+    const webview = fakeWebview();
+    const disposable = router.attachRouter(webview.channel);
+    webview.send({ type: 'alert:await', requestId: 'await-2', id: 'pty-2', until: 'exit', timeoutMs: 600_000 });
+    expect(router.getAlertStates().get('pty-2')?.awaited).toBe(true);
+
+    // A webview that cannot deliver an outcome must not hold a claim open, so
+    // the completion it was absorbing rings the human normally again.
+    disposable.dispose();
+    await Promise.resolve();
+
+    expect(router.getAlertStates().get('pty-2')?.awaited).toBe(false);
+  });
+
+  it('still answers an await it cancels on the way out', async () => {
+    const webview = fakeWebview();
+    const disposable = router.attachRouter(webview.channel);
+    webview.send({ type: 'alert:await', requestId: 'await-3', id: 'pty-3', until: 'quiet', timeoutMs: 600_000 });
+
+    // `handle.cancel()`'s outcome lands a microtask later, after the router has
+    // stopped posting — so dispose answers synchronously instead. Without that
+    // the webview's promise never settles and the `dor` client blocks to its
+    // own deadline (docs/specs/alert.md → Await).
+    disposable.dispose();
+    await Promise.resolve();
+
+    expect(outcomes(webview)).toHaveLength(1);
+    expect(outcomes(webview)[0]).toMatchObject({
+      requestId: 'await-3',
+      outcome: { kind: 'cancelled' },
+    });
+  });
+});

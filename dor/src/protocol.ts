@@ -19,6 +19,7 @@ export const SURFACE_CONTROL_METHODS = {
   ensure: 'surface.ensure',
   send: 'surface.send',
   read: 'surface.read',
+  await: 'surface.await',
   kill: 'surface.kill',
   iframe: 'surface.iframe',
   agentBrowser: 'surface.agentBrowser',
@@ -33,6 +34,24 @@ export interface DorControlRequestPayload {
   surfaceId?: string;
   method: string;
   params?: Record<string, unknown>;
+  /**
+   * The client's own deadline for this request, in milliseconds. A hint, not an
+   * instruction: the control server uses it to set a timer that deliberately
+   * *outlasts* the client's, so the client is always the side that decides the
+   * outcome. Absent (or nonsense) means "use the server's default".
+   */
+  timeoutMs?: number;
+}
+
+/**
+ * Sent server → webview when a request will never be answered: the `dor` client
+ * disconnected (timeout / Ctrl-C), or the server's own deadline fired. The
+ * webview aborts the request's `AbortSignal` so a long-running handler can
+ * release whatever it armed. Travels as the `dor:controlCancel` event, the
+ * cancellation counterpart of `dor:controlRequest` / `dor:controlResponse`.
+ */
+export interface DorControlCancelPayload {
+  requestId: string;
 }
 
 /** The result envelope returned for a control request. `result` is method-specific. */

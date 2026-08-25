@@ -1,4 +1,4 @@
-import type { AlertState } from '../alert-manager';
+import type { AlertState, AwaitHandle, AwaitOptions } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 import type { ShellEntry } from '../shell-defaults';
@@ -335,6 +335,14 @@ export interface PlatformAdapter {
   alertToggleTodo(id: string): void;
   alertMarkTodo(id: string): void;
   alertClearTodo(id: string): void;
+  /**
+   * Park until the Session finishes what it is doing (`docs/specs/alert.md` ->
+   * Await), for `dor await`. The host owns the wake condition, the grace
+   * window, and the `timeoutMs` ceiling; the caller only reads the outcome and
+   * may `cancel()` while it is still pending. A completion the await consumes
+   * is delivered to it instead of ringing the human.
+   */
+  alertAwait(id: string, options: AwaitOptions): AwaitHandle;
   // Alert subscriptions have no `off` counterpart, unlike the PTY listeners
   // above: their handlers are stable module-level functions registered once for
   // the renderer's lifetime (`initAlertStateReceiver`), so adapters store them

@@ -9,6 +9,7 @@ import type {
   ParseResult,
   SurfacePort as DorSurfacePort,
 } from 'dor/commands/types';
+import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
 import type { OpenPort } from '../../lib/platform/types';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 import {
@@ -16,6 +17,7 @@ import {
   getTerminalInstance,
   getTerminalPaneState,
   isPaneOscDriven,
+  resolveTerminalSessionId,
 } from '../../lib/terminal-registry';
 import { surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { hostPathDisplay } from './browser-url';
@@ -39,6 +41,8 @@ type DorControlParams = {
   key?: unknown;
   lines?: unknown;
   minimized?: unknown;
+  timeoutMs?: unknown;
+  until?: unknown;
   restart?: unknown;
   binaryPath?: unknown;
   includePorts?: unknown;
@@ -53,11 +57,18 @@ type DorControlParams = {
 };
 
 // The webview view of a control request: the shared wire payload, but with
-// semantically-typed params and a `respond` callback the transport layer wires
-// back to the request's `requestId`.
+// semantically-typed params, a `respond` callback the transport layer wires back
+// to the request's `requestId`, and a `signal` that fires when the request is
+// cancelled — the `dor` client hung up, or the control server's deadline passed.
+// A handler that parks (a long `dor await`) must listen to it and release
+// whatever it armed; nothing it responds with afterwards can reach the client.
+// Both are supplied by `lib/src/lib/platform/dor-control-dispatch.ts`.
 type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
   params?: DorControlParams;
   respond: (response: DorControlResult) => void;
+  /** Absent on the in-process dispatch path (and in tests), which has no
+   *  client to hang up — every consumer must treat it as optional. */
+  signal?: AbortSignal;
 };
 
 /** Outcome of {@link EnsureAgentBrowserSurface}: the fields the caller maps onto
@@ -809,6 +820,61 @@ export function useDorControl({
             surfaceId: target.id,
             surfaceRef: target.ref,
             text,
+          },
+        });
+        return;
+      }
+
+      // `dor await` — park until the Session finishes what it is doing
+      // (`docs/specs/alert.md` → Await). Everything that makes this a *wait* —
+      // the wake condition, the grace window, the `timeoutMs` ceiling, and the
+      // absorption of the completion it consumes — lives in the host's
+      // `AlertManager`; this branch only validates, parks, and reports.
+      if (detail.method === SURFACE_CONTROL_METHODS.await) {
+        const target = requireTerminalSurface(params.surface, detail);
+        if (!target) return;
+        const until = params.until;
+        if (until !== 'quiet' && until !== 'exit') {
+          detail.respond({ ok: false, error: `invalid await condition '${String(until)}'` });
+          return;
+        }
+        // The host re-checks this, but a bad ceiling there settles `cancelled`
+        // silently (no response ever reaches the caller); rejecting here turns
+        // that into a visible error.
+        const timeoutMs = numberParam(params.timeoutMs);
+        if (timeoutMs === undefined || timeoutMs <= 0 || timeoutMs > MAX_AWAIT_TIMEOUT_MS) {
+          detail.respond({ ok: false, error: `timeoutMs must be a positive number no greater than ${MAX_AWAIT_TIMEOUT_MS}` });
+          return;
+        }
+
+        const handle = getPlatform().alertAwait(resolveTerminalSessionId(target.id), { until, timeoutMs });
+        // The client hung up (Ctrl-C) or the control server's deadline passed:
+        // release the wait so it stops absorbing completions nobody can receive.
+        // Guarded because in-process callers may dispatch a request without one.
+        detail.signal?.addEventListener('abort', () => handle.cancel());
+
+        const outcome = await handle.promise;
+        // `cancelled` has no wire outcome of its own — it means the host tore
+        // the wait down (manager disposed, webview released). Answering with an
+        // error rather than returning silently is what forgets the request:
+        // `respond` is the only thing that clears `dor-control-dispatch`'s
+        // in-flight entry, and a client that is somehow still listening gets an
+        // answer instead of blocking to its own deadline.
+        if (outcome.kind === 'cancelled') {
+          detail.respond({ ok: false, error: `await on '${target.ref}' was cancelled by the host` });
+          return;
+        }
+        detail.respond({
+          ok: true,
+          result: {
+            workspaceRef: 'workspace:1',
+            surfaceId: target.id,
+            surfaceRef: target.ref,
+            outcome: outcome.kind,
+            ...(outcome.kind === 'resolved' ? { cause: outcome.cause } : {}),
+            // The host measured the wait; re-measuring here would only add the
+            // transport hop and disagree with what it absorbed.
+            waitedMs: outcome.waitedMs,
           },
         });
         return;

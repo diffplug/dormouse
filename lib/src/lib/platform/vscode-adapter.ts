@@ -1,6 +1,7 @@
 import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo, RemoteHostLink } from './types';
 import { OPEN_PORT_TIMEOUT_MS } from './types';
 import { createRemoteHostLinkClient } from '../../host/remote/link-client';
+import type { AwaitHandle, AwaitOptions, AwaitOutcome } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
 import { readInjectedRecoveryCommands } from '../vscode-recovery-global';
 import { setDefaultShellOpts } from '../shell-defaults';
@@ -13,8 +14,19 @@ import {
 } from '../terminal-state-store';
 import { getTerminalTheme, onTerminalThemeChange } from '../terminal-theme';
 import { isHostMessage, readHostMessageToken } from '../vscode-message-token';
-import type { DorControlResult } from 'dor/protocol';
+import { cancelDorControlRequest, dispatchDorControlRequest } from './dor-control-dispatch';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
+
+/**
+ * What `awaitHostReply` settles with when its caller's own deadline fired and
+ * the listener was detached. A distinct sentinel rather than `null`, so a host
+ * reply whose extracted value is legitimately `null` stays distinguishable from
+ * "no reply came".
+ */
+const DETACHED = Symbol('detached');
+
+/** The outcome a VS Code await handle reports when it can never be answered. */
+const CANCELLED_AWAIT: AwaitOutcome = { kind: 'cancelled', waitedMs: 0 };
 
 export class VSCodeAdapter implements PlatformAdapter {
   // VS Code owns the theme here: it provides --vscode-* itself and has its own
@@ -133,6 +145,7 @@ export class VSCodeAdapter implements PlatformAdapter {
             todo: msg.todo,
             notification: msg.notification ?? null,
             attentionDismissedRing: msg.attentionDismissedRing,
+            awaited: msg.awaited,
           });
         }
       } else if (msg.type === 'alert:watchedCommands') {
@@ -158,23 +171,15 @@ export class VSCodeAdapter implements PlatformAdapter {
       } else if (msg.type === 'dormouse:openThemeDebugger') {
         window.dispatchEvent(new CustomEvent('dormouse:openThemeDebugger'));
       } else if (msg.type === 'dor:controlRequest') {
-        const respond = (response: DorControlResult) => {
+        dispatchDorControlRequest(msg, (response) => {
           this.vscode.postMessage({
             type: 'dor:controlResponse',
             requestId: msg.requestId,
             ...response,
           });
-        };
-
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
-          detail: {
-            requestId: msg.requestId,
-            surfaceId: msg.surfaceId,
-            method: msg.method,
-            params: msg.params ?? {},
-            respond,
-          },
-        }));
+        });
+      } else if (msg.type === 'dor:controlCancel') {
+        cancelDorControlRequest(msg.requestId);
       } else if (msg.type === 'peer:ask') {
         this.remoteHostClient.onAsk(msg.requestId, msg.op, msg.params);
       } else if (msg.type === 'remoteHost:result') {
@@ -194,26 +199,51 @@ export class VSCodeAdapter implements PlatformAdapter {
    */
   private requestResponse<T>(requestType: string, responseType: string, data: Record<string, unknown>, extract: (msg: any) => T, timeoutMs = 1000): Promise<T | null> {
     const requestId = `req-${++this.nextRequestId}`;
+    const reply = this.awaitHostReply(responseType, requestId, extract);
     return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        window.removeEventListener('message', handler);
-        resolve(null);
-      }, timeoutMs);
-      const handler = (event: MessageEvent) => {
+      const timeout = setTimeout(() => reply.detach(), timeoutMs);
+      void reply.promise.then((value) => {
+        clearTimeout(timeout);
+        resolve(value === DETACHED ? null : value);
+      });
+      this.vscode.postMessage({ type: requestType, ...data, requestId });
+    });
+  }
+
+  /**
+   * One-shot listener for the host reply correlated by `requestId`. `detach`
+   * stops listening and settles the promise with `DETACHED` (a caller's own
+   * deadline fired). It settles rather than simply going quiet because a
+   * promise that can never resolve keeps every `.then` closure registered on it
+   * alive for the life of the webview.
+   */
+  private awaitHostReply<T>(responseType: string, requestId: string, extract: (msg: any) => T): { promise: Promise<T | typeof DETACHED>; detach(): void } {
+    let handler: ((event: MessageEvent) => void) | null = null;
+    let settle: ((value: T | typeof DETACHED) => void) | null = null;
+    const detach = (): void => {
+      if (!handler) return;
+      window.removeEventListener('message', handler);
+      handler = null;
+      settle?.(DETACHED);
+    };
+    const promise = new Promise<T | typeof DETACHED>((resolve) => {
+      settle = resolve;
+      handler = (event: MessageEvent) => {
         // Same guard as the main listener: a request/response reply carries
         // host-supplied data (a proxy URL, scrollback, clipboard contents), and
         // a forged one racing the real reply would win on first match.
         if (!isHostMessage(event.data, this.hostMessageToken)) return;
         const msg = event.data;
-        if (msg.type === responseType && msg.requestId === requestId) {
-          clearTimeout(timeout);
-          window.removeEventListener('message', handler);
-          resolve(extract(msg));
-        }
+        if (msg.type !== responseType || msg.requestId !== requestId) return;
+        // The real reply is the answer, so drop the `DETACHED` fallback before
+        // unhooking — otherwise `detach` would settle the promise first and win.
+        settle = null;
+        detach();
+        resolve(extract(msg));
       };
       window.addEventListener('message', handler);
-      this.vscode.postMessage({ type: requestType, ...data, requestId });
     });
+    return { promise, detach };
   }
 
   async init(): Promise<void> {
@@ -483,6 +513,26 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   alertClearTodo(id: string): void {
     this.vscode.postMessage({ type: 'alert:clearTodo', id });
+  }
+
+  /**
+   * The `AlertManager` lives in the extension host, so the wait parks there and
+   * only its outcome crosses back. Unlike `requestResponse` this has no local
+   * deadline — the ceiling is `timeoutMs`, enforced host-side — and `cancel()`
+   * asks rather than answers: the `cancelled` outcome arrives on the same
+   * result message as every other, so a claim is never released twice.
+   */
+  alertAwait(id: string, options: AwaitOptions): AwaitHandle {
+    const requestId = `req-${++this.nextRequestId}`;
+    const { promise } = this.awaitHostReply('alert:awaitResult', requestId, (msg) => msg.outcome as AwaitOutcome);
+    this.vscode.postMessage({ type: 'alert:await', requestId, id, until: options.until, timeoutMs: options.timeoutMs });
+    return {
+      // Nothing detaches this reply — the host answers exactly one
+      // `alert:awaitResult` per request, a cancel included — but the mapping
+      // keeps the handle's `AwaitOutcome` contract without a cast.
+      promise: promise.then((outcome) => (outcome === DETACHED ? CANCELLED_AWAIT : outcome)),
+      cancel: () => this.vscode.postMessage({ type: 'alert:awaitCancel', requestId }),
+    };
   }
 
   onAlertState(handler: (detail: AlertStateDetail) => void): void {

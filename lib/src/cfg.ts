@@ -50,6 +50,13 @@ export const cfg = {
      *  Snapping straight to the final geometry removes that whole race. */
     animate: true,
   },
+  overlays: {
+    /** ms before the illegal-rename warning dismisses itself. 0 disables the
+     *  timer entirely — what Chromatic uses, because a popover that removes
+     *  itself three seconds after the play function ends is present or absent
+     *  in the capture depending on how loaded the runner is. */
+    warningAutoDismissMs: 3_000,
+  },
   focusRing: {
     // Directional motion smear while the focus ring travels between panes, drawn as
     // a layer of bands behind the ring. A line smears only by moving ACROSS itself,

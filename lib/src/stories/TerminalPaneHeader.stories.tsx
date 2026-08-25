@@ -12,6 +12,7 @@ import {
 import type { ActivityNotification } from '../lib/alert-manager';
 import { summarizeCommandLine, type SetTerminalUserTitleResult } from '../lib/terminal-registry';
 import { removeMouseSelectionState, setMouseReporting, setOverride } from '../lib/mouse-selection';
+import { requireElement, waitForCondition, waitForPrimedState } from './settle-terminals';
 
 const SESSION_ID = 'tab-story';
 
@@ -139,10 +140,26 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** How long a play function keeps re-driving an interaction before giving up.
+ *  Matches `waitForCondition`'s default so every gate in a story shares one
+ *  patience budget. */
+const RETRY_BUDGET_MS = 4000;
+
+/**
+ * Right-click the bell to open the TODO/alert dialog.
+ *
+ * Gated on the primed state rather than a fixed delay: the dialog reads the
+ * notification and the running command out of the primed stores, and it clamps
+ * its position to the viewport exactly once, in a layout effect keyed on the
+ * trigger rect — so a dialog opened before priming lands keeps a position
+ * measured against content it no longer shows.
+ */
 async function openAlertRightClickDialog() {
-  await wait(100);
-  const alertButton = document.querySelector<HTMLButtonElement>(`[data-alert-button-for="${SESSION_ID}"]`);
-  if (!alertButton) return;
+  await waitForPrimedState();
+  const alertButton = await requireElement<HTMLButtonElement>(
+    `[data-alert-button-for="${SESSION_ID}"]`,
+    'alert bell',
+  );
 
   const rect = alertButton.getBoundingClientRect();
   alertButton.dispatchEvent(new MouseEvent('contextmenu', {
@@ -152,7 +169,7 @@ async function openAlertRightClickDialog() {
     clientX: rect.left + rect.width / 2,
     clientY: rect.top + rect.height / 2,
   }));
-  await wait(100);
+  await requireElement('[role="dialog"]', 'TODO and alert dialog');
 }
 
 /**
@@ -168,8 +185,9 @@ async function openAlertRightClickDialog() {
  * panel instead of as a silently empty snapshot.
  */
 async function hoverAlertButton() {
+  await waitForPrimedState();
   const start = performance.now();
-  while (performance.now() - start < 2000) {
+  while (performance.now() - start < RETRY_BUDGET_MS) {
     const bell = document.querySelector<HTMLButtonElement>(`[data-alert-button-for="${SESSION_ID}"]`);
     const rect = bell?.getBoundingClientRect();
     if (bell && rect) {
@@ -187,26 +205,53 @@ async function hoverAlertButton() {
   throw new Error('alert bell tooltip never rendered');
 }
 
+/**
+ * Open the TODO pill's notification preview.
+ *
+ * The pill opens it on both focus and hover, and this drives both: a programmatic
+ * `.focus()` is a no-op while the document itself is unfocused, and `mouseover`
+ * is exactly what React synthesizes `onMouseEnter` from — neither adds a visual
+ * state of its own (the pill's hover tint is CSS `:hover`, which a synthetic
+ * event never sets). Retried, and throws if the preview never appears, for the
+ * same reason as `hoverAlertButton`: silently snapshotting a header with no
+ * preview is the failure this story exists to catch.
+ */
 async function openTodoNotificationPreview() {
-  await wait(100);
-  const todoButton = document.querySelector<HTMLButtonElement>(`[data-session-todo-for="${SESSION_ID}"]`);
-  todoButton?.focus();
-  await wait(100);
+  await waitForPrimedState();
+  const pill = await requireElement<HTMLButtonElement>(
+    `[data-session-todo-for="${SESSION_ID}"]`,
+    'TODO pill',
+  );
+  const start = performance.now();
+  while (performance.now() - start < RETRY_BUDGET_MS) {
+    pill.focus();
+    const rect = pill.getBoundingClientRect();
+    pill.dispatchEvent(new MouseEvent('mouseover', {
+      bubbles: true,
+      cancelable: true,
+      relatedTarget: document.body,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    }));
+    await wait(50);
+    if (document.querySelector(`#todo-notification-preview-${SESSION_ID}`)) return;
+  }
+  throw new Error('TODO notification preview never rendered');
 }
 
 async function submitReservedRename() {
-  await wait(100);
-  const input = document.querySelector<HTMLInputElement>(
+  await waitForPrimedState();
+  const input = await requireElement<HTMLInputElement>(
     `[data-renaming-input-for="${SESSION_ID}"]`,
-  ) ?? document.querySelector<HTMLInputElement>('input');
-  if (!input) return;
+    'rename input',
+  );
   input.value = '<idle>';
   input.dispatchEvent(new KeyboardEvent('keydown', {
     key: 'Enter',
     bubbles: true,
     cancelable: true,
   }));
-  await wait(50);
+  await requireElement('[data-testid="illegal-rename-warning"]', 'illegal-rename warning');
 }
 
 /**
@@ -245,12 +290,9 @@ async function assertControlsVisible({ canvasElement }: { canvasElement: HTMLEle
   // Poll until the primed state (two rAFs) and the ResizeObserver-driven tier
   // have settled, instead of guessing a fixed delay. Surface the last reason if
   // it never settles within the timeout.
-  const start = performance.now();
-  let reason = violation();
-  while (reason && performance.now() - start < 1000) {
-    await wait(16);
-    reason = violation();
-  }
+  await waitForPrimedState();
+  await waitForCondition(() => violation() === null, { timeoutMs: 1000 });
+  const reason = violation();
   if (reason) throw new Error(reason);
 }
 

@@ -8,7 +8,7 @@ import { startAlertSpeech, toSpokenText } from './alert-speech';
 import { getAlertSpeechState } from './alert-speech-state';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from './alert-settings';
 import { clearPrimedActivity, primeActivity } from './session-activity-store';
-import type { SessionStatus } from './activity-monitor';
+import type { SessionStatus } from './alert-manager';
 import { removeTerminalPaneState, resetTerminalPaneState } from './terminal-state-store';
 import type { TerminalTitleSource } from './terminal-state';
 

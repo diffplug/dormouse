@@ -1,0 +1,5 @@
+exitCode: 1
+stdout:
+
+stderr:
+Error: Failed to parse "soon" for until: invalid --until 'soon' (expected quiet or exit)

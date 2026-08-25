@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import { log } from './log';
-import type { DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
+import type { DorControlCancelPayload, DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
 import type { OpenPort } from '../../lib/src/lib/platform/types';
 import { OPEN_PORT_TIMEOUT_MS } from '../../lib/src/lib/platform/types';
 
@@ -23,6 +23,7 @@ export interface PtySpawnOptions {
 // The pty host forwards the dor wire payloads verbatim over IPC.
 export type DorControlRequest = DorControlRequestPayload;
 export type DorControlResponse = DorControlResponsePayload;
+export type DorControlCancel = DorControlCancelPayload;
 
 interface PtyBufferEntry {
   replayChunks: string[];
@@ -181,6 +182,7 @@ let childReady = false;
 let pendingMessages: any[] = [];
 const callbackSet = new Set<PtyCallbacks>();
 const dorControlRequestListeners = new Set<(request: DorControlRequest) => void>();
+const dorControlCancelListeners = new Set<(cancel: DorControlCancel) => void>();
 // The socket path is chosen by the pty-host, not here: it has to land in a
 // hardened per-user directory (POSIX) or under an unguessable pipe name
 // (Windows), and only the process that binds it knows whether it came up. The
@@ -278,7 +280,12 @@ function ensureChild(extensionPath: string): ChildProcess {
           surfaceId: msg.surfaceId,
           method: msg.method,
           params: msg.params,
+          timeoutMs: msg.timeoutMs,
         });
+      }
+    } else if (msg.type === 'dor:controlCancel') {
+      for (const listener of dorControlCancelListeners) {
+        listener({ requestId: msg.requestId });
       }
     }
   });
@@ -312,6 +319,14 @@ export function addCallbacks(cb: PtyCallbacks): () => void {
 export function onDorControlRequest(listener: (request: DorControlRequest) => void): () => void {
   dorControlRequestListeners.add(listener);
   return () => { dorControlRequestListeners.delete(listener); };
+}
+
+// The control server gave up on a request (the `dor` client hung up, or the
+// server's own deadline fired). The webview holding it must hear so it can
+// release what the handler armed.
+export function onDorControlCancel(listener: (cancel: DorControlCancel) => void): () => void {
+  dorControlCancelListeners.add(listener);
+  return () => { dorControlCancelListeners.delete(listener); };
 }
 
 export function respondDorControl(response: DorControlResponse): void {
