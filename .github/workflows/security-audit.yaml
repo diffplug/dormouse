@@ -79,79 +79,41 @@ jobs:
           # report file racks up permission denials and exits without
           # writing audit-status.txt.
           #
-          # `--allowed-tools` only auto-approves; it removes nothing, so
-          # the session still carries the delegation tools. Run
-          # 32618922852 passed all 21 mechanical checks, handed the
-          # qualitative pass to two background subagents, then ended its
-          # turn to "wait for the completion notification" — which in a
-          # headless SDK run terminates the session, discarding the
-          # subagents and leaving both `audit-report.md` and
-          # `audit-status.txt` unwritten. The result was an INCONCLUSIVE
-          # issue and a blocked release gate off a run whose checks had
-          # all passed. Deny the delegation tools so that shape is
-          # unavailable rather than merely discouraged; the prompt below
-          # carries the general rule. Both the `Task` and `Agent` spellings
-          # are listed because the SDK reports the subagent tool under
-          # each in different places (`Task` in the session tool list,
-          # `Agent` on the tool_use itself).
+          # `--allowed-tools` only auto-approves; it removes nothing. Run
+          # 32618922852 proved that the hard way: it passed all 21
+          # mechanical checks, handed the qualitative pass to two
+          # background subagents, then ended its turn to "wait for the
+          # completion notification" — which in a headless SDK run
+          # terminates the session, discarding the subagents and leaving
+          # both output files unwritten. A clean audit blocked the
+          # release gate for $5 and no verdict.
+          #
+          # The cause was ending the turn, not delegating. `Task` is
+          # therefore allowed on purpose — the audit fans out to three
+          # scoped domain agents — and the orchestrator prompt carries
+          # the rule that makes it safe: block in a Bash `until` loop on
+          # the fragment files, never end the turn to wait. `Workflow`
+          # stays denied because nothing here should be spawning one.
           claude_args: >-
-            --allowed-tools "Read,Write,Edit,Bash,Grep,Glob"
-            --disallowed-tools "Task,Agent,Workflow"
+            --allowed-tools "Read,Write,Edit,Bash,Grep,Glob,Task,Agent"
+            --disallowed-tools "Workflow"
+          # The prompts live in `.github/audit/`, not inline here: they
+          # are long enough to need real diffs in review, they must be
+          # runnable locally against the same text CI uses
+          # (`scripts/security-audit-local.sh`), and the `FAIL IF` that
+          # requires every `## ` heading to be owned by exactly one
+          # domain is only a grep when those headings sit in markdown.
+          # Inline, YAML block-scalar wrapping split
+          # `## Automated Maintainer (tend)` across two lines and the
+          # check matched nothing.
           prompt: |
-            Audit this repository against SECURITY.md. The `FAIL IF`
-            lines are concrete checks; the spec also says the list is
-            not exhaustive, so flag any other security hole you find.
+            You are the orchestrator of this repository's nightly
+            security audit.
 
-            For each `FAIL IF`, run the mechanical check (`gh api`,
-            grep, file presence, or a script) and record PASS or FAIL
-            with concrete evidence — file path and line number, API
-            response excerpt, or command output. Then do a qualitative
-            pass over `.github/workflows/`, `.config/tend.yaml`,
-            `.github/renovate.json`, `scripts/`, and any code that
-            touches secrets.
-
-            The default `$GH_TOKEN` in this step is a workflow
-            `GITHUB_TOKEN` and does NOT have admin scope. For checks
-            that need admin access (rulesets bypass actors, repo or
-            environment secret listings, environment policy details),
-            prefix `gh api` with `GH_TOKEN=$AUDIT_PAT`. Example:
-
-              GH_TOKEN=$AUDIT_PAT gh api repos/$GITHUB_REPOSITORY/rulesets/16757376
-
-            `$AUDIT_PAT` is a fine-grained, read-only PAT covering
-            Administration + Secrets + Environments, guaranteed
-            present by the previous step. If a prefixed call still
-            returns 403, record FAIL with the note "PAT scope drifted
-            from SECURITY.md". Use `UNVERIFIABLE` only for a check you
-            could not determine — a transient network error, or an area
-            you ran out of room to reach — and explain which it was. It
-            is never a substitute for a check you could have run.
-
-            Write `audit-report.md` with three sections:
-              - `## FAIL IF results` — one line per check with PASS/FAIL
-                and evidence
-              - `## Qualitative findings` — severity BLOCKER / WARNING / INFO
-              - `## Summary` — overall PASS or FAIL with a one-paragraph
-                rationale
-
-            Write `PASS` or `FAIL` (no other text) to `audit-status.txt`.
-            Status is FAIL if any `FAIL IF` is violated or any
-            qualitative finding is BLOCKER. Do not call `exit` — the
-            workflow inspects the status file.
-
-            This is one headless turn, not a conversation. Ending your
-            turn ends the session and nothing resumes it, so do every
-            check inline: never delegate to a background subagent, and
-            never end your turn to wait on work that has not finished —
-            that work is discarded and the run produces no verdict at
-            all. Always write `audit-report.md` before you finish: if
-            you are running out of room, write it with whatever you
-            established and mark the unfinished areas `UNVERIFIABLE`.
-            A partial report still reaches a human — the reporting step
-            reproduces it in the INCONCLUSIVE issue. Write
-            `audit-status.txt` only when the verdict covers every check;
-            a `PASS` on a partial audit closes the failure issue and
-            opens the release gate on checks nobody ran.
+            Read `.github/audit/orchestrator.md` and follow it exactly.
+            It tells you which subagents to spawn, which prompt files to
+            give them, how to wait for them without ending your turn,
+            and how to write `audit-report.md` and `audit-status.txt`.
 
       # The SDK transcript is the only record of what the audit actually
       # did. `claude-code-action` keeps it out of the logs on purpose
