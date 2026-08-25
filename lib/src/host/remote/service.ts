@@ -28,7 +28,6 @@ import {
   PUSH_TEST_TAG,
   PUSH_TEST_TITLE,
   type AlertPushDeps,
-  type PushSendSummary,
 } from '../../remote/host/push-delivery';
 import { RemoteApiSession } from '../../remote/host/remote-api';
 import { RemoteHost, type WebSocketLike } from '../../remote/host/remote-host';
@@ -50,6 +49,7 @@ import {
   type PairingQueueItem,
   type PushDevicesResult,
   type PushParams,
+  type PushSendSummary,
   type RemoteHostConsoleStatus,
 } from './service-protocol';
 

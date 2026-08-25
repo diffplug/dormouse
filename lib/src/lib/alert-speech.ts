@@ -151,9 +151,13 @@ export function speakTestUtterance(): boolean {
     return false;
   }
   try {
-    // Drop anything queued first: repeated presses should say it once more, not
-    // stack a backlog behind a slow engine.
-    synth.cancel();
+    // No `cancel()` first, tempting as it is for a double-press: the engine
+    // queue is shared with real alarms, `cancel()` empties all of it, and the
+    // engine fires no callback for an utterance dropped before it started — so
+    // another Session's queued announcement would be lost with `startAlertSpeech`
+    // never learning it needs a re-dispatch (that is `interrupt()`'s job, and
+    // only it has the queue index to do it). A short fixed phrase stacking on a
+    // double-press is the smaller problem than a real alarm going out silently.
     synth.speak(utterance);
   } catch {
     return false;

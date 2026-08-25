@@ -41,7 +41,11 @@ function useTransientResult() {
 function ResultLine({ result }: { result: { text: string; tone: 'ok' | 'bad' } | null }) {
   if (!result) return null;
   return (
-    <div className={`mt-1 text-sm leading-relaxed ${result.tone === 'bad' ? 'text-error' : 'text-muted'}`}>
+    <div
+      role="status"
+      aria-live="polite"
+      className={`mt-1 text-sm leading-relaxed ${result.tone === 'bad' ? 'text-error' : 'text-muted'}`}
+    >
       {result.text}
     </div>
   );

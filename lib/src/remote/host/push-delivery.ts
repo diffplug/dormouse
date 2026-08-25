@@ -21,6 +21,7 @@ import {
   type PushDevicesResponse,
   type PushSendResponse,
 } from 'server-lib-common';
+import type { PushSendSummary } from '../../host/remote/service-protocol';
 import type { PushDevice } from '../../lib/push-devices';
 import type { HostEnrollment } from './enrollment';
 
@@ -108,21 +109,6 @@ export async function loadPushDevices(deps: AlertPushDeps): Promise<PushDevice[]
       devicePublicKey: device.devicePublicKey,
       label: labels.get(device.devicePublicKey) || 'Unnamed device',
     }));
-}
-
-/**
- * What one send actually did. The ring path ignores it — a push that fails must
- * never break the alert path — but the Settings dialog's test button exists
- * *only* to report this, and "sent" over a fan-out that reached nobody would be
- * worse than no button at all.
- *
- * `targeted` is 0 when the ACL authorized no device, which is a distinct answer
- * from a send that was attempted and refused: nothing was even tried.
- */
-export interface PushSendSummary {
-  targeted: number;
-  delivered: number;
-  failed: number;
 }
 
 /**
