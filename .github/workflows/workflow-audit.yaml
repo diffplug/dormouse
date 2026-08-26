@@ -126,7 +126,14 @@ jobs:
           # `"${WINDOW[@]}"` means the same thing everywhere and needs no
           # shellcheck exemption.
           WINDOW=(.github/workflows/ .config/tend.yaml .github/audit/ .vscode/ SECURITY.md)
-          WINDOW_NON_WORKFLOW=(.config/tend.yaml .github/audit/ .vscode/ SECURITY.md)
+          # DERIVED, never hand-maintained: element 0 is the workflows tree, and
+          # this is everything else — the half both classifiers must refuse
+          # rather than inspect, since each only ever content-checks
+          # `.github/workflows/`. Writing it out as a second literal list would
+          # put the drift back one level: add a path to WINDOW alone and a
+          # regen-shaped commit could carry an edit to it past the refusal,
+          # reproduce byte-for-byte, and be classified "explained".
+          WINDOW_NON_WORKFLOW=("${WINDOW[@]:1}")
           COMMITS=$(git log --all --since="$SINCE" --pretty=format:'%H' \
             -- "${WINDOW[@]}" | sort -u)
 
