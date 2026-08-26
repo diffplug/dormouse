@@ -1,9 +1,10 @@
 name: workflow-audit
 
 # Nightly audit of every commit touching .github/workflows/,
-# .config/tend.yaml, or .github/audit/. Surfaces changes from feature branches and direct
-# pushes, not just the main branch — so a bot push that adds a new
-# workflow file gets a visible issue even if it never opens a PR.
+# .config/tend.yaml, or .github/audit/. Surfaces changes from feature
+# branches and direct pushes, not just the main branch — so a bot push
+# that adds a new workflow file gets a visible issue even if it never
+# opens a PR.
 #
 # The config is in the window because it is an input to the generated
 # workflows, so an edit to it is a workflow change made one step
@@ -22,14 +23,18 @@ name: workflow-audit
 #     Renovate-authored PRs, where every changed line in
 #     .github/workflows/ is a `uses:` line whose action name is unchanged,
 #     only its ref. "Same action, new pin." The commit must leave
-#     .config/tend.yaml alone, as the regen arm requires, or the config
-#     would ride along unexamined in a pin-shaped diff.
+#     .config/tend.yaml and .github/audit/ alone, as the regen arm
+#     requires, or either would ride along unexamined in a pin-shaped
+#     diff.
 #   - tend regeneration — the changed tend-*.yaml files reproduce
 #     byte-for-byte from `uvx tend@<version> init` at the version in the
 #     files' own generated header, run against that commit's own
 #     .config/tend.yaml — which the commit must leave untouched, or
 #     "reproducible" is true by construction. The config being in the
 #     window is what closes the same trick split across two commits.
+#     .github/audit/ must be untouched for a simpler reason: the
+#     generator does not produce it, so reproducibility says nothing
+#     about it.
 #
 # Both classifiers fail open: any error, ambiguity, or unparseable input
 # reports the commit. A silent run is the healthy steady state and keeps
@@ -93,7 +98,9 @@ jobs:
           # classifier can explain such a commit (a Renovate bump touches only
           # `uses:` refs; a tend regen reproduces from `uvx tend init`, which
           # does not generate this directory), so anything landing here is
-          # reported on its own content, which is the intent.
+          # reported on its own content, which is the intent. Selection is only
+          # half of that: own_changes() has to name the path too, or the commit
+          # enters $COMMITS and then reports nothing.
           #
           # .config/tend.yaml is in the window, not just .github/workflows/.
           # Without it, a commit editing only the config never enters the audit,
@@ -104,6 +111,9 @@ jobs:
           # content. Both classifiers refuse any commit that touches the config,
           # so nothing in the widened window can be swallowed by an arm that
           # doesn't inspect it — that pairing is the invariant, not either half.
+          # It applies to .github/audit/ on the same terms: every path added to
+          # this window must also be added to own_changes() and refused by both
+          # classifiers, or widening the window is what hides the commit.
           COMMITS=$(git log --all --since="$SINCE" --pretty=format:'%H' \
             -- .github/workflows/ .config/tend.yaml .github/audit/ | sort -u)
 
@@ -151,12 +161,12 @@ jobs:
             [ "$pr_authors" = "renovate[bot]" ] || return 1
 
             # Same requirement as is_tend_regen, for the same reason: the content
-            # test below reads only .github/workflows/, so a config edit carried
-            # in a pin-bump-shaped commit would ride along unexamined. With both
-            # arms refusing it, any commit touching the config must be reported
-            # by one of them — the window covers two paths and neither classifier
-            # can silently swallow the one it doesn't inspect.
-            [ -z "$(git show --name-only --pretty='' "$sha" -- .config/tend.yaml)" ] || return 1
+            # test below reads only .github/workflows/, so a config or audit-prompt
+            # edit carried in a pin-bump-shaped commit would ride along unexamined.
+            # With both arms refusing them, any commit touching either path must be
+            # reported by one of them — the window covers three paths and neither
+            # classifier can silently swallow the two it doesn't inspect.
+            [ -z "$(git show --name-only --pretty='' "$sha" -- .config/tend.yaml .github/audit/)" ] || return 1
 
             diff=$(git show --format='' -U0 "$sha" -- .github/workflows/) || return 1
             # Content lines only — drop diff headers and hunk markers.
@@ -205,7 +215,11 @@ jobs:
             # holding up a control that exists because the bot can author
             # workflows. Real regen commits are version bumps that leave the
             # config untouched, so this costs nothing.
-            [ -z "$(git show --name-only --pretty='' "$sha" -- .config/tend.yaml)" ] || return 1
+            #
+            # .github/audit/ rides along for a blunter reason: `uvx tend init`
+            # does not generate it, so a reproducible .github/workflows/ says
+            # nothing at all about an audit-prompt edit in the same commit.
+            [ -z "$(git show --name-only --pretty='' "$sha" -- .config/tend.yaml .github/audit/)" ] || return 1
 
             version=$(git show "$sha:.github/workflows/tend-review.yaml" 2>/dev/null \
               | sed -nE '1s/^# Generated by tend ([0-9]+\.[0-9]+\.[0-9]+)\..*/\1/p')
@@ -229,7 +243,11 @@ jobs:
           SKIPPED=$(mktemp)
           COUNT=0
 
-          # What this commit itself changed under .github/workflows/.
+          # What this commit itself changed under the audited paths. These
+          # pathspecs are what decides whether a commit is reported at all — a
+          # commit selected into $COMMITS by a path missing here yields an empty
+          # FILES and is dropped without even a $SKIPPED line — so they must
+          # stay identical to the `git log` pathspecs above.
           #
           # For a merge, `git show --name-only` reports nothing, which would
           # otherwise produce a contentless report *and* hide an evil merge —
@@ -242,11 +260,11 @@ jobs:
             parents=$(git rev-list --parents -n1 "$sha" | cut -d' ' -f2-)
             nparents=$(printf '%s\n' "$parents" | wc -w | tr -d ' ')
             if [ "$nparents" -le 1 ]; then
-              git show --name-only --pretty='' "$sha" -- .github/workflows/ .config/tend.yaml
+              git show --name-only --pretty='' "$sha" -- .github/workflows/ .config/tend.yaml .github/audit/
               return
             fi
             for p in $parents; do
-              cur=$(git diff --name-only "$p" "$sha" -- .github/workflows/ .config/tend.yaml | sort -u)
+              cur=$(git diff --name-only "$p" "$sha" -- .github/workflows/ .config/tend.yaml .github/audit/ | sort -u)
               if [ "$first" -eq 1 ]; then
                 acc="$cur"; first=0
               else
