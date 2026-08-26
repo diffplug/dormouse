@@ -25,7 +25,9 @@ enumeration is the shortcut that goes stale.
 
 ## Qualitative pass
 
-You own the dependency graph, the lockfile, and `website/src/`. Look at:
+You own the dependency graph, the lockfile, `website/src/`, and
+`website/scripts/` — the generator whose output the first `FAIL IF` checks
+lives there, and owning the output without the generator is half a check.
 
 - newly added or upgraded runtime dependencies since the last audit
 - anything in the lockfile that resolves outside the registry
