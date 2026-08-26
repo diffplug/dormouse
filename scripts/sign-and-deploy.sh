@@ -691,6 +691,12 @@ sign_windows() {
     local exe_path
     exe_path=$(windows_exe_path)
 
+    # `--storepass` stays on argv because jsign offers no alternative: it reads
+    # the password only as a literal option value, with no environment or
+    # file indirection (checked against jsign's own `--help`). The exposure is
+    # `ps` on this machine for the duration of the call, and the PIN alone is
+    # inert without the physical YubiKey it unlocks. Accepted, not overlooked —
+    # see SECURITY.md, "Desktop Releases".
     log "Signing inner executable: $exe_path"
     jsign \
         --storetype PIV \
@@ -760,10 +766,15 @@ sign_updates() {
         if [[ -f "$bundle" ]]; then
             log "Tauri-signing: $(basename "$bundle")"
             # Use tauri signer to sign the bundle
+            # The key goes in the environment and NOT on argv. `tauri signer
+            # sign` documents `--private-key` as falling back to
+            # `[env: TAURI_SIGNING_PRIVATE_KEY]`, so the flag was redundant —
+            # and argv is world-readable through `ps` for the life of the
+            # process, which matters more here than usual: `pnpm exec` means
+            # every dependency's lifecycle scripts share this session.
             TAURI_SIGNING_PRIVATE_KEY="$TAURI_SIGNING_PRIVATE_KEY" \
             TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" \
                 pnpm --dir "$REPO_ROOT/standalone" exec tauri signer sign \
-                    --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
                     "$bundle"
         fi
     done
