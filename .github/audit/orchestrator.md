@@ -34,13 +34,18 @@ So do not end your turn. Block inside a Bash call instead, waiting for the
 files the subagents write:
 
 ```sh
-# 25 minutes, counted from when this loop starts — i.e. after checkout,
-# setup-node, and the install have already spent runner time. The audit
-# job in `.github/workflows/security-audit.yaml` declares
-# `timeout-minutes: 40` to stay clear of it; raising this deadline
-# without raising that one puts the runner's cancellation first again,
-# and this graceful path stops being reachable at all.
-DEADLINE=$(( $(date +%s) + 1500 ))
+# 25 minutes, counted from the first time this loop runs — i.e. after
+# checkout, setup-node, and the install have already spent runner time.
+# Persisted to a file because the prose below tells you to re-issue this
+# block past the ten-minute Bash cap: a fresh shell would otherwise
+# recompute the deadline from `now` each time, and it would never
+# arrive. The audit job in `.github/workflows/security-audit.yaml`
+# declares `timeout-minutes: 40` to stay clear of it; raising this
+# deadline without raising that one puts the runner's cancellation first
+# again, and this graceful path stops being reachable at all.
+DEADLINE_FILE="${RUNNER_TEMP:-.}/audit-deadline"
+[ -f "$DEADLINE_FILE" ] || echo $(( $(date +%s) + 1500 )) > "$DEADLINE_FILE"
+DEADLINE=$(cat "$DEADLINE_FILE")
 until [ -s audit-supply-chain.md ] && [ -s audit-ci-secrets.md ] && [ -s audit-application.md ]; do
   [ "$(date +%s)" -ge "$DEADLINE" ] && { echo "DEADLINE"; break; }
   sleep 10
@@ -52,7 +57,10 @@ A single Bash call is capped at ten minutes, and a domain can legitimately take
 longer than that. A timed-out wait is **not** a failure — re-issue the same
 loop until either every fragment exists or the 25-minute deadline passes.
 Re-issuing the wait is the whole technique; treating the first Bash timeout as
-"the subagents died" throws away work that was still running.
+"the subagents died" throws away work that was still running. Re-issue the
+block **verbatim**, including the `DEADLINE_FILE` lines: they read back the
+deadline the first call wrote, so the 25 minutes accumulate across re-issues
+and the `DEADLINE` branch fires on the third one instead of never.
 
 Never poll by ending your turn, and never substitute a bare `sleep` — the
 harness blocks it. The `until` loop above is the sanctioned form.

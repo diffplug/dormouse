@@ -32,8 +32,10 @@ jobs:
       # and carries a pointer back here.
       AUDIT_FRAGMENTS: audit-supply-chain.md audit-ci-secrets.md audit-application.md
     # Must stay well above the orchestrator's own wait deadline in
-    # `.github/audit/orchestrator.md` (25 minutes, counted from when the
-    # agent starts — i.e. after checkout, setup-node, and the install).
+    # `.github/audit/orchestrator.md` (25 minutes, counted from the first
+    # time its wait loop runs — i.e. after checkout, setup-node, the
+    # install, and the spawn — and persisted across the loop's
+    # re-issues so it accumulates rather than restarting).
     # At 20 minutes the runner cancelled the job before that deadline
     # could ever fire, so the graceful "give up and report what the
     # domains found" path was unreachable and every overrun landed as
