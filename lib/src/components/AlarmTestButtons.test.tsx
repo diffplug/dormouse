@@ -108,6 +108,8 @@ describe('PushTestButton', () => {
     await act(async () => button().click());
 
     expect(text()).toContain('No paired phone has enabled alerts yet');
+    // The ordinary answer on a freshly enrolled machine — not rendered as an error.
+    expect(container.querySelector('[role="status"]')?.className).not.toContain('text-error');
   });
 
   it('reports a fan-out that reached nobody', async () => {

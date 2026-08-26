@@ -108,7 +108,7 @@ export function PushTestButton() {
             .then((outcome) => {
               if (outcome.targeted === 0) {
                 // Not a failure: the Host is fine, nothing has opted in yet.
-                show('No paired phone has enabled alerts yet, so there was nowhere to send it.', 'bad');
+                show('No paired phone has enabled alerts yet, so there was nowhere to send it.', 'ok');
               } else if (outcome.delivered === 0) {
                 show(`No device accepted the push (${outcome.failed} failed).`, 'bad');
               } else if (outcome.failed > 0) {
