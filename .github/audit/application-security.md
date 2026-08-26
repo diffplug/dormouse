@@ -41,11 +41,19 @@ evasions), do not re-report it as a finding — report only if the situation has
 changed or is worse than described.
 
 You are also the **catch-all** domain, and this is defined by subtraction, not
-by a list: you own every top-level path in the repository that
-`supply-chain.md` and `ci-and-secrets.md` do not explicitly claim. Run `ls -A`
-and work out the remainder rather than trusting any enumeration — an
-enumeration goes stale the moment someone adds a directory, which is exactly
-how `.vscode/` and `.impeccable/` ended up owned by nobody.
+by a list: you own everything in the repository that `supply-chain.md` and
+`ci-and-secrets.md` do not explicitly claim. Run `ls -A` and work out the
+remainder rather than trusting any enumeration — an enumeration goes stale the
+moment someone adds a directory, which is exactly how `.vscode/` and
+`.impeccable/` ended up owned by nobody.
+
+Subtraction is **recursive, not top-level**. Where another domain claims a
+subdirectory rather than a whole tree, the rest of that tree is yours: the
+other two claim `website/public/`, `website/src/`, and `website/scripts/`, so
+`website/`'s remaining files — `vite.config.ts`, `react-router.config.ts`,
+`package.json`, `tsconfig.json` — are yours. Check one level down wherever a
+claim is partial, or the same orphaning happens again inside a directory
+instead of beside it.
 
 Today the remainder is `lib/`, `server/`, `server-lib-common/`, `standalone/`,
 `vscode-ext/`, `dor/`, `dor-lib-common/`, `canopy/`, `deploy/`, `docs/`,

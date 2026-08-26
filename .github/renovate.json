@@ -7,11 +7,13 @@
   "vulnerabilityAlerts": {
     "description": [
       "Security fixes must not wait for the Monday window. Everything else here is batched to one day a week, which is right for routine bumps and wrong for a known-vulnerable dependency, so this overrides the schedule only.",
-      "The `minimumReleaseAge` cooldown is deliberately NOT overridden. It exists for the opposite threat — a compromised release that gets yanked within a day — and dropping it for security PRs would trade a supply-chain control for patch latency we do not actually need: nothing here auto-merges, a human reviews every Renovate PR, and Dependabot alerts already make the vulnerability visible the moment it is published. The PR is the remediation, not the notification.",
+      "`minimumReleaseAge` is set here EXPLICITLY, and must stay that way. Renovate\u0027s own default for this block is `minimumReleaseAge: null`, force-applied before lookup — so omitting it does not inherit the cooldown from packageRules, it DROPS the cooldown entirely. Stating it is the only way to keep it.",
+      "Keeping it is the deliberate choice: the cooldown guards the opposite threat — a compromised release that gets yanked within a day — and a reviewer reading a Renovate diff cannot detect a supply-chain compromise the way the ecosystem\u0027s own yank process can. Nothing here auto-merges, and the Dependabot alert already makes the vulnerability visible the moment it is published, so what the cooldown costs is a day before the remediation PR appears, not a day before anyone knows.",
       "See SECURITY.md, Dependency Supply Chain."
     ],
     "enabled": true,
     "schedule": [],
+    "minimumReleaseAge": "1 day",
     "labels": ["security", "dependencies"]
   },
   "packageRules": [
