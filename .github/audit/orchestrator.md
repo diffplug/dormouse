@@ -79,15 +79,27 @@ harness blocks it. The `until` loop above is the sanctioned form.
 Assemble the report with Bash rather than by retyping the fragments:
 
 ```sh
+# `[ -s ]`, not `cat … || echo`: the same emptiness test the wait loop uses.
+# `cat` on an existing zero-byte fragment succeeds, so the `||` placeholder
+# would be skipped and that domain would render as a heading with a blank
+# body — indistinguishable from a domain that found nothing.
 { echo "# Security audit"; echo
-  echo "## Supply chain"; echo; cat audit-supply-chain.md 2>/dev/null || echo "_No report — this domain produced no fragment._"; echo
-  echo "## CI and secrets"; echo; cat audit-ci-secrets.md 2>/dev/null || echo "_No report — this domain produced no fragment._"; echo
-  echo "## Application security"; echo; cat audit-application.md 2>/dev/null || echo "_No report — this domain produced no fragment._"
+  echo "## Supply chain"; echo
+  if [ -s audit-supply-chain.md ]; then cat audit-supply-chain.md; else echo "_No report — this domain produced no fragment._"; fi; echo
+  echo "## CI and secrets"; echo
+  if [ -s audit-ci-secrets.md ]; then cat audit-ci-secrets.md; else echo "_No report — this domain produced no fragment._"; fi; echo
+  echo "## Application security"; echo
+  if [ -s audit-application.md ]; then cat audit-application.md; else echo "_No report — this domain produced no fragment._"; fi
 } > audit-report.md
 ```
 
-Then append a `## Summary` section: overall PASS or FAIL, a one-paragraph
-rationale, and one line per domain giving that domain's verdict.
+Then append a `## Summary` section: overall PASS, FAIL, or INCONCLUSIVE — the
+last whenever §4 below tells you to write no status file — a one-paragraph
+rationale, and one line per domain giving that domain's verdict. Do not force
+a binary here: the INCONCLUSIVE issue reproduces this report under a title
+saying no verdict was reached, so a `## Summary` asserting `PASS` over a
+domain that never reported contradicts the issue carrying it, and publishes
+an overall `PASS` covering an unaudited domain.
 
 ## 4. The verdict
 

@@ -341,7 +341,10 @@ jobs:
             {
               # Two different causes reach MISSING, and they want different
               # first moves from the reader: no status file at all means
-              # start in the transcript, while a downgraded PASS means the
+              # start at the report's own markers — the prose below names
+              # both, because that branch itself has two causes (a
+              # turn-ending failure mid-audit, and an expired wait deadline)
+              # which leave different markers. A downgraded PASS means the
               # named domains are the whole story — the rest reported, and
               # the "ran short, no verdict" prose below would be wrong
               # about a run that did reach one. The named set can be one,
@@ -374,9 +377,11 @@ jobs:
                   echo "which may itself contain a real finding — read it first. A"
                   echo "report without a verdict is the expected shape of an audit that"
                   echo "ran short: the prompt asks for the report either way, and for"
-                  echo "the status file only once the verdict covers every check. The"
-                  echo "areas it never reached are marked \`UNVERIFIABLE\` below — start"
-                  echo "there rather than in the transcript."
+                  echo "the status file only once the verdict covers every check. Start"
+                  echo "at the markers rather than the transcript: \`UNVERIFIABLE\` is a"
+                  echo "check the agent itself could not determine, while a domain"
+                  echo "section reading \`_No report …_\` is a domain that never reported"
+                  echo "at all — which is what an expired wait deadline looks like."
                 else
                   echo "**This is not a security finding** — the audit did not reach"
                   echo "one. Treat it as a failed audit run, not a failed audit."
