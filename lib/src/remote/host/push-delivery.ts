@@ -21,6 +21,7 @@ import {
   type PushDevicesResponse,
   type PushSendResponse,
 } from 'server-lib-common';
+import type { PushSendSummary } from '../../host/remote/service-protocol';
 import type { PushDevice } from '../../lib/push-devices';
 import type { HostEnrollment } from './enrollment';
 
@@ -33,6 +34,16 @@ const PUSH_TITLE_LIMIT = 100;
 
 /** Shown as the notification body; the Pane name carries the information. */
 const PUSH_BODY = 'Needs attention';
+
+/**
+ * The Settings dialog's test push. The title says plainly that nothing is
+ * actually waiting, so a test that arrives on a phone hours later — or on
+ * someone else's phone — cannot be mistaken for a real alarm.
+ */
+export const PUSH_TEST_TITLE = 'Dormouse test — nothing needs attention';
+
+/** Collapse key for the test, so repeated presses replace rather than stack. */
+export const PUSH_TEST_TAG = 'dormouse-push-test';
 
 /**
  * Apply this sink's bounds to a Pane label. The rule itself is
@@ -111,7 +122,7 @@ export async function sendPush(
   deps: AlertPushDeps,
   sessionId: string,
   title: string,
-): Promise<void> {
+): Promise<PushSendSummary> {
   // Read straight from the ACL, which is local and in-memory, rather than
   // asking the Server which devices are subscribed: the Server intersects the
   // names it is given with its own subscriptions anyway, so the target set is
@@ -124,7 +135,7 @@ export async function sendPush(
   // recipients would keep pushing Pane labels to a de-authorized phone. Read at
   // send time, so a revocation during the delay takes effect.
   const devicePublicKeys = deps.activeRecords().map((record) => record.devicePublicKey);
-  if (devicePublicKeys.length === 0) return;
+  if (devicePublicKeys.length === 0) return { targeted: 0, delivered: 0, failed: 0 };
 
   const response = await hostFetch(deps, API_ROUTES.pushSend, {
     devicePublicKeys,
@@ -143,4 +154,5 @@ export async function sendPush(
   if (result.failed > 0 || result.delivered === 0) {
     console.warn('remote-host: push was not delivered to every device', result);
   }
+  return { targeted: devicePublicKeys.length, delivered: result.delivered, failed: result.failed };
 }

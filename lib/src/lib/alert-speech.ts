@@ -123,6 +123,48 @@ function cancelSpeech(): void {
   globalThis.speechSynthesis?.cancel();
 }
 
+/** What the Settings dialog's test button says. Not a pane label — nothing rang. */
+const TEST_UTTERANCE = 'Dormouse alarm test';
+
+/**
+ * Say a fixed phrase so the Settings dialog can prove the alarm is audible now,
+ * rather than at 3am when a build finally finishes.
+ *
+ * Deliberately *not* routed through `speak()`: that publishes the transient
+ * per-Session `speaking` / `spoken` state that Panes and Doors render, and no
+ * Session rang here. A test that made a pane light up would be lying about
+ * which terminal wants attention.
+ *
+ * Returns `false` when this webview has no speech backend — the same
+ * degradation `speak()` makes silently (jsdom, Tauri on WebKitGTK). The button
+ * needs to tell those apart from a working engine, because "nothing happened"
+ * is the identical observation for both.
+ */
+export function speakTestUtterance(): boolean {
+  const synth = globalThis.speechSynthesis;
+  if (!synth || typeof globalThis.SpeechSynthesisUtterance !== 'function') return false;
+
+  let utterance: SpeechSynthesisUtterance;
+  try {
+    utterance = new globalThis.SpeechSynthesisUtterance(toSpokenText(TEST_UTTERANCE));
+  } catch {
+    return false;
+  }
+  try {
+    // No `cancel()` first, tempting as it is for a double-press: the engine
+    // queue is shared with real alarms, `cancel()` empties all of it, and the
+    // engine fires no callback for an utterance dropped before it started — so
+    // another Session's queued announcement would be lost with `startAlertSpeech`
+    // never learning it needs a re-dispatch (that is `interrupt()`'s job, and
+    // only it has the queue index to do it). A short fixed phrase stacking on a
+    // double-press is the smaller problem than a real alarm going out silently.
+    synth.speak(utterance);
+  } catch {
+    return false;
+  }
+  return true;
+}
+
 /**
  * Watch the activity store for fresh rings and speak the unattended ones.
  * Returns a disposer that cancels pending ring timers, silences the engine, and

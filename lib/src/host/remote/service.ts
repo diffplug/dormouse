@@ -22,7 +22,13 @@ import { filterAclRecords } from '../../remote/host/acl';
 import { isEnrollment, performEnrollment, type HostEnrollment } from '../../remote/host/enrollment';
 import type { HostSurfaceProvider } from '../../remote/host/host-surface-provider';
 import type { PendingPairing } from '../../remote/host/pairing-approval';
-import { loadPushDevices, sendPush, type AlertPushDeps } from '../../remote/host/push-delivery';
+import {
+  loadPushDevices,
+  sendPush,
+  PUSH_TEST_TAG,
+  PUSH_TEST_TITLE,
+  type AlertPushDeps,
+} from '../../remote/host/push-delivery';
 import { RemoteApiSession } from '../../remote/host/remote-api';
 import { RemoteHost, type WebSocketLike } from '../../remote/host/remote-host';
 import { originAllowedByConnectSrc } from './connect-src';
@@ -43,6 +49,7 @@ import {
   type PairingQueueItem,
   type PushDevicesResult,
   type PushParams,
+  type PushSendSummary,
   type RemoteHostConsoleStatus,
 } from './service-protocol';
 
@@ -162,6 +169,8 @@ export class RemoteHostService {
         return this.#deny(params as DenyParams);
       case 'push':
         return this.#push(params as PushParams);
+      case 'pushTest':
+        return this.#pushTest();
       case 'pushDevices':
         return this.#pushDevices();
       case 'pairingQueue':
@@ -276,6 +285,25 @@ export class RemoteHostService {
       });
     }
     return {};
+  }
+
+  /**
+   * The Settings dialog's "Send test push".
+   *
+   * The inverse of {@link #push} in the one way that matters: nothing is
+   * swallowed. A test whose whole purpose is to report an outcome must let the
+   * failure through, so an unenrolled machine, an unreachable server, and a
+   * fan-out that reached nobody all read differently at the button.
+   */
+  async #pushTest(): Promise<PushSendSummary> {
+    const deps = this.#pushDeps();
+    if (!deps) {
+      throw new Error('This machine is not connected to a Dormouse server.');
+    }
+    // A fixed tag, so pressing the button repeatedly replaces the notification
+    // on the phone rather than stacking copies — the same per-Session collapse
+    // rule the ring path uses, with the test as its own "Session".
+    return await sendPush(deps, PUSH_TEST_TAG, PUSH_TEST_TITLE);
   }
 
   async #pushDevices(): Promise<PushDevicesResult> {

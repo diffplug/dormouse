@@ -16,7 +16,7 @@
  * status rather than patching a field.
  */
 
-import type { RemoteHostConsoleStatus } from '../../host/remote/service-protocol';
+import type { PushSendSummary, RemoteHostConsoleStatus } from '../../host/remote/service-protocol';
 import { getPlatform } from '../../lib/platform';
 import type { RemoteHostLink } from '../../lib/platform/types';
 
@@ -261,6 +261,27 @@ export async function clearRemoteHostEnrollment(): Promise<void> {
   if (!active) throw new Error('This build has no remote Host service.');
   await active.command('clearEnrollment');
   await refreshAfterMutation();
+}
+
+/**
+ * Ask the Host service to send a test push and report what happened
+ * (`PushSendSummary` in `service-protocol.ts` — the same type the service's
+ * `pushTest` command answers with, so the two ends cannot drift).
+ *
+ * Rejects when there is no service, no enrollment, or the server refused —
+ * unlike the ring path, which swallows everything so a failed push can never
+ * break an alarm (`docs/specs/server.md` -> Web Push). A test button is the one
+ * caller that needs the failure.
+ *
+ * Lives here rather than beside the ring watcher in `alert-push.ts`: that
+ * module is deliberately inside the lazily-imported `RemotePairingModalHost`
+ * chunk, and importing it from the Settings dialog would pull the whole
+ * remote-host stack into the main bundle on every host.
+ */
+export async function sendTestPush(): Promise<PushSendSummary> {
+  const active = link();
+  if (!active) throw new Error('This build has no remote Host service.');
+  return (await active.command('pushTest')) as PushSendSummary;
 }
 
 function describeError(error: unknown): string {

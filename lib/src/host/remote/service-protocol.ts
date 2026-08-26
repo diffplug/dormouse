@@ -173,3 +173,22 @@ export interface RemoteHostConsoleStatus {
  * "nowhere to push", not "the server could not be asked" (`push-devices.ts`).
  */
 export type PushDevicesResult = { devices: Array<{ devicePublicKey: string; label: string }> } | null;
+
+/**
+ * What one push fan-out actually did: the result of the `pushTest` command, and
+ * the return of `sendPush` itself (`push-delivery.ts`) — one type on both ends
+ * of the bridge, so the button and the service cannot drift.
+ *
+ * The ring path ignores it — a failed push must never break the alert path —
+ * but the Settings dialog's test button exists *only* to report it, and "sent"
+ * over a fan-out that reached nobody would be worse than no button at all.
+ *
+ * `targeted` is 0 when the ACL authorized no device — the ordinary answer on a
+ * freshly enrolled machine, and a distinct outcome from a send that was
+ * attempted and refused: nothing was even tried.
+ */
+export interface PushSendSummary {
+  targeted: number;
+  delivered: number;
+  failed: number;
+}

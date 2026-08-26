@@ -759,3 +759,55 @@ describe('pushDevices', () => {
     expect((await command('pushDevices')).error).toBeTruthy();
   });
 });
+
+describe('pushTest', () => {
+  it('refuses when this machine is not connected to a server', async () => {
+    createService();
+    // The inverse of the ring path, which swallows everything: a test button
+    // that reported success here would be worse than no button.
+    const { error } = await command('pushTest');
+    expect(error).toContain('not connected');
+  });
+
+  it('reports that nothing was targeted when no device is authorized', async () => {
+    createService({ enrollment: ENROLLMENT, acl: { 'host-1': [] } });
+    await service.start();
+
+    const { result } = await command('pushTest');
+    // Distinct from a refused send: the Host is fine, nothing has opted in.
+    expect(result).toEqual({ targeted: 0, delivered: 0, failed: 0 });
+    expect(requests.some((request) => request.url.endsWith('/api/push/send'))).toBe(false);
+  });
+
+  it('sends through the real path and reports what was delivered', async () => {
+    createService({ enrollment: ENROLLMENT, acl: { 'host-1': [aclRecord('device-1')] } });
+    await service.start();
+
+    const { result } = await command('pushTest');
+    expect(result).toEqual({ targeted: 1, delivered: 1, failed: 0 });
+
+    const send = requests.find((request) => request.url.endsWith('/api/push/send'));
+    expect(send).toBeTruthy();
+    const body = JSON.parse(String(send!.init?.body)) as Record<string, unknown>;
+    // Recipients come from the ACL, exactly as a real ring does.
+    expect(body.devicePublicKeys).toEqual(['device-1']);
+    // A fixed collapse key, so repeated presses replace rather than stack.
+    expect(body.tag).toBe('dormouse-push-test');
+    expect(String(body.title)).toContain('test');
+  });
+
+  it('surfaces a refused send instead of swallowing it', async () => {
+    store = memoryStore({ enrollment: ENROLLMENT, acl: { 'host-1': [aclRecord('device-1')] } });
+    service = new RemoteHostService({
+      store,
+      provider: fakeProvider(),
+      sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
+      connectSrc: CONNECT_SRC,
+      createWebSocket: () => new FakeSocket(),
+      fetch: (async () => ({ ok: false, status: 500 })) as unknown as typeof globalThis.fetch,
+    });
+    await service.start();
+
+    expect((await command('pushTest')).error).toBeTruthy();
+  });
+});
