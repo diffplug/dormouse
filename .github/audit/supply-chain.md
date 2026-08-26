@@ -27,11 +27,12 @@ enumeration is the shortcut that goes stale.
 
 You own the dependency graph, the lockfile, and all of `website/` except
 `website/public/`, which is `ci-and-secrets`' because the Tauri updater manifest
-lives there. So `website/src/`, the build config (`package.json`,
+lives there. So `website/src/`, the build config (`website/package.json`,
 `vite.config.ts`, `react-router.config.ts`, `tsconfig.json`), and
-`website/scripts/` — `generate-deps.js` is the generator behind the disclosed
-dependency snapshot you check above, so the whole of it is yours, not just the
-`productDependencyFilters` array the root-completeness bullet names. Look at:
+`website/scripts/` are all yours — `generate-deps.js` is the generator behind
+the disclosed dependency snapshot you check above, so you audit the whole file,
+not just the `productDependencyFilters` array the root-completeness bullet
+names. Look at:
 
 - newly added or upgraded runtime dependencies since the last audit
 - anything in the lockfile that resolves outside the registry
