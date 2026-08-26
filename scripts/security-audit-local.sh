@@ -49,7 +49,7 @@ run_domain() {
   if [ -s "$out" ]; then
     echo "==> wrote $out"
   else
-    echo "==> $domain produced no fragment — in CI that is a FAIL" >&2
+    echo "==> $domain produced no fragment — in CI that is an INCONCLUSIVE audit, not a FAIL" >&2
     return 1
   fi
 }
