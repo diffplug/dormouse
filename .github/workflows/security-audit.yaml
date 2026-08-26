@@ -280,11 +280,13 @@ jobs:
           # writes its own fragment before returning a verdict, so a
           # missing or empty fragment means that domain never reported —
           # and a domain that died silently is indistinguishable, in the
-          # merged report, from one that found nothing. The orchestrator
-          # prompt is told to FAIL on this, but a prompt is not a control:
-          # without this check the matching `FAIL IF` in SECURITY.md is
-          # enforced only by the document being audited, which is
-          # circular. Downgrade to MISSING rather than FAIL for the same
+          # merged report, from one that found nothing. §4 of
+          # `.github/audit/orchestrator.md` tells the orchestrator to
+          # write no status file at all in that case — which lands on the
+          # MISSING branch below, not on FAIL — but a prompt is not a
+          # control: without this check the matching `FAIL IF` in
+          # SECURITY.md is enforced only by the document being audited,
+          # which is circular. Downgrade to MISSING rather than FAIL for the same
           # reason the three outcomes exist above — this is an audit that
           # did not finish, not a security finding — and MISSING already
           # exits non-zero and holds the release gate shut.

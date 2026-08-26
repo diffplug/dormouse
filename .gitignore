@@ -73,6 +73,3 @@ chromatic-diagnostics.json
 # Local security-audit fragments (scripts/security-audit-local.sh)
 audit-*.md
 audit-status.txt
-# The orchestrator's wait deadline, when its `${RUNNER_TEMP:-.}` fallback
-# lands here instead of the runner's temp dir.
-audit-deadline

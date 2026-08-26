@@ -39,11 +39,17 @@ files the subagents write:
 # Persisted to a file because the prose below tells you to re-issue this
 # block past the ten-minute Bash cap: a fresh shell would otherwise
 # recompute the deadline from `now` each time, and it would never
-# arrive. The audit job in `.github/workflows/security-audit.yaml`
-# declares `timeout-minutes: 40` to stay clear of it; raising this
+# arrive. `RUNNER_TEMP` carries no fallback on purpose: it is always set
+# in Actions and is fresh per job, and this file only ever runs there
+# (`scripts/security-audit-local.sh` runs the domains directly and never
+# the orchestrator). A fallback into the repo root would instead survive
+# between hand-runs and hand an already-expired deadline to the next one,
+# breaking out of the loop before a subagent could write anything. The
+# audit job in `.github/workflows/security-audit.yaml` declares
+# `timeout-minutes: 40` to stay clear of this deadline; raising this
 # deadline without raising that one puts the runner's cancellation first
 # again, and this graceful path stops being reachable at all.
-DEADLINE_FILE="${RUNNER_TEMP:-.}/audit-deadline"
+DEADLINE_FILE="$RUNNER_TEMP/audit-deadline"
 [ -f "$DEADLINE_FILE" ] || echo $(( $(date +%s) + 1500 )) > "$DEADLINE_FILE"
 DEADLINE=$(cat "$DEADLINE_FILE")
 until [ -s audit-supply-chain.md ] && [ -s audit-ci-secrets.md ] && [ -s audit-application.md ]; do
@@ -54,13 +60,16 @@ ls -la audit-*.md
 ```
 
 A single Bash call is capped at ten minutes, and a domain can legitimately take
-longer than that. A timed-out wait is **not** a failure — re-issue the same
-loop until either every fragment exists or the 25-minute deadline passes.
-Re-issuing the wait is the whole technique; treating the first Bash timeout as
-"the subagents died" throws away work that was still running. Re-issue the
-block **verbatim**, including the `DEADLINE_FILE` lines: they read back the
-deadline the first call wrote, so the 25 minutes accumulate across re-issues
-and the `DEADLINE` branch fires on the third one instead of never.
+longer than that. Issue this call with the maximum Bash timeout
+(`timeout: 600000`) — the harness default is two minutes, and at that length
+the 25 minutes take a dozen re-issues instead of three. A timed-out wait is
+**not** a failure — re-issue the same loop until either every fragment exists
+or the 25-minute deadline passes. Re-issuing the wait is the whole technique;
+treating the first Bash timeout as "the subagents died" throws away work that
+was still running. Re-issue the block **verbatim**, including the
+`DEADLINE_FILE` lines: they read back the deadline the first call wrote, so the
+25 minutes accumulate across re-issues and the `DEADLINE` branch fires on the
+third call instead of never.
 
 Never poll by ending your turn, and never substitute a bare `sleep` — the
 harness blocks it. The `until` loop above is the sanctioned form.
@@ -82,12 +91,22 @@ rationale, and one line per domain giving that domain's verdict.
 
 ## 4. The verdict
 
-Write `PASS` or `FAIL` — no other text — to `audit-status.txt`.
+Write `PASS` or `FAIL` — no other text — to `audit-status.txt`, and only when
+you reached a verdict that covers all three domains.
 
-FAIL if any subagent returned FAIL, **or** if any of the three fragments is
-missing or empty. A domain that produced no report did not pass; it did not
-finish. The reporting step checks this independently, so a `PASS` written over
-a missing fragment is caught and downgraded — but do not make it do that work.
+FAIL if any subagent returned FAIL. That is a finding, and it stays a finding
+whether or not the other domains reported.
+
+If no subagent returned FAIL but a fragment is missing or empty — the
+`DEADLINE` branch fired, or a domain died — **write no status file at all.** A
+domain that produced no report did not pass, but it did not fail either:
+`FAIL` publishes it as `[security-audit] FAIL`, relabels an open issue upward,
+and files a run that merely ran out of time as a security finding. That is the
+conflation the workflow's three outcomes exist to prevent. With no status file
+the reporting step reaches INCONCLUSIVE instead and reproduces the partial
+report you wrote in §3, placeholders and all. Never write `PASS` over a missing
+fragment: the reporting step catches that one independently and downgrades it,
+but do not make it do that work.
 
 **Write `audit-report.md` before `audit-status.txt`**, always, even if you are
 running short: a partial report reaches a human through the INCONCLUSIVE issue,
