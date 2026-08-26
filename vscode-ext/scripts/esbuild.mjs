@@ -53,8 +53,14 @@ const builds = [
 if (watch) {
   for (const options of builds) {
     const ctx = await esbuild.context(options);
+    // Build once and assert before watching. The assertion exists because a
+    // lost `define` compiles green, and a watch loop (`pnpm dogfood:vscode`)
+    // is exactly where one plausibly goes missing — skipping it here left the
+    // check absent from the build people actually iterate in.
+    await ctx.rebuild();
     await ctx.watch();
   }
+  assertConnectSrcBaked('dist/extension.js', remoteSrc);
   console.error('[esbuild] watching');
 } else {
   await Promise.all(builds.map((options) => esbuild.build(options)));

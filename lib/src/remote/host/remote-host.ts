@@ -32,6 +32,9 @@ import {
   WS_ROUTES,
   WS_TOKEN_PARAM,
   authorizeConnection,
+  boundedPairingAccount,
+  boundedPairingLabel,
+  isPairingRequest,
   type ConnectionDecision,
   type ConnectionPolicy,
   type ConnectionRequest,
@@ -310,7 +313,7 @@ export class RemoteHost {
     const clientId = frame.clientId;
     switch (frame.t) {
       case 'pair':
-        return this.#onPair(clientId, frame.request);
+        return this.#onPair(clientId, (frame as { request?: unknown }).request);
       case 'connect':
         return this.#onConnect(clientId);
       case 'connect2':
@@ -325,7 +328,28 @@ export class RemoteHost {
     }
   }
 
-  #onPair(clientId: string, request: PairingRequest): void {
+  #onPair(clientId: string, incoming: unknown): void {
+    // `pair` arrives from the relay, which this model does not trust — the
+    // Server runs the same guard, and that is exactly why the Host cannot rely
+    // on it having done so. Unvalidated, one malformed frame reaches the
+    // approval modal, where `request.devicePublicKey.slice(0, 8)` throws inside
+    // the app-wide ErrorBoundary and takes every terminal down with it; if
+    // approved, its fields land in a persisted ACL record. `connect2` has
+    // always contained this class of failure as an ordinary denial.
+    if (!isPairingRequest(incoming)) {
+      console.warn('remote-host: malformed pairing request');
+      this.#send({ t: 'pair-result', clientId, approved: false, error: 'malformed-request' });
+      return;
+    }
+    // The label is attacker-chosen free text rendered in the one dialog the
+    // ACL rests on. Bound and strip it here, once, so every consumer — the
+    // queue projection, the modal, and the ACL record written on approval —
+    // sees the same safe value.
+    const request: PairingRequest = {
+      ...incoming,
+      accountId: boundedPairingAccount(incoming.accountId),
+      requestedLabel: boundedPairingLabel(incoming.requestedLabel),
+    };
     const ticket = this.#ceremony.begin(request);
     const pending: PendingPairing = {
       clientId,

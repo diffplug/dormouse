@@ -438,7 +438,10 @@ if [ ! -f "$ENV_FILE" ]; then
   else
     die "no way to generate a high-entropy password (need /usr/bin/xxd or /usr/bin/openssl)."
   fi
-  [ ${#SETUP_PASSWORD} -ge 32 ] || die "generated setup password is implausibly short; refusing to install it."
+  # Both generators above produce 32 random bytes, i.e. 64 hex characters. The
+  # guard counts characters, so it must be 64 — checking for 32 would pass a
+  # regression to `-l 16`, which is half the entropy SECURITY.md claims.
+  [ ${#SETUP_PASSWORD} -ge 64 ] || die "generated setup password is implausibly short; refusing to install it."
 
   umask 077
   cat > "$ENV_FILE" <<ENV_EOF
@@ -723,6 +726,20 @@ cmd_verify() {
     else
       fail "Serve origin does not match DORMOUSE_ORIGIN ($ORIGIN)"
     fi
+  fi
+
+  # Serve and Funnel are one configuration surface, and Funnel publishes this
+  # exact origin to the public internet. The whole security analysis of the
+  # selfhost server assumes a tailnet-only origin — most of all the setup
+  # password, whose hardening is a constant-time compare and a 250ms delay
+  # (SECURITY.md, "The setup password"). So this is checked, never assumed.
+  local funnel_out
+  funnel_out="$(ts funnel status 2>/dev/null || true)"
+  if printf '%s\n%s' "$serve_out" "$funnel_out" | grep -qi 'funnel on'; then
+    fail "tailscale funnel is ON — this origin is published to the public internet"
+    printf '%s\n' "$funnel_out" | sed 's/^/      /'
+  else
+    pass "tailscale funnel is off (the origin stays tailnet-only)"
   fi
 
   local cfg_mode state_mode env_mode

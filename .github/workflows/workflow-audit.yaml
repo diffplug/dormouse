@@ -1,7 +1,7 @@
 name: workflow-audit
 
-# Nightly audit of every commit touching .github/workflows/ or
-# .config/tend.yaml. Surfaces changes from feature branches and direct
+# Nightly audit of every commit touching .github/workflows/,
+# .config/tend.yaml, or .github/audit/. Surfaces changes from feature branches and direct
 # pushes, not just the main branch — so a bot push that adds a new
 # workflow file gets a visible issue even if it never opens a PR.
 #
@@ -84,6 +84,17 @@ jobs:
           fi
           echo "Auditing commits since: $SINCE"
 
+          # .github/audit/ is in the window because it holds the security
+          # audit's own prompts — which domain owns which SECURITY.md section,
+          # what each one is told to check, and the rule that keeps the
+          # orchestrator from ending its turn. A bot that edits those changes
+          # what gets audited without touching a single workflow file, which is
+          # exactly the persistence this job exists to catch. Neither
+          # classifier can explain such a commit (a Renovate bump touches only
+          # `uses:` refs; a tend regen reproduces from `uvx tend init`, which
+          # does not generate this directory), so anything landing here is
+          # reported on its own content, which is the intent.
+          #
           # .config/tend.yaml is in the window, not just .github/workflows/.
           # Without it, a commit editing only the config never enters the audit,
           # and a later commit regenerating from it leaves the config untouched,
@@ -94,7 +105,7 @@ jobs:
           # so nothing in the widened window can be swallowed by an arm that
           # doesn't inspect it — that pairing is the invariant, not either half.
           COMMITS=$(git log --all --since="$SINCE" --pretty=format:'%H' \
-            -- .github/workflows/ .config/tend.yaml | sort -u)
+            -- .github/workflows/ .config/tend.yaml .github/audit/ | sort -u)
 
           if [ -z "$COMMITS" ]; then
             echo "No workflow or tend-config changes since $SINCE."

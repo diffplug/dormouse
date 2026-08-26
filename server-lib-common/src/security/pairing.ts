@@ -20,8 +20,16 @@
 import { toBase64Url } from './bytes.js';
 import { getWebCrypto, type WebCryptoLike } from './webcrypto.js';
 import { HostAcl, type HostAclRecord } from './acl.js';
+import { boundedPushText } from './push.js';
 
 export const DEFAULT_PAIRING_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * How many tickets one ceremony will hold. Far above any real use — a human
+ * approves one at a time — and low enough that a hostile relay cannot turn
+ * `pair` frames into unbounded memory in the process that owns the PTYs.
+ */
+const MAX_PENDING_TICKETS = 64;
 
 /**
  * How recent the session's last server-verified passkey assertion must be for
@@ -45,6 +53,108 @@ export interface PairingRequest {
   readonly devicePublicKey: string;
   /** Client-suggested label; the approver may override it. */
   readonly requestedLabel: string;
+}
+
+/**
+ * The longest `requestedLabel` the approval modal will render, in code points.
+ * Generous for a device name and far short of anything that can push the
+ * Approve/Deny buttons off a laptop screen.
+ */
+export const PAIRING_LABEL_LIMIT = 64;
+
+/**
+ * The device-key fingerprint shown to a human during pairing: the leading
+ * characters of the base64url device public key.
+ *
+ * Shared, because it is only useful if **both** ends render the same thing.
+ * The Host's approval modal shows the fingerprint of the key that is asking;
+ * Pocket shows the fingerprint of its own key. Comparing them is what turns
+ * the modal from a prompt the user can only accept on faith into one they can
+ * actually check — the pairing ceremony verifies no assertion, so the human is
+ * the control (`docs/specs/remote-security-model.md`, Pairing Ceremony).
+ */
+export const PAIRING_FINGERPRINT_LENGTH = 8;
+
+/**
+ * Where the fingerprint starts, and why it is not zero.
+ *
+ * A device public key is a *raw* P-256 point: the uncompressed-form tag `0x04`
+ * followed by X and Y. Base64url of that always begins `B`, and its second
+ * character only ever takes 16 values (two fixed bits from the tag plus four
+ * from X) — verified empirically over generated keys. Slicing from zero would
+ * therefore spend two of eight displayed characters on ~4 bits, leaving ~40
+ * where the length implies ~48. Since the whole point of the fingerprint is
+ * that a human compares it against another one, every displayed character has
+ * to be doing work.
+ */
+const FINGERPRINT_OFFSET = 2;
+
+/** The fingerprint of a device public key, for display to a human. */
+export function pairingFingerprint(devicePublicKey: string): string {
+  return devicePublicKey.slice(FINGERPRINT_OFFSET, FINGERPRINT_OFFSET + PAIRING_FINGERPRINT_LENGTH);
+}
+
+/**
+ * Structural validation of a `PairingRequest` off the wire.
+ *
+ * Shared, and used on **both** sides, for the reason the whole security model
+ * exists: the Server relays this frame, and the Host does not trust the
+ * Server. A guard that ran only on the Server would leave the Host — the party
+ * that actually writes the ACL and renders the approval UI — taking a
+ * relay-supplied object on faith. `connect2` has always been defended this way
+ * (`authorizeConnection` contains a malformed request as a denial); this is
+ * the same rule for `pair`.
+ */
+export function isPairingRequest(request: unknown): request is PairingRequest {
+  if (!request || typeof request !== 'object') return false;
+  const candidate = request as Record<string, unknown>;
+  return (
+    isBoundedString(candidate.accountId) &&
+    isBoundedString(candidate.passkeyCredentialId) &&
+    isBoundedString(candidate.passkeyPublicKeyHash) &&
+    isBoundedString(candidate.devicePublicKey) &&
+    isBoundedString(candidate.requestedLabel)
+  );
+}
+
+/**
+ * The longest any single `PairingRequest` field may be.
+ *
+ * Type checks alone bound nothing: a megabyte string is a `string`. Every real
+ * field here is a base64url key, a hash, a credential id, or a device name —
+ * all comfortably under this. The frame itself is not otherwise capped
+ * (`@hono/node-ws` constructs its `WebSocketServer` with `ws`'s 100 MiB
+ * default), so this is where a pairing frame stops being able to cost the Host
+ * process memory proportional to what the relay chose to send.
+ */
+const PAIRING_FIELD_LIMIT = 1024;
+
+function isBoundedString(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= PAIRING_FIELD_LIMIT;
+}
+
+/**
+ * A `requestedLabel` reduced to something safe to render in the approval
+ * modal. Same rule as `boundedPushText`, and for a stronger reason: the label
+ * is attacker-chosen free text, and this is the one dialog the entire ACL
+ * rests on. An unbounded label can push the buttons out of view, and a bidi
+ * override can make the displayed text read as something other than what it
+ * is.
+ */
+export function boundedPairingLabel(value: unknown): string {
+  return boundedPushText(value, { limit: PAIRING_LABEL_LIMIT, fallback: '(unnamed)' });
+}
+
+/**
+ * The other field the approval modal renders, reduced by the same rule.
+ *
+ * `accountId` is as attacker-chosen as the label is when the relay is hostile,
+ * and bounding one without the other just moves the overflow. The modal has no
+ * max-height, so an unbounded value here pushes Approve and Deny off the
+ * screen — a denial-of-service on the one dialog that must stay usable.
+ */
+export function boundedPairingAccount(value: unknown): string {
+  return boundedPushText(value, { limit: PAIRING_LABEL_LIMIT, fallback: '(unknown)' });
 }
 
 export type PairingState = 'pending' | 'approved' | 'denied' | 'expired';
@@ -104,6 +214,7 @@ export class PairingCeremony {
       requestedAt,
       expiresAt: requestedAt + this.#ttlMs,
     };
+    this.#pruneTickets();
     this.#tickets.set(pairingId, ticket);
     return this.#snapshot(ticket);
   }
@@ -148,6 +259,34 @@ export class PairingCeremony {
       throw new PairingError('not-pending', `pairing ${pairingId} is already ${ticket.state}`);
     }
     return ticket;
+  }
+
+  /**
+   * Bound the ticket map. Every `pair` frame the relay forwards mints a
+   * ticket, and nothing else ever removed one — a signed-in account can send
+   * them faster than the 30-second presence window closes, and they accumulate
+   * in the Host process on the user's laptop.
+   *
+   * Resolved and expired tickets are kept for one extra TTL rather than
+   * dropped on resolution, so a second approve on a ticket the user just acted
+   * on still fails as `not-pending` / `expired` — the error the UI and the
+   * spec describe — instead of degrading to `unknown-pairing`.
+   */
+  #pruneTickets(): void {
+    const cutoff = this.#now() - this.#ttlMs;
+    for (const [pairingId, ticket] of this.#tickets) {
+      if (ticket.expiresAt <= cutoff) this.#tickets.delete(pairingId);
+    }
+    // Age alone is rate-bounded, not bounded: a relay that sends pair frames
+    // faster than they expire still grows this map for one whole grace window.
+    // A count cap is the actual bound. Oldest first — `Map` iterates in
+    // insertion order, and the oldest pending request is the one whose human
+    // is least likely to still be looking at the modal.
+    while (this.#tickets.size >= MAX_PENDING_TICKETS) {
+      const oldest = this.#tickets.keys().next();
+      if (oldest.done) break;
+      this.#tickets.delete(oldest.value);
+    }
   }
 
   #reapExpiry(ticket: Ticket): void {

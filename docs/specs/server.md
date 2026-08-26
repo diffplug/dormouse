@@ -24,7 +24,12 @@ UI lives in `lib`/`standalone`.
 * A dropped WebSocket is handled by reloading the page / reconnecting the
   host. No resume protocol.
 * Everything transient (challenges, sessions, relay state) is in memory; a
-  server restart just means everyone reconnects.
+  server restart just means everyone reconnects. In-memory is not unbounded:
+  `HostChallengeIssuer.issue` prunes expired entries on every call, and
+  `PairingCeremony` drops tickets one TTL past expiry. Both matter because the
+  frames that mint them are cheap to send — `POST /api/signin/begin` needs no
+  auth at all, and a `connect` frame needs only a session, not a pairing, yet
+  issues a challenge in the Host process on the user's laptop.
 
 ## Configuration
 
@@ -182,6 +187,14 @@ malformed reads as a missing registration (which Pocket repairs by re-offering
 Enable) instead of a live one nothing can be delivered to. Source of truth:
 `PushSubscriptionStore.list` / `.upsert` in `server/src/state.ts` and the
 subscribe route in `server/src/app.ts`.
+
+`hosts.json` rows are validated as they are read, the same way
+`push-subscriptions.json`'s are and for the same reason: hand-editing this file
+is the *documented* revocation mechanism, so a half-finished edit is an
+expected state. A row that is not a well-formed enrollment is dropped rather
+than carried — unguarded, one with a null `hostToken` makes `findByToken`'s
+digest compare throw, which 500s every `/ws/host` upgrade and every push route
+over a single bad line.
 
 `hosts.json` stores `hostToken` — the host↔server relay bearer secret — in
 plaintext, and `vapid.json` a private key, so both files are written owner-only:
@@ -408,7 +421,16 @@ re-asserts via `/api/reauth/*` (one biometric prompt) and retries
 (`docs/specs/remote-security-model.md`, Pairing Ceremony). The Host runs
 `PairingCeremony` and only local approval writes the ACL. A malformed or
 stale `PairingRequest` is answered locally and is never shown in the Host
-approval UI.
+approval UI. **Both sides run the shape guard**, and deliberately so: the
+server's `isPairingRequest` check is a courtesy that keeps a bad frame off the
+wire, while the Host runs the same `isPairingRequest` from `server-lib-common`
+on arrival because the security model does not trust the relay. A Host that
+relied on the server's check would be taking a relayed object on faith in the
+one place — the approval UI and the record it writes — where that is least
+acceptable. The Host also reduces `requestedLabel` with `boundedPairingLabel`
+before any consumer sees it (same rule as `boundedPushText`): it is
+attacker-chosen text rendered in a security dialog. Source of truth:
+`RemoteHost.#onPair` in `lib/src/remote/host/remote-host.ts`.
 
 ### Connect (every session)
 
@@ -730,6 +752,10 @@ terminates HTTPS on the node's own MagicDNS name and proxies to the server on
 loopback. There is no cloud relay; that is staged in
 [SELF_HOST.md](../../SELF_HOST.md) `## Future`.
 
+The security properties this deployment is audited against — file modes, the
+loopback bind, the origin-rewrite refusal, the Funnel check — are the
+"Network posture" and "Credentials at rest" `FAIL IF` lines in `SECURITY.md`.
+
 Source of truth: `deploy/local/install-macos.sh`. It is the whole mechanism —
 one idempotent script, no hand-edited plists, no scheduled updater. Running it
 again updates the installed release from the current checkout; it never pulls,
@@ -755,11 +781,16 @@ Invariants the installer exists to hold:
   `config/server.env` is mode `0600`, generated once with a locally generated
   setup password, and preserved byte-for-byte thereafter. Purging state is a
   separate, explicitly confirmed operation.
-* **Loopback only.** The install pins `DORMOUSE_BIND_HOST=127.0.0.1` and
-  refuses to proceed without it — see the Configuration note above on why the
-  listen interface is a security boundary when the TLS proxy is local.
-  Port 3100, deliberately not 3000, so the installed service can coexist with
-  `pnpm dev:server` / `pnpm dev:pocket-server` on the same laptop.
+* **Loopback only, and tailnet-only.** The install pins
+  `DORMOUSE_BIND_HOST=127.0.0.1` and refuses to proceed without it — see the
+  Configuration note above on why the listen interface is a security boundary
+  when the TLS proxy is local. Port 3100, deliberately not 3000, so the
+  installed service can coexist with `pnpm dev:server` /
+  `pnpm dev:pocket-server` on the same laptop. `verify` also fails on an
+  active `tailscale funnel`: Serve and Funnel are one configuration surface,
+  and a Funnel publishes this same origin to the public internet, where the
+  setup password becomes an internet-facing guessing target that nothing in
+  the threat model was sized for (`SECURITY.md` -> "Network posture").
 * **`DORMOUSE_ORIGIN` is durable WebAuthn identity.** It is derived from the
   node's MagicDNS name. If an existing installation records a different origin
   the installer stops rather than rewriting it, because the rewrite silently

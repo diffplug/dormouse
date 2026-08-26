@@ -17,6 +17,12 @@ access. Adding a new passkey to an account, or compromising the coordinating
 Server, does not authorize a new client: the Host rejects any client that has
 not been locally paired.
 
+`SECURITY.md` -> "Remote Control" is this model's audited face: it names the
+subset of the properties below that are load-bearing enough to be checked
+nightly, and states plainly which risks are accepted (the setup password's
+minimal hardening) and which gaps are open (revocation, the audit trail). This
+spec is the design; that section is what a machine verifies about it.
+
 Everything in this spec is implemented in `server-lib-common/src/security/` —
 runtime-agnostic modules shared verbatim by the Server, the Host module in
 `lib`, and the Pocket client, so the three sides cannot disagree on what a
@@ -180,6 +186,28 @@ pairing modal, same pattern as KillConfirm — `docs/specs/server.md`, Host
 side); the user approves locally on the Host; the Host writes the
 `HostAclRecord` binding the passkey credential identity to the device public
 key. The Client is now trusted by that Host and no other.
+
+**The approval is only as good as what the modal lets a human check.** The
+ceremony verifies no assertion, so the person at the Host *is* the control —
+and every field of a `PairingRequest` is chosen by whoever composed it. The
+one checkable field is the device-key fingerprint: the Host's modal shows
+`pairingFingerprint(devicePublicKey)` and Pocket shows the fingerprint of its
+own key on the Hosts screen, so the two can be compared before approving. Both
+render the same helper from `server-lib-common/src/security/pairing.ts`
+precisely so they cannot drift into showing different slices of the same key.
+Without that comparison the prompt asks the user to recognize a key they have
+never seen; with it, a substituted or injected request — the thing a
+compromised Server could otherwise time to arrive exactly when one is expected
+— shows the wrong eight characters. `requestedLabel` is attacker-chosen free
+text and is reduced by `boundedPairingLabel` before display, so it cannot
+overflow the dialog or carry bidi overrides that make it read as something
+else.
+
+The Host validates the request's shape itself (`isPairingRequest`) rather than
+relying on the Server having done so, for the same reason it re-verifies
+everything at connect: the Server is not trusted, and an unvalidated relayed
+object reaching the approval UI is both a crash surface and a route to a
+malformed ACL record.
 
 Each displayed approval is bound to the ceremony ticket's immutable
 `pairingId`. If a Client replaces its pending request while the old modal or

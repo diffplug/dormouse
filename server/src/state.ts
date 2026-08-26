@@ -168,9 +168,22 @@ export class HostStore extends JsonFileStore {
     super(stateDir, 'hosts.json', now);
   }
 
-  /** Read `hosts.json`, or `[]` if no host has been enrolled yet. */
-  list(): Promise<StoredHost[]> {
-    return this.read<StoredHost[]>([]);
+  /**
+   * Read `hosts.json`, or `[]` if no host has been enrolled yet, dropping any
+   * row that is not a well-formed enrollment.
+   *
+   * Validated on read for the same reason `PushSubscriptionStore.list` is:
+   * hand-editing this file is the *documented* revocation mechanism
+   * (Guardrails), so a half-finished edit is an expected state, not a
+   * corruption. Unguarded, a row with a null `hostToken` makes `findByToken`'s
+   * `sha256(h.hostToken)` throw, which 500s every `/ws/host` upgrade and every
+   * push route — the whole server, over one bad line. Dropping the row instead
+   * makes that host un-enrolled, which is what the person editing it was
+   * reaching for anyway.
+   */
+  async list(): Promise<StoredHost[]> {
+    const rows = await this.read<unknown[]>([]);
+    return Array.isArray(rows) ? rows.filter(isStoredHost) : [];
   }
 
   /**
@@ -209,6 +222,17 @@ export class HostStore extends JsonFileStore {
       return host;
     });
   }
+}
+
+function isStoredHost(row: unknown): row is StoredHost {
+  if (!row || typeof row !== 'object') return false;
+  const candidate = row as Record<string, unknown>;
+  return (
+    typeof candidate.hostId === 'string' &&
+    typeof candidate.hostToken === 'string' &&
+    typeof candidate.label === 'string' &&
+    typeof candidate.enrolledAt === 'number'
+  );
 }
 
 /** A Web Push subscription as stored in `push-subscriptions.json`. */

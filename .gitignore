@@ -69,3 +69,7 @@ chromatic-diagnostics.json
 .claude/worktrees/
 .claude/commands/*
 !.claude/commands/release-notes.md
+
+# Local security-audit fragments (scripts/security-audit-local.sh)
+audit-*.md
+audit-status.txt

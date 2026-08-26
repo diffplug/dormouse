@@ -23,6 +23,7 @@ import {
   type PocketSocket,
 } from '../client/pocket-client';
 import { browserWebAuthn } from '../client/webauthn';
+import { pairingFingerprint } from 'server-lib-common';
 import { getOrCreateDeviceKey } from '../client/device-key';
 import {
   getPushAvailability,
@@ -129,6 +130,7 @@ const PK = {
   // reliable red inset hairline — panel-border is transparent in many themes.
   error: 'rounded-lg px-3.5 py-2.5 text-[13px] text-error shadow-[inset_0_0_0_1px_var(--color-error)]',
   empty: 'px-4 py-10 text-center text-[13px] text-app-fg/70',
+  deviceLine: 'px-4 pt-1 text-[11px] text-app-fg/60',
   disclosure:
     'w-fit cursor-pointer text-[12px] text-app-fg/70 underline underline-offset-2 transition-colors hover:text-app-fg',
   setup: 'flex flex-col gap-3 border-t border-app-fg/15 pt-4',
@@ -146,6 +148,26 @@ export default function App(): React.ReactElement {
       }),
     [],
   );
+
+  // This browser's own device-key fingerprint, shown on the Hosts screen so
+  // the laptop's approval modal can actually be checked against something. The
+  // pairing ceremony verifies no assertion — the human at the modal is the
+  // control, and until both ends showed the same 8 characters that human was
+  // being asked to approve a key they had no way to recognize.
+  const [deviceFingerprint, setDeviceFingerprint] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void getOrCreateDeviceKey()
+      .then(({ devicePublicKey }) => {
+        if (!cancelled) setDeviceFingerprint(pairingFingerprint(devicePublicKey));
+      })
+      // A device key this browser cannot create is a failure the pair/connect
+      // paths already report; this display is not the place to raise it again.
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const [phase, setPhase] = useState<Phase>('auth');
   const [error, setError] = useState<string | null>(null);
@@ -405,6 +427,7 @@ export default function App(): React.ReactElement {
         pushState={pushState}
         pushConfigStatus={pushConfig.status}
         onRefresh={() => run('refresh', loadHosts)}
+        deviceFingerprint={deviceFingerprint}
         onPair={onPair}
         onConnect={onConnect}
         onEnablePush={onEnablePush}
@@ -621,6 +644,7 @@ export function HostsView({
   isPushSubscribed,
   pushState,
   pushConfigStatus = 'ready',
+  deviceFingerprint,
   onRefresh,
   onPair,
   onConnect,
@@ -637,6 +661,8 @@ export function HostsView({
   pushState: PushAvailability | null;
   /** Whether the Server's VAPID public key is already cached for a permission tap. */
   pushConfigStatus?: PushConfigStatus;
+  /** This browser's device-key fingerprint; null until the key is loaded. */
+  deviceFingerprint: string | null;
   onRefresh: () => void;
   onPair: (host: HostView) => void;
   onConnect: (host: HostView) => void;
@@ -657,6 +683,15 @@ export function HostsView({
         </button>
       </header>
       <div className={PK.body}>
+        {deviceFingerprint ? (
+          // Compare this against the Key line in the approval dialog on the
+          // laptop before approving. Rendered even when nothing is pairable,
+          // so it reads as a property of this browser rather than a step in a
+          // flow.
+          <div className={PK.deviceLine}>
+            This device&rsquo;s key: <span className="font-mono">{deviceFingerprint}…</span>
+          </div>
+        ) : null}
         {error ? <div className={PK.error}>{error}</div> : null}
         {/* Install advice is moot when the server cannot push at all — the
             rows below already say push is disabled, and the ritual the notice

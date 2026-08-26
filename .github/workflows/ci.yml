@@ -22,7 +22,28 @@ jobs:
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      # The disclosed dependency snapshots are a SECURITY.md `FAIL IF`
+      # (Dependency Supply Chain), but until this step existed the only thing
+      # that ever ran the generator was the nightly security audit — strictly
+      # after the fact, and only if it reached that check. Two prod-dependency
+      # bumps shipped undisclosed that way (`ws` via vscode-ext, `hono` via a
+      # Renovate lockfile-only bump). Running it here makes forgetting to
+      # regenerate a failed PR instead of a finding filed the next morning.
+      #
+      # The generator needs `node_modules` to match the lockfile — it resolves
+      # every dependency by walking real directories and throws rather than
+      # under-reporting — which is exactly what `--frozen-lockfile` above
+      # guarantees.
+      - name: Dependency disclosure is current
+        run: |
+          node website/scripts/generate-deps.js
+          if ! git diff --quiet -- website/src/data/; then
+            echo "::error::The disclosed dependency snapshots are stale. Run \`node website/scripts/generate-deps.js\` and commit the result."
+            git --no-pager diff -- website/src/data/
+            exit 1
+          fi
 
       - name: Test
         run: pnpm test
