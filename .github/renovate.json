@@ -4,6 +4,16 @@
   "dependencyDashboard": true,
   "timezone": "America/Los_Angeles",
   "schedule": ["* * * * 1"],
+  "vulnerabilityAlerts": {
+    "description": [
+      "Security fixes must not wait for the Monday window. Everything else here is batched to one day a week, which is right for routine bumps and wrong for a known-vulnerable dependency, so this overrides the schedule only.",
+      "The `minimumReleaseAge` cooldown is deliberately NOT overridden. It exists for the opposite threat — a compromised release that gets yanked within a day — and dropping it for security PRs would trade a supply-chain control for patch latency we do not actually need: nothing here auto-merges, a human reviews every Renovate PR, and Dependabot alerts already make the vulnerability visible the moment it is published. The PR is the remediation, not the notification.",
+      "See SECURITY.md, Dependency Supply Chain."
+    ],
+    "enabled": true,
+    "schedule": [],
+    "labels": ["security", "dependencies"]
+  },
   "packageRules": [
     {
       "matchManagers": ["npm", "cargo"],
