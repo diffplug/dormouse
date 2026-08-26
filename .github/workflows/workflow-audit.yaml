@@ -118,8 +118,8 @@ jobs:
             -- .github/workflows/ .config/tend.yaml .github/audit/ | sort -u)
 
           if [ -z "$COMMITS" ]; then
-            echo "No workflow or tend-config changes since $SINCE."
-            echo "No workflow or tend-config changes since \`$SINCE\`." >> "$GITHUB_STEP_SUMMARY"
+            echo "No workflow, tend-config, or audit-prompt changes since $SINCE."
+            echo "No workflow, tend-config, or audit-prompt changes since \`$SINCE\`." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
@@ -333,7 +333,11 @@ jobs:
 
           BODY=$(mktemp)
           {
-            echo "$COUNT unexplained commit(s) touching \`.github/workflows/\` or \`.config/tend.yaml\` since \`$SINCE\`."
+            # Keep this enumeration in sync with the pathspecs above — it is the
+            # one line a human reads first, and an audit-prompt-only commit
+            # reported under a header naming only the other two paths is a
+            # report that misstates why the commit is in front of them.
+            echo "$COUNT unexplained commit(s) touching \`.github/workflows/\`, \`.config/tend.yaml\`, or \`.github/audit/\` since \`$SINCE\`."
             echo ""
             echo "Routine Renovate pin bumps and reproducible tend regenerations are"
             echo "classified and omitted — see the run summary for what was skipped."
