@@ -34,6 +34,12 @@ So do not end your turn. Block inside a Bash call instead, waiting for the
 files the subagents write:
 
 ```sh
+# 25 minutes, counted from when this loop starts — i.e. after checkout,
+# setup-node, and the install have already spent runner time. The audit
+# job in `.github/workflows/security-audit.yaml` declares
+# `timeout-minutes: 40` to stay clear of it; raising this deadline
+# without raising that one puts the runner's cancellation first again,
+# and this graceful path stops being reachable at all.
 DEADLINE=$(( $(date +%s) + 1500 ))
 until [ -s audit-supply-chain.md ] && [ -s audit-ci-secrets.md ] && [ -s audit-application.md ]; do
   [ "$(date +%s)" -ge "$DEADLINE" ] && { echo "DEADLINE"; break; }

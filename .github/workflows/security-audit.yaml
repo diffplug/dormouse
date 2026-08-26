@@ -20,6 +20,17 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-latest
+    env:
+      # The three per-domain fragment filenames, in one place. They are
+      # named by the redactor's argv, its fail-closed `rm -f`, and the
+      # reporting step's guard loop, and drift between two of those lists
+      # is precisely what the `FAIL IF` on the redactor exists to catch —
+      # a sink that stops being redacted but keeps being published. Every
+      # use word-splits this deliberately, so the names must stay
+      # space-separated and shell-safe. The artifact `path:` needs one
+      # entry per line and so cannot consume it; that list is spelled out
+      # and carries a pointer back here.
+      AUDIT_FRAGMENTS: audit-supply-chain.md audit-ci-secrets.md audit-application.md
     # Must stay well above the orchestrator's own wait deadline in
     # `.github/audit/orchestrator.md` (25 minutes, counted from when the
     # agent starts — i.e. after checkout, setup-node, and the install).
@@ -176,7 +187,14 @@ jobs:
           # per-domain fragments, and the transcript. The fragments are
           # agent output like any other: a subagent that shells out and
           # prints an environment lands the value in its own fragment,
-          # not in the merged report.
+          # not in the merged report. The fragment names come from the
+          # job-level `AUDIT_FRAGMENTS` so this list and the guard loop in
+          # the reporting step cannot drift; both expansions below are
+          # unquoted on purpose (shellcheck SC2086) because the value is a
+          # filename list. Keep every shell comment outside the
+          # single-quoted script — inside it, Node parses it as
+          # JavaScript and the step fails closed on every run, which
+          # `bash -n` does not catch.
           node -e '
             const fs = require("fs");
             let hits = 0;
@@ -199,10 +217,8 @@ jobs:
             } else {
               console.log("No literal secret occurrences found.");
             }
-          ' "$TRANSCRIPT" audit-report.md \
-              audit-supply-chain.md audit-ci-secrets.md audit-application.md \
-            || { rm -f "$TRANSCRIPT" audit-report.md \
-                   audit-supply-chain.md audit-ci-secrets.md audit-application.md; exit 1; }
+          ' "$TRANSCRIPT" audit-report.md $AUDIT_FRAGMENTS \
+            || { rm -f "$TRANSCRIPT" audit-report.md $AUDIT_FRAGMENTS; exit 1; }
 
       - name: Archive audit transcript
         if: always()
@@ -217,6 +233,10 @@ jobs:
           # ran. `if-no-files-found: warn` is load-bearing here — a domain
           # that died legitimately leaves no fragment, and that must not
           # fail the upload.
+          #
+          # This is the one fragment list that cannot read the job-level
+          # `AUDIT_FRAGMENTS` — `path:` wants one entry per line — so it
+          # is spelled out and has to be edited in step with that value.
           path: |
             ${{ runner.temp }}/claude-execution-output.json
             audit-report.md
@@ -267,7 +287,9 @@ jobs:
           # did not finish, not a security finding — and MISSING already
           # exits non-zero and holds the release gate shut.
           if [ "$STATUS" = "PASS" ]; then
-            for f in audit-supply-chain.md audit-ci-secrets.md audit-application.md; do
+            # Unquoted on purpose: `AUDIT_FRAGMENTS` is a filename list.
+            # shellcheck disable=SC2086
+            for f in $AUDIT_FRAGMENTS; do
               if [ ! -s "$f" ]; then
                 echo "::warning::Audit reported PASS but $f is missing or empty; downgrading to INCONCLUSIVE."
                 MISSING_FRAGMENTS="${MISSING_FRAGMENTS:+$MISSING_FRAGMENTS, }$f"
@@ -316,18 +338,29 @@ jobs:
               # Two different causes reach MISSING, and they want different
               # first moves from the reader: no status file at all means
               # start in the transcript, while a downgraded PASS means the
-              # named domain is the whole story — the other two reported,
-              # and the "ran short, no verdict" prose below would be wrong
-              # about a run that did reach one.
+              # named domains are the whole story — the rest reported, and
+              # the "ran short, no verdict" prose below would be wrong
+              # about a run that did reach one. The named set can be one,
+              # two, or all three: the fail-closed `rm -f` in `Redact
+              # secrets from agent output` deletes every fragment *and*
+              # `audit-report.md` while leaving `audit-status.txt` alone,
+              # so a PASS reaches this branch with all three named, no
+              # report body, and no transcript link. That path is a
+              # cleartext-secret incident, not a flaky domain, so the
+              # all-three case says so rather than leaving the reader to
+              # infer it from an empty issue.
               if [ -n "${MISSING_FRAGMENTS:-}" ]; then
                 echo "Audit verdict withheld at $DATE. [Run]($RUN_URL)"
                 echo
                 echo "The audit reported \`PASS\`, but it was downgraded: no report"
-                echo "fragment was left by $MISSING_FRAGMENTS. A domain that leaves no"
-                echo "fragment did not pass — it did not finish, and a missing fragment"
-                echo "is indistinguishable in the merged report from a domain that"
-                echo "found nothing. Whatever the other domains reported is below and"
-                echo "still stands; only the named one is unaudited."
+                echo "fragment was left for: $MISSING_FRAGMENTS. A domain that leaves"
+                echo "no fragment did not pass — it did not finish, and a missing"
+                echo "fragment is indistinguishable in the merged report from a domain"
+                echo "that found nothing. The named domains are unaudited; any report"
+                echo "reproduced below covers only the rest. If all three are named,"
+                echo "suspect \`Redact secrets from agent output\` — it deletes every"
+                echo "fragment and the report when it throws, and that means a secret"
+                echo "reached a file in cleartext."
               else
                 echo "Audit produced no verdict at $DATE. [Run]($RUN_URL)"
                 echo
