@@ -35,6 +35,9 @@ write scopes.
 ## Qualitative pass
 
 You own `.github/` (including `.github/audit/`, which holds this audit's own
-prompts), `.config/`, `.claude/`, `scripts/`, and `website/public/` — the Tauri
-updater manifest shipped apps fetch lives there, so it is a release artifact
-rather than marketing. You also own any code anywhere that touches a secret.
+prompts), `.config/`, `.claude/`, `.vscode/`, `scripts/`, and `website/public/`
+— the Tauri updater manifest shipped apps fetch lives there, so it is a release
+artifact rather than marketing. `.vscode/` is yours for the same reason
+`.claude/` is: `tasks.json` and `launch.json` name commands a maintainer's
+machine runs on a keystroke. You also own any code anywhere that touches a
+secret.

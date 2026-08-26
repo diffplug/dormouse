@@ -43,7 +43,8 @@ changed or is worse than described.
 You also own the **rest of the repository** qualitatively, so that no top-level
 path is outside every domain: `lib/`, `server/`, `server-lib-common/`,
 `standalone/`, `vscode-ext/`, `dor/`, `dor-lib-common/`, `canopy/`, `deploy/`,
-`docs/`, and the root files. Remote control is where the depth goes; the rest
-is a sweep for anything that would be a security hole in a terminal that runs
-local shells — command construction, path handling, deserialization of
-persisted state, IPC that crosses a trust boundary.
+`docs/`, `.impeccable/` (the design-token snapshot behind `DESIGN.md`), and the
+root files. Remote control is where the depth goes; the rest is a sweep for
+anything that would be a security hole in a terminal that runs local shells —
+command construction, path handling, deserialization of persisted state, IPC
+that crosses a trust boundary.
