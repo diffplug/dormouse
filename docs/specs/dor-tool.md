@@ -76,6 +76,11 @@ agent-driven). `kill` / `rename` stay universal. Kinds remain **disjoint** for
 - **Identity**: a tool Surface's id is its SessionId (I1 extends to tools).
   Faces and render modes change over its life without changing identity — the
   tool counterpart of I10, and stronger than browsers have today.
+- **Render swaps bypass `replaceSurface`.** A tool's web face is a param of
+  the tool's own leaf: swapping `iframe` ⇄ `ab-*` mutates `renderMode` in
+  place and never routes through the browser-surface replacement path. That is
+  what makes the invariant above true — the same gesture that replaces a
+  browser Surface's id (I10) merely updates a tool's params.
 - **Axes**: the tool column of the six-axis table reads "terminal column for
   the console face, browser column for the web face."
 - **Activity**: full machine via the PTY; WATCHING defaults off for
@@ -165,8 +170,21 @@ afterward.
 ### Dehydrate and rehydrate
 
 For tools announcing `dehydrate: true`. Reap on an idle threshold while
-`Doored` / `Hidden` (never on the minimize itself — reattach must not cost a
-boot every time), or under memory pressure:
+`Doored` / `Hidden` — including Surfaces of an inactive Workspace — never on
+the minimize itself (reattach must not cost a boot every time), or under
+memory pressure. The headline use case is Workspaces, not shutdown: a user can
+keep many tools across many Workspaces, and an inactive Workspace full of
+dehydratable tools drops to zero processes — relieving exactly the
+parked-surface pressure the workspaces rollout projects
+(`docs/specs/layout.md` Stage 4; `MAX_PARKED_SURFACES` in
+`docs/specs/tiling-engine.md`).
+
+**This is an in-session mechanism.** The dehydrated payload lives with the
+running host. Whether it survives a full host quit/restart follows each host's
+session-persistence story (`docs/specs/transport.md`); this spec takes no
+position on quit/restore — the Workspace case alone justifies the mechanism.
+
+The flow:
 
 1. Host sends the graceful-stop signal (grace window).
 2. Tool emits `367;dehydrate;{json}` on the way out; host captures and
@@ -226,13 +244,34 @@ lights an inert affordance: a chip in the pane header, the Dev-Server Chip
 pattern (the declared upgrade of the port scan), and clicking it is the user
 gesture that connects. Output alone never creates surfaces.
 
+**Accepted risk — content-driven announce inside a blessed tool.** A tool
+rendering hostile bytes (a pager on a malicious file) passes the foreground
+gate — the pager *is* the foreground process — so embedded bytes can announce
+an attacker-chosen localhost port and re-point the web face at a service
+already listening on the user's machine, under the tool's name. This is
+accepted, deliberately: the blast radius is the dedupe containment applied to
+ports — an announce only ever reveals/frames, it never transfers input
+authority, grants, or state; the iframe proxy dials upstream as a fresh client
+with no browser cookie authority; and the link-local/cloud-metadata SSRF guard
+stands regardless. The residual is a mislabeled view of the user's own local
+service, inert without further user gestures. If field reports change this
+calculus, the escalations are gesture-gating re-announces that change the
+port, or constraining the framed port to one owned by the session's process
+tree — the latter is not the default because it would break tools that wrap
+double-forking daemons (agent-browser-style), whose port the process-tree scan
+cannot see.
+
 ### Persistence and hosts
 
 `PersistedPane` gains `surfaceType: 'tool'`; params
-`{command, args, cwd, renderMode, url?, identity?, persist?, dehydrated?}`
+`{command, args, cwd, renderMode, url?, identity?, persist?}`
 (`docs/specs/transport.md` owns the persisted shapes; `lib/src/lib/session-types.ts`).
-Cold restore: `persist: "never"` rows are dropped silently (a clock, a
-calculator); the default respawns command + dehydrated state. Remote: the console face is
+The dehydrated payload is in-session state, not part of the persisted params
+(see Dehydrate and rehydrate). Cold restore follows each host's
+session-restore story: where sessions restore, `persist: "never"` rows are
+dropped silently (a clock, a calculator) and the default respawns from bare
+args — the args-only floor is what makes taking no position on quit/restore
+safe. Remote: the console face is
 a Session and rides protocol-v1 as-is; the web face inherits the staged
 browser-surface gap.
 
