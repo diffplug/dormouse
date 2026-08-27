@@ -175,7 +175,7 @@ function startHostServer() {
           'content-type': 'text/event-stream',
           'cache-control': 'no-cache',
           connection: 'keep-alive',
-          // No access-control-allow-origin here: cors(res) already set it, and
+          // No access-control-allow-origin here: cors(req, res) already set it, and
           // writeHead merges what setHeader recorded.
         });
         sseClients.add(res);
