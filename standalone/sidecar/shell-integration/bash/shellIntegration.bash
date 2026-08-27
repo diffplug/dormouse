@@ -28,17 +28,17 @@ __dormouse_633_installed=1
 # C1 ST U+009C. The last is held as its UTF-8 bytes because that is how it
 # reaches us from a filename, and because `[[:cntrl:]]` does not cover it under
 # LC_ALL=C — verified, not assumed.
-__dormouse_633_c1st=$(printf '\302\234')
+__dormouse_633_c1st=$'\302\234'
 
-# Escape a value for OSC 633 transport: the parser splits the E command field on
-# the first raw ';' then decodes \\ and \xNN, so backslash and semicolon must be
-# escaped; newlines/CR are escaped to keep the sequence single-line.
+# Escape a value for the E command field, leaving the result in
+# __dormouse_633_out. Backslash and semicolon are escaped because the parser
+# splits on the first raw ';' then decodes \\ and \xNN; newlines/CR keep the
+# sequence single-line; BEL/ESC/C1-ST are the OSC terminators. Escaping costs
+# nothing here because the parser decodes \xNN back.
+# Why terminators must not survive: docs/specs/terminal-escapes.md -> OSC 633.
 #
-# BEL/ESC/C1-ST are escaped because the terminator scan runs on the raw bytes,
-# *before* any \xNN decoding — so a command line holding a literal BEL ends the
-# sequence early and hands everything after it to the parser as a fresh,
-# fully-trusted OSC. Escaping loses nothing: the parser decodes \xNN back, so
-# the command line still reports verbatim.
+# Out-param rather than a return value: the call site would otherwise need
+# $(...), which forks a subshell on every command in the user's shell.
 __dormouse_633_escape() {
   local value=$1
   value=${value//\\/\\\\}
@@ -48,27 +48,21 @@ __dormouse_633_escape() {
   value=${value//$'\a'/\\x07}
   value=${value//$'\e'/\\x1b}
   value=${value//"$__dormouse_633_c1st"/\\x9c}
-  printf '%s' "$value"
+  __dormouse_633_out=$value
 }
 
-# Reduce a value for the `Cwd=` field, which — unlike E — the parser reads
-# verbatim, with no \xNN decoding, so that a Windows path's backslashes arrive
-# intact. That rules out escaping, so the terminators are removed instead.
-#
-# This is not theoretical: a POSIX path component may hold any byte but '/' and
-# NUL. A hostile program creates $'/tmp/evil\a\e]9;PWNED\a', the user cds in, and
-# every prompt thereafter forges an OSC 9 notification in this shell's own voice
-# — one that latches a ring, persists, is spoken aloud, and is pushed to the
-# paired phone. The injected bytes are consumed by the parser, so nothing shows
-# on screen, and the effect outlives the process that planted it.
+# Reduce a value for the `Cwd=` field into __dormouse_633_out. Unlike E, the
+# parser reads Cwd= verbatim — no \xNN decoding, so a Windows path's backslashes
+# arrive intact — which rules out escaping, so the terminators are removed
+# instead. A path component may hold any byte but '/' and NUL, so a directory
+# name can carry one; see docs/specs/terminal-escapes.md -> OSC 633.
 #
 # The C1 ST goes first and explicitly: under LC_ALL=C it is two ordinary bytes
 # that [[:cntrl:]] does not match.
 __dormouse_633_safe_cwd() {
   local value=$1
   value=${value//"$__dormouse_633_c1st"/}
-  value=${value//[[:cntrl:]]/}
-  printf '%s' "$value"
+  __dormouse_633_out=${value//[[:cntrl:]]/}
 }
 
 __dormouse_633_armed=                       # set at the END of the prompt hook: "the next command is the user's"
@@ -84,7 +78,8 @@ __dormouse_633_prompt() {
   __dormouse_633_armed=
   if [ -n "$__dormouse_633_ran" ]; then printf '\033]633;D;%s\007' "$exit_code"; fi
   __dormouse_633_ran=
-  printf '\033]633;P;Cwd=%s\007' "$(__dormouse_633_safe_cwd "$PWD")"
+  __dormouse_633_safe_cwd "$PWD"
+  printf '\033]633;P;Cwd=%s\007' "$__dormouse_633_out"
   printf '\033]633;A\007'
   if [ -n "$__dormouse_633_user_pc" ]; then
     ( exit "$exit_code" )                   # restore $? for the user's PROMPT_COMMAND
@@ -100,7 +95,8 @@ __dormouse_633_preexec() {
   [ -n "${COMP_LINE:-}" ] && return                        # tab-completion, not a submitted command
   __dormouse_633_armed=
   __dormouse_633_ran=1
-  printf '\033]633;E;%s\007' "$(__dormouse_633_escape "$BASH_COMMAND")"
+  __dormouse_633_escape "$BASH_COMMAND"
+  printf '\033]633;E;%s\007' "$__dormouse_633_out"
   printf '\033]633;C\007'
 }
 

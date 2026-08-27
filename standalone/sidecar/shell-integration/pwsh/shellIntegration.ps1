@@ -58,24 +58,22 @@ function Global:__dormouse_633_escape([string]$value) {
 	$value = $value.Replace(';', '\x3b')
 	$value = $value.Replace("`n", '\x0a')
 	$value = $value.Replace("`r", '\x0d')
-	# BEL, ESC (which begins ST) and the C1 ST end an OSC string, and the parser's
-	# terminator scan runs on the raw bytes *before* any \xNN decoding — so a
-	# command line holding a literal BEL ends the sequence early and hands the rest
-	# to the parser as a fresh, fully trusted OSC. Escaping loses nothing here: the
-	# parser decodes \xNN back. Written as char codes rather than `a/`e so this
-	# still works on Windows PowerShell 5.1, where `e does not exist.
+	# BEL, ESC (which begins ST) and the C1 ST end an OSC string and so must not
+	# survive; docs/specs/terminal-escapes.md -> OSC 633 has the why. Escaping
+	# costs nothing here because the parser decodes \xNN back. Written as char
+	# codes rather than `a/`e so this still works on Windows PowerShell 5.1, where
+	# `e does not exist.
 	$value = $value.Replace([string][char]0x07, '\x07')
 	$value = $value.Replace([string][char]0x1b, '\x1b')
 	$value = $value.Replace([string][char]0x9c, '\x9c')
 	return $value
 }
 
-# Reduce a value for the `Cwd=` field, which — unlike E — the parser reads
-# verbatim, with no \xNN decoding, so a Windows path's backslashes arrive
-# intact. That rules out escaping, so the terminators are removed instead. A
-# directory name carrying one would otherwise forge a trusted OSC in this
-# shell's own voice on every prompt render. \p{Cc} is the Unicode control
-# category, which covers C0, DEL, and the C1 range including U+009C.
+# Reduce a value for the `Cwd=` field. Unlike E, the parser reads Cwd= verbatim
+# — no \xNN decoding, so a Windows path's backslashes arrive intact — which
+# rules out escaping, so the terminators are removed instead. \p{Cc} is the
+# Unicode control category, covering C0, DEL, and the C1 range including the
+# U+009C that bash/zsh have to strip separately.
 function Global:__dormouse_633_safe_cwd([string]$value) {
 	if ($null -eq $value) { return '' }
 	return ($value -replace '\p{Cc}', '')
@@ -148,10 +146,8 @@ function Global:prompt() {
 	}
 
 	# Prompt start (A) and cwd (P). ProviderPath is the real filesystem path even
-	# when the current location is on a PSDrive. The cwd is sent unescaped — like
-	# the bash/zsh emitters' $PWD — because the parser reads Cwd= verbatim (no
-	# \xNN decoding); a Windows path's backslashes must reach it intact. Unescaped
-	# is not unfiltered: __dormouse_633_safe_cwd drops the OSC terminators first.
+	# when the current location is on a PSDrive. Unescaped is not unfiltered —
+	# see __dormouse_633_safe_cwd above for why Cwd= is reduced rather than escaped.
 	$cwd = (Get-Location).ProviderPath
 	$cwd = __dormouse_633_safe_cwd $cwd
 	$result += __dormouse_633_osc 'A'

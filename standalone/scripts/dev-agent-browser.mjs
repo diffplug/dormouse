@@ -14,7 +14,7 @@ import spawn from 'cross-spawn';
 import { createInterface } from 'node:readline';
 // The bridge's security boundary, in its own module so it is testable —
 // see standalone/scripts/dev-host-guard.test.mjs.
-import { corsHeaders, isAuthorized, isJsonRequest } from './dev-host-guard.mjs';
+import { corsHeaders, isAuthorized } from './dev-host-guard.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const standaloneDir = path.resolve(__dirname, '..');
@@ -140,17 +140,18 @@ const invokeMap = {
 };
 
 async function readJson(req) {
-  if (!isJsonRequest(req)) throw new Error('content-type must be application/json');
+  // The application/json requirement is enforced in the gate below, before
+  // routing, so that it also covers a route that never reads a body.
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
   if (chunks.length === 0) return {};
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
+const CORS = Object.entries(corsHeaders(viteOrigin));
+
 function cors(res) {
-  for (const [name, value] of Object.entries(corsHeaders(viteOrigin))) {
-    res.setHeader(name, value);
-  }
+  for (const [name, value] of CORS) res.setHeader(name, value);
 }
 
 function startHostServer() {
@@ -174,7 +175,8 @@ function startHostServer() {
           'content-type': 'text/event-stream',
           'cache-control': 'no-cache',
           connection: 'keep-alive',
-          'access-control-allow-origin': viteOrigin,
+          // No access-control-allow-origin here: cors(res) already set it, and
+          // writeHead merges what setHeader recorded.
         });
         sseClients.add(res);
         sendSse(res, 'sidecar', { event: 'dev:connected', data: { pid: process.pid } });

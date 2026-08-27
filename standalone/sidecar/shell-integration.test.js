@@ -19,11 +19,16 @@ const ZSH = '/bin/zsh';
 // findOscTerminator): BEL, ST, and the C1 ST.
 const TERMINATORS = ['\x07', '\x1b\\', '\u009c'];
 
-/** Source a shell's integration script, then call one of its helpers. */
+/**
+ * Source a shell's integration script, call one of its helpers, and echo the
+ * out-param it sets. The helpers assign `__dormouse_633_out` rather than
+ * printing, so the emitters can avoid a `$(...)` fork on every prompt.
+ */
 function callHelper(shell, fn, value, env = {}) {
-  const script = shell === BASH
-    ? `source ${JSON.stringify(path.join(dir, 'shell-integration/bash/shellIntegration.bash'))} 2>/dev/null; ${fn} "$1"`
-    : `source ${JSON.stringify(path.join(dir, 'shell-integration/zsh/.zshrc'))} 2>/dev/null; ${fn} "$1"`;
+  const source = shell === BASH
+    ? path.join(dir, 'shell-integration/bash/shellIntegration.bash')
+    : path.join(dir, 'shell-integration/zsh/.zshrc');
+  const script = `source ${JSON.stringify(source)} 2>/dev/null; ${fn} "$1"; printf '%s' "$__dormouse_633_out"`;
   // -i because the bash script returns early for a non-interactive shell; the
   // no-rc flags keep the developer's own dotfiles out of the result (and cut a
   // second off zsh).
@@ -43,12 +48,12 @@ assert.ok(shells.length > 0, 'expected at least one of bash/zsh to exist');
 
 for (const [name, bin] of shells) {
   test(`${name}: safe_cwd removes every OSC terminator`, () => {
-    for (const term of TERMINATORS) {
-      const hostile = `/tmp/evil${term}\x1b]9;PWNED\x07`;
-      const out = callHelper(bin, '__dormouse_633_safe_cwd', hostile);
-      for (const t of TERMINATORS) {
-        assert.ok(!out.includes(t), `${name}: ${JSON.stringify(t)} survived in ${JSON.stringify(out)}`);
-      }
+    // One fixture carrying all three, rather than one spawn per terminator for
+    // a byte-identical hazard set.
+    const hostile = `/tmp/evil${TERMINATORS.join('x')}\x1b]9;PWNED\x07`;
+    const out = callHelper(bin, '__dormouse_633_safe_cwd', hostile);
+    for (const t of TERMINATORS) {
+      assert.ok(!out.includes(t), `${name}: ${JSON.stringify(t)} survived in ${JSON.stringify(out)}`);
     }
   });
 

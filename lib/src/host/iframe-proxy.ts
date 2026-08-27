@@ -28,8 +28,12 @@
  *     A server bound to exactly one upstream is inherently not an open forwarder.
  *   - No token in the URL. It would land in `location.pathname` and break
  *     client-side routers (a React-Router/Remix dev server reads the path,
- *     matches no route, and renders its own 404). The dedicated server +
- *     loopback bind is the boundary instead.
+ *     matches no route, and renders its own 404), and it would not survive onto
+ *     root-relative sub-resource requests at all. The dedicated server and the
+ *     loopback bind are mitigations, **not** the boundary — the port is
+ *     discoverable in seconds. The boundary is the `Host` check plus the
+ *     conditional `Origin` vouch below: this server admits anyone and vouches
+ *     for no one it did not serve. See `./loopback-guard.ts`.
  */
 import * as http from 'http';
 import * as net from 'net';
@@ -181,7 +185,7 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
   //
   // An absent Origin stays absent, as before — that is a top-level navigation
   // or a same-origin GET, which is the ordinary iframe case.
-  if (headers.origin && isOwnOrigin(String(headers.origin), grant.port)) {
+  if (isOwnOrigin(req.headers.origin, grant.port)) {
     headers.origin = grant.upstream.origin;
   }
   // Referer needs no such test: it only substitutes our own proxy origin, so a

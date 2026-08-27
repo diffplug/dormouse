@@ -13,9 +13,7 @@
 // `SECURITY.md` -> "Loopback Listeners" auditing the class. This file keeps its
 // own copy rather than importing that module: it is a dev-only, unbundled
 // script in another package, and making it depend on built TS to share a few
-// lines would cost more than the duplication does. The credential mechanism
-// differs anyway — a URL token works here because the harness owns the page's
-// URL, which is exactly what the iframe proxy cannot assume.
+// lines would cost more than the duplication does.
 import { createHash, timingSafeEqual } from 'node:crypto';
 
 function sha256(value) {
@@ -38,6 +36,10 @@ function sha256(value) {
 export function isAuthorized(req, { token, port }) {
   const host = (req.headers?.host || '').toLowerCase();
   if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) return false;
+  // The content-type test belongs in the gate, not in the body reader: a route
+  // that never parses a body would otherwise silently lose the one control that
+  // stops a preflight-free cross-origin POST.
+  if (req.method && req.method !== 'GET' && !isJsonRequest(req)) return false;
   let presented;
   try {
     presented = new URL(req.url || '/', `http://127.0.0.1:${port}`).searchParams.get('t');
@@ -65,6 +67,8 @@ export function isJsonRequest(req) {
  * Exactly the dev page's origin, never `*`. Under `*` every response was
  * readable cross-origin, which leaks the `read_clipboard_text` and
  * `read_clipboard_file_paths` invokes outright.
+ *
+ * Constant for a run — build it once, not per request.
  */
 export function corsHeaders(viteOrigin) {
   return {

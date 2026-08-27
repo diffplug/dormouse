@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
 import { corsHeaders, isAuthorized, isJsonRequest } from './dev-host-guard.mjs';
 
 const TOKEN = 'a'.repeat(48);
@@ -40,44 +39,24 @@ test('only application/json bodies are accepted', () => {
   assert.equal(isJsonRequest(req('/', {})), false);
 });
 
+test('the gate itself refuses a non-JSON POST, so a bodyless route is covered too', () => {
+  const post = (headers) => isAuthorized(
+    { url: `/__dormouse_dev_host/send?t=${TOKEN}`, method: 'POST', headers: { host: `127.0.0.1:${PORT}`, ...headers } },
+    { token: TOKEN, port: PORT },
+  );
+  assert.equal(post({ 'content-type': 'application/json' }), true);
+  assert.equal(post({ 'content-type': 'text/plain' }), false);
+  assert.equal(post({}), false);
+  // GET carries no body, so it is exempt — that is how the SSE stream connects.
+  assert.equal(isAuthorized(
+    { url: `/__dormouse_dev_host/events?t=${TOKEN}`, method: 'GET', headers: { host: `127.0.0.1:${PORT}` } },
+    { token: TOKEN, port: PORT },
+  ), true);
+});
+
 test('CORS names one origin rather than *', () => {
   const headers = corsHeaders('http://localhost:1420');
   assert.equal(headers['access-control-allow-origin'], 'http://localhost:1420');
   assert.notEqual(headers['access-control-allow-origin'], '*');
   assert.equal(headers.vary, 'origin');
-});
-
-test('end to end, an unauthorized caller cannot tell the port from a closed one', async () => {
-  // Guards the ordering in dev-agent-browser.mjs: the gate runs before routing
-  // and before any body read, so every refusal looks like the fall-through 404.
-  let dispatched = false;
-  const server = http.createServer((request, response) => {
-    if (!isAuthorized(request, { token: TOKEN, port: server.address().port })) {
-      response.writeHead(404).end('not found');
-      return;
-    }
-    dispatched = true;
-    response.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}');
-  });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const port = server.address().port;
-  const url = (query) => `http://127.0.0.1:${port}/__dormouse_dev_host/send${query}`;
-
-  const attack = await fetch(url(''), {
-    method: 'POST',
-    headers: { 'content-type': 'text/plain' },
-    body: '{"cmd":"pty_spawn","args":{"options":{"shell":"/bin/sh","args":["-c","touch /tmp/pwned"]}}}',
-  });
-  assert.equal(attack.status, 404);
-  assert.equal(await attack.text(), 'not found');
-  assert.equal(dispatched, false, 'pty_spawn must not reach the sidecar');
-
-  const legit = await fetch(url(`?t=${TOKEN}`), {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: '{"cmd":"pty_request_init"}',
-  });
-  assert.equal(legit.status, 200);
-  assert.equal(dispatched, true);
-  await new Promise((resolve) => server.close(resolve));
 });
