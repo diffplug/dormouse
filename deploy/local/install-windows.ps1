@@ -977,7 +977,7 @@ while ($true) {
 `$LABEL = '$LABEL'
 `$TASK_PATH = '$TASK_PATH'
 # The port the installer configured Serve against. Only a fallback: the value in
-# configserver.env wins whenever it is readable.
+# config\server.env wins whenever it is readable.
 `$FALLBACK_PORT = '$LOOPBACK_PORT'
 "@
 
@@ -1682,6 +1682,16 @@ function Invoke-Rollback {
   }
   Restart-DormouseTask
   if (Wait-Health -Url "http://127.0.0.1:$PORT/api/hello" -Seconds 40) {
+    # A 200 says only that SOMETHING answers, and this is the one command whose
+    # entire contract is which release serves. Every kill in Stop-DormouseProcess
+    # is best-effort and Start-ScheduledTask runs -ErrorAction SilentlyContinue,
+    # so a failed reap leaves the release being rolled AWAY FROM holding the port
+    # and answering -- reported as "rolled back and healthy" without this check.
+    $serving = Get-ListeningRelease
+    if ($serving -ne $prev) {
+      Write-Host "${C_RED}port $PORT answers, but from '$(if ($serving) { $serving } else { 'an unidentifiable process' })' rather than the restored $prev -- check: manage verify$C_OFF"
+      return 1
+    }
     Write-Host "${C_GRN}rolled back and healthy$C_OFF"
     return 0
   }

@@ -805,8 +805,7 @@ because the macOS mechanism has no unprivileged Windows equivalent:
   *fails*; it does not restart one that exits 0, which is what launchd's
   `KeepAlive` does. So `bin\run-server.ps1` is a supervision loop with the same
   10-second throttle the plist declares, and `manage verify` checks that the
-  loop is still there rather than trusting the task settings alone. Stopping the
-  task terminates its whole job object, wrapper included.
+  loop is still there rather than trusting the task settings alone.
 
 Invariants the installer exists to hold:
 

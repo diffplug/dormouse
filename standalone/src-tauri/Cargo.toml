@@ -31,6 +31,9 @@ windows = { version = "0.62", features = [
     "Win32_System_Memory",
     "Win32_System_Ole",
     "Win32_UI_Shell",
+    # restrict_to_owner's Windows arm: the DACL that stands in for 0700/0600.
+    "Win32_Security",
+    "Win32_Security_Authorization",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

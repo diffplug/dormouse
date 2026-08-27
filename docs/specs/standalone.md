@@ -373,8 +373,17 @@ equivalent concept, so that step is unix-only). On unix the directory is
 written because the rename preserves its mode — the blob carries terminal
 transcripts, so under the bare umask it landed `0644` and any other local
 account could read the user's scrollback (`SECURITY.md` -> Remote Control,
-Credentials at rest). Best-effort and unix-only: Windows ACLs are not unix
-modes, and a filesystem without POSIX permissions must not fail a save. There
+Credentials at rest). On Windows `restrict_to_owner` applies the equivalent
+instead — a DACL protected from inheritance carrying exactly one entry, for the
+user the process runs as — because a unix mode is a silent no-op there and
+`%LOCALAPPDATA%` is not private by default; its inherited ACL has been observed
+granting SYSTEM, Administrators and an unresolvable `S-1-5-21-…` principal
+read/write on everything beneath it. `restrict_to_owner_leaves_one_owner_only_ace`
+asserts all three properties. The same function locks the sidecar's state
+directory in `remote_host_state_dir`, which is what the Host enrollment file
+inherits — `FileHostStateStore`'s own `0700`/`0600` cannot help on Windows and
+Node has no ACL API. Best-effort throughout: a filesystem without the
+permission model it wants must not fail a save. There
 is no WAL to grow, and overwriting in place bounds the on-disk size to one
 blob. **Window identity is implicit**:
 each command keys by the invoking `tauri::Window`'s `label()`, so the frontend
