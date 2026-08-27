@@ -331,7 +331,17 @@ jobs:
           # otherwise the verdict rests on the orchestrator faithfully
           # propagating it, which is the same "a prompt is not a control"
           # shape the missing-fragment guard exists to close.
-          if [ "$STATUS" = "PASS" ]; then
+          #
+          # Gated on "not already FAIL", NOT on "still PASS". The loop above
+          # writes the same variable, so a `PASS` gate meant one empty fragment
+          # switched this check off for every *other* fragment — and a domain
+          # that returned VERDICT: FAIL beside a missing sibling would go
+          # unnoticed, while the issue told the maintainer the rest was fine.
+          # The three outcomes are ordered: FAIL (a domain found something)
+          # outranks MISSING (the audit did not finish), which outranks PASS,
+          # so a dissent must be able to raise MISSING to FAIL and never the
+          # reverse.
+          if [ "$STATUS" != "FAIL" ]; then
             # shellcheck disable=SC2086
             for f in $AUDIT_FRAGMENTS; do
               [ -s "$f" ] || continue
@@ -353,6 +363,9 @@ jobs:
                 *)
                   echo "::warning::$f has no VERDICT line; the dissent check cannot read it."
                   UNREADABLE_VERDICTS="${UNREADABLE_VERDICTS:+$UNREADABLE_VERDICTS, }$f"
+                  # Never downgrade: a FAIL from an earlier fragment in this
+                  # same loop, or a MISSING from the missing-fragment loop
+                  # above, both outrank "unreadable".
                   [ "$STATUS" = FAIL ] || STATUS=MISSING ;;
               esac
             done
@@ -497,6 +510,19 @@ jobs:
               [ -n "$TRANSCRIPT_URL" ] && LINKS="$LINKS · [Transcript]($TRANSCRIPT_URL)"
               echo "Audit failed at $DATE. $LINKS"
               echo
+              # A FAIL can now arrive with fragments missing or unreadable
+              # alongside it: the dissent loop is gated on "not already FAIL"
+              # rather than "still PASS", so a domain that returned FAIL beside
+              # a broken sibling reaches this branch instead of being masked as
+              # MISSING. Say so, or the report below reads as the whole story
+              # while a domain in it was never audited.
+              if [ -n "${MISSING_FRAGMENTS:-}" ] || [ -n "${UNREADABLE_VERDICTS:-}" ]; then
+                [ -n "${MISSING_FRAGMENTS:-}" ] &&
+                  echo "> **Incomplete besides.** No report fragment was left for: $MISSING_FRAGMENTS — those domains are unaudited, not passing."
+                [ -n "${UNREADABLE_VERDICTS:-}" ] &&
+                  echo "> **Unreadable verdict.** The first line of $UNREADABLE_VERDICTS is neither \`VERDICT: PASS\` nor \`VERDICT: FAIL\`, so that domain's own conclusion could not be confirmed."
+                echo
+              fi
               cat audit-report.md
             } > audit-comment.md
           fi

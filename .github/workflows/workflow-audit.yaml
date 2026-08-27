@@ -363,7 +363,7 @@ jobs:
 
           BODY=$(mktemp)
           {
-            echo "$COUNT unexplained commit(s) in the audit window (\`.github/workflows/\`, \`.config/tend.yaml\`, \`.github/audit/\`, \`.vscode/\`, \`SECURITY.md\`) since \`$SINCE\`."
+            echo "$COUNT unexplained commit(s) in the audit window (\`${WINDOW[*]}\`) since \`$SINCE\`."
             echo ""
             echo "Routine Renovate pin bumps and reproducible tend regenerations are"
             echo "classified and omitted — see the run summary for what was skipped."
