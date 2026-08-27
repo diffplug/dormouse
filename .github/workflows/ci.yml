@@ -45,6 +45,17 @@ jobs:
             exit 1
           fi
 
+      # zsh is not on the ubuntu runner image, and it is the default shell on
+      # macOS — our primary platform. Without it, `standalone/sidecar`'s
+      # shell-integration suite silently covered only bash, which is half of
+      # what stands behind an emit-side security fix (SECURITY.md's OSC 633
+      # rules; the emitters are the boundary, since the parser cannot defend
+      # against a terminator that arrives inside a directory name). The suite
+      # names the shells it covered on every run, so a future image change that
+      # drops one is visible rather than silent.
+      - name: Install zsh (shell-integration tests)
+        run: sudo apt-get install -y --no-install-recommends zsh
+
       - name: Test
         run: pnpm test
 
