@@ -690,6 +690,10 @@ try {
 
   $VERSION_ARCH_JS = 'process.stdout.write(process.version + " " + process.arch);'
   $r = Invoke-NodeScript -NodeBin $NODE_BIN -Script $VERSION_ARCH_JS
+  # Checked before parsing: on a failure StdOut is empty and the version compare
+  # below would report "the build ran under Node  but the repository pins vX" --
+  # a version problem that does not exist, pointing away from the real one.
+  if ($r.ExitCode -ne 0) { Die "the pinned Node runtime at $NODE_BIN did not run.`n$(Get-FailureTail $r)" }
   $parts = $r.StdOut.Trim().Split(' ')
   $NODE_BUILD_VERSION = $parts[0]
   $NODE_BUILD_ARCH = $parts[1]
@@ -849,8 +853,12 @@ try {
 #
 # This script IS the KeepAlive: launchd restarts a LaunchAgent on any exit, and
 # Task Scheduler's own restart-on-failure only fires on a failed exit, so the
-# supervision loop lives here. Stopping the task terminates the whole job
-# object, this script included.
+# supervision loop lives here.
+#
+# Stopping the task terminates THIS process but not the cmd.exe/node.exe it
+# started -- those outlive it and keep the loopback port. Reaping them is the
+# installer's and manage.ps1's job (Get-DormouseProcess); nothing here can be
+# relied on to clean up after a task stop.
 $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $PSScriptRoot
@@ -1575,7 +1583,37 @@ function Invoke-Logs {
   foreach ($f in @($out, $err)) { if (-not (Test-Path -LiteralPath $f)) { [IO.File]::WriteAllText($f, '') } }
   Write-Host "tailing $LogDir\{server.out.log,server.err.log} -- ctrl-c to stop"
   Write-Host ""
-  Get-Content -LiteralPath $out, $err -Tail 50 -Wait
+  # NOT `Get-Content -LiteralPath $out, $err -Wait`: that walks the paths in
+  # order and -Wait blocks forever on the first, so the second file is never
+  # read at all. Losing server.err.log is the worst half -- run-server.ps1's
+  # supervision messages and node's stderr both land there. macOS gets the
+  # interleaving free from `tail -f a b`; here each file needs its own reader.
+  foreach ($f in @($out, $err)) {
+    $label = Split-Path -Leaf $f
+    foreach ($line in @(Get-Content -LiteralPath $f -Tail 50 -ErrorAction SilentlyContinue)) {
+      Write-Host "[$label] $line"
+    }
+  }
+  $jobs = @()
+  try {
+    foreach ($f in @($out, $err)) {
+      $jobs += Start-Job -ArgumentList $f -ScriptBlock {
+        param($Path)
+        Get-Content -LiteralPath $Path -Tail 0 -Wait | ForEach-Object {
+          "[$(Split-Path -Leaf $Path)] $_"
+        }
+      }
+    }
+    while ($true) {
+      foreach ($j in $jobs) { Receive-Job -Job $j | ForEach-Object { Write-Host $_ } }
+      Start-Sleep -Milliseconds 300
+    }
+  } finally {
+    foreach ($j in $jobs) {
+      try { Stop-Job -Job $j -ErrorAction SilentlyContinue } catch { }
+      try { Remove-Job -Job $j -Force -ErrorAction SilentlyContinue } catch { }
+    }
+  }
 }
 
 function Invoke-Restart {
@@ -1755,7 +1793,16 @@ usage: manage <command>
   $manageCmd = @"
 @echo off
 rem Installed by deploy/local/install-windows.ps1.
-"$POWERSHELL_EXE" -NoProfile -ExecutionPolicy Bypass -File "%~dp0manage.ps1" %*
+rem The trailing "& exit" matters. cmd.exe seeks back into this file after
+rem every command, and "manage uninstall" deletes bin -- this very file -- so
+rem that read fails with "The system cannot find the path specified." and
+rem returns 1, making a clean uninstall look broken. "exit" ends cmd.exe
+rem outright so it never seeks back, and with no argument it exits with the
+rem current ERRORLEVEL. "exit /b" does NOT work here: it only returns from the
+rem batch, which still requires reading the file. Tradeoff: calling this .cmd
+rem from another batch script ends that script too; it is meant to be run
+rem directly.
+"$POWERSHELL_EXE" -NoProfile -ExecutionPolicy Bypass -File "%~dp0manage.ps1" %* & exit
 "@
   [IO.File]::WriteAllText((Join-Path $BIN_DIR 'manage.cmd'), $manageCmd + "`r`n")
   Write-Ok "bin\manage.cmd"
@@ -1907,16 +1954,32 @@ rem Installed by deploy/local/install-windows.ps1.
     # $STAGED_NODE was verified executable and version/arch-matched earlier in
     # this run; the old release's runtime has not been checked at all.
     Set-ReleasePointer -ReleaseId $OLD_RELEASE -PointerPath $CURRENT_POINTER -NodeBin $STAGED_NODE
+    # `previous` was set to $OLD_RELEASE when the switch happened, and `current`
+    # now names it too. Leaving both pointing at one release would make
+    # `manage verify` report a rollback target that does not exist and
+    # `manage rollback` swap a release with itself and call it success. There is
+    # genuinely no previous release any more, so say so.
+    if (Test-Path -LiteralPath $PREVIOUS_POINTER) { [IO.File]::Delete($PREVIOUS_POINTER) }
     if (-not $TEST_MODE) {
       try {
         Stop-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue
-        Start-Sleep -Milliseconds 500
+        # The rejected release's node.exe outlives the task stop and keeps the
+        # loopback port. Without this the restored release cannot bind, and
+        # Wait-Health below gets its 200 from the very release we just rejected
+        # -- reporting "healthy again" for the wrong code.
+        [void](Stop-DormouseProcess -Root $INSTALL_ROOT)
         Start-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue
       } catch { }
     }
     if (Wait-Health -Url "http://127.0.0.1:$LOOPBACK_PORT/api/hello" -Seconds 40) {
-      Write-Warn2 "the previous release ($OLD_RELEASE) is healthy again."
-      return $true
+      # Same reason the forward path re-checks: a 200 does not say who answered.
+      $restored = if ($TEST_MODE) { $OLD_RELEASE } else { Get-ListeningRelease -Port $LOOPBACK_PORT }
+      if ($restored -eq $OLD_RELEASE) {
+        Write-Warn2 "the previous release ($OLD_RELEASE) is healthy again."
+        return $true
+      }
+      Write-Warn2 "port $LOOPBACK_PORT answers, but from '$(if ($restored) { $restored } else { 'an unidentifiable process' })' rather than the restored $OLD_RELEASE."
+      return $false
     }
     Write-Warn2 "the previous release did NOT become healthy. Inspect: $LOG_DIR"
     return $false

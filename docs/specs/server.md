@@ -785,6 +785,7 @@ is the mechanism-by-mechanism map:
 | Logs | `~/Library/Logs/Dormouse Server` | `<root>\logs` |
 | RunAtLoad | plist `RunAtLoad` | the at-logon trigger |
 | KeepAlive | plist `KeepAlive` — launchd restarts on any exit | the supervision loop in `bin\run-server.ps1`; Task Scheduler's own `RestartCount` only fires on a *failed* exit, so it is defence in depth, not the mechanism |
+| Stopping it | `launchctl bootout` takes the process tree | stopping the task ends only the `powershell.exe` it launched; its `cmd.exe`/`node.exe` children survive and must be reaped by install root (see the trap below) |
 | `current`/`previous` | symlinks, swapped with `rename(2)` on the link path | `current.txt`/`previous.txt` naming a release id, swapped with `rename(2)` on the file |
 | `0700` / `0600` | the modes, under `umask 077` | a DACL protected from inheritance carrying exactly one ACE, for the installing user |
 | Refuses | running as root (`id -u`) | running elevated (the `Administrator` role) |
@@ -846,7 +847,16 @@ Invariants the installer exists to hold:
 * **A failed update is a failure.** The candidate release is health-checked on
   an ephemeral port against a throwaway state dir *before* `current` moves; if
   the live service then fails to answer, `current` is restored to `previous`
-  and the installer exits nonzero. Rollback succeeding is not success.
+  and the installer exits nonzero. Rollback succeeding is not success. On
+  Windows the restore additionally clears the `previous` pointer, because the
+  switch had already set it to the release `current` is being restored to:
+  leaving both naming one release would make `verify` report a rollback target
+  that does not exist and `rollback` swap a release with itself and call it
+  success. *(The macOS installer has the same ordering and not yet this
+  correction.)* The Windows restore also reaps orphaned processes and re-checks
+  which release holds the port, for the reason in the Scheduled Task trap below
+  — otherwise the rejected release's own orphan answers the health check and is
+  reported as the previous release being "healthy again".
 
 Mechanical traps the scripts encode, each of which fails silently otherwise:
 
@@ -874,6 +884,20 @@ Mechanical traps the scripts encode, each of which fails silently otherwise:
   each needing something `Start-Process` cannot express: the candidate-release
   probe, which clears the environment for the `env -i` analog, and
   `run-server.ps1`'s `cmd.exe` redirector, which needs append redirection.
+* **Stopping a Scheduled Task does not reap its grandchildren.** (Windows.)
+  Task Scheduler ends the `powershell.exe` it launched; the `cmd.exe` and
+  `node.exe` beneath it survive. The orphan keeps `127.0.0.1:3100`, so the next
+  start cannot bind — and because the orphan answers `/api/hello` exactly like a
+  healthy server, every health check passes while the *old* release serves. This
+  is the "a stale process on 3100 would let the post-install health check pass
+  against the wrong server" trap from SELF_HOST.md's preflight, reached from the
+  inside. Two defences, both required: the installer and `manage` reap every
+  process belonging to the install root (matched by image path and command line,
+  never by image name — that would kill unrelated `node.exe` processes including
+  the invoking pnpm) before any start; and neither the installer nor
+  `manage verify` accepts a 200 as proof, instead resolving the PID holding the
+  port back to the release directory it runs from and comparing it to `current`.
+  `Source of truth:` `Get-DormouseProcess` / `Get-ListeningRelease`.
 * **Windows `tailscaled` serves its local API to one interactive session at a
   time.** (Windows.) On a PC with a second signed-in profile every `tailscale`
   call fails `401 Unauthorized: Tailscale already in use by <user>`. The
