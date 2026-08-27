@@ -774,8 +774,9 @@ Scheduler reads any of those. The install root holds `bin/` (the stable
 `run-server` wrapper and the `manage` helper), `config/`, `state/`, and
 `releases/<id>` with a current/previous pointer.
 
-Everything below the next table is identical on both platforms. What differs is
-only the native mechanism each invariant is expressed through:
+The *invariants* below are shared; where the two platforms reach them by
+different means, the text is tagged `(macOS)` or `(Windows)` inline. This table
+is the mechanism-by-mechanism map:
 
 | | macOS | Windows |
 | --- | --- | --- |
@@ -867,9 +868,12 @@ Mechanical traps the scripts encode, each of which fails silently otherwise:
   `Application`-typed resolution rather than `(Get-Command pnpm).Source`.
 * **Redirecting a native command's stderr inline sets `$?` to false.**
   (Windows.) Windows PowerShell 5.1 wraps each stderr line in an `ErrorRecord`,
-  so a clean `exit 0` reads as a failure. Every external command goes through
-  one `Invoke-Native` helper that captures the two streams via `Start-Process`
-  instead.
+  so a clean `exit 0` reads as a failure. The installer's own control flow runs
+  every external command through one `Invoke-Native` helper that captures the
+  two streams via `Start-Process` instead. Two spawns deliberately bypass it,
+  each needing something `Start-Process` cannot express: the candidate-release
+  probe, which clears the environment for the `env -i` analog, and
+  `run-server.ps1`'s `cmd.exe` redirector, which needs append redirection.
 * **Windows `tailscaled` serves its local API to one interactive session at a
   time.** (Windows.) On a PC with a second signed-in profile every `tailscale`
   call fails `401 Unauthorized: Tailscale already in use by <user>`. The

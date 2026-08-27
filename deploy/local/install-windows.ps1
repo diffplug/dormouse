@@ -277,6 +277,95 @@ function Get-FailureTail {
   return (($text | Select-Object -Last $Lines) -join "`n")
 }
 
+# Read one KEY=VALUE out of an env file, with ONE quote semantics.
+#
+# This file is read by the installer, by bin\run-server.ps1 and by
+# bin\manage.ps1, and they must agree on what a value is. They previously did
+# not: whole-line `-eq` comparisons here, a matched-quote-pair strip in
+# run-server, and `.Trim('"')` in manage. Writing DORMOUSE_BIND_HOST="127.0.0.1"
+# by hand then produced a green `manage verify` and an installer that refused
+# the same file for not setting the key -- the worst possible split, because
+# `verify` exists to diagnose exactly that. Strip one matched pair, like
+# run-server does, everywhere.
+function Get-EnvFileValue {
+  param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Key)
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+  foreach ($line in [IO.File]::ReadAllLines($Path)) {
+    $t = $line.Trim()
+    if ($t.Length -eq 0 -or $t.StartsWith('#')) { continue }
+    $i = $t.IndexOf('=')
+    if ($i -lt 1) { continue }
+    if ($t.Substring(0, $i) -ne $Key) { continue }
+    $value = $t.Substring($i + 1)
+    if ($value.Length -ge 2 -and $value.StartsWith('"') -and $value.EndsWith('"')) {
+      $value = $value.Substring(1, $value.Length - 2)
+    }
+    return $value
+  }
+  return $null
+}
+
+# Every process belonging to an installation at $Root.
+#
+# Stopping the Scheduled Task is NOT enough. The task's process is
+# powershell.exe running run-server.ps1, which starts cmd.exe, which starts
+# node.exe; Task Scheduler terminates the process it launched and the
+# grandchildren survive. The orphan keeps port 3100, so the next start cannot
+# bind, and -- because the orphan still answers /api/hello -- every health check
+# passes while the OLD release serves. That is the "stale process on 3100 lets
+# the health check pass against the wrong server" trap SELF_HOST.md warns about
+# in its preflight, reached from the inside.
+#
+# Matched by image path under this root and by command line naming this root's
+# wrapper, the same way standalone/scripts/dogfood.sh targets its own install
+# dir. Never by image name: killing every node.exe on the machine would take out
+# the pnpm that invoked this script, among others.
+function Get-DormouseProcess {
+  param([Parameter(Mandatory)][string]$Root)
+  $releasesDir = Join-Path $Root 'releases'
+  $wrapperPath = Join-Path $Root 'bin\run-server.ps1'
+  $matched = @()
+  foreach ($proc in @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)) {
+    if ($proc.ProcessId -eq $PID) { continue }
+    $exe = [string]$proc.ExecutablePath
+    $cmdline = [string]$proc.CommandLine
+    $hit = $false
+    if ($exe -and $exe.IndexOf($releasesDir, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $hit = $true }
+    elseif ($cmdline -and $cmdline.IndexOf($wrapperPath, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $hit = $true }
+    elseif ($cmdline -and $cmdline.IndexOf($releasesDir, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $hit = $true }
+    if ($hit) { $matched += $proc }
+  }
+  return $matched
+}
+
+function Stop-DormouseProcess {
+  param([Parameter(Mandatory)][string]$Root)
+  $procs = @(Get-DormouseProcess -Root $Root)
+  foreach ($proc in $procs) {
+    try { Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop } catch { }
+  }
+  # Let the sockets actually close before anything tries to bind again.
+  if ($procs.Count -gt 0) { Start-Sleep -Milliseconds 750 }
+  return $procs.Count
+}
+
+# Which release is the process on $Port actually running?
+#
+# A 200 from /api/hello proves only that SOMETHING is listening. This is what
+# distinguishes the release just installed from an orphan of an older one.
+function Get-ListeningRelease {
+  param([Parameter(Mandatory)][int]$Port)
+  $conn = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
+  if ($conn.Count -eq 0) { return $null }
+  $owner = $conn[0].OwningProcess
+  $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$owner" -ErrorAction SilentlyContinue
+  if (-not $proc -or -not $proc.ExecutablePath) { return $null }
+  # <root>\releases\<id>\runtime\node.exe -> <id>
+  $runtimeDir = Split-Path -Parent $proc.ExecutablePath
+  if (-not $runtimeDir) { return $null }
+  return (Split-Path -Leaf (Split-Path -Parent $runtimeDir))
+}
+
 function Test-Health {
   param([Parameter(Mandatory)][string]$Url, [int]$TimeoutSec = 3)
   try {
@@ -299,9 +388,7 @@ function Wait-Health {
 
 function New-Directory {
   param([Parameter(Mandatory)][string]$Path)
-  if (-not (Test-Path -LiteralPath $Path)) {
-    [void][IO.Directory]::CreateDirectory($Path)
-  }
+  [void][IO.Directory]::CreateDirectory($Path)
 }
 
 # The `rm -rf` the macOS installer gets for free.
@@ -311,14 +398,23 @@ function New-Directory {
 # refuse to unlink a read-only file. Every release tree contains hundreds of
 # them, so staging over a partial release, pruning, and uninstalling all hit
 # this. Clear the attribute first, then delete.
+#
+# Streamed, not collected: a `pnpm deploy --prod` tree is tens of thousands of
+# entries and there is no reason to hold them all at once. Only files are
+# visited -- a directory's ReadOnly bit does not block deletion on Windows.
 function Remove-Tree {
   param([Parameter(Mandatory)][string]$Path)
   if (-not (Test-Path -LiteralPath $Path)) { return }
-  foreach ($item in @(Get-ChildItem -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue)) {
-    if ($item.Attributes -band [IO.FileAttributes]::ReadOnly) {
-      try { $item.Attributes = $item.Attributes -band (-bnot [IO.FileAttributes]::ReadOnly) } catch { }
+  Get-ChildItem -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
+    if ($_.Attributes -band [IO.FileAttributes]::ReadOnly) {
+      try { $_.Attributes = $_.Attributes -band (-bnot [IO.FileAttributes]::ReadOnly) } catch { }
     }
   }
+  # Remove-Item, not [IO.Directory]::Delete: a pnpm release tree is full of
+  # junctions into the virtual store and read-only DIRECTORIES, and
+  # Directory.Delete refuses both ("Access to the path 'hono' is denied").
+  # Remove-Item -Recurse -Force handles them; the cost is provider overhead on a
+  # path that runs at most a few times per install.
   Remove-Item -LiteralPath $Path -Recurse -Force
 }
 
@@ -415,7 +511,7 @@ if (-not $TS_DNS_RAW) {
 $TS_DNS = $TS_DNS_RAW.TrimEnd('.')
 
 $MAGIC_DNS = Get-JsonValue -Object $tsJson -Path 'CurrentTailnet.MagicDNSEnabled'
-if ($MAGIC_DNS -ne 'True' -and $MAGIC_DNS -ne 'true') {
+if ($MAGIC_DNS -ne 'true') {
   Write-Warn2 "MagicDNS is not reported as enabled for this tailnet; the HTTPS name may not resolve for other devices."
 }
 
@@ -445,10 +541,7 @@ $PREVIOUS_POINTER = Join-Path $INSTALL_ROOT 'previous.txt'
 $FIRST_INSTALL = $true
 if (Test-Path -LiteralPath $ENV_FILE) {
   $FIRST_INSTALL = $false
-  $existingOrigin = ''
-  foreach ($line in [IO.File]::ReadAllLines($ENV_FILE)) {
-    if ($line -match '^DORMOUSE_ORIGIN=(.*)$') { $existingOrigin = $Matches[1].Trim('"'); break }
-  }
+  $existingOrigin = Get-EnvFileValue -Path $ENV_FILE -Key 'DORMOUSE_ORIGIN'
   if ($existingOrigin -and $existingOrigin -ne $ORIGIN) {
     Write-Host ""
     Write-Warn2 "This machine already has an installation bound to a DIFFERENT origin."
@@ -623,7 +716,7 @@ try {
   if ($GIT_DIRTY -eq 'true') { $RELEASE_ID = "$RELEASE_ID-dirty" }
   $STAGE = Join-Path $RELEASES_DIR $RELEASE_ID
 
-  if (Test-Path -LiteralPath $STAGE) { Remove-Tree $STAGE }
+  Remove-Tree $STAGE
   New-Directory (Join-Path $STAGE 'lib')
   New-Directory (Join-Path $STAGE 'runtime')
 
@@ -734,11 +827,10 @@ try {
   # The bind host is a security boundary whenever the TLS proxy is local: Serve
   # reaches the app over loopback, so an unbound socket would also publish the
   # plaintext port to the LAN and to the tailnet.
-  $envText = [IO.File]::ReadAllLines($ENV_FILE)
-  if (-not ($envText | Where-Object { $_ -eq 'DORMOUSE_BIND_HOST=127.0.0.1' })) {
+  if ((Get-EnvFileValue -Path $ENV_FILE -Key 'DORMOUSE_BIND_HOST') -ne '127.0.0.1') {
     Die "config/server.env must set DORMOUSE_BIND_HOST=127.0.0.1. Fix it before continuing -- Tailscale access control is not a reason to expose the plaintext backend."
   }
-  if (-not ($envText | Where-Object { $_ -eq "PORT=$LOOPBACK_PORT" })) {
+  if ((Get-EnvFileValue -Path $ENV_FILE -Key 'PORT') -ne "$LOOPBACK_PORT") {
     Die "config/server.env must set PORT=$LOOPBACK_PORT to match the Serve mapping."
   }
 
@@ -801,10 +893,23 @@ function Write-ServiceLog {
   try { [IO.File]::AppendAllText($ErrLog, "[run-server $stamp] $Text`r`n") } catch { }
 }
 
+# A degraded state -- no release pointer, no runtime, no entrypoint -- persists
+# until someone fixes it, and this loop wakes every 10s. Logging it each time
+# would put ~8,600 identical lines a day into server.err.log and bury the
+# original failure. Log a reason only when it CHANGES.
+$LastReason = $null
+function Write-DegradedLog {
+  param([string]$Text)
+  if ($Text -ne $script:LastReason) {
+    Write-ServiceLog $Text
+    $script:LastReason = $Text
+  }
+}
+
 while ($true) {
   $pointer = Join-Path $Root 'current.txt'
   if (-not (Test-Path -LiteralPath $pointer -PathType Leaf)) {
-    Write-ServiceLog "no current.txt release pointer; retrying in ${ThrottleSeconds}s"
+    Write-DegradedLog "no current.txt release pointer; retrying every ${ThrottleSeconds}s until it appears"
     Start-Sleep -Seconds $ThrottleSeconds
     continue
   }
@@ -814,15 +919,16 @@ while ($true) {
   $entry = Join-Path $release 'server\dist\index.js'
 
   if (-not (Test-Path -LiteralPath $nodeBin -PathType Leaf)) {
-    Write-ServiceLog "missing runtime $nodeBin; retrying in ${ThrottleSeconds}s"
+    Write-DegradedLog "missing runtime $nodeBin; retrying every ${ThrottleSeconds}s until it appears"
     Start-Sleep -Seconds $ThrottleSeconds
     continue
   }
   if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) {
-    Write-ServiceLog "missing entrypoint $entry; retrying in ${ThrottleSeconds}s"
+    Write-DegradedLog "missing entrypoint $entry; retrying every ${ThrottleSeconds}s until it appears"
     Start-Sleep -Seconds $ThrottleSeconds
     continue
   }
+  $script:LastReason = $null
 
   # cmd.exe is the redirector so both streams APPEND across restarts;
   # .NET's ProcessStartInfo can only redirect to a pipe, and Start-Process
@@ -837,9 +943,18 @@ while ($true) {
   foreach ($key in $EnvVars.Keys) { $psi.EnvironmentVariables[$key] = $EnvVars[$key] }
 
   Write-ServiceLog "starting release $releaseId"
+  # Disposed every iteration: an undisposed Process holds a SafeProcessHandle,
+  # which keeps the exited cmd.exe as a kernel process entry until the finalizer
+  # runs. This loop allocates almost nothing, so a GC may not happen for weeks
+  # and the handles would accumulate for the life of the service.
   $proc = [System.Diagnostics.Process]::Start($psi)
-  $proc.WaitForExit()
-  Write-ServiceLog "release $releaseId exited with code $($proc.ExitCode); restarting in ${ThrottleSeconds}s"
+  try {
+    $proc.WaitForExit()
+    $exitCode = $proc.ExitCode
+  } finally {
+    $proc.Dispose()
+  }
+  Write-ServiceLog "release $releaseId exited with code $exitCode; restarting in ${ThrottleSeconds}s"
   Start-Sleep -Seconds $ThrottleSeconds
 }
 '@
@@ -853,7 +968,9 @@ while ($true) {
 
 `$LABEL = '$LABEL'
 `$TASK_PATH = '$TASK_PATH'
-`$POWERSHELL_EXE = '$POWERSHELL_EXE'
+# The port the installer configured Serve against. Only a fallback: the value in
+# configserver.env wins whenever it is readable.
+`$FALLBACK_PORT = '$LOOPBACK_PORT'
 "@
 
   $manageBody = @'
@@ -882,17 +999,30 @@ function Fail { param([string]$T) Write-Host "  $C_RED$([char]0x2717)$C_OFF $T";
 function Note { param([string]$T) Write-Host "  $C_DIM$T$C_OFF" }
 function Warn { param([string]$T) Write-Host "  $C_YEL!$C_OFF $T" }
 
+# One quote semantics, shared with the installer and run-server.ps1: strip a
+# single matched pair, never `.Trim('"')`. They disagreed before -- a hand-typed
+# DORMOUSE_BIND_HOST="127.0.0.1" made `verify` pass green while the installer
+# refused the same file.
 function Get-EnvValue {
   param([Parameter(Mandatory)][string]$Key)
-  if (-not (Test-Path -LiteralPath $EnvFile)) { return $null }
+  if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) { return $null }
   foreach ($line in [IO.File]::ReadAllLines($EnvFile)) {
-    if ($line -match "^$([regex]::Escape($Key))=(.*)$") { return $Matches[1].Trim('"') }
+    $t = $line.Trim()
+    if ($t.Length -eq 0 -or $t.StartsWith('#')) { continue }
+    $i = $t.IndexOf('=')
+    if ($i -lt 1) { continue }
+    if ($t.Substring(0, $i) -ne $Key) { continue }
+    $value = $t.Substring($i + 1)
+    if ($value.Length -ge 2 -and $value.StartsWith('"') -and $value.EndsWith('"')) {
+      $value = $value.Substring(1, $value.Length - 2)
+    }
+    return $value
   }
   return $null
 }
 
 $PORT = Get-EnvValue 'PORT'
-if (-not $PORT) { $PORT = '3100' }
+if (-not $PORT) { $PORT = $FALLBACK_PORT }
 $ORIGIN = Get-EnvValue 'DORMOUSE_ORIGIN'
 
 $TS_BIN = $null
@@ -960,42 +1090,110 @@ function Invoke-Tailscale {
 function Remove-Tree {
   param([Parameter(Mandatory)][string]$Path)
   if (-not (Test-Path -LiteralPath $Path)) { return }
-  foreach ($item in @(Get-ChildItem -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue)) {
-    if ($item.Attributes -band [IO.FileAttributes]::ReadOnly) {
-      try { $item.Attributes = $item.Attributes -band (-bnot [IO.FileAttributes]::ReadOnly) } catch { }
+  Get-ChildItem -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
+    if ($_.Attributes -band [IO.FileAttributes]::ReadOnly) {
+      try { $_.Attributes = $_.Attributes -band (-bnot [IO.FileAttributes]::ReadOnly) } catch { }
     }
   }
+  # Remove-Item, not [IO.Directory]::Delete: a pnpm release tree is full of
+  # junctions into the virtual store and read-only DIRECTORIES, and
+  # Directory.Delete refuses both ("Access to the path 'hono' is denied").
+  # Remove-Item -Recurse -Force handles them; the cost is provider overhead on a
+  # path that runs at most a few times per install.
   Remove-Item -LiteralPath $Path -Recurse -Force
 }
 
-function Get-CurrentRelease {
-  if (-not (Test-Path -LiteralPath $CurrentPointer -PathType Leaf)) { return $null }
-  $id = ([IO.File]::ReadAllText($CurrentPointer)).Trim()
+# Same shape as the installer's Get-ReleasePointer, so the two scripts read a
+# release pointer the same way rather than in three different spellings.
+function Get-ReleasePointer {
+  param([Parameter(Mandatory)][string]$PointerPath)
+  if (-not (Test-Path -LiteralPath $PointerPath -PathType Leaf)) { return $null }
+  $id = ([IO.File]::ReadAllText($PointerPath)).Trim()
   if (-not $id) { return $null }
   return $id
 }
 
-function Get-PreviousRelease {
-  if (-not (Test-Path -LiteralPath $PreviousPointer -PathType Leaf)) { return $null }
-  $id = ([IO.File]::ReadAllText($PreviousPointer)).Trim()
-  if (-not $id) { return $null }
-  return $id
-}
+function Get-CurrentRelease { return Get-ReleasePointer -PointerPath $CurrentPointer }
+function Get-PreviousRelease { return Get-ReleasePointer -PointerPath $PreviousPointer }
 
+# Parsed once and cached: `status` alone asks for five fields, and each one
+# would otherwise re-read both current.txt and the RELEASE file.
+$script:ReleaseFields = $null
 function Get-ReleaseField {
   param([Parameter(Mandatory)][string]$Field)
-  $id = Get-CurrentRelease
-  if (-not $id) { return $null }
-  $file = Join-Path $Root "releases\$id\RELEASE"
-  if (-not (Test-Path -LiteralPath $file)) { return $null }
-  foreach ($line in [IO.File]::ReadAllLines($file)) {
-    if ($line -match "^$([regex]::Escape($Field))=(.*)$") { return $Matches[1] }
+  if ($null -eq $script:ReleaseFields) {
+    $script:ReleaseFields = @{}
+    $id = Get-CurrentRelease
+    if ($id) {
+      $file = Join-Path $Root "releases\$id\RELEASE"
+      if (Test-Path -LiteralPath $file -PathType Leaf) {
+        foreach ($line in [IO.File]::ReadAllLines($file)) {
+          $i = $line.IndexOf('=')
+          if ($i -lt 1) { continue }
+          $script:ReleaseFields[$line.Substring(0, $i)] = $line.Substring($i + 1)
+        }
+      }
+    }
   }
+  if ($script:ReleaseFields.ContainsKey($Field)) { return $script:ReleaseFields[$Field] }
   return $null
 }
 
 function Get-Task {
   return Get-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue
+}
+
+# Stopping the task leaves its cmd.exe/node.exe grandchildren running: Task
+# Scheduler terminates only the powershell.exe it launched. An orphan keeps the
+# loopback port, so the next start cannot bind while the orphan keeps answering
+# /api/hello -- a restart that looks healthy while the OLD release serves.
+# Matched by this install root, never by image name.
+function Get-DormouseProcess {
+  $releasesDir = Join-Path $Root 'releases'
+  $wrapperPath = Join-Path $Root 'bin\run-server.ps1'
+  $matched = @()
+  foreach ($proc in @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)) {
+    if ($proc.ProcessId -eq $PID) { continue }
+    $exe = [string]$proc.ExecutablePath
+    $cmdline = [string]$proc.CommandLine
+    $hit = $false
+    if ($exe -and $exe.IndexOf($releasesDir, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $hit = $true }
+    elseif ($cmdline -and $cmdline.IndexOf($wrapperPath, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $hit = $true }
+    elseif ($cmdline -and $cmdline.IndexOf($releasesDir, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $hit = $true }
+    if ($hit) { $matched += $proc }
+  }
+  return $matched
+}
+
+function Stop-DormouseProcess {
+  $procs = @(Get-DormouseProcess)
+  foreach ($proc in $procs) {
+    try { Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop } catch { }
+  }
+  if ($procs.Count -gt 0) { Start-Sleep -Milliseconds 750 }
+  return $procs.Count
+}
+
+# A 200 proves only that something is listening; this says which release it is.
+function Get-ListeningRelease {
+  $conn = @(Get-NetTCPConnection -State Listen -LocalPort ([int]$PORT) -ErrorAction SilentlyContinue)
+  if ($conn.Count -eq 0) { return $null }
+  $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$($conn[0].OwningProcess)" -ErrorAction SilentlyContinue
+  if (-not $proc -or -not $proc.ExecutablePath) { return $null }
+  $runtimeDir = Split-Path -Parent $proc.ExecutablePath
+  if (-not $runtimeDir) { return $null }
+  return (Split-Path -Leaf (Split-Path -Parent $runtimeDir))
+}
+
+# Stop the task AND everything it left behind, then start it again.
+function Restart-DormouseTask {
+  if (Get-Task) {
+    try { Stop-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue } catch { }
+  }
+  [void](Stop-DormouseProcess)
+  if (Get-Task) {
+    Start-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue
+  }
 }
 
 function Test-Health {
@@ -1006,11 +1204,13 @@ function Test-Health {
   } catch { return $false }
 }
 
+# Takes -Url like the installer's copy: two functions of the same name with
+# different signatures is how these two scripts drift apart.
 function Wait-Health {
-  param([int]$Seconds = 30)
+  param([Parameter(Mandatory)][string]$Url, [int]$Seconds = 30)
   $deadline = (Get-Date).AddSeconds($Seconds)
   while ((Get-Date) -lt $deadline) {
-    if (Test-Health -Url "http://127.0.0.1:$PORT/api/hello" -TimeoutSec 2) { return $true }
+    if (Test-Health -Url $Url -TimeoutSec 2) { return $true }
     Start-Sleep -Milliseconds 500
   }
   return $false
@@ -1055,20 +1255,28 @@ function Set-ReleasePointer {
 # unprotected path that inherited %LOCALAPPDATA%'s SYSTEM and Administrators
 # entries is caught by the identity test below regardless, so the identity test
 # is the whole invariant and the protection flag adds nothing.
+$script:CurrentUserSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 function Test-OwnerOnly {
   param([Parameter(Mandatory)][string]$Path)
   if (-not (Test-Path -LiteralPath $Path)) { return [pscustomobject]@{ Ok = $false; Reason = 'missing' } }
+  # GetAccessRules(..., [SecurityIdentifier]) returns the identities already in
+  # SID form. Reading $acl.Access instead yields NTAccount names that then need
+  # IdentityReference.Translate() per ACE -- an LSA lookup that can go to the
+  # domain controller on a domain-joined PC, once for every ACE of every state
+  # file this checks.
   $acl = Get-Acl -LiteralPath $Path
-  $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
   $others = @()
-  foreach ($rule in $acl.Access) {
-    $sid = $rule.IdentityReference
-    try { $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value }
-    catch { $sid = $rule.IdentityReference.Value }
-    if ($sid -ne $me) { $others += $rule.IdentityReference.Value }
+  foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+    if ($rule.IdentityReference.Value -ne $script:CurrentUserSid) {
+      $others += $rule.IdentityReference.Value
+    }
   }
   if ($others.Count -gt 0) {
-    return [pscustomobject]@{ Ok = $false; Reason = "also grants $(($others | Select-Object -Unique) -join ', ')" }
+    $names = foreach ($sid in ($others | Select-Object -Unique)) {
+      try { (New-Object Security.Principal.SecurityIdentifier($sid)).Translate([Security.Principal.NTAccount]).Value }
+      catch { $sid }
+    }
+    return [pscustomobject]@{ Ok = $false; Reason = "also grants $($names -join ', ')" }
   }
   return [pscustomobject]@{ Ok = $true; Reason = '' }
 }
@@ -1140,6 +1348,14 @@ function Invoke-Verify {
   Write-Host "Verifying the installed service"
   Write-Host ""
 
+  # Both are consulted by two separate checks below. Export-ScheduledTask is a
+  # CIM round trip into the Task Scheduler service -- the priciest call in this
+  # whole path -- so it is made once here rather than once per check.
+  $taskXml = Export-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue
+  $wrapper = Join-Path $Root 'bin\run-server.ps1'
+  $wrapperText = ''
+  if (Test-Path -LiteralPath $wrapper -PathType Leaf) { $wrapperText = [IO.File]::ReadAllText($wrapper) }
+
   $task = Get-Task
   if ($task) {
     Pass "Scheduled Task $TASK_PATH$LABEL is registered"
@@ -1174,15 +1390,13 @@ function Invoke-Verify {
 
     # The KeepAlive proper lives in bin\run-server.ps1's supervision loop;
     # Task Scheduler only restarts a task that *fails*.
-    $wrapper = Join-Path $Root 'bin\run-server.ps1'
-    if ((Test-Path -LiteralPath $wrapper) -and ([IO.File]::ReadAllText($wrapper) -match 'while \(\$true\)')) {
+    if ($wrapperText -match 'while \(\$true\)') {
       Pass "bin\run-server.ps1 supervises the server (KeepAlive)"
     } else {
       Fail "bin\run-server.ps1 is missing or has no supervision loop"
     }
 
-    $xml = Export-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue
-    if ($xml -and ($xml -match 'DORMOUSE_SETUP_PASSWORD')) {
+    if ($taskXml -and ($taskXml -match 'DORMOUSE_SETUP_PASSWORD')) {
       Fail "the task definition contains the setup password -- it must live only in config\server.env"
     } else {
       Pass "the task definition carries no credential"
@@ -1201,6 +1415,28 @@ function Invoke-Verify {
     Pass "Pocket app is served on loopback"
   } else {
     Fail "Pocket index is not served -- is lib\dist-pocket in the release?"
+  }
+
+  # The check that separates "something answers" from "the installed release
+  # answers". An orphaned node.exe from an older release holds the port and
+  # replies to /api/hello exactly like the current one, so every other health
+  # check here passes while stale code serves.
+  $cur = Get-CurrentRelease
+  $listening = Get-ListeningRelease
+  if (-not $listening) {
+    Fail "cannot identify the process listening on port $PORT"
+  } elseif ($listening -eq $cur) {
+    Pass "the process on port $PORT is the current release"
+  } else {
+    Fail "port $PORT is served by release '$listening', but current is '$cur' -- a stale process is answering"
+  }
+
+  $extra = @(Get-DormouseProcess | Where-Object { $_.Name -eq 'node.exe' })
+  if ($extra.Count -le 1) {
+    Pass "exactly one server process for this installation"
+  } else {
+    Fail "$($extra.Count) server processes are running for this installation; orphans from an earlier release are the usual cause"
+    foreach ($e in $extra) { Write-Host "      pid $($e.ProcessId) $($e.ExecutablePath)" }
   }
 
   $listeners = @(Get-NetTCPConnection -State Listen -LocalPort ([int]$PORT) -ErrorAction SilentlyContinue)
@@ -1315,10 +1551,8 @@ function Invoke-Verify {
   $src = Get-ReleaseField 'source_checkout'
   if ($src) {
     $refs = $false
-    $wrapper = Join-Path $Root 'bin\run-server.ps1'
-    if ((Test-Path -LiteralPath $wrapper) -and ([IO.File]::ReadAllText($wrapper) -match [regex]::Escape($src))) { $refs = $true }
-    $xml = Export-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue
-    if ($xml -and ($xml -match [regex]::Escape($src))) { $refs = $true }
+    if ($wrapperText -match [regex]::Escape($src)) { $refs = $true }
+    if ($taskXml -and ($taskXml -match [regex]::Escape($src))) { $refs = $true }
     if ($refs) { Fail "the Scheduled Task or wrapper references the source checkout ($src)" }
     else { Pass "the installed service does not reference the source checkout" }
   }
@@ -1347,11 +1581,9 @@ function Invoke-Logs {
 function Invoke-Restart {
   $task = Get-Task
   if (-not $task) { Write-Host "Scheduled Task $TASK_PATH$LABEL is not registered"; return 1 }
-  Stop-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue
-  Start-Sleep -Milliseconds 500
-  Start-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH
+  Restart-DormouseTask
   Write-Host "restarted; waiting for health..."
-  if (Wait-Health -Seconds 40) {
+  if (Wait-Health -Url "http://127.0.0.1:$PORT/api/hello" -Seconds 40) {
     Write-Host "${C_GRN}healthy$C_OFF"
     return 0
   }
@@ -1410,12 +1642,8 @@ function Invoke-Rollback {
     [Console]::Error.WriteLine("current did not advance to $prev")
     return 1
   }
-  if (Get-Task) {
-    Stop-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 500
-    Start-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue
-  }
-  if (Wait-Health -Seconds 40) {
+  Restart-DormouseTask
+  if (Wait-Health -Url "http://127.0.0.1:$PORT/api/hello" -Seconds 40) {
     Write-Host "${C_GRN}rolled back and healthy$C_OFF"
     return 0
   }
@@ -1444,6 +1672,10 @@ function Invoke-Uninstall {
     Unregister-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -Confirm:$false
     Write-Host "unregistered the Scheduled Task"
   }
+  # Otherwise a surviving node.exe keeps the port and locks the release files
+  # that are about to be deleted.
+  $reaped = Stop-DormouseProcess
+  if ($reaped -gt 0) { Write-Host "terminated $reaped leftover process(es)" }
 
   # Turn off only the mapping this installer owns.
   $serve = Invoke-Tailscale @('serve', 'status')
@@ -1456,7 +1688,7 @@ function Invoke-Uninstall {
   }
 
   foreach ($p in @((Join-Path $Root 'releases'), (Join-Path $Root 'bin'))) {
-    if (Test-Path -LiteralPath $p) { Remove-Tree $p }
+    Remove-Tree $p
   }
   foreach ($p in @($CurrentPointer, $PreviousPointer)) {
     if (Test-Path -LiteralPath $p) { [IO.File]::Delete($p) }
@@ -1481,7 +1713,7 @@ function Invoke-Purge {
   $reply = Read-Host 'Type exactly: DELETE DORMOUSE STATE'
   if ($reply -cne 'DELETE DORMOUSE STATE') { Write-Host 'aborted'; return 1 }
   foreach ($p in @($StateDir, (Join-Path $Root 'config'))) {
-    if (Test-Path -LiteralPath $p) { Remove-Tree $p }
+    Remove-Tree $p
   }
   Write-Host 'purged.'
   return 0
@@ -1543,7 +1775,6 @@ rem Installed by deploy/local/install-windows.ps1.
   $PROBE_STATE = Join-Path ([IO.Path]::GetTempPath()) ("dormouse-probe-state-" + [Guid]::NewGuid().ToString('N'))
   New-Directory $PROBE_STATE
   Protect-Path -Path $PROBE_STATE -Directory
-  $PROBE_LOG = [IO.Path]::GetTempFileName()
 
   # The analog of `env -i`: a scrubbed environment, so the candidate cannot
   # accidentally depend on anything in the developer's shell. SystemRoot and a
@@ -1581,13 +1812,20 @@ rem Installed by deploy/local/install-windows.ps1.
     try { if (-not $probe.HasExited) { $probe.Kill() } } catch { }
     try { $probe.WaitForExit(5000) | Out-Null } catch { }
     try { Remove-Tree $PROBE_STATE } catch { }
-    try { if (Test-Path -LiteralPath $PROBE_LOG) { [IO.File]::Delete($PROBE_LOG) } } catch { }
   }
 
-  function Show-ProbeOutput {
+  # Kills the child FIRST. Reading .Result blocks until the stream closes, and
+  # the stream stays open while the process lives -- so on the timeout path,
+  # where the candidate is hung rather than crashed, printing before killing
+  # would hang the installer instead of reporting the failure.
+  function Stop-ProbeAndDie {
+    param([Parameter(Mandatory)][string]$Text)
+    Stop-Probe
     Write-Host "--- candidate output ---"
     try { Write-Host $probeOutTask.Result } catch { }
     try { Write-Host $probeErrTask.Result } catch { }
+    Remove-Tree $STAGE
+    Die $Text
   }
 
   $probeOk = $false
@@ -1598,20 +1836,14 @@ rem Installed by deploy/local/install-windows.ps1.
   }
 
   if (-not $probeOk) {
-    Show-ProbeOutput
-    Stop-Probe
-    Remove-Tree $STAGE
-    Die "the candidate release did not answer /api/hello. The live service was left untouched."
+    Stop-ProbeAndDie "the candidate release did not answer /api/hello. The live service was left untouched."
   }
   Write-Ok "candidate answers /api/hello (scrubbed environment, ephemeral port $PROBE_PORT)"
 
   if (Test-Health -Url "http://127.0.0.1:$PROBE_PORT/" -TimeoutSec 3) {
     Write-Ok "candidate serves the Pocket app"
   } else {
-    Show-ProbeOutput
-    Stop-Probe
-    Remove-Tree $STAGE
-    Die "the candidate release did not serve the Pocket index. The live service was left untouched."
+    Stop-ProbeAndDie "the candidate release did not serve the Pocket index. The live service was left untouched."
   }
   Stop-Probe
 
@@ -1702,6 +1934,11 @@ rem Installed by deploy/local/install-windows.ps1.
     } else {
       Write-Detail "no previously registered task (first install)"
     }
+    # Stopping the task does not reap its cmd.exe/node.exe grandchildren, and a
+    # surviving one holds the loopback port -- which would make the health check
+    # below pass against the OLD release. See Get-DormouseProcess.
+    $orphans = Stop-DormouseProcess -Root $INSTALL_ROOT
+    if ($orphans -gt 0) { Write-Detail "terminated $orphans leftover process(es) from this installation" }
     Register-DormouseTask
     Write-Ok "registered $TASK_PATH$LABEL for $USER_ID (unelevated, at logon)"
     Start-Sleep -Milliseconds 500
@@ -1726,6 +1963,17 @@ rem Installed by deploy/local/install-windows.ps1.
       Die "update FAILED. Rollback was attempted -- this is not a success, whatever the previous release now reports."
     }
     Write-Ok "http://127.0.0.1:$LOOPBACK_PORT/api/hello responds"
+
+    # A 200 only proves something is listening. Confirm it is THIS release --
+    # otherwise an orphan of an older one answering on the same port reads as a
+    # successful update while the old code keeps serving.
+    $listening = Get-ListeningRelease -Port $LOOPBACK_PORT
+    if ($listening -ne $RELEASE_ID) {
+      Write-Warn2 "port $LOOPBACK_PORT is served by '$(if ($listening) { $listening } else { 'an unidentifiable process' })', not by $RELEASE_ID"
+      [void](Restore-PreviousRelease)
+      Die "update FAILED: the new release is not the process answering on $LOOPBACK_PORT. Rollback was attempted."
+    }
+    Write-Ok "the process on $LOOPBACK_PORT is release $RELEASE_ID"
 
     if (Test-Health -Url "http://127.0.0.1:$LOOPBACK_PORT/") {
       Write-Ok "Pocket app is served"

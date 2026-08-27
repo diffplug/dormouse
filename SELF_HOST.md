@@ -82,7 +82,7 @@ known:
 ## Prerequisites
 
 - **A tailnet.** The user needs a Tailscale account with MagicDNS and HTTPS
-  certificates enabled, Tailscale running on this Mac, and Tailscale on the
+  certificates enabled, Tailscale running on this laptop, and Tailscale on the
   phone that will run Pocket. A tailnet-only origin is not reachable merely
   because the laptop is on the tailnet.
 - **macOS or Windows.** Each installer refuses to run on the other platform. On
