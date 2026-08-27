@@ -774,8 +774,31 @@ fn read_session_from(dir: &Path, label: &str) -> Result<Option<String>, String> 
     }
 }
 
+/// Tighten a path to owner-only, best-effort.
+///
+/// Session snapshots are `PersistedWindow` blobs carrying terminal
+/// *transcripts* — scrollback, so whatever the user's shells printed:
+/// tokens echoed by a failing curl, a pasted connection string, the contents
+/// of a `.env` someone `cat`ed. Written under the umask they land `0644` in a
+/// `0755` directory, readable by every other account on the machine. The
+/// Host's own state file is already `0600` in a `0700` directory for a
+/// strictly *smaller* secret (`lib/src/host/remote/host-state-store.ts`), so
+/// this is closing an inconsistency, not inventing a rule.
+///
+/// Best-effort on purpose, and unix-only: Windows ACLs are not unix modes,
+/// and a filesystem without POSIX permissions must not fail a session save.
+#[cfg(unix)]
+fn restrict_to_owner(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
+}
+
+#[cfg(not(unix))]
+fn restrict_to_owner(_path: &Path, _mode: u32) {}
+
 fn write_session_to(dir: &Path, label: &str, state: &str) -> Result<(), String> {
     create_dir_all(dir).map_err(|e| format!("create sessions dir: {e}"))?;
+    restrict_to_owner(dir, 0o700);
     let file_name = session_file_name(label);
     let path = dir.join(&file_name);
     let tmp = dir.join(format!("{file_name}.tmp"));
@@ -783,6 +806,9 @@ fn write_session_to(dir: &Path, label: &str, state: &str) -> Result<(), String> 
     // target so a crash mid-write can never truncate the previous good snapshot.
     {
         let mut f = File::create(&tmp).map_err(|e| format!("open temp: {e}"))?;
+        // Before any bytes land: the rename below preserves the temp file's
+        // mode, so tightening here is what makes the final snapshot 0600.
+        restrict_to_owner(&tmp, 0o600);
         f.write_all(state.as_bytes())
             .map_err(|e| format!("write temp: {e}"))?;
         f.sync_all().map_err(|e| format!("fsync temp: {e}"))?;

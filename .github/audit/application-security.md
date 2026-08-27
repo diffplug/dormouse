@@ -48,12 +48,13 @@ moment someone adds a directory, which is exactly how `.vscode/` and
 `.impeccable/` ended up owned by nobody.
 
 Subtraction is **recursive, not top-level**. Where another domain claims a
-subdirectory rather than a whole tree, the rest of that tree is yours: the
-other two claim `website/public/`, `website/src/`, and `website/scripts/`, so
-`website/`'s remaining files — `vite.config.ts`, `react-router.config.ts`,
-`package.json`, `tsconfig.json` — are yours. Check one level down wherever a
-claim is partial, or the same orphaning happens again inside a directory
-instead of beside it.
+subdirectory rather than a whole tree, the rest of that tree is yours — so
+check one level down wherever a claim is partial, or the same orphaning
+happens inside a directory instead of beside it. `website/` is *not* an
+example of this any more: `supply-chain` claims all of it except
+`website/public/`, so none of it is yours. That was fixed by stating the claim
+as a subtraction rather than as two named subdirectories, which is the shape
+to prefer when you find the next one.
 
 Today the remainder is `lib/`, `server/`, `server-lib-common/`, `standalone/`,
 `vscode-ext/`, `dor/`, `dor-lib-common/`, `canopy/`, `deploy/`, `docs/`,
