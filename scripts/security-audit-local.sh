@@ -41,9 +41,18 @@ run_domain() {
     application-security) out=audit-application.md ;;
     *) echo "error: unknown domain '$domain' (supply-chain|ci-and-secrets|application-security)" >&2; return 64 ;;
   esac
-  echo "==> $domain -> $out"
+  # Same model split as CI (`.github/workflows/security-audit.yaml` ->
+  # `--agents`): the two mechanical domains run on the default, and
+  # application-security — the one that reads code adversarially — runs on
+  # Opus. Local and CI must agree here, or the domain where the model matters
+  # most is the one they disagree about.
+  local model_args=()
+  [ "$domain" = "application-security" ] && model_args=(--model opus)
+
+  echo "==> $domain -> $out${model_args[*]:+ (${model_args[*]})}"
   rm -f "$out"
   claude -p "$(cat "$AUDIT_DIR/_preamble.md"; echo; cat "$AUDIT_DIR/$domain.md")" \
+    "${model_args[@]}" \
     --allowed-tools "Read,Write,Edit,Bash,Grep,Glob" \
     --disallowed-tools "Task,Agent,Workflow"
   if [ -s "$out" ]; then

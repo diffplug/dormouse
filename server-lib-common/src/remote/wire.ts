@@ -408,12 +408,30 @@ export interface TerminalResizeParams {
 }
 
 /**
+ * The largest terminal dimension a remote peer may ask for.
+ *
+ * Far past any real display — a 4K screen at an unreadably small font is on
+ * the order of 800 columns — and small enough that the worst case a peer can
+ * request is a few million cells rather than an arbitrary number of them.
+ */
+export const MAX_TERMINAL_DIMENSION = 2000;
+
+/**
  * Coerce a requested terminal dimension (cols or rows) to a positive integer,
  * falling back to `fallback` when the value is absent or not finite. Shared so
  * the Host api, the client adapter, and the test harness all sanitize sizes the
  * same way.
+ *
+ * Clamped at **both** ends, and the upper bound is the security-relevant half:
+ * a local resize is derived from element geometry and cannot be large, but
+ * `terminal.resize` carries a peer-supplied number straight to `term.resize`
+ * in the webview that owns the pane, and xterm bounds only the minimum before
+ * allocating `rows × cols` cells. Unbounded, one frame asking for a million by
+ * a million wedges every terminal in that window — reachable by an authorized
+ * Client, or by a compromised Server forging `msg` on an established session
+ * (`SECURITY.md` -> Remote Control, Trust boundary).
  */
 export function clampTerminalDimension(value: number | undefined, fallback: number): number {
   if (value === undefined || !Number.isFinite(value)) return fallback;
-  return Math.max(1, Math.floor(value));
+  return Math.min(MAX_TERMINAL_DIMENSION, Math.max(1, Math.floor(value)));
 }

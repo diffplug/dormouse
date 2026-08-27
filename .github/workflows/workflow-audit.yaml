@@ -1,7 +1,7 @@
 name: workflow-audit
 
 # Nightly audit of every commit touching .github/workflows/,
-# .config/tend.yaml, .github/audit/, .vscode/, or SECURITY.md. Surfaces changes from feature branches and direct
+# .config/tend.yaml, .github/audit/, or .vscode/. Surfaces changes from feature branches and direct
 # pushes, not just the main branch — so a bot push that adds a new
 # workflow file gets a visible issue even if it never opens a PR.
 #
@@ -98,10 +98,18 @@ jobs:
           # .vscode/ is in the window because `tasks.json` can carry
           # `"runOn": "folderOpen"`, which executes when a maintainer opens the
           # folder — the same persistence-on-checkout shape a workflow gives,
-          # reached without touching .github/. SECURITY.md is in it because it
-          # is the document the nightly security audit enforces: weakening a
-          # `FAIL IF` and weakening the workflow that runs it are the same act
-          # one file apart, and only one of them was watched.
+          # reached without touching .github/.
+          #
+          # SECURITY.md is deliberately NOT in the window, though it was
+          # briefly. Two reasons, and the second is why the first is not enough
+          # on its own. What this job watches is code that *executes from any
+          # branch*: a workflow runs on a bot-pushed branch, and a folderOpen
+          # task runs when someone checks one out. SECURITY.md is inert until
+          # it is merged to main, which is admin-gated — so the branch-wide
+          # watch buys nothing PR review does not already give. And it changes
+          # in nearly every security commit, so including it would report a
+          # commit on almost every such PR; a control that cries wolf on
+          # routine work is one people learn to skim.
           #
           # .config/tend.yaml is in the window, not just .github/workflows/.
           # Without it, a commit editing only the config never enters the audit,
@@ -125,7 +133,7 @@ jobs:
           # and silently matches nothing under a shell that does not word-split.
           # `"${WINDOW[@]}"` means the same thing everywhere and needs no
           # shellcheck exemption.
-          WINDOW=(.github/workflows/ .config/tend.yaml .github/audit/ .vscode/ SECURITY.md)
+          WINDOW=(.github/workflows/ .config/tend.yaml .github/audit/ .vscode/)
           # DERIVED, never hand-maintained: element 0 is the workflows tree, and
           # this is everything else — the half both classifiers must refuse
           # rather than inspect, since each only ever content-checks

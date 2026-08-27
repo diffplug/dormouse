@@ -16,7 +16,11 @@ for a check you could not determine — a transient network error, or an area yo
 ran out of room to reach — and say which it was. It is never a substitute for a
 check you could have run.
 
-Write your findings to the file named in your own prompt, with two sections:
+Write your findings to the file named in your own prompt. **Its very first
+line must be literally `VERDICT: PASS` or `VERDICT: FAIL`** — nothing else on
+that line. The reporting step greps for it, so it is the one part of your
+report a machine reads: a `FAIL` there cannot be lost in a merge, and it is
+what stops an optimistic summary from overriding you. Then two sections:
 `### FAIL IF results` (one line per check) and `### Qualitative findings`
 (severity-tagged). **Write that file before you return** — your caller reads
 the file, not your reply, and a fragment that does not exist fails the whole

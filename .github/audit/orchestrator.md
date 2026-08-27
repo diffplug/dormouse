@@ -14,13 +14,21 @@ adversarially — and one context holding all three degrades the third.
 ## 1. Spawn all three
 
 Spawn them with the Task tool **in a single message** so they run
-concurrently. Give each subagent, verbatim:
+concurrently, using these three `subagent_type` values:
 
-- the shared preamble in `.github/audit/_preamble.md`, then
-- its own file: `.github/audit/supply-chain.md`,
-  `.github/audit/ci-and-secrets.md`, `.github/audit/application-security.md`.
+- `supply-chain`
+- `ci-and-secrets`
+- `application-security`
 
-Read all four files before you spawn anything.
+Each is already defined with the prompt it needs — pointing at
+`.github/audit/_preamble.md` plus its own domain file — and with the model it
+should run on. `application-security` is deliberately on a stronger model than
+the other two; do not override it, and do not paste prompt text into the Task
+call. A one-line instruction such as "begin your audit" is enough, because the
+agent definition carries the rest.
+
+Do not read the domain files yourself. They are long, you are not auditing,
+and holding all three in your context is the thing this split exists to avoid.
 
 ## 2. Wait without ending your turn
 

@@ -116,9 +116,24 @@ jobs:
           # the rule that makes it safe: block in a Bash `until` loop on
           # the fragment files, never end the turn to wait. `Workflow`
           # stays denied because nothing here should be spawning one.
+          # Two of the three domains are mechanical — run a generator, read
+          # `gh api`, compare a pin — and the session default (Sonnet)
+          # does them well. `application-security` is the one that has to
+          # read code adversarially, and its findings have been the ones
+          # that needed real reasoning: tracing a relay-minted `clientId`
+          # to a keystroke-injection path, or working out that an 8-char
+          # fingerprint carries ~40 bits because a P-256 point's leading
+          # byte is constant. It runs on Opus; the orchestrator and the
+          # other two stay on the cheaper default, so the cost lands only
+          # where the depth does.
+          #
+          # Each agent's prompt is a pointer, not a copy — the content
+          # stays in `.github/audit/` so CI and
+          # `scripts/security-audit-local.sh` cannot drift apart.
           claude_args: >-
             --allowed-tools "Read,Write,Edit,Bash,Grep,Glob,Task,Agent"
             --disallowed-tools "Workflow"
+            --agents '{"supply-chain":{"description":"Audits the Dependency Supply Chain section of SECURITY.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/supply-chain.md`, and follow them exactly."},"ci-and-secrets":{"description":"Audits the CI, tend, release, and audit-contract sections of SECURITY.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/ci-and-secrets.md`, and follow them exactly."},"application-security":{"description":"Audits the Remote Control section of SECURITY.md, and sweeps the rest of the product code.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/application-security.md`, and follow them exactly.","model":"opus"}}'
           # The prompts live in `.github/audit/`, not inline here: they
           # are long enough to need real diffs in review, they must be
           # runnable locally against the same text CI uses
@@ -300,6 +315,44 @@ jobs:
                 STATUS=MISSING
               fi
             done
+          fi
+
+          # Existence is not agreement. The loop above catches a domain that
+          # produced nothing; this catches one that produced a FAIL the merge
+          # then lost — a mis-summarised verdict, or three domains flattened
+          # into an optimistic paragraph. That case is worse than a missing
+          # fragment, because PASS *closes* the open failure issue below and
+          # opens the release gate, leaving the finding only in a 14-day
+          # artifact nobody is looking at.
+          #
+          # FAIL, not MISSING: a domain that returned FAIL did finish, and it
+          # found something. Each subagent is told to make line 1 of its
+          # fragment the literal verdict so this grep can exist at all —
+          # otherwise the verdict rests on the orchestrator faithfully
+          # propagating it, which is the same "a prompt is not a control"
+          # shape the missing-fragment guard exists to close.
+          if [ "$STATUS" = "PASS" ]; then
+            # shellcheck disable=SC2086
+            for f in $AUDIT_FRAGMENTS; do
+              [ -s "$f" ] || continue
+              if head -n1 "$f" | grep -q '^VERDICT: FAIL'; then
+                echo "::error::Audit reported PASS but $f opens with VERDICT: FAIL; downgrading to FAIL."
+                DISSENTING="${DISSENTING:+$DISSENTING, }$f"
+                STATUS=FAIL
+              fi
+            done
+            if [ -n "${DISSENTING:-}" ]; then
+              {
+                echo
+                echo "---"
+                echo
+                echo "**Downgraded to FAIL by the reporting step.** The merged verdict was"
+                echo "\`PASS\`, but these domain reports open with \`VERDICT: FAIL\`:"
+                echo "$DISSENTING."
+                echo
+                echo "A domain's own verdict outranks the merge."
+              } >> audit-report.md
+            fi
           fi
 
           DATE=$(date -u +%Y-%m-%dT%H:%MZ)
