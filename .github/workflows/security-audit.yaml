@@ -313,24 +313,24 @@ jobs:
           # reason the three outcomes exist above — this is an audit that
           # did not finish, not a security finding — and MISSING already
           # exits non-zero and holds the release gate shut.
-          # Gated the same way as the dissent loop below, and for the same
-          # reason: this records a *condition* the issue body reports on, so it
-          # has to run on any path that can reach that body. Gated on `PASS` it
-          # was skipped whenever the audit wrote no verdict at all — so a run
-          # that lost a fragment *and* never decided filed with no sign the
-          # fragment was missing. Only a settled FAIL skips it, and only
-          # because FAIL is already the ceiling.
-          if [ "$STATUS" != "FAIL" ]; then
-            # Unquoted on purpose: `AUDIT_FRAGMENTS` is a filename list.
-            # shellcheck disable=SC2086
-            for f in $AUDIT_FRAGMENTS; do
-              if [ ! -s "$f" ]; then
-                echo "::warning::$f is missing or empty; the audit cannot be considered complete."
-                MISSING_FRAGMENTS="${MISSING_FRAGMENTS:+$MISSING_FRAGMENTS, }$f"
-                STATUS=MISSING
-              fi
-            done
-          fi
+          # Recording a condition and escalating the status are two jobs, and
+          # gating the first on the second is what kept producing findings.
+          # Both loops now run UNCONDITIONALLY — they answer "what is true of
+          # this run", which the issue body reports on regardless of verdict.
+          # Only the escalation below is conditional. Gated on `!= FAIL` this
+          # loop was skipped whenever the orchestrator itself wrote FAIL, so a
+          # domain that left no fragment beside a real finding appeared
+          # nowhere: no annotation, no note, and a report that read as the
+          # whole story.
+          #
+          # Unquoted on purpose: `AUDIT_FRAGMENTS` is a filename list.
+          # shellcheck disable=SC2086
+          for f in $AUDIT_FRAGMENTS; do
+            if [ ! -s "$f" ]; then
+              echo "::warning::$f is missing or empty; the audit cannot be considered complete."
+              MISSING_FRAGMENTS="${MISSING_FRAGMENTS:+$MISSING_FRAGMENTS, }$f"
+            fi
+          done
 
           # Existence is not agreement. The loop above catches a domain that
           # produced nothing; this catches one that produced a FAIL the merge
@@ -347,55 +347,46 @@ jobs:
           # propagating it, which is the same "a prompt is not a control"
           # shape the missing-fragment guard exists to close.
           #
-          # Gated on "not already FAIL", NOT on "still PASS". The loop above
-          # writes the same variable, so a `PASS` gate meant one empty fragment
-          # switched this check off for every *other* fragment — and a domain
-          # that returned VERDICT: FAIL beside a missing sibling would go
-          # unnoticed, while the issue told the maintainer the rest was fine.
-          # The three outcomes are ordered: FAIL (a domain found something)
-          # outranks MISSING (the audit did not finish), which outranks PASS,
-          # so a dissent must be able to raise MISSING to FAIL and never the
-          # reverse.
-          if [ "$STATUS" != "FAIL" ]; then
-            # shellcheck disable=SC2086
-            for f in $AUDIT_FRAGMENTS; do
-              [ -s "$f" ] || continue
-              # Three cases, not two. A fragment whose first line is neither
-              # verdict — a subagent that ignored the preamble, a stray heading
-              # or blank line — must not fall through to an unchallenged PASS:
-              # that would put the verdict back on a prompt having been
-              # followed, which is the thing this guard exists to stop being
-              # the control. MISSING rather than FAIL, since a report we cannot
-              # read is an audit that did not finish rather than a finding, and
-              # deliberately not folded into MISSING_FRAGMENTS, whose message
-              # says no fragment was left at all.
-              case "$(head -n1 "$f")" in
-                'VERDICT: FAIL'*)
-                  echo "::error::$f opens with VERDICT: FAIL; the merged verdict cannot stand."
-                  DISSENTING="${DISSENTING:+$DISSENTING, }$f"
-                  STATUS=FAIL ;;
-                'VERDICT: PASS'*) ;;
-                *)
-                  echo "::warning::$f has no VERDICT line; the dissent check cannot read it."
-                  UNREADABLE_VERDICTS="${UNREADABLE_VERDICTS:+$UNREADABLE_VERDICTS, }$f"
-                  # Never downgrade: a FAIL from an earlier fragment in this
-                  # same loop, or a MISSING from the missing-fragment loop
-                  # above, both outrank "unreadable".
-                  [ "$STATUS" = FAIL ] || STATUS=MISSING ;;
-              esac
-            done
-            if [ -n "${DISSENTING:-}" ]; then
-              {
-                echo
-                echo "---"
-                echo
-                echo "**Downgraded to FAIL by the reporting step.** The merged verdict was"
-                echo "\`PASS\`, but these domain reports open with \`VERDICT: FAIL\`:"
-                echo "$DISSENTING."
-                echo
-                echo "A domain's own verdict outranks the merge."
-              } >> audit-report.md
-            fi
+          # Also unconditional, for the same reason.
+          # shellcheck disable=SC2086
+          for f in $AUDIT_FRAGMENTS; do
+            [ -s "$f" ] || continue
+            # Three cases, not two. A fragment whose first line is neither
+            # verdict — a subagent that ignored the preamble, a stray heading
+            # or blank line — must not fall through to an unchallenged PASS:
+            # that would put the verdict back on a prompt having been
+            # followed, which is the thing this guard exists to stop being
+            # the control. MISSING rather than FAIL, since a report we cannot
+            # read is an audit that did not finish rather than a finding, and
+            # deliberately not folded into MISSING_FRAGMENTS, whose message
+            # says no fragment was left at all.
+            case "$(head -n1 "$f")" in
+              'VERDICT: FAIL'*)
+                echo "::error::$f opens with VERDICT: FAIL; the merged verdict cannot stand."
+                DISSENTING="${DISSENTING:+$DISSENTING, }$f" ;;
+              'VERDICT: PASS'*) ;;
+              *)
+                echo "::warning::$f has no VERDICT line; the dissent check cannot read it."
+                UNREADABLE_VERDICTS="${UNREADABLE_VERDICTS:+$UNREADABLE_VERDICTS, }$f" ;;
+            esac
+          done
+          # Escalation, in ONE place, from what the loops recorded. Ordered:
+          # FAIL (a domain found something) outranks MISSING (the audit did
+          # not finish) outranks PASS. A dissent can raise MISSING to FAIL and
+          # never the reverse, and an orchestrator that already said FAIL stays
+          # there.
+          #
+          # There is deliberately no prose emitted here. The old code appended
+          # a "Downgraded to FAIL — the merged verdict was PASS" block to the
+          # report, which was a claim about a *combination* (dissent set AND
+          # the merge said PASS) and became false the moment a dissent could
+          # arrive on a run that said nothing. The notes block below carries
+          # the same fact in condition form.
+          if [ -n "${DISSENTING:-}" ]; then
+            STATUS=FAIL
+          elif [ "$STATUS" != "FAIL" ] &&
+               { [ -n "${MISSING_FRAGMENTS:-}" ] || [ -n "${UNREADABLE_VERDICTS:-}" ]; }; then
+            STATUS=MISSING
           fi
 
           DATE=$(date -u +%Y-%m-%dT%H:%MZ)
