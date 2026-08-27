@@ -3,6 +3,7 @@
 **Scope — these sections, and no others:**
 
 `## Remote Control`
+`## Loopback Listeners`
 
 **Output file:** `audit-application.md`
 
@@ -14,6 +15,11 @@ Read, at minimum: `docs/specs/remote-security-model.md`, `docs/specs/server.md`,
 the code they point at — `server-lib-common/src/security/`, `server/src/`,
 `lib/src/remote/`, `lib/src/host/remote/`, `vscode-ext/src/remote-host*.ts`,
 `scripts/csp-defaults.mjs`, and `deploy/local/install-macos.sh`.
+
+For `## Loopback Listeners`, read `lib/src/host/loopback-guard.ts` first — it
+states the rule — then each listener it names. Derive the set of listeners by
+searching the shipped trees yourself; the section's own list is a description of
+today's tree, not the scope.
 
 ## Qualitative pass
 

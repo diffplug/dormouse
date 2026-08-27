@@ -7,6 +7,15 @@
 // command execution as the developer. It listens on loopback, which is not a
 // boundary at all against the threat that matters here — a web page open in the
 // developer's own browser.
+//
+// The rule these checks implement is shared with Dormouse's other loopback
+// listeners and is stated once in `lib/src/host/loopback-guard.ts`, with
+// `SECURITY.md` -> "Loopback Listeners" auditing the class. This file keeps its
+// own copy rather than importing that module: it is a dev-only, unbundled
+// script in another package, and making it depend on built TS to share a few
+// lines would cost more than the duplication does. The credential mechanism
+// differs anyway — a URL token works here because the harness owns the page's
+// URL, which is exactly what the iframe proxy cannot assume.
 import { createHash, timingSafeEqual } from 'node:crypto';
 
 function sha256(value) {
