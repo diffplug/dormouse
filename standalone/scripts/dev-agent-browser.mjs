@@ -12,6 +12,9 @@ import { fileURLToPath } from 'node:url';
 // handles both and is a no-op on POSIX. See docs/specs/dor-cli.md.
 import spawn from 'cross-spawn';
 import { createInterface } from 'node:readline';
+// The bridge's security boundary, in its own module so it is testable —
+// see standalone/scripts/dev-host-guard.test.mjs.
+import { corsHeaders, isAuthorized, isJsonRequest } from './dev-host-guard.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const standaloneDir = path.resolve(__dirname, '..');
@@ -34,6 +37,14 @@ const browserSession = process.env.DORMOUSE_BROWSER_DEV_AB_SESSION || 'dormouse-
 // predictable PRNG and was never appropriate for it. Same construction as the
 // production hosts (`vscode-ext/src/pty-manager.ts`).
 const controlToken = randomBytes(24).toString('hex');
+// A second, separate credential, deliberately not `controlToken`: that one is
+// the `dor` control-API bearer and is handed to every shell this harness
+// spawns, so anything running in a dev terminal already holds it. This one
+// gates the HTTP bridge below, which is a strictly smaller circle — only the
+// dev page gets it, via the URL baked into `VITE_DORMOUSE_BROWSER_DEV_HOST`.
+// Overloading one token would hand the bridge to every spawned shell for free.
+const bridgeToken = randomBytes(24).toString('hex');
+const viteOrigin = `http://localhost:${vitePort}`;
 // The remote Host persists its enrollment + ACL here, under the harness's own
 // temp dir so a dev run never touches the installed app's state.
 const stateDir = path.join(os.tmpdir(), `dormouse-${process.pid}-browser-state`);
@@ -129,6 +140,7 @@ const invokeMap = {
 };
 
 async function readJson(req) {
+  if (!isJsonRequest(req)) throw new Error('content-type must be application/json');
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
   if (chunks.length === 0) return {};
@@ -136,9 +148,9 @@ async function readJson(req) {
 }
 
 function cors(res) {
-  res.setHeader('access-control-allow-origin', '*');
-  res.setHeader('access-control-allow-methods', 'GET,POST,OPTIONS');
-  res.setHeader('access-control-allow-headers', 'content-type');
+  for (const [name, value] of Object.entries(corsHeaders(viteOrigin))) {
+    res.setHeader(name, value);
+  }
 }
 
 function startHostServer() {
@@ -148,6 +160,13 @@ function startHostServer() {
       res.writeHead(204).end();
       return;
     }
+    // Before routing, before reading a body: an unauthorized caller must not be
+    // able to tell this port apart from a closed one, so answer exactly what the
+    // fall-through 404 answers.
+    if (!isAuthorized(req, { token: bridgeToken, port: hostPort })) {
+      res.writeHead(404).end('not found');
+      return;
+    }
     try {
       const url = new URL(req.url || '/', `http://${req.headers.host}`);
       if (req.method === 'GET' && url.pathname === '/__dormouse_dev_host/events') {
@@ -155,7 +174,7 @@ function startHostServer() {
           'content-type': 'text/event-stream',
           'cache-control': 'no-cache',
           connection: 'keep-alive',
-          'access-control-allow-origin': '*',
+          'access-control-allow-origin': viteOrigin,
         });
         sseClients.add(res);
         sendSse(res, 'sidecar', { event: 'dev:connected', data: { pid: process.pid } });
@@ -251,7 +270,9 @@ function startVite() {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
       ...process.env,
-      VITE_DORMOUSE_BROWSER_DEV_HOST: `http://127.0.0.1:${hostPort}`,
+      // The token rides in the URL, so the page needs nothing else plumbed to
+      // it and `BrowserSidecarHost` stays the single place that knows about it.
+      VITE_DORMOUSE_BROWSER_DEV_HOST: `http://127.0.0.1:${hostPort}/?t=${bridgeToken}`,
       DORMOUSE_BROWSER_DEV_VITE_PORT: String(vitePort),
     },
   });
@@ -306,6 +327,10 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 log(`starting browser dev host on http://127.0.0.1:${hostPort}`);
+// Printed so poking the bridge by hand stays possible. Local stderr only: this
+// harness never runs in CI, and the token dies with the process.
+log(`bridge token: ${bridgeToken}`);
+log(`try: curl -H 'content-type: application/json' -d '{"cmd":"pty_request_init"}' 'http://127.0.0.1:${hostPort}/__dormouse_dev_host/send?t=${bridgeToken}'`);
 await startHostServer();
 startSidecar();
 startVite();

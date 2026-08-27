@@ -5,10 +5,29 @@ export class BrowserSidecarHost {
   private readonly eventHandlers = new Set<(event: BrowserSidecarEvent) => void>();
   private nextId = 1;
 
-  constructor(private readonly baseUrl: string) {}
+  /**
+   * The harness bakes its bridge token into the base URL's query
+   * (`http://127.0.0.1:1422/?t=…`). Capture it once here, because `new URL`
+   * below drops the base's query when it resolves an absolute path.
+   */
+  private readonly token: string;
 
+  constructor(private readonly baseUrl: string) {
+    this.token = new URL(baseUrl).searchParams.get('t') ?? '';
+  }
+
+  /**
+   * The one place that knows the bridge is authenticated. Every caller — the
+   * three methods below and the console mirror in `browser-sidecar-adapter` —
+   * builds its URL here, so the token cannot be forgotten at a call site.
+   *
+   * It travels as a query param rather than an `Authorization` header because
+   * `EventSource` cannot set headers, and `/events` is gated like the rest.
+   */
   url(path: string): URL {
-    return new URL(path, this.baseUrl);
+    const url = new URL(path, this.baseUrl);
+    if (this.token) url.searchParams.set('t', this.token);
+    return url;
   }
 
   async init(): Promise<void> {
