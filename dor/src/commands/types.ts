@@ -17,9 +17,14 @@ export type SurfaceRenderMode = 'iframe' | 'ab-screencast' | 'ab-popout';
 export type SurfaceFace = 'console' | 'web';
 
 /** The face-set a kind names. Single source of truth for face gating — kind
- *  switches elsewhere should go through these predicates instead. */
+ *  switches elsewhere should go through these predicates instead. Exhaustive
+ *  on purpose: adding a kind (the staged both-faces `tool`) must be a compile
+ *  error here, not a silent `['web']`. */
 export function facesOfKind(kind: SurfaceKind): SurfaceFace[] {
-  return kind === 'terminal' ? ['console'] : ['web'];
+  switch (kind) {
+    case 'terminal': return ['console'];
+    case 'browser': return ['web'];
+  }
 }
 
 /** Whether this kind has a console face (PTY-backed: `read` / `send` / `await`
