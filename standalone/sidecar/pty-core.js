@@ -1048,12 +1048,20 @@ module.exports.create = function create(send, ptyModule) {
   const ptyShells = new Map(); // id -> resolved shell executable
   const scrollback = new Map(); // id -> { chunks: string[], totalChars: number }
 
+  // Only ever appends to a buffer `spawn` already created — never creates one.
+  // `spawn` installs the entry before it wires `onData`, so a live PTY always
+  // has one, and the only way to arrive here without one is after `kill` deleted
+  // it. That happens: `kill` never disposes the `onData` subscription, and a
+  // just-killed PTY can still deliver a final flush (notably under ConPTY, the
+  // same lag `gracefulKillAll` waits out). Creating the entry there would
+  // resurrect a dead pane's buffer under a key nothing deletes again — `kill`
+  // has already run and `killAll` only fires at shutdown — so the sidecar
+  // retains one buffer per killed pane for the life of the process, and
+  // `getScrollback` answers with post-kill bytes where the contract says a
+  // killed pane has no scrollback.
   function bufferScrollback(id, data) {
-    let entry = scrollback.get(id);
-    if (!entry) {
-      entry = { chunks: [], totalChars: 0 };
-      scrollback.set(id, entry);
-    }
+    const entry = scrollback.get(id);
+    if (!entry) return;
 
     entry.chunks.push(data);
     entry.totalChars += data.length;
