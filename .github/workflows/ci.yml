@@ -45,6 +45,42 @@ jobs:
             exit 1
           fi
 
+      # zsh is not on the ubuntu runner image, and it is the default shell on
+      # macOS — our primary platform. Without it, `standalone/sidecar`'s
+      # shell-integration suite silently covered only bash, which is half of
+      # what stands behind an emit-side security fix (SECURITY.md's OSC 633
+      # rules; the emitters are the boundary, since the parser cannot defend
+      # against a terminator that arrives inside a directory name). The suite
+      # names the shells it covered on every run, so a future image change that
+      # drops one is visible rather than silent.
+      # `update` first: the runner image's apt lists are baked at image build, so
+      # once the archive rotates zsh's version the cached Packages entry 404s.
+      # `timeout` because a degraded Azure mirror dribbles bytes rather than
+      # failing — see the fuller treatment in Standalone Smoketest below, which
+      # also rotates mirrors. That much machinery is not worth it for one
+      # package; the retry here covers the common case without turning a
+      # `Build & Test` red for a reason unrelated to the diff.
+      # 13 minutes, not 6: the budget has to outlast the schedule it wraps, or
+      # Actions kills the step mid-attempt and the ::error:: below — the line
+      # that says what the failure costs — never prints. Worst case is
+      # 3 x (120 update + 120 install) + 2 x 15 sleep = 750s, and the last sleep
+      # is guarded to keep that `2 x` true: unguarded it is 3 x 15 = 765s, which
+      # halves the headroom for pure dead time before a step that is already
+      # failing.
+      - name: Install zsh (shell-integration tests)
+        timeout-minutes: 13
+        run: |
+          for i in 1 2 3; do
+            if sudo timeout 120 apt-get update -q \
+               && sudo timeout 120 apt-get install -y -q --no-install-recommends zsh; then
+              exit 0
+            fi
+            echo "::warning::apt attempt $i for zsh failed or timed out"
+            if [ "$i" -lt 3 ]; then sleep 15; fi
+          done
+          echo "::error::could not install zsh; the shell-integration suite would silently cover only bash"
+          exit 1
+
       - name: Test
         run: pnpm test
 

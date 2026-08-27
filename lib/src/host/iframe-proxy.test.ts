@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as http from 'node:http';
 import { createIframeProxyUrl } from './iframe-proxy';
 
@@ -25,15 +25,25 @@ function upstream(handler: http.RequestListener): Promise<number> {
 }
 
 interface Fetched { status: number; headers: http.IncomingHttpHeaders; body: string }
-function get(url: string): Promise<Fetched> {
+function request(url: string, init: { method?: string; headers?: Record<string, string> } = {}): Promise<Fetched> {
+  const u = new URL(url);
   return new Promise((resolve, reject) => {
-    http.get(url, (res) => {
+    const req = http.request({
+      hostname: u.hostname,
+      port: u.port,
+      path: `${u.pathname}${u.search}`,
+      method: init.method ?? 'GET',
+      headers: init.headers,
+    }, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (c: Buffer) => chunks.push(c));
       res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString('utf8') }));
-    }).on('error', reject);
+    });
+    req.on('error', reject);
+    req.end();
   });
 }
+const get = (url: string) => request(url);
 
 async function frame(target: string): Promise<string> {
   const r = await createIframeProxyUrl(target, NO_LOG);
@@ -139,5 +149,66 @@ describe('iframe proxy — serving', () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatch(/dev server running|couldn’t reach/i);
     expect(res.headers['x-frame-options']).toBeUndefined();
+  });
+});
+
+describe('iframe proxy — the proxy never vouches for a stranger', () => {
+  // The port is ephemeral but not secret: the range scans in seconds, and a
+  // page in the user's own browser reaches loopback as easily as our webview
+  // does. So the Origin rewrite — the proxy telling the upstream "this came
+  // from you" — must be reserved for callers we actually served. See
+  // ./loopback-guard.ts for the shared rule.
+  let upstreamPort = 0;
+  let proxyPort = '';
+  let url = '';
+
+  beforeEach(async () => {
+    // An upstream that reports back exactly what it was told about its caller.
+    upstreamPort = await upstream((q, s) => {
+      s.writeHead(200, { 'content-type': 'application/json' });
+      s.end(JSON.stringify({ origin: q.headers.origin ?? null, host: q.headers.host ?? null }));
+    });
+    url = await frame(`http://127.0.0.1:${upstreamPort}/`);
+    proxyPort = new URL(url).port;
+  });
+
+  const post = (headers: Record<string, string>) => request(url, { method: 'POST', headers });
+
+  it('relabels the Origin of a page it served', async () => {
+    const res = await post({ host: `127.0.0.1:${proxyPort}`, origin: `http://127.0.0.1:${proxyPort}` });
+
+    // The legitimate iframe: origin-aware dev servers must see same-origin.
+    expect(JSON.parse(res.body)).toEqual({ origin: `http://127.0.0.1:${upstreamPort}`, host: `127.0.0.1:${upstreamPort}` });
+  });
+
+  it('forwards a foreign Origin untouched instead of laundering it', async () => {
+    const res = await post({ host: `127.0.0.1:${proxyPort}`, origin: 'https://evil.example' });
+
+    // Forwarded, not blocked: the upstream sees the truth and applies its own
+    // CSRF policy, so the proxy grants nothing that hitting the upstream port
+    // directly would not.
+    expect(JSON.parse(res.body).origin).toBe('https://evil.example');
+  });
+
+  it('leaves an absent Origin absent (top-level navigation, same-origin GET)', async () => {
+    const res = await post({ host: `127.0.0.1:${proxyPort}` });
+
+    expect(JSON.parse(res.body).origin).toBeNull();
+  });
+
+  it('refuses a request addressed to a rebound hostile name', async () => {
+    // evil.example re-resolved to 127.0.0.1 arrives with its own name in Host,
+    // and the browser treats the response as same-origin — so no CORS header
+    // would get a say. 421 Misdirected Request, before the upstream is dialed.
+    const res = await post({ host: 'evil.example:1234', origin: 'https://evil.example' });
+
+    expect(res.status).toBe(421);
+    expect(res.body).toBe('');
+  });
+
+  it('accepts either loopback spelling in Host', async () => {
+    for (const host of [`127.0.0.1:${proxyPort}`, `localhost:${proxyPort}`]) {
+      expect((await post({ host })).status).toBe(200);
+    }
   });
 });

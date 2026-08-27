@@ -29,7 +29,7 @@ rather than methods:
 
 ### Standalone browser-dev harness
 
-Source of truth: `standalone/scripts/dev-agent-browser.mjs`, `standalone/src/browser-sidecar-host.ts`, and `standalone/src/browser-sidecar-adapter.ts`.
+Source of truth: `standalone/scripts/dev-agent-browser.mjs`, `standalone/scripts/dev-host-guard.mjs`, `standalone/src/browser-sidecar-host.ts`, and `standalone/src/browser-sidecar-adapter.ts`.
 
 `pnpm dev:standalone:ab` starts the standalone sidecar directly, starts a localhost-only HTTP bridge, starts Vite with `VITE_DORMOUSE_BROWSER_DEV_HOST`, and opens the app URL in an `agent-browser` session. The browser build uses `BrowserSidecarAdapter` instead of `TauriAdapter` when that env var is present.
 
@@ -39,6 +39,15 @@ The browser-dev bridge is intentionally a transport shim over the same sidecar p
 - Webview → host request/response commands use `POST /__dormouse_dev_host/invoke`.
 - Host → webview events use `GET /__dormouse_dev_host/events` as an SSE stream.
 - Browser console calls are mirrored to `POST /__dormouse_dev_host/console` so a single `pnpm dev:standalone:ab` terminal shows sidecar logs, Vite logs, and in-browser diagnostics.
+
+**The bridge is authenticated, and loopback is not what makes it safe.** It dispatches `pty_spawn` into the sidecar with caller-supplied `shell`, `args`, `cwd` and `env`, so reaching it is arbitrary command execution as the developer — and the threat is a web page open in that developer's own browser, which loopback does nothing to stop. Four rules, enforced in `standalone/scripts/dev-host-guard.mjs`:
+
+- **Every request carries `?t=<token>`**, a per-run 24-byte credential the harness mints and bakes into the `VITE_DORMOUSE_BROWSER_DEV_HOST` URL, compared with `timingSafeEqual` over SHA-256 digests (equal-length inputs, so a wrong guess is refused rather than throwing). It travels in the query rather than an `Authorization` header because `EventSource` cannot set headers and `/events` is gated like the rest. `BrowserSidecarHost.url()` is the only place that attaches it, so no call site can forget it. This token is distinct from the `dor` control-API `controlToken`, which is handed to every shell the harness spawns; the bridge's circle is smaller.
+- **`Host` must be `127.0.0.1:<port>` or `localhost:<port>`**, against DNS rebinding — a hostile domain re-resolved to loopback arrives with its own name in `Host`, and the browser treats it as same-origin so CORS never applies.
+- **Non-GET requests must be `application/json`.** This is a security control: without it the endpoints are CORS-*simple*, so a foreign page can POST `mode: 'no-cors'` and, though it cannot read the reply, the request still executes. Requiring a non-simple type forces a preflight it cannot pass. It is enforced inside the gate rather than in the body reader, so a route that never parses a body is covered too.
+- **`access-control-allow-origin` names the Vite origin exactly, never `*`**, on every response including the SSE stream. Under `*` the `read_clipboard_text` and `read_clipboard_file_paths` invokes were readable cross-origin. Both loopback spellings of that origin — `http://localhost:<vite>` and `http://127.0.0.1:<vite>` — are accepted and echoed back, because they are the same dev page and pinning one would reject a developer who typed the other with symptoms (blank terminal, console CORS errors) that do not point at the cause. Echoing one of two known-good values is as tight as pinning one.
+
+The gate runs before routing and before any body read, and an unauthorized caller gets the same `404 not found` as an unknown path, so the port does not identify itself. Agent workflows are unaffected: the token reaches the page through the env var the harness already sets, and `agent-browser` drives the Vite origin, never the bridge. The harness prints the token and a ready-made `curl` on startup for driving it by hand.
 
 The remote Host rides the same shim: `remote_host_command` is one more invoke that writes `remoteHost:command` to the sidecar, and the sidecar's `remoteHost:*` events arrive on the SSE stream, so the harness runs a real Host against a per-run temp state directory (`docs/specs/standalone.md` → "Remote Host service").
 

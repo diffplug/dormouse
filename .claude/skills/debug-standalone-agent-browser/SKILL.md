@@ -22,7 +22,7 @@ The harness:
 
 - stages the `dor` CLI and sidecar proxy
 - starts the standalone Node sidecar directly
-- starts a localhost HTTP/SSE bridge for browser-side `PlatformAdapter` calls
+- starts a localhost HTTP/SSE bridge for browser-side `PlatformAdapter` calls, gated by a per-run token it bakes into the bridge URL the page is built against (`VITE_DORMOUSE_BROWSER_DEV_HOST`) — not into the page's own address, so there is no `?t=` in the address bar to look for. Nothing to pass yourself, but the bridge answers `404` to anything without it, so drive the app through `agent-browser` at the Vite port and not the bridge port. To poke the bridge by hand, use the `bridge token:` and ready-made `curl` the harness prints at startup.
 - starts Vite with `VITE_DORMOUSE_BROWSER_DEV_HOST`
 - opens the app in `agent-browser`
 - mirrors browser console logs as `[browser log] ...` in the harness terminal

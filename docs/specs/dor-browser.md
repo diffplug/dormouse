@@ -595,13 +595,35 @@ frame-src http://127.0.0.1:* http://localhost:*
 
 Security boundaries:
 
-- proxy binds loopback only,
+- proxy binds loopback only — which is a mitigation, **not** the boundary; see
+  the two gates below,
+- `Host` must name the grant's own loopback port, on the request and upgrade
+  paths alike, so DNS rebinding fails,
+- the `Origin` rewrite applies only to a caller the proxy itself served,
 - each grant fronts exactly one upstream,
 - no user script is injected,
 - link-local/cloud-metadata ranges are blocked,
 - every other user-supplied `http://` target is trusted as the user's command
   and framed with its frame-blocking headers stripped (the embed is the user's
   own, not third-party clickjacking).
+
+**Why the `Origin` rewrite is conditional.** Presenting a request as coming from
+the upstream's own origin is the proxy *vouching* for it, and that is what
+origin-aware dev servers rely on. The per-grant ephemeral port is not a secret —
+the range scans in seconds — so vouching unconditionally would let any page in
+the user's browser POST here and have its `Origin: https://evil.example`
+relabelled as the upstream's own, defeating exactly the check the rewrite exists
+to satisfy. It matters most on `handleUpgrade`: WebSockets are not subject to
+CORS, so a laundered `Origin` yields a *readable* socket to a dev server or
+`openvscode-server` that would have refused the real one. A foreign `Origin` is
+forwarded untouched rather than blocked, which leaves the upstream to apply its
+own policy and means the proxy grants nothing that hitting the upstream's port
+directly would not. An absent `Origin` stays absent — that is an ordinary
+top-level navigation or same-origin GET. `Referer` needs no such test: it only
+substitutes the proxy's own origin, so a foreign referer already passes through.
+The shared rule for all of Dormouse's loopback listeners lives in
+`lib/src/host/loopback-guard.ts`, and `SECURITY.md` → "Loopback Listeners" audits
+it.
 
 Source of truth: `lib/src/lib/platform/types.ts`,
 `lib/src/lib/platform/vscode-adapter.ts`, `vscode-ext/src/message-types.ts`,

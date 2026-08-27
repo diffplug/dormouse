@@ -47,10 +47,32 @@ export async function copyRewrapped(terminalId: string): Promise<void> {
   await writeTextToClipboard(out);
 }
 
+/**
+ * Neutralize every ESC in a bracketed-paste payload, rendering each as a
+ * visible U+241B. Without this, clipboard content holding `\x1b[201~` closes
+ * the bracket early and everything after it arrives as ordinary typed input —
+ * newlines included, which submit. A hostile page that can put text on the
+ * clipboard would then be able to run a command the user never pasted.
+ *
+ * This is byte-for-byte what xterm's own `bracketTextForPaste` does; we have to
+ * repeat it because `writePasteToPty` writes to the PTY directly and so never
+ * reaches it (see the comment below). Replacing rather than stripping keeps the
+ * paste visible: the user sees that something was defanged instead of watching
+ * bytes vanish.
+ *
+ * Only the bracketed branch is filtered. Without brackets the inside program has
+ * not asked to tell pasted bytes from typed ones, so there is no boundary left
+ * to protect and filtering would only break deliberate pastes of escape
+ * sequences — again matching xterm.
+ */
+function defangPasteEscapes(text: string): string {
+  return text.replace(/\x1b/g, '\u241b');
+}
+
 function writePasteToPty(terminalId: string, text: string): void {
   if (!text) return;
   const bracketed = getMouseSelectionState(terminalId).bracketedPaste;
-  const payload = bracketed ? `\x1b[200~${text}\x1b[201~` : text;
+  const payload = bracketed ? `\x1b[200~${defangPasteEscapes(text)}\x1b[201~` : text;
   // Paste and file-drop input bypass xterm's onData handler, so the touch has to
   // be marked here rather than by the keystroke path.
   markSessionTouched(terminalId);

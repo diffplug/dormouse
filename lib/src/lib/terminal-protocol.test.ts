@@ -262,6 +262,41 @@ describe('TerminalProtocolParser', () => {
     ]);
   });
 
+  // W1: the OSC terminator scan runs on raw bytes, so a `Cwd=` payload holding
+  // one ends the sequence early and everything after it parses as a fresh,
+  // fully-trusted OSC. The parser cannot defend against this — by the time it
+  // sees the bytes the sequence is already over — which is why the shell
+  // emitters filter `$PWD` before it is ever written
+  // (`standalone/sidecar/shell-integration/`, covered by
+  // `standalone/sidecar/shell-integration.test.js`). This test pins the reason
+  // that boundary has to live in the emitter.
+  it.each([
+    ['BEL', '\x07'],
+    ['ST', '\x1b\\'],
+    ['C1 ST', '\u009c'],
+  ])('a %s inside Cwd= would forge a trusted OSC 9 — hence emitter-side filtering', (_name, terminator) => {
+    const parser = new TerminalProtocolParser();
+    const result = parser.process(`\x1b]633;P;Cwd=/tmp/evil${terminator}\x1b]9;PWNED\x07rest`);
+
+    // Truncated cwd, a notification nobody sent, and nothing on screen to show
+    // for it: the injected bytes are consumed by the parser.
+    expect(result.visibleData).toBe('rest');
+    const notifications = result.events.filter((e) => e.kind === 'notification');
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toMatchObject({ notification: { source: 'OSC 9', body: 'PWNED' } });
+  });
+
+  it('a filtered Cwd= yields exactly one cwd event and forges nothing', () => {
+    // What the emitters now produce for the same hostile directory name.
+    const parser = new TerminalProtocolParser();
+    const result = parser.process('\x1b]633;P;Cwd=/tmp/evil]9;PWNED\x07rest');
+
+    expect(result.visibleData).toBe('rest');
+    expect(result.events.filter((e) => e.kind === 'notification')).toHaveLength(0);
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({ kind: 'semantic', event: { type: 'cwd' } });
+  });
+
   it('parses OSC 633 and 1337 CWD plus title fallbacks', () => {
     const parser = new TerminalProtocolParser();
     const result = parser.process('\x1b]633;P;Cwd=/tmp/with%20space\x07\x1b]1337;CurrentDir=/Users/me/app\x07\x1b]0;zsh\x07\x1b]2;vim\x07');
