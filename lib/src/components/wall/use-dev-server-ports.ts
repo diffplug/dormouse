@@ -35,7 +35,8 @@ import {
 } from './agent-browser-ports';
 import type { DooredItem } from './wall-types';
 import type { LathWallEngine } from './lath-wall-engine';
-import { isBrowserParams } from './browser-surface';
+import { surfaceKindFromParams } from './browser-surface';
+import { hasConsoleFace } from 'dor/commands/types';
 import { servesLoopback } from './port-url';
 
 // Wait this long after interest changes before scanning, so a tab's open +
@@ -49,8 +50,9 @@ const IDLE_TIMEOUT_MS = 2000;
 
 type ResolveOutcome = 'busy' | 'idle' | 'pending';
 
+// Port scans are console-face-gated (`docs/specs/glossary.md` → Faces).
 function isTerminalParams(params: unknown): boolean {
-  return !isBrowserParams(params);
+  return hasConsoleFace(surfaceKindFromParams(params));
 }
 
 // requestIdleCallback isn't universal (absent in WKWebView / Tauri on macOS),

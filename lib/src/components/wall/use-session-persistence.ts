@@ -8,7 +8,7 @@ import {
   subscribeToTerminalPaneState,
   UNNAMED_PANEL_TITLE,
 } from '../../lib/terminal-registry';
-import { isBrowserParams } from './browser-surface';
+import { surfaceKindFromParams } from './browser-surface';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem, WallSelectionKind } from './wall-types';
 import type { PersistedDoor, PersistedSurfaceRefs } from '../../lib/session-types';
@@ -45,7 +45,7 @@ export function useSessionPersistence({
     const panes = lath.listPanes().map((p) => ({
       id: p.id,
       title: p.title ?? UNNAMED_PANEL_TITLE,
-      surfaceType: isBrowserParams(p.params) ? ('browser' as const) : ('terminal' as const),
+      surfaceType: surfaceKindFromParams(p.params),
     }));
     // The runtime Door is id + token; its metadata is materialized HERE, from the
     // store that owned it all along, so a Surface persists where it navigated to

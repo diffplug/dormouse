@@ -19,7 +19,7 @@ import type {
   SurfacePort,
   SurfaceView,
 } from './types.js';
-import { hasConsoleFace } from './types.js';
+import { facesOfKind, hasConsoleFace } from './types.js';
 import {
   callerWorkingDirectory,
   errorMessage,
@@ -255,7 +255,9 @@ function renderSurfaceJson(
     id: surface.id,
     ref: surface.ref,
     kind: surface.kind,
-    faces: surface.faces,
+    // Derived at the JSON boundary: a kind *names* a face-set, so faces are a
+    // pure function of kind and are not carried as wire state.
+    faces: facesOfKind(surface.kind),
     render_mode: surface.renderMode,
     view: surface.view,
     title: surface.title,

@@ -45,16 +45,15 @@ import type {
   Surface as DorSurface,
   ResolvedSplitDirection as DorResolvedSplitDirection,
   ParseResult,
-  SurfaceKind as DorSurfaceKind,
   SurfaceRenderMode as DorSurfaceRenderMode,
   SurfaceView as DorSurfaceView,
 } from 'dor/commands/types';
-import { facesOfKind, hasConsoleFace, hasWebFace } from 'dor/commands/types';
+import { hasConsoleFace, hasWebFace } from 'dor/commands/types';
 import type { PersistedDoor, PersistedSurfaceRefs } from '../lib/session-types';
 import type { DropTarget, RestoreToken } from '../lib/lath/ops';
 import type { Edge } from '../lib/lath/model';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
-import { resolveRenderMode, isAgentBrowserParams, isBrowserParams, browserUrlFromParams } from './wall/browser-surface';
+import { resolveRenderMode, isAgentBrowserParams, isBrowserParams, browserUrlFromParams, surfaceKindFromParams } from './wall/browser-surface';
 import { hostPathDisplay } from './wall/browser-url';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { LathHost } from './wall/LathHost';
@@ -123,10 +122,6 @@ export { TerminalPaneHeader } from './wall/TerminalPaneHeader';
 function persistedPanelTitle(title: string | null | undefined): string {
   const trimmed = title?.trim();
   return trimmed || UNNAMED_PANEL_TITLE;
-}
-
-function surfaceKindFromParams(params: unknown): DorSurfaceKind {
-  return isBrowserParams(params) ? 'browser' : 'terminal';
 }
 
 function surfaceRenderModeFromParams(params: unknown): DorSurfaceRenderMode | null {
@@ -877,7 +872,6 @@ export function Wall({
         id: source.id,
         ref: surfaceRefForId(source.id),
         kind,
-        faces: facesOfKind(kind),
         renderMode,
         title,
         focused: source.id === activeId,
@@ -1044,9 +1038,12 @@ export function Wall({
 
     const newId = generatePaneId();
     const browserMeta = browserLeafMeta(title, params);
-    const replaceUntouchedTerminal = reference.kind === 'terminal' && isUntouched(reference.id);
+    // Replace-in-place is reserved for a reference with no web face — a blank
+    // untouched shell. Anything holding web content (a browser surface today, a
+    // both-faces tool later) must split beside it instead of being destroyed.
+    const replaceUntouchedShell = !hasWebFace(reference.kind) && isUntouched(reference.id);
 
-    if (replaceUntouchedTerminal) {
+    if (replaceUntouchedShell) {
       // Whether the user's current selection sits on the pane being replaced.
       const selectionReplaced = selectedTypeRef.current === 'pane' && selectedIdRef.current === reference.id;
       // Atomic identity swap in place; then dispose the old terminal session.

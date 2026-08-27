@@ -56,9 +56,6 @@ export interface Surface {
   id: string;
   ref: string;
   kind: SurfaceKind;
-  /** The face-set the kind names; carried on every row so scripts can gate on
-   *  faces before richer face-sets exist (`docs/specs/dor-tool.md`). */
-  faces: SurfaceFace[];
   renderMode: SurfaceRenderMode | null;
   title: string;
   focused: boolean;

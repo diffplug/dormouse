@@ -5,6 +5,7 @@
  * dev-server-port correlation, so the classification never drifts between them.
  */
 import type { RenderMode } from './agent-browser-screen';
+import type { SurfaceKind } from 'dor/commands/types';
 
 type BrowserParamsLike = {
   surfaceType?: unknown;
@@ -34,6 +35,14 @@ export function isAgentBrowserParams(params: unknown): boolean {
 export function isBrowserParams(params: unknown): boolean {
   const p = asParams(params);
   return p.surfaceType === 'browser' || typeof p.renderMode === 'string';
+}
+
+/** The Surface kind — the face-set name (`docs/specs/glossary.md` → Faces) —
+ *  these params describe. The params → kind step beneath `facesOfKind`
+ *  (`dor/commands/types`): keep every params-level kind switch on this one
+ *  function so a future kind changes the classification in one place. */
+export function surfaceKindFromParams(params: unknown): SurfaceKind {
+  return isBrowserParams(params) ? 'browser' : 'terminal';
 }
 
 /** The target URL a browser surface carries in its params (`dor list`); null
