@@ -352,6 +352,7 @@ jobs:
                 'VERDICT: PASS'*) ;;
                 *)
                   echo "::warning::$f has no VERDICT line; the dissent check cannot read it."
+                  UNREADABLE_VERDICTS="${UNREADABLE_VERDICTS:+$UNREADABLE_VERDICTS, }$f"
                   [ "$STATUS" = FAIL ] || STATUS=MISSING ;;
               esac
             done
@@ -435,6 +436,25 @@ jobs:
                 echo "suspect \`Redact secrets from agent output\` — it deletes every"
                 echo "fragment and the report when it throws, and that means a secret"
                 echo "reached a file in cleartext."
+              elif [ -n "${UNREADABLE_VERDICTS:-}" ]; then
+                # A third cause, and it must not borrow either arm's prose: the
+                # status file WAS written and said `PASS`, and every domain DID
+                # report — so "exited without writing audit-status.txt" and the
+                # `UNVERIFIABLE` / `_No report …_` markers below are both wrong
+                # here. What actually happened is that a fragment's first line
+                # was not a verdict, so the dissent check could not read it and
+                # the merged PASS could not be trusted.
+                echo "Audit verdict withheld at $DATE. [Run]($RUN_URL)"
+                echo
+                echo "The audit reported \`PASS\`, but it was downgraded: the first"
+                echo "line of $UNREADABLE_VERDICTS is neither \`VERDICT: PASS\` nor"
+                echo "\`VERDICT: FAIL\`, so the reporting step could not confirm that"
+                echo "domain agreed with the merged verdict. Every domain did report,"
+                echo "and the report below is complete — read the named domain's"
+                echo "section for its own conclusion. This is a defect in the audit's"
+                echo "output format, not necessarily a security finding: the fix is"
+                echo "usually that the subagent did not follow"
+                echo "\`.github/audit/_preamble.md\`'s rule that line 1 is the verdict."
               else
                 echo "Audit produced no verdict at $DATE. [Run]($RUN_URL)"
                 echo

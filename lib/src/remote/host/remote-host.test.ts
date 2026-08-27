@@ -269,9 +269,11 @@ describe('RemoteHost frame handling', () => {
     const denials = socket.frames('pair-result').filter((f) => f.approved === false);
     expect(denials).toHaveLength(sent - MAX_PENDING_PAIRINGS);
     expect(denials.every((f) => f.error === 'superseded')).toBe(true);
-    // The map itself is bounded, not just the payload it holds: evicting only
+    // The record is dropped, not just the payload it holds: evicting only
     // `pending` would free the capped request and keep the slot plus its
-    // relay-chosen key forever, which is the unbounded half.
+    // relay-chosen key forever, which is the unbounded half. This bounds the
+    // pairing path — `connect` frames allocate through a different route that
+    // this counter deliberately does not evict.
     expect(host.trackedClientCount).toBeLessThanOrEqual(MAX_PENDING_PAIRINGS);
 
     // Nothing reached the ACL without a human.

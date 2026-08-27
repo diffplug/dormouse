@@ -296,11 +296,6 @@ export class RemoteHost {
   }
 
   /**
-   * Drop the oldest pending pairing when the queue is full, so a new request
-   * displaces one rather than growing the map. Oldest first: whoever initiated
-   * it is the least likely to still be waiting on the modal.
-   */
-  /**
    * How many clients this Host is tracking. Exists for the pending-pairing
    * bound's test: the growth it guards against is in a private map, and a
    * bound nothing can observe is how the first version of that cap passed its
@@ -310,6 +305,19 @@ export class RemoteHost {
     return this.#clients.size;
   }
 
+  /**
+   * Drop the oldest pending pairing when the queue is full, so a new request
+   * displaces one rather than growing the map. Oldest first: whoever initiated
+   * it is the least likely to still be waiting on the modal.
+   *
+   * Bounds the *pairing* path specifically. `#onConnect` also creates a
+   * `#clients` entry through `#resetAuthorization`, and those carry no
+   * `pending`, so this counter does not see them and does not evict them —
+   * deliberately, since evicting an entry that may be `established` is a
+   * different act from denying a pending request. Those entries are cheap (a
+   * length-bounded key and two fields, no `PairingRequest`) and are cleared
+   * wholesale when the socket drops.
+   */
   #evictOldestPairingIfFull(): void {
     let pendingCount = 0;
     for (const state of this.#clients.values()) if (state.pending) pendingCount++;
