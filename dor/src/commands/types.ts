@@ -10,6 +10,30 @@ export type ResolvedSplitDirection = 'left' | 'right' | 'up' | 'down';
 export type SurfaceKind = 'terminal' | 'browser';
 export type SurfaceRenderMode = 'iframe' | 'ab-screencast' | 'ab-popout';
 
+/** A Surface's faces (`docs/specs/glossary.md` → Faces): the console face is a
+ *  PTY + xterm, the web face is a browser renderer. A kind names a face-set —
+ *  `terminal` = console-only, `browser` = web-only — and operations gate on the
+ *  face they need, not on the kind (the Liskov "face-gated" category). */
+export type SurfaceFace = 'console' | 'web';
+
+/** The face-set a kind names. Single source of truth for face gating — kind
+ *  switches elsewhere should go through these predicates instead. */
+export function facesOfKind(kind: SurfaceKind): SurfaceFace[] {
+  return kind === 'terminal' ? ['console'] : ['web'];
+}
+
+/** Whether this kind has a console face (PTY-backed: `read` / `send` / `await`
+ *  / port scans). */
+export function hasConsoleFace(kind: SurfaceKind): boolean {
+  return facesOfKind(kind).includes('console');
+}
+
+/** Whether this kind has a web face (browser-rendered: nav / render-mode /
+ *  agent-browser operations). */
+export function hasWebFace(kind: SurfaceKind): boolean {
+  return facesOfKind(kind).includes('web');
+}
+
 /** Where a Surface renders. Minimized Surfaces (baseboard doors) are listed too;
  *  `hidden` is reserved for Surfaces in an inactive Workspace (a future). */
 export type SurfaceView = 'paned' | 'zoomed' | 'minimized' | 'hidden';
@@ -32,6 +56,9 @@ export interface Surface {
   id: string;
   ref: string;
   kind: SurfaceKind;
+  /** The face-set the kind names; carried on every row so scripts can gate on
+   *  faces before richer face-sets exist (`docs/specs/dor-tool.md`). */
+  faces: SurfaceFace[];
   renderMode: SurfaceRenderMode | null;
   title: string;
   focused: boolean;

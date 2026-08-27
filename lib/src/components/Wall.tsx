@@ -49,6 +49,7 @@ import type {
   SurfaceRenderMode as DorSurfaceRenderMode,
   SurfaceView as DorSurfaceView,
 } from 'dor/commands/types';
+import { facesOfKind, hasConsoleFace, hasWebFace } from 'dor/commands/types';
 import type { PersistedDoor, PersistedSurfaceRefs } from '../lib/session-types';
 import type { DropTarget, RestoreToken } from '../lib/lath/ops';
 import type { Edge } from '../lib/lath/model';
@@ -857,11 +858,15 @@ export function Wall({
 
     return sources.map((source, index) => {
       const kind = surfaceKindFromParams(source.params);
+      // Row fields are face-gated, not kind-gated (docs/specs/glossary.md →
+      // Faces): shell state rides the console face, the URL rides the web face,
+      // so a future both-faces kind populates both without touching this map.
+      const consoleFace = hasConsoleFace(kind);
       const renderMode = surfaceRenderModeFromParams(source.params);
       const state = states[index];
       const activity = activityStates.get(source.id);
-      const shellActivity = kind === 'terminal' ? state.activity : null;
-      const title = kind === 'terminal'
+      const shellActivity = consoleFace ? state.activity : null;
+      const title = consoleFace
         ? deriveSurfaceLabel(state, states, appTitleForPane, source.title ?? source.id)
         : (source.title ?? source.id);
       const view: DorSurfaceView = source.minimized
@@ -872,17 +877,18 @@ export function Wall({
         id: source.id,
         ref: surfaceRefForId(source.id),
         kind,
+        faces: facesOfKind(kind),
         renderMode,
         title,
         focused: source.id === activeId,
         view,
-        cwd: kind === 'terminal' ? (state.cwd?.path ?? null) : null,
+        cwd: consoleFace ? (state.cwd?.path ?? null) : null,
         activity: shellActivity ? shellActivity.kind : null,
         ...(shellActivity?.kind === 'finished' && shellActivity.exitCode !== undefined
           ? { exitCode: shellActivity.exitCode }
           : {}),
-        command: kind === 'terminal' ? (state.currentCommand?.displayCommand ?? null) : null,
-        url: kind === 'terminal' ? null : browserUrlFromParams(source.params),
+        command: consoleFace ? (state.currentCommand?.displayCommand ?? null) : null,
+        url: hasWebFace(kind) ? browserUrlFromParams(source.params) : null,
         ringing: activity?.status === 'ALERT_RINGING',
         todo: activity?.todo === true,
         awaited: activity?.awaited === true,

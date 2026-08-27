@@ -44,6 +44,15 @@ follows:
 For browser Surfaces `renderMode` is canonical; the CLI `render_mode` field is
 derived from it for `dor` output and is never stored.
 
+**Faces** — the capability primitive beneath the kinds. A Surface has a
+**console face** (a PTY + xterm) or a **web face** (a browser renderer); a
+kind names a face-set — `terminal` = console-only, `browser` = web-only. A
+both-faces `tool` kind is staged in `docs/specs/dor-tool.md`. Operations gate
+on the face they need, never on the kind enum (see
+[Liskov contract](#liskov-contract)), and `dor list --json` rows carry the
+face-set as `faces`. Source of truth: `facesOfKind` / `hasConsoleFace` /
+`hasWebFace` in `dor/src/commands/types.ts`.
+
 A **Session** runs the full six-axis model below. A **browser Surface** participates only where a web view meaningfully can:
 
 | Axis | Terminal Surface (Session) | Browser Surface |
@@ -214,6 +223,7 @@ Every Registry API has layer preconditions, declared here:
 | **View-gated** | `View ≠ Hidden` | `focus` |
 | **Process-gated** | `Process = Live` | `write`, `resize` |
 | **Registry-gated** | `Registry = Mounted` | `refit` |
+| **Face-gated** | Surface has the required face ([Panes and Surfaces](#panes-and-surfaces)) | `dor read` / `send` / `await` / port scans (console face); browser nav / render ops (web face) |
 
 A caller holding a `SessionId` can issue universal operations without branching. Gated operations are explicit: the caller checks the relevant layer first. Uniform typed-error enforcement of these preconditions is staged — see [Future](#future).
 

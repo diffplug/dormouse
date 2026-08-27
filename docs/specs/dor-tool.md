@@ -1,9 +1,9 @@
 # Dor Tools
 
-> Status: design — nothing here is implemented yet. The whole design lives under
-> [Future](#future) per the spec lifecycle; it is written ahead of the code
-> because its vocabulary (faces, OSC 367, the announce contract) constrains
-> adjacent specs as they evolve.
+> Status: design — the faces groundwork (phase A) is implemented; everything
+> else lives under [Future](#future) per the spec lifecycle. The design is
+> written ahead of the code because its vocabulary (faces, OSC 367, the
+> announce contract) constrains adjacent specs as they evolve.
 
 > See `docs/specs/glossary.md` for canonical Surface / Session / Pane
 > vocabulary. Builds on `docs/specs/dor-cli.md` (surface handles, the `ensure`
@@ -16,16 +16,34 @@ it in a pane where the human and the agent both see it and both drive it — the
 human clicks, the agent sees the click; the agent types, the human sees the
 typing. No SDK, no protocol: print one escape sequence, read one env var.
 
+## Faces groundwork
+
+The face model's groundwork is implemented ahead of the `tool` kind (phase A
+of the ledger below); `docs/specs/glossary.md` → Faces is the canonical
+vocabulary. What exists today:
+
+- **Face predicates are the single source of face gating.** `facesOfKind` /
+  `hasConsoleFace` / `hasWebFace` in `dor/src/commands/types.ts`. Kind
+  switches in the host's surface-row projection and control handlers go
+  through them, so a future both-faces kind populates both sides of a row
+  (cwd *and* url) without touching the call sites.
+- **`dor list --json` rows carry `faces`** (`["console"]` / `["web"]`), so
+  scripts can gate on faces before richer face-sets exist.
+- **Console-face-gated operations report in face vocabulary.** `read` /
+  `send` / `await` / `surface.resolveOpen` against a Surface with no console
+  face fail with `surface 'surface:N' has no console face (kind: browser)`.
+
+Source of truth: `dor/src/commands/types.ts`, `renderSurfaceJson` in
+`dor/src/commands/list.ts`, `buildDorSurfacesInternal` in
+`lib/src/components/Wall.tsx`, `requireConsoleFaceSurface` in
+`lib/src/components/wall/use-dor-control.ts`.
+
 ## Future
 
-**Scope: dor-tools** — the whole feature, staged. Each phase is one PR, and
-each PR's job includes promoting its slice above the fold. The only hard
-ordering edge is A before C0; B may land before A.
+**Scope: dor-tools** — what remains, staged. Each phase is one PR, and each
+PR's job includes promoting its slice above the fold. (Phase A — the faces
+refactor — is implemented; see [Faces groundwork](#faces-groundwork).)
 
-- **A — faces refactor.** Face predicates (`hasConsoleFace` / `hasWebFace`)
-  replace kind switches; CLI gating and error wording recast in the Liskov
-  "face-gated" vocabulary; any `--json` contract churn lands here so scripts
-  adapt before tools exist. Pure refactor, no user-visible feature.
 - **B — `dor open`.** User-level table + dispatch only: entries resolve to a
   terminal command (the `ensure`/`split` machinery) or an existing **browser
   surface** pointing at a host-served viewer page (the iframe-proxy path). No
@@ -61,16 +79,15 @@ ordering edge is A before C0; B may land before A.
   grates. `--face` capability filters for `dor list`. A pre-spawn dedupe fast
   path.
 
-### Faces (glossary changes)
+### Faces: the tool face-set
 
-The primitive is the **face**, not the kind. A Surface has a **console face**
-(PTY + xterm), a **web face** (`BrowserPanel` + `renderMode`), or both. Kinds
-become derived names for face-sets: `terminal` = console-only, `browser` =
-web-only, `tool` = both. Verbs are **face-gated** — a new Liskov category
-beside Process-/View-gated: `read` / `send` / `await` / `--port` require a
-console face; nav/render/ab verbs require a web face and stay renderMode-gated
-exactly as for browser Surfaces (an iframe-rendered tool cannot be
-agent-driven). `kill` / `rename` stay universal. Kinds remain **disjoint** for
+The face vocabulary, predicates, and gating are live (see
+[Faces groundwork](#faces-groundwork); `docs/specs/glossary.md` → Faces).
+What remains is the both-faces kind itself: `tool` = console + web. Verbs
+stay face-gated: `read` / `send` / `await` / `--port` require a console face;
+nav/render/ab verbs require a web face and stay renderMode-gated exactly as
+for browser Surfaces (an iframe-rendered tool cannot be agent-driven).
+`kill` / `rename` stay universal. Kinds remain **disjoint** for
 `dor list --kind`.
 
 - **Identity**: a tool Surface's id is its SessionId (I1 extends to tools).
