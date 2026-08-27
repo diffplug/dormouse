@@ -14,7 +14,10 @@ Read, at minimum: `docs/specs/remote-security-model.md`, `docs/specs/server.md`,
 `docs/specs/remote-api.md`, `docs/specs/pocket-app.md`, `SELF_HOST.md`, and then
 the code they point at — `server-lib-common/src/security/`, `server/src/`,
 `lib/src/remote/`, `lib/src/host/remote/`, `vscode-ext/src/remote-host*.ts`,
-`scripts/csp-defaults.mjs`, and `deploy/local/install-macos.sh`.
+`scripts/csp-defaults.mjs`, and both installers — `deploy/local/install-macos.sh`
+and `deploy/local/install-windows.ps1`. The two hold the same invariants through
+different native mechanisms, so read them against each other: a control present
+in one and quietly absent from the other is a finding.
 
 For `## Loopback Listeners`, read `lib/src/host/loopback-guard.ts` first — it
 states the rule — then each listener it names. Derive the set of listeners by

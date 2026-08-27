@@ -56,19 +56,21 @@ once.
 
 ## 1. Stand up the server
 
-The whole self-host story today is one coordinating server on your own Mac,
+The whole self-host story today is one coordinating server on your own laptop,
 reachable only from your tailnet. One idempotent command builds the current
 checkout into a self-contained release and installs it:
 
 ```sh
-./deploy/local/install-macos.sh
+./deploy/local/install-macos.sh        # macOS
+.\deploy\local\install-windows.ps1     # Windows
 ```
 
-It installs under your home directory, needs no `sudo`, and wires up a
-LaunchAgent plus Tailscale Serve:
+It installs under your user profile, needs no administrator rights, and wires up
+a per-login service plus Tailscale Serve:
 
 ```text
 LaunchAgent (RunAtLoad + KeepAlive)
+  — or a Windows Scheduled Task at logon —
         |
         v
 Dormouse Node server on 127.0.0.1:3100
