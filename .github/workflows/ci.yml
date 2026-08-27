@@ -53,8 +53,26 @@ jobs:
       # against a terminator that arrives inside a directory name). The suite
       # names the shells it covered on every run, so a future image change that
       # drops one is visible rather than silent.
+      # `update` first: the runner image's apt lists are baked at image build, so
+      # once the archive rotates zsh's version the cached Packages entry 404s.
+      # `timeout` because a degraded Azure mirror dribbles bytes rather than
+      # failing — see the fuller treatment in Standalone Smoketest below, which
+      # also rotates mirrors. That much machinery is not worth it for one
+      # package; the retry here covers the common case without turning a
+      # `Build & Test` red for a reason unrelated to the diff.
       - name: Install zsh (shell-integration tests)
-        run: sudo apt-get install -y --no-install-recommends zsh
+        timeout-minutes: 6
+        run: |
+          for i in 1 2 3; do
+            if sudo timeout 120 apt-get update -q \
+               && sudo timeout 120 apt-get install -y -q --no-install-recommends zsh; then
+              exit 0
+            fi
+            echo "::warning::apt attempt $i for zsh failed or timed out; retrying in 15s"
+            sleep 15
+          done
+          echo "::error::could not install zsh; the shell-integration suite would silently cover only bash"
+          exit 1
 
       - name: Test
         run: pnpm test

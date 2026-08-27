@@ -148,15 +148,15 @@ async function readJson(req) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-const CORS = Object.entries(corsHeaders(viteOrigin));
-
-function cors(res) {
-  for (const [name, value] of CORS) res.setHeader(name, value);
+function cors(req, res) {
+  for (const [name, value] of Object.entries(corsHeaders(viteOrigin, req.headers.origin))) {
+    res.setHeader(name, value);
+  }
 }
 
 function startHostServer() {
   const server = http.createServer(async (req, res) => {
-    cors(res);
+    cors(req, res);
     if (req.method === 'OPTIONS') {
       res.writeHead(204).end();
       return;

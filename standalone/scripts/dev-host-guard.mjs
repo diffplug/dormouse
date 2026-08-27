@@ -64,15 +64,21 @@ export function isJsonRequest(req) {
 }
 
 /**
- * Exactly the dev page's origin, never `*`. Under `*` every response was
+ * The dev page's origin, echoed back — never `*`. Under `*` every response was
  * readable cross-origin, which leaks the `read_clipboard_text` and
  * `read_clipboard_file_paths` invokes outright.
  *
- * Constant for a run — build it once, not per request.
+ * Echoed rather than fixed because `http://localhost:<vite>` and
+ * `http://127.0.0.1:<vite>` are the same dev page, and a developer who types
+ * the other spelling would otherwise have every bridge call rejected by CORS —
+ * with a blank terminal and console errors that do not point at the cause.
+ * Echoing exactly one of two known-good values is as tight as pinning one:
+ * anything else still gets the first spelling and fails the browser's check.
  */
-export function corsHeaders(viteOrigin) {
+export function corsHeaders(viteOrigin, requestOrigin) {
+  const allowed = [viteOrigin, viteOrigin.replace('//localhost:', '//127.0.0.1:')];
   return {
-    'access-control-allow-origin': viteOrigin,
+    'access-control-allow-origin': allowed.includes(requestOrigin) ? requestOrigin : viteOrigin,
     vary: 'origin',
     'access-control-allow-methods': 'GET,POST,OPTIONS',
     'access-control-allow-headers': 'content-type',

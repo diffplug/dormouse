@@ -20,11 +20,13 @@
  * What it deliberately does NOT do, so nobody mistakes it for the whole rule:
  *   - It cannot tell whether the guard is actually *called* on every request,
  *     only that the file knows the guard exists. The audit still owns that.
- *   - It only matches `.listen(<port>, '127.0.0.1'|'localhost')`. A listener
- *     that binds every interface (`.listen(port)` with no host) is a different
- *     and larger problem, and `server/` does it deliberately from config, so
- *     flagging it here would be noise. Check 2 is what catches the pattern
- *     going stale.
+ *   - It matches only an explicit loopback host, in either of Node's two
+ *     spellings (positional and options-object). A listener that binds every
+ *     interface (`.listen(port)` with no host) is a different and larger
+ *     problem, and `server/` does it deliberately from config, so flagging it
+ *     here would be noise. A host built at runtime (`.listen(port, hostVar)`)
+ *     is invisible to a regex and always will be — that is the ceiling of a
+ *     textual check, and the audit is what covers above it.
  *   - Unix-domain sockets and named pipes are out of scope by design: no
  *     browser can reach one, which is why the `dor` control channel is bounded
  *     by socket permissions instead.
@@ -67,10 +69,21 @@ const ALLOWED = {
 };
 
 const GUARD_REFERENCES = ['loopback-guard', 'dev-host-guard'];
-// `.listen(<anything but a comma or close-paren>, '127.0.0.1' | 'localhost'`.
+// Node accepts two spellings of a loopback TCP bind, and both must match:
+//   .listen(<port>, '127.0.0.1', …)      positional
+//   .listen({ host: '127.0.0.1', … })    options object, either key order
 // The host argument is what distinguishes a TCP bind from a UDS/named-pipe
-// listen, which passes a single path and must not match.
-const LISTEN_RE = /\.listen\(\s*[^,)]+,\s*['"](?:127\.0\.0\.1|localhost)['"]/;
+// listen, which passes a single path and must not match. Applied to the whole
+// file rather than line by line — `.listen(` is routinely wrapped across lines,
+// and the `\s*`/`[^)]*?` spans already cross newlines.
+const LOOPBACK = "['\"](?:127\\.0\\.0\\.1|localhost)['\"]";
+const LISTEN_RE = new RegExp(
+  `\\.listen\\(\\s*(?:`
+  + `[^,)]+,\\s*${LOOPBACK}`                        // positional
+  + `|\\{[^}]*?host\\s*:\\s*${LOOPBACK}`             // options object
+  + `)`,
+  's',
+);
 
 const SOURCE_EXT = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/;
 const IS_TEST = /(?:\.test\.|\.spec\.|[\\/]tests?[\\/])/;
@@ -98,9 +111,9 @@ for (const rel of sourceFiles()) {
   // A tracked path can still be absent mid-rebase or in a sparse checkout.
   if (!existsSync(join(ROOT, rel))) continue;
   const text = readFileSync(join(ROOT, rel), 'utf-8');
-  const lines = text.split('\n');
-  const line = lines.findIndex((l) => LISTEN_RE.test(l));
-  if (line === -1) continue;
+  const match = LISTEN_RE.exec(text);
+  if (!match) continue;
+  const line = text.slice(0, match.index).split('\n').length;
   listeners.push(rel);
 
   if (rel in ALLOWED) {
@@ -110,7 +123,7 @@ for (const rel of sourceFiles()) {
   if (GUARD_REFERENCES.some((g) => text.includes(g))) continue;
 
   problems.push(
-    `${rel}:${line + 1}: binds a loopback listener without referencing a guard module.\n`
+    `${rel}:${line}: binds a loopback listener without referencing a guard module.\n`
     + '      A loopback bind is not an access control: a page in the user\'s own browser\n'
     + '      reaches 127.0.0.1 too, and the port is not a secret. Check Host and\n'
     + '      authenticate the caller — see lib/src/host/loopback-guard.ts and\n'

@@ -54,9 +54,15 @@ test('the gate itself refuses a non-JSON POST, so a bodyless route is covered to
   ), true);
 });
 
-test('CORS names one origin rather than *', () => {
-  const headers = corsHeaders('http://localhost:1420');
-  assert.equal(headers['access-control-allow-origin'], 'http://localhost:1420');
-  assert.notEqual(headers['access-control-allow-origin'], '*');
-  assert.equal(headers.vary, 'origin');
+test('CORS names one origin rather than *, in either loopback spelling', () => {
+  const acao = (origin) => corsHeaders('http://localhost:1420', origin)['access-control-allow-origin'];
+  // Both spellings are the same dev page, so both are echoed back.
+  assert.equal(acao('http://localhost:1420'), 'http://localhost:1420');
+  assert.equal(acao('http://127.0.0.1:1420'), 'http://127.0.0.1:1420');
+  // Anything else gets the canonical value, which the browser then rejects.
+  for (const origin of ['https://evil.example', 'http://localhost:9999', undefined]) {
+    assert.equal(acao(origin), 'http://localhost:1420');
+  }
+  assert.notEqual(acao('https://evil.example'), '*');
+  assert.equal(corsHeaders('http://localhost:1420', undefined).vary, 'origin');
 });
