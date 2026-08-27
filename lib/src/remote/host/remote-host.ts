@@ -32,6 +32,7 @@ import {
   WS_ROUTES,
   WS_TOKEN_PARAM,
   authorizeConnection,
+  MAX_PENDING_PAIRINGS,
   boundedPairingAccount,
   boundedPairingLabel,
   isPairingRequest,
@@ -112,6 +113,17 @@ export interface RemoteHostOptions {
   reconnect?: boolean;
 }
 
+/**
+ * The longest `clientId` this Host will act on.
+ *
+ * The relay mints these as base64url of 16 random bytes (~22 characters), so
+ * this is an order of magnitude of headroom. It exists because the id is a
+ * *map key* on a hostile-relay path: every other field of a `pair` frame is
+ * capped by `PAIRING_FIELD_LIMIT`, and bounding those while leaving the key
+ * free would bound only the part that was already bounded.
+ */
+const MAX_CLIENT_ID_LENGTH = 256;
+
 const INITIAL_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
 
@@ -148,7 +160,14 @@ export class RemoteHost {
 
   constructor(options: RemoteHostOptions) {
     this.#enrollment = options.enrollment;
-    this.#policy = { rpId: options.enrollment.rpId, origin: options.enrollment.origin };
+    this.#policy = {
+      rpId: options.enrollment.rpId,
+      origin: options.enrollment.origin,
+      // Mirrored from the Server at enrollment. Both sides must demand the
+      // same thing: the Host is the final authority, so a Server enforcing UV
+      // while the Host does not would leave the weaker verifier deciding.
+      requireUserVerification: options.enrollment.requireUserVerification ?? false,
+    };
     this.#now = options.now ?? (() => Date.now());
     this.#acl = loadHostAcl(options.enrollment.hostId, options.loadAcl);
     this.#challenges = new HostChallengeIssuer({ now: this.#now });
@@ -276,6 +295,55 @@ export class RemoteHost {
     this.#clients.clear();
   }
 
+  /**
+   * How many clients this Host is tracking. Exists for the pending-pairing
+   * bound's test: the growth it guards against is in a private map, and a
+   * bound nothing can observe is how the first version of that cap passed its
+   * own test while the map kept growing.
+   */
+  get trackedClientCount(): number {
+    return this.#clients.size;
+  }
+
+  /**
+   * Drop the oldest pending pairing when the queue is full, so a new request
+   * displaces one rather than growing the map. Oldest first: whoever initiated
+   * it is the least likely to still be waiting on the modal.
+   *
+   * Bounds the *pairing* path specifically. `#onConnect` also creates a
+   * `#clients` entry through `#resetAuthorization`, and those carry no
+   * `pending`, so this counter does not see them and does not evict them —
+   * deliberately, since evicting an entry that may be `established` is a
+   * different act from denying a pending request. Those entries are cheap (a
+   * length-bounded key and two fields, no `PairingRequest`) and are cleared
+   * wholesale when the socket drops.
+   */
+  #evictOldestPairingIfFull(): void {
+    let pendingCount = 0;
+    for (const state of this.#clients.values()) if (state.pending) pendingCount++;
+    while (pendingCount >= MAX_PENDING_PAIRINGS) {
+      let oldestId: string | null = null;
+      let oldestAt = Number.POSITIVE_INFINITY;
+      for (const [id, state] of this.#clients) {
+        if (state.pending && state.pending.requestedAt < oldestAt) {
+          oldestAt = state.pending.requestedAt;
+          oldestId = id;
+        }
+      }
+      if (oldestId === null) return;
+      this.#denyPairing(oldestId, this.#clients.get(oldestId)!.pending!.pairingId, 'superseded');
+      // Drop the record too, not just its payload. `#denyPairing` only clears
+      // `pending`, so without this the map keeps one entry per `pair` frame
+      // forever under a relay-chosen key — bounding the capped payload while
+      // leaving the unbounded part. `#clientState` recreates it if that client
+      // is ever heard from again, and an established or session-holding client
+      // is left alone.
+      const evicted = this.#clients.get(oldestId);
+      if (evicted && !evicted.established && !evicted.session) this.#clients.delete(oldestId);
+      pendingCount--;
+    }
+  }
+
   /** Get or create the per-client state record for `clientId`. */
   #clientState(clientId: string): ClientState {
     let state = this.#clients.get(clientId);
@@ -306,7 +374,8 @@ export class RemoteHost {
     if (
       !frame ||
       typeof (frame as { t?: unknown }).t !== 'string' ||
-      typeof (frame as { clientId?: unknown }).clientId !== 'string'
+      typeof (frame as { clientId?: unknown }).clientId !== 'string' ||
+      (frame as { clientId: string }).clientId.length > MAX_CLIENT_ID_LENGTH
     ) {
       return;
     }
@@ -359,6 +428,16 @@ export class RemoteHost {
       approve: (label) => this.#approvePairing(clientId, ticket.pairingId, label),
       deny: (error) => this.#denyPairing(clientId, ticket.pairingId, error),
     };
+    // Bound the queue before adding to it. Every `pair` frame allocates a
+    // `#clients` entry under a relay-chosen `clientId`, and those are removed
+    // only by `client-gone` — which a hostile relay simply never sends — or by
+    // the socket dropping. Unbounded, 5000 frames retain 5000 pending requests
+    // holding megabytes of relay-chosen strings in the process that owns every
+    // PTY, and the service re-serializes the whole queue to the webview on each
+    // one, so the traffic is quadratic. Reachable by anything that can sign in:
+    // a synced or stolen passkey is documented as buying only "the ability to
+    // ask", and this is what stops asking from being a denial of service.
+    this.#evictOldestPairingIfFull();
     this.#clientState(clientId).pending = pending;
     this.#requestApproval(pending);
   }

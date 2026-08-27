@@ -229,8 +229,32 @@ lacks (there `authorizeConnection` verifies presence itself). Under Server
 compromise, a forged freshness stamp gets an attacker no further than the
 human staring at the approval modal.
 
+**Pending pairings are bounded.** A `pair` frame allocates in three places —
+the ceremony's ticket map, the Host's per-`clientId` client map, and the
+service's queue mirrored to the webview — under a `clientId` the relay chooses,
+and only a `client-gone` removes one. All three cap what a *pairing* can
+retain (`MAX_PENDING_TICKETS`, `MAX_PENDING_PAIRINGS`), oldest evicted first —
+the controller answers its eviction with a `pair-result` denial and drops the
+client record rather than leaving someone on a modal that no longer exists,
+while the ceremony and the service's mirrored queue simply delete theirs —
+because anything that can sign in can send these and a queue that only grows
+wedges the process that owns every PTY.
+
+The client map is bounded against *that* path and not in general: `connect`
+also creates an entry (through `#resetAuthorization`), those carry no pending
+request, and the pairing counter neither sees nor evicts them — evicting an
+entry that may be `established` is a different act from denying a pending
+request. What keeps those cheap is `MAX_CLIENT_ID_LENGTH`, which bounds the
+frame's `clientId` before any map is touched: every other field of a `pair`
+frame is capped by `PAIRING_FIELD_LIMIT`, so leaving the key free would bound
+only the half that was already bounded. They are cleared wholesale when the
+relay socket drops.
+
 Source of truth: `PairingRequest` / `PairingTicket` / `PairingCeremony` /
-`PAIRING_PRESENCE_WINDOW_MS` in `server-lib-common/src/security/pairing.ts`
+`PAIRING_PRESENCE_WINDOW_MS` / `PAIRING_FIELD_LIMIT` / `MAX_PENDING_PAIRINGS`
+in `server-lib-common/src/security/pairing.ts`, and `MAX_CLIENT_ID_LENGTH` /
+`RemoteHost.#evictOldestPairingIfFull` in
+`lib/src/remote/host/remote-host.ts`
 (tickets are single-use with a `DEFAULT_PAIRING_TTL_MS` = 5-minute TTL;
 approval after expiry fails without touching the ACL — the presence window
 gates the *request*, not the approver's deliberation). The wire sequence —

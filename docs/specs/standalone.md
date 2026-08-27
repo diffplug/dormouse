@@ -368,8 +368,15 @@ reader). A days-long session made this pathological.
 cannot truncate the previous snapshot. The temp file is fsynced before the
 rename, and on unix the sessions directory is fsynced *after* the rename (a
 directory-entry fsync is what makes the rename itself durable; Windows has no
-equivalent concept, so that step is unix-only). There is no WAL to grow, and
-overwriting in place bounds the on-disk size to one blob. **Window identity is implicit**:
+equivalent concept, so that step is unix-only). On unix the directory is
+`0700` and the file `0600`, applied to the temp file *before* any bytes are
+written because the rename preserves its mode — the blob carries terminal
+transcripts, so under the bare umask it landed `0644` and any other local
+account could read the user's scrollback (`SECURITY.md` -> Remote Control,
+Credentials at rest). Best-effort and unix-only: Windows ACLs are not unix
+modes, and a filesystem without POSIX permissions must not fail a save. There
+is no WAL to grow, and overwriting in place bounds the on-disk size to one
+blob. **Window identity is implicit**:
 each command keys by the invoking `tauri::Window`'s `label()`, so the frontend
 stays window-agnostic and a second window (`win-2`, …) persists to its own file
 without ever rewriting the first window's blob — the store is multi-window even

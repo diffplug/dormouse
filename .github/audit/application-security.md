@@ -40,10 +40,28 @@ gap is known (revocation, the audit trail, the two `workflow-audit` window
 evasions), do not re-report it as a finding — report only if the situation has
 changed or is worse than described.
 
-You also own the **rest of the repository** qualitatively, so that no top-level
-path is outside every domain: `lib/`, `server/`, `server-lib-common/`,
-`standalone/`, `vscode-ext/`, `dor/`, `dor-lib-common/`, `canopy/`, `deploy/`,
-`docs/`, and the root files. Remote control is where the depth goes; the rest
-is a sweep for anything that would be a security hole in a terminal that runs
-local shells — command construction, path handling, deserialization of
-persisted state, IPC that crosses a trust boundary.
+You are also the **catch-all** domain, and this is defined by subtraction, not
+by a list: you own everything in the repository that `supply-chain.md` and
+`ci-and-secrets.md` do not explicitly claim. Run `ls -A` and work out the
+remainder rather than trusting any enumeration — an enumeration goes stale the
+moment someone adds a directory, which is exactly how `.vscode/` and
+`.impeccable/` ended up owned by nobody.
+
+Subtraction is **recursive, not top-level**. Where another domain claims a
+subdirectory rather than a whole tree, the rest of that tree is yours — so
+check one level down wherever a claim is partial, or the same orphaning
+happens inside a directory instead of beside it. `website/` is *not* an
+example of this any more: `supply-chain` claims all of it except
+`website/public/`, so none of it is yours. That was fixed by stating the claim
+as a subtraction rather than as two named subdirectories, which is the shape
+to prefer when you find the next one.
+
+Today the remainder is `lib/`, `server/`, `server-lib-common/`, `standalone/`,
+`vscode-ext/`, `dor/`, `dor-lib-common/`, `canopy/`, `deploy/`, `docs/`,
+`.impeccable/`, and the root files — but treat that as a description of the
+current tree, not as your scope. Your scope is the remainder.
+
+Remote control is where the depth goes; the rest is a sweep for anything that
+would be a security hole in a terminal that runs local shells — command
+construction, path handling, deserialization of persisted state, IPC that
+crosses a trust boundary.

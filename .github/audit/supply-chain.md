@@ -25,7 +25,13 @@ enumeration is the shortcut that goes stale.
 
 ## Qualitative pass
 
-You own the dependency graph, the lockfile, and `website/src/`. Look at:
+You own the dependency graph, the lockfile, and **all of `website/` except
+`website/public/`**, which is `ci-and-secrets`' because the Tauri updater
+manifest lives there. So `website/src/`, `website/scripts/`, and the build
+config (`package.json`, `vite.config.ts`, `react-router.config.ts`,
+`tsconfig.json`) are all yours. `generate-deps.js` is in that set: audit the
+whole generator, not just the `productDependencyFilters` array the
+root-completeness bullet names.
 
 - newly added or upgraded runtime dependencies since the last audit
 - anything in the lockfile that resolves outside the registry

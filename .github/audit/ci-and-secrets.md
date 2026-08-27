@@ -35,6 +35,14 @@ write scopes.
 ## Qualitative pass
 
 You own `.github/` (including `.github/audit/`, which holds this audit's own
-prompts), `.config/`, `.claude/`, `scripts/`, and `website/public/` — the Tauri
-updater manifest shipped apps fetch lives there, so it is a release artifact
-rather than marketing. You also own any code anywhere that touches a secret.
+prompts), `.config/`, `.claude/`, `.vscode/`, `scripts/`, and
+`website/public/` — the Tauri updater manifest shipped apps fetch lives there,
+so it is a release artifact rather than marketing. You also own any code
+anywhere that touches a secret.
+
+`.vscode/` is here rather than with the product code because it is
+configuration that can execute: a `tasks.json` entry with
+`"runOn": "folderOpen"` runs on checkout when a maintainer opens the folder,
+which is the same shape of persistence `workflow-audit.yaml` watches workflows
+for. There is no such task today; the point is that adding one should be a
+finding, not a quiet config change.

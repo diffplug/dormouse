@@ -34,6 +34,13 @@ export interface ServerConfig {
    * origin is unusable as one on a loopback dev server.
    */
   vapidSubject: string | null;
+  /**
+   * Demand a user-verified passkey assertion (biometric/PIN), not merely user
+   * presence. Off by default because a deployment whose authenticators cannot
+   * do UV would lock itself out; it is mirrored to every Host at enrollment so
+   * the two sides cannot disagree about what a valid assertion is.
+   */
+  readonly requireUserVerification: boolean;
 }
 
 /** Thrown for a missing or unusable environment; the entrypoint exits on it. */
@@ -62,6 +69,10 @@ export function readConfig(env: Env = process.env): ServerConfig {
   }
 
   const bindHost = env.DORMOUSE_BIND_HOST?.trim() || undefined;
+  // Opt-in, and only the exact string: an unset or misspelled value must read
+  // as "off" rather than as "on", because turning this on without
+  // UV-capable authenticators locks the account out of its own server.
+  const requireUserVerification = env.DORMOUSE_REQUIRE_USER_VERIFICATION?.trim() === 'true';
   const origin = env.DORMOUSE_ORIGIN ?? `http://localhost:${port}`;
   const stateDir = env.DORMOUSE_STATE_DIR ?? './data';
 
@@ -94,6 +105,7 @@ export function readConfig(env: Env = process.env): ServerConfig {
   return {
     port,
     bindHost,
+    requireUserVerification,
     setupPassword,
     origin,
     stateDir,

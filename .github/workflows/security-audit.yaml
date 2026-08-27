@@ -116,9 +116,24 @@ jobs:
           # the rule that makes it safe: block in a Bash `until` loop on
           # the fragment files, never end the turn to wait. `Workflow`
           # stays denied because nothing here should be spawning one.
+          # Two of the three domains are mechanical — run a generator, read
+          # `gh api`, compare a pin — and the session default (Sonnet)
+          # does them well. `application-security` is the one that has to
+          # read code adversarially, and its findings have been the ones
+          # that needed real reasoning: tracing a relay-minted `clientId`
+          # to a keystroke-injection path, or working out that an 8-char
+          # fingerprint carries ~40 bits because a P-256 point's leading
+          # byte is constant. It runs on Opus; the orchestrator and the
+          # other two stay on the cheaper default, so the cost lands only
+          # where the depth does.
+          #
+          # Each agent's prompt is a pointer, not a copy — the content
+          # stays in `.github/audit/` so CI and
+          # `scripts/security-audit-local.sh` cannot drift apart.
           claude_args: >-
             --allowed-tools "Read,Write,Edit,Bash,Grep,Glob,Task,Agent"
             --disallowed-tools "Workflow"
+            --agents '{"supply-chain":{"description":"Audits the Dependency Supply Chain section of SECURITY.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/supply-chain.md`, and follow them exactly."},"ci-and-secrets":{"description":"Audits the CI, tend, release, and audit-contract sections of SECURITY.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/ci-and-secrets.md`, and follow them exactly."},"application-security":{"description":"Audits the Remote Control section of SECURITY.md, and sweeps the rest of the product code.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/application-security.md`, and follow them exactly.","model":"opus"}}'
           # The prompts live in `.github/audit/`, not inline here: they
           # are long enough to need real diffs in review, they must be
           # runnable locally against the same text CI uses
@@ -276,6 +291,14 @@ jobs:
             *) STATUS=MISSING ;;
           esac
 
+          # What the *file* said, kept separate from `STATUS`, which the guards
+          # below mutate. Every note in the issue body is written about a
+          # condition rather than about a branch, and "the audit never wrote a
+          # verdict" is one of those conditions — it cannot be recovered from
+          # `STATUS` afterwards, because a dissent can raise that same MISSING
+          # to FAIL.
+          if [ "$STATUS" = "MISSING" ]; then STATUS_FILE_VERDICT=none; else STATUS_FILE_VERDICT="$STATUS"; fi
+
           # A PASS is only as good as the evidence behind it. Each domain
           # writes its own fragment before returning a verdict, so a
           # missing or empty fragment means that domain never reported —
@@ -290,16 +313,80 @@ jobs:
           # reason the three outcomes exist above — this is an audit that
           # did not finish, not a security finding — and MISSING already
           # exits non-zero and holds the release gate shut.
-          if [ "$STATUS" = "PASS" ]; then
-            # Unquoted on purpose: `AUDIT_FRAGMENTS` is a filename list.
-            # shellcheck disable=SC2086
-            for f in $AUDIT_FRAGMENTS; do
-              if [ ! -s "$f" ]; then
-                echo "::warning::Audit reported PASS but $f is missing or empty; downgrading to INCONCLUSIVE."
-                MISSING_FRAGMENTS="${MISSING_FRAGMENTS:+$MISSING_FRAGMENTS, }$f"
-                STATUS=MISSING
-              fi
-            done
+          # Recording a condition and escalating the status are two jobs, and
+          # gating the first on the second is what kept producing findings.
+          # Both loops now run UNCONDITIONALLY — they answer "what is true of
+          # this run", which the issue body reports on regardless of verdict.
+          # Only the escalation below is conditional. Gated on `!= FAIL` this
+          # loop was skipped whenever the orchestrator itself wrote FAIL, so a
+          # domain that left no fragment beside a real finding appeared
+          # nowhere: no annotation, no note, and a report that read as the
+          # whole story.
+          #
+          # Unquoted on purpose: `AUDIT_FRAGMENTS` is a filename list.
+          # shellcheck disable=SC2086
+          for f in $AUDIT_FRAGMENTS; do
+            if [ ! -s "$f" ]; then
+              echo "::warning::$f is missing or empty; the audit cannot be considered complete."
+              MISSING_FRAGMENTS="${MISSING_FRAGMENTS:+$MISSING_FRAGMENTS, }$f"
+            fi
+          done
+
+          # Existence is not agreement. The loop above catches a domain that
+          # produced nothing; this catches one that produced a FAIL the merge
+          # then lost — a mis-summarised verdict, or three domains flattened
+          # into an optimistic paragraph. That case is worse than a missing
+          # fragment, because PASS *closes* the open failure issue below and
+          # opens the release gate, leaving the finding only in a 14-day
+          # artifact nobody is looking at.
+          #
+          # FAIL, not MISSING: a domain that returned FAIL did finish, and it
+          # found something. Each subagent is told to make line 1 of its
+          # fragment the literal verdict so this grep can exist at all —
+          # otherwise the verdict rests on the orchestrator faithfully
+          # propagating it, which is the same "a prompt is not a control"
+          # shape the missing-fragment guard exists to close.
+          #
+          # Also unconditional, for the same reason.
+          # shellcheck disable=SC2086
+          for f in $AUDIT_FRAGMENTS; do
+            [ -s "$f" ] || continue
+            # Three cases, not two. A fragment whose first line is neither
+            # verdict — a subagent that ignored the preamble, a stray heading
+            # or blank line — must not fall through to an unchallenged PASS:
+            # that would put the verdict back on a prompt having been
+            # followed, which is the thing this guard exists to stop being
+            # the control. MISSING rather than FAIL, since a report we cannot
+            # read is an audit that did not finish rather than a finding, and
+            # deliberately not folded into MISSING_FRAGMENTS, whose message
+            # says no fragment was left at all.
+            case "$(head -n1 "$f")" in
+              'VERDICT: FAIL'*)
+                echo "::error::$f opens with VERDICT: FAIL; the merged verdict cannot stand."
+                DISSENTING="${DISSENTING:+$DISSENTING, }$f" ;;
+              'VERDICT: PASS'*) ;;
+              *)
+                echo "::warning::$f has no VERDICT line; the dissent check cannot read it."
+                UNREADABLE_VERDICTS="${UNREADABLE_VERDICTS:+$UNREADABLE_VERDICTS, }$f" ;;
+            esac
+          done
+          # Escalation, in ONE place, from what the loops recorded. Ordered:
+          # FAIL (a domain found something) outranks MISSING (the audit did
+          # not finish) outranks PASS. A dissent can raise MISSING to FAIL and
+          # never the reverse, and an orchestrator that already said FAIL stays
+          # there.
+          #
+          # There is deliberately no prose emitted here. The old code appended
+          # a "Downgraded to FAIL — the merged verdict was PASS" block to the
+          # report, which was a claim about a *combination* (dissent set AND
+          # the merge said PASS) and became false the moment a dissent could
+          # arrive on a run that said nothing. The notes block below carries
+          # the same fact in condition form.
+          if [ -n "${DISSENTING:-}" ]; then
+            STATUS=FAIL
+          elif [ "$STATUS" != "FAIL" ] &&
+               { [ -n "${MISSING_FRAGMENTS:-}" ] || [ -n "${UNREADABLE_VERDICTS:-}" ]; }; then
+            STATUS=MISSING
           fi
 
           DATE=$(date -u +%Y-%m-%dT%H:%MZ)
@@ -336,83 +423,65 @@ jobs:
             TRANSCRIPT_URL=""
           fi
 
-          if [ "$STATUS" = "MISSING" ]; then
-            TITLE="[security-audit] INCONCLUSIVE on $(date -u +%Y-%m-%d)"
-            {
-              # Two different causes reach MISSING, and they want different
-              # first moves from the reader: no status file at all means
-              # start at the report's own markers — the prose below names
-              # both, because that branch itself has two causes (a
-              # turn-ending failure mid-audit, and an expired wait deadline)
-              # which leave different markers. A downgraded PASS means the
-              # named domains are the whole story — the rest reported, and
-              # the "ran short, no verdict" prose below would be wrong
-              # about a run that did reach one. The named set can be one,
-              # two, or all three: the fail-closed `rm -f` in `Redact
-              # secrets from agent output` deletes every fragment *and*
-              # `audit-report.md` while leaving `audit-status.txt` alone,
-              # so a PASS reaches this branch with all three named, no
-              # report body, and no transcript link. That path is a
-              # cleartext-secret incident, not a flaky domain, so the
-              # all-three case says so rather than leaving the reader to
-              # infer it from an empty issue.
-              if [ -n "${MISSING_FRAGMENTS:-}" ]; then
-                echo "Audit verdict withheld at $DATE. [Run]($RUN_URL)"
-                echo
-                echo "The audit reported \`PASS\`, but it was downgraded: no report"
-                echo "fragment was left for: $MISSING_FRAGMENTS. A domain that leaves"
-                echo "no fragment did not pass — it did not finish, and a missing"
-                echo "fragment is indistinguishable in the merged report from a domain"
-                echo "that found nothing. The named domains are unaudited; any report"
-                echo "reproduced below covers only the rest. If all three are named,"
-                echo "suspect \`Redact secrets from agent output\` — it deletes every"
-                echo "fragment and the report when it throws, and that means a secret"
-                echo "reached a file in cleartext."
-              else
-                echo "Audit produced no verdict at $DATE. [Run]($RUN_URL)"
-                echo
-                echo "The audit step exited without writing \`audit-status.txt\`."
-                if [ -s audit-report.md ]; then
-                  echo "It did leave a partial \`audit-report.md\`, reproduced below,"
-                  echo "which may itself contain a real finding — read it first. A"
-                  echo "report without a verdict is the expected shape of an audit that"
-                  echo "ran short: the prompt asks for the report either way, and for"
-                  echo "the status file only once the verdict covers every check. Start"
-                  echo "at the markers rather than the transcript: \`UNVERIFIABLE\` is a"
-                  echo "check the agent itself could not determine, while a domain"
-                  echo "section reading \`_No report …_\` is a domain that never reported"
-                  echo "at all — which is what an expired wait deadline looks like."
-                else
-                  echo "**This is not a security finding** — the audit did not reach"
-                  echo "one. Treat it as a failed audit run, not a failed audit."
-                fi
-              fi
-              if [ -n "$TRANSCRIPT_URL" ]; then
-                echo
-                echo "[Download the transcript]($TRANSCRIPT_URL) to see where it stopped."
-              fi
-              if [ -s audit-report.md ]; then
-                echo
-                echo "---"
-                echo
-                cat audit-report.md
-              fi
-            } > audit-comment.md
-          else
-            TITLE="[security-audit] FAIL on $(date -u +%Y-%m-%d)"
-            if [ ! -s audit-report.md ]; then
-              printf '%s\n' \
-                "Audit reported FAIL but wrote no \`audit-report.md\`." \
-                > audit-report.md
-            fi
-            {
-              LINKS="[Run]($RUN_URL)"
-              [ -n "$TRANSCRIPT_URL" ] && LINKS="$LINKS · [Transcript]($TRANSCRIPT_URL)"
-              echo "Audit failed at $DATE. $LINKS"
-              echo
-              cat audit-report.md
-            } > audit-comment.md
+          # One note per condition that HOLDS, not one block per combination
+          # of conditions.
+          #
+          # This used to be an if/elif chain with hand-written prose per arm,
+          # and every arm was true only of the combination that could select
+          # it. Each time a gate widened, new combinations became reachable and
+          # the arm that caught them described a different failure — four review
+          # rounds in a row found exactly that, each one created by the previous
+          # round's fix. Prose proportional to combinations cannot be kept
+          # correct by patching combinations.
+          #
+          # So: collect the conditions, emit a line for each. Adding a fourth
+          # condition later means adding one note, and it cannot make any
+          # existing note wrong, because no note claims anything about the
+          # others.
+          NOTES=$(mktemp)
+          if [ -n "${DISSENTING:-}" ]; then
+            echo "- **A domain returned \`FAIL\`.** $DISSENTING opened with \`VERDICT: FAIL\` — read that domain's section first. A domain's own verdict outranks the merged one." >> "$NOTES"
           fi
+          if [ -n "${MISSING_FRAGMENTS:-}" ]; then
+            echo "- **A domain left no report.** Nothing was written for: $MISSING_FRAGMENTS. Those domains are unaudited, not passing — a missing fragment is indistinguishable in the merged report from a domain that found nothing. If all three are named, suspect \`Redact secrets from agent output\`: it deletes every fragment and the report when it throws, which means a secret reached a file in cleartext." >> "$NOTES"
+          fi
+          if [ -n "${UNREADABLE_VERDICTS:-}" ]; then
+            echo "- **A domain's verdict could not be read.** The first line of $UNREADABLE_VERDICTS is neither \`VERDICT: PASS\` nor \`VERDICT: FAIL\`, so its agreement with the merged verdict is unconfirmed. Usually a subagent that did not follow \`.github/audit/_preamble.md\`; the domain did report, so its section below still stands on its own." >> "$NOTES"
+          fi
+          if [ "$STATUS_FILE_VERDICT" = "none" ]; then
+            echo "- **The audit wrote no verdict.** \`audit-status.txt\` was absent, empty, or not \`PASS\`/\`FAIL\`, so the run ended without deciding. Start at the report's own markers: \`UNVERIFIABLE\` is a check the agent could not determine, while a domain section reading \`_No report …_\` is one that never reported — which is what an expired wait deadline looks like." >> "$NOTES"
+          fi
+
+          if [ "$STATUS" = "FAIL" ]; then
+            TITLE="[security-audit] FAIL on $(date -u +%Y-%m-%d)"
+            HEADLINE="Audit failed at $DATE."
+          else
+            TITLE="[security-audit] INCONCLUSIVE on $(date -u +%Y-%m-%d)"
+            HEADLINE="Audit reached no usable verdict at $DATE."
+          fi
+
+          {
+            LINKS="[Run]($RUN_URL)"
+            [ -n "$TRANSCRIPT_URL" ] && LINKS="$LINKS · [Transcript]($TRANSCRIPT_URL)"
+            echo "$HEADLINE $LINKS"
+            echo
+            if [ -s "$NOTES" ]; then
+              cat "$NOTES"
+              echo
+            elif [ "$STATUS" = "MISSING" ]; then
+              # Belt and braces: MISSING with no condition set should be
+              # unreachable, since every path that sets it also records why.
+              # Say so rather than filing a blank issue.
+              echo "- **Inconclusive for a reason this step could not name.** That is itself a bug in the reporting step."
+              echo
+            fi
+            if [ -s audit-report.md ]; then
+              cat audit-report.md
+            else
+              echo "_No \`audit-report.md\` was produced._"
+            fi
+          } > audit-comment.md
+          rm -f "$NOTES"
 
           EXISTING=$(gh issue list --label security-audit-failure \
                        --state open --json number --jq '.[0].number' || true)

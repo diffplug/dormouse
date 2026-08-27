@@ -32,6 +32,7 @@ import {
   type ConnectionRequest,
   type HostAclRecord,
   type PairingRequest,
+  MAX_PENDING_PAIRINGS,
 } from 'server-lib-common';
 import { RemoteHost } from './remote-host';
 import type { HostEnrollment } from './enrollment';
@@ -237,6 +238,46 @@ describe('RemoteHost frame handling', () => {
     approvals[0]!.approve();
     // The bound applies to what is persisted too, not only to what is shown.
     expect(Array.from(savedRecords[0]!.label).length).toBeLessThanOrEqual(64);
+  });
+
+  it('bounds pending pairings so pair frames cannot grow the host unbounded', () => {
+    const host = makeHost();
+    // Every `pair` frame allocates under a relay-chosen clientId, and
+    // `client-gone` — the only thing that removes one — is what a hostile relay
+    // simply never sends. Unbounded, 5000 frames retained 5000 requests holding
+    // megabytes of relay-chosen strings in the process that owns every PTY.
+    const sent = 200;
+    for (let i = 0; i < sent; i++) {
+      socket.receive({
+        t: 'pair',
+        clientId: `c${i}`,
+        request: {
+          accountId: 'owner',
+          passkeyCredentialId: `cred-${i}`,
+          passkeyPublicKeyHash: `hash-${i}`,
+          devicePublicKey: `device-${i}`,
+          requestedLabel: `iPhone ${i}`,
+        },
+      });
+    }
+
+    // `approvals` is the harness's cumulative call log, so it counts every
+    // request ever shown — the live queue is what is bounded. Evictions are
+    // observable as denials on the wire, which is also the point: an evicted
+    // client is told, rather than left waiting on a modal that no longer
+    // exists.
+    const denials = socket.frames('pair-result').filter((f) => f.approved === false);
+    expect(denials).toHaveLength(sent - MAX_PENDING_PAIRINGS);
+    expect(denials.every((f) => f.error === 'superseded')).toBe(true);
+    // The record is dropped, not just the payload it holds: evicting only
+    // `pending` would free the capped request and keep the slot plus its
+    // relay-chosen key forever, which is the unbounded half. This bounds the
+    // pairing path — `connect` frames allocate through a different route that
+    // this counter deliberately does not evict.
+    expect(host.trackedClientCount).toBeLessThanOrEqual(MAX_PENDING_PAIRINGS);
+
+    // Nothing reached the ACL without a human.
+    expect(savedRecords).toHaveLength(0);
   });
 
   it('deny → pair-result approved:false, ACL untouched', () => {
