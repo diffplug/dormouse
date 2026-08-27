@@ -114,7 +114,15 @@ jobs:
         # attempt) and rotate the mirror host between attempts so a sustained
         # single-mirror problem is escaped. Azure first (fast, same datacenter),
         # archive.ubuntu.com as fallback. --no-install-recommends trims the download.
-        timeout-minutes: 10
+        #
+        # 16 minutes, not 10: the budget has to outlast the schedule it wraps, or
+        # Actions kills the step mid-attempt and the ::error:: below — the line
+        # that says the mirrors were rotated and still failed — never prints,
+        # leaving a bare timeout in exactly the sustained-outage case the mirror
+        # rotation exists for. Worst case is
+        # 3 x (120 update + 180 install) + 3 x 15 sleep = 945s (the loop
+        # sleeps after the third failed attempt too, before the ::error::).
+        timeout-minutes: 16
         run: |
           mirrors=(azure.archive.ubuntu.com archive.ubuntu.com)
           src_files=(/etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list)
