@@ -27,9 +27,32 @@ export const DEFAULT_PAIRING_TTL_MS = 5 * 60 * 1000;
 /**
  * How many tickets one ceremony will hold. Far above any real use — a human
  * approves one at a time — and low enough that a hostile relay cannot turn
- * `pair` frames into unbounded memory in the process that owns the PTYs.
+ * `pair` frames into unbounded memory here.
+ *
+ * This bounds the ceremony's own map and nothing else. The Host keeps its own
+ * per-`clientId` records of a pending pairing, and the service mirrors a queue
+ * of them to the webview; both are bounded separately by
+ * {@link MAX_PENDING_PAIRINGS}. Capping only this map is what let 5000 `pair`
+ * frames retain ~16 MB of relay-chosen strings while `#tickets` sat happily at
+ * 64.
  */
 const MAX_PENDING_TICKETS = 64;
+
+/**
+ * How many pairing requests may await local approval at once, across the
+ * Host's own client map and the service's mirrored queue.
+ *
+ * Much smaller than {@link MAX_PENDING_TICKETS}, because this is the number a
+ * *human* is being asked to look at: past a handful the modal is not a
+ * decision any more. Oldest is evicted first — the person who initiated the
+ * oldest request is the least likely to still be watching for it.
+ *
+ * Every `pair` frame allocates in both structures keyed by a `clientId` the
+ * relay chooses, and the service re-serializes its whole queue to the webview
+ * on each change, so the cost of leaving them unbounded is quadratic rather
+ * than linear.
+ */
+export const MAX_PENDING_PAIRINGS = 8;
 
 /**
  * How recent the session's last server-verified passkey assertion must be for

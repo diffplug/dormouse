@@ -148,6 +148,18 @@ export interface HostEnrollResponse {
   /** What the Host must enforce as its ConnectionPolicy. */
   origin: string;
   rpId: string;
+  /**
+   * Whether the Host must demand a user-verified assertion (biometric/PIN,
+   * not merely presence).
+   *
+   * Optional and additive: an older Host reading a newer server's response
+   * ignores it, and a newer Host reading an older server's sees `undefined`,
+   * which is the same as `false`. It travels here rather than being
+   * configured on the Host because the invariant is that the two sides
+   * *mirror* — a Server demanding UV while the Host does not means the Host is
+   * the weaker verifier, and the Host is the one that decides access.
+   */
+  requireUserVerification?: boolean;
 }
 
 export interface HostsResponse {

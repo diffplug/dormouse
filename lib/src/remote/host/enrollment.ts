@@ -28,6 +28,16 @@ export interface HostEnrollment {
   origin: string;
   /** The Host's `ConnectionPolicy.rpId`. */
   rpId: string;
+  /**
+   * The Host's `ConnectionPolicy.requireUserVerification`, mirrored from the
+   * Server at enrollment so the two cannot disagree about what a valid
+   * assertion is.
+   *
+   * Optional, and absent means `false`: an enrollment persisted by an older
+   * build has no such field, and it must keep loading rather than being
+   * rejected as malformed.
+   */
+  requireUserVerification?: boolean;
 }
 
 /**
@@ -44,7 +54,11 @@ export function isEnrollment(value: unknown): value is HostEnrollment {
     typeof v.hostId === 'string' &&
     typeof v.hostToken === 'string' &&
     typeof v.origin === 'string' &&
-    typeof v.rpId === 'string'
+    typeof v.rpId === 'string' &&
+    // Optional — absent is the documented default. Present-but-wrong-typed is
+    // still a rejection: a store that round-trips `"false"` as truthy would be
+    // the silent disagreement this field exists to prevent.
+    (v.requireUserVerification === undefined || typeof v.requireUserVerification === 'boolean')
   );
 }
 
@@ -119,6 +133,12 @@ export async function performEnrollment(
     hostToken: enrolled?.hostToken,
     origin: enrolled?.origin,
     rpId: enrolled?.rpId,
+    // Only when the server actually sent a boolean: spreading `undefined` in
+    // would make the key present-and-undefined, which the guard treats the
+    // same but a store round-trip would not.
+    ...(typeof enrolled?.requireUserVerification === 'boolean'
+      ? { requireUserVerification: enrolled.requireUserVerification }
+      : {}),
   };
   if (!isEnrollment(enrollment)) {
     throw new Error(

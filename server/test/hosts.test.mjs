@@ -133,3 +133,17 @@ test('a host socket opens with a real enrollment token', async () => {
     await server.close();
   }
 });
+
+test('enrollment mirrors requireUserVerification to the Host, and omits it when off', async () => {
+  // The flag has to travel: the Host is the final authority on an assertion,
+  // so a Server that demands UV while the Host does not leaves the weaker
+  // verifier deciding access. Absent means false, which is what an older Host
+  // reading a newer server — or either reading an older one — must see.
+  const on = await freshApp({ requireUserVerification: true });
+  const { body: uvOn } = await enrollHost(on.app, { label: 'uv-on' });
+  assert.equal(uvOn.requireUserVerification, true);
+
+  const off = await freshApp();
+  const { body: uvOff } = await enrollHost(off.app, { label: 'uv-off' });
+  assert.equal('requireUserVerification' in uvOff, false);
+});

@@ -229,8 +229,18 @@ lacks (there `authorizeConnection` verifies presence itself). Under Server
 compromise, a forged freshness stamp gets an attacker no further than the
 human staring at the approval modal.
 
+**Pending requests are bounded.** A `pair` frame allocates in three places —
+the ceremony's ticket map, the Host's per-`clientId` client map, and the
+service's queue mirrored to the webview — under a `clientId` the relay chooses,
+and only a `client-gone` removes one. All three are capped
+(`MAX_PENDING_TICKETS`, `MAX_PENDING_PAIRINGS`), oldest evicted first and
+answered with a denial rather than dropped silently, because anything that can
+sign in can send these and a queue that only grows wedges the process that owns
+every PTY.
+
 Source of truth: `PairingRequest` / `PairingTicket` / `PairingCeremony` /
-`PAIRING_PRESENCE_WINDOW_MS` in `server-lib-common/src/security/pairing.ts`
+`PAIRING_PRESENCE_WINDOW_MS` / `MAX_PENDING_PAIRINGS` in
+`server-lib-common/src/security/pairing.ts`
 (tickets are single-use with a `DEFAULT_PAIRING_TTL_MS` = 5-minute TTL;
 approval after expiry fails without touching the ACL — the presence window
 gates the *request*, not the approver's deliberation). The wire sequence —

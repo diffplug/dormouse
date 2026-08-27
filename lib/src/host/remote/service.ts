@@ -18,6 +18,7 @@
  * are settled there (`sidecar-entry.ts`), so they never reach this dispatch.
  */
 
+import { MAX_PENDING_PAIRINGS } from 'server-lib-common';
 import { filterAclRecords } from '../../remote/host/acl';
 import { isEnrollment, performEnrollment, type HostEnrollment } from '../../remote/host/enrollment';
 import type { HostSurfaceProvider } from '../../remote/host/host-surface-provider';
@@ -434,6 +435,16 @@ export class RemoteHostService {
   // --- Pairing queue ---
 
   #enqueuePairing(pending: PendingPairing): void {
+    // Bounded, like the controller's own map: this one is mirrored to the
+    // webview in full on every change, so an unbounded queue costs quadratic
+    // bridge traffic on top of the memory. `RemoteHost` evicts on its side too;
+    // both are capped because either can be fed independently, and a cap that
+    // only one of them honors is not a cap.
+    while (this.#pairings.size >= MAX_PENDING_PAIRINGS) {
+      const oldest = this.#pairings.keys().next();
+      if (oldest.done) break;
+      this.#pairings.delete(oldest.value);
+    }
     // Coalesce by clientId: a re-sent pair for the same client replaces the old.
     this.#pairings.set(pending.clientId, pending);
     this.#emitQueue();

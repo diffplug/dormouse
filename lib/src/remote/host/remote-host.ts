@@ -32,6 +32,7 @@ import {
   WS_ROUTES,
   WS_TOKEN_PARAM,
   authorizeConnection,
+  MAX_PENDING_PAIRINGS,
   boundedPairingAccount,
   boundedPairingLabel,
   isPairingRequest,
@@ -148,7 +149,14 @@ export class RemoteHost {
 
   constructor(options: RemoteHostOptions) {
     this.#enrollment = options.enrollment;
-    this.#policy = { rpId: options.enrollment.rpId, origin: options.enrollment.origin };
+    this.#policy = {
+      rpId: options.enrollment.rpId,
+      origin: options.enrollment.origin,
+      // Mirrored from the Server at enrollment. Both sides must demand the
+      // same thing: the Host is the final authority, so a Server enforcing UV
+      // while the Host does not would leave the weaker verifier deciding.
+      requireUserVerification: options.enrollment.requireUserVerification ?? false,
+    };
     this.#now = options.now ?? (() => Date.now());
     this.#acl = loadHostAcl(options.enrollment.hostId, options.loadAcl);
     this.#challenges = new HostChallengeIssuer({ now: this.#now });
@@ -276,6 +284,29 @@ export class RemoteHost {
     this.#clients.clear();
   }
 
+  /**
+   * Drop the oldest pending pairing when the queue is full, so a new request
+   * displaces one rather than growing the map. Oldest first: whoever initiated
+   * it is the least likely to still be waiting on the modal.
+   */
+  #evictOldestPairingIfFull(): void {
+    let pendingCount = 0;
+    for (const state of this.#clients.values()) if (state.pending) pendingCount++;
+    while (pendingCount >= MAX_PENDING_PAIRINGS) {
+      let oldestId: string | null = null;
+      let oldestAt = Number.POSITIVE_INFINITY;
+      for (const [id, state] of this.#clients) {
+        if (state.pending && state.pending.requestedAt < oldestAt) {
+          oldestAt = state.pending.requestedAt;
+          oldestId = id;
+        }
+      }
+      if (oldestId === null) return;
+      this.#denyPairing(oldestId, this.#clients.get(oldestId)!.pending!.pairingId, 'superseded');
+      pendingCount--;
+    }
+  }
+
   /** Get or create the per-client state record for `clientId`. */
   #clientState(clientId: string): ClientState {
     let state = this.#clients.get(clientId);
@@ -359,6 +390,16 @@ export class RemoteHost {
       approve: (label) => this.#approvePairing(clientId, ticket.pairingId, label),
       deny: (error) => this.#denyPairing(clientId, ticket.pairingId, error),
     };
+    // Bound the queue before adding to it. Every `pair` frame allocates a
+    // `#clients` entry under a relay-chosen `clientId`, and those are removed
+    // only by `client-gone` — which a hostile relay simply never sends — or by
+    // the socket dropping. Unbounded, 5000 frames retain 5000 pending requests
+    // holding megabytes of relay-chosen strings in the process that owns every
+    // PTY, and the service re-serializes the whole queue to the webview on each
+    // one, so the traffic is quadratic. Reachable by anything that can sign in:
+    // a synced or stolen passkey is documented as buying only "the ability to
+    // ask", and this is what stops asking from being a denial of service.
+    this.#evictOldestPairingIfFull();
     this.#clientState(clientId).pending = pending;
     this.#requestApproval(pending);
   }
