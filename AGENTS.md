@@ -76,6 +76,8 @@ Specs are written ahead of the code on purpose: a new component's spec starts as
 
 The mechanically checkable parts of these conventions are enforced by `scripts/spec-lint.mjs` (`pnpm lint:specs`, also the first step of the root `pnpm test`): every spec indexed here, `## Future` last, relative links/anchors resolving, and backticked repo paths existing on disk.
 
+Two sibling lints run alongside it in `pnpm test`, each enforcing one invariant a spec states in prose: `scripts/xterm-lint.mjs` (`pnpm lint:xterm`) for the `@xterm/*` version lockstep in `docs/specs/webgl-text.md`, and `scripts/loopback-lint.mjs` (`pnpm lint:loopback`) for the rule in `SECURITY.md` -> "Loopback Listeners" that a loopback bind is not an access control — a new listener must reference a guard module or be allowlisted with a reason.
+
 ## Design
 
 See [PRODUCT.md](PRODUCT.md) for users, brand personality, and aesthetic direction (including the anti-references), and [DESIGN.md](DESIGN.md) for the full design system — tokens, named rules, and component vocabulary. Key principles:
