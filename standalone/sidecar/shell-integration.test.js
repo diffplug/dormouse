@@ -7,13 +7,27 @@
 // ESM test here warns on every run.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 const { existsSync } = require('node:fs');
 const path = require('node:path');
 
 const dir = __dirname;
-const BASH = '/bin/bash';
-const ZSH = '/bin/zsh';
+
+/**
+ * Resolve a shell off PATH, then the usual absolute spellings. Hardcoding
+ * `/bin/<shell>` silently dropped zsh on CI, where it lives in `/usr/bin` — the
+ * suite went green having covered half of what it claims to.
+ */
+function findShell(name) {
+  const fromPath = spawnSync(process.platform === 'win32' ? 'where' : 'which', [name], { encoding: 'utf8' });
+  const resolved = fromPath.status === 0 ? fromPath.stdout.split('\n')[0].trim() : '';
+  if (resolved && existsSync(resolved)) return resolved;
+  return [`/bin/${name}`, `/usr/bin/${name}`, `/usr/local/bin/${name}`, `/opt/homebrew/bin/${name}`]
+    .find((candidate) => existsSync(candidate)) ?? null;
+}
+
+const BASH = findShell('bash');
+const ZSH = findShell('zsh');
 
 // The three sequences that terminate an OSC string (terminal-protocol.ts →
 // findOscTerminator): BEL, ST, and the C1 ST.
@@ -43,8 +57,16 @@ function callHelper(shell, fn, value, env = {}) {
   });
 }
 
-const shells = [['bash', BASH], ['zsh', ZSH]].filter(([, bin]) => existsSync(bin));
-assert.ok(shells.length > 0, 'expected at least one of bash/zsh to exist');
+const shells = [['bash', BASH], ['zsh', ZSH]].filter(([, bin]) => bin);
+// Say out loud what was and was not covered. A shell that is merely absent
+// still reads as a pass in the summary line, which is how the zsh half of this
+// suite went unnoticed on CI for a run.
+const missing = [['bash', BASH], ['zsh', ZSH]].filter(([, bin]) => !bin).map(([n]) => n);
+console.error(`shell-integration: covering ${shells.map(([n]) => n).join(', ') || '(none)'}`
+  + (missing.length ? `; NOT covered (not installed): ${missing.join(', ')}` : ''));
+// bash is the floor: it is the one shell present on every platform we test on,
+// and a run that covers neither is not a pass.
+assert.ok(BASH, 'bash must be available to test the shell-integration emitters');
 
 for (const [name, bin] of shells) {
   test(`${name}: safe_cwd removes every OSC terminator`, () => {
