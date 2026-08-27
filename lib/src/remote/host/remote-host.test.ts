@@ -241,7 +241,7 @@ describe('RemoteHost frame handling', () => {
   });
 
   it('bounds pending pairings so pair frames cannot grow the host unbounded', () => {
-    makeHost();
+    const host = makeHost();
     // Every `pair` frame allocates under a relay-chosen clientId, and
     // `client-gone` — the only thing that removes one — is what a hostile relay
     // simply never sends. Unbounded, 5000 frames retained 5000 requests holding
@@ -269,6 +269,11 @@ describe('RemoteHost frame handling', () => {
     const denials = socket.frames('pair-result').filter((f) => f.approved === false);
     expect(denials).toHaveLength(sent - MAX_PENDING_PAIRINGS);
     expect(denials.every((f) => f.error === 'superseded')).toBe(true);
+    // The map itself is bounded, not just the payload it holds: evicting only
+    // `pending` would free the capped request and keep the slot plus its
+    // relay-chosen key forever, which is the unbounded half.
+    expect(host.trackedClientCount).toBeLessThanOrEqual(MAX_PENDING_PAIRINGS);
+
     // Nothing reached the ACL without a human.
     expect(savedRecords).toHaveLength(0);
   });

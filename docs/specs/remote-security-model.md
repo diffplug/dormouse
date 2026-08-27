@@ -233,10 +233,12 @@ human staring at the approval modal.
 the ceremony's ticket map, the Host's per-`clientId` client map, and the
 service's queue mirrored to the webview — under a `clientId` the relay chooses,
 and only a `client-gone` removes one. All three are capped
-(`MAX_PENDING_TICKETS`, `MAX_PENDING_PAIRINGS`), oldest evicted first and
-answered with a denial rather than dropped silently, because anything that can
-sign in can send these and a queue that only grows wedges the process that owns
-every PTY.
+(`MAX_PENDING_TICKETS`, `MAX_PENDING_PAIRINGS`), oldest evicted first — the
+controller answers its eviction with a `pair-result` denial and drops the
+client record rather than leaving someone on a modal that no longer exists,
+while the ceremony and the service's mirrored queue simply delete theirs —
+because anything that can sign in can send these and a queue that only grows
+wedges the process that owns every PTY.
 
 Source of truth: `PairingRequest` / `PairingTicket` / `PairingCeremony` /
 `PAIRING_PRESENCE_WINDOW_MS` / `MAX_PENDING_PAIRINGS` in

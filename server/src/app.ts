@@ -398,11 +398,11 @@ export function createApp(config: AppConfig): CreatedApp {
       hostToken: host.hostToken,
       origin,
       rpId,
-          // Mirrored to the Host so both sides demand the same thing. The Host
+      // Mirrored to the Host so both sides demand the same thing. The Host
       // is the final authority, so a Server that demands UV while the Host
       // does not would leave the weaker verifier deciding access.
       ...(config.requireUserVerification ? { requireUserVerification: true } : {}),
-};
+    };
     return c.json(res);
   });
 

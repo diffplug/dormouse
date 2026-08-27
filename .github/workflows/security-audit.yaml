@@ -335,11 +335,25 @@ jobs:
             # shellcheck disable=SC2086
             for f in $AUDIT_FRAGMENTS; do
               [ -s "$f" ] || continue
-              if head -n1 "$f" | grep -q '^VERDICT: FAIL'; then
-                echo "::error::Audit reported PASS but $f opens with VERDICT: FAIL; downgrading to FAIL."
-                DISSENTING="${DISSENTING:+$DISSENTING, }$f"
-                STATUS=FAIL
-              fi
+              # Three cases, not two. A fragment whose first line is neither
+              # verdict — a subagent that ignored the preamble, a stray heading
+              # or blank line — must not fall through to an unchallenged PASS:
+              # that would put the verdict back on a prompt having been
+              # followed, which is the thing this guard exists to stop being
+              # the control. MISSING rather than FAIL, since a report we cannot
+              # read is an audit that did not finish rather than a finding, and
+              # deliberately not folded into MISSING_FRAGMENTS, whose message
+              # says no fragment was left at all.
+              case "$(head -n1 "$f")" in
+                'VERDICT: FAIL'*)
+                  echo "::error::Audit reported PASS but $f opens with VERDICT: FAIL; downgrading to FAIL."
+                  DISSENTING="${DISSENTING:+$DISSENTING, }$f"
+                  STATUS=FAIL ;;
+                'VERDICT: PASS'*) ;;
+                *)
+                  echo "::warning::$f has no VERDICT line; the dissent check cannot read it."
+                  [ "$STATUS" = FAIL ] || STATUS=MISSING ;;
+              esac
             done
             if [ -n "${DISSENTING:-}" ]; then
               {

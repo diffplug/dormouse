@@ -113,6 +113,17 @@ export interface RemoteHostOptions {
   reconnect?: boolean;
 }
 
+/**
+ * The longest `clientId` this Host will act on.
+ *
+ * The relay mints these as base64url of 16 random bytes (~22 characters), so
+ * this is an order of magnitude of headroom. It exists because the id is a
+ * *map key* on a hostile-relay path: every other field of a `pair` frame is
+ * capped by `PAIRING_FIELD_LIMIT`, and bounding those while leaving the key
+ * free would bound only the part that was already bounded.
+ */
+const MAX_CLIENT_ID_LENGTH = 256;
+
 const INITIAL_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
 
@@ -289,6 +300,16 @@ export class RemoteHost {
    * displaces one rather than growing the map. Oldest first: whoever initiated
    * it is the least likely to still be waiting on the modal.
    */
+  /**
+   * How many clients this Host is tracking. Exists for the pending-pairing
+   * bound's test: the growth it guards against is in a private map, and a
+   * bound nothing can observe is how the first version of that cap passed its
+   * own test while the map kept growing.
+   */
+  get trackedClientCount(): number {
+    return this.#clients.size;
+  }
+
   #evictOldestPairingIfFull(): void {
     let pendingCount = 0;
     for (const state of this.#clients.values()) if (state.pending) pendingCount++;
@@ -303,6 +324,14 @@ export class RemoteHost {
       }
       if (oldestId === null) return;
       this.#denyPairing(oldestId, this.#clients.get(oldestId)!.pending!.pairingId, 'superseded');
+      // Drop the record too, not just its payload. `#denyPairing` only clears
+      // `pending`, so without this the map keeps one entry per `pair` frame
+      // forever under a relay-chosen key — bounding the capped payload while
+      // leaving the unbounded part. `#clientState` recreates it if that client
+      // is ever heard from again, and an established or session-holding client
+      // is left alone.
+      const evicted = this.#clients.get(oldestId);
+      if (evicted && !evicted.established && !evicted.session) this.#clients.delete(oldestId);
       pendingCount--;
     }
   }
@@ -337,7 +366,8 @@ export class RemoteHost {
     if (
       !frame ||
       typeof (frame as { t?: unknown }).t !== 'string' ||
-      typeof (frame as { clientId?: unknown }).clientId !== 'string'
+      typeof (frame as { clientId?: unknown }).clientId !== 'string' ||
+      (frame as { clientId: string }).clientId.length > MAX_CLIENT_ID_LENGTH
     ) {
       return;
     }
