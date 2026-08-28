@@ -279,8 +279,9 @@ Source of truth: `lib/src/components/wall/AgentBrowserScreenModal.tsx`,
 ## Agent-Browser Renderer
 
 Dormouse is a viewer/client for the user's installed `agent-browser`; it does
-not bundle or fork Chromium behavior. `dor ab` intercepts only `--key` and
-`--session`; every other argument is forwarded verbatim to:
+not bundle or fork Chromium behavior. `dor ab` intercepts only the three
+mutually exclusive identity flags `--key`, `--session` and `--surface`; every
+other argument is forwarded verbatim to:
 
 ```sh
 agent-browser --session <resolved-session> <args...>
@@ -301,15 +302,27 @@ Managed identity:
 - Default is `--key default`.
 - `--key <name>` maps to `dormouse.1.<name>` and must match
   `[A-Za-z0-9._-]+`.
-- `--key` and raw `--session` are mutually exclusive.
+- `--key`, raw `--session` and `--surface` are mutually exclusive.
 - GUI-spawned sessions use `dormouse.1.gui-<hex>` and are not addressable by
-  `--key`.
+  `--key`. They are reachable by `dor ab --surface <handle>`, which asks the
+  host for the session bound to the Surface a handle names rather than deriving
+  one from a key — the only address a GUI-minted session has (`docs/specs/dor-cli.md`
+  → Agent-Browser Surface Addressing). The host answers only for an
+  agent-browser-rendered Surface: web verbs stay renderMode-gated, so an
+  `iframe`-rendered Surface has a browser but no session to drive.
 - One agent-browser session maps to one Dormouse surface. Re-running `dor ab`
   for an existing session refreshes `wsPort`/`binaryPath` and reuses the pane.
+  A `--surface`-addressed run normally does the same: it resolved against a
+  surface already bound to that session. Not an invariant, though — the
+  forwarded command and `stream status` run in between, so a surface killed or
+  render-swapped in that window leaves the trailing request to mint a fresh
+  pane.
 
 Source of truth: `dor/src/commands/agent-browser.ts`,
-`dor/src/commands/types.ts` (`AgentBrowserSurfaceRequest`), `Wall.tsx`
-(`findAgentBrowserSurface`, `surface.agentBrowser` handling).
+`dor/src/commands/types.ts` (`AgentBrowserSurfaceRequest`,
+`ResolveAgentBrowserSessionRequest`), `Wall.tsx` / `use-dor-control.ts`
+(`findAgentBrowserSurface`, `surface.agentBrowser` and
+`surface.resolveAgentBrowser` handling).
 
 ### Agent-Browser Connection
 

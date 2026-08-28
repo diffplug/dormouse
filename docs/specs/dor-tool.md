@@ -22,8 +22,9 @@ typing. No SDK, no protocol: print one escape sequence, read one env var.
 Phase A of the ledger below is implemented: nothing in it is `tool`-specific,
 so it is documented where it belongs rather than restated here. The
 capability model and its predicates are owned by `docs/specs/glossary.md` →
-Panes and Surfaces; the `dor list --json` row fields and the
-`has no terminal` error wording by `docs/specs/dor-cli.md` → `dor list`.
+Panes and Surfaces; the `dor list --json` row fields and the matching
+`has no terminal` / `has no browser` failures by `docs/specs/dor-cli.md` →
+`dor list`.
 What this spec still owes is the kind that has both — see
 [The tool capability set](#the-tool-capability-set).
 
@@ -59,10 +60,12 @@ capability refactor — is implemented; see
   `DORMOUSE_DEHYDRATE` per the contract below (designed day 1; the `dehydrate`
   flag is reserved in the serve payload from C0). The Windows graceful-stop
   answer is needed here only.
-- **Later** — `ab-*` browser rendering: agent GUI-driving via the
-  agent-browser render modes, which requires `dor ab` surface-handle
-  addressing (`dor ab --surface surface:N <verb>`), the one genuinely new CLI
-  mechanism a Surface with both capabilities demands. Pocket/remote browser
+- **Later** — `ab-*` browser rendering: agent GUI-driving of a tool's browser
+  via the agent-browser render modes. The CLI mechanism it needed —
+  surface-handle addressing, `dor ab --surface surface:N <verb>` — is shipped
+  (`docs/specs/dor-cli.md` → Agent-Browser Surface Addressing) and already
+  reaches any agent-browser-rendered Surface; what remains here is pointing it
+  at a `tool` Surface's browser. Pocket/remote browser
   view (rides the browser-surface staging in `docs/specs/remote-api.md`;
   reserve the kind on the wire now). The VS Code full pipeline. An in-pane
   terminal/browser strip (decide against the glossary's reserved

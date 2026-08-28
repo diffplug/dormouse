@@ -241,6 +241,21 @@ export interface ResolveOpenTargetResponse {
   port: number;
 }
 
+export interface ResolveAgentBrowserSessionRequest {
+  /** A Surface handle (surface:N, surface:<stable-id>, surface:self,
+   *  surface:focused, title:<title>) naming the browser Surface to drive. */
+  surface: string;
+}
+
+export interface ResolveAgentBrowserSessionResponse {
+  surfaceId: string;
+  surfaceRef: string;
+  /** The agent-browser session bound to that Surface — what `dor ab --surface`
+   *  forwards as `--session`. Includes GUI-minted sessions, which no `--key`
+   *  can name. */
+  session: string;
+}
+
 export interface AgentBrowserSurfaceRequest {
   /** Managed workspace-scoped key; absent when attaching via raw --session. */
   key?: string;
@@ -272,6 +287,9 @@ export interface ControlClient {
   iframeSurface(request: IframeSurfaceRequest): Promise<IframeSurfaceResponse>;
   agentBrowserSurface(request: AgentBrowserSurfaceRequest): Promise<AgentBrowserSurfaceResponse>;
   resolveOpenTarget(request: ResolveOpenTargetRequest): Promise<ResolveOpenTargetResponse>;
+  resolveAgentBrowserSession(
+    request: ResolveAgentBrowserSessionRequest,
+  ): Promise<ResolveAgentBrowserSessionResponse>;
 }
 
 export interface AgentBrowserExecResult {

@@ -212,6 +212,21 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         minimized: false,
       };
     },
+    // Mirrors the host's session↔surface registry: surface:3 is bound to a
+    // GUI-minted session, surface:1 is a terminal and fails the host's gate.
+    // Which gate rejected is the host's business (asserted in Wall.test.tsx);
+    // the CLI has one catch and prints whatever comes back.
+    async resolveAgentBrowserSession(request) {
+      this.requests.push({ method: 'resolveAgentBrowserSession', request });
+      if (request.surface === 'surface:1') {
+        throw new Error("surface 'surface:1' has no browser (kind: terminal)");
+      }
+      return {
+        surfaceId: '33333333-3333-4333-8333-333333333333',
+        surfaceRef: 'surface:3',
+        session: 'dormouse.1.gui-a1b2c3',
+      };
+    },
     async resolveOpenTarget(request) {
       this.requests.push({ method: 'resolveOpenTarget', request });
       // Mirror the host: surface:1 owns port 5173; surface:2 owns nothing.
@@ -1085,11 +1100,95 @@ test('agent-browser forwards child exit code and skips surface on failure', asyn
   assert.deepEqual(client.requests, []);
 });
 
+test('agent-browser --surface drives the session the host says the surface is bound to', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['ab', '--surface', 'surface:3', 'click', '@e3'], { client, execAgentBrowser: ab.exec });
+  // The handle is resolved first, then everything else is forwarded verbatim
+  // against the resolved session — a GUI-minted name no `--key` can produce.
+  assert.deepEqual(client.requests[0], {
+    method: 'resolveAgentBrowserSession',
+    request: { surface: 'surface:3' },
+  });
+  assert.deepEqual(ab.calls, [
+    ['agent-browser', '--session', 'dormouse.1.gui-a1b2c3', 'click', '@e3'],
+    ['agent-browser', '--session', 'dormouse.1.gui-a1b2c3', 'stream', 'status', '--json'],
+  ]);
+  // No `key`: a surface-addressed session is not necessarily a managed one.
+  assert.deepEqual(client.requests[1], {
+    method: 'agentBrowserSurface',
+    request: { key: undefined, session: 'dormouse.1.gui-a1b2c3', wsPort: 61141 },
+  });
+});
+
+test('agent-browser --surface accepts --surface=handle and resolves an open target too', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['ab', '--surface=surface:3', 'open', ':5173'], { client, execAgentBrowser: ab.exec });
+  assert.deepEqual(ab.calls[0], [
+    'agent-browser', '--session', 'dormouse.1.gui-a1b2c3', 'open', 'http://localhost:5173/',
+  ]);
+});
+
+test('agent-browser --surface prints the host gate error and never forwards', async () => {
+  const ab = fakeAgentBrowser();
+  const result = await runCli(['ab', '--surface', 'surface:1', 'reload'], {
+    client: fixtureClient(),
+    execAgentBrowser: ab.exec,
+  });
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, "Error: surface 'surface:1' has no browser (kind: terminal)\n");
+  // An unresolved handle must never reach agent-browser as a session.
+  assert.deepEqual(ab.calls, []);
+});
+
+test('agent-browser --surface needs a control endpoint', async () => {
+  const ab = fakeAgentBrowser();
+  const result = await runCli(['ab', '--surface', 'surface:3', 'reload'], { execAgentBrowser: ab.exec });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /control endpoint is not available/);
+  assert.deepEqual(ab.calls, []);
+});
+
+test('agent-browser rejects a valueless identity flag, whichever one it is', async () => {
+  // The three flags share one parse loop; a trailing flag has no value and a
+  // following flag is never one, so neither may be swallowed as the value.
+  for (const args of [['ab', 'reload', '--key'], ['ab', 'reload', '--session'], ['ab', 'reload', '--surface']]) {
+    const ab = fakeAgentBrowser();
+    const result = await runCli(args, { client: fixtureClient(), execAgentBrowser: ab.exec });
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stderr, `Error: ${args[2]} requires a value\n`);
+    assert.deepEqual(ab.calls, []);
+  }
+  const ab = fakeAgentBrowser();
+  const result = await runCli(['ab', '--surface', '--json', 'reload'], { client: fixtureClient(), execAgentBrowser: ab.exec });
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stderr, 'Error: --surface requires a value\n');
+  assert.deepEqual(ab.calls, []);
+});
+
 test('agent-browser key/session conflict output', async () => {
   const ab = fakeAgentBrowser();
   await snapshot(
     'agent-browser-key-session-conflict',
     await runCli(['ab', '--key', 'a', '--session', 'b', 'open', 'x'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
+  );
+});
+
+test('agent-browser key/surface conflict reports in flag order, not argv order', async () => {
+  const ab = fakeAgentBrowser();
+  await snapshot(
+    'agent-browser-key-surface-conflict',
+    await runCli(['ab', '--surface', 'surface:3', '--key', 'a', 'reload'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
+  );
+});
+
+test('agent-browser three-way identity conflict output', async () => {
+  const ab = fakeAgentBrowser();
+  await snapshot(
+    'agent-browser-identity-conflict',
+    await runCli(['ab', '--key', 'a', '--session', 'b', '--surface', 'surface:3', 'reload'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
   );
 });
 

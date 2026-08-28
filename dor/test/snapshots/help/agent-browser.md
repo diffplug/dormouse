@@ -4,16 +4,19 @@ Invocation: `dor agent-browser --help`
 
 ```text
 USAGE
-  dor agent-browser [--key name|--session name] [args...]
+  dor agent-browser [--key name|--session name|--surface handle] [args...]
   dor agent-browser --help
 
 Forwards all arguments verbatim to your own agent-browser binary and binds the session to a Dormouse browser surface.
 
-dor intercepts exactly two flags:
-  --key <name>      Managed, workspace-scoped browser identity (default "default").
-                    Maps to agent-browser session dormouse.1.<name>.
-  --session <name>  Attach to a raw agent-browser session by its literal name.
-                    Mutually exclusive with --key.
+dor intercepts exactly three mutually exclusive identity flags:
+  --key <name>       Managed, workspace-scoped browser identity (default "default").
+                     Maps to agent-browser session dormouse.1.<name>.
+  --session <name>   Attach to a raw agent-browser session by its literal name.
+  --surface <handle> Drive the browser Surface a handle names (surface:N,
+                     surface:focused, a stable id, title:<title>). dor asks the
+                     host which agent-browser session that Surface is bound to,
+                     which is the only way to address a GUI-spawned session.
 
 Everything else — subcommands, flags, selectors — is agent-browser's own
 command surface. The binary is resolved from PATH (override with
@@ -37,10 +40,12 @@ Examples:
   dor ab --key storybook open http://localhost:6006
   dor ab click @e3                          # drives key "default"
   dor ab --key storybook reload             # drives key "storybook"
+  dor ab --surface surface:4 click @e3      # drives whatever surface:4 is bound to
 
 FLAGS
      [--key]      Workspace-scoped browser key (default "default").
-     [--session]  Raw agent-browser session name (mutually exclusive with --key).
+     [--session]  Raw agent-browser session name (mutually exclusive with --key/--surface).
+     [--surface]  Surface handle whose bound session to drive (mutually exclusive with --key/--session).
   -h  --help      Print help information and exit
       --          All subsequent inputs should be interpreted as arguments
 
