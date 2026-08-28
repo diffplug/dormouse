@@ -879,9 +879,15 @@ Invariants the installer exists to hold:
   contract is which release is running therefore resolves the PID holding the
   port back to the release directory it runs from and compares it: the
   post-switch health check (which rolls back and exits nonzero on a mismatch),
-  `manage verify`, `manage rollback`, and the rollback restore itself. On macOS
-  the resolution must read the executable's real path — see the `ps` trap below.
-  `Source of truth:` `listening_release` (macOS), `Get-ListeningRelease`
+  the rollback restore, `manage verify`, and — on macOS, because the identity is
+  folded into `wait_for_health` rather than bolted onto its callers — every
+  command that waits for health, which is `manage rollback` and `manage
+  restart`. Waiting on the identity rather than asserting it after the first
+  200 also absorbs the window in which an outgoing process answers one last
+  time. `manage status` is deliberately outside this: it reports what the
+  pointers say, not who is answering. On macOS the resolution must read the
+  executable's real path — see the `ps` trap below. `Source of truth:`
+  `listening_release` + `wait_for_health` (macOS), `Get-ListeningRelease`
   (Windows).
 
 Mechanical traps the scripts encode, each of which fails silently otherwise:

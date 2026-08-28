@@ -1554,8 +1554,11 @@ function Invoke-Verify {
   $prev = Get-PreviousRelease
   if ($prev -and $prev -eq $cur) {
     Fail "previous names the same release as current -- there is no rollback target"
-  } elseif ($prev) { Pass "a previous release is retained for rollback" }
-  else { Warn "no previous release retained yet -- rollback is unavailable until the next update" }
+  } elseif ($prev) {
+    Pass "a previous release is retained for rollback"
+  } else {
+    Warn "no previous release retained yet -- rollback is unavailable until the next update"
+  }
 
   # The release must not depend on the source checkout.
   $src = Get-ReleaseField 'source_checkout'
