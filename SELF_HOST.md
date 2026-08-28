@@ -224,8 +224,10 @@ day:
 - Loopback `/api/hello` responds and the Pocket app is served, and the process
   actually holding the port belongs to the current release — an orphan of an
   older release answers `/api/hello` identically, so a 200 alone would let every
-  check here pass while stale code serves. On Linux `systemctl --user is-active`
-  carries that proof, because a responder can be invisible to `ss` altogether.
+  check here pass while stale code serves. The server records its own identity
+  at bind time, so this is a file read rather than a hunt through the process
+  table; Linux additionally requires `systemctl --user is-active`, which is
+  what catches a responder no port lookup can see at all.
 - Port 3100 is bound only to `127.0.0.1`, and the plaintext port is unreachable
   on the laptop's Tailscale IP.
 - `tailscale serve` proxies to `127.0.0.1:3100` at the same origin recorded in

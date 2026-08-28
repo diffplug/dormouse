@@ -922,7 +922,15 @@ Invariants the installer exists to hold:
   `listening_release` is a file read, a port match and a liveness check on all
   three platforms rather than three different walks of the process table. It
   cannot go in `/api/hello`, which is unauthenticated, CORS-`*` and reachable
-  through `tailscale serve`.
+  through `tailscale serve`. This is also what took `ss` off the critical path
+  on Linux: identity no longer depends on resolving the port holder, so a box
+  without iproute2 installs fine and loses only `manage verify`'s bind check.
+
+  Linux still requires `systemctl --user is-active` alongside the identity, and
+  that leg is not redundant: it is what catches a responder no port-holder
+  lookup can see at all — a foreign network namespace, or WSL with
+  `networkingMode=mirrored`, where loopback is shared with the Windows host and
+  the listener can be a Windows process.
 
   Empty means **unknown**, never "nobody": a stale file whose pid is dead, a
   server started outside the installer, and a foreign process that got the port

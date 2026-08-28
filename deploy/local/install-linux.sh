@@ -265,6 +265,14 @@ case "$SYSTEMD_VERSION" in
     ;;
 esac
 
+# `ss` used to be load-bearing here: identity came from resolving the port
+# holder, so without iproute2 the post-switch wait could never succeed and a
+# good install rolled itself back. The server now records its own identity
+# (`DORMOUSE_RUNTIME_FILE`), so the only thing left that needs `ss` is
+# `manage verify`'s bind check — worth a warning, not a refusal.
+command -v ss >/dev/null 2>&1 \
+  || warn "ss not found (iproute2). The install works without it, but \`manage verify\` cannot confirm that port $LOOPBACK_PORT is bound only to 127.0.0.1."
+
 if [ "$TEST_MODE" != "1" ]; then
   # A user manager is what runs the service. Without one — a bare `su`, a
   # container with no logind, a distro where the session never registered —
@@ -359,7 +367,10 @@ if [ "$SKIP_TAILSCALE" = "1" ]; then
 else
 
   TS_STATUS_JSON="$(mktemp_file ts-status)"
-  TS_STATUS_ERR="$(ts status --json > "$TS_STATUS_JSON" 2>&1)" || {
+  # `2>&1 > file`, not `> file 2>&1`: the latter points stderr at the file too,
+  # so the capture is always empty and the operator-role remediation below
+  # becomes dead code with a blank error body.
+  TS_STATUS_ERR="$(ts status --json 2>&1 > "$TS_STATUS_JSON")" || {
     ts_denied "$TS_STATUS_ERR" && die_needs_operator "\`tailscale status\`" "$TS_STATUS_ERR"
     die "\`tailscale status --json\` failed. Is tailscaled running and signed in? (systemctl status tailscaled)
       ${TS_STATUS_ERR}"
@@ -1439,9 +1450,11 @@ else
     elif http_ok "http://127.0.0.1:$LOOPBACK_PORT/api/hello" 2; then
       warn "http://127.0.0.1:$LOOPBACK_PORT/api/hello answers, but NOT from this service."
       warn "  systemctl --user is-active $UNIT => $(systemctl --user is-active "$UNIT" 2>&1 || true)"
-      warn "Something else already holds port $LOOPBACK_PORT. Find and stop it, then re-run."
-      warn "If this is WSL with networkingMode=mirrored, loopback is shared with Windows,"
-      warn "so the holder may be a Windows process that ss here cannot see at all."
+      warn "  release identity          => ${SERVING:-<none recorded>} (expected $RELEASE_ID)"
+      warn "Either something else holds port $LOOPBACK_PORT, or this release never"
+      warn "recorded itself in $INSTALL_ROOT/run/server.json — check the log below for"
+      warn "a warning about writing that file. If this is WSL with networkingMode=mirrored,"
+      warn "loopback is shared with Windows and the holder may be a Windows process."
     else
       warn "the new release never answered http://127.0.0.1:$LOOPBACK_PORT/api/hello"
     fi
