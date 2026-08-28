@@ -463,7 +463,8 @@ which is what makes the second step possible. `manage purge` is the separate,
 irreversible operation that deletes them; it requires typing a confirmation
 phrase and is never part of a reinstall. Run them in that order — uninstall,
 then purge — and purge finishes by printing the single command that clears
-whatever is left in the install root.
+whatever is left: the install root, plus the log directory on Linux and macOS,
+where it sits outside that root.
 
 ## Checkpoint 6: limits and backup
 

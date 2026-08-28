@@ -1004,10 +1004,13 @@ cmd_purge() {
   printf 'purged.\n'
   # bin/run-server is what "uninstall" removes, so its absence means the
   # LaunchAgent and the code are already gone and this script is the last thing
-  # standing. It cannot delete itself out from under the shell running it.
+  # standing. It cannot delete itself out from under the shell running it. The
+  # logs live outside ROOT on a real install, so LOG_DIR has to be named too or
+  # the printed command leaves them behind. (~/Library/Logs/Dormouse Server is
+  # dormouse-owned, so deleting it leaves no empty directory behind.)
   if [ ! -e "$ROOT/bin/run-server" ]; then
-    printf '\nthe LaunchAgent and code were already uninstalled; this script is\n'
-    printf 'all that remains:\n\n  rm -rf "%s"\n\n' "$ROOT"
+    printf '\nthe LaunchAgent and code were already uninstalled; what remains\n'
+    printf 'is this script and the logs:\n\n  rm -rf "%s" "%s"\n\n' "$ROOT" "$LOG_DIR"
   fi
 }
 

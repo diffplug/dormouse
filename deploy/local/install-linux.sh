@@ -702,11 +702,14 @@ UNIT="$LABEL.service"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$ROOT/config/server.env"
 STATE_DIR="$ROOT/state"
-LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/dormouse-server/logs"
+# LOG_ROOT is the dormouse-owned directory the logs sit in — outside ROOT on a
+# real install, and what "purge" names so it does not leave an empty one behind.
+LOG_ROOT="${XDG_STATE_HOME:-$HOME/.local/state}/dormouse-server"
+LOG_DIR="$LOG_ROOT/logs"
 UNIT_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$UNIT"
 # A test install (DORMOUSE_INSTALL_ROOT) keeps its logs and unit inside its own
 # root, so `manage` must follow them there rather than at the real HOME paths.
-[ -d "$ROOT/logs" ] && LOG_DIR="$ROOT/logs"
+[ -d "$ROOT/logs" ] && { LOG_DIR="$ROOT/logs"; LOG_ROOT="$ROOT"; }
 [ -f "$ROOT/systemd/$UNIT" ] && UNIT_FILE="$ROOT/systemd/$UNIT"
 
 if [ -t 1 ]; then
@@ -1211,10 +1214,12 @@ cmd_purge() {
   printf 'purged.\n'
   # bin/run-server is what "uninstall" removes, so its absence means the service
   # and the code are already gone and this script is the last thing standing. It
-  # cannot delete itself out from under the shell running it, so say how.
+  # cannot delete itself out from under the shell running it, so say how. The
+  # logs live outside ROOT on a real install, so LOG_ROOT has to be named too or
+  # the printed command leaves them behind.
   if [ ! -e "$ROOT/bin/run-server" ]; then
-    printf '\nthe service and code were already uninstalled; this script is all\n'
-    printf 'that remains:\n\n  rm -rf "%s"\n\n' "$ROOT"
+    printf '\nthe service and code were already uninstalled; what remains is\n'
+    printf 'this script and the logs:\n\n  rm -rf "%s" "%s"\n\n' "$ROOT" "$LOG_ROOT"
   fi
 }
 

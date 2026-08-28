@@ -1867,13 +1867,16 @@ usage: manage <command>
 @echo off
 rem Installed by deploy/local/install-windows.ps1.
 rem The trailing "& exit" matters. cmd.exe seeks back into this file after
-rem every command, and "manage uninstall" deletes bin -- this very file -- so
-rem that read fails with "The system cannot find the path specified." and
-rem returns 1, making a clean uninstall look broken. "exit" ends cmd.exe
-rem outright so it never seeks back, and with no argument it exits with the
-rem current ERRORLEVEL. "exit /b" does NOT work here: it only returns from the
-rem batch, which still requires reading the file. Tradeoff: calling this .cmd
-rem from another batch script ends that script too; it is meant to be run
+rem every command, so a manage command that removes the file it is being read
+rem from makes that read fail with "The system cannot find the path specified."
+rem and return 1, making a clean run look broken. "uninstall" used to do exactly
+rem that -- it deleted bin, this very file included. It now deletes only
+rem bin\run-server.ps1, so nothing manage does removes this file; the guard is
+rem kept so the exit code does not depend on that staying true. "exit" ends
+rem cmd.exe outright so it never seeks back, and with no argument it exits with
+rem the current ERRORLEVEL. "exit /b" does NOT work here: it only returns from
+rem the batch, which still requires reading the file. Tradeoff: calling this
+rem .cmd from another batch script ends that script too; it is meant to be run
 rem directly.
 "$POWERSHELL_EXE" -NoProfile -ExecutionPolicy Bypass -File "%~dp0manage.ps1" %* & exit
 "@
