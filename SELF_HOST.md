@@ -9,15 +9,16 @@ is the whole self-host story today. An always-on cloud relay is designed but not
 built; it lives under `## Future`.
 
 The installer already exists — one idempotent command that ships in this
-repository, in a macOS and a Windows edition:
+repository, in a macOS, a Windows and a Linux edition:
 
 | OS | Installer | Service | Install root |
 | --- | --- | --- | --- |
 | macOS | `deploy/local/install-macos.sh` | LaunchAgent `sh.dormouse.server` | `~/Library/Application Support/Dormouse Server` |
 | Windows | `deploy/local/install-windows.ps1` | Scheduled Task `\Dormouse Server` | `%LOCALAPPDATA%\Dormouse Server` |
+| Linux | `deploy/local/install-linux.sh` | systemd user unit `dormouse-server.service` | `~/.local/share/dormouse-server` |
 
-The two hold the same invariants through different native mechanisms; where a
-checkpoint below differs, both forms are given. **Work out which one applies
+The three hold the same invariants through different native mechanisms; where a
+checkpoint below differs, each form is given. **Work out which one applies
 before the first command and stay on that column** — mixing them is the main way
 this runbook goes wrong. `docs/specs/server.md` -> "Installing it (behind
 Tailscale)" carries the full mechanism-by-mechanism table.
@@ -34,12 +35,12 @@ consent flows, secrets, or explicit approval of external or destructive
 changes. Do not dump the entire runbook back at the user.
 
 The installer is shipped, reviewed code. Run it — do not reimplement it, and do
-not paper over it with hand-run `launchctl`, `schtasks` or `tailscale serve`
-commands. If it does the wrong thing, that is a bug in the installer for that
-platform: say so plainly and offer to fix it as an ordinary reviewed code
-change, which is a different task from this one. Its contract lives in
-`docs/specs/server.md` under "Installing it (behind Tailscale)"; a change to one
-is a change to both.
+not paper over it with hand-run `launchctl`, `schtasks`, `systemctl --user` or
+`tailscale serve` commands. If it does the wrong thing, that is a bug in the
+installer for that platform: say so plainly and offer to fix it as an ordinary
+reviewed code change, which is a different task from this one. Its contract
+lives in `docs/specs/server.md` under "Installing it (behind Tailscale)"; a
+change to one is a change to both.
 
 Before acting:
 
@@ -70,13 +71,14 @@ known:
 
 | Value | Default / example |
 | --- | --- |
-| Laptop OS | must be macOS or Windows |
+| Laptop OS | must be macOS, Windows or Linux |
 | Laptop Tailscale DNS name | the installer derives it from `tailscale status --json` |
 | External origin | `https://<laptop-name>.<tailnet-dns-suffix>` |
-| Install root | macOS `~/Library/Application Support/Dormouse Server` · Windows `%LOCALAPPDATA%\Dormouse Server` |
+| Install root | macOS `~/Library/Application Support/Dormouse Server` · Windows `%LOCALAPPDATA%\Dormouse Server` · Linux `$XDG_DATA_HOME/dormouse-server`, i.e. `~/.local/share/dormouse-server` unless XDG is set — the installer prints the exact path it used |
 | State directory | `<install root>/state` |
-| Service | macOS `~/Library/LaunchAgents/sh.dormouse.server.plist` · Windows Scheduled Task `\Dormouse Server` |
+| Service | macOS `~/Library/LaunchAgents/sh.dormouse.server.plist` · Windows Scheduled Task `\Dormouse Server` · Linux `~/.config/systemd/user/dormouse-server.service` |
 | Loopback port | `3100` |
+| Lingering (Linux only) | off unless installed with `--linger`; decides whether the service outlives logout |
 | Installed release | printed by the installer and by `manage status` |
 
 ## Prerequisites
@@ -85,13 +87,29 @@ known:
   certificates enabled, Tailscale running on this laptop, and Tailscale on the
   phone that will run Pocket. A tailnet-only origin is not reachable merely
   because the laptop is on the tailnet.
-- **macOS or Windows.** Each installer refuses to run on the other platform. On
-  any third OS, stop and design the native service manager with the user rather
-  than translating LaunchAgent or Scheduled Task commands blindly.
-- **Neither installer runs privileged.** Both refuse — as root on macOS,
-  elevated on Windows. The whole credential posture is that one user account
-  owns `config/` and `state/`; an elevated run would write them owned by another
-  principal and register the service for it. Use an ordinary terminal.
+- **macOS, Windows or Linux.** Each installer refuses to run on the other
+  platforms. On a fourth OS, or on a Linux box without systemd, stop and design
+  the native service manager with the user rather than translating LaunchAgent,
+  Scheduled Task or unit-file commands blindly.
+- **No installer runs privileged.** All three refuse — as root on macOS and
+  Linux, elevated on Windows. The whole credential posture is that one user
+  account owns `config/` and `state/`; an elevated run would write them owned by
+  another principal and register the service for it. Use an ordinary terminal.
+- **On Linux, this account must be allowed to operate `tailscaled`.** Its local
+  API socket is root-owned, so an unprivileged `tailscale serve` is refused. The
+  installer checks this in preflight — before the build — and prints the fix:
+
+  ```sh
+  sudo tailscale set --operator=$USER
+  ```
+
+  It will not run `sudo` for the user. This is the only step of a Linux install
+  that needs root at all.
+- **On Linux, decide the availability shape before installing.** The default is
+  a per-login service, matching macOS and Windows: it starts when the user logs
+  in and stops when they log out. A machine reached over SSH, or one expected to
+  serve while nobody is logged in, needs `--linger` instead. Changing your mind
+  later is `loginctl enable-linger $USER` / `disable-linger`, not a reinstall.
 - **On Windows, one signed-in user at a time owns Tailscale.** `tailscaled`
   serves its local API to a single interactive session, so on a PC with a second
   signed-in profile every `tailscale` call fails with
@@ -124,6 +142,7 @@ build exact current checkout into a self-contained release
 per-login user agent, restarted on exit
   macOS   LaunchAgent (RunAtLoad + KeepAlive)
   Windows Scheduled Task (at logon) + supervision loop in run-server.ps1
+  Linux   systemd user unit (WantedBy=default.target, Restart=always)
         |
         v
 Dormouse Node server on 127.0.0.1:3100
@@ -160,16 +179,16 @@ rights, and lays out:
     vapid.json
 ```
 
-Logs live in `~/Library/Logs/Dormouse Server/` on macOS and `<install root>\logs`
-on Windows. The service definition is
-`~/Library/LaunchAgents/sh.dormouse.server.plist` or the Scheduled Task
-`\Dormouse Server`.
+Logs live in `~/Library/Logs/Dormouse Server/` on macOS, `<install root>\logs`
+on Windows, and `~/.local/state/dormouse-server/logs` on Linux. The service
+definition is `~/Library/LaunchAgents/sh.dormouse.server.plist`, the Scheduled
+Task `\Dormouse Server`, or
+`~/.config/systemd/user/dormouse-server.service`.
 
-Either installer deliberately will **not**: run `git pull`, fetch, or switch
-branches; install a scheduled updater; ask for elevation; install or
-re-authenticate Tailscale; rewrite an origin that no longer matches the node's
-DNS name; or touch `config/` and `state/`, which survive every update, prune,
-and uninstall.
+No installer will **ever**: run `git pull`, fetch, or switch branches; install a
+scheduled updater; ask for elevation; install or re-authenticate Tailscale;
+rewrite an origin that no longer matches the node's DNS name; or touch `config/`
+and `state/`, which survive every update, prune, and uninstall.
 
 The invariants it exists to hold — one replica, state outlives code, loopback
 only, `DORMOUSE_ORIGIN` as durable WebAuthn identity, and a failed update being
@@ -179,11 +198,12 @@ day:
 
 - An update is a short intentional restart. Existing Host and Pocket WebSockets
   disconnect and reconnect; there is no zero-downtime swap to attempt.
-- Both are per-login agents, so the service is unavailable while the laptop
+- All three are per-login agents, so the service is unavailable while the laptop
   sleeps, is shut down, or has no logged-in user. That is normally fine, because
   there is then no local Dormouse Host to control either. On Windows the
   at-logon trigger uses `LogonType=Interactive`, which is what keeps the task
-  free of a stored password — and is the same tradeoff.
+  free of a stored password — and is the same tradeoff. Linux is the one
+  platform that can be opted out of this, with `--linger` — see Prerequisites.
 
 ## Definition of done
 
@@ -195,8 +215,15 @@ day:
   `KeepAlive`. On Windows: the Scheduled Task is `Running`, has an at-logon
   trigger, no execution time limit, restarts on failure, runs unelevated, is not
   stopped by battery or idle transitions, and `bin\run-server.ps1` still carries
-  the supervision loop that is the actual KeepAlive.
-- Loopback `/api/hello` responds and the Pocket app is served.
+  the supervision loop that is the actual KeepAlive. On Linux: the unit is known
+  to the user manager, is `enabled`, passes `systemd-analyze --user verify`, and
+  declares `Restart=always` and `WantedBy=default.target`.
+- Loopback `/api/hello` responds and the Pocket app is served — **and the
+  responder is the installed release**, not merely something holding the port.
+  Windows and Linux prove that separately (Windows resolves the port-holder back
+  to a release directory; Linux gates every health check on
+  `systemctl --user is-active`); macOS does not yet, so read its ✓ as "something
+  answered".
 - Port 3100 is bound only to `127.0.0.1`, and the plaintext port is unreachable
   on the laptop's Tailscale IP.
 - `tailscale serve` proxies to `127.0.0.1:3100` at the same origin recorded in
@@ -204,9 +231,11 @@ day:
   publish this same origin to the public internet, which the setup password's
   hardening was never sized for (`SECURITY.md` -> "Network posture").
 - `config/`, `state/` and `config/server.env` are readable only by the
-  installing user: modes `0700`/`0600` on macOS, a DACL with exactly that one
-  user on Windows. The Windows check also covers each file in `state/`
-  individually, because Node's file modes are a no-op there.
+  installing user: modes `0700`/`0600` on macOS and Linux, a DACL with exactly
+  that one user on Windows. The Windows check also covers each file in `state/`
+  individually, because Node's file modes are a no-op there. The Linux check
+  also asserts the *owner* of all three, since a `0700` directory owned by
+  someone else satisfies the mode and inverts the property.
 - The current release pointer resolves to a release with `RELEASE` metadata, and
   neither the service definition nor the `run-server` wrapper refers to the
   source checkout. A retained previous release is checked too, but a first
@@ -233,7 +262,10 @@ certificates, an origin that disagrees with an existing installation, the Git SH
 and dirty status (it asks before installing a dirty worktree), and the Node and
 pnpm versions pinned in root `package.json`. The Windows edition additionally
 names the account holding `tailscaled`'s local API when another signed-in user
-has it.
+has it. The Linux edition additionally checks that a systemd user manager is
+reachable, that systemd is 240 or newer, and that this account may operate
+`tailscaled` — that last one before the build, because the refusal would
+otherwise surface only at the Serve step, after `current` had already moved.
 
 Establish with the user what the script cannot:
 
@@ -256,6 +288,11 @@ Establish with the user what the script cannot:
   Get-NetTCPConnection -State Listen -LocalPort 3100 -ErrorAction SilentlyContinue
   ```
 
+  ```sh
+  # Linux
+  ss -lntp 'sport = :3100'
+  ```
+
 ## Checkpoint 2: install
 
 With the user's approval:
@@ -268,6 +305,12 @@ With the user's approval:
 ```powershell
 # Windows, from an ordinary (not elevated) PowerShell
 .\deploy\local\install-windows.ps1
+```
+
+```sh
+# Linux, as the ordinary user who will own the install (no sudo).
+# Add --linger only if the service must outlive logout.
+./deploy/local/install-linux.sh
 ```
 
 It prints each step. Read the output with the user rather than summarizing it —
@@ -289,6 +332,12 @@ that yet.
 ```powershell
 # Windows
 & "$env:LOCALAPPDATA\Dormouse Server\bin\manage.cmd" verify
+```
+
+```sh
+# Linux — the installer prints the exact path; this is the default when
+# XDG_DATA_HOME is unset.
+"$HOME/.local/share/dormouse-server/bin/manage" verify
 ```
 
 Expect every check to pass and the command to exit 0. `manage status` gives the
@@ -317,6 +366,18 @@ Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 & "$env:LOCALAPPDATA\Dormouse Server\bin\manage.cmd" status
 ```
+
+```sh
+# Linux — Restart=always with RestartSec=10, so wait ~15s before reading status.
+systemctl --user kill --signal=SIGKILL dormouse-server.service
+"$HOME/.local/share/dormouse-server/bin/manage" status
+```
+
+On Linux, also prove the availability shape you chose. Without `--linger`, log
+out fully and confirm the service is gone (`loginctl` shows no session and the
+origin stops answering), then log back in and confirm it returns on its own.
+With `--linger`, confirm the opposite: it keeps answering across a logout, and
+`loginctl show-user $USER -p Linger` reports `yes`.
 
 Restart the laptop only if the user approves the interruption; otherwise say
 plainly that the run-at-load trigger plus the registered service has been
@@ -379,6 +440,7 @@ Updating is choosing a checkout and rerunning the same command:
 ```sh
 git -C <checkout> log --oneline -1     # decide deliberately what to install
 ./deploy/local/install-macos.sh        # or .\deploy\local\install-windows.ps1
+                                       # or ./deploy/local/install-linux.sh
 ```
 
 Prove it once, while the user is watching:
@@ -410,11 +472,13 @@ Make these explicit:
 
 Confirm that the install root, especially `config` and `state`, is covered by an
 encrypted backup outside the laptop — Time Machine on macOS, File History or any
-equivalent on Windows. Check the coverage rather than assuming it: on Windows,
+equivalent on Windows, Déjà Dup/restic/borg or whatever the distro's tooling is
+on Linux. Check the coverage rather than assuming it: on Windows,
 `%LOCALAPPDATA%` is **excluded** from File History's default library set and
-from OneDrive's Known Folder Move, so the install root is very likely
-unprotected until it is added explicitly. A second directory on the same disk is
-not a backup. These files include Host bearer credentials
+from OneDrive's Known Folder Move, and on Linux `~/.local/share` is routinely
+excluded by dotfile-oriented backup rules, so on both the install root is very
+likely unprotected until it is added explicitly. A second directory on the same
+disk is not a backup. These files include Host bearer credentials
 and a VAPID private key. Perform a small restore rehearsal without overwriting
 live state.
 
@@ -476,6 +540,31 @@ Do not print the setup password or any credential in the handoff.
   app; `quser` lists the sessions. Elevating does not bypass it.
 - **`install-windows.ps1` refuses because the session is elevated:** run it from
   an ordinary PowerShell. This is deliberate — see Prerequisites.
+- **The systemd user unit loops or will not start:** read
+  `systemctl --user status dormouse-server.service`,
+  `journalctl --user -u dormouse-server.service -n 50` for the unit's own view
+  of each start, and `~/.local/state/dormouse-server/logs` for the server's
+  output. The user manager does not run the user's shell startup files, so a
+  `PATH` that works in a terminal proves nothing here either.
+- **`systemctl --user` fails with a `DBUS_SESSION_BUS_ADDRESS` error (Linux):**
+  there is no user manager for this uid — usually because the shell was reached
+  with `su` rather than a real login. Use `machinectl shell $USER@` or a fresh
+  SSH session. The installer refuses in preflight rather than installing a unit
+  nothing will start.
+- **`tailscale serve` is refused for a non-root user (Linux):** grant the
+  operator role — see Prerequisites. The installer checks for this before
+  building, so hitting it later means the check regressed.
+- **The service disappears at logout (Linux):** that is the documented per-login
+  default, not a fault. This is deliberate — see Prerequisites for the `--linger`
+  opt-out, and make the availability change in checkpoint 6 explicit if you take
+  it.
+- **`/api/hello` answers but the unit is not active (Linux):** something else
+  holds port 3100 and the install correctly refuses to claim it. `ss -lntp
+  'sport = :3100'` names the process — unless it cannot see it, which is the
+  case under WSL with `networkingMode=mirrored`, where loopback is shared with
+  Windows and the listener may be a Windows process (a Windows Dormouse Server
+  install on the same machine will do exactly this). Stop the other server, or
+  install on a host that is not sharing loopback with one.
 - **The HTTPS URL returns 502:** check the loopback health endpoint first, then
   `tailscale serve status`. The service and the Serve configuration have
   separate lifecycles; `manage serve` re-applies the mapping if a dev session
@@ -492,9 +581,9 @@ Do not print the setup password or any credential in the handoff.
   and the node hostname.
 - **A Host cannot connect while Pocket can:** that Host build almost certainly
   lacks the `*.ts.net` `DORMOUSE_REMOTE_CONNECT_SRC` setting.
-- **State disappears:** verify the absolute Application Support state path and
-  the installed config. Do not initialize a new account until the old state has
-  been located or restored.
+- **State disappears:** verify the absolute state path for this platform's
+  install root and the installed config. Do not initialize a new account until
+  the old state has been located or restored.
 
 ## Future
 
