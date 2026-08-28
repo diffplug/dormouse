@@ -347,9 +347,9 @@ trap cleanup EXIT
 
 TS_STATUS_JSON="$(mktemp_file ts-status)"
 # `2>&1 > file`, not `> file 2>&1`: the latter points stderr at the file too,
-  # so the capture is always empty and the operator-role remediation below
-  # becomes dead code with a blank error body.
-  TS_STATUS_ERR="$(ts status --json 2>&1 > "$TS_STATUS_JSON")" || {
+# so the capture is always empty and the operator-role remediation below
+# becomes dead code with a blank error body.
+TS_STATUS_ERR="$(ts status --json 2>&1 > "$TS_STATUS_JSON")" || {
   ts_denied "$TS_STATUS_ERR" && die_needs_operator "\`tailscale status\`" "$TS_STATUS_ERR"
   die "\`tailscale status --json\` failed. Is tailscaled running and signed in? (systemctl status tailscaled)
     ${TS_STATUS_ERR}"

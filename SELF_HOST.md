@@ -267,8 +267,9 @@ names the account holding `tailscaled`'s local API when another signed-in user
 has it. The Linux edition additionally checks that a systemd user manager is
 reachable, that systemd is 240 or newer, that `ss` (iproute2) is present —
 without it the install cannot confirm which release is answering, and would
-roll a good install back — and that this account may operate `tailscaled` — that last one before the build, because the refusal would
-otherwise surface only at the Serve step, after `current` had already moved.
+roll a good install back — and that this account may operate `tailscaled` —
+that last one before the build, because the refusal would otherwise surface
+only at the Serve step, after `current` had already moved.
 
 Establish with the user what the script cannot:
 
