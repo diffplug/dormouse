@@ -210,7 +210,9 @@ day:
 - The current release pointer resolves to a release with `RELEASE` metadata, and
   neither the service definition nor the `run-server` wrapper refers to the
   source checkout. A retained previous release is checked too, but a first
-  install has none, so `verify` warns there rather than failing.
+  install has none, so `verify` warns there rather than failing. On macOS it
+  does fail if that pointer names the same release as `current`, because such
+  an install advertises a rollback target that does not exist.
 
 These cannot be proven from the laptop, and are the checkpoints below:
 

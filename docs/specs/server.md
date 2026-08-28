@@ -855,16 +855,23 @@ Invariants the installer exists to hold:
 * **A failed update is a failure.** The candidate release is health-checked on
   an ephemeral port against a throwaway state dir *before* `current` moves; if
   the live service then fails to answer, `current` is restored to `previous`
-  and the installer exits nonzero. Rollback succeeding is not success. On
-  Windows the restore additionally clears the `previous` pointer, because the
-  switch had already set it to the release `current` is being restored to:
+  and the installer exits nonzero. Rollback succeeding is not success. The
+  restore also clears the `previous` pointer, on both platforms, because the
+  switch had already aimed it at the release `current` is being restored to:
   leaving both naming one release would make `verify` report a rollback target
   that does not exist and `rollback` swap a release with itself and call it
-  success. *(The macOS installer has the same ordering and not yet this
-  correction.)* The Windows restore also reaps orphaned processes and re-checks
-  which release holds the port, for the reason in the Scheduled Task trap below
-  — otherwise the rejected release's own orphan answers the health check and is
-  reported as the previous release being "healthy again".
+  success. On macOS the clear is gated on the restore having actually landed —
+  `rollback_release` re-reads `current` and returns early, leaving `previous`
+  alone, if it did not come back to the outgoing release. Both call sites are
+  `rollback_release || true`, which disables `errexit` for the whole function
+  body, so without that gate a failed restore would strip the rollback pointer
+  off an install still running the rejected release. `manage verify` and
+  `manage rollback` on macOS refuse the same-release state independently too,
+  so an install left in it by an older installer reports honestly. The Windows
+  restore also reaps orphaned processes and re-checks which release holds
+  the port, for the reason in the Scheduled Task trap below — otherwise the
+  rejected release's own orphan answers the health check and is reported as the
+  previous release being "healthy again".
 
 Mechanical traps the scripts encode, each of which fails silently otherwise:
 
