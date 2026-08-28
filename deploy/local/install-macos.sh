@@ -160,6 +160,39 @@ fs.renameSync(tmp, link);
 ' "$1" "$2"
 }
 
+# Which release is the process listening on $1 actually running?
+#
+# A 200 from /api/hello proves only that SOMETHING answers on the port. This is
+# what separates the release that is supposed to be serving from an orphan of an
+# older one still holding it.
+#
+# Deliberately lsof's `txt` record and not `ps -o comm=`. run-server execs
+# "$INSTALL_ROOT/current/runtime/node", and ps reports that path verbatim,
+# symlink and all — so a ps-based check would resolve `current` a second time
+# and "confirm" whatever it points at now, agreeing with itself no matter which
+# release is answering. lsof reports the vnode's real path, which names the
+# release.
+listening_release() {
+  local pid path root
+  # lsof reports the vnode's PHYSICAL path, but $INSTALL_ROOT is logical — it is
+  # $HOME/... or DORMOUSE_INSTALL_ROOT verbatim, never canonicalized. Comparing
+  # the two directly is a check that can never pass, the exact mirror of the
+  # `ps` trap above. It bites a DORMOUSE_INSTALL_ROOT under `mktemp -d`, which
+  # on macOS sits below /var -> /private/var.
+  root="$(cd "$INSTALL_ROOT" 2>/dev/null && pwd -P)" || return 0
+  pid="$(lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
+  [ -n "$pid" ] || return 0
+  while IFS= read -r path; do
+    case "$path" in
+      "n$root/releases/"*)
+        path="${path#"n$root/releases/"}"
+        printf '%s\n' "${path%%/*}"
+        return 0
+        ;;
+    esac
+  done < <(lsof -p "$pid" -a -d txt -Fn 2>/dev/null || true)
+}
+
 # --------------------------------------------------------------- tailscale --
 
 TS_BIN=""
@@ -596,12 +629,56 @@ release_field() {
   sed -n "s/^$1=//p" "$target" | head -1
 }
 
+# Which release is the process listening on $1 actually running? Empty if
+# nothing is, or if the answer does not come from this install root.
+#
+# Deliberately lsof's `txt` record and not `ps -o comm=`, and deliberately a
+# physical root — see the full rationale on the installer's copy of this
+# function, and the `ps` trap in docs/specs/server.md.
+listening_release() {
+  local pid path root
+  # lsof reports the vnode's PHYSICAL path, but $ROOT is logical — it keeps
+  # whatever symlink the caller walked through (`pwd`, not `pwd -P`). Comparing
+  # the two directly is a check that can never pass, the exact mirror of the
+  # `ps` trap above. It bites a DORMOUSE_INSTALL_ROOT under `mktemp -d`, which
+  # on macOS sits below /var -> /private/var.
+  root="$(cd "$ROOT" 2>/dev/null && pwd -P)" || return 0
+  pid="$(lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
+  [ -n "$pid" ] || return 0
+  while IFS= read -r path; do
+    case "$path" in
+      "n$root/releases/"*)
+        path="${path#"n$root/releases/"}"
+        printf '%s\n' "${path%%/*}"
+        return 0
+        ;;
+    esac
+  done < <(lsof -p "$pid" -a -d txt -Fn 2>/dev/null || true)
+}
+
+# Healthy means the CURRENT release answers, not that anything does: an orphan
+# of an older release replies to /api/hello identically (see listening_release).
+# Waiting on that identity rather than asserting it after the first 200 also
+# absorbs the window where a process still shutting down answers one curl.
+# An empty `want` — no `current` at all — is never healthy.
+#
+# On timeout this explains which of the two failures happened, so callers can
+# keep reporting only their own context.
 wait_for_health() {
-  local deadline=$((SECONDS + ${1:-30}))
+  local deadline=$((SECONDS + ${1:-30})) want serving
+  want="$(basename "$(readlink "$ROOT/current" 2>/dev/null || true)")"
   while [ $SECONDS -lt $deadline ]; do
-    if curl -sf -o /dev/null "http://127.0.0.1:$PORT/api/hello"; then return 0; fi
+    if curl -sf -o /dev/null "http://127.0.0.1:$PORT/api/hello" &&
+      [ -n "$want" ] && [ "$(listening_release "$PORT")" = "$want" ]; then
+      return 0
+    fi
     sleep 0.5
   done
+  serving="$(listening_release "$PORT")"
+  if [ -n "$serving" ] && [ "$serving" != "$want" ]; then
+    printf "%sport %s is held by release '%s', not by %s — a stale process is answering%s\n" \
+      "$C_RED" "$PORT" "$serving" "${want:-the current release}" "$C_OFF" >&2
+  fi
   return 1
 }
 
@@ -696,6 +773,25 @@ cmd_verify() {
     printf '%s\n' "$listeners" | sed 's/^/      /'
   else
     pass "port $PORT is bound only to 127.0.0.1"
+  fi
+
+  # The check that separates "something answers" from "the current release
+  # answers". An orphaned node from an older release holds the port and replies
+  # to /api/hello exactly like the current one, so every other health check here
+  # passes while stale code serves. Only meaningful once something is listening
+  # — otherwise an empty result would report a foreign process where the line
+  # above has already said the port is dead.
+  if [ -n "$listeners" ]; then
+    local serving cur_id
+    serving="$(listening_release "$PORT")"
+    cur_id="$(basename "$(readlink "$ROOT/current" 2>/dev/null || true)")"
+    if [ -z "$serving" ]; then
+      fail "the process on port $PORT is not from this install root"
+    elif [ "$serving" = "$cur_id" ]; then
+      pass "the process on port $PORT is the current release"
+    else
+      fail "port $PORT is served by release '$serving', but current is '$cur_id' — a stale process is answering"
+    fi
   fi
 
   local tsip
@@ -1083,15 +1179,25 @@ rollback_release() {
   if [ "$TEST_MODE" != "1" ]; then
     launchctl kickstart -k "gui/$UID/$LABEL" >/dev/null 2>&1 || true
   fi
-  local j=0
+  # A 200 does not say who answered: the rejected release's own process holding
+  # the port would otherwise read as the previous release being healthy again.
+  # listening_release only runs once curl succeeds, so a still-starting server
+  # costs nothing here.
+  local old_id serving j=0
+  old_id="$(basename "$OLD_RELEASE")"
   while [ $j -lt 60 ]; do
-    if curl -sf -o /dev/null "http://127.0.0.1:$LOOPBACK_PORT/api/hello"; then
-      warn "the previous release ($(basename "$OLD_RELEASE")) is healthy again."
+    if curl -sf -o /dev/null "http://127.0.0.1:$LOOPBACK_PORT/api/hello" &&
+      [ "$(listening_release "$LOOPBACK_PORT")" = "$old_id" ]; then
+      warn "the previous release ($old_id) is healthy again."
       return 0
     fi
     sleep 0.5
     j=$((j + 1))
   done
+  serving="$(listening_release "$LOOPBACK_PORT")"
+  if [ -n "$serving" ] && [ "$serving" != "$old_id" ]; then
+    warn "port $LOOPBACK_PORT is held by release '$serving', not by the restored $old_id."
+  fi
   warn "the previous release did NOT become healthy. Inspect: $LOG_DIR"
   return 1
 }
@@ -1125,21 +1231,32 @@ step "Waiting for the installed service"
 if [ "$TEST_MODE" = "1" ]; then
   warn "test mode: skipping the live health check (no LaunchAgent was loaded)"
 else
+  # Wait for THIS release to be the one answering, not merely for a 200: an
+  # orphan of an older release holding the port answers identically, which would
+  # read as a successful update while the old code keeps serving. Waiting on it
+  # rather than asserting afterwards also covers the moments after `kickstart`
+  # when the outgoing process has not finished letting go of the port.
   LIVE_OK=0
   i=0
   while [ $i -lt 80 ]; do
-    if curl -sf -o /dev/null "http://127.0.0.1:$LOOPBACK_PORT/api/hello"; then LIVE_OK=1; break; fi
+    if curl -sf -o /dev/null "http://127.0.0.1:$LOOPBACK_PORT/api/hello" &&
+      [ "$(listening_release "$LOOPBACK_PORT")" = "$RELEASE_ID" ]; then LIVE_OK=1; break; fi
     sleep 0.5
     i=$((i + 1))
   done
 
   if [ "$LIVE_OK" != "1" ]; then
-    warn "the new release never answered http://127.0.0.1:$LOOPBACK_PORT/api/hello"
+    LISTENING="$(listening_release "$LOOPBACK_PORT")"
+    if [ -n "$LISTENING" ] && [ "$LISTENING" != "$RELEASE_ID" ]; then
+      warn "port $LOOPBACK_PORT is served by release '$LISTENING', not by $RELEASE_ID"
+    else
+      warn "the new release never answered http://127.0.0.1:$LOOPBACK_PORT/api/hello"
+    fi
     [ -f "$LOG_DIR/server.err.log" ] && tail -30 "$LOG_DIR/server.err.log" >&2
     rollback_release || true
     die "update FAILED. Rollback was attempted — this is not a success, whatever the previous release now reports."
   fi
-  ok "http://127.0.0.1:$LOOPBACK_PORT/api/hello responds"
+  ok "http://127.0.0.1:$LOOPBACK_PORT/api/hello responds, from $RELEASE_ID"
 
   if curl -sf -o /dev/null "http://127.0.0.1:$LOOPBACK_PORT/"; then
     ok "Pocket app is served"
