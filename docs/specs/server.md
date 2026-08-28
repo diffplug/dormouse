@@ -915,8 +915,10 @@ Mechanical traps the scripts encode, each of which fails silently otherwise:
   time and "confirm" whatever it points at now — agreeing with itself no matter
   which release is answering, which is the one thing the check exists to catch.
   `lsof -p <pid> -a -d txt -Fn` reports the vnode's real path, which names the
-  release directory. That path is *physical*, while the scripts' `$ROOT` is
-  logical (`pwd`, not `pwd -P`), so the comparison canonicalizes the root first
+  release directory. That path is *physical*, while the roots compared against
+  it are logical — `manage`'s `$ROOT` comes from `pwd` rather than `pwd -P`, and
+  the installer's `$INSTALL_ROOT` straight from `$HOME` or
+  `DORMOUSE_INSTALL_ROOT` — so the comparison canonicalizes the root first
   — otherwise an install root reached through a symlink matches nothing and the
   check can never pass, which on the forward path rolls back a good update. A
   `DORMOUSE_INSTALL_ROOT` under `mktemp -d` is exactly that case, since macOS

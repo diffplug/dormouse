@@ -174,8 +174,8 @@ fs.renameSync(tmp, link);
 # release.
 listening_release() {
   local pid path root
-  # lsof reports the vnode's PHYSICAL path, but $INSTALL_ROOT is logical — it keeps
-  # whatever symlink the caller walked through (`pwd`, not `pwd -P`). Comparing
+  # lsof reports the vnode's PHYSICAL path, but $INSTALL_ROOT is logical — it is
+  # $HOME/... or DORMOUSE_INSTALL_ROOT verbatim, never canonicalized. Comparing
   # the two directly is a check that can never pass, the exact mirror of the
   # `ps` trap above. It bites a DORMOUSE_INSTALL_ROOT under `mktemp -d`, which
   # on macOS sits below /var -> /private/var.
@@ -764,21 +764,6 @@ cmd_verify() {
     fail "Pocket index is not served — is lib/dist-pocket in the release?"
   fi
 
-  # The check that separates "something answers" from "the current release
-  # answers". An orphaned node from an older release holds the port and replies
-  # to /api/hello exactly like the current one, so every other health check here
-  # passes while stale code serves.
-  local serving cur_id
-  serving="$(listening_release "$PORT")"
-  cur_id="$(basename "$(readlink "$ROOT/current" 2>/dev/null || true)")"
-  if [ -z "$serving" ]; then
-    fail "cannot identify the process listening on port $PORT"
-  elif [ "$serving" = "$cur_id" ]; then
-    pass "the process on port $PORT is the current release"
-  else
-    fail "port $PORT is served by release '$serving', but current is '$cur_id' — a stale process is answering"
-  fi
-
   local listeners
   listeners="$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | tail -n +2 || true)"
   if [ -z "$listeners" ]; then
@@ -788,6 +773,25 @@ cmd_verify() {
     printf '%s\n' "$listeners" | sed 's/^/      /'
   else
     pass "port $PORT is bound only to 127.0.0.1"
+  fi
+
+  # The check that separates "something answers" from "the current release
+  # answers". An orphaned node from an older release holds the port and replies
+  # to /api/hello exactly like the current one, so every other health check here
+  # passes while stale code serves. Only meaningful once something is listening
+  # — otherwise an empty result would report a foreign process where the line
+  # above has already said the port is dead.
+  if [ -n "$listeners" ]; then
+    local serving cur_id
+    serving="$(listening_release "$PORT")"
+    cur_id="$(basename "$(readlink "$ROOT/current" 2>/dev/null || true)")"
+    if [ -z "$serving" ]; then
+      fail "the process on port $PORT is not from this install root"
+    elif [ "$serving" = "$cur_id" ]; then
+      pass "the process on port $PORT is the current release"
+    else
+      fail "port $PORT is served by release '$serving', but current is '$cur_id' — a stale process is answering"
+    fi
   fi
 
   local tsip
