@@ -225,7 +225,21 @@ Source of truth: `vscode-ext/src/webview-html.ts` assembles the CSP directives (
 
 That allowlist is still a build-time constant, not a runtime value: `vscode-ext/scripts/esbuild.mjs` substitutes `__DORMOUSE_REMOTE_CONNECT_SRC__` into `dist/extension.js`, defaulting to the SaaS origin (`https://*.dormouse.sh wss://*.dormouse.sh`), and `assertConnectSrcBaked` fails the build if the define did not reach the bundle — a lost define would otherwise surface only as a Host silently using the shipped default. `lib/src/host/remote/connect-src.ts` reads it through `bakedConnectSrc()`, as a `declare const` rather than an import, so the value is a literal in the bundle and nothing at runtime can move it. A selfhoster widens it for their own build with `DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:vscode` — the same variable and the same per-build opt-in as the standalone binary (`docs/specs/server.md` → "Where a Host may reach a relay server").
 
-`unsafe-inline` for styles is needed because VS Code injects theme CSS variables via inline styles on the body element. Scripts remain nonce-gated, with a fresh per-render nonce of 24 CSPRNG bytes (`node:crypto` `randomBytes`) base64url-encoded to 32 characters — a nonce that is guessable is a nonce that is not there, so `Math.random()` is not acceptable here. The webview HTML is built by Vite from the `lib` package, then at runtime `webview-html.ts` rewrites asset URLs to webview URIs, injects the CSP meta tag, applies nonces to all script tags, and injects initial state via a nonce-gated inline script.
+`unsafe-inline` for styles is needed because VS Code injects theme CSS variables via inline styles on the body element. Scripts remain nonce-gated, with a fresh per-render nonce of 24 CSPRNG bytes (`node:crypto` `randomBytes`) base64url-encoded to 32 characters — a nonce that is guessable is a nonce that is not there, so `Math.random()` is not acceptable here. The webview HTML is built by Vite from the `lib` package, then at runtime `webview-html.ts` rewrites asset URLs to webview URIs, injects the CSP meta tag, applies nonces to every tag that loads a script, and injects initial state via a nonce-gated inline script.
+
+**A nonce alone does not survive code splitting; `'strict-dynamic'` is what carries it.** Vite splits the bundle, and a split bundle loads scripts three ways, each gated by `script-src` and each needing a different thing to pass:
+
+| How the chunk loads | What satisfies `script-src` |
+| --- | --- |
+| The entry `<script type="module">` in `index.html` | its own `nonce` attribute, applied by `webview-html.ts` |
+| `<link rel="modulepreload">` beside it (the entry's static imports) | its own `nonce` attribute — a parser-started fetch is not something a trusted script loaded, so `'strict-dynamic'` never reaches it |
+| A lazy `import()` (e.g. `RemotePairingModalHost`, `browser`) | `'strict-dynamic'` — the fetch carries no nonce, because a nonce is **not** inherited through the module graph |
+
+Getting any one of them wrong fails remotely from its cause. A blocked modulepreload leaves an errored entry in the module map that the entry chunk's own static import then resolves to, so nothing mounts and the panel is simply blank. A blocked lazy `import()` surfaces as a render error naming a chunk that is sitting on disk. In both cases the only direct evidence is a CSP violation in the webview console (**Developer: Open Webview Developer Tools**), not in any extension-host log.
+
+`'strict-dynamic'` widens what an already-trusted script may *load*; it does not widen what may be *written into* the document, and nothing here grants `script-src 'unsafe-inline'`. It also makes host-source expressions inert, so adding `webview.cspSource` to `script-src` beside it would be dead weight.
+
+This whole class arrived with a build-tool upgrade — rolldown began splitting out its shared runtime — and can return the same way, so `vscode-ext/test/webview-html.test.ts` pins it against a fixture of real Vite output: `'strict-dynamic'` is present, `script-src` never gains `'unsafe-inline'`, every script-loading tag carries the nonce, and no tag carries two.
 
 ### Webview message authentication
 

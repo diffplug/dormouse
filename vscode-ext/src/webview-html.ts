@@ -48,7 +48,18 @@ export function getWebviewHtml(
   const csp = [
     `default-src 'none'`,
     `style-src ${webview.cspSource} 'unsafe-inline'`,
-    `script-src 'nonce-${nonce}'`,
+    // The nonce is the root of trust; `strict-dynamic` extends it to whatever
+    // the nonced entry chunk goes on to load. Vite code-splits, and a split
+    // bundle loads scripts two ways a bare nonce does not reach: a static import
+    // of a shared chunk, and a lazy `import()` of a route/feature chunk. Neither
+    // fetch carries the nonce — it is not inherited through the module graph —
+    // so a nonce-only policy blocks them, and the symptom is remote: a blank
+    // panel, or a render error naming a chunk that is present on disk.
+    // `strict-dynamic` is the mechanism for this: a script the nonce already
+    // vouched for may load more. It ignores host-source expressions, so adding
+    // `webview.cspSource` beside it would be dead weight; inline scripts stay
+    // blocked, since nothing here grants `unsafe-inline`.
+    `script-src 'nonce-${nonce}' 'strict-dynamic'`,
     `font-src ${webview.cspSource}`,
     `img-src ${webview.cspSource} data: blob:`,
     // ws: entries cover the agent-browser stream relay (frames + input for
@@ -72,6 +83,23 @@ export function getWebviewHtml(
   // Add nonce to existing script tags (from the built index.html)
   html = html.replace(/<script /g, `<script nonce="${nonce}" `);
   html = html.replace(/<script>/g, `<script nonce="${nonce}">`);
+
+  // ...and to the preload links Vite emits beside them. A preload is fetched as
+  // a script, so `script-src` gates it, and `strict-dynamic` does not cover it:
+  // the fetch is started by the parser, not by a script that the nonce already
+  // vouched for. The element's own nonce is the only thing that can satisfy the
+  // policy. Blocking one is not a lost optimization — the failed preload lands
+  // an errored entry in the module map, and the entry chunk's own import of that
+  // same URL then resolves to the failure, so nothing mounts and the panel is
+  // blank with no error outside the webview console. Vite only started emitting
+  // these for the entry's static imports when rolldown began splitting out its
+  // shared runtime chunk. A nonce on a non-script preload (a font, say) is inert
+  // — `font-src` carries no nonce — so match the whole preload family rather
+  // than guess which ones load scripts.
+  html = html.replace(
+    /<link (?=[^>]*\brel="(?:modulepreload|preload)")/g,
+    `<link nonce="${nonce}" `,
+  );
 
   // Inject the inline state script AFTER the nonce replacements so it doesn't
   // get a duplicate nonce attribute from the regex above.
