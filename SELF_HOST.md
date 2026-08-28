@@ -221,8 +221,9 @@ day:
 - Loopback `/api/hello` responds and the Pocket app is served, and the process
   actually holding the port belongs to the current release — an orphan of an
   older release answers `/api/hello` identically, so a 200 alone would let every
-  check here pass while stale code serves. On Linux `systemctl --user is-active`
-  carries that proof, because a responder can be invisible to `ss` altogether.
+  check here pass while stale code serves. Linux requires both legs — the port
+  holder resolving to the current release, and `systemctl --user is-active` —
+  the second because a responder can be invisible to `ss` altogether.
 - Port 3100 is bound only to `127.0.0.1`, and the plaintext port is unreachable
   on the laptop's Tailscale IP.
 - `tailscale serve` proxies to `127.0.0.1:3100` at the same origin recorded in
@@ -264,8 +265,9 @@ and dirty status (it asks before installing a dirty worktree), and the Node and
 pnpm versions pinned in root `package.json`. The Windows edition additionally
 names the account holding `tailscaled`'s local API when another signed-in user
 has it. The Linux edition additionally checks that a systemd user manager is
-reachable, that systemd is 240 or newer, and that this account may operate
-`tailscaled` — that last one before the build, because the refusal would
+reachable, that systemd is 240 or newer, that `ss` (iproute2) is present —
+without it the install cannot confirm which release is answering, and would
+roll a good install back — and that this account may operate `tailscaled` — that last one before the build, because the refusal would
 otherwise surface only at the Serve step, after `current` had already moved.
 
 Establish with the user what the script cannot:

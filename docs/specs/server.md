@@ -911,13 +911,15 @@ Invariants the installer exists to hold:
   what the pointers say rather than who is answering.
 
   macOS and Windows prove identity by resolving the PID holding the port back to
-  the release directory it runs from. Linux resolves it too, but leads with
-  `systemctl --user is-active` and keeps the resolution as the secondary check
-  that names the culprit: its service manager already owns the answer, and the
-  resolution alone cannot be trusted to fail closed there, because the responder
-  may be invisible to `ss` entirely — a foreign network namespace, or WSL with
-  `networkingMode=mirrored`, where loopback is shared with the Windows host and
-  the listener can be a Windows process.
+  the release directory it runs from. Linux requires that **and**
+  `systemctl --user is-active` — both legs, not one and a hint. The service
+  manager's view is what catches a responder the resolution cannot see at all: a
+  foreign network namespace, or WSL with `networkingMode=mirrored`, where
+  loopback is shared with the Windows host and the listener can be a Windows
+  process that `ss` never reports. Because the resolution is a required conjunct
+  rather than advisory, `ss` (iproute2) is a hard preflight dependency there —
+  without it `listening_release` returns empty forever and a good install would
+  roll itself back.
 
   The resolution must read the executable's real path — see the `ps` trap below.
   `Source of truth:` `listening_release` + `wait_for_health` (macOS),

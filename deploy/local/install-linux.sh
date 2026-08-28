@@ -261,6 +261,14 @@ case "$SYSTEMD_VERSION" in
     ;;
 esac
 
+# `ss` is not optional here. `listening_release` resolves the port holder with
+# it and `service_healthy` requires that identity to match, so on a box without
+# iproute2 the post-switch wait can never succeed: a perfectly good install
+# would roll itself back and exit nonzero, reporting a stale process that does
+# not exist. `manage verify`'s bind check degrades to a note; this path cannot.
+command -v ss >/dev/null 2>&1 \
+  || die "ss not found. It comes from iproute2 and is what resolves which release holds port $LOOPBACK_PORT — the install cannot confirm its own service without it. Install iproute2 (apt install iproute2 / dnf install iproute) and re-run."
+
 if [ "$TEST_MODE" != "1" ]; then
   # A user manager is what runs the service. Without one — a bare `su`, a
   # container with no logind, a distro where the session never registered —
@@ -338,7 +346,10 @@ cleanup() {
 trap cleanup EXIT
 
 TS_STATUS_JSON="$(mktemp_file ts-status)"
-TS_STATUS_ERR="$(ts status --json > "$TS_STATUS_JSON" 2>&1)" || {
+# `2>&1 > file`, not `> file 2>&1`: the latter points stderr at the file too,
+  # so the capture is always empty and the operator-role remediation below
+  # becomes dead code with a blank error body.
+  TS_STATUS_ERR="$(ts status --json 2>&1 > "$TS_STATUS_JSON")" || {
   ts_denied "$TS_STATUS_ERR" && die_needs_operator "\`tailscale status\`" "$TS_STATUS_ERR"
   die "\`tailscale status --json\` failed. Is tailscaled running and signed in? (systemctl status tailscaled)
     ${TS_STATUS_ERR}"
