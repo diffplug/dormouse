@@ -460,7 +460,8 @@ from `command-detail`.
   `surface_id` / `surface_ref` / `workspace_ref` handles.
 
   Exit codes: 0 on any resolution; 1 on a usage or target error (unknown
-  Surface, a browser Surface, a bad or missing `--until`) — `dor`'s existing
+  Surface, a Surface with no console face, a bad or missing `--until`) —
+  `dor`'s existing
   convention; 2 on timeout; 3 if the Surface died before completing. 3 is kept
   distinct from 2 so a caller can tell "still out there and slow" from "will
   never answer" — a distinction a single nonzero code can't carry. `dor`'s
@@ -496,8 +497,10 @@ from `command-detail`.
   ports. `--port` is distinct from `--ports`: it filters to terminal Surfaces
   that own the port (browser Surfaces never match, even when showing that URL),
   implies the same opt-in port scan, and includes port details in JSON / text
-  output. `--json` always includes both stable ids and stable refs, and
-  additionally emits the identity dump `dor identify` used to print — top-level
+  output. `--json` always includes both stable ids and stable refs, each row
+  carries its `faces` (`console` / `web` — operations gate on faces, not
+  kinds; `docs/specs/glossary.md` → Faces), and it additionally emits the
+  identity dump `dor identify` used to print — top-level
   `caller_surface_ref` / `caller_surface_id` (matched locally against
   `DORMOUSE_SURFACE_ID`, `null` when the caller is not in the list),
   `focused_surface_ref` / `focused_surface_id`, `workspace_ref` / `window_ref`,

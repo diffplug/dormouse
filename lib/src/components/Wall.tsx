@@ -45,15 +45,15 @@ import type {
   Surface as DorSurface,
   ResolvedSplitDirection as DorResolvedSplitDirection,
   ParseResult,
-  SurfaceKind as DorSurfaceKind,
   SurfaceRenderMode as DorSurfaceRenderMode,
   SurfaceView as DorSurfaceView,
 } from 'dor/commands/types';
+import { hasConsoleFace, hasWebFace } from 'dor/commands/types';
 import type { PersistedDoor, PersistedSurfaceRefs } from '../lib/session-types';
 import type { DropTarget, RestoreToken } from '../lib/lath/ops';
 import type { Edge } from '../lib/lath/model';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
-import { resolveRenderMode, isAgentBrowserParams, isBrowserParams, browserUrlFromParams } from './wall/browser-surface';
+import { resolveRenderMode, isAgentBrowserParams, isBrowserParams, browserUrlFromParams, surfaceKindFromParams } from './wall/browser-surface';
 import { hostPathDisplay } from './wall/browser-url';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { LathHost } from './wall/LathHost';
@@ -122,10 +122,6 @@ export { TerminalPaneHeader } from './wall/TerminalPaneHeader';
 function persistedPanelTitle(title: string | null | undefined): string {
   const trimmed = title?.trim();
   return trimmed || UNNAMED_PANEL_TITLE;
-}
-
-function surfaceKindFromParams(params: unknown): DorSurfaceKind {
-  return isBrowserParams(params) ? 'browser' : 'terminal';
 }
 
 function surfaceRenderModeFromParams(params: unknown): DorSurfaceRenderMode | null {
@@ -857,11 +853,15 @@ export function Wall({
 
     return sources.map((source, index) => {
       const kind = surfaceKindFromParams(source.params);
+      // Row fields are face-gated, not kind-gated (docs/specs/glossary.md →
+      // Faces): shell state rides the console face, the URL rides the web face,
+      // so a future both-faces kind populates both without touching this map.
+      const consoleFace = hasConsoleFace(kind);
       const renderMode = surfaceRenderModeFromParams(source.params);
       const state = states[index];
       const activity = activityStates.get(source.id);
-      const shellActivity = kind === 'terminal' ? state.activity : null;
-      const title = kind === 'terminal'
+      const shellActivity = consoleFace ? state.activity : null;
+      const title = consoleFace
         ? deriveSurfaceLabel(state, states, appTitleForPane, source.title ?? source.id)
         : (source.title ?? source.id);
       const view: DorSurfaceView = source.minimized
@@ -876,13 +876,13 @@ export function Wall({
         title,
         focused: source.id === activeId,
         view,
-        cwd: kind === 'terminal' ? (state.cwd?.path ?? null) : null,
+        cwd: consoleFace ? (state.cwd?.path ?? null) : null,
         activity: shellActivity ? shellActivity.kind : null,
         ...(shellActivity?.kind === 'finished' && shellActivity.exitCode !== undefined
           ? { exitCode: shellActivity.exitCode }
           : {}),
-        command: kind === 'terminal' ? (state.currentCommand?.displayCommand ?? null) : null,
-        url: kind === 'terminal' ? null : browserUrlFromParams(source.params),
+        command: consoleFace ? (state.currentCommand?.displayCommand ?? null) : null,
+        url: hasWebFace(kind) ? browserUrlFromParams(source.params) : null,
         ringing: activity?.status === 'ALERT_RINGING',
         todo: activity?.todo === true,
         awaited: activity?.awaited === true,
@@ -1038,9 +1038,12 @@ export function Wall({
 
     const newId = generatePaneId();
     const browserMeta = browserLeafMeta(title, params);
-    const replaceUntouchedTerminal = reference.kind === 'terminal' && isUntouched(reference.id);
+    // Replace-in-place is reserved for a reference with no web face — a blank
+    // untouched shell. Anything holding web content (a browser surface today, a
+    // both-faces tool later) must split beside it instead of being destroyed.
+    const replaceUntouchedShell = !hasWebFace(reference.kind) && isUntouched(reference.id);
 
-    if (replaceUntouchedTerminal) {
+    if (replaceUntouchedShell) {
       // Whether the user's current selection sits on the pane being replaced.
       const selectionReplaced = selectedTypeRef.current === 'pane' && selectedIdRef.current === reference.id;
       // Atomic identity swap in place; then dispose the old terminal session.
