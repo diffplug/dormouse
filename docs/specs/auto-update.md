@@ -1,6 +1,10 @@
 # Auto-Update Spec
 
-The standalone app checks for updates on launch and prompts in the Baseboard when one is available. It does not download or install the update until the user approves the prompt. Once approved, the app downloads the update in the background and installs it when the user quits. On next launch, a brief banner confirms the update succeeded (or notes a failure).
+> See `docs/specs/glossary.md` for Baseboard / Door vocabulary.
+
+The standalone app checks for updates on launch and prompts in the Baseboard when one is available. Nothing is downloaded or installed until the user approves that prompt. Once approved, the download runs in the background and the install runs when the user quits. On the next launch a brief banner confirms the update succeeded, or offers a debug report if it failed.
+
+Source of truth: `standalone/src/updater.ts`. The release pipeline that publishes the manifest this spec's endpoint serves is `docs/specs/deploy.md`.
 
 ## How it works
 
@@ -38,17 +42,23 @@ app launch
                               └─ install fails → overwrite with failure marker → quit_proceed → exit
 ```
 
-The `Update` object returned by `check()` is held in memory as an available update. Clicking the approval action calls `download()` and promotes it to a pending update only after the download succeeds.
+The `Update` object returned by `check()` is held in memory as the *available* update. The approval action calls `download()` and promotes it to the *pending* update only once the download succeeds — a failed download leaves the available update in place, so a second approval retries it rather than no-op'ing.
 
-Quit-time install is driven by the quit orchestrator (`docs/specs/standalone.md` §Quit flow): after the graceful terminal teardown and the durable final session save land, and only when an approved, downloaded update is pending, the orchestrator calls the updater's `installPendingUpdate()` (paired with `hasPendingUpdate()`). `installPendingUpdate()` writes the success marker *before* calling `install()` (§Post-install markers), and on Windows first kills the sidecar and waits for it to fully exit (§Sidecar teardown on Windows). It never closes the window itself: exiting the process is the orchestrator's `quit_proceed` job, which runs after this returns. In Vite dev mode (`pnpm dev:standalone`), `installPendingUpdate()` skips `install()` (the orchestrator still proceeds to exit); install must be tested from a packaged app because the updater resolves its replacement target from the current executable path.
+`startUpdateCheck()` is a no-op under the browser-dev harness (`VITE_DORMOUSE_BROWSER_DEV_HOST`), which has no Tauri updater behind it.
+
+### Quit-time install
+
+The install is driven by the quit orchestrator (`docs/specs/standalone.md` §Quit flow): after the graceful terminal teardown and the durable final session save land, and only when `hasPendingUpdate()` is true, the orchestrator calls `installPendingUpdate()`. That function writes the success marker *before* calling `install()` (§localStorage), and on Windows first kills the sidecar and waits for it to fully exit (§Sidecar teardown on Windows). It never closes the window itself: exiting the process is the orchestrator's `quit_proceed` job, which runs after this returns.
+
+In Vite dev mode (`pnpm dev:standalone`), `installPendingUpdate()` drops the pending update and skips `install()` — the updater resolves its replacement target from the current executable path, so install must be tested from a packaged app. The skip is lifted under `MODE === 'test'` so `standalone/src/updater.test.ts` can exercise the real path.
 
 ## Sidecar teardown on Windows
 
-The NSIS installer overwrites files inside the bundled sidecar — including node-pty's native `conpty.node`. Windows refuses to overwrite a native module that a live process still has loaded, so if the Node sidecar is running when NSIS reaches `node_modules`, the install fails with *"Error opening file for writing: …\_up_\sidecar\node_modules\node-pty\prebuilds\win32-x64\conpty.node"*. The Rust `RunEvent::Exit` sidecar kill is too late and asynchronous — NSIS starts copying files immediately after `install()` force-kills the app, racing the sidecar's shutdown. (By quit time the orchestrator's graceful teardown has already killed the sidecar's *PTYs*, but the sidecar process itself is still alive holding those native modules.)
+The NSIS installer overwrites files inside the bundled sidecar — including node-pty's native `conpty.node`. Windows refuses to overwrite a native module that a live process still has loaded, so if the Node sidecar is running when NSIS reaches `node_modules`, the install fails with *"Error opening file for writing: …\_up_\sidecar\node_modules\node-pty\prebuilds\win32-x64\conpty.node"*. Rust's `RunEvent::Exit` sidecar shutdown cannot cover this: `install()` force-kills the app and NSIS starts copying immediately, so that handler either never runs or is still polling for the sidecar's exit while NSIS is already writing. (By quit time the orchestrator's graceful teardown has killed the sidecar's *PTYs*, but the sidecar process itself is still alive holding those native modules.)
 
-Because `pty-core` spawns with `useConptyDll: true` on Windows (see [terminal-escapes.md](terminal-escapes.md#osc-color-queries-on-windows-require-the-bundled-conpty)), the same hazard now covers two more bundled files: the sidecar additionally `LoadLibrary`s node-pty's `conpty/conpty.dll`, and each pseudoconsole runs an `OpenConsole.exe` child process. `conpty.dll` is released when the sidecar exits (same as `conpty.node`); the `OpenConsole.exe` children run inside the sidecar's job object (`process_wrap`'s `JobObject`), so terminating the sidecar tears them down too.
+Because `pty-core` spawns with `useConptyDll: true` on Windows (see [terminal-escapes.md](terminal-escapes.md#osc-color-queries-on-windows-require-the-bundled-conpty)), the same hazard covers two more bundled files: the sidecar additionally `LoadLibrary`s node-pty's `conpty/conpty.dll`, and each pseudoconsole runs an `OpenConsole.exe` child process. `conpty.dll` is released when the sidecar exits (same as `conpty.node`); the `OpenConsole.exe` children run inside the sidecar's job object (`process_wrap`'s `JobObject`), so terminating the sidecar tears them down too.
 
-So on Windows `installPendingUpdate()` `invoke`s `kill_sidecar_now` and awaits it before `install()`. That command is synchronous on the Rust side: it sends the kill, then polls `try_wait` (capped at ~5s) until the process has actually exited and released its file handles. `try_wait` is used instead of the job-object `wait()` because `wait()` consumes a completion-port message the reaper thread relies on and could block forever if the sidecar had already exited. macOS and Linux can replace open files in place, so they skip this and rely on the existing `RunEvent::Exit` cleanup.
+So on Windows `installPendingUpdate()` `invoke`s `kill_sidecar_now` and awaits it before `install()`. That command is synchronous on the Rust side: it calls `start_kill()`, then polls `try_wait` every 20 ms (capped at ~5s) until the process has actually exited and released its file handles. `try_wait` is used instead of the job-object `wait()` because `wait()` consumes a completion-port message the reaper thread may already have drained — if the sidecar had crashed earlier it would block forever. The ~5s cap means a wedged sidecar cannot stall quit indefinitely. macOS and Linux can replace open files in place, so they skip the kill and rely on the existing `RunEvent::Exit` cleanup.
 
 ## Update notice in the Baseboard
 
@@ -62,29 +72,31 @@ Update status appears as a text notice on the right side of the Baseboard (the a
 | `post-update-success` | "Updated to v0.5.0 — from v0.4.0" | "Changelog" | 10 seconds |
 | `post-update-failure` | "Update failed" | "Click here to debug" | No |
 
-The "Install when I quit" action is the user's approval to download the update now and install it when they quit. The inline "Changelog" action calls Tauri's `getVersion()` and opens `https://dormouse.sh/changelog/after/<current-version>`.
-When a notice has follow-up actions, it uses ` · ` as the separator between the message and action labels.
+"Install when I quit" is the user's approval to download now and install at quit. "Changelog" calls Tauri's `getVersion()` and opens `https://dormouse.sh/changelog/after/<current-version>`. When a notice has follow-up actions, ` · ` separates the message from the action labels.
 
 All states are dismissible via [×]. Dismissing an unapproved `available` notice means no update is downloaded or installed in that session. Dismissing a `downloading` or `downloaded` notice hides it for the session only — it does not cancel an already-approved download/install.
 
-The notice matches the Baseboard's existing text style (`text-sm font-mono text-muted` — 12px via the theme.css `text-sm` override). It's pushed right via `ml-auto` so it doesn't compete with doors or the shortcut hint on the left.
+The notice matches the Baseboard's existing text style (`text-sm font-mono text-muted` — 12px via the theme.css `text-sm` override). The Baseboard places it inside its single right-hand `ml-auto` cluster, so it does not compete with doors or the shortcut hint on the left.
+
+### Debug report on failure
+
+"Click here to debug" opens `UpdateDebugModal`, which snapshots the failure (version + error string) so the modal survives any later state change. It offers two steps: a GitHub issue *search* seeded with the first 80 characters of the error unquoted (so GitHub can fuzzy-match), and a copyable markdown report assembled by `buildDebugReport()` — app version, `PLATFORM_STRING`, the error, and the tail of the Dormouse log. The log tail comes from the `read_update_log` Tauri command (the last 10 KB of `dormouse.log`, sliced on a char boundary); a failure to read it is embedded as a placeholder rather than aborting the report.
+
+Search-before-file is the reason the modal exists at all: an update failure is environment-specific and the log tail is the only evidence that survives the force-kill.
 
 ### Threading
 
-The Baseboard is in `lib/` but the updater is standalone-only. The notice is threaded as a `ReactNode` prop: `App` → `Wall` → `Baseboard` (via `baseboardNotice`). This keeps all updater knowledge out of `lib/` — the Baseboard just renders an opaque slot.
+The Baseboard is in `lib/` but the updater is standalone-only. The notice is threaded as a `ReactNode` prop: `App` → `Wall` (`baseboardNotice`) → `Baseboard` (`notice`). This keeps all updater knowledge out of `lib/` — the Baseboard just renders an opaque slot.
 
 ## Platform behavior at quit
 
-On every platform the quit orchestrator calls `quit_proceed` after the teardown +
-install step returns; `quit_proceed` sets the approved flag and calls
-`app.exit(0)`, so the app exit is uniform. The per-platform difference is only in
-what `install()` itself does:
+On every platform the quit orchestrator calls `quit_proceed` after the teardown + install step returns; `quit_proceed` sets the approved flag and calls `app.exit(0)`, so the app exit is uniform. The per-platform difference is only in what the install step does:
 
-| Platform | What `install()` does | App exit |
-|----------|----------------------|----------|
-| Windows | Kills the sidecar and waits for it to exit (so NSIS can overwrite its loaded native modules), then launches NSIS installer in passive mode (progress bar, no user interaction). Force-kills the app. | NSIS force-kills before `quit_proceed` is reached |
-| macOS | Replaces the `.app` bundle in place | `quit_proceed` → `app.exit(0)` |
-| Linux | Replaces the AppImage in place | `quit_proceed` → `app.exit(0)` |
+| Platform | Install step | App exit |
+|----------|--------------|----------|
+| Windows | `installPendingUpdate()` awaits `kill_sidecar_now` (so NSIS can overwrite the sidecar's loaded native modules), then `install()` launches the NSIS installer in passive mode (progress bar, no user interaction) and force-kills the app | NSIS force-kills before `quit_proceed` is reached |
+| macOS | `install()` replaces the `.app` bundle in place | `quit_proceed` → `app.exit(0)` |
+| Linux | `install()` replaces the AppImage in place | `quit_proceed` → `app.exit(0)` |
 | No pending update | — (`installPendingUpdate` not called) | `quit_proceed` → `app.exit(0)` |
 | Vite dev mode | Skips `install()` to avoid replacing the dev executable directory | `quit_proceed` → `app.exit(0)` |
 
@@ -99,16 +111,18 @@ Single key: `dormouse:update-result`
 | Successful install | `{ "from": "0.4.0", "to": "0.5.0" }` | On next launch, after reading |
 | Failed install | `{ "failed": true, "version": "0.5.0", "error": "..." }` | On next launch, after reading |
 
-The success marker is written *before* `install()` because Windows NSIS force-kills the process — if we wrote it after, it would never persist. If `install()` then throws, the marker is overwritten with a failure entry. No marker is written for an update that was found but never approved.
+The success marker is written *before* `install()` because Windows NSIS force-kills the process — if we wrote it after, it would never persist. If `install()` then throws, the marker is overwritten with a failure entry. No marker is written for an update that was found but never approved. A corrupt marker is swallowed and treated as no marker.
 
 ## Files
 
 | File | Role |
 |------|------|
-| [`standalone/src/updater.ts`](../../standalone/src/updater.ts) | State machine, update check, user-approved download, quit-time install (`hasPendingUpdate` / `installPendingUpdate`, called by the quit orchestrator), post-install markers |
-| [`standalone/src/quit.ts`](../../standalone/src/quit.ts) | Quit orchestrator (owned by `docs/specs/standalone.md` §Quit flow); calls `installPendingUpdate()` as the last teardown step |
+| [`standalone/src/updater.ts`](../../standalone/src/updater.ts) | State machine, update check, user-approved download, quit-time install (`hasPendingUpdate` / `installPendingUpdate`, called by the quit orchestrator), post-install markers, debug-report assembly |
+| [`standalone/src/updater.test.ts`](../../standalone/src/updater.test.ts) | Marker read/clear, the 5s probe delay, approval-gated download, marker-before-install ordering, and the Windows kill-before-install ordering |
 | [`standalone/src/UpdateBanner.tsx`](../../standalone/src/UpdateBanner.tsx) | Pure presentational component — renders inline notice content for the Baseboard |
-| [`standalone/src/main.tsx`](../../standalone/src/main.tsx) | Passes `<ConnectedUpdateBanner />` as the `baseboardNotice` prop to `<App />`, calls `startUpdateCheck()` after platform init |
+| [`standalone/src/UpdateDebugModal.tsx`](../../standalone/src/UpdateDebugModal.tsx) | Failure modal: issue search + copyable report |
+| [`standalone/src/quit.ts`](../../standalone/src/quit.ts) | Quit orchestrator (owned by `docs/specs/standalone.md` §Quit flow); calls `installPendingUpdate()` as the last teardown step |
+| [`standalone/src/main.tsx`](../../standalone/src/main.tsx) | Owns `<ConnectedUpdateBanner />` (banner + modal wiring), passes it as the `baseboardNotice` prop to `<App />`, calls `startUpdateCheck()` after restore |
 
 All updater code is standalone-only. The Baseboard accepts a generic `notice` prop (`ReactNode`) — it has no knowledge of the updater.
 
@@ -126,14 +140,14 @@ In `standalone/src-tauri/tauri.conf.json`:
 }
 ```
 
-The Rust side registers the plugin with `tauri_plugin_updater::Builder::new().build()` in `lib.rs`. The updater adds no Rust commands of its own; the install step runs entirely in JS (`installPendingUpdate`) and the process exit is the quit orchestrator's `quit_proceed` (`docs/specs/standalone.md` §Quit flow). Capabilities include `core:window:allow-close` and `core:window:allow-destroy` (used by the AppBar window controls); the quit flow itself needs no added capability (`core:event:allow-listen` already exists, and the quit commands are custom, which require none).
+The Rust side registers the plugin with `tauri_plugin_updater::Builder::new().build()` in `lib.rs`. The install step itself runs entirely in JS; the process exit is the quit orchestrator's `quit_proceed` (`docs/specs/standalone.md` §Quit flow). Two custom Rust commands serve the updater — `kill_sidecar_now` (shared with the quit path) and `read_update_log` — and custom commands need no capability entry. The plugin permissions the updater does need are in `standalone/src-tauri/capabilities/default.json`: `updater:default`, plus `core:app:allow-version` (marker versions, changelog URL) and `shell:default` (opening the changelog and issue search).
 
 ## Dependencies
 
 - `@tauri-apps/plugin-updater` — update check, download, install
-- `@tauri-apps/api/core` — `invoke('kill_sidecar_now')` before install on Windows
-- `@tauri-apps/api/app` — `getVersion()` for the "from" version in markers
-- `@tauri-apps/plugin-shell` — `open()` for the changelog link
+- `@tauri-apps/api/core` — `invoke('kill_sidecar_now')` before install on Windows, `invoke('read_update_log')` for the debug report
+- `@tauri-apps/api/app` — `getVersion()` for the "from" version in markers and the changelog URL
+- `@tauri-apps/plugin-shell` — `open()` for the changelog and issue-search links
 - `tauri-plugin-updater` Rust crate — registered in `Cargo.toml` and `lib.rs`
 
 ## Design decisions
@@ -142,10 +156,10 @@ The Rust side registers the plugin with `tauri_plugin_updater::Builder::new().bu
 
 **Why no silent download?** Update bundles can be large, can fail for environment-specific reasons, and may surprise users who did not opt into changing the app. The launch probe is silent, but download/install only begins after explicit approval.
 
-**Why the Baseboard, not a top banner?** A top banner pushes terminal content down, which is disruptive in a terminal app. The Baseboard is already a status strip — the update notice fits naturally alongside doors and shortcut hints. It also avoids adding a new UI element; the notice just occupies unused space in an existing one.
+**Why the Baseboard, not a top banner?** A top banner pushes terminal content down, which is disruptive in a terminal app. The Baseboard is already a status strip, so the notice occupies unused space in an existing element instead of adding a new one.
 
 **Why write the success marker before `install()`?** On Windows, the NSIS installer force-kills the process — code after `install()` may never run. Writing optimistically and overwriting on failure handles both platforms correctly.
 
 **Why install as the last step of the quit orchestrator, not a standalone hook?** The install must run *after* the graceful terminal teardown and the durable final session save (`docs/specs/standalone.md` §Quit flow) — otherwise a Windows NSIS force-kill mid-teardown would lose the freshest scrollback. Folding install into the orchestrator makes that ordering explicit and gives it the same bounded-exit backstops. The updater therefore owns no quit interception of its own.
 
-**Why `localStorage` instead of Tauri's store plugin?** `localStorage` persists across launches in Tauri's webview, requires no additional dependencies, and is automatically scoped to the app. If the user resets app data, markers are cleaned up naturally.
+**Why `localStorage` instead of Tauri's store plugin?** It persists across launches in Tauri's webview, needs no extra dependency, and is scoped to the app. If the user resets app data, markers are cleaned up naturally.

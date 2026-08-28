@@ -879,8 +879,6 @@ function truncateCommandTitle(title: string): string {
   return `${Array.from(title).slice(0, COMMAND_TITLE_LIMIT - 3).join('').trimEnd()}...`;
 }
 
-// Returns the title text plus whether it carries the fail glyph, so callers can
-// color the glyph without inferring its presence by matching the string.
 function headerPrimary(pane: TerminalPaneState, options: HeaderOptions): { text: string; failed: boolean } {
   const userTitle = titleCandidateForSource(pane, 'user')?.title.trim();
   if (userTitle) return { text: userTitle, failed: false };

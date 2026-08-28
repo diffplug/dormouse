@@ -40,7 +40,6 @@ function setupPanel(
     localResourceRoots: [vscode.Uri.file(mediaPath)],
   };
 
-  // Merge in current alert states so the webview starts with correct alert data
   const initialState = savedState
     ? mergeAlertStates(savedState, getAlertStates())
     : undefined;
@@ -263,7 +262,6 @@ export async function deactivate() {
   await refreshSavedSessionStateFromPtys(extensionContext, getAlertStates());
   step('graceful kill');
   await ptyManager.gracefulKillAll(2000);
-  // Force kill anything still alive and clean up
   ptyManager.killAll();
   step('done');
 }

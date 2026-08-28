@@ -42,9 +42,9 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
 
     // A focused cross-origin iframe owns the keyboard, so its keystrokes never
     // reach the capturing window listener above. The proxy shim posts our
-    // reserved leader chord back out (docs/specs/dor-browser.md → "The iframe
-    // shim message channel"); feed it into the same dispatch the in-document dual-tap
-    // would, after validating the message came from a live proxy origin.
+    // reserved leader chord back out (docs/specs/dor-browser.md → "Iframe
+    // Shim"); feed it into the same dispatch the in-document dual-tap would,
+    // after validating the message came from a live proxy origin.
     const onMessage = (e: MessageEvent) => {
       const data = e.data as { __dormouse?: unknown } | null;
       if (!data || data.__dormouse !== 'leader') return;

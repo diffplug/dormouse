@@ -233,10 +233,8 @@ export class RemoteApiSession {
     // the client after a fresh snapshot and blanks its picker until the next
     // change.
     const generation = ++this.#directoryGeneration;
-    // One snapshot per collect. The provider answers for every surface the Host
-    // can reach, so there is no longer a subset that is known sooner than the
-    // rest — this replaces the old local-then-merged double emit, which existed
-    // only because the peer round trip was visible from here.
+    // One snapshot per collect: the provider answers for every surface the Host
+    // can reach, so no subset is known sooner than the rest.
     let entries: DirectoryEntry[];
     try {
       entries = await this.#provider.collectDirectory();
@@ -358,8 +356,7 @@ export class RemoteApiSession {
       onExit: (exitCode) => {
         // Deliver the close to the client first, then drop the attachment so a
         // later write/resize for this surface fails safe with "not attached"
-        // instead of touching the now-dead PTY / disposed xterm (the pre-pin
-        // code re-resolved via the registry and got that fail-safe for free).
+        // instead of touching the now-dead PTY / disposed xterm.
         // Teardown unsubscribes this stream mid-callback, which is safe — the
         // subscription is this attachment's alone, so nothing is left to fire —
         // and nulls #attachment so #requireAttached fails and the bounce timer

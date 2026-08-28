@@ -103,7 +103,7 @@ Web Push is the one path where the Server makes an outbound request to an addres
 
 These are the two real gaps in the shipped model, and they are gaps rather than accepted risks — we intend to close them.
 
-**Revocation has no mechanism.** `HostAcl.revokeDevice` / `revokePasskey` exist and have no callers; no relay frame carries a revocation; there is no management UI. Revoking a lost phone means hand-editing JSON on the Host, and it takes effect at that Client's next `authorizeConnection` — an already-established session survives it, and the operator's only lever is stopping the Host. Server-pushed revocation propagation is staged in `docs/specs/remote-security-model.md` → Future.
+**Revocation has no mechanism.** `HostAcl.revokeDevice` / `revokePasskey` exist and have no callers; no relay frame carries a revocation; there is no management UI. Revoking a lost phone means hand-editing JSON on the Host **and restarting it**: `RemoteHostService.#startHost` reads the store once and hands the `RemoteHost` a snapshot for its whole lifetime, so an edit alone changes nothing that is running. The restart is the whole lever — it reloads the ACL and, by dropping the relay socket, ends every established session. Server-pushed revocation propagation is staged in `docs/specs/remote-security-model.md` → Future.
 
 **There is no audit trail.** The ACL records `approvedAt` / `approvedBy` for a pairing, and nothing records connects, attaches, denials, or writes. A self-hoster cannot answer "did anyone connect to my laptop last night", which also means an ACL entry added by any of the paths above would be invisible after the fact.
 

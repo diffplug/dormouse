@@ -2,7 +2,8 @@
 // targets. Every op is `(tree, …) → { tree, ok, … }`, synchronous, and returns a tree
 // that passes `validate`. On any invalid input the *input tree object* is returned
 // unchanged with `ok: false`, so callers can identity-compare to detect no-ops.
-// See docs/specs/tiling-engine.md ("Operations", "Restore tokens", "Hierarchical DnD").
+// See docs/specs/tiling-engine.md ("Operations", "Restore tokens", "Hierarchical
+// drag and drop").
 
 import {
   type Edge,
@@ -51,7 +52,7 @@ export type RestoreToken = {
   fingerprint: string | null;
 };
 
-/** A resolved drop, produced (in later stages) by hit-testing. */
+/** A resolved drop, produced by hit-testing. */
 export type DropTarget =
   | { kind: 'edge'; path: number[]; edge: Edge }
   | { kind: 'swap'; leaf: LeafId };

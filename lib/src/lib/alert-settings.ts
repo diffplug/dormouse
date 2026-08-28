@@ -9,8 +9,8 @@ import { getPlatform } from './platform';
  *
  * This renderer-side copy drives the UI and persists to `localStorage`. In
  * VS Code it is a mirror of the extension host's authoritative copy: the first
- * renderer seeds the host, mutations are sent as field patches, and the host
- * broadcasts its canonical snapshot to every webview. The host needs
+ * renderer seeds the host, an edit relays the whole normalized blob, and the
+ * host broadcasts its canonical snapshot to every webview. The host needs
  * `inactivityTimeoutMs` for its `AlertManager`; it relays the rest untouched so
  * two webviews cannot disagree about whether alarms speak.
  */
@@ -94,7 +94,7 @@ export function subscribeToAlertSettings(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-/** Apply a field patch, persist it, and push the delta to the host. */
+/** Apply a field patch, persist it, and relay the whole blob to the host. */
 export function updateAlertSettings(patch: Partial<AlertSettings>): void {
   const next = normalizeAlertSettings({ ...settings, ...patch });
   if (alertSettingsEqual(next, settings)) return;

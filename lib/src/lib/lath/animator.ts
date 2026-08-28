@@ -1,5 +1,5 @@
-// Lath animator: the headless motion core (docs/specs/tiling-engine.md → "Animation
-// contract"). Turns committed layout changes into presentation frames as a *pure
+// Lath animator: the headless motion core (docs/specs/tiling-engine.md →
+// "Animation"). Turns committed layout changes into presentation frames as a *pure
 // function of time* — no DOM, React, timers, or Date/performance. Time always comes
 // in as a `now` argument, so every renderer animates identically and tests assert
 // real interpolated values against a fake clock. The HTML adapter (LathHost) drives

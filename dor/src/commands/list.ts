@@ -152,9 +152,11 @@ async function runListCommand(
   }
 }
 
-// These are display predicates applied to the host's full surface projection.
+// Display predicates applied to the host's full surface projection. Cheap by
+// construction: `--port` is the only filter here that needs host data beyond the
+// projection, and it pays for it by opting into the port scan up in the caller.
 // (Caller-identity targeting — the `pane` field — is filtered host-side in
-// use-dor-control.ts; only `--port` opts into the expensive host port scan.)
+// use-dor-control.ts.)
 function applyListFilters(
   response: ListSurfacesResponse,
   flags: ListFlags,

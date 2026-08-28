@@ -4,78 +4,41 @@
 
 ## What's built
 
-Dormouse has two hosting modes: a `WebviewView` in the bottom panel (alongside Terminal, Problems, Output) and `WebviewPanel` editor tabs (via `dormouse.open`, supports multiple instances). Both restore across "Developer: Reload Window". PTY lifecycle is fully decoupled from the webview — PTYs live in the extension host via `pty-manager.ts`, survive panel visibility toggling, and replay buffered output on **resume**. Session persistence works across cold **restore**: pane layout, CWD, and alert state (enabled/disabled + todo) are saved and restored on cold start. Scrollback is never persisted (`docs/specs/transport.md` → "Persistence policy"); instead `deactivate()` interrupts the live PTYs and records each pane's agent resume invocation, which the next cold restore auto-runs (`docs/specs/layout.md` → "Agent resume on cold restore"). The view uses `workspaceState` for persistence; editor panels use VS Code's per-panel `vscode.setState()` so multiple panels don't clobber each other. Alert state is merged into every periodic save (not just deactivate) so it survives even if VS Code kills the extension host before deactivate completes. A `WebviewPanelSerializer` handles editor tab restoration; `onWebviewPanel:dormouse` activation event ensures the extension activates early enough. Theme integration uses VSCode `--vscode-*` tokens plus Dormouse semantic `--color-*` tokens, with a small resolver that materializes missing consumed VSCode colors from registry defaults. CSP is strict with nonce-gated scripts.
+Two hosting modes: a `WebviewView` in the bottom panel (alongside Terminal, Problems, Output) and `WebviewPanel` editor tabs (via `dormouse.open`, multiple instances). Both restore across "Developer: Reload Window", via a `WebviewPanelSerializer` plus the `onWebviewPanel:dormouse` activation event. PTY lifecycle is fully decoupled from the webview — PTYs live in the extension host (`pty-manager.ts`), survive panel visibility toggling, and replay buffered output on **resume**. Scrollback is never persisted (`docs/specs/transport.md` → "Persistence policy"); instead `deactivate()` interrupts the live PTYs and records each pane's agent resume invocation, which the next cold restore auto-runs (`docs/specs/layout.md` → "Agent resume on cold restore").
 
-**Architecture:**
+**Code map (extension host, `vscode-ext/src/`):**
 
 ```
-Extension Host (vscode-ext/src/)
-├── extension.ts              — entry point, activate/deactivate, panel setup
-├── webview-view-provider.ts  — WebviewView in bottom panel
-├── message-router.ts         — webview <-> host IPC, PTY ownership tracking
-├── message-types.ts          — bidirectional message type definitions
-├── pty-manager.ts            — PTY lifecycle, buffering (1M char cap), CWD queries
-├── pty-host.js               — forked child process wrapping pty-core via node-pty
-├── session-state.ts          — workspaceState persistence + alert state merging
-├── workspace-chrome.ts       — reflect Workspace union status (bell/TODO) onto native chrome title
-├── shell-selection.ts        — persisted shell picker (workspace/global selectedShellPath)
-├── agent-browser-host.ts     — extension-host wiring + stream relay for the agent-browser surface
-├── iframe-proxy-host.ts      — VS Code binding for the iframe transparent proxy (injects the logger)
-├── webview-html.ts           — CSP injection, nonce + message-token generation, asset URI rewriting
-├── remote-host.ts            — the remote Host service in this window: provider, command routing, storage
-├── remote-host-store.ts      — `VsCodeHostStateStore`: enrollment in SecretStorage, ACL in globalState
-├── peer-link.ts              — socket between windows: bind-as-lease arbitration, broker serves, clients report in
-│                             (in-window peer-surface brokering lives in message-router.ts)
-├── (../scripts/esbuild.mjs)  — outside src/: extension + pty-host bundles; bakes the Host's remote `connect-src`
-├── webview-messaging.ts      — serveWebview: pairs a document with its message token, returns the WebviewChannel
-└── log.ts                    — extension logging
-
-Shared PTY Core (standalone/sidecar/)
-└── pty-core.js               — node-pty wrapper shared between VS Code and Tauri sidecar
-
-Frontend Library (lib/src/)
-├── App.tsx                       — error boundary wrapper
-├── main.tsx                      — entry point
-├── cfg.ts                        — timing config (marching ants, alert thresholds)
-├── theme.css                     — --vscode-* -> semantic --color-* tokens
-├── index.css                     — Lath host styling, marching-ants keyframe
-├── components/
-│   ├── Wall.tsx                  — pane manager shell, mode state, session actions
-│   ├── wall/                     — Wall header/panel/overlay/context helpers
-│   ├── TerminalPane.tsx          — xterm.js mount point with ResizeObserver
-│   ├── Baseboard.tsx             — minimized-pane door carousel
-│   └── Door.tsx                  — individual minimized-pane door
-└── lib/
-    ├── terminal-registry.ts      — public registry facade
-    ├── terminal-store.ts         — registry maps and terminal entry shape
-    ├── terminal-lifecycle.ts     — xterm lifecycle, PTY wiring, mount/dispose/swap/focus
-    ├── terminal-theme.ts         — xterm theme observer and host painting
-    ├── terminal-report-filter.ts — replay/synthetic report filtering
-    ├── terminal-state.ts       — terminal CWD/command semantic model and derivation helpers
-    ├── terminal-state-store.ts — frontend semantic state store keyed by pane/session id
-    ├── terminal-mouse-router.ts  — mouse selection routing
-    ├── session-activity-store.ts — alert/TODO projection and delegates
-    ├── reconnect.ts              — resume (live-PTY) + restore (cold-start) entry point
-    ├── alert-manager.ts          — alert state machine (portable, no DOM deps)
-    ├── quiesce-detector.ts       — silence/output pattern detection for alert
-    ├── session-save.ts           — periodic save (debounced 500ms + 30s interval)
-    ├── session-restore.ts        — cold-start pane restoration
-    ├── session-types.ts          — PersistedSession/PersistedPane/PersistedAlertState types
-    ├── resume-patterns.ts        — detect an agent resume invocation in a buffer
-    ├── resolve-pane-element.ts   — resolve a pane element to its Lath leaf (overlay measurement)
-    ├── vscode-message-token.ts   — host-message token constants + the `isHostMessage` guard
-    └── platform/
-        ├── types.ts              — PlatformAdapter interface
-        ├── index.ts              — adapter factory (auto-detects VS Code vs fake)
-        ├── vscode-adapter.ts     — VS Code postMessage bridge
-        └── fake-adapter.ts       — mock adapter for testing + website playground
+extension.ts               — activate/deactivate, command registration, panel setup
+webview-view-provider.ts   — WebviewView in bottom panel
+message-router.ts          — webview <-> host IPC, PTY ownership, in-window peer fan-out
+message-types.ts           — bidirectional message type definitions
+pty-manager.ts             — PTY lifecycle, buffering (1M char cap), CWD queries
+pty-host.js                — forked child process wrapping standalone/sidecar/pty-core.js
+session-state.ts           — workspaceState persistence, alert merging, recovery capture
+workspace-chrome.ts        — Workspace union status (bell/TODO) → tab title / view badge
+shell-selection.ts         — persisted shell picker (`dormouse.selectedShellPath`)
+agent-browser-host.ts      — extension-host wiring + stream relay for the agent-browser surface
+iframe-proxy-host.ts       — VS Code binding for the iframe transparent proxy (injects the logger)
+webview-html.ts            — CSP injection, nonce + message-token minting, asset URI rewriting
+csp-nonce-placeholder.ts   — the one string vite.config.ts and webview-html.ts must agree on
+webview-messaging.ts       — serveWebview: pairs a document with its token, returns a WebviewChannel
+remote-host.ts             — the remote Host service in this window: provider, command routing, storage
+remote-host-store.ts       — `VsCodeHostStateStore`: enrollment in SecretStorage, ACL in globalState
+peer-link.ts               — socket between windows: bind-as-lease arbitration, broker serves clients
+peer-link-protocol.ts      — that socket's frame shapes, framing, handshake proofs, PTY route table
+processed-pty-streams.ts   — the window's one keyed registry of stripped PTY streams
+log.ts                     — extension logging
+(../scripts/esbuild.mjs)   — extension + pty-host bundles; bakes the Host's remote `connect-src`
 ```
+
+The webview itself is the shared `lib/` frontend, unmodified for this host: see `docs/specs/layout.md` and `docs/specs/transport.md` for its modules. The only VS Code-specific pieces in `lib/` are `lib/src/lib/platform/vscode-adapter.ts` (the postMessage bridge), `lib/src/lib/vscode-message-token.ts`, and `lib/src/lib/vscode-keybindings.ts`.
 
 ### Invariants (VS Code-specific)
 
 Universal PTY/transport invariants live in `docs/specs/transport.md`. The rules below are specific to running inside the VS Code extension host.
 
-- **Save before kill.** `deactivate()` must save session state *before* killing PTYs — CWD queries need live processes, and recovery capture needs an agent still running to interrupt. See ordering in `extension.ts:deactivate()`.
+- **Capture, then save, then kill.** `deactivate()` runs the agent-recovery capture *first* and both kills *last*, with the state flush and the live-PTY refresh in between: the resume hint exists only between the interrupt and the kill, and CWD queries need live processes. Full ordering under "VS Code persistence flow" below; `extension.ts:deactivate()` is the source of truth.
 - **Alert state is global.** A single `AlertManager` instance in `message-router.ts` is shared across all routers and survives router disposal. PTY data feeds into it at module level, regardless of webview visibility.
 - **WATCHING rules are host-authoritative.** The first webview seeds the shared host rule set after extension-host startup. Later webviews cannot replace it: rule edits arrive as per-command mutations, and `WatchedCommandHost` broadcasts the resulting canonical snapshot to every renderer so their dialogs and persisted mirrors stay synchronized.
 - **PTY ownership tracking.** Each router tracks its PTYs in `ownedPtyIds`. A module-level `globalOwnedPtyIds` set prevents a resuming router from stealing PTYs owned by another webview.
@@ -85,9 +48,20 @@ Universal PTY/transport invariants live in `docs/specs/transport.md`. The rules 
 - **Every host → webview send carries the message token.** The webview's `window` is a shared inbox that framed surfaces can also post to, so the adapter drops any `message` that isn't stamped with the per-boot token. Everything downstream of `serveWebview` holds a `WebviewChannel` rather than a `vscode.Webview`, so bypassing the stamp is a type error there rather than a convention to remember; only the two serve sites (`setupPanel`, `resolveWebviewView`) still hold a raw webview. Adding a `message` listener that skips `isHostMessage` reopens the forgery hole either way. See "Webview message authentication" below.
 - **Workbench keybindings mirror for selected chords.** `lib/src/lib/vscode-keybindings.ts` is the source of truth for the VS Code-hosted mirror allowlist. For `Ctrl/Cmd+P`, `Ctrl/Cmd+Shift+P`, `Ctrl/Cmd+B`, and `F1`, xterm still processes the key while the webview also posts `dormouse:runWorkbenchCommand`; `message-router.ts` validates that request against the same small command set before calling `vscode.commands.executeCommand`.
 
-### Extension manifest (current)
+### Extension manifest
 
-Source of truth: `vscode-ext/package.json` defines the activation events and `contributes` block (commands with titles/icons, menus, view container, webview view).
+Source of truth: `vscode-ext/package.json`. Activation is `onView:dormouse.view` + `onWebviewPanel:dormouse` — nothing else wakes the extension, so a window with no Dormouse view and no restored panel stays cold until one is opened.
+
+The whole `contributes` block:
+
+| Contribution | Value |
+| --- | --- |
+| Commands | `dormouse.focus` (Focus), `dormouse.open` (Open in Editor), `dormouse.debugTheme` (Debug Theme), `dormouse.newTerminal` (New Terminal, `$(add)`), `dormouse.selectShell` (Select Shell, `$(gear)`) — all titled `Dormouse: …`, so the palette groups them |
+| `menus.view/title` | `dormouse.selectShell` then `dormouse.newTerminal`, `when: view == dormouse.view` |
+| `viewsContainers.panel` | `dormouse-panel`, title `Dormouse`, icon `$(terminal)` |
+| `views` | `dormouse.view` in `dormouse-panel`, `type: webview` |
+
+There is no `configuration`, no `keybindings`, and no context key: Dormouse's settings live in its own in-webview Settings dialog rather than in `settings.json`, its chords are handled inside the webview (see the workbench-mirror invariant above), and nothing in the manifest is `when`-gated on Dormouse state. Context keys are [Future](#context-keys).
 
 ### Webview hosting
 
@@ -109,11 +83,12 @@ Extension Host (always running while extension is active)
 
 VS Code-specific consequences:
 
-- Hiding the Dormouse panel doesn't kill its PTYs.
-- VS Code toggling the panel visibility doesn't destroy sessions.
-- Closing a Dormouse editor-tab `WebviewPanel` is different from hiding it:
-  `setupPanel` attaches its router with `killOnDispose: true`, so disposal kills
-  that panel's owned PTYs and VS Code removes the tab's per-panel state.
+- Hiding or toggling the Dormouse panel neither kills its PTYs nor destroys sessions.
+- **Closing an editor-tab `WebviewPanel` is not hiding it.** `setupPanel` attaches
+  its router with `killOnDispose: true`, so disposal kills that panel's owned PTYs
+  and VS Code discards the tab's per-panel state. The `WebviewView` router is
+  attached without that flag: its `onDidDispose` releases the router and leaves the
+  PTYs alive.
 - Multiple VS Code windows each get their own extension host process, and therefore their own pty-host child process.
 
 PTY lifecycle, buffering, the reconnection sequence, and the full message protocol live in `docs/specs/transport.md`.
@@ -158,7 +133,7 @@ renderer-supplied numbers that become host timers.
 
 ### Shell selection
 
-The VS Code view title contributes `Dormouse: Select Shell` and `Dormouse: New Terminal`. The selected shell name is mirrored into the `WebviewView.description`, and `dormouse:selectedShell` keeps the webview's default-shell slot current for split/spawn/restore paths.
+The selected shell name is mirrored into the `WebviewView.description`, and `dormouse:selectedShell` keeps the webview's default-shell slot current for split/spawn/restore paths. `shell-selection.ts` reads `workspaceState` before `globalState` for `dormouse.selectedShellPath`, and a global save clears the workspace value so it cannot shadow the new default.
 
 `dormouse.newTerminal` focuses the Dormouse view and posts `dormouse:newTerminal` with the currently selected shell; the shared Wall selects the new pane and enters passthrough immediately. `dormouse.selectShell` opens a QuickPick, saves the shell path globally or per workspace, applies the description/default-shell update, and, when the picked shell differs from the previous selection, focuses the view and posts `dormouse:newTerminal` with `replaceUntouched: true` and `announce: true`. The shared `Wall` logic then replaces only a selected untouched terminal in-place; touched terminals cause an additional pane to be spawned and focused in passthrough instead.
 
@@ -166,45 +141,55 @@ The QuickPick is the only shell control here: `VSCodeAdapter` sets the optional 
 
 ### Serialization and restore
 
-`WebviewPanelSerializer` is registered so VS Code can restore editor panels after restart:
-
-```
-activationEvents: ["onWebviewPanel:dormouse"]
-```
+A `WebviewPanelSerializer` is registered under the `dormouse` view type so VS Code can restore editor panels after a restart; `onWebviewPanel:dormouse` is what activates the extension early enough for it to be there.
 
 The persisted-session shape (`PersistedSession` / `PersistedPane` / `PersistedAlertState` / `PersistedDoor`) lives in `docs/specs/transport.md`; it is shared with the standalone and fake adapters.
 
-**VS Code persistence flow:**
+**While running.** The frontend saves periodically — debounced 500 ms, plus a 30 s
+heartbeat that only fires when something marked the session dirty — via
+`dormouse:saveState`. The router's `onSaveState` merges in current alert states
+(`mergeAlertStates()`), then the **WebviewView** writes `workspaceState`
+(`dormouse.session`) while **WebviewPanels** persist through VS Code's per-panel
+`vscode.setState()`, so several panels cannot clobber each other. Alert state
+riding every save — not just teardown — is what makes it survive an extension host
+that is killed before `deactivate()` finishes.
 
-1. Frontend saves state periodically (debounced 500ms + 30s interval) via `dormouse:saveState` message.
-2. Router's `onSaveState` callback merges in current alert states via `mergeAlertStates()`.
-3. WebviewView writes to `workspaceState`; WebviewPanels persist via `vscode.setState()` (per-panel, no clobbering).
-4. On deactivate: capture agent recovery commands, then flush all sessions from webviews (1s timeout), then refresh from live PTYs (queries CWD while processes are still alive).
-5. Graceful shutdown: save state → interrupt + capture → SIGTERM → 2s wait → force kill.
-6. On activate: saved state loaded and passed to routers for cold-start restore via `readPersistedSession()` (defined in `docs/specs/transport.md`), which tolerates both parsed objects and JSON-stringified blobs returned by VS Code state APIs. The WebviewView and each deserialized WebviewPanel then claim the recovery commands matching their own pane ids out of the single record written at teardown (`docs/specs/transport.md` → "The recovery command"); neither container owns the record, so resolving first cannot delete the other's commands.
+**On deactivate**, in this order (`extension.ts:deactivate()`):
 
-Step 5 is where recovery is captured, and the ordering is the whole feature: the
-resume hint exists only between the interrupt and the kill, so the step-4 refresh
-(which runs before both) can never contain it. `captureAgentRecoveryCommands`
-writes `^C` into every live PTY, waits bounded for what they print, scans those
-buffers, and records the invocation — then `killAll()` runs
+1. Kick off `closePoppedOutSessions()` — started here but joined after step 2, so
+   its external-process time overlaps the capture instead of serializing behind it.
+   Its rejections are absorbed: throwing out of the join would skip the flush, the
+   refresh, and both kills, leaking the pty host.
+2. `captureAgentRecoveryCommands(context, 1200)`.
+3. `flushAllSessions(1000)` — ask every webview to save now, bounded.
+4. `refreshSavedSessionStateFromPtys()` — re-read CWD while the processes are alive.
+5. `gracefulKillAll(2000)` (SIGTERM, wait), then `killAll()` (force).
+
+**Recovery goes first, and that is the whole feature.** The resume hint exists only
+between the interrupt and the kill, so nothing after step 5 can find it — and VS
+Code kills the extension host on a budget we do not control, one that has never
+once let `[deactivate] done` print. So the one step whose data cannot be
+reconstructed afterwards runs before the steps whose data can (cwd re-reads, alert
+merges). `captureAgentRecoveryCommands` writes `^C` into every live PTY, waits
+bounded for what they print, scans those buffers, and records the invocation to a
+file of its own with a synchronous write — not to `workspaceState`, whose SQLite
+flush is already tearing down by then, and not to `PersistedPane.resumeCommand`,
+which the later step-3 flush would overwrite with the webview's stale copy
 (`docs/specs/transport.md` → "VS Code teardown ordering").
+
+**On activate**, saved state is loaded and passed to routers for cold-start restore
+via `readPersistedSession()` (defined in `docs/specs/transport.md`), which tolerates
+both parsed objects and JSON-stringified blobs returned by VS Code state APIs. The
+WebviewView and each deserialized WebviewPanel then claim the recovery commands
+matching *their own* pane ids out of the single record written at teardown
+(`docs/specs/transport.md` → "Consuming it"); neither container owns the record, so
+resolving first cannot delete the other's commands.
 
 ### Theme integration
 
-Two-layer CSS variable system: VS Code injects `--vscode-*` tokens; `lib/src/theme.css` maps them directly to semantic `--color-*` tokens for use in Tailwind utility classes. The webview entry point installs `installVscodeThemeVarResolver()` before React renders. That resolver reads VSCode-provided variables, materializes only missing Dormouse-consumed variables on `body.style`, and watches `body`/`html` class and style mutations so theme changes recompute those materialized values.
+The two-layer token strategy (`--vscode-*` → semantic `--color-*`), the consumed-token resolver, and its registry defaults are owned by `docs/specs/theme.md` (Runtime model). What is VS Code's here: this is the only host that supplies `--vscode-*` itself, so `lib/src/main.tsx` installs `installVscodeThemeVarResolver()` **before React renders** — it materializes only the *missing* Dormouse-consumed variables onto `body.style`, since `lib/src/theme.css` deliberately carries no hardcoded defaults or fallback chains to fall back on.
 
-Example of the pattern:
-```css
-/* theme.css: direct semantic binding */
---color-app-bg: var(--vscode-sideBar-background);
---color-app-fg: var(--vscode-sideBar-foreground);
---color-header-inactive-fg: var(--vscode-list-inactiveSelectionForeground);
-```
-
-`theme.css` intentionally has no hardcoded color defaults or CSS variable fallback chains. The resolver duplicates VSCode registry defaults for the Dormouse-consumed color IDs, including `null` default behavior where Dormouse needs a concrete CSS variable; the null-default materialization rules (including the `list.inactiveSelectionForeground` case) are owned by `docs/specs/theme.md` (Runtime model).
-
-A `MutationObserver` in `lib/src/lib/terminal-theme.ts` watches for VS Code theme changes — class + style mutations on both `body` and `html` — and live-updates all xterm.js instances. The `terminal-registry.ts` facade still exposes the public lifecycle APIs. The theme resolver has its own observer on the same roots and attributes (`vscode-color-observer.ts`) so derived `--vscode-*` variables stay in sync before xterm rereads the terminal palette.
+A `MutationObserver` in `lib/src/lib/terminal-theme.ts` watches for VS Code theme changes — class + style mutations on both `body` and `html` — and live-updates all xterm.js instances. The theme resolver has its own observer on the same roots and attributes (`lib/src/lib/themes/vscode-color-observer.ts`) so derived `--vscode-*` variables stay in sync before xterm rereads the terminal palette.
 
 `dormouse.debugTheme` focuses the Dormouse WebviewView and posts
 `dormouse:openThemeDebugger` to the webview. `VSCodeAdapter` converts that
@@ -219,13 +204,25 @@ TUIs query the terminal's foreground/background/cursor colors with `OSC 10/11/12
 
 ### CSP policy
 
-Source of truth: `vscode-ext/src/webview-html.ts` assembles the CSP directives (`randomSecret()` + the directive list).
+Source of truth: `vscode-ext/src/webview-html.ts` assembles the CSP directives (`randomSecret()` + the directive list):
 
-**The webview CSP carries no relay sources.** Its `connect-src` is `webview.cspSource` plus loopback `ws:` for the agent-browser stream relay — the remote Host holds its `/ws/host` socket from the *extension host*, which no CSP fences, so the origin allowlist is enforced there instead (see "Remote Host: a service in the extension host").
+```
+default-src 'none'
+style-src   <cspSource> 'unsafe-inline'
+script-src  'nonce-…' 'strict-dynamic'
+font-src    <cspSource>
+img-src     <cspSource> data: blob:
+connect-src <cspSource> ws://127.0.0.1:* ws://localhost:*
+frame-src   http://127.0.0.1:* http://localhost:*
+```
+
+`frame-src` exists because `dor iframe` frames its target through the loopback transparent proxy the extension host stands up, so the only origin ever embedded is loopback on an OS-assigned port; without the override the `default-src 'none'` fallback blocks the frame and leaves a blank white pane (`docs/specs/dor-browser.md`).
+
+**The webview CSP carries no relay sources.** Its `connect-src` loopback `ws:` entries are for the agent-browser stream relay only — the remote Host holds its `/ws/host` socket from the *extension host*, which no CSP fences, so the origin allowlist is enforced there instead (see "Remote Host: a service in the extension host").
 
 That allowlist is still a build-time constant, not a runtime value: `vscode-ext/scripts/esbuild.mjs` substitutes `__DORMOUSE_REMOTE_CONNECT_SRC__` into `dist/extension.js`, defaulting to the SaaS origin (`https://*.dormouse.sh wss://*.dormouse.sh`), and `assertConnectSrcBaked` fails the build if the define did not reach the bundle — a lost define would otherwise surface only as a Host silently using the shipped default. `lib/src/host/remote/connect-src.ts` reads it through `bakedConnectSrc()`, as a `declare const` rather than an import, so the value is a literal in the bundle and nothing at runtime can move it. A selfhoster widens it for their own build with `DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:vscode` — the same variable and the same per-build opt-in as the standalone binary (`docs/specs/server.md` → "Where a Host may reach a relay server").
 
-`unsafe-inline` for styles is needed because VS Code injects theme CSS variables via inline styles on the body element. Scripts remain nonce-gated, with a fresh per-render nonce of 24 CSPRNG bytes (`node:crypto` `randomBytes`) base64url-encoded to 32 characters — a nonce that is guessable is a nonce that is not there, so `Math.random()` is not acceptable here. The webview HTML is built by Vite from the `lib` package, then at runtime `webview-html.ts` rewrites asset URLs to webview URIs, injects the CSP meta tag, applies nonces to every tag that loads a script, and injects initial state via a nonce-gated inline script.
+`unsafe-inline` for styles is needed because VS Code injects theme CSS variables via inline styles on the body element. Scripts remain nonce-gated, with a fresh per-render nonce of 24 CSPRNG bytes (`node:crypto` `randomBytes`) base64url-encoded to 32 characters — a nonce that is guessable is a nonce that is not there, so `Math.random()` is not acceptable here. The webview HTML is built by Vite from the `lib` package; at runtime `webview-html.ts` rewrites asset URLs to webview URIs, injects the CSP meta tag, swaps Vite's nonce placeholder for the real one, and appends a nonce-gated inline script carrying the boot globals (message token, initial state, selected shell, recovery commands).
 
 **A nonce alone does not survive code splitting.** Vite splits the webview bundle, and `script-src` gates each way a chunk loads separately. Two mechanisms cover them, and the split is not negotiable — a nonce is **not** inherited through the module graph, and `'strict-dynamic'` does not vouch for a parser-started fetch:
 
@@ -251,7 +248,7 @@ Why a token rather than checking `event.source`/`event.origin`: a source check w
 
 The guard fails closed in both directions: a webview served without the global accepts nothing, and a host send without a token delivers nothing. Framed content cannot read the parent's globals cross-origin, so it cannot produce the token.
 
-This is the same shape as the origin check the Wall already applies to messages from proxied iframes (`isProxyOrigin` in `lib/src/lib/iframe-proxy-registry.ts`, used by `use-wall-keyboard.ts` and `IframePanel.tsx`) — a small module holding the trust criterion so each listener stays a one-line guard. Those two listeners validate their own senders and are unaffected by the token; the token covers only the adapter's host channel.
+This is the same shape as the origin check the Wall already applies to messages from proxied iframes (`isProxyOrigin` in `lib/src/lib/iframe-proxy-registry.ts`, used by `use-wall-keyboard.ts`; `IframePanel.tsx` compares against its own resolved proxy origin) — the trust criterion lives next to the registry so each listener stays a one-line guard. Those listeners validate their own senders and are unaffected by the token; the token covers only the adapter's host channel.
 
 Scope is VS Code. The standalone adapters receive the equivalent events over Tauri's `listen()` IPC and the dev harness's host WebSocket (`docs/specs/standalone.md`, `docs/specs/transport.md`), never `window.postMessage`, so they have no forgeable inbox to guard.
 
@@ -259,13 +256,13 @@ Source of truth: `lib/src/lib/vscode-message-token.ts` (constants + `isHostMessa
 
 ### Remote Host: a service in the extension host
 
-VS Code is a first-class remote Host, and the Host is not a webview thing. It is `RemoteHostService` — the relay socket, the enrollment, the ACL, the pairing ceremony, and remote-api v1 served through a `HostSurfaceProvider` — running in the extension host, the process that already owns the PTYs. The service itself is shared with the Tauri sidecar and specified elsewhere: `lib/src/host/remote/` for the service, `docs/specs/remote-api.md` for what it speaks. This section covers what is VS Code's: where its state lives, which window runs it, and what the webviews still do.
+VS Code is a first-class remote Host, and the Host is not a webview thing: the shared `RemoteHostService` (`lib/src/host/remote/`, specified in `docs/specs/remote-api.md`) runs in the extension host, the process that already owns the PTYs. This section covers what is VS Code's: where its state lives, which window runs it, and what the webviews still do.
 
 A webview is a **surface responder plus UI**: it answers what its own panes are called and how big its terminals are, renders the pairing modal, and carries the `window.dormouseRemoteHost` console hook. Nothing a webview says can widen access — the ACL and the access decision never leave the extension host (`docs/specs/remote-security-model.md`).
 
 **The store.** The Host's enrollment (`{ serverUrl, hostId, hostToken, origin, rpId }`) and its ACL are split by sensitivity: `hostToken` is a bearer credential that grants the `/ws/host` socket, so the enrollment goes to `SecretStorage` (OS keychain), while the ACL is public-key records with no secret in them and goes to `globalState`. Both are global rather than workspace-scoped, because a Host identity belongs to the machine and not to a folder.
 
-The service reads both **in-process** — no hydration tier, no synchronous write-through cache, no prefix claim, no cross-webview snapshot broadcast. Those existed only because a webview needed a synchronous `local-json-store` view of extension-host state; the store interface (`HostStateStore`) is async because the places state lives are. The enrollment is read once and kept, since `SecretStorage` is a keychain round trip and both the activation probe and the service want the same answer.
+The service reads both **in-process**, and the store interface (`HostStateStore`) is async because the places state lives are. The enrollment is read once and kept, since `SecretStorage` is a keychain round trip and both the activation probe and the service want the same answer.
 
 That memo is only safe because it is invalidated across windows: `SecretStorage` is shared by every window of an extension and `secrets.onDidChange` fires in all of them, so the store drops the memo whenever the enrollment key changes anywhere. Without it a promoted broker could resurrect an enrollment another window cleared, or never see one another window created. The ACL is deliberately **not** memoized — it is read from `globalState` on every load, which is in-process and free. All mutations are serialized in call order; in particular, two rapid pairing approvals write successively larger ACL snapshots, and the older snapshot must not finish last and erase the newer approval on restart. A failed write rejects its caller but does not wedge later mutations. That rule holds for every Host store, so it is one helper (`createSerialQueue` in `lib/src/host/remote/serial-queue.ts`) shared by this store, the sidecar's file store, and the service's own start/stop chain. The same subscription is what lets a window that was un-enrolled at activation join a Host a sibling just created: `initRemoteHost` re-checks on the event and contends then, with no reload.
 
@@ -290,7 +287,7 @@ The invariants are what make this simpler than the heartbeat lease it replaced:
 
 *The directory.* On unix the sockets live in a `dormouse-peer-<uid>` directory created 0700, and before every bind and every connect it is `lstat`-ed and required to be a directory, owned by this uid, at exactly mode 0700, and not a symlink. A loose directory we own is tightened; anything else is somebody else's, no retry makes it ours, and the peer link stands down for good rather than spinning against it (callers waiting on the contention are released rather than left hanging). Windows named pipes carry their own ACL and skip this layer.
 
-*The handshake.* The shared secret is a mode-0600 `remote-host.peer-token` in `globalStorageUri`, created once with an exclusive `wx` write rather than a rename so two windows starting together agree — the loser reads the winner's token instead of overwriting it under a client that already read the old one. `wx` creates the file before it writes the bytes, so the loser's read can land on a zero-length file; an empty read is therefore treated as *not yet written* and waited out (`TOKEN_WRITE_ATTEMPTS` × `TOKEN_WRITE_POLL_MS`) rather than taken as the token. That distinction is load-bearing rather than cosmetic: an empty `serverToken` fails the hello check below for every peer, and a broker never re-reads the token, so a window that adopted `''` would refuse the whole installation for its lifetime while every other window retried at `RETRY_MS` forever. A file still unreadable past the wait takes the stand-down path instead, and latches it: the exclusive create fails with `EEXIST` for a token path that is a *directory* as much as for one another window owns, so exhausting the wait means either a crash-left zero-length file or a `globalStorageUri` this process cannot read — neither of which a retry fixes. The throw re-derives which it was, because the caller's log line is the only diagnosis any of them gets. A `globalStorageUri` where the token can be neither read nor created latches the same permanent stand-down as an unsafe socket directory, for the same reason: it is not a transient failure, and retrying at `RETRY_MS` forever would make every command wait out its whole queue budget on every attempt instead of being told there is nothing to reach. It **never crosses the socket**. Instead three frames prove mutual knowledge of it:
+*The handshake.* The shared secret is a mode-0600 `remote-host.peer-token` in `globalStorageUri`, created once with an exclusive `wx` write rather than a rename so two windows starting together agree — the loser reads the winner's token instead of overwriting it under a client that already read the old one. `wx` creates the file before it writes the bytes, so the loser's read can land on a zero-length file; an empty read is therefore treated as *not yet written* and waited out (`TOKEN_WRITE_ATTEMPTS` × `TOKEN_WRITE_POLL_MS`) rather than taken as the token. That distinction is load-bearing: an empty `serverToken` fails the hello check below for every peer, and a broker never re-reads the token, so a window that adopted `''` would refuse the whole installation for its lifetime while every other window retried at `RETRY_MS` forever. Exhausting the wait means either a crash-left zero-length file or a `globalStorageUri` this process cannot read — the exclusive create answers `EEXIST` for a token path that is a *directory* or unreadable as much as for one another window owns — and neither is fixed by retrying, so it latches the same permanent stand-down as an unsafe socket directory rather than making every command wait out its queue budget on every attempt. The throw re-derives which case it was, because the caller's log line is the only diagnosis any of them gets. The token itself **never crosses the socket**; instead three frames prove mutual knowledge of it:
 
 1. `challenge { nonce }` — the *server* speaks first, on accept. A client that has not yet seen proof of the token must not volunteer one into whatever bound the path.
 2. `hello { nonce, proof }` — the client answers with `HMAC-SHA256(token, "client:" + serverNonce)` and a fresh nonce of its own.
@@ -314,7 +311,7 @@ Two events are pushed rather than answered: `pairing-queue` (the complete queue 
 
 **The relay socket.** `globalThis.WebSocket` arrived in Node 22, and `engines.vscode` here is `^1.85.0` — VS Code 1.85 shipped Node 18, so the supported range spans that boundary and an older extension host has no global to use. The service is therefore constructed with a factory that prefers `globalThis.WebSocket` and falls back to the bundled `ws`, whose socket satisfies exactly the surface `RemoteHost` reads (`send`, `close`, `readyState`, `addEventListener`, `message` events with `.data`, `close` events with `.code`). esbuild inlines `ws` lazily; its optional native accelerators `bufferutil` / `utf-8-validate` are marked external and are neither installed nor shipped — a `.node` addon cannot be bundled — so `ws` falls through its own `try`/`catch` to the JS paths. Source of truth: `createRelaySocket` in `vscode-ext/src/remote-host.ts`, the `external` list in `vscode-ext/scripts/esbuild.mjs`.
 
-**Lifetime.** `retainContextWhenHidden: true` is set on both hosting modes, so hiding the panel keeps a webview's terminals answerable. Closing every Dormouse view no longer takes the Host offline — the service outlives them.
+**Lifetime.** Hiding a panel keeps its terminals answerable (`retainContextWhenHidden`, above), and closing every Dormouse view does not take the Host offline — the service outlives them all.
 
 ### Peer surfaces
 
@@ -344,7 +341,7 @@ Directory answers are snapshots, so the same seam carries invalidation. A webvie
 
 **Attach-is-the-resize goes through the live xterm.** `attach` and `resize` are the same mutating operation on the owner (`docs/specs/remote-api.md`), and both drive the owner's xterm rather than the PTY directly, so the owning pane's own view stays consistent with the size the phone asked for. Cross-window attach first fans out a read-only `resolve`, selects its first answer, then sends the mutating `attach` only to that answer's tier and peer; duplicated cold-restored windows therefore do not both resize before one is selected. The owner replies with the size it settled at plus the `ptyId`; the service then streams that PTY. There is no `detach` op — the service stops streaming on its side and the pane keeps whatever size it was left at, which is what last-attach-wins means.
 
-**Which webview owns a pane never reaches the protocol layer.** `resolveSurface(surfaceId, size)` answers with a `SurfaceHandle` — provider-local `ptyId` routing key, the size it stands at, `resize`, `release` — or `null` if nobody owns it, and `remote-api.ts` holds one of those per attachment. One surface normally has one owner, so the first read-only resolve answer is the answer; when duplicated cold-restored windows temporarily answer for the same ids, the mutating attach and every later handle resize are addressed only to that selected tier/window. A resize nobody answered leaves the last known size standing. The shared half of that provider — the ask-backed directory and the handle construction — is `createAskSurfaceProvider` in `lib/src/host/remote/ask-surface-provider.ts`, so a Host cannot answer an attach differently in VS Code than in standalone.
+**Which webview owns a pane never reaches the protocol layer.** `resolveSurface`/`SurfaceHandle` are defined in `docs/specs/remote-api.md`, and the ask-backed half of the provider is shared with standalone (`createAskSurfaceProvider`). What is VS Code's: one surface normally has one owner, so the first read-only resolve answer is the answer; when duplicated cold-restored windows temporarily answer for the same ids, the mutating attach and every later handle resize are addressed only to that selected tier/window. A resize nobody answered leaves the last known size standing.
 
 **No second strip parser.** The extension host already runs the terminal-protocol parser once per PTY chunk and answers its queries (`message-router.ts`); webviews receive the stripped `visibleData` via `onProcessedPtyData` / `onProcessedPtyExit`, and that is exactly what the service's `streamPty` taps. A second parser here would answer every query twice and corrupt the PTY. (The sidecar, which hands raw bytes to its webview's own parser, does strip — `docs/specs/standalone.md`.)
 
@@ -384,7 +381,7 @@ Source of truth: `vscode-ext/src/peer-link.ts` for the sockets and arbitration; 
 
 `vscode-ext` runs vitest (`pnpm --filter dormouse test`, which typechecks first). The `vscode` module only exists inside a running editor, so `vitest.config.mts` aliases it to a stub. Most modules worth testing import `vscode` as `import type`, which erases; the stub covers what is left, which is the output channel `log.ts` opens and the `Uri.file` that `webview-html.ts` calls at runtime. Nothing else is stubbed on purpose — a test that reaches further should fail loudly rather than pass against a fake that quietly does nothing.
 
-Mostly these are the tests that need real I/O, since the pure halves already live in `lib`. Seven files, all under `vscode-ext/test/`:
+Mostly these are the tests that need real I/O, since the pure halves already live in `lib`. Six suites under `vscode-ext/test/`, plus `helpers.ts` and `vscode-stub.ts`:
 
 - **`peer-link.test.ts`** stands up a broker and a client over a real socket: bind-as-lease (first binder wins, idempotent re-announce, taking over a socket whose broker died without unlinking, re-binding when the reclaimed socket is unlinked out from under it, a reclaimed bind answering no role until it is verified, two windows racing for one corpse settling into a broker and a client, handing the Host to a surviving window when the broker dies, an accept-time server error logged rather than thrown, and the permanent stand-down when the shared token can be neither read nor created), the handshake (the three frames over a raw socket with the token never on the wire, a wrong-token proof dropped, a proof replayed from another connection rejected, and a squatter that took the path being served nothing), the socket directory being kept private, cross-window directory and surface ops, provider-local handles for colliding PTY ids, PTY routing and streaming with two viewers, route survival across unsubscribe and re-attach, what a disconnect does to in-flight terminals, forwarded commands, and requests still outstanding against it, and that a client whose socket died reports *unsettled* before its `close` lands, so it agrees with `forwardCommand`.
 - **`peer-link-protocol.test.ts`** is that link's socket-free half: frame shapes and framing (splits, oversized frames, malformed lines), the PTY routing table, the handshake proof primitives, and the guard that keeps `PEER_REPLY_BUDGET_MS` strictly larger than the `ASK_BUDGET_MS` fan-out it contains.
@@ -458,9 +455,10 @@ vscode.commands.executeCommand('setContext', 'dormouse.mode', 'command');
 
 ### Commands
 
+Palette/keybinding entry points for what today is webview-only. Shipped commands are in the manifest table above.
+
 | Command | Description |
 |---------|-------------|
-| `dormouse.focus` | Focus the Dormouse panel view |
 | `dormouse.newPane` | Split a new pane in Dormouse |
 | `dormouse.closePane` | Close the focused pane |
 | `dormouse.nextPane` | Focus next pane |

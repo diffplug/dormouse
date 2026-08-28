@@ -15,12 +15,8 @@ function findPaneHeaderForSession(id: string): HTMLElement | null {
   return document.querySelector<HTMLElement>(`[data-pane-header-for="${CSS.escape(id)}"]`);
 }
 
-/**
- * Single-pane shortcuts: Enter (focus/reattach), `|`/`%`/`-`/`"` (split),
- * Cmd-Arrow (swap with neighbor), k/x (kill confirm), `,` (rename),
- * m/d (minimize), t/a (todo/alert toggle), z (zoom + passthrough focus),
- * `>` (open the selected pane's header context menu).
- */
+/** Command-mode shortcuts acting on the selected pane or Door. The binding
+ *  table is `docs/specs/shortcuts.md`; the behavior is `docs/specs/layout.md`. */
 export function handlePaneShortcuts(
   e: KeyboardEvent,
   ctx: WallKeyboardCtx,

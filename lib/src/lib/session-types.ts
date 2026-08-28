@@ -239,8 +239,8 @@ function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession 
   const { surfaceRefs: _rawRefs, surfaceRefsNext: _rawNext, ...rest } = session;
   // A transcript — or a `resumeCommand` — in a pre-upgrade blob is dropped here
   // and cannot survive into a parsed Session; the one place that guarantees no
-  // reader hands either to a writer (docs/specs/transport.md -> "Retiring the
-  // transcripts already on disk").
+  // reader hands either to a writer (docs/specs/transport.md -> "What is
+  // persisted").
   //
   // Named as a deny-list rather than rebuilt from an allow-list, because the scrub
   // is the special case and the carry-through is the rule: an allow-list makes

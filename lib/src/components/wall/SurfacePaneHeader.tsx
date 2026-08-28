@@ -57,9 +57,9 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
   const actions = useContext(WallActionsContext);
   const isActiveHeader = mode === 'passthrough' && selectedId === id && windowFocused;
 
-  // Presence of a screen controller for this pane is exactly what marks it an
-  // agent-browser surface — terminals/iframes never register one, so the whole
-  // browser chrome (nav + URL + connection) is strictly scoped to it.
+  // Presence of a screen controller for this pane is exactly what marks it a
+  // browser surface — both renderers register one, terminals never do, so the
+  // whole browser chrome (nav + URL + connection) is strictly scoped to it.
   const screen = useAgentBrowserScreenController(id);
   const screenSnapshot = useAgentBrowserScreenSnapshot(screen);
   const chrome = useAgentBrowserChromeSnapshot(screen);

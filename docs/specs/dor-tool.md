@@ -1,10 +1,8 @@
 # Dor Tools
 
-> Status: design — the capability gating (phase A) is implemented; everything
-> else lives under [Future](#future) per the spec lifecycle. The design is
-> written ahead of the code because its vocabulary (the terminal/browser
-> capability split, OSC 367, the announce contract) constrains adjacent specs
-> as they evolve.
+> Status: design. The `tool` Surface does not exist yet; the only implemented
+> piece is the shared capability gating below. Everything else is under
+> [Future](#future).
 
 > See `docs/specs/glossary.md` for canonical Surface / Session / Pane
 > vocabulary. Builds on `docs/specs/dor-cli.md` (surface handles, the `ensure`
@@ -19,29 +17,34 @@ typing. No SDK, no protocol: print one escape sequence, read one env var.
 
 ## Capability gating
 
-Phase A of the ledger below is implemented: nothing in it is `tool`-specific,
-so it is documented where it belongs rather than restated here. The
-capability model and its predicates are owned by `docs/specs/glossary.md` →
-Panes and Surfaces; the `dor list --json` row fields and the matching
-`has no terminal` / `has no browser` failures by `docs/specs/dor-cli.md` →
-`dor list`.
+Phase A of the ledger below is implemented, and nothing in it is
+`tool`-specific, so it is documented where it belongs rather than restated
+here: the capability model and its `hasTerminal` / `hasBrowser` predicates in
+`docs/specs/glossary.md` → Panes and Surfaces, the `dor list --json`
+`has_terminal` / `has_browser` row fields and the matching `has no terminal` /
+`has no browser` failures in `docs/specs/dor-cli.md` → `dor list`.
+
+Source of truth: `dor/src/commands/types.ts` (the `KIND_CAPABILITIES` table
+both predicates read, and `SURFACE_KINDS` derived from it so `--kind` parsing
+cannot drift), `dor/src/commands/list.ts`,
+`lib/src/components/wall/use-dor-control.ts` (`requireTerminalSurface` /
+`requireBrowserSurface`, the host-side gates that emit those failures).
+
 What this spec still owes is the kind that has both — see
 [The tool capability set](#the-tool-capability-set).
 
 ## Future
 
-**Scope: dor-tools** — what remains, staged. Each phase is one PR, and each
-PR's job includes promoting its slice above the fold. (Phase A — the
-capability refactor — is implemented; see
+**Scope: dor-tools** — what remains, staged, one phase per PR. (Phase A, the
+capability refactor, is implemented; see
 [Capability gating](#capability-gating).)
 
 - **B — `dor open`.** User-level table + dispatch only: entries resolve to a
   terminal command (the `ensure`/`split` machinery) or an existing **browser
   surface** pointing at a host-served viewer page (the iframe-proxy path). No
   OSC, no atom, **nothing new persisted** — viewers are plain browser
-  surfaces, so C1 requires zero snapshot migration. VS Code routes `dor open`
-  to the native editor and reports which route it took (complete here,
-  permanently for v1).
+  surfaces, so C1 requires zero snapshot migration. The VS Code route (see
+  [The table](#the-table)) is complete here, permanently for v1.
 - **C0 — OSC 367 + header chip.** Parse/strip/register/sanitize for the serve
   verb, plus the inert header-chip affordance in ordinary terminals
   (announcement lights a chip; clicking connects via the existing port-connect
@@ -75,13 +78,11 @@ capability refactor — is implemented; see
 
 ### The tool capability set
 
-The capability vocabulary, predicates, and gating are live (see
-[Capability gating](#capability-gating)). What remains is the kind that has
-both: `tool` = terminal + browser. Verbs stay capability-gated: `read` / `send` / `await` / `--port`
-require a terminal; nav/render/ab verbs require a browser and stay
-renderMode-gated exactly as for browser Surfaces (an iframe-rendered tool
-cannot be agent-driven). `kill` / `rename` stay universal. Kinds remain
-**disjoint** for `dor list --kind`.
+`tool` = terminal + browser, the third kind added to the live gating. Verbs
+stay gated on the capability they need, exactly as glossary.md defines it, and
+the browser verbs stay renderMode-gated as for browser Surfaces (an
+iframe-rendered tool cannot be agent-driven). `kill` / `rename` stay universal.
+Kinds remain **disjoint** for `dor list --kind`.
 
 - **Identity**: a tool Surface's id is its SessionId (I1 extends to tools).
   Capabilities and render modes change over its life without changing identity
@@ -240,11 +241,11 @@ Two sections: named tools (name → command template) and glob rules (pattern �
 tool name). Entries may dispatch to plain terminal commands (`*.*` → a pager) —
 the atom is minted by the announcement, not by the table.
 
-Hosts: standalone runs the real pipeline behind the flag; VS Code v1 routes
-`dor open` to the native editor (an in-pane md/code viewer competes with the
-editor, which the native-first principle forbids) and reports which route it
-took — an agent in VS Code loses sight of what it opened, which is accepted for
-v1 and is the eventual argument for the full pipeline there.
+Hosts: VS Code v1 routes `dor open` to the native editor (an in-pane md/code
+viewer competes with the editor, which the native-first principle forbids) and
+reports which route it took — an agent in VS Code loses sight of what it
+opened, which is accepted for v1 and is the eventual argument for the full
+pipeline there.
 
 ### Security
 
@@ -274,22 +275,22 @@ cannot see.
 
 ### Persistence and hosts
 
-`PersistedPane` gains `surfaceType: 'tool'`; params
+`PersistedSurfaceType` gains `'tool'`; params
 `{command, args, cwd, renderMode, url?, identity?, persist?}`
-(`docs/specs/transport.md` owns the persisted shapes; `lib/src/lib/session-types.ts`).
-The dehydrated payload is in-session state, not part of the persisted params
-(see Dehydrate and rehydrate). Cold restore follows each host's
-session-restore story: where sessions restore, `persist: "never"` rows are
-dropped silently (a clock, a calculator) and the default respawns from bare
+(`docs/specs/transport.md` owns the persisted shapes;
+`lib/src/lib/session-types.ts`). The dehydrated payload is in-session state,
+not part of the persisted params (see
+[Dehydrate and rehydrate](#dehydrate-and-rehydrate)). Cold restore follows each
+host's session-restore story: where sessions restore, `persist: "never"` rows
+are dropped silently (a clock, a calculator) and the default respawns from bare
 args — the args-only floor is what makes taking no position on quit/restore
-safe. Remote: the terminal is
-a Session and rides protocol-v1 as-is; the browser inherits the staged
-browser-surface gap.
+safe. Remote: the terminal is a Session and rides protocol-v1 as-is; the
+browser inherits the staged browser-surface gap.
 
 ### Open questions
 
-The OSC-367 collision sweep before freezing; the dehydrate idle-threshold
-default; whether `persist` belongs in the announce or the table (currently the
-announce — self-knowledge, like identity); the final marketing noun ("Dor
-Tools" carries the LLM-tool-use collision-avoidance; the spec says "tool"
-throughout).
+Beyond the two raised inline (the [OSC 367](#osc-367) collision sweep, the
+Windows graceful-stop): the dehydrate idle-threshold default; whether `persist`
+belongs in the announce or the table (currently the announce — self-knowledge,
+like identity); the final marketing noun ("Dor Tools" carries the
+LLM-tool-use collision-avoidance; the spec says "tool" throughout).

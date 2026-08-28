@@ -1,5 +1,5 @@
-// LathHost — the HTML adapter for Lath (docs/specs/tiling-engine.md → "Adapters;
-// the HTML adapter (LathHost)"). The only non-headless piece of the engine: it
+// LathHost — the HTML adapter for Lath (docs/specs/tiling-engine.md → "The HTML
+// adapter (LathHost)"). The only non-headless piece of the engine: it
 // subscribes to the store, runs the pure `layout`/`sashes` per render, and paints
 // one stable absolutely-positioned div per leaf.
 //
@@ -516,7 +516,7 @@ export function LathHost({
   }, []);
 
   // --- Animation: imperatively apply the animator's interpolated frames to the leaf
-  // divs (docs/specs/tiling-engine.md → "Animation contract"). React renders the
+  // divs (docs/specs/tiling-engine.md → "Animation"). React renders the
   // TARGET geometry; these writes override it while a tween/fade is in flight. ---
 
   const rafRef = useRef<number | null>(null);

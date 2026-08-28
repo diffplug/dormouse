@@ -402,8 +402,9 @@ export function useDorControl({
     callerSurfaceId: string | undefined,
   ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaceList(), target, callerSurfaceId), [buildDorSurfaceList]);
 
-  // The shared prelude of the direct-operation handlers (send / read / kill): a
-  // target surface is required and must resolve against the listed surfaces.
+  // The shared prelude of every handler that acts on an existing surface
+  // (send / read / await / kill / resolve*): a target surface is required and
+  // must resolve against the listed surfaces — minimized ones included.
   // Responds with the failure and returns null so the caller just bails.
   const requireListedSurface = useCallback((
     surfaceParam: unknown,

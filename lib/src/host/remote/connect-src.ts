@@ -1,6 +1,6 @@
 /**
  * Where a Host is allowed to reach a relay server, enforced in the process that
- * holds the socket (docs/specs/server.md → "Host webview CSP").
+ * holds the socket (docs/specs/server.md → "Where a Host may reach a relay server").
  *
  * The allowlist is written as a CSP source list because that is what it used to
  * be: while the Host lived in a webview, `connect-src` was the enforcement. A

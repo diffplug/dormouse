@@ -29,7 +29,7 @@ type Resolution =
   | { kind: 'resolving' }
   | { kind: 'proxied'; src: string; origin: string }
   // The host can't run a proxy (e.g. the web host) — keep the blind raw-iframe
-  // fallback rather than hiding the surface (Open Decision #4).
+  // fallback rather than hiding the surface.
   | { kind: 'raw'; src: string }
   | { kind: 'error'; reason: 'unreachable' | 'scheme'; detail?: string };
 
@@ -290,8 +290,8 @@ export function IframePanel({ id, title, params }: PaneProps) {
   }, [id, resolution.kind, actions]);
 
   // Register a focus handle so onClickPanel → enterTerminalMode can focus the
-  // frame like any other surface (spec → "#3"), and exitTerminalMode can hand
-  // focus back. Focusing the element moves keyboard focus into the frame.
+  // frame like any other surface, and exitTerminalMode can hand focus back.
+  // Focusing the element moves keyboard focus into the frame.
   useEffect(() => {
     if (resolution.kind !== 'proxied' && resolution.kind !== 'raw') return;
     return registerSurfaceFocusHandle(id, {

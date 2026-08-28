@@ -341,9 +341,8 @@ export default function App(): React.ReactElement {
       setPairedIds((prev) => new Set(prev).add(host.hostId));
     });
 
-  // The VAPID key was prefetched before this action becomes available, so the
-  // permission prompt has no network round trip in front of it — iOS drops the
-  // transient activation required by requestPermission across one.
+  // Must stay free of network round trips before the permission prompt — see
+  // the prefetch effect above.
   const onEnablePush = (host: HostView) =>
     run('push', async () => {
       if (pushConfig.status !== 'ready') {
@@ -566,9 +565,10 @@ function InstallNotice(): React.ReactElement {
 }
 
 /**
- * The setup-password + label pair and its submit button, shared by the auth
- * screen and the local-passkey notice — the same credential form in two places,
- * so its ids, autocomplete rules, and disabled logic have one definition.
+ * The setup-password + label pair and its submit button. Kept separate from its
+ * caller so the credential form's ids, autocomplete rules, and disabled logic
+ * have one definition; `idPrefix` keeps those ids unique if it is ever rendered
+ * more than once on a screen.
  */
 function PasskeySetupFields({
   idPrefix,

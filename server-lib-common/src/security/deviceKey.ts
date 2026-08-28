@@ -31,8 +31,11 @@ export interface DeviceKeyPair {
 
 /**
  * Generate a Client device keypair. The private key is non-extractable; the
- * browser side is expected to persist the `CryptoKey` objects in IndexedDB
- * (with `navigator.storage.persist()`) rather than exporting anything.
+ * browser side is expected to persist the `CryptoKey` objects themselves in
+ * IndexedDB (`lib/src/remote/client/device-key.ts`) rather than exporting
+ * anything. Asking for `navigator.storage.persist()` is staged
+ * (docs/specs/remote-security-model.md -> Future), so retention is currently
+ * best-effort — see that spec's Storage Durability.
  */
 export async function generateDeviceKeyPair(
   crypto: WebCryptoLike = getWebCrypto(),

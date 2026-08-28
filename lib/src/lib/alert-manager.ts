@@ -923,7 +923,6 @@ export class AlertManager {
     }, this.inactivityTimeoutMs);
   }
 
-  /** Mark that the user is paying attention to this session. */
   attend(id: string): void {
     const entry = this.getOrCreateEntry(id);
     this.setAttention(id);

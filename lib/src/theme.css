@@ -35,11 +35,8 @@
   --text-sm: 0.75rem;           /*  12px */
   --text-sm--line-height: 1rem;
 
-  /* Surfaces — bg-only:
-   *   --color-app-bg           (chrome host)    sideBar.background
-   *   --color-terminal-bg                       terminal.background
-   *   --color-header-inactive-bg                list.inactiveSelectionBackground
-   *   --color-header-active-bg                  list.activeSelectionBackground */
+  /* Surfaces — bg-only chrome; surface-raised is for floating surfaces only
+   * (popovers, dialogs), never resting structure. See docs/specs/theme.md. */
   --color-surface-raised: var(--vscode-editorWidget-background);
   --color-app-bg: var(--vscode-sideBar-background);
   --color-app-fg: var(--vscode-sideBar-foreground);
@@ -51,17 +48,15 @@
   /* Borders */
   --color-border: var(--vscode-panel-border);
 
-  /* Chrome palette — anchored on VSCode file-tree list.* tokens. Panel
-   * headers and doors use only these four tokens. The focus ring (marching-
-   * ants + passthrough border) prefers VSCode's focusBorder and falls back to
-   * the focused header background when focusBorder is not usable. */
+  /* Chrome palette — anchored on VSCode file-tree list.* tokens. Pane headers
+   * use these four; doors take the dynamic pair below. */
   --color-header-active-bg: var(--vscode-list-activeSelectionBackground);
   --color-header-active-fg: var(--vscode-list-activeSelectionForeground);
   --color-header-inactive-bg: var(--vscode-list-inactiveSelectionBackground);
   --color-header-inactive-fg: var(--vscode-list-inactiveSelectionForeground);
 
-  /* Dynamic palette — Wall overrides these on body at runtime from the shared
-   * dynamic-palette helper, picking by OKLab distance/chroma.
+  /* Dynamic palette — useDynamicPalette() overrides these on body at runtime
+   * from the shared dynamic-palette helper, picking by OKLab distance/chroma.
    *
    *   --color-door-*    pick: (header-inactive bg/fg) or (terminal bg/fg)
    *   --color-focus-ring  pick: focusBorder or header-active-bg */
@@ -77,15 +72,15 @@
   --color-error: var(--vscode-terminal-ansiRed);
   --color-success: var(--vscode-terminal-ansiGreen);
 
-  /* Alarm — per-surface, computed at runtime by use-dynamic-palette.ts from the
-   * bg the bell sits on (OkLCH hue rotation + max chroma). The fallback below
-   * is shown only before the dynamic pass runs. */
+  /* Alarm — per-surface black/white contrast pick, computed at runtime by
+   * dynamic-palette.ts from the OKLab lightness of the bg the bell sits on.
+   * The binding below is only the baseline before the dynamic pass runs. */
   --color-alarm-vs-header-active: var(--vscode-terminal-ansiYellow);
   --color-alarm-vs-header-inactive: var(--vscode-terminal-ansiYellow);
   --color-alarm-vs-door: var(--vscode-terminal-ansiYellow);
   --color-alarm-vs-terminal: var(--vscode-terminal-ansiYellow);
 
-  /* Inputs — used by ThemePicker */
+  /* Inputs — theme picker chrome and the Pocket auth fields */
   --color-input-bg: var(--vscode-input-background);
   --color-input-border: var(--vscode-input-border);
 

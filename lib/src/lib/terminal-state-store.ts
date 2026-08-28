@@ -134,8 +134,8 @@ export function applyTerminalSemanticEvents(
   options?: { keystrokeHeuristic?: boolean },
 ): void {
   if (events.length === 0) return;
-  // Real OSC boundaries (not the heuristic's own synthesized prompt markers)
-  // promote the pane to OSC-driven, retiring the keystroke fallback for it.
+  // `keystrokeHeuristic` marks the fallback's own synthesized markers, which must
+  // not promote the pane — that would retire the very path emitting them.
   if (!options?.keystrokeHeuristic && !oscDrivenPanes.has(id) && events.some(isOscDrivenBoundary)) {
     oscDrivenPanes.add(id);
   }

@@ -65,13 +65,10 @@ function highlightKeys(line: string): string {
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const SPINNER_INTERVAL_MS = 100;
 
-/**
- * Static "your turn" pointer for the active section item. Animating this
- * would feed the activity monitor on whichever pane the runner lives on,
- * so the bell on a pane that hosts the runner could never reach the
- * RINGING state — the quiesce detector only rings after a stretch of
- * silence. A static glyph keeps the pane quiet between user actions.
- */
+/** Static "your turn" pointer for the active section item — deliberately not
+ *  animated, so the checklist doesn't compete for attention with the bell the
+ *  Alerts section is teaching. (Runner frames are written with
+ *  `skipActivity`, so animation would no longer tilt the bell either way.) */
 const ACTIVE_ITEM_GLYPH = "●";
 const STAR_PROMPT_TITLE = "Starred on GitHub";
 const FLAPPY_TITLE = "🐭 FlappyTerm 🐭";

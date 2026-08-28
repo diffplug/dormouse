@@ -224,5 +224,3 @@ export class Handshake implements HandshakeGate {
     return { ok: true };
   }
 }
-
-

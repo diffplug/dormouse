@@ -101,7 +101,6 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     return () => ro.disconnect();
   }, []);
 
-  // Measure door widths from hidden elements — re-measures when items change
   const measureEl = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
@@ -131,13 +130,11 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     setStartIndex(0);
   }, [itemKey]);
 
-  // Keyboard shortcut hint — only show when there's enough space and no doors
   const shortcutHint = IS_MAC
     ? 'LCmd → RCmd to enter command mode'
     : 'LShift → RShift to enter command mode';
   const showHint = items.length === 0 && containerWidth > 350;
 
-  // Calculate which doors fit
   // contentRect.width already excludes container padding
   const availableWidth = containerWidth;
   let visibleCount = 0;
@@ -153,7 +150,6 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
 
     for (let i = startIndex; i < items.length; i++) {
       const doorW = (widths[i] || 100) + (visibleCount > 0 ? doorGap : 0);
-      // Reserve space for right arrow if there are more items after this one
       const needsRightArrow = i + 1 < items.length;
       const rightReserve = needsRightArrow ? arrowWidth : 0;
 

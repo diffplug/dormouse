@@ -7,7 +7,7 @@
 // `vscode-ext/scripts/esbuild.mjs`), where the service refuses any origin
 // outside it. The *fact* is one fact — duplicating it meant a change to the
 // SaaS origin could ship one Host pointed at the old one. See
-// docs/specs/server.md → "Host webview CSP".
+// docs/specs/server.md → "Where a Host may reach a relay server".
 
 import { readFileSync } from 'node:fs';
 

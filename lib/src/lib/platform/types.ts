@@ -254,11 +254,10 @@ export interface PlatformAdapter {
   // Captures a single device-resolution (HiDPI) frame via the user's
   // agent-browser `screenshot` command and returns the raw image bytes. The
   // stream's screencast is CSS-resolution only (a Chromium limitation —
-  // Page.startScreencast ignores deviceScaleFactor), so the panel displays
-  // these crisp screenshots instead, using stream frames only as change
-  // signals. Absent on hosts that can't run the binary — the panel then shows
-  // only the placeholder (frame bytes are discarded; there is no frame-drawing
-  // fallback).
+  // Page.startScreencast ignores deviceScaleFactor), so the panel settles on
+  // these crisp screenshots, painting stream frames provisionally for latency.
+  // Absent on hosts that can't run the binary — the panel then keeps every
+  // changed stream frame as its final, lower-resolution image.
   agentBrowserScreenshot?(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotResult>;
   // Reads the current stream port for an already-running session. This is a
   // purpose-built status channel, not part of agentBrowserCommand's allowlist,

@@ -658,8 +658,6 @@ export function MobileTerminalUi({
 
   useEffect(() => clearGestureCompletionTimer, [clearGestureCompletionTimer]);
 
-  // Cancel any pending blur retries on unmount so they can't run against a
-  // torn-down DOM.
   useEffect(() => cancelBlurRetries, [cancelBlurRetries]);
 
   const handlePanePointerDownCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {

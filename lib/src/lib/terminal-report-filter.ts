@@ -43,9 +43,10 @@ export function stripMouseReportsFromInput(data: string): string {
 // SGR/urxvt mouse encoding, alt-screen, hidden cursor, application cursor keys —
 // and replaying it verbatim re-applies those DECSETs with no process alive to
 // ever DECRST them. This tail returns the terminal to a sane baseline for the
-// freshly spawned shell. Callers decide when it applies (dead restore/resume
-// only, never a live resume); see docs/specs/terminal-escapes.md
-// §Replay-time mode-reset tail. The mouse-encoding DECRSTs (?1005/?1006/?1015)
+// freshly spawned shell. It rides along with a replay, so the one caller is a
+// dead resume — never a live one, where the running process owns its modes; see
+// docs/specs/terminal-escapes.md §Replay-time mode-reset tail. The
+// mouse-encoding DECRSTs (?1005/?1006/?1015)
 // aren't surfaced by `terminal.modes` but xterm's parser consumes them.
 export const REPLAY_MODE_RESET =
   `${ESC}?1049l${ESC}?47l${ESC}?1047l` + // exit alt-screen (current + legacy variants)
