@@ -7,65 +7,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { createServer } from 'node:net';
 import { mkdtemp, readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 import { readConfig } from '../dist/config.js';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const ENTRYPOINT = join(here, '..', 'dist', 'index.js');
-
-function freePort() {
-  return new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.on('error', reject);
-    probe.listen(0, '127.0.0.1', () => {
-      const { port } = probe.address();
-      probe.close(() => resolve(port));
-    });
-  });
-}
-
-async function startServer(extraEnv) {
-  const port = await freePort();
-  const stateDir = await mkdtemp(join(tmpdir(), 'dormouse-runtime-'));
-  const child = spawn(process.execPath, [ENTRYPOINT], {
-    env: {
-      ...process.env,
-      DORMOUSE_SETUP_PASSWORD: 'correct horse battery staple',
-      DORMOUSE_STATE_DIR: stateDir,
-      DORMOUSE_POCKET_DIR: join(stateDir, 'no-pocket-build'),
-      DORMOUSE_BIND_HOST: '127.0.0.1',
-      PORT: String(port),
-      ...extraEnv,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('server did not report listening')), 15_000);
-    child.stdout.on('data', (chunk) => {
-      if (String(chunk).includes('server listening')) {
-        clearTimeout(timer);
-        resolve();
-      }
-    });
-    child.on('exit', (code) => {
-      clearTimeout(timer);
-      reject(new Error(`server exited early with ${code}`));
-    });
-  });
-  return { child, port, stateDir };
-}
-
-async function stop(child) {
-  if (child.exitCode !== null) return;
-  child.kill('SIGTERM');
-  await new Promise((resolve) => child.on('exit', resolve));
-}
+import { startServer, stopServer } from './spawn-server.mjs';
 
 test('a bound server records its pid, release and port, owner-only', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dormouse-rt-'));
@@ -98,7 +45,7 @@ test('a bound server records its pid, release and port, owner-only', async () =>
     const mode = (await stat(runtimeFile)).mode & 0o777;
     assert.equal(mode, 0o600, `expected 0600, got 0${mode.toString(8)}`);
   } finally {
-    await stop(child);
+    await stopServer(child);
   }
 });
 
@@ -110,7 +57,7 @@ test('nothing is written when no installer asked for it', async () => {
     await new Promise((r) => setTimeout(r, 500));
     await assert.rejects(readFile(runtimeFile, 'utf8'), /ENOENT/);
   } finally {
-    await stop(child);
+    await stopServer(child);
   }
 });
 

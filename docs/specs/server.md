@@ -1007,7 +1007,7 @@ Mechanical traps the scripts encode, each of which fails silently otherwise:
   installer parses `systemctl --version` and refuses below 240 rather than
   installing a unit whose logging silently lies.
 
-The installers carry three test-only hooks, each refused unless
+The installers carry two test-only hooks, each refused unless
 `DORMOUSE_INSTALL_TEST=1`: `DORMOUSE_INSTALL_ROOT` puts the whole install under
 a throwaway path, and — Linux only — `DORMOUSE_INSTALL_ORIGIN` supplies the
 origin so Tailscale is never consulted. That last one is what lets CI run the

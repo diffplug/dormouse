@@ -36,11 +36,12 @@
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
 
 /** The three shipped installers, by the platform name the specs use. */
-const INSTALLERS = [
+export const INSTALLERS = [
   { platform: 'macOS', file: 'deploy/local/install-macos.sh' },
   { platform: 'Windows', file: 'deploy/local/install-windows.ps1' },
   { platform: 'Linux', file: 'deploy/local/install-linux.sh' },
@@ -50,8 +51,20 @@ const INSTALLERS = [
  * One entry per `FAIL IF` clause this can see. `pattern` is matched against the
  * whole file; `skip` names platforms the rule does not apply to, with a reason
  * that has to be stated rather than implied.
+ *
+ * Every pattern must be anchored on the control's OWN text — a message it
+ * prints, a comparison it makes — never on an identifier that appears
+ * elsewhere in the file. A review found three rules satisfied by an unrelated
+ * occurrence: `\b64\b` matched two `exit 64` lines and the entropy guard's own
+ * explanatory comment, so the prose about the rule survived deleting the rule.
+ * `scripts/deploy-lint-selftest.mjs` is what keeps that honest: it removes each
+ * matched control in turn and requires this lint to fail.
+ *
+ * `minMatches` is for a control the installer writes twice on purpose — once in
+ * its own body and once into the generated `manage` — where matching only one
+ * would let the other be deleted silently.
  */
-const RULES = [
+export const RULES = [
   {
     // The *refusal*, not the value: the literal `DORMOUSE_BIND_HOST=127.0.0.1`
     // also appears in the env-file heredoc, so matching it would keep passing
@@ -72,19 +85,27 @@ const RULES = [
     },
   },
   {
+    // Anchored on each guard's own comparison. `-ge 64` occurs exactly once in
+    // either shell installer, but a bare /64/ on Windows also matched two
+    // `exit 64` argument-parse lines and the guard's *explanatory comment* —
+    // so the prose about the rule survived deleting the rule.
     rule: 'Credentials at rest — the entropy guard counts 64 hex characters, not 32',
     patterns: {
       macOS: /-ge 64/,
       Linux: /-ge 64/,
-      Windows: /\b64\b/,
+      Windows: /\$SETUP_PASSWORD\.Length -lt 64/,
     },
   },
   {
+    // Anchored on the failure message, not the identifier: the latter also
+    // appears in the env heredoc, in `show-password`, and in the candidate
+    // probe's throwaway password, so deleting the whole check left it green.
+    // The character class covers the Windows copy, which says `config\\server.env`.
     rule: 'Credentials at rest — manage verify fails when the service definition carries the password',
     patterns: {
-      macOS: /DORMOUSE_SETUP_PASSWORD/,
-      Linux: /DORMOUSE_SETUP_PASSWORD/,
-      Windows: /DORMOUSE_SETUP_PASSWORD/,
+      macOS: /it must live only in config[\\/]server\.env/,
+      Linux: /it must live only in config[\\/]server\.env/,
+      Windows: /it must live only in config[\\/]server\.env/,
     },
   },
   {
@@ -96,11 +117,13 @@ const RULES = [
     },
   },
   {
+    // Anchored on the refusal itself. `id -u` also appears in the user-manager
+    // preflight and in `owner_only`, and `Administrator` six times in ACL prose.
     rule: 'Network posture — the installer refuses to run privileged',
     patterns: {
-      macOS: /id -u/,
-      Linux: /id -u/,
-      Windows: /Administrator/,
+      macOS: /do not run this as root/,
+      Linux: /do not run this as root/,
+      Windows: /IsInRole\(\[Security\.Principal\.WindowsBuiltInRole\]::Administrator\)/,
     },
   },
   {
@@ -112,27 +135,36 @@ const RULES = [
     },
   },
   {
+    // Anchored on the two paths that matter. A bare `chmod 0700` also matches
+    // `run-server`, `manage` and the probe state dir, and `Protect-Path` has
+    // six hits, so relaxing config/+state/ to 0755 passed.
     rule: 'Credentials at rest — config/ and state/ are created owner-only',
     patterns: {
-      macOS: /chmod 0700/,
-      Linux: /chmod 0700/,
-      Windows: /Protect-Path/,
+      macOS: /chmod 0700 "\$CONFIG_DIR" "\$STATE_DIR"/,
+      Linux: /chmod 0700 "\$CONFIG_DIR" "\$STATE_DIR"/,
+      Windows: /Protect-Path -Path \$CONFIG_DIR -Directory/,
     },
   },
   {
+    // Anchored on the comparison, not the helper's name — the name appears at
+    // its definition and at every call site, so removing the check that
+    // consumes it left this green. Linux writes the conjunct twice (installer
+    // body and generated `manage`) and both must survive.
     rule: 'A 200 does not say who answered — health is paired with a release-identity check',
     patterns: {
-      macOS: /listening_release/,
-      Linux: /listening_release/,
-      Windows: /Get-ListeningRelease/,
+      macOS: /\[ "\$\(listening_release "\$PORT"\)" = "\$want" \]/,
+      Linux: /&& \[ "\$\(listening_release "\$(?:LOOPBACK_)?PORT"\)" = "\$1" \]/,
+      Windows: /\$listening -ne \$RELEASE_ID/,
     },
+    minMatches: { Linux: 2 },
   },
 ];
 
-const failures = [];
-let checked = 0;
+export function check() {
+  const failures = [];
+  let checked = 0;
 
-for (const { rule, patterns, skip = {} } of RULES) {
+  for (const { rule, patterns, skip = {}, minMatches = {} } of RULES) {
   for (const { platform, file } of INSTALLERS) {
     if (platform in skip) continue;
     const pattern = patterns[platform];
@@ -148,22 +180,31 @@ for (const { rule, patterns, skip = {} } of RULES) {
       failures.push(`${rule}\n    ${file}: missing`);
       continue;
     }
-    if (!pattern.test(text)) {
-      failures.push(`FAIL IF ${rule}\n    ${file} no longer matches ${pattern}`);
+    const want = minMatches[platform] ?? 1;
+    const found = text.match(new RegExp(pattern.source, `${pattern.flags.replace('g', '')}g`));
+    if ((found?.length ?? 0) < want) {
+      failures.push(
+        `FAIL IF ${rule}\n    ${file} matches ${pattern} ${found?.length ?? 0}x, expected at least ${want}`,
+      );
     }
   }
+  }
+
+  return { failures, checked };
 }
 
-if (failures.length > 0) {
-  console.error('deploy-lint: the installers no longer hold controls SECURITY.md requires\n');
-  for (const failure of failures) console.error(`  ${failure}\n`);
-  console.error(
-    'Each line above maps to a FAIL IF in SECURITY.md. If a control moved rather than\n' +
-      'disappeared, update the pattern in scripts/deploy-lint.mjs in the same commit.',
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const { failures, checked } = check();
+  if (failures.length > 0) {
+    console.error('deploy-lint: the installers no longer hold controls SECURITY.md requires\n');
+    for (const failure of failures) console.error(`  ${failure}\n`);
+    console.error(
+      'Each line above maps to a FAIL IF in SECURITY.md. If a control moved rather than\n' +
+        'disappeared, update the pattern in scripts/deploy-lint.mjs in the same commit.',
+    );
+    process.exit(1);
+  }
+  console.log(
+    `deploy-lint: OK (${INSTALLERS.length} installers, ${RULES.length} rules, ${checked} checks)`,
   );
-  process.exit(1);
 }
-
-console.log(
-  `deploy-lint: OK (${INSTALLERS.length} installers, ${RULES.length} rules, ${checked} checks)`,
-);
