@@ -902,25 +902,27 @@ Invariants the installer exists to hold:
   a mismatch), the rollback restore, `manage verify`, and — because the identity
   is folded into the health *wait* rather than bolted onto its callers — every
   command that waits for health, which is `manage rollback` and `manage
-  restart`. Waiting on the identity rather than asserting it after the first 200
-  also absorbs the window in which an outgoing process answers one last time.
-  `manage status` is deliberately outside this: it reports what the pointers
-  say, not who is answering.
+  restart`. Waiting on the identity rather than asserting it after the first
+  200 also absorbs the window in which an outgoing process answers one last
+  time. Two known exceptions, both stated so the invariant is not read as
+  covering them: Windows `manage restart` still accepts a bare 200, because
+  `Wait-Health` has no identity check and its callers do not add one; and
+  `manage status` on all three platforms is outside this by design, reporting
+  what the pointers say rather than who is answering.
 
   macOS and Windows prove identity by resolving the PID holding the port back to
-  the release directory it runs from. Linux leads with `systemctl --user
-  is-active` and keeps that resolution as the secondary check that names the
-  culprit, because its service manager already owns the answer and the
-  resolution alone cannot be trusted to fail closed there: the responder may be
-  invisible to `ss` entirely — a foreign network namespace, or WSL with
+  the release directory it runs from. Linux resolves it too, but leads with
+  `systemctl --user is-active` and keeps the resolution as the secondary check
+  that names the culprit: its service manager already owns the answer, and the
+  resolution alone cannot be trusted to fail closed there, because the responder
+  may be invisible to `ss` entirely — a foreign network namespace, or WSL with
   `networkingMode=mirrored`, where loopback is shared with the Windows host and
-  the listener can be a Windows process. An unresolvable holder is therefore
-  reported, never read as "nothing is there".
+  the listener can be a Windows process.
 
-  The resolution must read the executable's *real* path, not the one it was
-  exec'd by — see the `ps` trap below. `Source of truth:` `listening_release` +
-  `wait_for_health` (macOS), `Get-ListeningRelease` (Windows), `service_healthy`
-  + `listening_release` (Linux).
+  The resolution must read the executable's real path — see the `ps` trap below.
+  `Source of truth:` `listening_release` + `wait_for_health` (macOS),
+  `Get-ListeningRelease` (Windows), `service_healthy` + `listening_release`
+  (Linux).
 
 Mechanical traps the scripts encode, each of which fails silently otherwise:
 
@@ -945,10 +947,18 @@ Mechanical traps the scripts encode, each of which fails silently otherwise:
   time and "confirm" whatever it points at now — agreeing with itself no matter
   which release is answering, which is the one thing the check exists to catch.
   `lsof -p <pid> -a -d txt -Fn` reports the vnode's real path, which names the
-  release directory. Linux has the same trap — `ps -o args=` there prints the
-  `current/…` path too — and the same shape of answer: `/proc/<pid>/exe` is the
-  kernel's own reference to the executed inode, so it names the release
-  directory and keeps naming it after `current` is repointed elsewhere.
+  release directory. That path is *physical*, while the roots compared against
+  it are logical — `manage`'s `$ROOT` comes from `pwd` rather than `pwd -P`, and
+  the installer's `$INSTALL_ROOT` straight from `$HOME` or
+  `DORMOUSE_INSTALL_ROOT` — so the comparison canonicalizes the root first
+  — otherwise an install root reached through a symlink matches nothing and the
+  check can never pass, which on the forward path rolls back a good update. A
+  `DORMOUSE_INSTALL_ROOT` under `mktemp -d` is exactly that case, since macOS
+  puts it below `/var` -> `/private/var`. Linux has both halves: `ps -o args=`
+  there prints the `current/…` path too, and `/proc/<pid>/exe` — the kernel's
+  own reference to the executed inode, which names the release and keeps naming
+  it after `current` is repointed elsewhere — is physical in the same way, so it
+  canonicalizes the root identically.
 * **`pnpm` resolves to a `.ps1` before its `.CMD`.** (Windows.) The PowerShell
   shim cannot be launched as a process, so the installer takes the first
   `Application`-typed resolution rather than `(Get-Command pnpm).Source`.

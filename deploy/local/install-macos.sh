@@ -173,13 +173,19 @@ fs.renameSync(tmp, link);
 # release is answering. lsof reports the vnode's real path, which names the
 # release.
 listening_release() {
-  local pid path
+  local pid path root
+  # lsof reports the vnode's PHYSICAL path, but $INSTALL_ROOT is logical — it is
+  # $HOME/... or DORMOUSE_INSTALL_ROOT verbatim, never canonicalized. Comparing
+  # the two directly is a check that can never pass, the exact mirror of the
+  # `ps` trap above. It bites a DORMOUSE_INSTALL_ROOT under `mktemp -d`, which
+  # on macOS sits below /var -> /private/var.
+  root="$(cd "$INSTALL_ROOT" 2>/dev/null && pwd -P)" || return 0
   pid="$(lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
   [ -n "$pid" ] || return 0
   while IFS= read -r path; do
     case "$path" in
-      "n$INSTALL_ROOT/releases/"*)
-        path="${path#"n$INSTALL_ROOT/releases/"}"
+      "n$root/releases/"*)
+        path="${path#"n$root/releases/"}"
         printf '%s\n' "${path%%/*}"
         return 0
         ;;
@@ -626,17 +632,23 @@ release_field() {
 # Which release is the process listening on $1 actually running? Empty if
 # nothing is, or if the answer does not come from this install root.
 #
-# Deliberately lsof's `txt` record and not `ps -o comm=` — see the full
-# rationale on the installer's copy of this function, and the `ps` trap in
-# docs/specs/server.md.
+# Deliberately lsof's `txt` record and not `ps -o comm=`, and deliberately a
+# physical root — see the full rationale on the installer's copy of this
+# function, and the `ps` trap in docs/specs/server.md.
 listening_release() {
-  local pid path
+  local pid path root
+  # lsof reports the vnode's PHYSICAL path, but $ROOT is logical — it keeps
+  # whatever symlink the caller walked through (`pwd`, not `pwd -P`). Comparing
+  # the two directly is a check that can never pass, the exact mirror of the
+  # `ps` trap above. It bites a DORMOUSE_INSTALL_ROOT under `mktemp -d`, which
+  # on macOS sits below /var -> /private/var.
+  root="$(cd "$ROOT" 2>/dev/null && pwd -P)" || return 0
   pid="$(lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
   [ -n "$pid" ] || return 0
   while IFS= read -r path; do
     case "$path" in
-      "n$ROOT/releases/"*)
-        path="${path#"n$ROOT/releases/"}"
+      "n$root/releases/"*)
+        path="${path#"n$root/releases/"}"
         printf '%s\n' "${path%%/*}"
         return 0
         ;;
@@ -752,21 +764,6 @@ cmd_verify() {
     fail "Pocket index is not served — is lib/dist-pocket in the release?"
   fi
 
-  # The check that separates "something answers" from "the current release
-  # answers". An orphaned node from an older release holds the port and replies
-  # to /api/hello exactly like the current one, so every other health check here
-  # passes while stale code serves.
-  local serving cur_id
-  serving="$(listening_release "$PORT")"
-  cur_id="$(basename "$(readlink "$ROOT/current" 2>/dev/null || true)")"
-  if [ -z "$serving" ]; then
-    fail "cannot identify the process listening on port $PORT"
-  elif [ "$serving" = "$cur_id" ]; then
-    pass "the process on port $PORT is the current release"
-  else
-    fail "port $PORT is served by release '$serving', but current is '$cur_id' — a stale process is answering"
-  fi
-
   local listeners
   listeners="$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | tail -n +2 || true)"
   if [ -z "$listeners" ]; then
@@ -776,6 +773,25 @@ cmd_verify() {
     printf '%s\n' "$listeners" | sed 's/^/      /'
   else
     pass "port $PORT is bound only to 127.0.0.1"
+  fi
+
+  # The check that separates "something answers" from "the current release
+  # answers". An orphaned node from an older release holds the port and replies
+  # to /api/hello exactly like the current one, so every other health check here
+  # passes while stale code serves. Only meaningful once something is listening
+  # — otherwise an empty result would report a foreign process where the line
+  # above has already said the port is dead.
+  if [ -n "$listeners" ]; then
+    local serving cur_id
+    serving="$(listening_release "$PORT")"
+    cur_id="$(basename "$(readlink "$ROOT/current" 2>/dev/null || true)")"
+    if [ -z "$serving" ]; then
+      fail "the process on port $PORT is not from this install root"
+    elif [ "$serving" = "$cur_id" ]; then
+      pass "the process on port $PORT is the current release"
+    else
+      fail "port $PORT is served by release '$serving', but current is '$cur_id' — a stale process is answering"
+    fi
   fi
 
   local tsip
@@ -1231,7 +1247,7 @@ else
 
   if [ "$LIVE_OK" != "1" ]; then
     LISTENING="$(listening_release "$LOOPBACK_PORT")"
-    if [ -n "$LISTENING" ]; then
+    if [ -n "$LISTENING" ] && [ "$LISTENING" != "$RELEASE_ID" ]; then
       warn "port $LOOPBACK_PORT is served by release '$LISTENING', not by $RELEASE_ID"
     else
       warn "the new release never answered http://127.0.0.1:$LOOPBACK_PORT/api/hello"
