@@ -160,37 +160,34 @@ fs.renameSync(tmp, link);
 ' "$1" "$2"
 }
 
-# Which release is the process listening on $1 actually running?
+# Which release is serving port $1?
 #
 # A 200 from /api/hello proves only that SOMETHING answers on the port. This is
 # what separates the release that is supposed to be serving from an orphan of an
 # older one still holding it.
 #
-# Deliberately lsof's `txt` record and not `ps -o comm=`. run-server execs
-# "$INSTALL_ROOT/current/runtime/node", and ps reports that path verbatim,
-# symlink and all — so a ps-based check would resolve `current` a second time
-# and "confirm" whatever it points at now, agreeing with itself no matter which
-# release is answering. lsof reports the vnode's real path, which names the
-# release.
+# The server writes {pid, releaseId, port} at successful bind
+# (server/src/runtime-file.ts), so this is a file read and a liveness check
+# rather than lsof forensics over the process table. Empty means "unknown",
+# never "nobody": a stale file whose pid is dead, a server started outside the
+# installer, and a foreign process that got the port first are all
+# indistinguishable from here, and all must fail the comparison rather than
+# pass it.
 listening_release() {
-  local pid path root
-  # lsof reports the vnode's PHYSICAL path, but $INSTALL_ROOT is logical — it is
-  # $HOME/... or DORMOUSE_INSTALL_ROOT verbatim, never canonicalized. Comparing
-  # the two directly is a check that can never pass, the exact mirror of the
-  # `ps` trap above. It bites a DORMOUSE_INSTALL_ROOT under `mktemp -d`, which
-  # on macOS sits below /var -> /private/var.
-  root="$(cd "$INSTALL_ROOT" 2>/dev/null && pwd -P)" || return 0
-  pid="$(lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
-  [ -n "$pid" ] || return 0
-  while IFS= read -r path; do
-    case "$path" in
-      "n$root/releases/"*)
-        path="${path#"n$root/releases/"}"
-        printf '%s\n' "${path%%/*}"
-        return 0
-        ;;
-    esac
-  done < <(lsof -p "$pid" -a -d txt -Fn 2>/dev/null || true)
+  local port="$1" file pid release rport
+  file="$INSTALL_ROOT/run/server.json"
+  [ -r "$file" ] || return 0
+  pid="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$file" | head -1)"
+  release="$(sed -n 's/.*"releaseId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file" | head -1)"
+  rport="$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$file" | head -1)"
+  [ -n "$pid" ] && [ -n "$release" ] || return 0
+  # The file is about one socket; a record for a different port says nothing
+  # about this one.
+  [ "$rport" = "$port" ] || return 0
+  # A crash leaves the file behind on purpose, so liveness is what separates a
+  # serving process from a corpse.
+  kill -0 "$pid" 2>/dev/null || return 0
+  printf '%s\n' "$release"
 }
 
 # --------------------------------------------------------------- tailscale --
@@ -549,6 +546,14 @@ ENTRY="$ROOT/current/server/dist/index.js"
 [ -x "$NODE_BIN" ] || { echo "run-server: missing runtime $NODE_BIN" >&2; exit 78; }
 [ -f "$ENTRY" ] || { echo "run-server: missing entrypoint $ENTRY" >&2; exit 78; }
 
+# Tell the server who it is. It records {pid, releaseId, port} here once it has
+# actually bound, which is how `manage` and the installer answer "which release
+# is answering?" without reconstructing it from the process table. Set here
+# rather than in server.env because it is derived from `current`, which moves.
+export DORMOUSE_RUNTIME_FILE="$ROOT/run/server.json"
+RELEASE_TARGET="$(readlink "$ROOT/current" 2>/dev/null || true)"
+[ -n "$RELEASE_TARGET" ] && export DORMOUSE_RELEASE_ID="${RELEASE_TARGET##*/}"
+
 exec "$NODE_BIN" "$ENTRY"
 RUNSERVER_EOF
 chmod 0700 "$BIN_DIR/run-server"
@@ -629,31 +634,23 @@ release_field() {
   sed -n "s/^$1=//p" "$target" | head -1
 }
 
-# Which release is the process listening on $1 actually running? Empty if
-# nothing is, or if the answer does not come from this install root.
-#
-# Deliberately lsof's `txt` record and not `ps -o comm=`, and deliberately a
-# physical root — see the full rationale on the installer's copy of this
-# function, and the `ps` trap in docs/specs/server.md.
+# Which release is serving port $1? Empty when that cannot be established —
+# see the full rationale on the installer's copy of this function.
 listening_release() {
-  local pid path root
-  # lsof reports the vnode's PHYSICAL path, but $ROOT is logical — it keeps
-  # whatever symlink the caller walked through (`pwd`, not `pwd -P`). Comparing
-  # the two directly is a check that can never pass, the exact mirror of the
-  # `ps` trap above. It bites a DORMOUSE_INSTALL_ROOT under `mktemp -d`, which
-  # on macOS sits below /var -> /private/var.
-  root="$(cd "$ROOT" 2>/dev/null && pwd -P)" || return 0
-  pid="$(lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
-  [ -n "$pid" ] || return 0
-  while IFS= read -r path; do
-    case "$path" in
-      "n$root/releases/"*)
-        path="${path#"n$root/releases/"}"
-        printf '%s\n' "${path%%/*}"
-        return 0
-        ;;
-    esac
-  done < <(lsof -p "$pid" -a -d txt -Fn 2>/dev/null || true)
+  local port="$1" file pid release rport
+  file="$ROOT/run/server.json"
+  [ -r "$file" ] || return 0
+  pid="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$file" | head -1)"
+  release="$(sed -n 's/.*"releaseId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file" | head -1)"
+  rport="$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$file" | head -1)"
+  [ -n "$pid" ] && [ -n "$release" ] || return 0
+  # The file is about one socket; a record for a different port says nothing
+  # about this one.
+  [ "$rport" = "$port" ] || return 0
+  # A crash leaves the file behind on purpose, so liveness is what separates a
+  # serving process from a corpse.
+  kill -0 "$pid" 2>/dev/null || return 0
+  printf '%s\n' "$release"
 }
 
 # Healthy means the CURRENT release answers, not that anything does: an orphan
@@ -986,7 +983,7 @@ cmd_uninstall() {
   else
     printf 'left the Serve config alone (it does not point at 127.0.0.1:%s)\n' "$PORT"
   fi
-  rm -rf "$ROOT/releases" "$ROOT/current" "$ROOT/previous" "$ROOT/bin"
+  rm -rf "$ROOT/releases" "$ROOT/current" "$ROOT/previous" "$ROOT/bin" "$ROOT/run"
   printf '\nuninstalled. config and state remain at:\n  %s\n  %s\n\n' "$ROOT/config" "$STATE_DIR"
 }
 

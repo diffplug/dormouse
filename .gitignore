@@ -73,3 +73,6 @@ chromatic-diagnostics.json
 # Local security-audit fragments (scripts/security-audit-local.sh)
 audit-*.md
 audit-status.txt
+
+# deploy-lint-selftest backups, if a signal interrupts it mid-run
+*.selftest.bak

@@ -24,6 +24,9 @@
 #                             but do not touch systemd or the Serve config.
 #   DORMOUSE_INSTALL_ROOT     A throwaway install root (requires the above), so
 #                             path quoting and release switching can be tested.
+#   DORMOUSE_INSTALL_ORIGIN   An origin to use instead of asking Tailscale
+#                             (requires the above). Lets CI, which has no
+#                             tailnet, run everything up to the Serve step.
 
 set -euo pipefail
 
@@ -47,6 +50,11 @@ WANT_LINGER=0
 # an overridden root would leave `manage` and systemd disagreeing about where
 # the service lives. Overriding HOME instead would break pnpm, whose store and
 # downloaded runtime live under the real home.
+if [ -n "${DORMOUSE_INSTALL_ORIGIN:-}" ] && [ "$TEST_MODE" != "1" ]; then
+  echo "DORMOUSE_INSTALL_ORIGIN is only honored with DORMOUSE_INSTALL_TEST=1" >&2
+  exit 64
+fi
+
 if [ -n "${DORMOUSE_INSTALL_ROOT:-}" ]; then
   if [ "$TEST_MODE" != "1" ]; then
     echo "DORMOUSE_INSTALL_ROOT is only honored with DORMOUSE_INSTALL_TEST=1" >&2
@@ -206,34 +214,30 @@ req.on("error", () => process.exit(1));
 
 unit_active() { [ "$(systemctl --user is-active "$UNIT" 2>/dev/null || true)" = "active" ]; }
 
-# Echoes the release id of the process holding port $1, or nothing when no
-# listener under this install root can be seen. Requiring the `releases/` prefix
-# is what keeps an unrelated `node` somewhere else on the machine from being
-# reported as a release.
+# Echoes the release id serving port $1, or nothing when that cannot be
+# established. The server writes {pid, releaseId, port} at successful bind
+# (server/src/runtime-file.ts), so this is a file read and a liveness check
+# rather than three platforms' worth of process forensics.
 #
-# `/proc/<pid>/exe` and not `ps`: `bin/run-server` execs
-# "$ROOT/current/runtime/node", so `ps -o args=` names the path it was exec'd
-# by, symlink and all — resolving through that would follow `current` a second
-# time and agree with itself no matter which release is answering. `exe` is the
-# kernel's reference to the executed inode, so it names the release directly.
+# Empty means "unknown", never "nobody": a stale file whose pid is dead, a
+# server started outside the installer, and a foreign process that got the port
+# first are all indistinguishable from here, and all of them must fail the
+# comparison rather than pass it.
 listening_release() {
-  local port="$1" pid exe rest root
-  command -v ss >/dev/null 2>&1 || return 0
-  pid="$(ss -lntpH "sport = :$port" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -1)"
-  [ -n "$pid" ] || return 0
-  exe="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"
-  # `readlink -f` gives the PHYSICAL path, but $INSTALL_ROOT is logical — it
-  # comes straight from $HOME or DORMOUSE_INSTALL_ROOT, keeping whatever symlink
-  # the caller walked through. Comparing the two directly is a check that can
-  # never pass, the mirror of the `ps` trap above, and on the forward path it
-  # rolls back a good update. Canonicalize the root before the prefix test.
-  root="$(cd "$INSTALL_ROOT" 2>/dev/null && pwd -P)" || root="$INSTALL_ROOT"
-  case "$exe" in
-    "$root/releases/"*)
-      rest="${exe#"$root/releases/"}"
-      printf '%s\n' "${rest%%/*}"
-      ;;
-  esac
+  local port="$1" file pid release rport
+  file="$INSTALL_ROOT/run/server.json"
+  [ -r "$file" ] || return 0
+  pid="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$file" | head -1)"
+  release="$(sed -n 's/.*"releaseId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file" | head -1)"
+  rport="$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$file" | head -1)"
+  [ -n "$pid" ] && [ -n "$release" ] || return 0
+  # The file is about one socket; a record for a different port says nothing
+  # about this one.
+  [ "$rport" = "$port" ] || return 0
+  # A crash leaves the file behind on purpose, so liveness is what separates a
+  # serving process from a corpse.
+  kill -0 "$pid" 2>/dev/null || return 0
+  printf '%s\n' "$release"
 }
 
 # $1 = the release id that must be answering. Three legs, all required:
@@ -261,13 +265,13 @@ case "$SYSTEMD_VERSION" in
     ;;
 esac
 
-# `ss` is not optional here. `listening_release` resolves the port holder with
-# it and `service_healthy` requires that identity to match, so on a box without
-# iproute2 the post-switch wait can never succeed: a perfectly good install
-# would roll itself back and exit nonzero, reporting a stale process that does
-# not exist. `manage verify`'s bind check degrades to a note; this path cannot.
+# `ss` used to be load-bearing here: identity came from resolving the port
+# holder, so without iproute2 the post-switch wait could never succeed and a
+# good install rolled itself back. The server now records its own identity
+# (`DORMOUSE_RUNTIME_FILE`), so the only thing left that needs `ss` is
+# `manage verify`'s bind check — worth a warning, not a refusal.
 command -v ss >/dev/null 2>&1 \
-  || die "ss not found. It comes from iproute2 and is what resolves which release holds port $LOOPBACK_PORT — the install cannot confirm its own service without it. Install iproute2 (apt install iproute2 / dnf install iproute) and re-run."
+  || warn "ss not found (iproute2). The install works without it, but \`manage verify\` cannot confirm that port $LOOPBACK_PORT is bound only to 127.0.0.1."
 
 if [ "$TEST_MODE" != "1" ]; then
   # A user manager is what runs the service. Without one — a bare `su`, a
@@ -281,8 +285,16 @@ fi
 
 # --------------------------------------------------------------- tailscale --
 
-command -v tailscale >/dev/null 2>&1 \
-  || die "tailscale CLI not found on PATH. Install Tailscale and sign in first — this installer will not install or reauthenticate it for you. https://tailscale.com/docs/install/linux"
+# A test-mode run with an injected origin never consults Tailscale at all, which
+# is what lets CI — which has no tailnet — exercise the build, the staging, the
+# candidate probe and the release switch.
+SKIP_TAILSCALE=0
+[ "$TEST_MODE" = "1" ] && [ -n "${DORMOUSE_INSTALL_ORIGIN:-}" ] && SKIP_TAILSCALE=1
+
+if [ "$SKIP_TAILSCALE" != "1" ]; then
+  command -v tailscale >/dev/null 2>&1 \
+    || die "tailscale CLI not found on PATH. Install Tailscale and sign in first — this installer will not install or reauthenticate it for you. https://tailscale.com/docs/install/linux"
+fi
 
 ts() { tailscale "$@"; }
 
@@ -316,8 +328,6 @@ die_needs_operator() {
 printf '%sDormouse selfhost server — Linux installer%s\n' "$C_BLD" "$C_OFF"
 [ "$TEST_MODE" = "1" ] && warn "DORMOUSE_INSTALL_TEST=1 — systemd and Serve will not be touched."
 
-step "Checking Tailscale"
-
 # One EXIT trap for every temporary this script creates. `pnpm deploy --prod
 # --legacy` poisons the root node_modules/.pnpm-workspace-state-v1.json
 # (production:true / dev:false), which would make every later pnpm command in
@@ -345,48 +355,60 @@ cleanup() {
 }
 trap cleanup EXIT
 
-TS_STATUS_JSON="$(mktemp_file ts-status)"
-# `2>&1 > file`, not `> file 2>&1`: the latter points stderr at the file too,
-# so the capture is always empty and the operator-role remediation below
-# becomes dead code with a blank error body.
-TS_STATUS_ERR="$(ts status --json 2>&1 > "$TS_STATUS_JSON")" || {
-  ts_denied "$TS_STATUS_ERR" && die_needs_operator "\`tailscale status\`" "$TS_STATUS_ERR"
-  die "\`tailscale status --json\` failed. Is tailscaled running and signed in? (systemctl status tailscaled)
-    ${TS_STATUS_ERR}"
-}
+step "Checking Tailscale"
 
-TS_BACKEND="$(json_query "$TS_STATUS_JSON" "BackendState" || echo "")"
-[ "$TS_BACKEND" = "Running" ] || die "Tailscale backend state is '${TS_BACKEND:-unknown}', expected 'Running'. Sign in and connect (\`tailscale up\`), then re-run."
+if [ "$SKIP_TAILSCALE" = "1" ]; then
+  ORIGIN="$DORMOUSE_INSTALL_ORIGIN"
+  case "$ORIGIN" in
+    https://*) TS_DNS="${ORIGIN#https://}" ;;
+    *) die "DORMOUSE_INSTALL_ORIGIN must be an https:// origin, got '$ORIGIN'." ;;
+  esac
+  warn "test mode: using the injected origin $ORIGIN; Tailscale is not consulted."
+else
 
-TS_DNS_RAW="$(json_query "$TS_STATUS_JSON" "Self.DNSName" || echo "")"
-[ -n "$TS_DNS_RAW" ] || die "Tailscale reports no MagicDNS name for this node. Enable MagicDNS for the tailnet: https://login.tailscale.com/admin/dns"
-# MagicDNS names arrive fully qualified with a trailing dot.
-TS_DNS="${TS_DNS_RAW%.}"
+  TS_STATUS_JSON="$(mktemp_file ts-status)"
+  # `2>&1 > file`, not `> file 2>&1`: the latter points stderr at the file too,
+  # so the capture is always empty and the operator-role remediation below
+  # becomes dead code with a blank error body.
+  TS_STATUS_ERR="$(ts status --json 2>&1 > "$TS_STATUS_JSON")" || {
+    ts_denied "$TS_STATUS_ERR" && die_needs_operator "\`tailscale status\`" "$TS_STATUS_ERR"
+    die "\`tailscale status --json\` failed. Is tailscaled running and signed in? (systemctl status tailscaled)
+      ${TS_STATUS_ERR}"
+  }
 
-MAGIC_DNS_ENABLED="$(json_query "$TS_STATUS_JSON" "CurrentTailnet.MagicDNSEnabled" || echo "false")"
-[ "$MAGIC_DNS_ENABLED" = "true" ] || warn "MagicDNS is not reported as enabled for this tailnet; the HTTPS name may not resolve for other devices."
+  TS_BACKEND="$(json_query "$TS_STATUS_JSON" "BackendState" || echo "")"
+  [ "$TS_BACKEND" = "Running" ] || die "Tailscale backend state is '${TS_BACKEND:-unknown}', expected 'Running'. Sign in and connect (\`tailscale up\`), then re-run."
 
-ORIGIN="https://$TS_DNS"
-ok "node: $TS_DNS"
-ok "external origin: $ORIGIN"
+  TS_DNS_RAW="$(json_query "$TS_STATUS_JSON" "Self.DNSName" || echo "")"
+  [ -n "$TS_DNS_RAW" ] || die "Tailscale reports no MagicDNS name for this node. Enable MagicDNS for the tailnet: https://login.tailscale.com/admin/dns"
+  # MagicDNS names arrive fully qualified with a trailing dot.
+  TS_DNS="${TS_DNS_RAW%.}"
 
-CERT_DOMAINS="$(json_query "$TS_STATUS_JSON" "CertDomains" || echo "")"
-case ",$CERT_DOMAINS," in
-  *",$TS_DNS,"*) ok "tailnet HTTPS certificates enabled for this name" ;;
-  *)
-    warn "tailnet HTTPS certificates do not list $TS_DNS."
-    warn "Enable HTTPS at https://login.tailscale.com/admin/dns — Serve cannot get a certificate without it."
-    ;;
-esac
+  MAGIC_DNS_ENABLED="$(json_query "$TS_STATUS_JSON" "CurrentTailnet.MagicDNSEnabled" || echo "false")"
+  [ "$MAGIC_DNS_ENABLED" = "true" ] || warn "MagicDNS is not reported as enabled for this tailnet; the HTTPS name may not resolve for other devices."
 
-# Prove the operator role now rather than at the Serve step, which happens after
-# the build and after `current` has already moved. A node with no Serve
-# configuration exits nonzero too, so only a refusal is fatal here.
-if [ "$TEST_MODE" != "1" ]; then
-  if ! SERVE_PROBE="$(ts serve status 2>&1)"; then
-    ts_denied "$SERVE_PROBE" && die_needs_operator "\`tailscale serve status\`" "$SERVE_PROBE"
+  ORIGIN="https://$TS_DNS"
+  ok "node: $TS_DNS"
+  ok "external origin: $ORIGIN"
+
+  CERT_DOMAINS="$(json_query "$TS_STATUS_JSON" "CertDomains" || echo "")"
+  case ",$CERT_DOMAINS," in
+    *",$TS_DNS,"*) ok "tailnet HTTPS certificates enabled for this name" ;;
+    *)
+      warn "tailnet HTTPS certificates do not list $TS_DNS."
+      warn "Enable HTTPS at https://login.tailscale.com/admin/dns — Serve cannot get a certificate without it."
+      ;;
+  esac
+
+  # Prove the operator role now rather than at the Serve step, which happens after
+  # the build and after `current` has already moved. A node with no Serve
+  # configuration exits nonzero too, so only a refusal is fatal here.
+  if [ "$TEST_MODE" != "1" ]; then
+    if ! SERVE_PROBE="$(ts serve status 2>&1)"; then
+      ts_denied "$SERVE_PROBE" && die_needs_operator "\`tailscale serve status\`" "$SERVE_PROBE"
+    fi
+    ok "this account may operate tailscaled"
   fi
-  ok "this account may operate tailscaled"
 fi
 
 # --------------------------------------------------------- origin identity ---
@@ -657,6 +679,14 @@ ENTRY="$ROOT/current/server/dist/index.js"
 [ -x "$NODE_BIN" ] || { echo "run-server: missing runtime $NODE_BIN" >&2; exit 78; }
 [ -f "$ENTRY" ] || { echo "run-server: missing entrypoint $ENTRY" >&2; exit 78; }
 
+# Tell the server who it is. It records {pid, releaseId, port} here once it has
+# actually bound, which is how `manage` and the installer answer "which release
+# is answering?" without reconstructing it from the process table. Set here
+# rather than in server.env because it is derived from `current`, which moves.
+export DORMOUSE_RUNTIME_FILE="$ROOT/run/server.json"
+RELEASE_TARGET="$(readlink "$ROOT/current" 2>/dev/null || true)"
+[ -n "$RELEASE_TARGET" ] && export DORMOUSE_RELEASE_ID="${RELEASE_TARGET##*/}"
+
 exec "$NODE_BIN" "$ENTRY"
 RUNSERVER_EOF
 chmod 0700 "$BIN_DIR/run-server"
@@ -765,35 +795,25 @@ owner_only() {
   fi
 }
 
-# Which release does the process actually holding the loopback port run from?
+# Which release is serving the loopback port?
 #
-# A 200 from /api/hello proves *a* server is up, not that it is the current
-# release — a stale process on this port answers identically. Echoes the release
-# id, or nothing when no listener under this install root can be seen. The
-# `releases/` prefix is required so an unrelated `node` elsewhere on the machine
-# is never reported as a release.
-#
-# `/proc/<pid>/exe` and not `ps`: `bin/run-server` execs
-# "$ROOT/current/runtime/node", so `ps -o args=` names the path it was exec'd
-# by, symlink and all — resolving through that would follow `current` a second
-# time and agree with itself no matter which release is answering. `exe` is the
-# kernel's reference to the executed inode, so it names the release directly.
+# The server writes {pid, releaseId, port} at successful bind
+# (server/src/runtime-file.ts), so this is a file read and a liveness check.
+# Empty means "unknown", never "nobody": a stale file whose pid is dead, a
+# server started outside the installer, and a foreign process that got the port
+# first are all indistinguishable from here, and all must fail the comparison
+# rather than pass it.
 listening_release() {
-  local port="$1" pid exe rest root
-  command -v ss >/dev/null 2>&1 || return 0
-  pid="$(ss -lntpH "sport = :$port" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -1)"
-  [ -n "$pid" ] || return 0
-  exe="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"
-  # `readlink -f` gives the PHYSICAL path; $ROOT comes from `pwd`, which keeps
-  # whatever symlink the caller walked through. Canonicalize before comparing,
-  # or the prefix test matches nothing and the check can never pass.
-  root="$(cd "$ROOT" 2>/dev/null && pwd -P)" || root="$ROOT"
-  case "$exe" in
-    "$root/releases/"*)
-      rest="${exe#"$root/releases/"}"
-      printf '%s\n' "${rest%%/*}"
-      ;;
-  esac
+  local port="$1" file pid release rport
+  file="$ROOT/run/server.json"
+  [ -r "$file" ] || return 0
+  pid="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$file" | head -1)"
+  release="$(sed -n 's/.*"releaseId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file" | head -1)"
+  rport="$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$file" | head -1)"
+  [ -n "$pid" ] && [ -n "$release" ] || return 0
+  [ "$rport" = "$port" ] || return 0
+  kill -0 "$pid" 2>/dev/null || return 0
+  printf '%s\n' "$release"
 }
 
 unit_active() { [ "$(systemctl --user is-active "$UNIT" 2>/dev/null || true)" = "active" ]; }
@@ -1169,7 +1189,7 @@ cmd_uninstall() {
   else
     printf 'left the Serve config alone (it does not point at 127.0.0.1:%s)\n' "$PORT"
   fi
-  rm -rf "$ROOT/releases" "$ROOT/current" "$ROOT/previous" "$ROOT/bin"
+  rm -rf "$ROOT/releases" "$ROOT/current" "$ROOT/previous" "$ROOT/bin" "$ROOT/run"
   printf '\nuninstalled. config and state remain at:\n  %s\n  %s\n\n' "$ROOT/config" "$STATE_DIR"
   printf 'lingering, if you enabled it, is left as it is: loginctl disable-linger %s\n\n' "$USER"
 }
@@ -1430,9 +1450,11 @@ else
     elif http_ok "http://127.0.0.1:$LOOPBACK_PORT/api/hello" 2; then
       warn "http://127.0.0.1:$LOOPBACK_PORT/api/hello answers, but NOT from this service."
       warn "  systemctl --user is-active $UNIT => $(systemctl --user is-active "$UNIT" 2>&1 || true)"
-      warn "Something else already holds port $LOOPBACK_PORT. Find and stop it, then re-run."
-      warn "If this is WSL with networkingMode=mirrored, loopback is shared with Windows,"
-      warn "so the holder may be a Windows process that ss here cannot see at all."
+      warn "  release identity          => ${SERVING:-<none recorded>} (expected $RELEASE_ID)"
+      warn "Either something else holds port $LOOPBACK_PORT, or this release never"
+      warn "recorded itself in $INSTALL_ROOT/run/server.json — check the log below for"
+      warn "a warning about writing that file. If this is WSL with networkingMode=mirrored,"
+      warn "loopback is shared with Windows and the holder may be a Windows process."
     else
       warn "the new release never answered http://127.0.0.1:$LOOPBACK_PORT/api/hello"
     fi

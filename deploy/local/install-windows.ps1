@@ -349,21 +349,35 @@ function Stop-DormouseProcess {
   return $procs.Count
 }
 
-# Which release is the process on $Port actually running?
+# Which release is serving $Port?
 #
 # A 200 from /api/hello proves only that SOMETHING is listening. This is what
 # distinguishes the release just installed from an orphan of an older one.
+#
+# The server writes {pid, releaseId, port} at successful bind
+# (server/src/runtime-file.ts), so this is a file read and a liveness check
+# rather than a walk of the process table. $null means "unknown", never
+# "nobody": a stale file whose pid is dead, a server started outside the
+# installer, and a foreign process that got the port first are all
+# indistinguishable from here, and all must fail the comparison rather than
+# pass it.
 function Get-ListeningRelease {
   param([Parameter(Mandatory)][int]$Port)
-  $conn = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
-  if ($conn.Count -eq 0) { return $null }
-  $owner = $conn[0].OwningProcess
-  $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$owner" -ErrorAction SilentlyContinue
-  if (-not $proc -or -not $proc.ExecutablePath) { return $null }
-  # <root>\releases\<id>\runtime\node.exe -> <id>
-  $runtimeDir = Split-Path -Parent $proc.ExecutablePath
-  if (-not $runtimeDir) { return $null }
-  return (Split-Path -Leaf (Split-Path -Parent $runtimeDir))
+  $file = Join-Path $INSTALL_ROOT 'run\server.json'
+  if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return $null }
+  try {
+    $info = Get-Content -LiteralPath $file -Raw -ErrorAction Stop | ConvertFrom-Json
+  } catch {
+    return $null
+  }
+  if (-not $info -or -not $info.releaseId -or -not $info.pid) { return $null }
+  # The file is about one socket; a record for a different port says nothing
+  # about this one.
+  if ([int]$info.port -ne $Port) { return $null }
+  # A crash leaves the file behind on purpose, so liveness is what separates a
+  # serving process from a corpse.
+  if (-not (Get-Process -Id ([int]$info.pid) -ErrorAction SilentlyContinue)) { return $null }
+  return [string]$info.releaseId
 }
 
 function Test-Health {
@@ -949,6 +963,12 @@ while ($true) {
   $psi.UseShellExecute = $false
   $psi.CreateNoWindow = $true
   foreach ($key in $EnvVars.Keys) { $psi.EnvironmentVariables[$key] = $EnvVars[$key] }
+  # Tell the server who it is. It records {pid, releaseId, port} there once it
+  # has actually bound, which is how `manage` and the installer answer "which
+  # release is answering?" without walking the process table. Set here rather
+  # than in server.env because it is derived from current.txt, which moves.
+  $psi.EnvironmentVariables['DORMOUSE_RUNTIME_FILE'] = (Join-Path $Root 'run\server.json')
+  $psi.EnvironmentVariables['DORMOUSE_RELEASE_ID'] = $releaseId
 
   Write-ServiceLog "starting release $releaseId"
   # Disposed every iteration: an undisposed Process holds a SafeProcessHandle,
@@ -1183,14 +1203,23 @@ function Stop-DormouseProcess {
 }
 
 # A 200 proves only that something is listening; this says which release it is.
+# See the installer's copy for the full rationale.
 function Get-ListeningRelease {
-  $conn = @(Get-NetTCPConnection -State Listen -LocalPort ([int]$PORT) -ErrorAction SilentlyContinue)
-  if ($conn.Count -eq 0) { return $null }
-  $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$($conn[0].OwningProcess)" -ErrorAction SilentlyContinue
-  if (-not $proc -or -not $proc.ExecutablePath) { return $null }
-  $runtimeDir = Split-Path -Parent $proc.ExecutablePath
-  if (-not $runtimeDir) { return $null }
-  return (Split-Path -Leaf (Split-Path -Parent $runtimeDir))
+  $file = Join-Path $Root 'run\server.json'
+  if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return $null }
+  try {
+    $info = Get-Content -LiteralPath $file -Raw -ErrorAction Stop | ConvertFrom-Json
+  } catch {
+    return $null
+  }
+  if (-not $info -or -not $info.releaseId -or -not $info.pid) { return $null }
+  # The file is about one socket; a record for a different port says nothing
+  # about this one.
+  if ([int]$info.port -ne ([int]$PORT)) { return $null }
+  # A crash leaves the file behind on purpose, so liveness is what separates a
+  # serving process from a corpse.
+  if (-not (Get-Process -Id ([int]$info.pid) -ErrorAction SilentlyContinue)) { return $null }
+  return [string]$info.releaseId
 }
 
 # Stop the task AND everything it left behind, then start it again.
@@ -1747,7 +1776,7 @@ function Invoke-Uninstall {
     Write-Host "left the Serve config alone (it does not point at 127.0.0.1:$PORT)"
   }
 
-  foreach ($p in @((Join-Path $Root 'releases'), (Join-Path $Root 'bin'))) {
+  foreach ($p in @((Join-Path $Root 'releases'), (Join-Path $Root 'bin'), (Join-Path $Root 'run'))) {
     Remove-Tree $p
   }
   foreach ($p in @($CurrentPointer, $PreviousPointer)) {
