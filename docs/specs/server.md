@@ -201,10 +201,19 @@ over a single bad line.
 plaintext, and `vapid.json` a private key, so both files are written owner-only:
 the state dir is created
 `0o700` and every write lands in a `0o600` temp file before the rename
-(`server/src/state.ts`, `writeAtomic`). Without explicit modes these inherit
-the umask and end up world-readable, handing live host tokens to any other
-local account on a shared machine. Any new file under `$DORMOUSE_STATE_DIR`
-must go through `writeAtomic` for the same reason.
+(`server/src/state.ts`, `writeAtomic`). Any new file under
+`$DORMOUSE_STATE_DIR` must go through `writeAtomic` for the same reason.
+
+That mode is a cheap default, not the guarantee the deployment rests on, and the
+difference is worth stating so nothing is built on top of it. It earns its place
+on a multi-user unix host, where home-directory permissions vary by distro — so
+without an explicit mode, whether a second local account can read `hosts.json`
+depends on which distro the selfhoster happened to pick. It buys nothing where
+modes are not the mechanism: Windows, where they are a no-op and the profile ACL
+already excludes other accounts; a container, where the namespace is the
+boundary; or a database-backed deployment, where this file never runs. What
+protects the *installed* self-host server's state is the installer's directory
+permissions, in "Installing it" below.
 
 ## WebAuthn without a WebAuthn library
 
@@ -745,31 +754,67 @@ Everything past this loop (browser surfaces, in-flight replay, thumbnails,
 the tethering display, WebRTC) is staged in remote-api.md `## Future` as
 additive follow-ups.
 
-## Installing it (macOS, behind Tailscale)
+## Installing it (behind Tailscale)
 
-The selfhost deployment that exists today is a per-login macOS LaunchAgent on
-the user's own Mac, reachable only from their tailnet. `tailscale serve`
-terminates HTTPS on the node's own MagicDNS name and proxies to the server on
-loopback. There is no cloud relay; that is staged in
-[SELF_HOST.md](../../SELF_HOST.md) `## Future`.
+The selfhost deployment that exists today is a **per-login user agent on the
+user's own laptop**, reachable only from their tailnet: a LaunchAgent on macOS,
+a Scheduled Task on Windows. `tailscale serve` terminates HTTPS on the node's
+own MagicDNS name and proxies to the server on loopback. There is no cloud
+relay; that is staged in [SELF_HOST.md](../../SELF_HOST.md) `## Future`.
 
-The security properties this deployment is audited against — file modes, the
-loopback bind, the origin-rewrite refusal, the Funnel check — are the
+The security properties this deployment is audited against — the credential
+modes, the loopback bind, the origin-rewrite refusal, the Funnel check — are the
 "Network posture" and "Credentials at rest" `FAIL IF` lines in `SECURITY.md`.
+Those lines bind **both** installers; a control present in one and absent from
+the other is a finding.
 
-Source of truth: `deploy/local/install-macos.sh`. It is the whole mechanism —
-one idempotent script, no hand-edited plists, no scheduled updater. Running it
-again updates the installed release from the current checkout; it never pulls,
-fetches, or switches branches. The operator runbook is
-[SELF_HOST.md](../../SELF_HOST.md).
+Source of truth: `deploy/local/install-macos.sh` and
+`deploy/local/install-windows.ps1`. One of them is the whole mechanism on its
+platform — one idempotent script, no hand-edited service definitions, no
+scheduled updater. Running it again updates the installed release from the
+current checkout; it never pulls, fetches, or switches branches. The operator
+runbook is [SELF_HOST.md](../../SELF_HOST.md).
 
-The install root is `~/Library/Application Support/Dormouse Server`, holding
-`bin/` (the stable `run-server` wrapper and the `manage` helper), `config/`,
-`state/`, and `releases/<id>` with `current`/`previous` symlinks. Each release
-is self-contained: the production server tree, `lib/dist-pocket`, and a **copy
-of the exact Node binary the build ran under**, so the service depends on
-neither the source checkout, nor Homebrew/nvm, nor pnpm's store, nor the user's
-interactive `PATH` — launchd reads none of those.
+Each release is self-contained: the production server tree, `lib/dist-pocket`,
+and a **copy of the exact Node binary the build ran under**, so the service
+depends on neither the source checkout, nor Homebrew/nvm/a version manager, nor
+pnpm's store, nor the user's interactive `PATH` — neither launchd nor Task
+Scheduler reads any of those. The install root holds `bin/` (the stable
+`run-server` wrapper and the `manage` helper), `config/`, `state/`, and
+`releases/<id>` with a current/previous pointer.
+
+The *invariants* below are shared; where the two platforms reach them by
+different means, the text is tagged `(macOS)` or `(Windows)` inline. This table
+is the mechanism-by-mechanism map:
+
+| | macOS | Windows |
+| --- | --- | --- |
+| Service | LaunchAgent `sh.dormouse.server` in `gui/$UID` | Scheduled Task `\Dormouse Server`, at-logon, `LogonType=Interactive`, `RunLevel=Limited` |
+| Install root | `~/Library/Application Support/Dormouse Server` | `%LOCALAPPDATA%\Dormouse Server` |
+| Logs | `~/Library/Logs/Dormouse Server` | `<root>\logs` |
+| RunAtLoad | plist `RunAtLoad` | the at-logon trigger |
+| KeepAlive | plist `KeepAlive` — launchd restarts on any exit | the supervision loop in `bin\run-server.ps1`; Task Scheduler's own `RestartCount` only fires on a *failed* exit, so it is defence in depth, not the mechanism |
+| Stopping it | `launchctl bootout` takes the process tree | stopping the task ends only the `powershell.exe` it launched; its `cmd.exe`/`node.exe` children survive and must be reaped by install root (see the trap below) |
+| `current`/`previous` | symlinks, swapped with `rename(2)` on the link path | `current.txt`/`previous.txt` naming a release id, swapped with `rename(2)` on the file |
+| `0700` / `0600` | the modes, under `umask 077` | a DACL protected from inheritance carrying exactly one ACE, for the installing user |
+| Refuses | running as root (`id -u`) | running elevated (the `Administrator` role) |
+| Entry | `/bin/bash bin/run-server` | `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File bin\run-server.ps1`, at an absolute interpreter path |
+
+Two of those rows are the load-bearing Windows deviations, and both exist
+because the macOS mechanism has no unprivileged Windows equivalent:
+
+* **The release pointer is a file, not a symlink.** Windows has no
+  unprivileged replaceable directory symlink — a junction cannot be renamed over
+  an existing junction, and a delete-then-create leaves a window in which
+  `current` names nothing. A file *can* be replaced atomically
+  (`MoveFileEx(MOVEFILE_REPLACE_EXISTING)`), so the pointer holds the release id
+  and `bin\run-server.ps1` joins it to `releases\`. The switch still asserts
+  afterwards that the pointer advanced.
+* **KeepAlive lives in the wrapper.** Task Scheduler restarts a task that
+  *fails*; it does not restart one that exits 0, which is what launchd's
+  `KeepAlive` does. So `bin\run-server.ps1` is a supervision loop with the same
+  10-second throttle the plist declares, and `manage verify` checks that the
+  loop is still there rather than trusting the task settings alone.
 
 Invariants the installer exists to hold:
 
@@ -778,10 +823,16 @@ Invariants the installer exists to hold:
   Pocket clients reconnect across a release switch. There is no zero-downtime
   swap to attempt.
 * **State outlives code.** `config/` and `state/` sit outside `releases/`, are
-  mode `0700`, and are never touched by an update, a prune, or an uninstall.
-  `config/server.env` is mode `0600`, generated once with a locally generated
-  setup password, and preserved byte-for-byte thereafter. Purging state is a
-  separate, explicitly confirmed operation.
+  readable only by the installing user, and are never touched by an update, a
+  prune, or an uninstall. `config/server.env` is likewise user-only, generated
+  once with a locally generated setup password, and preserved byte-for-byte
+  thereafter. Purging state is a separate, explicitly confirmed operation. On
+  Windows the installer creates `server.env` and applies its DACL *before*
+  writing the password, so the secret never sits under the inherited
+  `%LOCALAPPDATA%` ACL. Node's file modes are a no-op on Windows, so the files
+  inside `state\` are covered by what they inherit from the directory rather
+  than by `server/src/state.ts`'s `0o600`; `manage verify` walks them
+  individually there, where the macOS one does not need to.
 * **Loopback only, and tailnet-only.** The install pins
   `DORMOUSE_BIND_HOST=127.0.0.1` and refuses to proceed without it — see the
   Configuration note above on why the listen interface is a security boundary
@@ -796,50 +847,93 @@ Invariants the installer exists to hold:
   node's MagicDNS name. If an existing installation records a different origin
   the installer stops rather than rewriting it, because the rewrite silently
   invalidates the registered passkey and every enrolled Host.
+* **The install belongs to one user account.** Both installers refuse to run
+  privileged — as root on macOS, elevated on Windows — because the whole
+  credential posture is that one account owns `config/` and `state/`. An
+  elevated run would write them owned by another principal and register the
+  service for it.
 * **A failed update is a failure.** The candidate release is health-checked on
   an ephemeral port against a throwaway state dir *before* `current` moves; if
   the live service then fails to answer, `current` is restored to `previous`
   and the installer exits nonzero. Rollback succeeding is not success. The
-  restore also clears the `previous` pointer, because the switch had already
-  aimed it at the release `current` is being restored to: leaving both naming
-  one release would make `verify` report a rollback target that does not exist
-  and `rollback` swap a release with itself and call it success. `manage
-  verify` and `manage rollback` each refuse that state independently, so an
-  install left in it by an older installer reports honestly. The clear is
-  gated on the restore having actually landed — `rollback_release` re-reads
-  `current` and returns early, leaving `previous` alone, if it did not come
-  back to the outgoing release. Both call sites are `rollback_release || true`,
-  which disables `errexit` for the whole function body, so without that gate a
-  failed restore would strip the rollback pointer off an install still running
-  the rejected release.
+  restore also clears the `previous` pointer, on both platforms, because the
+  switch had already aimed it at the release `current` is being restored to:
+  leaving both naming one release would make `verify` report a rollback target
+  that does not exist and `rollback` swap a release with itself and call it
+  success. On macOS the clear is gated on the restore having actually landed —
+  `rollback_release` re-reads `current` and returns early, leaving `previous`
+  alone, if it did not come back to the outgoing release. Both call sites are
+  `rollback_release || true`, which disables `errexit` for the whole function
+  body, so without that gate a failed restore would strip the rollback pointer
+  off an install still running the rejected release. `manage verify` and
+  `manage rollback` on macOS refuse the same-release state independently too,
+  so an install left in it by an older installer reports honestly. The Windows
+  restore also reaps orphaned processes and re-checks which release holds
+  the port, for the reason in the Scheduled Task trap below — otherwise the
+  rejected release's own orphan answers the health check and is reported as the
+  previous release being "healthy again".
 
-Two mechanical traps the script encodes, both of which fail silently otherwise:
+Mechanical traps the scripts encode, each of which fails silently otherwise:
 
-* **`pnpm deploy --prod --legacy` poisons the workspace.** It rewrites the root
-  `node_modules/.pnpm-workspace-state-v1.json` to `production: true` /
+* **`pnpm deploy --prod --legacy` poisons the workspace.** (Both.) It rewrites
+  the root `node_modules/.pnpm-workspace-state-v1.json` to `production: true` /
   `dev: false`. Every later pnpm command in that checkout then decides the
   workspace is stale and tries to run `pnpm install --production`, which would
   strip the developer's devDependencies. The installer snapshots that file and
-  restores it from an `EXIT` trap, so even a failed install leaves the checkout
-  as it found it.
-* **`mv -f tmp link` follows a symlink to a directory.** Used to swap
+  restores it unconditionally on exit — from an `EXIT` trap on macOS, a
+  `finally` block on Windows — so even a failed install leaves the checkout as
+  it found it.
+* **`mv -f tmp link` follows a symlink to a directory.** (macOS.) Used to swap
   `current`, it deposits the temp link *inside* the old release and leaves
   `current` pointing where it was — the update becomes a silent no-op, and the
   prune then deletes the release nothing points at. The switch uses `rename(2)`
   on the link path instead, and asserts afterwards that `current` advanced.
+* **`pnpm` resolves to a `.ps1` before its `.CMD`.** (Windows.) The PowerShell
+  shim cannot be launched as a process, so the installer takes the first
+  `Application`-typed resolution rather than `(Get-Command pnpm).Source`.
+* **Redirecting a native command's stderr inline sets `$?` to false.**
+  (Windows.) Windows PowerShell 5.1 wraps each stderr line in an `ErrorRecord`,
+  so a clean `exit 0` reads as a failure. The installer's own control flow runs
+  every external command through one `Invoke-Native` helper that captures the
+  two streams via `Start-Process` instead. Two spawns deliberately bypass it,
+  each needing something `Start-Process` cannot express: the candidate-release
+  probe, which clears the environment for the `env -i` analog, and
+  `run-server.ps1`'s `cmd.exe` redirector, which needs append redirection.
+* **Stopping a Scheduled Task does not reap its grandchildren.** (Windows.)
+  Task Scheduler ends the `powershell.exe` it launched; the `cmd.exe` and
+  `node.exe` beneath it survive. The orphan keeps `127.0.0.1:3100`, so the next
+  start cannot bind — and because the orphan answers `/api/hello` exactly like a
+  healthy server, every health check passes while the *old* release serves. This
+  is the "a stale process on 3100 would let the post-install health check pass
+  against the wrong server" trap from SELF_HOST.md's preflight, reached from the
+  inside. Two defences, both required: the installer and `manage` reap every
+  process belonging to the install root (matched by image path and command line,
+  never by image name — that would kill unrelated `node.exe` processes including
+  the invoking pnpm) before any start; and neither the installer nor
+  `manage verify` accepts a 200 as proof, instead resolving the PID holding the
+  port back to the release directory it runs from and comparing it to `current`.
+  `Source of truth:` `Get-DormouseProcess` / `Get-ListeningRelease`.
+* **Windows `tailscaled` serves its local API to one interactive session at a
+  time.** (Windows.) On a PC with a second signed-in profile every `tailscale`
+  call fails `401 Unauthorized: Tailscale already in use by <user>`. The
+  installer matches that string in preflight and says which account holds it and
+  what to do, rather than reporting the raw 401 as "is Tailscale signed in?".
 
-`bin/manage` carries the operator surface: `status`, `verify` (runs every
-acceptance check and exits nonzero on any failure), `logs`, `restart`,
-`show-password`, `serve` (re-apply the Serve mapping after a dev session
-repointed it), `rollback`, `uninstall`, and the separately-confirmed `purge`.
+`bin/manage` (`bin\manage.ps1`, with a `manage.cmd` shim, on Windows) carries
+the operator surface: `status`, `verify` (runs every acceptance check and exits
+nonzero on any failure), `logs`, `restart`, `show-password`, `serve` (re-apply
+the Serve mapping after a dev session repointed it), `rollback`, `uninstall`,
+and the separately-confirmed `purge`.
 
 The Host that connects to such a server needs a build whose baked relay
 allowlist admits the origin — see "Where a Host may reach a relay server"
 above; a `*.ts.net` origin requires `DORMOUSE_REMOTE_CONNECT_SRC` at build time.
 
-Availability follows from what a LaunchAgent is: a per-login agent, so the
-relay is down while the Mac sleeps, is shut off, or has no logged-in user.
-That is usually fine, since there is then no local Host to control either.
+Availability follows from what a per-login agent is, on either platform: the
+relay is down while the laptop sleeps, is shut off, or has no logged-in user.
+That is usually fine, since there is then no local Host to control either. On
+Windows the trigger is at-logon with `LogonType=Interactive`, which is what
+keeps the task free of a stored password — and is the same tradeoff.
 
 ## Future
 

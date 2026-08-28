@@ -127,15 +127,27 @@ describe('FileHostStateStore', () => {
     expect(await reopened.loadAcl('host-1')).toHaveLength(1);
   });
 
-  it('writes the file 0600 and creates its directory 0700', async () => {
-    // The enrollment carries `hostToken`, a bearer credential.
-    const nested = join(dir, 'nested');
-    const store = new FileHostStateStore(nested);
-    await store.saveEnrollment(ENROLLMENT);
+  // Skipped on Windows for the same reason as the directory test below, and it
+  // has always failed there — CI runs this suite only on ubuntu, so nothing
+  // caught it. A Unix mode is a silent no-op on Windows: `stat().mode` reports
+  // a synthesized value that has nothing to do with what the ACL permits, so
+  // the assertion tests neither the intent nor the outcome. What actually
+  // protects this file on Windows is the owner-only DACL that
+  // `remote_host_state_dir` applies to the directory before the sidecar starts,
+  // asserted by `restrict_to_owner_leaves_one_owner_only_ace` in
+  // `standalone/src-tauri/src/lib.rs`.
+  it.runIf(process.platform !== 'win32')(
+    'writes the file 0600 and creates its directory 0700',
+    async () => {
+      // The enrollment carries `hostToken`, a bearer credential.
+      const nested = join(dir, 'nested');
+      const store = new FileHostStateStore(nested);
+      await store.saveEnrollment(ENROLLMENT);
 
-    expect((await stat(join(nested, 'remote-host.json'))).mode & 0o777).toBe(0o600);
-    expect((await stat(nested)).mode & 0o777).toBe(0o700);
-  });
+      expect((await stat(join(nested, 'remote-host.json'))).mode & 0o777).toBe(0o600);
+      expect((await stat(nested)).mode & 0o777).toBe(0o700);
+    },
+  );
 
   it.runIf(process.platform !== 'win32')(
     'tightens a state directory the host created first',
