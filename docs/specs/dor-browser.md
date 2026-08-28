@@ -26,7 +26,7 @@ Two independent axes define a browser pane:
 
 | Axis | Values |
 | --- | --- |
-| Target | A bare URL, or a future Dormouse-owned backend process |
+| Target | A bare URL. (A process-backed target is owned by the **dor-tools** scope, `docs/specs/dor-tool.md`) |
 | Render | `ab-screencast`, `ab-popout`, `iframe` |
 
 The render axis is a pane parameter, not a separate surface kind. The `dor` CLI
@@ -651,8 +651,10 @@ When changing browser-surface behavior:
 - General per-surface teardown hook for iframe proxy grants and future
   Dormouse-owned backend processes. (Agent-browser surfaces already dispose their
   controller on kill/swap; iframe proxy grants still wait on the idle sweep.)
-- Plugin/backend target axis: spawn, health-check, proxy, and reap a local web
-  process such as `openvscode-server`.
+- Process-backed targets are owned by the **dor-tools** scope
+  (`docs/specs/dor-tool.md` `## Future`), which subsumes the plugin/backend
+  target axis formerly staged here. (That scope's C1 phase also depends on the
+  general per-surface teardown hook above.)
 - Optional terminal-side "this port is viewed by surface:N" indicator.
 - Replace the spawn-per-shot CLI screenshot with a persistent host-side CDP
   capture channel. Measured against agent-browser 0.27.3 (headless, attach

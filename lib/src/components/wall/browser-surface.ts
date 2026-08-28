@@ -40,7 +40,10 @@ export function isBrowserParams(params: unknown): boolean {
 /** The Surface kind — the face-set name (`docs/specs/glossary.md` → Faces) —
  *  these params describe. The params → kind step beneath `facesOfKind`
  *  (`dor/commands/types`): keep every params-level kind switch on this one
- *  function so a future kind changes the classification in one place. */
+ *  function so a future kind changes the classification in one place. Unlike
+ *  `facesOfKind`, the compiler cannot force that edit — a boolean-derived
+ *  return type-checks against a widened `SurfaceKind` — so a new kind must be
+ *  added here by hand or its params silently classify as `browser`. */
 export function surfaceKindFromParams(params: unknown): SurfaceKind {
   return isBrowserParams(params) ? 'browser' : 'terminal';
 }
