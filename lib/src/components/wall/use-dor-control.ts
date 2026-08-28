@@ -9,7 +9,7 @@ import type {
   ParseResult,
   SurfacePort as DorSurfacePort,
 } from 'dor/commands/types';
-import { hasConsoleFace } from 'dor/commands/types';
+import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
 import type { OpenPort } from '../../lib/platform/types';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
@@ -22,7 +22,7 @@ import {
 } from '../../lib/terminal-registry';
 import { surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { hostPathDisplay } from './browser-url';
-import { isAgentBrowserParams } from './browser-surface';
+import { agentBrowserSessionFromParams, isAgentBrowserParams } from './browser-surface';
 // One-way import: connect-port no longer depends on this module (its eager-surface
 // and refresh seams are injected as plain functions).
 import { connectPortToDefaultBrowser } from './connect-port';
@@ -180,7 +180,7 @@ function toSurfacePort(port: OpenPort): DorSurfacePort {
 async function attachSurfacePorts(surfaces: DorSurface[]): Promise<DorSurface[]> {
   const platform = getPlatform();
   return Promise.all(surfaces.map(async (surface) => {
-    if (!hasConsoleFace(surface.kind)) return surface;
+    if (!hasTerminal(surface.kind)) return surface;
     try {
       const ports = await platform.getOpenPorts(surface.id);
       return { ...surface, ports: ports.map(toSurfacePort) };
@@ -422,18 +422,35 @@ export function useDorControl({
     return target.value;
   }, [resolveListedSurface]);
 
-  // requireListedSurface plus the face gate shared by the handlers that
+  // requireListedSurface plus the capability gate shared by the handlers that
   // read/write/scan a shell (send / read / await / resolveOpen): these are
-  // console-face-gated operations (docs/specs/glossary.md → Faces). Responds
-  // and returns null on a target with no console face so the caller just bails.
-  const requireConsoleFaceSurface = useCallback((
+  // terminal-gated operations (docs/specs/glossary.md → Panes and Surfaces).
+  // Responds and returns null on a target with no terminal so the caller just
+  // bails.
+  const requireTerminalSurface = useCallback((
     surfaceParam: unknown,
     detail: DorControlRequest,
   ): DorSurface | null => {
     const target = requireListedSurface(surfaceParam, detail);
     if (!target) return null;
-    if (!hasConsoleFace(target.kind)) {
-      detail.respond({ ok: false, error: `surface '${target.ref}' has no console face (kind: ${target.kind})` });
+    if (!hasTerminal(target.kind)) {
+      detail.respond({ ok: false, error: `surface '${target.ref}' has no terminal (kind: ${target.kind})` });
+      return null;
+    }
+    return target;
+  }, [requireListedSurface]);
+
+  // The browser half of the same gate, for `dor ab --surface` (browser-gated;
+  // docs/specs/glossary.md → Panes and Surfaces). Minimized targets pass: a
+  // parked ab surface keeps its daemon session alive.
+  const requireBrowserSurface = useCallback((
+    surfaceParam: unknown,
+    detail: DorControlRequest,
+  ): DorSurface | null => {
+    const target = requireListedSurface(surfaceParam, detail);
+    if (!target) return null;
+    if (!hasBrowser(target.kind)) {
+      detail.respond({ ok: false, error: `surface '${target.ref}' has no browser (kind: ${target.kind})` });
       return null;
     }
     return target;
@@ -462,8 +479,8 @@ export function useDorControl({
 
   /** The agent-browser session ↔ surface registry: the surface bound to
    *  `session`, or null if none exists. */
-  const findAgentBrowserSurface = useCallback((session: string) => findSurfaceByParams((params) =>
-    isAgentBrowserParams(params) && (params as { session?: unknown }).session === session,
+  const findAgentBrowserSurface = useCallback((session: string) => findSurfaceByParams(
+    (params) => agentBrowserSessionFromParams(params) === session,
   ), [findSurfaceByParams]);
 
   // Fold a params patch onto a surface, pane or door alike — the store holds both,
@@ -560,7 +577,7 @@ export function useDorControl({
       const booting = findSurfaceByParams((params) =>
         isAgentBrowserParams(params)
         && (params as { key?: unknown }).key === 'default'
-        && (params as { session?: unknown }).session === undefined);
+        && agentBrowserSessionFromParams(params) === null);
       if (booting) return reveal(booting.id);
       // (c) Create it now: NO `session` (keeps the controller's stale-port
       // recovery inert until the daemon is up), but carry the target `url` so
@@ -794,7 +811,7 @@ export function useDorControl({
           detail.respond({ ok: false, error: 'input is required' });
           return;
         }
-        const target = requireConsoleFaceSurface(params.surface, detail);
+        const target = requireTerminalSurface(params.surface, detail);
         if (!target) return;
         getPlatform().writePty(target.id, input);
         detail.respond({
@@ -810,7 +827,7 @@ export function useDorControl({
       }
 
       if (detail.method === SURFACE_CONTROL_METHODS.read) {
-        const target = requireConsoleFaceSurface(params.surface, detail);
+        const target = requireTerminalSurface(params.surface, detail);
         if (!target) return;
         const lines = numberParam(params.lines);
         const scrollback = booleanParam(params.scrollback);
@@ -833,7 +850,7 @@ export function useDorControl({
       // absorption of the completion it consumes — lives in the host's
       // `AlertManager`; this branch only validates, parks, and reports.
       if (detail.method === SURFACE_CONTROL_METHODS.await) {
-        const target = requireConsoleFaceSurface(params.surface, detail);
+        const target = requireTerminalSurface(params.surface, detail);
         if (!target) return;
         const until = params.until;
         if (until !== 'quiet' && until !== 'exit') {
@@ -980,8 +997,8 @@ export function useDorControl({
         // Resolve a terminal Surface handle to the dev-server URL it owns, for
         // `dor ab open <surface>` / `dor iframe <surface>`. Same port scan as
         // `dor list --ports`; minimized doors are valid targets. Ports ride the
-        // console face, so a target without one is rejected by the guard.
-        const target = requireConsoleFaceSurface(params.surface, detail);
+        // terminal, so a target without one is rejected by the guard.
+        const target = requireTerminalSurface(params.surface, detail);
         if (!target) return;
         let ports: OpenPort[];
         try {
@@ -1016,12 +1033,43 @@ export function useDorControl({
         return;
       }
 
+      if (detail.method === SURFACE_CONTROL_METHODS.resolveAgentBrowser) {
+        // Resolve a browser Surface handle to the agent-browser session bound to
+        // it, for `dor ab --surface <handle> <verb...>`. Past the browser gate,
+        // web verbs stay renderMode-gated: an `iframe` renderer is a browser
+        // with nothing to drive (docs/specs/glossary.md → Panes and Surfaces).
+        const target = requireBrowserSurface(params.surface, detail);
+        if (!target) return;
+        if (target.renderMode === 'iframe') {
+          detail.respond({
+            ok: false,
+            error: `surface '${target.ref}' is not agent-browser rendered (render_mode: ${target.renderMode})`,
+          });
+          return;
+        }
+        // The session is the one row field the projection deliberately withholds
+        // (it is an identifier, not a capability), so read it from the params —
+        // live metadata for panes and parked doors alike.
+        const session = agentBrowserSessionFromParams(lath.getMeta(target.id)?.params);
+        if (!session) {
+          // An eagerly-created connect pane whose daemon boot has not yet named
+          // it (docs/specs/dor-browser.md → Pane Context Menu Connect).
+          detail.respond({ ok: false, error: `surface '${target.ref}' has no agent-browser session yet` });
+          return;
+        }
+        detail.respond({
+          ok: true,
+          result: { surfaceId: target.id, surfaceRef: target.ref, session },
+        });
+        return;
+      }
+
       detail.respond({ ok: false, error: `unsupported Dormouse control method '${detail.method}'` });
     };
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, requireListedSurface, requireConsoleFaceSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
+  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
 
   return { connectPort };
 }

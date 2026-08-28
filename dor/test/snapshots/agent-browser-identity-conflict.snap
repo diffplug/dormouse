@@ -1,0 +1,5 @@
+exitCode: 1
+stdout:
+
+stderr:
+Error: --key, --session and --surface are mutually exclusive

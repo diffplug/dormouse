@@ -2,9 +2,11 @@
  * `dor agent-browser` (alias `dor ab`) — near-transparent passthrough to the
  * user's own agent-browser binary, plus Dormouse surface management.
  *
- * Dormouse intercepts exactly two flags: `--key` (managed, workspace-scoped,
- * default "default") and `--session` (raw escape hatch). Everything else is
- * forwarded verbatim to `agent-browser --session <resolved> <args...>`. After
+ * Dormouse intercepts exactly three mutually-exclusive identity flags: `--key`
+ * (managed, workspace-scoped, default "default"), `--session` (raw escape hatch)
+ * and `--surface` (a Surface handle, resolved to its bound session host-side).
+ * Everything else is forwarded verbatim to
+ * `agent-browser --session <resolved> <args...>`. After
  * a successful forwarded command, the stream WebSocket port is read via
  * `stream status --json` and a `surface.agentBrowser` control request asks the
  * Wall to create or reuse the browser surface bound to that session.
@@ -83,23 +85,26 @@ export const agentBrowserCommand: Command = {
   helpPatches: [
     {
       scope: 'root',
-      findReplace: ['agent-browser [--key name] [--session name]<TO-EOL>', 'agent-browser [--key name|--session name] [args...]\n'],
+      findReplace: ['agent-browser [--key name] [--session name] [--surface handle]<TO-EOL>', 'agent-browser [--key name|--session name|--surface handle] [args...]\n'],
     },
     {
       scope: 'command-usage',
-      findReplace: ['agent-browser [--key name] [--session name]<TO-EOL>', 'agent-browser [--key name|--session name] [args...]\n'],
+      findReplace: ['agent-browser [--key name] [--session name] [--surface handle]<TO-EOL>', 'agent-browser [--key name|--session name|--surface handle] [args...]\n'],
     },
   ],
-  command: buildCommand<{ key?: string; session?: string }, [...args: string[]], DorCommandContext>({
+  command: buildCommand<{ key?: string; session?: string; surface?: string }, [...args: string[]], DorCommandContext>({
     docs: {
       brief: 'Drive a browser surface via your agent-browser install (alias: dor ab).',
       fullDescription: `Forwards all arguments verbatim to your own agent-browser binary and binds the session to a Dormouse browser surface.
 
-dor intercepts exactly two flags:
-  --key <name>      Managed, workspace-scoped browser identity (default "default").
-                    Maps to agent-browser session dormouse.1.<name>.
-  --session <name>  Attach to a raw agent-browser session by its literal name.
-                    Mutually exclusive with --key.
+dor intercepts exactly three mutually exclusive identity flags:
+  --key <name>       Managed, workspace-scoped browser identity (default "default").
+                     Maps to agent-browser session dormouse.1.<name>.
+  --session <name>   Attach to a raw agent-browser session by its literal name.
+  --surface <handle> Drive the browser Surface a handle names (surface:N,
+                     surface:focused, a stable id, title:<title>). dor asks the
+                     host which agent-browser session that Surface is bound to,
+                     which is the only way to address a GUI-spawned session.
 
 Everything else — subcommands, flags, selectors — is agent-browser's own
 command surface. The binary is resolved from PATH (override with
@@ -122,12 +127,14 @@ Examples:
   dor ab open surface:3                     # open the port terminal surface:3 owns
   dor ab --key storybook open http://localhost:6006
   dor ab click @e3                          # drives key "default"
-  dor ab --key storybook reload             # drives key "storybook"`,
+  dor ab --key storybook reload             # drives key "storybook"
+  dor ab --surface surface:4 click @e3      # drives whatever surface:4 is bound to`,
     },
     parameters: {
       flags: {
         key: { kind: 'parsed', parse: stringParser, brief: 'Workspace-scoped browser key (default "default").', optional: true, placeholder: 'name' },
-        session: { kind: 'parsed', parse: stringParser, brief: 'Raw agent-browser session name (mutually exclusive with --key).', optional: true, placeholder: 'name' },
+        session: { kind: 'parsed', parse: stringParser, brief: 'Raw agent-browser session name (mutually exclusive with --key/--surface).', optional: true, placeholder: 'name' },
+        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface handle whose bound session to drive (mutually exclusive with --key/--session).', optional: true, placeholder: 'handle' },
       },
       positional: {
         kind: 'array',
@@ -135,7 +142,7 @@ Examples:
         minimum: 0,
       },
     },
-    func: async function (this: DorCommandContext, _flags: { key?: string; session?: string }, ..._args: string[]): Promise<void | Error> {
+    func: async function (this: DorCommandContext, _flags: { key?: string; session?: string; surface?: string }, ..._args: string[]): Promise<void | Error> {
       // runCli intercepts every non-help agent-browser invocation before
       // stricli; reaching this func means that interception regressed.
       return new Error('internal: agent-browser passthrough was not intercepted');
@@ -143,25 +150,29 @@ Examples:
   }),
 };
 
-interface ResolvedSessionFlags {
-  /** Managed key; undefined when the caller attached via raw --session. */
-  key?: string;
-  session: string;
-  rest: string[];
-}
+/** The three identity flags dor intercepts, in the order they are reported when
+ *  more than one is given. */
+const IDENTITY_FLAGS = ['--key', '--session', '--surface'] as const;
+type IdentityFlag = (typeof IDENTITY_FLAGS)[number];
+
+/** Either a session known CLI-side (from `--session`, or namespaced from
+ *  `--key`) or a Surface handle for the host to resolve — never neither, never
+ *  both. A union rather than two optionals so the arm that has no session is
+ *  the arm that has a surface, by construction. `key` rides along only when it
+ *  named the session: a raw or surface-addressed session may be GUI-minted,
+ *  which no key names. */
+type ResolvedSessionFlags = { rest: string[] } & (
+  | { session: string; key?: string; surface?: undefined }
+  | { surface: string; session?: undefined; key?: undefined }
+);
 
 export function extractSessionFlags(args: string[]): ParseResult<ResolvedSessionFlags> {
-  let key: string | undefined;
-  let session: string | undefined;
+  const values = new Map<IdentityFlag, string>();
   const rest: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index] ?? '';
-    const flag = arg === '--key' || arg.startsWith('--key=')
-      ? '--key'
-      : arg === '--session' || arg.startsWith('--session=')
-        ? '--session'
-        : null;
+    const flag = IDENTITY_FLAGS.find((name) => arg === name || arg.startsWith(`${name}=`));
     if (!flag) {
       rest.push(arg);
       continue;
@@ -177,20 +188,30 @@ export function extractSessionFlags(args: string[]): ParseResult<ResolvedSession
     if (!value || value.startsWith('-')) {
       return { ok: false, message: `${flag} requires a value` };
     }
-    if (flag === '--key') key = value;
-    else session = value;
+    values.set(flag, value);
   }
 
-  if (key !== undefined && session !== undefined) {
-    return { ok: false, message: '--key and --session are mutually exclusive' };
+  // Three ways to name one browser; naming it twice is always a mistake, never
+  // a precedence question.
+  const given = IDENTITY_FLAGS.filter((flag) => values.has(flag));
+  if (given.length > 1) {
+    // "--key and --session"; "--key, --session and --surface" — reported in
+    // IDENTITY_FLAGS order, not argv order, so the message is stable.
+    const joined = `${given.slice(0, -1).join(', ')} and ${given[given.length - 1]}`;
+    return { ok: false, message: `${joined} are mutually exclusive` };
   }
+
+  const key = values.get('--key');
   if (key !== undefined && !KEY_PATTERN.test(key)) {
     return { ok: false, message: `--key must match ${KEY_PATTERN} (it becomes part of an agent-browser session name)` };
   }
 
-  if (session !== undefined) {
-    return { ok: true, value: { session, rest } };
-  }
+  const surface = values.get('--surface');
+  if (surface !== undefined) return { ok: true, value: { surface, rest } };
+
+  const session = values.get('--session');
+  if (session !== undefined) return { ok: true, value: { session, rest } };
+
   const resolvedKey = key ?? 'default';
   return { ok: true, value: { key: resolvedKey, session: sessionForKey(resolvedKey), rest } };
 }
@@ -198,7 +219,15 @@ export function extractSessionFlags(args: string[]): ParseResult<ResolvedSession
 export async function runAgentBrowserCli(args: string[], options: CliOptions): Promise<CliResult> {
   const flags = extractSessionFlags(args);
   if (!flags.ok) return fail(flags.message);
-  const { key, session } = flags.value;
+  const { key } = flags.value;
+
+  // `--surface <handle>` names the browser Surface rather than the session, so
+  // the session comes from the host's session↔surface registry before anything
+  // is forwarded. This is the only way to drive a GUI-spawned session, whose
+  // `gui-<hex>` name no `--key` can produce.
+  const resolvedSession = await resolveSession(flags.value, options);
+  if (!resolvedSession.ok) return fail(resolvedSession.message);
+  const session = resolvedSession.value;
 
   // `dor ab open <target>` accepts a Surface handle / bare :port wherever it
   // takes a URL; resolve it to a URL before forwarding, because agent-browser
@@ -266,6 +295,30 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
     stdout: result.stdout,
     stderr: result.stderr + stderrSuffix,
   };
+}
+
+/**
+ * The agent-browser session to forward: the one the flags already produced, or —
+ * for `--surface <handle>` — the one the host says that Surface is bound to
+ * (`surface.resolveAgentBrowser`). A handle needs a live control endpoint, and
+ * the host owns the gating: the target must have a browser, and that browser
+ * must be agent-browser-rendered with a session (an `iframe` renderer has no
+ * session to drive). Its messages are printed verbatim; dor does not
+ * re-interpret them.
+ */
+async function resolveSession(
+  flags: ResolvedSessionFlags,
+  options: CliOptions,
+): Promise<ParseResult<string>> {
+  if (flags.session !== undefined) return { ok: true, value: flags.session };
+  const client = requireControlClient(options);
+  if (client instanceof Error) return { ok: false, message: client.message };
+  try {
+    const { session } = await client.resolveAgentBrowserSession({ surface: flags.surface });
+    return { ok: true, value: session };
+  } catch (error) {
+    return { ok: false, message: errorMessage(error) };
+  }
 }
 
 // agent-browser's URL-navigation verbs. `goto` / `navigate` are documented

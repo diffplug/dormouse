@@ -876,35 +876,23 @@ Invariants the installer exists to hold:
 * **A failed update is a failure.** The candidate release is health-checked on
   an ephemeral port against a throwaway state dir *before* `current` moves; if
   the live service then fails to answer, `current` is restored to `previous`
-  and the installer exits nonzero. Rollback succeeding is not success. On
-  Windows and Linux the restore additionally clears the `previous` pointer,
-  because the switch had already set it to the release `current` is being
-  restored to: leaving both naming one release would make `verify` report a
-  rollback target that does not exist and `rollback` swap a release with itself
-  and call it success. *(The macOS installer has the same ordering and not yet
-  this correction.)*
-* **A health check is not an identity check.** `/api/hello` carries no release
-  identity, so a 200 on the loopback port proves only that *something* got there
-  first: a surviving orphan, a hand-started copy, a dev server repointed at
-  3100, or — on WSL with `networkingMode=mirrored`, where loopback is shared
-  with the Windows host — a Windows process no Linux tool can even see.
-  Reporting that responder as the installed release is the failure this
-  invariant exists to prevent, so **no installer may accept health without
-  separate proof of who answered**. The three do not hold it equally:
-
-  | | proof that the responder is this release |
-  | --- | --- |
-  | macOS | **none yet** — `verify` and both health loops are bare `curl` |
-  | Windows | reaps every process belonging to the install root, then resolves the PID holding the port back to a release directory (`Get-DormouseProcess` / `Get-ListeningRelease`) |
-  | Linux | `systemctl --user is-active`, as one gate every live check goes through — `service_healthy` in both the installer and `manage`, so `status`, `verify`, `restart` and `rollback` cannot report another server as this one |
-
-  Linux cannot orphan the way Windows can (`systemctl --user stop` takes the
-  cgroup), which is why the service manager's own view is its primary control
-  rather than process reaping. Its `/proc`-based port-holder check is secondary,
-  naming the culprit when it can: it must be secondary because it can come up
-  empty while the port is very much taken, which is exactly the shared-loopback
-  case above. An unresolvable holder is therefore reported, never treated as
-  "nothing is there".
+  and the installer exits nonzero. Rollback succeeding is not success. The
+  restore also clears the `previous` pointer, on every platform, because the
+  switch had already aimed it at the release `current` is being restored to:
+  leaving both naming one release would make `verify` report a rollback target
+  that does not exist and `rollback` swap a release with itself and call it
+  success. On macOS and Linux the clear is gated on the restore having actually
+  landed — `rollback_release` re-reads `current` and returns early, leaving
+  `previous` alone, if it did not come back to the outgoing release. Both call
+  sites are `rollback_release || true`, which disables `errexit` for the whole
+  function body, so without that gate a failed restore would strip the rollback
+  pointer off an install still running the rejected release. On those two,
+  `manage verify` and `manage rollback` refuse the same-release state
+  independently too, so an install left in it by an older installer reports
+  honestly. The Windows restore also reaps orphaned processes and re-checks
+  which release holds the port, for the reason in the Scheduled Task trap below
+  — otherwise the rejected release's own orphan answers the health check and is
+  reported as the previous release being "healthy again".
 
 Mechanical traps the scripts encode, each of which fails silently otherwise:
 

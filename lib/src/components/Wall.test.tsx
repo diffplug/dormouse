@@ -354,18 +354,7 @@ describe('Wall on the Lath engine', () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation((id) => id === 'pane-a');
 
     try {
-      let response: { result?: { surfaceId: string } } | undefined;
-      await act(async () => {
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
-          detail: {
-            method: SURFACE_CONTROL_METHODS.iframe,
-            params: { url: 'http://localhost:5173/' },
-            respond: (r: typeof response) => { response = r; },
-          },
-        }));
-      });
-      await flush();
-      const surfaceId = response!.result!.surfaceId;
+      const surfaceId = (await dispatchIframe('http://localhost:5173/')).id;
       const leaf0 = container.querySelector(`[data-lath-leaf="${surfaceId}"]`);
       expect(leaf0).toBeTruthy();
 
@@ -447,6 +436,12 @@ describe('Wall on the Lath engine', () => {
       await flush();
       expect(container.querySelector(`[data-lath-leaf="${browserId}"]`)?.hasAttribute('data-lath-parked')).toBe(true);
 
+      // Until the boot names it, `dor ab --surface` has nothing to drive.
+      expect(await dispatchResolveAgentBrowser(browserId)).toEqual({
+        ok: false,
+        error: `surface 'surface:2' has no agent-browser session yet`,
+      });
+
       // Boot completion writes `session` only to live parked metadata. The Door
       // record is intentionally still the session-less minimize-time snapshot.
       await act(async () => {
@@ -471,6 +466,47 @@ describe('Wall on the Lath engine', () => {
 
       expect((await dispatchKill(browserId))?.ok).toBe(true);
       expect(agentBrowserCommand).toHaveBeenCalledWith(defaultSession, ['close'], undefined);
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it('resolves a browser surface handle to its agent-browser session, and gates the rest', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    (fake as PlatformAdapter).agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      });
+      await flush();
+
+      // An ab-rendered surface bound to a GUI-minted session — the name no
+      // `--key` can produce, which is the point of addressing by handle.
+      const abId = await dispatchAgentBrowser({ session: 'dormouse.1.gui-a1b2c3', surface: 'surface:1' });
+      const iframeRef = (await dispatchIframe('http://localhost:5173/')).ref;
+
+      expect(await dispatchResolveAgentBrowser(abId)).toEqual({
+        ok: true,
+        result: { surfaceId: abId, surfaceRef: 'surface:2', session: 'dormouse.1.gui-a1b2c3' },
+      });
+      // A parked ab surface keeps its daemon session, so a minimized target resolves.
+      await act(async () => {
+        container.querySelector<HTMLButtonElement>(`[data-lath-leaf="${abId}"] [aria-label="Minimize"]`)!.click();
+      });
+      await flush();
+      expect(await dispatchResolveAgentBrowser(abId)).toMatchObject({ ok: true });
+
+      // Gate 1: a terminal has no browser at all.
+      expect(await dispatchResolveAgentBrowser('surface:1')).toEqual({
+        ok: false,
+        error: "surface 'surface:1' has no browser (kind: terminal)",
+      });
+      // Gate 2: an iframe renderer has a browser but no agent-browser session.
+      expect(await dispatchResolveAgentBrowser(iframeRef)).toEqual({
+        ok: false,
+        error: `surface '${iframeRef}' is not agent-browser rendered (render_mode: iframe)`,
+      });
     } finally {
       untouchedSpy.mockRestore();
     }
@@ -1054,6 +1090,39 @@ describe('Wall on the Lath engine', () => {
     await flush();
     expect(response?.ok).toBe(true);
     return response!.result!.surfaceId!;
+  }
+
+  /** `dor iframe <url>`; returns the new surface's `{ id, ref }`. */
+  async function dispatchIframe(url: string): Promise<{ id: string; ref: string }> {
+    let response: { ok: boolean; result?: { surfaceId: string; surfaceRef: string } } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.iframe,
+          params: { url },
+          respond: (r: typeof response) => { response = r; },
+        },
+      }));
+    });
+    await flush();
+    expect(response?.ok).toBe(true);
+    return { id: response!.result!.surfaceId, ref: response!.result!.surfaceRef };
+  }
+
+  /** `dor ab --surface <handle>`'s host half; returns the raw control response. */
+  async function dispatchResolveAgentBrowser(surface: string): Promise<unknown> {
+    let response: unknown;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.resolveAgentBrowser,
+          params: { surface },
+          respond: (r: unknown) => { response = r; },
+        },
+      }));
+    });
+    await flush();
+    return response;
   }
 
   it('dor split transfers focus to the new surface (passthrough)', async () => {
