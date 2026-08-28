@@ -201,10 +201,19 @@ over a single bad line.
 plaintext, and `vapid.json` a private key, so both files are written owner-only:
 the state dir is created
 `0o700` and every write lands in a `0o600` temp file before the rename
-(`server/src/state.ts`, `writeAtomic`). Without explicit modes these inherit
-the umask and end up world-readable, handing live host tokens to any other
-local account on a shared machine. Any new file under `$DORMOUSE_STATE_DIR`
-must go through `writeAtomic` for the same reason.
+(`server/src/state.ts`, `writeAtomic`). Any new file under
+`$DORMOUSE_STATE_DIR` must go through `writeAtomic` for the same reason.
+
+That mode is a cheap default, not the guarantee the deployment rests on, and the
+difference is worth stating so nothing is built on top of it. It earns its place
+on a multi-user unix host, where home-directory permissions vary by distro — so
+without an explicit mode, whether a second local account can read `hosts.json`
+depends on which distro the selfhoster happened to pick. It buys nothing where
+modes are not the mechanism: Windows, where they are a no-op and the profile ACL
+already excludes other accounts; a container, where the namespace is the
+boundary; or a database-backed deployment, where this file never runs. What
+protects the *installed* self-host server's state is the installer's directory
+permissions, in "Installing it" below.
 
 ## WebAuthn without a WebAuthn library
 
@@ -820,10 +829,10 @@ Invariants the installer exists to hold:
   thereafter. Purging state is a separate, explicitly confirmed operation. On
   Windows the installer creates `server.env` and applies its DACL *before*
   writing the password, so the secret never sits under the inherited
-  `%LOCALAPPDATA%` ACL; and because Node's file modes are a no-op there, the
-  `0o600` that `server/src/state.ts` requests does nothing, leaving inheritance
-  from `state\` as the only control — which is why the Windows `manage verify`
-  checks each state file individually and the macOS one does not need to.
+  `%LOCALAPPDATA%` ACL. Node's file modes are a no-op on Windows, so the files
+  inside `state\` are covered by what they inherit from the directory rather
+  than by `server/src/state.ts`'s `0o600`; `manage verify` walks them
+  individually there, where the macOS one does not need to.
 * **Loopback only, and tailnet-only.** The install pins
   `DORMOUSE_BIND_HOST=127.0.0.1` and refuses to proceed without it — see the
   Configuration note above on why the listen interface is a security boundary
