@@ -87,6 +87,30 @@ jobs:
       - name: Build
         run: pnpm build
 
+      # The Linux installer is the only one CI can execute, and most of what it
+      # does is shared with its two siblings: the release build, the staging,
+      # the self-contained runtime copy, the candidate health probe on an
+      # ephemeral port, the `current` switch, the prune, and the generated
+      # `manage`. Test mode stops short of systemd and Serve, and the injected
+      # origin is what lets it run on a machine with no tailnet.
+      - name: Self-host installer (Linux, test mode)
+        env:
+          DORMOUSE_INSTALL_TEST: '1'
+          DORMOUSE_INSTALL_ORIGIN: https://ci.example.ts.net
+        run: |
+          set -euo pipefail
+          root="$(mktemp -d)/dormouse-server"
+          # Twice: the first is a first install, the second exercises the update
+          # path — previous pointer, prune, and preserving config/server.env.
+          DORMOUSE_INSTALL_ROOT="$root" ./deploy/local/install-linux.sh --yes
+          before="$(sha256sum "$root/config/server.env" | cut -d' ' -f1)"
+          DORMOUSE_INSTALL_ROOT="$root" ./deploy/local/install-linux.sh --yes
+          after="$(sha256sum "$root/config/server.env" | cut -d' ' -f1)"
+          [ "$before" = "$after" ] || { echo "::error::server.env was not preserved across an update"; exit 1; }
+          [ -L "$root/previous" ] || { echo "::error::no previous release retained after an update"; exit 1; }
+          bash -n "$root/bin/manage"
+          bash -n "$root/bin/run-server"
+
   standalone-smoketest:
     name: Standalone Smoketest
     runs-on: ubuntu-latest

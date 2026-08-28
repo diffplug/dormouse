@@ -24,6 +24,9 @@
 #                             but do not touch systemd or the Serve config.
 #   DORMOUSE_INSTALL_ROOT     A throwaway install root (requires the above), so
 #                             path quoting and release switching can be tested.
+#   DORMOUSE_INSTALL_ORIGIN   An origin to use instead of asking Tailscale
+#                             (requires the above). Lets CI, which has no
+#                             tailnet, run everything up to the Serve step.
 
 set -euo pipefail
 
@@ -47,6 +50,11 @@ WANT_LINGER=0
 # an overridden root would leave `manage` and systemd disagreeing about where
 # the service lives. Overriding HOME instead would break pnpm, whose store and
 # downloaded runtime live under the real home.
+if [ -n "${DORMOUSE_INSTALL_ORIGIN:-}" ] && [ "$TEST_MODE" != "1" ]; then
+  echo "DORMOUSE_INSTALL_ORIGIN is only honored with DORMOUSE_INSTALL_TEST=1" >&2
+  exit 64
+fi
+
 if [ -n "${DORMOUSE_INSTALL_ROOT:-}" ]; then
   if [ "$TEST_MODE" != "1" ]; then
     echo "DORMOUSE_INSTALL_ROOT is only honored with DORMOUSE_INSTALL_TEST=1" >&2
@@ -269,8 +277,16 @@ fi
 
 # --------------------------------------------------------------- tailscale --
 
-command -v tailscale >/dev/null 2>&1 \
-  || die "tailscale CLI not found on PATH. Install Tailscale and sign in first — this installer will not install or reauthenticate it for you. https://tailscale.com/docs/install/linux"
+# A test-mode run with an injected origin never consults Tailscale at all, which
+# is what lets CI — which has no tailnet — exercise the build, the staging, the
+# candidate probe and the release switch.
+SKIP_TAILSCALE=0
+[ "$TEST_MODE" = "1" ] && [ -n "${DORMOUSE_INSTALL_ORIGIN:-}" ] && SKIP_TAILSCALE=1
+
+if [ "$SKIP_TAILSCALE" != "1" ]; then
+  command -v tailscale >/dev/null 2>&1 \
+    || die "tailscale CLI not found on PATH. Install Tailscale and sign in first — this installer will not install or reauthenticate it for you. https://tailscale.com/docs/install/linux"
+fi
 
 ts() { tailscale "$@"; }
 
@@ -304,8 +320,6 @@ die_needs_operator() {
 printf '%sDormouse selfhost server — Linux installer%s\n' "$C_BLD" "$C_OFF"
 [ "$TEST_MODE" = "1" ] && warn "DORMOUSE_INSTALL_TEST=1 — systemd and Serve will not be touched."
 
-step "Checking Tailscale"
-
 # One EXIT trap for every temporary this script creates. `pnpm deploy --prod
 # --legacy` poisons the root node_modules/.pnpm-workspace-state-v1.json
 # (production:true / dev:false), which would make every later pnpm command in
@@ -333,45 +347,57 @@ cleanup() {
 }
 trap cleanup EXIT
 
-TS_STATUS_JSON="$(mktemp_file ts-status)"
-TS_STATUS_ERR="$(ts status --json > "$TS_STATUS_JSON" 2>&1)" || {
-  ts_denied "$TS_STATUS_ERR" && die_needs_operator "\`tailscale status\`" "$TS_STATUS_ERR"
-  die "\`tailscale status --json\` failed. Is tailscaled running and signed in? (systemctl status tailscaled)
-    ${TS_STATUS_ERR}"
-}
+step "Checking Tailscale"
 
-TS_BACKEND="$(json_query "$TS_STATUS_JSON" "BackendState" || echo "")"
-[ "$TS_BACKEND" = "Running" ] || die "Tailscale backend state is '${TS_BACKEND:-unknown}', expected 'Running'. Sign in and connect (\`tailscale up\`), then re-run."
+if [ "$SKIP_TAILSCALE" = "1" ]; then
+  ORIGIN="$DORMOUSE_INSTALL_ORIGIN"
+  case "$ORIGIN" in
+    https://*) TS_DNS="${ORIGIN#https://}" ;;
+    *) die "DORMOUSE_INSTALL_ORIGIN must be an https:// origin, got '$ORIGIN'." ;;
+  esac
+  warn "test mode: using the injected origin $ORIGIN; Tailscale is not consulted."
+else
 
-TS_DNS_RAW="$(json_query "$TS_STATUS_JSON" "Self.DNSName" || echo "")"
-[ -n "$TS_DNS_RAW" ] || die "Tailscale reports no MagicDNS name for this node. Enable MagicDNS for the tailnet: https://login.tailscale.com/admin/dns"
-# MagicDNS names arrive fully qualified with a trailing dot.
-TS_DNS="${TS_DNS_RAW%.}"
+  TS_STATUS_JSON="$(mktemp_file ts-status)"
+  TS_STATUS_ERR="$(ts status --json > "$TS_STATUS_JSON" 2>&1)" || {
+    ts_denied "$TS_STATUS_ERR" && die_needs_operator "\`tailscale status\`" "$TS_STATUS_ERR"
+    die "\`tailscale status --json\` failed. Is tailscaled running and signed in? (systemctl status tailscaled)
+      ${TS_STATUS_ERR}"
+  }
 
-MAGIC_DNS_ENABLED="$(json_query "$TS_STATUS_JSON" "CurrentTailnet.MagicDNSEnabled" || echo "false")"
-[ "$MAGIC_DNS_ENABLED" = "true" ] || warn "MagicDNS is not reported as enabled for this tailnet; the HTTPS name may not resolve for other devices."
+  TS_BACKEND="$(json_query "$TS_STATUS_JSON" "BackendState" || echo "")"
+  [ "$TS_BACKEND" = "Running" ] || die "Tailscale backend state is '${TS_BACKEND:-unknown}', expected 'Running'. Sign in and connect (\`tailscale up\`), then re-run."
 
-ORIGIN="https://$TS_DNS"
-ok "node: $TS_DNS"
-ok "external origin: $ORIGIN"
+  TS_DNS_RAW="$(json_query "$TS_STATUS_JSON" "Self.DNSName" || echo "")"
+  [ -n "$TS_DNS_RAW" ] || die "Tailscale reports no MagicDNS name for this node. Enable MagicDNS for the tailnet: https://login.tailscale.com/admin/dns"
+  # MagicDNS names arrive fully qualified with a trailing dot.
+  TS_DNS="${TS_DNS_RAW%.}"
 
-CERT_DOMAINS="$(json_query "$TS_STATUS_JSON" "CertDomains" || echo "")"
-case ",$CERT_DOMAINS," in
-  *",$TS_DNS,"*) ok "tailnet HTTPS certificates enabled for this name" ;;
-  *)
-    warn "tailnet HTTPS certificates do not list $TS_DNS."
-    warn "Enable HTTPS at https://login.tailscale.com/admin/dns — Serve cannot get a certificate without it."
-    ;;
-esac
+  MAGIC_DNS_ENABLED="$(json_query "$TS_STATUS_JSON" "CurrentTailnet.MagicDNSEnabled" || echo "false")"
+  [ "$MAGIC_DNS_ENABLED" = "true" ] || warn "MagicDNS is not reported as enabled for this tailnet; the HTTPS name may not resolve for other devices."
 
-# Prove the operator role now rather than at the Serve step, which happens after
-# the build and after `current` has already moved. A node with no Serve
-# configuration exits nonzero too, so only a refusal is fatal here.
-if [ "$TEST_MODE" != "1" ]; then
-  if ! SERVE_PROBE="$(ts serve status 2>&1)"; then
-    ts_denied "$SERVE_PROBE" && die_needs_operator "\`tailscale serve status\`" "$SERVE_PROBE"
+  ORIGIN="https://$TS_DNS"
+  ok "node: $TS_DNS"
+  ok "external origin: $ORIGIN"
+
+  CERT_DOMAINS="$(json_query "$TS_STATUS_JSON" "CertDomains" || echo "")"
+  case ",$CERT_DOMAINS," in
+    *",$TS_DNS,"*) ok "tailnet HTTPS certificates enabled for this name" ;;
+    *)
+      warn "tailnet HTTPS certificates do not list $TS_DNS."
+      warn "Enable HTTPS at https://login.tailscale.com/admin/dns — Serve cannot get a certificate without it."
+      ;;
+  esac
+
+  # Prove the operator role now rather than at the Serve step, which happens after
+  # the build and after `current` has already moved. A node with no Serve
+  # configuration exits nonzero too, so only a refusal is fatal here.
+  if [ "$TEST_MODE" != "1" ]; then
+    if ! SERVE_PROBE="$(ts serve status 2>&1)"; then
+      ts_denied "$SERVE_PROBE" && die_needs_operator "\`tailscale serve status\`" "$SERVE_PROBE"
+    fi
+    ok "this account may operate tailscaled"
   fi
-  ok "this account may operate tailscaled"
 fi
 
 # --------------------------------------------------------- origin identity ---

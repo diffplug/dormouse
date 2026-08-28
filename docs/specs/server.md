@@ -999,6 +999,18 @@ Mechanical traps the scripts encode, each of which fails silently otherwise:
   installer parses `systemctl --version` and refuses below 240 rather than
   installing a unit whose logging silently lies.
 
+The installers carry three test-only hooks, each refused unless
+`DORMOUSE_INSTALL_TEST=1`: `DORMOUSE_INSTALL_ROOT` puts the whole install under
+a throwaway path, and — Linux only — `DORMOUSE_INSTALL_ORIGIN` supplies the
+origin so Tailscale is never consulted. That last one is what lets CI run the
+installer at all: `.github/workflows/ci.yml` installs twice into a temp root on
+every push, which exercises the release build, staging, the self-contained
+runtime copy, the candidate probe, the `current` switch, the prune, and that
+`config/server.env` survives an update byte-for-byte. Test mode stops before
+systemd and Serve, so the live service and the tailnet are never touched — and
+the macOS and Windows editions have no CI coverage at all, which is why
+`scripts/deploy-lint.mjs` checks all three textually.
+
 `bin/manage` (`bin\manage.ps1`, with a `manage.cmd` shim, on Windows) carries
 the operator surface: `status`, `verify` (runs every acceptance check and exits
 nonzero on any failure), `logs`, `restart`, `show-password`, `serve` (re-apply

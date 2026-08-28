@@ -12,7 +12,7 @@
   },
   "scripts": {
     "build": "pnpm run build:vscode && pnpm --filter dormouse-website build",
-    "test": "node scripts/spec-lint.mjs && node scripts/xterm-lint.mjs && node scripts/loopback-lint.mjs && pnpm -r run test",
+    "test": "node scripts/spec-lint.mjs && node scripts/xterm-lint.mjs && node scripts/loopback-lint.mjs && node scripts/deploy-lint.mjs && pnpm -r run test",
     "lint:specs": "node scripts/spec-lint.mjs",
     "lint:loopback": "node scripts/loopback-lint.mjs",
     "lint:xterm": "node scripts/xterm-lint.mjs",
@@ -30,7 +30,8 @@
     "dogfood:vscode": "pnpm run build:vscode && pnpm --filter dormouse dogfood",
     "dogfood:standalone": "bash standalone/scripts/dogfood.sh",
     "storybook": "pnpm --filter dormouse-lib storybook",
-    "bundle-themes": "node lib/scripts/bundle-themes.mjs"
+    "bundle-themes": "node lib/scripts/bundle-themes.mjs",
+    "lint:deploy": "node scripts/deploy-lint.mjs"
   },
   "devDependencies": {}
 }
