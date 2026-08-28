@@ -424,7 +424,7 @@ export function useDorControl({
 
   // requireListedSurface plus the capability gate shared by the handlers that
   // read/write/scan a shell (send / read / await / resolveOpen): these are
-  // terminal-gated operations (docs/specs/glossary.md → Surface kinds).
+  // terminal-gated operations (docs/specs/glossary.md → Panes and Surfaces).
   // Responds and returns null on a target with no terminal so the caller just
   // bails.
   const requireTerminalSurface = useCallback((

@@ -19,27 +19,13 @@ typing. No SDK, no protocol: print one escape sequence, read one env var.
 
 ## Capability gating
 
-The groundwork for the capability model is implemented ahead of the `tool`
-kind (phase A of the ledger below); `docs/specs/glossary.md` → Panes and
-Surfaces is the canonical vocabulary. What exists today:
-
-- **Two predicates are the single source of capability gating.** `hasTerminal`
-  / `hasBrowser` over the `KIND_CAPABILITIES` table in
-  `dor/src/commands/types.ts`. Kind switches in the host's surface-row
-  projection and control handlers go through them, so a future kind that has
-  both populates both sides of a row (cwd *and* url) without touching the call
-  sites.
-- **`dor list --json` rows carry `has_terminal` and `has_browser`** — always
-  both, so scripts gate on the capability rather than on `kind` and keep
-  matching once a kind that has both exists.
-- **Terminal-gated operations report in capability vocabulary.** `read` /
-  `send` / `await` / `surface.resolveOpen` against a Surface with no terminal
-  fail with `surface 'surface:N' has no terminal (kind: browser)`.
-
-Source of truth: `dor/src/commands/types.ts`, `renderSurfaceJson` in
-`dor/src/commands/list.ts`, `buildDorSurfacesInternal` in
-`lib/src/components/Wall.tsx`, `requireTerminalSurface` in
-`lib/src/components/wall/use-dor-control.ts`.
+Phase A of the ledger below is implemented: nothing in it is `tool`-specific,
+so it is documented where it belongs rather than restated here. The
+capability model and its predicates are owned by `docs/specs/glossary.md` →
+Panes and Surfaces; the `dor list --json` row fields and the
+`has no terminal` error wording by `docs/specs/dor-cli.md` → `dor list`.
+What this spec still owes is the kind that has both — see
+[The tool capability set](#the-tool-capability-set).
 
 ## Future
 
@@ -87,9 +73,8 @@ capability refactor — is implemented; see
 ### The tool capability set
 
 The capability vocabulary, predicates, and gating are live (see
-[Capability gating](#capability-gating); `docs/specs/glossary.md` → Panes and
-Surfaces). What remains is the kind that has both: `tool` = terminal +
-browser. Verbs stay capability-gated: `read` / `send` / `await` / `--port`
+[Capability gating](#capability-gating)). What remains is the kind that has
+both: `tool` = terminal + browser. Verbs stay capability-gated: `read` / `send` / `await` / `--port`
 require a terminal; nav/render/ab verbs require a browser and stay
 renderMode-gated exactly as for browser Surfaces (an iframe-rendered tool
 cannot be agent-driven). `kill` / `rename` stay universal. Kinds remain

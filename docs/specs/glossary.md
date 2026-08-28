@@ -44,18 +44,17 @@ follows:
 For browser Surfaces `renderMode` is canonical; the CLI `render_mode` field is
 derived from it for `dor` output and is never stored.
 
-**Kinds are capability sets, not exclusive categories.** Every Surface has a
-**terminal** (a PTY + xterm — i.e. a Session), a **browser** renderer, or
-both: `terminal` has only a terminal, `browser` only a browser, and the staged
-`tool` (`docs/specs/dor-tool.md`) has both. Operations gate on the capability
-they need, never on the kind enum (see [Liskov contract](#liskov-contract)) —
-`read` / `send` / `await` / port scans require the terminal, nav / render-mode
-/ agent-browser verbs require the browser. `dor list --json` rows carry
+**Kinds are capability sets, not exclusive categories.** The two kinds above
+have one capability each; the staged `tool` (`docs/specs/dor-tool.md`) has
+both. So Registry and `dor` operations gate on the capability they need rather
+than on the kind enum (see [Liskov contract](#liskov-contract)): `read` /
+`send` / `await` / port scans require the terminal, nav / render-mode /
+agent-browser verbs require the browser. `dor list --json` rows carry
 `has_terminal` and `has_browser` so callers can gate the same way; both are
 always emitted, and gating on them rather than on `kind` is what lets a script
 written today match a kind that has both. Source of truth: `hasTerminal` /
-`hasBrowser` over the `KIND_CAPABILITIES` table in
-`dor/src/commands/types.ts`.
+`hasBrowser` in `dor/src/commands/types.ts`. (Persistence keeps its own
+`PersistedSurfaceType` discriminant — `docs/specs/transport.md`.)
 
 A **Session** runs the full six-axis model below. A **browser Surface** participates only where a web view meaningfully can:
 
@@ -259,6 +258,7 @@ Use glossary names instead of these. The left column retains a meaning only wher
 | **terminal** | Keeps its meaning for the `xterm.Terminal` instance. Prose meaning "the whole thing" is **Session** (a terminal Surface). |
 | **surface** | A glossary term, not retired: the durable occupant of a Pane (a terminal Session or a browser Surface). Use **Session** only for the terminal kind; use **Surface** when a statement holds for both. |
 | **panel / pane / leaf** | Prefer **pane** for the layout slot; **leaf** is Lath's tree node for the same thing (they map 1:1). "panel" survives only in React component names (`TerminalPanel`, `BrowserPanel`, `IframePanel`). |
+| **face** | Retired. A Surface's capabilities are named by the kinds themselves: "console face" → **terminal**, "web face" → **browser**. Gate with `hasTerminal` / `hasBrowser`, not with a face-set. |
 | **tether** | Remote-control term only: a display showing "tethering to \<device\>" has ceded terminal size authority to a remote viewer (`docs/specs/remote-api.md`). Not a layout term — do not use it for Pane/Door relationships. |
 
 Remote-only vocabulary (**Viewer**, the wire-level `DirectoryEntry` projection) is defined in `docs/specs/remote-api.md` § Terminology.

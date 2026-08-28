@@ -19,7 +19,7 @@ import type {
   SurfacePort,
   SurfaceView,
 } from './types.js';
-import { hasBrowser, hasTerminal } from './types.js';
+import { hasBrowser, hasTerminal, SURFACE_KINDS } from './types.js';
 import {
   callerWorkingDirectory,
   errorMessage,
@@ -92,7 +92,7 @@ function buildListCommand(): Command['command'] {
       parse: parseSurfaceKind,
       brief: 'Surface kind to show.',
       optional: true,
-      placeholder: 'terminal|browser',
+      placeholder: SURFACE_KINDS.join('|'),
     },
     port: {
       kind: 'parsed',
@@ -288,7 +288,8 @@ function renderPortJson(port: SurfacePort): Record<string, unknown> {
 }
 
 function parseSurfaceKind(value: string): SurfaceKind {
-  if (value === 'terminal' || value === 'browser') return value;
+  const kind = SURFACE_KINDS.find((candidate) => candidate === value);
+  if (kind) return kind;
   throw new SyntaxError(`invalid --kind '${value}'`);
 }
 

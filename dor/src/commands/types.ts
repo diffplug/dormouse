@@ -10,20 +10,19 @@ export type ResolvedSplitDirection = 'left' | 'right' | 'up' | 'down';
 export type SurfaceKind = 'terminal' | 'browser';
 export type SurfaceRenderMode = 'iframe' | 'ab-screencast' | 'ab-popout';
 
-/** What a Surface kind is backed by (`docs/specs/glossary.md` → Surface kinds):
- *  a terminal (a PTY + xterm), a browser renderer, or both. Kinds are
- *  capability sets, not exclusive categories, so operations gate on the
- *  capability they need rather than on the kind enum (the Liskov
- *  terminal-gated / browser-gated categories).
- *
- *  This table is the single source of that gating; kind switches elsewhere go
- *  through the predicates below. `Record<SurfaceKind, ...>` on purpose: adding
- *  a kind (the staged `tool`, which has both) must be a compile error here,
- *  not a silent `false`. */
+/** What each kind is backed by (`docs/specs/glossary.md` → Panes and Surfaces).
+ *  The single source of capability gating; kind switches elsewhere go through
+ *  the predicates below. `Record<SurfaceKind, ...>` on purpose: adding a kind
+ *  (the staged `tool`, which has both) must be a compile error here, not a
+ *  silent `false`. */
 const KIND_CAPABILITIES: Record<SurfaceKind, { terminal: boolean; browser: boolean }> = {
   terminal: { terminal: true, browser: false },
   browser: { terminal: false, browser: true },
 };
+
+/** Every kind, derived from the table so `--kind` parsing and its help
+ *  placeholder cannot drift from it. */
+export const SURFACE_KINDS = Object.keys(KIND_CAPABILITIES) as SurfaceKind[];
 
 /** Whether this kind has a terminal — PTY-backed: `read` / `send` / `await` /
  *  port scans. */

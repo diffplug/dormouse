@@ -50,7 +50,7 @@ const IDLE_TIMEOUT_MS = 2000;
 
 type ResolveOutcome = 'busy' | 'idle' | 'pending';
 
-// Port scans are terminal-gated (`docs/specs/glossary.md` → Surface kinds).
+// Port scans are terminal-gated (`docs/specs/glossary.md` → Panes and Surfaces).
 function isTerminalParams(params: unknown): boolean {
   return hasTerminal(surfaceKindFromParams(params));
 }

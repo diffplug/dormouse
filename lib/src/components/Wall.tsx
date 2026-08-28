@@ -53,7 +53,7 @@ import type { PersistedDoor, PersistedSurfaceRefs } from '../lib/session-types';
 import type { DropTarget, RestoreToken } from '../lib/lath/ops';
 import type { Edge } from '../lib/lath/model';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
-import { resolveRenderMode, isAgentBrowserParams, isBrowserParams, browserUrlFromParams, surfaceKindFromParams } from './wall/browser-surface';
+import { resolveRenderMode, isAgentBrowserParams, browserUrlFromParams, surfaceKindFromParams } from './wall/browser-surface';
 import { hostPathDisplay } from './wall/browser-url';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { LathHost } from './wall/LathHost';
@@ -125,7 +125,9 @@ function persistedPanelTitle(title: string | null | undefined): string {
 }
 
 function surfaceRenderModeFromParams(params: unknown): DorSurfaceRenderMode | null {
-  return isBrowserParams(params) ? resolveRenderMode(params) : null;
+  // Same capability gate as the row's `url`, so both browser-side fields answer
+  // "does this Surface have a browser?" one way.
+  return hasBrowser(surfaceKindFromParams(params)) ? resolveRenderMode(params) : null;
 }
 
 function surfaceRefNumber(ref: string): number | null {
@@ -854,7 +856,7 @@ export function Wall({
     return sources.map((source, index) => {
       const kind = surfaceKindFromParams(source.params);
       // Row fields are capability-gated, not kind-gated (docs/specs/glossary.md
-      // → Surface kinds): shell state rides the terminal, the URL rides the
+      // → Panes and Surfaces): shell state rides the terminal, the URL rides the
       // browser, so a future kind that has both populates both without touching
       // this map.
       const terminalBacked = hasTerminal(kind);
