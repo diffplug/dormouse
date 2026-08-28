@@ -107,10 +107,7 @@ are still visible on `document.body`. ThemePicker also performs a browser
 layout-effect restore after mount so website hydration cannot leave the picker
 state saying a theme is active while xterm.js sees fallback colors.
 
-`theme.css` declares the theme-dependent `--color-*` tokens on `body` because
-`--vscode-*` variables also live there. Keep the parallel `@theme`
-declarations so Tailwind can generate utility classes, but treat the body-level
-declarations as the runtime source of truth.
+`theme.css` declares the theme-dependent `--color-*` tokens — and the `--mt-font-size` / `--mt-font-family` typography tokens — on `body` because `--vscode-*` variables also live there. Keep the parallel `@theme` and `:root` declarations so Tailwind can generate utility classes, but treat the body-level declarations as the runtime source of truth. Every token whose value reads a `--vscode-*` variable must appear in both places: CSS resolves `var()` inside a custom-property declaration at the element where the property is declared, so a document-level declaration cannot see a variable `applyTheme()` wrote to `body.style`, and the token resolves to nothing in every host where `applyTheme()` is the sole writer (standalone, website, Pocket). `lib/src/lib/themes/consumed-keys.test.ts` pins the two lists together.
 Dynamic palette tokens (`--color-door-bg`, `--color-door-fg`,
 `--color-focus-ring`, and the four `--color-alarm-vs-*` tokens) also have
 body-level baseline bindings matching the `@theme` declarations, so direct

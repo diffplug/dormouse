@@ -31,3 +31,40 @@ describe('CONSUMED_VSCODE_KEYS / bundle-themes.mjs parity', () => {
     expect(extra).toEqual([]);
   });
 });
+
+// theme.css declares the same tokens twice: once in `@theme` (so Tailwind
+// generates utility classes) and once on `body` (so they can actually see the
+// --vscode-* variables applyTheme() writes to body.style). CSS resolves var()
+// inside a custom-property declaration at the element where the property is
+// declared, so a token bound to a --vscode-* variable *only* above the body
+// block resolves to nothing in every host where applyTheme() is the sole
+// writer — standalone, website, Pocket. This pins the two lists together.
+describe('theme.css --vscode-* bindings are mirrored onto body', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const themeCss = readFileSync(resolve(here, '../../theme.css'), 'utf8');
+
+  function declarations(block: string): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const m of block.matchAll(/^\s*(--[\w-]+)\s*:\s*([^;]+);/gm)) out.set(m[1], m[2].trim());
+    return out;
+  }
+
+  function blockBody(pattern: RegExp): string {
+    const match = themeCss.match(pattern);
+    if (!match) throw new Error(`Could not locate ${pattern} in theme.css`);
+    return match[1];
+  }
+
+  const documentLevel = new Map([
+    ...declarations(blockBody(/@theme \{([\s\S]*?)\n\}/)),
+    ...declarations(blockBody(/\n:root \{([\s\S]*?)\n\}/)),
+  ]);
+  const bodyLevel = declarations(blockBody(/\nbody \{([\s\S]*?)\n\}/));
+
+  it('every document-level token bound to a --vscode-* variable is re-declared on body', () => {
+    const missing = [...documentLevel]
+      .filter(([name, value]) => value.includes('var(--vscode-') && !bodyLevel.has(name))
+      .map(([name]) => name);
+    expect(missing).toEqual([]);
+  });
+});
