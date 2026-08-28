@@ -16,6 +16,8 @@ import type {
   ListSurfacesResponse,
   ReadSurfaceRequest,
   ReadSurfaceResponse,
+  ResolveAgentBrowserSessionRequest,
+  ResolveAgentBrowserSessionResponse,
   ResolveOpenTargetRequest,
   ResolveOpenTargetResponse,
   SendSurfaceRequest,
@@ -123,6 +125,15 @@ export class SocketControlClient implements ControlClient {
 
   resolveOpenTarget(request: ResolveOpenTargetRequest): Promise<ResolveOpenTargetResponse> {
     return this.request<ResolveOpenTargetResponse>(SURFACE_CONTROL_METHODS.resolveOpen, request);
+  }
+
+  resolveAgentBrowserSession(
+    request: ResolveAgentBrowserSessionRequest,
+  ): Promise<ResolveAgentBrowserSessionResponse> {
+    return this.request<ResolveAgentBrowserSessionResponse>(
+      SURFACE_CONTROL_METHODS.resolveAgentBrowser,
+      request,
+    );
   }
 
   /**

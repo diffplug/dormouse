@@ -328,8 +328,10 @@ Invariants:
   that names it fails instead of silently retargeting.
 - Surface targets also accept `title:<exact display title>`, primarily for human
   recovery; automation should prefer refs from command responses or
-  `dor list`. Action commands (`read`, `send`, `kill`) resolve against
-  listed Surfaces, including minimized ones. For `split` and `ensure --surface`,
+  `dor list`. Action commands (`read`, `send`, `kill`, and `dor ab --surface`)
+  resolve against listed Surfaces, including minimized ones — a minimized
+  Surface is still a live target, and a parked agent-browser surface still holds
+  its daemon session. For `split` and `ensure --surface`,
   the reference target also resolves against the listed Surfaces so minimized
   peers participate in ambiguity checks; when the resolved reference is
   minimized, the new terminal is created minimized too and its Door is inserted
@@ -478,10 +480,13 @@ from `command-detail`.
   [impl](../../dor/src/commands/iframe.ts) [docs](../../dor/test/snapshots/help/iframe.md)
 - `dor agent-browser` / `dor ab` — delegates to the user's `agent-browser`,
   rendered in a Dormouse-native surface; the `ab-screencast` renderer of the
-  unified `browser` surface, see [dor-browser.md](dor-browser.md). In an
-  `open` / `goto` / `navigate` command, a Surface handle or schemeless `host:port`
-  target is resolved to a URL before it is forwarded — see [Browser Open Target
-  Resolution](#browser-open-target-resolution).
+  unified `browser` surface, see [dor-browser.md](dor-browser.md). Three
+  mutually exclusive identity flags name the browser to drive: `--key <name>`
+  (managed, default `default`), `--session <name>` (raw), and `--surface
+  <handle>` — see [Agent-Browser Surface Addressing](#agent-browser-surface-addressing).
+  In an `open` / `goto` / `navigate` command, a Surface handle or schemeless
+  `host:port` target is resolved to a URL before it is forwarded — see [Browser
+  Open Target Resolution](#browser-open-target-resolution).
 - `dor list` — the unified Surface listing. Lists every Surface in the current
   Workspace (terminals and browser Surfaces, including minimized ones), one row
   per Surface in stable `surface:N` order. Text marks the focused Surface with
@@ -566,6 +571,49 @@ sugar + `surface.resolveOpen` call), `dor/src/commands/iframe.ts` /
 `dor/src/protocol.ts` (`resolveOpen`), the `surface.resolveOpen` handler in
 `lib/src/components/wall/use-dor-control.ts`, and the port→URL grouping/selection
 in `lib/src/components/wall/port-url.ts` (`listenerUrlsByPort`).
+
+## Agent-Browser Surface Addressing
+
+`dor ab --surface <handle> <verb...>` drives the browser Surface a handle names
+rather than a session the caller must already know. It closes the asymmetry
+between terminal verbs, which are handle-addressed (`dor read surface:3`), and
+browser verbs, which were keyed only by `--key` / `--session`: the ref `dor
+list` prints can now drive the browser surface it names.
+
+`--surface` is a third **mutually exclusive** identity flag beside `--key` and
+`--session`; naming a browser twice is always a mistake, never a precedence
+question, so any two of the three fail (`--key and --surface are mutually
+exclusive`). It changes *addressing* only — every other argument is still
+forwarded verbatim, and the host-side subcommand allowlist is untouched.
+
+Resolution is **host-side**, mirroring `surface.resolveOpen`: the CLI sends the
+handle to the `surface.resolveAgentBrowser` control method and forwards the
+session it gets back. The handle resolves against **listed** Surfaces (visible
+**and** minimized — a parked agent-browser surface keeps its daemon session
+alive), and the host applies two gates in order:
+
+- **Browser-gated** (`docs/specs/glossary.md` → Panes and Surfaces). A target
+  with no browser fails: `surface 'surface:1' has no browser (kind: terminal)`.
+- **Render-mode-gated.** A browser Surface on the `iframe` renderer has a
+  browser but no agent-browser session to drive: `surface 'surface:2' is not
+  agent-browser rendered (render_mode: iframe)`.
+- An agent-browser Surface the context menu created eagerly, whose daemon boot
+  has not yet named it ([dor-browser.md](dor-browser.md) → Pane Context Menu
+  Connect), fails with `surface 'surface:2' has no agent-browser session yet`.
+
+Because the session comes from the surface rather than from a key, `--surface`
+is the only way to drive a **GUI-spawned** `dormouse.1.gui-<hex>` session, which
+no `--key` can name ([dor-browser.md](dor-browser.md) → Managed identity). Like
+every handle target, it requires a live control endpoint and fails clearly
+outside Dormouse.
+
+Source of truth: `dor/src/commands/agent-browser.ts`
+(`extractSessionFlags`, `resolveSessionForSurface`), `dor/src/protocol.ts`
+(`resolveAgentBrowser`), `dor/src/commands/types.ts`
+(`ResolveAgentBrowserSessionRequest` / `Response`), and the
+`surface.resolveAgentBrowser` handler in
+`lib/src/components/wall/use-dor-control.ts` (`requireBrowserSurface`,
+`agentBrowserSessionFromParams`).
 
 ## Agent Workflows
 

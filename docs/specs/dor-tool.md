@@ -59,10 +59,12 @@ capability refactor — is implemented; see
   `DORMOUSE_DEHYDRATE` per the contract below (designed day 1; the `dehydrate`
   flag is reserved in the serve payload from C0). The Windows graceful-stop
   answer is needed here only.
-- **Later** — `ab-*` browser rendering: agent GUI-driving via the
-  agent-browser render modes, which requires `dor ab` surface-handle
-  addressing (`dor ab --surface surface:N <verb>`), the one genuinely new CLI
-  mechanism a Surface with both capabilities demands. Pocket/remote browser
+- **Later** — `ab-*` browser rendering: agent GUI-driving of a tool's browser
+  via the agent-browser render modes. The CLI mechanism it needed —
+  surface-handle addressing, `dor ab --surface surface:N <verb>` — is shipped
+  (`docs/specs/dor-cli.md` → Agent-Browser Surface Addressing) and already
+  reaches any agent-browser-rendered Surface; what remains here is pointing it
+  at a `tool` Surface's browser. Pocket/remote browser
   view (rides the browser-surface staging in `docs/specs/remote-api.md`;
   reserve the kind on the wire now). The VS Code full pipeline. An in-pane
   terminal/browser strip (decide against the glossary's reserved

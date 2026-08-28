@@ -13,7 +13,7 @@ USAGE
   dor await <surface> --until condition [--json] [--timeout seconds]
   dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json]
   dor iframe [--json] [--minimize] [--surface id|ref] <target>
-  dor agent-browser [--key name|--session name] [args...]
+  dor agent-browser [--key name|--session name|--surface handle] [args...]
   dor list [--command text] [--cwd path] [--id-format refs|ids|both] [--json] [--kind terminal|browser] [--port number] [--ports] [--view paned|zoomed|minimized]
   dor --help
 

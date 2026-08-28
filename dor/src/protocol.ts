@@ -24,6 +24,7 @@ export const SURFACE_CONTROL_METHODS = {
   iframe: 'surface.iframe',
   agentBrowser: 'surface.agentBrowser',
   resolveOpen: 'surface.resolveOpen',
+  resolveAgentBrowser: 'surface.resolveAgentBrowser',
 } as const;
 
 export type SurfaceControlMethod = (typeof SURFACE_CONTROL_METHODS)[keyof typeof SURFACE_CONTROL_METHODS];

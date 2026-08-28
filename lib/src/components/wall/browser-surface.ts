@@ -10,6 +10,7 @@ import type { SurfaceKind } from 'dor/commands/types';
 type BrowserParamsLike = {
   surfaceType?: unknown;
   renderMode?: unknown;
+  session?: unknown;
   url?: unknown;
 };
 
@@ -46,6 +47,17 @@ export function isBrowserParams(params: unknown): boolean {
  *  narrower `PersistedSurfaceType`. */
 export function surfaceKindFromParams(params: unknown): SurfaceKind {
   return isBrowserParams(params) ? 'browser' : 'terminal';
+}
+
+/** The agent-browser session an ab-rendered surface is bound to — the join key
+ *  of the session↔surface registry — or null when the surface is not
+ *  ab-rendered, or is one the context-menu connect created eagerly and the
+ *  daemon has not yet named (`docs/specs/dor-browser.md` → Pane Context Menu
+ *  Connect). */
+export function agentBrowserSessionFromParams(params: unknown): string | null {
+  if (!isAgentBrowserParams(params)) return null;
+  const session = asParams(params).session;
+  return typeof session === 'string' && session ? session : null;
 }
 
 /** The target URL a browser surface carries in its params (`dor list`); null
