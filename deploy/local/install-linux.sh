@@ -217,14 +217,20 @@ unit_active() { [ "$(systemctl --user is-active "$UNIT" 2>/dev/null || true)" = 
 # time and agree with itself no matter which release is answering. `exe` is the
 # kernel's reference to the executed inode, so it names the release directly.
 listening_release() {
-  local port="$1" pid exe rest
+  local port="$1" pid exe rest root
   command -v ss >/dev/null 2>&1 || return 0
   pid="$(ss -lntpH "sport = :$port" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -1)"
   [ -n "$pid" ] || return 0
   exe="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"
+  # `readlink -f` gives the PHYSICAL path, but $INSTALL_ROOT is logical — it
+  # comes straight from $HOME or DORMOUSE_INSTALL_ROOT, keeping whatever symlink
+  # the caller walked through. Comparing the two directly is a check that can
+  # never pass, the mirror of the `ps` trap above, and on the forward path it
+  # rolls back a good update. Canonicalize the root before the prefix test.
+  root="$(cd "$INSTALL_ROOT" 2>/dev/null && pwd -P)" || root="$INSTALL_ROOT"
   case "$exe" in
-    "$INSTALL_ROOT/releases/"*)
-      rest="${exe#"$INSTALL_ROOT/releases/"}"
+    "$root/releases/"*)
+      rest="${exe#"$root/releases/"}"
       printf '%s\n' "${rest%%/*}"
       ;;
   esac
@@ -762,14 +768,18 @@ owner_only() {
 # time and agree with itself no matter which release is answering. `exe` is the
 # kernel's reference to the executed inode, so it names the release directly.
 listening_release() {
-  local port="$1" pid exe rest
+  local port="$1" pid exe rest root
   command -v ss >/dev/null 2>&1 || return 0
   pid="$(ss -lntpH "sport = :$port" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -1)"
   [ -n "$pid" ] || return 0
   exe="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"
+  # `readlink -f` gives the PHYSICAL path; $ROOT comes from `pwd`, which keeps
+  # whatever symlink the caller walked through. Canonicalize before comparing,
+  # or the prefix test matches nothing and the check can never pass.
+  root="$(cd "$ROOT" 2>/dev/null && pwd -P)" || root="$ROOT"
   case "$exe" in
-    "$ROOT/releases/"*)
-      rest="${exe#"$ROOT/releases/"}"
+    "$root/releases/"*)
+      rest="${exe#"$root/releases/"}"
       printf '%s\n' "${rest%%/*}"
       ;;
   esac
