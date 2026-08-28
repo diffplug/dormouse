@@ -2,6 +2,7 @@ import { createServer, type Server } from 'node:http';
 import { createReadStream, existsSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import type { AddressInfo } from 'node:net';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Browser } from 'playwright-core';
 
@@ -25,7 +26,7 @@ import { launchChromium } from './launch-chromium';
  * job.
  */
 
-const MEDIA_PATH = new URL('../media', import.meta.url).pathname;
+const MEDIA_PATH = fileURLToPath(new URL('../media', import.meta.url));
 
 const MIME: Record<string, string> = {
   '.js': 'text/javascript',
