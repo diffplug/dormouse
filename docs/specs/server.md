@@ -764,8 +764,10 @@ The selfhost deployment that exists today is a **per-login user agent on the
 user's own laptop**, reachable only from their tailnet: a LaunchAgent on macOS,
 a Scheduled Task on Windows, a systemd *user* service on Linux. `tailscale serve`
 terminates HTTPS on the node's own MagicDNS name and proxies to the server on
-loopback. There is no cloud relay; that is staged in
-[SELF_HOST.md](../../SELF_HOST.md) `## Future`.
+loopback. There is no cloud relay: an always-on relay is the same per-login
+install on an always-on tailnet machine, with `--linger` on Linux
+([SELF_HOST.md](../../SELF_HOST.md)). A managed multi-tenant deployment is
+staged under `## Future` below.
 
 The security properties this deployment is audited against — the credential
 modes, the loopback bind, the origin-rewrite refusal, the Funnel check — are the
