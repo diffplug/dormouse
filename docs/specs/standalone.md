@@ -472,6 +472,15 @@ existed would otherwise outlive every run. Flip both `PERSIST_SESSION` flags
 together; a harness that restored panes across a reload would be debugging a
 save/restore path the shipped app does not take.
 
+What the gate costs on reload is the *layout*, not the Sessions. Nothing wires
+`shutdown()` to `beforeunload`, so the sidecar and its PTYs outlive a page reload
+and `lib/src/lib/reconnect.ts` still resumes over them — but it reads `getState()`
+for the saved resume plan, and with the gate on there is none, so every live PTY
+lands in one tab group with doors and saved titles dropped. Real standalone has
+always behaved this way across a WebView reload and the harness now matches it;
+the cost is just more visible here, since enabling `abDebugLogs` means reloading
+(`.claude/skills/debug-standalone-agent-browser/SKILL.md`).
+
 ## Quit flow
 
 Source of truth: `standalone/src-tauri/src/lib.rs` (`QuitState`, `request_quit`,

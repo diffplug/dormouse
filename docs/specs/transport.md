@@ -225,8 +225,11 @@ something ends it:
 Standalone therefore **persists no Session state at all.** A clean quit has nothing
 to clear and a crash has nothing to recover; the write path itself is removed rather
 than written-then-ignored, since the blob it wrote was the transcript-bearing one.
-Live resume within a running app is unaffected — it reads the sidecar's live PTY
-list, not disk. A legacy blob found at boot is deleted, not read.
+The *Sessions* survive a reload within a running app — resume reads the sidecar's
+live PTY list, not disk — but the layout does not: `lib/src/lib/reconnect.ts` reads
+`getState()` for the saved resume plan, so with nothing persisted every live PTY
+lands in one tab group with doors and saved titles dropped. A legacy blob found at
+boot is deleted, not read.
 
 > Reserved: the workspaces-rollout scope (`docs/specs/layout.md` → `## Future`)
 > assumes a persisted `PersistedWindow` in standalone. Reconciling multi-Workspace

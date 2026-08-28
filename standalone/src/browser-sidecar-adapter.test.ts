@@ -83,6 +83,13 @@ describe("BrowserSidecarAdapter session persistence", () => {
     const host = new BrowserSidecarHost("http://localhost:1234");
     vi.spyOn(host, "init").mockResolvedValue(undefined);
     vi.spyOn(host, "onEvent").mockReturnValue(() => {});
+    // `init()` also runs `installConsoleForwarder()`, which replaces
+    // `console.log/warn/error` on the shared jsdom window with versions that POST to
+    // the dev host, and marks itself done with a flag nothing ever clears. Every
+    // later `console.*` in this file would inherit that. Claim the flag first so the
+    // forwarder no-ops and the test stays scoped to `clearPersistedState`.
+    (window as typeof window & { __DORMOUSE_BROWSER_CONSOLE_PATCHED__?: boolean })
+      .__DORMOUSE_BROWSER_CONSOLE_PATCHED__ = true;
     const adapter = new BrowserSidecarAdapter(host);
     await adapter.init();
     expect(localStorage.getItem(KEY)).toBeNull();
