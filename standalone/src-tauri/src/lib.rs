@@ -1320,8 +1320,11 @@ fn remote_host_state_dir(app: &AppHandle) -> Option<String> {
     // asks for `0700`/`0600`, which Windows ignores entirely, so on Windows this
     // is the only thing that restricts it: lock the directory here, before the
     // sidecar is spawned, and everything it writes inside inherits the single
-    // owner-only entry. On unix the store's own modes already do the job and
-    // this is a harmless re-assert of the same intent.
+    // owner-only entry — while an enrollment file a prior version already left
+    // there is tightened by propagation instead, which is the leg
+    // `restrict_to_owner_leaves_one_owner_only_ace` covers with `before.json`.
+    // On unix the store's own modes already do the job and this is a harmless
+    // re-assert of the same intent.
     if let Err(e) = restrict_to_owner(&dir, 0o700) {
         // Not fatal — a Host that cannot start is worse than one whose state
         // directory kept the OS default — but never silent: on Windows this
