@@ -364,6 +364,37 @@ test('create buffers scrollback for getScrollback requests', () => {
   });
 });
 
+test('kill leaves no scrollback for a PTY that flushes after it dies', () => {
+  const events = [];
+  const listeners = {};
+  const fakePty = {
+    pid: 123,
+    onData(handler) { listeners.data = handler; },
+    onExit(handler) { listeners.exit = handler; },
+    resize() {},
+    write() {},
+    kill() {},
+  };
+
+  const mgr = create((event, data) => events.push({ event, data }), {
+    spawn() { return fakePty; },
+  });
+
+  mgr.spawn('pane-1');
+  listeners.data?.('hello');
+  mgr.kill('pane-1');
+  // `kill` does not dispose the onData subscription, and a just-killed PTY can
+  // still deliver a final flush (ConPTY especially). That flush must not
+  // recreate the buffer `kill` deleted: nothing would ever delete it again.
+  listeners.data?.('trailing bytes');
+
+  mgr.getScrollback('pane-1', 'req-kill');
+  assert.deepEqual(events.at(-1), {
+    event: 'scrollback',
+    data: { id: 'pane-1', data: null, requestId: 'req-kill' },
+  });
+});
+
 test('list reports the resolved launch shell for live reconnects', () => {
   const events = [];
   const fakePty = {
