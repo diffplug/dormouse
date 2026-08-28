@@ -623,7 +623,7 @@ every handle target, it requires a live control endpoint and fails clearly
 outside Dormouse.
 
 Source of truth: `dor/src/commands/agent-browser.ts`
-(`extractSessionFlags`, `resolveSessionForSurface`), `dor/src/protocol.ts`
+(`extractSessionFlags`, `resolveSession`), `dor/src/protocol.ts`
 (`resolveAgentBrowser`), `dor/src/commands/types.ts`
 (`ResolveAgentBrowserSessionRequest` / `Response`), and the
 `surface.resolveAgentBrowser` handler in
