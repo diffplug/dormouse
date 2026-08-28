@@ -37,3 +37,54 @@ describe("BrowserSidecarAdapter capability surface", () => {
     expect(typeof adapter.onFilesDropped).toBe("function");
   });
 });
+
+// The harness must not persist Session state that production standalone drops.
+// `TauriAdapter` gates `saveState`/`getState` behind `PERSIST_SESSION` and reports
+// `persistsSession: false` (docs/specs/standalone.md -> "Standalone persists no
+// Session state"). A harness that writes `localStorage` instead exercises the whole
+// save/restore path — record build, `getCwd` round trip per pane, restore on reload —
+// that the real app never runs, and the blob outlives the run in the dev browser
+// profile even though the harness gives every run its own temp state dir.
+describe("BrowserSidecarAdapter session persistence", () => {
+  const KEY = "dormouse.browser-sidecar.session";
+
+  it("reports the same persistsSession as TauriAdapter", () => {
+    const harness: PlatformAdapter = new BrowserSidecarAdapter(
+      new BrowserSidecarHost("http://localhost:1234"),
+    );
+    const tauri: PlatformAdapter = new TauriAdapter();
+    expect(harness.persistsSession).toBe(tauri.persistsSession);
+    expect(harness.persistsSession).toBe(false);
+  });
+
+  it("does not write session state to localStorage", () => {
+    localStorage.removeItem(KEY);
+    const adapter: PlatformAdapter = new BrowserSidecarAdapter(
+      new BrowserSidecarHost("http://localhost:1234"),
+    );
+    adapter.saveState({ version: 3, panes: [], lathLayout: null });
+    expect(localStorage.getItem(KEY)).toBeNull();
+  });
+
+  it("does not restore a stale blob left by an earlier run", () => {
+    localStorage.setItem(KEY, JSON.stringify({ version: 3, panes: [], lathLayout: null }));
+    const adapter: PlatformAdapter = new BrowserSidecarAdapter(
+      new BrowserSidecarHost("http://localhost:1234"),
+    );
+    expect(adapter.getState()).toBeNull();
+    localStorage.removeItem(KEY);
+  });
+
+  // Ignoring the key is not enough: snapshots carry transcripts, and localStorage is
+  // keyed by browser profile rather than by the harness's per-run temp state dir, so a
+  // blob written before this gate existed would sit in the developer's profile forever.
+  it("deletes a pre-gate blob on init", async () => {
+    localStorage.setItem(KEY, JSON.stringify({ version: 3, panes: [], lathLayout: null }));
+    const host = new BrowserSidecarHost("http://localhost:1234");
+    vi.spyOn(host, "init").mockResolvedValue(undefined);
+    vi.spyOn(host, "onEvent").mockReturnValue(() => {});
+    const adapter = new BrowserSidecarAdapter(host);
+    await adapter.init();
+    expect(localStorage.getItem(KEY)).toBeNull();
+  });
+});
