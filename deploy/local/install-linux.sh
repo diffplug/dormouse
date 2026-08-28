@@ -200,29 +200,42 @@ req.on("error", () => process.exit(1));
 # --- who answered? -----------------------------------------------------------
 #
 # `/api/hello` carries no identity, so a 200 on the loopback port proves only
-# that *something* got there first. Every live check in this script therefore
-# goes through `service_healthy`, never through `http_ok` alone — including the
-# rollback path, which is the one place a false "healthy" is most expensive.
-# `manage` carries the same three helpers for the same reason.
+# that *something* got there first. Every live check waits on the identity
+# instead — never on `http_ok` alone — which also absorbs the window where an
+# outgoing process answers one last time. `manage` carries the same helpers.
 
 unit_active() { [ "$(systemctl --user is-active "$UNIT" 2>/dev/null || true)" = "active" ]; }
 
-service_healthy() {
-  unit_active && http_ok "http://127.0.0.1:$LOOPBACK_PORT/api/hello" 2
+# Echoes the release id of the process holding port $1, or nothing when no
+# listener under this install root can be seen. Requiring the `releases/` prefix
+# is what keeps an unrelated `node` somewhere else on the machine from being
+# reported as a release.
+#
+# `/proc/<pid>/exe` and not `ps`: `bin/run-server` execs
+# "$ROOT/current/runtime/node", so `ps -o args=` names the path it was exec'd
+# by, symlink and all — resolving through that would follow `current` a second
+# time and agree with itself no matter which release is answering. `exe` is the
+# kernel's reference to the executed inode, so it names the release directly.
+listening_release() {
+  local port="$1" pid exe rest
+  command -v ss >/dev/null 2>&1 || return 0
+  pid="$(ss -lntpH "sport = :$port" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -1)"
+  [ -n "$pid" ] || return 0
+  exe="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"
+  case "$exe" in
+    "$INSTALL_ROOT/releases/"*)
+      rest="${exe#"$INSTALL_ROOT/releases/"}"
+      printf '%s\n' "${rest%%/*}"
+      ;;
+  esac
 }
 
-# Echoes the release directory of the process holding $1, if one can be seen.
-# Returns 2 when ss is unavailable and 1 when it reports no listener — the
-# caller must tell those apart from "a foreign listener this kernel cannot see".
-listening_release() {
-  local port="$1" pid exe
-  command -v ss >/dev/null 2>&1 || return 2
-  pid="$(ss -lntpH "sport = :$port" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -1)"
-  [ -n "$pid" ] || return 1
-  exe="$(readlink -f "/proc/$pid/exe" 2>/dev/null || echo "")"
-  [ -n "$exe" ] || return 1
-  # <root>/releases/<id>/runtime/node -> <root>/releases/<id>
-  printf '%s' "${exe%/runtime/node}"
+# $1 = the release id that must be answering. Three legs, all required:
+# systemd's own view, a 200, and the identity of whoever holds the port.
+service_healthy() {
+  unit_active \
+    && http_ok "http://127.0.0.1:$LOOPBACK_PORT/api/hello" 2 \
+    && [ -n "$1" ] && [ "$(listening_release "$LOOPBACK_PORT")" = "$1" ]
 }
 
 # ---------------------------------------------------------------- systemd ---
@@ -737,39 +750,59 @@ owner_only() {
 
 # Which release does the process actually holding the loopback port run from?
 #
-# A 200 from /api/hello proves *a* server is up, not that it is the one just
-# installed — a stale process on this port answers identically. systemd's cgroup
-# makes the orphan case far less likely here than on Windows, but a leftover
-# `pnpm dev:server` repointed at this port, or a copy started by hand, is still
-# reachable. Resolving the listener's PID back to its release directory is the
-# only check that distinguishes them.
+# A 200 from /api/hello proves *a* server is up, not that it is the current
+# release — a stale process on this port answers identically. Echoes the release
+# id, or nothing when no listener under this install root can be seen. The
+# `releases/` prefix is required so an unrelated `node` elsewhere on the machine
+# is never reported as a release.
+#
+# `/proc/<pid>/exe` and not `ps`: `bin/run-server` execs
+# "$ROOT/current/runtime/node", so `ps -o args=` names the path it was exec'd
+# by, symlink and all — resolving through that would follow `current` a second
+# time and agree with itself no matter which release is answering. `exe` is the
+# kernel's reference to the executed inode, so it names the release directly.
 listening_release() {
-  local port="$1" pid exe
-  command -v ss >/dev/null 2>&1 || return 2
+  local port="$1" pid exe rest
+  command -v ss >/dev/null 2>&1 || return 0
   pid="$(ss -lntpH "sport = :$port" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -1)"
-  [ -n "$pid" ] || return 1
-  exe="$(readlink -f "/proc/$pid/exe" 2>/dev/null || echo "")"
-  [ -n "$exe" ] || return 1
-  # <root>/releases/<id>/runtime/node -> <root>/releases/<id>
-  printf '%s' "${exe%/runtime/node}"
+  [ -n "$pid" ] || return 0
+  exe="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"
+  case "$exe" in
+    "$ROOT/releases/"*)
+      rest="${exe#"$ROOT/releases/"}"
+      printf '%s\n' "${rest%%/*}"
+      ;;
+  esac
 }
 
 unit_active() { [ "$(systemctl --user is-active "$UNIT" 2>/dev/null || true)" = "active" ]; }
 
-# Health is only meaningful together with systemd's own view of the unit: a 200
-# on this port can come from any process that got there first, so "healthy" must
-# never be reported for someone else's server. Every live check in this script
-# goes through here — status, verify, restart and rollback alike.
+current_release() { basename "$(readlink "$ROOT/current" 2>/dev/null || true)"; }
+
+# $1 = the release id that must be answering. Three legs, all required: systemd's
+# own view, a 200, and the identity of whoever holds the port.
 service_healthy() {
-  unit_active && http_ok "http://127.0.0.1:$PORT/api/hello" "${1:-2}"
+  unit_active \
+    && http_ok "http://127.0.0.1:$PORT/api/hello" 2 \
+    && [ -n "$1" ] && [ "$(listening_release "$PORT")" = "$1" ]
 }
 
+# The identity lives in the wait, not at its callers, so `restart` and
+# `rollback` are both covered from one place — and waiting on it rather than
+# asserting it after the first 200 absorbs the window in which an outgoing
+# process answers one last time.
 wait_for_health() {
-  local deadline=$((SECONDS + ${1:-30}))
+  local deadline=$((SECONDS + ${1:-30})) want serving
+  want="$(current_release)"
   while [ $SECONDS -lt $deadline ]; do
-    if service_healthy 2; then return 0; fi
+    if service_healthy "$want"; then return 0; fi
     sleep 0.5
   done
+  serving="$(listening_release "$PORT")"
+  if [ -n "$serving" ] && [ "$serving" != "$want" ]; then
+    printf '%sport %s is held by release %s, not by %s — a stale process is answering%s\n' \
+      "$C_RED" "$PORT" "$serving" "${want:-the current release}" "$C_OFF" >&2
+  fi
   return 1
 }
 
@@ -802,10 +835,8 @@ cmd_status() {
     printf '  %snot loaded%s\n' "$C_RED" "$C_OFF"
   fi
   printf '\nHealth\n'
-  if service_healthy 3; then
+  if http_ok "http://127.0.0.1:$PORT/api/hello" 3; then
     printf '  loopback /api/hello : %sok%s\n' "$C_GRN" "$C_OFF"
-  elif http_ok "http://127.0.0.1:$PORT/api/hello" 3; then
-    printf '  loopback /api/hello : %sanswered by another process%s\n' "$C_RED" "$C_OFF"
   else
     printf '  loopback /api/hello : %sunreachable%s\n' "$C_RED" "$C_OFF"
   fi
@@ -881,14 +912,19 @@ cmd_verify() {
   fi
 
   # Health is never reported on its own. A ✓ next to "/api/hello responds" that
-  # a stranger's server earned is worse than no line at all, so the unit-active
-  # gate decides which of the three outcomes below is printed.
-  if service_healthy 5; then
-    pass "http://127.0.0.1:$PORT/api/hello responds, from this service"
-  elif http_ok "http://127.0.0.1:$PORT/api/hello" 5; then
-    fail "port $PORT answers /api/hello, but not from this service"
-  else
+  # a stranger's server earned is worse than no line at all, so all three legs
+  # decide which of the outcomes below is printed.
+  local want serving
+  want="$(current_release)"
+  serving="$(listening_release "$PORT")"
+  if service_healthy "$want"; then
+    pass "http://127.0.0.1:$PORT/api/hello responds, from release $want"
+  elif ! http_ok "http://127.0.0.1:$PORT/api/hello" 5; then
     fail "loopback /api/hello is unreachable"
+  elif [ -n "$serving" ] && [ "$serving" != "$want" ]; then
+    fail "port $PORT is held by release $serving, not by ${want:-the current release} — a stale process is answering"
+  else
+    fail "port $PORT answers /api/hello, but not from this service"
   fi
 
   if unit_active && http_ok "http://127.0.0.1:$PORT/" 5; then
@@ -897,36 +933,21 @@ cmd_verify() {
     fail "Pocket index is not served — is lib/dist-pocket in the release?"
   fi
 
-  # One `ss` invocation answers both remaining questions: which release holds
-  # the port (`-p` gives the pid) and what it is bound to (field 4). Splitting
-  # them into two calls risked observing two different listeners.
-  local listeners current_target serving
-  current_target="$(readlink -f "$ROOT/current" 2>/dev/null || echo "")"
+  # Identity is settled by the health block above, which already names a stale
+  # release; this only asks what the socket is bound to.
+  local listeners
   if ! command -v ss >/dev/null 2>&1; then
-    note "skipped the port-holder and bind checks (ss from iproute2 is not installed)"
+    note "skipped the bind check (ss from iproute2 is not installed)"
   else
-    listeners="$(ss -lntpH "sport = :$PORT" 2>/dev/null || true)"
+    listeners="$(ss -lntH "sport = :$PORT" 2>/dev/null || true)"
     if [ -z "$listeners" ]; then
-      # ss ran and found nothing. If /api/hello answered above, the responder is
-      # a process this kernel cannot see — a foreign namespace, or WSL's shared
-      # loopback with Windows under networkingMode=mirrored.
       fail "nothing this system can see is listening on port $PORT"
       note "if /api/hello answered above, the responder is outside this kernel's view"
+    elif printf '%s\n' "$listeners" | awk '{print $4}' | grep -qv '^127\.0\.0\.1:'; then
+      fail "port $PORT is bound off-loopback — fix DORMOUSE_BIND_HOST=127.0.0.1"
+      printf '%s\n' "$listeners" | sed 's/^/      /'
     else
-      if printf '%s\n' "$listeners" | awk '{print $4}' | grep -qv '^127\.0\.0\.1:'; then
-        fail "port $PORT is bound off-loopback — fix DORMOUSE_BIND_HOST=127.0.0.1"
-        printf '%s\n' "$listeners" | sed 's/^/      /'
-      else
-        pass "port $PORT is bound only to 127.0.0.1"
-      fi
-      serving="$(listening_release "$PORT" || echo "")"
-      if [ "$serving" = "$current_target" ] && [ -n "$serving" ]; then
-        pass "the process on port $PORT runs from the current release"
-      else
-        fail "port $PORT is held by something other than the current release"
-        printf '      listening: %s\n' "${serving:-<unknown>}"
-        printf '      current:   %s\n' "${current_target:-<unknown>}"
-      fi
+      pass "port $PORT is bound only to 127.0.0.1"
     fi
   fi
 
@@ -994,12 +1015,12 @@ cmd_verify() {
     fail "current release symlink or RELEASE metadata missing"
   fi
 
-  if [ -L "$ROOT/previous" ]; then
-    if [ -d "$ROOT/previous" ]; then
-      pass "a previous release is retained for rollback"
-    else
-      fail "the previous symlink points at a release that no longer exists"
-    fi
+  if [ -L "$ROOT/previous" ] && [ "$(readlink "$ROOT/previous")" = "$(readlink "$ROOT/current" 2>/dev/null)" ]; then
+    fail "previous names the same release as current — there is no rollback target"
+  elif [ -L "$ROOT/previous" ] && [ ! -d "$ROOT/previous" ]; then
+    fail "the previous symlink points at a release that no longer exists"
+  elif [ -L "$ROOT/previous" ]; then
+    pass "a previous release is retained for rollback"
   else
     warn "no previous release retained yet — rollback is unavailable until the next update"
   fi
@@ -1071,6 +1092,10 @@ cmd_rollback() {
   prev="$(readlink "$ROOT/previous")"
   cur="$(readlink "$ROOT/current" 2>/dev/null || echo '')"
   [ -d "$ROOT/releases/$(basename "$prev")" ] || { printf 'previous release directory is gone: %s\n' "$prev" >&2; return 1; }
+  # Swapping a release with itself would wait for health and print success while
+  # changing nothing. Refuse instead — an install left in that state by an older
+  # installer has no rollback target, whatever the `previous` link suggests.
+  [ "$prev" != "$cur" ] || { printf 'previous and current name the same release (%s) — nothing to roll back to\n' "$(basename "$prev")" >&2; return 1; }
   printf 'rolling back: %s -> %s\n' "$(basename "$cur")" "$(basename "$prev")"
   # Swap with the target release's own runtime. Falling back to the one under
   # `current` would mean reaching through the very symlink being moved, and a
@@ -1291,24 +1316,37 @@ rollback_release() {
   # $STAGE/runtime/node was verified executable and version/arch-matched earlier
   # in this run; $OLD_RELEASE/runtime/node has not been checked at all.
   atomic_symlink "$OLD_RELEASE" "$CURRENT_LINK" "$STAGE/runtime/node"
-  # The switch above already set `previous` to the release we are restoring to.
+
+  # Only clear `previous` once the restore has actually landed. Both call sites
+  # are `rollback_release || true`, which disables errexit for this whole body,
+  # so an unguarded clear would strip the rollback pointer off an install still
+  # sitting on the rejected release.
+  local restored_to
+  restored_to="$(readlink "$CURRENT_LINK" 2>/dev/null || echo "")"
+  if [ "$restored_to" != "$OLD_RELEASE" ]; then
+    warn "current was NOT restored to $(basename "$OLD_RELEASE") (points at '${restored_to:-nothing}'). Leaving the previous link in place so rollback stays possible."
+    return 1
+  fi
+  # The switch had already aimed `previous` at the release we just restored to.
   # Leaving both pointers naming one release would make `verify` report a
   # rollback target that does not exist and `rollback` swap a release with
-  # itself and call it success. (This is the Windows installer's correction;
-  # the macOS one does not yet have it.)
+  # itself and call it success; once `current` is back there, there genuinely is
+  # no previous release and the state must say so.
   rm -f "$PREVIOUS_LINK"
+
   if ! systemctl --user restart "$UNIT" >/dev/null 2>&1; then
     warn "restarting $UNIT after the restore failed. Inspect: systemctl --user status $UNIT"
     return 1
   fi
-  # `service_healthy`, not a bare `http_ok`. This is the path where a false
-  # "healthy again" is most expensive: the install has just failed *because*
-  # something else may hold the port, and reporting that stranger as the
-  # restored release is exactly the wrong thing to tell the operator.
-  local j=0
+  # Wait on the identity of the restored release, not on a bare 200. This is the
+  # path where a false "healthy again" is most expensive: the install has just
+  # failed *because* something else may hold the port, and reporting that
+  # stranger as the restored release is exactly the wrong thing to say here.
+  local want j=0
+  want="$(basename "$OLD_RELEASE")"
   while [ $j -lt 60 ]; do
-    if service_healthy; then
-      warn "the previous release ($(basename "$OLD_RELEASE")) is healthy again."
+    if service_healthy "$want"; then
+      warn "the previous release ($want) is healthy again."
       return 0
     fi
     sleep 0.5
@@ -1355,7 +1393,7 @@ else
   LIVE_OK=0
   i=0
   while [ $i -lt 80 ]; do
-    if service_healthy; then
+    if service_healthy "$RELEASE_ID"; then
       LIVE_OK=1
       break
     fi
@@ -1364,15 +1402,16 @@ else
   done
 
   if [ "$LIVE_OK" != "1" ]; then
-    if http_ok "http://127.0.0.1:$LOOPBACK_PORT/api/hello" 2; then
-      # The dangerous case: the port answers, but not from this service. Saying
-      # "healthy" here would report someone else's server as a successful
-      # install.
+    # Say which of the three legs failed, because the remedies are different.
+    SERVING="$(listening_release "$LOOPBACK_PORT")"
+    if [ -n "$SERVING" ] && [ "$SERVING" != "$RELEASE_ID" ]; then
+      warn "port $LOOPBACK_PORT is held by release '$SERVING', not by $RELEASE_ID — a stale process is answering"
+    elif http_ok "http://127.0.0.1:$LOOPBACK_PORT/api/hello" 2; then
       warn "http://127.0.0.1:$LOOPBACK_PORT/api/hello answers, but NOT from this service."
       warn "  systemctl --user is-active $UNIT => $(systemctl --user is-active "$UNIT" 2>&1 || true)"
       warn "Something else already holds port $LOOPBACK_PORT. Find and stop it, then re-run."
       warn "If this is WSL with networkingMode=mirrored, loopback is shared with Windows,"
-      warn "so the holder may be a Windows process that ss/lsof here cannot see."
+      warn "so the holder may be a Windows process that ss here cannot see at all."
     else
       warn "the new release never answered http://127.0.0.1:$LOOPBACK_PORT/api/hello"
     fi
@@ -1381,7 +1420,7 @@ else
     rollback_release || true
     die "update FAILED. Rollback was attempted — this is not a success, whatever the previous release now reports."
   fi
-  ok "unit is active and http://127.0.0.1:$LOOPBACK_PORT/api/hello responds"
+  ok "release $RELEASE_ID is active and answering on 127.0.0.1:$LOOPBACK_PORT"
 
   if http_ok "http://127.0.0.1:$LOOPBACK_PORT/" 5; then
     ok "Pocket app is served"
@@ -1389,25 +1428,6 @@ else
     warn "the Pocket index did not load"
     rollback_release || true
     die "update FAILED (Pocket index). Rollback was attempted."
-  fi
-
-  # Secondary to the unit-active gate above, and it names the culprit when it
-  # can. It compares canonical paths on both sides: $STAGE is built from $HOME,
-  # so a symlinked component anywhere in the install root would otherwise make a
-  # perfectly good install look like it was held by a stranger.
-  HOLDER_RELEASE="$(listening_release "$LOOPBACK_PORT" || echo "")"
-  STAGE_REAL="$(readlink -f "$STAGE" 2>/dev/null || echo "$STAGE")"
-  if [ -z "$HOLDER_RELEASE" ]; then
-    # Not silence: an unresolvable holder is the case where a foreign process
-    # answers the health check and nothing local can see it. The unit-active
-    # gate above is what actually caught it, so this is a note, not a failure.
-    warn "could not resolve which local process holds port $LOOPBACK_PORT; the unit-active check above is what proves this release is serving."
-  elif [ "$HOLDER_RELEASE" = "$STAGE_REAL" ]; then
-    ok "port $LOOPBACK_PORT is held by release $RELEASE_ID"
-  else
-    warn "port $LOOPBACK_PORT is held by $HOLDER_RELEASE, not the release just installed"
-    rollback_release || true
-    die "update FAILED: the health check was answered by another process. Stop whatever holds port $LOOPBACK_PORT and re-run."
   fi
 fi
 
