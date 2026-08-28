@@ -10,33 +10,30 @@ export type ResolvedSplitDirection = 'left' | 'right' | 'up' | 'down';
 export type SurfaceKind = 'terminal' | 'browser';
 export type SurfaceRenderMode = 'iframe' | 'ab-screencast' | 'ab-popout';
 
-/** A Surface's faces (`docs/specs/glossary.md` → Faces): the console face is a
- *  PTY + xterm, the web face is a browser renderer. A kind names a face-set —
- *  `terminal` = console-only, `browser` = web-only — and operations gate on the
- *  face they need, not on the kind (the Liskov "face-gated" category). */
-export type SurfaceFace = 'console' | 'web';
+/** What each kind is backed by (`docs/specs/glossary.md` → Panes and Surfaces).
+ *  The single source of capability gating; kind switches elsewhere go through
+ *  the predicates below. `Record<SurfaceKind, ...>` on purpose: adding a kind
+ *  (the staged `tool`, which has both) must be a compile error here, not a
+ *  silent `false`. */
+const KIND_CAPABILITIES: Record<SurfaceKind, { terminal: boolean; browser: boolean }> = {
+  terminal: { terminal: true, browser: false },
+  browser: { terminal: false, browser: true },
+};
 
-/** The face-set a kind names. Single source of truth for face gating — kind
- *  switches elsewhere should go through these predicates instead. Exhaustive
- *  on purpose: adding a kind (the staged both-faces `tool`) must be a compile
- *  error here, not a silent `['web']`. */
-export function facesOfKind(kind: SurfaceKind): SurfaceFace[] {
-  switch (kind) {
-    case 'terminal': return ['console'];
-    case 'browser': return ['web'];
-  }
+/** Every kind, derived from the table so `--kind` parsing and its help
+ *  placeholder cannot drift from it. */
+export const SURFACE_KINDS = Object.keys(KIND_CAPABILITIES) as SurfaceKind[];
+
+/** Whether this kind has a terminal — PTY-backed: `read` / `send` / `await` /
+ *  port scans. */
+export function hasTerminal(kind: SurfaceKind): boolean {
+  return KIND_CAPABILITIES[kind].terminal;
 }
 
-/** Whether this kind has a console face (PTY-backed: `read` / `send` / `await`
- *  / port scans). */
-export function hasConsoleFace(kind: SurfaceKind): boolean {
-  return facesOfKind(kind).includes('console');
-}
-
-/** Whether this kind has a web face (browser-rendered: nav / render-mode /
- *  agent-browser operations). */
-export function hasWebFace(kind: SurfaceKind): boolean {
-  return facesOfKind(kind).includes('web');
+/** Whether this kind has a browser renderer — nav / render-mode /
+ *  agent-browser operations. */
+export function hasBrowser(kind: SurfaceKind): boolean {
+  return KIND_CAPABILITIES[kind].browser;
 }
 
 /** Where a Surface renders. Minimized Surfaces (baseboard doors) are listed too;

@@ -9,7 +9,7 @@ import type {
   ParseResult,
   SurfacePort as DorSurfacePort,
 } from 'dor/commands/types';
-import { hasConsoleFace } from 'dor/commands/types';
+import { hasTerminal } from 'dor/commands/types';
 import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
 import type { OpenPort } from '../../lib/platform/types';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
@@ -180,7 +180,7 @@ function toSurfacePort(port: OpenPort): DorSurfacePort {
 async function attachSurfacePorts(surfaces: DorSurface[]): Promise<DorSurface[]> {
   const platform = getPlatform();
   return Promise.all(surfaces.map(async (surface) => {
-    if (!hasConsoleFace(surface.kind)) return surface;
+    if (!hasTerminal(surface.kind)) return surface;
     try {
       const ports = await platform.getOpenPorts(surface.id);
       return { ...surface, ports: ports.map(toSurfacePort) };
@@ -422,18 +422,19 @@ export function useDorControl({
     return target.value;
   }, [resolveListedSurface]);
 
-  // requireListedSurface plus the face gate shared by the handlers that
+  // requireListedSurface plus the capability gate shared by the handlers that
   // read/write/scan a shell (send / read / await / resolveOpen): these are
-  // console-face-gated operations (docs/specs/glossary.md → Faces). Responds
-  // and returns null on a target with no console face so the caller just bails.
-  const requireConsoleFaceSurface = useCallback((
+  // terminal-gated operations (docs/specs/glossary.md → Panes and Surfaces).
+  // Responds and returns null on a target with no terminal so the caller just
+  // bails.
+  const requireTerminalSurface = useCallback((
     surfaceParam: unknown,
     detail: DorControlRequest,
   ): DorSurface | null => {
     const target = requireListedSurface(surfaceParam, detail);
     if (!target) return null;
-    if (!hasConsoleFace(target.kind)) {
-      detail.respond({ ok: false, error: `surface '${target.ref}' has no console face (kind: ${target.kind})` });
+    if (!hasTerminal(target.kind)) {
+      detail.respond({ ok: false, error: `surface '${target.ref}' has no terminal (kind: ${target.kind})` });
       return null;
     }
     return target;
@@ -794,7 +795,7 @@ export function useDorControl({
           detail.respond({ ok: false, error: 'input is required' });
           return;
         }
-        const target = requireConsoleFaceSurface(params.surface, detail);
+        const target = requireTerminalSurface(params.surface, detail);
         if (!target) return;
         getPlatform().writePty(target.id, input);
         detail.respond({
@@ -810,7 +811,7 @@ export function useDorControl({
       }
 
       if (detail.method === SURFACE_CONTROL_METHODS.read) {
-        const target = requireConsoleFaceSurface(params.surface, detail);
+        const target = requireTerminalSurface(params.surface, detail);
         if (!target) return;
         const lines = numberParam(params.lines);
         const scrollback = booleanParam(params.scrollback);
@@ -833,7 +834,7 @@ export function useDorControl({
       // absorption of the completion it consumes — lives in the host's
       // `AlertManager`; this branch only validates, parks, and reports.
       if (detail.method === SURFACE_CONTROL_METHODS.await) {
-        const target = requireConsoleFaceSurface(params.surface, detail);
+        const target = requireTerminalSurface(params.surface, detail);
         if (!target) return;
         const until = params.until;
         if (until !== 'quiet' && until !== 'exit') {
@@ -980,8 +981,8 @@ export function useDorControl({
         // Resolve a terminal Surface handle to the dev-server URL it owns, for
         // `dor ab open <surface>` / `dor iframe <surface>`. Same port scan as
         // `dor list --ports`; minimized doors are valid targets. Ports ride the
-        // console face, so a target without one is rejected by the guard.
-        const target = requireConsoleFaceSurface(params.surface, detail);
+        // terminal, so a target without one is rejected by the guard.
+        const target = requireTerminalSurface(params.surface, detail);
         if (!target) return;
         let ports: OpenPort[];
         try {
@@ -1021,7 +1022,7 @@ export function useDorControl({
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, requireListedSurface, requireConsoleFaceSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
+  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
 
   return { connectPort };
 }

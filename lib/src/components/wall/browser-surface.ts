@@ -37,13 +37,13 @@ export function isBrowserParams(params: unknown): boolean {
   return p.surfaceType === 'browser' || typeof p.renderMode === 'string';
 }
 
-/** The Surface kind — the face-set name (`docs/specs/glossary.md` → Faces) —
- *  these params describe. The params → kind step beneath `facesOfKind`
- *  (`dor/commands/types`): keep every params-level kind switch on this one
- *  function so a future kind changes the classification in one place. Unlike
- *  `facesOfKind`, the compiler cannot force that edit — a boolean-derived
- *  return type-checks against a widened `SurfaceKind` — so a new kind must be
- *  added here by hand or its params silently classify as `browser`. */
+/** The Surface kind these params describe — the params → kind step beneath
+ *  `hasTerminal` / `hasBrowser` (`dor/commands/types`). Keep every params-level
+ *  kind switch on this one function so a future kind changes the classification
+ *  in one place. The boolean-derived return type-checks against a widened
+ *  `SurfaceKind`, so nothing here forces the edit; what catches a forgotten
+ *  kind is `use-session-persistence.ts`, where this return flows into the
+ *  narrower `PersistedSurfaceType`. */
 export function surfaceKindFromParams(params: unknown): SurfaceKind {
   return isBrowserParams(params) ? 'browser' : 'terminal';
 }
