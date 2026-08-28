@@ -867,11 +867,22 @@ Invariants the installer exists to hold:
   body, so without that gate a failed restore would strip the rollback pointer
   off an install still running the rejected release. `manage verify` and
   `manage rollback` on macOS refuse the same-release state independently too,
-  so an install left in it by an older installer reports honestly. The Windows
-  restore also reaps orphaned processes and re-checks which release holds
-  the port, for the reason in the Scheduled Task trap below — otherwise the
-  rejected release's own orphan answers the health check and is reported as the
-  previous release being "healthy again".
+  so an install left in it by an older installer reports honestly. The restore
+  then confirms *which* release answered rather than that anything did (next
+  invariant); on Windows it additionally reaps orphaned processes first, for the
+  reason in the Scheduled Task trap below.
+
+* **A 200 does not say who answered.** An orphan of an older release holds the
+  loopback port and replies to `/api/hello` exactly like a healthy current one,
+  so a bare health check passes while stale code serves — and on the forward
+  path that turns a failed update into a reported success. Every place whose
+  contract is which release is running therefore resolves the PID holding the
+  port back to the release directory it runs from and compares it: the
+  post-switch health check (which rolls back and exits nonzero on a mismatch),
+  `manage verify`, `manage rollback`, and the rollback restore itself. On macOS
+  the resolution must read the executable's real path — see the `ps` trap below.
+  `Source of truth:` `listening_release` (macOS), `Get-ListeningRelease`
+  (Windows).
 
 Mechanical traps the scripts encode, each of which fails silently otherwise:
 
@@ -888,6 +899,14 @@ Mechanical traps the scripts encode, each of which fails silently otherwise:
   `current` pointing where it was — the update becomes a silent no-op, and the
   prune then deletes the release nothing points at. The switch uses `rename(2)`
   on the link path instead, and asserts afterwards that `current` advanced.
+* **`ps` reports the path a process was exec'd by, symlink and all.** (macOS.)
+  `bin/run-server` execs `"$ROOT/current/runtime/node"`, so `ps -o comm=` names
+  `current/runtime/node` rather than the release behind it. Resolving which
+  release holds the port with `ps` would therefore follow `current` a second
+  time and "confirm" whatever it points at now — agreeing with itself no matter
+  which release is answering, which is the one thing the check exists to catch.
+  `lsof -p <pid> -a -d txt -Fn` reports the vnode's real path, which names the
+  release directory.
 * **`pnpm` resolves to a `.ps1` before its `.CMD`.** (Windows.) The PowerShell
   shim cannot be launched as a process, so the installer takes the first
   `Application`-typed resolution rather than `(Get-Command pnpm).Source`.
@@ -909,9 +928,8 @@ Mechanical traps the scripts encode, each of which fails silently otherwise:
   inside. Two defences, both required: the installer and `manage` reap every
   process belonging to the install root (matched by image path and command line,
   never by image name — that would kill unrelated `node.exe` processes including
-  the invoking pnpm) before any start; and neither the installer nor
-  `manage verify` accepts a 200 as proof, instead resolving the PID holding the
-  port back to the release directory it runs from and comparing it to `current`.
+  the invoking pnpm) before any start; and no health check accepts a 200 as
+  proof, per the "A 200 does not say who answered" invariant above.
   `Source of truth:` `Get-DormouseProcess` / `Get-ListeningRelease`.
 * **Windows `tailscaled` serves its local API to one interactive session at a
   time.** (Windows.) On a PC with a second signed-in profile every `tailscale`

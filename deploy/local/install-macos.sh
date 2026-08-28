@@ -160,6 +160,31 @@ fs.renameSync(tmp, link);
 ' "$1" "$2"
 }
 
+# Which release is the process listening on $1 actually running?
+#
+# A 200 from /api/hello proves only that SOMETHING answers on the port. This is
+# what separates the release that is supposed to be serving from an orphan of an
+# older one still holding it.
+#
+# Deliberately lsof's `txt` record and not `ps -o comm=`. run-server execs
+# "$INSTALL_ROOT/current/runtime/node", and ps reports that path verbatim,
+# symlink and all — so a ps-based check would resolve `current` a second time
+# and "confirm" whatever it points at now, agreeing with itself no matter which
+# release is answering. lsof reports the vnode's real path, which names the
+# release.
+listening_release() {
+  local pid path
+  pid="$(lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
+  [ -n "$pid" ] || return 0
+  while IFS= read -r path; do
+    case "$path" in n*) path="${path#n}" ;; *) continue ;; esac
+    case "$path" in "$INSTALL_ROOT/releases/"*) ;; *) continue ;; esac
+    path="${path#"$INSTALL_ROOT/releases/"}"
+    printf '%s\n' "${path%%/*}"
+    return 0
+  done < <(lsof -p "$pid" -a -d txt -Fn 2>/dev/null || true)
+}
+
 # --------------------------------------------------------------- tailscale --
 
 TS_BIN=""
@@ -605,6 +630,30 @@ wait_for_health() {
   return 1
 }
 
+# Which release is the process listening on $1 actually running?
+#
+# A 200 from /api/hello proves only that SOMETHING answers on the port. This is
+# what separates the release that is supposed to be serving from an orphan of an
+# older one still holding it.
+#
+# Deliberately lsof's `txt` record and not `ps -o comm=`. run-server execs
+# "$ROOT/current/runtime/node", and ps reports that path verbatim, symlink and
+# all — so a ps-based check would resolve `current` a second time and "confirm"
+# whatever it points at now, agreeing with itself no matter which release is
+# answering. lsof reports the vnode's real path, which names the release.
+listening_release() {
+  local pid path
+  pid="$(lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
+  [ -n "$pid" ] || return 0
+  while IFS= read -r path; do
+    case "$path" in n*) path="${path#n}" ;; *) continue ;; esac
+    case "$path" in "$ROOT/releases/"*) ;; *) continue ;; esac
+    path="${path#"$ROOT/releases/"}"
+    printf '%s\n' "${path%%/*}"
+    return 0
+  done < <(lsof -p "$pid" -a -d txt -Fn 2>/dev/null || true)
+}
+
 cmd_status() {
   printf '\nDormouse selfhost server\n'
   printf '  install root : %s\n' "$ROOT"
@@ -685,6 +734,21 @@ cmd_verify() {
     pass "Pocket app is served on loopback"
   else
     fail "Pocket index is not served — is lib/dist-pocket in the release?"
+  fi
+
+  # The check that separates "something answers" from "the current release
+  # answers". An orphaned node from an older release holds the port and replies
+  # to /api/hello exactly like the current one, so every other health check here
+  # passes while stale code serves.
+  local serving cur_id
+  serving="$(listening_release "$PORT")"
+  cur_id="$(basename "$(readlink "$ROOT/current" 2>/dev/null || echo '')" 2>/dev/null || echo '')"
+  if [ -z "$serving" ]; then
+    fail "cannot identify the process listening on port $PORT"
+  elif [ "$serving" = "$cur_id" ]; then
+    pass "the process on port $PORT is the current release"
+  else
+    fail "port $PORT is served by release '$serving', but current is '$cur_id' — a stale process is answering"
   fi
 
   local listeners
@@ -857,6 +921,17 @@ cmd_rollback() {
   fi
   launchctl kickstart -k "gui/$UID/$LABEL" || true
   if wait_for_health 30; then
+    # A 200 says only that SOMETHING answers, and this is the one command whose
+    # entire contract is which release serves. If the release being rolled AWAY
+    # FROM is still holding the port, it answers and reads as "rolled back and
+    # healthy" without this check.
+    local serving
+    serving="$(listening_release "$PORT")"
+    if [ "$serving" != "$(basename "$prev")" ]; then
+      printf '%sport %s answers, but from '"'"'%s'"'"' rather than the restored %s — check: manage verify%s\n' \
+        "$C_RED" "$PORT" "${serving:-an unidentifiable process}" "$(basename "$prev")" "$C_OFF"
+      return 1
+    fi
     printf '%srolled back and healthy%s\n' "$C_GRN" "$C_OFF"
   else
     printf '%srolled back but not healthy — check: manage logs%s\n' "$C_RED" "$C_OFF"
@@ -1086,8 +1161,21 @@ rollback_release() {
   local j=0
   while [ $j -lt 60 ]; do
     if curl -sf -o /dev/null "http://127.0.0.1:$LOOPBACK_PORT/api/hello"; then
-      warn "the previous release ($(basename "$OLD_RELEASE")) is healthy again."
-      return 0
+      # Same reason the forward switch re-checks: a 200 does not say who
+      # answered. The rejected release's own process holding the port would
+      # otherwise be reported as the previous release being healthy again.
+      local answered_by
+      if [ "$TEST_MODE" = "1" ]; then
+        answered_by="$(basename "$OLD_RELEASE")"
+      else
+        answered_by="$(listening_release "$LOOPBACK_PORT")"
+      fi
+      if [ "$answered_by" = "$(basename "$OLD_RELEASE")" ]; then
+        warn "the previous release ($(basename "$OLD_RELEASE")) is healthy again."
+        return 0
+      fi
+      warn "port $LOOPBACK_PORT answers, but from '${answered_by:-an unidentifiable process}' rather than the restored $(basename "$OLD_RELEASE")."
+      return 1
     fi
     sleep 0.5
     j=$((j + 1))
@@ -1140,6 +1228,17 @@ else
     die "update FAILED. Rollback was attempted — this is not a success, whatever the previous release now reports."
   fi
   ok "http://127.0.0.1:$LOOPBACK_PORT/api/hello responds"
+
+  # A 200 only proves something is listening. Confirm it is THIS release —
+  # otherwise an orphan of an older one answering on the same port reads as a
+  # successful update while the old code keeps serving.
+  LISTENING="$(listening_release "$LOOPBACK_PORT")"
+  if [ "$LISTENING" != "$RELEASE_ID" ]; then
+    warn "port $LOOPBACK_PORT is served by '${LISTENING:-an unidentifiable process}', not by $RELEASE_ID"
+    rollback_release || true
+    die "update FAILED: the new release is not the process answering on $LOOPBACK_PORT. Rollback was attempted."
+  fi
+  ok "the process on $LOOPBACK_PORT is release $RELEASE_ID"
 
   if curl -sf -o /dev/null "http://127.0.0.1:$LOOPBACK_PORT/"; then
     ok "Pocket app is served"
