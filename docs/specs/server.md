@@ -1004,9 +1004,20 @@ Mechanical traps the scripts encode, each of which fails silently otherwise:
   compared against the invoking account. `debug` is an unstable CLI surface, so
   only a *definitive* mismatch is fatal: an unreadable or unparseable answer
   warns and proceeds, degrading to the late refusal rather than blocking an
-  install that would have worked. The `serve status` read still runs first,
+  install that would have worked.
+
+  **Readability is decided by a different field than the answer.**
+  `ipn.Prefs.OperatorUser` carries `json:",omitempty"`, so an unset operator
+  omits the key rather than emitting an empty string — indistinguishable from an
+  unparseable blob if the answer field doubles as the liveness probe, which would
+  route the commonest form of this bug (nobody ever ran `tailscale set
+  --operator`) into the lenient branch and reopen the exact miss the check
+  closes. `ControlURL`, which has no `omitempty`, answers "did prefs parse?";
+  absent-or-empty `OperatorUser` on a blob that parsed is then a definitive
+  unset. The `serve status` read still runs first,
   because a denial *there* means something broader is wrong. Neither leg is
-  reachable in `DORMOUSE_INSTALL_TEST=1`, which never consults Tailscale, so
+  reachable under `DORMOUSE_INSTALL_TEST=1`, which gates the whole probe out —
+  and CI pairs it with an injected origin, which skips Tailscale altogether — so
   this is the one preflight rule CI cannot exercise.
 
   Because the late refusal is reached with `current` already switched and the
