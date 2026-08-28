@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 import { randomBytes } from 'crypto';
+import { CSP_NONCE_PLACEHOLDER } from './csp-nonce-placeholder';
 import { HOST_MESSAGE_TOKEN_GLOBAL } from '../../lib/src/lib/vscode-message-token';
 import { RECOVERY_COMMANDS_GLOBAL } from '../../lib/src/lib/vscode-recovery-global';
 
@@ -48,7 +49,13 @@ export function getWebviewHtml(
   const csp = [
     `default-src 'none'`,
     `style-src ${webview.cspSource} 'unsafe-inline'`,
-    `script-src 'nonce-${nonce}'`,
+    // The nonce is the root of trust; `strict-dynamic` extends it to what the
+    // entry chunk then loads. A nonce is not inherited through the module graph,
+    // so without it Vite's split chunks — a static import of the shared runtime,
+    // a lazy `import()` — are blocked. `strict-dynamic` also makes host-source
+    // expressions inert, so `webview.cspSource` beside it would be dead weight;
+    // inline scripts stay blocked, since nothing here grants `unsafe-inline`.
+    `script-src 'nonce-${nonce}' 'strict-dynamic'`,
     `font-src ${webview.cspSource}`,
     `img-src ${webview.cspSource} data: blob:`,
     // ws: entries cover the agent-browser stream relay (frames + input for
@@ -69,12 +76,28 @@ export function getWebviewHtml(
     `<head>\n    <meta http-equiv="Content-Security-Policy" content="${csp}">`,
   );
 
-  // Add nonce to existing script tags (from the built index.html)
-  html = html.replace(/<script /g, `<script nonce="${nonce}" `);
-  html = html.replace(/<script>/g, `<script nonce="${nonce}">`);
+  // Vite marks its own output — every script/style tag plus the
+  // `<meta property="csp-nonce">` its runtime preload helper reads — with the
+  // placeholder, using a real HTML parser. So there is no tag-matching to do
+  // here, and nonce coverage tracks whatever shape the bundler emits instead of
+  // a regex's guess at it (docs/specs/vscode.md → "CSP policy").
+  //
+  // Serving an unmarked document would leave every script un-nonced against a
+  // nonce-gated policy, and the only symptom is a blank panel — the silent
+  // failure this placeholder exists to end. Same reasoning as
+  // `assertConnectSrcBaked` in `scripts/esbuild.mjs`: a lost build-time
+  // substitution must not look recoverable at runtime.
+  if (!html.includes(CSP_NONCE_PLACEHOLDER)) {
+    throw new Error(
+      `Webview HTML at ${indexPath} carries no ${CSP_NONCE_PLACEHOLDER}. ` +
+        'The build dropped `html.cspNonce` (vscode-ext/vite.config.ts); rebuild with `pnpm build:vscode`.',
+    );
+  }
+  html = html.replaceAll(CSP_NONCE_PLACEHOLDER, nonce);
 
-  // Inject the inline state script AFTER the nonce replacements so it doesn't
-  // get a duplicate nonce attribute from the regex above.
+  // The inline state script is ours, not Vite's, so it carries no placeholder —
+  // nonce it directly. Injected AFTER the swap so its nonce cannot be
+  // substituted a second time.
   html = html.replace(
     '</head>',
     `    <script nonce="${nonce}">globalThis.${HOST_MESSAGE_TOKEN_GLOBAL} = ${serializeForInlineScript(messageToken)};\nglobalThis.__DORMOUSE_HOST_STATE__ = ${serializeForInlineScript(initialState)};\nglobalThis.__DORMOUSE_SELECTED_SHELL__ = ${serializeForInlineScript(selectedShell ?? null)};\nglobalThis.${RECOVERY_COMMANDS_GLOBAL} = ${serializeForInlineScript(recoveryCommands ?? null)};</script>\n  </head>`,
