@@ -375,15 +375,19 @@ transcripts, so under the bare umask it landed `0644` and any other local
 account could read the user's scrollback (`SECURITY.md` -> Remote Control,
 Credentials at rest). On Windows `restrict_to_owner` applies the equivalent
 instead — a DACL protected from inheritance carrying exactly one entry, for the
-user the process runs as — because a unix mode is a silent no-op there and
-`%LOCALAPPDATA%` is not private by default; its inherited ACL has been observed
-granting SYSTEM, Administrators and an unresolvable `S-1-5-21-…` principal
-read/write on everything beneath it. `restrict_to_owner_leaves_one_owner_only_ace`
-asserts all three properties. The same function locks the sidecar's state
-directory in `remote_host_state_dir`, which is what the Host enrollment file
-inherits — `FileHostStateStore`'s own `0700`/`0600` cannot help on Windows and
-Node has no ACL API. Best-effort throughout: a filesystem without the
-permission model it wants must not fail a save. There
+user the process runs as — because a unix mode is a silent no-op there, so
+without it the directory keeps whatever `%LOCALAPPDATA%` hands down, which is
+never owner-only. `restrict_to_owner_leaves_one_owner_only_ace`
+asserts all four properties — the fourth being that the entry reached a file
+that already existed when the lock ran. The same function locks the sidecar's
+state directory in `remote_host_state_dir`, which is what the Host enrollment
+file inherits — and on an upgrade that file already exists, so propagation, not
+create-time inheritance, is what tightens it. `FileHostStateStore`'s own
+`0700`/`0600` cannot help on Windows and Node has no ACL API. Neither call is
+fatal — a filesystem without the permission model it wants must not fail a save
+— but the state-dir one is not silent either: `remote_host_state_dir` logs a
+`WARNING` naming the path, because on Windows it is the only thing restricting
+`hostToken`. There
 is no WAL to grow, and overwriting in place bounds the on-disk size to one
 blob. **Window identity is implicit**:
 each command keys by the invoking `tauri::Window`'s `label()`, so the frontend

@@ -785,18 +785,24 @@ fn read_session_from(dir: &Path, label: &str) -> Result<Option<String>, String> 
 /// strictly *smaller* secret (`lib/src/host/remote/host-state-store.ts`), so
 /// this is closing an inconsistency, not inventing a rule.
 ///
-/// Best-effort on purpose: a filesystem without the permission model it wants
-/// must not fail a session save.
+/// Failures are reported rather than swallowed, and whether one is tolerable
+/// is the caller's decision: `write_session_to` ignores it — a filesystem
+/// without the permission model it wants must not fail a session save — while
+/// `remote_host_state_dir` logs it.
 ///
 /// The `mode` is a unix mode and is ignored on Windows, which has no such
 /// concept — there the equivalent is a DACL protected from inheritance carrying
 /// exactly one entry, for the user this process runs as. That is the same shape
 /// `deploy/local/install-windows.ps1` applies to the server's `state\`, and it
-/// is needed for the same reason: `%LOCALAPPDATA%` is not private by default.
-/// On a real machine its inherited ACL was found granting SYSTEM,
-/// Administrators, *and* an unresolvable `S-1-5-21-…` principal read/write on
-/// everything beneath it. A unix mode is a no-op on Windows, so before this the
-/// snapshots were readable by whoever that SID is.
+/// is needed for the same reason: a unix mode is a silent no-op on Windows, so
+/// without this the directory simply keeps whatever `%LOCALAPPDATA%` hands
+/// down, which is never owner-only. That inheritance always carries SYSTEM and
+/// Administrators (as a `0700` does not exclude root either), and in practice
+/// often stale entries from earlier installs — this machine's carried two
+/// unresolvable `S-1-5-21-…` principals from other Windows domains with
+/// read/write. Those particular entries are inert, since no account here can
+/// present a foreign install's SID, so what this closes is the parity gap with
+/// the unix mode rather than a demonstrated live hole.
 #[cfg(unix)]
 fn restrict_to_owner(path: &Path, mode: u32) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
@@ -1694,10 +1700,9 @@ mod tests {
     /// protected from inheritance and grant exactly one principal — this user.
     ///
     /// Worth a test rather than prose because the failure is silent and
-    /// invisible. A unix `mode` is a no-op on Windows, so before this existed
+    /// invisible: a unix `mode` is a no-op on Windows, so before this existed
     /// the session snapshots simply kept whatever `%LOCALAPPDATA%` handed down
-    /// — on a real machine that included an unresolvable `S-1-5-21-…` principal
-    /// with read access. Nothing about the app would look different.
+    /// — never owner-only — and nothing about the app would look different.
     #[test]
     #[cfg(windows)]
     fn restrict_to_owner_leaves_one_owner_only_ace() {
