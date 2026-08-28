@@ -805,7 +805,13 @@ Invariants the installer exists to hold:
   one release would make `verify` report a rollback target that does not exist
   and `rollback` swap a release with itself and call it success. `manage
   verify` and `manage rollback` each refuse that state independently, so an
-  install left in it by an older installer reports honestly.
+  install left in it by an older installer reports honestly. The clear is
+  gated on the restore having actually landed — `rollback_release` re-reads
+  `current` and returns early, leaving `previous` alone, if it did not come
+  back to the outgoing release. Both call sites are `rollback_release || true`,
+  which disables `errexit` for the whole function body, so without that gate a
+  failed restore would strip the rollback pointer off an install still running
+  the rejected release.
 
 Two mechanical traps the script encodes, both of which fail silently otherwise:
 

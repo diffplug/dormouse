@@ -1062,6 +1062,18 @@ rollback_release() {
   # $STAGE/runtime/node was verified executable and version/arch-matched earlier
   # in this run; $OLD_RELEASE/runtime/node has not been checked at all.
   atomic_symlink "$OLD_RELEASE" "$CURRENT_LINK" "$STAGE/runtime/node"
+  # Prove the restore landed before touching `previous`, the way the forward
+  # switch proves `current` advanced. Both callers invoke this as
+  # `rollback_release || true`, which disables errexit for the entire function
+  # body, so a failed atomic_symlink above falls through to here instead of
+  # aborting — and deleting `previous` then would strip the only rollback
+  # pointer off an install still sitting on the rejected release.
+  local restored_to
+  restored_to="$(readlink "$CURRENT_LINK" 2>/dev/null || echo "")"
+  if [ "$restored_to" != "$OLD_RELEASE" ]; then
+    warn "current was NOT restored to $(basename "$OLD_RELEASE") (points at '${restored_to:-nothing}'). Leaving the previous link in place so rollback stays possible."
+    return 1
+  fi
   # `previous` was pointed at $OLD_RELEASE before the switch, so leaving it would
   # make both links name the same release: `manage verify` would report a rollback
   # target that does not exist and `manage rollback` would swap a release with
