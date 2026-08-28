@@ -763,7 +763,9 @@ cmd_verify() {
     fail "current release symlink or RELEASE metadata missing"
   fi
 
-  if [ -L "$ROOT/previous" ]; then
+  if [ -L "$ROOT/previous" ] && [ "$(readlink "$ROOT/previous")" = "$(readlink "$ROOT/current" 2>/dev/null)" ]; then
+    fail "previous names the same release as current — there is no rollback target"
+  elif [ -L "$ROOT/previous" ]; then
     pass "a previous release is retained for rollback"
   else
     warn "no previous release retained yet — rollback is unavailable until the next update"
@@ -835,6 +837,10 @@ cmd_rollback() {
   prev="$(readlink "$ROOT/previous")"
   cur="$(readlink "$ROOT/current" 2>/dev/null || echo '')"
   [ -d "$ROOT/releases/$(basename "$prev")" ] || { printf 'previous release directory is gone: %s\n' "$prev" >&2; return 1; }
+  # Swapping a release with itself would wait for health and print success while
+  # changing nothing. Refuse instead — an install left in that state by an older
+  # installer has no rollback target, whatever the `previous` link suggests.
+  [ "$prev" != "$cur" ] || { printf 'previous and current name the same release (%s) — nothing to roll back to\n' "$(basename "$prev")" >&2; return 1; }
   printf 'rolling back: %s -> %s\n' "$(basename "$cur")" "$(basename "$prev")"
   local node_bin=""
   for candidate in "$prev/runtime/node" "$ROOT/current/runtime/node"; do
@@ -1056,6 +1062,12 @@ rollback_release() {
   # $STAGE/runtime/node was verified executable and version/arch-matched earlier
   # in this run; $OLD_RELEASE/runtime/node has not been checked at all.
   atomic_symlink "$OLD_RELEASE" "$CURRENT_LINK" "$STAGE/runtime/node"
+  # `previous` was pointed at $OLD_RELEASE before the switch, so leaving it would
+  # make both links name the same release: `manage verify` would report a rollback
+  # target that does not exist and `manage rollback` would swap a release with
+  # itself and call it healthy. Once `current` is back on $OLD_RELEASE there is
+  # genuinely no previous release, and the state must say so.
+  rm -f "$PREVIOUS_LINK"
   if [ "$TEST_MODE" != "1" ]; then
     launchctl kickstart -k "gui/$UID/$LABEL" >/dev/null 2>&1 || true
   fi

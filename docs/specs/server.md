@@ -799,7 +799,13 @@ Invariants the installer exists to hold:
 * **A failed update is a failure.** The candidate release is health-checked on
   an ephemeral port against a throwaway state dir *before* `current` moves; if
   the live service then fails to answer, `current` is restored to `previous`
-  and the installer exits nonzero. Rollback succeeding is not success.
+  and the installer exits nonzero. Rollback succeeding is not success. The
+  restore also clears the `previous` pointer, because the switch had already
+  aimed it at the release `current` is being restored to: leaving both naming
+  one release would make `verify` report a rollback target that does not exist
+  and `rollback` swap a release with itself and call it success. `manage
+  verify` and `manage rollback` each refuse that state independently, so an
+  install left in it by an older installer reports honestly.
 
 Two mechanical traps the script encodes, both of which fail silently otherwise:
 
