@@ -962,7 +962,8 @@ cmd_uninstall() {
   printf 'It PRESERVES your configuration and state:\n'
   printf '  config : %s\n' "$ROOT/config"
   printf '  state  : %s\n' "$STATE_DIR"
-  printf '\nUse "manage purge" separately to delete those irreversibly.\n\n'
+  printf '\nThis script is left in place so "purge" can still delete them\n'
+  printf 'irreversibly afterwards:\n\n  "%s" purge\n\n' "$ROOT/bin/manage"
   if [ ! -t 0 ]; then
     printf 'refusing to uninstall with no terminal to confirm at\n' >&2
     return 1
@@ -983,8 +984,12 @@ cmd_uninstall() {
   else
     printf 'left the Serve config alone (it does not point at 127.0.0.1:%s)\n' "$PORT"
   fi
-  rm -rf "$ROOT/releases" "$ROOT/current" "$ROOT/previous" "$ROOT/bin" "$ROOT/run"
+  # bin/run-server, not bin: this script lives there too, and "purge" — the
+  # command the message above points at — is unreachable once it is deleted.
+  rm -rf "$ROOT/releases" "$ROOT/current" "$ROOT/previous" "$ROOT/run"
+  rm -f "$ROOT/bin/run-server"
   printf '\nuninstalled. config and state remain at:\n  %s\n  %s\n\n' "$ROOT/config" "$STATE_DIR"
+  printf 'delete them irreversibly with:\n\n  "%s" purge\n\n' "$ROOT/bin/manage"
 }
 
 cmd_purge() {
@@ -997,6 +1002,13 @@ cmd_purge() {
   if [ "$reply" != "DELETE DORMOUSE STATE" ]; then printf 'aborted\n'; return 1; fi
   rm -rf "$STATE_DIR" "$ROOT/config"
   printf 'purged.\n'
+  # bin/run-server is what "uninstall" removes, so its absence means the
+  # LaunchAgent and the code are already gone and this script is the last thing
+  # standing. It cannot delete itself out from under the shell running it.
+  if [ ! -e "$ROOT/bin/run-server" ]; then
+    printf '\nthe LaunchAgent and code were already uninstalled; this script is\n'
+    printf 'all that remains:\n\n  rm -rf "%s"\n\n' "$ROOT"
+  fi
 }
 
 case "${1:-status}" in
@@ -1020,7 +1032,7 @@ usage: manage <command>
   show-password   warn, then display the setup password locally
   serve           re-apply the Tailscale Serve mapping for this server
   rollback        switch to the retained previous release, preserving state
-  uninstall       remove LaunchAgent + code (keeps config and state)
+  uninstall       remove LaunchAgent + code (keeps config, state, this script)
   purge           irreversibly delete config and state
 USAGE
     exit 64

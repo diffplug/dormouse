@@ -1747,7 +1747,10 @@ function Invoke-Uninstall {
   Write-Host "  config : $Root\config"
   Write-Host "  state  : $StateDir"
   Write-Host ""
-  Write-Host 'Use "manage purge" separately to delete those irreversibly.'
+  Write-Host 'This script is left in place so "purge" can still delete them'
+  Write-Host 'irreversibly afterwards:'
+  Write-Host ""
+  Write-Host ('  "{0}\bin\manage.cmd" purge' -f $Root)
   Write-Host ""
   if ([Console]::IsInputRedirected) {
     [Console]::Error.WriteLine('refusing to uninstall with no terminal to confirm at')
@@ -1776,9 +1779,13 @@ function Invoke-Uninstall {
     Write-Host "left the Serve config alone (it does not point at 127.0.0.1:$PORT)"
   }
 
-  foreach ($p in @((Join-Path $Root 'releases'), (Join-Path $Root 'bin'), (Join-Path $Root 'run'))) {
+  foreach ($p in @((Join-Path $Root 'releases'), (Join-Path $Root 'run'))) {
     Remove-Tree $p
   }
+  # bin\run-server.ps1, not bin: this script lives there too, and "purge" -- the
+  # command the message above points at -- is unreachable once it is deleted.
+  $runServer = Join-Path $Root 'bin\run-server.ps1'
+  if (Test-Path -LiteralPath $runServer) { [IO.File]::Delete($runServer) }
   foreach ($p in @($CurrentPointer, $PreviousPointer)) {
     if (Test-Path -LiteralPath $p) { [IO.File]::Delete($p) }
   }
@@ -1786,6 +1793,10 @@ function Invoke-Uninstall {
   Write-Host "uninstalled. config and state remain at:"
   Write-Host "  $Root\config"
   Write-Host "  $StateDir"
+  Write-Host ""
+  Write-Host "delete them irreversibly with:"
+  Write-Host ""
+  Write-Host ('  "{0}\bin\manage.cmd" purge' -f $Root)
   Write-Host ""
   return 0
 }
@@ -1805,6 +1816,17 @@ function Invoke-Purge {
     Remove-Tree $p
   }
   Write-Host 'purged.'
+  # bin\run-server.ps1 is what "uninstall" removes, so its absence means the
+  # Scheduled Task and the code are already gone and this script is the last
+  # thing standing. It cannot delete itself out from under the shell running it.
+  if (-not (Test-Path -LiteralPath (Join-Path $Root 'bin\run-server.ps1'))) {
+    Write-Host ""
+    Write-Host "the Scheduled Task and code were already uninstalled; this script"
+    Write-Host "is all that remains:"
+    Write-Host ""
+    Write-Host ('  Remove-Item -Recurse -Force "{0}"' -f $Root)
+    Write-Host ""
+  }
   return 0
 }
 
@@ -1830,7 +1852,7 @@ usage: manage <command>
   show-password   warn, then display the setup password locally
   serve           re-apply the Tailscale Serve mapping for this server
   rollback        switch to the retained previous release, preserving state
-  uninstall       remove the Scheduled Task + code (keeps config and state)
+  uninstall       remove the Scheduled Task + code (keeps config, state, this script)
   purge           irreversibly delete config and state
 "@
     exit 64
