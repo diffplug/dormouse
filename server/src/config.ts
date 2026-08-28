@@ -4,7 +4,7 @@
  * (docs/specs/server.md, "Configuration").
  */
 
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { defaultVapidSubject, type VapidKeys } from './push.js';
@@ -41,6 +41,19 @@ export interface ServerConfig {
    * the two sides cannot disagree about what a valid assertion is.
    */
   readonly requireUserVerification: boolean;
+  /**
+   * Absolute path the server records `{pid, releaseId, port}` into once it has
+   * bound, so an installer can ask *which release is answering* without
+   * reconstructing it from the process table. `null` — the default — writes
+   * nothing, which is what a dev run, a container and every test want.
+   * See `runtime-file.ts`.
+   */
+  runtimeFile: string | null;
+  /**
+   * The release directory's name, supplied by the installer's `run-server`
+   * wrapper. `null` when the server was not started by an installer.
+   */
+  releaseId: string | null;
 }
 
 /** Thrown for a missing or unusable environment; the entrypoint exits on it. */
@@ -102,6 +115,18 @@ export function readConfig(env: Env = process.env): ServerConfig {
   // delivery fail silently.
   const vapidSubject = env.DORMOUSE_VAPID_SUBJECT ?? defaultVapidSubject(origin);
 
+  // Installer-supplied, and absent everywhere else. A relative runtime path is
+  // refused rather than resolved against the cwd: the wrapper runs under a
+  // service manager whose working directory is not the installer's, so a
+  // relative path would land somewhere neither side can predict.
+  const runtimeFile = env.DORMOUSE_RUNTIME_FILE?.trim() || null;
+  if (runtimeFile !== null && !isAbsolute(runtimeFile)) {
+    throw new ConfigError(
+      `DORMOUSE_RUNTIME_FILE must be an absolute path, got '${runtimeFile}'.`,
+    );
+  }
+  const releaseId = env.DORMOUSE_RELEASE_ID?.trim() || null;
+
   return {
     port,
     bindHost,
@@ -112,5 +137,7 @@ export function readConfig(env: Env = process.env): ServerConfig {
     pocketDir,
     vapidKeys,
     vapidSubject,
+    runtimeFile,
+    releaseId,
   };
 }

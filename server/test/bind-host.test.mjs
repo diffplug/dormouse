@@ -7,15 +7,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { createServer } from 'node:net';
-import { mkdtemp } from 'node:fs/promises';
-import { networkInterfaces, tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { networkInterfaces } from 'node:os';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const ENTRYPOINT = join(here, '..', 'dist', 'index.js');
+import { startServer } from './spawn-server.mjs';
 
 /** A non-loopback IPv4 of this machine, or undefined on an isolated runner. */
 function externalIpv4() {
@@ -25,58 +19,6 @@ function externalIpv4() {
     }
   }
   return undefined;
-}
-
-/** A port that was free a moment ago — good enough for a spawned child. */
-function freePort() {
-  return new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.on('error', reject);
-    probe.listen(0, '127.0.0.1', () => {
-      const { port } = probe.address();
-      probe.close(() => resolve(port));
-    });
-  });
-}
-
-async function startServer(extraEnv) {
-  const port = await freePort();
-  const stateDir = await mkdtemp(join(tmpdir(), 'dormouse-bind-'));
-  const child = spawn(process.execPath, [ENTRYPOINT], {
-    env: {
-      ...process.env,
-      DORMOUSE_SETUP_PASSWORD: 'correct horse battery staple',
-      DORMOUSE_STATE_DIR: stateDir,
-      DORMOUSE_POCKET_DIR: join(stateDir, 'no-pocket-build'),
-      PORT: String(port),
-      ...extraEnv,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-
-  try {
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('server did not report listening')), 15_000);
-      child.stdout.on('data', (chunk) => {
-        if (String(chunk).includes('server listening')) {
-          clearTimeout(timer);
-          resolve();
-        }
-      });
-      child.on('exit', (code) => {
-        clearTimeout(timer);
-        reject(new Error(`server exited early with code ${code}`));
-      });
-    });
-  } catch (error) {
-    // Nobody else has a handle on this child yet — the caller registers
-    // `t.after(stop)` only once this resolves — so a rejection here would leave
-    // a server holding `port` for the rest of the run.
-    child.kill();
-    throw error;
-  }
-
-  return { port, stop: () => child.kill() };
 }
 
 /** Resolves true if /api/hello answers at `host` within a short budget. */

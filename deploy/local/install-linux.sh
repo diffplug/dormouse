@@ -1,7 +1,8 @@
 #!/bin/bash
 #
-# Install the Dormouse coordinating server on this Mac as a per-login
-# LaunchAgent, fronted by `tailscale serve` on the node's own HTTPS name.
+# Install the Dormouse coordinating server on this Linux machine as a per-login
+# systemd *user* service, fronted by `tailscale serve` on the node's own HTTPS
+# name.
 #
 # Running this a second time updates the installed release from the current
 # checkout. It never pulls, fetches, switches branches, or installs an updater:
@@ -11,35 +12,49 @@
 # contract this installs.
 #
 # Usage:
-#   ./deploy/local/install-macos.sh [--yes]
+#   ./deploy/local/install-linux.sh [--yes] [--linger]
+#
+#   --linger   Also enable lingering, so the service survives logout and starts
+#              at boot without a login. Off by default: the shipped contract is
+#              a per-login agent, and lingering changes that availability
+#              property. Required for a headless box you reach over SSH.
 #
 # Environment:
 #   DORMOUSE_INSTALL_TEST=1   Build, stage, health-check and switch releases,
-#                             but do not touch launchd or the Serve config.
+#                             but do not touch systemd or the Serve config.
 #   DORMOUSE_INSTALL_ROOT     A throwaway install root (requires the above), so
 #                             path quoting and release switching can be tested.
+#   DORMOUSE_INSTALL_ORIGIN   An origin to use instead of asking Tailscale
+#                             (requires the above). Lets CI, which has no
+#                             tailnet, run everything up to the Serve step.
 
 set -euo pipefail
 
-# macOS ships bash 3.2; nothing here may use bash 4+ syntax.
-
-LABEL="sh.dormouse.server"
-INSTALL_ROOT="$HOME/Library/Application Support/Dormouse Server"
-LOG_DIR="$HOME/Library/Logs/Dormouse Server"
-PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+LABEL="dormouse-server"
+UNIT="$LABEL.service"
+INSTALL_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/dormouse-server"
+LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/dormouse-server/logs"
+UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+UNIT_FILE="$UNIT_DIR/$UNIT"
 LOOPBACK_PORT=3100
 
 ASSUME_YES=0
 [ "${DORMOUSE_INSTALL_ASSUME_YES:-0}" = "1" ] && ASSUME_YES=1
 TEST_MODE=0
 [ "${DORMOUSE_INSTALL_TEST:-0}" = "1" ] && TEST_MODE=1
+WANT_LINGER=0
 
-# A throwaway install root, for exercising path quoting, plist generation,
+# A throwaway install root, for exercising path quoting, unit generation,
 # release switching and cleanup without touching the real installation. Gated to
 # test mode on purpose: a real install belongs in the documented location, and
-# an overridden root would leave `manage` and the LaunchAgent disagreeing about
-# where the service lives. Overriding HOME instead would break pnpm, whose store
-# and downloaded runtime live under the real home.
+# an overridden root would leave `manage` and systemd disagreeing about where
+# the service lives. Overriding HOME instead would break pnpm, whose store and
+# downloaded runtime live under the real home.
+if [ -n "${DORMOUSE_INSTALL_ORIGIN:-}" ] && [ "$TEST_MODE" != "1" ]; then
+  echo "DORMOUSE_INSTALL_ORIGIN is only honored with DORMOUSE_INSTALL_TEST=1" >&2
+  exit 64
+fi
+
 if [ -n "${DORMOUSE_INSTALL_ROOT:-}" ]; then
   if [ "$TEST_MODE" != "1" ]; then
     echo "DORMOUSE_INSTALL_ROOT is only honored with DORMOUSE_INSTALL_TEST=1" >&2
@@ -47,13 +62,15 @@ if [ -n "${DORMOUSE_INSTALL_ROOT:-}" ]; then
   fi
   INSTALL_ROOT="$DORMOUSE_INSTALL_ROOT"
   LOG_DIR="$INSTALL_ROOT/logs"
-  PLIST="$INSTALL_ROOT/LaunchAgents/$LABEL.plist"
+  UNIT_DIR="$INSTALL_ROOT/systemd"
+  UNIT_FILE="$UNIT_DIR/$UNIT"
 fi
 
 for arg in "$@"; do
   case "$arg" in
     --yes|-y) ASSUME_YES=1 ;;
-    --help|-h) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --linger) WANT_LINGER=1 ;;
+    --help|-h) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $arg" >&2; exit 64 ;;
   esac
 done
@@ -92,11 +109,13 @@ confirm() {
   esac
 }
 
+mktemp_file() { mktemp "${TMPDIR:-/tmp}/dormouse-$1.XXXXXX"; }
+
 # ------------------------------------------------------------- preflight ----
 
-[ "$(uname -s)" = "Darwin" ] || die "this installer is macOS-only (found $(uname -s)). See SELF_HOST.md Prerequisites — design the native service manager with the user rather than translating LaunchAgent commands."
+[ "$(uname -s)" = "Linux" ] || die "this installer is Linux-only (found $(uname -s)). Use deploy/local/install-macos.sh on macOS or deploy/local/install-windows.ps1 on Windows."
 
-[ "$(id -u)" != "0" ] || die "do not run this as root. It installs only into \$HOME and needs no sudo."
+[ "$(id -u)" != "0" ] || die "do not run this as root. It installs only into \$HOME and needs no sudo. The whole credential posture is that one user account owns config/ and state/; a root install would write them owned by another principal and register the service for it."
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -106,10 +125,10 @@ cd "$REPO_ROOT"
 JSON_RUNNER=""
 if command -v node >/dev/null 2>&1; then
   JSON_RUNNER="node"
-elif [ -x /usr/bin/python3 ]; then
+elif command -v python3 >/dev/null 2>&1; then
   JSON_RUNNER="python3"
 else
-  die "need either node or /usr/bin/python3 to read package.json and the Tailscale status."
+  die "need either node or python3 to read package.json and the Tailscale status."
 fi
 
 # json_query <file> <dotted.path> -> value on stdout, exit 1 if absent.
@@ -127,7 +146,7 @@ process.stdout.write(Array.isArray(v) ? v.join(",") : String(v));
 ' "$1" "$2"
       ;;
     python3)
-      /usr/bin/python3 -c '
+      python3 -c '
 import json, sys
 v = json.load(open(sys.argv[1]))
 for k in sys.argv[2].split("."):
@@ -160,19 +179,50 @@ fs.renameSync(tmp, link);
 ' "$1" "$2"
 }
 
-# Which release is serving port $1?
+# HTTP health check without assuming curl is installed. Ubuntu Server images
+# ship it, but a minimal container or Debian netinst does not, and the release
+# already carries a Node binary that can do this.
 #
-# A 200 from /api/hello proves only that SOMETHING answers on the port. This is
-# what separates the release that is supposed to be serving from an orphan of an
-# older one still holding it.
+# HTTP_NODE names the Node to fall back on; it advances from the build's runtime
+# to the staged one as soon as a release exists, so no call site has to pass it.
+# $1 = url, $2 = timeout seconds, $3 = node binary (optional override)
+HTTP_NODE=""
+http_ok() {
+  local url="$1" timeout="${2:-5}" node_bin="${3:-$HTTP_NODE}"
+  if command -v curl >/dev/null 2>&1; then
+    curl -sf -o /dev/null --max-time "$timeout" "$url"
+    return $?
+  fi
+  [ -n "$node_bin" ] && [ -x "$node_bin" ] || return 2
+  "$node_bin" -e '
+const http = require("http");
+const req = http.get(process.argv[1], { timeout: Number(process.argv[2]) * 1000 }, (res) => {
+  res.resume();
+  process.exit(res.statusCode >= 200 && res.statusCode < 300 ? 0 : 1);
+});
+req.on("timeout", () => { req.destroy(); process.exit(1); });
+req.on("error", () => process.exit(1));
+' "$url" "$timeout"
+}
+
+# --- who answered? -----------------------------------------------------------
 #
-# The server writes {pid, releaseId, port} at successful bind
+# `/api/hello` carries no identity, so a 200 on the loopback port proves only
+# that *something* got there first. Every live check waits on the identity
+# instead — never on `http_ok` alone — which also absorbs the window where an
+# outgoing process answers one last time. `manage` carries the same helpers.
+
+unit_active() { [ "$(systemctl --user is-active "$UNIT" 2>/dev/null || true)" = "active" ]; }
+
+# Echoes the release id serving port $1, or nothing when that cannot be
+# established. The server writes {pid, releaseId, port} at successful bind
 # (server/src/runtime-file.ts), so this is a file read and a liveness check
-# rather than lsof forensics over the process table. Empty means "unknown",
-# never "nobody": a stale file whose pid is dead, a server started outside the
-# installer, and a foreign process that got the port first are all
-# indistinguishable from here, and all must fail the comparison rather than
-# pass it.
+# rather than three platforms' worth of process forensics.
+#
+# Empty means "unknown", never "nobody": a stale file whose pid is dead, a
+# server started outside the installer, and a foreign process that got the port
+# first are all indistinguishable from here, and all of them must fail the
+# comparison rather than pass it.
 listening_release() {
   local port="$1" file pid release rport
   file="$INSTALL_ROOT/run/server.json"
@@ -190,72 +240,176 @@ listening_release() {
   printf '%s\n' "$release"
 }
 
+# $1 = the release id that must be answering. Three legs, all required:
+# systemd's own view, a 200, and the identity of whoever holds the port.
+service_healthy() {
+  unit_active \
+    && http_ok "http://127.0.0.1:$LOOPBACK_PORT/api/hello" 2 \
+    && [ -n "$1" ] && [ "$(listening_release "$LOOPBACK_PORT")" = "$1" ]
+}
+
+# ---------------------------------------------------------------- systemd ---
+
+command -v systemctl >/dev/null 2>&1 \
+  || die "systemctl not found. This installer targets a systemd user service; on a non-systemd init, stop and design the native service manager with the user rather than translating unit files blindly."
+
+SYSTEMD_VERSION="$(systemctl --version 2>/dev/null | head -1 | awk '{print $2}')"
+case "$SYSTEMD_VERSION" in
+  ''|*[!0-9]*) warn "could not parse the systemd version from \`systemctl --version\`." ;;
+  *)
+    # StandardOutput=append: landed in systemd 240. Below that the unit would
+    # silently truncate the log on every restart, so `manage logs` would lie.
+    if [ "$SYSTEMD_VERSION" -lt 240 ]; then
+      die "systemd $SYSTEMD_VERSION is too old: the unit uses StandardOutput=append:, which needs systemd 240 or newer."
+    fi
+    ;;
+esac
+
+# `ss` used to be load-bearing here: identity came from resolving the port
+# holder, so without iproute2 the post-switch wait could never succeed and a
+# good install rolled itself back. The server now records its own identity
+# (`DORMOUSE_RUNTIME_FILE`), so the only thing left that needs `ss` is
+# `manage verify`'s bind check — worth a warning, not a refusal.
+command -v ss >/dev/null 2>&1 \
+  || warn "ss not found (iproute2). The install works without it, but \`manage verify\` cannot confirm that port $LOOPBACK_PORT is bound only to 127.0.0.1."
+
+if [ "$TEST_MODE" != "1" ]; then
+  # A user manager is what runs the service. Without one — a bare `su`, a
+  # container with no logind, a distro where the session never registered —
+  # `systemctl --user` fails with a message about DBUS_SESSION_BUS_ADDRESS that
+  # does not say what to do about it.
+  if ! systemctl --user show-environment >/dev/null 2>&1; then
+    die "no systemd user manager is reachable for uid $(id -u). \`systemctl --user\` needs a running user instance and XDG_RUNTIME_DIR (currently '${XDG_RUNTIME_DIR:-<unset>}'). If you got here with \`su\`, log in as this user properly — \`machinectl shell $USER@\` or a fresh SSH session — and re-run."
+  fi
+fi
+
 # --------------------------------------------------------------- tailscale --
 
-TS_BIN=""
-TS_VIA_BUNDLE=0
-if command -v tailscale >/dev/null 2>&1; then
-  TS_BIN="$(command -v tailscale)"
-else
-  for candidate in \
-    "/Applications/Tailscale.app/Contents/MacOS/tailscale" \
-    "/Applications/Tailscale.app/Contents/MacOS/Tailscale" \
-    "$HOME/Applications/Tailscale.app/Contents/MacOS/tailscale" \
-    "$HOME/Applications/Tailscale.app/Contents/MacOS/Tailscale"; do
-    if [ -x "$candidate" ]; then
-      TS_BIN="$candidate"
-      TS_VIA_BUNDLE=1
-      break
-    fi
-  done
-fi
-[ -n "$TS_BIN" ] || die "tailscale CLI not found on PATH or in /Applications/Tailscale.app. Install Tailscale and sign in first — this installer will not install or reauthenticate it for you. https://tailscale.com/docs/install/mac"
+# A test-mode run with an injected origin never consults Tailscale at all, which
+# is what lets CI — which has no tailnet — exercise the build, the staging, the
+# candidate probe and the release switch.
+SKIP_TAILSCALE=0
+[ "$TEST_MODE" = "1" ] && [ -n "${DORMOUSE_INSTALL_ORIGIN:-}" ] && SKIP_TAILSCALE=1
 
-# TAILSCALE_BE_CLI=1 stops the bundled app executable from launching the GUI
-# instead of acting as the CLI. Harmless for a real CLI binary.
-ts() {
-  if [ "$TS_VIA_BUNDLE" = "1" ]; then
-    TAILSCALE_BE_CLI=1 "$TS_BIN" "$@"
-  else
-    "$TS_BIN" "$@"
-  fi
+if [ "$SKIP_TAILSCALE" != "1" ]; then
+  command -v tailscale >/dev/null 2>&1 \
+    || die "tailscale CLI not found on PATH. Install Tailscale and sign in first — this installer will not install or reauthenticate it for you. https://tailscale.com/docs/install/linux"
+fi
+
+ts() { tailscale "$@"; }
+
+# On Linux the CLI talks to tailscaled over a root-owned socket, so an
+# unprivileged `tailscale serve` is refused unless the daemon has been told this
+# user may operate it. That refusal arrives late — after the build, at the Serve
+# step — unless it is checked here, and its fix is a one-line sudo the user has
+# to run themselves.
+ts_denied() {
+  case "$1" in
+    *"Access denied"*|*"access denied"*|*"permission denied"*|*"Permission denied"*|*"operator"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# One remediation, three call sites. The `sudo` line is the single most
+# important operator-facing instruction in this script, so it is written once.
+# $1 = what was refused, $2 = the CLI's own output
+die_needs_operator() {
+  die "$1 was refused for this user: $2
+    On Linux the tailscaled control socket is root-owned. Grant this account the
+    operator role once, then re-run:
+
+        sudo tailscale set --operator=\$USER
+
+    This installer will not run sudo for you."
 }
 
 # ------------------------------------------------------------------ start ----
 
-printf '%sDormouse selfhost server — macOS installer%s\n' "$C_BLD" "$C_OFF"
-[ "$TEST_MODE" = "1" ] && warn "DORMOUSE_INSTALL_TEST=1 — launchd and Serve will not be touched."
+printf '%sDormouse selfhost server — Linux installer%s\n' "$C_BLD" "$C_OFF"
+[ "$TEST_MODE" = "1" ] && warn "DORMOUSE_INSTALL_TEST=1 — systemd and Serve will not be touched."
+
+# One EXIT trap for every temporary this script creates. `pnpm deploy --prod
+# --legacy` poisons the root node_modules/.pnpm-workspace-state-v1.json
+# (production:true / dev:false), which would make every later pnpm command in
+# this checkout try `pnpm install --production` and strip the developer's
+# devDependencies — so the snapshot is restored unconditionally, even on a
+# failed install. The probe temporaries are here too so that a `die` anywhere
+# between staging and the switch cannot leak them.
+TS_STATUS_JSON=""
+WS_STATE="$REPO_ROOT/node_modules/.pnpm-workspace-state-v1.json"
+WS_STATE_BACKUP=""
+PROBE_STATE=""
+PROBE_LOG=""
+restore_workspace_state() {
+  if [ -n "$WS_STATE_BACKUP" ] && [ -f "$WS_STATE_BACKUP" ]; then
+    cp -p "$WS_STATE_BACKUP" "$WS_STATE" 2>/dev/null || true
+    rm -f "$WS_STATE_BACKUP"
+    WS_STATE_BACKUP=""
+  fi
+}
+cleanup() {
+  restore_workspace_state
+  rm -f "$TS_STATUS_JSON" "$PROBE_LOG"
+  [ -n "$PROBE_STATE" ] && rm -rf "$PROBE_STATE"
+  return 0
+}
+trap cleanup EXIT
 
 step "Checking Tailscale"
 
-TS_STATUS_JSON="$(mktemp -t dormouse-ts-status)"
-trap 'rm -f "$TS_STATUS_JSON"' EXIT
-ts status --json > "$TS_STATUS_JSON" 2>/dev/null || die "\`tailscale status --json\` failed. Is Tailscale running and signed in?"
+if [ "$SKIP_TAILSCALE" = "1" ]; then
+  ORIGIN="$DORMOUSE_INSTALL_ORIGIN"
+  case "$ORIGIN" in
+    https://*) TS_DNS="${ORIGIN#https://}" ;;
+    *) die "DORMOUSE_INSTALL_ORIGIN must be an https:// origin, got '$ORIGIN'." ;;
+  esac
+  warn "test mode: using the injected origin $ORIGIN; Tailscale is not consulted."
+else
 
-TS_BACKEND="$(json_query "$TS_STATUS_JSON" "BackendState" || echo "")"
-[ "$TS_BACKEND" = "Running" ] || die "Tailscale backend state is '${TS_BACKEND:-unknown}', expected 'Running'. Sign in and connect, then re-run."
+  TS_STATUS_JSON="$(mktemp_file ts-status)"
+  # `2>&1 > file`, not `> file 2>&1`: the latter points stderr at the file too,
+  # so the capture is always empty and the operator-role remediation below
+  # becomes dead code with a blank error body.
+  TS_STATUS_ERR="$(ts status --json 2>&1 > "$TS_STATUS_JSON")" || {
+    ts_denied "$TS_STATUS_ERR" && die_needs_operator "\`tailscale status\`" "$TS_STATUS_ERR"
+    die "\`tailscale status --json\` failed. Is tailscaled running and signed in? (systemctl status tailscaled)
+      ${TS_STATUS_ERR}"
+  }
 
-TS_DNS_RAW="$(json_query "$TS_STATUS_JSON" "Self.DNSName" || echo "")"
-[ -n "$TS_DNS_RAW" ] || die "Tailscale reports no MagicDNS name for this node. Enable MagicDNS for the tailnet: https://login.tailscale.com/admin/dns"
-# MagicDNS names arrive fully qualified with a trailing dot.
-TS_DNS="${TS_DNS_RAW%.}"
+  TS_BACKEND="$(json_query "$TS_STATUS_JSON" "BackendState" || echo "")"
+  [ "$TS_BACKEND" = "Running" ] || die "Tailscale backend state is '${TS_BACKEND:-unknown}', expected 'Running'. Sign in and connect (\`tailscale up\`), then re-run."
 
-MAGIC_DNS_ENABLED="$(json_query "$TS_STATUS_JSON" "CurrentTailnet.MagicDNSEnabled" || echo "false")"
-[ "$MAGIC_DNS_ENABLED" = "true" ] || warn "MagicDNS is not reported as enabled for this tailnet; the HTTPS name may not resolve for other devices."
+  TS_DNS_RAW="$(json_query "$TS_STATUS_JSON" "Self.DNSName" || echo "")"
+  [ -n "$TS_DNS_RAW" ] || die "Tailscale reports no MagicDNS name for this node. Enable MagicDNS for the tailnet: https://login.tailscale.com/admin/dns"
+  # MagicDNS names arrive fully qualified with a trailing dot.
+  TS_DNS="${TS_DNS_RAW%.}"
 
-ORIGIN="https://$TS_DNS"
-ok "node: $TS_DNS"
-ok "external origin: $ORIGIN"
+  MAGIC_DNS_ENABLED="$(json_query "$TS_STATUS_JSON" "CurrentTailnet.MagicDNSEnabled" || echo "false")"
+  [ "$MAGIC_DNS_ENABLED" = "true" ] || warn "MagicDNS is not reported as enabled for this tailnet; the HTTPS name may not resolve for other devices."
 
-CERT_DOMAINS="$(json_query "$TS_STATUS_JSON" "CertDomains" || echo "")"
-case ",$CERT_DOMAINS," in
-  *",$TS_DNS,"*) ok "tailnet HTTPS certificates enabled for this name" ;;
-  *)
-    warn "tailnet HTTPS certificates do not list $TS_DNS."
-    warn "Enable HTTPS at https://login.tailscale.com/admin/dns — Serve cannot get a certificate without it."
-    warn "Tailscale may also prompt for consent the first time Serve requests one."
-    ;;
-esac
+  ORIGIN="https://$TS_DNS"
+  ok "node: $TS_DNS"
+  ok "external origin: $ORIGIN"
+
+  CERT_DOMAINS="$(json_query "$TS_STATUS_JSON" "CertDomains" || echo "")"
+  case ",$CERT_DOMAINS," in
+    *",$TS_DNS,"*) ok "tailnet HTTPS certificates enabled for this name" ;;
+    *)
+      warn "tailnet HTTPS certificates do not list $TS_DNS."
+      warn "Enable HTTPS at https://login.tailscale.com/admin/dns — Serve cannot get a certificate without it."
+      ;;
+  esac
+
+  # Prove the operator role now rather than at the Serve step, which happens after
+  # the build and after `current` has already moved. A node with no Serve
+  # configuration exits nonzero too, so only a refusal is fatal here.
+  if [ "$TEST_MODE" != "1" ]; then
+    if ! SERVE_PROBE="$(ts serve status 2>&1)"; then
+      ts_denied "$SERVE_PROBE" && die_needs_operator "\`tailscale serve status\`" "$SERVE_PROBE"
+    fi
+    ok "this account may operate tailscaled"
+  fi
+fi
 
 # --------------------------------------------------------- origin identity ---
 
@@ -331,29 +485,6 @@ else
   ok "pnpm on PATH matches the pin"
 fi
 
-# --------------------------------------------------- workspace-state guard ---
-#
-# `pnpm deploy --prod --legacy` rewrites the ROOT workspace state file
-# (node_modules/.pnpm-workspace-state-v1.json) to production:true / dev:false.
-# Every later pnpm command in this checkout then decides the workspace is stale
-# and tries to run `pnpm install --production`, which would strip the developer's
-# devDependencies. Snapshot the file and restore it unconditionally on exit, so
-# a failed install cannot leave the checkout poisoned either.
-
-WS_STATE="$REPO_ROOT/node_modules/.pnpm-workspace-state-v1.json"
-WS_STATE_BACKUP=""
-restore_workspace_state() {
-  if [ -n "$WS_STATE_BACKUP" ] && [ -f "$WS_STATE_BACKUP" ]; then
-    cp -p "$WS_STATE_BACKUP" "$WS_STATE" 2>/dev/null || true
-    rm -f "$WS_STATE_BACKUP"
-  fi
-}
-cleanup() {
-  restore_workspace_state
-  rm -f "$TS_STATUS_JSON"
-}
-trap cleanup EXIT
-
 # ------------------------------------------------------------------ build ----
 
 step "Building the release from this checkout"
@@ -376,12 +507,13 @@ ok "server built"
 # (onFail: download), so this is the pinned runtime, not whatever is on PATH.
 # Write it to a file: pnpm can emit progress chatter on stdout, which would
 # contaminate a command substitution.
-EXECPATH_FILE="$(mktemp -t dormouse-execpath)"
+EXECPATH_FILE="$(mktemp_file execpath)"
 pnpm exec node -e 'require("fs").writeFileSync(process.argv[1], process.execPath)' "$EXECPATH_FILE" >/dev/null 2>&1 \
   || die "could not resolve the pinned Node runtime via pnpm exec."
 NODE_BIN="$(cat "$EXECPATH_FILE")"
 rm -f "$EXECPATH_FILE"
 [ -x "$NODE_BIN" ] || die "resolved Node runtime is not executable: $NODE_BIN"
+HTTP_NODE="$NODE_BIN"
 
 NODE_BUILD_VERSION="$("$NODE_BIN" -e 'process.stdout.write(process.version)')"
 NODE_BUILD_ARCH="$("$NODE_BIN" -e 'process.stdout.write(process.arch)')"
@@ -392,6 +524,7 @@ ok "pinned runtime: $NODE_BUILD_VERSION ($NODE_BUILD_ARCH)"
 
 step "Staging the new release"
 
+umask 077
 mkdir -p "$RELEASES_DIR" "$BIN_DIR"
 mkdir -p "$CONFIG_DIR" "$STATE_DIR"
 chmod 0700 "$CONFIG_DIR" "$STATE_DIR"
@@ -406,9 +539,8 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE/lib" "$STAGE/runtime"
 
 info "pnpm deploy --prod --legacy"
-WS_STATE_BACKUP=""
 if [ -f "$WS_STATE" ]; then
-  WS_STATE_BACKUP="$(mktemp -t dormouse-wsstate)"
+  WS_STATE_BACKUP="$(mktemp_file wsstate)"
   cp -p "$WS_STATE" "$WS_STATE_BACKUP"
 fi
 pnpm --filter server deploy --prod --legacy "$STAGE/server" >/dev/null 2>&1 \
@@ -431,9 +563,10 @@ STAGED_NODE_VERSION="$("$STAGE/runtime/node" -e 'process.stdout.write(process.ve
 STAGED_NODE_ARCH="$("$STAGE/runtime/node" -e 'process.stdout.write(process.arch)')"
 [ "$STAGED_NODE_VERSION" = "v$NODE_PIN" ] || die "the copied runtime reports $STAGED_NODE_VERSION, expected v$NODE_PIN."
 case "$ARCH:$STAGED_NODE_ARCH" in
-  arm64:arm64|x86_64:x64) : ;;
-  *) die "the copied runtime is $STAGED_NODE_ARCH but this Mac is $ARCH." ;;
+  x86_64:x64|aarch64:arm64|armv7l:arm) : ;;
+  *) die "the copied runtime is $STAGED_NODE_ARCH but this machine is $ARCH." ;;
 esac
+HTTP_NODE="$STAGE/runtime/node"
 ok "self-contained runtime staged ($STAGED_NODE_VERSION $STAGED_NODE_ARCH)"
 
 cat > "$STAGE/RELEASE" <<RELEASE_EOF
@@ -460,20 +593,21 @@ ok "release $RELEASE_ID staged"
 step "Runtime configuration"
 
 if [ ! -f "$ENV_FILE" ]; then
-  SETUP_PASSWORD=""
-  if [ -x /usr/bin/xxd ]; then
-    SETUP_PASSWORD="$(/usr/bin/xxd -p -l 32 -c 32 /dev/urandom)"
-  elif [ -x /usr/bin/openssl ]; then
-    SETUP_PASSWORD="$(/usr/bin/openssl rand -hex 32)"
-  else
-    die "no way to generate a high-entropy password (need /usr/bin/xxd or /usr/bin/openssl)."
-  fi
-  # Both generators above produce 32 random bytes, i.e. 64 hex characters. The
-  # guard counts characters, so it must be 64 — checking for 32 would pass a
-  # regression to `-l 16`, which is half the entropy SECURITY.md claims.
+  # One named CSPRNG, not a fallback chain: the release's own Node was staged a
+  # few lines ago and is the binary this service will run under, so it is always
+  # present and needs no probing. `crypto.randomBytes` is OpenSSL's RAND_bytes.
+  # Never substitute $RANDOM, a timestamp, or any non-CSPRNG source.
+  SETUP_PASSWORD="$("$STAGE/runtime/node" -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"
+  # 32 random bytes is 64 hex characters. The guard counts characters, so it
+  # must be 64 — checking for 32 would pass a regression to 16 bytes, which is
+  # half the entropy SECURITY.md claims.
   [ ${#SETUP_PASSWORD} -ge 64 ] || die "generated setup password is implausibly short; refusing to install it."
 
-  umask 077
+  # Create the file and lock it down BEFORE the secret is written, so the
+  # password never sits under the directory's default permissions, even briefly.
+  # `cat >` truncates without touching the mode, so no second chmod is needed.
+  : > "$ENV_FILE"
+  chmod 0600 "$ENV_FILE"
   cat > "$ENV_FILE" <<ENV_EOF
 # Dormouse selfhost server — installer-owned runtime configuration.
 # Generated $BUILT_AT. Preserved byte-for-byte across updates.
@@ -488,7 +622,6 @@ DORMOUSE_BIND_HOST=127.0.0.1
 PORT=$LOOPBACK_PORT
 NODE_ENV=production
 ENV_EOF
-  chmod 0600 "$ENV_FILE"
   unset SETUP_PASSWORD
   ok "generated config/server.env (mode 0600) with a locally generated setup password"
   detail "the password was not printed; retrieve it with: manage show-password"
@@ -511,12 +644,12 @@ step "Installing the service wrapper and management helper"
 
 cat > "$BIN_DIR/run-server" <<'RUNSERVER_EOF'
 #!/bin/bash
-# Installed by deploy/local/install-macos.sh. Stable across releases.
+# Installed by deploy/local/install-linux.sh. Stable across releases.
 #
-# launchd does not read interactive shell startup files, so this must not depend
-# on the user's PATH, on Homebrew/nvm/Volta, on pnpm's store, or on the source
-# checkout. It loads only the installer-owned env file and execs the runtime
-# copied into the current release.
+# The systemd user manager does not read interactive shell startup files, so
+# this must not depend on the user's PATH, on nvm/fnm/Volta, on pnpm's store, or
+# on the source checkout. It loads only the installer-owned env file and execs
+# the runtime copied into the current release.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -561,19 +694,20 @@ ok "bin/run-server"
 
 cat > "$BIN_DIR/manage" <<'MANAGE_EOF'
 #!/bin/bash
-# Installed by deploy/local/install-macos.sh.
+# Installed by deploy/local/install-linux.sh.
 set -euo pipefail
 
-LABEL="sh.dormouse.server"
+LABEL="dormouse-server"
+UNIT="$LABEL.service"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$ROOT/config/server.env"
 STATE_DIR="$ROOT/state"
-LOG_DIR="$HOME/Library/Logs/Dormouse Server"
-PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-# A test install (DORMOUSE_INSTALL_ROOT) keeps its logs and plist inside its own
+LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/dormouse-server/logs"
+UNIT_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$UNIT"
+# A test install (DORMOUSE_INSTALL_ROOT) keeps its logs and unit inside its own
 # root, so `manage` must follow them there rather than at the real HOME paths.
 [ -d "$ROOT/logs" ] && LOG_DIR="$ROOT/logs"
-[ -f "$ROOT/LaunchAgents/$LABEL.plist" ] && PLIST="$ROOT/LaunchAgents/$LABEL.plist"
+[ -f "$ROOT/systemd/$UNIT" ] && UNIT_FILE="$ROOT/systemd/$UNIT"
 
 if [ -t 1 ]; then
   C_RED=$'\033[31m'; C_GRN=$'\033[32m'; C_YEL=$'\033[33m'; C_DIM=$'\033[2m'; C_OFF=$'\033[0m'
@@ -593,23 +727,31 @@ env_value() {
 
 PORT="$(env_value PORT || echo 3100)"
 ORIGIN="$(env_value DORMOUSE_ORIGIN || echo "")"
+NODE_FOR_HTTP="$ROOT/current/runtime/node"
 
 TS_BIN=""
-TS_VIA_BUNDLE=0
-if command -v tailscale >/dev/null 2>&1; then
-  TS_BIN="$(command -v tailscale)"
-else
-  for candidate in \
-    "/Applications/Tailscale.app/Contents/MacOS/tailscale" \
-    "/Applications/Tailscale.app/Contents/MacOS/Tailscale" \
-    "$HOME/Applications/Tailscale.app/Contents/MacOS/tailscale" \
-    "$HOME/Applications/Tailscale.app/Contents/MacOS/Tailscale"; do
-    if [ -x "$candidate" ]; then TS_BIN="$candidate"; TS_VIA_BUNDLE=1; break; fi
-  done
-fi
+command -v tailscale >/dev/null 2>&1 && TS_BIN="$(command -v tailscale)"
 ts() {
   [ -n "$TS_BIN" ] || return 127
-  if [ "$TS_VIA_BUNDLE" = "1" ]; then TAILSCALE_BE_CLI=1 "$TS_BIN" "$@"; else "$TS_BIN" "$@"; fi
+  "$TS_BIN" "$@"
+}
+
+http_ok() {
+  local url="$1" timeout="${2:-5}"
+  if command -v curl >/dev/null 2>&1; then
+    curl -sf -o /dev/null --max-time "$timeout" "$url"
+    return $?
+  fi
+  [ -x "$NODE_FOR_HTTP" ] || return 2
+  "$NODE_FOR_HTTP" -e '
+const http = require("http");
+const req = http.get(process.argv[1], { timeout: Number(process.argv[2]) * 1000 }, (res) => {
+  res.resume();
+  process.exit(res.statusCode >= 200 && res.statusCode < 300 ? 0 : 1);
+});
+req.on("timeout", () => { req.destroy(); process.exit(1); });
+req.on("error", () => process.exit(1));
+' "$url" "$timeout"
 }
 
 # Replace a symlink atomically, without following it. `mv -f tmp link` follows
@@ -634,8 +776,33 @@ release_field() {
   sed -n "s/^$1=//p" "$target" | head -1
 }
 
-# Which release is serving port $1? Empty when that cannot be established —
-# see the full rationale on the installer's copy of this function.
+# $1 = path, $2 = expected octal mode, $3 = label. Asserts both legs of
+# "reachable only by the installing user" from a single stat.
+owner_only() {
+  local out mode owner me
+  me="$(id -un)"
+  out="$(stat -c '%a %U' "$1" 2>/dev/null || true)"
+  if [ -z "$out" ]; then
+    fail "$3 is missing: $1"
+    return
+  fi
+  mode="${out%% *}"
+  owner="${out#* }"
+  if [ "$mode" = "$2" ] && [ "$owner" = "$me" ]; then
+    pass "$3 is mode 0$2, owned by $me"
+  else
+    fail "$3 is mode 0$mode owned by $owner — expected mode 0$2 owned by $me"
+  fi
+}
+
+# Which release is serving the loopback port?
+#
+# The server writes {pid, releaseId, port} at successful bind
+# (server/src/runtime-file.ts), so this is a file read and a liveness check.
+# Empty means "unknown", never "nobody": a stale file whose pid is dead, a
+# server started outside the installer, and a foreign process that got the port
+# first are all indistinguishable from here, and all must fail the comparison
+# rather than pass it.
 listening_release() {
   local port="$1" file pid release rport
   file="$ROOT/run/server.json"
@@ -644,36 +811,37 @@ listening_release() {
   release="$(sed -n 's/.*"releaseId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file" | head -1)"
   rport="$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$file" | head -1)"
   [ -n "$pid" ] && [ -n "$release" ] || return 0
-  # The file is about one socket; a record for a different port says nothing
-  # about this one.
   [ "$rport" = "$port" ] || return 0
-  # A crash leaves the file behind on purpose, so liveness is what separates a
-  # serving process from a corpse.
   kill -0 "$pid" 2>/dev/null || return 0
   printf '%s\n' "$release"
 }
 
-# Healthy means the CURRENT release answers, not that anything does: an orphan
-# of an older release replies to /api/hello identically (see listening_release).
-# Waiting on that identity rather than asserting it after the first 200 also
-# absorbs the window where a process still shutting down answers one curl.
-# An empty `want` — no `current` at all — is never healthy.
-#
-# On timeout this explains which of the two failures happened, so callers can
-# keep reporting only their own context.
+unit_active() { [ "$(systemctl --user is-active "$UNIT" 2>/dev/null || true)" = "active" ]; }
+
+current_release() { basename "$(readlink "$ROOT/current" 2>/dev/null || true)"; }
+
+# $1 = the release id that must be answering. Three legs, all required: systemd's
+# own view, a 200, and the identity of whoever holds the port.
+service_healthy() {
+  unit_active \
+    && http_ok "http://127.0.0.1:$PORT/api/hello" 2 \
+    && [ -n "$1" ] && [ "$(listening_release "$PORT")" = "$1" ]
+}
+
+# The identity lives in the wait, not at its callers, so `restart` and
+# `rollback` are both covered from one place — and waiting on it rather than
+# asserting it after the first 200 absorbs the window in which an outgoing
+# process answers one last time.
 wait_for_health() {
   local deadline=$((SECONDS + ${1:-30})) want serving
-  want="$(basename "$(readlink "$ROOT/current" 2>/dev/null || true)")"
+  want="$(current_release)"
   while [ $SECONDS -lt $deadline ]; do
-    if curl -sf -o /dev/null "http://127.0.0.1:$PORT/api/hello" &&
-      [ -n "$want" ] && [ "$(listening_release "$PORT")" = "$want" ]; then
-      return 0
-    fi
+    if service_healthy "$want"; then return 0; fi
     sleep 0.5
   done
   serving="$(listening_release "$PORT")"
   if [ -n "$serving" ] && [ "$serving" != "$want" ]; then
-    printf "%sport %s is held by release '%s', not by %s — a stale process is answering%s\n" \
+    printf '%sport %s is held by release %s, not by %s — a stale process is answering%s\n' \
       "$C_RED" "$PORT" "$serving" "${want:-the current release}" "$C_OFF" >&2
   fi
   return 1
@@ -697,17 +865,18 @@ cmd_status() {
   else
     printf '  previous     : (none — rollback unavailable)\n'
   fi
-  printf '\nLaunchAgent\n'
-  if launchctl print "gui/$UID/$LABEL" >/dev/null 2>&1; then
-    # Only the top-level fields: launchctl indents them with a single tab, and
-    # the nested endpoint dictionaries carry their own `state =` lines.
-    launchctl print "gui/$UID/$LABEL" 2>/dev/null \
-      | awk -F ' = ' '$1 ~ /^\t(state|pid|last exit code)$/ { printf "  %s = %s\n", substr($1, 2), $2 }'
+  printf '\nsystemd user service\n'
+  if systemctl --user cat "$UNIT" >/dev/null 2>&1; then
+    systemctl --user show "$UNIT" \
+      -p LoadState -p ActiveState -p SubState -p MainPID -p NRestarts -p ExecMainStatus \
+      2>/dev/null | sed 's/^/  /'
+    printf '  UnitFileState = %s\n' "$(systemctl --user is-enabled "$UNIT" 2>&1 || true)"
+    printf '  Linger        = %s\n' "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null || echo '?')"
   else
     printf '  %snot loaded%s\n' "$C_RED" "$C_OFF"
   fi
   printf '\nHealth\n'
-  if curl -sf "http://127.0.0.1:$PORT/api/hello" >/dev/null 2>&1; then
+  if http_ok "http://127.0.0.1:$PORT/api/hello" 3; then
     printf '  loopback /api/hello : %sok%s\n' "$C_GRN" "$C_OFF"
   else
     printf '  loopback /api/hello : %sunreachable%s\n' "$C_RED" "$C_OFF"
@@ -727,74 +896,106 @@ cmd_verify() {
   FAILURES=0
   printf '\nVerifying the installed service\n\n'
 
-  if launchctl print "gui/$UID/$LABEL" >/dev/null 2>&1; then
-    pass "LaunchAgent $LABEL is loaded in gui/$UID"
+  if systemctl --user cat "$UNIT" >/dev/null 2>&1; then
+    pass "systemd user unit $UNIT is known to the user manager"
   else
-    fail "LaunchAgent $LABEL is not loaded"
+    fail "systemd user unit $UNIT is not loaded"
   fi
 
-  if [ -f "$PLIST" ] && plutil -lint "$PLIST" >/dev/null 2>&1; then
-    pass "LaunchAgent plist is valid"
-    if grep -q "<key>RunAtLoad</key>" "$PLIST" && grep -q "<key>KeepAlive</key>" "$PLIST"; then
-      pass "plist declares RunAtLoad and KeepAlive"
+  if [ -f "$UNIT_FILE" ]; then
+    if systemd-analyze --user verify "$UNIT_FILE" >/dev/null 2>&1; then
+      pass "unit file passes systemd-analyze verify"
     else
-      fail "plist is missing RunAtLoad or KeepAlive"
+      # systemd-analyze is absent on some minimal images; only fail when it ran
+      # and objected.
+      if command -v systemd-analyze >/dev/null 2>&1; then
+        fail "unit file fails systemd-analyze verify: $UNIT_FILE"
+      else
+        note "skipped systemd-analyze verify (not installed)"
+      fi
     fi
-    if grep -q "DORMOUSE_SETUP_PASSWORD" "$PLIST"; then
-      fail "plist contains the setup password — it must live only in config/server.env"
+    if grep -q '^Restart=always$' "$UNIT_FILE" && grep -q '^WantedBy=default.target$' "$UNIT_FILE"; then
+      pass "unit declares Restart=always and WantedBy=default.target"
     else
-      pass "plist carries no credential"
+      fail "unit is missing Restart=always or WantedBy=default.target"
+    fi
+    if grep -q "DORMOUSE_SETUP_PASSWORD" "$UNIT_FILE"; then
+      fail "the unit file contains the setup password — it must live only in config/server.env"
+    else
+      pass "unit file carries no credential"
     fi
   else
-    fail "LaunchAgent plist missing or invalid: $PLIST"
+    fail "unit file missing: $UNIT_FILE"
   fi
 
-  if curl -sf -o /dev/null "http://127.0.0.1:$PORT/api/hello"; then
-    pass "http://127.0.0.1:$PORT/api/hello responds"
+  if [ "$(systemctl --user is-enabled "$UNIT" 2>/dev/null || echo no)" = "enabled" ]; then
+    pass "unit is enabled (starts at login)"
   else
+    fail "unit is not enabled — it will not start at the next login"
+  fi
+
+  # systemd's own view is the only thing that distinguishes *our* server from
+  # anything else answering on the port, so it is checked before health is.
+  local active
+  active="$(systemctl --user is-active "$UNIT" 2>/dev/null || true)"
+  if [ "$active" = "active" ]; then
+    pass "unit is active"
+  else
+    fail "unit is '${active:-unknown}' — any healthy /api/hello below is another process answering"
+  fi
+
+  local linger
+  linger="$(loginctl show-user "$USER" -p Linger --value 2>/dev/null || echo "unknown")"
+  if [ "$linger" = "yes" ]; then
+    note "lingering is ON — the service also runs while you are logged out"
+  else
+    note "lingering is off — the service runs only while this user is logged in"
+  fi
+
+  # Health is never reported on its own. A ✓ next to "/api/hello responds" that
+  # a stranger's server earned is worse than no line at all, so all three legs
+  # decide which of the outcomes below is printed.
+  local want serving
+  want="$(current_release)"
+  serving="$(listening_release "$PORT")"
+  if service_healthy "$want"; then
+    pass "http://127.0.0.1:$PORT/api/hello responds, from release $want"
+  elif ! http_ok "http://127.0.0.1:$PORT/api/hello" 5; then
     fail "loopback /api/hello is unreachable"
+  elif [ -n "$serving" ] && [ "$serving" != "$want" ]; then
+    fail "port $PORT is held by release $serving, not by ${want:-the current release} — a stale process is answering"
+  else
+    fail "port $PORT answers /api/hello, but not from this service"
   fi
 
-  if curl -sf -o /dev/null "http://127.0.0.1:$PORT/"; then
+  if unit_active && http_ok "http://127.0.0.1:$PORT/" 5; then
     pass "Pocket app is served on loopback"
   else
     fail "Pocket index is not served — is lib/dist-pocket in the release?"
   fi
 
+  # Identity is settled by the health block above, which already names a stale
+  # release; this only asks what the socket is bound to.
   local listeners
-  listeners="$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | tail -n +2 || true)"
-  if [ -z "$listeners" ]; then
-    fail "nothing is listening on port $PORT"
-  elif printf '%s\n' "$listeners" | grep -qv '127\.0\.0\.1:'"$PORT"; then
-    fail "port $PORT is bound off-loopback — fix DORMOUSE_BIND_HOST=127.0.0.1"
-    printf '%s\n' "$listeners" | sed 's/^/      /'
+  if ! command -v ss >/dev/null 2>&1; then
+    note "skipped the bind check (ss from iproute2 is not installed)"
   else
-    pass "port $PORT is bound only to 127.0.0.1"
-  fi
-
-  # The check that separates "something answers" from "the current release
-  # answers". An orphaned node from an older release holds the port and replies
-  # to /api/hello exactly like the current one, so every other health check here
-  # passes while stale code serves. Only meaningful once something is listening
-  # — otherwise an empty result would report a foreign process where the line
-  # above has already said the port is dead.
-  if [ -n "$listeners" ]; then
-    local serving cur_id
-    serving="$(listening_release "$PORT")"
-    cur_id="$(basename "$(readlink "$ROOT/current" 2>/dev/null || true)")"
-    if [ -z "$serving" ]; then
-      fail "the process on port $PORT is not from this install root"
-    elif [ "$serving" = "$cur_id" ]; then
-      pass "the process on port $PORT is the current release"
+    listeners="$(ss -lntH "sport = :$PORT" 2>/dev/null || true)"
+    if [ -z "$listeners" ]; then
+      fail "nothing this system can see is listening on port $PORT"
+      note "if /api/hello answered above, the responder is outside this kernel's view"
+    elif printf '%s\n' "$listeners" | awk '{print $4}' | grep -qv '^127\.0\.0\.1:'; then
+      fail "port $PORT is bound off-loopback — fix DORMOUSE_BIND_HOST=127.0.0.1"
+      printf '%s\n' "$listeners" | sed 's/^/      /'
     else
-      fail "port $PORT is served by release '$serving', but current is '$cur_id' — a stale process is answering"
+      pass "port $PORT is bound only to 127.0.0.1"
     fi
   fi
 
   local tsip
   tsip="$(ts ip -4 2>/dev/null | head -1 || true)"
   if [ -n "$tsip" ]; then
-    if curl -s --max-time 3 -o /dev/null "http://$tsip:$PORT/api/hello" 2>/dev/null; then
+    if http_ok "http://$tsip:$PORT/api/hello" 3; then
       fail "plaintext port $PORT is reachable on the Tailscale IP $tsip"
     else
       pass "plaintext port $PORT is not reachable on the Tailscale IP"
@@ -835,13 +1036,12 @@ cmd_verify() {
     pass "tailscale funnel is off (the origin stays tailnet-only)"
   fi
 
-  local cfg_mode state_mode env_mode
-  cfg_mode="$(stat -f '%Lp' "$ROOT/config" 2>/dev/null || echo '???')"
-  state_mode="$(stat -f '%Lp' "$STATE_DIR" 2>/dev/null || echo '???')"
-  env_mode="$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || echo '???')"
-  [ "$cfg_mode" = "700" ] && pass "config/ is mode 0700" || fail "config/ is mode $cfg_mode, expected 700"
-  [ "$state_mode" = "700" ] && pass "state/ is mode 0700" || fail "state/ is mode $state_mode, expected 700"
-  [ "$env_mode" = "600" ] && pass "config/server.env is mode 0600" || fail "config/server.env is mode $env_mode, expected 600"
+  # The property is "reachable only by the installing user", and on unix that
+  # is mode AND owner: a 0700 directory owned by someone else satisfies the mode
+  # and inverts the property. Both legs, all three paths, one stat each.
+  owner_only "$ROOT/config" 700 "config/"
+  owner_only "$STATE_DIR" 700 "state/"
+  owner_only "$ENV_FILE" 600 "config/server.env"
 
   if grep -q '^DORMOUSE_BIND_HOST=127\.0\.0\.1$' "$ENV_FILE" 2>/dev/null; then
     pass "DORMOUSE_BIND_HOST=127.0.0.1"
@@ -858,6 +1058,8 @@ cmd_verify() {
 
   if [ -L "$ROOT/previous" ] && [ "$(readlink "$ROOT/previous")" = "$(readlink "$ROOT/current" 2>/dev/null)" ]; then
     fail "previous names the same release as current — there is no rollback target"
+  elif [ -L "$ROOT/previous" ] && [ ! -d "$ROOT/previous" ]; then
+    fail "the previous symlink points at a release that no longer exists"
   elif [ -L "$ROOT/previous" ]; then
     pass "a previous release is retained for rollback"
   else
@@ -868,8 +1070,8 @@ cmd_verify() {
   local src
   src="$(release_field source_checkout || echo '')"
   if [ -n "$src" ]; then
-    if grep -q "$src" "$PLIST" 2>/dev/null || grep -q "$src" "$ROOT/bin/run-server" 2>/dev/null; then
-      fail "the LaunchAgent or wrapper references the source checkout ($src)"
+    if grep -q "$src" "$UNIT_FILE" 2>/dev/null || grep -q "$src" "$ROOT/bin/run-server" 2>/dev/null; then
+      fail "the unit or wrapper references the source checkout ($src)"
     else
       pass "the installed service does not reference the source checkout"
     fi
@@ -887,12 +1089,13 @@ cmd_verify() {
 cmd_logs() {
   mkdir -p "$LOG_DIR"
   touch "$LOG_DIR/server.out.log" "$LOG_DIR/server.err.log"
-  printf 'tailing %s/{server.out.log,server.err.log} — ctrl-c to stop\n\n' "$LOG_DIR"
+  printf 'tailing %s/{server.out.log,server.err.log} — ctrl-c to stop\n' "$LOG_DIR"
+  printf 'systemd also records unit events: journalctl --user -u %s\n\n' "$UNIT"
   tail -n 50 -f "$LOG_DIR/server.out.log" "$LOG_DIR/server.err.log"
 }
 
 cmd_restart() {
-  launchctl kickstart -k "gui/$UID/$LABEL"
+  systemctl --user restart "$UNIT"
   printf 'restarted; waiting for health...\n'
   if wait_for_health 30; then
     printf '%shealthy%s\n' "$C_GRN" "$C_OFF"
@@ -935,20 +1138,22 @@ cmd_rollback() {
   # installer has no rollback target, whatever the `previous` link suggests.
   [ "$prev" != "$cur" ] || { printf 'previous and current name the same release (%s) — nothing to roll back to\n' "$(basename "$prev")" >&2; return 1; }
   printf 'rolling back: %s -> %s\n' "$(basename "$cur")" "$(basename "$prev")"
-  local node_bin=""
-  for candidate in "$prev/runtime/node" "$ROOT/current/runtime/node"; do
-    if [ -x "$candidate" ]; then node_bin="$candidate"; break; fi
-  done
-  [ -n "$node_bin" ] || { printf 'no usable runtime found to swap the symlinks\n' >&2; return 1; }
-  # `previous` first: node_bin can be "$ROOT/current/runtime/node", and moving
-  # `current` to $prev would repoint it at the runtime that was just rejected.
+  # Swap with the target release's own runtime. Falling back to the one under
+  # `current` would mean reaching through the very symlink being moved, and a
+  # rollback target with no usable runtime cannot be started anyway.
+  local node_bin="$prev/runtime/node"
+  [ -x "$node_bin" ] || { printf 'previous release has no usable runtime: %s\n' "$node_bin" >&2; return 1; }
   if [ -n "$cur" ]; then atomic_symlink "$cur" "$ROOT/previous" "$node_bin"; fi
   atomic_symlink "$prev" "$ROOT/current" "$node_bin"
   if [ "$(readlink "$ROOT/current")" != "$prev" ]; then
     printf 'current did not advance to %s\n' "$prev" >&2
     return 1
   fi
-  launchctl kickstart -k "gui/$UID/$LABEL" || true
+  if ! systemctl --user restart "$UNIT"; then
+    printf '%sthe symlinks were rolled back, but restarting %s failed%s\n' "$C_RED" "$UNIT" "$C_OFF" >&2
+    printf 'inspect: systemctl --user status %s\n' "$UNIT" >&2
+    return 1
+  fi
   if wait_for_health 30; then
     printf '%srolled back and healthy%s\n' "$C_GRN" "$C_OFF"
   else
@@ -958,7 +1163,7 @@ cmd_rollback() {
 }
 
 cmd_uninstall() {
-  printf '\nThis removes the LaunchAgent and the installed code.\n'
+  printf '\nThis removes the systemd user unit and the installed code.\n'
   printf 'It PRESERVES your configuration and state:\n'
   printf '  config : %s\n' "$ROOT/config"
   printf '  state  : %s\n' "$STATE_DIR"
@@ -971,8 +1176,9 @@ cmd_uninstall() {
   local reply=""
   read -r reply || true
   case "$reply" in y|Y|yes|YES) ;; *) printf 'aborted\n'; return 1 ;; esac
-  launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
-  rm -f "$PLIST"
+  systemctl --user disable --now "$UNIT" 2>/dev/null || true
+  rm -f "$UNIT_FILE"
+  systemctl --user daemon-reload 2>/dev/null || true
   # Turn off only the mapping this installer owns.
   if ts serve status 2>/dev/null | grep -q "127.0.0.1:$PORT"; then
     if ts serve --bg off 2>/dev/null; then
@@ -985,6 +1191,7 @@ cmd_uninstall() {
   fi
   rm -rf "$ROOT/releases" "$ROOT/current" "$ROOT/previous" "$ROOT/bin" "$ROOT/run"
   printf '\nuninstalled. config and state remain at:\n  %s\n  %s\n\n' "$ROOT/config" "$STATE_DIR"
+  printf 'lingering, if you enabled it, is left as it is: loginctl disable-linger %s\n\n' "$USER"
 }
 
 cmd_purge() {
@@ -1013,14 +1220,14 @@ case "${1:-status}" in
     cat <<USAGE
 usage: manage <command>
 
-  status          LaunchAgent, process, health, Serve origin, and release
+  status          unit state, process, health, Serve origin, and release
   verify          run every acceptance check; exits nonzero on any failure
   logs            tail the local server logs
-  restart         kickstart the LaunchAgent and wait for health
+  restart         restart the user service and wait for health
   show-password   warn, then display the setup password locally
   serve           re-apply the Tailscale Serve mapping for this server
   rollback        switch to the retained previous release, preserving state
-  uninstall       remove LaunchAgent + code (keeps config and state)
+  uninstall       remove the unit + code (keeps config and state)
   purge           irreversibly delete config and state
 USAGE
     exit 64
@@ -1038,8 +1245,8 @@ step "Health-checking the candidate release"
 # so nothing touches the live service or the real state while we prove the new
 # code boots and serves.
 PROBE_PORT="$("$STAGE/runtime/node" -e 'const n=require("net");const s=n.createServer();s.listen(0,"127.0.0.1",()=>{const p=s.address().port;s.close(()=>process.stdout.write(String(p)))});')"
-PROBE_STATE="$(mktemp -d -t dormouse-probe-state)"
-PROBE_LOG="$(mktemp -t dormouse-probe-log)"
+PROBE_STATE="$(mktemp -d "${TMPDIR:-/tmp}/dormouse-probe-state.XXXXXX")"
+PROBE_LOG="$(mktemp_file probe-log)"
 chmod 0700 "$PROBE_STATE"
 
 env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
@@ -1052,38 +1259,38 @@ env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
   "$STAGE/runtime/node" "$STAGE/server/dist/index.js" > "$PROBE_LOG" 2>&1 &
 PROBE_PID=$!
 
+# Only the process needs stopping here; PROBE_STATE and PROBE_LOG are globals
+# the EXIT trap owns, so a `die` anywhere in this block cannot leak them.
 probe_cleanup() {
   kill "$PROBE_PID" 2>/dev/null || true
   wait "$PROBE_PID" 2>/dev/null || true
-  rm -rf "$PROBE_STATE"
-  rm -f "$PROBE_LOG"
+}
+
+# One exit for both candidate failures: tear the probe down, discard the
+# half-staged release, and say the live service was never touched.
+die_candidate() {
+  echo "--- candidate output ---" >&2
+  cat "$PROBE_LOG" >&2
+  probe_cleanup
+  rm -rf "$STAGE"
+  die "$1 The live service was left untouched."
 }
 
 PROBE_OK=0
 i=0
 while [ $i -lt 60 ]; do
-  if curl -sf -o /dev/null "http://127.0.0.1:$PROBE_PORT/api/hello"; then PROBE_OK=1; break; fi
+  if http_ok "http://127.0.0.1:$PROBE_PORT/api/hello" 2; then PROBE_OK=1; break; fi
+  # Stop early if the candidate has already died — no point burning the timeout.
   kill -0 "$PROBE_PID" 2>/dev/null || break
   sleep 0.25
   i=$((i + 1))
 done
 
-if [ "$PROBE_OK" != "1" ]; then
-  echo "--- candidate output ---" >&2
-  cat "$PROBE_LOG" >&2
-  probe_cleanup
-  rm -rf "$STAGE"
-  die "the candidate release did not answer /api/hello. The live service was left untouched."
-fi
+[ "$PROBE_OK" = "1" ] || die_candidate "the candidate release did not answer /api/hello."
 ok "candidate answers /api/hello (scrubbed PATH, ephemeral port $PROBE_PORT)"
 
-if curl -sf -o /dev/null "http://127.0.0.1:$PROBE_PORT/"; then
-  ok "candidate serves the Pocket app"
-else
-  probe_cleanup
-  rm -rf "$STAGE"
-  die "the candidate release did not serve the Pocket index. The live service was left untouched."
-fi
+http_ok "http://127.0.0.1:$PROBE_PORT/" 5 || die_candidate "the candidate release did not serve the Pocket index."
+ok "candidate serves the Pocket app"
 probe_cleanup
 
 # ----------------------------------------------------------- switch release --
@@ -1107,43 +1314,38 @@ SWITCHED_TO="$(readlink "$CURRENT_LINK" 2>/dev/null || echo "")"
 [ "$SWITCHED_TO" = "$STAGE" ] || die "current did not advance to $RELEASE_ID (points at '${SWITCHED_TO:-nothing}')."
 ok "current -> $RELEASE_ID"
 
-# ------------------------------------------------------------- launchagent --
+# ------------------------------------------------------------ systemd unit --
 
-write_plist() {
-  mkdir -p "$(dirname "$PLIST")"
-  cat > "$PLIST" <<PLIST_EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>Label</key>
-	<string>$LABEL</string>
-	<key>ProgramArguments</key>
-	<array>
-		<string>/bin/bash</string>
-		<string>$BIN_DIR/run-server</string>
-	</array>
-	<key>WorkingDirectory</key>
-	<string>$INSTALL_ROOT</string>
-	<key>RunAtLoad</key>
-	<true/>
-	<key>KeepAlive</key>
-	<true/>
-	<key>ThrottleInterval</key>
-	<integer>10</integer>
-	<key>ExitTimeOut</key>
-	<integer>15</integer>
-	<key>ProcessType</key>
-	<string>Background</string>
-	<key>StandardOutPath</key>
-	<string>$LOG_DIR/server.out.log</string>
-	<key>StandardErrorPath</key>
-	<string>$LOG_DIR/server.err.log</string>
-</dict>
-</plist>
-PLIST_EOF
-  chmod 0644 "$PLIST"
-  plutil -lint "$PLIST" >/dev/null || die "generated plist failed plutil -lint: $PLIST"
+write_unit() {
+  mkdir -p "$UNIT_DIR"
+  # Paths are double-quoted in ExecStart so a root containing spaces (which the
+  # test root may) survives systemd's own word splitting.
+  cat > "$UNIT_FILE" <<UNIT_EOF
+[Unit]
+Description=Dormouse coordinating server (selfhost)
+Documentation=https://github.com/diffplug/dormouse/blob/main/SELF_HOST.md
+
+[Service]
+Type=simple
+ExecStart=/bin/bash "$BIN_DIR/run-server"
+WorkingDirectory=$INSTALL_ROOT
+# launchd's KeepAlive equivalent, with the same 10-second throttle the macOS
+# plist declares as ThrottleInterval.
+Restart=always
+RestartSec=10
+TimeoutStopSec=15
+NoNewPrivileges=yes
+StandardOutput=append:$LOG_DIR/server.out.log
+StandardError=append:$LOG_DIR/server.err.log
+
+[Install]
+WantedBy=default.target
+UNIT_EOF
+  chmod 0644 "$UNIT_FILE"
+  if command -v systemd-analyze >/dev/null 2>&1; then
+    systemd-analyze --user verify "$UNIT_FILE" >/dev/null 2>&1 \
+      || die "the generated unit failed systemd-analyze verify: $UNIT_FILE"
+  fi
 }
 
 rollback_release() {
@@ -1155,70 +1357,71 @@ rollback_release() {
   # $STAGE/runtime/node was verified executable and version/arch-matched earlier
   # in this run; $OLD_RELEASE/runtime/node has not been checked at all.
   atomic_symlink "$OLD_RELEASE" "$CURRENT_LINK" "$STAGE/runtime/node"
-  # Prove the restore landed before touching `previous`, the way the forward
-  # switch proves `current` advanced. Both callers invoke this as
-  # `rollback_release || true`, which disables errexit for the entire function
-  # body, so a failed atomic_symlink above falls through to here instead of
-  # aborting — and deleting `previous` then would strip the only rollback
-  # pointer off an install still sitting on the rejected release.
+
+  # Only clear `previous` once the restore has actually landed. Both call sites
+  # are `rollback_release || true`, which disables errexit for this whole body,
+  # so an unguarded clear would strip the rollback pointer off an install still
+  # sitting on the rejected release.
   local restored_to
   restored_to="$(readlink "$CURRENT_LINK" 2>/dev/null || echo "")"
   if [ "$restored_to" != "$OLD_RELEASE" ]; then
     warn "current was NOT restored to $(basename "$OLD_RELEASE") (points at '${restored_to:-nothing}'). Leaving the previous link in place so rollback stays possible."
     return 1
   fi
-  # `previous` was pointed at $OLD_RELEASE before the switch, so leaving it would
-  # make both links name the same release: `manage verify` would report a rollback
-  # target that does not exist and `manage rollback` would swap a release with
-  # itself and call it healthy. Once `current` is back on $OLD_RELEASE there is
-  # genuinely no previous release, and the state must say so.
+  # The switch had already aimed `previous` at the release we just restored to.
+  # Leaving both pointers naming one release would make `verify` report a
+  # rollback target that does not exist and `rollback` swap a release with
+  # itself and call it success; once `current` is back there, there genuinely is
+  # no previous release and the state must say so.
   rm -f "$PREVIOUS_LINK"
-  if [ "$TEST_MODE" != "1" ]; then
-    launchctl kickstart -k "gui/$UID/$LABEL" >/dev/null 2>&1 || true
+
+  if ! systemctl --user restart "$UNIT" >/dev/null 2>&1; then
+    warn "restarting $UNIT after the restore failed. Inspect: systemctl --user status $UNIT"
+    return 1
   fi
-  # A 200 does not say who answered: the rejected release's own process holding
-  # the port would otherwise read as the previous release being healthy again.
-  # listening_release only runs once curl succeeds, so a still-starting server
-  # costs nothing here.
-  local old_id serving j=0
-  old_id="$(basename "$OLD_RELEASE")"
+  # Wait on the identity of the restored release, not on a bare 200. This is the
+  # path where a false "healthy again" is most expensive: the install has just
+  # failed *because* something else may hold the port, and reporting that
+  # stranger as the restored release is exactly the wrong thing to say here.
+  local want j=0
+  want="$(basename "$OLD_RELEASE")"
   while [ $j -lt 60 ]; do
-    if curl -sf -o /dev/null "http://127.0.0.1:$LOOPBACK_PORT/api/hello" &&
-      [ "$(listening_release "$LOOPBACK_PORT")" = "$old_id" ]; then
-      warn "the previous release ($old_id) is healthy again."
+    if service_healthy "$want"; then
+      warn "the previous release ($want) is healthy again."
       return 0
     fi
     sleep 0.5
     j=$((j + 1))
   done
-  serving="$(listening_release "$LOOPBACK_PORT")"
-  if [ -n "$serving" ] && [ "$serving" != "$old_id" ]; then
-    warn "port $LOOPBACK_PORT is held by release '$serving', not by the restored $old_id."
-  fi
   warn "the previous release did NOT become healthy. Inspect: $LOG_DIR"
   return 1
 }
 
-step "Installing the LaunchAgent"
-write_plist
-ok "wrote and linted $PLIST"
+step "Installing the systemd user service"
+write_unit
+ok "wrote $UNIT_FILE"
 
 if [ "$TEST_MODE" = "1" ]; then
-  warn "test mode: skipping launchctl bootout/bootstrap/kickstart"
+  warn "test mode: skipping systemctl daemon-reload/enable/restart"
 else
-  BOOTOUT_OUT="$(launchctl bootout "gui/$UID/$LABEL" 2>&1)" && BOOTOUT_RC=0 || BOOTOUT_RC=$?
-  if [ "$BOOTOUT_RC" != "0" ]; then
-    case "$BOOTOUT_OUT" in
-      *"No such process"*|*"not find"*|*"not currently loaded"*) detail "no previously loaded agent (first install)" ;;
-      *) die "launchctl bootout failed unexpectedly (rc=$BOOTOUT_RC): $BOOTOUT_OUT" ;;
-    esac
-  else
-    detail "unloaded the previous agent"
-  fi
+  systemctl --user daemon-reload || die "systemctl --user daemon-reload failed."
+  systemctl --user enable "$UNIT" >/dev/null 2>&1 || die "systemctl --user enable $UNIT failed."
+  systemctl --user restart "$UNIT" || die "systemctl --user restart $UNIT failed. Inspect: journalctl --user -u $UNIT -n 50"
+  ok "unit enabled and started"
 
-  launchctl bootstrap "gui/$UID" "$PLIST" || die "launchctl bootstrap failed for $PLIST"
-  launchctl kickstart -k "gui/$UID/$LABEL" || die "launchctl kickstart failed for $LABEL"
-  ok "LaunchAgent bootstrapped into gui/$UID"
+  if [ "$WANT_LINGER" = "1" ] && ! loginctl enable-linger "$USER" 2>/dev/null; then
+    warn "could not enable lingering as this user. Run it yourself if you want it:"
+    warn "    sudo loginctl enable-linger $USER"
+  fi
+  # Report what lingering actually IS, not what was asked for: re-running
+  # without --linger does not turn off lingering a previous run enabled, and
+  # saying "runs only while you are logged in" there would be false.
+  if [ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null || echo unknown)" = "yes" ]; then
+    ok "lingering is on — the service survives logout and starts at boot"
+  else
+    detail "lingering is off; the service runs only while you are logged in."
+    detail "For a headless box, re-run with --linger (or: loginctl enable-linger $USER)."
+  fi
 fi
 
 # ------------------------------------------------------------ live health ----
@@ -1226,36 +1429,43 @@ fi
 step "Waiting for the installed service"
 
 if [ "$TEST_MODE" = "1" ]; then
-  warn "test mode: skipping the live health check (no LaunchAgent was loaded)"
+  warn "test mode: skipping the live health check (no unit was started)"
 else
-  # Wait for THIS release to be the one answering, not merely for a 200: an
-  # orphan of an older release holding the port answers identically, which would
-  # read as a successful update while the old code keeps serving. Waiting on it
-  # rather than asserting afterwards also covers the moments after `kickstart`
-  # when the outgoing process has not finished letting go of the port.
   LIVE_OK=0
   i=0
   while [ $i -lt 80 ]; do
-    if curl -sf -o /dev/null "http://127.0.0.1:$LOOPBACK_PORT/api/hello" &&
-      [ "$(listening_release "$LOOPBACK_PORT")" = "$RELEASE_ID" ]; then LIVE_OK=1; break; fi
+    if service_healthy "$RELEASE_ID"; then
+      LIVE_OK=1
+      break
+    fi
     sleep 0.5
     i=$((i + 1))
   done
 
   if [ "$LIVE_OK" != "1" ]; then
-    LISTENING="$(listening_release "$LOOPBACK_PORT")"
-    if [ -n "$LISTENING" ] && [ "$LISTENING" != "$RELEASE_ID" ]; then
-      warn "port $LOOPBACK_PORT is served by release '$LISTENING', not by $RELEASE_ID"
+    # Say which of the three legs failed, because the remedies are different.
+    SERVING="$(listening_release "$LOOPBACK_PORT")"
+    if [ -n "$SERVING" ] && [ "$SERVING" != "$RELEASE_ID" ]; then
+      warn "port $LOOPBACK_PORT is held by release '$SERVING', not by $RELEASE_ID — a stale process is answering"
+    elif http_ok "http://127.0.0.1:$LOOPBACK_PORT/api/hello" 2; then
+      warn "http://127.0.0.1:$LOOPBACK_PORT/api/hello answers, but NOT from this service."
+      warn "  systemctl --user is-active $UNIT => $(systemctl --user is-active "$UNIT" 2>&1 || true)"
+      warn "  release identity          => ${SERVING:-<none recorded>} (expected $RELEASE_ID)"
+      warn "Either something else holds port $LOOPBACK_PORT, or this release never"
+      warn "recorded itself in $INSTALL_ROOT/run/server.json — check the log below for"
+      warn "a warning about writing that file. If this is WSL with networkingMode=mirrored,"
+      warn "loopback is shared with Windows and the holder may be a Windows process."
     else
       warn "the new release never answered http://127.0.0.1:$LOOPBACK_PORT/api/hello"
     fi
     [ -f "$LOG_DIR/server.err.log" ] && tail -30 "$LOG_DIR/server.err.log" >&2
+    journalctl --user -u "$UNIT" -n 20 --no-pager >&2 2>/dev/null || true
     rollback_release || true
     die "update FAILED. Rollback was attempted — this is not a success, whatever the previous release now reports."
   fi
-  ok "http://127.0.0.1:$LOOPBACK_PORT/api/hello responds, from $RELEASE_ID"
+  ok "release $RELEASE_ID is active and answering on 127.0.0.1:$LOOPBACK_PORT"
 
-  if curl -sf -o /dev/null "http://127.0.0.1:$LOOPBACK_PORT/"; then
+  if http_ok "http://127.0.0.1:$LOOPBACK_PORT/" 5; then
     ok "Pocket app is served"
   else
     warn "the Pocket index did not load"
@@ -1291,7 +1501,10 @@ if [ "$TEST_MODE" = "1" ]; then
 elif [ "$NEEDS_SERVE" = "1" ]; then
   info "tailscale serve --bg $LOOPBACK_PORT"
   detail "Tailscale may open a browser consent flow if HTTPS is not yet enabled."
-  ts serve --bg "$LOOPBACK_PORT" || die "\`tailscale serve --bg $LOOPBACK_PORT\` failed."
+  SERVE_ERR="$(ts serve --bg "$LOOPBACK_PORT" 2>&1)" || {
+    ts_denied "$SERVE_ERR" && die_needs_operator "\`tailscale serve\`" "$SERVE_ERR"
+    die "\`tailscale serve --bg $LOOPBACK_PORT\` failed: ${SERVE_ERR}"
+  }
   ok "Serve configured"
 fi
 
@@ -1339,6 +1552,7 @@ printf '    install root  %s\n' "$INSTALL_ROOT"
 printf '    config        %s\n' "$ENV_FILE"
 printf '    state         %s\n' "$STATE_DIR"
 printf '    logs          %s\n' "$LOG_DIR"
+printf '    unit          %s\n' "$UNIT_FILE"
 printf '\n'
 printf '    manage:  "%s" <status|verify|logs|restart|show-password|serve|rollback|uninstall>\n' "$BIN_DIR/manage"
 printf '\n'
