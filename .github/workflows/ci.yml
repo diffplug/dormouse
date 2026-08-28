@@ -137,8 +137,11 @@ jobs:
       - name: Install Chromium
         run: pnpm --filter dormouse exec playwright-core install --with-deps chromium
 
-      # The smoketest loads what the build emits, so the build has to precede it.
-      # `build:frontend` alone: this job never touches the extension host bundle.
+      # The smoketest loads what the build emits, so the build has to precede
+      # it. `build:frontend` alone — this job never touches the extension host
+      # bundle — and its `prebuild:frontend` hook builds the two workspace
+      # packages the webview bundle imports, which a clean checkout has no dist
+      # for.
       - name: Build the webview frontend
         run: pnpm --filter dormouse build:frontend
 
