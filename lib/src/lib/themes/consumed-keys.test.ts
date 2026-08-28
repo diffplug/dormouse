@@ -32,14 +32,16 @@ describe('CONSUMED_VSCODE_KEYS / bundle-themes.mjs parity', () => {
   });
 });
 
-// theme.css declares the same tokens twice: once in `@theme` (so Tailwind
-// generates utility classes) and once on `body` (so they can actually see the
-// --vscode-* variables applyTheme() writes to body.style). CSS resolves var()
-// inside a custom-property declaration at the element where the property is
-// declared, so a token bound to a --vscode-* variable *only* above the body
-// block resolves to nothing in every host where applyTheme() is the sole
-// writer — standalone, website, Pocket. This pins the two lists together.
-describe('theme.css --vscode-* bindings are mirrored onto body', () => {
+// theme.css declares the same tokens twice: once above the body block (in
+// `@theme`, so Tailwind generates utility classes, or in `:root`) and once on
+// `body` (so they can actually see the --vscode-* variables applyTheme() writes
+// to body.style). CSS resolves var() inside a custom-property declaration at
+// the element where the property is declared, so a token whose value reads any
+// var() chain *only* above the body block resolves to nothing in every host
+// where applyTheme() is the sole writer — standalone, website, Pocket. The
+// check compares values, not just presence, so repointing one level's binding
+// without the other fails too. This pins the two lists together.
+describe('theme.css var() bindings are mirrored onto body', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const themeCss = readFileSync(resolve(here, '../../theme.css'), 'utf8');
 
@@ -61,9 +63,9 @@ describe('theme.css --vscode-* bindings are mirrored onto body', () => {
   ]);
   const bodyLevel = declarations(blockBody(/\nbody \{([\s\S]*?)\n\}/));
 
-  it('every document-level token bound to a --vscode-* variable is re-declared on body', () => {
+  it('every document-level token bound to a var() chain is mirrored onto body', () => {
     const missing = [...documentLevel]
-      .filter(([name, value]) => value.includes('var(--vscode-') && !bodyLevel.has(name))
+      .filter(([name, value]) => value.includes('var(') && bodyLevel.get(name) !== value)
       .map(([name]) => name);
     expect(missing).toEqual([]);
   });
