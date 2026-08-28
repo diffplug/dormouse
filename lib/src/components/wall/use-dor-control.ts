@@ -22,7 +22,7 @@ import {
 } from '../../lib/terminal-registry';
 import { surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { hostPathDisplay } from './browser-url';
-import { agentBrowserSessionFromParams, isAgentBrowserParams, resolveRenderMode } from './browser-surface';
+import { agentBrowserSessionFromParams, isAgentBrowserParams } from './browser-surface';
 // One-way import: connect-port no longer depends on this module (its eager-surface
 // and refresh seams are injected as plain functions).
 import { connectPortToDefaultBrowser } from './connect-port';
@@ -577,7 +577,7 @@ export function useDorControl({
       const booting = findSurfaceByParams((params) =>
         isAgentBrowserParams(params)
         && (params as { key?: unknown }).key === 'default'
-        && (params as { session?: unknown }).session === undefined);
+        && agentBrowserSessionFromParams(params) === null);
       if (booting) return reveal(booting.id);
       // (c) Create it now: NO `session` (keeps the controller's stale-port
       // recovery inert until the daemon is up), but carry the target `url` so
@@ -1035,22 +1035,22 @@ export function useDorControl({
 
       if (detail.method === SURFACE_CONTROL_METHODS.resolveAgentBrowser) {
         // Resolve a browser Surface handle to the agent-browser session bound to
-        // it, for `dor ab --surface <handle> <verb...>`. Two gates, in order: the
-        // target must have a browser at all, and that browser must be
-        // agent-browser rendered — web verbs stay renderMode-gated, so an
-        // `iframe` renderer has no session to drive
-        // (docs/specs/dor-browser.md → Agent-Browser Renderer).
+        // it, for `dor ab --surface <handle> <verb...>`. Past the browser gate,
+        // web verbs stay renderMode-gated: an `iframe` renderer is a browser
+        // with nothing to drive (docs/specs/glossary.md → Panes and Surfaces).
         const target = requireBrowserSurface(params.surface, detail);
         if (!target) return;
-        const surfaceParams = lath.getMeta(target.id)?.params;
-        if (!isAgentBrowserParams(surfaceParams)) {
+        if (target.renderMode === 'iframe') {
           detail.respond({
             ok: false,
-            error: `surface '${target.ref}' is not agent-browser rendered (render_mode: ${resolveRenderMode(surfaceParams)})`,
+            error: `surface '${target.ref}' is not agent-browser rendered (render_mode: ${target.renderMode})`,
           });
           return;
         }
-        const session = agentBrowserSessionFromParams(surfaceParams);
+        // The session is the one row field the projection deliberately withholds
+        // (it is an identifier, not a capability), so read it from the params —
+        // live metadata for panes and parked doors alike.
+        const session = agentBrowserSessionFromParams(lath.getMeta(target.id)?.params);
         if (!session) {
           // An eagerly-created connect pane whose daemon boot has not yet named
           // it (docs/specs/dor-browser.md → Pane Context Menu Connect).

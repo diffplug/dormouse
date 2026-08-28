@@ -22,8 +22,9 @@ typing. No SDK, no protocol: print one escape sequence, read one env var.
 Phase A of the ledger below is implemented: nothing in it is `tool`-specific,
 so it is documented where it belongs rather than restated here. The
 capability model and its predicates are owned by `docs/specs/glossary.md` →
-Panes and Surfaces; the `dor list --json` row fields and the
-`has no terminal` error wording by `docs/specs/dor-cli.md` → `dor list`.
+Panes and Surfaces; the `dor list --json` row fields and the matching
+`has no terminal` / `has no browser` failures by `docs/specs/dor-cli.md` →
+`dor list`.
 What this spec still owes is the kind that has both — see
 [The tool capability set](#the-tool-capability-set).
 

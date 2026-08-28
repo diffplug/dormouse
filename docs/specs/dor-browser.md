@@ -312,9 +312,11 @@ Managed identity:
   `iframe`-rendered Surface has a browser but no session to drive.
 - One agent-browser session maps to one Dormouse surface. Re-running `dor ab`
   for an existing session refreshes `wsPort`/`binaryPath` and reuses the pane.
-  A `--surface`-addressed run does the same: it resolves to a session already
-  bound to a surface, so the trailing `surface.agentBrowser` request always
-  takes the reuse arm.
+  A `--surface`-addressed run normally does the same: it resolved against a
+  surface already bound to that session. Not an invariant, though — the
+  forwarded command and `stream status` run in between, so a surface killed or
+  render-swapped in that window leaves the trailing request to mint a fresh
+  pane.
 
 Source of truth: `dor/src/commands/agent-browser.ts`,
 `dor/src/commands/types.ts` (`AgentBrowserSurfaceRequest`,

@@ -403,7 +403,13 @@ Commands that operate on one existing Surface take the target as a required
 positional handle: `dor read <surface>`, `dor send <surface> ...`, and
 `dor kill <surface> ...`. Commands that create/place a Surface keep `--surface`
 as an optional visible reference Surface (`split`, `ensure`, `iframe`, and
-browser creation). `dor send <surface>` accepts exactly one input mode:
+browser creation). `dor ab --surface` is the one target that rides a flag: the
+whole positional space of that command belongs to `agent-browser`, so its
+target has nowhere else to go. It is a target, not a reference — it names the
+Surface acted on and resolves against listed Surfaces, the same as a positional
+handle — so `--surface` means "act on this" for `dor ab` and "place near this"
+for the create/place commands. See [Agent-Browser Surface
+Addressing](#agent-browser-surface-addressing). `dor send <surface>` accepts exactly one input mode:
 `--text`/`--key`, `--stdin`, or `--sequence`. `--text` and `--key` may be
 combined only in that order, duplicate input flags are rejected, and
 `--sequence` is the explicit form for arbitrary ordering or multiple events.
@@ -503,7 +509,12 @@ from `command-detail`.
   implies the same opt-in port scan, and includes port details in JSON / text
   output. `--json` always includes both stable ids and stable refs, each row
   carries `has_terminal` / `has_browser` (always both — gate on those, not on
-  `kind`; `docs/specs/glossary.md` → Panes and Surfaces), and it additionally
+  `kind`; `docs/specs/glossary.md` → Panes and Surfaces). A command that needs a
+  capability its target lacks fails with that same vocabulary, one message per
+  capability: `surface 'surface:N' has no terminal (kind: browser)` from the
+  terminal-gated verbs (`read` / `send` / `await`, port scans), and `surface
+  'surface:N' has no browser (kind: terminal)` from the browser-gated ones
+  (`dor ab --surface`). `--json` additionally
   emits the identity dump `dor identify` used to print — top-level
   `caller_surface_ref` / `caller_surface_id` (matched locally against
   `DORMOUSE_SURFACE_ID`, `null` when the caller is not in the list),
@@ -593,13 +604,17 @@ session it gets back. The handle resolves against **listed** Surfaces (visible
 alive), and the host applies two gates in order:
 
 - **Browser-gated** (`docs/specs/glossary.md` → Panes and Surfaces). A target
-  with no browser fails: `surface 'surface:1' has no browser (kind: terminal)`.
-- **Render-mode-gated.** A browser Surface on the `iframe` renderer has a
-  browser but no agent-browser session to drive: `surface 'surface:2' is not
+  with no browser fails with the shared capability wording documented under
+  [`dor list`](#current-implemented-commands).
+- **Render-mode-gated.** Past that gate, a browser Surface on the `iframe`
+  renderer is a browser with nothing to drive: `surface 'surface:2' is not
   agent-browser rendered (render_mode: iframe)`.
-- An agent-browser Surface the context menu created eagerly, whose daemon boot
-  has not yet named it ([dor-browser.md](dor-browser.md) → Pane Context Menu
-  Connect), fails with `surface 'surface:2' has no agent-browser session yet`.
+
+Neither gate covers one further case: an agent-browser Surface the context menu
+created eagerly, whose daemon boot has not yet named it
+([dor-browser.md](dor-browser.md) → Pane Context Menu Connect). It has the
+capability and the renderer but no session, and fails with `surface 'surface:2'
+has no agent-browser session yet`.
 
 Because the session comes from the surface rather than from a key, `--surface`
 is the only way to drive a **GUI-spawned** `dormouse.1.gui-<hex>` session, which

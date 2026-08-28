@@ -17,6 +17,7 @@
  * (Browser Open Target Resolution) and docs/specs/dor-browser.md.
  */
 
+import { errorMessage } from './shared.js';
 import type { ControlClient, ParseResult } from './types.js';
 
 declare const URL: {
@@ -108,6 +109,6 @@ export async function resolveSurfaceOpenTarget(
     const { url } = await client.resolveOpenTarget({ surface: target });
     return { ok: true, value: url };
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    return { ok: false, message: errorMessage(error) };
   }
 }

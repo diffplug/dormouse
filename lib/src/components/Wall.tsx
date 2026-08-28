@@ -53,7 +53,7 @@ import type { PersistedDoor, PersistedSurfaceRefs } from '../lib/session-types';
 import type { DropTarget, RestoreToken } from '../lib/lath/ops';
 import type { Edge } from '../lib/lath/model';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
-import { resolveRenderMode, isAgentBrowserParams, browserUrlFromParams, surfaceKindFromParams } from './wall/browser-surface';
+import { resolveRenderMode, agentBrowserSessionFromParams, browserUrlFromParams, surfaceKindFromParams } from './wall/browser-surface';
 import { hostPathDisplay } from './wall/browser-url';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { LathHost } from './wall/LathHost';
@@ -168,14 +168,17 @@ function compareBySurfaceRef(a: DorSurface, b: DorSurface): number {
  *  surface lifetime and browser lifetime are bound (spec → Lifecycle). No-op
  *  for other surface types. */
 function closeAgentBrowserSession(params: unknown): void {
-  if (!isAgentBrowserParams(params)) return;
-  const p = params as { session?: unknown; binaryPath?: unknown };
-  if (typeof p.session !== 'string') return;
-  const binaryPath = typeof p.binaryPath === 'string' ? p.binaryPath : undefined;
+  const session = agentBrowserSessionFromParams(params);
+  if (!session) return;
+  const binaryPath = (params as { binaryPath?: unknown }).binaryPath;
   // Mark before issuing the close so a popped-out surface's auto-revert sees
   // the impending teardown and doesn't relaunch the session we're killing.
-  markAgentBrowserSessionClosed(p.session);
-  getPlatform().agentBrowserCommand?.(p.session, ['close'], binaryPath).catch(() => {});
+  markAgentBrowserSessionClosed(session);
+  getPlatform().agentBrowserCommand?.(
+    session,
+    ['close'],
+    typeof binaryPath === 'string' ? binaryPath : undefined,
+  ).catch(() => {});
 }
 
 function ShellSpawnNotice({

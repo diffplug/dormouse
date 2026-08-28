@@ -212,19 +212,14 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         minimized: false,
       };
     },
-    // Mirrors the host's session↔surface registry: surface:3 is an ab-rendered
-    // browser, surface:4 an iframe one, surface:5 an ab pane whose daemon has not
-    // named it yet, and surface:1 a terminal.
+    // Mirrors the host's session↔surface registry: surface:3 is bound to a
+    // GUI-minted session, surface:1 is a terminal and fails the host's gate.
+    // Which gate rejected is the host's business (asserted in Wall.test.tsx);
+    // the CLI has one catch and prints whatever comes back.
     async resolveAgentBrowserSession(request) {
       this.requests.push({ method: 'resolveAgentBrowserSession', request });
       if (request.surface === 'surface:1') {
         throw new Error("surface 'surface:1' has no browser (kind: terminal)");
-      }
-      if (request.surface === 'surface:4') {
-        throw new Error("surface 'surface:4' is not agent-browser rendered (render_mode: iframe)");
-      }
-      if (request.surface === 'surface:5') {
-        throw new Error("surface 'surface:5' has no agent-browser session yet");
       }
       return {
         surfaceId: '33333333-3333-4333-8333-333333333333',
@@ -1135,22 +1130,17 @@ test('agent-browser --surface accepts --surface=handle and resolves an open targ
   ]);
 });
 
-test('agent-browser --surface surfaces the host gate errors and never forwards', async () => {
-  for (const [surface, pattern] of [
-    ['surface:1', /has no browser \(kind: terminal\)/],
-    ['surface:4', /is not agent-browser rendered \(render_mode: iframe\)/],
-    ['surface:5', /has no agent-browser session yet/],
-  ]) {
-    const ab = fakeAgentBrowser();
-    const result = await runCli(['ab', '--surface', surface, 'reload'], {
-      client: fixtureClient(),
-      execAgentBrowser: ab.exec,
-    });
-    assert.equal(result.exitCode, 1);
-    assert.equal(result.stdout, '');
-    assert.match(result.stderr, pattern);
-    assert.deepEqual(ab.calls, []);
-  }
+test('agent-browser --surface prints the host gate error and never forwards', async () => {
+  const ab = fakeAgentBrowser();
+  const result = await runCli(['ab', '--surface', 'surface:1', 'reload'], {
+    client: fixtureClient(),
+    execAgentBrowser: ab.exec,
+  });
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, "Error: surface 'surface:1' has no browser (kind: terminal)\n");
+  // An unresolved handle must never reach agent-browser as a session.
+  assert.deepEqual(ab.calls, []);
 });
 
 test('agent-browser --surface needs a control endpoint', async () => {
@@ -1186,11 +1176,11 @@ test('agent-browser key/session conflict output', async () => {
   );
 });
 
-test('agent-browser key/surface conflict output', async () => {
+test('agent-browser key/surface conflict reports in flag order, not argv order', async () => {
   const ab = fakeAgentBrowser();
   await snapshot(
     'agent-browser-key-surface-conflict',
-    await runCli(['ab', '--key', 'a', '--surface', 'surface:3', 'reload'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
+    await runCli(['ab', '--surface', 'surface:3', '--key', 'a', 'reload'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
   );
 });
 

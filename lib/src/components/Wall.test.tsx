@@ -354,18 +354,7 @@ describe('Wall on the Lath engine', () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation((id) => id === 'pane-a');
 
     try {
-      let response: { result?: { surfaceId: string } } | undefined;
-      await act(async () => {
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
-          detail: {
-            method: SURFACE_CONTROL_METHODS.iframe,
-            params: { url: 'http://localhost:5173/' },
-            respond: (r: typeof response) => { response = r; },
-          },
-        }));
-      });
-      await flush();
-      const surfaceId = response!.result!.surfaceId;
+      const surfaceId = (await dispatchIframe('http://localhost:5173/')).id;
       const leaf0 = container.querySelector(`[data-lath-leaf="${surfaceId}"]`);
       expect(leaf0).toBeTruthy();
 
@@ -495,18 +484,7 @@ describe('Wall on the Lath engine', () => {
       // An ab-rendered surface bound to a GUI-minted session — the name no
       // `--key` can produce, which is the point of addressing by handle.
       const abId = await dispatchAgentBrowser({ session: 'dormouse.1.gui-a1b2c3', surface: 'surface:1' });
-      let iframeResponse: { result?: { surfaceRef: string } } | undefined;
-      await act(async () => {
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
-          detail: {
-            method: SURFACE_CONTROL_METHODS.iframe,
-            params: { url: 'http://localhost:5173/' },
-            respond: (r: typeof iframeResponse) => { iframeResponse = r; },
-          },
-        }));
-      });
-      await flush();
-      const iframeRef = iframeResponse!.result!.surfaceRef;
+      const iframeRef = (await dispatchIframe('http://localhost:5173/')).ref;
 
       expect(await dispatchResolveAgentBrowser(abId)).toEqual({
         ok: true,
@@ -1112,6 +1090,23 @@ describe('Wall on the Lath engine', () => {
     await flush();
     expect(response?.ok).toBe(true);
     return response!.result!.surfaceId!;
+  }
+
+  /** `dor iframe <url>`; returns the new surface's `{ id, ref }`. */
+  async function dispatchIframe(url: string): Promise<{ id: string; ref: string }> {
+    let response: { ok: boolean; result?: { surfaceId: string; surfaceRef: string } } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.iframe,
+          params: { url },
+          respond: (r: typeof response) => { response = r; },
+        },
+      }));
+    });
+    await flush();
+    expect(response?.ok).toBe(true);
+    return { id: response!.result!.surfaceId, ref: response!.result!.surfaceRef };
   }
 
   /** `dor ab --surface <handle>`'s host half; returns the raw control response. */

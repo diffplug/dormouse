@@ -155,25 +155,16 @@ Examples:
 const IDENTITY_FLAGS = ['--key', '--session', '--surface'] as const;
 type IdentityFlag = (typeof IDENTITY_FLAGS)[number];
 
-interface ResolvedSessionFlags {
-  /** Managed key; undefined when the caller attached via raw --session or by
-   *  --surface (a Surface's session may be GUI-minted, which no key names). */
-  key?: string;
-  /** The session to forward, known CLI-side. Undefined only for `--surface`,
-   *  whose session the host resolves from the Surface it names. */
-  session?: string;
-  /** The Surface handle to resolve host-side; set iff `session` is undefined. */
-  surface?: string;
-  rest: string[];
-}
-
-/** "--key and --session", "--key, --session and --surface" — the Oxford-free
- *  join the mutual-exclusion error reads well at both arities. */
-function joinFlags(flags: readonly string[]): string {
-  return flags.length <= 1
-    ? (flags[0] ?? '')
-    : `${flags.slice(0, -1).join(', ')} and ${flags[flags.length - 1]}`;
-}
+/** Either a session known CLI-side (from `--session`, or namespaced from
+ *  `--key`) or a Surface handle for the host to resolve — never neither, never
+ *  both. A union rather than two optionals so the arm that has no session is
+ *  the arm that has a surface, by construction. `key` rides along only when it
+ *  named the session: a raw or surface-addressed session may be GUI-minted,
+ *  which no key names. */
+type ResolvedSessionFlags = { rest: string[] } & (
+  | { session: string; key?: string; surface?: undefined }
+  | { surface: string; session?: undefined; key?: undefined }
+);
 
 export function extractSessionFlags(args: string[]): ParseResult<ResolvedSessionFlags> {
   const values = new Map<IdentityFlag, string>();
@@ -204,7 +195,10 @@ export function extractSessionFlags(args: string[]): ParseResult<ResolvedSession
   // a precedence question.
   const given = IDENTITY_FLAGS.filter((flag) => values.has(flag));
   if (given.length > 1) {
-    return { ok: false, message: `${joinFlags(given)} are mutually exclusive` };
+    // "--key and --session"; "--key, --session and --surface" — reported in
+    // IDENTITY_FLAGS order, not argv order, so the message is stable.
+    const joined = `${given.slice(0, -1).join(', ')} and ${given[given.length - 1]}`;
+    return { ok: false, message: `${joined} are mutually exclusive` };
   }
 
   const key = values.get('--key');
@@ -231,7 +225,7 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
   // the session comes from the host's session↔surface registry before anything
   // is forwarded. This is the only way to drive a GUI-spawned session, whose
   // `gui-<hex>` name no `--key` can produce.
-  const resolvedSession = await resolveSessionForSurface(flags.value, options);
+  const resolvedSession = await resolveSession(flags.value, options);
   if (!resolvedSession.ok) return fail(resolvedSession.message);
   const session = resolvedSession.value;
 
@@ -307,22 +301,20 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
  * The agent-browser session to forward: the one the flags already produced, or —
  * for `--surface <handle>` — the one the host says that Surface is bound to
  * (`surface.resolveAgentBrowser`). A handle needs a live control endpoint, and
- * the host owns both gates: the target must have a browser, and that browser
+ * the host owns the gating: the target must have a browser, and that browser
  * must be agent-browser-rendered with a session (an `iframe` renderer has no
- * session to drive).
+ * session to drive). Its messages are printed verbatim; dor does not
+ * re-interpret them.
  */
-async function resolveSessionForSurface(
-  flags: { session?: string; surface?: string },
+async function resolveSession(
+  flags: ResolvedSessionFlags,
   options: CliOptions,
 ): Promise<ParseResult<string>> {
   if (flags.session !== undefined) return { ok: true, value: flags.session };
-  const surface = flags.surface;
-  // extractSessionFlags always sets exactly one of the two.
-  if (surface === undefined) return { ok: false, message: 'internal: no agent-browser session or surface' };
   const client = requireControlClient(options);
   if (client instanceof Error) return { ok: false, message: client.message };
   try {
-    const { session } = await client.resolveAgentBrowserSession({ surface });
+    const { session } = await client.resolveAgentBrowserSession({ surface: flags.surface });
     return { ok: true, value: session };
   } catch (error) {
     return { ok: false, message: errorMessage(error) };
