@@ -785,20 +785,156 @@ fn read_session_from(dir: &Path, label: &str) -> Result<Option<String>, String> 
 /// strictly *smaller* secret (`lib/src/host/remote/host-state-store.ts`), so
 /// this is closing an inconsistency, not inventing a rule.
 ///
-/// Best-effort on purpose, and unix-only: Windows ACLs are not unix modes,
-/// and a filesystem without POSIX permissions must not fail a session save.
+/// Failures are reported rather than swallowed, and whether one is tolerable
+/// is the caller's decision: `write_session_to` ignores it — a filesystem
+/// without the permission model it wants must not fail a session save — while
+/// `remote_host_state_dir` logs it.
+///
+/// The `mode` is a unix mode and is ignored on Windows, which has no such
+/// concept — there the equivalent is a DACL protected from inheritance carrying
+/// exactly one entry, for the user this process runs as. That is the same shape
+/// `deploy/local/install-windows.ps1` applies to the server's `state\`, and it
+/// is needed for the same reason: a unix mode is a silent no-op on Windows, so
+/// without this the directory simply keeps whatever `%LOCALAPPDATA%` hands
+/// down, which is never owner-only. That inheritance always carries SYSTEM and
+/// Administrators (as a `0700` does not exclude root either), and in practice
+/// often stale entries from earlier installs — this machine's carried two
+/// unresolvable `S-1-5-21-…` principals from other Windows domains with
+/// read/write. Those particular entries are inert, since no account here can
+/// present a foreign install's SID, so what this closes is the parity gap with
+/// the unix mode rather than a demonstrated live hole.
 #[cfg(unix)]
-fn restrict_to_owner(path: &Path, mode: u32) {
+fn restrict_to_owner(path: &Path, mode: u32) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
-    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+        .map_err(|e| format!("set_permissions: {e}"))
 }
 
-#[cfg(not(unix))]
-fn restrict_to_owner(_path: &Path, _mode: u32) {}
+/// Replace `path`'s DACL with a single full-control entry for the current
+/// user, and mark it protected so nothing is inherited from the parent.
+///
+/// Reports rather than swallowing. Whether a failure is tolerable depends on
+/// the caller, not on this function: `write_session_to` runs on the quit path
+/// and would rather keep a snapshot under the ACL Windows gave it than lose it,
+/// while `remote_host_state_dir` runs at sidecar start and is — per
+/// `SECURITY.md`, "Credentials at rest" — the *only* thing restricting
+/// `hostToken` on Windows, so a failure there is a silent downgrade of the one
+/// control and must reach the log.
+#[cfg(windows)]
+fn restrict_to_owner(path: &Path, _mode: u32) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PWSTR;
+    use windows::Win32::Foundation::{CloseHandle, LocalFree, ERROR_SUCCESS, HANDLE, HLOCAL};
+    use windows::Win32::Security::Authorization::{
+        SetEntriesInAclW, SetNamedSecurityInfoW, EXPLICIT_ACCESS_W, SET_ACCESS, SE_FILE_OBJECT,
+        TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
+    };
+    use windows::Win32::Security::{
+        GetTokenInformation, TokenUser, ACE_FLAGS, ACL, CONTAINER_INHERIT_ACE,
+        DACL_SECURITY_INFORMATION, NO_INHERITANCE, OBJECT_INHERIT_ACE,
+        PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER,
+    };
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    // FILE_ALL_ACCESS, not GENERIC_ALL. The generic rights map to different
+    // concrete masks for containers and for objects, so SetEntriesInAclW splits
+    // a single inheritable GENERIC_ALL entry into an effective ACE plus an
+    // inherit-only one -- two entries where the intent was one. A concrete mask
+    // needs no such split, which is what keeps the DACL to exactly one ACE.
+    const FILE_ALL_ACCESS: u32 = 0x001F_01FF;
+
+    unsafe {
+        let mut token = HANDLE::default();
+        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token)
+            .map_err(|e| format!("OpenProcessToken: {e}"))?;
+        // Size query first: TOKEN_USER is variable-length because the SID is.
+        let mut needed = 0u32;
+        let _ = GetTokenInformation(token, TokenUser, None, 0, &mut needed);
+        if needed == 0 {
+            let _ = CloseHandle(token);
+            return Err("GetTokenInformation reported a zero-length TOKEN_USER".into());
+        }
+        let mut buf = vec![0u8; needed as usize];
+        let got = GetTokenInformation(
+            token,
+            TokenUser,
+            Some(buf.as_mut_ptr().cast()),
+            needed,
+            &mut needed,
+        );
+        let _ = CloseHandle(token);
+        got.map_err(|e| format!("GetTokenInformation: {e}"))?;
+
+        // The SID points into `buf`, so `buf` must outlive every use below.
+        let user = &*(buf.as_ptr() as *const TOKEN_USER);
+        let sid = user.User.Sid;
+
+        // A directory carries the entry down to what the Node sidecar and the
+        // rest of the app write inside it; a file inherits nothing.
+        let inheritance = if path.is_dir() {
+            ACE_FLAGS(CONTAINER_INHERIT_ACE.0 | OBJECT_INHERIT_ACE.0)
+        } else {
+            NO_INHERITANCE
+        };
+
+        let access = EXPLICIT_ACCESS_W {
+            grfAccessPermissions: FILE_ALL_ACCESS,
+            grfAccessMode: SET_ACCESS,
+            grfInheritance: inheritance,
+            Trustee: TRUSTEE_W {
+                pMultipleTrustee: std::ptr::null_mut(),
+                MultipleTrusteeOperation: Default::default(),
+                TrusteeForm: TRUSTEE_IS_SID,
+                TrusteeType: TRUSTEE_IS_USER,
+                // With TRUSTEE_IS_SID this field carries the SID pointer, not a
+                // name. That is the documented Win32 convention, not a cast bug.
+                ptstrName: PWSTR(sid.0 as *mut u16),
+            },
+        };
+
+        let mut acl: *mut ACL = std::ptr::null_mut();
+        let rc = SetEntriesInAclW(Some(&mut [access]), None, &mut acl);
+        if rc != ERROR_SUCCESS {
+            return Err(format!("SetEntriesInAclW: {rc:?}"));
+        }
+
+        let mut wide: Vec<u16> = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        // PROTECTED_DACL_SECURITY_INFORMATION is the half that matters: without
+        // it the inherited entries survive alongside ours and nothing is
+        // actually revoked.
+        let rc = SetNamedSecurityInfoW(
+            PWSTR(wide.as_mut_ptr()),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            Some(acl),
+            None,
+        );
+        // Freed before the early return: the ACL is LocalAlloc'd by
+        // SetEntriesInAclW and belongs to us whether or not the apply worked.
+        let _ = LocalFree(Some(HLOCAL(acl.cast())));
+        if rc != ERROR_SUCCESS {
+            return Err(format!("SetNamedSecurityInfoW: {rc:?}"));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn restrict_to_owner(_path: &Path, _mode: u32) -> Result<(), String> {
+    Ok(())
+}
 
 fn write_session_to(dir: &Path, label: &str, state: &str) -> Result<(), String> {
     create_dir_all(dir).map_err(|e| format!("create sessions dir: {e}"))?;
-    restrict_to_owner(dir, 0o700);
+    // Deliberately ignored here: this is the quit path, and losing the snapshot
+    // is worse than keeping one under the ACL the OS gave it.
+    let _ = restrict_to_owner(dir, 0o700);
     let file_name = session_file_name(label);
     let path = dir.join(&file_name);
     let tmp = dir.join(format!("{file_name}.tmp"));
@@ -808,7 +944,7 @@ fn write_session_to(dir: &Path, label: &str, state: &str) -> Result<(), String> 
         let mut f = File::create(&tmp).map_err(|e| format!("open temp: {e}"))?;
         // Before any bytes land: the rename below preserves the temp file's
         // mode, so tightening here is what makes the final snapshot 0600.
-        restrict_to_owner(&tmp, 0o600);
+        let _ = restrict_to_owner(&tmp, 0o600);
         f.write_all(state.as_bytes())
             .map_err(|e| format!("write temp: {e}"))?;
         f.sync_all().map_err(|e| format!("fsync temp: {e}"))?;
@@ -1179,6 +1315,26 @@ fn remote_host_state_dir(app: &AppHandle) -> Option<String> {
         append_log(format!("[sidecar] create state dir: {e}"));
         return None;
     }
+    // The Node sidecar writes the Host enrollment here, and that record carries
+    // `hostToken` — a bearer credential for `/ws/host`. `FileHostStateStore`
+    // asks for `0700`/`0600`, which Windows ignores entirely, so on Windows this
+    // is the only thing that restricts it: lock the directory here, before the
+    // sidecar is spawned, and everything it writes inside inherits the single
+    // owner-only entry — while an enrollment file a prior version already left
+    // there is tightened by propagation instead, which is the leg
+    // `restrict_to_owner_leaves_one_owner_only_ace` covers with `before.json`.
+    // On unix the store's own modes already do the job and this is a harmless
+    // re-assert of the same intent.
+    if let Err(e) = restrict_to_owner(&dir, 0o700) {
+        // Not fatal — a Host that cannot start is worse than one whose state
+        // directory kept the OS default — but never silent: on Windows this
+        // call is the only thing restricting `hostToken`, so its failure is a
+        // downgrade of the sole control and has to be visible.
+        append_log(format!(
+            "[sidecar] WARNING could not restrict state dir {}: {e}",
+            dir.display()
+        ));
+    }
     Some(dir.to_string_lossy().into_owned())
 }
 
@@ -1540,6 +1696,166 @@ mod tests {
     impl Drop for TempDir {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// The Windows half of `restrict_to_owner`: after it runs, the DACL must be
+    /// protected from inheritance and grant exactly one principal — this user.
+    ///
+    /// Worth a test rather than prose because the failure is silent and
+    /// invisible: a unix `mode` is a no-op on Windows, so before this existed
+    /// the session snapshots simply kept whatever `%LOCALAPPDATA%` handed down
+    /// — never owner-only — and nothing about the app would look different.
+    #[test]
+    #[cfg(windows)]
+    fn restrict_to_owner_leaves_one_owner_only_ace() {
+        use windows::Win32::Foundation::{LocalFree, ERROR_SUCCESS, HLOCAL};
+        use windows::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
+        use windows::Win32::Security::{
+            EqualSid, GetAclInformation, GetSecurityDescriptorControl, AclSizeInformation, ACL,
+            ACL_SIZE_INFORMATION, DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+            SE_DACL_PROTECTED,
+        };
+        use windows::core::PCWSTR;
+        use std::os::windows::ffi::OsStrExt;
+
+        let dir = TempDir::new("acl");
+        let target = dir.path().join("sessions");
+        fs::create_dir_all(&target).expect("failed to create target dir");
+
+        // A file created BEFORE the lock, to prove the entry propagates down.
+        fs::write(target.join("before.json"), b"{}").expect("failed to write");
+
+        super::restrict_to_owner(&target, 0o700).expect("restrict_to_owner failed");
+
+        let wide: Vec<u16> = target
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        unsafe {
+            let mut dacl: *mut ACL = std::ptr::null_mut();
+            let mut sd = PSECURITY_DESCRIPTOR::default();
+            let rc = GetNamedSecurityInfoW(
+                PCWSTR(wide.as_ptr()),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                None,
+                None,
+                Some(&mut dacl),
+                None,
+                &mut sd,
+            );
+            assert_eq!(rc, ERROR_SUCCESS, "GetNamedSecurityInfoW failed");
+            assert!(!dacl.is_null(), "no DACL on the locked directory");
+
+            // Inheritance must be broken, or the parent's entries survive
+            // alongside ours and nothing has actually been revoked.
+            let mut control: u16 = 0;
+            let mut revision = 0u32;
+            GetSecurityDescriptorControl(sd, &mut control, &mut revision)
+                .expect("GetSecurityDescriptorControl failed");
+            assert!(
+                control & SE_DACL_PROTECTED.0 != 0,
+                "DACL is not protected from inheritance"
+            );
+
+            let mut info = ACL_SIZE_INFORMATION::default();
+            GetAclInformation(
+                dacl,
+                std::ptr::addr_of_mut!(info).cast(),
+                std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+                AclSizeInformation,
+            )
+            .expect("GetAclInformation failed");
+            assert_eq!(
+                info.AceCount, 1,
+                "expected exactly one ACE, found {}",
+                info.AceCount
+            );
+
+            // And that one entry must be *us*, not merely a single stranger.
+            let mut ace: *mut std::ffi::c_void = std::ptr::null_mut();
+            windows::Win32::Security::GetAce(dacl, 0, &mut ace).expect("GetAce failed");
+            // ACCESS_ALLOWED_ACE: 4-byte header, 4-byte mask, then the SID.
+            let sid_in_ace = PSID((ace as *mut u8).add(8).cast());
+
+            let mut token = windows::Win32::Foundation::HANDLE::default();
+            windows::Win32::System::Threading::OpenProcessToken(
+                windows::Win32::System::Threading::GetCurrentProcess(),
+                windows::Win32::Security::TOKEN_QUERY,
+                &mut token,
+            )
+            .expect("OpenProcessToken failed");
+            let mut needed = 0u32;
+            let _ = windows::Win32::Security::GetTokenInformation(
+                token,
+                windows::Win32::Security::TokenUser,
+                None,
+                0,
+                &mut needed,
+            );
+            let mut buf = vec![0u8; needed as usize];
+            windows::Win32::Security::GetTokenInformation(
+                token,
+                windows::Win32::Security::TokenUser,
+                Some(buf.as_mut_ptr().cast()),
+                needed,
+                &mut needed,
+            )
+            .expect("GetTokenInformation failed");
+            let _ = windows::Win32::Foundation::CloseHandle(token);
+            let me = (*(buf.as_ptr() as *const windows::Win32::Security::TOKEN_USER))
+                .User
+                .Sid;
+            assert!(
+                EqualSid(sid_in_ace, me).is_ok(),
+                "the single ACE is not the current user"
+            );
+
+            // And it reached what was already inside. This is not decoration:
+            // on an upgrade remote-host.json already exists under the inherited
+            // ACL holding a live hostToken, so propagation to existing children
+            // is the only thing that tightens that file.
+            let child: Vec<u16> = target
+                .join("before.json")
+                .as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
+            let mut child_dacl: *mut ACL = std::ptr::null_mut();
+            let mut child_sd = PSECURITY_DESCRIPTOR::default();
+            assert_eq!(
+                GetNamedSecurityInfoW(
+                    PCWSTR(child.as_ptr()),
+                    SE_FILE_OBJECT,
+                    DACL_SECURITY_INFORMATION,
+                    None,
+                    None,
+                    Some(&mut child_dacl),
+                    None,
+                    &mut child_sd,
+                ),
+                ERROR_SUCCESS,
+                "GetNamedSecurityInfoW failed on the pre-existing child"
+            );
+            let mut child_info = ACL_SIZE_INFORMATION::default();
+            GetAclInformation(
+                child_dacl,
+                std::ptr::addr_of_mut!(child_info).cast(),
+                std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+                AclSizeInformation,
+            )
+            .expect("GetAclInformation failed on the pre-existing child");
+            assert_eq!(
+                child_info.AceCount, 1,
+                "the pre-existing child kept {} ACEs -- the entry did not propagate",
+                child_info.AceCount
+            );
+
+            let _ = LocalFree(Some(HLOCAL(child_sd.0)));
+            let _ = LocalFree(Some(HLOCAL(sd.0)));
         }
     }
 

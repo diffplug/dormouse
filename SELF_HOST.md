@@ -3,15 +3,28 @@
 > This is an assistant-run setup playbook. Start a fresh Claude instance in
 > this repository and say: `read @SELF_HOST.md and walk me through it`.
 
-This installs the Dormouse coordinating server on the user's own Mac, reachable
-only from their tailnet at `https://<laptop>.<tailnet>.ts.net`. That is the
-whole self-host story today. An always-on cloud relay is designed but not
+This installs the Dormouse coordinating server on the user's own laptop,
+reachable only from their tailnet at `https://<laptop>.<tailnet>.ts.net`. That
+is the whole self-host story today. An always-on cloud relay is designed but not
 built; it lives under `## Future`.
 
-The installer already exists: `deploy/local/install-macos.sh`, one idempotent
-command that ships in this repository. This runbook is about running it and
-finishing the parts it cannot do on its own — the passkey, the Host build, the
-backup. Nobody following it should have to write or edit code.
+The installer already exists — one idempotent command that ships in this
+repository, in a macOS and a Windows edition:
+
+| OS | Installer | Service | Install root |
+| --- | --- | --- | --- |
+| macOS | `deploy/local/install-macos.sh` | LaunchAgent `sh.dormouse.server` | `~/Library/Application Support/Dormouse Server` |
+| Windows | `deploy/local/install-windows.ps1` | Scheduled Task `\Dormouse Server` | `%LOCALAPPDATA%\Dormouse Server` |
+
+The two hold the same invariants through different native mechanisms; where a
+checkpoint below differs, both forms are given. **Work out which one applies
+before the first command and stay on that column** — mixing them is the main way
+this runbook goes wrong. `docs/specs/server.md` -> "Installing it (behind
+Tailscale)" carries the full mechanism-by-mechanism table.
+
+This runbook is about running the installer and finishing the parts it cannot do
+on its own — the passkey, the Host build, the backup. Nobody following it should
+have to write or edit code.
 
 ## Instructions to the assistant
 
@@ -21,27 +34,27 @@ consent flows, secrets, or explicit approval of external or destructive
 changes. Do not dump the entire runbook back at the user.
 
 The installer is shipped, reviewed code. Run it — do not reimplement it, and do
-not paper over it with hand-run `launchctl` or `tailscale serve` commands. If it
-does the wrong thing, that is a bug in `deploy/local/install-macos.sh`: say so
-plainly and offer to fix it as an ordinary reviewed code change, which is a
-different task from this one. Its contract lives in `docs/specs/server.md`
-under "Installing it (macOS, behind Tailscale)"; a change to one is a change to
-both.
+not paper over it with hand-run `launchctl`, `schtasks` or `tailscale serve`
+commands. If it does the wrong thing, that is a bug in the installer for that
+platform: say so plainly and offer to fix it as an ordinary reviewed code
+change, which is a different task from this one. Its contract lives in
+`docs/specs/server.md` under "Installing it (behind Tailscale)"; a change to one
+is a change to both.
 
 Before acting:
 
 1. Read `docs/specs/server.md` — "Configuration", "Where a Host may reach a
-   relay server (self-host builds)", and "Installing it (macOS, behind
-   Tailscale)" — plus `docs/specs/remote-security-model.md` for the trust model
-   you are about to set up.
-2. Run `./deploy/local/install-macos.sh --help` and skim the script. Its errors
-   are written to be read by whoever is standing here; quote them rather than
-   paraphrasing.
-3. Check whether `~/Library/Application Support/Dormouse Server` already exists.
-   If it does, this is an update or a repair, not a first install: read
-   `bin/manage status` before changing anything.
+   relay server (self-host builds)", and "Installing it (behind Tailscale)" —
+   plus `docs/specs/remote-security-model.md` for the trust model you are about
+   to set up.
+2. Establish the OS and pick the installer column. Run its `--help` / `-Help`
+   and skim the script. Its errors are written to be read by whoever is standing
+   here; quote them rather than paraphrasing.
+3. Check whether the install root for that platform already exists. If it does,
+   this is an update or a repair, not a first install: read `manage status`
+   before changing anything.
 4. Recheck the linked official documentation. This runbook was updated on
-   2026-08-20; dashboards and CLI syntax change.
+   2026-08-27; dashboards and CLI syntax change.
 5. Explain the current checkpoint, carry it out, verify it, and only then move
    to the next checkpoint.
 6. Never ask the user to paste the setup password or any other bearer credential
@@ -57,24 +70,34 @@ known:
 
 | Value | Default / example |
 | --- | --- |
-| Laptop OS | must be macOS |
+| Laptop OS | must be macOS or Windows |
 | Laptop Tailscale DNS name | the installer derives it from `tailscale status --json` |
 | External origin | `https://<laptop-name>.<tailnet-dns-suffix>` |
-| Install root | `~/Library/Application Support/Dormouse Server` |
-| State directory | `~/Library/Application Support/Dormouse Server/state` |
-| LaunchAgent | `~/Library/LaunchAgents/sh.dormouse.server.plist` |
+| Install root | macOS `~/Library/Application Support/Dormouse Server` · Windows `%LOCALAPPDATA%\Dormouse Server` |
+| State directory | `<install root>/state` |
+| Service | macOS `~/Library/LaunchAgents/sh.dormouse.server.plist` · Windows Scheduled Task `\Dormouse Server` |
 | Loopback port | `3100` |
 | Installed release | printed by the installer and by `manage status` |
 
 ## Prerequisites
 
 - **A tailnet.** The user needs a Tailscale account with MagicDNS and HTTPS
-  certificates enabled, Tailscale running on this Mac, and Tailscale on the
+  certificates enabled, Tailscale running on this laptop, and Tailscale on the
   phone that will run Pocket. A tailnet-only origin is not reachable merely
   because the laptop is on the tailnet.
-- **macOS.** The installer is macOS-only and refuses to run anywhere else. On
-  another OS, stop and design the native service manager with the user rather
-  than translating LaunchAgent commands blindly.
+- **macOS or Windows.** Each installer refuses to run on the other platform. On
+  any third OS, stop and design the native service manager with the user rather
+  than translating LaunchAgent or Scheduled Task commands blindly.
+- **Neither installer runs privileged.** Both refuse — as root on macOS,
+  elevated on Windows. The whole credential posture is that one user account
+  owns `config/` and `state/`; an elevated run would write them owned by another
+  principal and register the service for it. Use an ordinary terminal.
+- **On Windows, one signed-in user at a time owns Tailscale.** `tailscaled`
+  serves its local API to a single interactive session, so on a PC with a second
+  signed-in profile every `tailscale` call fails with
+  `401 Unauthorized: Tailscale already in use by <user>`. That user must sign
+  out or quit the Tailscale tray app first. The installer detects this in
+  preflight and names the account holding it.
 - **A Host build that can reach a `*.ts.net` origin.** The shipped standalone
   and VS Code Hosts bake in the SaaS-only relay allowlist, so a self-host relay
   needs a local build of whichever Host the user runs:
@@ -92,13 +115,15 @@ known:
 ## What the installer does
 
 ```text
-user runs ./deploy/local/install-macos.sh
+user runs the installer for their platform
         |
         v
 build exact current checkout into a self-contained release
         |
         v
-macOS LaunchAgent (RunAtLoad + KeepAlive)
+per-login user agent, restarted on exit
+  macOS   LaunchAgent (RunAtLoad + KeepAlive)
+  Windows Scheduled Task (at logon) + supervision loop in run-server.ps1
         |
         v
 Dormouse Node server on 127.0.0.1:3100
@@ -110,20 +135,21 @@ tailscale serve --bg terminates private HTTPS
 https://<laptop>.<tailnet>.ts.net
 ```
 
-It installs only under the current user's home, needs no `sudo`, and lays out:
+It installs only under the current user's profile, needs no administrator
+rights, and lays out:
 
 ```text
-~/Library/Application Support/Dormouse Server/
+<install root>/
   bin/
-    run-server
-    manage
+    run-server            (run-server.ps1 on Windows)
+    manage                (manage.ps1 + manage.cmd on Windows)
   config/
     server.env
-  current -> releases/<release-id>
-  previous -> releases/<release-id>
+  current    -> releases/<release-id>     (current.txt naming it, on Windows)
+  previous   -> releases/<release-id>     (previous.txt, on Windows)
   releases/
     <release-id>/
-      runtime/node
+      runtime/node        (runtime\node.exe on Windows)
       server/
       lib/dist-pocket/
       RELEASE
@@ -132,15 +158,18 @@ It installs only under the current user's home, needs no `sudo`, and lays out:
     hosts.json
     push-subscriptions.json
     vapid.json
-
-~/Library/LaunchAgents/sh.dormouse.server.plist
-~/Library/Logs/Dormouse Server/
 ```
 
-It deliberately will **not**: run `git pull`, fetch, or switch branches; install
-a scheduled updater; ask for `sudo`; install or re-authenticate Tailscale;
-rewrite an origin that no longer matches the node's DNS name; or touch `config/`
-and `state/`, which survive every update, prune, and uninstall.
+Logs live in `~/Library/Logs/Dormouse Server/` on macOS and `<install root>\logs`
+on Windows. The service definition is
+`~/Library/LaunchAgents/sh.dormouse.server.plist` or the Scheduled Task
+`\Dormouse Server`.
+
+Either installer deliberately will **not**: run `git pull`, fetch, or switch
+branches; install a scheduled updater; ask for elevation; install or
+re-authenticate Tailscale; rewrite an origin that no longer matches the node's
+DNS name; or touch `config/` and `state/`, which survive every update, prune,
+and uninstall.
 
 The invariants it exists to hold — one replica, state outlives code, loopback
 only, `DORMOUSE_ORIGIN` as durable WebAuthn identity, and a failed update being
@@ -150,16 +179,23 @@ day:
 
 - An update is a short intentional restart. Existing Host and Pocket WebSockets
   disconnect and reconnect; there is no zero-downtime swap to attempt.
-- A LaunchAgent is a per-login agent, so the service is unavailable while the
-  laptop sleeps, is shut down, or has no logged-in user. That is normally fine,
-  because there is then no local Dormouse Host to control either.
+- Both are per-login agents, so the service is unavailable while the laptop
+  sleeps, is shut down, or has no logged-in user. That is normally fine, because
+  there is then no local Dormouse Host to control either. On Windows the
+  at-logon trigger uses `LogonType=Interactive`, which is what keeps the task
+  free of a stored password — and is the same tradeoff.
 
 ## Definition of done
 
 `manage verify` checks all of these locally and exits nonzero on any failure:
 
-- The LaunchAgent is loaded in `gui/$UID`, its plist lints, declares `RunAtLoad`
-  and `KeepAlive`, and carries no credential.
+- The service is registered and running, declares its run-at-load and
+  restart-on-exit behavior, and carries no credential. On macOS: the LaunchAgent
+  is loaded in `gui/$UID` and its plist lints, declares `RunAtLoad` and
+  `KeepAlive`. On Windows: the Scheduled Task is `Running`, has an at-logon
+  trigger, no execution time limit, restarts on failure, runs unelevated, is not
+  stopped by battery or idle transitions, and `bin\run-server.ps1` still carries
+  the supervision loop that is the actual KeepAlive.
 - Loopback `/api/hello` responds and the Pocket app is served.
 - Port 3100 is bound only to `127.0.0.1`, and the plaintext port is unreachable
   on the laptop's Tailscale IP.
@@ -167,17 +203,20 @@ day:
   `config/server.env`, and `tailscale funnel` is **off** — a Funnel would
   publish this same origin to the public internet, which the setup password's
   hardening was never sized for (`SECURITY.md` -> "Network posture").
-- `config/` and `state/` are mode `0700`, `config/server.env` is mode `0600`.
-- `current` resolves to a release with `RELEASE` metadata, and neither the plist
-  nor `bin/run-server` refers to the source checkout. A retained `previous`
-  release is checked too, but a first install has none, so `verify` warns there
-  rather than failing.
+- `config/`, `state/` and `config/server.env` are readable only by the
+  installing user: modes `0700`/`0600` on macOS, a DACL with exactly that one
+  user on Windows. The Windows check also covers each file in `state/`
+  individually, because Node's file modes are a no-op there.
+- The current release pointer resolves to a release with `RELEASE` metadata, and
+  neither the service definition nor the `run-server` wrapper refers to the
+  source checkout. A retained previous release is checked too, but a first
+  install has none, so `verify` warns there rather than failing.
 
 These cannot be proven from the laptop, and are the checkpoints below:
 
 - The HTTPS origin answers from a second tailnet device, and stops answering
   when that device leaves the tailnet.
-- launchd restarts the server after a real kill.
+- The service manager restarts the server after a real kill.
 - State survives a reinstall from a newer checkout, and rollback returns the
   previous release.
 - Pocket passkey setup and Host enrollment complete against this origin.
@@ -186,12 +225,15 @@ These cannot be proven from the laptop, and are the checkpoints below:
 ## Checkpoint 1: preflight
 
 The installer performs its own preflight and stops with a specific error rather
-than proceeding, so do not re-run these by hand: macOS and non-root, the
-Tailscale CLI (on `PATH` or in the app bundle, invoked with
-`TAILSCALE_BE_CLI=1`), backend state `Running`, the node's MagicDNS name and
-derived origin, tailnet HTTPS certificates, an origin that disagrees with an
-existing installation, the Git SHA and dirty status (it asks before installing a
-dirty worktree), and the Node and pnpm versions pinned in root `package.json`.
+than proceeding, so do not re-run these by hand: the right OS and an unprivileged
+session, the Tailscale CLI (on `PATH`, in the macOS app bundle invoked with
+`TAILSCALE_BE_CLI=1`, or under `Program Files\Tailscale` on Windows), backend
+state `Running`, the node's MagicDNS name and derived origin, tailnet HTTPS
+certificates, an origin that disagrees with an existing installation, the Git SHA
+and dirty status (it asks before installing a dirty worktree), and the Node and
+pnpm versions pinned in root `package.json`. The Windows edition additionally
+names the account holding `tailscaled`'s local API when another signed-in user
+has it.
 
 Establish with the user what the script cannot:
 
@@ -205,7 +247,13 @@ Establish with the user what the script cannot:
   against the wrong server:
 
   ```sh
+  # macOS
   lsof -nP -iTCP:3100 -sTCP:LISTEN
+  ```
+
+  ```powershell
+  # Windows
+  Get-NetTCPConnection -State Listen -LocalPort 3100 -ErrorAction SilentlyContinue
   ```
 
 ## Checkpoint 2: install
@@ -213,7 +261,13 @@ Establish with the user what the script cannot:
 With the user's approval:
 
 ```sh
+# macOS
 ./deploy/local/install-macos.sh
+```
+
+```powershell
+# Windows, from an ordinary (not elevated) PowerShell
+.\deploy\local\install-windows.ps1
 ```
 
 It prints each step. Read the output with the user rather than summarizing it —
@@ -228,7 +282,13 @@ that yet.
 ## Checkpoint 3: verify
 
 ```sh
+# macOS
 "$HOME/Library/Application Support/Dormouse Server/bin/manage" verify
+```
+
+```powershell
+# Windows
+& "$env:LOCALAPPDATA\Dormouse Server\bin\manage.cmd" verify
 ```
 
 Expect every check to pass and the command to exit 0. `manage status` gives the
@@ -241,18 +301,28 @@ Then, from another tailnet-connected device:
 3. Temporarily leave Tailscale on that device and confirm the origin becomes
    unreachable.
 
-Kill the server process once and confirm launchd restarts it within a second or
-two:
+Kill the server process once and confirm the service manager restarts it:
 
 ```sh
+# macOS — launchd restarts within a second or two
 pkill -f 'Dormouse Server/current/server/dist/index.js'
 "$HOME/Library/Application Support/Dormouse Server/bin/manage" status
 ```
 
+```powershell
+# Windows — run-server.ps1's supervision loop restarts after its 10s throttle,
+# so wait ~15s before reading status.
+Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
+  Where-Object { $_.CommandLine -like '*Dormouse Server*' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+& "$env:LOCALAPPDATA\Dormouse Server\bin\manage.cmd" status
+```
+
 Restart the laptop only if the user approves the interruption; otherwise say
-plainly that `RunAtLoad` plus the loaded LaunchAgent has been verified but the
-reboot test was skipped. After a real login or reboot, confirm both the process
-and the background Serve mapping return without rerunning the installer.
+plainly that the run-at-load trigger plus the registered service has been
+verified but the reboot test was skipped. After a real login or reboot, confirm
+both the process and the background Serve mapping return without rerunning the
+installer.
 
 ## Checkpoint 4: first-run setup
 
@@ -282,9 +352,10 @@ command line.
    carries the same four commands and stays as the scripting seam
    (`docs/specs/server.md`, "Remote control, in the Settings dialog").
 
-   Enrollment persists in the Host service's own store — a mode-`0600` file
-   under the app-data dir in standalone, `SecretStorage` in VS Code — so later
-   launches connect on their own. The section then shows the server, the relay
+   Enrollment persists in the Host service's own store — a file under the
+   app-data dir in standalone (mode `0600` on macOS and Linux; on Windows the
+   mode is a no-op and the app-data ACL is what protects it), `SecretStorage` in
+   VS Code — so later launches connect on their own. The section then shows the server, the relay
    connection, and the paired-device count.
 
    A build without the `*.ts.net` allowlist refuses this outright, before the
@@ -307,7 +378,7 @@ Updating is choosing a checkout and rerunning the same command:
 
 ```sh
 git -C <checkout> log --oneline -1     # decide deliberately what to install
-./deploy/local/install-macos.sh
+./deploy/local/install-macos.sh        # or .\deploy\local\install-windows.ps1
 ```
 
 Prove it once, while the user is watching:
@@ -318,8 +389,8 @@ Prove it once, while the user is watching:
 3. Run `manage rollback`, confirm the previous release comes back healthy, then
    return to the desired release.
 
-`manage uninstall` removes the LaunchAgent and installed code and keeps `config`
-and `state`, reporting where they are. `manage purge` is the separate,
+`manage uninstall` removes the service definition and installed code and keeps
+`config` and `state`, reporting where they are. `manage purge` is the separate,
 irreversible operation that deletes them; it requires typing a confirmation
 phrase and is never part of a reinstall.
 
@@ -327,7 +398,7 @@ phrase and is never part of a reinstall.
 
 Make these explicit:
 
-- The relay is down while the Mac sleeps, is shut down, Tailscale is
+- The relay is down while the laptop sleeps, is shut down, Tailscale is
   disconnected, or the user is logged out.
 - The installer does not follow `main`. Updates happen only when the user
   reruns it.
@@ -337,9 +408,13 @@ Make these explicit:
 - Tailscale network policy still controls which tailnet members can reach the
   laptop. Review existing grants if the tailnet contains other users.
 
-Confirm that the install root, especially `config` and `state`, is covered by
-Time Machine or another encrypted backup outside the laptop. A second directory
-on the same disk is not a backup. These files include Host bearer credentials
+Confirm that the install root, especially `config` and `state`, is covered by an
+encrypted backup outside the laptop — Time Machine on macOS, File History or any
+equivalent on Windows. Check the coverage rather than assuming it: on Windows,
+`%LOCALAPPDATA%` is **excluded** from File History's default library set and
+from OneDrive's Known Folder Move, so the install root is very likely
+unprotected until it is added explicitly. A second directory on the same disk is
+not a backup. These files include Host bearer credentials
 and a VAPID private key. Perform a small restore rehearsal without overwriting
 live state.
 
@@ -353,9 +428,8 @@ Give the user a concise final report. Include:
 - The rollback command.
 - Backup status and restore location.
 - Any skipped acceptance test or remaining manual Host/Pocket setup.
-- That updates happen only when the user reruns
-  `./deploy/local/install-macos.sh`, plus the sleep/shutdown/logout
-  availability limitation.
+- That updates happen only when the user reruns the installer for their
+  platform, plus the sleep/shutdown/logout availability limitation.
 - The installed `manage status`, `manage verify`, `manage logs`, and
   `manage restart` commands.
 
@@ -369,7 +443,10 @@ Do not print the setup password or any credential in the handoff.
 - Host installations: `docs/specs/standalone.md`, `docs/specs/vscode.md`
 - [Install Tailscale on macOS](https://tailscale.com/docs/install/mac)
 - [Tailscale variants on macOS](https://tailscale.com/docs/concepts/macos-variants)
+- [Install Tailscale on Windows](https://tailscale.com/docs/install/windows)
 - [Manage scripts with launchd](https://support.apple.com/guide/terminal/script-management-with-launchd-apdc6c1077b/mac)
+- [Windows Task Scheduler](https://learn.microsoft.com/en-us/windows/win32/taskschd/task-scheduler-start-page)
+- [ScheduledTasks PowerShell module](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/)
 - [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve)
 
 ## Troubleshooting boundaries
@@ -382,8 +459,25 @@ Do not print the setup password or any credential in the handoff.
   inspect `launchctl print gui/$UID/sh.dormouse.server`, and read
   `~/Library/Logs/Dormouse Server`. launchd does not run the user's interactive
   shell startup files, so a `PATH` that works in Terminal proves nothing here.
+- **The Scheduled Task loops or will not start:** read
+  `Get-ScheduledTaskInfo -TaskName 'Dormouse Server'` for `LastTaskResult`,
+  `Export-ScheduledTask -TaskName 'Dormouse Server'` for the definition, and
+  `<install root>\logs`. `run-server.ps1` timestamps every start and exit into
+  `server.err.log`, so a crash loop is visible as a run of those lines. Task
+  Scheduler does not run the user's PowerShell profile, so a `PATH` that works
+  interactively proves nothing here either.
+- **The task shows `Ready` rather than `Running` after a reboot:** the trigger
+  is at-logon with `LogonType=Interactive`, so it fires on interactive sign-in,
+  not at boot. That is the same per-login limitation the LaunchAgent has, not a
+  fault.
+- **Every `tailscale` command returns `401 Unauthorized: Tailscale already in
+  use by <user>` (Windows):** another signed-in Windows profile owns
+  `tailscaled`'s local API. Have that user sign out or quit the Tailscale tray
+  app; `quser` lists the sessions. Elevating does not bypass it.
+- **`install-windows.ps1` refuses because the session is elevated:** run it from
+  an ordinary PowerShell. This is deliberate — see Prerequisites.
 - **The HTTPS URL returns 502:** check the loopback health endpoint first, then
-  `tailscale serve status`. The LaunchAgent and the Serve configuration have
+  `tailscale serve status`. The service and the Serve configuration have
   separate lifecycles; `manage serve` re-applies the mapping if a dev session
   repointed it.
 - **Port 3100 is visible on the LAN or the Tailscale IP:** stop. Confirm
@@ -405,7 +499,7 @@ Do not print the setup password or any credential in the handoff.
 ## Future
 
 **Scope: always-on-relay** — run the coordinating server on a cloud host
-instead of the laptop, so the relay stays reachable while the Mac is asleep,
+instead of the laptop, so the relay stays reachable while the laptop is asleep,
 shut down, or logged out. Nothing below is implemented. It matters only for a
 user who controls a Host that is not this laptop; a laptop that must be awake
 to be controlled gains little from an always-on relay.
@@ -994,8 +1088,8 @@ needed.
 
 Include the Droplet name and DigitalOcean region (not its public IP
 unless useful), how to view container and deployment workflow logs, and the
-automatic deployment trigger. Do not describe the laptop LaunchAgent as if it
-were installed.
+automatic deployment trigger. Do not describe the laptop's LaunchAgent or
+Scheduled Task as if it were installed.
 
 ### References
 
