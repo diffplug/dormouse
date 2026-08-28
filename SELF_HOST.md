@@ -559,7 +559,10 @@ Do not print the setup password or any credential in the handoff.
   nothing will start.
 - **`tailscale serve` is refused for a non-root user (Linux):** grant the
   operator role — see Prerequisites. The installer checks for this before
-  building, so hitting it later means the check regressed.
+  building, so hitting it later means the check regressed. If you do hit it
+  late, the release is already installed and the service already running: grant
+  the role, then run `manage serve` to add the HTTPS front door rather than
+  reinstalling.
 - **The service disappears at logout (Linux):** that is the documented per-login
   default, not a fault. This is deliberate — see Prerequisites for the `--linger`
   opt-out, and make the availability change in checkpoint 6 explicit if you take
