@@ -1,9 +1,10 @@
 # Dor Tools
 
-> Status: design — the faces groundwork (phase A) is implemented; everything
+> Status: design — the capability gating (phase A) is implemented; everything
 > else lives under [Future](#future) per the spec lifecycle. The design is
-> written ahead of the code because its vocabulary (faces, OSC 367, the
-> announce contract) constrains adjacent specs as they evolve.
+> written ahead of the code because its vocabulary (the terminal/browser
+> capability split, OSC 367, the announce contract) constrains adjacent specs
+> as they evolve.
 
 > See `docs/specs/glossary.md` for canonical Surface / Session / Pane
 > vocabulary. Builds on `docs/specs/dor-cli.md` (surface handles, the `ensure`
@@ -16,33 +17,36 @@ it in a pane where the human and the agent both see it and both drive it — the
 human clicks, the agent sees the click; the agent types, the human sees the
 typing. No SDK, no protocol: print one escape sequence, read one env var.
 
-## Faces groundwork
+## Capability gating
 
-The face model's groundwork is implemented ahead of the `tool` kind (phase A
-of the ledger below); `docs/specs/glossary.md` → Faces is the canonical
-vocabulary. What exists today:
+The groundwork for the capability model is implemented ahead of the `tool`
+kind (phase A of the ledger below); `docs/specs/glossary.md` → Panes and
+Surfaces is the canonical vocabulary. What exists today:
 
-- **Face predicates are the single source of face gating.** `facesOfKind` /
-  `hasConsoleFace` / `hasWebFace` in `dor/src/commands/types.ts`. Kind
-  switches in the host's surface-row projection and control handlers go
-  through them, so a future both-faces kind populates both sides of a row
-  (cwd *and* url) without touching the call sites.
-- **`dor list --json` rows carry `faces`** (`["console"]` / `["web"]`), so
-  scripts can gate on faces before richer face-sets exist.
-- **Console-face-gated operations report in face vocabulary.** `read` /
-  `send` / `await` / `surface.resolveOpen` against a Surface with no console
-  face fail with `surface 'surface:N' has no console face (kind: browser)`.
+- **Two predicates are the single source of capability gating.** `hasTerminal`
+  / `hasBrowser` over the `KIND_CAPABILITIES` table in
+  `dor/src/commands/types.ts`. Kind switches in the host's surface-row
+  projection and control handlers go through them, so a future kind that has
+  both populates both sides of a row (cwd *and* url) without touching the call
+  sites.
+- **`dor list --json` rows carry `has_terminal` and `has_browser`** — always
+  both, so scripts gate on the capability rather than on `kind` and keep
+  matching once a kind that has both exists.
+- **Terminal-gated operations report in capability vocabulary.** `read` /
+  `send` / `await` / `surface.resolveOpen` against a Surface with no terminal
+  fail with `surface 'surface:N' has no terminal (kind: browser)`.
 
 Source of truth: `dor/src/commands/types.ts`, `renderSurfaceJson` in
 `dor/src/commands/list.ts`, `buildDorSurfacesInternal` in
-`lib/src/components/Wall.tsx`, `requireConsoleFaceSurface` in
+`lib/src/components/Wall.tsx`, `requireTerminalSurface` in
 `lib/src/components/wall/use-dor-control.ts`.
 
 ## Future
 
 **Scope: dor-tools** — what remains, staged. Each phase is one PR, and each
-PR's job includes promoting its slice above the fold. (Phase A — the faces
-refactor — is implemented; see [Faces groundwork](#faces-groundwork).)
+PR's job includes promoting its slice above the fold. (Phase A — the
+capability refactor — is implemented; see
+[Capability gating](#capability-gating).)
 
 - **B — `dor open`.** User-level table + dispatch only: entries resolve to a
   terminal command (the `ensure`/`split` machinery) or an existing **browser
@@ -69,42 +73,43 @@ refactor — is implemented; see [Faces groundwork](#faces-groundwork).)
   `DORMOUSE_DEHYDRATE` per the contract below (designed day 1; the `dehydrate`
   flag is reserved in the serve payload from C0). The Windows graceful-stop
   answer is needed here only.
-- **Later** — `ab-*` web faces: agent GUI-driving via the agent-browser render
-  modes, which requires `dor ab` surface-handle addressing (`dor ab --surface
-  surface:N <verb>`), the one genuinely new CLI mechanism the face union
-  demands. Pocket/remote web face (rides the browser-surface staging in
-  `docs/specs/remote-api.md`; reserve the kind on the wire now). The VS Code
-  full pipeline. An in-pane face strip (decide against the glossary's reserved
-  multiple-Surfaces-per-Pane). A `boots: web` table hint if the console flash
-  grates. `--face` capability filters for `dor list`. A pre-spawn dedupe fast
-  path.
+- **Later** — `ab-*` browser rendering: agent GUI-driving via the
+  agent-browser render modes, which requires `dor ab` surface-handle
+  addressing (`dor ab --surface surface:N <verb>`), the one genuinely new CLI
+  mechanism a Surface with both capabilities demands. Pocket/remote browser
+  view (rides the browser-surface staging in `docs/specs/remote-api.md`;
+  reserve the kind on the wire now). The VS Code full pipeline. An in-pane
+  terminal/browser strip (decide against the glossary's reserved
+  multiple-Surfaces-per-Pane). A `boots: web` table hint if the terminal flash
+  grates. `--has terminal` / `--has browser` filters for `dor list`. A
+  pre-spawn dedupe fast path.
 
-### Faces: the tool face-set
+### The tool capability set
 
-The face vocabulary, predicates, and gating are live (see
-[Faces groundwork](#faces-groundwork); `docs/specs/glossary.md` → Faces).
-What remains is the both-faces kind itself: `tool` = console + web. Verbs
-stay face-gated: `read` / `send` / `await` / `--port` require a console face;
-nav/render/ab verbs require a web face and stay renderMode-gated exactly as
-for browser Surfaces (an iframe-rendered tool cannot be agent-driven).
-`kill` / `rename` stay universal. Kinds remain **disjoint** for
-`dor list --kind`.
+The capability vocabulary, predicates, and gating are live (see
+[Capability gating](#capability-gating); `docs/specs/glossary.md` → Panes and
+Surfaces). What remains is the kind that has both: `tool` = terminal +
+browser. Verbs stay capability-gated: `read` / `send` / `await` / `--port`
+require a terminal; nav/render/ab verbs require a browser and stay
+renderMode-gated exactly as for browser Surfaces (an iframe-rendered tool
+cannot be agent-driven). `kill` / `rename` stay universal. Kinds remain
+**disjoint** for `dor list --kind`.
 
 - **Identity**: a tool Surface's id is its SessionId (I1 extends to tools).
-  Faces and render modes change over its life without changing identity — the
-  tool counterpart of I10, and stronger than browsers have today.
-- **Render swaps bypass `replaceSurface`.** A tool's web face is a param of
+  Capabilities and render modes change over its life without changing identity
+  — the tool counterpart of I10, and stronger than browsers have today.
+- **Render swaps bypass `replaceSurface`.** A tool's browser is a param of
   the tool's own leaf: swapping `iframe` ⇄ `ab-*` mutates `renderMode` in
   place and never routes through the browser-surface replacement path. That is
   what makes the invariant above true — the same gesture that replaces a
   browser Surface's id (I10) merely updates a tool's params.
-- **Axes**: the tool column of the six-axis table reads "terminal column for
-  the console face, browser column for the web face."
+- **Axes**: the tool column of the six-axis table reads terminal-column
+  semantics for its terminal and browser-column semantics for its browser.
 - **Activity**: full machine via the PTY; WATCHING defaults off for
   tool-spawned commands (`lib/src/lib/watched-commands.ts` rules).
-- **Untouched**: input to **either** face touches — the first web-face
-  interaction arms kill-confirm, so an unsaved scratch tool gets the
-  confirmation letter while an idle just-opened viewer dies silently.
+- **Untouched**: input to **either** capability touches — the first
+  browser-side interaction arms kill-confirm, so an unsaved scratch tool gets
+  the confirmation letter while an idle just-opened viewer dies silently.
 
 ### OSC 367
 
@@ -144,23 +149,24 @@ ESC ] 367 ; dehydrate ; {"v":1, …} ESC \
 
 **Spawn**: shell-hosted PTY through the `ensure` spawn path
 (`dor/src/commands/ensure.ts` semantics: prompt-wait typing, per-shell quoting
-via `dor/src/commands/shell-quote.ts`, command-exit tracking). Console face
+via `dor/src/commands/shell-quote.ts`, command-exit tracking). Terminal
 front from spawn — startup logs beat any spinner, and a command that never
 announces is simply a terminal running a TUI: a complete outcome, not a
 degraded one. A "TUI tool" is a registry entry whose command never announces.
 
-**Announce** → the same Surface **grows a web face** in place: no replacement,
-no ref transfer, no new id — params gain the web face and `surfaceType` flips
-by derivation. The pane flips to the GUI face; the console face sits behind a
-toggle on the header's far-left chip. Accepted: a fast tool flashes its console
-for ~100ms; the flip animation makes it read as teaching the two-face model.
+**Announce** → the same Surface **grows a browser** in place: no replacement,
+no ref transfer, no new id — params gain the browser and `surfaceType` flips
+by derivation. The pane flips to the browser; the terminal sits behind a
+toggle on the header's far-left chip. Accepted: a fast tool flashes its
+terminal for ~100ms; the flip animation makes it read as teaching the
+terminal-plus-browser pairing.
 
-**Command exit** → the web face is retired and the pane flips to the console —
-a shell prompt above the tool's dying words, the correct debugging posture.
-Re-running the command re-announces and revives the web face on the same
-Surface.
+**Command exit** → the browser is retired and the pane flips back to the
+terminal — a shell prompt above the tool's dying words, the correct debugging
+posture. Re-running the command re-announces and revives the browser on the
+same Surface.
 
-**Kill** → universal; reaps the process and the web face's backing resources.
+**Kill** → universal; reaps the process and the browser's backing resources.
 
 ### Identity and dedupe
 
@@ -233,7 +239,7 @@ fallback).
   functions of the target — reuse and cold restore both become
   caller-independent, and relative assets (a markdown image whose src is
   `diagram.png`) resolve for the tool itself.
-- `dor list`: rows report `kind: tool` with the web face's `render_mode`; the
+- `dor list`: rows report `kind: tool` with the browser's `render_mode`; the
   location column shows the **target**, else the announce name (cwd and
   localhost URLs are plumbing); JSON carries target + cwd + url.
 
@@ -264,7 +270,7 @@ gesture that connects. Output alone never creates surfaces.
 **Accepted risk — content-driven announce inside a blessed tool.** A tool
 rendering hostile bytes (a pager on a malicious file) passes the foreground
 gate — the pager *is* the foreground process — so embedded bytes can announce
-an attacker-chosen localhost port and re-point the web face at a service
+an attacker-chosen localhost port and re-point the browser at a service
 already listening on the user's machine, under the tool's name. This is
 accepted, deliberately: the blast radius is the dedupe containment applied to
 ports — an announce only ever reveals/frames, it never transfers input
@@ -288,8 +294,8 @@ The dehydrated payload is in-session state, not part of the persisted params
 session-restore story: where sessions restore, `persist: "never"` rows are
 dropped silently (a clock, a calculator) and the default respawns from bare
 args — the args-only floor is what makes taking no position on quit/restore
-safe. Remote: the console face is
-a Session and rides protocol-v1 as-is; the web face inherits the staged
+safe. Remote: the terminal is
+a Session and rides protocol-v1 as-is; the browser inherits the staged
 browser-surface gap.
 
 ### Open questions

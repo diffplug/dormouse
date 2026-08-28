@@ -48,7 +48,7 @@ import type {
   SurfaceRenderMode as DorSurfaceRenderMode,
   SurfaceView as DorSurfaceView,
 } from 'dor/commands/types';
-import { hasConsoleFace, hasWebFace } from 'dor/commands/types';
+import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import type { PersistedDoor, PersistedSurfaceRefs } from '../lib/session-types';
 import type { DropTarget, RestoreToken } from '../lib/lath/ops';
 import type { Edge } from '../lib/lath/model';
@@ -853,15 +853,16 @@ export function Wall({
 
     return sources.map((source, index) => {
       const kind = surfaceKindFromParams(source.params);
-      // Row fields are face-gated, not kind-gated (docs/specs/glossary.md →
-      // Faces): shell state rides the console face, the URL rides the web face,
-      // so a future both-faces kind populates both without touching this map.
-      const consoleFace = hasConsoleFace(kind);
+      // Row fields are capability-gated, not kind-gated (docs/specs/glossary.md
+      // → Surface kinds): shell state rides the terminal, the URL rides the
+      // browser, so a future kind that has both populates both without touching
+      // this map.
+      const terminalBacked = hasTerminal(kind);
       const renderMode = surfaceRenderModeFromParams(source.params);
       const state = states[index];
       const activity = activityStates.get(source.id);
-      const shellActivity = consoleFace ? state.activity : null;
-      const title = consoleFace
+      const shellActivity = terminalBacked ? state.activity : null;
+      const title = terminalBacked
         ? deriveSurfaceLabel(state, states, appTitleForPane, source.title ?? source.id)
         : (source.title ?? source.id);
       const view: DorSurfaceView = source.minimized
@@ -876,13 +877,13 @@ export function Wall({
         title,
         focused: source.id === activeId,
         view,
-        cwd: consoleFace ? (state.cwd?.path ?? null) : null,
+        cwd: terminalBacked ? (state.cwd?.path ?? null) : null,
         activity: shellActivity ? shellActivity.kind : null,
         ...(shellActivity?.kind === 'finished' && shellActivity.exitCode !== undefined
           ? { exitCode: shellActivity.exitCode }
           : {}),
-        command: consoleFace ? (state.currentCommand?.displayCommand ?? null) : null,
-        url: hasWebFace(kind) ? browserUrlFromParams(source.params) : null,
+        command: terminalBacked ? (state.currentCommand?.displayCommand ?? null) : null,
+        url: hasBrowser(kind) ? browserUrlFromParams(source.params) : null,
         ringing: activity?.status === 'ALERT_RINGING',
         todo: activity?.todo === true,
         awaited: activity?.awaited === true,
@@ -1038,10 +1039,10 @@ export function Wall({
 
     const newId = generatePaneId();
     const browserMeta = browserLeafMeta(title, params);
-    // Replace-in-place is reserved for a reference with no web face — a blank
+    // Replace-in-place is reserved for a reference with no browser — a blank
     // untouched shell. Anything holding web content (a browser surface today, a
-    // both-faces tool later) must split beside it instead of being destroyed.
-    const replaceUntouchedShell = !hasWebFace(reference.kind) && isUntouched(reference.id);
+    // tool that has both later) must split beside it instead of being destroyed.
+    const replaceUntouchedShell = !hasBrowser(reference.kind) && isUntouched(reference.id);
 
     if (replaceUntouchedShell) {
       // Whether the user's current selection sits on the pane being replaced.

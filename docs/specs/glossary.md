@@ -44,14 +44,18 @@ follows:
 For browser Surfaces `renderMode` is canonical; the CLI `render_mode` field is
 derived from it for `dor` output and is never stored.
 
-**Faces** — the capability primitive beneath the kinds. A Surface has a
-**console face** (a PTY + xterm) or a **web face** (a browser renderer); a
-kind names a face-set — `terminal` = console-only, `browser` = web-only. A
-both-faces `tool` kind is staged in `docs/specs/dor-tool.md`. Operations gate
-on the face they need, never on the kind enum (see
-[Liskov contract](#liskov-contract)), and `dor list --json` rows carry the
-face-set as `faces`. Source of truth: `facesOfKind` / `hasConsoleFace` /
-`hasWebFace` in `dor/src/commands/types.ts`.
+**Kinds are capability sets, not exclusive categories.** Every Surface has a
+**terminal** (a PTY + xterm — i.e. a Session), a **browser** renderer, or
+both: `terminal` has only a terminal, `browser` only a browser, and the staged
+`tool` (`docs/specs/dor-tool.md`) has both. Operations gate on the capability
+they need, never on the kind enum (see [Liskov contract](#liskov-contract)) —
+`read` / `send` / `await` / port scans require the terminal, nav / render-mode
+/ agent-browser verbs require the browser. `dor list --json` rows carry
+`has_terminal` and `has_browser` so callers can gate the same way; both are
+always emitted, and gating on them rather than on `kind` is what lets a script
+written today match a kind that has both. Source of truth: `hasTerminal` /
+`hasBrowser` over the `KIND_CAPABILITIES` table in
+`dor/src/commands/types.ts`.
 
 A **Session** runs the full six-axis model below. A **browser Surface** participates only where a web view meaningfully can:
 
@@ -223,7 +227,8 @@ Every Registry API has layer preconditions, declared here:
 | **View-gated** | `View ≠ Hidden` | `focus` |
 | **Process-gated** | `Process = Live` | `write`, `resize` |
 | **Registry-gated** | `Registry = Mounted` | `refit` |
-| **Face-gated** | Surface has the required face ([Panes and Surfaces](#panes-and-surfaces)) | `dor read` / `send` / `await` / port scans (console face); browser nav / render ops (web face) |
+| **Terminal-gated** | Surface has a terminal ([Panes and Surfaces](#panes-and-surfaces)) | `dor read` / `send` / `await`, port scans |
+| **Browser-gated** | Surface has a browser ([Panes and Surfaces](#panes-and-surfaces)) | browser nav / render-mode ops |
 
 A caller holding a `SessionId` can issue universal operations without branching. Gated operations are explicit: the caller checks the relevant layer first. Uniform typed-error enforcement of these preconditions is staged — see [Future](#future).
 
