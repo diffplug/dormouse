@@ -18,9 +18,9 @@ export const window = {
 
 /**
  * `getWebviewHtml` resolves the media directory through `Uri.file` before
- * handing it to `asWebviewUri`. The tests only ever compare the result as a
- * string, so a plain `fsPath` carrier is the whole contract.
+ * handing it to `asWebviewUri`, which is the only thing that reads it back. A
+ * plain `fsPath` carrier is the whole contract.
  */
 export const Uri = {
-  file: (fsPath: string) => ({ fsPath, toString: () => `file://${fsPath}` }),
+  file: (fsPath: string) => ({ fsPath }),
 };
