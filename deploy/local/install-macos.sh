@@ -173,13 +173,19 @@ fs.renameSync(tmp, link);
 # release is answering. lsof reports the vnode's real path, which names the
 # release.
 listening_release() {
-  local pid path
+  local pid path root
+  # lsof reports the vnode's PHYSICAL path, but $INSTALL_ROOT is logical — it keeps
+  # whatever symlink the caller walked through (`pwd`, not `pwd -P`). Comparing
+  # the two directly is a check that can never pass, the exact mirror of the
+  # `ps` trap above. It bites a DORMOUSE_INSTALL_ROOT under `mktemp -d`, which
+  # on macOS sits below /var -> /private/var.
+  root="$(cd "$INSTALL_ROOT" 2>/dev/null && pwd -P)" || return 0
   pid="$(lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
   [ -n "$pid" ] || return 0
   while IFS= read -r path; do
     case "$path" in
-      "n$INSTALL_ROOT/releases/"*)
-        path="${path#"n$INSTALL_ROOT/releases/"}"
+      "n$root/releases/"*)
+        path="${path#"n$root/releases/"}"
         printf '%s\n' "${path%%/*}"
         return 0
         ;;
@@ -626,17 +632,23 @@ release_field() {
 # Which release is the process listening on $1 actually running? Empty if
 # nothing is, or if the answer does not come from this install root.
 #
-# Deliberately lsof's `txt` record and not `ps -o comm=` — see the full
-# rationale on the installer's copy of this function, and the `ps` trap in
-# docs/specs/server.md.
+# Deliberately lsof's `txt` record and not `ps -o comm=`, and deliberately a
+# physical root — see the full rationale on the installer's copy of this
+# function, and the `ps` trap in docs/specs/server.md.
 listening_release() {
-  local pid path
+  local pid path root
+  # lsof reports the vnode's PHYSICAL path, but $ROOT is logical — it keeps
+  # whatever symlink the caller walked through (`pwd`, not `pwd -P`). Comparing
+  # the two directly is a check that can never pass, the exact mirror of the
+  # `ps` trap above. It bites a DORMOUSE_INSTALL_ROOT under `mktemp -d`, which
+  # on macOS sits below /var -> /private/var.
+  root="$(cd "$ROOT" 2>/dev/null && pwd -P)" || return 0
   pid="$(lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
   [ -n "$pid" ] || return 0
   while IFS= read -r path; do
     case "$path" in
-      "n$ROOT/releases/"*)
-        path="${path#"n$ROOT/releases/"}"
+      "n$root/releases/"*)
+        path="${path#"n$root/releases/"}"
         printf '%s\n' "${path%%/*}"
         return 0
         ;;
@@ -1231,7 +1243,7 @@ else
 
   if [ "$LIVE_OK" != "1" ]; then
     LISTENING="$(listening_release "$LOOPBACK_PORT")"
-    if [ -n "$LISTENING" ]; then
+    if [ -n "$LISTENING" ] && [ "$LISTENING" != "$RELEASE_ID" ]; then
       warn "port $LOOPBACK_PORT is served by release '$LISTENING', not by $RELEASE_ID"
     else
       warn "the new release never answered http://127.0.0.1:$LOOPBACK_PORT/api/hello"

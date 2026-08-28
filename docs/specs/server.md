@@ -884,8 +884,11 @@ Invariants the installer exists to hold:
   command that waits for health, which is `manage rollback` and `manage
   restart`. Waiting on the identity rather than asserting it after the first
   200 also absorbs the window in which an outgoing process answers one last
-  time. `manage status` is deliberately outside this: it reports what the
-  pointers say, not who is answering. On macOS the resolution must read the
+  time. Two known exceptions, both stated so the invariant is not read as
+  covering them: Windows `manage restart` still accepts a bare 200, because
+  `Wait-Health` has no identity check and its callers do not add one; and
+  `manage status` on both platforms is outside this by design, reporting what
+  the pointers say rather than who is answering. On macOS the resolution must read the
   executable's real path — see the `ps` trap below. `Source of truth:`
   `listening_release` + `wait_for_health` (macOS), `Get-ListeningRelease`
   (Windows).
@@ -912,7 +915,12 @@ Mechanical traps the scripts encode, each of which fails silently otherwise:
   time and "confirm" whatever it points at now — agreeing with itself no matter
   which release is answering, which is the one thing the check exists to catch.
   `lsof -p <pid> -a -d txt -Fn` reports the vnode's real path, which names the
-  release directory.
+  release directory. That path is *physical*, while the scripts' `$ROOT` is
+  logical (`pwd`, not `pwd -P`), so the comparison canonicalizes the root first
+  — otherwise an install root reached through a symlink matches nothing and the
+  check can never pass, which on the forward path rolls back a good update. A
+  `DORMOUSE_INSTALL_ROOT` under `mktemp -d` is exactly that case, since macOS
+  puts it below `/var` -> `/private/var`.
 * **`pnpm` resolves to a `.ps1` before its `.CMD`.** (Windows.) The PowerShell
   shim cannot be launched as a process, so the installer takes the first
   `Application`-typed resolution rather than `(Get-Command pnpm).Source`.
