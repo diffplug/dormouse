@@ -15,6 +15,7 @@ import {
   createWebPushSender,
   generateVapidKeys,
 } from './push.js';
+import { removeRuntimeFile, writeRuntimeFile } from './runtime-file.js';
 import { VapidStore } from './state.js';
 
 function loadConfig() {
@@ -29,7 +30,8 @@ function loadConfig() {
   }
 }
 
-const { port, bindHost, vapidKeys, vapidSubject, ...appConfig } = loadConfig();
+const { port, bindHost, vapidKeys, vapidSubject, runtimeFile, releaseId, ...appConfig } =
+  loadConfig();
 const { origin, stateDir } = appConfig;
 
 // The one part of the VAPID story that is not a pure env read: with no keys
@@ -69,8 +71,37 @@ const server = serve(
     console.log(
       `server listening on http://${bindHost ?? 'localhost'}:${info.port} (origin ${origin})`,
     );
+    // Only now, with the port actually taken: this file is what tells an
+    // installer which release is answering, and claiming it before the bind
+    // succeeded would be the very confusion it exists to remove. Never fatal —
+    // an unwritten identity degrades the installer to "unknown", which it
+    // handles, where a crash here would take down a working server.
+    if (runtimeFile !== null) {
+      void writeRuntimeFile(runtimeFile, {
+        pid: process.pid,
+        releaseId,
+        port: info.port,
+        origin,
+        startedAt: new Date().toISOString(),
+      }).catch((err: unknown) => {
+        console.warn(
+          `could not write ${runtimeFile}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+    }
   },
 );
+
+// A clean exit takes the file with it. A crash deliberately leaves it: readers
+// check whether the recorded pid is alive, so a stale file reads as "nothing is
+// serving" rather than as a lie.
+if (runtimeFile !== null) {
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(signal, () => {
+      void removeRuntimeFile(runtimeFile).finally(() => process.exit(0));
+    });
+  }
+}
 
 // Bind the relay's WS upgrade handler onto the running server (@hono/node-ws).
 injectWebSocket(server);

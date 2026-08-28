@@ -42,6 +42,8 @@ UI lives in `lib`/`standalone`.
 | `DORMOUSE_REQUIRE_USER_VERIFICATION` | `true` demands a *user-verified* passkey assertion (biometric/PIN), not merely user presence. Off by default, and only the exact string `true` enables it — a misspelling must read as off, because turning this on without UV-capable authenticators locks the account out of its own server. Mirrored to every Host in its `HostEnrollResponse` so both sides demand the same thing (`SECURITY.md` -> Remote Control). |
 | `DORMOUSE_BIND_HOST`      | Interface to listen on. Unset binds every interface (what a container wants); set `127.0.0.1` when a TLS proxy on the same machine is the front door. |
 | `DORMOUSE_VAPID_PUBLIC_KEY` / `DORMOUSE_VAPID_PRIVATE_KEY` | Web Push signing keypair. Set both or neither. At startup the Server decodes both, derives the P-256 public point from the private key, and exits on a missing, malformed, or mismatched pair. Unset, the server mints a pair on first boot and persists it to `vapid.json`. |
+| `DORMOUSE_RUNTIME_FILE`   | Absolute path the server records `{pid, releaseId, port, origin, startedAt}` into once it has **bound**, mode `0600`. Unset — dev, containers, every test — writes nothing. A relative value is a `ConfigError`: the wrapper runs under a service manager whose working directory is not the installer's, so it would land somewhere neither side can predict. Deliberately outside `DORMOUSE_STATE_DIR`, being runtime truth about one process rather than durable state that gets backed up and restored. |
+| `DORMOUSE_RELEASE_ID`     | The release directory's name, supplied by the installer's `run-server` wrapper, recorded in the runtime file. `null` when the server was not started by an installer. |
 | `DORMOUSE_VAPID_SUBJECT`  | `mailto:`/`https:` contact for push-service operators (RFC 8292). Defaults to `DORMOUSE_ORIGIN` when that origin is https and not loopback; otherwise there is no default and push stays off. The Server parses and validates it at startup and exits on an invalid value — including a loopback contact, which Apple rejects. |
 
 WebAuthn requires a secure context: `localhost` works for development; for a
@@ -59,6 +61,8 @@ explicitly — keeps working unchanged.
 
 Source of truth: `server/src/config.ts` (`readConfig`) maps the environment to
 the entrypoint's config and is unit-tested in `server/test/config.test.mjs`;
+`server/test/runtime-file.test.mjs` spawns the real entrypoint and asserts the
+runtime file appears only after a bind, names that process, and is `0600`;
 `server/test/bind-host.test.mjs` spawns the real entrypoint and asserts the
 plaintext port is unreachable off-loopback when `DORMOUSE_BIND_HOST=127.0.0.1`.
 `readConfig` also reads the `DORMOUSE_VAPID_*` vars — the both-or-neither
@@ -902,27 +906,32 @@ Invariants the installer exists to hold:
   a mismatch), the rollback restore, `manage verify`, and — because the identity
   is folded into the health *wait* rather than bolted onto its callers — every
   command that waits for health, which is `manage rollback` and `manage
-  restart`. Waiting on the identity rather than asserting it after the first
-  200 also absorbs the window in which an outgoing process answers one last
-  time. Two known exceptions, both stated so the invariant is not read as
-  covering them: Windows `manage restart` still accepts a bare 200, because
-  `Wait-Health` has no identity check and its callers do not add one; and
-  `manage status` on all three platforms is outside this by design, reporting
-  what the pointers say rather than who is answering.
+  restart`. Waiting on the identity rather than asserting it after the first 200
+  also absorbs the window in which an outgoing process answers one last time.
+  Two known exceptions, both stated so the invariant is not read as covering
+  them: Windows `manage restart` still accepts a bare 200, because `Wait-Health`
+  has no identity check and its callers do not add one; and `manage status` on
+  all three platforms is outside this by design, reporting what the pointers say
+  rather than who is answering.
 
-  macOS and Windows prove identity by resolving the PID holding the port back to
-  the release directory it runs from. Linux resolves it too, but leads with
-  `systemctl --user is-active` and keeps the resolution as the secondary check
-  that names the culprit: its service manager already owns the answer, and the
-  resolution alone cannot be trusted to fail closed there, because the responder
-  may be invisible to `ss` entirely — a foreign network namespace, or WSL with
-  `networkingMode=mirrored`, where loopback is shared with the Windows host and
-  the listener can be a Windows process.
+  **The server answers this itself.** `run-server` passes
+  `DORMOUSE_RUNTIME_FILE` and `DORMOUSE_RELEASE_ID` (Configuration above), and
+  the server writes `{pid, releaseId, port}` there once it has *bound*, so
+  `listening_release` is a file read, a port match and a liveness check on all
+  three platforms rather than three different walks of the process table. It
+  cannot go in `/api/hello`, which is unauthenticated, CORS-`*` and reachable
+  through `tailscale serve`.
 
-  The resolution must read the executable's real path — see the `ps` trap below.
-  `Source of truth:` `listening_release` + `wait_for_health` (macOS),
-  `Get-ListeningRelease` (Windows), `service_healthy` + `listening_release`
-  (Linux).
+  Empty means **unknown**, never "nobody": a stale file whose pid is dead, a
+  server started outside the installer, and a foreign process that got the port
+  first are indistinguishable from the reader's side, and all must fail the
+  comparison rather than pass it. A clean exit removes the file; a crash leaves
+  it, which the liveness check reads correctly. Linux additionally leads with
+  `systemctl --user is-active`, because there the responder can be invisible
+  even to `ss` — a foreign network namespace, or WSL with
+  `networkingMode=mirrored`, where loopback is shared with the Windows host.
+  `Source of truth:` `server/src/runtime-file.ts`, read by `listening_release`
+  (macOS, Linux) and `Get-ListeningRelease` (Windows).
 
 Mechanical traps the scripts encode, each of which fails silently otherwise:
 
@@ -940,25 +949,6 @@ Mechanical traps the scripts encode, each of which fails silently otherwise:
   `current` pointing where it was — the update becomes a silent no-op, and the
   prune then deletes the release nothing points at. The switch uses `rename(2)`
   on the link path instead, and asserts afterwards that `current` advanced.
-* **`ps` reports the path a process was exec'd by, symlink and all.** (macOS,
-  Linux.) `bin/run-server` execs `"$ROOT/current/runtime/node"`, so `ps -o comm=`
-  names `current/runtime/node` rather than the release behind it. Resolving which
-  release holds the port with `ps` would therefore follow `current` a second
-  time and "confirm" whatever it points at now — agreeing with itself no matter
-  which release is answering, which is the one thing the check exists to catch.
-  `lsof -p <pid> -a -d txt -Fn` reports the vnode's real path, which names the
-  release directory. That path is *physical*, while the roots compared against
-  it are logical — `manage`'s `$ROOT` comes from `pwd` rather than `pwd -P`, and
-  the installer's `$INSTALL_ROOT` straight from `$HOME` or
-  `DORMOUSE_INSTALL_ROOT` — so the comparison canonicalizes the root first
-  — otherwise an install root reached through a symlink matches nothing and the
-  check can never pass, which on the forward path rolls back a good update. A
-  `DORMOUSE_INSTALL_ROOT` under `mktemp -d` is exactly that case, since macOS
-  puts it below `/var` -> `/private/var`. Linux has both halves: `ps -o args=`
-  there prints the `current/…` path too, and `/proc/<pid>/exe` — the kernel's
-  own reference to the executed inode, which names the release and keeps naming
-  it after `current` is repointed elsewhere — is physical in the same way, so it
-  canonicalizes the root identically.
 * **`pnpm` resolves to a `.ps1` before its `.CMD`.** (Windows.) The PowerShell
   shim cannot be launched as a process, so the installer takes the first
   `Application`-typed resolution rather than `(Get-Command pnpm).Source`.

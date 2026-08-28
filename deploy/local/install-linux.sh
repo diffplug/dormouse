@@ -206,34 +206,30 @@ req.on("error", () => process.exit(1));
 
 unit_active() { [ "$(systemctl --user is-active "$UNIT" 2>/dev/null || true)" = "active" ]; }
 
-# Echoes the release id of the process holding port $1, or nothing when no
-# listener under this install root can be seen. Requiring the `releases/` prefix
-# is what keeps an unrelated `node` somewhere else on the machine from being
-# reported as a release.
+# Echoes the release id serving port $1, or nothing when that cannot be
+# established. The server writes {pid, releaseId, port} at successful bind
+# (server/src/runtime-file.ts), so this is a file read and a liveness check
+# rather than three platforms' worth of process forensics.
 #
-# `/proc/<pid>/exe` and not `ps`: `bin/run-server` execs
-# "$ROOT/current/runtime/node", so `ps -o args=` names the path it was exec'd
-# by, symlink and all — resolving through that would follow `current` a second
-# time and agree with itself no matter which release is answering. `exe` is the
-# kernel's reference to the executed inode, so it names the release directly.
+# Empty means "unknown", never "nobody": a stale file whose pid is dead, a
+# server started outside the installer, and a foreign process that got the port
+# first are all indistinguishable from here, and all of them must fail the
+# comparison rather than pass it.
 listening_release() {
-  local port="$1" pid exe rest root
-  command -v ss >/dev/null 2>&1 || return 0
-  pid="$(ss -lntpH "sport = :$port" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -1)"
-  [ -n "$pid" ] || return 0
-  exe="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"
-  # `readlink -f` gives the PHYSICAL path, but $INSTALL_ROOT is logical — it
-  # comes straight from $HOME or DORMOUSE_INSTALL_ROOT, keeping whatever symlink
-  # the caller walked through. Comparing the two directly is a check that can
-  # never pass, the mirror of the `ps` trap above, and on the forward path it
-  # rolls back a good update. Canonicalize the root before the prefix test.
-  root="$(cd "$INSTALL_ROOT" 2>/dev/null && pwd -P)" || root="$INSTALL_ROOT"
-  case "$exe" in
-    "$root/releases/"*)
-      rest="${exe#"$root/releases/"}"
-      printf '%s\n' "${rest%%/*}"
-      ;;
-  esac
+  local port="$1" file pid release rport
+  file="$INSTALL_ROOT/run/server.json"
+  [ -r "$file" ] || return 0
+  pid="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$file" | head -1)"
+  release="$(sed -n 's/.*"releaseId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file" | head -1)"
+  rport="$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$file" | head -1)"
+  [ -n "$pid" ] && [ -n "$release" ] || return 0
+  # The file is about one socket; a record for a different port says nothing
+  # about this one.
+  [ "$rport" = "$port" ] || return 0
+  # A crash leaves the file behind on purpose, so liveness is what separates a
+  # serving process from a corpse.
+  kill -0 "$pid" 2>/dev/null || return 0
+  printf '%s\n' "$release"
 }
 
 # $1 = the release id that must be answering. Three legs, all required:
@@ -646,6 +642,14 @@ ENTRY="$ROOT/current/server/dist/index.js"
 [ -x "$NODE_BIN" ] || { echo "run-server: missing runtime $NODE_BIN" >&2; exit 78; }
 [ -f "$ENTRY" ] || { echo "run-server: missing entrypoint $ENTRY" >&2; exit 78; }
 
+# Tell the server who it is. It records {pid, releaseId, port} here once it has
+# actually bound, which is how `manage` and the installer answer "which release
+# is answering?" without reconstructing it from the process table. Set here
+# rather than in server.env because it is derived from `current`, which moves.
+export DORMOUSE_RUNTIME_FILE="$ROOT/run/server.json"
+RELEASE_TARGET="$(readlink "$ROOT/current" 2>/dev/null || true)"
+[ -n "$RELEASE_TARGET" ] && export DORMOUSE_RELEASE_ID="${RELEASE_TARGET##*/}"
+
 exec "$NODE_BIN" "$ENTRY"
 RUNSERVER_EOF
 chmod 0700 "$BIN_DIR/run-server"
@@ -754,35 +758,25 @@ owner_only() {
   fi
 }
 
-# Which release does the process actually holding the loopback port run from?
+# Which release is serving the loopback port?
 #
-# A 200 from /api/hello proves *a* server is up, not that it is the current
-# release — a stale process on this port answers identically. Echoes the release
-# id, or nothing when no listener under this install root can be seen. The
-# `releases/` prefix is required so an unrelated `node` elsewhere on the machine
-# is never reported as a release.
-#
-# `/proc/<pid>/exe` and not `ps`: `bin/run-server` execs
-# "$ROOT/current/runtime/node", so `ps -o args=` names the path it was exec'd
-# by, symlink and all — resolving through that would follow `current` a second
-# time and agree with itself no matter which release is answering. `exe` is the
-# kernel's reference to the executed inode, so it names the release directly.
+# The server writes {pid, releaseId, port} at successful bind
+# (server/src/runtime-file.ts), so this is a file read and a liveness check.
+# Empty means "unknown", never "nobody": a stale file whose pid is dead, a
+# server started outside the installer, and a foreign process that got the port
+# first are all indistinguishable from here, and all must fail the comparison
+# rather than pass it.
 listening_release() {
-  local port="$1" pid exe rest root
-  command -v ss >/dev/null 2>&1 || return 0
-  pid="$(ss -lntpH "sport = :$port" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -1)"
-  [ -n "$pid" ] || return 0
-  exe="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"
-  # `readlink -f` gives the PHYSICAL path; $ROOT comes from `pwd`, which keeps
-  # whatever symlink the caller walked through. Canonicalize before comparing,
-  # or the prefix test matches nothing and the check can never pass.
-  root="$(cd "$ROOT" 2>/dev/null && pwd -P)" || root="$ROOT"
-  case "$exe" in
-    "$root/releases/"*)
-      rest="${exe#"$root/releases/"}"
-      printf '%s\n' "${rest%%/*}"
-      ;;
-  esac
+  local port="$1" file pid release rport
+  file="$ROOT/run/server.json"
+  [ -r "$file" ] || return 0
+  pid="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$file" | head -1)"
+  release="$(sed -n 's/.*"releaseId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file" | head -1)"
+  rport="$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$file" | head -1)"
+  [ -n "$pid" ] && [ -n "$release" ] || return 0
+  [ "$rport" = "$port" ] || return 0
+  kill -0 "$pid" 2>/dev/null || return 0
+  printf '%s\n' "$release"
 }
 
 unit_active() { [ "$(systemctl --user is-active "$UNIT" 2>/dev/null || true)" = "active" ]; }
@@ -1158,7 +1152,7 @@ cmd_uninstall() {
   else
     printf 'left the Serve config alone (it does not point at 127.0.0.1:%s)\n' "$PORT"
   fi
-  rm -rf "$ROOT/releases" "$ROOT/current" "$ROOT/previous" "$ROOT/bin"
+  rm -rf "$ROOT/releases" "$ROOT/current" "$ROOT/previous" "$ROOT/bin" "$ROOT/run"
   printf '\nuninstalled. config and state remain at:\n  %s\n  %s\n\n' "$ROOT/config" "$STATE_DIR"
   printf 'lingering, if you enabled it, is left as it is: loginctl disable-linger %s\n\n' "$USER"
 }
