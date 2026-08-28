@@ -218,12 +218,11 @@ day:
   the supervision loop that is the actual KeepAlive. On Linux: the unit is known
   to the user manager, is `enabled`, passes `systemd-analyze --user verify`, and
   declares `Restart=always` and `WantedBy=default.target`.
-- Loopback `/api/hello` responds and the Pocket app is served — **and the
-  responder is the installed release**, not merely something holding the port.
-  Windows and Linux prove that separately (Windows resolves the port-holder back
-  to a release directory; Linux gates every health check on
-  `systemctl --user is-active`); macOS does not yet, so read its ✓ as "something
-  answered".
+- Loopback `/api/hello` responds and the Pocket app is served, and the process
+  actually holding the port belongs to the current release — an orphan of an
+  older release answers `/api/hello` identically, so a 200 alone would let every
+  check here pass while stale code serves. On Linux `systemctl --user is-active`
+  carries that proof, because a responder can be invisible to `ss` altogether.
 - Port 3100 is bound only to `127.0.0.1`, and the plaintext port is unreachable
   on the laptop's Tailscale IP.
 - `tailscale serve` proxies to `127.0.0.1:3100` at the same origin recorded in
@@ -239,9 +238,9 @@ day:
 - The current release pointer resolves to a release with `RELEASE` metadata, and
   neither the service definition nor the `run-server` wrapper refers to the
   source checkout. A retained previous release is checked too, but a first
-  install has none, so `verify` warns there rather than failing. On macOS it
-  does fail if that pointer names the same release as `current`, because such
-  an install advertises a rollback target that does not exist.
+  install has none, so `verify` warns there rather than failing. It does fail if
+  that pointer names the same release as `current`, because such an install
+  advertises a rollback target that does not exist.
 
 These cannot be proven from the laptop, and are the checkpoints below:
 

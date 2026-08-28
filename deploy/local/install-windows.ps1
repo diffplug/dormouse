@@ -1552,8 +1552,13 @@ function Invoke-Verify {
   }
 
   $prev = Get-PreviousRelease
-  if ($prev) { Pass "a previous release is retained for rollback" }
-  else { Warn "no previous release retained yet -- rollback is unavailable until the next update" }
+  if ($prev -and $prev -eq $cur) {
+    Fail "previous names the same release as current -- there is no rollback target"
+  } elseif ($prev) {
+    Pass "a previous release is retained for rollback"
+  } else {
+    Warn "no previous release retained yet -- rollback is unavailable until the next update"
+  }
 
   # The release must not depend on the source checkout.
   $src = Get-ReleaseField 'source_checkout'
@@ -1664,6 +1669,13 @@ function Invoke-Rollback {
   $cur = Get-CurrentRelease
   if (-not (Test-Path -LiteralPath (Join-Path $Root "releases\$prev"))) {
     [Console]::Error.WriteLine("previous release directory is gone: $prev")
+    return 1
+  }
+  # Swapping a release with itself would wait for health and print success while
+  # changing nothing. Refuse instead -- an install whose two pointers name one
+  # release has no rollback target, whatever `previous` suggests.
+  if ($prev -eq $cur) {
+    [Console]::Error.WriteLine("previous and current name the same release ($prev) -- nothing to roll back to")
     return 1
   }
   Write-Host "rolling back: $cur -> $prev"
