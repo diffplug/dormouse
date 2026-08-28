@@ -13,8 +13,8 @@ export interface ConfirmKill {
 export const KILL_SHAKE_MS = 400;
 export const KILL_CONFIRM_MS = 220;
 
-// Excludes 'x' so the kill shortcut can't accept itself on a double-tap.
-const KILL_CONFIRM_CHARS = 'abcdefghijklmnopqrstuvwyz';
+// Excludes both kill shortcuts ('x' and 'k') so a double-tap can't accept itself.
+const KILL_CONFIRM_CHARS = 'abcdefghijlmnopqrstuvwyz';
 export function randomKillChar(): string {
   return KILL_CONFIRM_CHARS[Math.floor(Math.random() * KILL_CONFIRM_CHARS.length)];
 }
