@@ -148,15 +148,31 @@ export const RULES = [
   {
     // Anchored on the comparison, not the helper's name — the name appears at
     // its definition and at every call site, so removing the check that
-    // consumes it left this green. Linux writes the conjunct twice (installer
-    // body and generated `manage`) and both must survive.
+    // consumes it left this green.
+    //
+    // `minMatches` is doing the real work here, and it has to be set for every
+    // platform. Each writes the conjunct at more than one site, and a pattern
+    // that matched only one left the others deletable: on macOS the first
+    // version matched the generated `manage`'s wait and left the post-switch
+    // wait — the one whose failure rolls back and dies — unlinted. Counting is
+    // what makes "every copy survives" checkable; the self-test cannot see it,
+    // because it proves the *matched* text is load-bearing, never that every
+    // copy of the control is matched.
+    //
+    // The counts, and where they come from:
+    //   macOS   3 — `manage`'s wait_for_health, the post-switch wait, the rollback wait
+    //   Linux   2 — `service_healthy`, once in the body and once in `manage`
+    //   Windows 4 — post-switch, Restore-PreviousRelease, `manage rollback`, `manage verify`
+    // Windows names its comparison four different ways, so the pattern matches
+    // the shape (an identity variable against an expected release) rather than
+    // one spelling.
     rule: 'A 200 does not say who answered — health is paired with a release-identity check',
     patterns: {
-      macOS: /\[ "\$\(listening_release "\$PORT"\)" = "\$want" \]/,
+      macOS: /\[ "\$\(listening_release "\$(?:LOOPBACK_)?PORT"\)" = "\$\w+" \]/,
       Linux: /&& \[ "\$\(listening_release "\$(?:LOOPBACK_)?PORT"\)" = "\$1" \]/,
-      Windows: /\$listening -ne \$RELEASE_ID/,
+      Windows: /\$(?:listening|restored|serving) -(?:ne|eq) \$(?:RELEASE_ID|OLD_RELEASE|prev|cur)\b/,
     },
-    minMatches: { Linux: 2 },
+    minMatches: { macOS: 3, Linux: 2, Windows: 4 },
   },
 ];
 

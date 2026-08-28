@@ -17,7 +17,11 @@ import { startServer, stopServer } from './spawn-server.mjs';
 test('a bound server records its pid, release and port, owner-only', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dormouse-rt-'));
   const runtimeFile = join(dir, 'run', 'server.json');
+  // Bound explicitly: the shared helper leaves DORMOUSE_BIND_HOST unset because
+  // bind-host.test.mjs needs that case, and unset means every interface — with
+  // the helper's known setup password, for the length of the test.
   const { child, port } = await startServer({
+    DORMOUSE_BIND_HOST: '127.0.0.1',
     DORMOUSE_RUNTIME_FILE: runtimeFile,
     DORMOUSE_RELEASE_ID: '20260101T000000Z-abc1234',
   });
@@ -52,7 +56,7 @@ test('a bound server records its pid, release and port, owner-only', async () =>
 test('nothing is written when no installer asked for it', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dormouse-rt-'));
   const runtimeFile = join(dir, 'server.json');
-  const { child } = await startServer({});
+  const { child } = await startServer({ DORMOUSE_BIND_HOST: '127.0.0.1' });
   try {
     await new Promise((r) => setTimeout(r, 500));
     await assert.rejects(readFile(runtimeFile, 'utf8'), /ENOENT/);

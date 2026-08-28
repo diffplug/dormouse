@@ -12,12 +12,20 @@
  * lint passes" says nothing about any of that; asserting "the lint fails when
  * each control is removed" is the property that matters.
  *
- * This is not a claim that the patterns are *sufficient* — a control can be
- * present and wrong, and the security audit still owns that. It is only a claim
- * that each pattern is anchored on its own control rather than on incidental
- * text elsewhere in the file.
+ * This is not a claim that the patterns are *sufficient*, and there is one gap
+ * worth naming because this file looks like it covers it. Removing the *matched*
+ * text proves that match is load-bearing; it says nothing about a second copy of
+ * the same control that the pattern never matched. A review found exactly that:
+ * the identity rule matched one call site per platform, so macOS's post-switch
+ * wait — the one whose failure rolls back and dies — was deletable with this
+ * self-test green. `minMatches` in `deploy-lint.mjs` is what covers that, and it
+ * has to be set per platform from a counted list of the real call sites. A
+ * control can also be present and wrong; the security audit still owns that.
  *
- * Restores every file it touches, including on failure.
+ * Restores every file it touches on any thrown error. A signal mid-run (Ctrl-C,
+ * a cancelled job) is the one gap: it can leave an installer with one control
+ * deleted and a `*.selftest.bak` beside it. `deploy-lint` catches that on the
+ * way in, and the backups are gitignored so they cannot be staged by accident.
  */
 
 import { copyFileSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

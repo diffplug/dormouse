@@ -81,7 +81,10 @@ export async function startServer(extraEnv = {}) {
 
 /** Stop a spawned server and wait for it to actually go. */
 export async function stopServer(child) {
-  if (child.exitCode !== null) return;
+  // A child killed by a signal keeps `exitCode === null` and sets `signalCode`.
+  // Checking only the former falls through to a no-op `kill` and then awaits an
+  // `'exit'` that already fired — the test hangs instead of failing.
+  if (child.exitCode !== null || child.signalCode !== null) return;
   child.kill('SIGTERM');
   await new Promise((resolve) => child.on('exit', resolve));
 }
