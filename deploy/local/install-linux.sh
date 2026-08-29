@@ -310,17 +310,21 @@ ts_denied() {
   esac
 }
 
-# One remediation, three call sites. The `sudo` line is the single most
+# One remediation, four call sites. The `sudo` line is the single most
 # important operator-facing instruction in this script, so it is written once.
-# $1 = what was refused, $2 = the CLI's own output
+# The lead clause is the caller's, because one of the four has not run anything
+# yet: preflight predicts the refusal rather than reporting one.
+# $1 = lead clause, phrased for what actually happened
+# $2 = supporting detail (the CLI's own output, or what the role check found)
+# $3 = optional trailing paragraph, for context only some call sites have
 die_needs_operator() {
-  die "$1 was refused for this user: $2
+  die "$1: $2
     On Linux the tailscaled control socket is root-owned. Grant this account the
     operator role once, then re-run:
 
         sudo tailscale set --operator=\$USER
 
-    This installer will not run sudo for you."
+    This installer will not run sudo for you.${3:-}"
 }
 
 # ------------------------------------------------------------------ start ----
@@ -336,6 +340,7 @@ printf '%sDormouse selfhost server — Linux installer%s\n' "$C_BLD" "$C_OFF"
 # failed install. The probe temporaries are here too so that a `die` anywhere
 # between staging and the switch cannot leak them.
 TS_STATUS_JSON=""
+TS_PREFS_JSON=""
 WS_STATE="$REPO_ROOT/node_modules/.pnpm-workspace-state-v1.json"
 WS_STATE_BACKUP=""
 PROBE_STATE=""
@@ -349,7 +354,7 @@ restore_workspace_state() {
 }
 cleanup() {
   restore_workspace_state
-  rm -f "$TS_STATUS_JSON" "$PROBE_LOG"
+  rm -f "$TS_STATUS_JSON" "$TS_PREFS_JSON" "$PROBE_LOG"
   [ -n "$PROBE_STATE" ] && rm -rf "$PROBE_STATE"
   return 0
 }
@@ -371,7 +376,7 @@ else
   # so the capture is always empty and the operator-role remediation below
   # becomes dead code with a blank error body.
   TS_STATUS_ERR="$(ts status --json 2>&1 > "$TS_STATUS_JSON")" || {
-    ts_denied "$TS_STATUS_ERR" && die_needs_operator "\`tailscale status\`" "$TS_STATUS_ERR"
+    ts_denied "$TS_STATUS_ERR" && die_needs_operator "\`tailscale status\` was refused for this user" "$TS_STATUS_ERR"
     die "\`tailscale status --json\` failed. Is tailscaled running and signed in? (systemctl status tailscaled)
       ${TS_STATUS_ERR}"
   }
@@ -401,13 +406,54 @@ else
   esac
 
   # Prove the operator role now rather than at the Serve step, which happens after
-  # the build and after `current` has already moved. A node with no Serve
-  # configuration exits nonzero too, so only a refusal is fatal here.
+  # the build and after `current` has already moved.
+  #
+  # `tailscale serve status` cannot answer this on its own: it is a *read*, and
+  # tailscaled serves reads to everyone. Only writes are gated on the operator
+  # role, so on exactly the machine whose Serve write is about to be denied the
+  # read probe prints "No serve config" and exits 0. The role itself is the thing
+  # to check, and `debug prefs` is where tailscaled exposes it. The read still
+  # runs first: a denial *there* means something broader than the operator role
+  # is wrong. A node with no Serve configuration exits nonzero too, so only a
+  # refusal is fatal.
   if [ "$TEST_MODE" != "1" ]; then
     if ! SERVE_PROBE="$(ts serve status 2>&1)"; then
-      ts_denied "$SERVE_PROBE" && die_needs_operator "\`tailscale serve status\`" "$SERVE_PROBE"
+      ts_denied "$SERVE_PROBE" && die_needs_operator "\`tailscale serve status\` was refused for this user" "$SERVE_PROBE"
     fi
-    ok "this account may operate tailscaled"
+
+    # Only a definitive mismatch is fatal. `debug` is an explicitly unstable CLI
+    # surface, so an unreadable or unparseable answer must not block an install
+    # that would otherwise succeed; it degrades to the late refusal this check
+    # exists to pull earlier, which is no worse than having no check.
+    #
+    # Readability is decided by a *different* field than the answer, because
+    # `ipn.Prefs.OperatorUser` carries `json:",omitempty"`: with no operator set
+    # the key is absent, which is indistinguishable from an unparseable blob if
+    # the answer field is also the liveness probe. Reading it that way would send
+    # the commonest case of this bug — nobody ever ran `tailscale set --operator`
+    # — into the lenient branch, i.e. exactly the miss this whole check exists to
+    # close. `ControlURL` has no `omitempty` and is always marshalled, so it
+    # answers "did prefs parse?" on its own; absent-or-empty `OperatorUser` on a
+    # blob that parsed is then a definitive unset, not an unknown.
+    #
+    # json_query's stderr is dropped here and only here: every other call site
+    # reads JSON already known to be well-formed, whereas on this path a parse
+    # failure is an expected outcome and its runner's stack trace would bury the
+    # two warnings below.
+    TS_PREFS_JSON="$(mktemp_file ts-prefs)"
+    if ts debug prefs 2>/dev/null > "$TS_PREFS_JSON" \
+      && json_query "$TS_PREFS_JSON" "ControlURL" >/dev/null 2>&1; then
+      TS_OPERATOR="$(json_query "$TS_PREFS_JSON" "OperatorUser" 2>/dev/null || true)"
+      if [ -n "$TS_OPERATOR" ] && [ "$TS_OPERATOR" = "$(id -un)" ]; then
+        ok "this account may operate tailscaled"
+      else
+        die_needs_operator "\`tailscale serve\` will be refused for this user" \
+          "tailscaled's operator is ${TS_OPERATOR:-unset}, not this account ($(id -un))."
+      fi
+    else
+      warn "could not read tailscaled's operator role from \`tailscale debug prefs\`."
+      warn "If it is unset, the Serve step below will be refused."
+    fi
   fi
 fi
 
@@ -1502,7 +1548,13 @@ elif [ "$NEEDS_SERVE" = "1" ]; then
   info "tailscale serve --bg $LOOPBACK_PORT"
   detail "Tailscale may open a browser consent flow if HTTPS is not yet enabled."
   SERVE_ERR="$(ts serve --bg "$LOOPBACK_PORT" 2>&1)" || {
-    ts_denied "$SERVE_ERR" && die_needs_operator "\`tailscale serve\`" "$SERVE_ERR"
+    ts_denied "$SERVE_ERR" && die_needs_operator "\`tailscale serve\` was refused for this user" "$SERVE_ERR" "
+
+    The release is installed and the service is running on 127.0.0.1:$LOOPBACK_PORT;
+    only the HTTPS front door is missing. After granting the role you can finish
+    without a reinstall:
+
+        \"$BIN_DIR/manage\" serve"
     die "\`tailscale serve --bg $LOOPBACK_PORT\` failed: ${SERVE_ERR}"
   }
   ok "Serve configured"

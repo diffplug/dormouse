@@ -991,10 +991,38 @@ Mechanical traps the scripts encode, each of which fails silently otherwise:
 * **Linux `tailscaled` answers only root unless an operator is set.** (Linux.)
   Its local API socket is root-owned, so an unprivileged `tailscale serve` is
   refused. Left unchecked that refusal arrives at the Serve step — after the
-  build, and after `current` has already advanced to the new release. The
-  installer probes `tailscale serve status` in preflight instead, matches the
-  denial, and prints the one-line fix (`sudo tailscale set --operator=$USER`)
-  rather than running sudo itself.
+  build, and after `current` has already advanced to the new release. Preflight
+  checks the operator role instead, and prints the one-line fix
+  (`sudo tailscale set --operator=$USER`) rather than running sudo itself.
+
+  **The check reads the role, not a Serve command's exit status.** Only *writes*
+  to the local API are gated on the operator role; tailscaled serves reads to
+  everyone. So `tailscale serve status` prints `No serve config` and exits 0 on
+  exactly the machine whose Serve write is about to be denied, and a preflight
+  built on it silently passes and defers the refusal to the late step it exists
+  to avoid. The role is read from `tailscale debug prefs` (`OperatorUser`) and
+  compared against the invoking account. `debug` is an unstable CLI surface, so
+  only a *definitive* mismatch is fatal: an unreadable or unparseable answer
+  warns and proceeds, degrading to the late refusal rather than blocking an
+  install that would have worked.
+
+  **Readability is decided by a different field than the answer.**
+  `ipn.Prefs.OperatorUser` carries `json:",omitempty"`, so an unset operator
+  omits the key rather than emitting an empty string — indistinguishable from an
+  unparseable blob if the answer field doubles as the liveness probe, which would
+  route the commonest form of this bug (nobody ever ran `tailscale set
+  --operator`) into the lenient branch and reopen the exact miss the check
+  closes. `ControlURL`, which has no `omitempty`, answers "did prefs parse?";
+  absent-or-empty `OperatorUser` on a blob that parsed is then a definitive
+  unset. The `serve status` read still runs first,
+  because a denial *there* means something broader is wrong. Neither leg is
+  reachable under `DORMOUSE_INSTALL_TEST=1`, which gates the whole probe out —
+  and CI pairs it with an injected origin, which skips Tailscale altogether — so
+  this is the one preflight rule CI cannot exercise.
+
+  Because the late refusal is reached with `current` already switched and the
+  service healthy, it reports that the install is complete but unserved and
+  points at `manage serve`, which re-applies the mapping without a reinstall.
 * **`systemctl --user` needs a real login session, not just a shell.** (Linux.)
   Under `su`, or anywhere `XDG_RUNTIME_DIR` is unset and no user manager is
   running, it fails with a message about `DBUS_SESSION_BUS_ADDRESS` that does
