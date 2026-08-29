@@ -46,17 +46,22 @@ describe('theme.css var() bindings are mirrored onto body', () => {
     return out;
   }
 
-  function blockBody(pattern: RegExp): string {
-    const match = themeCss.match(pattern);
-    if (!match) throw new Error(`Could not locate ${pattern} in theme.css`);
-    return match[1];
+  // Global patterns + matchAll, not match(): a second @theme or :root block
+  // would otherwise be read past in silence. `@theme inline` is the shape that
+  // matters most — Tailwind v4 accepts it, and inline is what you reach for
+  // when a token's value is a var() chain, i.e. exactly what this checks.
+  function blockBodies(pattern: RegExp): string[] {
+    const bodies = [...themeCss.matchAll(pattern)].map((m) => m[1]);
+    if (bodies.length === 0) throw new Error(`Could not locate ${pattern} in theme.css`);
+    return bodies;
   }
 
-  const documentLevel = new Map([
-    ...declarations(blockBody(/@theme \{([\s\S]*?)\n\}/)),
-    ...declarations(blockBody(/\n:root \{([\s\S]*?)\n\}/)),
-  ]);
-  const bodyLevel = declarations(blockBody(/\nbody \{([\s\S]*?)\n\}/));
+  const documentLevel = new Map(
+    [/@theme(?: inline| static)? \{([\s\S]*?)\n\}/g, /\n:root \{([\s\S]*?)\n\}/g]
+      .flatMap((pattern) => blockBodies(pattern))
+      .flatMap((block) => [...declarations(block)]),
+  );
+  const bodyLevel = declarations(blockBodies(/\nbody \{([\s\S]*?)\n\}/g).join('\n'));
 
   it('every document-level token bound to a var() chain is mirrored onto body', () => {
     const missing = [...documentLevel]
