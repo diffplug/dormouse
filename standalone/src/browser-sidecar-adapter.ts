@@ -254,13 +254,8 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   private static STATE_KEY = 'dormouse.browser-sidecar.session';
 
-  // The harness mirrors TauriAdapter's gate rather than persisting on its own:
-  // standalone persists no Session state, and a harness that restored panes
-  // across a reload would exercise the whole save/restore path -- record build,
-  // a `getCwd` round trip per pane on every debounce and 30s heartbeat, restore
-  // on load -- that the real app never runs (docs/specs/standalone.md ->
-  // "Standalone persists no Session state"). Flip both flags together when
-  // workspaces-rollout turns persistence on (docs/specs/layout.md -> `## Future`).
+  // Mirrors TauriAdapter's gate (docs/specs/standalone.md -> "Standalone persists
+  // no Session state"); flip both flags together.
   private static PERSIST_SESSION = false;
 
   readonly persistsSession = BrowserSidecarAdapter.PERSIST_SESSION;
@@ -283,13 +278,8 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     }
   }
 
-  /**
-   * Drop any blob an earlier run left behind. Snapshots carry transcripts, and
-   * `localStorage` is keyed by browser profile, not by the per-run temp state dir
-   * the harness gives every other slot (`standalone/scripts/dev-agent-browser.mjs`),
-   * so ignoring the key would leave those bytes in the developer's profile
-   * indefinitely. Same reason TauriAdapter.init deletes rather than ignores.
-   */
+  // Delete (not just ignore) pre-gate blobs: they carry transcripts and localStorage
+  // outlives the harness's per-run temp state dir.
   private clearPersistedState(): void {
     if (BrowserSidecarAdapter.PERSIST_SESSION) return;
     try { localStorage.removeItem(BrowserSidecarAdapter.STATE_KEY); }

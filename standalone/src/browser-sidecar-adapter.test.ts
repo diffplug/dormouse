@@ -38,13 +38,8 @@ describe("BrowserSidecarAdapter capability surface", () => {
   });
 });
 
-// The harness must not persist Session state that production standalone drops.
-// `TauriAdapter` gates `saveState`/`getState` behind `PERSIST_SESSION` and reports
-// `persistsSession: false` (docs/specs/standalone.md -> "Standalone persists no
-// Session state"). A harness that writes `localStorage` instead exercises the whole
-// save/restore path — record build, `getCwd` round trip per pane, restore on reload —
-// that the real app never runs, and the blob outlives the run in the dev browser
-// profile even though the harness gives every run its own temp state dir.
+// The harness must not persist Session state that production standalone drops
+// (docs/specs/standalone.md -> "Standalone persists no Session state").
 describe("BrowserSidecarAdapter session persistence", () => {
   const KEY = "dormouse.browser-sidecar.session";
 
@@ -75,19 +70,13 @@ describe("BrowserSidecarAdapter session persistence", () => {
     localStorage.removeItem(KEY);
   });
 
-  // Ignoring the key is not enough: snapshots carry transcripts, and localStorage is
-  // keyed by browser profile rather than by the harness's per-run temp state dir, so a
-  // blob written before this gate existed would sit in the developer's profile forever.
   it("deletes a pre-gate blob on init", async () => {
     localStorage.setItem(KEY, JSON.stringify({ version: 3, panes: [], lathLayout: null }));
     const host = new BrowserSidecarHost("http://localhost:1234");
     vi.spyOn(host, "init").mockResolvedValue(undefined);
     vi.spyOn(host, "onEvent").mockReturnValue(() => {});
-    // `init()` also runs `installConsoleForwarder()`, which replaces
-    // `console.log/warn/error` on the shared jsdom window with versions that POST to
-    // the dev host, and marks itself done with a flag nothing ever clears. Every
-    // later `console.*` in this file would inherit that. Claim the flag first so the
-    // forwarder no-ops and the test stays scoped to `clearPersistedState`.
+    // Claim the console-forwarder flag so init() doesn't patch console.* on the
+    // shared jsdom window for every later test in this file.
     (window as typeof window & { __DORMOUSE_BROWSER_CONSOLE_PATCHED__?: boolean })
       .__DORMOUSE_BROWSER_CONSOLE_PATCHED__ = true;
     const adapter = new BrowserSidecarAdapter(host);
