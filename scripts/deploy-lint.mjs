@@ -160,19 +160,30 @@ export const RULES = [
     // copy of the control is matched.
     //
     // The counts, and where they come from:
-    //   macOS   3 — `manage`'s wait_for_health, the post-switch wait, the rollback wait
+    //   macOS   4 — `manage`'s wait_for_health, `manage verify`, the post-switch
+    //               wait, the rollback wait
     //   Linux   2 — `service_healthy`, once in the body and once in `manage`
     //   Windows 4 — post-switch, Restore-PreviousRelease, `manage rollback`, `manage verify`
     // Windows names its comparison four different ways, so the pattern matches
     // the shape (an identity variable against an expected release) rather than
     // one spelling.
+    //
+    // macOS writes the comparison two ways, so its pattern carries both.
+    // `manage verify` needs the release twice — once for the gate, once for the
+    // failure message that names it — so it assigns `serving` first instead of
+    // calling `listening_release` inline. A pattern that required the inline
+    // form counted 3 sites and left `verify`'s deletable, while Windows counted
+    // its structurally identical `manage verify` site: one rule, two standards.
+    // `verify` is the audit command, so what a miss there loses is a green tick
+    // a stranger's process earned. Only `=` is counted; the `!=` uses at the
+    // post-failure diagnostics are reports, not gates.
     rule: 'A 200 does not say who answered — health is paired with a release-identity check',
     patterns: {
-      macOS: /\[ "\$\(listening_release "\$(?:LOOPBACK_)?PORT"\)" = "\$\w+" \]/,
+      macOS: /\[ "\$(?:\(listening_release "\$(?:LOOPBACK_)?PORT"\)|serving)" = "\$\w+" \]/,
       Linux: /&& \[ "\$\(listening_release "\$(?:LOOPBACK_)?PORT"\)" = "\$1" \]/,
       Windows: /\$(?:listening|restored|serving) -(?:ne|eq) \$(?:RELEASE_ID|OLD_RELEASE|prev|cur)\b/,
     },
-    minMatches: { macOS: 3, Linux: 2, Windows: 4 },
+    minMatches: { macOS: 4, Linux: 2, Windows: 4 },
   },
 ];
 
