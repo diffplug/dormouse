@@ -60,9 +60,13 @@ export const INSTALLERS = [
  * `scripts/deploy-lint-selftest.mjs` is what keeps that honest: it removes each
  * matched control in turn and requires this lint to fail.
  *
- * `minMatches` is for a control the installer writes twice on purpose — once in
- * its own body and once into the generated `manage` — where matching only one
- * would let the other be deleted silently.
+ * `exactMatches` is for a control the installer writes at several sites on
+ * purpose — in its own body and into the generated `manage` — where matching
+ * only one would let the others be deleted silently. Setting it is a claim that
+ * *these are all the sites*, and the comparison is exact in both directions:
+ * fewer matches means a control went missing, more means a site was added and
+ * the count must be bumped deliberately in the same commit. Rules without it
+ * require at least one match.
  */
 export const RULES = [
   {
@@ -150,29 +154,94 @@ export const RULES = [
     // its definition and at every call site, so removing the check that
     // consumes it left this green.
     //
-    // `minMatches` is doing the real work here, and it has to be set for every
-    // platform. Each writes the conjunct at more than one site, and a pattern
-    // that matched only one left the others deletable: on macOS the first
-    // version matched the generated `manage`'s wait and left the post-switch
-    // wait — the one whose failure rolls back and dies — unlinted. Counting is
-    // what makes "every copy survives" checkable; the self-test cannot see it,
-    // because it proves the *matched* text is load-bearing, never that every
-    // copy of the control is matched.
+    // `exactMatches` is doing the real work here, and it has to be set for
+    // every platform. Each writes the conjunct at more than one site, and a
+    // pattern that matched only one left the others deletable: on macOS the
+    // first version matched the generated `manage`'s wait and left the
+    // post-switch wait — the one whose failure rolls back and dies — unlinted.
+    // Counting is what makes "every copy survives" checkable; the self-test
+    // cannot see it, because it proves the *matched* text is load-bearing,
+    // never that every copy of the control is matched. The count was once a
+    // floor, which meant a legitimately-added site silently re-armed the same
+    // gap: the new site could later lose its identity conjunct without the
+    // count dropping below the floor. Exact is what forces the bump.
     //
     // The counts, and where they come from:
-    //   macOS   3 — `manage`'s wait_for_health, the post-switch wait, the rollback wait
+    //   macOS   3 — `manage`'s wait_for_health, the post-switch wait, the
+    //               rollback wait
     //   Linux   2 — `service_healthy`, once in the body and once in `manage`
     //   Windows 4 — post-switch, Restore-PreviousRelease, `manage rollback`, `manage verify`
     // Windows names its comparison four different ways, so the pattern matches
     // the shape (an identity variable against an expected release) rather than
     // one spelling.
+    //
+    // Every macOS comparison counted here calls `listening_release` inline, so
+    // no match can be held up by a spelling that never consults it. `manage
+    // verify` is the one macOS site that cannot be written that way — it needs
+    // the answer twice, once for the gate and once for the failure message that
+    // names the release — so it assigns `serving` first, and the rule below
+    // covers it. Folding it in here instead, by accepting a bare
+    // `[ "$serving" = "$x" ]` as a second spelling, looked free and was not:
+    // that alternative is bound to nothing, so any of the sites above could be
+    // rewritten into it — including the post-switch wait — and the count would
+    // still read 4. Only `=` is counted; the `!=` uses at `install-macos.sh`
+    // :675 and :1195 are post-failure diagnostics, reports rather than gates.
     rule: 'A 200 does not say who answered — health is paired with a release-identity check',
     patterns: {
       macOS: /\[ "\$\(listening_release "\$(?:LOOPBACK_)?PORT"\)" = "\$\w+" \]/,
       Linux: /&& \[ "\$\(listening_release "\$(?:LOOPBACK_)?PORT"\)" = "\$1" \]/,
       Windows: /\$(?:listening|restored|serving) -(?:ne|eq) \$(?:RELEASE_ID|OLD_RELEASE|prev|cur)\b/,
     },
-    minMatches: { macOS: 3, Linux: 2, Windows: 4 },
+    exactMatches: { macOS: 3, Linux: 2, Windows: 4 },
+  },
+  {
+    // macOS `manage verify`'s half of the rule above, split out because it is
+    // the one site that resolves the release into a variable first. `verify` is
+    // the audit command, so a miss here is a green tick a stranger's process
+    // earned — the outcome the rule above exists to prevent — and an earlier
+    // pattern that demanded the inline spelling left it wholly unlinted while
+    // Windows counted its structurally identical `verify` site: one rule, two
+    // standards.
+    //
+    // All three parts are needed, which is why the pattern is an alternation
+    // with an exact count of 3 rather than one pattern per part. A comparison
+    // is only as good as both of its operands, so each is pinned to the thing
+    // that has to have produced it: `serving` to `listening_release`, `cur_id`
+    // to the `current` symlink. Editing any of the three parts drops the count
+    // to 2 — deleting the comparison leaves the two lookups; rewriting
+    // `serving="$cur_id"` leaves the comparison and the expected release;
+    // rewriting `cur_id="$serving"` compares the port's holder to itself, so
+    // `verify` green-ticks whatever answers. That last one is the same shape as
+    // the first, on the other operand, and it stayed green until the count
+    // reached 3. Matching the parts in one span instead would need a
+    // `[\s\S]*?` gap between them, which the self-test cannot check honestly —
+    // it deletes the matched text verbatim, so a match swallowing the lines
+    // between would turn the lint red for the wrong reason and the self-test
+    // could not tell.
+    //
+    // `local serving cur_id` is what makes this `verify`'s site and no other:
+    // the two other macOS functions that declare `serving` pair it with `want`
+    // and `old_id`. `$cur_id` anchors the comparison the same way, and the
+    // `cur_id=` prefix anchors the symlink read — the file's three other
+    // `basename readlink current` reads assign `want` or print inline.
+    //
+    // The other three macOS sites the rule above counts still bind only their
+    // *served* operand: `want`, `old_id`, and `$RELEASE_ID` can each be
+    // rewritten to whatever `listening_release` returned with the lint green.
+    // Same for Windows's four. Closing that class is a wider change than this
+    // site, and is left open deliberately — the analysis is in #482.
+    rule: '`manage verify` resolves who holds the port, and compares it to the current release',
+    patterns: {
+      macOS:
+        /local serving cur_id\n\s+serving="\$\(listening_release "\$PORT"\)"|cur_id="\$\(basename "\$\(readlink "\$ROOT\/current"|\[ "\$serving" = "\$cur_id" \]/,
+    },
+    skip: {
+      Linux:
+        'its `manage verify` gate calls `service_healthy`, so the comparison lives in that helper — counted by the rule above',
+      Windows:
+        'its `manage verify` assigns `$listening` the same way, but the Windows pattern counts a bare variable-vs-variable comparison, so that site is one of the four the rule above counts — unbound to `Get-ListeningRelease`, the gap named in the comment above',
+    },
+    exactMatches: { macOS: 3 },
   },
 ];
 
@@ -180,7 +249,7 @@ export function check() {
   const failures = [];
   let checked = 0;
 
-  for (const { rule, patterns, skip = {}, minMatches = {} } of RULES) {
+  for (const { rule, patterns, skip = {}, exactMatches = {} } of RULES) {
   for (const { platform, file } of INSTALLERS) {
     if (platform in skip) continue;
     const pattern = patterns[platform];
@@ -196,11 +265,20 @@ export function check() {
       failures.push(`${rule}\n    ${file}: missing`);
       continue;
     }
-    const want = minMatches[platform] ?? 1;
-    const found = text.match(new RegExp(pattern.source, `${pattern.flags.replace('g', '')}g`));
-    if ((found?.length ?? 0) < want) {
+    const want = exactMatches[platform];
+    const found =
+      text.match(new RegExp(pattern.source, `${pattern.flags.replace('g', '')}g`))?.length ?? 0;
+    if (want === undefined) {
+      if (found < 1) {
+        failures.push(`FAIL IF ${rule}\n    ${file} matches ${pattern} 0x, expected at least 1`);
+      }
+    } else if (found < want) {
       failures.push(
-        `FAIL IF ${rule}\n    ${file} matches ${pattern} ${found?.length ?? 0}x, expected at least ${want}`,
+        `FAIL IF ${rule}\n    ${file} matches ${pattern} ${found}x, expected exactly ${want} — a control went missing`,
+      );
+    } else if (found > want) {
+      failures.push(
+        `FAIL IF ${rule}\n    ${file} matches ${pattern} ${found}x, expected exactly ${want} — if a site was added on purpose, bump exactMatches in the same commit`,
       );
     }
   }
