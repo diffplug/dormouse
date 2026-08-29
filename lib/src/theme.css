@@ -97,15 +97,10 @@
 
 /* --- Body-level dynamic theme bindings ---
  *
- * These mirror the :root and @theme blocks above but are declared on `body`.
- * CSS resolves var() inside a custom-property declaration at the element where
- * the property is declared, so body-level declarations can see --vscode-*
- * variables that applyTheme() writes to body.style. Every token above whose
- * value reads any var() chain — indirect bindings like var(--color-door-bg)
- * included, not just direct --vscode-* reads — must be repeated here with the
- * same value, or it resolves to nothing in the hosts where applyTheme() is the
- * only writer (standalone, website, Pocket); consumed-keys.test.ts pins the two
- * lists together. */
+ * Runtime source of truth: only body-level declarations can see the --vscode-*
+ * variables applyTheme() writes to body.style. Every var()-bound token above
+ * must be mirrored here with the same value (consumed-keys.test.ts enforces
+ * this; rationale in docs/specs/theme.md). */
 body {
   --mt-font-size: var(--vscode-font-size);
   --mt-font-family: var(--vscode-editor-font-family);
