@@ -37,3 +37,50 @@ describe("BrowserSidecarAdapter capability surface", () => {
     expect(typeof adapter.onFilesDropped).toBe("function");
   });
 });
+
+// The harness must not persist Session state that production standalone drops
+// (docs/specs/standalone.md -> "Standalone persists no Session state").
+describe("BrowserSidecarAdapter session persistence", () => {
+  const KEY = "dormouse.browser-sidecar.session";
+
+  it("reports the same persistsSession as TauriAdapter", () => {
+    const harness: PlatformAdapter = new BrowserSidecarAdapter(
+      new BrowserSidecarHost("http://localhost:1234"),
+    );
+    const tauri: PlatformAdapter = new TauriAdapter();
+    expect(harness.persistsSession).toBe(tauri.persistsSession);
+    expect(harness.persistsSession).toBe(false);
+  });
+
+  it("does not write session state to localStorage", () => {
+    localStorage.removeItem(KEY);
+    const adapter: PlatformAdapter = new BrowserSidecarAdapter(
+      new BrowserSidecarHost("http://localhost:1234"),
+    );
+    adapter.saveState({ version: 3, panes: [], lathLayout: null });
+    expect(localStorage.getItem(KEY)).toBeNull();
+  });
+
+  it("does not restore a stale blob left by an earlier run", () => {
+    localStorage.setItem(KEY, JSON.stringify({ version: 3, panes: [], lathLayout: null }));
+    const adapter: PlatformAdapter = new BrowserSidecarAdapter(
+      new BrowserSidecarHost("http://localhost:1234"),
+    );
+    expect(adapter.getState()).toBeNull();
+    localStorage.removeItem(KEY);
+  });
+
+  it("deletes a pre-gate blob on init", async () => {
+    localStorage.setItem(KEY, JSON.stringify({ version: 3, panes: [], lathLayout: null }));
+    const host = new BrowserSidecarHost("http://localhost:1234");
+    vi.spyOn(host, "init").mockResolvedValue(undefined);
+    vi.spyOn(host, "onEvent").mockReturnValue(() => {});
+    // Claim the console-forwarder flag so init() doesn't patch console.* on the
+    // shared jsdom window for every later test in this file.
+    (window as typeof window & { __DORMOUSE_BROWSER_CONSOLE_PATCHED__?: boolean })
+      .__DORMOUSE_BROWSER_CONSOLE_PATCHED__ = true;
+    const adapter = new BrowserSidecarAdapter(host);
+    await adapter.init();
+    expect(localStorage.getItem(KEY)).toBeNull();
+  });
+});
