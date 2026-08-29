@@ -46,8 +46,10 @@ export const GITHUB_BODY_LIMIT = 65536;
  */
 const SAFETY_MARGIN = 512;
 
-/** Lines that open or close a fenced block; an odd count leaves one open. */
+/** Lines that open or close a fenced block. */
 const FENCE = /^\s{0,3}(```+|~~~+)/;
+/** A closing fence carries no info string, so only these can close a block. */
+const CLOSER = /^\s{0,3}(```+|~~~+)\s*$/;
 
 /**
  * Truncate `body` so the result fits in `limit`, keeping the head.
@@ -64,8 +66,10 @@ export function clampIssueBody(body, { limit = GITHUB_BODY_LIMIT, note = '' } = 
   // `originalLength` is known now, so the footer's own length is exact.
   const footer = buildFooter(body.length, note);
   // A fence left open by the cut would swallow the footer into a code block.
-  // Reserve for closing one whether or not it turns out to be needed — four
-  // characters is not worth a second pass to reclaim.
+  // Reserve nominally for closing one whether or not it turns out to be
+  // needed. The exact marker is not known until after the cut, and a longer
+  // one (a ```` opener needs five characters with its newline) is absorbed by
+  // `SAFETY_MARGIN` — not worth a second pass to size precisely.
   const room = budget - footer.length - 4;
   if (room <= 0) {
     // Pathological: the note alone does not fit. Ship the footer rather than
@@ -101,21 +105,24 @@ function isHighSurrogate(code) {
 }
 
 /**
- * The closing fence `kept` needs, or `''`. Counts fence lines rather than
- * tracking nesting: a report is machine-merged from several agents' markdown,
- * so a mismatched ``` / ~~~ pair is likelier than a nested one, and an
- * unnecessary closing fence renders as an empty code block while a missing
- * one hides the footer entirely. The marker is taken from the unmatched
- * opener, since ``` and ~~~ do not close each other.
+ * The closing fence `kept` needs, or `''`. Tracks the open fence rather than
+ * counting fence lines: a report is machine-merged from several agents'
+ * markdown, so it carries both mismatched backtick/tilde pairs and nested
+ * blocks (a longer outer fence around a shorter inner one), and a parity count
+ * reads the inner opener as the outer closer. The marker is taken from the
+ * unmatched opener, since backtick and tilde fences do not close each other.
  */
 function unclosedFence(kept) {
-  const fences = kept.split('\n').filter((line) => FENCE.test(line));
-  if (fences.length % 2 === 0) return '';
-  // Close with the same marker the opener used: a backtick fence does not
-  // close a tilde-fenced block, so a mismatched closer leaves the footer
-  // inside the code block rather than below it. With an odd count the last
-  // fence line is the unmatched opener.
-  return `\n${FENCE.exec(fences[fences.length - 1])[1]}`;
+  let open = '';
+  for (const line of kept.split('\n')) {
+    const marker = FENCE.exec(line)?.[1];
+    if (!marker) continue;
+    // A fence closes only with its own character, at least as long, and
+    // nothing after it; anything else is literal content inside the block.
+    if (!open) open = marker;
+    else if (marker[0] === open[0] && marker.length >= open.length && CLOSER.test(line)) open = '';
+  }
+  return open ? `\n${open}` : '';
 }
 
 function buildFooter(originalLength, note) {

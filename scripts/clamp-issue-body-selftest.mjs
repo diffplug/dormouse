@@ -129,6 +129,38 @@ for (const opener of ['~~~', '```', '````', '~~~~']) {
   check(`the ${opener} body fits`, clamped.length <= GITHUB_BODY_LIMIT, `got ${clamped.length}`);
 }
 
+// 6b. A nested fence — a longer outer marker around a shorter inner one, the
+//     shape this repo's own comment guidance prescribes — leaves *two* blocks
+//     open at the cut, and a parity count reads the inner opener as the outer
+//     closer and so emits nothing at all.
+{
+  const body = `head\n\n\`\`\`\`\nouter\n\`\`\`\n${'inner code line\n'.repeat(6_000)}`;
+  const { body: clamped } = clampIssueBody(body, { note: 'n.' });
+  const beforeFooter = clamped.slice(0, clamped.lastIndexOf('\n\n---\n\n'));
+  check(
+    'a nested fence is closed with the outer marker',
+    beforeFooter.endsWith('\n````'),
+    `tail ${JSON.stringify(beforeFooter.slice(-12))}`,
+  );
+  check('the nested body fits', clamped.length <= GITHUB_BODY_LIMIT, `got ${clamped.length}`);
+}
+
+// 6c. A fence-shaped line carrying an info string is literal content inside an
+//     open block, not a closer. A parity count treats ```js as closing the
+//     block it sits in, so the same footer-inside-the-fence failure reappears
+//     on the commonest markdown shape of all: a language-tagged example.
+{
+  const body = `head\n\n\`\`\`\n${'line\n'.repeat(200)}\`\`\`js\n${'line\n'.repeat(20_000)}`;
+  const { body: clamped } = clampIssueBody(body, { note: 'n.' });
+  const beforeFooter = clamped.slice(0, clamped.lastIndexOf('\n\n---\n\n'));
+  check(
+    'an info-string fence line does not count as a closer',
+    beforeFooter.endsWith('\n```'),
+    `tail ${JSON.stringify(beforeFooter.slice(-12))}`,
+  );
+  check('the info-string body fits', clamped.length <= GITHUB_BODY_LIMIT, `got ${clamped.length}`);
+}
+
 // 7. The pathological branch — a note so long the footer alone blows the
 //    budget — must still return something postable. Returning the whole
 //    footer would be over the limit, so `gh` would reject it and the step
