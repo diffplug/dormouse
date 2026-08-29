@@ -1085,11 +1085,11 @@ it, with `--linger`.
 single-owner selfhost server and a multi-tenant SaaS on `*.dormouse.sh`,
 including the Bring-Your-Own-Tailnet (BYOT) posture that puts the relay inside a
 customer's own tailnet without a custom client build. The wire API and security
-model are unchanged from selfhost ([remote-api.md](./remote-api.md), Server
-deployment modes); everything here is deployment and relay plumbing beneath
-them. Complementary front-door work is staged elsewhere and this scope does not
-restate it: the SaaS account model (email + passkey self-serve signup) in
-remote-api.md, and CloudFlare routing + Pocket static serving in
+model are unchanged from selfhost ([remote-api.md](./remote-api.md),
+Transport); everything here is deployment and relay plumbing beneath them. The
+SaaS account model (email + passkey self-serve signup) is this scope's own —
+see **Accounts** below. Complementary front-door work staged elsewhere, which
+this scope does not restate: CloudFlare routing + Pocket static serving in
 [pocket-app.md](./pocket-app.md) `## Future`.
 
 Framing invariant: Tailscale is network-layer defense-in-depth *under* the
