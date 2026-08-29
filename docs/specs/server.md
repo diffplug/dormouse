@@ -1053,6 +1053,23 @@ nonzero on any failure), `logs`, `restart`, `show-password`, `serve` (re-apply
 the Serve mapping after a dev session repointed it), `rollback`, `uninstall`,
 and the separately-confirmed `purge`.
 
+Teardown is two steps in that order, and `uninstall` has to leave `manage`
+itself behind for the second one to be reachable at all: it removes the service
+definition, the releases, the pointers, `run/` and `bin/run-server`, but not the
+`bin` directory `manage` lives in — deleting that would strand `config/` and
+`state/`, the data the message it prints tells you to run `purge` for. `purge`
+deletes `state/` and `config/` after its typed confirmation and, when
+`bin/run-server` is already gone, closes by printing the one command that
+removes what is left; it cannot delete itself out from under the shell running
+it. That command names the dormouse-owned log directory alongside the install
+root, because on Linux and macOS the logs live outside it — `LOG_ROOT`
+(`$XDG_STATE_HOME/dormouse-server`) and `~/Library/Logs/Dormouse Server`
+respectively, each named at the level dormouse owns so no empty directory
+survives. On Windows `logs` is inside the root, so the root alone is enough.
+Source of truth:
+`cmd_uninstall` / `cmd_purge` (`Invoke-Uninstall` / `Invoke-Purge` on Windows)
+in the `manage` script each installer generates.
+
 The Host that connects to such a server needs a build whose baked relay
 allowlist admits the origin — see "Where a Host may reach a relay server"
 above; a `*.ts.net` origin requires `DORMOUSE_REMOTE_CONNECT_SRC` at build time.

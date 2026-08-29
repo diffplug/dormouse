@@ -748,11 +748,14 @@ UNIT="$LABEL.service"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$ROOT/config/server.env"
 STATE_DIR="$ROOT/state"
-LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/dormouse-server/logs"
+# LOG_ROOT is the dormouse-owned directory the logs sit in — outside ROOT on a
+# real install, and what "purge" names so it does not leave an empty one behind.
+LOG_ROOT="${XDG_STATE_HOME:-$HOME/.local/state}/dormouse-server"
+LOG_DIR="$LOG_ROOT/logs"
 UNIT_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$UNIT"
 # A test install (DORMOUSE_INSTALL_ROOT) keeps its logs and unit inside its own
 # root, so `manage` must follow them there rather than at the real HOME paths.
-[ -d "$ROOT/logs" ] && LOG_DIR="$ROOT/logs"
+[ -d "$ROOT/logs" ] && { LOG_DIR="$ROOT/logs"; LOG_ROOT="$ROOT"; }
 [ -f "$ROOT/systemd/$UNIT" ] && UNIT_FILE="$ROOT/systemd/$UNIT"
 
 if [ -t 1 ]; then
@@ -1213,7 +1216,8 @@ cmd_uninstall() {
   printf 'It PRESERVES your configuration and state:\n'
   printf '  config : %s\n' "$ROOT/config"
   printf '  state  : %s\n' "$STATE_DIR"
-  printf '\nUse "manage purge" separately to delete those irreversibly.\n\n'
+  printf '\nThis script is left in place so "purge" can still delete them\n'
+  printf 'irreversibly afterwards:\n\n  "%s" purge\n\n' "$ROOT/bin/manage"
   if [ ! -t 0 ]; then
     printf 'refusing to uninstall with no terminal to confirm at\n' >&2
     return 1
@@ -1235,8 +1239,12 @@ cmd_uninstall() {
   else
     printf 'left the Serve config alone (it does not point at 127.0.0.1:%s)\n' "$PORT"
   fi
-  rm -rf "$ROOT/releases" "$ROOT/current" "$ROOT/previous" "$ROOT/bin" "$ROOT/run"
+  # bin/run-server, not bin: this script lives there too, and "purge" — the
+  # command the message above points at — is unreachable once it is deleted.
+  rm -rf "$ROOT/releases" "$ROOT/current" "$ROOT/previous" "$ROOT/run"
+  rm -f "$ROOT/bin/run-server"
   printf '\nuninstalled. config and state remain at:\n  %s\n  %s\n\n' "$ROOT/config" "$STATE_DIR"
+  printf 'delete them irreversibly with:\n\n  "%s" purge\n\n' "$ROOT/bin/manage"
   printf 'lingering, if you enabled it, is left as it is: loginctl disable-linger %s\n\n' "$USER"
 }
 
@@ -1250,6 +1258,15 @@ cmd_purge() {
   if [ "$reply" != "DELETE DORMOUSE STATE" ]; then printf 'aborted\n'; return 1; fi
   rm -rf "$STATE_DIR" "$ROOT/config"
   printf 'purged.\n'
+  # bin/run-server is what "uninstall" removes, so its absence means the service
+  # and the code are already gone and this script is the last thing standing. It
+  # cannot delete itself out from under the shell running it, so say how. The
+  # logs live outside ROOT on a real install, so LOG_ROOT has to be named too or
+  # the printed command leaves them behind.
+  if [ ! -e "$ROOT/bin/run-server" ]; then
+    printf '\nthe service and code were already uninstalled; what remains is\n'
+    printf 'this script and the logs:\n\n  rm -rf "%s" "%s"\n\n' "$ROOT" "$LOG_ROOT"
+  fi
 }
 
 case "${1:-status}" in
@@ -1273,7 +1290,7 @@ usage: manage <command>
   show-password   warn, then display the setup password locally
   serve           re-apply the Tailscale Serve mapping for this server
   rollback        switch to the retained previous release, preserving state
-  uninstall       remove the unit + code (keeps config and state)
+  uninstall       remove the unit + code (keeps config, state, and this script)
   purge           irreversibly delete config and state
 USAGE
     exit 64

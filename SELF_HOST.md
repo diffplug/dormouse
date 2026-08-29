@@ -458,9 +458,13 @@ Prove it once, while the user is watching:
    return to the desired release.
 
 `manage uninstall` removes the service definition and installed code and keeps
-`config` and `state`, reporting where they are. `manage purge` is the separate,
+`config` and `state`, reporting where they are. It also keeps `manage` itself,
+which is what makes the second step possible. `manage purge` is the separate,
 irreversible operation that deletes them; it requires typing a confirmation
-phrase and is never part of a reinstall.
+phrase and is never part of a reinstall. Run them in that order — uninstall,
+then purge — and purge finishes by printing the single command that clears
+whatever is left: the install root, plus the log directory on Linux and macOS,
+where it sits outside that root.
 
 ## Checkpoint 6: limits and backup
 
