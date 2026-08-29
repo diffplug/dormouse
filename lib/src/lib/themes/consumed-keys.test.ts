@@ -46,17 +46,25 @@ describe('theme.css var() bindings are mirrored onto body', () => {
     return out;
   }
 
-  function blockBody(pattern: RegExp): string {
-    const match = themeCss.match(pattern);
-    if (!match) throw new Error(`Could not locate ${pattern} in theme.css`);
-    return match[1];
+  // Global patterns + matchAll, not match(): a second @theme or :root block
+  // would otherwise be read past in silence. Tailwind v4's @theme takes
+  // combinable modifiers (inline, static, reference, default), so the header
+  // is matched with a wildcard rather than an enumeration. `[^{}\n]*` keeps it
+  // bounded to the header line: it can't run past one block's `{` into the
+  // next, and it can't match the prose `@theme` mentions in theme.css's file
+  // comment, since neither of those lines contains a `{`.
+  function blockBodies(pattern: RegExp): string[] {
+    const bodies = [...themeCss.matchAll(pattern)].map((m) => m[1]);
+    if (bodies.length === 0) throw new Error(`Could not locate ${pattern} in theme.css`);
+    return bodies;
   }
 
-  const documentLevel = new Map([
-    ...declarations(blockBody(/@theme \{([\s\S]*?)\n\}/)),
-    ...declarations(blockBody(/\n:root \{([\s\S]*?)\n\}/)),
-  ]);
-  const bodyLevel = declarations(blockBody(/\nbody \{([\s\S]*?)\n\}/));
+  const documentLevel = new Map(
+    [/@theme\b[^{}\n]*\{([\s\S]*?)\n\}/g, /\n:root \{([\s\S]*?)\n\}/g]
+      .flatMap((pattern) => blockBodies(pattern))
+      .flatMap((block) => [...declarations(block)]),
+  );
+  const bodyLevel = declarations(blockBodies(/\nbody \{([\s\S]*?)\n\}/g).join('\n'));
 
   it('every document-level token bound to a var() chain is mirrored onto body', () => {
     const missing = [...documentLevel]
