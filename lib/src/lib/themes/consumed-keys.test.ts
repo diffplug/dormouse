@@ -31,3 +31,37 @@ describe('CONSUMED_VSCODE_KEYS / bundle-themes.mjs parity', () => {
     expect(extra).toEqual([]);
   });
 });
+
+// Every var()-bound token declared at document level (@theme or :root) must be
+// mirrored onto body with the same value, or it resolves to nothing outside
+// VS Code — rationale in docs/specs/theme.md. Values are compared, not just
+// presence, so repointing one level's binding without the other fails too.
+describe('theme.css var() bindings are mirrored onto body', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const themeCss = readFileSync(resolve(here, '../../theme.css'), 'utf8');
+
+  function declarations(block: string): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const m of block.matchAll(/^\s*(--[\w-]+)\s*:\s*([^;]+);/gm)) out.set(m[1], m[2].trim());
+    return out;
+  }
+
+  function blockBody(pattern: RegExp): string {
+    const match = themeCss.match(pattern);
+    if (!match) throw new Error(`Could not locate ${pattern} in theme.css`);
+    return match[1];
+  }
+
+  const documentLevel = new Map([
+    ...declarations(blockBody(/@theme \{([\s\S]*?)\n\}/)),
+    ...declarations(blockBody(/\n:root \{([\s\S]*?)\n\}/)),
+  ]);
+  const bodyLevel = declarations(blockBody(/\nbody \{([\s\S]*?)\n\}/));
+
+  it('every document-level token bound to a var() chain is mirrored onto body', () => {
+    const missing = [...documentLevel]
+      .filter(([name, value]) => value.includes('var(') && bodyLevel.get(name) !== value)
+      .map(([name]) => name);
+    expect(missing).toEqual([]);
+  });
+});
