@@ -203,22 +203,37 @@ export const RULES = [
     // Windows counted its structurally identical `verify` site: one rule, two
     // standards.
     //
-    // Both halves are needed, which is why the pattern is an alternation with
-    // an exact count of 2 rather than one pattern per half. Deleting the
-    // comparison leaves the lookup; rewriting the lookup to `serving="$cur_id"`
-    // leaves the comparison, and `verify` then green-ticks whatever holds the
-    // port. Either edit drops the count to 1. Matching both in one span instead
-    // would need a `[\s\S]*?` gap between them, which the self-test cannot
-    // check honestly — it deletes the matched text verbatim, so a match
-    // swallowing the lines between would turn the lint red for the wrong
-    // reason and the self-test could not tell.
+    // All three parts are needed, which is why the pattern is an alternation
+    // with an exact count of 3 rather than one pattern per part. A comparison
+    // is only as good as both of its operands, so each is pinned to the thing
+    // that has to have produced it: `serving` to `listening_release`, `cur_id`
+    // to the `current` symlink. Every way of neutering the gate drops the
+    // count to 2 — deleting the comparison leaves the two lookups; rewriting
+    // `serving="$cur_id"` leaves the comparison and the expected release;
+    // rewriting `cur_id="$serving"` compares the port's holder to itself, so
+    // `verify` green-ticks whatever answers. That last one is the same shape as
+    // the first, on the other operand, and it stayed green until the count
+    // reached 3. Matching the parts in one span instead would need a
+    // `[\s\S]*?` gap between them, which the self-test cannot check honestly —
+    // it deletes the matched text verbatim, so a match swallowing the lines
+    // between would turn the lint red for the wrong reason and the self-test
+    // could not tell.
     //
     // `local serving cur_id` is what makes this `verify`'s site and no other:
     // the two other macOS functions that declare `serving` pair it with `want`
-    // and `old_id`. `$cur_id` anchors the comparison the same way.
+    // and `old_id`. `$cur_id` anchors the comparison the same way, and the
+    // `cur_id=` prefix anchors the symlink read — the file's three other
+    // `basename readlink current` reads assign `want` or print inline.
+    //
+    // The other three macOS sites the rule above counts still bind only their
+    // *served* operand: `want`, `old_id`, and `$RELEASE_ID` can each be
+    // rewritten to whatever `listening_release` returned with the lint green.
+    // Same for Windows's four. Closing that class is a wider change than this
+    // site — see the PR body.
     rule: '`manage verify` resolves who holds the port, and compares it to the current release',
     patterns: {
-      macOS: /local serving cur_id\n\s+serving="\$\(listening_release "\$PORT"\)"|\[ "\$serving" = "\$cur_id" \]/,
+      macOS:
+        /local serving cur_id\n\s+serving="\$\(listening_release "\$PORT"\)"|cur_id="\$\(basename "\$\(readlink "\$ROOT\/current"|\[ "\$serving" = "\$cur_id" \]/,
     },
     skip: {
       Linux:
@@ -226,7 +241,7 @@ export const RULES = [
       Windows:
         'its `manage verify` assigns `$listening` the same way, but the Windows pattern counts a bare variable-vs-variable comparison, so that site is one of the four the rule above counts — unbound to `Get-ListeningRelease`, which is the gap named in the PR body',
     },
-    exactMatches: { macOS: 2 },
+    exactMatches: { macOS: 3 },
   },
 ];
 
