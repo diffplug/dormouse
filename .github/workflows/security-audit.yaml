@@ -483,9 +483,7 @@ jobs:
           } > audit-comment.md
           rm -f "$NOTES"
 
-          # Truncate before posting: an over-long body is rejected, and under
-          # `set -e` that rejection files the verdict nowhere. Non-fatal so the
-          # clamp can never itself be the silencer. See SECURITY.md.
+          # Truncate before posting, non-fatally. See SECURITY.md.
           node scripts/clamp-issue-body.mjs audit-comment.md \
             --note "The untruncated \`audit-report.md\` is in this run's \`audit-transcript\` artifact${TRANSCRIPT_URL:+ ([download]($TRANSCRIPT_URL))}." \
             || echo "clamp-issue-body.mjs failed; posting audit-comment.md unclamped." >&2
