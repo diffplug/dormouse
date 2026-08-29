@@ -47,9 +47,12 @@ describe('theme.css var() bindings are mirrored onto body', () => {
   }
 
   // Global patterns + matchAll, not match(): a second @theme or :root block
-  // would otherwise be read past in silence. `@theme inline` is the shape that
-  // matters most — Tailwind v4 accepts it, and inline is what you reach for
-  // when a token's value is a var() chain, i.e. exactly what this checks.
+  // would otherwise be read past in silence. Tailwind v4's @theme takes
+  // combinable modifiers (inline, static, reference, default), so the header
+  // is matched with a wildcard rather than an enumeration. `[^{}\n]*` keeps it
+  // bounded to the header line: it can't run past one block's `{` into the
+  // next, and it can't match the prose `@theme` mentions in theme.css's file
+  // comment, since neither of those lines contains a `{`.
   function blockBodies(pattern: RegExp): string[] {
     const bodies = [...themeCss.matchAll(pattern)].map((m) => m[1]);
     if (bodies.length === 0) throw new Error(`Could not locate ${pattern} in theme.css`);
@@ -57,7 +60,7 @@ describe('theme.css var() bindings are mirrored onto body', () => {
   }
 
   const documentLevel = new Map(
-    [/@theme(?: inline| static)? \{([\s\S]*?)\n\}/g, /\n:root \{([\s\S]*?)\n\}/g]
+    [/@theme\b[^{}\n]*\{([\s\S]*?)\n\}/g, /\n:root \{([\s\S]*?)\n\}/g]
       .flatMap((pattern) => blockBodies(pattern))
       .flatMap((block) => [...declarations(block)]),
   );
