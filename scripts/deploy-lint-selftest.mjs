@@ -18,9 +18,12 @@
  * the same control that the pattern never matched. A review found exactly that:
  * the identity rule matched one call site per platform, so macOS's post-switch
  * wait — the one whose failure rolls back and dies — was deletable with this
- * self-test green. `minMatches` in `deploy-lint.mjs` is what covers that, and it
- * has to be set per platform from a counted list of the real call sites. A
- * control can also be present and wrong; the security audit still owns that.
+ * self-test green. `exactMatches` in `deploy-lint.mjs` is what covers that, and
+ * it has to be set per platform from a counted list of the real call sites. For
+ * those rules this file also proves the exactness itself is load-bearing, by
+ * adding a copy and requiring the lint to fail — a floor would stay green and
+ * silently re-arm the counted-sites gap on the next addition. A control can
+ * also be present and wrong; the security audit still owns that.
  *
  * Restores every file it touches on any thrown error. A signal mid-run (Ctrl-C,
  * a cancelled job) is the one gap: it can leave an installer with one control
@@ -49,7 +52,7 @@ function lintFails() {
 const weak = [];
 let held = 0;
 
-for (const { rule, patterns, skip = {}, minMatches = {} } of RULES) {
+for (const { rule, patterns, skip = {}, exactMatches = {} } of RULES) {
   for (const { platform, file } of INSTALLERS) {
     if (platform in skip) continue;
     const pattern = patterns[platform];
@@ -63,14 +66,28 @@ for (const { rule, patterns, skip = {}, minMatches = {} } of RULES) {
       continue;
     }
 
-    // Remove one occurrence. For a control the installer writes twice on
-    // purpose, `minMatches` is what makes removing either one a failure.
+    // Remove one occurrence. For a control the installer writes at several
+    // sites on purpose, `exactMatches` is what makes removing any one a failure.
     const backup = `${path}.selftest.bak`;
     copyFileSync(path, backup);
     try {
       writeFileSync(path, original.replace(match[0], ''));
       if (lintFails()) held += 1;
       else weak.push(`${platform.padEnd(8)} ${rule}`);
+    } finally {
+      copyFileSync(backup, path);
+      rmSync(backup, { force: true });
+    }
+
+    // For an exact-count rule, an added copy must fail too — exact is what
+    // forces a deliberate count bump when a new site appears, instead of a
+    // floor silently absorbing it.
+    if (exactMatches[platform] === undefined) continue;
+    copyFileSync(path, backup);
+    try {
+      writeFileSync(path, `${original}\n${match[0]}\n`);
+      if (lintFails()) held += 1;
+      else weak.push(`${platform.padEnd(8)} ${rule}\n      an added copy stays green`);
     } finally {
       copyFileSync(backup, path);
       rmSync(backup, { force: true });
@@ -89,4 +106,4 @@ if (weak.length > 0) {
   process.exit(1);
 }
 
-console.log(`deploy-lint-selftest: OK (${held}/${held} rules are load-bearing)`);
+console.log(`deploy-lint-selftest: OK (${held}/${held} checks are load-bearing)`);

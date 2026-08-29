@@ -60,9 +60,13 @@ export const INSTALLERS = [
  * `scripts/deploy-lint-selftest.mjs` is what keeps that honest: it removes each
  * matched control in turn and requires this lint to fail.
  *
- * `minMatches` is for a control the installer writes twice on purpose — once in
- * its own body and once into the generated `manage` — where matching only one
- * would let the other be deleted silently.
+ * `exactMatches` is for a control the installer writes at several sites on
+ * purpose — in its own body and into the generated `manage` — where matching
+ * only one would let the others be deleted silently. Setting it is a claim that
+ * *these are all the sites*, and the comparison is exact in both directions:
+ * fewer matches means a control went missing, more means a site was added and
+ * the count must be bumped deliberately in the same commit. Rules without it
+ * require at least one match.
  */
 export const RULES = [
   {
@@ -150,14 +154,17 @@ export const RULES = [
     // its definition and at every call site, so removing the check that
     // consumes it left this green.
     //
-    // `minMatches` is doing the real work here, and it has to be set for every
-    // platform. Each writes the conjunct at more than one site, and a pattern
-    // that matched only one left the others deletable: on macOS the first
-    // version matched the generated `manage`'s wait and left the post-switch
-    // wait — the one whose failure rolls back and dies — unlinted. Counting is
-    // what makes "every copy survives" checkable; the self-test cannot see it,
-    // because it proves the *matched* text is load-bearing, never that every
-    // copy of the control is matched.
+    // `exactMatches` is doing the real work here, and it has to be set for
+    // every platform. Each writes the conjunct at more than one site, and a
+    // pattern that matched only one left the others deletable: on macOS the
+    // first version matched the generated `manage`'s wait and left the
+    // post-switch wait — the one whose failure rolls back and dies — unlinted.
+    // Counting is what makes "every copy survives" checkable; the self-test
+    // cannot see it, because it proves the *matched* text is load-bearing,
+    // never that every copy of the control is matched. The count was once a
+    // floor, which meant a legitimately-added site silently re-armed the same
+    // gap: the new site could later lose its identity conjunct without the
+    // count dropping below the floor. Exact is what forces the bump.
     //
     // The counts, and where they come from:
     //   macOS   4 — `manage`'s wait_for_health, `manage verify`, the post-switch
@@ -183,7 +190,7 @@ export const RULES = [
       Linux: /&& \[ "\$\(listening_release "\$(?:LOOPBACK_)?PORT"\)" = "\$1" \]/,
       Windows: /\$(?:listening|restored|serving) -(?:ne|eq) \$(?:RELEASE_ID|OLD_RELEASE|prev|cur)\b/,
     },
-    minMatches: { macOS: 4, Linux: 2, Windows: 4 },
+    exactMatches: { macOS: 4, Linux: 2, Windows: 4 },
   },
 ];
 
@@ -191,7 +198,7 @@ export function check() {
   const failures = [];
   let checked = 0;
 
-  for (const { rule, patterns, skip = {}, minMatches = {} } of RULES) {
+  for (const { rule, patterns, skip = {}, exactMatches = {} } of RULES) {
   for (const { platform, file } of INSTALLERS) {
     if (platform in skip) continue;
     const pattern = patterns[platform];
@@ -207,11 +214,20 @@ export function check() {
       failures.push(`${rule}\n    ${file}: missing`);
       continue;
     }
-    const want = minMatches[platform] ?? 1;
-    const found = text.match(new RegExp(pattern.source, `${pattern.flags.replace('g', '')}g`));
-    if ((found?.length ?? 0) < want) {
+    const want = exactMatches[platform];
+    const found =
+      text.match(new RegExp(pattern.source, `${pattern.flags.replace('g', '')}g`))?.length ?? 0;
+    if (want === undefined) {
+      if (found < 1) {
+        failures.push(`FAIL IF ${rule}\n    ${file} matches ${pattern} 0x, expected at least 1`);
+      }
+    } else if (found < want) {
       failures.push(
-        `FAIL IF ${rule}\n    ${file} matches ${pattern} ${found?.length ?? 0}x, expected at least ${want}`,
+        `FAIL IF ${rule}\n    ${file} matches ${pattern} ${found}x, expected exactly ${want} — a control went missing`,
+      );
+    } else if (found > want) {
+      failures.push(
+        `FAIL IF ${rule}\n    ${file} matches ${pattern} ${found}x, expected exactly ${want} — if a site was added on purpose, bump exactMatches in the same commit`,
       );
     }
   }
