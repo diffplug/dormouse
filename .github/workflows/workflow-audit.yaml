@@ -372,6 +372,18 @@ jobs:
             cat "$REPORT"
           } > "$BODY"
 
+          # `$REPORT` grows a section per unexplained commit, so a busy window
+          # can exceed GitHub's 65536-character body limit — and that rejection
+          # is fatal to this `set -e` step, filing nothing at all rather than a
+          # shorter issue. Preventive here rather than observed; the same
+          # oversight cost `security-audit` a real BLOCKER finding on run
+          # 33249330988, which is what the helper was written for.
+          # No `setup-node` step in this job: `node` is preinstalled on
+          # `ubuntu-latest` and the script has no dependencies, so the checkout
+          # above is all it needs.
+          node scripts/clamp-issue-body.mjs "$BODY" \
+            --note "The commits past this point were dropped to fit; re-derive the full list from the audit window named at the top of this issue, or read it in [the run](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)."
+
           TITLE="[workflow-audit] $COUNT unexplained change(s) on $(date -u +%Y-%m-%d)"
           gh issue create --repo "$GITHUB_REPOSITORY" \
             --title "$TITLE" --body-file "$BODY"

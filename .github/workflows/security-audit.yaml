@@ -483,6 +483,21 @@ jobs:
           } > audit-comment.md
           rm -f "$NOTES"
 
+          # GitHub rejects an issue or comment body over 65536 characters, and
+          # `set -e` makes that rejection the end of this step — so a report
+          # that trips the limit is filed *nowhere*: no issue, no comment, just
+          # a red run and an artifact that expires. Run 33249330988 did exactly
+          # that, losing a `VERDICT: FAIL` with a BLOCKER finding behind a 68 KB
+          # `audit-report.md`.
+          #
+          # This is the normal shape of a bad audit rather than an edge case:
+          # the report grows with the findings, so the runs most worth reporting
+          # are the ones most likely to be silenced. Clamp instead of guarding —
+          # the head (headline, links, dissent notes) is what a reader acts on,
+          # and the untruncated report is in the transcript the header links.
+          node scripts/clamp-issue-body.mjs audit-comment.md \
+            --note "The untruncated \`audit-report.md\` is in this run's \`audit-transcript\` artifact${TRANSCRIPT_URL:+ ([download]($TRANSCRIPT_URL))}."
+
           EXISTING=$(gh issue list --label security-audit-failure \
                        --state open --json number --jq '.[0].number' || true)
           if [ -n "$EXISTING" ]; then
