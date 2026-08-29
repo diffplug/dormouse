@@ -222,9 +222,9 @@ export const RULES = [
     },
     skip: {
       Linux:
-        'its `cmd_status` gate calls `service_healthy`, so the comparison lives in that helper — counted by the rule above',
+        'its `manage verify` gate calls `service_healthy`, so the comparison lives in that helper — counted by the rule above',
       Windows:
-        "its `manage verify` compares inline, so that site is one of the four the rule above counts",
+        'its `manage verify` assigns `$listening` the same way, but the Windows pattern counts a bare variable-vs-variable comparison, so that site is one of the four the rule above counts — unbound to `Get-ListeningRelease`, which is the gap named in the PR body',
     },
     exactMatches: { macOS: 2 },
   },
