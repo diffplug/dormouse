@@ -495,8 +495,19 @@ jobs:
           # are the ones most likely to be silenced. Clamp instead of guarding —
           # the head (headline, links, dissent notes) is what a reader acts on,
           # and the untruncated report is in the transcript the header links.
+          #
+          # Never fatal. The clamp now stands between the verdict and every
+          # `gh issue create` / `gh issue comment` below, so under `set -e` a
+          # failure of the helper itself — `node` gone from a future runner
+          # image, an unreadable path, an unexpected throw — reopens exactly
+          # the window this closes, and reopens it for the common case where
+          # the body was under the limit and would have posted untouched. The
+          # script rewrites the file only when it is over budget, so on failure
+          # `audit-comment.md` is still the body composed above; posting it
+          # unclamped risks GitHub's rejection, while not posting guarantees it.
           node scripts/clamp-issue-body.mjs audit-comment.md \
-            --note "The untruncated \`audit-report.md\` is in this run's \`audit-transcript\` artifact${TRANSCRIPT_URL:+ ([download]($TRANSCRIPT_URL))}."
+            --note "The untruncated \`audit-report.md\` is in this run's \`audit-transcript\` artifact${TRANSCRIPT_URL:+ ([download]($TRANSCRIPT_URL))}." \
+            || echo "clamp-issue-body.mjs failed; posting audit-comment.md unclamped." >&2
 
           EXISTING=$(gh issue list --label security-audit-failure \
                        --state open --json number --jq '.[0].number' || true)

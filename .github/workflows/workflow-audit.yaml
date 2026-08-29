@@ -381,8 +381,13 @@ jobs:
           # No `setup-node` step in this job: `node` is preinstalled on
           # `ubuntu-latest` and the script has no dependencies, so the checkout
           # above is all it needs.
+          # Never fatal, for the same reason as in `security-audit.yaml`: under
+          # `set -e` a failure of the helper would file nothing at all rather
+          # than a long issue, and that is sharper here because of the missing
+          # `setup-node` noted above.
           node scripts/clamp-issue-body.mjs "$BODY" \
-            --note "The commits past this point were dropped to fit; re-derive the full list from the audit window named at the top of this issue, or read it in [the run](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)."
+            --note "The commits past this point were dropped to fit; re-derive the full list from the audit window named at the top of this issue, or read it in [the run](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)." \
+            || echo "clamp-issue-body.mjs failed; posting the body unclamped." >&2
 
           TITLE="[workflow-audit] $COUNT unexplained change(s) on $(date -u +%Y-%m-%d)"
           gh issue create --repo "$GITHUB_REPOSITORY" \

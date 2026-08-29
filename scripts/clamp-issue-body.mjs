@@ -69,8 +69,11 @@ export function clampIssueBody(body, { limit = GITHUB_BODY_LIMIT, note = '' } = 
   const room = budget - footer.length - 4;
   if (room <= 0) {
     // Pathological: the note alone does not fit. Ship the footer rather than
-    // an over-long body — the links in it are the part that still works.
-    return { body: footer.trimStart(), clamped: true, originalLength: body.length };
+    // an over-long body — the links in it are the part that still works. Cut
+    // it to budget too: a footer long enough to reach this branch is itself
+    // over the limit, and shipping that is the same total failure as shipping
+    // the original.
+    return { body: footer.trimStart().slice(0, budget), clamped: true, originalLength: body.length };
   }
 
   let kept = body.slice(0, room);
@@ -99,14 +102,20 @@ function isHighSurrogate(code) {
 
 /**
  * The closing fence `kept` needs, or `''`. Counts fence lines rather than
- * tracking the opening marker: a report is machine-merged from several agents'
- * markdown, so a mismatched ``` / ~~~ pair is likelier than a nested one, and
- * an unnecessary closing fence renders as an empty code block while a missing
- * one hides the footer entirely.
+ * tracking nesting: a report is machine-merged from several agents' markdown,
+ * so a mismatched ``` / ~~~ pair is likelier than a nested one, and an
+ * unnecessary closing fence renders as an empty code block while a missing
+ * one hides the footer entirely. The marker is taken from the unmatched
+ * opener, since ``` and ~~~ do not close each other.
  */
 function unclosedFence(kept) {
-  const fences = kept.split('\n').filter((line) => FENCE.test(line)).length;
-  return fences % 2 === 1 ? '\n```' : '';
+  const fences = kept.split('\n').filter((line) => FENCE.test(line));
+  if (fences.length % 2 === 0) return '';
+  // Close with the same marker the opener used: a backtick fence does not
+  // close a tilde-fenced block, so a mismatched closer leaves the footer
+  // inside the code block rather than below it. With an odd count the last
+  // fence line is the unmatched opener.
+  return `\n${FENCE.exec(fences[fences.length - 1])[1]}`;
 }
 
 function buildFooter(originalLength, note) {

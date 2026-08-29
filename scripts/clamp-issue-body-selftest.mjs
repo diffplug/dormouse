@@ -109,7 +109,43 @@ function auditShapedBody(totalLength) {
   );
 }
 
-// 6. The CLI rewrites the file in place — what the workflow actually calls.
+// 6. A tilde fence is closed with a tilde fence. A ``` closer does not end a
+//    ~~~ block, so a mismatched one leaves the footer — and the artifact link
+//    in it — rendering as literal text inside the code block, which is the
+//    failure case 5 exists to prevent. The report is machine-merged from
+//    several agents' markdown, so the opener's marker is not ours to assume.
+for (const opener of ['~~~', '```', '````', '~~~~']) {
+  const body = `head\n\n${opener}\n${'code line in a fence\n'.repeat(6_000)}`;
+  const { body: clamped } = clampIssueBody(body, { note: 'n.' });
+  const beforeFooter = clamped.slice(0, clamped.lastIndexOf('\n\n---\n\n'));
+  const fences = beforeFooter.split('\n').filter((line) => /^\s{0,3}(```+|~~~+)/.test(line));
+  check(`a ${opener} fence is balanced before the footer`, fences.length % 2 === 0, `counted ${fences.length}`);
+  const closer = fences[fences.length - 1];
+  check(
+    `a ${opener} fence is closed with its own marker`,
+    closer === opener,
+    `got ${JSON.stringify(closer)}`,
+  );
+  check(`the ${opener} body fits`, clamped.length <= GITHUB_BODY_LIMIT, `got ${clamped.length}`);
+}
+
+// 7. The pathological branch — a note so long the footer alone blows the
+//    budget — must still return something postable. Returning the whole
+//    footer would be over the limit, so `gh` would reject it and the step
+//    would die exactly as it does without the clamp.
+{
+  const { body: clamped, clamped: didClamp } = clampIssueBody('x'.repeat(70_000), {
+    note: 'n'.repeat(GITHUB_BODY_LIMIT),
+  });
+  check('an over-long note is still reported as clamped', didClamp);
+  check(
+    'an over-long note does not itself exceed the limit',
+    clamped.length <= GITHUB_BODY_LIMIT,
+    `got ${clamped.length}`,
+  );
+}
+
+// 8. The CLI rewrites the file in place — what the workflow actually calls.
 {
   const dir = mkdtempSync(join(tmpdir(), 'clamp-issue-body-'));
   try {
