@@ -167,30 +167,66 @@ export const RULES = [
     // count dropping below the floor. Exact is what forces the bump.
     //
     // The counts, and where they come from:
-    //   macOS   4 — `manage`'s wait_for_health, `manage verify`, the post-switch
-    //               wait, the rollback wait
+    //   macOS   3 — `manage`'s wait_for_health, the post-switch wait, the
+    //               rollback wait
     //   Linux   2 — `service_healthy`, once in the body and once in `manage`
     //   Windows 4 — post-switch, Restore-PreviousRelease, `manage rollback`, `manage verify`
     // Windows names its comparison four different ways, so the pattern matches
     // the shape (an identity variable against an expected release) rather than
     // one spelling.
     //
-    // macOS writes the comparison two ways, so its pattern carries both.
-    // `manage verify` needs the release twice — once for the gate, once for the
-    // failure message that names it — so it assigns `serving` first instead of
-    // calling `listening_release` inline. A pattern that required the inline
-    // form counted 3 sites and left `verify`'s deletable, while Windows counted
-    // its structurally identical `manage verify` site: one rule, two standards.
-    // `verify` is the audit command, so what a miss there loses is a green tick
-    // a stranger's process earned. Only `=` is counted; the `!=` uses at the
-    // post-failure diagnostics are reports, not gates.
+    // Every macOS comparison counted here calls `listening_release` inline, so
+    // no match can be held up by a spelling that never consults it. `manage
+    // verify` is the one macOS site that cannot be written that way — it needs
+    // the answer twice, once for the gate and once for the failure message that
+    // names the release — so it assigns `serving` first, and the rule below
+    // covers it. Folding it in here instead, by accepting a bare
+    // `[ "$serving" = "$x" ]` as a second spelling, looked free and was not:
+    // that alternative is bound to nothing, so any of the sites above could be
+    // rewritten into it — including the post-switch wait — and the count would
+    // still read 4. Only `=` is counted; the `!=` uses at `install-macos.sh`
+    // :675 and :1195 are post-failure diagnostics, reports rather than gates.
     rule: 'A 200 does not say who answered — health is paired with a release-identity check',
     patterns: {
-      macOS: /\[ "\$(?:\(listening_release "\$(?:LOOPBACK_)?PORT"\)|serving)" = "\$\w+" \]/,
+      macOS: /\[ "\$\(listening_release "\$(?:LOOPBACK_)?PORT"\)" = "\$\w+" \]/,
       Linux: /&& \[ "\$\(listening_release "\$(?:LOOPBACK_)?PORT"\)" = "\$1" \]/,
       Windows: /\$(?:listening|restored|serving) -(?:ne|eq) \$(?:RELEASE_ID|OLD_RELEASE|prev|cur)\b/,
     },
-    exactMatches: { macOS: 4, Linux: 2, Windows: 4 },
+    exactMatches: { macOS: 3, Linux: 2, Windows: 4 },
+  },
+  {
+    // macOS `manage verify`'s half of the rule above, split out because it is
+    // the one site that resolves the release into a variable first. `verify` is
+    // the audit command, so a miss here is a green tick a stranger's process
+    // earned — the outcome the rule above exists to prevent — and an earlier
+    // pattern that demanded the inline spelling left it wholly unlinted while
+    // Windows counted its structurally identical `verify` site: one rule, two
+    // standards.
+    //
+    // Both halves are needed, which is why the pattern is an alternation with
+    // an exact count of 2 rather than one pattern per half. Deleting the
+    // comparison leaves the lookup; rewriting the lookup to `serving="$cur_id"`
+    // leaves the comparison, and `verify` then green-ticks whatever holds the
+    // port. Either edit drops the count to 1. Matching both in one span instead
+    // would need a `[\s\S]*?` gap between them, which the self-test cannot
+    // check honestly — it deletes the matched text verbatim, so a match
+    // swallowing the lines between would turn the lint red for the wrong
+    // reason and the self-test could not tell.
+    //
+    // `local serving cur_id` is what makes this `verify`'s site and no other:
+    // the two other macOS functions that declare `serving` pair it with `want`
+    // and `old_id`. `$cur_id` anchors the comparison the same way.
+    rule: '`manage verify` resolves who holds the port, and compares it to the current release',
+    patterns: {
+      macOS: /local serving cur_id\n\s+serving="\$\(listening_release "\$PORT"\)"|\[ "\$serving" = "\$cur_id" \]/,
+    },
+    skip: {
+      Linux:
+        'its `cmd_status` gate calls `service_healthy`, so the comparison lives in that helper — counted by the rule above',
+      Windows:
+        "its `manage verify` compares inline, so that site is one of the four the rule above counts",
+    },
+    exactMatches: { macOS: 2 },
   },
 ];
 

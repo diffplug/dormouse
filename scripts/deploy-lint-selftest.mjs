@@ -87,7 +87,10 @@ for (const { rule, patterns, skip = {}, exactMatches = {} } of RULES) {
     try {
       writeFileSync(path, `${original}\n${match[0]}\n`);
       if (lintFails()) held += 1;
-      else weak.push(`${platform.padEnd(8)} ${rule}\n      an added copy stays green`);
+      else
+        weak.push(
+          `${platform.padEnd(8)} ${rule}\n      an added copy stays green — the count must compare exactly, not as a floor`,
+        );
     } finally {
       copyFileSync(backup, path);
       rmSync(backup, { force: true });
@@ -96,12 +99,13 @@ for (const { rule, patterns, skip = {}, exactMatches = {} } of RULES) {
 }
 
 if (weak.length > 0) {
-  console.error('deploy-lint-selftest: rules that stay green after their control is removed\n');
+  console.error('deploy-lint-selftest: checks that stayed green when they should have gone red\n');
   for (const w of weak) console.error(`  ${w}\n`);
   console.error(
-    'Each pattern above matches text that is not the control — usually the\n' +
-      'identifier rather than the message or comparison, or a comment that\n' +
-      'describes the rule. Anchor it on something only the control itself says.',
+    'For a removed control: the pattern matches text that is not the control —\n' +
+      'usually the identifier rather than the message or comparison, or a comment\n' +
+      'that describes the rule. Anchor it on something only the control itself\n' +
+      'says. For an added copy: the fix is in deploy-lint.mjs, not the pattern.',
   );
   process.exit(1);
 }
