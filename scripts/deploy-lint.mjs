@@ -207,8 +207,8 @@ export const RULES = [
     // with an exact count of 3 rather than one pattern per part. A comparison
     // is only as good as both of its operands, so each is pinned to the thing
     // that has to have produced it: `serving` to `listening_release`, `cur_id`
-    // to the `current` symlink. Every way of neutering the gate drops the
-    // count to 2 — deleting the comparison leaves the two lookups; rewriting
+    // to the `current` symlink. Editing any of the three parts drops the count
+    // to 2 — deleting the comparison leaves the two lookups; rewriting
     // `serving="$cur_id"` leaves the comparison and the expected release;
     // rewriting `cur_id="$serving"` compares the port's holder to itself, so
     // `verify` green-ticks whatever answers. That last one is the same shape as
@@ -229,7 +229,7 @@ export const RULES = [
     // *served* operand: `want`, `old_id`, and `$RELEASE_ID` can each be
     // rewritten to whatever `listening_release` returned with the lint green.
     // Same for Windows's four. Closing that class is a wider change than this
-    // site — see the PR body.
+    // site, and is left open deliberately — the analysis is in #482.
     rule: '`manage verify` resolves who holds the port, and compares it to the current release',
     patterns: {
       macOS:
@@ -239,7 +239,7 @@ export const RULES = [
       Linux:
         'its `manage verify` gate calls `service_healthy`, so the comparison lives in that helper — counted by the rule above',
       Windows:
-        'its `manage verify` assigns `$listening` the same way, but the Windows pattern counts a bare variable-vs-variable comparison, so that site is one of the four the rule above counts — unbound to `Get-ListeningRelease`, which is the gap named in the PR body',
+        'its `manage verify` assigns `$listening` the same way, but the Windows pattern counts a bare variable-vs-variable comparison, so that site is one of the four the rule above counts — unbound to `Get-ListeningRelease`, the gap named in the comment above',
     },
     exactMatches: { macOS: 3 },
   },
