@@ -110,6 +110,43 @@ jobs:
           [ -L "$root/previous" ] || { echo "::error::no previous release retained after an update"; exit 1; }
           bash -n "$root/bin/manage"
           bash -n "$root/bin/run-server"
+  webview-smoketest:
+    name: Webview Boot Smoketest
+    runs-on: ubuntu-latest
+    # Its own job, in parallel with Build & Test: this is the only check that
+    # needs a browser, and pinning that cost to one job keeps `pnpm test` free of
+    # it. It is also the only check that runs the shipped bundle rather than
+    # inspecting it — the VS Code webview's CSP is enforced by Chromium, so a
+    # policy that blocks the app is invisible to every string-level test we have
+    # (docs/specs/vscode.md -> "CSP policy").
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      # Frozen for the same supply-chain reason as every other job here.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `playwright-core` ships no browser, deliberately — a unit-test run should
+      # not drag one down. Fetch it here, where it is actually used.
+      - name: Install Chromium
+        run: pnpm --filter dormouse exec playwright-core install --with-deps chromium
+
+      # The smoketest loads what the build emits, so the build has to precede
+      # it. `build:frontend` alone — this job never touches the extension host
+      # bundle — and its `prebuild:frontend` hook builds the two workspace
+      # packages the webview bundle imports, which a clean checkout has no dist
+      # for.
+      - name: Build the webview frontend
+        run: pnpm --filter dormouse build:frontend
+
+      - name: Smoketest
+        run: pnpm --filter dormouse test:smoke
 
   standalone-smoketest:
     name: Standalone Smoketest

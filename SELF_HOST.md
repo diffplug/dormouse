@@ -458,9 +458,13 @@ Prove it once, while the user is watching:
    return to the desired release.
 
 `manage uninstall` removes the service definition and installed code and keeps
-`config` and `state`, reporting where they are. `manage purge` is the separate,
+`config` and `state`, reporting where they are. It also keeps `manage` itself,
+which is what makes the second step possible. `manage purge` is the separate,
 irreversible operation that deletes them; it requires typing a confirmation
-phrase and is never part of a reinstall.
+phrase and is never part of a reinstall. Run them in that order — uninstall,
+then purge — and purge finishes by printing the single command that clears
+whatever is left: the install root, plus the log directory on Linux and macOS,
+where it sits outside that root.
 
 ## Checkpoint 6: limits and backup
 
@@ -559,7 +563,10 @@ Do not print the setup password or any credential in the handoff.
   nothing will start.
 - **`tailscale serve` is refused for a non-root user (Linux):** grant the
   operator role — see Prerequisites. The installer checks for this before
-  building, so hitting it later means the check regressed.
+  building, so hitting it later means the check regressed. If you do hit it
+  late, the release is already installed and the service already running: grant
+  the role, then run `manage serve` to add the HTTPS front door rather than
+  reinstalling.
 - **The service disappears at logout (Linux):** that is the documented per-login
   default, not a fault. This is deliberate — see Prerequisites for the `--linger`
   opt-out, and make the availability change in checkpoint 6 explicit if you take

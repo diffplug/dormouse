@@ -116,13 +116,22 @@ are still visible on `document.body`; ThemePicker additionally re-restores in a
 layout effect after mount, so hydration cannot leave the picker claiming a theme
 is active while xterm.js sees fallback colors.
 
-`theme.css` declares the theme-dependent `--color-*` tokens on `body` because
-`--vscode-*` variables also live there; the parallel `@theme` declarations exist
-so Tailwind can generate utility classes, but the body-level ones are the
-runtime source of truth. The dynamic tokens also carry body-level baseline
-bindings matching `@theme`, so direct CSS-var consumers such as the mobile
-gesture SVG — and a ringing bell before the first dynamic pass — render visibly
-before `useDynamicPalette()` publishes refined values.
+`theme.css` declares the theme-dependent tokens twice: at document level
+(`@theme` so Tailwind generates utility classes, or `:root`) and on `body`,
+the runtime source of truth. CSS resolves `var()` inside a custom-property
+declaration at the element where the property is declared, so only the `body`
+copy can see the `--vscode-*` variables `applyTheme()` writes to `body.style`;
+a token declared only at document level resolves to nothing wherever
+`applyTheme()` is the sole writer (standalone, website, Pocket). Every token
+whose value contains `var()` — indirect chains included — must therefore
+appear at both levels with the same value.
+`lib/src/lib/themes/consumed-keys.test.ts` enforces this.
+Dynamic palette tokens (`--color-door-bg`, `--color-door-fg`,
+`--color-focus-ring`, and the four `--color-alarm-vs-*` tokens) also have
+body-level baseline bindings matching the `@theme` declarations, so direct
+CSS-var consumers such as the mobile gesture SVG — and a ringing bell before
+the first dynamic pass — render visibly before `useDynamicPalette()` publishes
+refined values.
 
 `theme.css` must not contain hardcoded color defaults or `var(..., fallback)`
 chains. Runtime hosts plus the shared resolver are responsible for providing the
