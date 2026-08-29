@@ -1,19 +1,10 @@
 #!/usr/bin/env node
 /**
- * Proves `clamp-issue-body.mjs` actually produces a body GitHub will accept.
+ * Proves `clamp-issue-body.mjs` produces a body GitHub will accept.
  *
- * The regression this locks down is run 33249330988: the security audit
- * reached `VERDICT: FAIL`, composed a 68 KB comment, and `gh issue create`
- * rejected it with `GraphQL: Body is too long (maximum is 65536 characters)`.
- * The step died on `set -e`, so the finding reached no issue and no comment.
- * The first case below reproduces that body shape and asserts the clamp
- * returns something under the limit — it fails against an unclamped body,
- * which is the whole point.
- *
- * Everything else here guards a way the clamp could be *technically* under the
- * limit and still useless: dropping the head (which carries the verdict and
- * the links), emitting half a code point, or leaving a fence open so the
- * truncation note renders inside a code block instead of as prose.
+ * The regression is run 33249330988: the security audit reached `VERDICT:
+ * FAIL`, composed a 68 KB comment, and `gh issue create` rejected it as too
+ * long, so the finding reached no issue and no comment.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -22,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { GITHUB_BODY_LIMIT, clampIssueBody } from './clamp-issue-body.mjs';
+import { BODY_LIMIT, clampIssueBody } from './clamp-issue-body.mjs';
 
 const failures = [];
 
@@ -38,146 +29,37 @@ function auditShapedBody(totalLength) {
     '',
     '- **A domain returned `FAIL`.** audit-application.md opened with `VERDICT: FAIL`.',
     '',
-    '## Report',
-    '',
   ].join('\n');
-  const filler = `${'finding detail line that is long enough to be representative'.padEnd(72, '.')}\n`;
+  const filler = `${'finding detail line'.padEnd(72, '.')}\n`;
   return head + filler.repeat(Math.ceil((totalLength - head.length) / filler.length));
 }
 
-// 1. The actual regression: a 68 KB audit body must come back postable.
+// The regression: a 68 KB audit body comes back postable, head intact.
 {
   const body = auditShapedBody(68_424);
-  check('the unclamped fixture is over the limit', body.length > GITHUB_BODY_LIMIT, `got ${body.length}`);
-
-  const { body: clamped, clamped: didClamp, originalLength } = clampIssueBody(body, {
-    note: 'The full report is in the run artifact.',
-  });
-  check('an over-long body is reported as clamped', didClamp);
-  check('originalLength reports the input length', originalLength === body.length);
-  check(
-    'a clamped body fits GitHub\'s limit',
-    clamped.length <= GITHUB_BODY_LIMIT,
-    `got ${clamped.length}, limit ${GITHUB_BODY_LIMIT}`,
-  );
+  const clamped = clampIssueBody(body, 'The full report is in the run artifact.');
+  check('a clamped body fits the limit', clamped.length <= BODY_LIMIT, `got ${clamped.length}`);
   check('the head survives', clamped.startsWith('Audit failed at 2026-08-29.'));
   check('the dissent note survives', clamped.includes('**A domain returned `FAIL`.**'));
-  check('the reader is told it was truncated', clamped.includes('Truncated here'));
+  check('the reader is told it was truncated', clamped.includes('Truncated to fit'));
   check('the caller-supplied pointer survives', clamped.includes('The full report is in the run artifact.'));
+  check('re-clamping is a no-op', clampIssueBody(clamped, 'n.') === clamped);
 }
 
-// 2. A body already under the limit is left exactly alone, so the workflow can
-//    run this unconditionally and a normal-sized report is unaffected.
+// A body under the limit is left byte-identical, so the workflow can run this
+// unconditionally.
 {
   const body = auditShapedBody(1_000);
-  const result = clampIssueBody(body, { note: 'ignored' });
-  check('a short body is not reported as clamped', result.clamped === false);
-  check('a short body is returned byte-identical', result.body === body);
+  check('a short body is untouched', clampIssueBody(body, 'ignored') === body);
 }
 
-// 3. Clamping is idempotent: a second pass over an already-clamped body must
-//    not re-truncate or stack a second footer.
+// A `--note` long enough to blow the budget by itself must still fit.
 {
-  const once = clampIssueBody(auditShapedBody(68_424), { note: 'n.' }).body;
-  const twice = clampIssueBody(once, { note: 'n.' });
-  check('re-clamping an already-clamped body is a no-op', twice.clamped === false && twice.body === once);
+  const clamped = clampIssueBody('x'.repeat(70_000), 'n'.repeat(BODY_LIMIT));
+  check('an over-long note still fits', clamped.length <= BODY_LIMIT, `got ${clamped.length}`);
 }
 
-// 4. No lone surrogate at the cut. An emoji-dense body puts a surrogate pair
-//    astride every candidate offset; half of one is invalid UTF-8 on the way
-//    out, which is a different rejection from the one we are fixing.
-{
-  const body = 'head\n' + '🔒'.repeat(60_000);
-  const { body: clamped } = clampIssueBody(body, { note: 'n.' });
-  check(
-    'a clamped body is valid UTF-8 (no lone surrogate)',
-    !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(clamped),
-  );
-  check('the emoji body still fits', clamped.length <= GITHUB_BODY_LIMIT);
-}
-
-// 5. A fence left open by the cut is closed, so the truncation note renders as
-//    prose rather than disappearing into a code block.
-{
-  const body = `head\n\n\`\`\`\n${'code line in a fence\n'.repeat(6_000)}`;
-  const { body: clamped } = clampIssueBody(body, { note: 'n.' });
-  const fences = clamped.split('\n').filter((line) => /^\s{0,3}(```+|~~~+)/.test(line)).length;
-  check('an open fence is closed before the footer', fences % 2 === 0, `counted ${fences} fence lines`);
-  check(
-    'the footer is outside the fence',
-    clamped.lastIndexOf('```') < clamped.indexOf('Truncated here'),
-  );
-}
-
-// 6. A tilde fence is closed with a tilde fence. A ``` closer does not end a
-//    ~~~ block, so a mismatched one leaves the footer — and the artifact link
-//    in it — rendering as literal text inside the code block, which is the
-//    failure case 5 exists to prevent. The report is machine-merged from
-//    several agents' markdown, so the opener's marker is not ours to assume.
-for (const opener of ['~~~', '```', '````', '~~~~']) {
-  const body = `head\n\n${opener}\n${'code line in a fence\n'.repeat(6_000)}`;
-  const { body: clamped } = clampIssueBody(body, { note: 'n.' });
-  const beforeFooter = clamped.slice(0, clamped.lastIndexOf('\n\n---\n\n'));
-  const fences = beforeFooter.split('\n').filter((line) => /^\s{0,3}(```+|~~~+)/.test(line));
-  check(`a ${opener} fence is balanced before the footer`, fences.length % 2 === 0, `counted ${fences.length}`);
-  const closer = fences[fences.length - 1];
-  check(
-    `a ${opener} fence is closed with its own marker`,
-    closer === opener,
-    `got ${JSON.stringify(closer)}`,
-  );
-  check(`the ${opener} body fits`, clamped.length <= GITHUB_BODY_LIMIT, `got ${clamped.length}`);
-}
-
-// 6b. A nested fence — a longer outer marker around a shorter inner one, the
-//     shape this repo's own comment guidance prescribes — leaves *two* blocks
-//     open at the cut, and a parity count reads the inner opener as the outer
-//     closer and so emits nothing at all.
-{
-  const body = `head\n\n\`\`\`\`\nouter\n\`\`\`\n${'inner code line\n'.repeat(6_000)}`;
-  const { body: clamped } = clampIssueBody(body, { note: 'n.' });
-  const beforeFooter = clamped.slice(0, clamped.lastIndexOf('\n\n---\n\n'));
-  check(
-    'a nested fence is closed with the outer marker',
-    beforeFooter.endsWith('\n````'),
-    `tail ${JSON.stringify(beforeFooter.slice(-12))}`,
-  );
-  check('the nested body fits', clamped.length <= GITHUB_BODY_LIMIT, `got ${clamped.length}`);
-}
-
-// 6c. A fence-shaped line carrying an info string is literal content inside an
-//     open block, not a closer. A parity count treats ```js as closing the
-//     block it sits in, so the same footer-inside-the-fence failure reappears
-//     on the commonest markdown shape of all: a language-tagged example.
-{
-  const body = `head\n\n\`\`\`\n${'line\n'.repeat(200)}\`\`\`js\n${'line\n'.repeat(20_000)}`;
-  const { body: clamped } = clampIssueBody(body, { note: 'n.' });
-  const beforeFooter = clamped.slice(0, clamped.lastIndexOf('\n\n---\n\n'));
-  check(
-    'an info-string fence line does not count as a closer',
-    beforeFooter.endsWith('\n```'),
-    `tail ${JSON.stringify(beforeFooter.slice(-12))}`,
-  );
-  check('the info-string body fits', clamped.length <= GITHUB_BODY_LIMIT, `got ${clamped.length}`);
-}
-
-// 7. The pathological branch — a note so long the footer alone blows the
-//    budget — must still return something postable. Returning the whole
-//    footer would be over the limit, so `gh` would reject it and the step
-//    would die exactly as it does without the clamp.
-{
-  const { body: clamped, clamped: didClamp } = clampIssueBody('x'.repeat(70_000), {
-    note: 'n'.repeat(GITHUB_BODY_LIMIT),
-  });
-  check('an over-long note is still reported as clamped', didClamp);
-  check(
-    'an over-long note does not itself exceed the limit',
-    clamped.length <= GITHUB_BODY_LIMIT,
-    `got ${clamped.length}`,
-  );
-}
-
-// 8. The CLI rewrites the file in place — what the workflow actually calls.
+// The CLI rewrites the file in place — what the workflows actually call.
 {
   const dir = mkdtempSync(join(tmpdir(), 'clamp-issue-body-'));
   try {
@@ -186,7 +68,7 @@ for (const opener of ['~~~', '```', '````', '~~~~']) {
     const cli = fileURLToPath(new URL('./clamp-issue-body.mjs', import.meta.url));
     execFileSync('node', [cli, file, '--note', 'See the artifact.'], { stdio: 'pipe' });
     const written = readFileSync(file, 'utf8');
-    check('the CLI rewrites the file under the limit', written.length <= GITHUB_BODY_LIMIT, `got ${written.length}`);
+    check('the CLI rewrites the file under the limit', written.length <= BODY_LIMIT, `got ${written.length}`);
     check('the CLI passes --note through', written.includes('See the artifact.'));
   } finally {
     rmSync(dir, { recursive: true, force: true });

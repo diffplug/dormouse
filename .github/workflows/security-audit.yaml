@@ -483,28 +483,9 @@ jobs:
           } > audit-comment.md
           rm -f "$NOTES"
 
-          # GitHub rejects an issue or comment body over 65536 characters, and
-          # `set -e` makes that rejection the end of this step — so a report
-          # that trips the limit is filed *nowhere*: no issue, no comment, just
-          # a red run and an artifact that expires. Run 33249330988 did exactly
-          # that, losing a `VERDICT: FAIL` with a BLOCKER finding behind a 68 KB
-          # `audit-report.md`.
-          #
-          # This is the normal shape of a bad audit rather than an edge case:
-          # the report grows with the findings, so the runs most worth reporting
-          # are the ones most likely to be silenced. Clamp instead of guarding —
-          # the head (headline, links, dissent notes) is what a reader acts on,
-          # and the untruncated report is in the transcript the header links.
-          #
-          # Never fatal. The clamp now stands between the verdict and every
-          # `gh issue create` / `gh issue comment` below, so under `set -e` a
-          # failure of the helper itself — `node` gone from a future runner
-          # image, an unreadable path, an unexpected throw — reopens exactly
-          # the window this closes, and reopens it for the common case where
-          # the body was under the limit and would have posted untouched. The
-          # script rewrites the file only when it is over budget, so on failure
-          # `audit-comment.md` is still the body composed above; posting it
-          # unclamped risks GitHub's rejection, while not posting guarantees it.
+          # Truncate before posting: an over-long body is rejected, and under
+          # `set -e` that rejection files the verdict nowhere. Non-fatal so the
+          # clamp can never itself be the silencer. See SECURITY.md.
           node scripts/clamp-issue-body.mjs audit-comment.md \
             --note "The untruncated \`audit-report.md\` is in this run's \`audit-transcript\` artifact${TRANSCRIPT_URL:+ ([download]($TRANSCRIPT_URL))}." \
             || echo "clamp-issue-body.mjs failed; posting audit-comment.md unclamped." >&2

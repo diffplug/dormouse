@@ -1,168 +1,51 @@
 #!/usr/bin/env node
 /**
- * Clamp a composed issue/comment body to GitHub's maximum length, in place.
+ * Truncate an issue/comment body in place so GitHub cannot reject it as too
+ * long. See SECURITY.md -> "CI Validation Contract" for why a rejection loses
+ * the whole finding.
  *
- * Why this exists: GitHub rejects a body over 65536 characters with
- * `GraphQL: Body is too long (maximum is 65536 characters)`. In
- * `.github/workflows/security-audit.yaml` that rejection lands on a `set -e`
- * step *after* the verdict is decided, so an audit that trips the limit is
- * reported nowhere at all — not as an issue, not as a comment, only as a red
- * run and a 14-day artifact. Run 33249330988 did exactly that: `VERDICT: FAIL`
- * with a BLOCKER finding, a 68 KB `audit-report.md`, and no issue filed.
- *
- * A too-long body is the *normal* shape of a bad audit, not an edge case: the
- * report grows with the number of findings, so the runs most worth reporting
- * are the ones most likely to be silenced. Clamping is therefore the fix, not
- * a nicety — a truncated report that reaches a human beats a whole one that
- * does not.
- *
- * The head is what survives. Everything the reporting step puts first — the
- * headline, the run and transcript links, the per-condition notes naming which
- * domain dissented — is the part a reader needs to act, and the report body
- * that follows is the part the artifact still holds in full.
- *
- * Usage:
- *   node scripts/clamp-issue-body.mjs <file> [--note "<markdown sentence>"]
- *
- * Rewrites `<file>` only when it is over the limit, so it is safe to run
- * unconditionally and running it twice changes nothing the second time.
+ * Usage: node scripts/clamp-issue-body.mjs <file> [--note "<markdown>"]
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-/**
- * GitHub's documented ceiling, quoted from the rejection message. Counted in
- * UTF-16 code units (JavaScript's `String.length`), which is never *less* than
- * the number of characters GitHub counts, so clamping to it cannot overshoot.
- */
-export const GITHUB_BODY_LIMIT = 65536;
+/** Well under GitHub's 65536-character ceiling, and past what anyone reads. */
+export const BODY_LIMIT = 32_000;
 
-/**
- * Headroom below the ceiling. Costs a paragraph of a report nobody can read in
- * full anyway, and covers any disagreement between our count and GitHub's — a
- * body rejected for being 12 characters over is the same total failure as one
- * rejected for being 3000 over.
- */
-const SAFETY_MARGIN = 512;
-
-/** Lines that open or close a fenced block. */
-const FENCE = /^\s{0,3}(```+|~~~+)/;
-/** A closing fence carries no info string, so only these can close a block. */
-const CLOSER = /^\s{0,3}(```+|~~~+)\s*$/;
-
-/**
- * Truncate `body` so the result fits in `limit`, keeping the head.
- *
- * Returns the body unchanged when it already fits, so the caller can treat
- * "clamped" as a real event rather than diffing.
- */
-export function clampIssueBody(body, { limit = GITHUB_BODY_LIMIT, note = '' } = {}) {
-  const budget = limit - SAFETY_MARGIN;
-  if (body.length <= budget) return { body, clamped: false, originalLength: body.length };
-
-  // Reserve the footer before cutting: it is appended after the cut, so a
-  // footer sized against the *original* body would push the result back over.
-  // `originalLength` is known now, so the footer's own length is exact.
-  const footer = buildFooter(body.length, note);
-  // A fence left open by the cut would swallow the footer into a code block.
-  // Reserve nominally for closing one whether or not it turns out to be
-  // needed. The exact marker is not known until after the cut, and a longer
-  // one (a ```` opener needs five characters with its newline) is absorbed by
-  // `SAFETY_MARGIN` — not worth a second pass to size precisely.
-  const room = budget - footer.length - 4;
-  if (room <= 0) {
-    // Pathological: the note alone does not fit. Ship the footer rather than
-    // an over-long body — the links in it are the part that still works. Cut
-    // it to budget too: a footer long enough to reach this branch is itself
-    // over the limit, and shipping that is the same total failure as shipping
-    // the original.
-    return { body: footer.trimStart().slice(0, budget), clamped: true, originalLength: body.length };
-  }
-
-  let kept = body.slice(0, room);
-  // Never end on a lone high surrogate: half a code point is invalid UTF-8 on
-  // the way out and can be rejected or mangled rather than merely truncated.
-  if (kept.length > 0 && isHighSurrogate(kept.charCodeAt(kept.length - 1))) {
-    kept = kept.slice(0, -1);
-  }
-  // Prefer a line boundary so the cut does not land mid-sentence, mid-link, or
-  // mid-table-row. Only when one is reasonably close: on a body that is one
-  // enormous line, a hard cut beats discarding everything.
+/** Truncate `body` to `BODY_LIMIT`, keeping the head. Unchanged if it fits. */
+export function clampIssueBody(body, note = '') {
+  if (body.length <= BODY_LIMIT) return body;
+  const footer = `\n\n---\n\n_Truncated to fit: the full body is ${body.length} characters.${note ? ` ${note}` : ''}_\n`;
+  let kept = body.slice(0, Math.max(0, BODY_LIMIT - footer.length));
+  // Cut at a line boundary, unless that would throw away most of what we kept.
   const lastNewline = kept.lastIndexOf('\n');
-  if (lastNewline > room * 0.8) kept = kept.slice(0, lastNewline);
-
-  const fenceClose = unclosedFence(kept);
-  return {
-    body: `${kept.replace(/\s+$/, '')}${fenceClose}${footer}`,
-    clamped: true,
-    originalLength: body.length,
-  };
-}
-
-function isHighSurrogate(code) {
-  return code >= 0xd800 && code <= 0xdbff;
-}
-
-/**
- * The closing fence `kept` needs, or `''`. Tracks the open fence rather than
- * counting fence lines: a report is machine-merged from several agents'
- * markdown, so it carries both mismatched backtick/tilde pairs and nested
- * blocks (a longer outer fence around a shorter inner one), and a parity count
- * reads the inner opener as the outer closer. The marker is taken from the
- * unmatched opener, since backtick and tilde fences do not close each other.
- */
-function unclosedFence(kept) {
-  let open = '';
-  for (const line of kept.split('\n')) {
-    const marker = FENCE.exec(line)?.[1];
-    if (!marker) continue;
-    // A fence closes only with its own character, at least as long, and
-    // nothing after it; anything else is literal content inside the block.
-    if (!open) open = marker;
-    else if (marker[0] === open[0] && marker.length >= open.length && CLOSER.test(line)) open = '';
-  }
-  return open ? `\n${open}` : '';
-}
-
-function buildFooter(originalLength, note) {
-  const suffix = note ? ` ${note}` : '';
-  return `\n\n---\n\n_Truncated here: the full body is ${originalLength} characters, over GitHub's ${GITHUB_BODY_LIMIT}-character limit for an issue or comment.${suffix}_\n`;
+  if (lastNewline > kept.length * 0.8) kept = kept.slice(0, lastNewline);
+  // Final slice covers a `--note` long enough to blow the budget by itself.
+  return `${kept.trimEnd()}${footer}`.slice(0, BODY_LIMIT);
 }
 
 function main(argv) {
   const args = argv.slice(2);
-  let file = '';
-  let note = '';
-  for (let i = 0; i < args.length; i += 1) {
-    if (args[i] === '--note') {
-      note = args[i + 1] ?? '';
-      i += 1;
-    } else if (!file) {
-      file = args[i];
-    }
-  }
+  const noteAt = args.indexOf('--note');
+  const note = noteAt === -1 ? '' : (args.splice(noteAt, 2)[1] ?? '');
+  const file = args[0];
   if (!file) {
     console.error('usage: clamp-issue-body.mjs <file> [--note "<markdown>"]');
     process.exit(2);
   }
 
   const original = readFileSync(file, 'utf8');
-  const { body, clamped, originalLength } = clampIssueBody(original, { note });
-  if (!clamped) {
-    console.log(`${file}: ${originalLength} characters, within the ${GITHUB_BODY_LIMIT} limit.`);
+  const clamped = clampIssueBody(original, note);
+  if (clamped === original) {
+    console.log(`${file}: ${original.length} characters, within ${BODY_LIMIT}.`);
     return;
   }
-  writeFileSync(file, body);
-  console.log(
-    `${file}: clamped ${originalLength} -> ${body.length} characters to fit GitHub's ${GITHUB_BODY_LIMIT} limit.`,
-  );
+  writeFileSync(file, clamped);
+  console.log(`${file}: truncated ${original.length} -> ${clamped.length} characters.`);
 }
 
 // Only when run as the CLI, so the self-test can import the pure function.
-// `pathToFileURL` rather than string-building a `file://` URL: the latter is
-// wrong for any path holding a space or a `#`, and CI checkout paths are not
-// ours to promise.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main(process.argv);
 }
