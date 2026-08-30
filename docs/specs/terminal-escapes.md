@@ -1,5 +1,7 @@
 # Terminal Escape Sequence Registry
 
+> See `docs/specs/glossary.md` for the Session vocabulary used when a row talks about replay or resumed Sessions.
+
 > Single registry of the escape sequences Dormouse parses, answers, or deliberately ignores. Its value is being exhaustive: every sequence Dormouse intervenes in has one row below, pointing at the spec that owns its behavior — `docs/specs/alert.md` (notifications), `docs/specs/terminal-state.md` (CWD, prompt/command, titles), `docs/specs/mouse-and-clipboard.md` (mouse modes, paste). It also documents Dormouse's iTerm2 self-identification, because that identity is what provokes most of these sequences at us.
 
 ## Families
