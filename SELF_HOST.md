@@ -462,9 +462,13 @@ Prove it once, while the user is watching:
    return to the desired release.
 
 `manage uninstall` removes the service definition and installed code and keeps
-`config` and `state`, reporting where they are. `manage purge` is the separate,
+`config` and `state`, reporting where they are. It also keeps `manage` itself,
+which is what makes the second step possible. `manage purge` is the separate,
 irreversible operation that deletes them; it requires typing a confirmation
-phrase and is never part of a reinstall.
+phrase and is never part of a reinstall. Run them in that order — uninstall,
+then purge — and purge finishes by printing the single command that clears
+whatever is left: the install root, plus the log directory on Linux and macOS,
+where it sits outside that root.
 
 ## Checkpoint 6: limits and backup
 
@@ -564,7 +568,10 @@ Do not print the setup password or any credential in the handoff.
   nothing will start.
 - **`tailscale serve` is refused for a non-root user (Linux):** grant the
   operator role — see Prerequisites. The installer checks for this before
-  building, so hitting it later means the check regressed.
+  building, so hitting it later means the check regressed. If you do hit it
+  late, the release is already installed and the service already running: grant
+  the role, then run `manage serve` to add the HTTPS front door rather than
+  reinstalling.
 - **The service disappears at logout (Linux):** that is the documented per-login
   default, not a fault. This is deliberate — see Prerequisites for the `--linger`
   opt-out, and make the availability change in checkpoint 6 explicit if you take
@@ -813,16 +820,47 @@ Each fails silently unless encoded in the scripts:
   by image name, which would kill unrelated `node.exe` processes including the
   invoking pnpm — and no health check accepts a 200 as proof (invariant above).
   Source of truth: `Get-DormouseProcess` / `Get-ListeningRelease`.
-- **Each `tailscaled` refuses in its own way, and preflight translates.** On
-  Windows the local API serves one interactive session at a time, so a second
-  signed-in profile fails every call with
-  `401 Unauthorized: Tailscale already in use by <user>` — matched in preflight
-  and reported as which account holds it. On Linux the socket is root-owned, so
-  an unprivileged `tailscale serve` is refused; unchecked, that refusal would
-  land at the Serve step, after the build and after `current` had advanced.
-  Preflight probes `tailscale serve status`, matches the denial, and prints the
-  one-line fix (`sudo tailscale set --operator=$USER`) rather than running sudo
-  itself.
+- **Windows `tailscaled` serves its local API to one interactive session at a
+  time.** (Windows.) On a PC with a second signed-in profile every `tailscale`
+  call fails `401 Unauthorized: Tailscale already in use by <user>`. The
+  installer matches that string in preflight and says which account holds it
+  and what to do, rather than reporting the raw 401 as "is Tailscale signed
+  in?".
+- **Linux `tailscaled` answers only root unless an operator is set.** (Linux.)
+  Its local API socket is root-owned, so an unprivileged `tailscale serve` is
+  refused. Left unchecked that refusal arrives at the Serve step — after the
+  build, and after `current` has already advanced to the new release. Preflight
+  checks the operator role instead, and prints the one-line fix
+  (`sudo tailscale set --operator=$USER`) rather than running sudo itself.
+
+  **The check reads the role, not a Serve command's exit status.** Only
+  *writes* to the local API are gated on the operator role; tailscaled serves
+  reads to everyone. So `tailscale serve status` prints `No serve config` and
+  exits 0 on exactly the machine whose Serve write is about to be denied, and a
+  preflight built on it silently passes and defers the refusal to the late step
+  it exists to avoid. The role is read from `tailscale debug prefs`
+  (`OperatorUser`) and compared against the invoking account. `debug` is an
+  unstable CLI surface, so only a *definitive* mismatch is fatal: an unreadable
+  or unparseable answer warns and proceeds, degrading to the late refusal
+  rather than blocking an install that would have worked.
+
+  **Readability is decided by a different field than the answer.**
+  `ipn.Prefs.OperatorUser` carries `json:",omitempty"`, so an unset operator
+  omits the key rather than emitting an empty string — indistinguishable from
+  an unparseable blob if the answer field doubles as the liveness probe, which
+  would route the commonest form of this bug (nobody ever ran `tailscale set
+  --operator`) into the lenient branch and reopen the exact miss the check
+  closes. `ControlURL`, which has no `omitempty`, answers "did prefs parse?";
+  absent-or-empty `OperatorUser` on a blob that parsed is then a definitive
+  unset. The `serve status` read still runs first, because a denial *there*
+  means something broader is wrong. Neither leg is reachable under
+  `DORMOUSE_INSTALL_TEST=1`, which gates the whole probe out — and CI pairs it
+  with an injected origin, which skips Tailscale altogether — so this is the
+  one preflight rule CI cannot exercise.
+
+  Because the late refusal is reached with `current` already switched and the
+  service healthy, it reports that the install is complete but unserved and
+  points at `manage serve`, which re-applies the mapping without a reinstall.
 - **`systemctl --user` needs a real login session, not just a shell.** (Linux.)
   Under `su`, or wherever no user manager runs, it fails with a
   `DBUS_SESSION_BUS_ADDRESS` message that does not say what to do. Preflight
@@ -840,6 +878,22 @@ Each fails silently unless encoded in the scripts:
 failure), `logs`, `restart`, `show-password`, `serve` (re-apply the Serve
 mapping after a dev session repointed it), `rollback`, `uninstall`, and the
 separately-confirmed `purge`.
+
+Teardown is two steps in that order, and `uninstall` has to leave `manage`
+itself behind for the second one to be reachable at all: it removes the service
+definition, the releases, the pointers, `run/` and `bin/run-server`, but not
+the `bin` directory `manage` lives in — deleting that would strand `config/`
+and `state/`, the data the message it prints tells you to run `purge` for.
+`purge` deletes `state/` and `config/` after its typed confirmation and, when
+`bin/run-server` is already gone, closes by printing the one command that
+removes what is left; it cannot delete itself out from under the shell running
+it. That command names the dormouse-owned log directory alongside the install
+root, because on Linux and macOS the logs live outside it — `LOG_ROOT`
+(`$XDG_STATE_HOME/dormouse-server`) and `~/Library/Logs/Dormouse Server`
+respectively, each named at the level dormouse owns so no empty directory
+survives. On Windows `logs` is inside the root, so the root alone is enough.
+Source of truth: `cmd_uninstall` / `cmd_purge` (`Invoke-Uninstall` /
+`Invoke-Purge` on Windows) in the `manage` script each installer generates.
 
 The installers carry two test-only hooks, each refused unless
 `DORMOUSE_INSTALL_TEST=1`: `DORMOUSE_INSTALL_ROOT` puts the whole install under

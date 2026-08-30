@@ -1747,7 +1747,10 @@ function Invoke-Uninstall {
   Write-Host "  config : $Root\config"
   Write-Host "  state  : $StateDir"
   Write-Host ""
-  Write-Host 'Use "manage purge" separately to delete those irreversibly.'
+  Write-Host 'This script is left in place so "purge" can still delete them'
+  Write-Host 'irreversibly afterwards:'
+  Write-Host ""
+  Write-Host ('  "{0}\bin\manage.cmd" purge' -f $Root)
   Write-Host ""
   if ([Console]::IsInputRedirected) {
     [Console]::Error.WriteLine('refusing to uninstall with no terminal to confirm at')
@@ -1776,9 +1779,13 @@ function Invoke-Uninstall {
     Write-Host "left the Serve config alone (it does not point at 127.0.0.1:$PORT)"
   }
 
-  foreach ($p in @((Join-Path $Root 'releases'), (Join-Path $Root 'bin'), (Join-Path $Root 'run'))) {
+  foreach ($p in @((Join-Path $Root 'releases'), (Join-Path $Root 'run'))) {
     Remove-Tree $p
   }
+  # bin\run-server.ps1, not bin: this script lives there too, and "purge" -- the
+  # command the message above points at -- is unreachable once it is deleted.
+  $runServer = Join-Path $Root 'bin\run-server.ps1'
+  if (Test-Path -LiteralPath $runServer) { [IO.File]::Delete($runServer) }
   foreach ($p in @($CurrentPointer, $PreviousPointer)) {
     if (Test-Path -LiteralPath $p) { [IO.File]::Delete($p) }
   }
@@ -1786,6 +1793,10 @@ function Invoke-Uninstall {
   Write-Host "uninstalled. config and state remain at:"
   Write-Host "  $Root\config"
   Write-Host "  $StateDir"
+  Write-Host ""
+  Write-Host "delete them irreversibly with:"
+  Write-Host ""
+  Write-Host ('  "{0}\bin\manage.cmd" purge' -f $Root)
   Write-Host ""
   return 0
 }
@@ -1805,6 +1816,17 @@ function Invoke-Purge {
     Remove-Tree $p
   }
   Write-Host 'purged.'
+  # bin\run-server.ps1 is what "uninstall" removes, so its absence means the
+  # Scheduled Task and the code are already gone and this script is the last
+  # thing standing. It cannot delete itself out from under the shell running it.
+  if (-not (Test-Path -LiteralPath (Join-Path $Root 'bin\run-server.ps1'))) {
+    Write-Host ""
+    Write-Host "the Scheduled Task and code were already uninstalled; this script"
+    Write-Host "is all that remains:"
+    Write-Host ""
+    Write-Host ('  Remove-Item -Recurse -Force "{0}"' -f $Root)
+    Write-Host ""
+  }
   return 0
 }
 
@@ -1830,7 +1852,7 @@ usage: manage <command>
   show-password   warn, then display the setup password locally
   serve           re-apply the Tailscale Serve mapping for this server
   rollback        switch to the retained previous release, preserving state
-  uninstall       remove the Scheduled Task + code (keeps config and state)
+  uninstall       remove the Scheduled Task + code (keeps config, state, this script)
   purge           irreversibly delete config and state
 "@
     exit 64
@@ -1845,13 +1867,16 @@ usage: manage <command>
 @echo off
 rem Installed by deploy/local/install-windows.ps1.
 rem The trailing "& exit" matters. cmd.exe seeks back into this file after
-rem every command, and "manage uninstall" deletes bin -- this very file -- so
-rem that read fails with "The system cannot find the path specified." and
-rem returns 1, making a clean uninstall look broken. "exit" ends cmd.exe
-rem outright so it never seeks back, and with no argument it exits with the
-rem current ERRORLEVEL. "exit /b" does NOT work here: it only returns from the
-rem batch, which still requires reading the file. Tradeoff: calling this .cmd
-rem from another batch script ends that script too; it is meant to be run
+rem every command, so a manage command that removes the file it is being read
+rem from makes that read fail with "The system cannot find the path specified."
+rem and return 1, making a clean run look broken. "uninstall" used to do exactly
+rem that -- it deleted bin, this very file included. It now deletes only
+rem bin\run-server.ps1, so nothing manage does removes this file; the guard is
+rem kept so the exit code does not depend on that staying true. "exit" ends
+rem cmd.exe outright so it never seeks back, and with no argument it exits with
+rem the current ERRORLEVEL. "exit /b" does NOT work here: it only returns from
+rem the batch, which still requires reading the file. Tradeoff: calling this
+rem .cmd from another batch script ends that script too; it is meant to be run
 rem directly.
 "$POWERSHELL_EXE" -NoProfile -ExecutionPolicy Bypass -File "%~dp0manage.ps1" %* & exit
 "@

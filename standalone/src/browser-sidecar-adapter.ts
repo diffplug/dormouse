@@ -94,6 +94,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   }
 
   async init(): Promise<void> {
+    this.clearPersistedState();
     await this.host.init();
     this.unlistenHost = this.host.onEvent(({ event, data }) => this.handleHostEvent(event, data));
     this.installConsoleForwarder();
@@ -253,20 +254,36 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   private static STATE_KEY = 'dormouse.browser-sidecar.session';
 
+  // Mirrors TauriAdapter's gate (docs/specs/standalone.md -> "Standalone persists
+  // no Session state"); flip both flags together.
+  private static PERSIST_SESSION = false;
+
+  readonly persistsSession = BrowserSidecarAdapter.PERSIST_SESSION;
+
   // See TauriAdapter: PersistedWindow when the workspaces flag is on, bare
   // PersistedSession when off; the helpers own the translation + JSON/storage
   // plumbing (docs/specs/transport.md).
   saveState(state: unknown): void {
+    if (!BrowserSidecarAdapter.PERSIST_SESSION) return;
     try { saveSessionState(localStorage, BrowserSidecarAdapter.STATE_KEY, state); }
     catch { console.error('[browser-sidecar] Failed to save session state'); }
   }
 
   getState(): unknown {
+    if (!BrowserSidecarAdapter.PERSIST_SESSION) return null;
     try {
       return loadSessionState(localStorage, BrowserSidecarAdapter.STATE_KEY);
     } catch {
       return null;
     }
+  }
+
+  // Delete (not just ignore) pre-gate blobs: they carry transcripts and localStorage
+  // outlives the harness's per-run temp state dir.
+  private clearPersistedState(): void {
+    if (BrowserSidecarAdapter.PERSIST_SESSION) return;
+    try { localStorage.removeItem(BrowserSidecarAdapter.STATE_KEY); }
+    catch { /* private-mode storage: nothing to clear */ }
   }
 
   private handleHostEvent(event: string, data: unknown): void {

@@ -41,7 +41,7 @@ The gate runs before routing and before any body read, and an unauthorized calle
 
 The remote Host rides the same shim: `remote_host_command` is one more fire-and-forget send that writes `remoteHost:command` to the sidecar, and the sidecar's `remoteHost:*` events arrive on the SSE stream, so the harness runs a real Host against a per-run temp state directory (`docs/specs/standalone.md` → "Remote Host service").
 
-The harness may omit native-only desktop chrome such as window controls and update checks, but it must preserve the `PlatformAdapter` PTY, control-request, clipboard, iframe-proxy, remote-Host, and agent-browser contracts used by the app. Tauri APIs must not be required at static module-evaluation time when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set, because the page is loaded by a normal browser rather than the Tauri WebView.
+The harness may omit native-only desktop chrome such as window controls and update checks, but it must preserve the `PlatformAdapter` PTY, control-request, clipboard, iframe-proxy, remote-Host, and agent-browser contracts used by the app. It also mirrors standalone's Session-persistence answer rather than choosing its own: `BrowserSidecarAdapter` carries the same `PERSIST_SESSION = false` gate as `TauriAdapter`, reports `persistsSession: false`, and deletes any pre-gate `localStorage` blob on `init()` (`docs/specs/standalone.md` → "Standalone persists no Session state"). Persisting here would restore panes across a reload that the real app drops, and would run the record build and its per-pane `getCwd` round trip on a path production never takes. Tauri APIs must not be required at static module-evaluation time when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set, because the page is loaded by a normal browser rather than the Tauri WebView.
 
 ## PTY lifecycle
 
@@ -209,12 +209,14 @@ something ends it:
 | VS Code editor-tab close (`killOnDispose: true`) | Yes | Fresh for that panel |
 | VS Code extension-host crash | No, but `deactivate()` never ran | Fresh |
 
-Standalone therefore **persists no Session state at all**, gated by one
-`PERSIST_SESSION` flag in `tauri-adapter.ts`. A clean quit has nothing to clear and
-a crash has nothing to recover. Live resume within a running app is unaffected — it
-reads the sidecar's live PTY list, not disk. A legacy blob found at boot is deleted,
-not read. The store, the quit flush/drain ordering, and the `PersistedWindow`
-plumbing below the flag are intact and still needed by the workspaces-rollout scope.
+Standalone therefore **persists no Session state at all.** A clean quit has nothing
+to clear and a crash has nothing to recover; the write path itself is removed rather
+than written-then-ignored, since the blob it wrote was the transcript-bearing one.
+The *Sessions* survive a reload within a running app — resume reads the sidecar's
+live PTY list, not disk — but the layout does not: `lib/src/lib/reconnect.ts` reads
+`getState()` for the saved resume plan, so with nothing persisted every live PTY
+lands in one tab group with doors and saved titles dropped. A legacy blob found at
+boot is deleted, not read.
 
 > Reserved: the workspaces-rollout scope (`docs/specs/layout.md` → `## Future`)
 > assumes a persisted `PersistedWindow` in standalone. Reconciling multi-Workspace
