@@ -26,10 +26,8 @@ UI lives in `lib`/`standalone`.
 * Everything transient (challenges, sessions, relay state) is in memory; a
   server restart just means everyone reconnects. In-memory is not unbounded:
   `HostChallengeIssuer.issue` prunes expired entries on every call, and
-  `PairingCeremony` drops tickets one TTL past expiry. Both matter because the
-  frames that mint them are cheap to send — `POST /api/signin/begin` needs no
-  auth at all, and a `connect` frame needs only a session, not a pairing, yet
-  issues a challenge in the Host process on the user's laptop.
+  `PairingCeremony` drops tickets one TTL past expiry — the frames that mint
+  them are cheap to send and need little or no auth (rationale).
 
 ## Configuration
 
@@ -62,10 +60,8 @@ selfhost install sets it. The default stays unbound so a container — where the
 namespace is the boundary and the port is published explicitly — keeps working.
 Binding loopback is *containment, not admission*: every route is still gated by
 the setup password or a bearer token, exactly as `SECURITY.md` -> "Loopback
-Listeners" requires. (That section's guard-module rule, and
-`scripts/loopback-lint.mjs`, cover the app's browser-reachable local proxies;
-this socket is out of their scope because it binds from config rather than from
-a loopback literal.)
+Listeners" requires. `scripts/loopback-lint.mjs` does not cover this socket —
+it binds from config rather than from a loopback literal (rationale).
 
 `DORMOUSE_ORIGIN` is parsed once and normalized with `URL.origin`; WebAuthn
 clientData checks, passkey assertion verification, and the Host enrollment
@@ -110,16 +106,13 @@ loop needs.
 override rule; `standalone/scripts/build-sidecar-proxy.mjs` and
 `vscode-ext/scripts/esbuild.mjs` esbuild-`define` it into their bundles, where
 `bakedConnectSrc()` in `lib/src/host/remote/connect-src.ts` is the single reader.
-Two build-time guards, both because their failure mode is silent: a lost define
-compiles fine and would only show up as a Host quietly using the shipped default
-instead of the selfhoster's origins, so `assertConnectSrcBaked` greps the bundle
-for it; and an override the matcher could never read (a trailing slash, a path,
-a bare host, a scheme outside `http`/`https`/`ws`/`wss`, a port outside 1–65535)
-matches nothing at runtime, so `resolveRemoteConnectSrc` rejects it rather than
-ship a binary that builds green and refuses the very server it was built for.
-The grammar is one regex duplicated into the `.mjs`, which cannot import
-TypeScript; `connect-src.test.ts` pins the two patterns — and the two copies of
-the default — as identical.
+Two build-time guards, both because their failure mode is silent (rationale):
+`assertConnectSrcBaked` greps the bundle for the define, and
+`resolveRemoteConnectSrc` rejects an override the matcher could never read (a
+trailing slash, a path, a bare host, a scheme outside `http`/`https`/`ws`/`wss`,
+a port outside 1–65535). The grammar is one regex duplicated into the `.mjs`,
+which cannot import TypeScript; `connect-src.test.ts` pins the two patterns —
+and the two copies of the default — as identical.
 
 **Enforcement is `originAllowedByConnectSrc`, at three points in
 `lib/src/host/remote/service.ts`:** `enroll` is refused for an origin outside
@@ -171,12 +164,11 @@ concurrent read-modify-writes cannot lose each other. Source of truth:
 **Rows are validated as they are read** — `hosts.json` and
 `push-subscriptions.json` both — because hand-editing these files is the
 *documented* revocation mechanism, so a half-finished edit is an expected state
-rather than corruption. A malformed host row is dropped instead of carried;
-unguarded, one with a null `hostToken` makes `findByToken`'s digest compare
-throw, which 500s every `/ws/host` upgrade and every push route over one bad
-line. A malformed subscription reads as a missing registration, which Pocket
-repairs by re-offering Enable, rather than as a live one nothing can be
-delivered to.
+rather than corruption. A malformed host row is dropped instead of carried,
+since one bad line would otherwise 500 every `/ws/host` upgrade and every push
+route (rationale). A malformed subscription reads as a missing registration,
+which Pocket repairs by re-offering Enable, rather than as a live one nothing
+can be delivered to.
 
 `push-subscriptions.json` is the one store that deletes rather than appends: a
 push service reports a dead subscription with 404/410, and a browser that
@@ -201,26 +193,19 @@ the state dir is created `0o700` and every write lands in a `0o600` temp file
 before the rename. Any new file under `$DORMOUSE_STATE_DIR` must go through
 `writeAtomic` for the same reason.
 
-That mode is a cheap default, not the guarantee the deployment rests on, and the
-difference is worth stating so nothing is built on top of it. It earns its place
-on a multi-user unix host, where home-directory permissions vary by distro, so
-without an explicit mode whether a second local account can read `hosts.json`
-depends on which distro the selfhoster picked. It buys nothing where modes are
-not the mechanism — Windows, a container, a database-backed deployment. What
-protects the *installed* server's state is the installer's directory
-permissions, in "Installing it" below.
+That mode is a cheap default, not the guarantee the deployment rests on, so
+nothing may be built on top of it (rationale). What protects the *installed*
+server's state is the installer's directory permissions, in "Installing it"
+below.
 
 ## WebAuthn without a WebAuthn library
 
-Two facts keep the server dependency-free:
-
-* **Registration**: browsers expose the new credential's public key directly —
-  `response.getPublicKey()` returns SPKI DER. No CBOR, no attestation parsing
-  (we request `attestation: 'none'` anyway).
-* **Assertions**: `verifyPasskeyAssertion` in `server-lib-common` already
-  verifies full assertions against an SPKI key — the same function the Host
-  uses, so Server and Host literally cannot disagree on what a valid assertion
-  is.
+No WebAuthn library, and none is needed (rationale). Registration reads
+`response.getPublicKey()` — SPKI DER straight from the browser, with
+`attestation: 'none'` requested, so there is no CBOR and no attestation to
+parse. Assertions go through `verifyPasskeyAssertion` in `server-lib-common`,
+**the same function the Host uses**, so Server and Host cannot disagree on what
+a valid assertion is.
 
 `POST /api/setup/finish` takes `{ credentialId, publicKey, clientDataJSON }` and
 checks, in order: `clientDataJSON` decodes; `type === 'webauthn.create'`; its
@@ -351,11 +336,9 @@ dependency. Source of truth: `server/src/push.ts` plus the routes in
   never silent: the refusal is logged (origin only — the endpoint is a bearer
   capability) and counted in the response's `failed`, since the route answers
   200 either way and the Host needs to tell an all-failed fan-out from success.
-  The log carries the push service's own reason body alongside the status —
+  The log carries the push service's own reason body alongside the status,
   whitespace-collapsed and capped at 200 characters so an HTML error page cannot
-  flood it — because a status alone does not separate a bad subject from a bad
-  key from a bad payload, and this is the only place that explanation is ever
-  visible.
+  flood it — the only place a rejection is ever explained (rationale).
 - **Delivery is bounded twice, and both bounds resolve as `failed`** so the row
   survives to be retried, unlike a 404/410. The inner bound is a 10-second
   socket-inactivity timeout per push-service request; the outer is a 15-second
@@ -365,26 +348,19 @@ dependency. Source of truth: `server/src/push.ts` plus the routes in
   injected `PushSender`, and since every send in a fan-out starts at once it
   bounds the route as a whole regardless of device count. It bounds the route,
   not the socket: `web-push` accepts no `AbortSignal`, so a request that loses
-  the race is left to its own inactivity timeout. What it prevents is a wedged
-  push service holding the handler open while successive alarms stack concurrent
-  sends behind it. Both are separate from the 300-second provider TTL — an alarm
-  that arrives an hour late is noise, not information.
+  the race is left to its own inactivity timeout (rationale). Both are separate
+  from the 300-second provider TTL — an alarm that arrives an hour late is
+  noise, not information.
 - Push is disabled, not half-working, when no VAPID key **or no VAPID subject**
   is configured: the config route reports `null` and challenge/subscribe/send
   answer 503. The key and the subject are advertised together or not at all — a
   phone that registered against a key the Server has no contact to sign with
   would be subscribed to a push it can never receive.
 - **A VAPID subject naming a loopback host is a startup error, not a default.**
-  Apple answers `403 {"reason":"BadJwtToken"}` for one — verified against
-  `web.push.apple.com` for `mailto:admin@localhost` and `https://localhost:3000`,
-  while `mailto:admin@example.com` and an ordinary https origin were accepted, so
-  the rule is loopback specifically and not reachability of the contact.
-  `web-push` only warns about the https form, at send time, and says nothing
-  about `mailto:` at `localhost`. This mattered: the previous default
-  (`mailto:admin@localhost`) let a Server boot clean, answer 200 on send, and
-  deliver nothing to any iPhone — the one platform the feature targets. Hence
-  the origin-derived default, and hence a loopback dev server turning push off
-  instead of guessing a placeholder contact. Source of truth:
+  Apple rejects the JWT signed under one, `web-push` does not warn, and the send
+  still answers 200 — the failure is invisible from the Server (rationale). So
+  the default is derived from `DORMOUSE_ORIGIN`, and a loopback dev server turns
+  push off rather than guessing a placeholder contact. Source of truth:
   `defaultVapidSubject` / `assertVapidSubject` in `server/src/push.ts`.
 
 ## Relay
@@ -462,9 +438,7 @@ approval as the only thing that writes the ACL — is
 **Both sides run the shape guard**, and deliberately so: the server's
 `isPairingRequest` is a courtesy that keeps a bad frame off the wire, while the
 Host runs the same guard on arrival because the security model does not trust
-the relay. A Host that leaned on the server's check would be taking a relayed
-object on faith in the one place — the approval UI and the record it writes —
-where that is least acceptable. The Host likewise reduces `requestedLabel` with
+the relay (rationale). The Host likewise reduces `requestedLabel` with
 `boundedPairingLabel` before any consumer sees it (same rule as
 `boundedPushText`): it is attacker-chosen text rendered in a security dialog.
 Source of truth: `RemoteHost.#onPair` in `lib/src/remote/host/remote-host.ts`.
@@ -565,18 +539,16 @@ live in that host's spec.
   enrollment fails the exchange**: the response goes through the same
   `isEnrollment` guard every *read* uses, and a body missing a field or sending
   one mistyped throws naming those fields rather than minting a record with an
-  `undefined` in the `ConnectionPolicy` the Host authenticates passkeys against —
-  one the store would reject on the next read, un-enrolling the machine at the
-  next launch. The request carries a 10 s `AbortSignal.timeout`, under the
+  `undefined` in the `ConnectionPolicy` the Host authenticates passkeys against
+  (rationale). The request carries a 10 s `AbortSignal.timeout`, under the
   webview's own 15 s command budget so the console sees the real error, because
   it runs on the service's lifecycle chain where every later start/stop command
   queues behind it. Source of truth: `lib/src/remote/host/enrollment.ts`.
 
   **Order matters, and the store goes first.** The `hostToken` exists nowhere
   else and cannot be re-minted from the same password exchange, so the save is
-  awaited before any Host is stopped: a failed write leaves the old Host running
-  and every answer it gives still true, rather than stranding the machine with
-  no Host, a status that says otherwise, and a lost credential. Replacing a
+  awaited before any Host is stopped — a failed write must leave the old Host
+  running and every answer it gives still true (rationale). Replacing a
   *running* Host emits `{ name: 'status', enrolled: false }` between the two,
   because the webview gate that arms on it is edge-triggered and everything it
   holds — the mirrored pairing queue, the push device list — belongs to the
@@ -669,12 +641,9 @@ only on `displaced` — `Reconnect`. Rules the UI exists to honor:
   re-reads on open since another window may have enrolled meanwhile. The
   *connection* moves with no event at all, so the store also polls every 2 s
   **while something is subscribed** — the seconds the dialog is open, not a
-  standing timer in every window. Without it a machine that finished connecting
-  a moment after the dialog opened would read as permanently "Connecting…". The
-  answer is compared field-wise before being published, since the service returns
-  a fresh object every poll and the section would otherwise re-render twice a
-  minute to paint identical text (same rule as `setPushDevices` in
-  `lib/src/lib/push-devices.ts`).
+  standing timer in every window. The answer is compared field-wise before being
+  published, since the service returns a fresh object every poll (rationale;
+  same rule as `setPushDevices` in `lib/src/lib/push-devices.ts`).
 - **Reads are serialized, and coalescing stops at anything that changes the
   answer.** Ticks arriving during a slow read queue behind it, so a 15-second
   Host-service timeout becomes the visible error instead of being superseded by
@@ -683,9 +652,8 @@ only on `displaced` — `Reconnect`. Rules the UI exists to honor:
   stood then — joining it would report the old enrollment as though the command
   had not run, the inverse of the delete-first ordering the service uses. Losing
   the last subscriber drops it for the same reason: a reopened dialog must not be
-  answered with a status fetched for the closed one, and would otherwise sit on
-  "Checking…" until that read settled. Source of truth: `dropInFlightRead` in
-  `lib/src/remote/host/host-status-store.ts`.
+  answered with a status fetched for the closed one (rationale). Source of
+  truth: `dropInFlightRead` in `lib/src/remote/host/host-status-store.ts`.
 
 The `window.dormouseRemoteHost` console hook keeps the same four commands and
 remains the scripting seam. Pairing approval is deliberately *not* here: it is a
