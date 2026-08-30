@@ -531,7 +531,7 @@ export function MobileTerminalUi({
     };
     // Wall defers xterm focus via rAF, so a single blur can be reverted after we
     // return; repeat across rAF and a few staggered ticks. See
-    // mobile-terminal-ui.md (Touch interactions). A fresh blur supersedes any
+    // mobile-terminal-ui.md (Keyboard focus invariant). A fresh blur supersedes any
     // still-pending retries; tracking the handles also lets unmount cancel them
     // (otherwise a late retry fires against a torn-down DOM).
     cancelBlurRetries();
@@ -658,8 +658,6 @@ export function MobileTerminalUi({
 
   useEffect(() => clearGestureCompletionTimer, [clearGestureCompletionTimer]);
 
-  // Cancel any pending blur retries on unmount so they can't run against a
-  // torn-down DOM.
   useEffect(() => cancelBlurRetries, [cancelBlurRetries]);
 
   const handlePanePointerDownCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {

@@ -9,45 +9,41 @@ that exercises and regression-tests it.
 
 The fork's own process doc is
 [FORK.md on the `sdf` branch](https://github.com/diffplug/xterm.js/blob/sdf/FORK.md);
-this spec does not restate its release recipe. File pointers under
-`addons/addon-webgl/` refer to the fork repo (cloned at `~/projects/xterm.js`),
-not this repo.
+this spec does not restate its release recipe. `addons/addon-webgl/` paths
+below are in the fork repo (cloned at `~/projects/xterm.js`; the release
+tarball also ships `src/`, so they are readable from `canopy/node_modules`).
 
 **Two webgl addons, one repo.** Production terminals render through *stock*
 `@xterm/addon-webgl` (`docs/specs/layout.md` → "Renderer"); only `canopy/`
-consumes the SDF fork. Everything below is about the fork. "Does Dormouse use
-WebGL?" is answered by layout.md, not here.
+consumes the SDF fork, and everything below is about the fork.
 
 ## Fork pipeline
 
 - **Repo/branches**: `master` on diffplug/xterm.js is a pristine fast-forward
   mirror of upstream; `sdf` (the default branch) carries our changes.
   Upstreamable fixes branch off `master` and are cherry-picked into `sdf`.
-- **Versioning**: the addon is published as `@diffplug/xterm-addon-webgl-sdf`
-  with versions shaped `<addon-version>-sdf<coreBeta>.<iteration>` (e.g.
-  `0.20.0-sdf301.1` = built from the commit of `@xterm/xterm@6.1.0-beta.301`,
-  iteration 1). The addon bundles xterm core internals, so consumers must pin
-  the exact `@xterm/xterm` beta it was built from — the pins in
-  `canopy/package.json` move in lockstep. Since `0.20.0-sdf301.1` the tarball
-  also declares `peerDependencies: { '@xterm/xterm': '^<that beta>' }`, which is
-  what the lint checks: upstream's `bin/publish.js` injects that field at publish
-  time and our hand-cut `npm pack` release does not run it, so earlier fork
-  tarballs shipped without any peer range. It is also the only record of the
-  base as a *full* version — the `-sdfNNN` counter repeats across upstream
-  release lines (`5.6.0-beta.1..143`, then `6.1.0-beta.1..302`).
+- **Versioning**: published as `@diffplug/xterm-addon-webgl-sdf`, versions
+  shaped `<addon-version>-sdf<coreBeta>.<iteration>` (`0.20.0-sdf301.1` = built
+  from the commit of `@xterm/xterm@6.1.0-beta.301`, iteration 1). The addon
+  bundles xterm core internals, so consumers pin the exact `@xterm/xterm` beta
+  it was built from. Since `0.20.0-sdf301.1` the tarball declares
+  `peerDependencies: { '@xterm/xterm': '^<that beta>' }` (upstream's
+  `bin/publish.js` injects it; our hand-cut `npm pack` skips it, so earlier
+  tarballs have none) — the authoritative record of the base, because it names
+  a *full* version while the `-sdfNNN` counter restarts on each upstream
+  release line (`5.6.0-beta.1..143`, then `6.1.0-beta.1..302`).
 - **Distribution**: GitHub Release assets consumed as a pnpm tarball-URL
-  dependency. Deliberately not an npm registry: GitHub Packages requires auth
-  even for public reads, and release assets need none. The lockfile records a
-  sha512 integrity hash; treat published assets as immutable and cut a new
-  iteration instead of replacing one. Renovate cannot see tarball URLs, so
-  version bumps are manual edits of `canopy/package.json`. Because the tarball
-  is invisible to it, Renovate would otherwise drift canopy's two sibling pins
-  off the fork base unnoticed, so `.github/renovate.json` disables `@xterm/**`
-  scoped to `canopy/package.json` — both pins move only by hand (or via
-  `node scripts/xterm-bump.mjs --canopy <forkVersion>`, which rewrites the URL
-  and both pins from the commit the fork version encodes). `lib/` and
-  `standalone/` keep tracking upstream betas as one grouped `xterm` PR, so
-  between fork rebases the two can sit on different `@xterm/xterm` betas. That
+  dependency, not an npm registry — GitHub Packages requires auth even for
+  public reads, release assets do not. The lockfile records a sha512 integrity
+  hash; treat published assets as immutable and cut a new iteration instead.
+- **Canopy's three pins move by hand, together.** Renovate cannot see tarball
+  URLs, so it would drift canopy's two sibling `@xterm/*` pins off the fork
+  base unnoticed; `.github/renovate.json` therefore disables `@xterm/**` scoped
+  to `canopy/package.json`. Bumps are manual edits, or
+  `node scripts/xterm-bump.mjs --canopy <forkVersion>`, which rewrites the
+  tarball URL and both pins from the commit the fork version encodes. `lib/`
+  and `standalone/` keep tracking upstream betas as one grouped `xterm` PR, so
+  between fork rebases the two can sit on different `@xterm/xterm` betas — that
   divergence is expected and confined to the Storybook-only lab.
 - **Upstream pins are per-commit, not per-latest.** The four `@xterm/*`
   packages ship from one repo but carry independent beta counters — an addon is
@@ -57,19 +53,20 @@ WebGL?" is answered by layout.md, not here.
   commits, and because `^6.1.0-beta.N` admits every later beta, nothing in npm
   or pnpm complains while addons run against core internals they were not
   compiled against. `scripts/xterm-lint.mjs` (offline, in `pnpm test`) enforces
-  three things this depends on: every addon pin's peer range equals `^` its
-  workspace's core pin — the SDF fork tarball included, which is what makes the
-  canopy lockstep exact rather than counter-deep — `lib` and `standalone` agree,
-  and canopy's tarball URL is self-consistent (tag, filename and `-sdfNNN`
-  counter agree with the core pin, which independently catches a release whose
-  tag misstates the base its peer range declares). `scripts/xterm-bump.mjs`
-  (`pnpm bump:xterm`) derives the newest set that all four packages published
-  from one commit and writes it.
+  what this depends on: every `@xterm/*` pin is an exact version, never a
+  range; every addon pin's peer range equals `^` its workspace's core pin — the
+  fork tarball included, which is what makes the canopy lockstep exact rather
+  than counter-deep; `lib` and `standalone` agree; and canopy's tarball URL is
+  self-consistent (tag, filename and `-sdfNNN` counter agree with the core pin,
+  which independently catches a release whose tag misstates the base its peer
+  range declares). `scripts/xterm-bump.mjs` (`pnpm bump:xterm`) writes the
+  newest set all four packages published from one commit into `lib/` and
+  `standalone/`, refusing to write one the lint would reject.
 - **Releases are hand-cut today** (build, `npm pack`, `gh release create` per
   FORK.md); automating this is staged in `## Future`.
 - **Dev loop**: `pnpm link ~/projects/xterm.js/addons/addon-webgl` from
-  `canopy/`. Caution: pnpm link writes persistent residue — a `link:`
-  dependency in the root `package.json` and an override in
+  `canopy/`. Caution: pnpm 11's link writes persistent residue — a `link:`
+  dependency in the *root* `package.json` and an `overrides:` entry in
   `pnpm-workspace.yaml` — which silently keeps resolving the link. Revert both
   and reinstall before trusting a tarball verification.
 
@@ -85,28 +82,25 @@ an older base makes canopy's `UpstreamVsFork` harness compare against an
 upstream we no longer ship, which is the one thing the harness exists to
 prevent. Each time Renovate opens the grouped `xterm` PR:
 
-1. **Read the upstream diff first** and decide what it is worth. Start with
-   `node scripts/xterm-bump.mjs --dry-run`: it names the newest coherent set
-   (which is often an older core than Renovate proposed), prints the commit
-   range from canopy's fork base to it, and lists the files in that range under
-   `addons/addon-webgl/`. Most betas touch none of them, in which case the bump
-   is a no-op for us and the fork does not move; when they do, that diff is the
-   improvements-and-risks assessment.
+1. **Read the upstream diff first** and decide what it is worth.
+   `node scripts/xterm-bump.mjs --dry-run` names the newest coherent set (often
+   an older core than Renovate proposed), prints the commit range from canopy's
+   fork base to it, and lists that range's files under `addons/addon-webgl/`.
+   Most betas touch none of them, so the bump is a no-op for us and the fork
+   does not move; when they do, that diff is the risk assessment.
 2. **Rebase and release the fork** per the `Merging upstream` section of
    FORK.md — including its warning that a conflict-free merge is not a correct
    one, because upstream regularly adds obligations to code we extended without
    anything conflicting.
-3. **Bump `canopy/package.json`** — `node scripts/xterm-bump.mjs --canopy
-   <forkVersion>` moves the tarball URL and both pins together — and update the
-   version-correspondence comment at the `UpstreamWebglAddon` import in
-   `canopy/src/GlTerminal.stories.tsx`.
+3. **Bump `canopy/package.json`** with `--canopy <forkVersion>`, and update the
+   version/commit triple in both places that record it (see "Canopy lab").
 
 Land all of it in the same PR as the `@xterm/*` bump, so the tree never records
 a state where lib and the fork disagree about which upstream they track.
 
 ## SDF glyph architecture
 
-All behavior below is gated behind the fork-added addon options
+Fork-internal, and reachable only through the fork-added addon options
 `sdf: boolean` (default false — upstream behavior is untouched when off) and
 `sdfGlyphSize: number`, documented in the fork's
 `addons/addon-webgl/typings/addon-webgl.d.ts`.
@@ -115,9 +109,9 @@ All behavior below is gated behind the fork-added addon options
   path is retained for custom glyphs (box drawing/block/powerline drawn by the
   custom-glyph rasterizer), powerline-range glyphs, decorated cells
   (underline/strikethrough/overline), glyphs treated as background colors, and
-  probable color emoji (`isProbablyEmoji`, which delegates to the shared
-  `isEmoji` range table and errs toward raster — a text symbol going raster
-  only costs crispness; an emoji going SDF would lose its colors).
+  probable color emoji (`isProbablyEmoji`, which widens the shared `isEmoji`
+  range table and errs toward raster — a text symbol going raster only costs
+  crispness; an emoji going SDF would lose its colors).
 - **Rasterization**: `SdfGlyphRasterizer` is a vendored adaptation of
   mapbox/tiny-sdf (BSD-2-Clause, attribution in its header): xterm's
   `TEXT_BASELINE` metrics, a dynamically sized scratch canvas for wide/CJK and
@@ -159,8 +153,10 @@ Source of truth (fork repo): `addons/addon-webgl/src/SdfGlyphRasterizer.ts`,
 ## Canopy lab
 
 `canopy/` is a Storybook-only workspace package (port 6007, `pnpm dev:canopy`),
-not part of the production build, and deliberately independent of
-`dormouse-lib`. Its stories are the visual harness for the fork:
+deliberately independent of `dormouse-lib`, and outside the production build —
+the root `build` script covers only vscode + website, though canopy's `test`
+(a `tsc` typecheck) does run under `pnpm test`. Its stories are the visual
+harness for the fork:
 
 - `ColorsAndGlyphs` / `TextureAtlas` — stock fork rendering (`sdf: false`) and
   its live glyph atlas.
@@ -170,13 +166,15 @@ not part of the production build, and deliberately independent of
   bitmap-upscaled (blurry) vs shader-rendered from an SDF atlas (crisp).
 - `UpstreamVsFork` — the regression harness: identical content through
   pristine upstream `@xterm/addon-webgl`, the fork with `sdf: false`, and the
-  fork with `sdf: true`, stacked. The upstream pin is built from the same
-  commit as the fork base; the version/commit correspondence is documented
-  once, at the `UpstreamWebglAddon` import in
-  `canopy/src/GlTerminal.stories.tsx` (the addon's beta counter is offset from
-  core's — re-derive with `npm view @xterm/addon-webgl@<ver> gitHead` when the
-  fork rebases). The harness owns its discriminating rows (`chevronGauntlet`)
-  so demo-content edits cannot silently weaken it.
+  fork with `sdf: true`, stacked. The upstream pin must be built from the same
+  commit as the fork base, and because the `@xterm/*` beta counters are
+  independent the two version numbers never match — so the triple (addon
+  version, core version, commit) has to be written down. It lives in two
+  places, the `UpstreamWebglAddon` import in `canopy/src/GlTerminal.stories.tsx`
+  and `canopy/README.md`, and `--canopy` prints a reminder to update both while
+  picking the matching addon itself (`npm view @xterm/addon-webgl@<ver>
+  gitHead` re-derives it by hand). The harness owns its discriminating rows
+  (`chevronGauntlet`) so demo-content edits cannot silently weaken it.
 
 Story content writes PUA glyphs (powerline chevrons etc.) as `\uE0BX` escapes,
 never literal characters: the literals are invisible in editors and were once

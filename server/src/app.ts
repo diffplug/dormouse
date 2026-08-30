@@ -1,5 +1,5 @@
 /**
- * The selfhost POC server (docs/specs/server.md), slice 1: accounts & passkeys.
+ * The selfhost server (docs/specs/server.md): accounts, passkeys, push, relay.
  *
  * Built as a factory — `createApp(config)` — rather than a module-level
  * singleton so tests can spin up an isolated server (its own state dir, its own
@@ -11,9 +11,9 @@
  * assertions are verified by `verifyPasskeyAssertion` from `server-lib-common`,
  * the exact same verifier the Host uses, so Server and Host cannot disagree on
  * what a valid assertion is. Challenges are minted by `HostChallengeIssuer`
- * (a generic single-use/TTL store despite the name). Setup and sign-in get
- * SEPARATE issuers so a challenge minted for one flow can never be redeemed in
- * the other.
+ * (a generic single-use/TTL store despite the name). Setup, sign-in and
+ * push-subscribe each get their OWN issuer, so a challenge minted for one flow
+ * can never be redeemed in another.
  */
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -97,7 +97,7 @@ export interface AppConfig {
    * behavior; a deployment opts in explicitly (env → config in `index.ts`).
    */
   readonly requireUserVerification?: boolean;
-  /** Directory holding `account.json`. */
+  /** Directory holding the JSON state files (docs/specs/server.md, "State files"). */
   readonly stateDir: string;
   /**
    * Directory of the built Pocket web app (`lib`'s `dist-pocket`). When it
@@ -149,9 +149,9 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const PASSWORD_FAILURE_DELAY_MS = 250;
 
 /**
- * In-memory session store. Exposed on the created app so slice 2's WS path can
- * validate a raw `token` query param, and the `requireSession` middleware can
- * validate a `Bearer` header, against one shared source of truth.
+ * In-memory session store. Exposed on the created app so the `/ws/client` path
+ * can validate a raw `token` query param, and the `requireSession` middleware a
+ * `Bearer` header, against one shared source of truth.
  */
 export class SessionStore {
   readonly #sessions = new Map<string, Session>();
@@ -210,7 +210,7 @@ export function createApp(config: AppConfig): CreatedApp {
   const hostStore = new HostStore(config.stateDir, now);
   const pushStore = new PushSubscriptionStore(config.stateDir, now);
   const sessions = new SessionStore(now);
-  // Server-side handshake policy layered on the transport-dumb hub (slice 3).
+  // Server-side handshake policy layered on the transport-dumb hub.
   const handshake = new Handshake(accounts, {
     origin,
     rpId,

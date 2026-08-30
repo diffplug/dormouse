@@ -2,6 +2,10 @@
 
 > This is an assistant-run setup playbook. Start a fresh Claude instance in
 > this repository and say: `read @SELF_HOST.md and walk me through it`.
+>
+> It is also the spec for `deploy/local/` — the
+> [Installer contract](#installer-contract-maintainers) at the end is the
+> maintainer half, and `scripts/spec-lint.mjs` checks this file with the specs.
 
 This installs the Dormouse coordinating server on the user's own laptop,
 reachable only from their tailnet at `https://<laptop>.<tailnet>.ts.net`. That
@@ -21,8 +25,8 @@ repository, in a macOS, a Windows and a Linux edition:
 The three hold the same invariants through different native mechanisms; where a
 checkpoint below differs, each form is given. **Work out which one applies
 before the first command and stay on that column** — mixing them is the main way
-this runbook goes wrong. `docs/specs/server.md` -> "Installing it (behind
-Tailscale)" carries the full mechanism-by-mechanism table.
+this runbook goes wrong. The [Installer contract](#installer-contract-maintainers)
+at the end of this file carries the full mechanism-by-mechanism table.
 
 This runbook is about running the installer and finishing the parts it cannot do
 on its own — the passkey, the Host build, the backup. Nobody following it should
@@ -39,16 +43,16 @@ The installer is shipped, reviewed code. Run it — do not reimplement it, and d
 not paper over it with hand-run `launchctl`, `schtasks`, `systemctl --user` or
 `tailscale serve` commands. If it does the wrong thing, that is a bug in the
 installer for that platform: say so plainly and offer to fix it as an ordinary
-reviewed code change, which is a different task from this one. Its contract
-lives in `docs/specs/server.md` under "Installing it (behind Tailscale)"; a
-change to one is a change to both.
+reviewed code change, which is a different task from this one. Its contract is
+the [Installer contract](#installer-contract-maintainers) section of this same
+file; a change to one is a change to both.
 
 Before acting:
 
-1. Read `docs/specs/server.md` — "Configuration", "Where a Host may reach a
-   relay server (self-host builds)", and "Installing it (behind Tailscale)" —
-   plus `docs/specs/remote-security-model.md` for the trust model you are about
-   to set up.
+1. Read `docs/specs/server.md` — "Configuration" and "Where a Host may reach a
+   relay server (self-host builds)" — plus `docs/specs/remote-security-model.md`
+   for the trust model you are about to set up, and the
+   [Installer contract](#installer-contract-maintainers) below.
 2. Establish the OS and pick the installer column. Run its `--help` / `-Help`
    and skim the script. Its errors are written to be read by whoever is standing
    here; quote them rather than paraphrasing.
@@ -195,9 +199,9 @@ and `state/`, which survive every update, prune, and uninstall.
 
 The invariants it exists to hold — one replica, state outlives code, loopback
 only, `DORMOUSE_ORIGIN` as durable WebAuthn identity, and a failed update being
-a failure rather than a rollback dressed as success — are documented in
-`docs/specs/server.md`. Two of them shape what the user should expect day to
-day:
+a failure rather than a rollback dressed as success — are the
+[Installer contract](#installer-contract-maintainers)'s Invariants. Two of them
+shape what the user should expect day to day:
 
 - An update is a short intentional restart. Existing Host and Pocket WebSockets
   disconnect and reconnect; there is no zero-downtime swap to attempt.
@@ -511,8 +515,9 @@ Do not print the setup password or any credential in the handoff.
 
 ## Official references
 
-- Dormouse runtime, state contract, and what the installer guarantees:
-  `docs/specs/server.md`
+- Dormouse server runtime and state contract: `docs/specs/server.md`. What the
+  installer guarantees is the
+  [Installer contract](#installer-contract-maintainers) in this file.
 - Dormouse trust model: `docs/specs/remote-security-model.md`
 - Host installations: `docs/specs/standalone.md`, `docs/specs/vscode.md`
 - [Install Tailscale on macOS](https://tailscale.com/docs/install/mac)
@@ -635,3 +640,268 @@ fronting it — would buy a stable origin independent of any one machine's name,
 which is the one thing the above does not give. That belongs with the
 multi-tenant work in `docs/specs/server.md` `## Future`, not with a single-user
 install, and is not designed here.
+
+## Installer contract (maintainers)
+
+The runbook above is the operator half; this section is the *spec* for the
+three installers — what they guarantee and the traps they encode. Source of
+truth: `deploy/local/install-macos.sh`, `deploy/local/install-windows.ps1`,
+`deploy/local/install-linux.sh` — one idempotent script per platform, the whole
+mechanism there, with no hand-edited service definitions and no scheduled
+updater. Running one again updates the installed release from the current
+checkout; it never pulls, fetches, or switches branches.
+
+The security properties this deployment is audited against are the
+"Network posture (self-hosted)" and "Credentials at rest" `FAIL IF` lines in
+`SECURITY.md`. Those lines bind **all three** installers — a control present in
+one and absent from another is a finding — and `scripts/deploy-lint.mjs`
+(`pnpm lint:deploy`, part of `pnpm test`) checks each one textually against
+each installer, the only automated signal the Windows edition has, since
+nothing in CI executes PowerShell. Its companion
+`scripts/deploy-lint-selftest.mjs` deletes each matched control in turn and
+requires the lint to fail, so a rule cannot be satisfied by prose about itself.
+
+Each release is self-contained: the production server tree, `lib/dist-pocket`,
+and a copy of the exact Node binary the build ran under, so the service depends
+on neither the source checkout, nor Homebrew/nvm/a version manager, nor pnpm's
+store, nor the user's interactive `PATH` — none of launchd, Task Scheduler, or
+the systemd user manager reads any of those.
+
+### Mechanism map
+
+Service and install root are in the table at the top of this file; logs and
+service-definition paths are under "What the installer does".
+
+| | macOS | Windows | Linux |
+| --- | --- | --- | --- |
+| RunAtLoad | plist `RunAtLoad` | the at-logon trigger, `LogonType=Interactive`, `RunLevel=Limited` | `WantedBy=default.target` |
+| KeepAlive | plist `KeepAlive` | the supervision loop in `bin\run-server.ps1`; Task Scheduler's `RestartCount` fires only on a *failed* exit, so it is defence in depth, not the mechanism | `Restart=always`, `RestartSec=10` |
+| Stopping it | `launchctl bootout` takes the process tree | ends only the `powershell.exe`; its children survive and are reaped by install root (see the traps) | `systemctl --user stop` takes the whole cgroup |
+| `current`/`previous` | symlinks, swapped with `rename(2)` on the link path | `current.txt`/`previous.txt` naming a release id, swapped with `rename(2)` on the file | symlinks, swapped with `rename(2)` on the link path |
+| `0700` / `0600` | the modes, under `umask 077` | a DACL protected from inheritance carrying exactly one ACE, for the installing user | the modes, under `umask 077`; `verify` checks mode **and** owner |
+| Entry | `/bin/bash bin/run-server` | `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File bin\run-server.ps1`, at an absolute interpreter path | `ExecStart=/bin/bash "<root>/bin/run-server"` |
+
+Two rows are load-bearing Windows deviations, both because the macOS mechanism
+has no unprivileged Windows equivalent. The release pointer is a **file**:
+Windows has no unprivileged replaceable directory symlink (a junction cannot be
+renamed over an existing junction, and delete-then-create leaves a window where
+`current` names nothing), while a file swaps atomically with
+`MoveFileEx(MOVEFILE_REPLACE_EXISTING)`; the switch still asserts afterwards
+that the pointer advanced. And KeepAlive lives in the **wrapper**: Task
+Scheduler restarts a task that *fails*, not one that exits 0, so
+`run-server.ps1` is a supervision loop with the plist's own 10-second throttle,
+and `manage verify` checks the loop is still present rather than trusting the
+task settings. Linux needs neither workaround; its one deviation is that
+**lingering is the availability knob, and it is opt-in** (`--linger`, see
+Prerequisites): a user manager stops at logout exactly like a LaunchAgent, the
+installer never changes that silently, and `manage verify` reports which mode
+is live rather than asserting either.
+
+### Invariants
+
+- **One replica; an update is a short intentional restart.** Server transient
+  state is in memory (`docs/specs/server.md` → Guardrails), so Hosts and Pocket
+  clients reconnect across a release switch; there is no zero-downtime swap to
+  attempt.
+- **State outlives code.** `config/` and `state/` sit outside `releases/`, are
+  readable only by the installing user, and are never touched by an update,
+  prune, or uninstall; purging is a separate, explicitly confirmed operation.
+  `config/server.env` is generated once with a setup password from the
+  platform's CSPRNG — 32 bytes, i.e. **64 hex characters**, and a guard refuses
+  anything shorter, counting characters rather than bytes so a regression to
+  half the entropy cannot pass — and is preserved byte-for-byte thereafter.
+  `manage verify` fails if the password ever appears in the service definition;
+  it must live only in `server.env`. Windows applies the `server.env` DACL
+  *before* writing the password (Linux: `chmod 0600` on the empty file first),
+  so the secret never sits under the inherited `%LOCALAPPDATA%` ACL — and
+  because Node's file modes are a no-op on Windows, `manage verify` walks the
+  files in `state\` individually there, where the unix editions need not.
+- **Loopback only, and tailnet-only.** The install pins
+  `DORMOUSE_BIND_HOST=127.0.0.1` and refuses to proceed without it
+  (`docs/specs/server.md` → Configuration on why the listen interface is a
+  security boundary when the TLS proxy is local). Port 3100, deliberately not
+  3000, so the installed service coexists with `pnpm dev:server` /
+  `pnpm dev:pocket-server` on the same machine. `verify` also fails on an
+  active `tailscale funnel`: Serve and Funnel are one configuration surface,
+  and a Funnel publishes this origin — and the setup password behind it — to
+  the public internet, which nothing in the threat model was sized for
+  (`SECURITY.md` → "Network posture").
+- **`DORMOUSE_ORIGIN` is durable WebAuthn identity.** Derived from the node's
+  MagicDNS name. If an existing installation records a different origin the
+  installer stops rather than rewriting it, because the rewrite silently
+  invalidates the registered passkey and every enrolled Host.
+- **The install belongs to one user account.** Every installer refuses to run
+  privileged — root on macOS/Linux, elevated on Windows — because the whole
+  credential posture is that one account owns `config/` and `state/`; an
+  elevated run would write them owned by another principal and register the
+  service for it. The property is checked from the other side too: on unix,
+  "reachable only by the installing user" is mode **and** owner, since a `0700`
+  directory owned by another principal satisfies the mode and inverts the
+  property. Linux's `manage verify` asserts both legs on `config/`, `state/`
+  and `config/server.env`. *(The macOS installer checks the modes only, and not
+  yet the owner.)*
+- **A failed update is a failure.** The candidate release is health-checked on
+  an ephemeral port against a throwaway state dir *before* `current` moves; if
+  the live service then fails to answer, `current` is restored to `previous`
+  and the installer exits nonzero — rollback succeeding is not success. The
+  restore also clears `previous` on every platform, because the switch had
+  already aimed it at the release being restored; leaving both naming one
+  release makes `verify` report a rollback target that does not exist and
+  `rollback` swap a release with itself. On macOS and Linux that clear is gated
+  on the restore having actually landed (`rollback_release` re-reads `current`
+  and returns early otherwise): both call sites are `rollback_release || true`,
+  which disables `errexit` for the whole function body, so without the gate a
+  failed restore would strip the rollback pointer off an install still running
+  the rejected release. Both also refuse the same-release state independently
+  in `manage verify` / `manage rollback`, so an install left in it by an older
+  installer reports honestly. The restore then confirms *which* release
+  answered (next invariant); on Windows it reaps orphaned processes first (see
+  the traps).
+- **A 200 does not say who answered.** An orphan of an older release holding
+  the loopback port answers `/api/hello` exactly like a healthy current one, so
+  every check whose contract is *which release is running* proves the
+  responder's identity rather than accepting a bare 200: the post-switch health
+  check (rolls back and exits nonzero on a mismatch), the rollback restore,
+  `manage verify`, and — because the identity is folded into the health *wait*
+  — every command that waits for health (`manage rollback`, `manage restart`).
+  Waiting on the identity also absorbs the window in which an outgoing process
+  answers one last time. The server answers this itself: `run-server` passes
+  `DORMOUSE_RUNTIME_FILE` and `DORMOUSE_RELEASE_ID`
+  (`docs/specs/server.md` → Configuration) and the server records
+  `{pid, releaseId, port, origin, startedAt}` there once it has **bound**, so
+  `listening_release` (macOS, Linux) / `Get-ListeningRelease` (Windows) is a
+  file read, a port match and a liveness check rather than a walk of the
+  process table — which is also what took `ss` off Linux's critical path. It
+  cannot go in `/api/hello`, which is unauthenticated, CORS-`*` and reachable
+  through `tailscale serve`. Empty means **unknown**, never "nobody": a stale
+  file whose pid is dead, a server started outside the installer, and a foreign
+  port-holder are indistinguishable from the reader's side, and all must fail
+  the comparison. A clean exit removes the file; a crash leaves it, which the
+  liveness check reads correctly. Linux still leads with
+  `systemctl --user is-active`, which catches a responder no port lookup can
+  see at all — a foreign network namespace, or WSL with
+  `networkingMode=mirrored`, where loopback is shared with the Windows host.
+  Two known exceptions, stated so the invariant is not read as covering them:
+  Windows `manage restart` still accepts a bare 200, and `manage status` on all
+  three platforms reports what the pointers say by design. Source of truth:
+  `server/src/runtime-file.ts`.
+
+### Mechanical traps
+
+Each fails silently unless encoded in the scripts:
+
+- **`pnpm deploy --prod --legacy` poisons the workspace.** (All three.) It
+  rewrites `node_modules/.pnpm-workspace-state-v1.json` to production mode,
+  after which every pnpm command in that checkout strips the developer's
+  devDependencies. The installer snapshots the file and restores it
+  unconditionally on exit — `EXIT` trap on macOS/Linux, `finally` on Windows —
+  so even a failed install leaves the checkout as it found it.
+- **`mv -f tmp link` follows a symlink to a directory.** (macOS, Linux.) Used
+  to swap `current`, it deposits the temp link *inside* the old release and
+  leaves `current` where it was — a silent no-op update, after which the prune
+  deletes the release nothing points at. The switch uses `rename(2)` on the
+  link path and asserts afterwards that `current` advanced.
+- **`pnpm` resolves to a `.ps1` before its `.CMD`.** (Windows.) The shim cannot
+  be launched as a process, so the installer takes the first
+  `Application`-typed resolution rather than `(Get-Command pnpm).Source`.
+- **Redirecting a native command's stderr inline sets `$?` to false.**
+  (Windows, PowerShell 5.1: each stderr line becomes an `ErrorRecord`, so a
+  clean `exit 0` reads as failure.) Every external command in the installer's
+  control flow goes through one `Invoke-Native` helper via `Start-Process`; the
+  two deliberate bypasses (the candidate-release probe — the `env -i` analog —
+  and `run-server.ps1`'s `cmd.exe` append redirector) each need something
+  `Start-Process` cannot express.
+- **Stopping a Scheduled Task does not reap its grandchildren.** (Windows.) The
+  orphaned `cmd.exe`/`node.exe` keeps `127.0.0.1:3100` and answers
+  `/api/hello` like a healthy server, so the next start cannot bind and every
+  bare health check passes against the *old* release. Two defences, both
+  required: the installer and `manage` reap every process belonging to the
+  install root before any start — matched by image path and command line, never
+  by image name, which would kill unrelated `node.exe` processes including the
+  invoking pnpm — and no health check accepts a 200 as proof (invariant above).
+  Source of truth: `Get-DormouseProcess` / `Get-ListeningRelease`.
+- **Windows `tailscaled` serves its local API to one interactive session at a
+  time.** (Windows.) On a PC with a second signed-in profile every `tailscale`
+  call fails `401 Unauthorized: Tailscale already in use by <user>`. The
+  installer matches that string in preflight and says which account holds it
+  and what to do, rather than reporting the raw 401 as "is Tailscale signed
+  in?".
+- **Linux `tailscaled` answers only root unless an operator is set.** (Linux.)
+  Its local API socket is root-owned, so an unprivileged `tailscale serve` is
+  refused. Left unchecked that refusal arrives at the Serve step — after the
+  build, and after `current` has already advanced to the new release. Preflight
+  checks the operator role instead, and prints the one-line fix
+  (`sudo tailscale set --operator=$USER`) rather than running sudo itself.
+
+  **The check reads the role, not a Serve command's exit status.** Only
+  *writes* to the local API are gated on the operator role; tailscaled serves
+  reads to everyone. So `tailscale serve status` prints `No serve config` and
+  exits 0 on exactly the machine whose Serve write is about to be denied, and a
+  preflight built on it silently passes and defers the refusal to the late step
+  it exists to avoid. The role is read from `tailscale debug prefs`
+  (`OperatorUser`) and compared against the invoking account. `debug` is an
+  unstable CLI surface, so only a *definitive* mismatch is fatal: an unreadable
+  or unparseable answer warns and proceeds, degrading to the late refusal
+  rather than blocking an install that would have worked.
+
+  **Readability is decided by a different field than the answer.**
+  `ipn.Prefs.OperatorUser` carries `json:",omitempty"`, so an unset operator
+  omits the key rather than emitting an empty string — indistinguishable from
+  an unparseable blob if the answer field doubles as the liveness probe, which
+  would route the commonest form of this bug (nobody ever ran `tailscale set
+  --operator`) into the lenient branch and reopen the exact miss the check
+  closes. `ControlURL`, which has no `omitempty`, answers "did prefs parse?";
+  absent-or-empty `OperatorUser` on a blob that parsed is then a definitive
+  unset. The `serve status` read still runs first, because a denial *there*
+  means something broader is wrong. Neither leg is reachable under
+  `DORMOUSE_INSTALL_TEST=1`, which gates the whole probe out — and CI pairs it
+  with an injected origin, which skips Tailscale altogether — so this is the
+  one preflight rule CI cannot exercise.
+
+  Because the late refusal is reached with `current` already switched and the
+  service healthy, it reports that the install is complete but unserved and
+  points at `manage serve`, which re-applies the mapping without a reinstall.
+- **`systemctl --user` needs a real login session, not just a shell.** (Linux.)
+  Under `su`, or wherever no user manager runs, it fails with a
+  `DBUS_SESSION_BUS_ADDRESS` message that does not say what to do. Preflight
+  checks `systemctl --user show-environment` and names the fix — log in
+  properly, or `machinectl shell $USER@`.
+- **`StandardOutput=append:` is systemd 240 or newer.** (Linux.) Older systemd
+  truncates the log on every restart, so `manage logs` would quietly show only
+  the current run. The installer parses `systemctl --version` and refuses below
+  240 rather than installing a unit whose logging silently lies.
+
+### Operator surface and test hooks
+
+`bin/manage` (`bin\manage.ps1`, with a `manage.cmd` shim, on Windows) carries:
+`status`, `verify` (runs every acceptance check and exits nonzero on any
+failure), `logs`, `restart`, `show-password`, `serve` (re-apply the Serve
+mapping after a dev session repointed it), `rollback`, `uninstall`, and the
+separately-confirmed `purge`.
+
+Teardown is two steps in that order, and `uninstall` has to leave `manage`
+itself behind for the second one to be reachable at all: it removes the service
+definition, the releases, the pointers, `run/` and `bin/run-server`, but not
+the `bin` directory `manage` lives in — deleting that would strand `config/`
+and `state/`, the data the message it prints tells you to run `purge` for.
+`purge` deletes `state/` and `config/` after its typed confirmation and, when
+`bin/run-server` is already gone, closes by printing the one command that
+removes what is left; it cannot delete itself out from under the shell running
+it. That command names the dormouse-owned log directory alongside the install
+root, because on Linux and macOS the logs live outside it — `LOG_ROOT`
+(`$XDG_STATE_HOME/dormouse-server`) and `~/Library/Logs/Dormouse Server`
+respectively, each named at the level dormouse owns so no empty directory
+survives. On Windows `logs` is inside the root, so the root alone is enough.
+Source of truth: `cmd_uninstall` / `cmd_purge` (`Invoke-Uninstall` /
+`Invoke-Purge` on Windows) in the `manage` script each installer generates.
+
+The installers carry two test-only hooks, each refused unless
+`DORMOUSE_INSTALL_TEST=1`: `DORMOUSE_INSTALL_ROOT` puts the whole install under
+a throwaway path, and — Linux only — `DORMOUSE_INSTALL_ORIGIN` supplies the
+origin so Tailscale is never consulted. That last one is what lets CI run the
+installer at all: `.github/workflows/ci.yml` installs twice into a temp root on
+every push, exercising the release build, staging, the self-contained runtime
+copy, the candidate probe, the `current` switch, the prune, and that
+`config/server.env` survives an update byte-for-byte. Test mode stops before
+systemd and Serve — and the macOS and Windows editions have no CI coverage at
+all, which is why `deploy-lint` checks all three textually.

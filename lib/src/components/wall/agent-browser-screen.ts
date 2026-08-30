@@ -1,14 +1,14 @@
 /**
- * Per-surface bridge between an agent-browser pane's body (AgentBrowserPanel)
- * and its tab header (SurfacePaneHeader) + the screen modal, which are
- * separate components for one pane (see docs/specs/dor-browser.md →
- * "Render indicator & the Display modal").
+ * Per-surface bridge between a browser pane's body (AgentBrowserPanel /
+ * IframePanel) and its tab header (SurfacePaneHeader) + the screen modal, which
+ * are separate components for one pane (see docs/specs/dor-browser.md →
+ * "Browser Chrome" and "Display Modal And Render Swaps").
  *
  * The panel owns the live state (viewport, pane size, sync) and the action
  * (`runAgentBrowser`); the header and modal only read a snapshot and invoke
  * actions. So the panel registers a controller keyed by its surface id; the
- * header derives "this pane is an agent-browser surface" purely from the
- * presence of a controller for `api.id`.
+ * header derives "this pane shows browser chrome" purely from the presence of a
+ * controller for `api.id` (both renderers register one; terminals never do).
  *
  * Two stores, both consumed via useSyncExternalStore:
  *   1. a surface-id-keyed controller registry (presence + per-controller

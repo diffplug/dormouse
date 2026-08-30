@@ -108,8 +108,7 @@ export function setMouseReporting(id: string, mode: MouseTrackingMode): void {
   const s = ensure(id);
   if (s.mouseReporting === mode) return;
   s.mouseReporting = mode;
-  // Per spec §1.1 / §2: when the inside program stops requesting mouse reporting,
-  // any active override is no longer meaningful. End it.
+  // Spec §2 (auto-clear on reporting off): with nothing left to override, end it.
   if (mode === 'none' && s.override !== 'off') {
     s.override = 'off';
   }

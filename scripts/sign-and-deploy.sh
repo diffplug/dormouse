@@ -203,13 +203,11 @@ nsis_plugin_path() {
         "$(windows_release_dir)/nsis/x64/plugins/nsis_tauri_utils.dll"
 }
 
-# Returns 0 if a specific artifact has already been downloaded
 artifact_downloaded() {
     local name="$1"
     [[ -f "$DOWNLOAD_DIR/.downloaded-$name" ]]
 }
 
-# Returns 0 if ALL known artifacts have been downloaded
 all_artifacts_downloaded() {
     for name in "${ARTIFACT_NAMES[@]}"; do
         artifact_downloaded "$name" || return 1
@@ -580,7 +578,6 @@ sign_macos_app() {
         --timestamp \
         "$app_path"
 
-    # Verify
     codesign --verify --deep --strict --verbose=2 "$app_path" \
         || error "Signature verification failed for $app_path"
 
@@ -765,7 +762,6 @@ sign_updates() {
                   "$release_dir/$FNAME_LINUX"; do
         if [[ -f "$bundle" ]]; then
             log "Tauri-signing: $(basename "$bundle")"
-            # Use tauri signer to sign the bundle
             # The key goes in the environment and NOT on argv. `tauri signer
             # sign` documents `--private-key` as falling back to
             # `[env: TAURI_SIGNING_PRIVATE_KEY]`, so the flag was redundant —
@@ -779,12 +775,10 @@ sign_updates() {
         fi
     done
 
-    # Build latest.json manifest
     local base_url="https://github.com/$GITHUB_REPO/releases/download/v$version"
     local pub_date
     pub_date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 
-    # Read .sig file contents
     local sig_mac="" sig_win="" sig_linux=""
     [[ -f "$release_dir/$FNAME_MAC.sig" ]] && { sig_mac=$(cat "$release_dir/$FNAME_MAC.sig"); rm "$release_dir/$FNAME_MAC.sig"; }
     [[ -f "$release_dir/$FNAME_WIN.sig" ]] && { sig_win=$(cat "$release_dir/$FNAME_WIN.sig"); rm "$release_dir/$FNAME_WIN.sig"; }
@@ -877,7 +871,6 @@ create_release() {
         echo "Release $tag" > "$notes_file"
     fi
 
-    # Create or update the release
     if gh release view "$tag" --repo "$GITHUB_REPO" &>/dev/null; then
         log "Release $tag already exists — updating assets..."
         gh release upload "$tag" \

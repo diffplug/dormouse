@@ -188,7 +188,7 @@ export class RemoteHostService {
   async #enroll(params: EnrollParams): Promise<EnrollResult> {
     if (!this.#allowed(params.serverUrl)) {
       // Refused before the password leaves the machine. Self-hosters widen the
-      // list in their own build (docs/specs/server.md → "Host webview CSP").
+      // list in their own build (docs/specs/server.md → "Where a Host may reach a relay server").
       throw new Error(
         `${params.serverUrl} is outside this build's allowed remote sources (${this.#connectSrc}). ` +
           'A self-host build bakes its own via DORMOUSE_REMOTE_CONNECT_SRC.',

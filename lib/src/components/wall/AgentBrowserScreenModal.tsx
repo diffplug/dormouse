@@ -1,7 +1,6 @@
 /**
- * Display modal for a web surface (docs/specs/dor-browser.md → "Render
- * indicator & the Display modal"; docs/specs/dor-browser.md → "Render-mode
- * transitions"). Opened from the header's far-left chip, it is the
+ * Display modal for a web surface (docs/specs/dor-browser.md → "Display Modal
+ * And Render Swaps"). Opened from the header's far-left chip, it is the
  * single place that owns *how* a surface renders:
  *
  *   - Render — swap the backend in place, preserving the target:

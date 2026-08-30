@@ -218,7 +218,11 @@ export function createSidecarSurfaceBridge(
 }
 
 export interface SidecarRemoteHostOptions extends SidecarSurfaceBridgeOptions {
-  /** Where the enrollment + ACL file lives; absent in the browser dev harness. */
+  /**
+   * Where the enrollment + ACL file lives. The browser dev harness passes a
+   * per-run temp dir; standalone passes an empty value only when Rust could not
+   * create the app-data directory, which falls back to the in-memory store.
+   */
   stateDir?: string;
 }
 

@@ -4,7 +4,8 @@
  * Searches for theme extensions, downloads VSIX files, extracts theme
  * JSONs in the browser, and converts them to DormouseTheme objects.
  *
- * fflate is dynamically imported so it doesn't affect initial bundle size.
+ * fflate and jsonc-parser are dynamically imported — they are only needed when
+ * the user actually installs a theme, so they stay out of the initial bundle.
  */
 
 import type { DormouseTheme } from './types';
@@ -62,7 +63,6 @@ export async function fetchExtensionThemes(
   namespace: string,
   name: string,
 ): Promise<DormouseTheme[]> {
-  // 1. Get latest version metadata
   const metaRes = await fetch(`${OPENVSX_API}/${namespace}/${name}/latest`);
   if (!metaRes.ok) throw new Error(`OpenVSX metadata failed: ${metaRes.status}`);
   const meta = await metaRes.json();
@@ -70,16 +70,13 @@ export async function fetchExtensionThemes(
   const downloadUrl = meta.files?.download;
   if (!downloadUrl) throw new Error(`No download URL for ${namespace}/${name}`);
 
-  // 2. Download VSIX
   const vsixRes = await fetch(downloadUrl);
   if (!vsixRes.ok) throw new Error(`VSIX download failed: ${vsixRes.status}`);
   const vsixBuf = new Uint8Array(await vsixRes.arrayBuffer());
 
-  // 3. Extract (dynamic import — fflate only loaded when needed)
   const { unzipSync } = await import('fflate');
   const entries = unzipSync(vsixBuf);
 
-  // 4. Read package.json
   const pkgData = entries['extension/package.json'];
   if (!pkgData) throw new Error('No package.json in VSIX');
   const pkgJson = JSON.parse(new TextDecoder().decode(pkgData));
@@ -104,10 +101,8 @@ export async function fetchExtensionThemes(
       return `%${k}%`;
     });
 
-  // 5. Parse JSONC (dynamic import to avoid loading at startup)
   const { parse: parseJsonc } = await import('jsonc-parser');
 
-  // 6. Convert each theme variant
   const themes: DormouseTheme[] = [];
   for (const contrib of themeContribs) {
     const themePath = `extension/${contrib.path.replace(/^\.\//, '')}`;

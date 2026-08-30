@@ -1,5 +1,5 @@
 // The Lath-side Wall store: the headless state machine + geometry + enter hints over
-// the stage-1 core (docs/specs/tiling-engine.md → "The wall store and engine"). It
+// the pure core (docs/specs/tiling-engine.md → "The wall store and engine"). It
 // owns the split tree, a per-leaf metadata map, zoom, the reported layout geometry,
 // and the pending enter-hint map, and exposes a `useSyncExternalStore`-compatible
 // snapshot. Every mutator applies exactly one pure core op; a rejected op

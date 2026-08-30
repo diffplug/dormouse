@@ -27,10 +27,10 @@ one protocol, not two:
 
 Design principle, and a standing constraint on everything staged below:
 **replicate state, don't stream a desktop.** Terminals are sent as PTY data and
-rendered client-side (the Client already ships the terminal renderer); browser
-surfaces will be sent as per-surface screencasts. This is what makes VR viable —
-each surface arrives as its own independently placeable stream — and it makes
-the phone cheap: one attached surface costs one stream.
+rendered client-side; browser surfaces will be sent as per-surface screencasts.
+This is what makes VR viable — each surface arrives as its own independently
+placeable stream — and it makes the phone cheap: one attached surface, one
+stream.
 
 ## v1 scope
 
@@ -49,89 +49,89 @@ contract) and `lib/src/remote/host/remote-api.ts` (the Host implementation):
   single-user), no layout operations
 
 Everything else — including browser-surface remoting — is staged in
-[Future](#future). Each staged item is additive — a new method, event, or
-optional field — so nothing in the shipped protocol changes shape when it
-lands.
+[Future](#future).
 
-### Where the Host runs
+### The provider seam
 
-The Host is a **Node-side service in the process that owns the PTYs**, never a
-webview: `RemoteHostService` in `lib/src/host/remote/service.ts`, installed in
-the Tauri sidecar (`docs/specs/standalone.md`) and in the VS Code extension host
-(`docs/specs/vscode.md`). It holds everything an access decision depends on —
-the relay socket, the enrollment, the ACL, the pairing ceremony — so nothing a
-webview says can widen access (`docs/specs/remote-security-model.md`).
-
-`RemoteApiSession` speaks this protocol and nothing else: surface ids, PTY ids,
-sizes, and bytes. *Where* a named surface lives — this window's webviews,
-another window's, another process's — is a deployment fact rather than a
-protocol concept, so every environment-specific answer sits behind
-`HostSurfaceProvider` (`lib/src/remote/host/host-surface-provider.ts`):
-`collectDirectory` / `watchDirectory`, `resolveSurface` returning a
-`SurfaceHandle`, and `writePty` / `resizePty` / `streamPty`. The session
-therefore imports no platform adapter, no store, and no `document`, and both
-installations share the ask-backed half of the provider
+The Host runs in the process that owns the PTYs, never a webview
+(`docs/specs/server.md` → "Host side"). Within it, `RemoteApiSession` speaks this
+protocol and nothing else: surface ids, PTY ids, sizes, and bytes. *Where* a
+named surface lives — this window's webviews, another window's, another
+process's — is a deployment fact rather than a protocol concept, so every
+environment-specific answer sits behind `HostSurfaceProvider`
+(`lib/src/remote/host/host-surface-provider.ts`): `collectDirectory` /
+`watchDirectory`, `resolveSurface` returning a `SurfaceHandle`, and `writePty` /
+`resizePty` / `streamPty`. The session therefore imports no platform adapter, no
+store, and no `document`, and both installations share the ask-backed half
 (`lib/src/host/remote/ask-surface-provider.ts`) so an attach cannot be answered
-differently in one host than the other. `SurfaceHandle.ptyId` is a
-provider-local routing key, not necessarily the PTY process's own id; the VS
-Code provider uses an opaque per-peer key so a cold-restored id collision cannot
-move an attachment's stream or input to another window.
+differently in one host than the other.
+
+`SurfaceHandle.ptyId` is a provider-local routing key, not necessarily the PTY
+process's own id: the VS Code provider mints an opaque per-peer handle so a
+cold-restored id collision between duplicated windows cannot move an
+attachment's stream or input to another window.
 
 ## Terminology
 
-`docs/specs/glossary.md` is canonical for **Pane** and **Surface**; the wire
+`docs/specs/glossary.md` is canonical for **Pane** and **Surface**, and the wire
 shapes reuse the existing surface model (`dor/src/protocol.ts`,
-`dor/src/commands/types.ts`). Remote-specific usage:
+`dor/src/commands/types.ts`): a Surface is named on the wire by `surfaceId`, and
+the picker lists Panes, so attaching to a Pane means attaching to its selected
+Surface. Remote-only vocabulary:
 
-* **Surface** — identified on the wire by `surfaceId`.
-* **Pane** — the phone's picker lists panes; attaching to a pane means
-  attaching to its selected surface.
 * **Viewer** — one connected Client session. Multiple viewers may coexist.
-* **Window** — the Host's full layout tree (its Workspaces, their Panes and
-  Surfaces) plus geometry, consumed only by VR (future; see
-  [Future](#future)). The glossary reserves **Wall** for the renderer of a
+* **Window** — the Host's full layout tree plus geometry, consumed only by VR
+  ([Future](#future)). The glossary reserves **Wall** for the renderer of a
   single Workspace, so the VR subscription replicates the *Window*.
 
 ## Transport
 
-### Channels
+**WebSocket relay only** (`docs/specs/server.md` → "Relay"): the Client holds one
+WebSocket to the Server for the whole session; the Host multiplexes every session
+over its single relay socket, keyed by the relay-assigned `clientId` (the Client
+never sees or sends it). Control messages and terminal data both ride it as JSON
+— terminal data is small and ordering matters. Media channels arrive with browser
+surfaces (future). The API and the security model are identical in the Server's
+selfhost and (future) SaaS modes; only how accounts come to exist differs.
 
-Transport is **WebSocket relay only**: one WebSocket per session, relayed
-through the Server, bound to the `sessionId` issued by `authorizeConnection`.
-Control messages ride the socket as JSON; terminal data rides here too (it is
-small and ordering matters). Media channels arrive with browser surfaces
-(future).
-
-### Server deployment modes
-
-The Server always ships in two modes; the remote API and the security model
-are identical in both — the modes differ only in how accounts come to exist.
-
-* **Selfhost** — an env-var sets a setup password; presenting it allows the
-  system's only user to create their account and register the first passkey.
-  Sign-in from then on is passkey-only. No database: accounts, passkey
-  credentials, and revocation state live in local files. Shipped
-  (`docs/specs/server.md`). Selfhost is not a stepping stone: it remains a
-  supported mode alongside SaaS permanently.
-* **SaaS multitenant** — anyone can create an account with email + passkey.
-  Future (deployment plumbing staged in `docs/specs/pocket-app.md`
-  `## Future`).
+A `RemoteApiSession` is created lazily on the first message after an allowed
+`connect2` decision, and disposed both when the Client disconnects and on any
+fresh authorization attempt — so a re-authorizing client can never inherit the
+previous session's attachment. Source of truth: `RemoteHost` in
+`lib/src/remote/host/remote-host.ts`.
 
 ### Envelope
 
 Same shape as the dor control protocol — requests correlated by `requestId`,
-events correlated by `subId`:
+events by `subId`:
 
 ```ts
-interface RemoteRequest  { requestId: string; method: string; params?: object }
-interface RemoteResponse { requestId: string; ok: boolean; result?: object; error?: string }
-interface RemoteEvent    { subId: string; event: string; data: object }
+interface RemoteRequest  { requestId: string; method: string; params?: unknown }
+interface RemoteResponse { requestId: string; ok: boolean; result?: unknown; error?: string }
+interface RemoteEventMsg { subId: string; event: string; data: unknown }
 ```
+
+A subscribing method (`directory.watch`, `surface.attach`) opens its stream under
+the *request's own id* — the Host reuses `requestId` as the `subId` — so the
+Client can install its event handler before sending and never race a snapshot or
+a first data frame. The six methods and three events are named constants
+(`REMOTE_METHODS`, `REMOTE_EVENTS`); events are dispatched by name, so a future
+event lands additively and an old client ignores what it does not know.
+
+Every peer-supplied `cols`/`rows` passes through `clampTerminalDimension` —
+1 … `MAX_TERMINAL_DIMENSION` (2000), falling back to the current size when absent
+or non-finite — on the Host, in the webview responder that drives the real xterm,
+and in the Client adapter. The upper bound is the security-relevant half: a local
+resize comes from element geometry and cannot be large, but `terminal.resize`
+carries a peer-supplied number straight into `term.resize`, which bounds only the
+minimum before allocating `rows × cols` cells.
 
 ### Hello
 
 First exchange on the control channel; establishes version and viewer kind so
-the protocol can grow without breaking older Pockets.
+the protocol can grow without breaking older Pockets. The Host does not *gate*
+other methods on it — authorization already happened at connect time, so
+skipping hello grants nothing.
 
 ```ts
 // client → host
@@ -168,7 +168,7 @@ interface DirectoryEntry {
   type: 'terminal';
   title: string;                // derived title, same one the Wall's pane header shows
   focused: boolean;             // focused on the host
-  // From the existing semantic-event model (terminal-state.ts):
+  // From the existing semantic-event model (docs/specs/terminal-state.md):
   activity?: 'unknown' | 'prompt' | 'editing' | 'running' | 'finished';
   exitCode?: number;
   alive: boolean;               // the PTY process is still alive (see below)
@@ -188,55 +188,60 @@ any change the Host coalesces (150ms window, `DIRECTORY_DEBOUNCE_MS`) and
 resends the whole thing. Delta events are a future optimization there is no
 current reason to pay for.
 
-**One snapshot per collect.** The provider answers for every surface the Host
-can reach, so there is no subset that is known sooner than the rest and the
-session emits exactly one `directory.snapshot` per collect. A collect that
-finishes after its subscription was replaced or torn down is dropped rather than
-sent, and so is one that is no longer the newest: collects overlap whenever
-something changes during a slow round trip and can settle in either order, so a
-per-collect generation (the same shape as the per-attach one) keeps a stale
-answer — including one that timed out to an empty list — from landing on top of
-a fresh snapshot and blanking the picker until the next change.
-A provider collection that rejects emits nothing and leaves the last good
-snapshot standing. The rejection is contained inside the session, and the next
-invalidation or `directory.watch` retries the collection.
+**One snapshot per collect.** The provider answers for every surface the Host can
+reach, so no subset is known sooner than the rest. A collect is dropped rather
+than sent if its subscription was replaced or torn down, or if it is no longer
+the newest: collects overlap whenever something changes during a slow round trip
+and can settle in either order, so a per-collect generation (the same shape as
+the per-attach one) keeps a stale answer — including one that timed out to an
+empty list — from blanking the picker until the next change. A collection that
+rejects emits nothing, leaves the last good snapshot standing, and is contained
+inside the session; the next invalidation or `directory.watch` retries it.
 
-Invalidation reaches the session through `watchDirectory`: webviews announce
-that their pane state, activity, or focus changed, and membership changes (a
-webview attaching or disposing, a peer window joining or dropping) invalidate
+**Duplicate `surfaceId`s collapse to the first answerer.** Two cold-restored
+windows can hold panes with identical ids, and two identical rows would make a
+picker keyed by `surfaceId` a lottery over which window an attach reaches;
+answerers arrive local-tier-first, the same owner an attach's read-only resolve
+probe selects, so the row shown is the surface attached.
+
+Invalidation reaches the session through `watchDirectory`: webviews announce that
+their pane state, activity, or focus changed, and membership changes (a webview
+attaching or disposing, a peer window joining or dropping) invalidate
 unconditionally. Both feed the same coalescer, which re-collects from every
 answerer before sending the replacement snapshot.
 
 The picker renders from titles, activity, and the `ringing`/`hasTODO` badges;
-thumbnails are staged (see [Future](#future)). Browser panes are not listed;
-iframe surfaces additionally refuse attachment by design (see
-[Future](#future) for browser remoting — iframe surfaces are not on the
-critical path even there).
+thumbnails are staged. Browser and iframe surfaces are neither listed nor
+attachable — they never enter the xterm registry the directory is collected from,
+so `surface.attach` cannot resolve them either (see [Future](#future) for browser
+remoting; iframe surfaces are not on the critical path even there).
 
-`alive` reflects real PTY-process liveness: it is `true` while the pane's
-process is running and `false` once that process has exited. Dormouse keeps an
-exited pane open in the Host registry (rendering "[Process exited with code N]")
-until the user closes it, so such a surface is still *listed* but reports
-`alive: false` — the phone's picker uses this to stop offering a dead pane as
-attachable (attaching would transfer nothing).
-
-This is distinct from `exitCode`, which is the last finished command's
-shell-integration semantic status, not PTY lifetime. A pane can report
-`alive: true` with an `exitCode` set (a command finished but the shell lives on),
-and a pane reporting `alive: false` may carry no `exitCode` at all.
+`alive` is real PTY-process liveness. Dormouse keeps an exited pane open in the
+Host registry (rendering "[Process exited with code N]") until the user closes
+it, so such a surface is still *listed* but reports `alive: false` — the phone's
+picker uses this to stop offering a dead pane as attachable (attaching would
+transfer nothing). Distinct from `exitCode`, which is the last finished command's
+shell-integration status, not process lifetime: a pane can report `alive: true`
+with an `exitCode` set (a command finished, the shell lives on), and one
+reporting `alive: false` may carry no `exitCode` at all.
 
 ## Attaching to a surface
 
 `surface.attach { surfaceId, cols, rows }` opens the surface's stream;
-`surface.detach { surfaceId }` closes it. One attachment per session (the
+`surface.detach { surfaceId }` closes it. Detach names its surface so a stale
+detach cannot kill a newer attachment; detaching anything that is not the
+current attachment is an idempotent no-op. One attachment per session (the
 phone's model); lifting that cap for VR is future work. Attachment is
 view-state only with one deliberate exception: attaching to a terminal takes
 size authority.
 
 ### Terminal surfaces
 
-Replicated, not screencast: the client renders its own xterm from the same
-data the host UI consumes.
+Replicated, not screencast: the client renders its own xterm from the same data
+the host UI consumes. That means the *processed* stream — protocol sequences
+already parsed and stripped, with every generated response discarded, so the
+phone never answers a query the laptop's own xterm already answered
+([terminal-escapes.md](./terminal-escapes.md)).
 
 #### Attach is the resize
 
@@ -245,13 +250,15 @@ exactly what makes a terminal paint itself — so attach carries the client's
 dimensions and there is no snapshot transfer:
 
 1. Client attaches with `{ cols, rows }`.
-2. Host resizes the PTY through the existing xterm resize path
-   (last-attach-wins; see Size authority). `SIGWINCH` makes full-screen TUIs
-   repaint completely and shells redraw their prompt line, filling the
-   client's screen from the live stream alone.
-3. If the requested size equals the current size, `terminal.resize` would be a
-   no-op, so the Host bounces the PTY's rows to force one SIGWINCH-driven
-   repaint (`FORCE_REPAINT_BOUNCE_MS`).
+2. Host resizes through the owning xterm's resize path (last-attach-wins). The
+   resulting `SIGWINCH` makes full-screen TUIs repaint completely and shells
+   redraw their prompt line, filling the client's screen from the live stream
+   alone.
+3. If the requested size equals the current size, that resize would be a no-op,
+   so the Host bounces rows on the **PTY only** — leaving the already-correct
+   owning xterm untouched — and restores them `FORCE_REPAINT_BOUNCE_MS` later.
+   The bounce goes down, except from a 1-row surface, where `rows - 1` would
+   itself be a no-op that fires no `SIGWINCH`.
 
 Normal-screen history does not regenerate on resize; it is deliberately absent
 from the shipped protocol (see [Future](#future): in-flight replay, then
@@ -278,8 +285,7 @@ These two are the whole v1 stream. A viewer is not notified when another
 display takes size authority, and semantic state (activity/cwd/title) reaches
 the client only through `directory.snapshot` — the host→client
 `terminal.resize` and `terminal.semantic` events are staged in
-[Future](#future) (item 5) and land additively, since events are dispatched by
-name.
+[Future](#future) (item 5).
 
 ```ts
 // client → host (requires the input grant)
@@ -288,69 +294,74 @@ type TerminalInput =
   | { method: 'terminal.resize'; params: { surfaceId: string; cols: number; rows: number } };
 ```
 
-`terminal.write` and `terminal.resize` are valid only for the session's current
-attachment. A stale request for a detached surface, or a request for a
-background surface listed in the directory but not attached by this session, is
-rejected and must not reach the PTY or change its size.
-The attachment is bound to the terminal selected at `surface.attach` time:
-after a Host-side pane swap moves that terminal to another pane, the remote
-stream, `terminal.write`, and `terminal.resize` keep targeting the same PTY
-rather than re-resolving the old `surfaceId` through the current registry slot.
-When that PTY exits, the Host emits `terminal.closed` and then drops the
-attachment, so a later `terminal.write`/`terminal.resize` for the surface is
-rejected ("surface is not attached") instead of acting on the disposed terminal.
-Disposing the Viewer, and any newer `surface.attach`, invalidate an in-flight
-peer surface resolution: a handle that resolves late is released immediately and
-never becomes an attachment. That is what keeps last-attach-wins true when the
-two resolutions take different lengths of time — a sibling window's pane is a
-round trip away while a local one resolves immediately, so without it the older,
-slower attach would land last and take the attachment. A superseded attach is
-answered with an error rather than left pending, since the client holds a
-request open until it is answered; a disposed session has no transport left to
-answer on.
-Provider resolution and resize are asynchronous process/window boundaries.
-An attach is not acknowledged until its required resize settles; rejected
-surface resolution, attach resize, and `terminal.resize` are returned as
-protocol errors and are contained inside the session rather than becoming
-unhandled Host-process rejections. The stream is subscribed before that resize
-settles. Subscription also observes liveness atomically: each production
-provider replays a recorded exit when the PTY died while `resolveSurface` was in
-flight, before the session had its sink. Local providers do that synchronously;
-a VS Code peer sends a subscription acknowledgement after installing the sink
-and checking liveness, on the same ordered socket and after any replay. The
-session waits for that readiness before resizing or acknowledging. Either kind
-of exit therefore tears the attachment down first, so the attach is answered
-`surface closed while attaching` and the buffered `terminal.closed` is dropped
-rather than flushed, since the client is never given the subscription it would
-arrive on. Source of truth: `HostSurfaceProvider.streamPty`,
-`RemoteApiSession.#beginAttach`, and the peer `subscribe` / `subscribed` frames
-in `vscode-ext/src/peer-link.ts`.
+#### Attachment invariants
+
+Source of truth: `RemoteApiSession.#attach` / `#beginAttach` in
+`lib/src/remote/host/remote-api.ts`, `HostSurfaceProvider.streamPty`, and the
+peer `subscribe` / `subscribed` frames in `vscode-ext/src/peer-link.ts`.
+
+* **Only the current attachment is writable.** A `terminal.write`/`terminal.resize`
+  for a detached surface, or for a background surface listed in the directory but
+  not attached by this session, is rejected and must not reach the PTY or change
+  its size.
+* **The attachment is pinned to a terminal, not to a registry slot.** It is bound
+  to the terminal resolved at `surface.attach` time, so after a Host-side pane
+  swap moves that terminal to another pane, the stream and both input methods
+  keep targeting the same PTY rather than re-resolving `surfaceId`.
+* **Exit drops the attachment.** On PTY exit the Host emits `terminal.closed` and
+  *then* drops the attachment, so a later write/resize is rejected ("surface is
+  not attached") instead of acting on the disposed terminal.
+* **A late resolution never becomes an attachment.** Disposing the Viewer, and any
+  newer `surface.attach`, invalidate an in-flight surface resolution; a handle
+  that arrives afterwards is released immediately. This is what keeps
+  last-attach-wins true when two resolutions take different lengths of time — a
+  sibling window's pane is a round trip away while a local one resolves at once,
+  so without it the older, slower attach would land last and win.
+* **Every attach is answered.** A superseded attach gets an error rather than
+  being left pending, since the Client holds the request open — and its event
+  subscription with it — until it is answered. A disposed session is the one
+  exception: no transport left to answer on.
+* **The result promises a size already applied.** Provider resolution and resize
+  cross process/window boundaries, so an attach is not acknowledged until its
+  required resize settles. Rejected resolution, attach resize, and
+  `terminal.resize` come back as protocol errors, contained inside the session
+  rather than becoming unhandled Host-process rejections.
+* **Subscription and liveness are atomic.** The stream is subscribed before the
+  resize settles (some PTYs repaint synchronously), so a PTY that died while
+  `resolveSurface` was in flight must still be observed: every production
+  provider replays the recorded exit before the subscription is usable — local
+  ones synchronously, a VS Code peer by acknowledging on the same ordered socket
+  *after* any replay, which the session waits for before resizing or
+  acknowledging. Either way the attachment is torn down first, the attach is
+  answered `surface closed while attaching`, and the buffered `terminal.closed`
+  is dropped rather than flushed — the Client never gets the subscription it
+  would have arrived on.
 
 #### Size authority: last-attach-wins
 
 A terminal has one size, and the most recent size writer owns it: attaching
 with dimensions and `terminal.resize` both take authority, and the Host user
-interacting with the pane locally reclaims it. The Host-side **"tethering to
-\<device\>"** display that greys out other displays of a tethered pane is
-staged — see [Future](#future); today the authority semantics hold at the PTY
-level without the dedicated display.
+interacting with the pane locally reclaims it. There is deliberately no remote
+detach at the surface owner: the Host stops streaming on its side and the pane
+keeps whatever size it was left at, which is what last-attach-wins means. The
+Host-side **"tethering to \<device\>"** display that greys out other displays of
+a tethered pane is staged — see [Future](#future); today the authority semantics
+hold at the PTY level without the dedicated display.
 
-## Input authority
+## Input authority and multiple viewers
 
-Deliberately flat: selfhost is single-user, so every paired session is the
-owner and gets full input (`grants: { input: true, layout: false }`). No
-session gets layout operations. Graded grants, Host-side viewer visibility,
-and layout mutations are staged — see [Future](#future).
+Input authority is deliberately flat: selfhost is single-user, so every paired
+session is the owner and gets full input (`grants: { input: true, layout: false }`),
+and no session gets layout operations.
 
-## Multi-viewer semantics
+Concurrent sessions then need no special machinery: attach state is per-session,
+streams fan out per attachment (one PTY subscription, one sink per attachment),
+and terminal size is last-attach-wins. Interleaved typing from two granted
+sessions is no worse than two keyboards on one machine; the window lease (future)
+is the only exclusive resource.
 
-Concurrent sessions need no special machinery: attach state is per-session,
-streams fan out per attachment, and terminal size is last-attach-wins.
-Interleaved typing from two granted sessions is no worse than two keyboards on
-one machine; the window lease (future) is the only exclusive resource. Showing
-connected viewers on the Host UI (label from the ACL record, e.g. `iPhone
-Safari`) with per-viewer disconnect is staged with the tethering display — see
-[Future](#future).
+Graded grants, layout mutations, and showing connected viewers on the Host UI
+with per-viewer disconnect are all staged — see [Future](#future).
 
 ## Future
 
@@ -364,8 +375,7 @@ Browser remoting was specified alongside protocol-v1 but the shipped slice is
 terminal-only, so it is now the first staged item. The existing screencast
 path (`docs/specs/dor-browser.md`), made remote:
 
-* The client hello gains the reserved `capabilities` field
-  (what the client can render — screencast formats, window support):
+* The client hello gains the reserved `capabilities` field:
   `{ screencast: ['jpeg' | 'webp'], input: boolean, window: boolean }`.
 * `DirectoryEntry` gains browser entries — `type: 'browser'` (the canonical
   component-level kind, `docs/specs/glossary.md` Naming conventions) plus a

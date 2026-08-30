@@ -25,18 +25,22 @@ export const STRIP_RESPONSE_HEADERS = new Set([
 ]);
 
 // The fixed, Dormouse-owned shim — like agent-browser's EDIT_SCRIPTS, never
-// user-supplied, so it is not an eval vector. Injected inline into served HTML
-// (loopback CSP is dropped, so an inline script runs). It posts four message
-// kinds to the Wall and nothing else (every other keystroke flows to the tool):
+// user-supplied, so it is not an eval vector. Injected inline into served HTML;
+// this is why the upstream CSP is dropped whole rather than per-directive (an
+// inline script needs `script-src` gone as much as the frame needs
+// `frame-ancestors` gone). It posts four message kinds to the Wall and nothing
+// else (every other keystroke flows to the tool):
 //   - `leader`: the reserved dual-tap ⌘/⇧ chord (matching handle-dual-tap.ts),
-//     so the global chord keeps working with the frame focused (#1).
+//     so the global chord keeps working with the frame focused.
 //   - `pointerdown`: a click landed in the frame. A cross-origin click reaches
 //     only the frame, so the Wall can't see it; this lets it select the pane /
-//     enter passthrough (#3). It's genuine user input, so it can't loop with the
+//     enter passthrough. It's genuine user input, so it can't loop with the
 //     parent's programmatic focus.
 //   - `location`: the proxied frame's current URL. The parent converts it back
 //     to the upstream URL and uses it to keep iframe Back/Forward/Reload chrome
 //     honest.
+//   - `open-window`: a `target=_blank` anchor or `window.open` the single-frame
+//     renderer can't honor; the parent offers it as a new pane instead.
 export const IFRAME_SHIM = `(function(){
   var P=window.parent;
   if(!P||P===window)return;
@@ -102,9 +106,11 @@ export const IFRAME_SHIM = `(function(){
   else setTimeout(postLocation,0);
 })();`;
 
-// Drop any in-document CSP (loopback "relax CSP") and inject the shim before
-// </head> so it runs before the tool's own scripts. The response-header CSP is
-// stripped separately via STRIP_RESPONSE_HEADERS.
+// Drop any in-document CSP and inject the shim before </head> so it runs before
+// the tool's own scripts. Applies to every framed http upstream, loopback or
+// remote — the trade is stated in docs/specs/dor-browser.md → "Iframe Host
+// Capability And CSP". The response-header CSP is stripped separately via
+// STRIP_RESPONSE_HEADERS.
 export function instrumentHtml(body: string): string {
   const html = body.replace(
     /<meta[^>]+http-equiv=["']?content-security-policy["']?[^>]*>/gi,

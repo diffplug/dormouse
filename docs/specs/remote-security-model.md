@@ -12,10 +12,10 @@ coordinating Server:
   identified by an asymmetric device keypair generated in the browser and
   stored locally as a non-extractable WebCrypto key.
 
-This separation ensures that account-level compromise is insufficient for host
-access. Adding a new passkey to an account, or compromising the coordinating
-Server, does not authorize a new client: the Host rejects any client that has
-not been locally paired.
+The separation is what makes account-level compromise insufficient for host
+access: the Host rejects any client that has not been locally paired (see
+[Security Guarantees](#security-guarantees) for the full list and its one
+qualification).
 
 `SECURITY.md` -> "Remote Control" is this model's audited face: it names the
 subset of the properties below that are load-bearing enough to be checked
@@ -23,12 +23,12 @@ nightly, and states plainly which risks are accepted (the setup password's
 minimal hardening) and which gaps are open (revocation, the audit trail). This
 spec is the design; that section is what a machine verifies about it.
 
-Everything in this spec is implemented in `server-lib-common/src/security/` —
-runtime-agnostic modules shared verbatim by the Server, the Host module in
-`lib`, and the Pocket client, so the three sides cannot disagree on what a
-valid credential is. The concrete pairing and connect message sequences live
-in `docs/specs/server.md` (Relay); this spec defines what those sequences must
-establish.
+The primitives — assertion verification, device signatures, challenges, the
+ACL, the ceremony — live in `server-lib-common/src/security/`: runtime-agnostic
+modules shared verbatim by the Server, the Host module in `lib`, and the Pocket
+client, so the three sides cannot disagree on what a valid credential is. The
+concrete pairing and connect message sequences live in `docs/specs/server.md`
+(Relay); this spec defines what those sequences must establish.
 
 ## Goals
 
@@ -51,6 +51,13 @@ Non-goals:
 * Defending against a compromised operating system
 * Preventing users from intentionally clearing browser data
 * Providing permanent device identity guarantees across browser resets
+* **End-to-end confidentiality from the Server.** The relay terminates TLS and
+  forwards cleartext terminal bytes, so whoever operates the Server can read
+  every keystroke and every byte of output. Self-hosted ships first precisely
+  because that operator is the user. (The PRF-derived session key that would
+  change this is in [Future](#future).)
+* **Availability.** The shipped self-host deployment is a per-login user agent,
+  so the relay is down whenever the machine is (`docs/specs/server.md`).
 
 ## Terminology
 
@@ -64,8 +71,9 @@ Non-goals:
 * **Server** — the coordinating service: account management, passkey
   registration, WebAuthn challenge generation, and signaling/rendezvous. The
   Server is not the final authority for Host access. (Revocation today is
-  local state editing — see `docs/specs/server.md` Guardrails; Server-pushed
-  revocation propagation is staged in [Future](#future).)
+  local state editing plus a Host restart — see `docs/specs/server.md`
+  Guardrails; Server-pushed revocation propagation is staged in
+  [Future](#future).)
 
 ## Trust Model
 
@@ -94,10 +102,31 @@ multiple physical devices. Therefore:
 
 A passkey authenticates a user account but does not grant access to any Host.
 
+**Presence, or verification.** The default demand is the authenticator's
+user-*presence* flag. A deployment raises it to user *verification* (biometric
+or PIN) with `DORMOUSE_REQUIRE_USER_VERIFICATION=true`; the Server mirrors the
+flag into every Host's enrollment response, and the Host copies it into its
+`ConnectionPolicy`. **Both verifiers must demand the same thing** — they
+evaluate the same assertion, so a Server demanding UV while the Host does not
+leaves the weaker verifier deciding, which inverts "the Host is the final
+authority". Pocket asks for `userVerification: 'preferred'` either way, so
+platform authenticators prompt for biometrics in practice even where neither
+side requires it; that is convention, not a guarantee, which is why the flag
+exists.
+
+**The Host stores only a hash of each paired passkey's public key.** The Client
+presents the full key at connection time and the Host checks it against the
+stored hash, so a compromised Server cannot substitute a different passkey; the
+Server likewise verifies against its own *stored* key, never against the one
+the request carries.
+
 Source of truth: `verifyPasskeyAssertion` / `hashPasskeyPublicKey` in
 `server-lib-common/src/security/passkey.ts` — the same assertion verifier runs
-on the Server and the Host (`docs/specs/server.md`, "WebAuthn without a
-WebAuthn library").
+on the Server (`Handshake.checkConnect2` in `server/src/handshake.ts`) and the
+Host (`authorizeConnection`); `HostEnrollment.requireUserVerification` in
+`lib/src/remote/host/enrollment.ts` carries the mirrored flag. Only ES256
+(ECDSA P-256 / SHA-256) is accepted, the mandatory-to-implement WebAuthn
+algorithm.
 
 ## Device Keys
 
@@ -125,24 +154,21 @@ recoverable event (see [Device Key Loss](#device-key-loss)).
 
 Sign-in returns the asserted passkey's **public** key, so any browser profile
 holding a synced passkey can build pair and connect requests rather than only
-the one that registered it. This is deliberately not a weakening: the key is
-public, the Host receives it in every `ConnectionRequest` regardless, and every
-guarantee below still holds — a Client that signs in has merely asked, and
-reaches nothing until the Host's local approval adds *its own device key* to the
-ACL. What it removes is an artifact of the wire that made each new browser
-profile register a redundant second passkey.
+the one that registered it. Deliberately not a weakening: the key is public,
+the Host receives it in every `ConnectionRequest` regardless, and a Client that
+signs in has merely asked — it reaches nothing until the Host's local approval
+adds *its own device key* to the ACL.
 
 The device key has one use outside connection establishment: a Client signs its
-Web Push subscription with it, so the Server can bind that subscription to the
-same identity the Host's ACL records and the Host can address a push by
-`devicePublicKey` ([server.md](./server.md) -> Web Push). That signature carries
-its own domain tag (`PUSH_SUBSCRIBE_DOMAIN` in
+Web Push subscription with it, binding that subscription to the same identity
+the Host's ACL records ([server.md](./server.md) -> Web Push). That signature
+carries its own domain tag (`PUSH_SUBSCRIBE_DOMAIN` in
 `server-lib-common/src/security/push.ts`) rather than `DEVICE_AUTH_DOMAIN`,
-because the Server relays Host-issued challenges during `connect` and therefore
-sees them in transit — sharing one domain would let a challenge captured in one
-protocol be presented to the other. **A push subscription authorizes nothing:**
-it is a delivery address, it grants no access, and losing or forging one cannot
-move a Client across the ACL boundary.
+because the Server sees Host-issued challenges in transit during `connect` —
+sharing one domain would let a challenge captured in one protocol be presented
+to the other. **A push subscription authorizes nothing:** it is a delivery
+address, and losing or forging one cannot move a Client across the ACL
+boundary.
 
 ## Host Authorization
 
@@ -152,7 +178,7 @@ the Server cannot unilaterally grant access.
 The record schema (source of truth: `HostAclRecord` / `HostAcl` in
 `server-lib-common/src/security/acl.ts`; persisted by the Host service through
 its `HostStateStore` — a 0600 file in standalone, `globalState` in VS Code —
-never in a webview realm, `docs/specs/server.md`):
+never on the Server, `docs/specs/server.md`):
 
 ```ts
 interface HostAclRecord {
@@ -174,11 +200,21 @@ A record authorizes the *pair* of a passkey credential and a device key:
 `HostAcl` reports a miss (`passkey-not-paired`, `device-not-paired`,
 `pairing-mismatch`) unless both halves match one active record.
 
+Every store reads its records back as `unknown[]`, so `isHostAclRecord` +
+`filterAclRecords` (`lib/src/remote/host/acl.ts`) drop anything malformed or
+belonging to another `hostId` before it can reach `authorizeConnection`. That
+is hygiene, not authorization — every field is attacker-choosable by anything
+that can write the store at all; the local approval that minted the record is
+the authorization.
+
 ## Pairing Ceremony
 
 Pairing establishes trust between one Client and one Host, and local approval
-on the Host is the only path into the ACL. A newly-added passkey is *not*
-automatically trusted — the Client must still complete Host pairing.
+on the Host is the only path that *mints* an ACL record. A newly-added passkey
+is *not* automatically trusted — the Client must still complete Host pairing.
+(Records can be *carried* rather than minted, by the one-shot `adopt` migration
+from builds that kept the Host in webview `localStorage`; that path is bounded
+separately — `SECURITY.md` -> "Remote Control".)
 
 What the ceremony establishes: the Client authenticates with a passkey and
 presents its device public key; the Host displays local approval UI (the
@@ -189,19 +225,18 @@ key. The Client is now trusted by that Host and no other.
 
 **The approval is only as good as what the modal lets a human check.** The
 ceremony verifies no assertion, so the person at the Host *is* the control —
-and every field of a `PairingRequest` is chosen by whoever composed it. The
-one checkable field is the device-key fingerprint: the Host's modal shows
-`pairingFingerprint(devicePublicKey)` and Pocket shows the fingerprint of its
-own key on the Hosts screen, so the two can be compared before approving. Both
-render the same helper from `server-lib-common/src/security/pairing.ts`
-precisely so they cannot drift into showing different slices of the same key.
-Without that comparison the prompt asks the user to recognize a key they have
-never seen; with it, a substituted or injected request — the thing a
-compromised Server could otherwise time to arrive exactly when one is expected
-— shows the wrong eight characters. `requestedLabel` is attacker-chosen free
-text and is reduced by `boundedPairingLabel` before display, so it cannot
-overflow the dialog or carry bidi overrides that make it read as something
-else.
+and every field of a `PairingRequest` is chosen by whoever composed it. The one
+checkable field is the device-key fingerprint: the Host's modal and Pocket's
+Hosts screen both render `pairingFingerprint` from
+`server-lib-common/src/security/pairing.ts` — the same helper on both ends,
+precisely so they cannot drift into showing different slices of the same key —
+so a substituted or injected request, the thing a compromised Server could
+otherwise time to arrive exactly when one is expected, shows the wrong eight
+characters. Without that comparison the prompt asks the user to recognize a key
+they have never seen. `requestedLabel` and `accountId` are attacker-chosen free
+text, reduced by `boundedPairingLabel` / `boundedPairingAccount` before display,
+so neither can overflow the dialog or carry bidi overrides that make it read as
+something else.
 
 The Host validates the request's shape itself (`isPairingRequest`) rather than
 relying on the Server having done so, for the same reason it re-verifies
@@ -218,9 +253,9 @@ service/webview contract in `lib/src/host/remote/service-protocol.ts`.
 
 **Presence for pairing is server-attested plus Host-approved.** The Server
 relays a pairing request only while the session's last server-verified
-passkey assertion is within `PAIRING_PRESENCE_WINDOW_MS` (30 seconds;
-sign-in, re-auth, and the connect handshake all refresh the stamp — `checkPair`
-in `server/src/handshake.ts`). A stale session is answered with
+passkey assertion is within `PAIRING_PRESENCE_WINDOW_MS` (30 seconds; sign-in,
+re-auth, and a verified `connect2` all refresh the stamp — `checkPair` /
+`checkConnect2` in `server/src/handshake.ts`). A stale session is answered with
 `PAIRING_STALE_PRESENCE_ERROR`; the Client re-asserts with one WebAuthn prompt
 (`/api/reauth/begin` + `/api/reauth/finish`, refreshing the same session and
 relay socket) and retries. The Host does not re-verify an assertion at pairing
@@ -232,23 +267,21 @@ human staring at the approval modal.
 **Pending pairings are bounded.** A `pair` frame allocates in three places —
 the ceremony's ticket map, the Host's per-`clientId` client map, and the
 service's queue mirrored to the webview — under a `clientId` the relay chooses,
-and only a `client-gone` removes one. All three cap what a *pairing* can
-retain (`MAX_PENDING_TICKETS`, `MAX_PENDING_PAIRINGS`), oldest evicted first —
-the controller answers its eviction with a `pair-result` denial and drops the
-client record rather than leaving someone on a modal that no longer exists,
-while the ceremony and the service's mirrored queue simply delete theirs —
-because anything that can sign in can send these and a queue that only grows
-wedges the process that owns every PTY.
+and only a `client-gone` removes one. All three are capped
+(`MAX_PENDING_TICKETS`, `MAX_PENDING_PAIRINGS`), oldest evicted first, because
+anything that can sign in can send these and a queue that only grows wedges the
+process that owns every PTY. The controller answers its own eviction with a
+`pair-result` denial and drops the whole client *record*, not just the request
+it held — clearing the payload while keeping the map slot would bound only what
+`PAIRING_FIELD_LIMIT` already bounds and leave the relay-chosen key, which is
+why `MAX_CLIENT_ID_LENGTH` also caps `clientId` at the frame boundary, before
+any map is touched.
 
-The client map is bounded against *that* path and not in general: `connect`
-also creates an entry (through `#resetAuthorization`), those carry no pending
-request, and the pairing counter neither sees nor evicts them — evicting an
+That bounds the *pairing* path only. `connect` creates a client entry by
+another route (`#resetAuthorization`); those carry no pending request, and the
+pairing counter deliberately neither sees nor evicts them, since dropping an
 entry that may be `established` is a different act from denying a pending
-request. What keeps those cheap is `MAX_CLIENT_ID_LENGTH`, which bounds the
-frame's `clientId` before any map is touched: every other field of a `pair`
-frame is capped by `PAIRING_FIELD_LIMIT`, so leaving the key free would bound
-only the half that was already bounded. They are cleared wholesale when the
-relay socket drops.
+request. They are cleared wholesale when the relay socket drops.
 
 Source of truth: `PairingRequest` / `PairingTicket` / `PairingCeremony` /
 `PAIRING_PRESENCE_WINDOW_MS` / `PAIRING_FIELD_LIMIT` / `MAX_PENDING_PAIRINGS`
@@ -273,14 +306,19 @@ A connection succeeds only if **all** of the following hold:
 The Host makes the final decision — `authorizeConnection` in
 `server-lib-common/src/security/connection.ts` evaluates the assertion, the
 device signature, and the ACL against the Host's `ConnectionPolicy`
-(origin/rpId), and returns a `ConnectionDecision` regardless of what the
-Server claims to have already checked. Host challenges are 32-byte,
-single-use, TTL-bounded values from `HostChallengeIssuer`
-(`server-lib-common/src/security/challenge.ts`, default 2-minute TTL).
-Minting one also reclaims the expired challenges ahead of it, so a flow that
-mints before it can authenticate the caller — `POST /api/signin/begin` — retains
-only what a caller can mint inside one TTL window, rather than accumulating for
-the process's lifetime.
+(origin/rpId/UV), and returns a `ConnectionDecision` regardless of what the
+Server claims to have already checked. It never short-circuits: every layer is
+evaluated and every failure is reported.
+
+Host challenges are 32-byte, single-use, TTL-bounded values from
+`HostChallengeIssuer` (`server-lib-common/src/security/challenge.ts`, default
+2-minute TTL). `authorizeConnection` consumes the challenge *before* any other
+work, so it can never be presented twice whatever the rest of the decision
+does. Minting one also reclaims the expired challenges ahead of it, so a flow
+that mints before it can authenticate the caller — `POST /api/signin/begin` —
+retains only what a caller can mint inside one TTL window, rather than
+accumulating for the process's lifetime.
+
 Every new `connect` / `connect2` closes that Client's established message gate
 and disposes its prior control session before this evaluation, and only the
 newest evaluation may re-open that gate: each attempt carries an authorization
@@ -299,14 +337,10 @@ connection. The concrete sequence is the connect diagram in
 ## Storage Durability
 
 Where the device key lives is browser-managed storage, and durability differs
-by platform:
-
-* **iOS browser tab** — durability is limited: browser-managed storage may be
-  evicted after periods of inactivity. Do not treat it as permanent.
-* **iOS installed PWA** — the preferred mode; meaningfully stronger retention.
-* **Android browser tab** — generally durable; suitable for casual use.
-* **Android installed PWA** — the preferred mode; the strongest web-only
-  durability guarantee.
+by platform: an iOS browser tab is the weakest (storage may be evicted after
+inactivity — do not treat it as permanent), an Android browser tab is generally
+durable, and an installed PWA is the preferred mode on both, strongest on
+Android.
 
 Today Pocket generates the device key in whatever context it runs — the
 install-before-pairing guidance and storage-persistence hardening are staged
@@ -331,13 +365,23 @@ paired passkey, and the new key starts unauthorized everywhere.
 Dormouse is designed so that:
 
 * Adding a new passkey does not grant Host access.
-* Compromising the Server does not grant Host access.
+* Compromising the Server does not let it *create* an authorized Client.
 * Passkey synchronization does not automatically create trusted Clients.
 * Every trusted Client must be explicitly paired with every Host.
 * Every connection requires fresh user presence.
 * Every access decision is ultimately made by the Host.
 
 The Host remains the final authority throughout the system.
+
+**One honest qualification.** "Server compromise grants no Host access" bounds
+*creation*, not *action*. After a decision the Host gates `msg` frames on
+`established` for a `clientId` the relay itself minted, and there is no
+per-frame authentication, so a compromised Server can fabricate frames on a
+session an authorized Client already has open — reaching `terminal.write`,
+which is keystroke injection into a live PTY — as well as suppress or rewrite
+frames in either direction. That follows from the relay being a dumb pipe with
+no end-to-end authentication (see Non-goals); the PRF-derived session key in
+[Future](#future) is what would close it.
 
 ## Future
 
@@ -346,7 +390,12 @@ The Host remains the final authority throughout the system.
 The Server pushing revocations to Hosts. Today `HostAcl.revokeDevice` /
 `revokePasskey` exist but have no callers, and no relay frame carries a
 revocation — revoking is hand-editing state (`docs/specs/server.md`,
-Guardrails) and takes effect at the Host's next `authorizeConnection`.
+Guardrails). Note what that costs an operator: `RemoteHostService.#startHost`
+reads the store once and hands the `RemoteHost` a snapshot for its whole
+lifetime, so an edited record is not observed until the Host is restarted.
+Restarting is therefore the entire lever — it reloads the ACL *and*, by
+dropping the relay socket, ends every established session. Editing alone
+changes nothing that is running.
 
 ### Storage-durability hardening
 

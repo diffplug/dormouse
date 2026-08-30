@@ -51,7 +51,6 @@ export function collectDirectorySnapshot(): DirectoryEntry[] {
     // A pane whose PTY exited lingers in the registry (showing "[Process
     // exited…]") with `exited` set; report it as not-alive. A missing entry
     // (shouldn't happen — ids come from `registry.keys()`) is also not-alive.
-    // A live pane has an entry with `exited` unset → alive.
     const entry = registry.get(id);
     const alive = entry !== undefined && entry.exited !== true;
     return {

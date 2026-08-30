@@ -128,7 +128,7 @@ export type LathWallEngine = {
    *  persistence subscription subscribe to. */
   store: LathWallStore;
 
-  // --- animation (stage 3; docs/specs/tiling-engine.md → "Animation contract") ---
+  // --- animation (docs/specs/tiling-engine.md → "Animation") ---
   /** The headless motion core the HTML adapter drives from its rAF loop. Created
    *  with a 0 duration under reduced motion, so the same code path snaps instantly. */
   animator: LathAnimator;

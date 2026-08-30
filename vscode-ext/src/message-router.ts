@@ -196,7 +196,6 @@ function onTerminalSemanticEvents(listener: SemanticEventsListener): () => void 
   return () => { semanticEventsListeners.delete(listener); };
 }
 
-// Log all alert state transitions (including timer-driven ones)
 alertManager.onStateChange((id, state) => {
   log.info(`[alert] ${id}: → ${state.status} (todo=${state.todo})`);
 });
@@ -473,7 +472,6 @@ export function attachRouter(
     };
   }
 
-  // Route webview messages to the PTY manager
   const messageDisposable = channel.onDidReceiveMessage((msg: WebviewMessage) => {
     switch (msg.type) {
       case 'pty:spawn': {
@@ -750,7 +748,6 @@ export function attachRouter(
           })),
         };
         post(list);
-        // Send replay/scrollback data for each reconnectable PTY
         for (const [id] of reconnectable) {
           // For already-owned PTYs the replay buffer was consumed on first connect,
           // so use scrollback (full history, never cleared).
@@ -763,7 +760,6 @@ export function attachRouter(
             post(replay);
           }
         }
-        // Send current alert state for all reconnectable PTYs
         for (const [id] of reconnectable) {
           const alertState = alertManager.getState(id);
           log.info(`[alert-reconnect] ${id}: sending ${alertState.status} (todo=${alertState.todo})`);

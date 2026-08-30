@@ -128,7 +128,9 @@ export type KeyLike = {
   shiftKey: boolean;
 };
 
-/** Canonical persisted params for a browser surface, as the view reads them. */
+/** Canonical persisted params for a browser surface, as the view reads them.
+ *  Pop-out is deliberately absent: it is derived from `renderMode`, never stored
+ *  (docs/specs/dor-browser.md → "Canonical Params"). */
 export interface AgentBrowserSurfaceParams {
   surfaceType?: string;
   renderMode?: RenderMode;
@@ -138,7 +140,6 @@ export interface AgentBrowserSurfaceParams {
   binaryPath?: string;
   url?: string;
   syncEngaged?: boolean;
-  poppedOut?: boolean;
 }
 
 /** The live DOM bindings a mounted view lends the controller. `attachView`
@@ -1172,8 +1173,9 @@ export class AgentBrowserSurfaceController {
     // never force its viewport to the (now-stub) pane size. Sync resumes when it
     // pops back in — the streamPort-change reclaim re-issues against the fresh session.
     if (this.poppedOut) return;
-    // Hosts without agentBrowserCommand (Tauri today) can't drive the viewport;
-    // stay silent rather than warn on every resize. The surface just reads SCALED.
+    // Hosts without agentBrowserCommand (e.g. the web demo) can't drive the
+    // viewport; stay silent rather than warn on every resize — the surface just
+    // reads SCALED.
     if (!getPlatform().agentBrowserCommand) return;
     const el = this.sink?.viewport;
     if (!el) return;

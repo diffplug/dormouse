@@ -163,9 +163,6 @@ function PlaygroundDesktopExperience() {
         themeStore: themes,
       });
       detectorRef.current = detector;
-      // The detector now reads app state entirely through the WallEvent stream and
-      // the activity/mouse stores — no tiling api. `start()` seeds its prev-state
-      // maps and subscribes to those stores.
       detector.start();
 
       const shellRegistry = new PlaygroundShellRegistry(

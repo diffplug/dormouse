@@ -2,8 +2,8 @@
  * `RemotePtyAdapter` — a {@link PlatformAdapter} backed by a connected
  * {@link PocketClient} session, so the exact mobile terminal UI the website
  * proves out with `FakePtyAdapter` (`PocketTerminalExperience`) can render a
- * real remote Host over the remote-api v1 wire (docs/specs/pocket-app.md). The
- * adapter mapping table is the spec:
+ * real remote Host over the remote-api v1 wire. docs/specs/pocket-app.md owns
+ * this mapping:
  *
  *   onPtyList        ← directory.snapshot   (id = surfaceId)
  *   attach semantics ← surface.attach       (one attachment per session)
@@ -17,33 +17,23 @@
  * shells/clipboard empty, alerts no-op; alert/TODO/ringing badges instead ride
  * the directory snapshot and are read via {@link getDirectoryEntries}).
  *
- * ── What phase 1b needs to know about terminal-registry (terminal-lifecycle.ts)
+ * Two things the terminal registry (`terminal-lifecycle.ts`) makes load-bearing:
  *
- * The registry binds a pane purely by string id: `getOrCreateTerminal(id)`
- * creates an xterm, registers `onPtyData`/`onPtyExit` handlers that filter on
- * `detail.id === id`, and writes matching data straight into that xterm. So the
- * ONLY contract this adapter must honor for the data pump is: emit
- * `onPtyData({ id: surfaceId, data })` / `onPtyExit({ id: surfaceId, ... })` and
- * mount each pane's xterm under a session id equal to its `surfaceId`.
- *
- * `getOrCreateTerminal` also calls `spawnPty(id, {cols,rows})` and, on xterm
- * fit/resize, `resizePty(id, cols, rows)`, and on keystrokes `writePty(id, ..)`.
- * `spawnPty` being a no-op here does NOT break session creation — the registry
- * never waits on a spawn ack; it just wires listeners and calls spawn for the
- * local-PTY adapters. (FakePtyAdapter's `spawnPty` fires an `onPtySpawn` extra
- * the playground's shell registry listens to; there is no such shell registry
- * on the remote side — the Host owns the shell — so we emit nothing on spawn.)
- *
- * The catch phase 1b must handle: nothing is streaming until the pane is
- * ATTACHED. v1 allows one attachment per session, so the UI must call
- * {@link setActivePane}(surfaceId, cols, rows) whenever the active pane changes
- * (detach-old → attach-new). Until then `writePty`/`resizePty` for a
- * non-attached pane are dropped (the Host would reject them anyway), and the
- * attach repaint — not a snapshot transfer — is what fills the client screen.
- * The registry's own `onResize → resizePty` path keeps the attached pane sized;
- * `setActivePane` seeds the first size. Protocol-v1 has no host-initiated
- * resize event — size-authority notification is staged in remote-api.md
- * ## Future (the PlatformAdapter interface has no inbound-resize channel).
+ * - It binds a pane purely by string id, filtering `onPtyData`/`onPtyExit` on
+ *   `detail.id === id`, so this adapter must emit those events keyed by
+ *   `surfaceId` and each pane's xterm must be mounted under that same id.
+ *   `spawnPty` being a no-op is fine: the registry never waits on a spawn ack,
+ *   and unlike `FakePtyAdapter` there is no shell registry to notify on spawn —
+ *   the Host owns the shell.
+ * - Nothing streams until a pane is ATTACHED, and v1 allows one attachment per
+ *   session, so the UI must call {@link setActivePane} on every active-pane
+ *   change (detach-old → attach-new). `writePty`/`resizePty` for a non-attached
+ *   pane are dropped — the Host would reject them anyway — and the attach
+ *   repaint, not a snapshot transfer, is what fills the client screen.
+ *   `setActivePane` seeds the first size; the registry's `onResize → resizePty`
+ *   keeps the attached pane sized afterwards. Protocol-v1 has no host-initiated
+ *   resize event and `PlatformAdapter` has no inbound-resize channel;
+ *   size-authority notification is staged in remote-api.md `## Future`.
  */
 
 import {

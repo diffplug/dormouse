@@ -37,10 +37,11 @@ The `UpstreamVsFork` story renders identical content through three renderers
 stacked: pristine upstream `@xterm/addon-webgl`, the fork with `sdf: false`
 (isolates the instance-layout/shader changes), and the fork with `sdf: true`
 (isolates the SDF glyph path). The upstream pin must be the same commit as the
-fork base — the addon's beta counter is offset from core's (addon
-`0.20.0-beta.298` == core `6.1.0-beta.301` == commit `8c9b9fdb`); re-derive it
-with `npm view @xterm/addon-webgl@<ver> gitHead` when the fork rebases, or let
-`node scripts/xterm-bump.mjs --canopy <forkVersion>` pick the matching addon.
+fork base — the `@xterm/*` beta counters are independent, so the numbers never
+match (addon `0.20.0-beta.298` == core `6.1.0-beta.301` == commit `8c9b9fdb`);
+re-derive it with `npm view @xterm/addon-webgl@<ver> gitHead` when the fork
+rebases, or let `node scripts/xterm-bump.mjs --canopy <forkVersion>` pick the
+matching addon.
 
 Story content writes PUA glyphs (powerline chevrons etc.) as `\uE0BX` escapes,
 never literal characters — the literals are invisible in editors and were once
@@ -53,8 +54,10 @@ silently dropped in a file rewrite, which presented as a rendering regression.
 cd canopy && pnpm link ~/projects/xterm.js/addons/addon-webgl
 ```
 
-`pnpm link` writes only into `node_modules`, so nothing accidental gets
-committed; a later `pnpm install` restores the release tarball.
+CAUTION: pnpm 11's link also writes persistent residue — a `link:` dependency in
+the ROOT `package.json` and an `overrides:` entry in `pnpm-workspace.yaml` —
+which silently keeps resolving the link. Revert both and `pnpm install` before
+trusting a tarball verification.
 
 ## Roadmap
 

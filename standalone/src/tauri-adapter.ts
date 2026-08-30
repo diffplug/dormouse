@@ -108,7 +108,6 @@ export class TauriAdapter implements PlatformAdapter {
   readonly remoteHost: RemoteHostLink = this.remoteHostClient.link;
 
   constructor() {
-    // Wire alert manager state changes to handlers
     this.alertManager.onStateChange((id, state) => {
       for (const handler of this.alertStateHandlers) {
         handler({ id, ...state });
@@ -117,9 +116,6 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   async init(): Promise<void> {
-    // Set up event listeners for PTY events from the Rust backend
-    // (The Rust backend manages the Node.js sidecar lifecycle via std::process::Command)
-    //
     // Registered together rather than one await after another: every `listen`
     // is an independent round trip to Rust, and serializing them puts the whole
     // set in front of the first paint.

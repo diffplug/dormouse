@@ -8,7 +8,7 @@ Dormouse is a terminal, so users trust it with shells, source trees, credentials
 
 Dormouse Pocket lets a phone attach to a terminal running on the user's laptop, so the pairing stack is the one part of the product that takes input from the network. An authorized Client is deliberately equivalent to a person sitting at that laptop's keyboard — `terminal.write` is raw keystroke injection into a live PTY, and protocol-v1 has no notion of a restricted session. The entire trust model therefore exists to make *authorized* hard to reach, and impossible to reach by accident.
 
-The design lives in [`docs/specs/remote-security-model.md`](docs/specs/remote-security-model.md), the deployment in [`docs/specs/server.md`](docs/specs/server.md), and the operator runbook in [`SELF_HOST.md`](SELF_HOST.md). This section does not restate them: it names the properties that are load-bearing enough to audit, and the risks we have accepted rather than closed. Two deployment modes are defined (`docs/specs/remote-api.md` → "Server deployment modes"); everything below is **self-hosted**, the only one that ships today. Cloud-hosted is [staged](#cloud-hosted-mode-staged).
+The design lives in [`docs/specs/remote-security-model.md`](docs/specs/remote-security-model.md), the server runtime in [`docs/specs/server.md`](docs/specs/server.md), and the self-host deployment — operator runbook and installer contract both — in [`SELF_HOST.md`](SELF_HOST.md). This section does not restate them: it names the properties that are load-bearing enough to audit, and the risks we have accepted rather than closed. Two deployment modes are defined (`docs/specs/remote-api.md` → "Transport"); everything below is **self-hosted**, the only one that ships today. Cloud-hosted is [staged](#cloud-hosted-mode-staged).
 
 ### Trust boundary
 
@@ -103,7 +103,7 @@ Web Push is the one path where the Server makes an outbound request to an addres
 
 These are the two real gaps in the shipped model, and they are gaps rather than accepted risks — we intend to close them.
 
-**Revocation has no mechanism.** `HostAcl.revokeDevice` / `revokePasskey` exist and have no callers; no relay frame carries a revocation; there is no management UI. Revoking a lost phone means hand-editing JSON on the Host, and it takes effect at that Client's next `authorizeConnection` — an already-established session survives it, and the operator's only lever is stopping the Host. Server-pushed revocation propagation is staged in `docs/specs/remote-security-model.md` → Future.
+**Revocation has no mechanism.** `HostAcl.revokeDevice` / `revokePasskey` exist and have no callers; no relay frame carries a revocation; there is no management UI. Revoking a lost phone means hand-editing JSON on the Host **and restarting it**: `RemoteHostService.#startHost` reads the store once and hands the `RemoteHost` a snapshot for its whole lifetime, so an edit alone changes nothing that is running. The restart is the whole lever — it reloads the ACL and, by dropping the relay socket, ends every established session. Server-pushed revocation propagation is staged in `docs/specs/remote-security-model.md` → Future.
 
 **There is no audit trail.** The ACL records `approvedAt` / `approvedBy` for a pairing, and nothing records connects, attaches, denials, or writes. A self-hoster cannot answer "did anyone connect to my laptop last night", which also means an ACL entry added by any of the paths above would be invisible after the fact.
 

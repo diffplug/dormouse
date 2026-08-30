@@ -104,8 +104,8 @@ export function useDevServerPortCorrelation({
 
       const platform = getPlatform();
       if (!platform.getOpenPorts) {
-        // No port enumeration on this host (e.g. Tauri today): nothing will ever
-        // match, so settle to "no match" and stop (don't poll).
+        // No port enumeration on this host: nothing will ever match, so settle
+        // to "no match" and stop (don't poll).
         for (const port of unsettled) setDevServerResolution(port, null);
         return 'idle';
       }
