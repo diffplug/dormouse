@@ -450,7 +450,8 @@ fn pty_get_cwd(
         .and_then(|cwd| cwd.as_str().map(String::from)))
 }
 
-// Mirrors `OPEN_PORT_TIMEOUT_MS` in `lib/src/lib/platform/types.ts` — keep in sync.
+// Mirrors `OPEN_PORT_TIMEOUT_MS` in `lib/src/lib/platform/types.ts` — pinned by
+// `lib/src/lib/mirrored-constants.test.ts`.
 const OPEN_PORT_TIMEOUT_MS: u64 = 3000;
 
 #[tauri::command(async)]

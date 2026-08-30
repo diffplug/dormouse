@@ -22,8 +22,8 @@
  *      blockquote. Scoped to docs/specs (SELF_HOST.md is a deployment spec;
  *      its lone incidental "baseboard" doesn't warrant the callout).
  *   6. A named scope (`**Scope: X**` leading a line) is defined exactly once
- *      across the corpus, and every bold `(**Scope: X**)` reference names a
- *      defined scope.
+ *      across the corpus, and every bold reference — `(**Scope: X**)` or the
+ *      bare `the **x** scope` form — names a defined scope.
  *   7. Every `Reserved:` paragraph names `## Future` or a defined scope — the
  *      Reservations convention in AGENTS.md.
  *   8. Every `<foo>.rationale.md` pairs with an existing `<foo>.md`, keys its
@@ -196,6 +196,9 @@ for (const spec of specFiles) {
 
 // --- Check 6: named scopes defined once; bold references resolve --------------
 const SCOPE_RE = /\*\*Scope: ([a-z0-9-]+)\*\*/g;
+// Cross-spec references also use the bare form ("the **dor-tools** scope"),
+// which AGENTS.md sanctions with "other specs link to it by name".
+const SCOPE_REF_RE = /\*\*([a-z0-9-]+)\*\* scope/g;
 const scopeDefs = new Map(); // name -> "file:line" of the definition
 const scopeRefs = [];
 for (const rel of allFiles) {
@@ -214,6 +217,9 @@ for (const rel of allFiles) {
       } else {
         scopeRefs.push({ rel, line: i + 1, name: m[1] });
       }
+    }
+    for (const m of line.matchAll(SCOPE_REF_RE)) {
+      scopeRefs.push({ rel, line: i + 1, name: m[1] });
     }
   });
 }

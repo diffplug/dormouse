@@ -24,9 +24,9 @@ function resolveDefaultShell(platform = process.platform, env = process.env) {
 }
 
 const LOGIN_ARG_UNSUPPORTED_SHELLS = new Set(['csh', 'tcsh']);
-// Mirrors ITERM2_COMPAT_VERSION in lib/src/lib/terminal-protocol.ts — keep in
-// sync (terminal-escapes.md: one compatibility version across env and device
-// responses).
+// Mirrors ITERM2_COMPAT_VERSION in lib/src/lib/terminal-protocol.ts — pinned by
+// lib/src/lib/mirrored-constants.test.ts (terminal-escapes.md: one
+// compatibility version across env and device responses).
 const ITERM2_COMPAT_VERSION = '3.5.0';
 
 // bash flags that merely select an interactive and/or login shell. When the args
@@ -574,8 +574,10 @@ module.exports.getCwdForPid = getCwdForPid;
 // the "what server is this terminal running" signal, without the churn of
 // ephemeral outbound connections.
 
-// Mirrors `OPEN_PORT_TIMEOUT_MS` in `lib/src/lib/platform/types.ts` — keep in
-// sync. Used as the per-subprocess timeout cap inside the open-port pipeline.
+// Mirrors `OPEN_PORT_TIMEOUT_MS` in `lib/src/lib/platform/types.ts` and
+// `standalone/src-tauri/src/lib.rs` — pinned by
+// `lib/src/lib/mirrored-constants.test.ts`. Used as the per-subprocess timeout
+// cap inside the open-port pipeline.
 const OPEN_PORT_TIMEOUT_MS = 3000;
 module.exports.OPEN_PORT_TIMEOUT_MS = OPEN_PORT_TIMEOUT_MS;
 
