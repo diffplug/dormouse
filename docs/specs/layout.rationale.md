@@ -18,6 +18,8 @@ The passthrough `solid` variant replaced the original `border: 1px solid ${color
 
 ## Renderer
 
+**Why the GL context is claimed lazily.** A GL context is a scarce per-page resource. Claiming at create would spend the budget on surfaces that never paint — cold restore builds a session for every persisted pane, minimized doors included — and because eviction is oldest-first and one-way, the panes it demoted would be the earliest-restored ones, permanently.
+
 **DOM-renderer cost.** The DOM renderer emits one `<span>` per style run per row, so a TUI that paints every cell its own truecolor collapses to one span-with-inline-style *per cell*, rebuilt every frame. On a 99×25 pane that is ~1150 elements of style recalc plus layout per frame: measured in Safari 26.5 (2026-08), a single such pane held the whole page at ~110ms/frame (~9fps) while the rest of the app was idle. The same pane on the WebGL renderer holds a locked 60fps (16.6ms, zero frames over 25ms).
 
 **Context budget.** The per-page live-context cap was measured at 16 in Safari 26.5, evicted oldest-first. The `onContextLoss` → dispose-the-addon → DOM-fallback path was verified live by exhausting the budget and watching the demoted panes keep painting.
