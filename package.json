@@ -14,6 +14,7 @@
     "build": "pnpm run build:vscode && pnpm --filter dormouse-website build",
     "test": "node scripts/spec-lint.mjs && node scripts/xterm-lint.mjs && node scripts/loopback-lint.mjs && node scripts/deploy-lint.mjs && node scripts/deploy-lint-selftest.mjs && node scripts/clamp-issue-body-selftest.mjs && pnpm -r run test",
     "lint:specs": "node scripts/spec-lint.mjs",
+    "audit:prose": "node scripts/prose-audit.mjs",
     "lint:loopback": "node scripts/loopback-lint.mjs",
     "lint:xterm": "node scripts/xterm-lint.mjs",
     "bump:xterm": "node scripts/xterm-bump.mjs",
