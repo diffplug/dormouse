@@ -174,22 +174,6 @@ Dormouse does not implement the following, and all of them **fail inertly** per 
 
 The `OSC 1337` rows are illustrative, not a closed set: *every* `1337` payload other than `CurrentDir=` is consumed, named here or not. `OSC 50` and `OSC 52` are matched by code; every other unrecognized OSC family reaches xterm.js untouched.
 
-## Files
-
-| File | Role |
-|---|---|
-| `lib/src/lib/terminal-protocol.ts` | The parser: OSC dispatch, terminator/introducer scanning, standalone-BEL stripping, `CSI > q` stripping + the iTerm2 DCS answer, OSC 10/11/12 answering, OSC 99 chunk state, event → sink/response/semantic collectors |
-| `lib/src/lib/terminal-report-filter.ts` | The three input-side report filters and `REPLAY_MODE_RESET` |
-| `lib/src/lib/mouse-mode-observer.ts` | DECSET/DECRST parser hooks feeding the mouse-selection store |
-| `lib/src/lib/keyboard-protocol-arbiter.ts` | kitty ↔ win32-input-mode arbitration on Windows |
-| `lib/src/lib/terminal-lifecycle.ts` | `vtExtensions` + `linkHandler` wiring, replay + reset-tail application, input filtering on `onData` |
-| `lib/src/lib/external-links.ts`, `external-link-confirmation.ts`, `lib/src/components/ExternalLinkModal.tsx` | OSC 8 activation: URI policy, display-text verdict, the dialog |
-| `lib/src/host/remote/pty-strip.ts` | The strip-only parser the Node-resident remote Host runs per streamed PTY |
-| `standalone/sidecar/pty-core.js` | iTerm2 identity env, `useConptyDll`, `applyShellIntegration` |
-| `standalone/sidecar/shell-integration/` | The injected per-shell OSC 633 emitters (bash, zsh, pwsh) |
-
-Two escape-aware modules sit *downstream* of the PTY boundary and are owned elsewhere: `lib/src/lib/terminal-controls.ts` (`stripTerminalControls`, whose rules are specified in [transport.md](transport.md)) and the alt-screen span elision in `lib/src/lib/terminal-state-store.ts` ([terminal-state.md](terminal-state.md)). Both read already-stripped output as *content*; neither changes what reaches xterm.js.
-
 ## References
 
 - iTerm2 proprietary escape codes: https://iterm2.com/documentation-escape-codes.html

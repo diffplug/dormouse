@@ -217,30 +217,6 @@ The session read boundary resolves the layout once: `persistedLathLayout` (`sess
 
 ## Testing
 
-Source of truth: `lib/src/lib/lath/{model,layout,ops,animator,hit-test,property,persistence}.test.ts` (+ shared core builders in `test-util.ts`, shared `leafMeta` fixtures in `test-fixtures.ts`); `lath-wall-store.test.ts`, `LathHost.test.tsx`, `lath-wall-engine.test.ts` under `lib/src/components/wall/`, and `Wall.test.tsx` under `lib/src/components/`.
-
-- Core (DOM-free): property tests over seeded random op sequences (tiling exactness, `validate` after every op, the `ok: false` identity contract, `move` ≡ `remove`+insert, restore-tier degradation) plus golden trees, `neighbors`/`autoEdge`/`sashes` geometry, and per-op rejection cases. Animator: fake-clock tests asserting real interpolated rects/opacities against the exported easing — mid-flight retarget from the interpolated frame, enter-from-edge starting rects, discrete rise/hold/lower layer timing, dying freeze-and-fade + shrink geometry, snap semantics, settled detection, reduced-motion zero-duration. Hit-testing: candidates in depth order, band caps, self/no-op/duplicate filtering, external (null-dragged) drags, and `previewRect` equality against an explicit `move`+`layout`.
-- Binding (jsdom), guarantee by guarantee: **node identity survives every op** (the no-re-parent contract) and DOM order stays fixed while layout order changes; a parked leaf keeps its node and children across park/restore, holds its last rect while hidden (asserted under StrictMode, where every ref detaches and re-attaches), reattaches from that rect, and unmounts only on `forgetLeaf` or cap eviction, whose evicted Doors still take late metadata writes; frames apply imperatively between commits (fake rAF + fixed-duration engine) and a mid-tween re-render does not snap styles; sash drag preview/commit/cancel with the snap-on-commit; the pane-drag gesture (threshold, button bail, preview overlay, wheel depth cycling, baseboard minimize, Escape, external door-drag); inset zoom with its elevated layer lifetime; the pane props contract via `componentsOverride`; store mutator/rejection/notify semantics; the read-boundary layout resolution (`session-restore.test.ts` / `reconnect.test.ts`); engine hydration from a persisted layout and from fresh ids; a `<Wall>` smoke (split, kill, layout save capture).
-- Acceptance: every row below was driven live through the standalone agent-browser harness (`pnpm dev:standalone:ab`; mechanics in `.claude/skills/debug-standalone-agent-browser/SKILL.md`) — motion rows frame-sampled, drag rows checked for pixel-exact preview-equals-commit (rationale).
-
-Acceptance matrix — each row is an end-to-end observable, independent of engine internals:
-
-| # | Flow | Expected observable |
-| --- | --- | --- |
-| 1 | Type into the selected terminal | Keystrokes echo; `dor list` marks it `*` (focused) |
-| 2 | `dor iframe <url>` / `dor ensure` from a touched terminal | Surface created in the background; caller keeps DOM focus (`document.activeElement` stays its xterm textarea) and selection; follow-up typing lands |
-| 3 | Click between panes (body and header), both directions | Selection and focus follow the click; passthrough entered |
-| 4 | `dor kill` of a background surface | Surface removed; caller's selection, focus, and typing all survive (focus is never lost, not healed) |
-| 5 | Kill the selected pane (`dor kill` self or confirm flow) | Selection adopts a survivor; typing works there |
-| 6 | Minimize the last pane | Door created and selected; auto-spawn fills the Wall; **door keeps selection** through the spawn |
-| 7 | Click a door | Reattach at original position when structure allows (exact tier); pane selected |
-| 8 | Embedded page focuses itself (iframe surface) | Selection moves onto that pane — visible jump, same as a click; never a silent desync |
-| 9 | Zoom toggle on a pane | Pane rises, expands to the 15px-inset wall rect, then shrinks and lowers on return; layout identical after |
-| 10 | Restart the app (harness re-open) | Layout, doors, titles, and params restored |
-| 11 | Kill with animation | Fade in place, survivors tween into the space; a second kill mid-tween retargets cleanly; reduced-motion instant |
-| 12 | Drag a pane to a leaf edge, an ancestor edge, and center | Split-beside-pane, split-beside-column/row, and swap respectively; preview rect matches the committed result; dragging while a door is selected moves selection onto the dragged pane |
-| 13 | Drag a pane onto the baseboard; drag a door out | Minimize with token; restore at the hit-tested position |
-
-Row 8's counterpart guard (a background `dor` command must never yank cross-frame focus out of the host editor) is a Wall-level policy that predates Lath; its acceptance check is run against the VS Code host rather than the standalone harness.
+Source of truth: the DOM-free suites in `lib/src/lib/lath/`, the binding suites under `lib/src/components/wall/`, and `lib/src/components/Wall.test.tsx`. They pin the core algebra, rejection identity, geometry, animator, hit testing, persistence, stable DOM identity, parking, drag/resize/zoom, and Wall integration. The standalone agent-browser acceptance run covered the corresponding live flows; its evidence is retained in the rationale.
 
 Ordering constraint: the workspace-switching stages of the **workspaces-rollout** scope (defined in [layout.md](layout.md)) build on this engine — a workspace switch under Lath is "swap which tree renders." `onApiReady` (the old tiling-api ready callback) is gone and **must not come back**: the website tutorial, its last consumer, drives off the engine-neutral `WallEvent` stream (`paneAdded` for pane creation, `selectionChange` for kb-arrows).

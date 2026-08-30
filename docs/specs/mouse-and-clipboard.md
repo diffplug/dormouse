@@ -277,30 +277,6 @@ Everything above is about the terminal. Dormouse also renders real `<input>`s �
 
 ---
 
-## Files
-
-| File | Role |
-|------|------|
-| `lib/src/lib/mouse-selection.ts` | Per-terminal selection / override / bracketed-paste state store |
-| `lib/src/lib/mouse-mode-observer.ts` | DECSET/DECRST parser hook; syncs mouse-reporting and bracketed-paste modes |
-| `lib/src/lib/terminal-mouse-router.ts` | Drag routing (mouse + touch), smart-token hinting, temporary-override clearing |
-| `lib/src/lib/clipboard.ts` | Copy/paste entry points and the tiered paste chain |
-| `lib/src/lib/shell-escape.ts` | Per-shell path quoting for the paste/drop path (§8.6) |
-| `lib/src/components/wall/keyboard/handle-mouse-selection-keys.ts` | Drag-time key routing (§3.6), `e` extension, copy/paste chords |
-| `lib/src/components/wall/keyboard/handle-editable-clipboard.ts` | Copy/cut/paste inside Dormouse's own text fields (§8.9) |
-| `lib/src/components/wall/keyboard/chords.ts` | The copy vs. paste modifier convention (§8.2) |
-| `lib/src/lib/rewrap.ts` | Copy Rewrapped transformations |
-| `lib/src/lib/selection-text.ts` | Selected-cell text extraction + selection normalization |
-| `lib/src/lib/selection-geometry.ts` | Selected cells → visible rects → single perimeter SVG path |
-| `lib/src/lib/smart-token.ts` | URL / path / error-location patterns (`PATTERNS`) |
-| `lib/src/components/SelectionOverlay.tsx` | Perimeter outline and drag hints |
-| `lib/src/components/SelectionPopup.tsx` | Copy popup and shortcut labels |
-| `lib/src/components/wall/MouseOverrideBanner.tsx` | Temporary-override banner |
-| `standalone/sidecar/clipboard-ops.js` | OS-native clipboard tiers for VSCode and macOS/Linux Tauri (§8.6) |
-| `standalone/src-tauri/src/clipboard_win.rs` | Native Win32 clipboard tiers for Tauri on Windows (§8.6) |
-
----
-
 ## 9. Future
 
 The following are explicitly not implemented today; they may be added in response to user feedback.

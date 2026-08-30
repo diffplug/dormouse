@@ -644,53 +644,6 @@ Source of truth: `lib/src/lib/platform/types.ts`,
 `vscode-ext/src/message-router.ts`, `vscode-ext/src/webview-html.ts`,
 `standalone/src/tauri-adapter.ts`, `lib/src/host/iframe-proxy-rewrite.ts`.
 
-## Code Map
-
-- CLI: `dor/src/commands/agent-browser.ts`, `dor/src/commands/iframe.ts`,
-  `dor/src/commands/open-target.ts`, `dor/src/commands/types.ts`.
-- Shell/render swap/lifecycle: `lib/src/components/Wall.tsx`,
-  `lib/src/components/wall/BrowserPanel.tsx`,
-  `lib/src/components/wall/browser-surface.ts`,
-  `lib/src/components/wall/LathHost.tsx` (`BODY_COMPONENTS`).
-- Pane context-menu connect: `lib/src/components/wall/PaneHeaderContextMenu.tsx`,
-  `lib/src/components/wall/connect-port.ts`, `lib/src/components/wall/port-url.ts`.
-- Chrome/modal: `SurfacePaneHeader.tsx`, `AgentBrowserScreenModal.tsx`,
-  `agent-browser-screen.ts`, `browser-url.ts`, `use-dev-server-ports.ts`,
-  `agent-browser-ports.ts`.
-- Agent-browser renderer: `AgentBrowserPanel.tsx`,
-  `agent-browser-surface-controller.ts`, `agent-browser-connection.ts`,
-  `agent-browser-input.ts`, `agent-browser-screenshot-loop.ts`,
-  `agent-browser-tab.ts`, `agent-browser-sessions.ts`.
-- Iframe renderer/proxy: `IframePanel.tsx`, `iframe-proxy-registry.ts`,
-  `lib/src/host/iframe-proxy.ts`, `lib/src/host/iframe-proxy-rewrite.ts`,
-  `lib/src/host/loopback-guard.ts`,
-  `lib/src/lib/platform/iframe-proxy-types.ts`.
-- Host adapters: `lib/src/host/agent-browser-host.ts`,
-  `vscode-ext/src/agent-browser-host.ts`, `vscode-ext/src/iframe-proxy-host.ts`,
-  `standalone/src/tauri-adapter.ts`, `standalone/src-tauri/src/lib.rs`,
-  `standalone/sidecar/main.js`.
-
-## Maintainer checklist
-
-When changing browser-surface behavior:
-
-- Never reintroduce `surfaceType: 'iframe' | 'agent-browser'` or `poppedOut` as
-  stored state ([Canonical Params](#canonical-params)); a new render mode also
-  updates the kind-mapping table in `docs/specs/glossary.md`.
-- Never add re-parenting or reordering that moves a browser Surface's DOM
-  ([Canonical Params](#canonical-params)).
-- A new agent-browser subcommand must be added to
-  `AGENT_BROWSER_ALLOWED_SUBCOMMANDS` (`lib/src/lib/platform/types.ts`); the
-  host-side allowlist is the security boundary, not the CLI.
-- External-binary spawns go through `spawnAndCapture` (`dor-lib-common`), never
-  raw `child_process` — see `docs/specs/dor-cli.md` → Spawning External Binaries.
-- A new kill/swap/teardown path runs `closeAgentBrowserSession` **and**
-  `disposeAgentBrowserSurfaceController`, and respects the closed-session mark
-  ([Placement And Lifetime](#placement-and-lifetime)).
-- Any new proxy header rule belongs in the rewrite table above *and* in
-  `STRIP_RESPONSE_HEADERS`; the two gates (`Host`, conditional `Origin`) are the
-  boundary, so never relax one without `SECURITY.md` → "Loopback Listeners".
-
 ## Future
 
 - Stable agent-browser profile/state persistence so pop-out preserves logins,

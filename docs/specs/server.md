@@ -677,16 +677,10 @@ its one self-authored response is the plaintext missing-build stub at `GET /`.
 
 ## Testing
 
-The security and relay layers are covered without a browser: `pnpm --filter
-server test` drives setup → pairing → connect end to end through the real server
-— `app.request()` for HTTP routes, real WebSockets against an ephemeral-port
-server for the relay — using `SimAuthenticator` (from `server-lib-common`) plus
-the `FakeHost` harness in `server/test/harness/fake-host.mjs`. `bind-host` and
-`runtime-file` instead spawn the real entrypoint, since what they assert is a
-property of the process rather than of the app. Revoked-record
-denial is covered at the unit level in `server-lib-common`'s own tests, not
-through the relay. Browser-dependent layers — the Host module and the Pocket
-terminal view — are dogfooded rather than automated.
+`pnpm --filter server test` drives setup → pairing → connect through real HTTP
+and WebSocket boundaries with `SimAuthenticator` and `FakeHost`; process-level
+tests spawn the real entrypoint. `server-lib-common` pins revoked-record denial.
+Browser-dependent Host and Pocket UI remain dogfood coverage.
 
 ## Running it
 

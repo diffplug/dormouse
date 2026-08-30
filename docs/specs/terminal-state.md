@@ -218,15 +218,3 @@ Callers that show one Session's label use `deriveSurfaceLabel()` — `deriveHead
 - `prompt` and `editing` collapse into a single `idle` bucket: the distinction between "at the prompt" and "typing a command" is not load-bearing for grouping. `finished` stays distinct so a recently-completed pane can be filtered separately even though its header label carries the same `<idle>` prefix.
 
 Source of truth, both in `lib/src/lib/terminal-state.ts`: `groupTerminalPanes()` defines grouping modes (`TerminalGroupingMode`) and per-mode key derivation (directory uses `cwdAtStart ?? cwd`; command uses the running command's `displayCommand`, else the idle label); `statusBucket()` projects the 5 `ShellActivity.kind` values onto 4 buckets.
-
-## Files
-
-| File | Role |
-|------|------|
-| `lib/src/lib/terminal-state.ts` | Pure semantic model: types, reducer, CWD precedence, header derivation, grouping, `surfaceRunsCommand` (the `dor ensure` idempotency predicate — `docs/specs/dor-cli.md`) |
-| `lib/src/lib/terminal-state-store.ts` | React-facing store; PTY-id → pane-id resolution; keystroke fallback recording (`recordTerminalUserInput`) and returned-prompt detection |
-| `lib/src/lib/terminal-command-input.ts` | Submit detection: Enter vs. a newline inside a bracketed paste, with the in-paste flag surviving chunk splits |
-| `lib/src/lib/terminal-buffer-read.ts` | Reads the cursor's rendered logical line from the xterm buffer, bounded at the cursor column |
-| `lib/src/lib/terminal-prompt-shape.ts` | Prompt shape derivation and command extraction for the keystroke fallback |
-| `lib/src/lib/terminal-controls.ts` | `stripTerminalControls` — shared presentation-control stripping for consumers that read raw output as content |
-| `lib/src/lib/terminal-protocol.ts` | Semantic OSC parsing that emits `TerminalSemanticEvent` (parsing location rules in `docs/specs/terminal-escapes.md`) |

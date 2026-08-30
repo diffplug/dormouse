@@ -438,67 +438,6 @@ A store commit that empties the tree (last pane killed or minimized) triggers th
 5. **Door keeps selection through the auto-spawn refill**: minimizing the last pane selects the new door, then the refill fills the emptied Wall without stealing selection (see [Auto-spawn refill](#auto-spawn-refill)). Explicit user selection of a pane — a click, a drag, or an embed focusing itself — still moves selection off a door.
 6. **Focus-neutral surface creation (`dor ensure` / `dor iframe` / `dor ab`)**: unlike `dor split`, these open in the background without moving focus off the caller (`docs/specs/dor-cli.md`, `docs/specs/dor-browser.md`). Under Lath this is inherent — an add never re-parents the caller's subtree or steals activation, and the create simply does not call `selectPane` (`settleAddSelection` returns false for a focus-neutral, non-selection-replacing add). The one exception: `dor iframe` / `dor ab` replacing the pane the user is *currently selected on* moves selection to the replacement (else it would dangle on the removed leaf); replacing any other pane, or a door selection, is left untouched. A throwaway that never reports OSC 633 integration is torn down with `killPaneImmediately`, whose live selection check leaves the caller's selection intact (a `--minimize` throwaway is already a door, and `killPaneImmediately` disposes it directly).
 
-## Files
-
-| File | Role |
-|------|------|
-| `lib/src/components/Wall.tsx` | Orchestrator: mode/selection state, session actions, providers |
-| `lib/src/components/wall/wall-types.ts` / `wall-context.tsx` | Shared Wall types and React contexts |
-| `lib/src/components/wall/LathHost.tsx` | Tiling-engine HTML adapter: leaf divs, sashes, drag, animator frames |
-| `lib/src/components/wall/AlertSpeechIndicator.tsx` | Pointer-transparent whole-Pane `SPEAKING` / `SPOKEN` overlay |
-| `lib/src/components/wall/TerminalPanel.tsx` | Pane body wrapper; registers the pane element (`usePaneChrome`) |
-| `lib/src/components/wall/TerminalPaneHeader.tsx` | Pane header: rename, indicators, controls, right-click menu |
-| `lib/src/components/wall/InlineEditInput.tsx` | Inline title/URL editor: draft-owning input, selected once on mount |
-| `lib/src/components/wall/IllegalRenameWarning.tsx` | Auto-dismissing popover for a rejected rename |
-| `lib/src/components/wall/use-dismiss-overlay.ts` | Shared pane-header popover dismissal contract |
-| `lib/src/components/KillConfirm.tsx` | Kill-confirm modal, random confirm character, shake/exit timings |
-| `lib/src/components/wall/PaneHeaderContextMenu.tsx` | Header right-click menu: `surface:N` handle plus bound TCP ports |
-| `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` | Focus ring: travel tween, rAF loop, re-measures, smear velocity |
-| `lib/src/components/wall/SelectionRing.tsx` | SVG shell: ring path plus the eight-piece smear group |
-| `lib/src/lib/ring-geometry.ts` | Pure ring outline + smear-piece geometry, piece/corner taxonomy |
-| `lib/src/components/wall/MouseOverrideBanner.tsx` | Temporary mouse-override banner from the header icon |
-| `lib/src/components/wall/use-wall-keyboard.ts` | The one capture-phase `keydown` listener and its delegation order |
-| `lib/src/components/wall/keyboard/` | The dispatch modules plus the `WallKeyboardCtx` / `WallNav` seams |
-| `lib/src/lib/vscode-keybindings.ts` | VS Code workbench chord mirror allowlist |
-| `lib/src/components/wall/use-session-persistence.ts` | Debounced save, flush triggers, file-drop paste routing |
-| `lib/src/components/wall/use-dor-control.ts` | `useDorControl`: the `surface.*` control-request handler (`docs/specs/dor-cli.md`) |
-| `lib/src/components/wall/use-window-focused.ts` | Window focus tracking for header and ring dimming |
-| `lib/src/components/Baseboard.tsx` | Bottom strip: doors, overflow arrows, hints, right cluster |
-| `lib/src/components/Door.tsx` | One door — mouse-hole button with alert/TODO indicators |
-| `lib/src/components/TerminalPane.tsx` | Thin xterm.js mount point for persistent session elements |
-| `lib/src/lib/terminal-registry.ts` | Public facade preserving registry imports |
-| `lib/src/lib/terminal-store.ts` | Registry maps, entry shape, pending shell opts, overlay dims |
-| `lib/src/lib/terminal-lifecycle.ts` | Session lifecycle: create, resume, restore, mount, dispose, refit |
-| `lib/src/lib/terminal-state.ts` | Pure semantic model: cwd, command reducer, header derivation |
-| `lib/src/lib/terminal-state-store.ts` | Semantic state store and PTY-id → pane-id resolution |
-| `lib/src/lib/session-activity-store.ts` | Activity snapshot store, primed alert state, platform delegates |
-| `lib/src/lib/terminal-theme.ts` | xterm theme extraction, host painting, theme MutationObserver |
-| `lib/src/lib/terminal-report-filter.ts` | Synthetic/replay report detection and replay writer |
-| `lib/src/lib/terminal-mouse-router.ts` | Mouse selection routing, smart-token hinting, Alt shape toggle |
-| `lib/src/components/wall/resolve-pane-element.ts` | Climbs a pane element to its enclosing `[data-lath-leaf]` |
-| `lib/src/lib/quiesce-detector.ts` | Per-session output/silence detector: busy/quiet/settled |
-| `lib/src/lib/alert-manager.ts` | Detectors, WATCHING rules, attention tracking, per-session TODO |
-| `lib/src/lib/session-types.ts` | Persisted-session type definitions (`docs/specs/transport.md`) |
-| `lib/src/lib/session-save.ts` | Serialization: layout, cwd, alert state — never scrollback |
-| `lib/src/lib/session-restore.ts` | Deserialization: `restoreTerminal()` per saved pane |
-| `lib/src/lib/reconnect.ts` | Priority-based recovery: live PTYs, saved session, empty |
-| `lib/src/lib/workspace-store.ts` / `workspace-union.ts` | Dormant Workspace model + verbs; pure union projection |
-| `lib/src/lib/window-persistence.ts` | `PersistedSession` ⇄ `PersistedWindow` behind the workspaces flag |
-| `lib/src/lib/resume-patterns.ts` | Detects an agent resume invocation in a live buffer |
-| `lib/src/index.css` | Lath host styling — `.lath-host` / `.lath-leaf` / `.lath-sash` |
-| `lib/src/theme.css` | Two-layer VSCode theme tokens and Tailwind v4 `@theme` |
-
-## Maintainer checklist
-
-When changing layout behavior:
-
-- Changing a command-mode binding or the mode-switch gesture: describe the behavior here **and** update the table in `docs/specs/shortcuts.md` in the same edit — that table is the only enumeration of the bindings.
-- Pane-header changes: layout owns placement and sizing only — the **Defers** line above names each behavior's owner.
-- Persisted-shape changes (`PersistedPane` / `PersistedDoor` / layout blobs) belong to `docs/specs/transport.md` — update it there.
-- **Never use raw color classes** in new pane chrome; tokens come from `lib/src/components/design.tsx` (AGENTS.md → Design).
-- Pane spawn/kill/tween motion is owned by the Lath animator (`docs/specs/tiling-engine.md` → "Animation"); layout.md owns only the interaction behavior around it.
-- Anything workspace-strip or switching related stays under `## Future` (workspaces-rollout) until built.
-
 ## Future
 
 **Scope: workspaces-rollout** — the remaining stages of the multi-Workspace feature. The model, container verbs, Window persistence (behind `dormouse.flags.workspaces`), and union projection are implemented but unwired — see [Workspaces](#workspaces) above; persisted containers in `docs/specs/transport.md`, union projection in `docs/specs/alert.md`. This ledger is the single home for what remains; other specs link here rather than restating it.

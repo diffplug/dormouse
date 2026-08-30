@@ -639,28 +639,3 @@ root `package.json` for the `dev:standalone*` orchestration.
 - `pnpm dev:standalone:ab` runs the sidecar + webview in a normal browser via
   the browser-dev harness instead of the Tauri WebView
   (`docs/specs/transport.md`, Standalone browser-dev harness).
-
-## Files
-
-| File | Role |
-|------|------|
-| `standalone/src-tauri/src/lib.rs` | Rust backend: sidecar spawn/supervision, invoke commands, event forwarding, per-window session file store (`save_session` / `load_session`), quit interception (`QuitState`, `request_quit`, `quit_ack` / `quit_progress` / `quit_cancel` / `quit_proceed`, §Quit flow), file drop, logging, dock icon, exit teardown |
-| `standalone/src-tauri/src/clipboard_win.rs` | Native Win32 clipboard reads on Windows (owned by `docs/specs/mouse-and-clipboard.md`) |
-| `standalone/src-tauri/src/pe_subsystem.rs` | Shared PE-subsystem byte-flip (offset lookup + read/set) used by `build.rs` (GUI-patch the bundled sidecar node) and `lib.rs` (derive the console-subsystem `dor` node) — §Windows node subsystem |
-| `standalone/scripts/tauri.mjs` | Tauri CLI wrapper (`pnpm tauri` runs `stage` first, so the relay allowlist is already baked into the sidecar bundle, not into the webview CSP) |
-| `standalone/src-tauri/tauri.conf.json` | Window config, dev/build commands, sidecar resources glob, updater config |
-| `standalone/src/main.tsx` | Webview bootstrap (boot sequence above); initializes the quit orchestrator and installs the confirmation gate on the Tauri branch, mounts `<QuitConfirmModalHost>` via Wall's `dialogHost` prop |
-| `standalone/src/quit.ts` | Quit orchestrator: listens for `dormouse://quit-requested`, runs the graceful teardown, calls `quit_ack` / `quit_progress` / `quit_proceed` / `quit_cancel` (§Quit flow) |
-| `standalone/src/quit-confirm-store.ts`, `QuitConfirmModal.tsx` | Quit-confirmation dialog: the running-work gate + module store, and the modal mounted via Wall's `dialogHost` prop (§Quit flow, "Confirmation dialog") |
-| `standalone/src/AppBar.tsx` | Titlebar: New workspace placeholder, window controls |
-| `standalone/src/tauri-adapter.ts` | `TauriAdapter`: PlatformAdapter over Tauri invoke/events, session persistence via the Rust store, control-request dispatch |
-| `standalone/src/tauri-session-store.ts` | `TauriSessionStore`: Rust-backed `SessionKeyValueStore` — boot-seeded write-through cache over `load_session` / `save_session` (§Persistence) |
-| `standalone/src/updater.ts`, `UpdateBanner.tsx`, `UpdateDebugModal.tsx` | Auto-update (owned by `docs/specs/auto-update.md`) |
-| `standalone/src/browser-sidecar-host.ts`, `browser-sidecar-adapter.ts` | Browser-dev harness (owned by `docs/specs/transport.md`) |
-| `standalone/sidecar/main.js` | Sidecar entry: stdio JSON-lines dispatch, shutdown ordering, parent-PID watchdog |
-| `standalone/sidecar/pty-core.js` | Shared PTY manager (owned by `docs/specs/transport.md`) |
-| `standalone/sidecar/dor-control-server.js` | dor CLI control socket (owned by `docs/specs/dor-cli.md`) |
-| `standalone/sidecar/clipboard-ops.js` | OS clipboard tiers (owned by `docs/specs/mouse-and-clipboard.md`) |
-| `lib/src/host/remote/sidecar-entry.ts` | Sidecar binding of the remote Host service, bundled to `sidecar/remote-host.cjs` (§Remote Host service; protocol owned by `docs/specs/remote-api.md`) |
-| `standalone/scripts/build-sidecar-proxy.mjs` | Bundles `lib/src/host/` into the sidecar `.cjs` copies |
-| `standalone/scripts/dev-agent-browser.mjs` | `dev:standalone:ab` entry (owned by `docs/specs/transport.md`) |
