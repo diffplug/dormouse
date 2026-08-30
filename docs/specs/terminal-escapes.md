@@ -108,7 +108,7 @@ Unknown CSI sequences pass through to xterm.js so it can handle standard termina
 
 ## iTerm2 identity
 
-Dormouse reports an iTerm2-compatible identity so that tools (shells, build systems, agent clients) emit the iTerm2-style escape codes this spec set supports. One compatibility version is used across env and device responses: `ITERM2_COMPAT_VERSION`, currently `3.5.0`, defined twice — in `standalone/sidecar/pty-core.js` and `lib/src/lib/terminal-protocol.ts` — with a mirror comment on each.
+Dormouse reports an iTerm2-compatible identity so that tools (shells, build systems, agent clients) emit the iTerm2-style escape codes this spec set supports. One compatibility version is used across env and device responses: `ITERM2_COMPAT_VERSION`, currently `3.5.0`, defined twice — in `standalone/sidecar/pty-core.js` and `lib/src/lib/terminal-protocol.ts` — pinned together by `lib/src/lib/mirrored-constants.test.ts`.
 
 Environment for spawned PTYs:
 

@@ -90,7 +90,8 @@ and `agent_browser_screenshot` receives a temp-file *path* from the sidecar
 and reads the bytes in Rust so images never ride the JSON-lines pipe shared
 with PTY traffic (`docs/specs/dor-browser.md`). Request/response commands block on the
 sidecar's reply with a timeout; `OPEN_PORT_TIMEOUT_MS` in `lib.rs` mirrors the
-constant in `lib/src/lib/platform/types.ts` and the two must stay in sync.
+constant in `lib/src/lib/platform/types.ts` (and `standalone/sidecar/pty-core.js`);
+`lib/src/lib/mirrored-constants.test.ts` pins the copies together.
 
 **Blocking commands must be `#[tauri::command(async)]`.** `request_from_sidecar`
 and `request_from_sidecar_timeout` block the calling thread on a `recv_timeout`,
