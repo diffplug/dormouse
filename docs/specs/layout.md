@@ -191,7 +191,7 @@ Untouched sessions skip this confirmation. A newly spawned shell starts `untouch
 A fixed-positioned element rendered on top of the Lath host. Covers the active element's area inflated by `SELECTION_RING_INFLATE_PX` (4px) for panes; doors are not inflated. The inflate is derived in `lib/src/components/design.tsx` so both ring strokes center on the gutter's midline: the 1px passthrough border spans [3px, 4px] from the pane edge — dead center of the 7px gutter, on whole pixels because the gutter is odd.
 
 - Exactly one pane or door is **active** at a time. One SVG renderer (`SelectionRing`, `variant: 'ants' | 'solid'`) draws both modes.
-- **Passthrough:** `variant='solid'` — a 1px solid SVG stroke that replaced the old `border: 1px solid ${color}` CSS border, placed pixel-identically (centerline `strokeWidth/2` inside the div edge for both panes and doors), no glow.
+- **Passthrough:** `variant='solid'` — a 1px solid SVG stroke, centerline `strokeWidth/2` inside the div edge for both panes and doors, no glow (rationale).
 - **Command:** `variant='ants'` — animated marching-ants border (`cfg.marchingAnts`: 10px segment, 60% dash / 40% gap, 0.4s cycle, 2px stroke). Unchanged while the ring travels; the motion smear is a separate layer behind it (see [Ring travel](#ring-travel)). The animation pauses while the window is unfocused, and the whole ring drops to `saturate(0.3)` then.
 - Border radius follows DESIGN.md's Concentric-Corners Rule: the pane ring's rect is inflated by `SELECTION_RING_INFLATE_PX`, so its radius is the pane radius plus that offset (`PANE_SELECTION_RING_RADIUS_PX`, with the marching-ants path inset so its stroke centerline sits on the same gutter midline, concentric with the pane corner); doors sit at zero offset and keep `0.5rem 0.5rem 0 0`.
 - Color is the resolved `--color-focus-ring`, re-read whenever `document.body`'s class/style changes because the dynamic palette publishes it there (`useFocusRingColor`).
@@ -214,13 +214,13 @@ Per-frame writes are **imperative** — the same React-owns-structure / frame-ow
 
 While travelling, each ring edge trails a soft band sized by its own motion. A line smears only by moving *across* itself — sliding along its own length leaves it unchanged — so **a horizontal edge is driven by its vertical speed and a vertical edge by its horizontal speed, and all four edges are independent.** Each speed normalizes against `cfg.focusRing.smearFullSpeed` into a single `t`; width ramps from `strokeWidth` to `smearMaxPx` and alpha from 0 to `smearPeakAlpha`. Both start at zero, so a stationary edge contributes nothing rather than laying a band under the crisp ring. A settled or reduced-motion ring has null speeds and the smear layer is `display: none`, keeping snapshots deterministic. Source of truth: `lib/src/lib/ring-geometry.ts`.
 
-- **Velocity is analytic, and the smear peaks on the opening frame.** `sampleRingVelocity` differentiates the tween: an edge at `from + (to - from) * E(t)` moves at `|to - from| * E'(t) / durationMs`, with `E'` from `LATH_EASING.slope`. The house ease-out peaks at `E'(0) = 4.545x` its average speed, so that is where the blur belongs. **Do not go back to finite-differencing rendered positions**: there is no previous sample on frame one, so the smear was hidden outright for the frame covering ~31% of a 220ms travel; an EMA over it lagged ~1.7 frames; and a backward difference under-reports any decelerating curve, landing the rendered peak mid-travel at ~46% of the true value. Analytic velocity is also jitter-free by construction, so it needs no smoothing.
+- **Velocity is analytic, and the smear peaks on the opening frame.** `sampleRingVelocity` differentiates the tween (`E'` from `LATH_EASING.slope`), so the blur peaks exactly where the ease-out is fastest — frame one — and is jitter-free by construction, needing no smoothing. **Never finite-difference rendered positions**: frame one has no previous sample, and a backward difference under-reports any decelerating curve (rationale).
 - **Extent and intensity are deliberately independent.** Alpha is *not* divided by the widening factor: strict ink conservation would tie peak alpha to extent and make the effect impossible to strengthen by widening — a wider band would just spread the same ink thinner. `smearFullSpeed` sets the shape over a travel: low values pin nearly every move at full smear, high values make blur track speed so short hops smear less than long jumps.
-- **Per-edge, not per-axis.** Collapsing the four edges to one horizontal and one vertical speed (e.g. from the ring *centre's* velocity) is wrong for ordinary split layouts: moving between panes flush at the top but differing in height, the top edge translates purely sideways and must stay crisp while the bottom edge moves diagonally and smears hard. A centre velocity averages those into the same wrong answer for both.
+- **Per-edge, not per-axis.** Never collapse the four edge speeds to one horizontal and one vertical (e.g. from the ring *centre's* velocity): in ordinary split layouts, edges of the same ring move differently at the same moment, and an averaged speed is wrong for every one of them (rationale).
 - **Two layers, because the geometry is incompatible.** The ring is one closed path so the dash phase runs unbroken around the perimeter, and SVG `stroke-width` is a single scalar, so that path cannot carry four widths. The smear is a sibling `<g data-ring="smear">` of eight pieces drawn underneath; the ring (`<path data-ring="outline">`) is never transformed, re-dashed, or re-alpha'd. Keeping all dash bookkeeping on the untouched path is the point of the split.
 - **Eight pieces: four edges plus four corners.** Straight edges carry their width in a plain `stroke-width`. A corner has to reach two widths at once, so each corner arc is stroked at unit width and given `transform: scale(a, b)` — `a` the vertical neighbour's width, `b` the horizontal neighbour's — under which a unit stroke renders `b` thick where its tangent is horizontal and `a` thick where vertical, tapering between with no seam at either join; `cornerPath` pre-divides the arc by the same `(a, b)` so the on-screen curve is unchanged. Opacity cannot vary along a stroke, so a corner takes the mean of its two edges'. Every piece is cut from ONE shared point set (`ringPoints`), which is also what `roundedRectPath` walks, so the smear provably tiles the ring; `ring-geometry.test.ts` pins that. The overlay finds each piece by `data-piece`, never by index.
-- **Dash length is computed, not measured.** `ringPerimeter` returns the outline's exact length in closed form — straight runs plus `1.6232252401402307 × r` per corner, the arc length of the *quadratic* quarter-turn the path actually draws. Do not substitute `π/2` (the quarter-*circle* value); it is 3% short and would silently shift every dash. `SVGGeometryElement.getTotalLength()` is not to be reinstated: it forces a synchronous style+layout flush on every frame at a cost scaling with the whole document, and it is itself only an approximation (browsers flatten curves to measure) — verified in Safari to agree with the closed form to 6e-4px on a 3253px ring. Dropping it also retired the jsdom `getTotalLength` stubs, so tests assert real dash geometry.
-- **The smear replaced an SVG `feGaussianBlur`. Do not go back**: WebKit CPU-rasterizes SVG filters every frame, measured in Safari 26.5 at 25.6ms/frame with 31 of 98 frames over 25ms during travel, versus a locked 16.7ms with zero dropped frames. Stroke widths, scale transforms and opacities are GPU-composited and cost nothing. CSS `filter: blur()` is also free, so the cost is SVG filters specifically, not blur.
+- **Dash length is computed, not measured.** `ringPerimeter` returns the outline's exact length in closed form — straight runs plus `1.6232252401402307 × r` per corner, the arc length of the *quadratic* quarter-turn the path actually draws. Do not substitute `π/2` (the quarter-*circle* value — 3% short, silently shifting every dash), and do not reinstate `SVGGeometryElement.getTotalLength()`, which forces a synchronous style+layout flush on every frame (rationale).
+- **The smear replaced an SVG `feGaussianBlur`. Do not go back**: WebKit CPU-rasterizes SVG filters every frame, and the cost is SVG filters specifically, not blur — stroke widths, scale transforms, opacities, and CSS `filter: blur()` are all GPU-composited and free (rationale).
 
 ### Position tracking
 
@@ -272,7 +272,7 @@ Triggered by pressing `,` in command mode or clicking the session name in the pa
 
 The name `<span>` is replaced by an `InlineEditInput` (shared with the browser URL editor in `docs/specs/dor-browser.md`): same font (`font-mono font-medium`), `bg-transparent`, no border, seeded from the label with the failure glyph stripped. `Enter` confirms, `Escape` cancels, `blur` confirms — whichever lands first settles the edit, so the blur that follows an Enter/Escape unmount cannot submit a second time. It stops propagation on `mousedown`/`click`/`keydown` so the panel click and the header drag never fire.
 
-The field is **controlled by its own draft state**, seeded at mount and untouched by later prop changes, and the `select()` ref callback has a stable identity so it runs exactly once. Pane headers re-render on every activity, terminal-state, and palette change, and an editor that re-derived its value (or re-ran `select()`) on those renders would fight the user mid-word — one re-render between two keystrokes and the second keystroke replaces everything typed so far. Mounting is the reset: the editor exists only while the pane is being renamed, so each rename starts from the current label.
+The field is **controlled by its own draft state**, seeded at mount and untouched by later prop changes, and the `select()` ref callback has a stable identity so it runs exactly once — pane headers re-render constantly, and an editor that re-derived its value or re-ran `select()` on those renders would fight the user mid-word (rationale). Mounting is the reset: the editor exists only while the pane is being renamed, so each rename starts from the current label.
 
 Clipboard chords inside the field are the wall's job on hosts whose webview has no native Edit menu — see `docs/specs/mouse-and-clipboard.md` §8.9.
 
@@ -332,14 +332,9 @@ context. A GL context is a scarce per-page resource and cold restore builds a se
 for every persisted pane *including minimized doors*, which never paint; claiming at
 create would spend the budget on invisible surfaces and, since eviction is
 oldest-first and one-way, permanently demote the earliest-restored panes. xterm's
-built-in DOM renderer is the fallback, never the default.
-
-The DOM renderer emits one `<span>` per style run per row, so a TUI that paints
-every cell its own truecolor collapses to one span-with-inline-style *per cell*,
-rebuilt every frame. On a 99×25 pane that is ~1150 elements of style recalc plus
-layout per frame: measured in Safari 26.5, a single such pane held the whole page
-at ~110ms/frame (~9fps) while the rest of the app was idle. The same pane on the
-WebGL renderer holds a locked 60fps (16.6ms, zero frames over 25ms).
+built-in DOM renderer is the fallback, never the default — its per-cell span
+rebuild makes a truecolor-dense TUI slower than WebGL by an order of magnitude
+(rationale).
 
 Fallback to the DOM renderer is automatic and must stay that way, because two
 failure modes are expected in the field:
@@ -348,12 +343,11 @@ failure modes are expected in the field:
   disabled). Construction throws; `tryEnableWebglRenderer` swallows it. A
   `typeof WebGL2RenderingContext === 'undefined'` pre-check skips the doomed
   request entirely so unit tests don't log a `getContext` failure per terminal.
-- **Context-budget eviction.** Browsers cap live WebGL contexts per page —
-  measured at **16 in Safari 26.5**, evicted oldest-first. One context per
-  terminal means a Window past ~16 terminals silently drops its *oldest* panes
-  back to the DOM renderer. The `onContextLoss` handler disposes the addon,
-  which is xterm's documented signal to resume DOM rendering; verified live by
-  exhausting the budget and watching the panes keep painting.
+- **Context-budget eviction.** Browsers cap live WebGL contexts per page — on
+  the order of **16**, evicted oldest-first (rationale). One context per
+  terminal means a Window past the cap silently drops its *oldest* panes back
+  to the DOM renderer. The `onContextLoss` handler disposes the addon, which
+  is xterm's documented signal to resume DOM rendering.
 
 Degradation is therefore never worse than the pre-WebGL behavior, but it is also
 one-way: a pane that loses its context stays on the DOM renderer even after other
@@ -364,11 +358,6 @@ is inspectable rather than silent — including after a context loss demotes a p
 `cfg.terminal.webglRenderer` disables the whole path; `lib/.storybook/preview.ts`
 pins it off under Chromatic, because a canvas snapshots as an opaque bitmap that
 varies with the runner's GPU while styled spans diff deterministically.
-
-Verified in Safari 26.5 (the numbers above) and structurally in Chrome. **Not yet
-verified inside Tauri's WKWebView**: same engine as Safari and Tauri does not
-disable the GPU, so it is expected to work — read `data-renderer` on a pane's host
-element to confirm.
 
 Source of truth: `tryEnableWebglRenderer` in `lib/src/lib/terminal-lifecycle.ts`.
 Not to be confused with the SDF fork in `docs/specs/webgl-text.md`, which is a

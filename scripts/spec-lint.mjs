@@ -17,6 +17,20 @@
  *      Conservative: only tokens that start with a known top-level directory
  *      and contain no globs/placeholders are checked. Build outputs that only
  *      exist after a build are skipped via SKIP_PATH_PREFIXES.
+ *   5. Every spec that uses glossary vocabulary (Session / Pane / Door /
+ *      baseboard / passthrough) leads with a `> See docs/specs/glossary.md`
+ *      blockquote. Scoped to docs/specs (SELF_HOST.md is a deployment spec;
+ *      its lone incidental "baseboard" doesn't warrant the callout).
+ *   6. A named scope (`**Scope: X**` leading a line) is defined exactly once
+ *      across the corpus, and every bold reference — `(**Scope: X**)` or the
+ *      bare `the **x** scope` form — names a defined scope.
+ *   7. Every `Reserved:` paragraph names `## Future` or a defined scope — the
+ *      Reservations convention in AGENTS.md.
+ *   8. Every `<foo>.rationale.md` pairs with an existing `<foo>.md`, keys its
+ *      entries by that spec's headings (each rationale `## X` must exist as a
+ *      heading in the spec), and has no `## Future` — rationale files are
+ *      informative, the fold belongs to the spec. Rationale files are not
+ *      specs: they skip checks 1, 2, and 5 but ride 3 and 4.
  */
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname, normalize } from 'node:path';
@@ -39,14 +53,16 @@ const SKIP_PATH_PREFIXES = [
   'canopy/node_modules', // created by pnpm install; lint:specs must pass on a fresh checkout (webgl-text.md)
 ];
 
-const specFiles = readdirSync(join(ROOT, SPECS_DIR))
+const specDirFiles = readdirSync(join(ROOT, SPECS_DIR))
   .filter((f) => f.endsWith('.md'))
   // Keep repo-relative paths in POSIX form on every platform — they are
   // compared against forward-slash paths written in the markdown.
   .map((f) => `${SPECS_DIR}/${f}`);
+const rationaleFiles = specDirFiles.filter((f) => f.endsWith('.rationale.md'));
+const specFiles = specDirFiles.filter((f) => !f.endsWith('.rationale.md'));
 // SELF_HOST.md is a root-level spec (the self-host deployment: runbook +
 // installer contract); it rides checks 2-4 alongside the docs/specs files.
-const allFiles = ['AGENTS.md', 'SELF_HOST.md', ...specFiles];
+const allFiles = ['AGENTS.md', 'SELF_HOST.md', ...specFiles, ...rationaleFiles];
 const foldCheckedFiles = ['SELF_HOST.md', ...specFiles];
 const problems = [];
 
@@ -72,6 +88,15 @@ function headings(rel) {
     if (m) out.push({ level: m[1].length, title: m[2].trim() });
   }
   return out;
+}
+
+/** Lines of a file with fenced code blocks blanked, for prose-only checks. */
+function proseLines(rel) {
+  let inFence = false;
+  return read(rel).split('\n').map((line) => {
+    if (/^\s*```/.test(line)) { inFence = !inFence; return ''; }
+    return inFence ? '' : line;
+  });
 }
 
 const anchorCache = new Map();
@@ -147,6 +172,99 @@ for (const rel of allFiles) {
       }
     }
   });
+}
+
+// --- Check 5: glossary callout for specs using glossary vocabulary -----------
+// Conservative match: the capitalized glossary senses plus the two words that
+// are dormouse-specific in any case. Lowercase "session"/"pane" prose and
+// compounds like `PersistedPane` do not trigger.
+const GLOSSARY_VOCAB = /\b(?:Pane|Door|Session|[Bb]aseboard|passthrough)\b/;
+for (const spec of specFiles) {
+  if (spec.endsWith('/glossary.md')) continue;
+  const lines = proseLines(spec);
+  const firstH2 = lines.findIndex((l) => /^##\s/.test(l));
+  const head = lines.slice(0, firstH2 === -1 ? lines.length : firstH2);
+  if (head.some((l) => l.startsWith('>') && l.includes('glossary.md'))) continue;
+  const hit = lines.findIndex((l) => GLOSSARY_VOCAB.test(l));
+  if (hit !== -1) {
+    problems.push(
+      `${spec}:${hit + 1}: uses glossary vocabulary but has no leading ` +
+      '"> See docs/specs/glossary.md ..." blockquote',
+    );
+  }
+}
+
+// --- Check 6: named scopes defined once; bold references resolve --------------
+const SCOPE_RE = /\*\*Scope: ([a-z0-9-]+)\*\*/g;
+// Cross-spec references also use the bare form ("the **dor-tools** scope"),
+// which AGENTS.md sanctions with "other specs link to it by name".
+const SCOPE_REF_RE = /\*\*([a-z0-9-]+)\*\* scope/g;
+const scopeDefs = new Map(); // name -> "file:line" of the definition
+const scopeRefs = [];
+for (const rel of allFiles) {
+  proseLines(rel).forEach((line, i) => {
+    for (const m of line.matchAll(SCOPE_RE)) {
+      if (m.index === 0) {
+        // A definition leads its line; references are parenthesized mid-line.
+        if (scopeDefs.has(m[1])) {
+          problems.push(
+            `${rel}:${i + 1}: scope "${m[1]}" already defined at ` +
+            `${scopeDefs.get(m[1])} — a scope is defined in exactly one spec`,
+          );
+        } else {
+          scopeDefs.set(m[1], `${rel}:${i + 1}`);
+        }
+      } else {
+        scopeRefs.push({ rel, line: i + 1, name: m[1] });
+      }
+    }
+    for (const m of line.matchAll(SCOPE_REF_RE)) {
+      scopeRefs.push({ rel, line: i + 1, name: m[1] });
+    }
+  });
+}
+for (const ref of scopeRefs) {
+  if (!scopeDefs.has(ref.name)) {
+    problems.push(`${ref.rel}:${ref.line}: reference to undefined scope "${ref.name}"`);
+  }
+}
+
+// --- Check 7: Reserved: names ## Future or a defined scope --------------------
+for (const rel of allFiles) {
+  const lines = proseLines(rel);
+  lines.forEach((line, i) => {
+    if (!/\bReserved:/.test(line)) return;
+    // The paragraph: this line plus continuations, up to a blank line, a new
+    // top-level bullet, or a heading.
+    let para = line;
+    for (let j = i + 1; j < lines.length; j++) {
+      if (lines[j].trim() === '' || /^[-*]\s/.test(lines[j]) || /^#{1,6}\s/.test(lines[j])) break;
+      para += '\n' + lines[j];
+    }
+    const named = /Future/.test(para) || [...scopeDefs.keys()].some((n) => para.includes(n));
+    if (!named) {
+      problems.push(
+        `${rel}:${i + 1}: "Reserved:" paragraph names neither ## Future nor a defined scope`,
+      );
+    }
+  });
+}
+
+// --- Check 8: rationale files pair with a spec and key by its headings --------
+for (const rat of rationaleFiles) {
+  const spec = rat.replace(/\.rationale\.md$/, '.md');
+  if (!existsSync(join(ROOT, spec))) {
+    problems.push(`${rat}: no paired spec -> ${spec}`);
+    continue;
+  }
+  const specAnchors = anchorsOf(spec);
+  for (const h of headings(rat).filter((h) => h.level === 2)) {
+    if (/^(\d+\.\s*)?Future$/i.test(h.title)) {
+      problems.push(`${rat}: rationale files are informative — the fold ("## Future") belongs to ${spec}`);
+    } else if (!specAnchors.has(slug(h.title))) {
+      problems.push(`${rat}: "## ${h.title}" is not a heading in ${spec}`);
+    }
+  }
 }
 
 // -----------------------------------------------------------------------------

@@ -6,6 +6,8 @@ const path = require('node:path');
 
 // Handshake proof domains. Separating the two directions keeps a proof the
 // server emitted from being replayable as a client's answer and vice versa.
+// Mirrored in dor/src/control-client.ts — pinned by
+// lib/src/lib/mirrored-constants.test.ts.
 const CLIENT_PROOF_DOMAIN = 'dor-control/client';
 const SERVER_PROOF_DOMAIN = 'dor-control/server';
 

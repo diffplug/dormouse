@@ -18,7 +18,7 @@ Each platform adapter wraps a PTY-spawning runtime and a transport channel betwe
 
 Three optional members are plain booleans rather than methods:
 
-- `persistsSession?` — absent reads as `true`. `TauriAdapter` sets it `false` (see "The governing rule"), which makes `saveSession` skip the whole record build, not just the write — the per-pane `getCwd` round trips are the expensive part. The browser-dev adapter leaves it absent and still writes to `localStorage`, so the harness restores sessions the real app deliberately does not.
+- `persistsSession?` — absent reads as `true`. `TauriAdapter` and `BrowserSidecarAdapter` both set it `false` (see "The governing rule"), which makes `saveSession` skip the whole record build, not just the write — the per-pane `getCwd` round trips are the expensive part.
 - `hostOwnsTheme?` — absent reads as `false`; `VSCodeAdapter` sets it `true`, so the Settings dialog hides its theme picker there (`docs/specs/theme.md` → "Where the user picks a theme").
 - `hostOwnsShells?` — absent reads as `false`; `VSCodeAdapter` sets it `true`, so the Settings dialog hides its Shell row in favor of the native QuickPick (`docs/specs/vscode.md` → "Shell selection").
 
@@ -35,9 +35,9 @@ The bridge is a transport shim over the same sidecar protocol, not a second PTY 
 - **Every request carries `?t=<token>`**, a per-run 24-byte credential the harness mints and bakes into the `VITE_DORMOUSE_BROWSER_DEV_HOST` URL, compared with `timingSafeEqual` over SHA-256 digests (equal-length inputs, so a wrong guess is refused rather than throwing). It rides the query rather than an `Authorization` header because `EventSource` cannot set headers and `/events` is gated like the rest; `BrowserSidecarHost.url()` is the only place that attaches it, so no call site can forget it. Distinct from the `dor` control-API `controlToken` handed to every spawned shell — the bridge's circle is smaller.
 - **`Host` must be `127.0.0.1:<port>` or `localhost:<port>`**, against DNS rebinding — a hostile domain re-resolved to loopback arrives with its own name in `Host`, and the browser treats it as same-origin so CORS never applies.
 - **Non-GET requests must be `application/json`.** Without it the endpoints are CORS-*simple*, so a foreign page can POST `mode: 'no-cors'` and, though it cannot read the reply, the request still executes. A non-simple type forces a preflight it cannot pass. Enforced in the gate rather than the body reader, so a route that never parses a body is covered too.
-- **`access-control-allow-origin` names the Vite origin exactly, never `*`**, on every response including the SSE stream — under `*` the clipboard invokes were readable cross-origin. Both loopback spellings of that origin are accepted and echoed back: they are the same dev page, and pinning one would reject a developer who typed the other with symptoms (blank terminal, console CORS errors) that do not point at the cause.
+- **`access-control-allow-origin` names the Vite origin exactly, never `*`**, on every response including the SSE stream (rationale). Both loopback spellings of that origin are accepted and echoed back — they are the same dev page, and pinning one rejects a developer who typed the other (rationale).
 
-The gate runs before routing and before any body read, and an unauthorized caller gets the same `404 not found` as an unknown path, so the port does not identify itself. Agent workflows are unaffected: the token reaches the page through the env var the harness already sets, and `agent-browser` drives the Vite origin, never the bridge. The harness prints the token and a ready-made `curl` on startup.
+The gate runs before routing and before any body read, and an unauthorized caller gets the same `404 not found` as an unknown path, so the port does not identify itself. The harness prints the token and a ready-made `curl` on startup.
 
 The remote Host rides the same shim: `remote_host_command` is one more fire-and-forget send that writes `remoteHost:command` to the sidecar, and the sidecar's `remoteHost:*` events arrive on the SSE stream, so the harness runs a real Host against a per-run temp state directory (`docs/specs/standalone.md` → "Remote Host service").
 
@@ -96,7 +96,7 @@ Both buffers are capped at 1M chars per PTY; at the cap the oldest chunks are tr
    doors instead of visible panes.
 ```
 
-Saved pane and door titles are seeded back via `setTerminalUserTitle()`, which rejects titles starting with `<idle>` — the sentinel that prefixes the auto-generated finished-pane header. The seed callers in `terminal-lifecycle.ts` additionally skip `<unnamed>` so the default panel placeholder is not seeded as a real user pin. (Persistence cannot tell a deliberate `<unnamed>` pin from the default placeholder, so a user who explicitly pinned `<unnamed>` sees it revert to the derived header on reload.)
+Saved pane and door titles are seeded back via `setTerminalUserTitle()`, which rejects titles starting with `<idle>` — the sentinel that prefixes the auto-generated finished-pane header. The seed callers in `terminal-lifecycle.ts` additionally skip `<unnamed>` so the default panel placeholder is not seeded as a real user pin (rationale).
 
 For cold restore (no live PTYs), the webview falls back to saved session state: it spawns new PTYs in saved CWDs using the currently selected Dormouse shell and restores the saved Lath layout. No transcript is replayed ("What is persisted" below), and any pane carrying a recovery command auto-runs it. The entry module (`reconnect.ts`) uses a 500 ms timeout when waiting for the PTY list.
 
@@ -147,7 +147,7 @@ Workspace union status (`docs/specs/alert.md`) adds no new message. Standalone c
 
 Both settings messages carry renderer-supplied numbers that become host timers, so the host **must** revalidate rather than trust them: `AlertSettingsHost` runs every inbound blob through `normalizeAlertSettings`, which drops unknown keys, defaults missing ones, and clamps each delay into range. A webview cannot install a `NaN` or absurd attention window. The two directions share one adapter method — `alertPublishSettings(settings, { seed })` — because the seed/replace distinction only picks a message type; it is not a different payload.
 
-Note the per-store cost: each app-global store relayed this way spends one `PlatformAdapter` push method plus an on/off listener pair, three message types, and a host coordinator with its own subscribe/unsubscribe. Two stores (WATCHING rules, alarm settings) is worth the directness. A third should instead collapse them into one keyed channel with a host-side key→normalizer registry, rather than paying the tax again.
+**Do not add a third app-global store on this pattern.** Two (WATCHING rules, alarm settings) is worth the directness; a third collapses them into one keyed channel with a host-side key→normalizer registry instead of paying the per-store tax again (rationale).
 
 The OSC parsing/stripping rules that produce `pty:data` and `terminal:semanticEvents` are specified in `docs/specs/terminal-escapes.md`.
 
@@ -175,9 +175,9 @@ Every read goes through `readPersistedSession()` / `readPersistedWindow()`. Both
 
 *Detection.* Source of truth: `lib/src/lib/resume-patterns.ts` (`detectResumeCommand`, `normalizeResumeCommand`) over the shared `stripTerminalControls` in `lib/src/lib/terminal-controls.ts`. Because this string is executed, four rules are load-bearing:
 
-- **Only a known invocation plus an opaque id.** The command is *rebuilt* as label + captured id, never sliced out of the buffer, and the id grammar is alphanumeric/hyphen/underscore only — shell punctuation can never enter executable state. Anything trailing the id is dropped. The invocation must be followed by a word break (`claude --continuex` is not an offer to continue), but nothing stronger, because agents wrap hints in prose: codex's real hint is prose on the same line (`To continue this session, run codex resume <id>`), so the prose-tolerant match is load-bearing rather than hypothetical.
+- **Only a known invocation plus an opaque id.** The command is *rebuilt* as label + captured id, never sliced out of the buffer, and the id grammar is alphanumeric/hyphen/underscore only — shell punctuation can never enter executable state. Anything trailing the id is dropped. The invocation must be followed by a word break (`claude --continuex` is not an offer to continue), but nothing stronger, because agents wrap their hints in prose on the same line (rationale).
 - **The scan window is stripped as a whole, in one pass.** An *unterminated* string control (OSC, DCS, SOS, PM, APC) swallows the rest of the window rather than surrendering its payload — a window title cut mid-sequence must not read as terminal output. "Terminated" tracks what the renderer honours rather than ECMA-48 alone: ST in both forms (`\x1b\\`, `\x9c`), BEL for OSC, and — because xterm aborts a string control on them — CAN/SUB and a bare ESC. A CSI the window was cut off *inside* is swallowed for the same reason (a tail ending `\x1b[38;5` must not surrender `38;5` to the greedy id pattern), and every escape sequence is matched by its full ECMA-48 shape (ESC, intermediates, one final byte) rather than the Fe range — `ESC 7`/`ESC 8` and `ESC c` have finals outside it, and stripping only the introducer leaks the final byte into the text. A payload whose *introducer* fell off the front of the window is unrecoverable here and grants no more than ordinary output already does.
-- **Stripping runs in boundary mode, whose rule is inverted.** *Every* control becomes a newline rather than vanishing, except the two classes that neither move the cursor nor erase — SGR and charset designators, where the text either side really is contiguous. Deleting the rest welds text that was never adjacent on screen: cursor moves of every kind (`ESC M`, `ESC 7`/`ESC 8`, `ESC c`, VT/FF/backspace — not only CSI ones), and erasures too, since `\x1b[2K` means the text before it on that line is gone. Observed in the wild as a stored `claude --resume <uuid>codex`, welded across a redraw seam.
+- **Stripping runs in boundary mode, whose rule is inverted.** *Every* control becomes a newline rather than vanishing, except the two classes that neither move the cursor nor erase — SGR and charset designators, where the text either side really is contiguous. Deleting the rest welds text that was never adjacent on screen: cursor moves of every kind (`ESC M`, `ESC 7`/`ESC 8`, `ESC c`, VT/FF/backspace — not only CSI ones), and erasures too, since `\x1b[2K` means the text before it on that line is gone (rationale).
 - **Rightmost match in the last 50 lines wins.** No pattern can span the newline a boundary leaves, so the stripped window is scanned whole; the rightmost match is the newest hint *by position*, so carriage-return-only redraws still select the newest visible one and pattern order never outranks recency. Restore revalidates through `normalizeResumeCommand` before typing, as defense against a snapshot written by an older detector.
 
 ## Persistence policy
@@ -188,7 +188,7 @@ Structure only: panes (id, cwd, title, `untouched`, `surfaceType`, TODO/alert bl
 
 ### Retiring the transcripts already on disk
 
-Every pre-upgrade installation had a transcript-bearing snapshot in `workspaceState` or the standalone file store. Ignoring the field was not enough — the bytes had to go, and three rules keep them gone:
+Ignoring the field is not enough — the bytes have to go, and three rules keep them gone (rationale):
 
 - `readPersistedSession` does not *require* `scrollback` on a pane (so a snapshot written without it is still readable) and **drops** it when present, along with any `resumeCommand`. A transcript can be read out of a legacy blob but never survives into a parsed Session, so nothing downstream can persist it forward.
 - The first save after upgrade therefore rewrites each store without transcripts. Standalone, which stops reading its store entirely, clears the slot outright at boot rather than waiting for a save that may never come — including an orphaned sibling temp file left by a crash before atomic rename, which `load_session` cannot see but which still holds the legacy bytes.
@@ -211,7 +211,7 @@ something ends it:
 
 Standalone therefore **persists no Session state at all.** A clean quit has nothing
 to clear and a crash has nothing to recover; the write path itself is removed rather
-than written-then-ignored, since the blob it wrote was the transcript-bearing one.
+than written-then-ignored (rationale).
 The *Sessions* survive a reload within a running app — resume reads the sidecar's
 live PTY list, not disk — but the layout does not: `lib/src/lib/reconnect.ts` reads
 `getState()` for the saved resume plan, so with nothing persisted every live PTY
@@ -225,17 +225,13 @@ boot is deleted, not read.
 ### Consuming it
 
 On the next cold activation, a pane carrying a recovery command **runs it
-automatically** — no prompt, no button. Auto-run without a confirmation gate is
-safe because the invocation is a known label plus a validated id that fails
-closed — agent session files are per-user and per-project directory, so an id
-cannot be planted to be resumed into, and the id grammar keeps shell
-punctuation out of what is executed — and because provenance is structural:
-detection reads only the bytes a pane emitted after Dormouse's own interrupt,
-never a scan of arbitrary saved history (`docs/specs/vscode.md` → "Capturing
-agent recovery"). `claude --resume <id>` restores the conversation, lands at an
-idle prompt, and makes no request until the user types; it also restores *more*
-context than the scrollback it replaces, since the resumed agent renders the
-real conversation.
+automatically** — no prompt, no button. Auto-run is safe only while the two
+guarantees above hold: the invocation is a rebuilt label plus a validated id
+that fails closed (*Detection*, above), and its provenance is structural — detection
+reads only the bytes a pane emitted after Dormouse's own interrupt, never a
+scan of arbitrary saved history (`docs/specs/vscode.md` → "Capturing agent
+recovery"). Weaken either and the confirmation gate has to come back
+(rationale).
 
 Two consumption rules, shared with `dor split` launches: the command is typed
 only once the fresh shell reaches a prompt, because the platform write bypasses
@@ -249,9 +245,9 @@ notice that its session was resumed, so the discontinuity stays legible and a
 failed resume explains itself (`docs/specs/layout.md` → "Agent resume on cold
 restore").
 
-Known cost: every cold activation spawns every agent that was running (claude
-≈ 5 s, codex ≈ 25 s with MCP servers), and Reload Window is frequent. If it
-becomes a complaint, the mitigation is a setting, not a prompt.
+Known cost: every cold activation spawns every agent that was running, and
+Reload Window is frequent. If it becomes a complaint, the mitigation is a
+setting, not a prompt (rationale).
 
 ## Universal invariants
 
@@ -260,10 +256,10 @@ of one. Adapter-specific layering (deactivate ordering, save APIs, panel retenti
 lives in the adapter spec, e.g. `docs/specs/vscode.md` and `docs/specs/standalone.md`
 → Quit flow.
 
-- **Scrollback buffers survive PTY exit.** In the shared `pty-core.js`, only the hard `kill`/`killAll` (or host-process exit) clears a PTY's scrollback buffer; natural exit, signal-driven exit, and `gracefulKillAll` leave it readable via `getScrollback`. Recovery capture no longer depends on this (it runs *before* any kill — `docs/specs/vscode.md` → "Capturing agent recovery"), but a final flush that reads a pane whose shell has just exited still does.
+- **Scrollback buffers survive PTY exit.** In the shared `pty-core.js`, only the hard `kill`/`killAll` (or host-process exit) clears a PTY's scrollback buffer; natural exit, signal-driven exit, and `gracefulKillAll` leave it readable via `getScrollback`. The live consumer is the final flush that reads a pane whose shell has just exited (rationale).
 - **A position in a pane's output is a received count, not a buffer length.** The host-side buffer is capped (1 MB) and evicts from the front, so `scrollbackChars` goes flat while output keeps flowing — on exactly the long-running agent pane recovery exists for. Anything marking a point in the stream, or watching a pane for growth, reads the monotonic `getScrollbackReceived` and slices with `getScrollbackSince`, which joins only the chunks spanning the mark and clamps to what the buffer still holds. Source of truth: `vscode-ext/src/pty-manager.ts`.
-- **A spawn that fails still reports an exit.** `pty-core.spawn` answers a node-pty failure with `error` *and* `exit`. `error` is a host-side log line that reaches no webview, so without the exit a pane keeps any command seeded for it as permanently running — a phantom running header, a `countRunningSessions` that never returns to zero, and a quit confirmation on every attempt to close. Reachable whenever a persisted or selected shell binary is gone.
-- **Whole-host acks are correlated by request id.** `interrupt` and `gracefulKillAll` both run on a teardown path with a timeout, so a timed-out call's ack still arrives afterwards. Matching on message type alone let that stale reply resolve the *next* call the instant it was issued. The pty-host echoes `requestId` on `interruptDone` / `gracefulKillDone` and the caller compares it.
+- **A spawn that fails still reports an exit.** `pty-core.spawn` answers a node-pty failure with `error` *and* `exit`. `error` is a host-side log line that reaches no webview, so without the exit a pane keeps any command seeded for it as permanently running (rationale). Reachable whenever a persisted or selected shell binary is gone.
+- **Whole-host acks are correlated by request id, never by message type alone.** `interrupt` and `gracefulKillAll` both run on a teardown path with a timeout, so a timed-out call's ack still arrives afterwards. The pty-host echoes `requestId` on `interruptDone` / `gracefulKillDone` and the caller compares it (rationale).
 - **An omitted interrupt target list is not an empty one.** `pty-core.interrupt(ids)` broadcasts to every live PTY only when `ids` is *omitted*; an empty array is a no-op. A caller that computes a set which happens to come out empty must get silence, not the blanket second press that destroys codex's hint.
 - **Shell login args are shell-specific.** The shared `pty-core.js` launches POSIX shells with `-l` only for shells that accept it. `csh`/`tcsh` must be spawned without `-l` so users whose login shell is C-shell-derived can open a usable terminal in any adapter.
 - **Replay drops terminal replies only.** While saved output is being replayed into xterm.js, terminal-generated OSC/CSI/DCS query and focus reports are dropped so they do not enter the resumed/restored shell's input buffer. The replay filter must preserve user keyboard escape sequences, including arrows, function keys, and bracketed paste. Source of truth: `lib/src/lib/terminal-report-filter.ts`.

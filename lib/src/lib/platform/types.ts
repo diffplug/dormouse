@@ -36,7 +36,8 @@ export interface OpenPort {
  * `Get-NetTCPConnection`, `netstat`). Wider than the 1 s cwd query because
  * enumeration shells out on macOS/Windows; tight enough to fail visibly rather
  * than hang a pane header. Mirrored as `OPEN_PORT_TIMEOUT_MS` in
- * `standalone/sidecar/pty-core.js` and `standalone/src-tauri/src/lib.rs`.
+ * `standalone/sidecar/pty-core.js` and `standalone/src-tauri/src/lib.rs`;
+ * pinned by `mirrored-constants.test.ts`.
  */
 export const OPEN_PORT_TIMEOUT_MS = 3000;
 

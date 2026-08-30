@@ -1,8 +1,10 @@
 # Keyboard Shortcuts
 
+> See `docs/specs/glossary.md` for the Session / Pane / Door / baseboard vocabulary and the two mode names used in every row.
+
 Quick-reference index of every keyboard shortcut, grouped by the mode/context in which it applies. This file owns only the table; the behavior behind each row is owned elsewhere and linked per section — [layout.md](layout.md) (command mode, mode switching, kill/rename), [mouse-and-clipboard.md](mouse-and-clipboard.md) (selection, copy, paste), [dor-browser.md](dor-browser.md) (browser surfaces), [tiling-engine.md](tiling-engine.md) (drag gestures), [vscode.md](vscode.md) (the workbench mirror). Change behavior there first, then keep this table in sync.
 
-Dormouse has two modes (`docs/specs/glossary.md` owns the names):
+Dormouse has two modes:
 
 - **Command mode** — keys drive pane layout and selection.
 - **Passthrough mode** — keys reach the selected Surface's content (a terminal's PTY, a browser surface's page), except the mode-switch gesture and the clipboard chords.

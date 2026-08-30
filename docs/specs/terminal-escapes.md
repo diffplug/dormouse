@@ -1,5 +1,7 @@
 # Terminal Escape Sequence Registry
 
+> See `docs/specs/glossary.md` for the Session vocabulary used when a row talks about replay or resumed Sessions.
+
 > Single registry of the escape sequences Dormouse parses, answers, or deliberately ignores. Its value is being exhaustive: every sequence Dormouse intervenes in has one row below, pointing at the spec that owns its behavior — `docs/specs/alert.md` (notifications), `docs/specs/terminal-state.md` (CWD, prompt/command, titles), `docs/specs/mouse-and-clipboard.md` (mouse modes, paste). It also documents Dormouse's iTerm2 self-identification, because that identity is what provokes most of these sequences at us.
 
 ## Families
@@ -61,7 +63,7 @@ Some sequences are dual-purpose. The notification rows for `OSC 9 ; <message>`, 
 
 #### OSC color queries on Windows require the bundled ConPTY
 
-OSC 10/11/12 answering only works if the program's query actually reaches the consumer. On Windows that depends on the ConPTY backend node-pty uses: the **in-box `CreatePseudoConsole`** silently swallows color queries (they never reach the consumer, so nothing can answer and TUIs fall back to a dark background), while node-pty's **bundled OpenConsole** (`conpty.dll`) forwards them — the same passthrough Windows Terminal relies on. So `pty-core.js` spawns with `useConptyDll: true` on Windows. That requires `node-pty/prebuilds/<arch>/conpty.node` plus its sibling `conpty/{conpty.dll,OpenConsole.exe}` to ship: standalone bundles them via the Tauri `resources: ["../sidecar/**/*"]` glob; the VS Code extension via `cp -RL node_modules/node-pty dist/node-pty`. macOS/Linux PTYs forward queries natively, so the flag is Windows-only. It also has an installer consequence on Windows — see [auto-update.md](auto-update.md#sidecar-teardown-on-windows).
+`pty-core.js` spawns with `useConptyDll: true` on Windows: the in-box `CreatePseudoConsole` silently swallows color queries, so nothing can answer and TUIs fall back to a dark background, while node-pty's bundled OpenConsole (`conpty.dll`) forwards them (rationale). That requires `node-pty/prebuilds/<arch>/conpty.node` plus its sibling `conpty/{conpty.dll,OpenConsole.exe}` to ship: standalone bundles them via the Tauri `resources: ["../sidecar/**/*"]` glob; the VS Code extension via `cp -RL node_modules/node-pty dist/node-pty`. macOS/Linux PTYs forward queries natively, so the flag is Windows-only. It also has an installer consequence on Windows — see [auto-update.md](auto-update.md#sidecar-teardown-on-windows).
 
 ### OSC 8 hyperlinks
 
@@ -108,7 +110,7 @@ Unknown CSI sequences pass through to xterm.js so it can handle standard termina
 
 ## iTerm2 identity
 
-Dormouse reports an iTerm2-compatible identity so that tools (shells, build systems, agent clients) emit the iTerm2-style escape codes this spec set supports. One compatibility version is used across env and device responses: `ITERM2_COMPAT_VERSION`, currently `3.5.0`, defined twice — in `standalone/sidecar/pty-core.js` and `lib/src/lib/terminal-protocol.ts` — with a mirror comment on each.
+Dormouse reports an iTerm2-compatible identity so that tools (shells, build systems, agent clients) emit the iTerm2-style escape codes this spec set supports. One compatibility version is used across env and device responses: `ITERM2_COMPAT_VERSION`, currently `3.5.0`, defined twice — in `standalone/sidecar/pty-core.js` and `lib/src/lib/terminal-protocol.ts` — pinned together by `lib/src/lib/mirrored-constants.test.ts`.
 
 Environment for spawned PTYs:
 
@@ -140,7 +142,7 @@ A binary on `PATH` only has to be **found**, so it injects via one env var (`DOR
 
 Injection is wired in `applyShellIntegration`, called from `resolveSpawnConfig` (`standalone/sidecar/pty-core.js`), so it applies to both distributions — the standalone sidecar and the VS Code pty-host both spawn through it. The integration scripts are static files under `standalone/sidecar/shell-integration/`; the directory is resolved from `DORMOUSE_SHELL_INTEGRATION_DIR` (set by the host, mirroring `DORMOUSE_CLI_BIN`) and falls back to the sidecar's own directory. Standalone ships them via the tauri `../sidecar/**/*` resources glob; the VS Code build copies them into `dist/shell-integration`. If the scripts are missing, injection is skipped and the shell spawns exactly as before — injection is fail-safe.
 
-**Emitted fields are filtered before they are written, and that is a security boundary, not tidiness.** A POSIX path component may hold any byte but `/` and NUL, and a command line may hold anything at all, so an attacker-chosen directory name or command can carry an OSC terminator — BEL, `ESC \`, or the C1 ST `U+009C` (all three are what `findOscTerminator` scans for). The parser cannot defend against this: the terminator scan runs on raw bytes, so by the time the parser sees them the `633` sequence is already over and the remainder arrives as a fresh, fully-trusted OSC. It would forge notifications, command lines, or titles in the shell's own voice — `OSC 9` most damagingly, since an alert latches a ring, persists, is spoken aloud, and is pushed to the paired phone. The injected bytes are consumed by the parser, so nothing appears on screen, and a poisoned directory re-fires for anyone who enters it, outliving the process that planted it. The boundary therefore has to be on the *emit* side, in the scripts Dormouse ships:
+**Emitted fields are filtered before they are written, and that is a security boundary, not tidiness.** A POSIX path component may hold any byte but `/` and NUL, and a command line may hold anything at all, so an attacker-chosen directory name or command can carry an OSC terminator — BEL, `ESC \`, or the C1 ST `U+009C` (all three are what `findOscTerminator` scans for) — ending the `633` sequence early, so the remainder arrives as a fresh, fully-trusted OSC that forges a notification, command line, or title in the shell's own voice. The parser cannot defend against this, because its terminator scan runs on raw bytes: by the time the parser sees them the sequence is already over. The boundary therefore has to be on the *emit* side, in the scripts Dormouse ships (rationale):
 
 - **`E` (command line)** is escaped by `__dormouse_633_escape`, which covers BEL, ESC and the C1 ST alongside `\`, `;`, LF and CR. Escaping costs nothing here because the parser decodes `\xNN` back, so the command line still reports verbatim.
 - **`Cwd=`** cannot be escaped — the parser reads it verbatim, with no `\xNN` decoding, precisely so a Windows path's backslashes arrive intact. `__dormouse_633_safe_cwd` therefore *removes* control characters rather than escaping them. Backslashes and semicolons are deliberately preserved. Under `LC_ALL=C` the C1 ST is two ordinary bytes that `[[:cntrl:]]` does not match, so the shell scripts strip it explicitly first.
