@@ -1,15 +1,5 @@
-/**
- * Live agent-browser session viewer (see docs/specs/dor-browser.md).
- *
- * This component is a THIN VIEW. All the non-React lifecycle — the stream
- * connection + screenshot loop, viewport-sync state machine, pop-out/pop-in
- * orchestration + auto-revert, CDP observer, canonical-URL tracking, input
- * bridging, params persistence, and the screen/chrome registration — lives in a
- * surface-id-keyed controller registry (`agent-browser-surface-controller.ts`,
- * mirroring `terminal-lifecycle.ts`). The controller outlives panel unmount; the
- * view just mounts a canvas, feeds params/visibility, forwards DOM input, and
- * subscribes to one snapshot via `useSyncExternalStore`.
- */
+/** React view for the surface-scoped lifecycle in
+ * `agent-browser-surface-controller.ts`; see docs/specs/dor-browser.md. */
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { clsx } from 'clsx';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';

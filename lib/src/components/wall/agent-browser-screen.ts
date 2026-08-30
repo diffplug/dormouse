@@ -1,41 +1,10 @@
-/**
- * Per-surface bridge between a browser pane's body (AgentBrowserPanel /
- * IframePanel) and its tab header (SurfacePaneHeader) + the screen modal, which
- * are separate components for one pane (see docs/specs/dor-browser.md →
- * "Browser Chrome" and "Display Modal And Render Swaps").
- *
- * The panel owns the live state (viewport, pane size, sync) and the action
- * (`runAgentBrowser`); the header and modal only read a snapshot and invoke
- * actions. So the panel registers a controller keyed by its surface id; the
- * header derives "this pane shows browser chrome" purely from the presence of a
- * controller for `api.id` (both renderers register one; terminals never do).
- *
- * Two stores, both consumed via useSyncExternalStore:
- *   1. a surface-id-keyed controller registry (presence + per-controller
- *      snapshot subscription), mirroring `terminal-lifecycle.ts`;
- *   2. a single "which surface's screen modal is open" value, mirroring
- *      `external-link-confirmation.ts`.
- */
+/** Per-surface bridge from browser bodies to their separate header and modal;
+ * see docs/specs/dor-browser.md → "Browser Chrome". */
 import { useSyncExternalStore } from 'react';
 
 export type ScreenState = 'SYNCED' | 'SCALED';
 
-/** How a web surface is rendered (docs/specs/dor-browser.md → "Canonical Params";
- *  dor-browser.md → "Pop-Out"). The `ab-` prefix names the engine
- *  (agent-browser), leaving room for a future engine beside it; `iframe` is the
- *  engine-less DOM embed:
- *    - `ab-screencast` — real Chromium to a canvas: agent-drivable, any URL, but
- *      laggy for a human.
- *    - `ab-popout`     — the same agent-browser relaunched headed as a native OS
- *      window: agent-drivable, any URL, native human feel; the in-Dormouse pane
- *      becomes a stub.
- *    - `iframe`        — the page's own DOM in a proxied iframe: native + zero-lag,
- *      but loopback-only and not agent-drivable.
- *  Absent from params ⇒ `iframe` — a surface with no explicit mode resolves to
- *  the engine-less embed (`resolveRenderMode` in browser-surface.ts;
- *  docs/specs/dor-browser.md → "Canonical Params"). Note this differs from the
- *  `ScreenSnapshot.renderMode` glyph default below, which reads absent as
- *  `ab-screencast`. */
+/** Canonical renderer values; defaulting belongs to `resolveRenderMode`. */
 export type RenderMode = 'ab-screencast' | 'ab-popout' | 'iframe';
 
 export interface ScreenSnapshot {

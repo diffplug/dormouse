@@ -24,52 +24,30 @@
   Upstreamable fixes branch off `master` and are cherry-picked into `sdf`.
 - **Versioning**: published as `@diffplug/xterm-addon-webgl-sdf`, versions
   shaped `<addon-version>-sdf<coreBeta>.<iteration>` (`0.20.0-sdf301.1` = built
-  from the commit of `@xterm/xterm@6.1.0-beta.301`, iteration 1). The addon
-  bundles xterm core internals, so consumers pin the exact `@xterm/xterm` beta
-  it was built from. Since `0.20.0-sdf301.1` the tarball declares
-  `peerDependencies: { '@xterm/xterm': '^<that beta>' }` (upstream's
-  `bin/publish.js` injects it; our hand-cut `npm pack` skips it, so earlier
-  tarballs have none) — the authoritative record of the base, because it names
-  a *full* version while the `-sdfNNN` counter restarts on each upstream
-  release line (`5.6.0-beta.1..143`, then `6.1.0-beta.1..302`).
+  from `@xterm/xterm@6.1.0-beta.301`, iteration 1). **Consumers must pin the
+  exact core beta named by the tarball's peer dependency** because the addon
+  bundles core internals; the `-sdfNNN` counter alone is not globally unique.
 - **Distribution**: GitHub Release assets consumed as a pnpm tarball-URL
   dependency, not an npm registry — GitHub Packages requires auth even for
   public reads, release assets do not. **Never replace a published asset** —
   the lockfile records a sha512 integrity hash, so cut a new iteration
   instead.
-- **Canopy's three pins move by hand, together.** Renovate cannot see tarball
-  URLs, so it would drift canopy's two sibling `@xterm/*` pins off the fork
-  base unnoticed; `.github/renovate.json` therefore disables `@xterm/**` scoped
-  to `canopy/package.json`. Bumps are manual edits, or
-  `node scripts/xterm-bump.mjs --canopy <forkVersion>`, which rewrites the
-  tarball URL and both pins from the commit the fork version encodes. `lib/`
-  and `standalone/` keep tracking upstream betas as one grouped `xterm` PR, so
-  between fork rebases the two can sit on different `@xterm/xterm` betas — that
-  divergence is expected and confined to the Storybook-only lab.
+- **Canopy's three pins move together.** Renovate ignores canopy's `@xterm/**`
+  because it cannot follow the fork tarball URL; update manually or with
+  `node scripts/xterm-bump.mjs --canopy <forkVersion>`. `lib/` and `standalone/`
+  may track a newer upstream beta between fork rebases.
 - **Upstream pins are per-commit, not per-latest.** The four `@xterm/*`
-  packages ship from one repo but carry independent beta counters — an addon is
-  published only when its own content changes — and each addon's
-  `peerDependencies['@xterm/xterm']` names the exact core version published
-  from the same commit. So "the latest of each" is routinely a set spanning two
-  commits, and because `^6.1.0-beta.N` admits every later beta, nothing in npm
-  or pnpm complains while addons run against core internals they were not
-  compiled against. `scripts/xterm-lint.mjs` (offline, in `pnpm test`) enforces
-  what this depends on: every `@xterm/*` pin is an exact version, never a
-  range; every addon pin's peer range equals `^` its workspace's core pin — the
-  fork tarball included, which is what makes the canopy lockstep exact rather
-  than counter-deep; `lib` and `standalone` agree; and canopy's tarball URL is
-  self-consistent (tag, filename and `-sdfNNN` counter agree with the core pin,
-  which independently catches a release whose tag misstates the base its peer
-  range declares). `scripts/xterm-bump.mjs` (`pnpm bump:xterm`) writes the
-  newest set all four packages published from one commit into `lib/` and
-  `standalone/`, refusing to write one the lint would reject.
+  packages have independent beta counters despite sharing a repo. **Every pin
+  must be exact and every addon's core peer must match its workspace core pin.**
+  `scripts/xterm-lint.mjs` also requires `lib` and `standalone` to agree and
+  checks the canopy tarball tag, filename, counter, and peer as one set.
+  `scripts/xterm-bump.mjs` (`pnpm bump:xterm`) writes the newest coherent
+  per-commit set for `lib` and `standalone`.
 - **Releases are hand-cut today** (build, `npm pack`, `gh release create` per
   FORK.md); automating this is staged in `## Future`.
 - **Dev loop**: `pnpm link ~/projects/xterm.js/addons/addon-webgl` from
-  `canopy/`. **Revert the link residue and reinstall before trusting a tarball
-  verification** — pnpm 11's link writes a `link:` dependency into the *root*
-  `package.json` and an `overrides:` entry into `pnpm-workspace.yaml`, which
-  silently keep resolving the link.
+  `canopy/`. **Revert its root `package.json` / `pnpm-workspace.yaml` residue and
+  reinstall before verifying a tarball.**
 
 Source of truth: `canopy/package.json` (pins), `canopy/README.md` (bump flow),
 `scripts/xterm-lint.mjs` + `scripts/xterm-bump.mjs` (the pin invariants and the
@@ -167,20 +145,14 @@ for the fork:
   bitmap-upscaled (blurry) vs shader-rendered from an SDF atlas (crisp).
 - `UpstreamVsFork` — the regression harness: identical content through
   pristine upstream `@xterm/addon-webgl`, the fork with `sdf: false`, and the
-  fork with `sdf: true`, stacked. The upstream pin must be built from the same
-  commit as the fork base, and because the `@xterm/*` beta counters are
-  independent the two version numbers never match — so the triple (addon
-  version, core version, commit) has to be written down. It lives in two
-  places, the `UpstreamWebglAddon` import in `canopy/src/GlTerminal.stories.tsx`
-  and `canopy/README.md`, and `--canopy` prints a reminder to update both while
-  picking the matching addon itself (`npm view @xterm/addon-webgl@<ver>
-  gitHead` re-derives it by hand). The harness owns its discriminating rows
-  (`chevronGauntlet`) so demo-content edits cannot silently weaken it.
+  fork with `sdf: true`, stacked. **Its upstream addon must come from the fork
+  base commit.** Record the addon/core/commit triple in both
+  `canopy/src/GlTerminal.stories.tsx` and `canopy/README.md`; `--canopy` selects
+  the addon and reminds editors to update both. The harness owns its
+  discriminating `chevronGauntlet` rows.
 
-**Never write PUA glyphs (powerline chevrons etc.) as literal characters** —
-story content uses `\uE0BX` escapes, because the literals are invisible in
-editors and were once silently dropped in a file rewrite, presenting as a
-rendering regression.
+**Never write PUA glyphs as literals; use `\uE0BX` escapes** so invisible
+characters cannot disappear during a rewrite.
 
 Source of truth: `canopy/src/GlTerminal.stories.tsx`, `canopy/README.md`.
 

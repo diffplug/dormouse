@@ -456,9 +456,7 @@ export function MobileTerminalUi({
   const gestureCompletionTimerRef = useRef<number | null>(null);
   const cursorPointerIdRef = useRef<number | null>(null);
   const cursorPointerTargetRef = useRef<EventTarget | null>(null);
-  // Handles for the staggered blur retries scheduled by blurPaneTextInputs, so
-  // an unmount can cancel them — otherwise a still-pending retry fires after the
-  // component is gone (in jsdom, after the test env tears down `document`).
+  // Cancel delayed blur retries on unmount, including after test DOM teardown.
   const blurRetryTimersRef = useRef<number[]>([]);
   const blurRetryFrameRef = useRef<number | null>(null);
   const [gestureState, setGestureState] = useState<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
@@ -529,11 +527,8 @@ export function MobileTerminalUi({
       if (!terminalHostRef.current?.contains(active)) return;
       if (isEditableTarget(active)) active.blur();
     };
-    // Wall defers xterm focus via rAF, so a single blur can be reverted after we
-    // return; repeat across rAF and a few staggered ticks. See
-    // mobile-terminal-ui.md (Keyboard focus invariant). A fresh blur supersedes any
-    // still-pending retries; tracking the handles also lets unmount cancel them
-    // (otherwise a late retry fires against a torn-down DOM).
+    // Wall can restore xterm focus in rAF; retry across its focus window. A new
+    // blur supersedes the old retries. See mobile-terminal-ui.md.
     cancelBlurRetries();
     blurActivePaneInput();
     for (const delay of [0, 50, 200]) {

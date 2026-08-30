@@ -16,16 +16,11 @@ export async function writeTextToClipboard(text: string): Promise<void> {
       await navigator.clipboard.writeText(text);
     }
   } catch {
-    // Clipboard write can fail when the document lacks focus or the
-    // Permissions API denied access. Silently ignore — the user will
-    // notice the paste didn't work and can retry.
+    // Best effort by contract above.
   }
 }
 
-/**
- * Copy the terminal's current selection to the clipboard as-is.
- * No-op if no selection exists.
- */
+/** Copy the current selection as-is; no-op without one. */
 export async function copyRaw(terminalId: string): Promise<void> {
   const terminal = getTerminalInstance(terminalId);
   const sel = getMouseSelectionState(terminalId).selection;
@@ -33,11 +28,7 @@ export async function copyRaw(terminalId: string): Promise<void> {
   await writeTextToClipboard(extractSelectionText(terminal, sel));
 }
 
-/**
- * Copy the terminal's current selection with rewrap transformations applied.
- * Block selections are not rewrapped (they're intentionally rectangular slabs).
- * No-op if no selection exists.
- */
+/** Copy with rewrap, except for rectangular block selections. */
 export async function copyRewrapped(terminalId: string): Promise<void> {
   const terminal = getTerminalInstance(terminalId);
   const sel = getMouseSelectionState(terminalId).selection;
@@ -47,24 +38,8 @@ export async function copyRewrapped(terminalId: string): Promise<void> {
   await writeTextToClipboard(out);
 }
 
-/**
- * Neutralize every ESC in a bracketed-paste payload, rendering each as a
- * visible U+241B. Without this, clipboard content holding `\x1b[201~` closes
- * the bracket early and everything after it arrives as ordinary typed input —
- * newlines included, which submit. A hostile page that can put text on the
- * clipboard would then be able to run a command the user never pasted.
- *
- * This is byte-for-byte what xterm's own `bracketTextForPaste` does; we have to
- * repeat it because `writePasteToPty` writes to the PTY directly and so never
- * reaches it (see the comment below). Replacing rather than stripping keeps the
- * paste visible: the user sees that something was defanged instead of watching
- * bytes vanish.
- *
- * Only the bracketed branch is filtered. Without brackets the inside program has
- * not asked to tell pasted bytes from typed ones, so there is no boundary left
- * to protect and filtering would only break deliberate pastes of escape
- * sequences — again matching xterm.
- */
+/** Replace ESC with visible U+241B so clipboard text cannot close a bracketed
+ * paste early. Never apply this to unbracketed input; see spec §8.5. */
 function defangPasteEscapes(text: string): string {
   return text.replace(/\x1b/g, '\u241b');
 }
@@ -96,9 +71,7 @@ export function pasteFilePaths(terminalId: string, paths: string[]): void {
 }
 
 export async function readTextFromClipboard(): Promise<string> {
-  // Prefer the platform's native text read when available — navigator.clipboard.readText()
-  // on macOS WKWebView pops a "Paste from <App>" confirmation menu at the cursor every
-  // time it's invoked from JS, which defeats the point of a paste shortcut.
+  // Prefer native reads; macOS WKWebView prompts on every navigator read.
   const platform = getPlatform();
   if (platform.readClipboardText) {
     try {
@@ -115,15 +88,8 @@ export async function readTextFromClipboard(): Promise<string> {
   }
 }
 
-/**
- * Read the clipboard and write its contents to the PTY, honoring the inside
- * program's bracketed-paste mode when enabled (spec §8.5). Prefers file
- * references over plain text (a Finder Cmd+V types the path, not "Document.pdf"
- * as a name string), with raw images saved to a temp file as a last resort.
- *
- * File-path and text reads run in parallel since they're independent IPC
- * roundtrips; the image read is sequential because it allocates a temp file.
- */
+/** Paste file references, then text, then an image temp path; spec §8.6 owns
+ * priority and concurrency. */
 export async function doPaste(terminalId: string): Promise<void> {
   const platform = getPlatform();
 

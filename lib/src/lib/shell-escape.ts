@@ -29,15 +29,8 @@ export function shellEscapeWindows(input: string): string {
   return `"${input.replace(/"/g, '""')}"`;
 }
 
-/**
- * Escape a filesystem path for one Session's captured shell parser, for the
- * drop/paste path.
- *
- * Quoting for the wrong parser is a code-execution bug, not a cosmetic one: a
- * cmd-style `"$(calc.exe).txt"` staged in a PowerShell pane runs the
- * subexpression the moment the user presses Enter, and pressing Enter is the
- * whole reason they dropped the file in (dormouse#430).
- */
+/** Escape a pasted path for its Session's captured parser. Dispatching by OS
+ * alone is unsafe; see mouse-and-clipboard.md §8.6. */
 export function shellEscapePath(input: string, shellKind: ShellCommandKind): string {
   switch (shellKind) {
     case 'powershell':

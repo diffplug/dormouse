@@ -52,7 +52,7 @@ Below the sections the menu lists `Starred on GitHub` (persisted separately, cal
 
 Four keys are intercepted by `TutRunner` while a specific section is open — they are **not** real Dormouse shortcuts. The three alert demos all report their fake commands through `OSC 633 ; E / C / D` written with `FakePtyAdapter.sendOutput`, which the fake adapter runs through the real `TerminalProtocolParser`; the OSCs are stripped from visible output, so a demo never disturbs the TUI its pane is drawing. Each demo's visible run (`BUSY_DEMO_DURATION_MS`) must outlast `cfg.alert.userAttention` so the bell actually rings rather than being suppressed as "user is looking"; see the comments in `tut-runner.ts`.
 
-- **`s`** (Alerts section) — reports a fake `longtask` on *both* alert demo panes (`tut-boxed`, `tut-splash`), overriding the command their shell is really running, and drives `FakePtyAdapter.pumpActivity` on `tut-boxed` while the runner draws an in-place countdown. Two panes running one command is what makes `al-spreads` observable: WATCHING is keyed on the command name, so a single bell click lights both (`docs/specs/alert.md`). The pump always targets `tut-boxed` because it is the quiet pane — `tut-splash` animates forever, so it stays `BUSY` and can never reach `ALERT_RINGING`. The fake exit is reported `WATCH_DEMO_COMMAND_MS` later — the busy duration *plus* the monitor's full silence chain — not when the burst ends: WATCHING rings on *silence from a still-running command*, and reporting the exit early would dispose the monitor before it could ring. Re-pressing `s` after the countdown finishes cancels the prior delayed exit first, so an old completion cannot terminate the new fake command; presses during the countdown are ignored so pumps can't stack. Afterwards each pane's real command line is put back via `TutorialShell.reportRunningCommand()`, so a pane whose TUI is still drawing never looks idle.
+- **`s`** (Alerts section) — reports `longtask` on both alert panes so command-keyed WATCHING demonstrates `al-spreads`, but pumps only quiet `tut-boxed` (`tut-splash` animates continuously). The fake command stays running through `WATCH_DEMO_COMMAND_MS`, long enough for WATCHING's silence chain to ring. Replays cancel the prior delayed exit; presses during the countdown cannot stack pumps. Afterwards `TutorialShell.reportRunningCommand()` restores each pane's real command.
 - **`n`** (Alerts section) — writes a raw `OSC 777` notification to `tut-boxed`, exercising the terminal-report track, which needs no WATCHING rule.
 - **`x`** (Alerts section) — starts a fake `slowbuild` on `tut-splash` and reports its exit `BUSY_DEMO_DURATION_MS` later. Deliberately an *unwatched* command name, so the command-exit track (rather than WATCHING) owns the bell; the user has to attend the pane and leave it for the ring to arm.
 - **`p`** (Copy paste section) — toggles the **Place To Paste** scratch modal (`website/src/components/PlaceToPaste.tsx`) via `onTogglePlaceToPaste`. Only wired on desktop; Pocket omits the callback, and the runner hides the prompt line when it is absent.
@@ -97,26 +97,14 @@ These exist in `dormouse-lib` (or `MobileTerminalUi`) so the browser-side tutori
 
 ## Mouse and Clipboard Feature Coverage
 
-The Playground is the primary dogfood surface for `docs/specs/mouse-and-clipboard.md`. The layout (`tut-main` runner, `tut-boxed` `changelog`, `tut-splash` `ascii-splash`) covers most of the spec. Legend: ✅ exercisable today, ⚠️ partial, ❌ not exercisable.
+The Playground is the primary dogfood surface for
+`docs/specs/mouse-and-clipboard.md`; the three-pane layout covers:
 
-| Spec § | Feature | Status | Why |
-|---|---|---|---|
-| [§1](mouse-and-clipboard.md#1-the-mouse-icon-header-indicator) | Mouse icon visible when program requests reporting | ✅ | `ascii-splash` and `changelog` both emit `MOUSE_ENABLE` (`?1000h` / `?1002h` / `?1003h` / `?1006h`). |
-| [§2](mouse-and-clipboard.md#2-override-state) | Temporary/permanent override, banner, Make sticky / Cancel | ✅ | The `cp-override` item walks the user through the `changelog` header's mouse icon. |
-| [§3.1–§3.3](mouse-and-clipboard.md#31-initiating-a-selection) | Drag, Alt-block shape, the "Hold Opt/Alt for block selection" hint | ✅ | Works on any visible text. |
-| [§3.3](mouse-and-clipboard.md#33-selection-hint-text) | "Press e to select the full URL/path" hint | ❌ | No qualifying tokens in the live scenarios. |
-| [§3.4](mouse-and-clipboard.md#34-selection-follows-content) | Pure-scroll follows, cancel-on-change, cancel-on-resize | ⚠️ | `ascii-splash` makes cancel-on-change and resize observable; scenarios too short for pure-scroll. |
-| [§3.5](mouse-and-clipboard.md#35-selection-in-the-live-region-vs-scrollback) | Scrollback-origin / cross-boundary drags | ⚠️ | Scrollback too short to exercise. |
-| [§3.6](mouse-and-clipboard.md#36-during-a-drag) | Keyboard routing during drag | ✅ | With override active on a mouse-capturing runner, drag-time keyboard consumption is observable. |
-| [§3.7](mouse-and-clipboard.md#37-ending-a-selection) | Popup on mouse-up, new-drag-replaces | ✅ | Any selection. |
-| [§4.1.1](mouse-and-clipboard.md#411-copy-raw) | Copy Raw | ✅ | `cp-raw`. |
-| [§4.1.2](mouse-and-clipboard.md#412-copy-rewrapped) | Copy Rewrapped (paragraph unwrap) | ✅ | `cp-rewrap`; `ChangelogRunner` renders wrapped detail lines that exercise the rewrap path. |
-| [§4.2](mouse-and-clipboard.md#42-keyboard-shortcuts) | Cmd+C / Cmd+Shift+C | ✅ | Credits `cp-raw` / `cp-rewrap` the same way the popup buttons do. |
-| [§4.3](mouse-and-clipboard.md#43-dismissing-the-popup) | Esc / click-outside dismiss | ✅ | Any selection popup. |
-| [§5](mouse-and-clipboard.md#5-smart-extension-url--path-detection) | Smart-extension (URL / abs path / rel path / Windows path / error location) | ❌ | No matching tokens in the scenarios. |
-| [§5.3](mouse-and-clipboard.md#53-extension-action) | Press `e` to extend | ❌ | Blocked on §5 coverage. |
-| [§8.2](mouse-and-clipboard.md#82-paste-keybindings) | Cmd+V / Cmd+Shift+V / Ctrl+V / Ctrl+Shift+V paste | ⚠️ | Fires and writes to the fake PTY, but `TutorialShell.handleInput` echoes char-by-char and ignores bracketed-paste markers. |
-| [§8.5](mouse-and-clipboard.md#85-bracketed-paste) | Bracketed paste wraps `\e[200~ … \e[201~` | ❌ | No scenario emits `\x1b[?2004h`, so `bracketedPaste` stays `false`. |
+| Status | Spec coverage |
+|---|---|
+| ✅ Exercisable | §§1–2 (mouse reporting + override), §§3.1–3.3 (drag, block shape, block hint), §§3.6–3.7 (drag keys + popup), and §§4.1–4.3 (raw/rewrapped copy, shortcuts, dismissal). `ascii-splash` and `changelog` provide mouse-capturing text; tutorial items drive the named actions. |
+| ⚠️ Partial | §3.4 exposes change/resize cancellation but not pure scroll; §3.5 lacks enough scrollback; §8.2 writes paste chords to the fake PTY, whose shell ignores bracket markers. |
+| ❌ Missing | §§3.3 and 5 lack smart tokens and therefore `e` extension; §8.5 lacks a scenario that enables bracketed paste. |
 
 Auto-scroll during a drag and right-click paste are deferred in the implementation itself ([§9. Future](mouse-and-clipboard.md#9-future)) — not Playground gaps.
 

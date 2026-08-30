@@ -1,21 +1,6 @@
-/**
- * `dor agent-browser` (alias `dor ab`) — near-transparent passthrough to the
- * user's own agent-browser binary, plus Dormouse surface management.
- *
- * Dormouse intercepts exactly three mutually-exclusive identity flags: `--key`
- * (managed, workspace-scoped, default "default"), `--session` (raw escape hatch)
- * and `--surface` (a Surface handle, resolved to its bound session host-side).
- * Everything else is forwarded verbatim to
- * `agent-browser --session <resolved> <args...>`. After
- * a successful forwarded command, the stream WebSocket port is read via
- * `stream status --json` and a `surface.agentBrowser` control request asks the
- * Wall to create or reuse the browser surface bound to that session.
- *
- * The stricli command registered here exists only to serve `--help`; real
- * invocations are intercepted in `runCli` before stricli parses argv, because
- * forwarded agent-browser args (e.g. `open --headed`) must not be parsed as
- * dor flags.
- */
+/** `dor ab` passthrough and Surface binding; see docs/specs/dor-cli.md and
+ * docs/specs/dor-browser.md. `runCli` intercepts real invocations before
+ * stricli so forwarded arguments are never parsed as dor flags. */
 
 import { buildCommand } from '@stricli/core';
 // All external spawns go through dor-lib-common's spawnAndCapture, which owns the

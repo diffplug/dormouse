@@ -15,24 +15,6 @@
 > `docs/specs/alert.md` for `dor await`'s wake conditions. Evidence and
 > dead-approach history: [dor-cli.rationale.md](dor-cli.rationale.md).
 
-Source of truth:
-
-| Scope | Source |
-| --- | --- |
-| `stricli` application, command registry, and stdout/stderr capture | `dor/src/cli.ts` |
-| Command implementation, `stricli` flag definitions, and output rendering | `dor/src/commands/*.ts` |
-| Control method request/response types | `dor/src/commands/types.ts` |
-| Socket client and request envelope | `dor/src/control-client.ts`, `dor/src/protocol.ts` |
-| Control server (loaded by both hosts) | `standalone/sidecar/dor-control-server.js` |
-| POSIX / Windows launchers | `dor/bin/dor`, `dor/bin/dor.cmd` |
-| Snapshot tests for CLI output and help text | `dor/test/cli-output.test.mjs`, `dor/test/cli-help.test.mjs`, `dor/test/snapshots/` |
-| Shared staging script | `scripts/stage-dor-cli.mjs` |
-| Agent skill markdown and its inlining codegen | `dor/skill.md`, `scripts/generate-dor-skill.mjs` |
-| Standalone staging/runtime env | `standalone/package.json`, `standalone/src-tauri/src/lib.rs`, `standalone/sidecar/pty-core.js`, `standalone/sidecar/main.js` |
-| VS Code staging/runtime env | `vscode-ext/package.json`, `vscode-ext/src/pty-manager.ts`, `vscode-ext/src/pty-host.js` |
-| Control request routing into the webview | `standalone/src/tauri-adapter.ts`, `vscode-ext/src/message-router.ts`, `lib/src/lib/platform/vscode-adapter.ts` |
-| Implemented webview control handler | `lib/src/components/wall/use-dor-control.ts` (the `useDorControl` hook, mounted by `lib/src/components/Wall.tsx`) |
-
 ## Bundling And PATH
 
 **`dor` must work without `npm i -g`.** Both hosts stage the workspace `dor`
@@ -111,6 +93,11 @@ would mangle into `C:\c\Users\…` and match no Surface; `msysToWindowsCwd`
 (`dor/src/commands/shared.ts`) folds it back to a native path, and backs both
 `dor ensure --cwd` and `dor list --cwd`.
 
+Source of truth: `dor/bin/dor`, `dor/bin/dor.cmd`,
+`scripts/stage-dor-cli.mjs`, and host staging/env wiring in
+`standalone/src-tauri/src/lib.rs`, `standalone/sidecar/pty-core.js`,
+`vscode-ext/src/pty-manager.ts`, and `vscode-ext/src/pty-host.js`.
+
 ## Spawning External Binaries
 
 **Every spawn of an external/user-installed binary must go through
@@ -153,6 +140,9 @@ on `dor-lib-common`. It owns three concerns:
 vscode-ext) inlines it. **The `dor` and `dormouse-lib` prebuilds must build
 `dor-lib-common` first** so its `.d.ts` files exist before either package
 typechecks imports through those exports.
+
+Source of truth: `dor-lib-common/src/spawn.ts`, `dor-lib-common/package.json`,
+`dor/package.json`, and `lib/package.json`.
 
 ## Host Plumbing
 
@@ -270,9 +260,10 @@ and responding forgets it. **A handler that parks must release whatever it armed
 when the signal fires** — nothing it responds with afterwards can reach the
 client. A late response for a reaped id is a silent no-op on the server.
 
-Source of truth: `lib/src/lib/platform/dor-control-dispatch.ts`, plus each
-host's hop in `standalone/src/tauri-adapter.ts`,
-`standalone/src/browser-sidecar-adapter.ts`,
+Source of truth: `standalone/sidecar/dor-control-server.js`,
+`dor/src/control-client.ts`, `dor/src/protocol.ts`,
+`lib/src/lib/platform/dor-control-dispatch.ts`, and each host's hop in
+`standalone/src/tauri-adapter.ts`, `standalone/src/browser-sidecar-adapter.ts`,
 `lib/src/lib/platform/vscode-adapter.ts`, `vscode-ext/src/pty-manager.ts`, and
 `vscode-ext/src/message-router.ts`.
 
@@ -328,6 +319,10 @@ Invariants:
   Stable Surface ids are globally unique, but cross-Workspace id routing is
   staged with Workspace-aware listing/targeting; the current webview control
   handler resolves ids in the mounted Workspace.
+
+Source of truth: handle parsing in `dor/src/commands/shared.ts`, request and row
+types in `dor/src/commands/types.ts`, and the ref registry/resolution in
+`lib/src/components/wall/use-dor-control.ts`.
 
 ## Current Implemented Commands
 
