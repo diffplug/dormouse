@@ -328,6 +328,9 @@ export function startAlertSpeech(): () => void {
   return () => {
     stopRingWatch();
     unsubscribeActivity();
+    // Evicted utterances keep their handlers (see `track`), so detaching below
+    // does not reach them. Dropping the tokens is what makes any late callback
+    // from one inert: `settle` early-outs on the generation check.
     currentToken.clear();
     for (const utterance of utterances) detach(utterance);
     utterances.clear();
