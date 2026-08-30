@@ -5,25 +5,9 @@ import { hasCopyModifier, hasPasteModifier } from './chords';
 
 type TextField = HTMLInputElement | HTMLTextAreaElement;
 
-/**
- * Cmd/Ctrl + C / X / V inside one of our own text fields — pane rename, the
- * browser URL editor, dialog inputs.
- *
- * The standalone host replaces macOS's default menu so its native Paste item
- * stops fighting the terminal's DOM-level Cmd+V (`standalone/src-tauri/src/lib.rs`),
- * and WKWebView routes clipboard chords through that menu — so with it gone,
- * copy/cut/paste do nothing in any DOM input there. This restores them in JS.
- * The gate is the adapter's optional `readClipboardText`, today the two
- * standalone adapters — the menu-less macOS build this is written for, plus the
- * Chrome dev harness, where the JS path simply replaces a working native one.
- * Everywhere else (VS Code, the website, Pocket) the native chords are left
- * alone (`docs/specs/mouse-and-clipboard.md` §8.9).
- *
- * Alone among the `handle-*` dispatch modules it takes no `WallKeyboardCtx`: a
- * focused text field owns these chords whatever mode the wall is in, and xterm's
- * input proxy — the one editable element that is the terminal's — is excluded by
- * name. Returns true if handled.
- */
+/** Restore editable-field clipboard chords when the adapter exposes a native
+ * clipboard read. The focused field owns them in every Wall mode; xterm's input
+ * proxy is excluded. See mouse-and-clipboard.md §8.9. */
 export function handleEditableClipboard(e: KeyboardEvent): boolean {
   if (!hasPasteModifier(e) || e.altKey) return false;
   const key = e.key.toLowerCase();

@@ -4,12 +4,7 @@
 
 Quick-reference index of every keyboard shortcut, grouped by the mode/context in which it applies. This file owns only the table; the behavior behind each row is owned elsewhere and linked per section — [layout.md](layout.md) (command mode, mode switching, kill/rename), [mouse-and-clipboard.md](mouse-and-clipboard.md) (selection, copy, paste), [dor-browser.md](dor-browser.md) (browser surfaces), [tiling-engine.md](tiling-engine.md) (drag gestures), [vscode.md](vscode.md) (the workbench mirror). Change behavior there first, then keep this table in sync.
 
-Dormouse has two modes:
-
-- **Command mode** — keys drive pane layout and selection.
-- **Passthrough mode** — keys reach the selected Surface's content (a terminal's PTY, a browser surface's page), except the mode-switch gesture and the clipboard chords.
-
-The Wall runs one capture-phase `keydown` listener on `window` whose branches are tried in a fixed order: dual-tap gesture → text-field clipboard → terminal selection/clipboard keys → **passthrough gate** → **rename gate** → kill confirmation → **dialog gate** → pane shortcuts → arrow navigation. Rows reached before the passthrough gate therefore fire in *both* modes; everything after it is command-mode only. A popover or dialog that owns the keyboard (the alert dialog, the header context menu) adds its own listener on top and reports itself as dialog-keyboard-active, so the pane shortcuts stay dormant while it is open.
+Bindings reached before layout's passthrough gate fire in both modes; the rest are command-mode only. [layout.md](layout.md#keyboard-shortcuts-command-mode) owns the dispatch order and dialog gate.
 
 ## Mode switching
 
@@ -92,7 +87,7 @@ Mirrored workbench chords: the terminal still receives the key *and* Dormouse as
 | `⌘⇧P` / `Ctrl+Shift+P`, or `F1` (unmodified) | `workbench.action.showCommands` |
 | `⌘B` / `Ctrl+B` | `workbench.action.toggleSidebarVisibility` |
 
-The standalone (Tauri) host contributes no chords of its own. Its menu is deliberately minimal — an App submenu on macOS plus a Window submenu, and **no Edit menu**, so a native `⌘C`/`⌘V` cannot fight the webview's DOM handlers; the remaining chords are the OS defaults of those predefined menu items (`docs/specs/standalone.md`).
+The standalone host contributes no chords; `docs/specs/standalone.md` owns its native-menu contract.
 
 ## Implementation references
 

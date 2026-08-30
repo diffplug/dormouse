@@ -1,19 +1,6 @@
-// The Lath-side Wall store: the headless state machine + geometry + enter hints over
-// the pure core (docs/specs/tiling-engine.md → "The wall store and engine"). It
-// owns the split tree, a per-leaf metadata map, zoom, the reported layout geometry,
-// and the pending enter-hint map, and exposes a `useSyncExternalStore`-compatible
-// snapshot. Every mutator applies exactly one pure core op; a rejected op
-// (`ok: false`) commits nothing and returns the failure verbatim, so callers can
-// distinguish "did nothing" from "changed".
-//
-// This is the sole state authority: every state op and geometry query reaches it
-// directly as `lath.store.*`. The engine (`lath-wall-engine.ts`) only layers
-// presentation / vocabulary / persistence conveniences over it — it re-exports none
-// of these mutators or queries.
-//
-// What lives here is *geometry + metadata only*: there is no selection, focus,
-// mode, or activation anywhere in this file — those stay in the Wall, which wires
-// itself to this store.
+// Sole Lath state authority: geometry + metadata, never selection/focus/mode.
+// Each mutator applies one core op; rejection commits and notifies nothing.
+// See docs/specs/tiling-engine.md → "The wall store and engine".
 
 import {
   type Edge,
@@ -46,31 +33,16 @@ import { PANE_GUTTER_PX } from '../design';
 // itself lives with the persisted-layout wire format it serializes into.
 export type { LeafMeta };
 
-/** The geometry the wall lays out with: `gap` is the pane-to-pane gutter, `minLeaf`
- *  a comfortable minimum pane size. Pure data beside the store's geometry contract —
- *  the HTML adapter (LathHost) lays out with it and reports it back via
- *  `setLayoutGeometry`, so the store's queries (restore / resize / neighbors /
- *  autoEdge) match the screen. */
+/** Shared by LathHost rendering and the store's geometry-dependent queries. */
 export const LATH_LAYOUT_OPTS: LayoutOpts = { gap: PANE_GUTTER_PX, minLeaf: { width: 100, height: 60 } };
 
 /** An immutable view of the store. `getSnapshot` returns the same object identity
  *  until the next commit, as `useSyncExternalStore` requires. */
 export type LathWallSnapshot = {
   tree: LathTree;
-  /** Meta for every leaf the Wall owns — whether it is laid out in `tree` or
-   *  detached into a Door. Detachment is a fact about the TREE, not about metadata:
-   *  a Doored Surface keeps running and keeps updating its title/params, so the
-   *  store stays its single authority either way and no Door record has to carry a
-   *  copy that can go stale (docs/specs/layout.md → "Minimize and reattach"). The
-   *  persisted layout filters this down to `tree`'s own leaves. */
+  /** Meta for tree leaves and Doors alike; no runtime Door metadata copy. */
   leafMeta: ReadonlyMap<string, LeafMeta>;
-  /** The detached leaves whose DOM stays mounted, each with the rect it held when it
-   *  left the tree — pure render state for the adapter, keyed by leaf id
-   *  (docs/specs/tiling-engine.md → "Parked leaves"). Parking keeps an `<iframe>`
-   *  from reloading; it says nothing about metadata, which lives in `leafMeta` for
-   *  parked and unparked Doors alike. Insertion-ordered, so the cap evicts the
-   *  oldest. A null rect means the leaf was parked before it was ever laid out
-   *  (`dor iframe --minimize` creates and minimizes in one commit). */
+  /** Mounted detached leaves in eviction order; null means never laid out. */
   parked: ReadonlyMap<string, Rect | null>;
   zoomedId: string | null;
   /** Monotonic; bumps on every commit (meta writes and zoom included) so effects
@@ -78,14 +50,7 @@ export type LathWallSnapshot = {
   revision: number;
 };
 
-/** How many Surfaces may keep their DOM while Doored. Each parked leaf is a live
- *  document — an iframe still running its scripts, timers, and sockets — so
- *  "preserve state" has to stop somewhere. `doorLeaf` enforces this itself, in the
- *  same commit, so no caller can forget; past the cap the oldest DOM is dropped and
- *  that Surface reverts to reattaching by reload. Its metadata is untouched — only
- *  the DOM is capped. Generous enough that a normal baseboard never hits it; the
- *  workspaces-rollout switch (which parks a whole Workspace at a time) is what makes
- *  a bound necessary at all. */
+/** Cap live parked documents; oldest DOM is evicted while metadata survives. */
 export const MAX_PARKED_SURFACES = 8;
 
 /** Where a new leaf lands: beside `refId` on `edge`. `null` (or a `refId` that is

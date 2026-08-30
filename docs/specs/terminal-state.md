@@ -102,13 +102,6 @@ The parser accepts both BEL and ST terminators and handles split chunks. Support
 
 For shells without OSC 133/633 integration, the command is read from what is on screen rather than reconstructed from keystrokes.
 
-```
-idle prompt rendered ──learn──▶ prompt shape (terminator char + repeat count)
-Enter (not bracketed paste) + known shape ──parse rendered line──▶ commandLine + commandStart(user_input)
-prompt-looking output while a user_input command runs ──▶ synthesized finish → prompt
-first authentic OSC boundary ──▶ pane promoted to OSC-driven; fallback retired
-```
-
 - **Prompt-shape learning.** The store learns a cwd-invariant prompt **shape** — the prompt's trailing terminator character (`%`, `$`, `#`, `>`, `❯`, `➜`, `λ`) plus how many times that character already appears earlier in the prompt — from every detected idle prompt, including the shell's first prompt at spawn. A prompt with no recognized terminator yields no shape, hence no title, rather than a wrong one.
 - **Submit parsing.** On submit (an Enter that is not inside a bracketed paste) it reads the cursor's rendered logical line (`prompt + command`, soft-wrapped rows joined and bounded at the cursor column so zsh-autosuggestions ghost text is excluded) and splits the command off at the shape's terminator occurrence, trimming what follows. A non-empty result emits `commandLine` + `commandStart(source: "user_input")` immediately, so the active command shows without command-start integration. Parsing the rendered line makes the title correct regardless of how the command arrived — typed, history-recalled, or pasted — and independent of the race between shell output and idle detection. Command-internal terminators (`dir > out.txt`) survive because they sit after the prompt's own.
 - **Shape survival and reconnect seeding.** The prompt shape survives across commands (it does not reset on `promptStart`/`promptEnd`/`commandStart`) and is pre-seeded from restored scrollback on session restore / VS Code panel reopen, so the first command after a reconnect — when the live shell will not re-emit its prompt — is still titled. Seeding is learn-only and fires no prompt transition.

@@ -1,34 +1,18 @@
 import type { SessionStatus } from './alert-manager';
 import { ACTIVITY_NOTIFICATION_SOURCES, type ActivityNotification, type TodoState } from './alert-manager';
 
-/**
- * Only the TODO reminder and its notification detail survive a restart.
- * WATCHING is not persisted per Session — it is derived from the global rule
- * set keyed on the running command (`docs/specs/alert.md`). `status` is written
- * for diagnostics and older readers; restore never resurrects a ring from it.
- */
+/** Only TODO/detail restore; `status` is diagnostic and never resurrects a ring. */
 export interface PersistedAlertState {
   status: SessionStatus;
   todo: TodoState;
   notification?: ActivityNotification | null;
 }
 
-/**
- * Surface kind recorded per pane (`docs/specs/glossary.md`). Absent reads as
- * `'terminal'`. A `'browser'` pane has no PTY or registry entry; it
- * is reconstructed from the persisted layout, so restore/resume must route it
- * differently from a terminal (see `session-restore.ts`, `reconnect.ts`).
- */
+/** Absent means terminal; browser panes rebuild from the persisted layout. */
 export type PersistedSurfaceType = 'terminal' | 'browser';
 
-/**
- * Durable structure for one pane — furniture, never content. Scrollback is
- * deliberately absent: it is not persisted by any writer (docs/specs/transport.md
- * -> "What is persisted"). Nor is the agent recovery command: it is host-owned and
- * single-use, so it travels out of band on the boot payload
- * (`PlatformAdapter.getRecoveryCommands`) rather than through anything the webview
- * can save back.
- */
+/** Durable pane structure, never scrollback. Single-use recovery commands travel
+ * out of band through `PlatformAdapter.getRecoveryCommands`. */
 export interface PersistedPane {
   id: string;
   cwd: string | null;
@@ -38,13 +22,7 @@ export interface PersistedPane {
   surfaceType?: PersistedSurfaceType;
 }
 
-/**
- * Build the persisted record for a browser surface. Browser panes have no PTY,
- * so the terminal-only fields (cwd/untouched) are always
- * blank; the persisted layout reconstructs the surface and `alert` carries the
- * optional TODO. Single source of truth shared by the renderer save path
- * (`session-save.ts`) and the VS Code host refresh (`vscode-ext/session-state.ts`).
- */
+/** Shared browser-pane projection for renderer saves and VS Code host refresh. */
 export function browserPersistedPane(
   pane: { id: string; title: string },
   alert: PersistedAlertState | null,
@@ -91,22 +69,14 @@ export interface PersistedSession {
 
 export type WorkspaceId = string;
 
-/**
- * A named Workspace (one Wall's worth of Surfaces + its layout) as persisted
- * inside a `PersistedWindow` (`docs/specs/glossary.md`). Stage 2b. The inner
- * `session` keeps its own v3 versioning; the Window wraps it.
- */
+/** A named Workspace inside a Window; its inner Session keeps independent versioning. */
 export interface PersistedWorkspace {
   id: WorkspaceId;
   name: string;
   session: PersistedSession;
 }
 
-/**
- * The standalone Window's persisted snapshot: an ordered list of Workspaces and
- * which one is active. VS Code does NOT use this — each webview persists exactly
- * one bare `PersistedSession` (`docs/specs/vscode.md`). Stage 2b.
- */
+/** Standalone Window snapshot. VS Code persists one bare Session per webview. */
 export interface PersistedWindow {
   version: 1;
   workspaces: PersistedWorkspace[];
@@ -206,10 +176,7 @@ function normalizeSurfaceRefsNext(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1 ? value : undefined;
 }
 
-/** The conditional-spread of the surface-ref registry fields (`surfaceRefs` +
- *  its `surfaceRefsNext` counter), so a restored `PersistedSession`'s refs thread
- *  through `RestoredSession` / `ReconnectResult` without each carry site repeating
- *  the pair of presence checks. */
+/** Carry the optional ref map and counter together through restore/resume shapes. */
 export function carrySurfaceRefs(
   source: Pick<PersistedSession, 'surfaceRefs' | 'surfaceRefsNext'> | null | undefined,
 ): Pick<PersistedSession, 'surfaceRefs' | 'surfaceRefsNext'> {
@@ -219,12 +186,7 @@ export function carrySurfaceRefs(
   };
 }
 
-/**
- * Parse a persisted session blob (`version: 3`), or null if nothing usable is
- * present. A blob that is absent/empty returns null silently; one that is present
- * but unreadable (bad JSON, wrong shape) is logged and discarded so a corrupt save
- * can never block startup — the caller starts fresh (`docs/specs/transport.md`).
- */
+/** Parse a v3 Session; malformed present state warns and falls back to fresh. */
 export function readPersistedSession(raw: unknown): PersistedSession | null {
   if (isEmptyState(raw)) return null;
   const value = parseJsonString(raw);
@@ -237,18 +199,8 @@ function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession 
   const surfaceRefs = normalizeSurfaceRefs(session.surfaceRefs);
   const surfaceRefsNext = normalizeSurfaceRefsNext(session.surfaceRefsNext);
   const { surfaceRefs: _rawRefs, surfaceRefsNext: _rawNext, ...rest } = session;
-  // A transcript — or a `resumeCommand` — in a pre-upgrade blob is dropped here
-  // and cannot survive into a parsed Session; the one place that guarantees no
-  // reader hands either to a writer (docs/specs/transport.md -> "What is
-  // persisted").
-  //
-  // Named as a deny-list rather than rebuilt from an allow-list, because the scrub
-  // is the special case and the carry-through is the rule: an allow-list makes
-  // every *future* `PersistedPane` field silently vanish on read until someone
-  // remembers to add it here, with no type error to catch it — the field
-  // round-trips through the save fine and only shows up as "my setting doesn't
-  // survive a restart". Neither retired field is on `PersistedPaneInput`, hence
-  // the widening.
+  // Deny-list retired fields so future PersistedPane fields pass through without
+  // manual allowlist updates. Neither retired field is on PersistedPaneInput.
   const panes: PersistedPane[] = session.panes.map((pane) => {
     const {
       scrollback: _retiredScrollback,
@@ -302,16 +254,7 @@ export function wrapSessionInWindow(
   return { version: 1, workspaces: [{ id, name, session }], activeWorkspaceId: id };
 }
 
-/**
- * Read a persisted Window snapshot (a canonical `PersistedWindow` or a
- * JSON-stringified one). Returns null when nothing usable is present — an
- * absent/empty blob silently, a present-but-unreadable one with a warning so a
- * corrupt save can never block startup (`docs/specs/transport.md`).
- *
- * Each inner session is validated through `readPersistedSession`; Workspaces whose
- * session is unreadable are dropped. If `activeWorkspaceId` does not match any
- * Workspace, the first Workspace is made active so the snapshot stays usable.
- */
+/** Parse a Window, dropping invalid Workspaces and repairing a dangling active id. */
 export function readPersistedWindow(raw: unknown): PersistedWindow | null {
   if (isEmptyState(raw)) return null;
   const value = parseJsonString(raw);

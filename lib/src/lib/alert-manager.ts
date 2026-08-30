@@ -124,22 +124,10 @@ export interface AwaitHandle {
   cancel(): void;
 }
 
-/**
- * Grace window: the detector's own floor for reaching BUSY, so a caller that
- * arrives before the peer's first byte cannot be told "nothing is happening"
- * before the machine it is watching could possibly have reported. Derived from
- * `cfg.alert`, not a new number.
- */
+/** Detector floor for reaching BUSY; prevents a pre-output false idle. */
 export const AWAIT_GRACE_MS = cfg.alert.busyCandidateGap + cfg.alert.busyConfirmGap;
 
-/**
- * Ceiling on a parked await, matching `dor await --timeout`'s own 24h cap. It
- * exists here because the value ends up in `setTimeout`, whose delay is a
- * *signed 32-bit* millisecond count: anything above ~24.9 days silently
- * overflows and fires on the next tick, turning a long park into an instant
- * `timeout`. Rejecting is therefore safer than clamping — a caller asking for
- * more than a day is confused, not patient.
- */
+/** Host-side cap below `setTimeout`'s signed-32-bit overflow boundary. */
 export const MAX_AWAIT_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 
 /** One parked await. Owned by the `AlertManager`; see `awaitCompletion`. */
@@ -181,19 +169,8 @@ export const DEFAULT_ALERT_STATE: AlertState = {
   awaited: false,
 };
 
-/**
- * Three independent alarm tracks per Session, unioned into one public status.
- * Each track is IDLE -> (a busy/armed state) -> ringing, and each ring latches
- * in the entry until it is attended, dismissed, or TODO'd.
- *
- * The output/silence detector is not one of the tracks: it runs for every
- * Session for its whole lifetime and never latches anything. WATCHING is the
- * policy gate — whether the watched-commands rule set matches the foreground
- * command (`isWatching`) — and it decides both whether the detector's state is
- * publicly visible and whether a settle is allowed to ring. The ring itself
- * latches in `watchingRingingCommand`, which is why it survives the command
- * exiting (the same moment that usually turns WATCHING off).
- */
+/** Three independent alarm tracks plus an always-on, non-latching detector.
+ * WATCHING gates detector projection; its ring latches separately. */
 interface AlertEntry {
   /** Always-on output/silence detector. Never disposed before the entry is. */
   detector: QuiesceDetector;
@@ -217,38 +194,12 @@ interface AlertEntry {
   attentionDismissedRing: boolean;
 }
 
-/**
- * Manages the always-on output/silence detectors, attention tracking, the
- * WATCHING rule set, and todo state for PTY sessions.
- *
- * Every completion runs the same three steps in order: **observe** — a settle,
- * a command finish, or a notification/progress cycle end becomes a
- * `CompletionEvent`; **claim** — registered claimants get first refusal in
- * registration order, and a claimed event stops there; **ring rule** — only an
- * unclaimed event reaches its track's suppression rules and may latch a ring.
- * `dispatchCompletion` is the single place those ring rules live, so an
- * observer (`dor await`) can see completions that never ring a human.
- *
- * Portable — no DOM dependencies. Can run in the extension host (VSCode),
- * in the webview adapter (Tauri), or in tests.
- */
+/** Portable Session Activity manager. `dispatchCompletion` is the single
+ * observe→claim→ring seam, so await can claim completions before suppression. */
 export class AlertManager {
   private entries = new Map<string, AlertEntry>();
-  /**
-   * Sessions `remove()` has retired, until something proves the id is live
-   * again. `disposeSession` calls `alertRemove` and only *then* kills the PTY,
-   * so output already in flight keeps arriving after the entry is gone — and
-   * every PTY-driven entry point creates the entry it cannot find. Without
-   * this, each killed pane that was still producing output leaves behind a
-   * fresh `AlertEntry` and `QuiesceDetector` that nothing will ever dispose.
-   *
-   * Raw output and resizes cannot lift it: they are exactly what a dying PTY
-   * emits, and they carry no evidence that anyone is home. A semantic or
-   * protocol event does lift it, because an id can be handed to a *new*
-   * Session (a replacement pane reuses it, and the WATCHING rule set is
-   * supposed to apply immediately), and a command start is the first thing
-   * that Session reports.
-   */
+  /** Blocks late output/resize from recreating a removed entry. Only a semantic
+   * or protocol event proves a reused id belongs to a live replacement. */
   private removed = new Set<string>();
   private claimants = new Map<string, Set<CompletionClaimant>>();
   private awaits = new Map<string, AwaitGroup>();
@@ -261,15 +212,7 @@ export class AlertManager {
 
   // --- Settings ---
 
-  /**
-   * The walk-away window (`docs/specs/alert.md` -> Attention): how long
-   * "looking at this pane" lasts, and — because the same idea gates it — the
-   * minimum runtime a command needs before its exit is allowed to ring.
-   *
-   * `AlertSettingsHost` clamps before this is reached, but the value originates
-   * in a renderer and ends up in `setTimeout`, so nonsense is rejected here too
-   * rather than trusted from one caller away.
-   */
+  /** Walk-away and command-exit minimum-runtime window. Revalidate at this timer sink. */
   setInactivityTimeoutMs(ms: number): void {
     if (!Number.isFinite(ms) || ms <= 0 || ms === this.inactivityTimeoutMs) return;
     this.inactivityTimeoutMs = ms;

@@ -10,16 +10,7 @@
 
 ## Conceptual model
 
-A **Pane** holds a **Surface** — a terminal **Session** or a **browser surface** (`iframe` / agent-browser).
-
-A Surface's **View** state places it in one of two containers:
-
-- **Pane** — visible, in the content area. A terminal renders through xterm.js, a browser surface through `BrowserPanel`. The header carries the controls and doubles as the drag handle.
-- **Door** — minimized, in the baseboard, drawn as a mouse hole cut into it. The Surface stays alive — a terminal's PTY keeps running and buffering; a browser surface's backing session or proxy grant stays alive and its DOM stays mounted-but-hidden (see [Minimize and reattach](#minimize-and-reattach)). The door shows the Surface's title plus alert and TODO indicators.
-
-**Transitioning between Pane and Door never alters the Surface.** Terminal content, scrollback, and process state survive; for a browser surface the backing session survives while the *viewer* resources are released — no canvas, screencast WebSocket, screenshot loop, or input forwarding runs while it is a Door.
-
-A **Workspace** is the named group of Surfaces rendered by a single **Wall**, together with their layout. A Window may hold several Workspaces. This spec owns the standalone Workspace presentation; the strip UI and real switching are staged in [Future](#future) (**Scope: workspaces-rollout**). VS Code maps each Workspace to its own webview instead (`docs/specs/vscode.md`).
+A Wall renders one Workspace's Surfaces as Panes in Content or Doors on the Baseboard. Pane↔Door preserves the Surface; a Doored browser Surface keeps its backing session while releasing its viewer resources (see [Minimize and reattach](#minimize-and-reattach)). The standalone Workspace strip and switching are staged in [Future](#future) (**Scope: workspaces-rollout**); VS Code maps each Workspace to a webview (`docs/specs/vscode.md`).
 
 ## Shell layout
 
@@ -283,7 +274,7 @@ Submitted values are rejected when empty or when they fail the `setTerminalUserT
 
 ## Session lifecycle and terminal registry
 
-For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getOrCreateTerminal(id)` on React mount and `unmountElement(id)` on React unmount. The session (xterm.js instance, PTY, DOM element) persists in the registry across mount/unmount cycles — the DOM element is detached from its container but the Registry entry stays `Mounted`. A browser surface's pane ID is a Surface id with no registry entry or PTY (`docs/specs/glossary.md`); its DOM is hosted by LathHost's leaf div and it is reconstructed from persisted params, not from the registry.
+For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getOrCreateTerminal(id)` on React mount and `unmountElement(id)` on React unmount. The session (xterm.js instance, PTY, DOM element) persists in the registry across mount/unmount cycles; an unmounted element leaves the entry `Orphaned`. A browser surface's pane ID is a Surface id with no registry entry or PTY (`docs/specs/glossary.md`); its DOM is hosted by LathHost's leaf div and it is reconstructed from persisted params, not from the registry.
 
 - **Create**: `getOrCreateTerminal` spawns xterm.js + UnicodeGraphemesAddon + FitAddon + PTY, returns existing if already created. The xterm instance sets `allowProposedApi: true` because UnicodeGraphemesAddon activates through xterm's proposed Unicode API. The WebGL addon is *not* loaded at create — it is claimed lazily on the session's first mount (see "Renderer" below).
 - **Resume**: `resumeTerminal` creates xterm entry and writes replay data without spawning a new PTY. Used when the webview is recreated while the host retains Live PTYs (Link: Severed → Resuming → Live).
@@ -298,33 +289,7 @@ For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getO
 
 ### Agent resume on cold restore
 
-A cold **restore** spawns a *fresh* shell and replays nothing. What can come back
-is the agent the host interrupted on its way down: when the host's boot payload
-carries an invocation for that surface (`PlatformAdapter.getRecoveryCommands`;
-`docs/specs/transport.md` → "The recovery command"), the restored pane runs it —
-no prompt, no button.
-
-- **Restore only.** `restoreSession` passes the command to `restoreTerminal` per
-  terminal pane; **resume** never does, because there the agent is still Live and
-  has nothing to resume. Browser surfaces are skipped with the rest of the terminal
-  restore path.
-- **Revalidated, not trusted.** `normalizeResumeCommand` re-checks the invocation
-  before it is typed, so a snapshot written by an older detector cannot execute
-  something the current grammar would reject.
-- **Typed at the prompt, not at spawn**, through the same
-  `typeCommandWhenPromptReady` wait as a `dor split` launch, with `commandLine` +
-  `commandStart(user_input)` seeded synchronously first
-  (`docs/specs/transport.md` → "Consuming it" owns both rules).
-- **The pane announces it.** One dim line — `⟲ resuming agent session: <command>` —
-  written to xterm, not the PTY. With no transcript, it is the only thing saying
-  why an agent appeared, and it marks the discontinuity the resume otherwise
-  hides: the interrupted turn did **not** continue. A notice, not a control — no
-  dismiss, no retirement rules.
-- **No confirmation gate**, for the reasons recorded in `docs/specs/transport.md`
-  → "Consuming it".
-
-Source of truth: `restoreTerminal` in `lib/src/lib/terminal-lifecycle.ts`, called
-from `lib/src/lib/session-restore.ts`.
+On cold restore, a terminal pane with a host-captured recovery invocation runs it automatically; `docs/specs/transport.md` owns the restore-only gate, validation, and prompt-ready typing. Layout writes one dim `⟲ resuming agent session: <command>` line to xterm, never the PTY, to mark the discontinuity; it is a passive notice with no dismiss or lifecycle. Source of truth: `restoreTerminal` in `lib/src/lib/terminal-lifecycle.ts`, called from `lib/src/lib/session-restore.ts`.
 
 ### Renderer
 
