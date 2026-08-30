@@ -38,7 +38,7 @@ The webview itself is the shared `lib/` frontend, unmodified for this host: see 
 
 Universal PTY/transport invariants live in `docs/specs/transport.md`. The rules below are specific to running inside the VS Code extension host.
 
-- **Capture, then save, then kill.** `deactivate()` runs the agent-recovery capture *first* and both kills *last*, with the state flush and the live-PTY refresh in between: the resume hint exists only between the interrupt and the kill, and CWD queries need live processes. Full ordering under "VS Code persistence flow" below; `extension.ts:deactivate()` is the source of truth.
+- **Capture, then save, then kill.** `deactivate()` runs the agent-recovery capture *first* and both kills *last*, with the state flush and the live-PTY refresh in between: the resume hint exists only between the interrupt and the kill, and CWD queries need live processes. Full ordering under "Serialization and restore" below (capture mechanics: "Capturing agent recovery"); `extension.ts:deactivate()` is the source of truth.
 - **Alert state is global.** A single `AlertManager` instance in `message-router.ts` is shared across all routers and survives router disposal. PTY data feeds into it at module level, regardless of webview visibility.
 - **WATCHING rules are host-authoritative.** The first webview seeds the shared host rule set after extension-host startup. Later webviews cannot replace it: rule edits arrive as per-command mutations, and `WatchedCommandHost` broadcasts the resulting canonical snapshot to every renderer so their dialogs and persisted mirrors stay synchronized.
 - **PTY ownership tracking.** Each router tracks its PTYs in `ownedPtyIds`. A module-level `globalOwnedPtyIds` set prevents a resuming router from stealing PTYs owned by another webview.
@@ -172,10 +172,14 @@ once let `[deactivate] done` print. So the one step whose data cannot be
 reconstructed afterwards runs before the steps whose data can (cwd re-reads, alert
 merges). `captureAgentRecoveryCommands` writes `^C` into every live PTY, waits
 bounded for what they print, scans those buffers, and records the invocation to a
-file of its own with a synchronous write — not to `workspaceState`, whose SQLite
-flush is already tearing down by then, and not to `PersistedPane.resumeCommand`,
-which the later step-3 flush would overwrite with the webview's stale copy
-(`docs/specs/transport.md` → "VS Code teardown ordering").
+file of its own — `recovery.json` under `context.storageUri`, written
+synchronously and replaced temp-then-rename — not to `workspaceState`, whose
+SQLite flush is already tearing down by then (measured: detection complete, the
+record never written), and not to `PersistedPane.resumeCommand`, which the later
+step-3 flush would overwrite with the webview's stale copy. The record is
+rewritten the moment each command is found, so being killed mid-poll costs at
+most a late agent's command; every wait is bounded, and a timeout loses the
+recovery command rather than delaying shutdown.
 
 **On activate**, saved state is loaded and passed to routers for cold-start restore
 via `readPersistedSession()` (defined in `docs/specs/transport.md`), which tolerates
@@ -183,7 +187,68 @@ both parsed objects and JSON-stringified blobs returned by VS Code state APIs. T
 WebviewView and each deserialized WebviewPanel then claim the recovery commands
 matching *their own* pane ids out of the single record written at teardown
 (`docs/specs/transport.md` → "Consuming it"); neither container owns the record, so
-resolving first cannot delete the other's commands.
+resolving first cannot delete the other's commands. A panel's pane ids come from
+the `vscode.setState()` blob VS Code hands back at `deserializeWebviewPanel`, so
+recovery needs no host-side per-panel store — the record is keyed by surface id,
+not owned by a container.
+
+#### Capturing agent recovery
+
+The agents print their resume invocation when **interrupted**, not when
+signalled — SIGTERM is inert against both — so capture writes `^C` to the pty:
+the tty line discipline delivers SIGINT to the foreground process group itself
+(no `tcgetpgrp`, no master fd node-pty does not expose, and a path that exists
+on ConPTY too), the shell survives, and the hint arrives as ordinary
+`pty:data`. Every live terminal PTY is interrupted, not just recognized agents:
+a foreground gate would need per-pane command knowledge the host does not have,
+`^C` into a non-agent is inert, `detectResumeCommand` is the real filter, and
+every one of these processes is killed seconds later regardless. Exited PTYs
+*are* excluded — they can neither take a `^C` nor yield a hint, and including
+them would permanently defeat the "nothing left to wait for" early exit.
+
+**Press-wait-press, gated per pane.** The two agents want opposite things:
+claude prints its hint only on a *second* press (after `Press Ctrl-C again to
+exit`), while codex prints after the first — at a latency that is not a
+constant — and a second press arriving mid-print destroys its hint entirely.
+So: one `^C` to every live PTY, then poll on a 40 ms tick, sending one more
+`^C` to a pane that has yielded nothing either the moment it asks
+(`Press Ctrl-C again`) or once ~600 ms have passed with ~200 ms of silence —
+quiet used as evidence that a print is not in flight, **not** as evidence the
+pane is finished. Both clocks start when the first press is *acked*, not at
+step entry: they are statements about the agent, and measuring from entry folds
+the interrupt's own round trip into the window. The poll's ~1.2 s wall-clock
+ceiling is the one timing anchored to entry, being a shutdown budget rather
+than an agent timing. **Do not finish early on quiet**: codex says nothing for
+~250 ms and then prints its entire shutdown at once, so silence is what it
+looks like *before* it speaks — two settle-on-quiet heuristics died on exactly
+that, and the only sound early exit is having nothing left to wait for.
+Polling to the ceiling is affordable because the record is written eagerly.
+Coupling the ask gate to an English UI string is deliberate: a wording change
+loses claude's recovery visibly and recoverably, where a mistimed window
+destroys codex's every single time.
+
+**Only post-interrupt bytes count.** Each pane's received-count mark
+(`getScrollbackReceived`, `docs/specs/transport.md` → Universal invariants) is
+taken before the first `^C`, and detection reads only what arrived after it. A
+correctness boundary, not an optimisation: the command is executed on the next
+restore, so the only bytes allowed to become executable state are the ones
+produced in response to Dormouse's own interrupt — scanning the whole buffer
+let a stale hint or an old launch echo win. It also fails in the safe
+direction: buffer eviction can only discard fresh output, never promote stale
+output as fresh. Widening this scan would quietly weaken the provenance
+argument that lets recovery auto-run without confirmation
+(`docs/specs/transport.md` → "Consuming it").
+
+The capture also clears any previous record before its first early return —
+consumption happens only when a container actually resolves, so a session
+where the Dormouse view is never opened would otherwise carry the record
+forward and auto-run a week-old invocation on some much later restore. One
+environment hazard: `CLAUDE_CODE_CHILD_SESSION` in a pane's env disables
+transcript saving in claude, which then prints no hint at all — a missing hint
+is ordinary, and a Dormouse launched from inside a Claude Code session
+legitimately produces nothing. Source of truth: `captureAgentRecoveryCommands`
+in `vscode-ext/src/session-state.ts`, `interrupt` in
+`vscode-ext/src/pty-manager.ts`.
 
 ### Theme integration
 
@@ -264,7 +329,7 @@ A webview is a **surface responder plus UI**: it answers what its own panes are 
 
 The service reads both **in-process**, and the store interface (`HostStateStore`) is async because the places state lives are. The enrollment is read once and kept, since `SecretStorage` is a keychain round trip and both the activation probe and the service want the same answer.
 
-That memo is only safe because it is invalidated across windows: `SecretStorage` is shared by every window of an extension and `secrets.onDidChange` fires in all of them, so the store drops the memo whenever the enrollment key changes anywhere. Without it a promoted broker could resurrect an enrollment another window cleared, or never see one another window created. The ACL is deliberately **not** memoized — it is read from `globalState` on every load, which is in-process and free. All mutations are serialized in call order; in particular, two rapid pairing approvals write successively larger ACL snapshots, and the older snapshot must not finish last and erase the newer approval on restart. A failed write rejects its caller but does not wedge later mutations. That rule holds for every Host store, so it is one helper (`createSerialQueue` in `lib/src/host/remote/serial-queue.ts`) shared by this store, the sidecar's file store, and the service's own start/stop chain. The same subscription is what lets a window that was un-enrolled at activation join a Host a sibling just created: `initRemoteHost` re-checks on the event and contends then, with no reload.
+That memo is only safe because it is invalidated across windows: `SecretStorage` is shared by every window of an extension and `secrets.onDidChange` fires in all of them, so the store drops the memo whenever the enrollment key changes anywhere. Without it a promoted broker could resurrect an enrollment another window cleared, or never see one another window created. The ACL is deliberately **not** memoized — it is read from `globalState` on every load, which is in-process and free. All mutations ride the shared serial queue under the store contract (`docs/specs/server.md` → "Host side"); a failed write rejects its caller but does not wedge later mutations. The same subscription is what lets a window that was un-enrolled at activation join a Host a sibling just created: `initRemoteHost` re-checks on the event and contends then, with no reload.
 
 The keys and JSON values are the ones the webview-resident Host wrote before the service existed (`ENROLLMENT_KEY` in `lib/src/remote/host/store.ts`, `ACL_KEY_PREFIX` in `lib/src/remote/host/acl.ts`, one entry per `hostId` so a re-enrollment cannot inherit a stale ACL), so an already-enrolled installation is picked up with no migration step. Both names are imported rather than mirrored: a key that drifted between the two sides would strand an enrollment that is still on disk.
 

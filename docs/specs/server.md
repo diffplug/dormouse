@@ -522,6 +522,37 @@ called — and reaches the service over the `remoteHost:*` bridge, so the consol
 API's shape is unchanged and its calls are now promises one round trip further
 away.
 
+**One service, two bindings.** The runtime every host shares lives in
+`lib/src/host/remote/`: the service itself (`service.ts`), the wire contract
+both ends of the bridge compile against (`service-protocol.ts`), the webview
+half of the bridge (`link-client.ts` — command correlation, the 15 s timeout,
+and the rule that an ask is *always* answered even when nothing matches), the
+enrollment exchange (`enrollment.ts`), the edge-triggered webview gate
+(`enrolled-gate.ts`), the ask-backed surface provider
+(`ask-surface-provider.ts`; the provider seam itself is
+[remote-api.md](./remote-api.md)), and `serial-queue.ts`. What remains per host
+is its store, its process plumbing, and its transport for the three bridge
+messages — specced in `docs/specs/standalone.md` → "Remote Host service" and
+`docs/specs/vscode.md` → "Remote Host: a service in the extension host", with
+the per-host message-name table in `docs/specs/transport.md` → "Message
+protocol".
+
+**The store contract.** Both stores implement `HostStateStore`
+(`lib/src/host/remote/host-state-store.ts`) under the same rules: reads fail
+closed — an error that says nothing about what the file holds must answer
+neither empty nor stale, because an empty ACL silently de-pairs every device;
+the in-memory view advances only after the durable write lands, so a failed
+save cannot be mistaken for durable state by a later read; every mutation is
+serialized in call order through the shared `createSerialQueue`
+(`lib/src/host/remote/serial-queue.ts`, also the service's own start/stop
+chain) — two rapid pairing approvals write successively larger ACL snapshots,
+and the older must not finish last and erase the newer; and a store that
+cannot persist still *holds* what it is given in memory and reports
+`persistent: false` rather than dropping writes. Each store's mechanics — the
+sidecar's single 0600 JSON file, rename semantics, and memory fallback;
+VS Code's SecretStorage/globalState split and cross-window memo invalidation —
+live in that host's spec.
+
 * **Enrollment** (Settings dialog, or the console hook, once): server URL +
   setup password → `POST /api/host/enroll` → the service persists
   `{ serverUrl, hostId, hostToken, origin, rpId }` (+ `requireUserVerification`
@@ -758,279 +789,33 @@ in; clearing site data destroys that device key → re-pair, per the security
 model; a dropped WebSocket sends you back to the Hosts view — reconnect by
 tapping Connect again.
 
-## Installing it (behind Tailscale)
+## Installing it
 
-The selfhost deployment that exists today is a **per-login user agent on the
-user's own laptop**, reachable only from their tailnet: a LaunchAgent on macOS,
-a Scheduled Task on Windows, a systemd *user* service on Linux. `tailscale serve`
-terminates HTTPS on the node's own MagicDNS name and proxies to the server on
-loopback. There is no cloud relay: an always-on relay is the same per-login
-install on an always-on tailnet machine, with `--linger` on Linux
-([SELF_HOST.md](../../SELF_HOST.md)). A managed multi-tenant deployment is
-staged under `## Future` below.
+The shipped selfhost deployment is a per-login user agent on the user's own
+machine, reachable only from their tailnet — a LaunchAgent on macOS, a
+Scheduled Task on Windows, a systemd *user* service on Linux — with
+`tailscale serve` terminating HTTPS on the node's MagicDNS name and proxying to
+the server on loopback. There is no cloud relay: an always-on relay is the same
+installer on an always-on tailnet machine. Availability follows from what a
+per-login agent is: the relay is down while the machine sleeps, is shut off, or
+has no logged-in user — usually fine, since there is then no local Host to
+control either.
 
-The security properties this deployment is audited against — the credential
-modes, the CSPRNG setup password and its entropy guard, the loopback bind, the
-origin-rewrite refusal, the privilege refusal, the Funnel check, and the
-release-identity rule below — are the "Network posture" and "Credentials at
-rest" `FAIL IF` lines in `SECURITY.md`. Those lines bind **all three**
-installers; a control present in one and absent from another is a finding, and
-`scripts/deploy-lint.mjs` (`pnpm lint:deploy`, part of `pnpm test`) checks each
-one textually against each installer — the only automated signal the Windows
-edition has, since nothing in CI executes PowerShell. Its companion
-`scripts/deploy-lint-selftest.mjs` deletes each matched control in turn and
-requires the lint to fail, so a rule cannot be satisfied by prose about itself.
-
+**[SELF_HOST.md](../../SELF_HOST.md) is both the operator runbook and the
+installer spec**: the platform mechanism map, the invariants the three
+installers hold, and the mechanical traps they encode all live in its
+"Installer contract" section, audited by the `FAIL IF` lines in `SECURITY.md`
+and checked textually by `scripts/deploy-lint.mjs` (`pnpm lint:deploy`).
 Source of truth: `deploy/local/install-macos.sh`,
-`deploy/local/install-windows.ps1`, and `deploy/local/install-linux.sh` — one
-idempotent script per platform, the whole mechanism there, with no hand-edited
-service definitions and no scheduled updater. Running it again updates the
-installed release from the current checkout; it never pulls, fetches, or
-switches branches. The operator runbook is [SELF_HOST.md](../../SELF_HOST.md).
+`deploy/local/install-windows.ps1`, `deploy/local/install-linux.sh`.
 
-Each release is self-contained: the production server tree, `lib/dist-pocket`,
-and a **copy of the exact Node binary the build ran under**, so the service
-depends on neither the source checkout, nor Homebrew/nvm/a version manager, nor
-pnpm's store, nor the user's interactive `PATH` — none of launchd, Task
-Scheduler, or the systemd user manager reads any of those. The install root
-holds `bin/` (the stable `run-server` wrapper and the `manage` helper),
-`config/`, `state/`, and `releases/<id>` with a current/previous pointer.
-
-The invariants below are shared; where the three platforms reach them by
-different means the text is tagged `(macOS)`, `(Windows)` or `(Linux)` inline.
-This table is the mechanism-by-mechanism map:
-
-| | macOS | Windows | Linux |
-| --- | --- | --- | --- |
-| Service | LaunchAgent `sh.dormouse.server` in `gui/$UID` | Scheduled Task `\Dormouse Server`, at-logon, `LogonType=Interactive`, `RunLevel=Limited` | systemd **user** unit `dormouse-server.service` in `$XDG_CONFIG_HOME/systemd/user` |
-| Install root | `~/Library/Application Support/Dormouse Server` | `%LOCALAPPDATA%\Dormouse Server` | `$XDG_DATA_HOME/dormouse-server` (`~/.local/share/dormouse-server`) |
-| Logs | `~/Library/Logs/Dormouse Server` | `<root>\logs` | `$XDG_STATE_HOME/dormouse-server/logs`, via `StandardOutput=append:` |
-| RunAtLoad | plist `RunAtLoad` | the at-logon trigger | `WantedBy=default.target` — the user manager starts it with the session |
-| KeepAlive | plist `KeepAlive` — launchd restarts on any exit | the supervision loop in `bin\run-server.ps1`; Task Scheduler's `RestartCount` fires only on a *failed* exit, so it is defence in depth, not the mechanism | `Restart=always`, `RestartSec=10` — the same throttle the plist declares as `ThrottleInterval` |
-| Stopping it | `launchctl bootout` takes the process tree | ends only the `powershell.exe`; its `cmd.exe`/`node.exe` children survive and are reaped by install root (see the trap below) | `systemctl --user stop` takes the whole cgroup, so no orphan survives |
-| `current`/`previous` | symlinks, swapped with `rename(2)` on the link path | `current.txt`/`previous.txt` naming a release id, swapped with `rename(2)` on the file | symlinks, swapped with `rename(2)` on the link path |
-| `0700` / `0600` | the modes, under `umask 077` | a DACL protected from inheritance carrying exactly one ACE, for the installing user | the modes, under `umask 077`; `verify` checks mode **and** owner |
-| Refuses | running as root (`id -u`) | running elevated (the `Administrator` role) | running as root (`id -u`) |
-| Entry | `/bin/bash bin/run-server` | `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File bin\run-server.ps1`, at an absolute interpreter path | `ExecStart=/bin/bash "<root>/bin/run-server"` |
-
-Two of those rows are the load-bearing Windows deviations, and both exist
-because the macOS mechanism has no unprivileged Windows equivalent:
-
-* **The release pointer is a file, not a symlink.** Windows has no
-  unprivileged replaceable directory symlink — a junction cannot be renamed over
-  an existing junction, and a delete-then-create leaves a window in which
-  `current` names nothing. A file *can* be replaced atomically
-  (`MoveFileEx(MOVEFILE_REPLACE_EXISTING)`), so the pointer holds the release id
-  and `bin\run-server.ps1` joins it to `releases\`. The switch still asserts
-  afterwards that the pointer advanced.
-* **KeepAlive lives in the wrapper.** Task Scheduler restarts a task that
-  *fails*, not one that exits 0 — which is what launchd's `KeepAlive` does. So
-  `bin\run-server.ps1` is a supervision loop with the plist's own 10-second
-  throttle, and `manage verify` checks the loop is still there rather than
-  trusting the task settings alone.
-
-Linux has unprivileged symlinks, real file modes, and a service manager that
-tears down a whole cgroup, so it needs none of those workarounds and stays close
-to the macOS script. It has one deviation of its own:
-
-* **Lingering is the availability knob, and it is opt-in.** A systemd user
-  manager starts at login and stops at logout — the same per-login shape as a
-  LaunchAgent, so the default install matches the documented availability
-  property exactly. `loginctl enable-linger` *changes* that property, keeping
-  the service up while the user is logged out and starting it at boot, so the
-  installer never enables it silently: it is the `--linger` flag, and
-  `manage verify` reports which mode is live rather than asserting either.
-
-Invariants the installer exists to hold:
-
-* **One replica, and an update is a short intentional restart.** Challenges,
-  sessions and relay bindings are in memory (Guardrails above), so Hosts and
-  Pocket clients reconnect across a release switch. There is no zero-downtime
-  swap to attempt.
-* **State outlives code.** `config/` and `state/` sit outside `releases/`, are
-  readable only by the installing user, and are never touched by an update, a
-  prune, or an uninstall. `config/server.env` is likewise user-only, generated
-  once with a setup password drawn from the platform's CSPRNG — 32 bytes, i.e.
-  **64 hex characters**, and a guard refuses to install anything shorter,
-  counting characters rather than bytes so a regression to half the entropy
-  cannot pass — and preserved byte-for-byte thereafter. `manage verify` also
-  fails if the password ever appears in the service definition; it must live
-  only in `server.env`. Purging state is a separate, explicitly confirmed
-  operation. On Windows the installer creates `server.env` and applies its DACL
-  *before* writing the password, so the secret never sits under the inherited
-  `%LOCALAPPDATA%` ACL; Linux does the same with `chmod 0600` on an empty file
-  before the first byte. Node's file modes are a no-op on Windows, so the files
-  inside `state\` are covered by what they inherit from the directory rather than
-  by `server/src/state.ts`'s `0o600`; `manage verify` walks them individually
-  there, where the macOS and Linux ones do not need to.
-* **Loopback only, and tailnet-only.** The install pins
-  `DORMOUSE_BIND_HOST=127.0.0.1` and refuses to proceed without it — see the
-  Configuration note above on why the listen interface is a security boundary
-  when the TLS proxy is local. Port 3100, deliberately not 3000, so the
-  installed service can coexist with `pnpm dev:server` /
-  `pnpm dev:pocket-server` on the same laptop. `verify` also fails on an
-  active `tailscale funnel`: Serve and Funnel are one configuration surface,
-  and a Funnel publishes this same origin to the public internet, where the
-  setup password becomes an internet-facing guessing target that nothing in
-  the threat model was sized for (`SECURITY.md` -> "Network posture").
-* **`DORMOUSE_ORIGIN` is durable WebAuthn identity.** It is derived from the
-  node's MagicDNS name. If an existing installation records a different origin
-  the installer stops rather than rewriting it, because the rewrite silently
-  invalidates the registered passkey and every enrolled Host.
-* **The install belongs to one user account.** Every installer refuses to run
-  privileged — as root on macOS and Linux, elevated on Windows — because the
-  whole credential posture is that one account owns `config/` and `state/`. An
-  elevated run would write them owned by another principal and register the
-  service for it. The property is checked from the other side too: on unix,
-  "reachable only by the installing user" is mode **and** owner, since a `0700`
-  directory owned by another principal satisfies the mode and inverts the
-  property. Linux's `manage verify` asserts both legs on `config/`, `state/` and
-  `config/server.env`. *(The macOS installer checks the modes only, and not yet
-  the owner.)*
-* **A failed update is a failure.** The candidate release is health-checked on
-  an ephemeral port against a throwaway state dir *before* `current` moves; if
-  the live service then fails to answer, `current` is restored to `previous` and
-  the installer exits nonzero. Rollback succeeding is not success. The restore
-  also clears `previous` on every platform, because the switch had already aimed
-  it at the release `current` is being restored to — leaving both naming one
-  release makes `verify` report a rollback target that does not exist and
-  `rollback` swap a release with itself and call it success. On macOS and Linux
-  that clear is gated on the restore having actually landed (`rollback_release`
-  re-reads `current` and returns early otherwise): both call sites are
-  `rollback_release || true`, which disables `errexit` for the whole function
-  body, so without the gate a failed restore would strip the rollback pointer
-  off an install still running the rejected release. Those two also refuse the
-  same-release state independently in `manage verify` / `manage rollback`, so an
-  install left in it by an older installer reports honestly. The restore then
-  confirms *which* release answered rather than that anything did (next
-  invariant); on Windows it reaps orphaned processes first, per the Scheduled
-  Task trap below.
-
-* **A 200 does not say who answered.** An orphan of an older release holds the
-  loopback port and replies to `/api/hello` exactly like a healthy current one,
-  so a bare health check passes while stale code serves — and on the forward
-  path that turns a failed update into a reported success. Every place whose
-  contract is which release is running therefore proves the responder's
-  identity: the post-switch health check (which rolls back and exits nonzero on
-  a mismatch), the rollback restore, `manage verify`, and — because the identity
-  is folded into the health *wait* rather than bolted onto its callers — every
-  command that waits for health, which is `manage rollback` and `manage
-  restart`. Waiting on the identity rather than asserting it after the first 200
-  also absorbs the window in which an outgoing process answers one last time.
-  Two known exceptions, both stated so the invariant is not read as covering
-  them: Windows `manage restart` still accepts a bare 200, because `Wait-Health`
-  has no identity check and its callers do not add one; and `manage status` on
-  all three platforms is outside this by design, reporting what the pointers say
-  rather than who is answering.
-
-  **The server answers this itself.** `run-server` passes
-  `DORMOUSE_RUNTIME_FILE` and `DORMOUSE_RELEASE_ID` (Configuration above), and
-  the server writes them there once it has *bound*, so `listening_release` is a
-  file read, a port match and a liveness check on all three platforms rather
-  than three different walks of the process table — which is also what took `ss`
-  off Linux's critical path, so a box without iproute2 installs fine and loses
-  only `manage verify`'s bind check. It cannot go in `/api/hello`, which is
-  unauthenticated, CORS-`*` and reachable through `tailscale serve`. Linux still
-  leads with `systemctl --user is-active`, which is not redundant: it catches a
-  responder no port-holder lookup can see at all — a foreign network namespace,
-  or WSL with `networkingMode=mirrored`, where loopback is shared with the
-  Windows host and the listener can be a Windows process.
-
-  Empty means **unknown**, never "nobody": a stale file whose pid is dead, a
-  server started outside the installer, and a foreign process that got the port
-  first are indistinguishable from the reader's side, and all must fail the
-  comparison rather than pass it. A clean exit removes the file; a crash leaves
-  it, which the liveness check reads correctly. Source of truth:
-  `server/src/runtime-file.ts`, read by `listening_release` (macOS, Linux) and
-  `Get-ListeningRelease` (Windows).
-
-Mechanical traps the scripts encode, each of which fails silently otherwise:
-
-* **`pnpm deploy --prod --legacy` poisons the workspace.** (All three.) It
-  rewrites the root `node_modules/.pnpm-workspace-state-v1.json` to
-  `production: true` / `dev: false`, after which every pnpm command in that
-  checkout decides the workspace is stale and reaches for
-  `pnpm install --production`, stripping the developer's devDependencies. The
-  installer snapshots that file and restores it unconditionally on exit — `EXIT`
-  trap on macOS and Linux, `finally` on Windows — so even a failed install
-  leaves the checkout as it found it.
-* **`mv -f tmp link` follows a symlink to a directory.** (macOS, Linux.) Used to
-  swap `current`, it deposits the temp link *inside* the old release and leaves
-  `current` where it was — a silent no-op update, after which the prune deletes
-  the release nothing points at. The switch uses `rename(2)` on the link path
-  instead, and asserts afterwards that `current` advanced.
-* **`pnpm` resolves to a `.ps1` before its `.CMD`.** (Windows.) The shim cannot
-  be launched as a process, so the installer takes the first
-  `Application`-typed resolution rather than `(Get-Command pnpm).Source`.
-* **Redirecting a native command's stderr inline sets `$?` to false.**
-  (Windows.) PowerShell 5.1 wraps each stderr line in an `ErrorRecord`, so a
-  clean `exit 0` reads as a failure. Every external command in the installer's
-  control flow goes through one `Invoke-Native` helper that captures both
-  streams via `Start-Process`. Two spawns bypass it deliberately, each needing
-  something `Start-Process` cannot express: the candidate-release probe (the
-  `env -i` analog) and `run-server.ps1`'s `cmd.exe` append redirector.
-* **Stopping a Scheduled Task does not reap its grandchildren.** (Windows.)
-  Task Scheduler ends the `powershell.exe` it launched; the `cmd.exe` and
-  `node.exe` beneath it survive. The orphan keeps `127.0.0.1:3100`, so the next
-  start cannot bind — and because it answers `/api/hello` exactly like a healthy
-  server, every health check passes while the *old* release serves. (This is
-  SELF_HOST.md's "a stale process on 3100 would let the post-install health
-  check pass against the wrong server" preflight, reached from the inside.) Two
-  defences, both required: the installer and `manage` reap every process
-  belonging to the install root before any start — matched by image path and
-  command line, never by image name, which would kill unrelated `node.exe`
-  processes including the invoking pnpm; and no health check accepts a 200 as
-  proof, per "A 200 does not say who answered" above. Source of truth:
-  `Get-DormouseProcess` / `Get-ListeningRelease`.
-* **Each `tailscaled` refuses in its own way, and preflight must translate.**
-  On Windows the local API serves one interactive session at a time, so a second
-  signed-in profile makes every call fail
-  `401 Unauthorized: Tailscale already in use by <user>` — matched in preflight
-  and reported as which account holds it, rather than as "is Tailscale signed
-  in?". On Linux the socket is root-owned, so an unprivileged `tailscale serve`
-  is refused; unchecked, that refusal lands at the Serve step — after the build,
-  and after `current` has already advanced. Preflight probes
-  `tailscale serve status`, matches the denial, and prints the one-line fix
-  (`sudo tailscale set --operator=$USER`) rather than running sudo itself.
-* **`systemctl --user` needs a real login session, not just a shell.** (Linux.)
-  Under `su`, or anywhere `XDG_RUNTIME_DIR` is unset and no user manager runs,
-  it fails with a message about `DBUS_SESSION_BUS_ADDRESS` that does not say
-  what to do. Preflight checks `systemctl --user show-environment` and names the
-  fix — log in properly, or `machinectl shell $USER@`.
-* **`StandardOutput=append:` is systemd 240 or newer.** (Linux.) Older systemd
-  does not understand the directive and truncates the log on every restart, so
-  `manage logs` would quietly show only the current run. The installer parses
-  `systemctl --version` and refuses below 240 rather than installing a unit
-  whose logging silently lies.
-
-The installers carry two test-only hooks, each refused unless
-`DORMOUSE_INSTALL_TEST=1`: `DORMOUSE_INSTALL_ROOT` puts the whole install under
-a throwaway path, and — Linux only — `DORMOUSE_INSTALL_ORIGIN` supplies the
-origin so Tailscale is never consulted. That last one is what lets CI run the
-installer at all: `.github/workflows/ci.yml` installs twice into a temp root on
-every push, which exercises the release build, staging, the self-contained
-runtime copy, the candidate probe, the `current` switch, the prune, and that
-`config/server.env` survives an update byte-for-byte. Test mode stops before
-systemd and Serve, so the live service and the tailnet are never touched — and
-the macOS and Windows editions have no CI coverage at all, which is why
-`scripts/deploy-lint.mjs` checks all three textually.
-
-`bin/manage` (`bin\manage.ps1`, with a `manage.cmd` shim, on Windows) carries
-the operator surface: `status`, `verify` (runs every acceptance check and exits
-nonzero on any failure), `logs`, `restart`, `show-password`, `serve` (re-apply
-the Serve mapping after a dev session repointed it), `rollback`, `uninstall`,
-and the separately-confirmed `purge`.
-
-A Host connecting to such a server needs a build whose baked relay allowlist
-admits the origin: a `*.ts.net` origin means `DORMOUSE_REMOTE_CONNECT_SRC` at
-build time (see "Where a Host may reach a relay server" above).
-
-Availability follows from what a per-login agent is: the relay is down while the
-laptop sleeps, is shut off, or has no logged-in user — usually fine, since there
-is then no local Host to control either. Windows reaches the same shape through
-an at-logon `LogonType=Interactive` trigger, which is also what keeps the task
-free of a stored password. Linux is the one platform that can be opted out of
-it, with `--linger`.
+Two couplings stay on this side of the seam: the server writes
+`DORMOUSE_RUNTIME_FILE` / `DORMOUSE_RELEASE_ID` once bound (Configuration
+above) so the installers' health checks can prove *which* release answered
+rather than accepting any 200 on the port; and a Host connecting to an
+installed server needs a build whose baked relay allowlist admits the origin —
+a `*.ts.net` origin means `DORMOUSE_REMOTE_CONNECT_SRC` at build time (see
+"Where a Host may reach a relay server" above).
 
 ## Future
 

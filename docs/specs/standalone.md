@@ -143,7 +143,9 @@ it as `DORMOUSE_STATE_DIR` (§Persistence, "Rust file store"); the sidecar's
 0600 in a 0700 directory via temp-then-rename. One file rather than one per
 value, so a write is one atomic rename and the enrollment can never end up
 describing a different Host than the records approved under it. `hostToken` is a
-bearer credential and never enters a webview realm. Three invariants:
+bearer credential and never enters a webview realm. Three invariants — this
+store's application of the shared store contract (`docs/specs/server.md` →
+"Host side"):
 
 - **Reads fail closed.** Only `ENOENT` — nothing written yet — and a file that
   was read but cannot be parsed answer empty; the parse failure warns, because

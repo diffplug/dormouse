@@ -167,19 +167,17 @@ The wrapping lives at the **standalone adapter boundary**, not in the shared sav
 
 Every read goes through `readPersistedSession()` / `readPersistedWindow()`. Both accept the canonical parsed object *or* a JSON-stringified blob (host state APIs may hand back the inner serialized string); both log and discard a present-but-unreadable blob so a corrupt save can never block startup. `readPersistedWindow` additionally drops Workspaces whose inner session is unreadable and repairs a dangling `activeWorkspaceId` to the first Workspace.
 
-**The recovery command.** One agent resume invocation per surface (`claude --resume <id>`, `claude --continue`, `codex resume <id>`). It is the only thing that survives a teardown.
+**The recovery command.** One agent resume invocation per surface (`claude --resume <id>`, `claude --continue`, `codex resume <id>`) — the only thing that survives a teardown.
 
 *It is not part of the persisted session.* `PersistedPane` carries no `resumeCommand`, and `normalizeSessionV3` strips one out of a pre-upgrade blob the same way it strips a transcript. The command is host-owned and single-use, so it travels out of band: the host puts `surfaceId -> invocation` on the webview's boot payload, and the renderer reads it through `PlatformAdapter.getRecoveryCommands()`. Keeping it off the session shape is what makes the one-shot guarantee structural rather than procedural — the webview has nothing to write back, so no save/restore cycle can carry a stale invocation past the destructive read below. An adapter whose host captures nothing simply omits the method.
 
-*Who writes it.* Exactly one writer: a host teardown that interrupted a running agent, reading the live in-memory buffer (`captureAgentRecoveryCommands` in `vscode-ext/src/session-state.ts`). The renderer save path never derives it and never guesses. Standalone writes it never, because standalone persists no Session state at all.
-
-*Who reads it.* Cold restore, which auto-runs it (`docs/specs/layout.md` → "Agent resume on cold restore"); nothing reads it on resume, where the agent is still Live. Exactly-once holds on two levels, because the capture interrupts every live PTY and those panes are spread across the Dormouse view and any number of editor panels. `takeRecoveryCommands` reads and unlinks the file on the first call of an activation — destructively even on a parse failure — so the durable copy is gone before any webview is served and a failed activation cannot replay it; within the activation each webview claims only the entries matching *its own* saved pane ids, and a claimed entry leaves the map. So no container can delete another's commands by resolving first, and a view that is disposed and re-resolved (moving the panel container, say) restores without re-running the agent. A record older than 7 days is discarded unread, bounding a host that never came back. Source of truth: `takeRecoveryCommands` in `vscode-ext/src/session-state.ts`, `getRecoveryCommands` in `vscode-adapter.ts`, `restoreSession` in `session-restore.ts`.
+*Exactly one writer, exactly one read.* The writer is the VS Code host's teardown, which interrupts every live PTY and scans only what each pane printed in response — the capture gesture, its timing gates, and the post-interrupt provenance rule are `docs/specs/vscode.md` → "Capturing agent recovery". The renderer save path never derives it, and standalone writes it never (it persists no Session state at all). Cold restore is the one reader — **resume** never reads it, the agent there still being Live. `takeRecoveryCommands` reads and unlinks the record on the first call of an activation, destructively even on a parse failure, so the durable copy is gone before any webview is served and a failed activation cannot replay it; within the activation each webview claims only the entries matching *its own* saved pane ids, so no container can delete another's commands by resolving first, and a view that is disposed and re-resolved restores without re-running the agent. A record older than 7 days is discarded unread, bounding a host that never came back. Source of truth: `takeRecoveryCommands` in `vscode-ext/src/session-state.ts`, `getRecoveryCommands` in `vscode-adapter.ts`, `restoreSession` in `session-restore.ts`.
 
 *Detection.* Source of truth: `lib/src/lib/resume-patterns.ts` (`detectResumeCommand`, `normalizeResumeCommand`) over the shared `stripTerminalControls` in `lib/src/lib/terminal-controls.ts`. Because this string is executed, four rules are load-bearing:
 
-- **Only a known invocation plus an opaque id.** The command is *rebuilt* as label + captured id, never sliced out of the buffer, and the id grammar is alphanumeric/hyphen/underscore only — shell punctuation can never enter executable state. Anything trailing the id is dropped. The one thing that must follow the invocation is a word break, so `claude --continuex` is not an offer to continue; nothing stronger, because agents wrap hints in prose punctuation. Text *around* the invocation is not part of the judgement: codex's real hint is prose on the same line (`To continue this session, run codex resume <id>`), so the prose-tolerant match is load-bearing rather than hypothetical.
-- **The scan window is stripped as a whole, in one pass**, so a string control whose payload spans an LF is removed as a unit. An *unterminated* string control (OSC, DCS, SOS, PM, APC) swallows the rest of the window rather than surrendering its payload — a window title cut mid-sequence must not read as terminal output. "Terminated" tracks what the renderer honours rather than ECMA-48 alone: ST in both forms (`\x1b\\`, `\x9c`), BEL for OSC, and — because xterm aborts a string control on CAN/SUB and ends one on a bare ESC — those three too, so a prompt printed behind an aborted sequence stays visible. A CSI the window was cut off *inside* is swallowed for the same reason: a tail ending `\x1b[38;5` must not surrender `38;5` to the greedy id pattern. Every escape sequence is matched by its full ECMA-48 shape (ESC, intermediates, one final byte) rather than by the Fe range, because `ESC 7`/`ESC 8` and `ESC c` have finals outside it and stripping only the introducer leaks the final byte into the text as a digit or letter. A payload whose *introducer* fell off the front of the window (chunk eviction can strand one) is unrecoverable here and grants no more than ordinary output already does.
-- **Stripping runs in boundary mode, whose rule is inverted.** *Every* control becomes a newline rather than vanishing, except the two classes that neither move the cursor nor erase — SGR and charset designators, where the text either side really is contiguous. Deleting the rest welds text that was never adjacent on screen: cursor moves obviously (not only CSI ones — `ESC M` scrolls up, `ESC 7`/`ESC 8` bracket a redraw, `ESC c` resets, VT/FF/backspace move), but erasures too, since `\x1b[2K` means the text before it on that line is gone. Observed in the wild as a stored `claude --resume <uuid>codex`, where a redraw had put `\x1b[K\x1b[1;1H` between two screen regions and the greedy id pattern ate across the seam.
+- **Only a known invocation plus an opaque id.** The command is *rebuilt* as label + captured id, never sliced out of the buffer, and the id grammar is alphanumeric/hyphen/underscore only — shell punctuation can never enter executable state. Anything trailing the id is dropped. The invocation must be followed by a word break (`claude --continuex` is not an offer to continue), but nothing stronger, because agents wrap hints in prose: codex's real hint is prose on the same line (`To continue this session, run codex resume <id>`), so the prose-tolerant match is load-bearing rather than hypothetical.
+- **The scan window is stripped as a whole, in one pass.** An *unterminated* string control (OSC, DCS, SOS, PM, APC) swallows the rest of the window rather than surrendering its payload — a window title cut mid-sequence must not read as terminal output. "Terminated" tracks what the renderer honours rather than ECMA-48 alone: ST in both forms (`\x1b\\`, `\x9c`), BEL for OSC, and — because xterm aborts a string control on them — CAN/SUB and a bare ESC. A CSI the window was cut off *inside* is swallowed for the same reason (a tail ending `\x1b[38;5` must not surrender `38;5` to the greedy id pattern), and every escape sequence is matched by its full ECMA-48 shape (ESC, intermediates, one final byte) rather than the Fe range — `ESC 7`/`ESC 8` and `ESC c` have finals outside it, and stripping only the introducer leaks the final byte into the text. A payload whose *introducer* fell off the front of the window is unrecoverable here and grants no more than ordinary output already does.
+- **Stripping runs in boundary mode, whose rule is inverted.** *Every* control becomes a newline rather than vanishing, except the two classes that neither move the cursor nor erase — SGR and charset designators, where the text either side really is contiguous. Deleting the rest welds text that was never adjacent on screen: cursor moves of every kind (`ESC M`, `ESC 7`/`ESC 8`, `ESC c`, VT/FF/backspace — not only CSI ones), and erasures too, since `\x1b[2K` means the text before it on that line is gone. Observed in the wild as a stored `claude --resume <uuid>codex`, welded across a redraw seam.
 - **Rightmost match in the last 50 lines wins.** No pattern can span the newline a boundary leaves, so the stripped window is scanned whole; the rightmost match is the newest hint *by position*, so carriage-return-only redraws still select the newest visible one and pattern order never outranks recency. Restore revalidates through `normalizeResumeCommand` before typing, as defense against a snapshot written by an older detector.
 
 ## Persistence policy
@@ -222,214 +220,36 @@ plumbing below the flag are intact and still needed by the workspaces-rollout sc
 > assumes a persisted `PersistedWindow` in standalone. Reconciling multi-Workspace
 > persistence with this rule is part of that scope, not this one.
 
-### Capturing the recovery command
-
-The agents print their resume invocation when **interrupted**, not when signalled:
-
-| Mechanism | claude | codex |
-| --- | --- | --- |
-| SIGTERM to the pty leader | inert — an interactive shell ignores it | inert |
-| SIGTERM to the foreground process group | prints | silent |
-| **`^C` written to the pty** | prints, but only on a second press | prints, and a second press destroys it |
-
-So capture writes `\x03` to the pty rather than signalling a pid. The tty line
-discipline delivers SIGINT to the foreground process group itself, which means no
-`tcgetpgrp`, no master fd that node-pty does not expose, and a path that exists on
-ConPTY as well. The shell survives the interrupt, so the hint arrives as ordinary
-`pty:data` into the live buffer.
-
-**The second press is per-pane, and only on request.** The two agents want opposite
-things: claude prints `Press Ctrl-C again to exit` on the first press and its hint
-only on the second, while codex exits on the first press and prints its hint a
-little later — and a second press arriving before that print finishes aborts it
-entirely, leaving `Shutting down...^C` and nothing else. A timing window is not
-sufficient: codex's latency is not a constant (~255 ms for a bare session, over
-400 ms in a real project inside a pane), so any fixed window eventually
-double-presses it. The loop is therefore:
-
-1. one `^C` to every live PTY;
-2. poll on a 40 ms tick, and send one more `^C` to a pane that has yielded nothing —
-   either the moment it shows `Press Ctrl-C again`, or once ~600 ms have passed and
-   the pane has been silent for ~200 ms. Both clocks start when the first press is
-   *acked*, not when the teardown step is entered: they are statements about the
-   agent, and the agent's clock starts when the `^C` lands. Measuring from entry
-   folds the interrupt's own round trip (up to its 400 ms timeout) into the window
-   and can fire the blind press while codex is still inside its first ~255 ms of
-   silence. The poll's wall-clock ceiling (~1.2 s) is the one timing anchored to
-   entry instead, because that one is a shutdown budget rather than an agent timing;
-3. keep polling to that ceiling, storing each command the moment it appears.
-
-Both halves of the gate are load-bearing. An ask-only gate is not enough: observed
-in a real pane, codex answered the first press by *repainting its TUI* — 256 bytes
-of cursor positioning ending on its footer hint — and carried on running, never
-printing a hint and never asking. The silence requirement guards the other side,
-since a second press landing mid-shutdown destroys the hint. Note that quiet is
-used here as evidence that pressing again cannot interrupt a print already in
-flight — *not* as evidence that the pane is finished.
-
-**Do not try to finish early on quiet.** Codex says nothing for ~250 ms after the
-interrupt and then prints its entire shutdown at once, so silence is what it looks
-like *before* it speaks, not after. Two heuristics died on exactly that: settling
-when detections stopped arriving (exited at +219 ms, capturing only the faster
-agent) and settling when output stopped arriving (exited at +160 ms, capturing
-nothing at all). The only sound early exit is having nothing left to wait for.
-Polling to the ceiling is affordable precisely because the record is written
-eagerly: the cost is budget taken from the later teardown steps, and those are the
-ones whose data can be reconstructed.
-
-Coupling the ask gate to an English UI string is deliberate: if the wording
-changes, claude's recovery is lost — visibly and recoverably — whereas a mistimed
-window destroys codex's every single time. Only the host can make this call,
-because only the host sees what came back.
-
-**Why press-wait-press.** Codex is the constraining case, because its `^C` is
-consumed by the input line first. Measured against real sessions in a pty:
-
-| State when interrupted | Gesture | Hint | At |
-| --- | --- | --- | --- |
-| idle after a pause | one `^C` | yes | 262 ms |
-| idle after a pause | two `^C`, 150 ms apart | **no** | — |
-| idle after a pause | `^C`, 800 ms, `^C` | yes | 855 ms |
-| unsent text in the input | one `^C` | **no** | — |
-| unsent text in the input | two `^C`, 150 ms apart | yes | 464 ms |
-| unsent text in the input | `^C`, 800 ms, `^C` | yes | 1061 ms |
-| freshly launched, no conversation | one `^C` | no — correctly, nothing to resume | — |
-
-A blanket second press destroys the idle case, and an ask-gated one never fires
-at all — `Press Ctrl-C again` was absent from every codex cell, so the phrase gate
-can only ever serve claude. Press-wait-press is the only gesture covering both,
-and the constants are sized against these numbers: the idle case yields at 262 ms
-and so leaves the retry set before the ~600 ms fallback arrives. Confirmed end to
-end in a real pane: fallback press at +625 ms, hint at +789 ms, applied on the
-next activation.
-
-Every live terminal PTY is interrupted, not just recognized agents. A foreground
-gate would need the host to learn each pane's running command — it receives only
-`alert:state` today — and it buys nothing here, because every one of these
-processes is killed seconds later regardless. `^C` into a non-agent is inert (a
-shell clears its line; an editor ignores it), and `detectResumeCommand` is the
-real filter. Exited PTYs *are* excluded: one can neither take a `^C` nor yield a
-hint, and including them would permanently defeat the "nothing left to wait for"
-early exit.
-
-Detection runs over the **live in-memory buffer**; the transcript is discarded
-immediately after, so only the detected invocation is stored — never a writer,
-never a log line.
-
-**Only post-interrupt bytes count.** Each pane's received-count mark is taken
-before the first `^C`, and detection reads only what arrived after it. This is a
-correctness boundary, not an optimisation: a recovery command is executed on the
-next restore, so the only bytes allowed to become executable state are the ones
-produced *in response to Dormouse's own interrupt*. Scanning the whole buffer let
-an old launch echo or a previous agent's hint win — observed as a codex pane
-capturing a stale `claude --resume` id, and as an id welded to text from an
-earlier screen region. It also fails in the safe direction: if the bounded buffer
-evicted bytes meanwhile, slicing at the old mark can only discard fresh output,
-never promote stale output as fresh. Widening this scan would quietly weaken the
-provenance argument that lets recovery run without confirmation ("Consuming it").
-
-Both real-world hint shapes matter, and both are covered:
-
-```
-Resume this session with:
-claude --resume 4464d32c-a5c8-41a6-a320-a0fd07893096      ← own line
-
-To continue this session, run codex resume 01a00dfd-...   ← prose, same line
-```
-
-**Environment hazard.** `CLAUDE_CODE_CHILD_SESSION` in a pane's environment disables
-transcript saving in claude, which then prints no hint at all. Capture must treat a
-missing hint as ordinary, and a Dormouse launched from inside a Claude Code session
-will legitimately produce nothing.
-
 ### Consuming it
 
 On the next cold activation, a pane carrying a recovery command **runs it
-automatically** — no prompt, no button. The command is consumed destructively: the
-host clears the field before handing state to the webview, so a resume is offered
-once and a failed activation does not replay it.
+automatically** — no prompt, no button. Auto-run without a confirmation gate is
+safe because the invocation is a known label plus a validated id that fails
+closed — agent session files are per-user and per-project directory, so an id
+cannot be planted to be resumed into, and the id grammar keeps shell
+punctuation out of what is executed — and because provenance is structural:
+detection reads only the bytes a pane emitted after Dormouse's own interrupt,
+never a scan of arbitrary saved history (`docs/specs/vscode.md` → "Capturing
+agent recovery"). `claude --resume <id>` restores the conversation, lands at an
+idle prompt, and makes no request until the user types; it also restores *more*
+context than the scrollback it replaces, since the resumed agent renders the
+real conversation.
 
-Auto-run is safe to do without a confirmation:
+Two consumption rules, shared with `dor split` launches: the command is typed
+only once the fresh shell reaches a prompt, because the platform write bypasses
+xterm's keystroke fallback and spawn-then-type is exactly the window shell
+startup swallows keystrokes in; and it seeds `commandLine` +
+`commandStart(user_input)` synchronously first
+(`docs/specs/terminal-state.md`), so a restored Workspace immediately counts
+its agents in `countRunningSessions` — and the quit-confirmation dialog counts
+sessions the user did not start by hand. The pane shows a passive one-line
+notice that its session was resumed, so the discontinuity stays legible and a
+failed resume explains itself (`docs/specs/layout.md` → "Agent resume on cold
+restore").
 
-- `claude --resume <id>` restores the conversation, lands at an idle prompt, and
-  makes no request until the user types. It does not resume interrupted work.
-- Provenance is tight, and structurally so: detection reads *only* the bytes a
-  pane emitted after Dormouse interrupted it (see "Only post-interrupt bytes
-  count" above), within one bounded wait — never a scan of arbitrary saved
-  history, and never output that predates the teardown.
-- A wrong id fails closed. Agent session files are per-user and per-project
-  directory, so an id cannot be planted to be resumed into, and the id grammar
-  keeps shell punctuation out of what is executed.
-
-It also restores *more* context than the scrollback it replaces: the resumed agent
-renders the real conversation, which a transcript replay only approximated.
-
-The pane shows a passive one-line notice that its session was resumed — not a
-dialog, with no retirement rules — so the discontinuity stays legible (the
-interrupted turn did **not** continue) and a failed resume explains itself. The
-command is typed only once the fresh shell reaches a prompt, because the platform
-write bypasses xterm's keystroke fallback and spawn-then-type is exactly the window
-shell startup swallows keystrokes in. Like any programmatic launch it seeds
-`commandLine` + `commandStart` (`docs/specs/terminal-state.md`), so a restored
-Workspace immediately counts its agents in `countRunningSessions` — and the
-following quit-confirmation dialog counts sessions the user did not start by hand.
-
-Known cost: every cold activation spawns every agent that was running, and cold
-start is not free (claude ≈ 5 s, codex ≈ 25 s with MCP servers). It is proportional
-to how many agents were actually running, and Reload Window is frequent. If it
+Known cost: every cold activation spawns every agent that was running (claude
+≈ 5 s, codex ≈ 25 s with MCP servers), and Reload Window is frequent. If it
 becomes a complaint, the mitigation is a setting, not a prompt.
-
-### VS Code teardown ordering
-
-Capture runs **first**, and that is load-bearing rather than tidy: `[deactivate]
-done` has never once been reached in a real shutdown, because VS Code kills the
-extension host on a budget we do not control. The one step whose data cannot be
-reconstructed afterwards therefore goes before the steps whose data can. The order
-is:
-
-1. start closing popped-out browser windows — kicked off here but joined at step 3,
-   so it overlaps the poll instead of spending budget of its own. It shares no
-   state with the interrupt and spends its time in external processes. Its failure
-   is absorbed, never propagated: thrown out of the join it would skip the flush,
-   the CWD refresh, and both kills, leaking the pty host;
-2. `captureAgentRecoveryCommands` — one `^C` to every live PTY, then poll to a
-   ~1.2 s ceiling, second-pressing only the panes that ask (above);
-3. join the pop-out close;
-4. flush structural state from the webview (no scrollback);
-5. re-read CWD from the live PTYs and merge alert state;
-6. `gracefulKillAll` then `killAll()`.
-
-Each wait is bounded, and a timeout loses the recovery command rather than delaying
-shutdown.
-
-Step 2 writes its own record — `recovery.json` under `context.storageUri`, written
-synchronously and replaced temp-then-rename — rather than `workspaceState` or the
-session blob. Two reasons, both of the sort that only show up in a real shutdown.
-`workspaceState.update()` hands its value to VS Code's storage service, which
-batches the SQLite flush on its own schedule; by `deactivate()` that service is
-already tearing down, so the write never lands however early it is issued
-(measured: detection complete at +276 ms, record never written). And a later
-`flushAllSessions` would overwrite the session blob with the webview's copy, which
-knows nothing of what was just captured. The record is rewritten the moment each
-command is found, so being killed mid-poll costs at most a late agent's command.
-
-Recovery covers editor `WebviewPanel`s as well as the `WebviewView`, and it has to:
-the capture interrupts every live PTY, so a panel's agent pays the same interrupted
-turn whether or not it can recover. It needs no host-side per-panel store, because
-the record is keyed by *surface id* rather than owned by a container — a panel gets
-its pane ids from the `vscode.setState()` blob VS Code hands back at
-`deserializeWebviewPanel`, and claims exactly those entries.
-
-Step 2 also clears any previous record before its first early return. Consumption
-only happens when a container actually resolves, so a session where the Dormouse
-view is never opened would otherwise carry the record forward and auto-run a
-week-old invocation on some much later restore.
-
-Source of truth: `captureAgentRecoveryCommands` / `takeRecoveryCommands` in
-`vscode-ext/src/session-state.ts`, `deactivate()` + `setupPanel` in
-`vscode-ext/src/extension.ts`, `resolveWebviewView` in
-`vscode-ext/src/webview-view-provider.ts`, `interrupt` in
-`vscode-ext/src/pty-manager.ts`.
 
 ## Universal invariants
 
@@ -438,7 +258,7 @@ of one. Adapter-specific layering (deactivate ordering, save APIs, panel retenti
 lives in the adapter spec, e.g. `docs/specs/vscode.md` and `docs/specs/standalone.md`
 → Quit flow.
 
-- **Scrollback buffers survive PTY exit.** In the shared `pty-core.js`, only the hard `kill`/`killAll` (or host-process exit) clears a PTY's scrollback buffer; natural exit, signal-driven exit, and `gracefulKillAll` leave it readable via `getScrollback`. Recovery capture no longer depends on this (it runs *before* any kill — see "VS Code teardown ordering"), but a final flush that reads a pane whose shell has just exited still does.
+- **Scrollback buffers survive PTY exit.** In the shared `pty-core.js`, only the hard `kill`/`killAll` (or host-process exit) clears a PTY's scrollback buffer; natural exit, signal-driven exit, and `gracefulKillAll` leave it readable via `getScrollback`. Recovery capture no longer depends on this (it runs *before* any kill — `docs/specs/vscode.md` → "Capturing agent recovery"), but a final flush that reads a pane whose shell has just exited still does.
 - **A position in a pane's output is a received count, not a buffer length.** The host-side buffer is capped (1 MB) and evicts from the front, so `scrollbackChars` goes flat while output keeps flowing — on exactly the long-running agent pane recovery exists for. Anything marking a point in the stream, or watching a pane for growth, reads the monotonic `getScrollbackReceived` and slices with `getScrollbackSince`, which joins only the chunks spanning the mark and clamps to what the buffer still holds. Source of truth: `vscode-ext/src/pty-manager.ts`.
 - **A spawn that fails still reports an exit.** `pty-core.spawn` answers a node-pty failure with `error` *and* `exit`. `error` is a host-side log line that reaches no webview, so without the exit a pane keeps any command seeded for it as permanently running — a phantom running header, a `countRunningSessions` that never returns to zero, and a quit confirmation on every attempt to close. Reachable whenever a persisted or selected shell binary is gone.
 - **Whole-host acks are correlated by request id.** `interrupt` and `gracefulKillAll` both run on a teardown path with a timeout, so a timed-out call's ack still arrives afterwards. Matching on message type alone let that stale reply resolve the *next* call the instant it was issued. The pty-host echoes `requestId` on `interruptDone` / `gracefulKillDone` and the caller compares it.

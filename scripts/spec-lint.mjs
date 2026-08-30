@@ -8,10 +8,12 @@
  *   1. Every docs/specs/*.md file is indexed in AGENTS.md.
  *   2. `## Future` (or `## N. Future`), when present, is the LAST section of
  *      its spec — the fold convention.
- *   3. Every relative markdown link in AGENTS.md + docs/specs resolves: the
- *      target file exists, and a `#fragment` matches a real heading anchor.
- *   4. Every backticked repo path mentioned in AGENTS.md + docs/specs exists
- *      on disk — catches `Source of truth:` pointers rotting on renames.
+ *   3. Every relative markdown link in AGENTS.md + SELF_HOST.md + docs/specs
+ *      resolves: the target file exists, and a `#fragment` matches a real
+ *      heading anchor.
+ *   4. Every backticked repo path mentioned in AGENTS.md + SELF_HOST.md +
+ *      docs/specs exists on disk — catches `Source of truth:` pointers
+ *      rotting on renames.
  *      Conservative: only tokens that start with a known top-level directory
  *      and contain no globs/placeholders are checked. Build outputs that only
  *      exist after a build are skipped via SKIP_PATH_PREFIXES.
@@ -26,7 +28,7 @@ const SPECS_DIR = 'docs/specs';
 const TOP_LEVEL_DIRS = [
   'lib/', 'standalone/', 'vscode-ext/', 'website/', 'server/',
   'server-lib-common/', 'dor/', 'dor-lib-common/', 'canopy/', 'docs/',
-  'scripts/', '.github/', '.claude/', '.vscode/',
+  'scripts/', 'deploy/', '.github/', '.claude/', '.vscode/',
 ];
 // Path prefixes that are legitimate references to build/staged/generated
 // output which does not exist in a clean checkout.
@@ -41,7 +43,10 @@ const specFiles = readdirSync(join(ROOT, SPECS_DIR))
   // Keep repo-relative paths in POSIX form on every platform — they are
   // compared against forward-slash paths written in the markdown.
   .map((f) => `${SPECS_DIR}/${f}`);
-const allFiles = ['AGENTS.md', ...specFiles];
+// SELF_HOST.md is a root-level spec (the self-host deployment: runbook +
+// installer contract); it rides checks 2-4 alongside the docs/specs files.
+const allFiles = ['AGENTS.md', 'SELF_HOST.md', ...specFiles];
+const foldCheckedFiles = ['SELF_HOST.md', ...specFiles];
 const problems = [];
 
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf-8');
@@ -86,7 +91,7 @@ for (const spec of specFiles) {
 }
 
 // --- Check 2: Future is the last section ------------------------------------
-for (const spec of specFiles) {
+for (const spec of foldCheckedFiles) {
   const h2s = headings(spec).filter((h) => h.level === 2);
   const futureIdx = h2s.findIndex((h) => /^(\d+\.\s*)?Future$/i.test(h.title));
   if (futureIdx !== -1 && futureIdx !== h2s.length - 1) {
