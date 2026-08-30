@@ -233,7 +233,7 @@ export async function deactivate() {
   // step whose data cannot be reconstructed afterwards runs before the steps whose
   // data can (cwd re-reads, alert merges). The resume hint exists only between the
   // interrupt and the kill; miss that window and it is gone
-  // (docs/specs/transport.md -> "VS Code teardown ordering").
+  // (docs/specs/vscode.md -> "Serialization and restore").
   //
   // Closing any headed pop-out window (so quitting never orphans a real Chrome
   // window — spec → "Headed Pop-Out" lifecycle) is the one step that does not have

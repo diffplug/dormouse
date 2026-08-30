@@ -195,7 +195,9 @@ not owned by a container.
 #### Capturing agent recovery
 
 The agents print their resume invocation when **interrupted**, not when
-signalled — SIGTERM is inert against both — so capture writes `^C` to the pty:
+signalled — SIGTERM to the pty leader is inert against both, and the
+foreground-process-group signal that does reach claude leaves codex silent — so
+capture writes `^C` to the pty:
 the tty line discipline delivers SIGINT to the foreground process group itself
 (no `tcgetpgrp`, no master fd node-pty does not expose, and a path that exists
 on ConPTY too), the shell survives, and the hint arrives as ordinary
@@ -226,6 +228,27 @@ Polling to the ceiling is affordable because the record is written eagerly.
 Coupling the ask gate to an English UI string is deliberate: a wording change
 loses claude's recovery visibly and recoverably, where a mistimed window
 destroys codex's every single time.
+
+Codex is the constraining case — its `^C` is consumed by the input line first —
+and the timing constants are sized against these measurements in a real pty:
+
+| State when interrupted | Gesture | Hint | At |
+| --- | --- | --- | --- |
+| idle after a pause | one `^C` | yes | 262 ms |
+| idle after a pause | two `^C`, 150 ms apart | **no** | — |
+| idle after a pause | `^C`, 800 ms, `^C` | yes | 855 ms |
+| unsent text in the input | one `^C` | **no** | — |
+| unsent text in the input | two `^C`, 150 ms apart | yes | 464 ms |
+| unsent text in the input | `^C`, 800 ms, `^C` | yes | 1061 ms |
+| freshly launched, no conversation | one `^C` | no — correctly, nothing to resume | — |
+
+A blanket second press destroys the idle case, and an ask-gated one never fires
+at all — `Press Ctrl-C again` was absent from every codex cell, so the phrase
+gate can only ever serve claude. Press-wait-press is the only gesture covering
+both, and the constants are sized so the idle case (yielding at 262 ms) leaves
+the retry set before the ~600 ms fallback arrives. Confirmed end to end in a
+real pane: fallback press at +625 ms, hint at +789 ms, applied on the next
+activation.
 
 **Only post-interrupt bytes count.** Each pane's received-count mark
 (`getScrollbackReceived`, `docs/specs/transport.md` → Universal invariants) is

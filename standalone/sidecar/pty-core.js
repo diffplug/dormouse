@@ -1189,8 +1189,9 @@ module.exports.create = function create(send, ptyModule) {
   // renderer reads it today — `PlatformAdapter` dropped its `getScrollback` once
   // scrollback stopped being persisted — but this buffer is what a standalone-side
   // recovery capture would read, and it is why `gracefulKillAll` deliberately
-  // preserves scrollback where `kill`/`killAll` clear it (docs/specs/transport.md
-  // -> "Capturing the recovery command", "Universal invariants").
+  // preserves scrollback where `kill`/`killAll` clear it (docs/specs/vscode.md
+  // -> "Capturing agent recovery"; docs/specs/transport.md -> "Universal
+  // invariants").
   function getScrollback(id, requestId) {
     const entry = scrollback.get(id);
     send('scrollback', {
@@ -1202,7 +1203,7 @@ module.exports.create = function create(send, ptyModule) {
 
   // Send ONE ^C to the given PTYs (all live ones when `ids` is omitted), so an
   // agent prints its resume invocation before the host tears the process down
-  // (docs/specs/transport.md -> "Capturing the recovery command"). Writes ^C into
+  // (docs/specs/vscode.md -> "Capturing agent recovery"). Writes ^C into
   // the pty rather than signalling a pid: the tty line discipline delivers SIGINT
   // to the foreground process group itself, so this needs neither tcgetpgrp nor
   // the master fd node-pty does not expose, and it is the one mechanism both
@@ -1215,7 +1216,7 @@ module.exports.create = function create(send, ptyModule) {
   // press landing in that window aborts the print entirely ("Shutting down...^C"
   // and nothing else). Claude needs the second press and prints nothing without
   // it. Only the host can tell them apart, because only the host sees what came
-  // back (docs/specs/transport.md -> "Capturing the recovery command").
+  // back (docs/specs/vscode.md -> "Capturing agent recovery").
   //
   // "Omitted" therefore means omitted, never "an empty list": a caller that
   // forwards a computed set that happened to come out empty must get a no-op, not

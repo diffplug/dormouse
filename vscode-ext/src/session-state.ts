@@ -147,8 +147,8 @@ const ASK_TAIL_CHARS = 8192;
 /**
  * Interrupt the live PTYs, then record each pane's agent resume invocation.
  *
- * The only writer of recovery state (docs/specs/transport.md -> "Capturing the
- * recovery command"). Two properties earn their complexity:
+ * The only writer of recovery state (docs/specs/vscode.md -> "Capturing agent
+ * recovery"). Two properties earn their complexity:
  *
  * 1. **Runs first in `deactivate()`.** The extension host is killed on a budget
  *    that has never once been generous enough to reach `[deactivate] done`, so

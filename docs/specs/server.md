@@ -527,10 +527,11 @@ away.
 both ends of the bridge compile against (`service-protocol.ts`), the webview
 half of the bridge (`link-client.ts` — command correlation, the 15 s timeout,
 and the rule that an ask is *always* answered even when nothing matches), the
-enrollment exchange (`enrollment.ts`), the edge-triggered webview gate
-(`enrolled-gate.ts`), the ask-backed surface provider
-(`ask-surface-provider.ts`; the provider seam itself is
-[remote-api.md](./remote-api.md)), and `serial-queue.ts`. What remains per host
+ask-backed surface provider (`ask-surface-provider.ts`; the provider seam
+itself is [remote-api.md](./remote-api.md)), and `serial-queue.ts`. The
+enrollment exchange (`lib/src/remote/host/enrollment.ts`) and the
+edge-triggered webview gate (`lib/src/remote/host/enrolled-gate.ts`) sit on the
+webview side and are reached across the bridge. What remains per host
 is its store, its process plumbing, and its transport for the three bridge
 messages — specced in `docs/specs/standalone.md` → "Remote Host service" and
 `docs/specs/vscode.md` → "Remote Host: a service in the extension host", with
