@@ -1,19 +1,20 @@
 # Server (selfhost)
 
 > See `docs/specs/glossary.md` for Session / Pane / Surface vocabulary; this spec uses it for what the relay exposes.
+> Owns the selfhost Server (`server/`) and the shared Host-service runtime (`lib/src/host/remote/`). Read
+> [remote-security-model.md](./remote-security-model.md) first — it owns the trust model this one deploys;
+> [remote-api.md](./remote-api.md) owns what flows after authorization, [pocket-app.md](./pocket-app.md) the phone.
 
-The coordinating Server from the
-[remote security model](./remote-security-model.md), in its selfhost mode, cut
-down to the smallest thing that completes this loop:
+The coordinating Server from the remote security model, in its selfhost mode,
+cut down to the smallest thing that completes this loop:
 
 > Run the server with a setup password. Visit it, present the password, create
 > a passkey. Pair your phone with your laptop's Dormouse Terminal. Pick up a
 > running terminal session from the laptop on the phone.
 
-One Node process (Hono, as the `server` package already is). No database. No
-browser-surface support — **terminal-only**. The heavy lifting is already
-done: every security primitive lives in `server-lib-common`, and the terminal
-UI lives in `lib`/`standalone`.
+One Node process (Hono). No database. **Terminal-only.** Every security
+primitive lives in `server-lib-common`; the terminal UI lives in
+`lib`/`standalone`.
 
 ## Guardrails
 
@@ -24,9 +25,9 @@ UI lives in `lib`/`standalone`.
 * A dropped WebSocket is handled by reloading the page / reconnecting the
   host. No resume protocol.
 * Everything transient (challenges, sessions, relay state) is in memory; a
-  server restart just means everyone reconnects. In-memory is not unbounded:
-  `HostChallengeIssuer.issue` prunes expired entries on every call, and
-  `PairingCeremony` drops tickets one TTL past expiry — the frames that mint
+  server restart means everyone reconnects. **Transient stores must prune** —
+  `HostChallengeIssuer.issue` drops expired entries on every call,
+  `PairingCeremony` tickets one TTL past expiry — because the frames that mint
   them are cheap to send and need little or no auth (rationale).
 
 ## Configuration
@@ -44,19 +45,17 @@ This table is the whole of what `server/src/` reads from the environment.
 | `DORMOUSE_BIND_HOST`      | Interface to listen on. Unset binds every interface (what a container wants); set `127.0.0.1` when a TLS proxy on the same machine is the front door. |
 | `DORMOUSE_VAPID_PUBLIC_KEY` / `DORMOUSE_VAPID_PRIVATE_KEY` | Web Push signing keypair. Set both or neither. At startup the Server decodes both, derives the P-256 public point from the private key, and exits on a missing, malformed, or mismatched pair. Unset, the server mints a pair on first boot and persists it to `vapid.json`. |
 | `DORMOUSE_VAPID_SUBJECT`  | `mailto:`/`https:` contact for push-service operators (RFC 8292). Defaults to `DORMOUSE_ORIGIN` when that origin is https and not loopback; otherwise there is no default and push stays off. Validated at startup — an invalid value, a loopback contact included, exits. |
-| `DORMOUSE_RUNTIME_FILE`   | Absolute path the server records `{pid, releaseId, port, origin, startedAt}` into once it has **bound**, mode `0600`. Unset — dev, containers, every test — writes nothing. A relative value is a `ConfigError`: the wrapper runs under a service manager whose working directory is not the installer's, so it would land somewhere neither side can predict. Deliberately outside `DORMOUSE_STATE_DIR`, being runtime truth about one process rather than durable state that gets backed up and restored. |
+| `DORMOUSE_RUNTIME_FILE`   | Absolute path the server records `{pid, releaseId, port, origin, startedAt}` into once it has **bound**, mode `0600`. Unset — dev, containers, every test — writes nothing. A relative value is a `ConfigError`: the wrapper runs under a service manager whose working directory is not the installer's, so it would land somewhere neither side can predict. Outside `DORMOUSE_STATE_DIR`: runtime truth about one process, not durable state that gets backed up and restored. |
 | `DORMOUSE_RELEASE_ID`     | The release directory's name, supplied by the installer's `run-server` wrapper, recorded in the runtime file. `null` when the server was not started by an installer. |
 
-WebAuthn requires a secure context: `localhost` works for development; for a
-real phone, put the server behind TLS (`tailscale serve` is the intended
-selfhost path, any reverse proxy works). The server itself always speaks
-plain HTTP.
+**The server itself always speaks plain HTTP**, and WebAuthn requires a secure
+context: `localhost` works for development; a real phone needs TLS in front
+(`tailscale serve` is the intended selfhost path, any reverse proxy works).
 
-Because of that, the listen interface is a security boundary whenever the TLS
-proxy is local: `tailscale serve` reaches the app over loopback, so leaving the
-socket on every interface would also publish the plaintext port to the LAN and
-to the tailnet itself. `DORMOUSE_BIND_HOST` exists to close that, and the
-selfhost install sets it. The default stays unbound so a container — where the
+**Must bind loopback when the TLS proxy is local.** `tailscale serve` reaches
+the app over loopback, so a socket left on every interface also publishes the
+plaintext port to the LAN and to the tailnet itself; the selfhost install sets
+`DORMOUSE_BIND_HOST`. The default stays unbound so a container — where the
 namespace is the boundary and the port is published explicitly — keeps working.
 Binding loopback is *containment, not admission*: every route is still gated by
 the setup password or a bearer token, exactly as `SECURITY.md` -> "Loopback
@@ -68,23 +67,22 @@ clientData checks, passkey assertion verification, and the Host enrollment
 policy all use that normalized origin.
 
 Source of truth: `server/src/config.ts` (`readConfig`), a pure env→config
-mapping unit-tested in `server/test/config.test.mjs`. Only the half that touches
-disk stays in `server/src/index.ts`: with no keypair configured it mints one and
-persists `vapid.json`, then validates the pair and subject before building the
-app. `server/test/runtime-file.test.mjs` and `server/test/bind-host.test.mjs`
-each spawn the real entrypoint — the first asserting the runtime file appears
-only after a bind, names that process, and is `0600`; the second that the
-plaintext port is unreachable off-loopback when `DORMOUSE_BIND_HOST=127.0.0.1`.
+mapping unit-tested in `server/test/config.test.mjs`; only the disk half stays
+in `server/src/index.ts`, which mints and persists `vapid.json` when no keypair
+is configured, then validates the pair and subject **before** building the app.
+`server/test/runtime-file.test.mjs` and `server/test/bind-host.test.mjs` spawn
+the real entrypoint: the runtime file appears only after a bind, names that
+process, and is `0600`; the plaintext port is unreachable off-loopback under
+`DORMOUSE_BIND_HOST=127.0.0.1`.
 
 ## Where a Host may reach a relay server (self-host builds)
 
-Neither Host renders the relay socket in a webview any more: standalone's runs
-in the Node sidecar and VS Code's in the extension host, so no CSP fences either
-of them. The same CSP-shaped source list is therefore **baked into the Node
-bundle** and enforced there — one syntax, one build-time variable
-(`DORMOUSE_REMOTE_CONNECT_SRC`), whichever process ends up holding the socket.
-The webview CSPs carry no relay sources at all (`docs/specs/vscode.md` → "CSP
-policy"; `standalone/scripts/tauri-conf.test.mjs` asserts the standalone one).
+No CSP fences the relay socket — standalone's runs in the Node sidecar, VS
+Code's in the extension host — so the same CSP-shaped source list is **baked
+into the Node bundle** and enforced there: one syntax, one build-time variable
+(`DORMOUSE_REMOTE_CONNECT_SRC`), whichever process holds the socket. The webview
+CSPs carry no relay sources at all (`docs/specs/vscode.md` → "CSP policy";
+`standalone/scripts/tauri-conf.test.mjs` asserts the standalone one).
 
 The shipped binary is scoped to the SaaS origin only,
 `https://*.dormouse.sh wss://*.dormouse.sh`. An override **replaces** that
@@ -97,10 +95,9 @@ DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:vscod
 
 So a self-host server on any other origin is reachable only from a custom build
 (same variable on `pnpm --filter dormouse-standalone tauri build`). The default
-carries **no localhost entry**, and `http`/`ws` are a different scheme class
-from `https`/`wss`, so a default build refuses to enroll against a plaintext
-`http://localhost:3000` dev server — see "Running it" for the override a local
-loop needs.
+carries **no localhost entry and no plaintext scheme**, so a default build
+refuses to enroll against an `http://localhost:3000` dev server — see "Running
+it" for the override a local loop needs.
 
 `scripts/csp-defaults.mjs` holds the one definition of the default and the
 override rule; `standalone/scripts/build-sidecar-proxy.mjs` and
@@ -115,21 +112,25 @@ which cannot import TypeScript; `connect-src.test.ts` pins the two patterns —
 and the two copies of the default — as identical.
 
 **Enforcement is `originAllowedByConnectSrc`, at three points in
-`lib/src/host/remote/service.ts`:** `enroll` is refused for an origin outside
-the list, before the setup password leaves the machine; `adopt` is refused the
-same way, since a webview handing over an older build's enrollment may name a
-relay this build may not reach; and `start` refuses a persisted enrollment
-naming one, staying idle with a warning rather than connecting (a binary
-downgraded from a custom build, or a server that moved). Matching is
-deliberately narrower than a browser's: `https`/`wss` are one scheme class and
+`lib/src/host/remote/service.ts`:**
+
+* `enroll` — refused for an origin outside the list, before the setup password
+  leaves the machine.
+* `adopt` — refused the same way, since a webview handing over an older build's
+  enrollment may name a relay this build may not reach.
+* `start` — refuses a persisted enrollment naming one, staying idle with a
+  warning rather than connecting (a binary downgraded from a custom build, or a
+  server that moved).
+
+Matching is narrower than a browser's: `https`/`wss` are one scheme class and
 `http`/`ws` the other, host matches exactly or by a leading `*.` wildcard
 covering any depth of sub-domain but never the bare domain, ports must match
-unless the source says `*` (and numeric ports are canonicalized as `URL` does,
-so a leading zero is not a silent miss), and anything unparseable fails closed.
-Enrollment and Host-authenticated push fetches use `redirect: 'error'`: unlike
-the former webview CSP, a Node process does not re-check a redirect target, so
-following one could carry the setup password, Host bearer token, or notification
-metadata outside the baked allowlist.
+unless the source says `*` (numeric ports canonicalized as `URL` does, so a
+leading zero is not a silent miss), and anything unparseable fails closed.
+Enrollment and Host-authenticated push fetches **must** use `redirect: 'error'`
+— a Node process does not re-check a redirect target, so following one could
+carry the setup password, Host bearer token, or notification metadata outside
+the baked allowlist.
 
 Reserved: the `https://*.dormouse.sh wss://*.dormouse.sh` entries are
 *wildcards* on purpose. The BYOT posture (`## Future`, Scope: saas-multitenant)
@@ -151,52 +152,55 @@ $DORMOUSE_STATE_DIR/
   vapid.json     { publicKey, privateKey, createdAt }   (only when unset by env)
 ```
 
-That is the entire persistent state. The Host's ACL is not here — it lives on
-the Host, in the process that owns the PTYs
+That is the entire persistent state. **The Host's ACL is never here** — it
+lives on the Host, in the process that owns the PTYs
 (`lib/src/host/remote/host-state-store.ts`), which is the whole point of the
 security model.
 
-Every write is temp-file-plus-rename, and every mutation is serialized through a
+Every write is temp-file-plus-rename and every mutation is serialized through a
 per-store promise chain, so a crash cannot leave an unparseable file and two
-concurrent read-modify-writes cannot lose each other. Source of truth:
-`server/src/state.ts`.
+concurrent read-modify-writes cannot lose each other.
 
 **Rows are validated as they are read** — `hosts.json` and
 `push-subscriptions.json` both — because hand-editing these files is the
 *documented* revocation mechanism, so a half-finished edit is an expected state
-rather than corruption. A malformed host row is dropped instead of carried,
+rather than corruption. A malformed host row is dropped rather than carried,
 since one bad line would otherwise 500 every `/ws/host` upgrade and every push
-route (rationale). A malformed subscription reads as a missing registration,
+route (rationale); a malformed subscription reads as a missing registration,
 which Pocket repairs by re-offering Enable, rather than as a live one nothing
 can be delivered to.
 
-`push-subscriptions.json` is the one store that deletes rather than appends: a
+`push-subscriptions.json` is the one store that deletes rather than appends — a
 push service reports a dead subscription with 404/410, and a browser that
 rotates its endpoint must replace the stale row rather than leave one per
-rotation. Rows are keyed on the **pair** (`hostId`, `devicePublicKey`), so a
-phone paired with two laptops subscribes twice and a Host can only ever read or
-reach its own subscribers, and each records the public VAPID key it was
-registered under so a rotation reads as stale rather than as still working. The
-row holds no label — the Server never learns one. Because one service-worker
-scope has only one subscription, an upsert whose endpoint, encryption keys, or
-VAPID key differs from an existing row for that device atomically deletes all of
-the device's prior Host rows. The response reports the state that mutation left
-behind — every Host this device is still registered with — rather than the fact
-that a deletion happened, so a committed POST whose response was lost is
-repaired by its own idempotent retry. Scoping that answer to the device is safe
-where `GET /api/push/subscriptions` must not be: the request carries a device
-signature, so the caller has proven it owns the identity reported on.
+rotation:
+
+* **Rows are keyed on the pair (`hostId`, `devicePublicKey`)**, so a phone
+  paired with two laptops subscribes twice and a Host can only ever read or
+  reach its own subscribers. Each row records the public VAPID key it was
+  registered under, so a rotation reads as stale rather than as still working,
+  and holds no label — the Server never learns one.
+* **An upsert that differs deletes the device's other rows atomically.** One
+  service-worker scope has only one subscription, so an endpoint, encryption
+  keys, or VAPID key differing from an existing row for that device deletes all
+  of that device's prior Host rows.
+* **The response reports the state that mutation left behind** — every Host
+  this device is still registered with — rather than the fact that a deletion
+  happened, so a committed POST whose response was lost is repaired by its own
+  idempotent retry. Scoping that answer to the device is safe where
+  `GET /api/push/subscriptions` must not be: the request carries a device
+  signature, so the caller has proven it owns the identity reported on.
 
 `hosts.json` stores `hostToken` — the host↔server relay bearer secret — in
 plaintext, and `vapid.json` a private key, so both files are written owner-only:
 the state dir is created `0o700` and every write lands in a `0o600` temp file
-before the rename. Any new file under `$DORMOUSE_STATE_DIR` must go through
-`writeAtomic` for the same reason.
+before the rename. **Any new file under `$DORMOUSE_STATE_DIR` must go through
+`writeAtomic`.** **Never build anything on that mode** — it is a cheap default,
+not the guarantee the deployment rests on (rationale); what protects the
+*installed* server's state is the installer's directory permissions, in
+"Installing it" below.
 
-That mode is a cheap default, not the guarantee the deployment rests on, so
-nothing may be built on top of it (rationale). What protects the *installed*
-server's state is the installer's directory permissions, in "Installing it"
-below.
+Source of truth: `server/src/state.ts`.
 
 ## WebAuthn without a WebAuthn library
 
@@ -228,9 +232,6 @@ browser's `clientDataJSON.challenge` by decoded base64url bytes, so padded
 browser serializations redeem the issued challenge without weakening single-use
 replay protection.
 
-Sharing the verifier is also what makes the whole thing testable without a
-browser — see Testing below.
-
 ## HTTP API
 
 This table is the whole of it. The paths live in `API_ROUTES` / `WS_ROUTES` /
@@ -238,7 +239,7 @@ This table is the whole of it. The paths live in `API_ROUTES` / `WS_ROUTES` /
 
 | Route                            | Auth           | Does                                              |
 | -------------------------------- | -------------- | ------------------------------------------------- |
-| `GET /api/hello`                 | —              | The shared greeting. Deliberately carries no release identity: it is unauthenticated, CORS-`*` and reachable through `tailscale serve` — see the runtime file under "Installing it" |
+| `GET /api/hello`                 | —              | The shared greeting. Carries no release identity: it is unauthenticated, CORS-`*` and reachable through `tailscale serve` — see the runtime file under "Installing it" |
 | `POST /api/setup/begin`          | setup password | `{ challenge }` for registration. Only the password gates it — re-presenting the password adds another passkey to the account |
 | `POST /api/setup/finish`         | setup password | `{ credentialId, publicKey, clientDataJSON }` → creates/updates `account.json` |
 | `POST /api/signin/begin`         | —              | `{ challenge }` for sign-in                        |
@@ -308,9 +309,9 @@ dependency. Source of truth: `server/src/push.ts` plus the routes in
   their identities for diagnosis, while the Host has no deliverable devices.
 - **The subscription is bound to a Client identity by signature.** The Client
   signs `(hostId, challenge, devicePublicKey, endpoint)` with its device key
-  under `PUSH_SUBSCRIBE_DOMAIN` — deliberately *not* `DEVICE_AUTH_DOMAIN`, since
-  the Server relays Host-issued challenges during `connect` and so sees them in
-  transit. Binding the endpoint is what stops a captured signature registering a
+  under `PUSH_SUBSCRIBE_DOMAIN`, never `DEVICE_AUTH_DOMAIN`, since the Server
+  relays Host-issued challenges during `connect` and so sees them in transit.
+  Binding the endpoint is what stops a captured signature registering a
   different endpoint under the same identity. The challenge is single-use and
   consumed before verification, as at sign-in.
 - **A subscription authorizes nothing.** It is a delivery address the Host may
@@ -351,9 +352,9 @@ dependency. Source of truth: `server/src/push.ts` plus the routes in
   the race is left to its own inactivity timeout (rationale). Both are separate
   from the 300-second provider TTL — an alarm that arrives an hour late is
   noise, not information.
-- Push is disabled, not half-working, when no VAPID key **or no VAPID subject**
-  is configured: the config route reports `null` and challenge/subscribe/send
-  answer 503. The key and the subject are advertised together or not at all — a
+- **Push is disabled, not half-working**, when no VAPID key **or no VAPID
+  subject** is configured: the config route reports `null` and
+  challenge/subscribe/send answer 503. Key and subject ship together or not — a
   phone that registered against a key the Server has no contact to sign with
   would be subscribed to a push it can never receive.
 - **A VAPID subject naming a loopback host is a startup error, not a default.**
@@ -375,7 +376,7 @@ both directions. `clientId` is a server-assigned secret stamped onto every
 host-bound frame so the Host can address replies, and is never sent to the
 Client.
 
-Only one socket may own a `hostId`. Registering a second one for the same
+**Only one socket may own a `hostId`.** Registering a second one for the same
 `hostId` displaces the first: clients bound to it are told `host-gone`, their
 sessions are cleared, and the old socket is closed with
 `WS_CLOSE_HOST_REPLACED` (4000) / `WS_CLOSE_HOST_REPLACED_REASON`. Those
@@ -385,7 +386,7 @@ contract rather than a log line: the evicted Host keys its stand-down on it
 *replacement* time and not only on disconnect is load-bearing — the displaced
 socket's own close event is a no-op here, and the new Host process has a fresh
 ACL and no memory of those sessions, so their in-flight `msg` frames must never
-stay authorized. Source of truth: `server/src/relay.ts` (`registerHost`).
+stay authorized.
 
 The relay keeps one current Host binding per Client socket. Host-originated
 handshake replies and `msg` frames are routed only when the frame comes from
@@ -405,8 +406,9 @@ Client with a relay-local expiry derived from the server's observation time
 Client, but the server never compares its own clock to that Host wall-clock
 timestamp. That memory is consumed **unconditionally** on the next `connect2`,
 whether or not the rest of the check passes, so a replayed `connect2` is refused
-at the relay before the Host's challenge can be burned. Source of truth:
-`server/src/handshake.ts`.
+at the relay before the Host's challenge can be burned.
+
+Source of truth: `server/src/relay.ts` (`registerHost`), `server/src/handshake.ts`.
 
 ### Pairing (phone ↔ laptop, first time)
 
@@ -435,10 +437,10 @@ UI or burn a ticket. The ceremony beyond this point — `PairingCeremony`, local
 approval as the only thing that writes the ACL — is
 [remote-security-model.md](./remote-security-model.md) -> Pairing Ceremony.
 
-**Both sides run the shape guard**, and deliberately so: the server's
-`isPairingRequest` is a courtesy that keeps a bad frame off the wire, while the
-Host runs the same guard on arrival because the security model does not trust
-the relay (rationale). The Host likewise reduces `requestedLabel` with
+**Both sides run the shape guard.** The server's `isPairingRequest` is a
+courtesy that keeps a bad frame off the wire; the Host runs the same guard on
+arrival because the security model does not trust the relay (rationale). The
+Host likewise reduces `requestedLabel` with
 `boundedPairingLabel` before any consumer sees it (same rule as
 `boundedPushText`): it is attacker-chosen text rendered in a security dialog.
 Source of truth: `RemoteHost.#onPair` in `lib/src/remote/host/remote-host.ts`.
@@ -466,16 +468,22 @@ before sending one `connect2` (`PocketClient.connect` in
 `lib/src/remote/client/pocket-client.ts`).
 
 The server's half of "fresh user presence is validated by the Server and the
-Host" is four checks, all of which must pass or the Client gets a `decision`
-with the failure list and the Host never sees the request: the challenge is the
-exact one this server relayed to *this* client for *this* host and unexpired;
-the account is the owner; the asserted credential is a registered passkey whose
-stored key equals the one the request carries; and the assertion verifies
-**against the stored key** — never against `request.passkey.publicKey`, which is
-what makes a substituted public key useless. A pass also refreshes the session's
-presence stamp, so "connect to host A, then pair host B moments later" needs no
-second prompt. The Host's `authorizeConnection` remains the final authority
-regardless of what the server claims to have checked.
+Host" is four checks; all must pass or the Client gets a `decision` with the
+failure list and the Host never sees the request:
+
+* the challenge is the exact one this server relayed to *this* client for
+  *this* host, and unexpired;
+* the account is the owner;
+* the asserted credential is a registered passkey whose stored key equals the
+  one the request carries;
+* the assertion verifies **against the stored key** — never against
+  `request.passkey.publicKey`, which is what makes a substituted public key
+  useless.
+
+A pass also refreshes the session's presence stamp, so "connect to host A, then
+pair host B moments later" needs no second prompt. **The Host's
+`authorizeConnection` remains the final authority** regardless of what the
+server claims to have checked.
 
 ### After authorization
 
@@ -492,9 +500,7 @@ sidecar (`docs/specs/standalone.md` → "Remote Host service") and in the VS Cod
 extension host (`docs/specs/vscode.md` → "Remote Host: a service in the
 extension host"). The webview holds only UI — the pairing modal, the
 `window.dormouseRemoteHost` console hook, and answering what its own panes are
-called — and reaches the service over the `remoteHost:*` bridge, so the console
-API's shape is unchanged and its calls are now promises one round trip further
-away.
+called — and reaches the service over the `remoteHost:*` bridge.
 
 **One service, two bindings.** The runtime every host shares lives in
 `lib/src/host/remote/`: the service itself (`service.ts`), the wire contract
@@ -513,26 +519,28 @@ the per-host message-name table in `docs/specs/transport.md` → "Message
 protocol".
 
 **The store contract.** Both stores implement `HostStateStore`
-(`lib/src/host/remote/host-state-store.ts`) under the same rules: reads fail
-closed — an error that says nothing about what the file holds must answer
-neither empty nor stale, because an empty ACL silently de-pairs every device;
-the in-memory view advances only after the durable write lands, so a failed
-save cannot be mistaken for durable state by a later read; every mutation is
-serialized in call order through the shared `createSerialQueue`
-(`lib/src/host/remote/serial-queue.ts`, also the service's own start/stop
-chain) — two rapid pairing approvals write successively larger ACL snapshots,
-and the older must not finish last and erase the newer; and a store that
-cannot persist still *holds* what it is given in memory and reports
-`persistent: false` rather than dropping writes. Each store's mechanics — the
-sidecar's single 0600 JSON file, rename semantics, and memory fallback;
-VS Code's SecretStorage/globalState split and cross-window memo invalidation —
-live in that host's spec.
+(`lib/src/host/remote/host-state-store.ts`) under the same rules:
+
+* **Reads fail closed** — an error that says nothing about what the file holds
+  must answer neither empty nor stale, because an empty ACL silently de-pairs
+  every device.
+* **The in-memory view advances only after the durable write lands**, so a
+  failed save cannot be mistaken for durable state by a later read.
+* **Every mutation is serialized in call order** through the shared
+  `createSerialQueue` (`lib/src/host/remote/serial-queue.ts`, also the service's
+  own start/stop chain): two rapid pairing approvals write successively larger
+  ACL snapshots, and the older must not finish last and erase the newer.
+* **A store that cannot persist still holds what it is given** in memory and
+  reports `persistent: false` rather than dropping writes.
+
+Each store's mechanics — the sidecar's single 0600 JSON file, rename semantics,
+and memory fallback; VS Code's SecretStorage/globalState split and cross-window
+memo invalidation — live in that host's spec.
 
 * **Enrollment** (Settings dialog, or the console hook, once): server URL +
   setup password → `POST /api/host/enroll` → the service persists
   `{ serverUrl, hostId, hostToken, origin, rpId }` (+ `requireUserVerification`
-  when the server sent it) through its `HostStateStore` — a 0600 JSON file under
-  the app-data dir in standalone, `SecretStorage` in VS Code — then opens and
+  when the server sent it) through its `HostStateStore`, then opens and
   maintains `GET /ws/host`. `hostToken` is a bearer credential and never enters a
   webview realm. Refused outright for a server outside this build's allowlist
   (above), before the password leaves the machine. **A 200 that is not an
@@ -541,9 +549,8 @@ live in that host's spec.
   one mistyped throws naming those fields rather than minting a record with an
   `undefined` in the `ConnectionPolicy` the Host authenticates passkeys against
   (rationale). The request carries a 10 s `AbortSignal.timeout`, under the
-  webview's own 15 s command budget so the console sees the real error, because
-  it runs on the service's lifecycle chain where every later start/stop command
-  queues behind it. Source of truth: `lib/src/remote/host/enrollment.ts`.
+  webview's own 15 s command budget so the console sees the real error
+  (rationale). Source of truth: `lib/src/remote/host/enrollment.ts`.
 
   **Order matters, and the store goes first.** The `hostToken` exists nowhere
   else and cannot be re-minted from the same password exchange, so the save is
@@ -564,8 +571,8 @@ live in that host's spec.
   on it would evict the newer Host, which would reconnect and evict this one,
   forever. Coming back is an explicit act — `reconnect()` — which takes the slot
   back and displaces the other Host in turn. `displaced` is therefore the one
-  connection state the user has to act on, and the only one the Settings dialog
-  gives a button. A close event from a socket the controller no longer owns is
+  connection state the user has to act on. A close event from a socket the
+  controller no longer owns is
   ignored, so a dead socket's late eviction cannot stand down the live one, and
   disposing the service is terminal: an enrollment or ACL read already in flight
   cannot construct a socket after its sidecar/extension instance tore down.
@@ -586,11 +593,11 @@ live in that host's spec.
   `clientId`.** The service coalesces a re-sent pair under one `clientId` by
   *replacing* what it holds, but rejects an old modal action whose immutable
   ticket id no longer matches; the mirror compares on `pairingId` and remounts
-  keyed by it, while leaving an unchanged item alone — every snapshot arrives as
-  fresh JSON, so identity comparison would re-render on every event. The modal
-  shows the requested label + account with Approve / Deny (same pattern as
-  KillConfirm); approving after the ticket expires sends
-  `pair-result approved:false` and dismisses, ACL untouched. In VS Code the queue
+  keyed by it, while leaving an unchanged item alone
+  (`lib/src/remote/host/activation.ts`). The modal shows the requested label +
+  account with Approve / Deny (same pattern as KillConfirm); approving after the
+  ticket expires sends `pair-result approved:false` and dismisses, ACL
+  untouched. In VS Code the queue
   is broadcast to every window, since any may be the one in front of the user.
 * **Terminal bridge**: served through a `HostSurfaceProvider`
   ([remote-api.md](./remote-api.md)). `directory.watch` snapshots come from the
@@ -640,37 +647,33 @@ only on `displaced` — `Reconnect`. Rules the UI exists to honor:
   gate arms on — so every event triggers a full `status` command, and the dialog
   re-reads on open since another window may have enrolled meanwhile. The
   *connection* moves with no event at all, so the store also polls every 2 s
-  **while something is subscribed** — the seconds the dialog is open, not a
-  standing timer in every window. The answer is compared field-wise before being
-  published, since the service returns a fresh object every poll (rationale;
-  same rule as `setPushDevices` in `lib/src/lib/push-devices.ts`).
+  **while something is subscribed**, never as a standing timer in every window,
+  and compares the answer field-wise before publishing (rationale; same rule as
+  `setPushDevices` in `lib/src/lib/push-devices.ts`).
 - **Reads are serialized, and coalescing stops at anything that changes the
   answer.** Ticks arriving during a slow read queue behind it, so a 15-second
   Host-service timeout becomes the visible error instead of being superseded by
-  newer polls. But `enroll`, `reconnect` and `clearEnrollment` each *drop* the
-  read in flight, because a `status` issued beforehand answers the question as it
-  stood then — joining it would report the old enrollment as though the command
-  had not run, the inverse of the delete-first ordering the service uses. Losing
-  the last subscriber drops it for the same reason: a reopened dialog must not be
-  answered with a status fetched for the closed one (rationale). Source of
-  truth: `dropInFlightRead` in `lib/src/remote/host/host-status-store.ts`.
+  newer polls; `enroll`, `reconnect`, `clearEnrollment` and losing the last
+  subscriber each *drop* the read in flight, since an answer fetched before the
+  command — or for a dialog now closed — is no longer the question anyone asked
+  (rationale). Source of truth: `dropInFlightRead` in
+  `lib/src/remote/host/host-status-store.ts`.
 
-The `window.dormouseRemoteHost` console hook keeps the same four commands and
-remains the scripting seam. Pairing approval is deliberately *not* here: it is a
-modal, because it must interrupt
+The `window.dormouseRemoteHost` console hook exposes the same four commands and
+remains the scripting seam. **Pairing approval is never here** — it is a modal,
+because it must interrupt
 ([remote-security-model.md](./remote-security-model.md), Pairing Ceremony).
 
 `docs/stories/pairing.mdx` walks this section and the pairing modal in sequence
 with the rest of the setup, rendering the real components; it is a narrative
-Storybook page, not a spec, so this section is what it defers to.
+Storybook page that defers to this one.
 
 ## Pocket side (phone)
 
 Pocket is served by this server and built from `lib`; its architecture,
 theming, and same-origin deployment rule are [pocket-app.md](./pocket-app.md).
-What matters here is only the seam: the server ships the static build and
-authors no styling of its own — its one self-authored response is the plaintext
-missing-build stub at `GET /`.
+The seam: the server ships the static build and authors no styling of its own —
+its one self-authored response is the plaintext missing-build stub at `GET /`.
 
 ## Testing
 
@@ -678,9 +681,9 @@ The security and relay layers are covered without a browser: `pnpm --filter
 server test` drives setup → pairing → connect end to end through the real server
 — `app.request()` for HTTP routes, real WebSockets against an ephemeral-port
 server for the relay — using `SimAuthenticator` (from `server-lib-common`) plus
-the `FakeHost` harness in `server/test/harness/fake-host.mjs`. Two suites
-instead spawn the real entrypoint, because what they assert is a property of the
-process rather than of the app: `bind-host` and `runtime-file`. Revoked-record
+the `FakeHost` harness in `server/test/harness/fake-host.mjs`. `bind-host` and
+`runtime-file` instead spawn the real entrypoint, since what they assert is a
+property of the process rather than of the app. Revoked-record
 denial is covered at the unit level in `server-lib-common`'s own tests, not
 through the relay. Browser-dependent layers — the Host module and the Pocket
 terminal view — are dogfooded rather than automated.
@@ -701,10 +704,9 @@ Builds the Pocket app (`lib/dist-pocket`) and the server, then serves both on
 needs a secure context, and only `localhost` is exempt.
 
 On the default localhost origin **push is off** and the server says so at
-startup: there is no routable operator contact to sign a VAPID JWT with, and a
-phone could not route to localhost anyway. Setting `DORMOUSE_ORIGIN` to an https
-origin enables it with no further configuration, since that origin becomes the
-subject. To exercise push against a desktop browser on localhost, supply a
+startup — no routable VAPID subject (Web Push above). Setting `DORMOUSE_ORIGIN`
+to an https origin enables it with no further configuration, since that origin
+becomes the subject. To exercise push against a desktop browser on localhost, supply a
 contact explicitly:
 
 ```sh
@@ -712,11 +714,11 @@ DORMOUSE_SETUP_PASSWORD=hunter2 DORMOUSE_VAPID_SUBJECT=mailto:you@example.com \
   pnpm dev:pocket-server
 ```
 
-**2. Host** (the laptop being controlled). The Host runs in the sidecar / the
-extension host and refuses any origin outside the allowlist baked into that
-bundle — by default the SaaS origin only, with no localhost and no plaintext
-scheme. A local server therefore needs the override at build time, which
-`dev:standalone` picks up because it re-stages the sidecar bundles on the way:
+**2. Host** (the laptop being controlled). The Host refuses any origin outside
+the allowlist baked into its bundle (above), which by default admits neither
+localhost nor a plaintext scheme, so a local server needs the override at build
+time — `dev:standalone` picks it up because it re-stages the sidecar bundles on
+the way:
 
 ```sh
 DORMOUSE_REMOTE_CONNECT_SRC='http://localhost:3000 ws://localhost:3000' pnpm dev:standalone
@@ -765,10 +767,9 @@ machine, reachable only from their tailnet — a LaunchAgent on macOS, a
 Scheduled Task on Windows, a systemd *user* service on Linux — with
 `tailscale serve` terminating HTTPS on the node's MagicDNS name and proxying to
 the server on loopback. There is no cloud relay: an always-on relay is the same
-installer on an always-on tailnet machine. Availability follows from what a
-per-login agent is: the relay is down while the machine sleeps, is shut off, or
-has no logged-in user — usually fine, since there is then no local Host to
-control either.
+installer on an always-on tailnet machine. The relay is down while the machine
+sleeps, is shut off, or has no logged-in user — usually fine, since there is
+then no local Host to control either.
 
 **[SELF_HOST.md](../../SELF_HOST.md) is both the operator runbook and the
 installer spec**: the platform mechanism map, the invariants the three
