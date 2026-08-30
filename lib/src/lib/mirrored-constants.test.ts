@@ -29,6 +29,25 @@ describe('ITERM2_COMPAT_VERSION mirrors', () => {
   });
 });
 
+// docs/specs/dor-cli.md: the control-socket handshake. The CLI is a bundled ESM
+// binary with no shared build against the CJS server module, so the proof
+// domains are duplicated — and drift is silent: the server's own test builds
+// its client frames from the server's copy, so only a failed handshake at
+// runtime would notice.
+describe('dor control-socket proof-domain mirrors', () => {
+  const client = 'dor/src/control-client.ts';
+  const server = 'standalone/sidecar/dor-control-server.js';
+  const clientSrc = readRepoFile(client);
+  const serverSrc = readRepoFile(server);
+
+  for (const name of ['CLIENT_PROOF_DOMAIN', 'SERVER_PROOF_DOMAIN'] as const) {
+    it(`${name} matches between the dor CLI and the sidecar server`, () => {
+      const re = new RegExp(`^const ${name} = '([^']+)';$`, 'm');
+      expect(extract(clientSrc, client, re)).toBe(extract(serverSrc, server, re));
+    });
+  }
+});
+
 // docs/specs/standalone.md -> "Rust <-> sidecar bridge"
 describe('OPEN_PORT_TIMEOUT_MS mirrors', () => {
   it('matches the sidecar copy in standalone/sidecar/pty-core.js', () => {
