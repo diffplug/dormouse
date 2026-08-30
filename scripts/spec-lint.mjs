@@ -31,6 +31,10 @@
  *      heading in the spec), and has no `## Future` — rationale files are
  *      informative, the fold belongs to the spec. Rationale files are not
  *      specs: they skip checks 1, 2, and 5 but ride 3 and 4.
+ *   9. Word-budget ratchet: every checked file stays under its budget in
+ *      scripts/spec-word-budgets.json. Growth past the budget fails; the fix
+ *      is to cut, or to raise the budget deliberately in the same PR. Budgets
+ *      carry small headroom so routine edits don't trip it.
  */
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname, normalize } from 'node:path';
@@ -264,6 +268,27 @@ for (const rat of rationaleFiles) {
     } else if (!specAnchors.has(slug(h.title))) {
       problems.push(`${rat}: "## ${h.title}" is not a heading in ${spec}`);
     }
+  }
+}
+
+// --- Check 9: word-budget ratchet ---------------------------------------------
+const BUDGETS_FILE = 'scripts/spec-word-budgets.json';
+const budgets = JSON.parse(read(BUDGETS_FILE));
+for (const rel of allFiles) {
+  const words = read(rel).split(/\s+/).filter(Boolean).length;
+  const budget = budgets[rel];
+  if (budget === undefined) {
+    problems.push(`${BUDGETS_FILE}: no budget for ${rel} — add one (currently ${words} words)`);
+  } else if (words > budget) {
+    problems.push(
+      `${rel}: ${words} words exceeds its ${budget}-word budget — cut, ` +
+      `or raise the budget in ${BUDGETS_FILE} deliberately in the same PR`,
+    );
+  }
+}
+for (const rel of Object.keys(budgets)) {
+  if (!allFiles.includes(rel)) {
+    problems.push(`${BUDGETS_FILE}: stale entry for missing file ${rel}`);
   }
 }
 
