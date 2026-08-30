@@ -38,8 +38,10 @@ export interface SocketControlClientOptions {
 // Must match standalone/sidecar/dor-control-server.js, the other half of this
 // handshake. The two live in different packages (a bundled ESM CLI and a plain
 // CJS module loaded by both hosts) with no shared build, so the constants and
-// the proof construction are duplicated rather than imported — pinned by
-// lib/src/lib/mirrored-constants.test.ts.
+// the proof construction are duplicated rather than imported. The two domain
+// constants are pinned by lib/src/lib/mirrored-constants.test.ts; the proof
+// construction is not, so `proveToken` and `proofMatches` have to be changed
+// in both copies by hand.
 const CLIENT_PROOF_DOMAIN = 'dor-control/client';
 const SERVER_PROOF_DOMAIN = 'dor-control/server';
 
