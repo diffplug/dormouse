@@ -16,6 +16,10 @@ The five taxes dockview-react charged, and what Lath does instead. Each line in 
 
 **Dormouse already kept a shadow model.** DOM neighbor inspection, layout snapshots carrying structure signatures, and spatial navigation doing rect math over group elements — the app continuously re-derived the tree dockview owned but did not usefully share. Lath owns the tree outright, and its pure `neighbors()` / `layout()` queries replaced that DOM math.
 
+## Parked leaves
+
+**Why a parked leaf holds its rect instead of hiding cheaply.** Sizing it to zero — or `display: none` — reports a 0×0 viewport to the guest document, so the guest reflows on the way out and again on the way back; a screencast canvas and an `<iframe>`'s layout both visibly re-settle. Holding the last rect behind `visibility: hidden` skips both reflows, which is what makes reattach pixel-identical rather than merely fast.
+
 ## Testing
 
 **What the live acceptance run covered.** Beyond walking every matrix row through the standalone agent-browser harness, the run frame-sampled the motion rows — kill freeze-and-fade followed by the survivor tween, the last-pane shrink-to-corner with its top-left auto-spawn entry, and continuous retarget under two kills fired 200ms apart — and checked pixel-exact preview-equals-commit for drops at leaf, column, and root depth.
