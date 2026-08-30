@@ -25,12 +25,12 @@ one protocol, not two:
 | Layout mutations        | no               | yes              |
 | Input                   | to attached pane | to any surface   |
 
-Design principle, and a standing constraint on everything staged below:
-**replicate state, don't stream a desktop.** Terminals are sent as PTY data and
-rendered client-side; browser surfaces will be sent as per-surface screencasts.
-This is what makes VR viable — each surface arrives as its own independently
-placeable stream — and it makes the phone cheap: one attached surface, one
-stream.
+**Replicate state, don't stream a desktop** — the design principle, and a
+standing constraint on everything staged below. Terminals are sent as PTY data
+and rendered client-side; browser surfaces will be sent as per-surface
+screencasts. This is what makes VR viable — each surface arrives as its own
+independently placeable stream — and it makes the phone cheap: one attached
+surface, one stream.
 
 ## v1 scope
 
@@ -53,7 +53,7 @@ Everything else — including browser-surface remoting — is staged in
 
 ### The provider seam
 
-The Host runs in the process that owns the PTYs, never a webview
+**The Host runs in the process that owns the PTYs, never a webview**
 (`docs/specs/server.md` → "Host side"). Within it, `RemoteApiSession` speaks this
 protocol and nothing else: surface ids, PTY ids, sizes, and bytes. *Where* a
 named surface lives — this window's webviews, another window's, another
@@ -73,8 +73,7 @@ attachment's stream or input to another window.
 
 ## Terminology
 
-`docs/specs/glossary.md` is canonical for **Pane** and **Surface**, and the wire
-shapes reuse the existing surface model (`dor/src/protocol.ts`,
+The wire shapes reuse the existing surface model (`dor/src/protocol.ts`,
 `dor/src/commands/types.ts`): a Surface is named on the wire by `surfaceId`, and
 the picker lists Panes, so attaching to a Pane means attaching to its selected
 Surface. Remote-only vocabulary:
@@ -118,7 +117,7 @@ a first data frame. The six methods and three events are named constants
 (`REMOTE_METHODS`, `REMOTE_EVENTS`); events are dispatched by name, so a future
 event lands additively and an old client ignores what it does not know.
 
-Every peer-supplied `cols`/`rows` passes through `clampTerminalDimension` —
+**Every peer-supplied `cols`/`rows` passes through `clampTerminalDimension`** —
 1 … `MAX_TERMINAL_DIMENSION` (2000), falling back to the current size when absent
 or non-finite — on the Host, in the webview responder that drives the real xterm,
 and in the Client adapter. The upper bound is the security-relevant half: a local
@@ -183,10 +182,10 @@ type DirectoryEvent =
   | { event: 'directory.snapshot'; data: { entries: DirectoryEntry[] } };
 ```
 
-Snapshot-only, deliberately: a directory is dozens of entries at most, so on
-any change the Host coalesces (150ms window, `DIRECTORY_DEBOUNCE_MS`) and
-resends the whole thing. Delta events are a future optimization there is no
-current reason to pay for.
+Snapshot-only: a directory is dozens of entries at most, so on any change the
+Host coalesces (150ms window, `DIRECTORY_DEBOUNCE_MS`) and resends the whole
+thing. Delta events are a future optimization there is no current reason to
+pay for.
 
 **One snapshot per collect.** The provider answers for every surface the Host can
 reach, so no subset is known sooner than the rest. A collect is dropped rather
@@ -211,10 +210,10 @@ unconditionally. Both feed the same coalescer, which re-collects from every
 answerer before sending the replacement snapshot.
 
 The picker renders from titles, activity, and the `ringing`/`hasTODO` badges;
-thumbnails are staged. Browser and iframe surfaces are neither listed nor
-attachable — they never enter the xterm registry the directory is collected from,
-so `surface.attach` cannot resolve them either (see [Future](#future) for browser
-remoting; iframe surfaces are not on the critical path even there).
+thumbnails are staged. **Browser and iframe surfaces are neither listed nor
+attachable** — they never enter the xterm registry the directory is collected
+from, so `surface.attach` cannot resolve them either (see [Future](#future) for
+browser remoting; iframe surfaces are not on the critical path even there).
 
 `alive` is real PTY-process liveness. Dormouse keeps an exited pane open in the
 Host registry (rendering "[Process exited with code N]") until the user closes
@@ -232,8 +231,8 @@ reporting `alive: false` may carry no `exitCode` at all.
 detach cannot kill a newer attachment; detaching anything that is not the
 current attachment is an idempotent no-op. One attachment per session (the
 phone's model); lifting that cap for VR is future work. Attachment is
-view-state only with one deliberate exception: attaching to a terminal takes
-size authority.
+view-state only with one exception: attaching to a terminal takes size
+authority.
 
 ### Terminal surfaces
 
@@ -260,9 +259,9 @@ dimensions and there is no snapshot transfer:
    The bounce goes down, except from a 1-row surface, where `rows - 1` would
    itself be a no-op that fires no `SIGWINCH`.
 
-Normal-screen history does not regenerate on resize; it is deliberately absent
-from the shipped protocol (see [Future](#future): in-flight replay, then
-semantic scrollback).
+Normal-screen history does not regenerate on resize, and is absent from the
+shipped protocol (see [Future](#future): in-flight replay, then semantic
+scrollback).
 
 ```ts
 // client → host
@@ -341,17 +340,17 @@ peer `subscribe` / `subscribed` frames in `vscode-ext/src/peer-link.ts`.
 
 A terminal has one size, and the most recent size writer owns it: attaching
 with dimensions and `terminal.resize` both take authority, and the Host user
-interacting with the pane locally reclaims it. There is deliberately no remote
-detach at the surface owner: the Host stops streaming on its side and the pane
-keeps whatever size it was left at, which is what last-attach-wins means. The
+interacting with the pane locally reclaims it. **There is no remote detach at
+the surface owner** — the Host stops streaming on its side and the pane keeps
+whatever size it was left at, which is what last-attach-wins means. The
 Host-side **"tethering to \<device\>"** display that greys out other displays of
 a tethered pane is staged — see [Future](#future); today the authority semantics
 hold at the PTY level without the dedicated display.
 
 ## Input authority and multiple viewers
 
-Input authority is deliberately flat: selfhost is single-user, so every paired
-session is the owner and gets full input (`grants: { input: true, layout: false }`),
+**Input authority is flat**: selfhost is single-user, so every paired session
+is the owner and gets full input (`grants: { input: true, layout: false }`),
 and no session gets layout operations.
 
 Concurrent sessions then need no special machinery: attach state is per-session,

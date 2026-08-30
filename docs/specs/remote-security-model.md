@@ -20,8 +20,7 @@ qualification).
 `SECURITY.md` -> "Remote Control" is this model's audited face: it names the
 subset of the properties below that are load-bearing enough to be checked
 nightly, and states plainly which risks are accepted (the setup password's
-minimal hardening) and which gaps are open (revocation, the audit trail). This
-spec is the design; that section is what a machine verifies about it.
+minimal hardening) and which gaps are open (revocation, the audit trail).
 
 The primitives — assertion verification, device signatures, challenges, the
 ACL, the ceremony — live in `server-lib-common/src/security/`: runtime-agnostic
@@ -77,7 +76,7 @@ Non-goals:
 
 ## Trust Model
 
-Dormouse intentionally separates:
+Dormouse separates:
 
 | Layer      | Responsibility             |
 | ---------- | -------------------------- |
@@ -86,8 +85,8 @@ Dormouse intentionally separates:
 | Host ACL   | Authorization              |
 | Host       | Final access decision      |
 
-No single layer is sufficient to gain access. A successful connection requires
-all layers to agree.
+**No single layer is sufficient to gain access** — a successful connection
+requires all four to agree.
 
 ## Passkeys
 
@@ -96,11 +95,10 @@ WebAuthn assertion, validated by **both** the Server and the Host.
 
 Passkeys are frequently *synchronized* credentials — iCloud Keychain, Google
 Password Manager, platform authenticators — so a single passkey may appear on
-multiple physical devices. Therefore:
+multiple physical devices:
 
-> Passkeys are treated as user credentials, not device identities.
-
-A passkey authenticates a user account but does not grant access to any Host.
+> Passkeys are treated as user credentials, not device identities. A passkey
+> authenticates a user account; it grants access to no Host.
 
 **Presence, or verification.** The default demand is the authenticator's
 user-*presence* flag. A deployment raises it to user *verification* (biometric
@@ -154,10 +152,10 @@ recoverable event (see [Device Key Loss](#device-key-loss)).
 
 Sign-in returns the asserted passkey's **public** key, so any browser profile
 holding a synced passkey can build pair and connect requests rather than only
-the one that registered it. Deliberately not a weakening: the key is public,
-the Host receives it in every `ConnectionRequest` regardless, and a Client that
-signs in has merely asked — it reaches nothing until the Host's local approval
-adds *its own device key* to the ACL.
+the one that registered it. Not a weakening: the key is public, the Host
+receives it in every `ConnectionRequest` regardless, and a Client that signs in
+has merely asked — it reaches nothing until the Host's local approval adds *its
+own device key* to the ACL.
 
 The device key has one use outside connection establishment: a Client signs its
 Web Push subscription with it, binding that subscription to the same identity
@@ -216,12 +214,16 @@ is *not* automatically trusted — the Client must still complete Host pairing.
 from builds that kept the Host in webview `localStorage`; that path is bounded
 separately — `SECURITY.md` -> "Remote Control".)
 
-What the ceremony establishes: the Client authenticates with a passkey and
-presents its device public key; the Host displays local approval UI (the
-pairing modal, same pattern as KillConfirm — `docs/specs/server.md`, Host
-side); the user approves locally on the Host; the Host writes the
-`HostAclRecord` binding the passkey credential identity to the device public
-key. The Client is now trusted by that Host and no other.
+What the ceremony establishes, in order:
+
+1. The Client authenticates with a passkey and presents its device public key.
+2. The Host displays local approval UI (the pairing modal, same pattern as
+   KillConfirm — `docs/specs/server.md`, Host side).
+3. The user approves locally on the Host.
+4. The Host writes the `HostAclRecord` binding the passkey credential identity
+   to the device public key.
+
+The Client is now trusted by that Host and no other.
 
 **The approval is only as good as what the modal lets a human check.** The
 ceremony verifies no assertion, so the person at the Host *is* the control —
@@ -238,14 +240,13 @@ text, reduced by `boundedPairingLabel` / `boundedPairingAccount` before display,
 so neither can overflow the dialog or carry bidi overrides that make it read as
 something else.
 
-The Host validates the request's shape itself (`isPairingRequest`) rather than
-relying on the Server having done so, for the same reason it re-verifies
-everything at connect: the Server is not trusted, and an unvalidated relayed
-object reaching the approval UI is both a crash surface and a route to a
-malformed ACL record.
+**The Host validates the request's shape itself** (`isPairingRequest`), never
+relying on the Server having done so: the Server is not trusted, and an
+unvalidated relayed object reaching the approval UI is both a crash surface and
+a route to a malformed ACL record.
 
-Each displayed approval is bound to the ceremony ticket's immutable
-`pairingId`. If a Client replaces its pending request while the old modal or
+**Each displayed approval is bound to the ceremony ticket's immutable
+`pairingId`.** If a Client replaces its pending request while the old modal or
 its click command is still in flight, the Host rejects that stale action; it
 never selects a request by mutable `clientId` alone. Source of truth:
 `RemoteHostService.#pendingPairing` in `lib/src/host/remote/service.ts` and the
@@ -279,9 +280,9 @@ any map is touched.
 
 That bounds the *pairing* path only. `connect` creates a client entry by
 another route (`#resetAuthorization`); those carry no pending request, and the
-pairing counter deliberately neither sees nor evicts them, since dropping an
-entry that may be `established` is a different act from denying a pending
-request. They are cleared wholesale when the relay socket drops.
+pairing counter neither sees nor evicts them, since dropping an entry that may
+be `established` is a different act from denying a pending request. They are
+cleared wholesale when the relay socket drops.
 
 Source of truth: `PairingRequest` / `PairingTicket` / `PairingCeremony` /
 `PAIRING_PRESENCE_WINDOW_MS` / `PAIRING_FIELD_LIMIT` / `MAX_PENDING_PAIRINGS`
@@ -319,10 +320,10 @@ that mints before it can authenticate the caller — `POST /api/signin/begin` �
 retains only what a caller can mint inside one TTL window, rather than
 accumulating for the process's lifetime.
 
-Every new `connect` / `connect2` closes that Client's established message gate
-and disposes its prior control session before this evaluation, and only the
-newest evaluation may re-open that gate: each attempt carries an authorization
-generation, and one that has been superseded while it awaited verification sends
+**Every new `connect` / `connect2` closes that Client's established message
+gate** and disposes its prior control session before this evaluation, and only
+the newest evaluation may re-open that gate: each attempt carries an
+authorization generation, and one superseded while it awaited verification sends
 no decision at all — otherwise an older `allowed` landing last would re-open the
 gate its successor had just closed. A structurally malformed request from the
 relay is contained as a denied decision rather than an async failure in the Node
@@ -336,11 +337,13 @@ connection. The concrete sequence is the connect diagram in
 
 ## Storage Durability
 
-Where the device key lives is browser-managed storage, and durability differs
-by platform: an iOS browser tab is the weakest (storage may be evicted after
-inactivity — do not treat it as permanent), an Android browser tab is generally
-durable, and an installed PWA is the preferred mode on both, strongest on
-Android.
+The device key lives in browser-managed storage, and durability differs by
+platform:
+
+* **iOS browser tab** — weakest; storage may be evicted after inactivity.
+  **Never treat it as permanent.**
+* **Android browser tab** — generally durable.
+* **Installed PWA** — the preferred mode on both, strongest on Android.
 
 Today Pocket generates the device key in whatever context it runs — the
 install-before-pairing guidance and storage-persistence hardening are staged
@@ -369,9 +372,8 @@ Dormouse is designed so that:
 * Passkey synchronization does not automatically create trusted Clients.
 * Every trusted Client must be explicitly paired with every Host.
 * Every connection requires fresh user presence.
-* Every access decision is ultimately made by the Host.
-
-The Host remains the final authority throughout the system.
+* Every access decision is ultimately made by the Host — the final authority
+  throughout the system.
 
 **One honest qualification.** "Server compromise grants no Host access" bounds
 *creation*, not *action*. After a decision the Host gates `msg` frames on

@@ -43,10 +43,10 @@ is absent — the interface is designed for capability degradation (`getCwd` →
 null, shells/clipboard empty, alerts inert, `alertAwait` settling `cancelled`
 rather than handing back a promise that never resolves).
 
-Pocket hides `MobileWall`'s local Kill affordance (`showKillButton={false}`):
-remote panes are Host-owned, and v1 grants no phone-side kill/layout authority.
-Closing a local xterm view without a Host-side close would leave the Host
-attachment live and the phone view inconsistent.
+**Pocket hides `MobileWall`'s local Kill affordance** (`showKillButton={false}`)
+— remote panes are Host-owned, and v1 grants no phone-side kill/layout
+authority. Closing a local xterm view without a Host-side close would leave the
+Host attachment live and the phone view inconsistent.
 
 Adapter-specific extras (the same pattern as `FakePtyAdapter`'s scenario
 controls): the concrete `RemotePtyAdapter` exposes `setActivePane(id)` — the
@@ -69,8 +69,8 @@ Three details the table above leaves implicit:
   the active pane (`attachableDirectoryEntries` in
   `lib/src/remote/pocket-app/wall-model.ts`).
 
-Pocket's local "paired" host marker is optimistic cache, not authority. When a
-connect denial reports an ACL miss (`passkey-not-paired`,
+**Pocket's local "paired" host marker is optimistic cache, not authority.**
+When a connect denial reports an ACL miss (`passkey-not-paired`,
 `device-not-paired`, or `pairing-mismatch`), Pocket clears that marker and
 shows Pair again so expected Host ACL resets, revocations, or browser
 device-key loss recover through the normal pairing ceremony.
@@ -102,10 +102,10 @@ static serving of the built Pocket bundle.
 
 ## Design system and theming
 
-Pocket is a product surface, not a marketing page: all of it — the auth screens
-included — renders on the shared themeable design system (`--color-*` tokens
-over `--vscode-*`; [theme.md](./theme.md), `DESIGN.md`), never the website's
-separate "homepage" system (`website/src/index.css`). There is no
+Pocket is a product surface, not a marketing page: **all of it — the auth
+screens included — renders on the shared themeable design system** (`--color-*`
+tokens over `--vscode-*`; [theme.md](./theme.md), `DESIGN.md`), never the
+website's separate "homepage" system (`website/src/index.css`). There is no
 Pocket-specific palette; changing the theme re-skins the auth screens and the
 wall together.
 
@@ -193,8 +193,8 @@ iOS, cookies, `localStorage`, and IndexedDB are not shared between Safari and a
 Home Screen web app, so the install generates its own device key and is a
 *different Client* than the same phone's Safari tab.
 
-Exactly one consequence survives, and it is the security model working as
-designed: the install needs **its own pairing approval** on each Host. Signing
+**The install needs its own pairing approval on each Host** — the one
+consequence that survives, and the security model working as designed: signing
 in is not enough to reach a machine, and a Client the user has not approved
 there must not inherit access
 ([remote-security-model.md](./remote-security-model.md)).
@@ -202,10 +202,9 @@ there must not inherit access
 Signing in *is* enough to ask. `SigninFinishResponse` returns the asserted
 passkey's public key, which a Client needs to build pair and connect requests,
 so a profile that never performed the registration can still pair rather than
-being pushed into a redundant second passkey — that limit was an artifact of the
-wire, not a property of the trust model. The key is public: the Host is handed
-it in every `ConnectionRequest` anyway, and holding it authorizes nothing. If
-the cached copy disappears mid-session, Pocket directs the user to sign in
+being pushed into a redundant second passkey. Holding that public key authorizes
+nothing ([remote-security-model.md](./remote-security-model.md) -> Device Keys).
+If the cached copy disappears mid-session, Pocket directs the user to sign in
 again, and the verified response restores it on any profile. Source of truth:
 `PASSKEY_UNAVAILABLE_MESSAGE` and `PocketClient.signin` in
 `lib/src/remote/client/pocket-client.ts`.
@@ -231,8 +230,8 @@ Source of truth: `isInstalledWebApp` / `requiresInstallForPush` in
 - **Install is required** is the *presence* of `navigator.standalone`, even when
   it is `false`. The property is iOS/iPadOS Safari only and `undefined`
   everywhere else — including macOS Safari, where Web Push works in an ordinary
-  tab and an install prompt would be wrong. This deliberately avoids parsing a
-  user-agent string, which iPadOS makes unreliable by reporting as a Mac.
+  tab and an install prompt would be wrong. **Never parse the user-agent
+  string** here — iPadOS makes it unreliable by reporting as a Mac.
 - **A tab cannot see whether the app is also installed.** The two have separate
   storage and share no signal, so the install notice necessarily also shows to
   someone who installed it and opened the wrong window; the copy says so rather
@@ -273,18 +272,18 @@ Which Hosts those are is read back from the Server when the Hosts view opens,
 not remembered locally, so a reload does not re-offer an action already taken
 and a row pruned after a 410 stops claiming alerts are on. The read is
 `GET /api/push/subscriptions`, which returns the **account's** registrations as
-identities and is filtered to this device by `PocketClient` — deliberately not
-parameterized by `devicePublicKey`, which would be an enumeration primitive over
-an input the caller need not own, where the account's own rows are already its
-to read (the same scoping `GET /api/hosts` uses). `POST /api/push/subscribe`
-answers with the same thing — every Host this device is registered with after
-the mutation — so both answers are complete and neither is a delta: nothing to
-merge, only the question of which is newer. Pocket counts completed
-registrations, captures that count when a read begins, and discards the read's
-snapshot if a registration overtook it; it also clears the previous snapshot at
-the start of a read, so a failed read re-offers an idempotent action instead of
-preserving a stale **Alerts on** claim. Source of truth: `getPushAvailability`
-in `lib/src/remote/client/push-subscribe.ts`,
+identities and is filtered to this device by `PocketClient`. **Never
+parameterize that read by `devicePublicKey`** — it would be an enumeration
+primitive over an input the caller need not own, where the account's own rows
+are already its to read (the same scoping `GET /api/hosts` uses).
+`POST /api/push/subscribe` answers with the same thing — every Host this device
+is registered with after the mutation — so both answers are complete and neither
+is a delta: nothing to merge, only the question of which is newer. Pocket counts
+completed registrations, captures that count when a read begins, and discards
+the read's snapshot if a registration overtook it; it also clears the previous
+snapshot at the start of a read, so a failed read re-offers an idempotent action
+instead of preserving a stale **Alerts on** claim. Source of truth:
+`getPushAvailability` in `lib/src/remote/client/push-subscribe.ts`,
 `PocketClient.listPushSubscribedHosts`, and the hosts-phase effect in
 `lib/src/remote/pocket-app/App.tsx`.
 
@@ -408,9 +407,8 @@ line: the pairing ceremony verifies no assertion
 laptop's approval modal is the control — and the fingerprint that modal shows,
 of the key that is *asking*, is a value nobody can check unless the phone shows
 it too. Both ends call the same `pairingFingerprint` helper from
-`server-lib-common` (an 8-character slice of the base64url public point, taken
-past the two near-constant leading characters) so they cannot drift into showing
-different slices of the same key.
+`server-lib-common` — an 8-character slice of the base64url public point, taken
+past the two near-constant leading characters.
 
 It renders whenever the key loads, paired or not, so it reads as a property of
 this browser rather than a step in a flow. A key that fails to load leaves it
@@ -419,10 +417,10 @@ failure. Source of truth: `HostsView` in `lib/src/remote/pocket-app/App.tsx`.
 
 ## Deployment: same-origin, always
 
-WebAuthn binds passkeys to the serving origin, and Chrome's Private Network
-Access rules are progressively blocking public-site → private-network fetches.
-Both point the same way: **the Pocket app is always served same-origin with
-its API.** Pocket holds itself to it by construction — an empty API base and a
+**The Pocket app is always served same-origin with its API.** WebAuthn binds
+passkeys to the serving origin, and Chrome's Private Network Access rules are
+progressively blocking public-site → private-network fetches — both point the
+same way. Pocket holds itself to it by construction — an empty API base and a
 `wsBase` derived from `location.origin` — and the Server enforces it: a
 registration or assertion whose `clientDataJSON.origin` is not the configured
 `DORMOUSE_ORIGIN` is rejected, so a Pocket served anywhere else cannot sign in
