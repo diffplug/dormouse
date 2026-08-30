@@ -167,16 +167,15 @@ that is killed before `deactivate()` finishes.
 
 **Recovery goes first, and that is the whole feature.** The resume hint exists only
 between the interrupt and the kill, so nothing after step 5 can find it — and VS
-Code kills the extension host on a budget we do not control, one that has never
-once let `[deactivate] done` print. So the one step whose data cannot be
-reconstructed afterwards runs before the steps whose data can (cwd re-reads, alert
-merges). `captureAgentRecoveryCommands` writes `^C` into every live PTY, waits
-bounded for what they print, scans those buffers, and records the invocation to a
-file of its own — `recovery.json` under `context.storageUri`, written
-synchronously and replaced temp-then-rename — not to `workspaceState`, whose
-SQLite flush is already tearing down by then (measured: detection complete, the
-record never written), and not to `PersistedPane.resumeCommand`, which the later
-step-3 flush would overwrite with the webview's stale copy. The record is
+Code kills the extension host on a budget we do not control (rationale). So the
+one step whose data cannot be reconstructed afterwards runs before the steps
+whose data can (cwd re-reads, alert merges). `captureAgentRecoveryCommands`
+writes `^C` into every live PTY, waits bounded for what they print, scans those
+buffers, and records the invocation to a file of its own —
+`recovery.json` under `context.storageUri`, written synchronously and
+replaced temp-then-rename. **Not `workspaceState`**, whose SQLite flush is already
+tearing down by then (rationale), and **not `PersistedPane.resumeCommand`**, which
+the later step-3 flush would overwrite with the webview's stale copy. The record is
 rewritten the moment each command is found, so being killed mid-poll costs at
 most a late agent's command; every wait is bounded, and a timeout loses the
 recovery command rather than delaying shutdown.
@@ -195,12 +194,10 @@ not owned by a container.
 #### Capturing agent recovery
 
 The agents print their resume invocation when **interrupted**, not when
-signalled — SIGTERM to the pty leader is inert against both, and the
-foreground-process-group signal that does reach claude leaves codex silent — so
-capture writes `^C` to the pty:
-the tty line discipline delivers SIGINT to the foreground process group itself
-(no `tcgetpgrp`, no master fd node-pty does not expose, and a path that exists
-on ConPTY too), the shell survives, and the hint arrives as ordinary
+signalled, so capture writes `^C` to the pty rather than signalling it
+(rationale): the tty line discipline delivers SIGINT to the foreground process
+group itself (no `tcgetpgrp`, no master fd node-pty does not expose, and a path
+that exists on ConPTY too), the shell survives, and the hint arrives as ordinary
 `pty:data`. Every live terminal PTY is interrupted, not just recognized agents:
 a foreground gate would need per-pane command knowledge the host does not have,
 `^C` into a non-agent is inert, `detectResumeCommand` is the real filter, and
@@ -222,33 +219,19 @@ the interrupt's own round trip into the window. The poll's ~1.2 s wall-clock
 ceiling is the one timing anchored to entry, being a shutdown budget rather
 than an agent timing. **Do not finish early on quiet**: codex says nothing for
 ~250 ms and then prints its entire shutdown at once, so silence is what it
-looks like *before* it speaks — two settle-on-quiet heuristics died on exactly
-that, and the only sound early exit is having nothing left to wait for.
-Polling to the ceiling is affordable because the record is written eagerly.
-Coupling the ask gate to an English UI string is deliberate: a wording change
-loses claude's recovery visibly and recoverably, where a mistimed window
-destroys codex's every single time.
+looks like *before* it speaks, and the only sound early exit is having nothing
+left to wait for (rationale). Polling to the ceiling is affordable because the
+record is written eagerly. Coupling the ask gate to an English UI string is
+deliberate: a wording change loses claude's recovery visibly and recoverably,
+where a mistimed window destroys codex's every single time.
 
-Codex is the constraining case — its `^C` is consumed by the input line first —
-and the timing constants are sized against these measurements in a real pty:
-
-| State when interrupted | Gesture | Hint | At |
-| --- | --- | --- | --- |
-| idle after a pause | one `^C` | yes | 262 ms |
-| idle after a pause | two `^C`, 150 ms apart | **no** | — |
-| idle after a pause | `^C`, 800 ms, `^C` | yes | 855 ms |
-| unsent text in the input | one `^C` | **no** | — |
-| unsent text in the input | two `^C`, 150 ms apart | yes | 464 ms |
-| unsent text in the input | `^C`, 800 ms, `^C` | yes | 1061 ms |
-| freshly launched, no conversation | one `^C` | no — correctly, nothing to resume | — |
-
-A blanket second press destroys the idle case, and an ask-gated one never fires
-at all — `Press Ctrl-C again` was absent from every codex cell, so the phrase
-gate can only ever serve claude. Press-wait-press is the only gesture covering
-both, and the constants are sized so the idle case (yielding at 262 ms) leaves
-the retry set before the ~600 ms fallback arrives. Confirmed end to end in a
-real pane: fallback press at +625 ms, hint at +789 ms, applied on the next
-activation.
+**Codex is the constraining case** — its `^C` is consumed by the input line
+first — and the timing constants are sized against measurements in a real pty
+(rationale). Two simpler gestures are ruled out: a blanket second press destroys
+codex's idle case, and an ask-gated one never fires for codex at all, since
+`Press Ctrl-C again` is a claude string. Press-wait-press is the only gesture
+covering both, and the constants are sized so codex's idle case, which yields at
+262 ms, leaves the retry set before the ~600 ms fallback arrives.
 
 **Only post-interrupt bytes count.** Each pane's received-count mark
 (`getScrollbackReceived`, `docs/specs/transport.md` → Universal invariants) is
@@ -319,9 +302,9 @@ That allowlist is still a build-time constant, not a runtime value: `vscode-ext/
 
 Get any of it wrong and the failure is remote from its cause: a blank panel, or a render error naming a chunk that is sitting on disk. In both cases the only direct evidence is a CSP violation in the webview console (**Developer: Open Webview Developer Tools**) — nothing reaches an extension-host log, and the extension itself activates normally.
 
-CSP is enforced by Chromium, so none of this is observable from string inspection — which is why `vscode-ext/test/webview-boot.smoketest.ts` loads the real bundle under the real policy in a real engine, and why it is the check that would have caught this. Reproducing the pre-fix document makes it fail on all four assertions with the same `script-src-elem` violations the webview console showed. A unit test still guards the transform: `vscode-ext/test/webview-html.test.ts` pins it against a fixture of real Vite output: `'strict-dynamic'` is present, `script-src` never gains `'unsafe-inline'`, each named script-loading tag carries the real nonce, no placeholder survives, no tag carries two nonces, and an unmarked document is refused. That fixture is the limit of what it can prove, though — a fixture cannot notice Vite emitting a shape nobody anticipated, which is the gap the smoketest exists to cover.
+CSP is enforced by Chromium, so none of this is observable from string inspection (rationale). Two checks cover it and neither replaces the other: `vscode-ext/test/webview-boot.smoketest.ts` loads the real bundle under the real policy in a real engine, and `vscode-ext/test/webview-html.test.ts` pins the transform against a fixture of real Vite output (the pinned assertions are listed under "Testing the extension host"). A fixture is the limit of what the unit test can prove — it cannot notice Vite emitting a shape nobody anticipated, which is the gap the smoketest exists to cover.
 
-**On the overlap between the two mechanisms.** With the `<meta property="csp-nonce">` in place, Vite's runtime preload helper nonces the `<link>` it injects ahead of a lazy `import()`, which populates the module map and lets the import resolve — so `'strict-dynamic'` could not be shown to be load-bearing by experiment, including with `build.modulePreload` disabled. It stays anyway: it is the mechanism CSP actually specifies for "a script the nonce vouched for may load more", whereas the alternative is an emergent interaction between a bundler's preload helper and the module map. Depending on the latter alone would make the policy correct by accident.
+**Keep `'strict-dynamic'` even though no experiment shows it load-bearing** (rationale). It is the mechanism CSP actually specifies for "a script the nonce vouched for may load more"; the alternative that happens to work — an emergent interaction between Vite's preload helper and the module map — would make the policy correct by accident.
 
 ### Webview message authentication
 
@@ -334,7 +317,7 @@ So host-originated messages are authenticated by a **per-boot message token**:
 - **Every** host → webview send goes through a channel. `attachRouter` takes a `WebviewChannel` (not a `vscode.Webview`) and exposes `post()` as a local; `DormouseViewProvider` stores its channel and `postMessage` forwards to it, returning `false` before the view is served or after it disposes — the same undelivered signal the VS Code API gives for a dead webview, which the `dormouse:newTerminal` retry loop and `forwardDorControlRequest`'s rejection path already handle.
 - `VSCodeAdapter` captures the token **once, at construction**, and both of its `message` listeners — the main dispatcher and the per-request reply listener inside `requestResponse` — call `isHostMessage(event.data, token)` before reading anything else, including `type`.
 
-Why a token rather than checking `event.source`/`event.origin`: a source check would have to assert something about VS Code's internal webview frame topology, which is undocumented and can change between releases. A token depends on nothing but itself. It is deliberately **not** the CSP nonce — that nonce authorizes script execution, this token authenticates a message sender; conflating them makes both harder to reason about. Both live in the same injected markup and are equally readable by the top document; neither is reachable from a cross-origin frame.
+**Do not swap the token for an `event.source`/`event.origin` check, and do not reuse the CSP nonce as the token** — that nonce authorizes script execution, this token authenticates a message sender (rationale). Both live in the same injected markup and are equally readable by the top document; neither is reachable from a cross-origin frame.
 
 The guard fails closed in both directions: a webview served without the global accepts nothing, and a host send without a token delivers nothing. Framed content cannot read the parent's globals cross-origin, so it cannot produce the token.
 
@@ -459,7 +442,7 @@ A result is never sent both ways. The broker keeps a `commandRoutes` table of wh
 
 Pairing UI events are the opposite: unaddressed and broadcast to every window's webviews, because the approval modal must appear wherever the user happens to be looking.
 
-**A window with no Host at all still answers the read-only commands.** Reaching the terminal refusal means this window sees no enrollment — it contends when one exists and again the moment another window writes one — so that is the ordinary un-enrolled state, not a failure. `status`, `pushDevices`, and `pairingQueue` are therefore answered with exactly what an idle service returns (the un-enrolled `RemoteHostConsoleStatus`, `null`, `[]`), because each caller reads the difference: `pushDevices` answers `null` for "nowhere to push" and rejects only when the server could not be asked, so an error there had the Settings dialog reporting an unreachable server on a machine that had simply never enrolled, and `enrolled-gate.ts` seeds itself from `status`. Everything else refuses with an error rather than dropping it, so the console hook fails fast instead of hanging for its whole timeout.
+**A window with no Host at all still answers the read-only commands.** Reaching the terminal refusal means this window sees no enrollment — it contends when one exists and again the moment another window writes one — so that is the ordinary un-enrolled state, not a failure. `status`, `pushDevices`, and `pairingQueue` are therefore answered with exactly what an idle service returns (the un-enrolled `RemoteHostConsoleStatus`, `null`, `[]`), because each caller reads the difference: `pushDevices` answers `null` for "nowhere to push" and rejects only when the server could not be asked — refusing instead misreports an unreachable server on a machine that simply never enrolled (rationale) — and `enrolled-gate.ts` seeds itself from `status`. Everything else refuses with an error rather than dropping it, so the console hook fails fast instead of hanging for its whole timeout.
 
 One UI event *is* addressed: when a window completes the handshake the broker sends it the current `{ name: 'status', enrolled }`. `status` is emitted when the Host's lifecycle changes it, and a window connecting changes nothing — so a window opened after the enrollment would otherwise sit disarmed, announcing no directory changes and watching for no rings, until the user reloaded it.
 
@@ -499,10 +482,9 @@ Source of truth:
 
 **The build does not typecheck.** `pnpm build` bundles with esbuild, which strips
 types without checking them, so `tsc` runs separately as `pnpm typecheck` — wired
-into the package's `test` script so the root `pnpm test` covers it. This is the
-package's only automated check; it exists because a reference to a deleted function
-once reached a commit and surfaced as a runtime throw during `deactivate()`, which
-has no `try`/`catch` and would have skipped every teardown step behind it.
+into the package's `test` script so the root `pnpm test` covers it. Keeping it
+wired there is what protects `deactivate()`, which has no `try`/`catch`: a
+runtime throw inside it skips every teardown step behind it (rationale).
 
 The checked program deliberately spans two runtimes: `src/` is extension-host Node
 code, but it imports shared modules from `../lib/src/`, some of which are webview
