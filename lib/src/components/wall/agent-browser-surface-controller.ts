@@ -1223,7 +1223,7 @@ export class AgentBrowserSurfaceController {
     return true;
   }
 
-  // Headed Pop-Out: relaunch this session's browser as a native OS window. The
+  // Pop-Out: relaunch this session's browser as a native OS window. The
   // pane becomes a stub; the stream stays connected to observe tabs/status and
   // to auto-revert when the window closes. The new Chrome process gets a fresh
   // stream port, which we write into params so the WS reconnects.

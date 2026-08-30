@@ -81,7 +81,10 @@ if (isChromatic()) {
   // AFTER first paint — the primed-state decorator applies two rAFs in, which
   // kicks off the bell's `transition-transform` rotation — so a capture can land
   // mid-tween. Only the duration is overridden, so the resting appearance is
-  // unchanged; it is simply reached on the first frame.
+  // unchanged; it is simply reached on the first frame. An author `!important`
+  // outranks even inline transition declarations (the selection ring's
+  // unfocus-saturate fade), so a snapshot showing such a fade already finished
+  // is expected, not a regression.
   const instantTransitions = document.createElement('style');
   instantTransitions.textContent =
     '*, *::before, *::after { transition-duration: 0s !important; transition-delay: 0s !important; }';

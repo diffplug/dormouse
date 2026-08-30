@@ -43,6 +43,8 @@
 
 **Where a bad enrollment record would surface.** A record minted with an `undefined` in its `ConnectionPolicy` would not fail at enrollment time. It would fail at the *next* read — the store rejects it, so the machine silently un-enrolls at the next launch, an app-restart away from the response that caused it. Failing the exchange on the spot names the missing fields instead.
 
+**Why the enrollment request's 10 s timeout has to be the shorter one.** It runs on the service's lifecycle chain, where every later start/stop command queues behind it, so an enrollment left to hang past the webview's own 15 s command budget would replace the real error with a timeout — and stall every command queued after it.
+
 **What losing the `hostToken` costs.** The alternative ordering — stop the running Host, then save — strands the machine with no Host, a status that says otherwise, and a credential that cannot be re-minted from the same password exchange. The user's only recovery is a fresh enrollment against the server.
 
 ## Remote control, in the Settings dialog

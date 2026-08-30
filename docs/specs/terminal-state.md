@@ -6,7 +6,7 @@
 
 Dormouse models terminal panes by their latest reported working directory, current command line, whether the shell is at a prompt / editing / running a foreground command / waiting after a finish, the command's exit status and start-time directory, and an app-sent title override.
 
-Session CWD and command execution state are separate. `cwd` means "the shell/session reported this directory"; it is not necessarily the internal CWD of a foreground program. A command snapshots `cwdAtStart` when it starts, and that snapshot is used for grouping and header disambiguation while the command is running.
+Session CWD and command execution state are separate. `cwd` means "the shell/session reported this directory" — not necessarily the internal CWD of a foreground program. A command snapshots `cwdAtStart` when it starts, and grouping and header disambiguation use that snapshot while the command runs.
 
 ## Core Model
 
@@ -51,9 +51,9 @@ type TerminalTitle = {
 };
 ```
 
-Host identity is part of directory identity. `file://localhost/Users/me/project` and `file://prod-box/home/me/project` are different locations even if their display labels can be compact.
+**Host identity is part of directory identity.** `file://localhost/Users/me/project` and `file://prod-box/home/me/project` are different locations even where their display labels compact to the same thing.
 
-`ShellActivity` intentionally is not `isRunning`. The shell process normally keeps running; the important state is whether a foreground command is active.
+`ShellActivity` is not `isRunning`: the shell process normally keeps running, so the state that matters is whether a foreground command is active.
 
 Terminal title is a label override, not a command lifecycle signal. `title` is the latest title event of any source; `titleCandidates` keeps the latest value per channel with its own timestamp, so app, shell, and user sources stay independently inspectable.
 
@@ -72,7 +72,7 @@ type TerminalSemanticEvent =
   | { type: "title"; title: TerminalTitle };
 ```
 
-Feature code consumes `TerminalPaneState` or `TerminalSemanticEvent`, never raw OSC sequences.
+Feature code **must** consume `TerminalPaneState` or `TerminalSemanticEvent`, never raw OSC sequences.
 Protocol-derived semantic events are timestamped in stream order before they reach the reducer, so command-start boundaries and title candidates from the same PTY chunk remain comparable even when they were parsed in the same millisecond.
 
 `AlertManager` also consumes command lifecycle semantic events for command-exit alerting, but only the ones the protocol parser produced — see `docs/specs/alert.md`.
@@ -123,11 +123,11 @@ Only the OSC 9 *message* form (`OSC 9 ; <message>`) feeds the title channel, tak
 
 Non-OSC title source:
 
-- `user` — user-pinned title set via the inline rename UI (`setTerminalUserTitle`). Always wins over every other candidate. Titles equal to or starting with `<idle>` are rejected as reserved, because they would be indistinguishable from the derived idle header.
+- `user` — user-pinned title set via the inline rename UI (`setTerminalUserTitle`). **Always wins** over every other candidate. Titles equal to or starting with `<idle>` are rejected as reserved: they would be indistinguishable from the derived idle header.
 
-The `user_input` command fallback is best effort and renderer-only: it is sufficient for headers and grouping, but the `AlertManager` never sees it — the store synthesizes those events locally rather than through the protocol parse path that feeds alerts. Command-exit alerting and command-keyed WATCHING both need real shell integration, and `docs/specs/alert.md` records that as a deliberate limitation rather than plumbing the heuristic into a second command-tracking path.
+The `user_input` command fallback is best effort and renderer-only: enough for headers and grouping, but the `AlertManager` **never** sees it — the store synthesizes those events locally rather than through the protocol parse path that feeds alerts. `docs/specs/alert.md` owns that limitation.
 
-Programmatic interactive launches that write directly to the platform PTY bypass xterm's keystroke fallback. They therefore emit `commandLine` + `commandStart(source: "user_input")` synchronously before the write: both `dor split/ensure -- <command>` and a cold-restore agent resume use `seedLaunchedCommand`. This keeps headers, grouping, and `countRunningSessions` correct on shells without OSC integration; an integrated shell's later boundaries remain authoritative. Source of truth: `seedLaunchedCommand` and its callers in `lib/src/lib/terminal-state-store.ts` and `lib/src/lib/terminal-lifecycle.ts`.
+Programmatic interactive launches that write directly to the platform PTY bypass xterm's keystroke fallback, so they **must** emit `commandLine` + `commandStart(source: "user_input")` synchronously before the write — both `dor split/ensure -- <command>` and a cold-restore agent resume use `seedLaunchedCommand`. This keeps headers, grouping, and `countRunningSessions` correct on shells without OSC integration; an integrated shell's later boundaries remain authoritative. Source of truth: `seedLaunchedCommand` and its callers in `lib/src/lib/terminal-state-store.ts` and `lib/src/lib/terminal-lifecycle.ts`.
 
 The parser accepts both BEL and ST terminators and handles split chunks. Supported-but-malformed semantic OSCs are consumed without changing state. Unsupported OSC pass-through vs. consume/ignore behavior is defined centrally in `docs/specs/terminal-escapes.md`.
 
@@ -146,7 +146,7 @@ The parser accepts both BEL and ST terminators and handles split chunks. Support
 
 ### Keystroke fallback
 
-For shells without OSC 133/633 integration, the command is read from what is on screen rather than reconstructed from keystrokes. This subsection is the single home for the fallback rules; `docs/specs/terminal-escapes.md` (Shell-integration injection → Keystroke fallback) defers here.
+For shells without OSC 133/633 integration, the command is read from what is on screen rather than reconstructed from keystrokes.
 
 ```
 idle prompt rendered ──learn──▶ prompt shape (terminator char + repeat count)
@@ -156,13 +156,13 @@ first authentic OSC boundary ──▶ pane promoted to OSC-driven; fallback ret
 ```
 
 - **Prompt-shape learning.** The store learns a cwd-invariant prompt **shape** — the prompt's trailing terminator character (`%`, `$`, `#`, `>`, `❯`, `➜`, `λ`) plus how many times that character already appears earlier in the prompt — from every detected idle prompt, including the shell's first prompt at spawn. A prompt with no recognized terminator yields no shape, hence no title, rather than a wrong one.
-- **Submit parsing.** On submit (an Enter that is not inside a bracketed paste) it reads the cursor's rendered logical line (`prompt + command`, soft-wrapped rows joined and bounded at the cursor column so zsh-autosuggestions ghost text is excluded) and splits the command off at the shape's terminator occurrence, trimming what follows. A non-empty result emits `commandLine` + `commandStart(source: "user_input")` immediately, so the active command shows even without command-start integration. Because it parses the rendered line, the title is correct regardless of how the command arrived — typed, history-recalled, or pasted — and independent of the race between shell output and idle detection. Command-internal terminators (`dir > out.txt`) survive because they sit after the prompt's own.
+- **Submit parsing.** On submit (an Enter that is not inside a bracketed paste) it reads the cursor's rendered logical line (`prompt + command`, soft-wrapped rows joined and bounded at the cursor column so zsh-autosuggestions ghost text is excluded) and splits the command off at the shape's terminator occurrence, trimming what follows. A non-empty result emits `commandLine` + `commandStart(source: "user_input")` immediately, so the active command shows without command-start integration. Parsing the rendered line makes the title correct regardless of how the command arrived — typed, history-recalled, or pasted — and independent of the race between shell output and idle detection. Command-internal terminators (`dir > out.txt`) survive because they sit after the prompt's own.
 - **Shape survival and reconnect seeding.** The prompt shape survives across commands (it does not reset on `promptStart`/`promptEnd`/`commandStart`) and is pre-seeded from restored scrollback on session restore / VS Code panel reopen, so the first command after a reconnect — when the live shell will not re-emit its prompt — is still titled. Seeding is learn-only and fires no prompt transition.
 - **Swap safety.** The fallback resolves the current Session id from the PTY id before recording submit input or prompt-looking output, so drag-to-swap moves the fallback state — including the learned prompt shape — with the visible pane.
-- **Synthesized idle transitions.** Visible output that looks like a returned shell prompt always refreshes the learned prompt shape, but only synthesizes the idle prompt transition when `currentCommand.source === "user_input"`. This keeps shape learning available for all shells while scoping the finish/start synthesis to shells that do not emit command finish/start OSCs (OSC-tracked shells drive their own boundaries).
-- **What counts as a returned prompt.** Judged over the last 1024 chars of a pane's output, with alt-screen spans dropped (a TUI's own `$` is not the user's prompt) and presentation controls removed by the shared `stripTerminalControls` (`lib/src/lib/terminal-controls.ts`; its stripping rules, including why an unterminated string control swallows the rest of the window, are specified in `docs/specs/transport.md`). Matching is anchored: PowerShell `PS <path>>`, cmd.exe `<drive>:\...>`, a leading `➜`/`❯`/`λ`, a bare `$`/`#`/`%` final line whose preceding non-blank line carries path/user context, or a generic line carrying a `/`, `~`, `@`, or `:` **and** ending in a prompt char plus space. A custom prompt with neither signal will not match — deliberate, since a false positive flips a running command back to idle.
-- **Boundary mode, plus a trailing-boundary trim.** Stripping runs in **boundary mode** (every control becomes a line break) for the same reason resume detection does: deleting a redraw's cursor move welds text that was never adjacent on screen, and `building...\x1b[1;1HC:\Users\me>` would then read as one line starting with `building`, so none of the anchored shapes match. But a boundary is not a real line break, and the difference decides the safe direction: a **genuine** trailing newline means nothing is painted on the current line yet — no prompt — and must keep reading as `null`; a **boundary** at the tail means only that a control sequence closed the line, which is what a prompt that clears to end-of-line after painting itself (`C:\Users\me>\x1b[K`) does, and treating that as an empty last line would hide every such prompt. Stripping the same text *without* boundaries leaves exactly the real breaks, which is how the two are told apart. Both directions are pinned by tests in `lib/src/lib/terminal-state-store.test.ts`.
-- **Per-pane retirement.** The keystroke fallback and real OSC 633/133 integration are mutually exclusive per pane. The first authentic OSC boundary a pane emits (`promptStart`/`promptEnd`/`commandFinish` always, or a `commandStart` whose event source is `osc633_boundaries`/`osc133_boundaries`) promotes the pane to **OSC-driven**, after which the keystroke path stops recording: `recordTerminalUserInput` early-returns and no further `user_input` `commandStart`/`commandLine` is synthesized, so injected shells never double-count. The synthesized prompt markers the fallback itself emits are passed with a `keystrokeHeuristic` flag so they do **not** trigger promotion — otherwise the fallback would retire the very path that emits them. The flag is per-pane runtime state, seeded fresh and cleared on pane reset/removal; it is not persisted. `isPaneOscDriven()` exposes it, because `dor ensure --restart` can only match a surface whose shell re-reports its command (`docs/specs/dor-cli.md`).
+- **Synthesized idle transitions.** Visible output that looks like a returned shell prompt always refreshes the learned prompt shape, but **may** synthesize the idle prompt transition only when `currentCommand.source === "user_input"` — shape learning stays available for all shells while finish/start synthesis is scoped to shells that emit no command boundaries of their own.
+- **What counts as a returned prompt.** Judged over the last 1024 chars of a pane's output, with alt-screen spans dropped (a TUI's own `$` is not the user's prompt) and presentation controls removed by the shared `stripTerminalControls` (`lib/src/lib/terminal-controls.ts`; its stripping rules, including why an unterminated string control swallows the rest of the window, are specified in `docs/specs/transport.md`). Matching is anchored: PowerShell `PS <path>>`, cmd.exe `<drive>:\...>`, a leading `➜`/`❯`/`λ`, a bare `$`/`#`/`%` final line whose preceding non-blank line carries path/user context, or a generic line carrying a `/`, `~`, `@`, or `:` **and** ending in a prompt char plus space. A custom prompt with neither signal **must not** match: a false positive flips a running command back to idle.
+- **Boundary mode, plus a trailing-boundary trim.** Stripping runs in **boundary mode** (every control becomes a line break), as resume detection does: deleting a redraw's cursor move welds text that was never adjacent on screen, so `building...\x1b[1;1HC:\Users\me>` would read as one line starting with `building` and no anchored shape would match. But a boundary is not a real line break, and the difference decides the safe direction: a **genuine** trailing newline means nothing is painted on the current line yet — no prompt — and **must** keep reading as `null`; a **boundary** at the tail means only that a control closed the line, which is what a prompt that clears to end-of-line after painting itself (`C:\Users\me>\x1b[K`) does, and reading that as an empty last line would hide every such prompt. Stripping the same text *without* boundaries leaves exactly the real breaks, which is how the two are told apart. Both directions are pinned by `lib/src/lib/terminal-state-store.test.ts`.
+- **Per-pane retirement.** The keystroke fallback and real OSC 633/133 integration are mutually exclusive per pane. The first authentic OSC boundary a pane emits (`promptStart`/`promptEnd`/`commandFinish` always, or a `commandStart` whose event source is `osc633_boundaries`/`osc133_boundaries`) promotes the pane to **OSC-driven**, after which the keystroke path stops recording: `recordTerminalUserInput` early-returns and no further `user_input` `commandStart`/`commandLine` is synthesized, so injected shells never double-count. The synthesized prompt markers the fallback itself emits carry a `keystrokeHeuristic` flag so they **must not** trigger promotion — otherwise the fallback would retire the very path that emits them. The flag is per-pane runtime state, seeded fresh and cleared on pane reset/removal, never persisted. `isPaneOscDriven()` exposes it, because `dor ensure --restart` can only match a surface whose shell re-reports its command (`docs/specs/dor-cli.md`).
 
 ### CWD precedence
 
@@ -183,7 +183,7 @@ type DerivedHeader = {
 };
 ```
 
-The header carries the primary label, an optional secondary disambiguator, and `lastCommandFailed` — a structured flag set when `primary` ends with the fail glyph (see below). Richer activity state still lives on `pane.activity` directly; consumers that need it (status grouping) read it from there.
+The header carries the primary label, an optional secondary disambiguator, and `lastCommandFailed` — a structured flag set when `primary` ends with the fail glyph (see below). Richer activity state lives on `pane.activity`; consumers that need it (status grouping) read it from there.
 
 Header priority — first match wins:
 
@@ -197,11 +197,11 @@ Header priority — first match wins:
    When the finished command exited non-zero, a trailing fail glyph (`✗`) is appended — `<idle> ${LAST_TITLE} ✗` — and `lastCommandFailed` is set on the result. "Failed" requires a real non-zero `exitCode`: the keystroke fallback never records one, so it shows no glyph either way. The glyph rides in `primary` so plain-text title consumers (OS/tab titles) carry it, while the pane header reads `lastCommandFailed` to color it red without re-parsing the string.
 4. Otherwise (no running command and no last command): `<idle>`.
 
-App-sent titles are filtered before they can override a command label. A title that is only a bare interpreter name or executable path (`zsh`, `C:\WINDOWS\system32\cmd.exe`) is discarded: under Windows ConPTY the console title is relayed for every child process whether or not it chose one, so such a title carries no command information. cmd.exe's `<path>\cmd.exe - <command>` form is reduced to the `<command>` half. Titles carrying arguments or prose (`lazygit: dormouse`, `README.md - VIM`) are kept. Source of truth: `meaningfulTerminalTitle()` in `lib/src/lib/terminal-state.ts`.
+**App-sent titles are filtered before they can override a command label.** A title that is only a bare interpreter name or executable path (`zsh`, `C:\WINDOWS\system32\cmd.exe`) is discarded: under Windows ConPTY the console title is relayed for every child process whether or not it chose one, so such a title carries no command information. cmd.exe's `<path>\cmd.exe - <command>` form is reduced to the `<command>` half. Titles carrying arguments or prose (`lazygit: dormouse`, `README.md - VIM`) are kept. Source of truth: `meaningfulTerminalTitle()` in `lib/src/lib/terminal-state.ts`.
 
-`OSC 99` / `OSC 777` candidates are diagnostics only (the header context menu's title-candidates table). Shell titles from outside a command's window — before it started, or after it finished — are likewise never promoted: they do not replace `<idle>` or pollute `LAST_TITLE`.
+`OSC 99` / `OSC 777` candidates are diagnostics only (the header context menu's title-candidates table). Shell titles from outside a command's window — before it started, or after it finished — are likewise **never** promoted: they do not replace `<idle>` or pollute `LAST_TITLE`.
 
-`<idle> ${LAST_TITLE}` keeps the just-finished context visible so the user can see at a glance which program just exited. It persists across subsequent prompt/editing transitions until a new `commandStart` replaces it; only a fresh pane (no `lastCommand` at all) shows plain `<idle>`. Failure is surfaced minimally here — the `✗` glyph and nothing more; output and TODO notification belong to the alert/TODO machinery (`docs/specs/alert.md`).
+`<idle> ${LAST_TITLE}` keeps visible, at a glance, which program just exited. It persists across subsequent prompt/editing transitions until a new `commandStart` replaces it; only a fresh pane (no `lastCommand` at all) shows plain `<idle>`. Failure is surfaced minimally — the `✗` glyph and nothing more; output and TODO notification belong to the alert/TODO machinery (`docs/specs/alert.md`).
 
 Disambiguation:
 
@@ -213,14 +213,11 @@ Callers that show one Session's label use `deriveSurfaceLabel()` — `deriveHead
 
 ## Grouping
 
-Source of truth: `groupTerminalPanes()` in `lib/src/lib/terminal-state.ts` defines grouping modes (`TerminalGroupingMode`) and per-mode key derivation (directory uses `cwdAtStart ?? cwd`; command uses the running command's `displayCommand`, else the idle label).
+- Directory group keys use `cwdIdentity(cwd)` (`scheme|host|pathKind|path`), so remote hosts and Windows/POSIX path kinds stay distinct.
+- Windows UNC display labels keep `\\server\share\` as the path root and do not repeat the server/share in the trailing path segments.
+- `prompt` and `editing` collapse into a single `idle` bucket: the distinction between "at the prompt" and "typing a command" is not load-bearing for grouping. `finished` stays distinct so a recently-completed pane can be filtered separately even though its header label carries the same `<idle>` prefix.
 
-Source of truth: `statusBucket()` in `lib/src/lib/terminal-state.ts` projects the 5 `ShellActivity.kind` values onto 4 buckets (prompt+editing collapse to `idle`).
-
-`prompt` and `editing` collapse into a single `idle` bucket because the user-visible distinction between "at the prompt" and "typing a command" is not load-bearing for grouping. `finished` stays distinct so a recently-completed pane can be filtered separately even though its header label has the same `<idle>` prefix as plain idle panes.
-
-Directory group keys use `cwdIdentity(cwd)` (`scheme|host|pathKind|path`) so remote hosts and Windows/POSIX path kinds remain distinct.
-Windows UNC display labels keep `\\server\share\` as the path root and do not repeat the server/share in the trailing path segments.
+Source of truth, both in `lib/src/lib/terminal-state.ts`: `groupTerminalPanes()` defines grouping modes (`TerminalGroupingMode`) and per-mode key derivation (directory uses `cwdAtStart ?? cwd`; command uses the running command's `displayCommand`, else the idle label); `statusBucket()` projects the 5 `ShellActivity.kind` values onto 4 buckets.
 
 ## Files
 

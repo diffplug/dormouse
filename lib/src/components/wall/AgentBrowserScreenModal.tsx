@@ -81,7 +81,7 @@ export function AgentBrowserScreenModal({
   const [customH, setCustomH] = useState(String(initial?.viewport.h ?? 720));
   const [customDpi, setCustomDpi] = useState(String(initial?.viewport.dpr ?? 1));
 
-  // Render backend (Path 1 + Headed Pop-Out). The Render section only appears
+  // Render backend (Path 1 + Pop-Out). The Render section only appears
   // when the surface wires `setRenderMode` (the swap is wired); otherwise the
   // modal is the plain screencast viewport modal it has always been.
   const currentMode: RenderMode = snapshot?.renderMode ?? 'ab-screencast';

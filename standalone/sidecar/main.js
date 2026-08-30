@@ -209,7 +209,7 @@ async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
   // Close any headed pop-out windows so quitting never orphans a real Chrome
-  // window (spec → "Headed Pop-Out" lifecycle). Bounded so a hung agent-browser
+  // window (spec → "Pop-Out" lifecycle). Bounded so a hung agent-browser
   // can't wedge the exit; mirrors the VS Code host's deactivate().
   try {
     await Promise.race([

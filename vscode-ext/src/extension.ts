@@ -236,7 +236,7 @@ export async function deactivate() {
   // (docs/specs/vscode.md -> "Serialization and restore").
   //
   // Closing any headed pop-out window (so quitting never orphans a real Chrome
-  // window — spec → "Headed Pop-Out" lifecycle) is the one step that does not have
+  // window — spec → "Pop-Out" lifecycle) is the one step that does not have
   // to queue behind it: it shares no state with the PTY interrupt and spends its
   // time in external processes rather than on this thread. Kicked off first but
   // joined after, so it overlaps the capture poll instead of adding its own round

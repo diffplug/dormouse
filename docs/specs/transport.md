@@ -14,7 +14,7 @@ Each platform adapter wraps a PTY-spawning runtime and a transport channel betwe
 | Pocket (`RemotePtyAdapter`) | the paired laptop's Host | remote protocol-v1 over the relay (`docs/specs/remote-api.md`) |
 | Fake (tests, playground) | in-process | direct function calls / event emitter |
 
-`RemotePtyAdapter` implements only the PTY core (list/data/write/resize/exit) and no-ops or omits the rest — the interface is built for capability degradation, so a host that cannot do something says so by absence rather than by the UI branching on which host it is.
+`RemotePtyAdapter` implements only the PTY core (list/data/write/resize/exit) and no-ops or omits the rest — the interface is built for capability degradation: a host that cannot do something says so by absence, never by the UI branching on host identity.
 
 Three optional members are plain booleans rather than methods:
 
@@ -41,7 +41,7 @@ The gate runs before routing and before any body read, and an unauthorized calle
 
 The remote Host rides the same shim: `remote_host_command` is one more fire-and-forget send that writes `remoteHost:command` to the sidecar, and the sidecar's `remoteHost:*` events arrive on the SSE stream, so the harness runs a real Host against a per-run temp state directory (`docs/specs/standalone.md` → "Remote Host service").
 
-The harness may omit native-only desktop chrome such as window controls and update checks, but it must preserve the `PlatformAdapter` PTY, control-request, clipboard, iframe-proxy, remote-Host, and agent-browser contracts used by the app. It also mirrors standalone's Session-persistence answer rather than choosing its own: `BrowserSidecarAdapter` carries the same `PERSIST_SESSION = false` gate as `TauriAdapter`, reports `persistsSession: false`, and deletes any pre-gate `localStorage` blob on `init()` (`docs/specs/standalone.md` → "Standalone persists no Session state"). Persisting here would restore panes across a reload that the real app drops, and would run the record build and its per-pane `getCwd` round trip on a path production never takes. Tauri APIs must not be required at static module-evaluation time when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set, because the page is loaded by a normal browser rather than the Tauri WebView.
+The harness **may omit** native-only desktop chrome (window controls, update checks) but **must preserve** every `PlatformAdapter` contract the app uses — PTY, control-request, clipboard, iframe-proxy, remote-Host, agent-browser. It **must mirror** standalone's Session-persistence answer: `BrowserSidecarAdapter` carries the same `PERSIST_SESSION = false` gate as `TauriAdapter`, reports `persistsSession: false`, and deletes any pre-gate `localStorage` blob on `init()` — persisting here would restore panes across a reload the real app drops (`docs/specs/standalone.md` → "Standalone persists no Session state"; rationale). Tauri APIs **must not** be required at static module-evaluation time when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set, because a normal browser loads the page, not the Tauri WebView.
 
 ## PTY lifecycle
 
@@ -113,7 +113,7 @@ Source of truth:
 
 The schema is exhaustive there; what follows is only the contracts that are not obvious from the type.
 
-**Sender authenticity is the adapter's job, not the protocol's.** The schema says what a message means, never that it came from the host. Each adapter must establish that on its own transport before dispatching: the Tauri and browser-dev adapters inherit it from a private IPC channel and a host-owned socket, while the VS Code adapter shares its `window` inbox with framed surfaces and so requires a per-boot token on every host message (`docs/specs/vscode.md` → "Webview message authentication"). An adapter whose transport is reachable by page content must authenticate before it branches on `type`.
+**Sender authenticity is the adapter's job, not the protocol's.** Each adapter must establish it on its own transport before dispatching: the Tauri and browser-dev adapters inherit it from a private IPC channel and a host-owned socket, while the VS Code adapter shares its `window` inbox with framed surfaces and so requires a per-boot token on every host message (`docs/specs/vscode.md` → "Webview message authentication"). An adapter whose transport is reachable by page content must authenticate before it branches on `type`.
 
 VS Code-only workbench chord mirroring uses `dormouse:runWorkbenchCommand` from webview to host. The host validates the requested command against the allowlist in `lib/src/lib/vscode-keybindings.ts` before calling `vscode.commands.executeCommand`; generic command execution over the webview boundary is not allowed.
 
@@ -145,7 +145,7 @@ Workspace union status (`docs/specs/alert.md`) adds no new message. Standalone c
 | Host → webview | `pty:replay` | Buffered raw output since spawn; the webview parses semantic OSCs during replay reconstruction without triggering alerts. |
 | Host → webview | `dormouse:newTerminal` | Payload may include `shell`, `args`, display `name`, `replaceUntouched`, and `announce`; the webview replaces the selected untouched terminal in-place only when `replaceUntouched` is true, otherwise it spawns a new pane. |
 
-Both settings messages carry renderer-supplied numbers that become host timers, so the host **must** revalidate rather than trust them: `AlertSettingsHost` runs every inbound blob through `normalizeAlertSettings`, which drops unknown keys, defaults missing ones, and clamps each delay into range. A webview cannot install a `NaN` or absurd attention window. The two directions share one adapter method — `alertPublishSettings(settings, { seed })` — because the seed/replace distinction only picks a message type; it is not a different payload.
+Both settings messages carry renderer-supplied numbers that become host timers, so the host **must revalidate** rather than trust them: `AlertSettingsHost` runs every inbound blob through `normalizeAlertSettings`, which drops unknown keys, defaults missing ones, and clamps each delay into range. The two directions share one adapter method — `alertPublishSettings(settings, { seed })` — because the seed/replace distinction only picks a message type; it is not a different payload.
 
 **Do not add a third app-global store on this pattern.** Two (WATCHING rules, alarm settings) is worth the directness; a third collapses them into one keyed channel with a host-side key→normalizer registry instead of paying the per-store tax again (rationale).
 

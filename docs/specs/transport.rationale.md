@@ -8,6 +8,8 @@
 
 **Why both loopback spellings are echoed.** `127.0.0.1:<port>` and `localhost:<port>` are the same dev page, and pinning one rejects a developer who typed the other with symptoms — blank terminal, console CORS errors — that do not point at the token gate as the cause.
 
+**The second cost of persisting in the harness.** Besides restoring panes production drops, a harness that persisted would run the record build — and its per-pane `getCwd` round trip — on a path production never takes.
+
 **Agent workflows were unaffected by the gate.** The token reaches the page through the `VITE_DORMOUSE_BROWSER_DEV_HOST` env var the harness already sets, and `agent-browser` drives the Vite origin, never the bridge — so adding authentication cost the agent harness nothing.
 
 ## Reconnection protocol

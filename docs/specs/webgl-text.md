@@ -1,21 +1,21 @@
 # WebGL Text Rendering (SDF fork + canopy)
 
-Dormouse's 3D/WebXR terminal effort needs text that stays crisp when a terminal
-is rendered at arbitrary scale and orientation — a texture in a 3D scene, not a
-1:1 pixel grid. This spec covers the three layers that deliver that: the
-diffplug/xterm.js fork pipeline, the signed-distance-field (SDF) glyph
-architecture inside the forked webgl addon, and the `canopy/` Storybook lab
-that exercises and regression-tests it.
-
-The fork's own process doc is
-[FORK.md on the `sdf` branch](https://github.com/diffplug/xterm.js/blob/sdf/FORK.md);
-this spec does not restate its release recipe. `addons/addon-webgl/` paths
-below are in the fork repo (cloned at `~/projects/xterm.js`; the release
-tarball also ships `src/`, so they are readable from `canopy/node_modules`).
-
-**Two webgl addons, one repo.** Production terminals render through *stock*
-`@xterm/addon-webgl` (`docs/specs/layout.md` → "Renderer"); only `canopy/`
-consumes the SDF fork, and everything below is about the fork.
+> Dormouse's 3D/WebXR terminal effort needs text that stays crisp at any scale
+> and orientation — a texture in a 3D scene, not a 1:1 pixel grid. This spec
+> covers the three layers that deliver that: the diffplug/xterm.js fork
+> pipeline, the signed-distance-field (SDF) glyph architecture inside the
+> forked webgl addon, and the `canopy/` Storybook lab that exercises and
+> regression-tests it.
+>
+> **Two webgl addons, one repo.** Production terminals render through *stock*
+> `@xterm/addon-webgl` (`docs/specs/layout.md` → "Renderer"); only `canopy/`
+> consumes the SDF fork, and everything below is about the fork.
+>
+> The fork's own process doc is
+> [FORK.md on the `sdf` branch](https://github.com/diffplug/xterm.js/blob/sdf/FORK.md),
+> whose release recipe this spec does not restate. `addons/addon-webgl/` paths
+> below are in the fork repo (cloned at `~/projects/xterm.js`; the release
+> tarball also ships `src/`, so they are readable from `canopy/node_modules`).
 
 ## Fork pipeline
 
@@ -34,8 +34,9 @@ consumes the SDF fork, and everything below is about the fork.
   release line (`5.6.0-beta.1..143`, then `6.1.0-beta.1..302`).
 - **Distribution**: GitHub Release assets consumed as a pnpm tarball-URL
   dependency, not an npm registry — GitHub Packages requires auth even for
-  public reads, release assets do not. The lockfile records a sha512 integrity
-  hash; treat published assets as immutable and cut a new iteration instead.
+  public reads, release assets do not. **Never replace a published asset** —
+  the lockfile records a sha512 integrity hash, so cut a new iteration
+  instead.
 - **Canopy's three pins move by hand, together.** Renovate cannot see tarball
   URLs, so it would drift canopy's two sibling `@xterm/*` pins off the fork
   base unnoticed; `.github/renovate.json` therefore disables `@xterm/**` scoped
@@ -65,10 +66,10 @@ consumes the SDF fork, and everything below is about the fork.
 - **Releases are hand-cut today** (build, `npm pack`, `gh release create` per
   FORK.md); automating this is staged in `## Future`.
 - **Dev loop**: `pnpm link ~/projects/xterm.js/addons/addon-webgl` from
-  `canopy/`. Caution: pnpm 11's link writes persistent residue — a `link:`
-  dependency in the *root* `package.json` and an `overrides:` entry in
-  `pnpm-workspace.yaml` — which silently keeps resolving the link. Revert both
-  and reinstall before trusting a tarball verification.
+  `canopy/`. **Revert the link residue and reinstall before trusting a tarball
+  verification** — pnpm 11's link writes a `link:` dependency into the *root*
+  `package.json` and an `overrides:` entry into `pnpm-workspace.yaml`, which
+  silently keep resolving the link.
 
 Source of truth: `canopy/package.json` (pins), `canopy/README.md` (bump flow),
 `scripts/xterm-lint.mjs` + `scripts/xterm-bump.mjs` (the pin invariants and the
@@ -76,11 +77,11 @@ tool that satisfies them), FORK.md in the fork.
 
 ## Following upstream
 
-An `@xterm/*` bump is not a dependency chore that stops at `lib/` and
-`standalone/` — it is the trigger to re-evaluate the fork. Leaving the fork on
-an older base makes canopy's `UpstreamVsFork` harness compare against an
-upstream we no longer ship, which is the one thing the harness exists to
-prevent. Each time Renovate opens the grouped `xterm` PR:
+**Every `@xterm/*` bump is a trigger to re-evaluate the fork**, not a
+dependency chore that stops at `lib/` and `standalone/`: leaving the fork on an
+older base makes canopy's `UpstreamVsFork` harness compare against an upstream
+we no longer ship, the one thing the harness exists to prevent. Each time
+Renovate opens the grouped `xterm` PR:
 
 1. **Read the upstream diff first** and decide what it is worth.
    `node scripts/xterm-bump.mjs --dry-run` names the newest coherent set (often
@@ -95,8 +96,8 @@ prevent. Each time Renovate opens the grouped `xterm` PR:
 3. **Bump `canopy/package.json`** with `--canopy <forkVersion>`, and update the
    version/commit triple in both places that record it (see "Canopy lab").
 
-Land all of it in the same PR as the `@xterm/*` bump, so the tree never records
-a state where lib and the fork disagree about which upstream they track.
+**Land all of it in the same PR** as the `@xterm/*` bump, so the tree never
+records lib and the fork disagreeing about which upstream they track.
 
 ## SDF glyph architecture
 
@@ -153,10 +154,10 @@ Source of truth (fork repo): `addons/addon-webgl/src/SdfGlyphRasterizer.ts`,
 ## Canopy lab
 
 `canopy/` is a Storybook-only workspace package (port 6007, `pnpm dev:canopy`),
-deliberately independent of `dormouse-lib`, and outside the production build —
-the root `build` script covers only vscode + website, though canopy's `test`
-(a `tsc` typecheck) does run under `pnpm test`. Its stories are the visual
-harness for the fork:
+**kept independent of `dormouse-lib`** and outside the production build — the
+root `build` script covers only vscode + website, though canopy's `test` (a
+`tsc` typecheck) does run under `pnpm test`. Its stories are the visual harness
+for the fork:
 
 - `ColorsAndGlyphs` / `TextureAtlas` — stock fork rendering (`sdf: false`) and
   its live glyph atlas.
@@ -176,9 +177,10 @@ harness for the fork:
   gitHead` re-derives it by hand). The harness owns its discriminating rows
   (`chevronGauntlet`) so demo-content edits cannot silently weaken it.
 
-Story content writes PUA glyphs (powerline chevrons etc.) as `\uE0BX` escapes,
-never literal characters: the literals are invisible in editors and were once
-silently dropped in a file rewrite, which presented as a rendering regression.
+**Never write PUA glyphs (powerline chevrons etc.) as literal characters** —
+story content uses `\uE0BX` escapes, because the literals are invisible in
+editors and were once silently dropped in a file rewrite, presenting as a
+rendering regression.
 
 Source of truth: `canopy/src/GlTerminal.stories.tsx`, `canopy/README.md`.
 
