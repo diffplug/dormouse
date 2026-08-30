@@ -26,6 +26,11 @@
  *      defined scope.
  *   7. Every `Reserved:` paragraph names `## Future` or a defined scope — the
  *      Reservations convention in AGENTS.md.
+ *   8. Every `<foo>.rationale.md` pairs with an existing `<foo>.md`, keys its
+ *      entries by that spec's headings (each rationale `## X` must exist as a
+ *      heading in the spec), and has no `## Future` — rationale files are
+ *      informative, the fold belongs to the spec. Rationale files are not
+ *      specs: they skip checks 1, 2, and 5 but ride 3 and 4.
  */
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname, normalize } from 'node:path';
@@ -48,14 +53,16 @@ const SKIP_PATH_PREFIXES = [
   'canopy/node_modules', // created by pnpm install; lint:specs must pass on a fresh checkout (webgl-text.md)
 ];
 
-const specFiles = readdirSync(join(ROOT, SPECS_DIR))
+const specDirFiles = readdirSync(join(ROOT, SPECS_DIR))
   .filter((f) => f.endsWith('.md'))
   // Keep repo-relative paths in POSIX form on every platform — they are
   // compared against forward-slash paths written in the markdown.
   .map((f) => `${SPECS_DIR}/${f}`);
+const rationaleFiles = specDirFiles.filter((f) => f.endsWith('.rationale.md'));
+const specFiles = specDirFiles.filter((f) => !f.endsWith('.rationale.md'));
 // SELF_HOST.md is a root-level spec (the self-host deployment: runbook +
 // installer contract); it rides checks 2-4 alongside the docs/specs files.
-const allFiles = ['AGENTS.md', 'SELF_HOST.md', ...specFiles];
+const allFiles = ['AGENTS.md', 'SELF_HOST.md', ...specFiles, ...rationaleFiles];
 const foldCheckedFiles = ['SELF_HOST.md', ...specFiles];
 const problems = [];
 
@@ -235,6 +242,23 @@ for (const rel of allFiles) {
       );
     }
   });
+}
+
+// --- Check 8: rationale files pair with a spec and key by its headings --------
+for (const rat of rationaleFiles) {
+  const spec = rat.replace(/\.rationale\.md$/, '.md');
+  if (!existsSync(join(ROOT, spec))) {
+    problems.push(`${rat}: no paired spec -> ${spec}`);
+    continue;
+  }
+  const specAnchors = anchorsOf(spec);
+  for (const h of headings(rat).filter((h) => h.level === 2)) {
+    if (/^(\d+\.\s*)?Future$/i.test(h.title)) {
+      problems.push(`${rat}: rationale files are informative — the fold ("## Future") belongs to ${spec}`);
+    } else if (!specAnchors.has(slug(h.title))) {
+      problems.push(`${rat}: "## ${h.title}" is not a heading in ${spec}`);
+    }
+  }
 }
 
 // -----------------------------------------------------------------------------
