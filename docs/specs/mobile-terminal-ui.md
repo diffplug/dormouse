@@ -18,9 +18,7 @@ Three consumers compose these components today: the website Pocket playground
 (`website/src/components/PocketTerminalExperience.tsx` on `FakePtyAdapter`; page
 wiring in `docs/specs/tutorial.md`), the real Pocket app
 (`lib/src/remote/pocket-app/PocketWall.tsx` on `RemotePtyAdapter`;
-`docs/specs/pocket-app.md`), and Storybook. The composition was designed and
-validated through the website `/playground/pocket` prototype (originally specced
-as `mobile-ui.md`; see git history).
+`docs/specs/pocket-app.md`), and Storybook.
 
 ## Core layout
 
@@ -64,13 +62,12 @@ Chrome rules:
 * `MobileTerminalUi` provides `TouchUiContext` = true, so shared selection UI
   omits physical-keyboard shortcut hints (`docs/specs/mouse-and-clipboard.md`).
 
-The reserve area's height is a fixed CSS height and the root is `h-screen` (when
-`fillViewport`) or `h-full` — never a height recomputed from
-`window.visualViewport`. The reserve is intentionally stable so the terminal
-region does not bounce while the OS keyboard animates. When the OS keyboard is
-hidden the reserve shows the selected app keyboard UI; when it is visible the OS
-keyboard may cover or occupy that same physical area, which is preferred over
-resizing the whole app around the keyboard.
+**Never recompute height from `window.visualViewport`**: the reserve area's
+height is a fixed CSS height and the root is `h-screen` (when `fillViewport`) or
+`h-full`, so the terminal region does not bounce while the OS keyboard animates.
+When the OS keyboard is hidden the reserve shows the selected app keyboard UI;
+when it is visible the OS keyboard may cover or occupy that same physical area,
+which is preferred over resizing the whole app around the keyboard.
 
 ## Touch mode selector
 
@@ -97,9 +94,9 @@ every pane rather than only the active one — a pane switched away from must no
 be left in a stale override. The consumer owns this wiring; source of truth:
 `PocketWall.tsx` and `PocketTerminalExperience.tsx`.
 
-Select mode routes touch and pen drags through the shared terminal
-mouse-selection router, not a mobile-only selection implementation, so selection
-geometry, smart token extension, copy popups, rewrapped copy, and TUI
+Select mode **must** route touch and pen drags through the shared terminal
+mouse-selection router, never a mobile-only selection implementation, so
+selection geometry, smart token extension, copy popups, rewrapped copy, and TUI
 mouse-capture override rules match desktop
 (`docs/specs/mouse-and-clipboard.md`). Paste rides the native browser/OS paste
 flow; there is no mobile clipboard manager and no multi-line paste review.
@@ -118,15 +115,13 @@ Scroll-like and touch event routing, by mode:
   `wheel` is left alone so it still reaches the terminal, and real mouse pointers
   fall through untouched.
 
-Gesture mode intentionally consumes primary mouse/trackpad clicks in addition to
-touch input, which keeps the composition usable in desktop browsers, narrow
-desktop viewports, and Storybook without a touchscreen. Such a click starts
-radial gesture handling, calls `preventDefault()`, stops propagation, and
-captures the pointer; it is never passed through to the embedded `Wall`, xterm,
-or the tiling engine for focus, selection, or pane interaction. Non-primary
-mouse buttons are ignored so their browser or host behavior can continue. Users
-who want terminal selection or TUI mouse input must choose Select or Mouse mode
-explicitly.
+Gesture mode consumes primary mouse/trackpad clicks in addition to touch input,
+which keeps the composition usable in desktop browsers, narrow desktop
+viewports, and Storybook without a touchscreen. Such a click starts radial
+gesture handling, calls `preventDefault()`, stops propagation, and captures the
+pointer; it **must never** be passed through to the embedded `Wall`, xterm, or
+the tiling engine for focus, selection, or pane interaction. Non-primary mouse
+buttons are ignored so their browser or host behavior can continue.
 
 ## Gesture mode
 
@@ -158,7 +153,7 @@ below (`FADE_START` < `HIGHLIGHT` < `SELECT` < `LAYOUT`).
 Gesture menu item state uses the same palette as pane headers. Idle groups and
 options use inactive header background/foreground; highlighted or selected ones
 use active header background/foreground plus an inset `color-focus-ring` ring.
-Layout-affecting borders must not be used to indicate gesture selection state.
+**Never** indicate gesture selection state with a layout-affecting border.
 Inactive chips get only a quiet shadow; the heavier elevation is reserved for
 active chips. The select circle and its eight compass-direction ticks render at
 full opacity, with a thicker tick on the current highlighted or selected
@@ -189,9 +184,7 @@ aligns Enter's top-left corner, NE aligns Backspace's bottom-left corner, SW
 aligns Tab's top-right corner, and NW aligns Esc's bottom-right corner. NE and SE
 place their two secondary options to the right of the center option, one above
 and one below; NW and SW place theirs to the left. The pack stays close to the
-select circle while preserving room for long labels like Backspace. Source of
-truth: `GAP_CARDINAL_RING`, `GAP_CLUSTER`, and `rootOptionLayout()` in
-`lib/src/components/MobileGestureRadialMenu.tsx`.
+select circle while preserving room for long labels like Backspace.
 
 | Group | Center | Secondary (above) | Secondary (below) |
 | --- | --- | --- | --- |
@@ -213,10 +206,12 @@ completion feedback.
 Root labels use compact key glyphs: `⌃` for Ctrl, `⬆︎` for Shift, and
 `▲`/`▼`/`◀`/`▶` for arrow keys. Enter and Backspace stay spelled out.
 
-Source of truth: `MOBILE_TERMINAL_KEY_SEQUENCES` in
-`lib/src/components/MobileTerminalUi.tsx` maps actions to byte sequences;
-`MOBILE_GESTURE_GROUPS` and `MOBILE_GESTURE_QUIT_GROUP` in
-`lib/src/lib/mobile-gesture-menu.ts` define the root and quit actions.
+Source of truth: `GAP_CARDINAL_RING`, `GAP_CLUSTER`, and `rootOptionLayout()` in
+`lib/src/components/MobileGestureRadialMenu.tsx` place the labels;
+`MOBILE_TERMINAL_KEY_SEQUENCES` in `lib/src/components/MobileTerminalUi.tsx`
+maps actions to byte sequences; `MOBILE_GESTURE_GROUPS` and
+`MOBILE_GESTURE_QUIT_GROUP` in `lib/src/lib/mobile-gesture-menu.ts` define the
+root and quit actions.
 
 ### Selection stages
 
@@ -253,12 +248,11 @@ the drag keeps pushing that way, so the user does not have to drag all the way
 back through the overshoot before a move in another direction registers; and the
 compass stays visually collapsed while that outward push is brisk, then latches
 expanded once the drag settles (`OPTION_EXPAND_RELEASE`), so it does not flicker
-mid-overshoot. Source of truth: `advanceOptionOrigin()` in
-`lib/src/lib/mobile-gesture-menu.ts`.
+mid-overshoot.
 
-Source of truth: `MOBILE_GESTURE_OPTION_DIRECTIONS` in
-`lib/src/lib/mobile-gesture-menu.ts` defines exploded-option directions per
-group.
+Source of truth, both in `lib/src/lib/mobile-gesture-menu.ts`:
+`advanceOptionOrigin()` for the ratchet, `MOBILE_GESTURE_OPTION_DIRECTIONS` for
+exploded-option directions per group.
 
 Examples:
 
@@ -288,10 +282,10 @@ and placeholder copy.
 Default input mode is **Type**. Recent and Draft are placeholder-only today —
 the real features are staged (see [Future](#future)).
 
-Tapping the **Type** selector focuses the hidden input synchronously during the
-tap/click handler — the user-gesture-linked call is what makes mobile browsers
-open the native keyboard; focus deferred to `requestAnimationFrame` or a timer
-may be treated as not user-initiated and refused. A follow-up effect
+Tapping the **Type** selector **must** focus the hidden input synchronously
+during the tap/click handler — the user-gesture-linked call is what makes mobile
+browsers open the native keyboard; focus deferred to `requestAnimationFrame` or
+a timer may be treated as not user-initiated and refused. A follow-up effect
 additionally re-asserts focus via rAF and staggered timers as best effort — it
 helps after re-renders, and is the only focus path when Type is the initial mode
 with no tap (where strict browsers may keep the keyboard closed until the first
@@ -313,8 +307,8 @@ Required behavior:
 
 ## Keyboard focus invariant
 
-Pane-content touches must never open the native keyboard. The pane content area
-may focus the terminal internally for key routing or mouse handling, but the
+**Pane-content touches must never open the native keyboard.** The pane content
+area may focus the terminal internally for key routing or mouse handling, but the
 wrapper configures every text input created by the terminal surface as a
 non-keyboard target (`inputmode="none"`, readonly, not tab-reachable — kept true
 for later-mounted inputs by a `MutationObserver`) and blurs it when the touch

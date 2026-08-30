@@ -2,9 +2,9 @@
 
 > See `docs/specs/glossary.md` for Pane / Door vocabulary used in the surface hierarchy below.
 
-Dormouse's theme contract is intentionally small: render the terminal chrome
-with VSCode-appropriate surfaces, and render terminal content with
-theme-appropriate xterm.js colors.
+Dormouse's theme contract is small: render the terminal chrome with
+VSCode-appropriate surfaces, and terminal content with theme-appropriate
+xterm.js colors.
 
 VSCode extension mode gets `--vscode-*` variables from VSCode. Standalone,
 website, and Pocket apply the same shape of variables to `document.body` with
@@ -18,9 +18,9 @@ like VSCode registry defaults before Dormouse renders.
 
 ## Surface hierarchy
 
-The chrome is anchored on VSCode's file-tree styling because those colors are
-designed to read clearly inside the sidebar host area. Use bg-only chrome for
-panes and doors; do not add borders to make the hierarchy work.
+**Use bg-only chrome** for panes and doors — never borders to make the hierarchy
+work. The chrome is anchored on VSCode's file-tree styling, whose colors are
+designed to read clearly inside the sidebar host area.
 
 **Build every surface from the three list pairs.** The chrome — and full
 standalone/Pocket screens like the auth flow — must draw hierarchy from three
@@ -33,28 +33,28 @@ cohesive foreground/background pairs, and nothing else:
   unfocused headers.
 
 Hierarchy is the background swap between these pairs; secondary text is alpha on
-the same pair's own foreground (`text-app-fg/70`), never a separate token. Do
-**not** carry resting structure with `surface-raised`, `border` (panel.border),
+the same pair's own foreground (`text-app-fg/70`), never a separate token.
+**Never carry resting structure** with `surface-raised`, `border` (panel.border),
 `input-border`, or `muted` (descriptionForeground): themes leave those unset, and
 the resolver then hands back a generic value unrelated to the theme. Kimbie Dark
 is the cautionary case — `editorWidget.background` is near-black (`#131510`, a
 dark patch, not a gentle lift), and `panel.border` / `input.border` /
 `descriptionForeground` are all unset, so hairlines land on VSCode's flat
 `#80808059` (or `transparent`, for `input.border`, which has no registry default
-in any kind) and a card-and-border layout collapses into invisible edges on muddy
-backgrounds. `surface-raised` + `border` are for *floating* surfaces only
-(popovers, dialogs, theme picker). When a hairline is genuinely needed, derive it
-from a pair foreground at low alpha or an inset shadow (`DESIGN.md`'s
-Inset-Over-Border rule), not a border token. Reference implementation: the Pocket
-auth chrome in `lib/src/remote/pocket-app/App.tsx`.
+in any kind) and a card-and-border layout collapses into invisible edges.
+`surface-raised` + `border` are for *floating* surfaces only (popovers, dialogs,
+theme picker). Derive a genuinely needed hairline from a pair foreground at low
+alpha or an inset shadow (`DESIGN.md`'s Inset-Over-Border rule), never a border
+token. Reference implementation: the Pocket auth chrome in
+`lib/src/remote/pocket-app/App.tsx`.
 
-Header-internal text and buttons inherit the header foreground. Do not add
-`text-muted` inside headers; use `hover:bg-current/10` for neutral hover
+**Never add `text-muted` inside headers** — header-internal text and buttons
+inherit the header foreground; use `hover:bg-current/10` for neutral hover
 feedback. Semantic exceptions are the `text-alarm-vs-*` tint for ringing alerts
 and error styling for destructive actions.
 
-High-contrast VSCode themes may make bg-only chrome look flatter than normal.
-That is accepted; terminal content still uses the theme's terminal palette.
+High-contrast VSCode themes may make bg-only chrome look flatter than normal —
+accepted; terminal content still uses the theme's terminal palette.
 
 ### Dynamic picks
 
@@ -118,29 +118,28 @@ is active while xterm.js sees fallback colors.
 
 `theme.css` declares the theme-dependent tokens twice: at document level
 (`@theme` so Tailwind generates utility classes, or `:root`) and on `body`,
-the runtime source of truth. CSS resolves `var()` inside a custom-property
-declaration at the element where the property is declared, so only the `body`
-copy can see the `--vscode-*` variables `applyTheme()` writes to `body.style`;
-a token declared only at document level resolves to nothing wherever
-`applyTheme()` is the sole writer (standalone, website, Pocket). Every token
-whose value contains `var()` — indirect chains included — must therefore
-appear at both levels with the same value.
-`lib/src/lib/themes/consumed-keys.test.ts` enforces this.
-Dynamic palette tokens (`--color-door-bg`, `--color-door-fg`,
+the runtime source of truth. **Every token whose value contains `var()` —
+indirect chains included — must appear at both levels with the same value**,
+because CSS resolves `var()` inside a custom-property declaration at the element
+where the property is declared: only the `body` copy sees the `--vscode-*`
+variables `applyTheme()` writes to `body.style`, so a token declared only at
+document level resolves to nothing wherever `applyTheme()` is the sole writer
+(standalone, website, Pocket). `lib/src/lib/themes/consumed-keys.test.ts`
+enforces this. Dynamic palette tokens (`--color-door-bg`, `--color-door-fg`,
 `--color-focus-ring`, and the four `--color-alarm-vs-*` tokens) also have
 body-level baseline bindings matching the `@theme` declarations, so direct
 CSS-var consumers such as the mobile gesture SVG — and a ringing bell before
 the first dynamic pass — render visibly before `useDynamicPalette()` publishes
 refined values.
 
-`theme.css` must not contain hardcoded color defaults or `var(..., fallback)`
-chains. Runtime hosts plus the shared resolver are responsible for providing the
-consumed `--vscode-*` variables before Dormouse renders.
+**Never put hardcoded color defaults or `var(..., fallback)` chains in
+`theme.css`**; runtime hosts plus the shared resolver provide the consumed
+`--vscode-*` variables before Dormouse renders.
 
 VSCode color IDs with `null` registry defaults need component-equivalent
-materialization because Dormouse consumes them through direct CSS variables.
+materialization, because Dormouse consumes them through direct CSS variables.
 Source of truth: `RESOLUTION_RULES` in
-`lib/src/lib/themes/vscode-color-registry.ts`. The shape of them:
+`lib/src/lib/themes/vscode-color-registry.ts`. Their shape:
 
 - `list.inactiveSelectionForeground` resolves to normal foreground
   (`sideBar.foreground`, then base `foreground`), not
@@ -196,15 +195,15 @@ installed themes are re-parsed from storage and so are a fresh object on every
 read. A same-theme re-apply (the hydration repeat above) is not a change, and
 neither is re-selecting the active theme, so the boot-time `restoreActiveTheme()`
 cannot be mistaken for a user picking one. It exists for the website tutorial's
-theme step ([tutorial.md](./tutorial.md)); do not reach for
+theme step ([tutorial.md](./tutorial.md)); **never** reach for
 `onTerminalThemeChange()` (`terminal-theme.ts`) instead, which watches resolved
 xterm palette JSON through a `MutationObserver` and fires on the first mutation
 after it starts.
 
 ## Where the user picks a theme
 
-One rule: **every host that lets the user pick a theme does it in the Settings
-dialog**, opened from the far right of the baseboard
+**Every host that lets the user pick a theme does it in the Settings dialog**,
+opened from the far right of the baseboard
 (`lib/src/components/SettingsDialog.tsx`, alarm sections in
 [alert.md](./alert.md)). Host chrome — the standalone titlebar, the website
 playground navbar — carries no theme control.
@@ -229,18 +228,18 @@ playground navbar — carries no theme control.
   the active theme's `ThemeSwatch` and label so it reads as the same control as
   the row it stands in for; `compact` shows the swatch beside the word "Theme".
 - **The host's fallback theme is module state, not a prop.**
-  `setDefaultThemeId()` in `lib/src/lib/themes/apply.ts` (the shape of
+  `setDefaultThemeId()` in `lib/src/lib/themes/apply.ts` (shaped like
   `shell-defaults.ts`) holds it and `restoreActiveTheme()` takes no argument, so
-  every path that re-resolves the active theme gets the same answer. That matters
-  because uninstalling the active theme is reachable from two depths — the picker
-  row's `X` and the store dialog's `Remove` — and while the fallback was a prop
-  the picker held, `Remove` re-resolved without it and dropped to the first
-  bundled theme instead of the host's. `useRestoredTheme()` latches it before its
-  first restore and ahead of any child render, because on the desktop Pocket page
-  the header's picker mounts before the component that calls the hook.
-- **No `window.confirm` here** — no native dialog in app chrome at all, see
-  `DESIGN.md` → "Don't": an uninstall gated on `confirm` silently did nothing on
-  the desktop app, because the call returned without ever showing a dialog.
+  every path that re-resolves the active theme gets the same answer — uninstalling
+  the active theme is reachable from two depths (the picker row's `X`, the store
+  dialog's `Remove`), and a prop-held fallback is missing on one of them, which
+  drops to the first bundled theme instead of the host's. `useRestoredTheme()`
+  latches it before its first restore and ahead of any child render, because on
+  the desktop Pocket page the header's picker mounts before the component that
+  calls the hook.
+- **Never use `window.confirm`** — no native dialog in app chrome at all
+  (`DESIGN.md` → "Don't"): on the desktop app the call returns without ever
+  showing a dialog, so an uninstall gated on it silently did nothing.
   Uninstalling is a single click, matching `WatchedCommandList`'s remove control
   in the same dialog. Recovery is not symmetric though — the store dialog's
   `Remove` leaves the extension row on screen to re-install, while the picker
@@ -313,15 +312,13 @@ When changing theme behavior:
   bundled and installed theme.
 - Keep xterm.js terminal colors sourced from `--vscode-terminal-*` variables, not
   from Dormouse chrome tokens.
-- Keep debugger dynamic-pick reporting and runtime dynamic-palette picks sharing
-  `pickDoorPair()` and `pickFocusRing()`, and keep the alarm tint on
-  `pickAlarmColor()` — do not fork those rules in UI code. (The debugger does not
-  report alarm picks today.)
-- Do not add hardcoded color defaults or CSS variable fallback chains to
+- **Never fork** the dynamic picks in UI code: debugger reporting and runtime
+  both go through `pickDoorPair()`, `pickFocusRing()`, and `pickAlarmColor()`.
+  (The debugger does not report alarm picks today.)
+- **Never** add hardcoded color defaults or CSS variable fallback chains to
   `lib/src/theme.css`; fix the theme data or runtime host instead.
-- Avoid reintroducing a pass-through `--mt-*` layer or one-off tokens for tabs,
-  badges, accents, or button hovers unless there is a new rendered surface that
-  cannot be expressed by the hierarchy above.
+- **Never** reintroduce a pass-through `--mt-*` layer or one-off tokens for tabs,
+  badges, accents, or button hovers, unless a new rendered surface cannot be
+  expressed by the hierarchy above.
 - Build any new full app surface (standalone/Pocket) from the three list pairs
-  (see “Build every surface from the three list pairs”); do not lean on
-  `surface-raised`, `border`, or `input-border` for resting structure.
+  (see “Build every surface from the three list pairs”).
