@@ -41,20 +41,8 @@ Source of truth: `lib/src/components/wall/BrowserPanel.tsx`,
 
 ## Canonical Params
 
-The persisted pane params are flat:
-
-```ts
-type BrowserPanelParams = {
-  surfaceType?: string;   // 'browser'
-  renderMode?: 'ab-screencast' | 'ab-popout' | 'iframe';
-  url?: string;
-  session?: string;
-  key?: string;
-  wsPort?: number;
-  binaryPath?: string;
-  syncEngaged?: boolean;
-};
-```
+The persisted `BrowserPanelParams` are flat; their canonical shape lives in
+`lib/src/components/wall/BrowserPanel.tsx`.
 
 Invariants:
 
@@ -583,14 +571,9 @@ Source of truth: `IframePanel.tsx`, `lib/src/components/wall/use-window-focused.
 
 ## Iframe Host Capability And CSP
 
-The optional adapter method is:
-
-```ts
-createIframeProxyUrl?(targetUrl: string): Promise<
-  | { ok: true; url: string }
-  | { ok: false; reason: 'unreachable' | 'scheme'; detail?: string }
->;
-```
+The optional `PlatformAdapter.createIframeProxyUrl` method and
+`IframeProxyResult` union are canonical in `lib/src/lib/platform/types.ts` and
+`lib/src/lib/platform/iframe-proxy-types.ts`.
 
 Reachability is diagnosed lazily by served error pages after the iframe loads the
 proxy URL, and frame refusal is not diagnosed at all — any http upstream is
@@ -639,7 +622,8 @@ GET. `Referer` needs no such test: it only substitutes the proxy's own origin.
 The shared rule for all of Dormouse's loopback listeners lives in
 `lib/src/host/loopback-guard.ts`; `SECURITY.md` → "Loopback Listeners" audits it.
 
-Source of truth: `lib/src/lib/platform/types.ts`,
+Source of truth: `lib/src/lib/platform/iframe-proxy-types.ts`,
+`lib/src/lib/platform/types.ts`,
 `lib/src/lib/platform/vscode-adapter.ts`, `vscode-ext/src/message-types.ts`,
 `vscode-ext/src/message-router.ts`, `vscode-ext/src/webview-html.ts`,
 `standalone/src/tauri-adapter.ts`, `lib/src/host/iframe-proxy-rewrite.ts`.

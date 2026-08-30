@@ -396,113 +396,38 @@ and prints raw usage lines contradicting what the commands accept
 --version`/`-v` (sole argument only) is rewritten to `dor version`, and `ab` to
 `agent-browser`, before parsing.
 
-- `dor split` [impl](../../dor/src/commands/split.ts) [docs](../../dor/test/snapshots/help/split.md).
-  **Only a bare `dor split` (no `--`, no command) focuses the new surface**, so
-  a human types straight into it; anything with a `--` leaves focus on the
-  caller, like `dor ensure`. stricli discards `--` while parsing, so the CLI
-  captures its presence pre-parse (`DorCommandContext.hasArgumentEscape` in
-  `dor/src/cli.ts`) and folds it with command-presence into the request's
-  `focusNeutral` — the single source of truth for the decision, honored as sent
-  by `createSplitSurface` in `lib/src/components/wall/use-dor-control.ts`.
-- `dor ensure` [impl](../../dor/src/commands/ensure.ts) [docs](../../dor/test/snapshots/help/ensure.md).
-  Requires a `--` command tail; `stricli` cannot express "these flags, then one
-  required tail", so `validateEnsureDelimiter` runs as the command's `preParse`
-  and **must be kept in step with the flag list beside it**. Matching is on the
-  exact OSC 633 command a shell reports, scoped by resolved cwd, so **a shell
-  without integration can never be matched**: an explicitly-configured `cmd.exe`
-  fails immediately, and any other shell that never reports integration within
-  8s has its throwaway split killed and fails cleanly rather than half-running
-  something untrackable. `--restart` drives the live PTY (Ctrl+C, wait for the
-  prompt, retype), so it works on minimized doors too.
-- `dor version` [impl](../../dor/src/commands/version.ts) [docs](../../dor/test/snapshots/help/version.md)
-- `dor skill` — prints the bundled agent skill (`--json` wraps it as
-  `{ "markdown": … }`), or installs its bootstrap stub with `--install`; see
-  [Agent Skill](#agent-skill).
-  [impl](../../dor/src/commands/skill.ts) [docs](../../dor/test/snapshots/help/skill.md)
-- `dor send` [impl](../../dor/src/commands/send.ts) [docs](../../dor/test/snapshots/help/send.md).
-  Accepts exactly one input mode: `--text`/`--key`, `--stdin`, or `--sequence`.
-  `--text` and `--key` may be combined only in that order, duplicate input flags
-  are rejected, and `--sequence` is the explicit form for arbitrary ordering or
-  multiple events. Ordering is argv-level, so it too is enforced in `preParse`.
-- `dor read` [impl](../../dor/src/commands/read.ts) [docs](../../dor/test/snapshots/help/read.md).
-  Reads rendered text straight off the xterm buffer, so both modes return clean,
-  ANSI-free lines and `--lines` trims by rendered line.
-- `dor await` [impl](../../dor/src/commands/await.ts) [docs](../../dor/test/snapshots/help/await.md) —
-  blocks until a terminal Surface finishes what it is doing, then reports why
-  the wait ended. **`--until quiet|exit` is required and is never inferred or
-  defaulted**: it is the one flag `await` has no fallback for. `--timeout`
-  accepts whole seconds from 1 through 86400 (24h), defaulting to 600. The host
-  owns the wake condition, the grace window, the absorption rule, and the
-  `--timeout` ceiling — see `docs/specs/alert.md` → Await.
+The snapshots own command names, syntax, flags, and defaults. The spec keeps the
+behavior that help cannot express:
 
-  **`await` never prints terminal text** — compose
-  `dor await surface:N --until quiet && dor read surface:N` to see the screen
-  (rationale). Its whole stdout is the bare cause (`quiet` / `exit` / `bell` /
-  `idle`), so `CAUSE=$(dor await …)` is the whole idiom; the one-line narrative
-  goes to stderr on *every* outcome, success included. That narrative's duration
-  is the await's own wall time, not a claim about how long the peer worked, and
-  it says *output*, never *animation*: the detector watches PTY bytes, not
-  motion. JSON prints only on a resolution, so a timeout or a death speaks
-  through the exit code and stderr alone.
+| Command | Behavioral contract |
+|---|---|
+| `split` | **Only a bare split focuses the new Surface.** A `--` marker or command tail leaves the caller focused; pre-parse preserves the marker that stricli discards. |
+| `ensure` | **Must have a `--` command tail.** Matching uses the exact OSC 633 command plus resolved CWD; `cmd.exe` without integration fails immediately, other unintegrated shells time out after 8s and lose their throwaway split, and restart drives the live PTY so it also works on Doors. |
+| `send` | **Must select exactly one input mode.** Text then key is the only mixed order; duplicate flags require the explicit sequence form. |
+| `read` | Returns clean, ANSI-free rendered lines; line limits count rendered lines. |
+| `await` | **Must name `--until quiet|exit`; never infer it.** Timeout is 1–86400 whole seconds, default 600; `alert.md` owns wake semantics. |
+| `kill` | **Must select exactly one confirmation mode.** Conditional text needs four non-whitespace characters and must match `read`; browser Surfaces are killable. |
+| `iframe`, `agent-browser` / `ab` | `dor-browser.md` owns the renderers; [target resolution](#browser-open-target-resolution) and [agent-browser addressing](#agent-browser-surface-addressing) live below. The passthrough is intercepted before stricli parses it. |
+| `list` | Lists every current-Workspace Surface, including Doors, in stable ref order. Filters are ANDed client-side; `--port` filters terminals and implies the opt-in detail scan, while `--ports` only requests details. |
+| `skill` | Prints the bundled skill or installs its bootstrap stub; [Agent Skill](#agent-skill) owns the contract. |
 
-  Exit codes: 0 on any resolution; 1 on a usage or target error (unknown
-  Surface, a Surface with no terminal, a bad or missing `--until`); 2 on
-  timeout; **3 if the Surface died before completing**, kept distinct from 2 so
-  a caller can tell "still out there and slow" from "will never answer". `dor`'s
-  other commands use only 0 and 1, so `normalizeExitCode` in `dor/src/cli.ts`
-  passes a command-set positive code through instead of collapsing everything
-  nonzero to 1.
-- `dor kill` [impl](../../dor/src/commands/kill.ts) [docs](../../dor/test/snapshots/help/kill.md).
-  **Exactly one confirmation mode is required** — `--confirm-dangerously`, or
-  `--confirm-if-read <text>`, whose trimmed text must hold at least 4
-  non-whitespace characters (rejected CLI-side, so a trivial substring can't
-  stand in for a check) and is matched host-side against what `dor read` would
-  return. Not terminal-gated: browser Surfaces are killable too.
-- `dor iframe` — **provisional**; high-fidelity URL embed with structural
-  limitations; the `iframe` renderer of the unified `browser` surface, see
-  [dor-browser.md](dor-browser.md). Its target accepts a Surface handle or a
-  schemeless `host:port` (defaulted to http) as well as a URL — see [Browser
-  Open Target Resolution](#browser-open-target-resolution).
-  [impl](../../dor/src/commands/iframe.ts) [docs](../../dor/test/snapshots/help/iframe.md)
-- `dor agent-browser` / `dor ab` — delegates to the user's `agent-browser`,
-  rendered in a Dormouse-native surface; the `ab-screencast` renderer of the
-  unified `browser` surface, see [dor-browser.md](dor-browser.md). Three
-  mutually exclusive identity flags name the browser to drive: `--key <name>`
-  (managed, default `default`), `--session <name>` (raw), and `--surface
-  <handle>` — see [Agent-Browser Surface Addressing](#agent-browser-surface-addressing).
-  In an `open` / `goto` / `navigate` command, a Surface handle or schemeless
-  `host:port` target is resolved to a URL before it is forwarded — see [Browser
-  Open Target Resolution](#browser-open-target-resolution). **The passthrough is
-  intercepted in `runCli` *before* stricli parses**, so forwarded agent-browser
-  args never hit `dor`'s flag parser; the registered stricli command exists only
-  to render `--help`.
-- `dor list` [impl](../../dor/src/commands/list.ts) [docs](../../dor/test/snapshots/help/list.md) —
-  the unified Surface listing: every Surface in the current Workspace (terminals
-  and browser Surfaces, minimized ones included), one row per Surface in stable
-  `surface:N` order, marking the focused Surface and the calling terminal.
-  Filters are ANDed and applied CLI-side to the host's full projection:
-  `--kind terminal|browser`, `--view paned|zoomed|minimized`, exact
-  `--command <text>`, `--cwd <path>` (resolved like `dor ensure --cwd`, relative
-  to the invoking shell's `PWD` when available), and `--port <number>`.
-  **`--port` is distinct from `--ports`:** it filters to terminal Surfaces that
-  own the port (browser Surfaces never match, even when showing that URL), while
-  implying the same opt-in port scan and port details in the output.
-  `--json` always includes both stable ids and stable refs, and each row carries
-  `has_terminal` / `has_browser` — derived from `kind` at the JSON boundary, and
-  **the thing to gate on rather than `kind` itself** (`docs/specs/glossary.md` →
-  Panes and Surfaces). A command that needs a capability its target lacks fails
-  with that same vocabulary, one message per capability: `surface 'surface:N'
-  has no terminal (kind: browser)` from the terminal-gated verbs (`read` /
-  `send` / `await`, port scans), and `surface 'surface:N' has no browser (kind:
-  terminal)` from the browser-gated ones (`dor ab --surface`). `--json`
-  additionally emits the identity dump the retired `dor identify` printed — top-level
-  `caller_surface_ref` / `caller_surface_id` (matched locally against
-  `DORMOUSE_SURFACE_ID`, `null` when the caller is not in the list),
-  `focused_surface_ref` / `focused_surface_id`, `workspace_ref` / `window_ref`,
-  and a `host` block (`DORMOUSE_HOST` / `DORMOUSE_HOST_WORKSPACE` / runtime
-  paths). **It must not expose the control socket:** the CLI is the public API,
-  the socket is private plumbing. Activity/state filters and workspace scope are
-  staged (see [Future](#future)).
+**`await` never prints terminal text.** Stdout is only the resolution cause;
+the narrative goes to stderr on every outcome, and JSON appears only on a
+resolution. Exit codes are 0 resolution, 1 usage/target error, 2 timeout, and 3
+Surface death; other commands use only 0/1. Compose it with `dor read` when the
+screen is needed. (rationale)
+
+`list --json` includes stable ids and refs, capability booleans, caller/focus
+identity, singleton Workspace/Window refs, and Host identity/runtime paths.
+**Consumers must gate on `has_terminal` / `has_browser`, not `kind`.** Commands
+use the same capability vocabulary in target errors. **Never expose the control
+socket:** the CLI is public; the socket is private. Activity/state filters and
+Workspace scope are staged (see [Future](#future)).
+
+Source of truth: generated help in `dor/test/snapshots/help/`, exhaustiveness in
+`dor/test/cli-help.test.mjs`, command behavior in `dor/src/commands/`, CLI
+pre-parsing in `dor/src/cli.ts`, and host dispatch in
+`lib/src/components/wall/use-dor-control.ts`.
 
 ## Browser Open Target Resolution
 

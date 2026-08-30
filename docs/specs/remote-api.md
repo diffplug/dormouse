@@ -101,14 +101,9 @@ previous session's attachment. Source of truth: `RemoteHost` in
 
 ### Envelope
 
-Same shape as the dor control protocol — requests correlated by `requestId`,
-events by `subId`:
-
-```ts
-interface RemoteRequest  { requestId: string; method: string; params?: unknown }
-interface RemoteResponse { requestId: string; ok: boolean; result?: unknown; error?: string }
-interface RemoteEventMsg { subId: string; event: string; data: unknown }
-```
+Requests are correlated by `requestId`, events by `subId`; the canonical
+`RemoteRequest`, `RemoteResponse`, and `RemoteEventMsg` shapes live in
+`server-lib-common/src/remote/wire.ts`.
 
 A subscribing method (`directory.watch`, `surface.attach`) opens its stream under
 the *request's own id* — the Host reuses `requestId` as the `subId` — so the
@@ -130,24 +125,11 @@ minimum before allocating `rows × cols` cells.
 First exchange on the control channel; establishes version and viewer kind so
 the protocol can grow without breaking older Pockets. The Host does not *gate*
 other methods on it — authorization already happened at connect time, so
-skipping hello grants nothing.
-
-```ts
-// client → host
-interface HelloParams {
-  protocolVersion: 1;
-  viewer: 'phone' | 'vr' | 'desktop';
-}
-
-// host → client
-interface HelloResult {
-  protocolVersion: 1;
-  hostId: string;
-  /** Always { input: true, layout: false } today — selfhost is single-user, so
-   *  every paired session is the owner. Graded grants are future work. */
-  grants: { input: boolean; layout: boolean };
-}
-```
+skipping hello grants nothing. `HelloParams` and `HelloResult` in
+`server-lib-common/src/remote/wire.ts` define the exact exchange: protocol v1
+and a phone/VR/desktop viewer go Client→Host; protocol v1, Host id, and grants
+return. Grants are always `{ input: true, layout: false }` today because
+selfhost is single-user; graded grants are future work.
 
 Reserved: a `capabilities` field on the client hello (what the client can
 render — screencast formats, window support) lands additively when browser
@@ -157,30 +139,10 @@ surfaces arrive; see [Future](#future).
 
 `directory.watch` subscribes to a live, lightweight listing of every pane —
 enough to render the picker and know which pane wants attention, without
-attaching to anything.
-
-```ts
-/** Terminal-only today: no browser entries. */
-interface DirectoryEntry {
-  paneRef: string;
-  surfaceId: string;            // the selected surface in the pane
-  type: 'terminal';
-  title: string;                // derived title, same one the Wall's pane header shows
-  focused: boolean;             // focused on the host
-  // From the existing semantic-event model (docs/specs/terminal-state.md):
-  activity?: 'unknown' | 'prompt' | 'editing' | 'running' | 'finished';
-  exitCode?: number;
-  alive: boolean;               // the PTY process is still alive (see below)
-  cwd?: string;
-  /** The pane's alert is ringing on the host (alert-manager). */
-  ringing: boolean;
-  /** The pane has an outstanding TODO waiting for the user. */
-  hasTODO: boolean;
-}
-
-type DirectoryEvent =
-  | { event: 'directory.snapshot'; data: { entries: DirectoryEntry[] } };
-```
+attaching to anything. `DirectoryEntry` and `DirectorySnapshot` in
+`server-lib-common/src/remote/wire.ts` define the exact terminal-only payload;
+it carries identity, derived title, focus, semantic state, PTY liveness, and
+alert/TODO badges.
 
 Snapshot-only: a directory is dozens of entries at most, so on any change the
 Host coalesces (150ms window, `DIRECTORY_DEBOUNCE_MS`) and resends the whole
@@ -263,35 +225,16 @@ Normal-screen history does not regenerate on resize, and is absent from the
 shipped protocol (see [Future](#future): in-flight replay, then semantic
 scrollback).
 
-```ts
-// client → host
-{ method: 'surface.attach', params: { surfaceId: string, cols: number, rows: number } }
-
-// host → client, the attach result
-interface TerminalAttachResult {
-  cols: number; rows: number;     // the size the PTY now has
-  // Reserved: `inflight` (in-flight replay) and `blocks` (semantic
-  // scrollback) land here additively — see Future.
-}
-
-// then a stream of:
-type TerminalEvent =
-  | { event: 'terminal.data';     data: { bytes: string /* base64url */ } }
-  | { event: 'terminal.closed';   data: { exitCode?: number } };
-```
+The exact attach, data, close, write, and resize payloads are canonical in
+`server-lib-common/src/remote/wire.ts` (`AttachParams`,
+`TerminalAttachResult`, `TerminalDataEvent`, `TerminalClosedEvent`,
+`TerminalWriteParams`, and `TerminalResizeParams`). PTY bytes are base64url.
 
 These two are the whole v1 stream. A viewer is not notified when another
 display takes size authority, and semantic state (activity/cwd/title) reaches
 the client only through `directory.snapshot` — the host→client
 `terminal.resize` and `terminal.semantic` events are staged in
 [Future](#future) (item 5).
-
-```ts
-// client → host (requires the input grant)
-type TerminalInput =
-  | { method: 'terminal.write';  params: { surfaceId: string; bytes: string } }
-  | { method: 'terminal.resize'; params: { surfaceId: string; cols: number; rows: number } };
-```
 
 #### Attachment invariants
 

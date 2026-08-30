@@ -10,46 +10,10 @@ Session CWD and command execution state are separate. `cwd` means "the shell/ses
 
 ## Core Model
 
-```ts
-type TerminalPaneState = {
-  cwd: CwdState | null;
-  activity: ShellActivity;
-  pendingCommandLine: string | null;
-  currentCommand: CommandRun | null;
-  lastCommand: CommandRun | null;
-  title: TerminalTitle | null;   // latest title event, whatever its source
-  titleCandidates: Partial<Record<TerminalTitle["source"], TerminalTitle>>;
-};
-
-type CwdState = {
-  uri?: string; path: string; host?: string; scheme?: "file";
-  pathKind: "posix" | "windows" | "unknown";
-  isRemote: boolean;
-  source: "osc7" | "osc9_9" | "osc633" | "osc1337" | "process" | "manual";
-  updatedAt: number;
-};
-
-type ShellActivity =
-  | { kind: "unknown" } | { kind: "prompt" } | { kind: "editing" }
-  | { kind: "running" } | { kind: "finished"; exitCode?: number };
-
-type CommandRun = {
-  id: string;
-  rawCommandLine: string | null;  // exactly what the shell reported, or null
-  displayCommand: string;         // summarized label
-  cwdAtStart: CwdState | null;
-  startedAt: number; finishedAt?: number; exitCode?: number;
-  source: "osc633_E" | "osc633_boundaries" | "osc133_boundaries" | "user_input";
-  finalTerminalTitle?: TerminalTitle;  // set only at commandFinish; see Header Derivation
-  outputRange?: { startMarkId?: string; endMarkId?: string };  // declared, never populated
-};
-
-type TerminalTitle = {
-  title: string;
-  source: "osc0" | "osc2" | "osc9" | "osc99" | "osc777" | "user";
-  updatedAt: number;
-};
-```
+`TerminalPaneState` composes CWD, shell activity, pending/current/last command,
+and latest/per-source title state. Exact fields and unions are canonical in
+`lib/src/lib/terminal-state.ts` (`CwdState`, `ShellActivity`, `CommandRun`, and
+`TerminalTitle`).
 
 **Host identity is part of directory identity.** `file://localhost/Users/me/project` and `file://prod-box/home/me/project` are different locations even where their display labels compact to the same thing.
 
@@ -59,18 +23,8 @@ Terminal title is a label override, not a command lifecycle signal. `title` is t
 
 ## Normalized Events
 
-All protocol parsing emits normalized semantic events before feature code sees the state:
-
-```ts
-type TerminalSemanticEvent =
-  | { type: "cwd"; cwd: CwdState }
-  | { type: "promptStart" }
-  | { type: "promptEnd" }
-  | { type: "commandLine"; commandLine: string }
-  | { type: "commandStart"; source?: CommandRun["source"]; startedAt?: number }
-  | { type: "commandFinish"; exitCode?: number }
-  | { type: "title"; title: TerminalTitle };
-```
+All protocol parsing emits the canonical `TerminalSemanticEvent` union in
+`lib/src/lib/terminal-state.ts` before feature code sees the state.
 
 Feature code **must** consume `TerminalPaneState` or `TerminalSemanticEvent`, never raw OSC sequences.
 Protocol-derived semantic events are timestamped in stream order before they reach the reducer, so command-start boundaries and title candidates from the same PTY chunk remain comparable even when they were parsed in the same millisecond.
@@ -175,15 +129,11 @@ Asynchronous process CWD query results are applied through PTY-id resolution, so
 
 ## Header Derivation
 
-```ts
-type DerivedHeader = {
-  primary: string;
-  secondary?: string;
-  lastCommandFailed?: boolean;
-};
-```
-
-The header carries the primary label, an optional secondary disambiguator, and `lastCommandFailed` — a structured flag set when `primary` ends with the fail glyph (see below). Richer activity state lives on `pane.activity`; consumers that need it (status grouping) read it from there.
+The canonical `DerivedHeader` type lives in `lib/src/lib/terminal-state.ts`. It
+carries the primary label, an optional secondary disambiguator, and
+`lastCommandFailed` — a structured flag set when `primary` ends with the fail
+glyph (see below). Richer activity state lives on `pane.activity`; consumers
+that need it (status grouping) read it from there.
 
 Header priority — first match wins:
 
