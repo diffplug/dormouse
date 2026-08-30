@@ -372,6 +372,13 @@ jobs:
             cat "$REPORT"
           } > "$BODY"
 
+          # Same truncation as security-audit.yaml; `$REPORT` grows a section per
+          # unexplained commit. `node` is preinstalled and the script has no
+          # dependencies, so this job needs no setup-node.
+          node scripts/clamp-issue-body.mjs "$BODY" \
+            --note "The commits past this point were dropped to fit; re-derive the full list from the audit window named at the top of this issue, or read it in [the run](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)." \
+            || echo "clamp-issue-body.mjs failed; posting the body unclamped." >&2
+
           TITLE="[workflow-audit] $COUNT unexplained change(s) on $(date -u +%Y-%m-%d)"
           gh issue create --repo "$GITHUB_REPOSITORY" \
             --title "$TITLE" --body-file "$BODY"

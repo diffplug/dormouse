@@ -483,6 +483,11 @@ jobs:
           } > audit-comment.md
           rm -f "$NOTES"
 
+          # Truncate before posting, non-fatally. See SECURITY.md.
+          node scripts/clamp-issue-body.mjs audit-comment.md \
+            --note "The untruncated \`audit-report.md\` is in this run's \`audit-transcript\` artifact${TRANSCRIPT_URL:+ ([download]($TRANSCRIPT_URL))}." \
+            || echo "clamp-issue-body.mjs failed; posting audit-comment.md unclamped." >&2
+
           EXISTING=$(gh issue list --label security-audit-failure \
                        --state open --json number --jq '.[0].number' || true)
           if [ -n "$EXISTING" ]; then

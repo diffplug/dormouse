@@ -81,6 +81,8 @@ The mechanically checkable parts of these conventions are enforced by `scripts/s
 
 Three sibling lints run alongside it in `pnpm test`, each enforcing one invariant a spec states in prose: `scripts/xterm-lint.mjs` (`pnpm lint:xterm`) for the `@xterm/*` version lockstep in `docs/specs/webgl-text.md`; `scripts/loopback-lint.mjs` (`pnpm lint:loopback`) for the rule in `SECURITY.md` -> "Loopback Listeners" that a loopback bind is not an access control — a new listener must reference a guard module or be allowlisted with a reason; and `scripts/deploy-lint.mjs` (`pnpm lint:deploy`) for the installer controls in `SECURITY.md` -> "Credentials at rest" and "Network posture (self-hosted)", which bind all three of `deploy/local/install-{macos,windows,linux}` and were previously enforced by nothing. Its companion `scripts/deploy-lint-selftest.mjs` proves each rule is load-bearing by deleting the control — and, for exact-count rules, adding a copy — and requiring the lint to fail.
 
+`pnpm test` also runs `scripts/clamp-issue-body-selftest.mjs` — not a lint but the test for `scripts/clamp-issue-body.mjs`, the helper the audit workflows use to keep an issue body postable. It lives at the repo root because its callers do.
+
 ## Design
 
 See [PRODUCT.md](PRODUCT.md) for users, brand personality, and aesthetic direction (including the anti-references), and [DESIGN.md](DESIGN.md) for the full design system — tokens, named rules, and component vocabulary. Key principles:
