@@ -32,6 +32,8 @@ Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was abs
 
 **What the smoketest caught** (2026-08). The code-split CSP failure was invisible to string inspection and produced only a blank panel plus `script-src-elem` violations in the webview console. `webview-boot.smoketest.ts` is the check that would have caught it: reproducing the pre-fix document makes it fail on all four of its assertions with exactly those violations.
 
+**Why a fixture is not enough.** `webview-html.test.ts` feeds the transform a fixture of real Vite output, which is the limit of what it can prove: it cannot notice Vite emitting a shape nobody anticipated. That is the gap `webview-boot.smoketest.ts` exists to cover.
+
 **`'strict-dynamic'` could not be shown load-bearing by experiment.** With the `<meta property="csp-nonce">` in place, Vite's runtime preload helper nonces the `<link>` it injects ahead of a lazy `import()`, which populates the module map and lets the import resolve — including with `build.modulePreload` disabled (2026-08). The directive is kept anyway because that is an emergent interaction between a bundler's preload helper and the module map, not a policy guarantee.
 
 ## Webview message authentication
@@ -39,6 +41,10 @@ Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was abs
 **Why a token rather than `event.source` / `event.origin`.** A source check would have to assert something about VS Code's internal webview frame topology, which is undocumented and can change between releases. A token depends on nothing but itself.
 
 **Why not reuse the CSP nonce.** The two answer different questions — the nonce authorizes script execution, the token authenticates a message sender — and conflating them makes both harder to reason about, even though both are minted the same way and live in the same injected markup.
+
+## Remote Host: a service in the extension host
+
+**Where the `WebSocket` boundary falls.** `globalThis.WebSocket` arrived in Node 22, and VS Code 1.85 — the floor `engines.vscode` declares — shipped Node 18, so an older extension host has no global to use at all.
 
 ## Peer surfaces across windows
 
