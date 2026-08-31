@@ -746,9 +746,11 @@ To test push, **add Pocket to the Home Screen before signing in** and do all of
 the above inside the installed app: iOS delivers Web Push only there, and the
 install is a separate storage partition needing its own pairing, so setting up
 in the tab first means doing it twice ([pocket-app.md](./pocket-app.md) ->
-Installable web app). Alerts are then a per-Host opt-in — **Enable alerts** on the Host's
-row, which is the user gesture iOS requires before it will prompt for
-permission. Connecting alone does not subscribe.
+Installable web app). Push is then one tap for the whole device — **Enable push
+notifications**, on the card above the host list, which subscribes the browser
+and registers every paired Host at once. That tap is the user gesture iOS
+requires before it will prompt for permission; connecting alone does not
+subscribe.
 
 Limitations to know about: each browser storage partition has its own device key
 and therefore needs its own Host pairing, even when a synced passkey signs it
@@ -795,15 +797,12 @@ decision constrains every item: **the stock allowlist stays
 self-hosting keeps requiring a source build, deliberately, so no item below
 may depend on widening it. Staged order:
 
-1. **Push as a step, not a footnote.** After the first successful connect,
-   offer Enable alerts full-width; the per-host row stays as the ongoing
-   surface.
-2. **Enrollment offer.** The installer leaves the origin plus a one-time
+1. **Enrollment offer.** The installer leaves the origin plus a one-time
    enroll token at a well-known per-user path; a Host on the same machine
    offers one-click enrollment ("A Dormouse server is installed here — enroll
    as this machine?"). The three-field form stays as the remote-server
    fallback. Touches the `SELF_HOST.md` installer contract when built.
-3. **QR-first phone setup.** The enrolled Host mints a short-TTL, single-use
+2. **QR-first phone setup.** The enrolled Host mints a short-TTL, single-use
    setup token from the server over its authenticated channel and renders
    `https://<origin>/#setup?token=…` as a QR. Scanning replaces typing the
    origin and the setup password; the token's nonce rides into the pairing
@@ -813,7 +812,7 @@ may depend on widening it. Staged order:
    collapses to one confirm. Single-use plus TTL bound the shoulder-surf
    window; the Host announces each redemption. The setup password remains for
    the QR-less path.
-4. **One-minute resume.** On an approved connection the Host mints a resume
+3. **One-minute resume.** On an approved connection the Host mints a resume
    token — single-use, bound to the device key and that connection, 60-second
    TTL. A dropped WebSocket reattaches with it instead of rerunning the
    passkey ceremony; past the minute it is a full connect. Host-minted and

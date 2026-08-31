@@ -204,7 +204,8 @@ it in the wrong window.
 <Canvas of={HostsView.MixedList} />
 
 One row per enrolled Host. A row is offline when no Dormouse instance currently
-holds that server's relay slot.
+holds that server's relay slot. The card above them is push, which §7 comes back
+to.
 
 Each row offers exactly one action, and which one is not a guess. Pocket asks
 every online Host whether its ACL already holds a record for this browser, so
@@ -312,6 +313,19 @@ sessions:
 
 <Canvas of={PocketWall.ConnectedShell} story={{ autoplay: true }} />
 
+Push is asked for back on the Hosts view rather than over the terminal you just
+tapped Connect to reach — the card you already saw in §5, above the list from the
+moment anything is paired. It is one card and not one per machine because the
+permission prompt and the subscription it mints belong to the whole browser: the
+tap grants once and registers every paired machine. Afterwards the card collapses
+to a line and each paired row says **Push on** for itself:
+
+<Canvas of={HostsView.PushSubscribed} />
+
+The offer appears only where push can work — an installed app on a server with
+push configured (§1). A phone in a Safari tab is told to add Dormouse to the Home
+Screen instead, which is also where a server with push disabled says so.
+
 ---
 
 ## 8. Living with it
@@ -326,7 +340,8 @@ the test goes through the same Host, the same ACL, and the same server a real
 alarm would, so a phone that buzzes is evidence of everything from §1 to §6 at
 once. Its answers are kept deliberately distinct, because they call for
 different responses: on a machine that has enrolled (§3) but has no phone with
-alerts enabled yet, "nowhere to send it" is the ordinary answer, not a failure —
+push notifications enabled yet, "nowhere to send it" is the ordinary answer, not
+a failure —
 while a fan-out that no device accepted is one worth chasing. The notification
 itself is titled to say that nothing actually needs attention, so a test that
 lands hours late, or on another paired phone, cannot masquerade as a real

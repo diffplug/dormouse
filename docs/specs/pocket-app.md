@@ -148,26 +148,25 @@ source, never dropped into the output by hand.
 
 - **The worker caches nothing and registers no `fetch` handler.** Pocket is
   useless without a live relay connection, so an offline cache would buy no
-  working screens while fighting `registerPocketServing`, which re-reads
-  `index.html` per request because a rebuild swaps in new content-hashed assets.
-  It handles `push`, `notificationclick`, and `install`/`activate` to take over
+  working screens while fighting `registerPocketServing`, whose per-request
+  `index.html` re-read exists because rebuilds swap in new hashed assets. It
+  handles `push`, `notificationclick`, and `install`/`activate` to take over
   immediately (`skipWaiting` + `clients.claim`, free with no cache to migrate) —
   nothing else.
 - **A push that cannot be parsed still shows a notification.**
-  `userVisibleOnly: true` promises the browser that every delivery becomes
-  visible; one that catches the worker showing none substitutes its own "site
-  updated in the background" notice and counts it against the subscription.
-  Malformed and payload-less pushes therefore fall back to generic text rather
-  than returning early — reading the raw text is guarded separately, so no
-  payload shape exits the handler without a notification. `title`/`body` are
-  re-bounded at this sink because the string is terminal-supplied
-  ([alert.md](./alert.md) -> Push notifications owns the rule the worker
-  mirrors).
+  `userVisibleOnly: true` promises that every delivery becomes visible; a
+  browser catching the worker showing none substitutes its own "site updated in
+  the background" notice and counts it against the subscription. Malformed and
+  payload-less pushes therefore fall back to generic text rather than returning
+  early — reading the raw text is guarded separately, so no payload shape exits
+  the handler without a notification. `title`/`body` are re-bounded at this sink
+  because the string is terminal-supplied ([alert.md](./alert.md) -> Push
+  notifications owns the rule).
 - **Registration is best-effort and never awaited.** Every screen works without
-  the worker, so a failure warns and boot continues — ordinary on a browser
-  without support and on an insecure origin, since service workers need a secure
-  context with only `localhost` exempt, the same constraint WebAuthn imposes
-  (Deployment, below).
+  the worker, so a failure warns and boot continues — ordinary without support
+  and on an insecure origin, since service workers need a secure context
+  (`localhost` exempt), the same constraint WebAuthn imposes (Deployment,
+  below).
 - Clicking a notification focuses the app and leaves the user on the directory.
   There is no deep link to a Pane: protocol-v1 carries no routable surface ref.
 
@@ -193,7 +192,7 @@ again, and the verified response restores it on any profile. Source of truth:
 `lib/src/remote/client/pocket-client.ts`.
 
 So the order is: install to the Home Screen **first**, then sign in, approve the
-pairing on the machine, and enable alerts from within it — **and Pocket says so
+pairing on the machine, and enable push from within it — **and Pocket says so
 wherever setup can happen**, above the first-run fields and inside the return
 visit's disclosure. That precedes the passkey it warns about, though not the
 device key, which `App` mints at boot.
@@ -219,10 +218,10 @@ order, and every unavailable result is named in the UI:
 | Result | Condition | UI consequence |
 |---|---|---|
 | `needs-install` | `navigator.standalone` exists but the app is not installed; checked before capability probes because iOS tabs omit those APIs. `needsHomeScreenInstall` exports that predicate alone, so the auth gate awaits no push machinery. | Explain Home Screen install wherever setup can happen, and again on the Hosts view; with no prompt API it stays advice — setup in a tab must still work. |
-| `unsupported` | Service workers, `Notification`, or `PushManager` are unavailable after the install gate. | Explain that this browser cannot receive alerts. |
+| `unsupported` | Service workers, `Notification`, or `PushManager` are unavailable after the install gate. | Explain that this browser cannot receive push. |
 | `no-worker` | The tracked registration failed or resolved empty, commonly on an insecure origin. | Explain the worker failure. |
 | `denied` | Notification permission is denied. | Direct the user to browser settings. |
-| `ready` | Worker and APIs exist and permission is not denied. | Offer the Host-specific registration action; this does not mean any Host is registered yet. |
+| `ready` | Worker and APIs exist and permission is not denied. | Offer the registration action. |
 
 **Never parse the user-agent:** iPadOS reports as a Mac; the presence of
 `navigator.standalone` is the install-required signal and stays absent on macOS
@@ -234,49 +233,63 @@ Because registration is best-effort and asynchronous, both the availability
 check and the subscribe path await the tracked registration promise from
 `lib/src/remote/pocket-app/service-worker.ts` rather than
 `navigator.serviceWorker.ready`, which never settles when registration failed —
-that would hang the button the user just tapped, with no way out.
+that would hang the button the user just tapped.
 
-The Server's VAPID public key is also prefetched before Pocket offers Enable
-alerts. The config state is explicit (`loading`, `ready`, `disabled`, or
-`error`): a failed fetch offers Retry, which only caches the key, and a
-successful retry then reveals Enable. Permission is requested on that separate,
-fresh tap, because putting a network round trip between an iOS user gesture and
-`Notification.requestPermission()` can consume the transient activation.
-Source of truth: the push-config state and actions in
-`lib/src/remote/pocket-app/App.tsx`.
+The Server's VAPID public key is prefetched before Pocket offers Enable. The
+config state is explicit (`loading`, `ready`, `disabled`, or `error`): a failed
+fetch offers Retry, which only caches the key, and the next tap reveals Enable.
+Permission is requested on that separate, fresh tap, because a network round
+trip between an iOS user gesture and `Notification.requestPermission()` can
+consume the transient activation. Source of truth: the push-config state and
+actions in `lib/src/remote/pocket-app/App.tsx`.
 
-Browser availability and Host registration are separate states. A
+Browser availability and Host registration are separate states: a
 `PushSubscription` belongs to the service-worker scope, while the Server stores
-one row per `(hostId, devicePublicKey)`. An existing browser subscription
-therefore leaves Enable alerts available for every Host that has not registered;
-only a successful `POST /api/push/subscribe` flips that Host to Alerts on.
+one row per `(hostId, devicePublicKey)`.
 
-Which Hosts those are is read from the Server when the Hosts view opens, not
-remembered locally, so a reload does not re-offer an action already taken and a
-row pruned after a 410 stops claiming alerts are on.
-`GET /api/push/subscriptions` returns the **account's** registrations, filtered
-to this device by `PocketClient`. **Never parameterize that read by
-`devicePublicKey`** — an enumeration primitive over an input the caller need not
-own, where the account's own rows are already its to read (the scoping
-`GET /api/hosts` uses). `POST /api/push/subscribe` answers with the same thing —
-every Host this device is registered with after the mutation — so both are
-complete answers, never deltas: nothing to merge, only which is newer. Pocket
-counts completed registrations, captures that count when a read begins, and
-drops the read's snapshot if a registration overtook it; it also clears the
-previous snapshot at the start of a read, so a failed read re-offers an
-idempotent action rather than preserving a stale **Alerts on** claim. Source of
-truth:
-`getPushAvailability` in `lib/src/remote/client/push-subscribe.ts`,
-`PocketClient.listPushSubscribedHosts`, and the hosts-phase effect in
+**Push is asked for once per device, on one card, on the Hosts view.** The
+permission prompt and the subscription it mints are scope-wide, so the per-Host
+rows are bookkeeping, not something to ask for once each. The card reads
+the paired Hosts as a set — **Enable push notifications** while any lacks a row, one
+**Push notifications on.** line once all have one — and its tap subscribes the
+browser, then registers every paired Host, repairing a rotated endpoint at
+once. Each response commits as it lands, so a loop that fails partway keeps what
+it registered. **Never offer push from the wall or from a Host
+row:** the terminal is what the user tapped Connect to reach. The row states
+**Push on** beside its pair state — the only thing that says *which* Host the
+card still covers.
+
+Every state the card can be in is one pure predicate over (paired set,
+registrations, availability, config); `needs-install` is the one it declines to
+render, because `InstallNotice` is the push card for that state and is on screen
+exactly then. Source of truth: `pushNoticeState` and `PushNotice` in
 `lib/src/remote/pocket-app/App.tsx`.
 
-A Server row is necessary but not sufficient for **Alerts on**. Pocket also
-checks that permission is still granted, that the scope still holds a
-`PushSubscription` minted for the Server's current VAPID key, and that it still
-points at the address actually registered; any of the four failing re-exposes
-Enable rather than letting a stale row hide the repair path. The Server likewise
-omits rows registered under an old VAPID key, so repairing one Host after a
-rotation cannot make another Host's old endpoint look current.
+Which Hosts those are is read from the Server on entering the Hosts list — the
+connect neither refetches nor drops it — never locally, so a reload does not
+re-offer an action already taken and a row pruned after a 410 stops claiming
+push is on.
+`GET /api/push/subscriptions` returns the **account's** registrations, filtered
+to this device by `PocketClient`. **Never parameterize
+that read by `devicePublicKey`** — an enumeration primitive over an input the
+caller need not own, where the account's own rows are already its to read (the
+scoping `GET /api/hosts` uses). `POST /api/push/subscribe` answers with the same
+thing — every Host this device is registered with after the mutation — so both
+are complete answers, never deltas: nothing to merge, only which is newer.
+One run token drops any read a newer load, or a completed registration, already
+overtook. A read in flight or failed never settles at empty on its own behalf:
+the card re-offers its idempotent Enable rather than preserving a stale
+**Push notifications on.** claim. Source of truth: `getPushAvailability` in
+`lib/src/remote/client/push-subscribe.ts`, `PocketClient.listPushSubscribedHosts`,
+and the push effect in `lib/src/remote/pocket-app/App.tsx`.
+
+A Server row is necessary but not sufficient for **Push notifications on**.
+Pocket also checks that permission is still granted, that the scope holds a
+`PushSubscription` minted for the Server's current VAPID key, and that it points
+at the registered address; any of the four failing re-exposes Enable rather than
+letting a stale row hide the repair path. The Server likewise omits rows under
+an old VAPID key, so repairing one Host after a rotation cannot make another's
+old endpoint look current.
 
 The endpoint check is the non-obvious one: a push service may rotate an address
 on its own with the VAPID key unchanged, so the subscription stays valid and
@@ -294,29 +307,29 @@ is not forced to re-register. Source of truth: `hasCurrentPushSubscription` in
 `vapidPublicKey` field in `server/src/state.ts`, and the subscriptions read in
 `server/src/app.ts`.
 
-Repair is deferred to the next app open rather than a
-`pushsubscriptionchange` handler in `sw.js`: a worker can open the device key (a
-non-extractable `CryptoKey` in IndexedDB) but cannot obtain a session token,
-which lives only in `PocketClient` memory behind a fresh WebAuthn assertion —
-and `navigator.credentials` does not exist in a worker. Unattended
-re-registration would need a long-lived credential
+Repair waits for the next app open rather than a `pushsubscriptionchange`
+handler in `sw.js`: a worker can open the device key (a non-extractable
+`CryptoKey` in IndexedDB) but not obtain a session token, which lives only in
+`PocketClient` memory behind a fresh WebAuthn assertion — and
+`navigator.credentials` does not exist in a worker. Unattended re-registration
+would need a long-lived credential
 [remote-security-model.md](./remote-security-model.md) does not grant.
 
 Registering another Host, or retrying that POST, reuses the scope's existing
 `PushSubscription` when its `applicationServerKey` matches the Server's VAPID
-key byte-for-byte; Pocket unsubscribes and mints a new endpoint only when the
-key differs: replacing a matching subscription would invalidate the endpoint
-already stored for every other Host. When it does rotate, the Server drops
-that device's other Host rows in the same mutation and its response lists
-what survived — which is what makes a committed POST whose response was lost
-self-repairing: the idempotent retry cannot re-announce a deletion it already
-performed, but it can always say what is registered now.
+key byte-for-byte; Pocket mints a new endpoint only when the key differs, since
+replacing a matching subscription would invalidate the endpoint already stored
+for every other Host. When it does rotate, the Server drops that device's other
+Host rows in the same mutation and its response lists what survived — which
+makes a committed POST whose response was lost self-repairing: the idempotent
+retry cannot re-announce a deletion it already performed, but it can always say
+what is registered now.
 
 `subscribeToPushInBrowser` reports that replacement through a *required*
 callback, fired the moment the old address stops being valid — before the new
 one is minted, so a `subscribe()` that throws cannot take the fact with it
 (hence not a return value). Its one job is the UI: Pocket stops claiming
-**Alerts on** for every Host at that instant. Source of truth:
+**Push notifications on** for every Host at that instant. Source of truth:
 `subscribeToPushInBrowser` in
 `lib/src/remote/client/push-subscribe.ts`, `PushSubscriptionStore.upsert` in
 `server/src/state.ts`, and `onEnablePush` in
