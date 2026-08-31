@@ -15,6 +15,8 @@ import type {
   PlatformAdapter,
   PtyInfo,
   RemoteHostLink,
+  ToolControlResult,
+  ToolHostRequest,
 } from "dormouse-lib/lib/platform/types";
 import {
   answerAskCommand,
@@ -299,6 +301,15 @@ export class TauriAdapter implements PlatformAdapter {
     try {
       return await rawInvoke<string>("read_clipboard_text");
     } catch { return null; }
+  }
+
+  async toolControl(request: ToolHostRequest): Promise<ToolControlResult> {
+    // The sidecar owns the filesystem (shared lib/src/host/tool-host.ts).
+    try {
+      return await rawInvoke<ToolControlResult>("tool_control", { request });
+    } catch (err) {
+      return { status: "error", message: errMessage(err) };
+    }
   }
 
   async createIframeProxyUrl(targetUrl: string): Promise<IframeProxyResult> {

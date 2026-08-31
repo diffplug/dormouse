@@ -27,6 +27,8 @@ import { nowMs, type LathWallEngine } from './lath-wall-engine';
 import { type DragController, createDragController } from './lath-drag-controller';
 import { TerminalPanel } from './TerminalPanel';
 import { BrowserPanel } from './BrowserPanel';
+import { ToolPanel } from './ToolPanel';
+import { ToolPaneHeader } from './ToolPaneHeader';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
 import { AlertSpeechIndicator } from './AlertSpeechIndicator';
@@ -92,10 +94,14 @@ export type LathComponentsOverride = {
 const BODY_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
   terminal: TerminalPanel,
   browser: BrowserPanel,
+  // A tool is both, one Session deep; ToolPanel keeps each mounted and flips
+  // visibility (docs/specs/dor-tool.md).
+  tool: ToolPanel,
 };
 const TAB_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
   terminal: TerminalPaneHeader,
   surface: SurfacePaneHeader,
+  tool: ToolPaneHeader,
 };
 
 /** For a terminal Surface the pane id is its session id (docs/specs/layout.md). */
@@ -109,6 +115,8 @@ function TerminalLeafOverlay({ id }: PaneProps) {
 // one way plus a surface-kind branch in the render path.
 const OVERLAY_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
   terminal: TerminalLeafOverlay,
+  // A tool has a PTY, so it rings like a terminal whichever half is forward.
+  tool: TerminalLeafOverlay,
 };
 
 type DragState = {

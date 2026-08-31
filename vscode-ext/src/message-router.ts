@@ -21,6 +21,8 @@ import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
 import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
+import { toolControl } from './tool-host';
+import type { ToolHostRequest } from '../../lib/src/lib/platform/types';
 import { ASK_BUDGET_MS } from '../../lib/src/host/remote/service-protocol';
 import { configurePeerLink, remoteNotifyPeerChange } from './peer-link';
 import { createProcessedPtyStreams } from './processed-pty-streams';
@@ -632,6 +634,15 @@ export function attachRouter(
         ).then((result) => {
           post({ type: 'agentBrowser:popResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
         });
+        break;
+      case 'tool:control':
+        toolControl(msg.request as ToolHostRequest).then(
+          (result) => post({ type: 'tool:result', requestId: msg.requestId, result } satisfies ExtensionMessage),
+          (err) => post({
+            type: 'tool:result', requestId: msg.requestId,
+            result: { status: 'error', message: err?.message ?? String(err) },
+          } satisfies ExtensionMessage),
+        );
         break;
       case 'iframe:createProxyUrl':
         createIframeProxyUrl(typeof msg.url === 'string' ? msg.url : '').then(

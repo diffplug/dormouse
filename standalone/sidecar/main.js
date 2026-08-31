@@ -14,6 +14,7 @@ const { createDorControlServer } = require('./dor-control-server');
 // Built from lib/src/host/iframe-proxy.ts (shared with the VS Code host) by
 // scripts/build-sidecar-proxy.mjs. See docs/specs/dor-browser.md.
 const { createIframeProxyUrl } = require('./iframe-proxy.cjs');
+const { createToolHost } = require('./tool-host.cjs');
 // Same pattern: lib/src/host/agent-browser-host.ts is the single source of truth
 // for the agent-browser host capabilities, run here exactly as the VS Code
 // extension host runs it. See docs/specs/dor-browser.md → "Agent-Browser Host Capabilities".
@@ -49,6 +50,10 @@ const remoteHost = createSidecarRemoteHost({
   stateDir: process.env.DORMOUSE_STATE_DIR,
   mgr,
 });
+
+// Dor Tools. Shares the app's state directory, so an approved repo stays
+// approved across restarts (docs/specs/dor-tool.md -> Trust).
+const toolHost = createToolHost({ stateDir: process.env.DORMOUSE_STATE_DIR });
 
 // The control token arrives from Rust in our own environment, and `pty-core`
 // merges `process.env` into every shell it spawns — so it has to come out of
@@ -133,6 +138,11 @@ function handleLine(line) {
       case 'sidecar:shutdown': shutdown(); break;
       case 'dor:controlResponse': dorControl?.respond(data); break;
       case 'remoteHost:command': remoteHost.handleCommand(data); break;
+      case 'tool:control':
+        respondAsync('tool:result', data.requestId, async () => ({
+          result: await toolHost.handle(data.request),
+        }));
+        break;
       case 'iframe:createProxyUrl':
         // Log to stderr — stdout is the JSON-lines protocol channel.
         respondAsync('iframe:proxyUrl', data.requestId, async () => ({

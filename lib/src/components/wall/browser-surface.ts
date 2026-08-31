@@ -12,6 +12,8 @@ type BrowserParamsLike = {
   renderMode?: unknown;
   session?: unknown;
   url?: unknown;
+  /** Tool only: the header chip pinning the terminal forward past serving. */
+  showTerminal?: unknown;
 };
 
 function asParams(params: unknown): BrowserParamsLike {
@@ -31,10 +33,29 @@ export function isAgentBrowserParams(params: unknown): boolean {
   return p.renderMode === 'ab-screencast' || p.renderMode === 'ab-popout';
 }
 
-/** Whether params describe any browser surface (vs a terminal): the unified
- *  'browser' type, or anything carrying a renderMode. */
+/** Whether params describe a `tool` Surface — one Session with a terminal and,
+ *  once it serves, a browser (`docs/specs/dor-tool.md`). Checked before the
+ *  browser test below, because a serving tool also carries a `renderMode`. */
+export function isToolParams(params: unknown): boolean {
+  return asParams(params).surfaceType === 'tool';
+}
+
+/** Whether a tool is currently showing its browser rather than its terminal.
+ *  False until it serves (no `url` yet), and false while the header's far-left
+ *  chip has the terminal pinned forward. Both halves stay mounted either way —
+ *  the toggle is visibility, never unmount, or the xterm buffer and the framed
+ *  document would be rebuilt on every flip. */
+export function toolShowsBrowser(params: unknown): boolean {
+  const p = asParams(params);
+  return isToolParams(params) && typeof p.url === 'string' && p.showTerminal !== true;
+}
+
+/** Whether params describe a plain browser surface (vs a terminal): the unified
+ *  'browser' type, or anything carrying a renderMode. A tool is neither — it is
+ *  its own kind, and `isToolParams` answers for it. */
 export function isBrowserParams(params: unknown): boolean {
   const p = asParams(params);
+  if (isToolParams(params)) return false;
   return p.surfaceType === 'browser' || typeof p.renderMode === 'string';
 }
 

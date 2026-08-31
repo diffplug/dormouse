@@ -5,6 +5,9 @@ import type { ShellEntry } from '../shell-defaults';
 // Defined in its own dependency-free file so the Node proxy in lib/src/host can
 // share it without pulling this browser-typed module into a Node tsconfig.
 import type { IframeProxyResult } from './iframe-proxy-types';
+import type { ToolControlResult, ToolHostRequest } from './tool-types';
+
+export type { ToolControlResult, ToolHostRequest, ToolLookupResult } from './tool-types';
 
 export interface PtyInfo {
   id: string;
@@ -275,6 +278,14 @@ export interface PlatformAdapter {
   // could not. Absent on hosts with no process to run a proxy (e.g. the web
   // host), where the panel falls back to a raw, uninstrumented `<iframe>`.
   createIframeProxyUrl?(targetUrl: string): Promise<IframeProxyResult>;
+
+  // Dor Tools (see docs/specs/dor-tool.md). Two operations behind one method:
+  // resolve a tool name against the nearest dormouse.yml, and record a trust
+  // decision a human made in Dormouse's own chrome. Both need a filesystem, so
+  // this is absent on hosts with none (the web demo), where `dor tool <name>`
+  // reports that the host cannot read a tool file. `dor tool -- <command>`
+  // needs none of it and works everywhere.
+  toolControl?(request: ToolHostRequest): Promise<ToolControlResult>;
 
   // Render-swap support (docs/specs/dor-browser.md → "Display Modal And Render Swaps";
   // docs/specs/dor-browser.md → "Pop-Out"). All optional

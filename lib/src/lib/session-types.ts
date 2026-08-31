@@ -9,7 +9,7 @@ export interface PersistedAlertState {
 }
 
 /** Absent means terminal; browser panes rebuild from the persisted layout. */
-export type PersistedSurfaceType = 'terminal' | 'browser';
+export type PersistedSurfaceType = 'terminal' | 'browser' | 'tool';
 
 /** Durable pane structure, never scrollback. Single-use recovery commands travel
  * out of band through `PlatformAdapter.getRecoveryCommands`. */
@@ -131,7 +131,7 @@ function isPersistedPaneShape(value: unknown): boolean {
     // them and stay readable, new ones never do, and `normalizeSessionV3` strips
     // both either way.
     (value.untouched === undefined || typeof value.untouched === 'boolean') &&
-    (value.surfaceType === undefined || value.surfaceType === 'terminal' || value.surfaceType === 'browser') &&
+    (value.surfaceType === undefined || value.surfaceType === 'terminal' || value.surfaceType === 'browser' || value.surfaceType === 'tool') &&
     (value.alert === undefined || isPersistedAlertShape(value.alert))
   );
 }

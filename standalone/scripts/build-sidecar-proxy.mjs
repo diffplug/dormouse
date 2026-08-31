@@ -3,6 +3,7 @@
 // TypeScript source while the sidecar itself stays plain CJS.
 //   - lib/src/host/iframe-proxy.ts        → sidecar/iframe-proxy.cjs
 //   - lib/src/host/agent-browser-host.ts  → sidecar/agent-browser-host.cjs
+//   - lib/src/host/tool-host.ts           → sidecar/tool-host.cjs
 //   - lib/src/host/remote/sidecar-entry.ts → sidecar/remote-host.cjs
 // See docs/specs/dor-browser.md and docs/specs/remote-api.md.
 import { build } from 'esbuild';
@@ -25,6 +26,7 @@ const remoteSrc = resolveRemoteConnectSrc(process.env, 'sidecar');
 const bundles = [
   { entry: 'iframe-proxy.ts', out: 'iframe-proxy.cjs' },
   { entry: 'agent-browser-host.ts', out: 'agent-browser-host.cjs' },
+  { entry: 'tool-host.ts', out: 'tool-host.cjs' },
   {
     entry: 'remote/sidecar-entry.ts',
     out: 'remote-host.cjs',

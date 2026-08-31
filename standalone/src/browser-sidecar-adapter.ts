@@ -12,6 +12,8 @@ import type {
   PlatformAdapter,
   PtyInfo,
   RemoteHostLink,
+  ToolControlResult,
+  ToolHostRequest,
 } from "dormouse-lib/lib/platform/types";
 import {
   answerAskCommand,
@@ -84,6 +86,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     // drops `this` and makes the internal `this.host` access throw. The VS Code
     // adapter binds for the same reason; mirror it so any call style is safe.
     this.createIframeProxyUrl = this.createIframeProxyUrl.bind(this);
+    this.toolControl = this.toolControl.bind(this);
     this.agentBrowserCommand = this.agentBrowserCommand.bind(this);
     this.agentBrowserEdit = this.agentBrowserEdit.bind(this);
     this.agentBrowserScreenshot = this.agentBrowserScreenshot.bind(this);
@@ -158,6 +161,14 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   async readClipboardText(): Promise<string | null> {
     try { return await this.host.invoke("read_clipboard_text"); } catch { return null; }
+  }
+
+  async toolControl(request: ToolHostRequest): Promise<ToolControlResult> {
+    try {
+      return await this.host.invoke("tool_control", { request });
+    } catch (err) {
+      return { status: "error", message: errMessage(err) };
+    }
   }
 
   async createIframeProxyUrl(targetUrl: string): Promise<IframeProxyResult> {
