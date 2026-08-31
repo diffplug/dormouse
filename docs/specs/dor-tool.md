@@ -149,26 +149,39 @@ Source of truth: the `surface.tool` handler in
 `dormouse.yml` is repo-controlled and its entries execute, so it is inert until
 the repo is trusted. The phase-C user-global file needs none of this.
 
-1. **Keyed on the absolute repo root**, granted once and remembered. Denial is
-   remembered too, so a hostile repo cannot re-ask every invocation.
-2. **Only a gesture in Dormouse's own chrome grants it** — a dialog naming the
-   repo and the command, never a prompt rendered as terminal output. The
+1. **Keyed on the branch's upstream remote URL**, canonicalized, so every
+   worktree and clone of one repo shares a grant. A folder grant covers one
+   project root instead, for a repo with no resolvable remote or a checkout the
+   user wants scoped. Either key satisfies the check.
+2. **Only a gesture in Dormouse's own chrome grants it** — a prompt in the
+   tool's own pane naming the command, never one rendered as terminal output. The
    [naked-prompt test](#cli) signals human intent but is not a security
    boundary (rationale). Same shape as the local-approval ceremony in
    `docs/specs/remote-security-model.md`.
-3. **Agents cannot grant trust.** `dor tool <name>` against an untrusted repo
-   fails, telling the caller to have a human approve it.
+3. **Agents cannot grant trust.** `dor tool <name>` against an unapproved repo
+   creates the Surface and reports `pending`; its pane shows what would run and
+   waits. **Nothing from the repo executes until a human chooses** — no PTY is
+   spawned, so not even a shell starts. Declining closes the pane and records
+   nothing, so a reflexive refusal cannot permanently disable a repo's tools.
 4. **Anything `prespawn_*` is behind the same gate**, since it executes — the
    natural implementation order, probe-then-prompt, is backwards.
 5. **The phase-C glob table stays user-global and may only name user-global
    tools.** Implicit dispatch reaching repo-local entries is the
    `dor open README.md`-in-a-malicious-repo attack.
-6. **Path-level, never content-hashed.** A `dormouse.yml` that changes under a
-   trusted root does not re-prompt (rationale).
+6. **Never content-hashed.** A `dormouse.yml` that changes under a granted key
+   does not re-prompt (rationale).
+7. **The upstream comes from the repo and is not verified.** `@{upstream}` and
+   `remote get-url` read `.git/config`, so a directory shipping its own `.git`
+   can claim any URL and inherit its grant. **Accepted risk**: cloning is
+   unaffected, since there the user chose the URL, and the vector needs someone
+   to hand you a directory rather than a repo you cloned. A cross-repo PR that
+   tracks its fork therefore prompts, while one fetched into `origin` does not —
+   a useful heuristic, not a boundary.
 
-Source of truth: `lib/src/host/tool-trust.ts` (the record; granting is
-deliberately absent from it) and
-`lib/src/components/wall/ToolTrustDialog.tsx` (the only grant path).
+Source of truth: `lib/src/host/tool-trust.ts` (the record and its two key
+kinds), `lib/src/host/git-upstream.ts` + `lib/src/host/git-remote-url.ts` (how a
+project resolves to an upstream key), and
+`lib/src/components/wall/ToolApproval.tsx` (the only grant path).
 
 ## Serving
 

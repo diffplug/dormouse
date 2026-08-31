@@ -53,7 +53,7 @@ import type { PersistedDoor, PersistedSurfaceRefs } from '../lib/session-types';
 import type { DropTarget, RestoreToken } from '../lib/lath/ops';
 import type { Edge } from '../lib/lath/model';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
-import { resolveRenderMode, agentBrowserSessionFromParams, browserUrlFromParams, isToolParams, surfaceKindFromParams } from './wall/browser-surface';
+import { resolveRenderMode, agentBrowserSessionFromParams, browserUrlFromParams, isToolParams, surfaceKindFromParams, toolPendingFromParams } from './wall/browser-surface';
 import { hostPathDisplay } from './wall/browser-url';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { LathHost } from './wall/LathHost';
@@ -68,7 +68,6 @@ import {
 } from './wall/lath-wall-engine';
 import type { LeafMeta } from '../lib/lath/persistence';
 import { useToolServing } from './wall/use-tool-serving';
-import { ToolTrustDialog, type ToolTrustRequest } from './wall/ToolTrustDialog';
 import type { WallNav } from './wall/keyboard/types';
 import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
@@ -1185,19 +1184,37 @@ export function Wall({
   }, [generatePaneId, surfaceRefForId, forgetSurfaceRef, selectPane, enterTerminalMode, showShellSpawnNotice, lath, nav]);
 
   // --- dor control plane (the `dor` CLI's webview handler) ---
-  // Only this dialog grants trust (docs/specs/dor-tool.md -> Trust). One
-  // request at a time: a second `dor tool` against the same untrusted repo
-  // fails the same way and re-raises nothing.
-  const [toolTrustRequest, setToolTrustRequest] = useState<ToolTrustRequest | null>(null);
-  const requestToolTrust = useCallback((request: ToolTrustRequest) => {
-    setToolTrustRequest((current) => current ?? request);
-  }, []);
-  const resolveToolTrust = useCallback((decision: 'trusted' | 'denied') => {
-    const request = toolTrustRequest;
-    setToolTrustRequest(null);
-    if (!request) return;
-    void getPlatform().toolControl?.({ op: 'trust', root: request.projectRoot, decision });
-  }, [toolTrustRequest]);
+  // Approving a pending tool: record the grant, then start the command in the
+  // pane that has been showing the prompt. The two steps are ordered so a
+  // failed write never leaves a running command in an unapproved repo.
+  const resolveToolApproval = useCallback(async (id: string, choice: 'upstream' | 'folder' | 'decline') => {
+    const pending = toolPendingFromParams(lath.getMeta(id)?.params);
+    if (!pending) return;
+    if (choice === 'decline') {
+      // A refusal writes nothing: it closes the pane and leaves no record, so a
+      // reflexive decline cannot permanently disable tools for this repo.
+      killPaneImmediately(id);
+      return;
+    }
+    await getPlatform().toolControl?.({
+      op: 'trust',
+      kind: choice,
+      projectRoot: pending.projectRoot,
+      upstreamUrl: pending.upstreamUrl,
+    });
+    // Hand the leaf the command only now. `setPendingShellOpts` before the
+    // terminal half mounts is exactly how `createSplitSurface` starts a
+    // commanded split; clearing `toolPending` is what mounts it.
+    setPendingShellOpts(id, {
+      shell: getDefaultShellOpts()?.shell,
+      args: getDefaultShellOpts()?.args,
+      cwd: pending.cwd,
+      untouched: false,
+      command: pending.run,
+      requireIntegration: true,
+    });
+    lath.store.updateParams(id, { toolPending: undefined });
+  }, [lath, killPaneImmediately]);
 
   // A tool grows its browser when its command starts serving.
   useToolServing({ lath, doorsRef });
@@ -1213,7 +1230,6 @@ export function Wall({
     createContentSurface,
     killPaneImmediately,
     revealSurface,
-    requestToolTrust,
     lastAgentBrowserBinaryPathRef,
   });
 
@@ -1428,11 +1444,14 @@ export function Wall({
     onConnectPort: connectPort,
     // Pin the terminal forward past serving, or release it. Visibility only —
     // ToolPanel keeps both halves mounted (docs/specs/dor-tool.md).
+    onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline') => {
+      void resolveToolApproval(id, choice);
+    },
     onToggleToolTerminal: (id: string) => {
       const showing = lath.getMeta(id)?.params?.showTerminal === true;
       lath.store.updateParams(id, { showTerminal: showing ? undefined : true });
     },
-  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, connectPort, lath, nav]);
+  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, connectPort, resolveToolApproval, lath, nav]);
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
 
@@ -1596,9 +1615,6 @@ export function Wall({
             />
 
             <ExternalLinkModalHost onKeyboardActiveChange={setDialogKeyboardActive} />
-            {toolTrustRequest ? (
-              <ToolTrustDialog request={toolTrustRequest} onDecision={resolveToolTrust} />
-            ) : null}
             <AgentBrowserScreenModalHost
               onKeyboardActiveChange={setDialogKeyboardActive}
               resolveLabel={surfaceRefForId}

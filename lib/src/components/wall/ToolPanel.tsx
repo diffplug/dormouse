@@ -6,6 +6,9 @@ import { BrowserPanel } from './BrowserPanel';
 import { TerminalPanel } from './TerminalPanel';
 import { toolFace } from './browser-surface';
 import { ToolPortConflict } from './ToolPortConflict';
+import { ToolApproval } from './ToolApproval';
+import { useContext } from 'react';
+import { WallActionsContext } from './wall-context';
 import type { PaneProps } from './pane-props';
 
 /**
@@ -35,6 +38,19 @@ function Half({ shown, children }: { shown: boolean; children: React.ReactNode }
 
 export function ToolPanel(props: PaneProps) {
   const face = toolFace(props.params);
+  const actions = useContext(WallActionsContext);
+
+  // Rendered alone, not as one of two halves: mounting TerminalPanel would spawn
+  // a shell in a repo the user has not approved yet. Nothing runs until they do.
+  if (face === 'pending-approval') {
+    return (
+      <ToolApproval
+        {...props}
+        onResolve={(id, choice) => void actions.onResolveToolApproval?.(id, choice)}
+      />
+    );
+  }
+
   const showSecond = face !== 'terminal';
   return (
     <div className="relative h-full w-full">

@@ -16,6 +16,8 @@ type BrowserParamsLike = {
   showTerminal?: unknown;
   /** Tool only: the ports found when autobind refused to choose. */
   toolPortConflict?: unknown;
+  /** Tool only: the approval this Surface is waiting on before it runs. */
+  toolPending?: unknown;
 };
 
 function asParams(params: unknown): BrowserParamsLike {
@@ -51,8 +53,29 @@ export function toolPortConflictFromParams(params: unknown): number[] | null {
     : null;
 }
 
+/** What a pending tool is waiting to be allowed to run. */
+export interface ToolPending {
+  readonly name: string;
+  readonly run: string;
+  readonly path: string;
+  readonly projectRoot: string;
+  readonly cwd: string;
+  readonly upstreamUrl: string | null;
+}
+
+/** The approval a tool Surface is waiting on, or null once it may run. */
+export function toolPendingFromParams(params: unknown): ToolPending | null {
+  const value = asParams(params).toolPending;
+  if (!value || typeof value !== 'object') return null;
+  const pending = value as Record<string, unknown>;
+  const strings = ['name', 'run', 'path', 'projectRoot', 'cwd'] as const;
+  if (!strings.every((field) => typeof pending[field] === 'string')) return null;
+  if (pending.upstreamUrl !== null && typeof pending.upstreamUrl !== 'string') return null;
+  return pending as unknown as ToolPending;
+}
+
 /**
- * Which of a tool's three faces is forward. A three-state answer rather than a
+ * Which of a tool's faces is forward. A three-state answer rather than a
  * boolean because the header and the body must agree: a port conflict occupies
  * the browser's place (there is nothing to frame, so the pane shows *why*
  * where the browser would have been) but has no URL to edit, so it must not
@@ -62,10 +85,14 @@ export function toolPortConflictFromParams(params: unknown): number[] | null {
  * `browser` and `port-conflict` are mutually exclusive by construction —
  * autobind writes a conflict only when it declined to write a URL.
  */
-export type ToolFace = 'terminal' | 'browser' | 'port-conflict';
+export type ToolFace = 'terminal' | 'browser' | 'port-conflict' | 'pending-approval';
 
 export function toolFace(params: unknown): ToolFace {
-  if (!isToolParams(params) || asParams(params).showTerminal === true) return 'terminal';
+  if (!isToolParams(params)) return 'terminal';
+  // Checked before everything, including the terminal pin: until the human
+  // approves, there is no terminal to show — nothing has spawned.
+  if (toolPendingFromParams(params) !== null) return 'pending-approval';
+  if (asParams(params).showTerminal === true) return 'terminal';
   if (toolPortConflictFromParams(params) !== null) return 'port-conflict';
   return browserUrlFromParams(params) !== null ? 'browser' : 'terminal';
 }

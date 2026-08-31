@@ -173,7 +173,7 @@ export interface ToolSurfaceResponse {
    * started. `adopted` is a key match whose command had exited — the Surface is
    * reused and the command re-run in place, keeping its position and scrollback.
    */
-  status: 'created' | 'existing' | 'adopted';
+  status: 'created' | 'existing' | 'adopted' | 'pending';
   surfaceId: string;
   surfaceRef: string;
   /** The rendered command, as typed into the shell. */

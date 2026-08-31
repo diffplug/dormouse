@@ -115,3 +115,54 @@ describe('the port-conflict face', () => {
     expect(half('terminal').style.visibility).toBe('visible');
   });
 });
+
+describe('the pending-approval face', () => {
+  const pending = {
+    surfaceType: 'tool',
+    command: 'pnpm storybook',
+    cwd: '/repo',
+    toolPending: {
+      name: 'storybook',
+      run: 'pnpm storybook',
+      path: '/repo/dormouse.yml',
+      projectRoot: '/repo',
+      cwd: '/repo',
+      upstreamUrl: 'https://github.com/diffplug/dormouse',
+    },
+  };
+
+  it('mounts no terminal, so no shell runs in an unapproved repo', () => {
+    // The load-bearing assertion: both halves stay mounted for every other
+    // face, and mounting TerminalPanel here would spawn a PTY before the human
+    // has allowed anything.
+    show(pending);
+    expect(container.querySelector('[data-testid="terminal"]')).toBeNull();
+    expect(container.querySelector('[data-testid="browser"]')).toBeNull();
+  });
+
+  it('names the command it is asking about', () => {
+    show(pending);
+    expect(container.textContent).toContain('dor tool storybook');
+    expect(container.textContent).toContain('pnpm storybook');
+  });
+
+  it('offers the upstream and the folder', () => {
+    show(pending);
+    const labels = [...container.querySelectorAll('button')].map((b) => b.textContent ?? '');
+    expect(labels.some((l) => l.includes('upstream https://github.com/diffplug/dormouse'))).toBe(true);
+    expect(labels.some((l) => l.includes('folder'))).toBe(true);
+    expect(labels.some((l) => l.includes('Disallow and close'))).toBe(true);
+  });
+
+  it('omits the upstream button when git resolved no remote', () => {
+    show({ ...pending, toolPending: { ...pending.toolPending, upstreamUrl: null } });
+    const labels = [...container.querySelectorAll('button')].map((b) => b.textContent ?? '');
+    expect(labels.some((l) => l.includes('upstream'))).toBe(false);
+    expect(labels.some((l) => l.includes('folder'))).toBe(true);
+  });
+
+  it('takes precedence over the terminal pin, since there is no terminal yet', () => {
+    show({ ...pending, showTerminal: true });
+    expect(container.querySelector('[data-testid="terminal"]')).toBeNull();
+  });
+});

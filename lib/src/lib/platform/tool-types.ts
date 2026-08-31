@@ -8,15 +8,22 @@
 
 export type ToolHostRequest =
   | { op: 'lookup'; name: string; cwd: string }
-  | { op: 'trust'; root: string; decision: 'trusted' | 'denied' };
+  | { op: 'trust'; kind: 'upstream' | 'folder'; projectRoot: string; upstreamUrl: string | null };
 
 /** Result of resolving a tool name. `ok` carries the rendered dedupe key: the
  *  host owns `$PROJECT_ROOT`, so the webview never sees a template. */
 export type ToolLookupResult =
   | { status: 'no-file' }
   | { status: 'unknown-tool'; projectRoot: string; path: string; names: string[] }
-  | { status: 'untrusted'; projectRoot: string; path: string; name: string; run: string }
-  | { status: 'denied'; projectRoot: string; path: string }
+  | {
+      status: 'untrusted';
+      projectRoot: string;
+      path: string;
+      name: string;
+      run: string;
+      /** Canonical upstream URL, or null when there is no resolvable remote. */
+      upstreamUrl: string | null;
+    }
   | { status: 'error'; message: string }
   | {
       status: 'ok';

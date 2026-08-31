@@ -13,7 +13,9 @@ import { resolveDedupeKey } from './tool-registry';
 import {
   FileToolTrustStore,
   MemoryToolTrustStore,
+  folderGrantKey,
   lookupTool,
+  upstreamGrantKey,
   type ToolTrustStore,
 } from './tool-trust';
 
@@ -35,7 +37,14 @@ export function createToolHost(options: { stateDir?: string } = {}): ToolHost {
   return {
     async handle(request) {
       if (request.op === 'trust') {
-        await trust.set(request.root, request.decision);
+        // The key is derived here, not taken from the request: the webview says
+        // *which kind* the human picked, and the host owns the mapping from a
+        // project to its keys.
+        const key = request.kind === 'upstream' && request.upstreamUrl
+          ? upstreamGrantKey(request.upstreamUrl)
+          : folderGrantKey(request.projectRoot);
+        const kind = request.kind === 'upstream' && request.upstreamUrl ? 'upstream' : 'folder';
+        await trust.grant(key, kind);
         return { status: 'trust-recorded' };
       }
 

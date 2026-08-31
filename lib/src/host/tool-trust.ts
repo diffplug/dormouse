@@ -13,6 +13,7 @@ import { chmod, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promise
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { ToolFileError, parseToolFile, type ToolEntry, type ToolFile } from './tool-registry';
+import { resolveUpstreamUrl } from './git-upstream';
 
 export const TOOL_FILE_NAME = 'dormouse.yml';
 /**
@@ -34,20 +35,84 @@ async function readToolFile(path: string): Promise<string> {
 }
 const TRUST_FILE_NAME = 'tool-trust.json';
 
-export type TrustState = 'trusted' | 'denied' | 'unknown';
+/**
+ * What a grant covers. `upstream` is the canonical remote URL the project's
+ * branch tracks, so every worktree and clone of one repo shares it; `folder` is
+ * a single project root, for a repo with no resolvable remote or one the user
+ * wants scoped to this checkout only.
+ */
+export type TrustGrantKind = 'upstream' | 'folder';
 
+/** A grant key: kind-prefixed so one map holds both without collisions. */
+export function upstreamGrantKey(canonicalUrl: string): string {
+  return `upstream:${canonicalUrl}`;
+}
+export function folderGrantKey(root: string): string {
+  return `folder:${resolve(root)}`;
+}
+
+interface TrustGrant {
+  readonly kind: TrustGrantKind;
+  /** ISO timestamp. Not read by anything yet; see the schema note below. */
+  readonly grantedAt: string;
+}
+
+/**
+ * There is no `denied`. A refusal closes the tool's pane and writes nothing, so
+ * a reflexive decline cannot permanently disable tools for every checkout of a
+ * repo — which would be unrecoverable, since nothing can revoke or even list a
+ * decision (`docs/specs/dor-tool.md` -> Trust).
+ *
+ * The entry is an object rather than a bare `true` on purpose:
+ * `docs/specs/remote-security-model.md` designed revocation into its ACL record
+ * from the start and still shipped without callers, but the *field* was there.
+ * A flat boolean map has nowhere to put one, so adding revocation later would be
+ * a schema change on a security file.
+ */
 interface TrustFile {
-  /** Absolute repo roots, each mapped to the decision a human made there. */
-  roots: Record<string, 'trusted' | 'denied'>;
+  readonly version: 1;
+  readonly grants: Record<string, TrustGrant>;
 }
 
 function emptyTrust(): TrustFile {
-  return { roots: {} };
+  return { version: 1, grants: {} };
 }
 
-/** Records the trust decision for a repo root. One small JSON file, written
- *  temp-then-rename so a crash mid-write cannot leave a truncated file that
- *  reads as "nothing is trusted". */
+/**
+ * Read a stored file, migrating the pre-versioned shape.
+ *
+ * v0 was `{ roots: Record<absPath, 'trusted' | 'denied'> }`. Its trusted entries
+ * become folder grants; its denials are dropped, because the state no longer
+ * exists and a stored denial would otherwise be permanent and invisible.
+ */
+function parseTrustFile(parsed: unknown): TrustFile {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return emptyTrust();
+  const record = parsed as { version?: unknown; grants?: unknown; roots?: unknown };
+
+  if (record.version === 1 && record.grants && typeof record.grants === 'object' && !Array.isArray(record.grants)) {
+    const grants: Record<string, TrustGrant> = {};
+    for (const [key, value] of Object.entries(record.grants as Record<string, unknown>)) {
+      const grant = value as { kind?: unknown; grantedAt?: unknown };
+      if (grant?.kind !== 'upstream' && grant?.kind !== 'folder') continue;
+      grants[key] = { kind: grant.kind, grantedAt: typeof grant.grantedAt === 'string' ? grant.grantedAt : '' };
+    }
+    return { version: 1, grants };
+  }
+
+  if (record.roots && typeof record.roots === 'object' && !Array.isArray(record.roots)) {
+    const grants: Record<string, TrustGrant> = {};
+    for (const [root, decision] of Object.entries(record.roots as Record<string, unknown>)) {
+      if (decision !== 'trusted') continue;
+      grants[folderGrantKey(root)] = { kind: 'folder', grantedAt: '' };
+    }
+    return { version: 1, grants };
+  }
+
+  return emptyTrust();
+}
+
+/** Records grants. One small JSON file, written temp-then-rename so a crash
+ *  mid-write cannot leave a truncated file that reads as "nothing is trusted". */
 export class FileToolTrustStore {
   readonly #dir: string;
   readonly #path: string;
@@ -58,14 +123,21 @@ export class FileToolTrustStore {
     this.#path = join(stateDir, TRUST_FILE_NAME);
   }
 
-  async get(root: string): Promise<TrustState> {
-    return (await this.#read()).roots[resolve(root)] ?? 'unknown';
+  /** Whether any of these keys has been granted. Callers pass every key that
+   *  would cover this project — the upstream and the folder — so one lookup
+   *  answers "may this run?". */
+  async isTrusted(keys: readonly string[]): Promise<boolean> {
+    const { grants } = await this.#read();
+    return keys.some((key) => grants[key] !== undefined);
   }
 
-  /** Record a decision a human made in Dormouse's chrome. */
-  async set(root: string, decision: 'trusted' | 'denied'): Promise<void> {
+  /** Record a grant a human made in Dormouse's chrome. */
+  async grant(key: string, kind: TrustGrantKind): Promise<void> {
     const current = await this.#read();
-    const next: TrustFile = { roots: { ...current.roots, [resolve(root)]: decision } };
+    const next: TrustFile = {
+      version: 1,
+      grants: { ...current.grants, [key]: { kind, grantedAt: new Date().toISOString() } },
+    };
     await this.#write(next);
     this.#cache = next;
   }
@@ -73,15 +145,7 @@ export class FileToolTrustStore {
   async #read(): Promise<TrustFile> {
     if (this.#cache) return this.#cache;
     try {
-      const parsed: unknown = JSON.parse(await readFile(this.#path, 'utf-8'));
-      const roots =
-        parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-          ? (parsed as { roots?: unknown }).roots
-          : null;
-      this.#cache =
-        roots && typeof roots === 'object' && !Array.isArray(roots)
-          ? { roots: roots as TrustFile['roots'] }
-          : emptyTrust();
+      this.#cache = parseTrustFile(JSON.parse(await readFile(this.#path, 'utf-8')));
     } catch {
       // A missing file is the common case (nothing trusted yet). A corrupt one
       // starts empty rather than throwing: failing closed here means every tool
@@ -102,14 +166,14 @@ export class FileToolTrustStore {
 
 /** An in-memory store, for hosts with no state directory and for tests. */
 export class MemoryToolTrustStore {
-  readonly #roots = new Map<string, 'trusted' | 'denied'>();
+  readonly #grants = new Map<string, TrustGrant>();
 
-  async get(root: string): Promise<TrustState> {
-    return this.#roots.get(resolve(root)) ?? 'unknown';
+  async isTrusted(keys: readonly string[]): Promise<boolean> {
+    return keys.some((key) => this.#grants.has(key));
   }
 
-  async set(root: string, decision: 'trusted' | 'denied'): Promise<void> {
-    this.#roots.set(resolve(root), decision);
+  async grant(key: string, kind: TrustGrantKind): Promise<void> {
+    this.#grants.set(key, { kind, grantedAt: new Date().toISOString() });
   }
 }
 
@@ -155,8 +219,16 @@ export async function findToolFile(
 export type ToolLookup =
   | { status: 'no-file' }
   | { status: 'unknown-tool'; projectRoot: string; path: string; names: string[] }
-  | { status: 'untrusted'; projectRoot: string; path: string; name: string; run: string }
-  | { status: 'denied'; projectRoot: string; path: string }
+  | {
+      status: 'untrusted';
+      projectRoot: string;
+      path: string;
+      name: string;
+      run: string;
+      /** Canonical upstream URL, or null when there is no resolvable remote —
+       *  the approval UI then offers only the folder grant. */
+      upstreamUrl: string | null;
+    }
   | { status: 'error'; message: string }
   | { status: 'ok'; projectRoot: string; path: string; file: ToolFile; entry: ToolEntry };
 
@@ -172,6 +244,7 @@ export async function lookupTool(
   cwd: string,
   trust: ToolTrustStore,
   readTextFile?: (path: string) => Promise<string>,
+  resolveUpstream: (dir: string) => Promise<string | null> = resolveUpstreamUrl,
 ): Promise<ToolLookup> {
   let found;
   try {
@@ -201,16 +274,20 @@ export async function lookupTool(
     };
   }
 
-  const state = await trust.get(found.dir);
-  if (state === 'denied') return { status: 'denied', projectRoot: found.dir, path: found.path };
-  if (state === 'unknown') {
-    return {
-      status: 'untrusted',
-      projectRoot: found.dir,
-      path: found.path,
-      name: entry.name,
-      run: entry.run,
-    };
+  // Either grant covers this project: the upstream every worktree shares, or
+  // this folder alone. Resolved before the check so the approval UI can offer
+  // both, and so a hit on either short-circuits identically.
+  const upstreamUrl = await resolveUpstream(found.dir);
+  const keys = [folderGrantKey(found.dir), ...(upstreamUrl ? [upstreamGrantKey(upstreamUrl)] : [])];
+  if (await trust.isTrusted(keys)) {
+    return { status: 'ok', projectRoot: found.dir, path: found.path, file, entry };
   }
-  return { status: 'ok', projectRoot: found.dir, path: found.path, file, entry };
+  return {
+    status: 'untrusted',
+    projectRoot: found.dir,
+    path: found.path,
+    name: entry.name,
+    run: entry.run,
+    upstreamUrl,
+  };
 }

@@ -379,7 +379,6 @@ export function useDorControl({
   createContentSurface,
   killPaneImmediately,
   revealSurface,
-  requestToolTrust,
   lastAgentBrowserBinaryPathRef,
 }: {
   /** The Lath engine — visible-pane projection (`lath.listPanes()`), aspect-ratio
@@ -420,12 +419,6 @@ export function useDorControl({
    *  Used by the human-initiated `connectPort` (a menu click is a request to see
    *  that surface); the `dor ab` control path stays focus-neutral. */
   revealSurface: (id: string) => void;
-  /** Ask the human to approve a repo's `dormouse.yml`. Raises Dormouse's own
-   *  dialog — never a prompt in the terminal, which `dor send` could forge
-   *  (docs/specs/dor-tool.md -> Trust). Fire-and-forget: the request that
-   *  triggered it has already failed, and the caller runs it again after
-   *  approving. */
-  requestToolTrust: (request: { projectRoot: string; path: string; name: string; run: string }) => void;
   /** The last binary path a `dor ab` surface resolved on a terminal's PATH. */
   lastAgentBrowserBinaryPathRef: MutableRefObject<string | undefined>;
 }): { connectPort: (id: string, url: string) => Promise<void> } {
@@ -803,19 +796,52 @@ export function useDorControl({
                     : `no tool '${toolName}' in ${lookup.path}`,
                 });
                 return;
-              case 'untrusted':
-                requestToolTrust({ projectRoot: lookup.projectRoot, path: lookup.path, name: lookup.name, run: lookup.run });
+              case 'untrusted': {
+                // The pane appears now and asks; the command spawns only on
+                // approval (docs/specs/dor-tool.md -> Trust). Nothing from the
+                // repo has executed to reach this point — the file was read and
+                // parsed, which is inert, and is what lets the prompt name the
+                // command it is asking about.
+                const pendingTarget = resolveSplitTarget();
+                if (!pendingTarget) return;
+                const pending = createSplitSurface({
+                  direction: autoDorDirection(pendingTarget.target),
+                  minimized: booleanParam(params.minimized),
+                  reference: pendingTarget.target,
+                  cwd,
+                  focusNeutral: true,
+                  leafMeta: toolLeafMeta(lookup.name, {
+                    surfaceType: 'tool',
+                    command: lookup.run,
+                    cwd,
+                    toolName: lookup.name,
+                    toolPending: {
+                      name: lookup.name,
+                      run: lookup.run,
+                      path: lookup.path,
+                      projectRoot: lookup.projectRoot,
+                      upstreamUrl: lookup.upstreamUrl,
+                    },
+                  }),
+                });
+                if (!pending.ok) {
+                  detail.respond({ ok: false, error: pending.message });
+                  return;
+                }
                 detail.respond({
-                  ok: false,
-                  error: `'${lookup.projectRoot}' is not approved to run tools. Dormouse is asking; approve it there and run this again.`,
+                  ok: true,
+                  result: {
+                    status: 'pending',
+                    surfaceId: pending.value.id,
+                    surfaceRef: pending.value.ref,
+                    command: lookup.run,
+                    cwd,
+                    minimized: pending.value.minimized,
+                    key: null,
+                  },
                 });
                 return;
-              case 'denied':
-                detail.respond({
-                  ok: false,
-                  error: `'${lookup.projectRoot}' was declined for tools. Re-approve it in Dormouse to run ${lookup.path}.`,
-                });
-                return;
+              }
               default:
                 detail.respond({ ok: false, error: lookup.message });
                 return;
@@ -1313,7 +1339,7 @@ export function useDorControl({
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceByParams, findSurfaceIdRunningCommand, killPaneImmediately, requireBrowserSurface, requireListedSurface, requireTerminalSurface, requestToolTrust, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
+  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceByParams, findSurfaceIdRunningCommand, killPaneImmediately, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
 
   return { connectPort };
 }

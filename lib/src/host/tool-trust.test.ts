@@ -2,7 +2,17 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { FileToolTrustStore, MemoryToolTrustStore, findToolFile, lookupTool } from './tool-trust';
+import {
+  FileToolTrustStore,
+  MemoryToolTrustStore,
+  findToolFile,
+  folderGrantKey,
+  lookupTool,
+  upstreamGrantKey,
+} from './tool-trust';
+
+/** No git in these fixtures; the folder grant is the only key unless stated. */
+const noUpstream = async () => null;
 
 const YML = `
 tools:
@@ -46,32 +56,56 @@ describe('findToolFile', () => {
 });
 
 describe('FileToolTrustStore', () => {
-  it('is unknown until a decision is recorded, then remembers it across instances', async () => {
+  it('is untrusted until a grant is recorded, then remembers it across instances', async () => {
     const stateDir = join(root, 'state');
-    const store = new FileToolTrustStore(stateDir);
-    expect(await store.get('/repo')).toBe('unknown');
-    await store.set('/repo', 'trusted');
-    expect(await store.get('/repo')).toBe('trusted');
-    expect(await new FileToolTrustStore(stateDir).get('/repo')).toBe('trusted');
+    const key = folderGrantKey('/repo');
+    expect(await new FileToolTrustStore(stateDir).isTrusted([key])).toBe(false);
+    await new FileToolTrustStore(stateDir).grant(key, 'folder');
+    expect(await new FileToolTrustStore(stateDir).isTrusted([key])).toBe(true);
   });
 
-  it('remembers a denial, so a hostile repo cannot re-ask every invocation', async () => {
+  it('shares one upstream grant across every checkout — the point of the change', async () => {
     const store = new FileToolTrustStore(join(root, 'state'));
-    await store.set('/repo', 'denied');
-    expect(await store.get('/repo')).toBe('denied');
+    const upstream = upstreamGrantKey('https://github.com/diffplug/dormouse');
+    await store.grant(upstream, 'upstream');
+    // A second worktree resolves the same upstream and a different folder.
+    expect(await store.isTrusted([folderGrantKey('/w/two'), upstream])).toBe(true);
+    // ...while an unrelated repo with no upstream grant does not.
+    expect(await store.isTrusted([folderGrantKey('/w/other')])).toBe(false);
   });
 
-  it('keys on the resolved path', async () => {
+  it('keys folder grants on the resolved path', async () => {
     const store = new FileToolTrustStore(join(root, 'state'));
-    await store.set('/repo/../repo', 'trusted');
-    expect(await store.get('/repo')).toBe('trusted');
+    await store.grant(folderGrantKey('/repo/../repo'), 'folder');
+    expect(await store.isTrusted([folderGrantKey('/repo')])).toBe(true);
+  });
+
+  it('keeps upstream and folder keys from colliding', async () => {
+    const store = new FileToolTrustStore(join(root, 'state'));
+    await store.grant(folderGrantKey('/repo'), 'folder');
+    expect(await store.isTrusted([upstreamGrantKey('/repo')])).toBe(false);
   });
 
   it('starts empty on a corrupt file rather than failing every tool', async () => {
     const stateDir = join(root, 'state');
     await mkdir(stateDir, { recursive: true });
     await writeFile(join(stateDir, 'tool-trust.json'), '{not json');
-    expect(await new FileToolTrustStore(stateDir).get('/repo')).toBe('unknown');
+    expect(await new FileToolTrustStore(stateDir).isTrusted([folderGrantKey('/repo')])).toBe(false);
+  });
+
+  it('migrates the pre-versioned shape, keeping grants and dropping denials', async () => {
+    // v0 was `{ roots: Record<absPath, 'trusted' | 'denied'> }`. A stored denial
+    // must not survive as anything: the state no longer exists, and nothing can
+    // revoke or even list it.
+    const stateDir = join(root, 'state');
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(
+      join(stateDir, 'tool-trust.json'),
+      JSON.stringify({ roots: { '/old/yes': 'trusted', '/old/no': 'denied' } }),
+    );
+    const store = new FileToolTrustStore(stateDir);
+    expect(await store.isTrusted([folderGrantKey('/old/yes')])).toBe(true);
+    expect(await store.isTrusted([folderGrantKey('/old/no')])).toBe(false);
   });
 });
 
@@ -79,40 +113,52 @@ describe('lookupTool', () => {
   const write = (text = YML) => writeFile(join(root, 'dormouse.yml'), text);
 
   it('reports no-file when there is nothing to read', async () => {
-    expect(await lookupTool('storybook', root, new MemoryToolTrustStore())).toEqual({ status: 'no-file' });
+    expect(await lookupTool('storybook', root, new MemoryToolTrustStore(), undefined, noUpstream))
+      .toEqual({ status: 'no-file' });
   });
 
   it('asks for trust before running anything, naming the command', async () => {
     await write();
-    expect(await lookupTool('storybook', root, new MemoryToolTrustStore())).toMatchObject({
-      status: 'untrusted',
-      projectRoot: root,
-      name: 'storybook',
-      run: 'pnpm storybook',
-    });
+    expect(await lookupTool('storybook', root, new MemoryToolTrustStore(), undefined, noUpstream))
+      .toMatchObject({
+        status: 'untrusted',
+        projectRoot: root,
+        name: 'storybook',
+        run: 'pnpm storybook',
+        upstreamUrl: null,
+      });
   });
 
-  it('resolves once the repo is trusted', async () => {
+  it('offers the upstream when git resolves one', async () => {
+    await write();
+    const upstream = async () => 'https://github.com/diffplug/dormouse';
+    expect(await lookupTool('storybook', root, new MemoryToolTrustStore(), undefined, upstream))
+      .toMatchObject({ status: 'untrusted', upstreamUrl: 'https://github.com/diffplug/dormouse' });
+  });
+
+  it('runs when the upstream is granted, even in a folder never seen before', async () => {
     await write();
     const trust = new MemoryToolTrustStore();
-    await trust.set(root, 'trusted');
-    const result = await lookupTool('storybook', root, trust);
+    await trust.grant(upstreamGrantKey('https://github.com/diffplug/dormouse'), 'upstream');
+    const upstream = async () => 'https://github.com/diffplug/dormouse';
+    expect((await lookupTool('storybook', root, trust, undefined, upstream)).status).toBe('ok');
+  });
+
+  it('resolves once the folder is granted', async () => {
+    await write();
+    const trust = new MemoryToolTrustStore();
+    await trust.grant(folderGrantKey(root), 'folder');
+    const result = await lookupTool('storybook', root, trust, undefined, noUpstream);
     expect(result.status).toBe('ok');
     if (result.status !== 'ok') return;
     expect(result.entry.run).toBe('pnpm storybook');
     expect(result.projectRoot).toBe(root);
   });
 
-  it('stays denied once denied', async () => {
-    await write();
-    const trust = new MemoryToolTrustStore();
-    await trust.set(root, 'denied');
-    expect((await lookupTool('storybook', root, trust)).status).toBe('denied');
-  });
 
   it('reports an unknown tool with the names it does know, before any trust check', async () => {
     await write();
-    expect(await lookupTool('nope', root, new MemoryToolTrustStore())).toMatchObject({
+    expect(await lookupTool('nope', root, new MemoryToolTrustStore(), undefined, noUpstream)).toMatchObject({
       status: 'unknown-tool',
       names: ['once', 'storybook'],
     });
@@ -120,7 +166,7 @@ describe('lookupTool', () => {
 
   it('surfaces a parse error as an error rather than throwing', async () => {
     await write('tools:\n  t:\n    run: x\n    prespawn_dedupe: [$NOPE]\n');
-    const result = await lookupTool('t', root, new MemoryToolTrustStore());
+    const result = await lookupTool('t', root, new MemoryToolTrustStore(), undefined, noUpstream);
     expect(result).toMatchObject({ status: 'error' });
     if (result.status !== 'error') return;
     expect(result.message).toMatch(/unknown substitution '\$NOPE'/);
@@ -140,7 +186,7 @@ describe('the pre-approval read (regression: review finding 13)', () => {
 
   it('still reads a normal file', async () => {
     await writeFile(join(root, 'dormouse.yml'), YML);
-    expect((await lookupTool('storybook', root, new MemoryToolTrustStore())).status).toBe('untrusted');
+    expect((await lookupTool('storybook', root, new MemoryToolTrustStore(), undefined, noUpstream)).status).toBe('untrusted');
   });
 });
 
@@ -161,7 +207,7 @@ describe('the size cap runs before the read (regression: PR #493 review)', () =>
     // check standing. 100k four-byte characters: well under the cap by
     // `.length`, well over it by bytes. Counting code units would let it through.
     const oversized = `# ${'\u{1F600}'.repeat(100_000)}\n`;
-    const result = await lookupTool('storybook', root, new MemoryToolTrustStore(), async () => oversized);
+    const result = await lookupTool('storybook', root, new MemoryToolTrustStore(), async () => oversized, noUpstream);
     expect(result).toMatchObject({ status: 'error' });
     if (result.status !== 'error') return;
     expect(result.message).toMatch(/after reading$/);

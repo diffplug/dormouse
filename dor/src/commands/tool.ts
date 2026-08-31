@@ -113,7 +113,9 @@ A tool has an identity if and only if its dormouse.yml entry gave it one, via pr
 
 --fresh ignores a declared key and always creates.
 
-A dormouse.yml is repo-controlled and its entries execute, so it is inert until you approve the repo in Dormouse itself. An unapproved repo fails with a message rather than prompting in the terminal; approve it in the app and run the command again. Declining is remembered too.
+A dormouse.yml is repo-controlled and its entries execute, so it is inert until you approve it in Dormouse itself. For an unapproved repo the surface is created and reports "pending": its pane shows what would run and waits for you to allow the upstream, allow just this folder, or close it. Nothing from the repo runs until you choose, and declining records nothing.
+
+Approving an upstream covers every worktree and clone of that repo. Approving a folder covers that checkout only, which is what you want for a branch you have not read.
 
 Where the tool lands: it always splits without taking focus and prints the new surface's handle, whether a human typed it or a script did. Taking over the calling pane when the invocation is typed alone at a prompt is designed but not built.
 

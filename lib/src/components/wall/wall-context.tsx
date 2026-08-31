@@ -60,6 +60,9 @@ export interface WallActions {
   /** Flip which half of a `tool` Surface is forward — the header's leading chip
    *  (docs/specs/dor-tool.md). Visibility only: both halves stay mounted. */
   onToggleToolTerminal?: (id: string) => void;
+  /** Resolve a pending tool's approval: grant and start it, or close its pane
+   *  (docs/specs/dor-tool.md -> Trust). */
+  onResolveToolApproval?: (id: string, choice: 'upstream' | 'folder' | 'decline') => void;
 }
 
 export const WallActionsContext = createContext<WallActions>({
@@ -80,6 +83,7 @@ export const WallActionsContext = createContext<WallActions>({
   resolveSurfaceRef: (id: string) => id,
   onConnectPort: () => {},
   onToggleToolTerminal: () => {},
+  onResolveToolApproval: () => {},
 });
 
 /** Engine-directed writes from a pane/header (title + params). The read side is
