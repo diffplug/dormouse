@@ -56,6 +56,18 @@ export interface HostView {
  */
 export type HostPairState = 'paired' | 'unpaired' | 'stale';
 
+/**
+ * One-way refinement: because `stale` refines `unpaired`, a sweep's plain
+ * `unpaired` must not erase what a denial taught the row — only a pairing
+ * clears it. Lives next to the state so no writer has to know the rule.
+ */
+export function refinePairState(
+  prev: HostPairState | undefined,
+  next: HostPairState,
+): HostPairState {
+  return next === 'unpaired' && prev === 'stale' ? 'stale' : next;
+}
+
 export type PushConfigStatus = 'loading' | 'ready' | 'disabled' | 'error';
 
 type PushConfigState =
@@ -204,9 +216,10 @@ export default function App(): React.ReactElement {
 
   const setPairStateFor = useCallback((hostId: string, state: HostPairState) => {
     setPairStates((prev) => {
-      if (prev.get(hostId) === state) return prev;
+      const settled = refinePairState(prev.get(hostId), state);
+      if (prev.get(hostId) === settled) return prev;
       const next = new Map(prev);
-      next.set(hostId, state);
+      next.set(hostId, settled);
       return next;
     });
   }, []);

@@ -5,7 +5,13 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { HostsView, type HostPairState, type HostView, type PushConfigStatus } from './App';
+import {
+  HostsView,
+  refinePairState,
+  type HostPairState,
+  type HostView,
+  type PushConfigStatus,
+} from './App';
 import type { PushAvailability } from '../client/push-subscribe';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -160,6 +166,22 @@ describe('HostsView pair/connect actions', () => {
 
     expect(onConnect).toHaveBeenCalledWith(HOSTS[0]);
     expect(onPair).toHaveBeenCalledWith(HOSTS[1]);
+  });
+});
+
+describe('refinePairState', () => {
+  /**
+   * The sweep re-runs right after a denial (its `busy` dep flips back to
+   * null), and the Host's answer for a lost pairing is plain `unpaired` — so
+   * without the one-way refinement, "Pair again" would survive exactly one
+   * relay round trip before decaying to "Pair".
+   */
+  it('keeps stale through a sweep answer; only a pairing clears it', () => {
+    expect(refinePairState('stale', 'unpaired')).toBe('stale');
+    expect(refinePairState('stale', 'paired')).toBe('paired');
+    expect(refinePairState('unpaired', 'unpaired')).toBe('unpaired');
+    expect(refinePairState(undefined, 'unpaired')).toBe('unpaired');
+    expect(refinePairState('paired', 'stale')).toBe('stale');
   });
 });
 
