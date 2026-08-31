@@ -400,8 +400,9 @@ single-use, which Hosts each Client asked, stamping the `hostId` on the way out
 as for `challenge`. The session token on the socket is the whole authorization:
 the query carries no signature, and `authorizeConnection` neither reads the
 answer nor is bound by it, so a wrong one costs a button tapped twice. Both
-sides run `isPairStatusQuery`; a malformed query is answered `false`, never
-left unanswered.
+sides run `isPairStatusQuery`: the relay refuses a malformed query with an
+`error` frame and forwards only the proven fields; the Host revalidates and
+answers `false` rather than staying silent.
 
 For `connect2`, the server remembers the last Host challenge it relayed to a
 Client with a relay-local expiry derived from the server's observation time

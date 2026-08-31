@@ -167,6 +167,8 @@ export class PocketClient {
    * the Hosts view asks every online Host at once.
    */
   readonly #waiters = new Map<string, Waiter>();
+  /** In-flight advisory pair-status asks, keyed by hostId, so overlapping callers join one. */
+  readonly #pairStatusAsks = new Map<string, Promise<boolean>>();
   /** In-flight remote-api requests, keyed by `requestId`. */
   readonly #pending = new Map<string, PendingRequest>();
   /** Live event subscriptions, keyed by `subId`. */
@@ -414,24 +416,70 @@ export class PocketClient {
    * decides which button the row offers, never whether a connection is allowed
    * (`docs/specs/remote-security-model.md`). Rejects when the Host cannot be
    * asked, which leaves the marker untouched as the fallback.
+   *
+   * Overlapping asks about one Host join the in-flight query — a re-rendered
+   * Hosts view (StrictMode's doubled effects, a Refresh mid-sweep) must not
+   * trip the single-waiter guard and lose the row's answer.
    */
-  async queryPaired(hostId: string): Promise<boolean> {
+  queryPaired(hostId: string): Promise<boolean> {
+    const inflight = this.#pairStatusAsks.get(hostId);
+    if (inflight) return inflight;
+    const ask = this.#queryPairedNow(hostId).finally(() => {
+      this.#pairStatusAsks.delete(hostId);
+    });
+    this.#pairStatusAsks.set(hostId, ask);
+    return ask;
+  }
+
+  async #queryPairedNow(hostId: string): Promise<boolean> {
     const { credentialId } = this.#passkeyForRequest();
     const device = await this.#getDeviceKey();
-    const query: PairStatusQuery = {
-      passkeyCredentialId: credentialId,
-      devicePublicKey: device.devicePublicKey,
-    };
-    const awaited = this.#expect(pairStatusKey(hostId), PAIR_STATUS_TIMEOUT_MS);
-    this.#send({ t: 'pair-status', hostId, query });
-    const frame = (await awaited) as Extract<ServerToClientFrame, { t: 'pair-status-result' }>;
+    // Ask about every credential this browser holds a public key for — the
+    // same set `connect` scopes its assertion to — signed-in first as the
+    // near-certain hit. Asking only the signed-in one would offer Pair on a
+    // row whose Connect would succeed through an older credential.
+    const credentialIds = [
+      credentialId,
+      ...this.#storage.knownCredentialIds().filter((id) => id !== credentialId),
+    ];
+    let paired = false;
+    for (const passkeyCredentialId of credentialIds) {
+      const frame = await this.#askPairStatus(hostId, {
+        passkeyCredentialId,
+        devicePublicKey: device.devicePublicKey,
+      });
+      if (frame.paired) {
+        paired = true;
+        break;
+      }
+    }
     // Write-on-change only: the common answer confirms the marker, and
     // localStorage writes are synchronous.
-    if (frame.paired !== this.#storage.isPaired(hostId)) {
-      if (frame.paired) this.#storage.markPaired(hostId);
+    if (paired !== this.#storage.isPaired(hostId)) {
+      if (paired) this.#storage.markPaired(hostId);
       else this.#storage.unmarkPaired(hostId);
     }
-    return frame.paired;
+    return paired;
+  }
+
+  async #askPairStatus(
+    hostId: string,
+    query: PairStatusQuery,
+  ): Promise<Extract<ServerToClientFrame, { t: 'pair-status-result' }>> {
+    const key = pairStatusKey(hostId);
+    const awaited = this.#expect(key, PAIR_STATUS_TIMEOUT_MS);
+    try {
+      this.#send({ t: 'pair-status', hostId, query });
+    } catch (error) {
+      // The frame never left, so nothing will settle the waiter; reclaim it
+      // (and its deadline timer) rather than leaking an unhandled rejection
+      // when the deadline fires.
+      this.#waiters.get(key)?.reject(error instanceof Error ? error : new Error(String(error)));
+      this.#waiters.delete(key);
+      void awaited.catch(() => undefined);
+      throw error;
+    }
+    return (await awaited) as Extract<ServerToClientFrame, { t: 'pair-status-result' }>;
   }
 
   async #sendPair(hostId: string, request: PairingRequest): Promise<PairResult> {

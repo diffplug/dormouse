@@ -486,6 +486,47 @@ describe('queryPaired', () => {
     expect(client.isPaired('h2')).toBe(true);
   });
 
+  it('joins overlapping asks about one Host into a single query', async () => {
+    const { client, socket } = await signedIn();
+    const first = client.queryPaired('h1');
+    const second = client.queryPaired('h1');
+    await nextSent(socket, (f) => f.t === 'pair-status');
+    socket.receive({ t: 'pair-status-result', hostId: 'h1', paired: true });
+    expect(await first).toBe(true);
+    expect(await second).toBe(true);
+    // One frame for both callers: a joined ask must not re-send (the waiter
+    // key is single-flight) or double-consume the relay's routing token.
+    expect(socket.sent.filter((f) => f.t === 'pair-status')).toHaveLength(1);
+  });
+
+  /**
+   * `connect` scopes its assertion to every credential this browser holds a
+   * public key for, so the advisory ask covers the same set — asking only the
+   * signed-in one would offer Pair on a row whose Connect would succeed
+   * through an older credential.
+   */
+  it('asks about every known credential before concluding unpaired', async () => {
+    const storage = memoryStorage();
+    storage.setPasskeyPublicKey('cred-old', 'pk-old');
+    const { client, socket } = await signedIn({ storage });
+
+    const asking = client.queryPaired('h1');
+    const first = await nextSent(socket, (f) => f.t === 'pair-status');
+    expect((first.query as Record<string, unknown>).passkeyCredentialId).toBe(CREDENTIAL_ID);
+    socket.receive({ t: 'pair-status-result', hostId: 'h1', paired: false });
+
+    await nextSent(
+      socket,
+      (f) =>
+        f.t === 'pair-status' &&
+        (f.query as Record<string, unknown>).passkeyCredentialId === 'cred-old',
+    );
+    socket.receive({ t: 'pair-status-result', hostId: 'h1', paired: true });
+
+    expect(await asking).toBe(true);
+    expect(client.isPaired('h1')).toBe(true);
+  });
+
   /**
    * A Host that predates the frame silently drops it, so the ask carries a
    * deadline: the waiter key must come back (a stranded key would throw
@@ -506,8 +547,10 @@ describe('queryPaired', () => {
       await expect(asking).rejects.toThrow(/timed out/);
       expect(client.isPaired('h1')).toBe(true);
 
-      // The key is free again, and a late answer to the dead ask is dropped
-      // rather than settling the retry.
+      // The key is free again, and an answer arriving while nothing awaits it
+      // is dropped. (A late answer landing after a retry re-registers the key
+      // WOULD settle the retry — the ask carries no per-attempt identity; see
+      // the error-correlation follow-up.)
       socket.receive({ t: 'pair-status-result', hostId: 'h1', paired: false });
       const retry = client.queryPaired('h1');
       await nextSent(socket, (f) => f.t === 'pair-status');

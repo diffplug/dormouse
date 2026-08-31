@@ -89,9 +89,12 @@ export interface PairingRequest {
  * wrong answer — a compromised relay, a Host whose ACL changed mid-query —
  * therefore costs at most a button the user has to tap twice.
  *
- * Not an enumeration primitive despite carrying no proof of ownership: both
- * halves are unguessable random identifiers (a credential id, a P-256 point),
- * so the only pairs a caller can ask about are ones it already holds.
+ * It carries no proof of ownership, and an authenticated session can assemble
+ * askable pairs beyond its own — the account's device keys are visible to any
+ * signed-in session via `GET /api/push/subscriptions` — so a stolen synced
+ * passkey does allow silently mapping which browsers are paired where. That
+ * yields reconnaissance only: every pair it can learn about was authorized by
+ * a person at the Host, and the answer still grants nothing.
  */
 export interface PairStatusQuery {
   readonly passkeyCredentialId: string;

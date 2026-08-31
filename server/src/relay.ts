@@ -51,7 +51,8 @@ export interface ClientConn {
    * `hostId` because that binding is what a query must not disturb, and needed
    * so a `pair-status-result` is routed only to a client that asked this Host.
    * Bounded by the number of connected Hosts: a query is forwarded only to one
-   * that is online, and its answer removes the entry.
+   * that is online, and its answer — or that Host's disconnect or replacement
+   * (`#dropClientsOf`) — removes the entry.
    */
   readonly pairStatusQueries: Set<string>;
 }
@@ -195,6 +196,10 @@ export class RelayHub {
    */
   #dropClientsOf(hostId: string): void {
     for (const client of this.#clients.values()) {
+      // A query the departed process received can never be answered, and a
+      // replacement Host must not be able to consume the token for an ask it
+      // never saw — the entry goes with the Host.
+      client.pairStatusQueries.delete(hostId);
       if (client.hostId === hostId) {
         this.#toClient(client, { t: 'host-gone' });
         client.hostId = null;
@@ -248,7 +253,16 @@ export class RelayHub {
           return;
         }
         client.pairStatusQueries.add(frame.hostId);
-        this.#toHost(host, { t: 'pair-status', clientId: client.clientId, query: frame.query });
+        // Forward only the two fields the guard proved, never the client's own
+        // object — no unvalidated extra properties ride into the Host process.
+        this.#toHost(host, {
+          t: 'pair-status',
+          clientId: client.clientId,
+          query: {
+            passkeyCredentialId: frame.query.passkeyCredentialId,
+            devicePublicKey: frame.query.devicePublicKey,
+          },
+        });
         return;
       }
       case 'pair':

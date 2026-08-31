@@ -326,11 +326,22 @@ export default function App(): React.ReactElement {
   //
   // Serially, because the relay answers a frame naming a Host that went offline
   // with an `error` that fails every waiter in flight: one at a time, that costs
-  // the row that asked rather than every row.
+  // the row that asked rather than every row. The same fail-all blast radius is
+  // why the sweep yields to user actions — `busy` in the deps stops new asks
+  // the moment a pair/connect ceremony starts (one already in flight is the
+  // residual risk until error frames carry correlation) and restarts the sweep
+  // when the action ends.
   useEffect(() => {
-    if (phase !== 'hosts') return;
+    if (phase !== 'hosts' || busy !== null) return;
     let live = true;
     void (async () => {
+      try {
+        // Reopen after leaveWall's close — otherwise every ask on this pass
+        // throws into the catch below and the sweep silently learns nothing.
+        await ensureSocket();
+      } catch {
+        return; // No socket, no truth; the cached markers stand.
+      }
       for (const host of hosts) {
         if (!live) return;
         if (!host.online) continue;
@@ -346,7 +357,7 @@ export default function App(): React.ReactElement {
     return () => {
       live = false;
     };
-  }, [phase, hosts, client, setPairStateFor]);
+  }, [phase, busy, hosts, client, ensureSocket, setPairStateFor]);
 
   // Socket drop / host-gone: dispose the adapter and fall back to Hosts.
   useEffect(() => {
@@ -784,6 +795,14 @@ export function HostsView({
                       ? 'Could not check whether this server can send alerts.'
                       : PUSH_COPY.ready;
             const status = !host.online ? 'Offline' : paired ? 'Paired' : 'Not paired';
+            // The one-action invariant, stated once: which verb this row
+            // offers and what its button says, on a single paired split.
+            const action = paired
+              ? { label: busy === 'connect' ? '…' : 'Connect', run: onConnect }
+              : {
+                  label: busy === 'pair' ? '…' : pairing === 'stale' ? 'Pair again' : 'Pair',
+                  run: onPair,
+                };
             return (
               <div key={host.hostId} className="flex flex-col gap-1.5">
                 <div className={clsx(PK.row, !host.online && PK.rowOffline)}>
@@ -799,11 +818,9 @@ export function HostsView({
                       type="button"
                       className={pkButton({ tone: 'primary', size: 'sm' })}
                       disabled={busy !== null || !host.online}
-                      onClick={() => (paired ? onConnect : onPair)(host)}
+                      onClick={() => action.run(host)}
                     >
-                      {paired
-                        ? busy === 'connect' ? '…' : 'Connect'
-                        : busy === 'pair' ? '…' : pairing === 'stale' ? 'Pair again' : 'Pair'}
+                      {action.label}
                     </button>
                   </div>
                 </div>

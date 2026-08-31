@@ -31,6 +31,7 @@ import {
   WS_TOKEN_PARAM,
   authorizeConnection,
   clampTerminalDimension,
+  isPairStatusQuery,
   fromBase64Url,
   toBase64Url,
   utf8Decode,
@@ -108,13 +109,11 @@ export class FakeHost extends EventEmitter {
       case 'pair-status': {
         // Advisory display truth, answered straight from the ACL: no ticket, no
         // challenge, and nothing here may influence the `connect2` decision.
-        const query = frame.query ?? {};
+        // Mirrors the real Host exactly (remote-host.ts #onPairStatus),
+        // validation included, so tests cannot pass against behavior it lacks.
         const paired =
-          this.acl.findActive({
-            passkeyCredentialId: query.passkeyCredentialId,
-            devicePublicKey: query.devicePublicKey,
-          }) !== undefined;
-        this.emit('pair-status', { clientId, query, paired });
+          isPairStatusQuery(frame.query) && this.acl.findActive(frame.query) !== undefined;
+        this.emit('pair-status', { clientId, query: frame.query, paired });
         this.#send({ t: 'pair-status-result', clientId, paired });
         return;
       }
