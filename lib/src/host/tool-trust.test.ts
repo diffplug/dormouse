@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, symlink, unlink, utimes, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, mkdir, rm, symlink, unlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -133,6 +133,19 @@ describe('FileToolTrustStore', () => {
     await grant;
 
     expect(reclaimed).toBe(true);
+    expect(await store.isTrusted([folderGrantKey('/repo')])).toBe(true);
+  });
+
+  it('migrates a leftover single-file lock from the previous format', async () => {
+    const stateDir = join(root, 'state');
+    const lockPath = join(stateDir, 'tool-trust.json.lock');
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(lockPath, JSON.stringify({ pid: process.pid, token: 'legacy' }));
+
+    const store = new FileToolTrustStore(stateDir);
+    await store.grant(folderGrantKey('/repo'), 'folder');
+
+    expect((await lstat(lockPath)).isDirectory()).toBe(true);
     expect(await store.isTrusted([folderGrantKey('/repo')])).toBe(true);
   });
 

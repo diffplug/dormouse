@@ -210,9 +210,34 @@ export class FileToolTrustStore {
     if (process.platform !== 'win32') await chmod(this.#dir, 0o700).catch(() => {});
   }
 
+  async #ensureLockDirectory(): Promise<void> {
+    for (;;) {
+      try {
+        await mkdir(this.#lockPath, { recursive: true, mode: 0o700 });
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      }
+
+      // The lock was one file before it became a directory of participants.
+      // `recursive` tolerates an existing directory but not that leftover file,
+      // so remove the obsolete shape before trying the directory create again.
+      try {
+        await unlink(this.#lockPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        // Another new host may have won the migration between our failed mkdir
+        // and unlink. In that case the desired directory already exists.
+        const entry = await lstat(this.#lockPath).catch(() => null);
+        if (entry?.isDirectory()) return;
+        throw error;
+      }
+    }
+  }
+
   async #acquireCommitLock(): Promise<() => Promise<void>> {
     await this.#ensureDir();
-    await mkdir(this.#lockPath, { recursive: true, mode: 0o700 });
+    await this.#ensureLockDirectory();
     const token = randomUUID();
     const choosingPath = join(this.#lockPath, `choosing-${token}.json`);
     const ticketPath = join(this.#lockPath, `ticket-${token}.json`);
