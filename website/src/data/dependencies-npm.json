@@ -334,5 +334,12 @@
     "license": "MIT",
     "author": "Einar Otto Stangvik <einaros@gmail.com> (http://2x.io)",
     "homepage": "https://github.com/websockets/ws"
+  },
+  {
+    "name": "yaml",
+    "version": "2.9.0",
+    "license": "ISC",
+    "author": "Eemeli Aro <eemeli@gmail.com>",
+    "homepage": "https://eemeli.org/yaml/"
   }
 ]
