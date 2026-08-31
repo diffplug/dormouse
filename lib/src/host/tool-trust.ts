@@ -10,7 +10,7 @@
  * gesture produced and answers "is it trusted yet?".
  */
 import { constants } from 'node:fs';
-import { chmod, mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { ToolFileError, parseToolFile, type ToolEntry, type ToolFile } from './tool-registry';
@@ -25,11 +25,18 @@ export const TOOL_FILE_NAME = 'dormouse.yml';
  */
 const TOOL_FILE_MAX_BYTES = 256 * 1024;
 
-/** Read one regular tool file through one no-follow descriptor, with a hard cap. */
+/** Refuse stable symlinks on every host, then fstat and cap one descriptor.
+ *  POSIX also opens no-follow, closing the lstat/open replacement race there. */
 async function readToolFile(path: string): Promise<string> {
+  const entry = await lstat(path);
+  if (entry.isSymbolicLink()) {
+    throw new ToolFileError(`${path}: tool file must be a regular file, not a symbolic link`);
+  }
+
   let file;
   try {
-    file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const noFollow = typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0;
+    file = await open(path, constants.O_RDONLY | noFollow);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ELOOP' || code === 'EMLINK') {
