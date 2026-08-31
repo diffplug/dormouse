@@ -142,11 +142,10 @@ export interface ReauthFinishResponse {
  * or the one-time `token` of an installer's `EnrollmentOffer` (enroll-offer.ts)
  * for a Host on the server's own machine. Both, or neither, is a 400.
  */
-export interface HostEnrollRequest {
-  password?: string;
-  enrollToken?: string;
-  label: string;
-}
+export type HostEnrollRequest = { label: string } & (
+  | { password: string; enrollToken?: never }
+  | { password?: never; enrollToken: string }
+);
 export interface HostEnrollResponse {
   hostId: string;
   /** Bearer credential for the `token` param of /ws/host. */

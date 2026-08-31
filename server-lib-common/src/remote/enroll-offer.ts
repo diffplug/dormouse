@@ -18,7 +18,8 @@ export interface EnrollmentOffer {
   readonly mintedAt: string;
 }
 
-const ENROLL_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
+/** The token's public format, so a redeemer can refuse junk before reading disk. */
+export const ENROLL_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 
 /** Bound on the displayed `mintedAt`; an ISO-8601 stamp needs about 30. */
 const MINTED_AT_MAX_LENGTH = 64;

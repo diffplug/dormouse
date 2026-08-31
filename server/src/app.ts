@@ -386,20 +386,28 @@ export function createApp(config: AppConfig): CreatedApp {
 
   app.post(API_ROUTES.hostEnroll, async (c) => {
     const body = await readJson<HostEnrollRequest>(c);
-    const password = body?.password;
-    const enrollToken = body?.enrollToken;
-    // Exactly one credential. Trying both in turn would let a spent enroll
-    // token fall through to the password, leaving which one authorized the
-    // enrollment ambiguous on both sides.
-    if ((typeof password === 'string') === (typeof enrollToken === 'string')) {
+    const password: unknown = body?.password;
+    const enrollToken: unknown = body?.enrollToken;
+    // Exactly one credential, counted by presence rather than by type. Trying
+    // both in turn would let a spent enroll token fall through to the password,
+    // leaving which one authorized the enrollment ambiguous on both sides. A
+    // lone credential of the wrong type is that branch's own delayed 401, the
+    // same answer the password-gated setup routes give.
+    if ((password !== undefined) === (enrollToken !== undefined)) {
       return c.json({ error: 'supply exactly one of password or enrollToken' }, 400);
     }
-    if (typeof enrollToken === 'string') {
-      // Unconfigured, absent, malformed, wrong-shaped and wrong-token are one
-      // `rejected`: none of them may tell a caller which one it hit.
+    if (enrollToken !== undefined) {
+      if (typeof enrollToken !== 'string') return credentialFailure(c, UNAUTHORIZED_ERROR);
+      // Unconfigured, absent, malformed, expired, wrong-shaped and wrong-token
+      // are one `rejected`: none of them may tell a caller which one it hit.
       const redemption = await redeemEnrollToken(config.enrollTokenFile, enrollToken);
       if (redemption === 'rejected') return credentialFailure(c, UNAUTHORIZED_ERROR);
       if (redemption === 'not-invalidated') {
+        // Reached only after a *successful* compare, so answering fast with a
+        // distinct body would confirm a valid token without spending it. Same
+        // delay as a rejection; the 500 stays, since the operator has to learn
+        // that the install cannot spend its own offer.
+        await delay(CREDENTIAL_FAILURE_DELAY_MS);
         return c.json({ error: 'could not invalidate the enroll token' }, 500);
       }
     } else if (!passwordOk(password)) {

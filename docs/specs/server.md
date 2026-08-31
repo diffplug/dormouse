@@ -47,7 +47,7 @@ This table is the whole of what `server/src/` reads from the environment.
 | `DORMOUSE_VAPID_SUBJECT`  | `mailto:`/`https:` contact for push-service operators (RFC 8292). Defaults to `DORMOUSE_ORIGIN` when that origin is https and not loopback; otherwise there is no default and push stays off. Validated at startup — an invalid value, a loopback contact included, exits. |
 | `DORMOUSE_RUNTIME_FILE`   | Absolute path the server records `{pid, releaseId, port, origin, startedAt}` into once it has **bound**, mode `0600`. Unset — dev, containers, every test — writes nothing. A relative value is a `ConfigError`: the wrapper runs under a service manager whose working directory is not the installer's, so it would land somewhere neither side can predict. Outside `DORMOUSE_STATE_DIR`: runtime truth about one process, not durable state that gets backed up and restored. |
 | `DORMOUSE_RELEASE_ID`     | The release directory's name, supplied by the installer's `run-server` wrapper, recorded in the runtime file. `null` when the server was not started by an installer. |
-| `DORMOUSE_ENROLL_TOKEN_FILE` | Absolute path of the installer's enrollment offer — `{origin, token, mintedAt}`, the token 64 hex characters, shape in `server-lib-common/src/remote/enroll-offer.ts` — which `POST /api/host/enroll` accepts in place of the setup password. Unset, one-click enrollment is off. A relative value is a `ConfigError`, for the reason above. **Single-use — unlinked before the Host is enrolled — and read fresh on every attempt.** |
+| `DORMOUSE_ENROLL_TOKEN_FILE` | Absolute path of the installer's enrollment offer — `{origin, token, mintedAt}`, the token 64 hex characters, shape in `server-lib-common/src/remote/enroll-offer.ts` — which `POST /api/host/enroll` accepts in place of the setup password. Unset, one-click enrollment is off. A relative value is a `ConfigError`, for the reason above. **Single-use — unlinked before the Host is enrolled — and read fresh on every attempt.** Offers expire after 7 days; the installer re-mints on every run. An enrollment that fails after the unlink has still spent the offer — re-running the installer mints a new one. |
 
 **The server itself always speaks plain HTTP**, and WebAuthn requires a secure
 context: `localhost` works for development; a real phone needs TLS in front
@@ -72,7 +72,9 @@ mapping pinned by `server/test/config.test.mjs`; only the disk half stays
 in `server/src/index.ts`, which mints and persists `vapid.json` when no keypair
 is configured, then validates the pair and subject **before** building the app.
 `server/test/runtime-file.test.mjs` and `server/test/bind-host.test.mjs` pin the
-runtime-identity and loopback controls at the process boundary.
+runtime-identity and loopback controls at the process boundary, and
+`server/src/enroll-token.ts` redeems the enrollment offer, pinned by
+`server/test/enroll-token.test.mjs`.
 
 ## Where a Host may reach a relay server (self-host builds)
 
