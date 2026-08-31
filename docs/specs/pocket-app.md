@@ -246,13 +246,13 @@ actions in `lib/src/remote/pocket-app/App.tsx`.
 **Push is a step of first run, not only a footnote.** Landing in a working
 terminal is where a push notification explains itself, so a connect to an
 unregistered Host opens the wall under a full-width dismissible offer, on
-exactly the conditions that put **Enable push notifications** on that Host's row
+the same `canEnablePush` that puts **Enable push notifications** on that Host's row
 — plus an answered subscriptions read, since a banner shown to someone already
 subscribed costs more than one shown late. One tap subscribes directly, with no
 fetch between it and the permission prompt. **Not now** stands the offer down
 for the run and is not persisted; success removes it; the per-host row is the
-ongoing surface either way. Source of truth: `shouldOfferPushPrompt` and
-`PushPrompt` in `lib/src/remote/pocket-app/App.tsx`.
+ongoing surface either way. Source of truth: `canEnablePush`,
+`shouldOfferPushPrompt` and `PushPrompt` in `lib/src/remote/pocket-app/App.tsx`.
 
 Browser availability and Host registration are separate states: a
 `PushSubscription` belongs to the service-worker scope, while the Server stores
@@ -272,11 +272,11 @@ caller need not own, where the account's own rows are already its to read (the
 scoping `GET /api/hosts` uses). `POST /api/push/subscribe` answers with the same
 thing — every Host this device is registered with after the mutation — so both
 are complete answers, never deltas: nothing to merge, only which is newer.
-Pocket drops a read that a completed registration, or a newer load of its own,
-already overtook. A read in flight is unanswered rather than empty — only the
-full-width offer waits on that; the row offers its idempotent Enable meanwhile,
-as after a failed read, rather than preserving a stale **Push notifications on**
-claim. Source of truth:
+One run token drops any read a newer load, or a completed registration, already
+overtook. A read that is in flight or failed stays unanswered rather than
+settling at empty — only the full-width offer waits on that; the row offers its
+idempotent Enable meanwhile, rather than preserving a stale
+**Push notifications on** claim. Source of truth:
 `getPushAvailability` in
 `lib/src/remote/client/push-subscribe.ts`,
 `PocketClient.listPushSubscribedHosts`, and the push effect in

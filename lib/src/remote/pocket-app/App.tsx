@@ -75,10 +75,10 @@ export type PushConfigStatus = 'loading' | 'ready' | 'disabled' | 'error';
  * Whether this device is registered for push notifications with one Host.
  *
  * `unknown` is the honest third state: the Server's subscriptions read has not
- * answered yet. Each surface decides what to do with it — see
- * `hostPushRegistration` in `App`.
+ * answered — not yet, or not at all. Each surface decides what to do with it —
+ * see `hostPushRegistration` in `App`.
  */
-export type PushRegistration = 'on' | 'off' | 'unknown';
+type PushRegistration = 'on' | 'off' | 'unknown';
 
 type PushConfigState =
   | { status: 'loading' }
@@ -184,6 +184,18 @@ const PK = {
   divided: 'border-t border-app-fg/15 pt-4',
 } as const;
 
+/**
+ * The one failure presentation, on all three screens. Announced everywhere,
+ * because on each of them a failure is the only thing that changed.
+ */
+function ErrorRow({ message }: { message: string }): React.ReactElement {
+  return (
+    <div className={PK.error} role="alert">
+      {message}
+    </div>
+  );
+}
+
 export default function App(): React.ReactElement {
   const client = useMemo(
     () =>
@@ -240,18 +252,14 @@ export default function App(): React.ReactElement {
   );
   const [activeHost, setActiveHost] = useState<HostView | null>(null);
   const [pushState, setPushState] = useState<PushAvailability | null>(null);
-  /** Null while the Server's answer is still in flight — see the effect below. */
+  /** Null while the Server's answer is unknown — see the effect below. */
   const [pushSubscribedHostIds, setPushSubscribedHostIds] = useState<Set<string> | null>(null);
   const [pushSubscriptionCurrent, setPushSubscriptionCurrent] = useState(false);
   const [pushConfig, setPushConfig] = useState<PushConfigState>({ status: 'loading' });
   /**
-   * Advances on every completed registration. Both the subscribe response and
-   * the subscriptions read answer with this device's whole Host set, so the
-   * only question between them is which is newer: a read that this counter
-   * overtook is stale and gets dropped rather than merged.
+   * Advances at the start of every push load, and on a completed registration
+   * that supersedes one; see the effect below.
    */
-  const pushRegistrationVersionRef = useRef(0);
-  /** Advances at the start of every push load; see the effect below. */
   const pushLoadRunRef = useRef(0);
   /**
    * The first-connect prompt, turned down for this run of the app. Deliberately
@@ -296,12 +304,10 @@ export default function App(): React.ReactElement {
   // first-connect prompt — read this one load, and its answers routinely land
   // while the user is already on the wall. What a cleanup would have done, a
   // monotonic run token does instead: every continuation commits only if its
-  // token is still the current one, so a newer load supersedes an older one
-  // without an in-flight read being dropped at the navigation. The
-  // subscriptions read carries the second guard too — a registration that
-  // completed meanwhile holds the newer complete answer and must not be
-  // overwritten by a read it overtook. (`App` never unmounts between phases, so
-  // there is nothing to tear down on the way out.)
+  // token is still the current one, so anything newer supersedes this load
+  // whole — a later load, or a completed registration (see `onEnablePush`) —
+  // without an in-flight read being dropped at the navigation. (`App` never
+  // unmounts between phases, so there is nothing to tear down on the way out.)
   //
   // The VAPID key is fetched here too, so the Enable tap has no network round
   // trip in front of the permission prompt — iOS drops transient activation
@@ -334,24 +340,17 @@ export default function App(): React.ReactElement {
     // stops claiming push notifications are on. Null means unanswered, which is
     // a state of its own — see `hostPushRegistration` below.
     setPushSubscribedHostIds(null);
-    const registrationVersionAtStart = pushRegistrationVersionRef.current;
     void client
       .listPushSubscribedHosts()
       .then((hostIds) => {
-        // A registration that landed while this was in flight already answered
-        // the same question about the same device, and did so later. Nothing to
-        // merge — the newer complete answer simply stands.
-        if (!current() || pushRegistrationVersionRef.current !== registrationVersionAtStart) return;
-        setPushSubscribedHostIds(new Set(hostIds));
+        if (current()) setPushSubscribedHostIds(new Set(hostIds));
       })
       .catch(() => {
-        // Best-effort: settle at empty rather than staying unanswered, so a
-        // failed read re-offers an idempotent action on both surfaces instead of
-        // preserving a stale claim. Guarded like the success path, since an
-        // Enable that completed meanwhile holds the newer complete answer.
-        if (current() && pushRegistrationVersionRef.current === registrationVersionAtStart) {
-          setPushSubscribedHostIds(new Set());
-        }
+        // Stay unanswered. A read that failed learned nothing, and empty is not
+        // nothing — it is an answered "off", which would raise the wall's
+        // full-width banner over someone already subscribed, the one case the
+        // third state exists to prevent. Unknown re-offers the row's idempotent
+        // Enable and keeps the banner down; the next Hosts entry re-reads.
       });
   }, [phase, client]);
 
@@ -360,17 +359,15 @@ export default function App(): React.ReactElement {
    * the single derivation both push surfaces read, so they cannot disagree about
    * what the Server said.
    *
-   * `unknown` until the subscriptions read answers; `on` demands both a Server
-   * row and a browser subscription that still matches it, since either half
-   * missing means the repair path has to stay offered.
+   * `unknown` while the subscriptions read is unanswered — in flight, or
+   * failed, which never settles at empty on its behalf. `on` demands both a
+   * Server row and a browser subscription that still matches it, since either
+   * half missing means the repair path has to stay offered.
    */
-  const hostPushRegistration = useCallback(
-    (hostId: string): PushRegistration => {
-      if (pushSubscribedHostIds === null) return 'unknown';
-      return pushSubscriptionCurrent && pushSubscribedHostIds.has(hostId) ? 'on' : 'off';
-    },
-    [pushSubscribedHostIds, pushSubscriptionCurrent],
-  );
+  const hostPushRegistration = (hostId: string): PushRegistration => {
+    if (pushSubscribedHostIds === null) return 'unknown';
+    return pushSubscriptionCurrent && pushSubscribedHostIds.has(hostId) ? 'on' : 'off';
+  };
 
   // The client nulls its socket on any close, so an action taken after a
   // server restart / network drop must reopen it rather than reuse a dead
@@ -536,24 +533,38 @@ export default function App(): React.ReactElement {
   // Must stay free of network round trips before the permission prompt — see
   // the prefetch effect above.
   const onEnablePush = (host: HostView) =>
-    run('push', async () => {
+    run(PUSH_OP, async () => {
       if (pushConfig.status !== 'ready') {
         throw new Error('Check the server configuration before enabling push notifications.');
       }
-      const subscription = await subscribeToPushInBrowser(pushConfig.key, () => {
-        // The scope no longer holds an address the Server can reach, so no Host
-        // may keep claiming push notifications through it. The moment it becomes
-        // true, which is what re-offers Enable if minting the replacement then
-        // throws and there is no response to correct the UI with.
-        setPushSubscriptionCurrent(false);
-      });
-      const { hostIds } = await client.subscribeToPush(host.hostId, subscription);
-      pushRegistrationVersionRef.current += 1;
-      setPushSubscriptionCurrent(true);
-      // Authoritative and complete for this device — including after a retry
-      // whose first attempt committed but lost its response — so it replaces
-      // the set rather than adding to it.
-      setPushSubscribedHostIds(new Set(hostIds));
+      try {
+        const subscription = await subscribeToPushInBrowser(pushConfig.key, () => {
+          // The scope no longer holds an address the Server can reach, so no Host
+          // may keep claiming push notifications through it. The moment it becomes
+          // true, which is what re-offers Enable if minting the replacement then
+          // throws and there is no response to correct the UI with.
+          setPushSubscriptionCurrent(false);
+        });
+        const { hostIds } = await client.subscribeToPush(host.hostId, subscription);
+        // A completed registration is newer than any load still in flight — it
+        // answered the same question about the same device, later — so it takes
+        // the token from the load whole: set, boolean and catch alike are
+        // dropped rather than each carrying its own guard. The next Hosts entry
+        // re-reads fresh.
+        pushLoadRunRef.current++;
+        setPushSubscriptionCurrent(true);
+        // Authoritative and complete for this device — including after a retry
+        // whose first attempt committed but lost its response — so it replaces
+        // the set rather than adding to it.
+        setPushSubscribedHostIds(new Set(hostIds));
+      } catch (err) {
+        // A denied permission prompt is a failure that changes availability, and
+        // availability is only probed on entering Hosts — so without this the
+        // banner stays up offering an Enable that can only throw again. Re-probed
+        // before rethrowing, so the error still gets its one showing.
+        void getPushAvailability().then(setPushState);
+        throw err;
+      }
     });
 
   // A config retry deliberately stops after caching the key. The next Enable
@@ -583,9 +594,18 @@ export default function App(): React.ReactElement {
     [client, loadHosts, run],
   );
 
+  /**
+   * Drop a push failure the user has moved past. The error state is op-keyed,
+   * but `HostsView` owns its whole viewport and so reports whatever it holds —
+   * a banner's dismissed message would otherwise reappear, context-free, above
+   * the host list.
+   */
+  const clearPushError = () => setError((prev) => (prev?.op === PUSH_OP ? null : prev));
+
   const leaveWall = () => {
     teardownAdapter();
     client.close();
+    clearPushError();
     setActiveHost(null);
     setPhase('hosts');
   };
@@ -652,10 +672,13 @@ export default function App(): React.ReactElement {
         push={
           offerPush
             ? {
-                busy: busy === 'push',
-                error: error?.op === 'push' ? error.message : null,
+                busy: busy === PUSH_OP,
+                error: error?.op === PUSH_OP ? error.message : null,
                 onEnable: () => onEnablePush(activeHost),
-                onDismiss: () => setPushPromptDismissed(true),
+                onDismiss: () => {
+                  setPushPromptDismissed(true);
+                  clearPushError();
+                },
               }
             : undefined
         }
@@ -671,6 +694,23 @@ export default function App(): React.ReactElement {
 }
 
 // --- ConnectedView ---------------------------------------------------------
+
+/**
+ * Whether an Enable tap could reach the permission prompt at all: this browser
+ * can receive push, and the Server's VAPID key is cached for the tap.
+ *
+ * Shared by both surfaces rather than restated, since a difference between them
+ * is a Host row offering an Enable the wall's banner would not, or the reverse —
+ * pinned by "gates both push surfaces on one predicate" in App.test.tsx. Each
+ * surface adds its own further conditions.
+ */
+export function canEnablePush(
+  availability: PushAvailability | null,
+  configStatus: PushConfigStatus,
+): boolean {
+  // Not merely `!== 'ready'`: unknown is not permission to ask.
+  return availability === 'ready' && configStatus === 'ready';
+}
 
 /**
  * Whether the wall offers push as a step of first-run rather than a footnote.
@@ -699,9 +739,8 @@ export function shouldOfferPushPrompt({
   configStatus: PushConfigStatus;
 }): boolean {
   if (dismissed) return false;
-  // Not merely `!== 'ready'`: unknown is not permission to ask.
-  if (availability !== 'ready' || configStatus !== 'ready') return false;
-  // Neither is an unanswered registration read, for the same reason.
+  if (!canEnablePush(availability, configStatus)) return false;
+  // An unanswered registration read is not permission to ask either.
   return registration === 'off';
 }
 
@@ -731,11 +770,7 @@ export function PushPrompt({
 }): React.ReactElement {
   return (
     <div className="flex shrink-0 flex-col gap-2 px-4 pt-3">
-      {error ? (
-        <div className={PK.error} role="alert">
-          {error}
-        </div>
-      ) : null}
+      {error ? <ErrorRow message={error} /> : null}
       <div className={PK.notice}>
         <div className={PK.noticeTitle}>Turn on push notifications</div>
         <p className={PK.noticeBody}>
@@ -748,7 +783,7 @@ export function PushPrompt({
             disabled={busy}
             onClick={onEnable}
           >
-            {busy ? '…' : 'Enable push notifications'}
+            {busy ? '…' : PUSH_ENABLE_LABEL}
           </button>
           <button
             type="button"
@@ -789,7 +824,15 @@ export function ConnectedView({
   return (
     <div className={PK.app}>
       <header className={PK.header}>
-        <button type="button" className={pkButton({ tone: 'ghost', size: 'sm' })} onClick={onLeave}>
+        {/* Locked mid-registration: `busy` is global, so leaving now lands the
+            user on a Hosts view where every action is disabled and nothing on
+            screen says why. */}
+        <button
+          type="button"
+          className={pkButton({ tone: 'ghost', size: 'sm' })}
+          disabled={push?.busy ?? false}
+          onClick={onLeave}
+        >
           ‹ Hosts
         </button>
         <h1 className={PK.headerTitle}>{host.label || host.hostId}</h1>
@@ -877,12 +920,7 @@ export function SetupOrSignin({
             after setup arrives after the trap. The returning layout carries
             the same notice inside its disclosure instead — see below. */}
         {firstRun && needsInstall ? <InstallFirstNotice /> : null}
-        {/* Announced, because a failed sign-in changes nothing else on screen. */}
-        {error ? (
-          <div className={PK.error} role="alert">
-            {error}
-          </div>
-        ) : null}
+        {error ? <ErrorRow message={error} /> : null}
 
         {firstRun ? (
           <>
@@ -1075,6 +1113,12 @@ function PasskeySetupFields({
  */
 type HostPushState = PushAvailability | 'subscribed';
 
+/** The `run` label the registration owns; both push surfaces select on it. */
+const PUSH_OP = 'push';
+
+/** One string, two surfaces — the banner's action and the Host row's. */
+const PUSH_ENABLE_LABEL = 'Enable push notifications';
+
 const PUSH_COPY: Record<HostPushState, string> = {
   ready: 'Get a push notification when a terminal needs attention.',
   subscribed: 'Push notifications on.',
@@ -1141,7 +1185,7 @@ export function HostsView({
             This device&rsquo;s key: <span className="font-mono">{deviceFingerprint}…</span>
           </div>
         ) : null}
-        {error ? <div className={PK.error}>{error}</div> : null}
+        {error ? <ErrorRow message={error} /> : null}
         {/* Install advice is moot when the server cannot push at all — the
             rows below already say push is disabled, and the ritual the notice
             describes would end at that same message. */}
@@ -1208,14 +1252,14 @@ export function HostsView({
                     {/* `shrink-0`: the label is long enough to wrap inside the
                         button on a narrow phone, and a two-line row action reads
                         as broken — the copy beside it is the part that wraps. */}
-                    {hostPushState === 'ready' && pushConfigStatus === 'ready' ? (
+                    {hostPushState !== 'subscribed' && canEnablePush(pushState, pushConfigStatus) ? (
                       <button
                         type="button"
                         className={clsx(pkButton({ tone: 'secondary', size: 'sm' }), 'shrink-0')}
                         disabled={busy !== null}
                         onClick={() => onEnablePush(host)}
                       >
-                        {busy === 'push' ? '…' : 'Enable push notifications'}
+                        {busy === PUSH_OP ? '…' : PUSH_ENABLE_LABEL}
                       </button>
                     ) : hostPushState === 'ready' && pushConfigStatus === 'error' ? (
                       <button

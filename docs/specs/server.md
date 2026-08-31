@@ -747,9 +747,10 @@ the above inside the installed app: iOS delivers Web Push only there, and the
 install is a separate storage partition needing its own pairing, so setting up
 in the tab first means doing it twice ([pocket-app.md](./pocket-app.md) ->
 Installable web app). Push is then a per-Host opt-in — **Enable push
-notifications**, offered full-width on the first connect and on the Host's row
-thereafter, which is the user gesture iOS requires before it will prompt for
-permission. Connecting alone does not subscribe.
+notifications**, on a paired Host's row and full-width over the terminal on any
+connect to a Host this phone has not registered with. That tap is the user
+gesture iOS requires before it will prompt for permission; connecting alone does
+not subscribe.
 
 Limitations to know about: each browser storage partition has its own device key
 and therefore needs its own Host pairing, even when a synced passkey signs it

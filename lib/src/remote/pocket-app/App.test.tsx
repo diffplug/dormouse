@@ -9,6 +9,7 @@ import {
   HostsView,
   PushPrompt,
   SetupOrSignin,
+  canEnablePush,
   refinePairState,
   shouldOfferPushPrompt,
   type HostPairState,
@@ -61,7 +62,9 @@ function renderHosts(
           error={null}
           pairState={overrides.pairState ?? (() => 'paired')}
           isPushSubscribed={overrides.isPushSubscribed ?? (() => false)}
-          pushState={overrides.pushState ?? 'ready'}
+          // Not `??`: an explicit null is "the browser has not been asked yet",
+          // which is one of the states under test.
+          pushState={overrides.pushState !== undefined ? overrides.pushState : 'ready'}
           pushConfigStatus={overrides.pushConfigStatus ?? 'ready'}
           onRefresh={() => undefined}
           onPair={overrides.onPair ?? (() => undefined)}
@@ -522,6 +525,38 @@ describe('the first-connect push prompt stays away', () => {
 
   it('after Not now, for the rest of the run', () => {
     expect(offerPush({ dismissed: true })).toBe(false);
+  });
+});
+
+describe('canEnablePush', () => {
+  /**
+   * The banner and the Host row used to restate the same availability/config
+   * gate side by side, staying equal only by parallel edits — while the spec
+   * claimed they matched exactly. They now read one predicate; this is what
+   * catches either of them growing its own copy again.
+   */
+  it('gates both push surfaces, over every availability and config state', () => {
+    const availabilities: (PushAvailability | null)[] = [
+      'ready',
+      'denied',
+      'unsupported',
+      'no-worker',
+      'needs-install',
+      null,
+    ];
+    for (const availability of availabilities) {
+      for (const configStatus of ['ready', 'loading', 'disabled', 'error'] as const) {
+        const eligible = availability === 'ready' && configStatus === 'ready';
+        expect(canEnablePush(availability, configStatus)).toBe(eligible);
+
+        // The wall's banner, which adds its own dismissal/registration clauses.
+        expect(offerPush({ availability, configStatus })).toBe(eligible);
+
+        // The Hosts row, which adds its own subscribed/unknown handling.
+        renderHosts({ pushState: availability, pushConfigStatus: configStatus });
+        expect(enableButtonIn(pushRowFor('First laptop')) !== null).toBe(eligible);
+      }
+    }
   });
 });
 
