@@ -186,6 +186,29 @@ describe('restoreSession', () => {
     expect(result?.paneIds).toEqual(['pane-term', 'pane-web']);
   });
 
+  it('respawns a restored tool command with integration gating', () => {
+    const saved: PersistedSession = {
+      version: 3,
+      panes: [{
+        id: 'pane-tool',
+        title: 'storybook',
+        cwd: '/repo',
+        untouched: true,
+        surfaceType: 'tool',
+        command: 'pnpm storybook',
+        tool: { name: 'storybook', render: 'iframe', port: 'announced' },
+      }],
+    };
+
+    restoreSession(createPlatform(saved, { 'pane-tool': 'claude --resume should-not-win' }));
+
+    expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith('pane-tool', expect.objectContaining({
+      command: 'pnpm storybook',
+      requireIntegration: true,
+      resumeCommand: null,
+    }));
+  });
+
   it('passes the native lathLayout through untouched', () => {
     const lathLayout = {
       version: 1 as const,

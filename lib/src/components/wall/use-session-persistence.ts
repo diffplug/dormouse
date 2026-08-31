@@ -43,11 +43,19 @@ export function useSessionPersistence({
   const trackerRef = useRef(createSessionDirtyTracker());
 
   const doSave = useCallback((): Promise<void> => {
-    const panes = lath.listPanes().map((p) => ({
-      id: p.id,
-      title: p.title ?? UNNAMED_PANEL_TITLE,
-      surfaceType: surfaceKindFromParams(p.params),
-    }));
+    const panes = lath.listPanes().map((p) => {
+      // Apply the same projection used by the saved Lath layout. In particular,
+      // a still-pending approval becomes a plain terminal and a running tool
+      // loses only its derived browser state.
+      const meta = lath.getMeta(p.id);
+      const persistable = meta ? persistableLeafMeta(meta) : undefined;
+      return {
+        id: p.id,
+        title: persistable?.title ?? p.title ?? UNNAMED_PANEL_TITLE,
+        surfaceType: surfaceKindFromParams(persistable?.params),
+        params: persistable?.params,
+      };
+    });
     // The runtime Door is id + token; its metadata is materialized HERE, from the
     // store that owned it all along, so a Surface persists where it navigated to
     // rather than where it was minimized and a restart cold-loads it there.

@@ -11,6 +11,16 @@ export interface PersistedAlertState {
 /** Absent means terminal; browser panes rebuild from the persisted layout. */
 export type PersistedSurfaceType = 'terminal' | 'browser' | 'tool';
 
+/** Stable declaration/runtime identity needed to rebuild a tool after its PTY
+ * is respawned. Derived browser state (URL/session/port conflict) never enters
+ * this projection. */
+export interface PersistedToolMetadata {
+  name?: string;
+  render: 'iframe' | 'ab-screencast';
+  port: 'announced' | 'auto';
+  key?: string[];
+}
+
 /** Durable pane structure, never scrollback. Single-use recovery commands travel
  * out of band through `PlatformAdapter.getRecoveryCommands`. */
 export interface PersistedPane {
@@ -20,6 +30,11 @@ export interface PersistedPane {
   untouched: boolean;
   alert?: PersistedAlertState | null;
   surfaceType?: PersistedSurfaceType;
+  /** Tool-only command, re-run on cold restore. This is separate from the
+   * host-owned, single-use agent recovery command. */
+  command?: string;
+  /** Tool-only stable metadata; browser state is re-derived after respawn. */
+  tool?: PersistedToolMetadata;
 }
 
 /** Shared browser-pane projection for renderer saves and VS Code host refresh. */
@@ -132,7 +147,19 @@ function isPersistedPaneShape(value: unknown): boolean {
     // both either way.
     (value.untouched === undefined || typeof value.untouched === 'boolean') &&
     (value.surfaceType === undefined || value.surfaceType === 'terminal' || value.surfaceType === 'browser' || value.surfaceType === 'tool') &&
+    (value.command === undefined || (value.surfaceType === 'tool' && typeof value.command === 'string')) &&
+    (value.tool === undefined || (value.surfaceType === 'tool' && isPersistedToolMetadataShape(value.tool))) &&
     (value.alert === undefined || isPersistedAlertShape(value.alert))
+  );
+}
+
+function isPersistedToolMetadataShape(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return (
+    (value.name === undefined || typeof value.name === 'string') &&
+    (value.render === 'iframe' || value.render === 'ab-screencast') &&
+    (value.port === 'announced' || value.port === 'auto') &&
+    (value.key === undefined || (Array.isArray(value.key) && value.key.every((part) => typeof part === 'string')))
   );
 }
 

@@ -415,6 +415,20 @@ describe('terminal-registry alert behavior', () => {
     expect(received).toEqual(['claude --resume 4f2c9b1e-6a03\r']);
   });
 
+  it('auto-runs a restored tool command once shell integration is ready', async () => {
+    const id = 'restored-tool-command';
+    const received: string[] = [];
+    fakePlatform.setInputHandler(id, (data) => received.push(data));
+
+    restoreTerminal(id, { command: 'pnpm storybook', requireIntegration: true });
+    expect(getTerminalPaneState(id).currentCommand?.rawCommandLine).toBe('pnpm storybook');
+    expect(received).toEqual([]);
+
+    applyTerminalSemanticEvents(id, [{ type: 'promptStart' }]);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(received).toEqual(['pnpm storybook\r']);
+  });
+
   it('announces the resume in the pane instead of replaying a transcript', () => {
     const id = 'noticed-resume-command';
     const entry = restoreTerminal(id, { resumeCommand: 'codex resume 01JCX8ZK' });

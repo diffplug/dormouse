@@ -1,5 +1,5 @@
 import type { PlatformAdapter } from './platform/types';
-import { browserPersistedPane, readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedSurfaceType } from './session-types';
+import { browserPersistedPane, readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedSurfaceType, type PersistedToolMetadata } from './session-types';
 import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouched, resolveTerminalSessionId } from './terminal-registry';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 
@@ -15,7 +15,7 @@ function getPreviousPaneMap(platform: PlatformAdapter): Map<string, PersistedPan
 // the unconditional flushes + store-level compare only bound the staleness.
 export async function saveSession(
   platform: PlatformAdapter,
-  panes: Array<{ id: string; title: string; surfaceType?: PersistedSurfaceType }>,
+  panes: Array<{ id: string; title: string; surfaceType?: PersistedSurfaceType; params?: Record<string, unknown> }>,
   doors: PersistedDoor[] = [],
   // The native Lath persisted layout (docs/specs/tiling-engine.md → "Persistence").
   // The only layout Dormouse writes.
@@ -32,9 +32,14 @@ export async function saveSession(
   // only for `saveState` to drop the result.
   if (platform.persistsSession === false) return;
   const previousPanes = getPreviousPaneMap(platform);
-  const allPanes = new Map<string, { id: string; title: string; surfaceType: PersistedSurfaceType }>();
+  const allPanes = new Map<string, { id: string; title: string; surfaceType: PersistedSurfaceType; params?: Record<string, unknown> }>();
   for (const pane of panes) {
-    allPanes.set(pane.id, { id: pane.id, title: persistedVisiblePaneTitle(pane.title), surfaceType: pane.surfaceType ?? 'terminal' });
+    allPanes.set(pane.id, {
+      id: pane.id,
+      title: persistedVisiblePaneTitle(pane.title),
+      surfaceType: pane.surfaceType ?? 'terminal',
+      params: pane.params,
+    });
   }
   const persistedDoors = doors.map((door) => ({
     ...door,
@@ -46,7 +51,7 @@ export async function saveSession(
     const doorSurfaceType = item.component === 'browser' || item.component === 'tool'
       ? item.component
       : 'terminal';
-    allPanes.set(item.id, { id: item.id, title: item.title, surfaceType: doorSurfaceType });
+    allPanes.set(item.id, { id: item.id, title: item.title, surfaceType: doorSurfaceType, params: item.params });
   }
 
   const persisted: PersistedPane[] = await Promise.all(
@@ -62,12 +67,22 @@ export async function saveSession(
       const liveAlert = getLivePersistedAlertState(pane.id);
       const sessionId = resolveTerminalSessionId(pane.id);
       const cwd = await platform.getCwd(sessionId);
-      return {
+      const terminalPane: PersistedPane = {
         id: pane.id,
         title: pane.title,
         cwd: cwd ?? previousPane?.cwd ?? null,
         untouched: isUntouched(pane.id),
         alert: liveAlert ?? previousPane?.alert ?? null,
+      };
+      if (pane.surfaceType !== 'tool') return terminalPane;
+
+      const command = toolCommandFromParams(pane.params) ?? previousPane?.command;
+      const tool = toolMetadataFromParams(pane.params) ?? previousPane?.tool;
+      return {
+        ...terminalPane,
+        surfaceType: 'tool',
+        ...(command ? { command } : {}),
+        ...(tool ? { tool } : {}),
       };
     }),
   );
@@ -80,6 +95,22 @@ export async function saveSession(
     ...(surfaceRefsNext !== undefined && surfaceRefsNext > 1 ? { surfaceRefsNext } : {}),
   };
   platform.saveState(session);
+}
+
+function toolCommandFromParams(params: Record<string, unknown> | undefined): string | null {
+  const command = params?.command;
+  return typeof command === 'string' && command.trim() ? command : null;
+}
+
+function toolMetadataFromParams(params: Record<string, unknown> | undefined): PersistedToolMetadata | null {
+  if (!params) return null;
+  const name = typeof params.toolName === 'string' && params.toolName ? params.toolName : undefined;
+  const render = params.toolRender === 'ab-screencast' ? 'ab-screencast' : 'iframe';
+  const port = params.toolPort === 'auto' ? 'auto' : 'announced';
+  const key = Array.isArray(params.toolKey) && params.toolKey.every((part) => typeof part === 'string')
+    ? params.toolKey as string[]
+    : undefined;
+  return { ...(name ? { name } : {}), render, port, ...(key ? { key } : {}) };
 }
 
 function persistedVisiblePaneTitle(title: string): string {

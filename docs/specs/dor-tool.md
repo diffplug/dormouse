@@ -330,11 +330,11 @@ that move the port, or constrain the framed port to the session's process tree
 
 ## Persistence and hosts
 
-`PersistedSurfaceType` gains `'tool'`; params
-`{command, args, cwd, renderMode, key?, persist?}` (`docs/specs/transport.md`
-owns the persisted shapes; `lib/src/lib/session-types.ts`). Because `'tool'` is
-a new type rather than an edit to an existing one, everything staged after B1
-is additive and no snapshot migration is required.
+`PersistedSurfaceType` includes `'tool'`. Its `PersistedPane` row carries the
+command plus stable tool metadata (name, declared renderer and port strategy,
+and optional key); cwd remains the pane's normal field. The Lath leaf carries
+the equivalent render params. Because `'tool'` is a new type rather than an
+edit to an existing one, no snapshot migration is required.
 
 **The URL is never persisted.** A tool's port is whatever it bound this time,
 so the URL is re-derived from the [scan](#serving) after respawn. A restored
