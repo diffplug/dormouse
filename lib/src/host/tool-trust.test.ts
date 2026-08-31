@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -145,27 +145,26 @@ describe('the pre-approval read (regression: review finding 13)', () => {
 });
 
 describe('the size cap runs before the read (regression: PR #493 review)', () => {
-  it('refuses by stat, without the bytes ever becoming resident', async () => {
-    const path = join(root, 'dormouse.yml');
-    await writeFile(path, `# ${'x'.repeat(300_000)}\n`);
-    let read = false;
-    // The default reader stats first; prove it never reaches the read.
-    const result = await lookupTool('storybook', root, new MemoryToolTrustStore(), async (p) => {
-      read = true;
-      return readFile(p, 'utf-8');
-    });
-    // An injected reader has no stat of its own, so the belt-and-braces check
-    // catches it — but the shipped default must refuse before reading.
+  it('refuses at stat, before the file is ever read', async () => {
+    await writeFile(join(root, 'dormouse.yml'), `# ${'x'.repeat(300_000)}\n`);
+    const result = await lookupTool('storybook', root, new MemoryToolTrustStore());
     expect(result).toMatchObject({ status: 'error' });
-    expect(read).toBe(true);
-    const viaDefault = await lookupTool('storybook', root, new MemoryToolTrustStore());
-    expect(viaDefault).toMatchObject({ status: 'error' });
+    if (result.status !== 'error') return;
+    // Naming the check that fired is the assertion: a status alone is produced
+    // by the post-read fallback too, so it would stay green with the stat
+    // removed — the exact regression this block exists for.
+    expect(result.message).toMatch(/\(stat\)$/);
   });
 
   it('measures bytes, not UTF-16 code units', async () => {
-    // 200k four-byte characters: well under the cap by `.length`, well over by
-    // bytes. Counting code units would let it through.
-    await writeFile(join(root, 'dormouse.yml'), `# ${'\u{1F600}'.repeat(100_000)}\n`);
-    expect(await lookupTool('storybook', root, new MemoryToolTrustStore())).toMatchObject({ status: 'error' });
+    // Injected reader, so `stat` never runs and `Buffer.byteLength` is the only
+    // check standing. 100k four-byte characters: well under the cap by
+    // `.length`, well over it by bytes. Counting code units would let it through.
+    const oversized = `# ${'\u{1F600}'.repeat(100_000)}\n`;
+    await writeFile(join(root, 'dormouse.yml'), 'tools: {}\n');
+    const result = await lookupTool('storybook', root, new MemoryToolTrustStore(), async () => oversized);
+    expect(result).toMatchObject({ status: 'error' });
+    if (result.status !== 'error') return;
+    expect(result.message).toMatch(/\(read\)$/);
   });
 });

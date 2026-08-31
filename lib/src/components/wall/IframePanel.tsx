@@ -14,6 +14,7 @@ import {
   type ScreenActions,
   type ScreenRegistration,
 } from './agent-browser-screen';
+import { isToolParams } from './browser-surface';
 import { hostPathDisplay } from './browser-url';
 
 // Sandbox the proxied frame so a tool's `if (top !== self) top.location = …`
@@ -83,6 +84,7 @@ export function IframePanel({ id, title, params }: PaneProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   usePaneChrome(id, elRef);
   const sourceUrl = typeof params?.url === 'string' ? params.url : '';
+  const isTool = isToolParams(params);
   const [liveUrl, setLiveUrl] = useState(sourceUrl);
   // A new-tab/window request from the proxy shim, pending the user's choice to
   // open it as a new pane (docs/specs/dor-browser.md → "Iframe Shim").
@@ -222,12 +224,17 @@ export function IframePanel({ id, title, params }: PaneProps) {
       chromeActions,
       hostCapable: false,
       // embed→popout spawns the new agent-browser headed and mounts it
-      // popped-out, so it needs both spawn and pop-out host capabilities.
-      canPopOut: !!getPlatform().agentBrowserPopOut,
+      // popped-out, so it needs both spawn and pop-out host capabilities. Never
+      // for a tool: a tool's `render` is `iframe` or `ab-screencast`
+      // (docs/specs/dor-tool.md -> Declaring tools), so offering pop-out would
+      // silently reinterpret the request as a screencast — the swap re-derives
+      // the browser under the new renderer and there is no headed mode to land
+      // in. Show the two backends a tool actually has.
+      canPopOut: !isTool && !!getPlatform().agentBrowserPopOut,
     });
     registrationRef.current = registration;
     return () => { registration.dispose(); registrationRef.current = null; };
-  }, [id, swapCapable, screenActions, chromeActions]);
+  }, [id, swapCapable, screenActions, chromeActions, isTool]);
   // Keep the header's URL current as navigation and in-frame location changes
   // land. The iframe src is still driven only by sourceUrl.
   useEffect(() => {

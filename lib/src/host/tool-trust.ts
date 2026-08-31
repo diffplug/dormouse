@@ -28,7 +28,9 @@ const TOOL_FILE_MAX_BYTES = 256 * 1024;
 async function readToolFile(path: string): Promise<string> {
   const info = await stat(path);
   if (info.size > TOOL_FILE_MAX_BYTES) {
-    throw new ToolFileError(`${path}: tool file is larger than ${TOOL_FILE_MAX_BYTES} bytes`);
+    throw new ToolFileError(
+      `${path}: tool file is larger than ${TOOL_FILE_MAX_BYTES} bytes (stat)`,
+    );
   }
   return readFile(path, 'utf-8');
 }
@@ -134,7 +136,9 @@ export async function findToolFile(
       // `byteLength`, not `.length`: the cap is bytes, and a string of
       // multi-byte characters would otherwise pass a check it exceeds.
       if (Buffer.byteLength(text, 'utf-8') > TOOL_FILE_MAX_BYTES) {
-        throw new ToolFileError(`${path}: tool file is larger than ${TOOL_FILE_MAX_BYTES} bytes`);
+        throw new ToolFileError(
+          `${path}: tool file is larger than ${TOOL_FILE_MAX_BYTES} bytes (read)`,
+        );
       }
       return { path, dir, text };
     } catch (error) {
