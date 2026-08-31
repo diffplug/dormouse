@@ -351,6 +351,17 @@ paired passkey, and the new key starts unauthorized everywhere.
 
 ## Security Guarantees
 
+Each property below is established in its own section above; this is the
+enumeration the section heading promises — the checklist an auditor or a
+change reviewer verifies against:
+
+* Adding a new passkey does not grant Host access.
+* Compromising the Server does not let it *create* an authorized Client.
+* Passkey synchronization does not automatically create trusted Clients.
+* Every trusted Client must be explicitly paired with every Host.
+* Every connection requires fresh user presence.
+* Every access decision is ultimately made by the Host.
+
 **Server compromise cannot create an authorized Client, but it can act through
 an authorized session already open.** After a decision the Host gates `msg` frames on
 `established` for a `clientId` the relay itself minted, and there is no

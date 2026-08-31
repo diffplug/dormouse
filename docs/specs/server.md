@@ -138,9 +138,17 @@ host would foreclose it.
 
 ## State files
 
-The entire persistent state is `account.json`, `hosts.json`,
-`push-subscriptions.json`, and, when no keypair is configured, `vapid.json`;
-`server/src/state.ts` owns their exact schemas. **The Host's ACL is never here** — it
+The entire persistent state is four JSON files. `server/src/state.ts` owns the
+exact schemas; the row shapes are sketched here because hand-editing these
+files is the *documented* revocation mechanism, so the editor should not need
+the source open:
+
+- `account.json` — `{ accountId, passkeys: [{ credentialId, publicKey /* SPKI b64u */, label, createdAt }] }`
+- `hosts.json` — `[{ hostId, hostToken, label, enrolledAt }]`
+- `push-subscriptions.json` — `[{ hostId, devicePublicKey, endpoint, keys, vapidPublicKey, subscribedAt }]`
+- `vapid.json` — `{ publicKey, privateKey, createdAt }`; exists only when no keypair is configured by env
+
+**The Host's ACL is never here** — it
 lives on the Host, in the process that owns the PTYs
 (`lib/src/host/remote/host-state-store.ts`), which is the whole point of the
 security model.
