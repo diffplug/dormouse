@@ -123,4 +123,4 @@ Single key: `dormouse:update-result`
 
 ## Configuration
 
-The config fixes the endpoint at `https://dormouse.sh/standalone-latest.json`, uses the Ed25519 public key published by the release pipeline, and selects passive NSIS installation. Rust registers `tauri-plugin-updater`; the JS install step and the quit orchestrator own the lifecycle. Custom commands need no capability entry, while updater, app-version, and shell-opening calls do.
+The config fixes the endpoint at `https://dormouse.sh/standalone-latest.json`, pins the production Ed25519 public key that `scripts/sign-and-deploy.sh` signs releases against (`docs/specs/deploy.md`), and selects passive NSIS installation. Rust registers `tauri-plugin-updater`; the JS install step and the quit orchestrator own the lifecycle. Custom commands need no capability entry, while updater, app-version, and shell-opening calls do.

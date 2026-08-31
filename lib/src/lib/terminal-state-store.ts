@@ -24,7 +24,7 @@ const promptSubmitStates = new Map<string, PromptSubmitState>();
 const promptShapes = new Map<string, PromptShape>();
 const promptOutputBuffers = new Map<string, string>();
 // Panes with authentic OSC 633/133 boundaries; the keystroke fallback stands
-// down permanently for each id here.
+// down for each id here until the pane is reset or removed.
 const oscDrivenPanes = new Set<string>();
 const listeners = new Set<() => void>();
 

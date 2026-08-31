@@ -188,7 +188,7 @@ function shingles(text, size = 7) {
 function codeCandidates(specText, refs) {
   const specShingles = shingles(proseOnly(specText));
   const files = [];
-  for (const rel of refs.filter((path) => codeExtensions.has(extension(path)))) {
+  for (const rel of refs.filter((path) => codeExtensions.has(extension(path)) && existsSync(join(ROOT, path)))) {
     const text = read(rel);
     const blocks = commentBlocks(rel, text);
     const totalWords = wordCount(text);
