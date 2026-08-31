@@ -910,9 +910,9 @@ export function useDorControl({
           // Spawn-time dedupe, and only for a tool that was given an identity
           // (docs/specs/dor-tool.md -> Identity and dedupe).
           if (key && !booleanParam(params.fresh)) {
-            const match = findSurfaceByParams(
-              (candidate) => toolKeysEqual((candidate as { toolKey?: unknown } | null | undefined)?.toolKey, key),
-            );
+            const matchesToolKey = (candidate: unknown) =>
+              toolKeysEqual((candidate as { toolKey?: unknown } | null | undefined)?.toolKey, key);
+            const match = findSurfaceByParams(matchesToolKey);
             if (match) {
               const matchedCommand = toolCommandFromParams(lath.getMeta(match.id)?.params) || command;
               // A dedicated Surface whose command exited is unambiguously free,
@@ -938,6 +938,7 @@ export function useDorControl({
               // handle would leave a minimized tool minimized, which is exactly
               // the "appears to do nothing" the invariant is written against.
               revealSurface(match.id);
+              const survivor = findSurfaceByParams(matchesToolKey);
               detail.respond({
                 ok: true,
                 result: {
@@ -946,7 +947,7 @@ export function useDorControl({
                   surfaceRef: surfaceRefForId(match.id),
                   command: matchedCommand,
                   cwd,
-                  minimized: match.minimized,
+                  minimized: survivor?.minimized ?? false,
                   key,
                   ...(warnings.length > 0 ? { warnings } : {}),
                 },
