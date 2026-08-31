@@ -763,6 +763,60 @@ a `*.ts.net` origin means `DORMOUSE_REMOTE_CONNECT_SRC` at build time (see
 
 ## Future
 
+**Scope: selfhost-onboarding** — collapse self-host first-run friction. Today a
+person hand-ferries five values across three surfaces: the origin typed into
+mobile Safari and again into the enroll form, the 64-hex setup password typed
+into both, and an 8-character key fingerprint compared by eye between two
+screens. The target is *run installer → click Enroll → scan QR → approve*, with
+nothing typed anywhere. One settled decision constrains every item: **the stock
+allowlist stays `*.dormouse.sh`-only** ("Where a Host may reach a relay
+server") — self-hosting keeps requiring a source build, deliberately, so no
+item below may depend on widening the baked allowlist. Staged order:
+
+1. **Truthful Pair/Connect.** Pocket's paired marker is a localStorage guess,
+   so an unpaired Host shows a primary Connect that can only fail. A relay
+   frame lets the connected Host answer whether a (credential, device-key)
+   pair is in its ACL — advisory display truth only; `authorizeConnection`
+   still decides. Show Pair alone when unpaired, Connect alone when paired; a
+   denial naming a credential/device mismatch swaps the row to "Pair again";
+   Pair success auto-continues into Connect, so approval on the laptop lands
+   the phone in a terminal rather than back on the Hosts list.
+2. **First-run truth on the phone.** With no evidence of prior use, lead with
+   setup instead of the "Welcome back" sign-in with setup behind a disclosure.
+   On iOS in a browser tab, the Home Screen guidance moves *before* setup —
+   today it renders on the Hosts view, after the device key already exists in
+   the wrong storage partition, the trap whose fix
+   [remote-security-model.md](./remote-security-model.md) `## Future` stages.
+3. **Push as a step, not a footnote.** After the first successful connect,
+   offer Enable alerts full-width; the per-host row stays as the ongoing
+   surface.
+4. **Enrollment offer.** The installer leaves the origin plus a one-time
+   enroll token at a well-known per-user path; a Host on the same machine
+   offers one-click enrollment ("A Dormouse server is installed here — enroll
+   as this machine?"). The three-field form stays as the remote-server
+   fallback. Touches the `SELF_HOST.md` installer contract when built.
+5. **QR-first phone setup.** The enrolled Host mints a short-TTL, single-use
+   setup token from the server over its authenticated channel and renders
+   `https://<origin>/#setup?token=…` as a QR. Scanning replaces typing the
+   origin and the setup password; the token's nonce rides into the pairing
+   request, so the approval modal verifies the scanning phone
+   cryptographically instead of asking a human to compare fingerprints —
+   displaying the QR on the laptop *is* the local-presence act, and approval
+   collapses to one confirm. Single-use plus TTL bound the shoulder-surf
+   window, and the Host announces each token's redemption. The setup password
+   remains for the QR-less path.
+6. **One-minute resume.** On an approved connection the Host mints a resume
+   token — single-use, bound to the device key and that connection, 60-second
+   TTL. A dropped WebSocket reattaches with it instead of rerunning the
+   passkey ceremony; past the minute it is a full connect. Host-minted and
+   Host-verified — the Server only relays — so the final-authority invariant
+   holds.
+
+Unstaged but adjacent: origin migration (re-binding the passkey and
+enrollments after a Tailscale node rename, instead of redoing everything), and
+the revocation UI already staged in
+[remote-security-model.md](./remote-security-model.md) `## Future`.
+
 **Scope: saas-multitenant** — the server-side hurdles between today's
 single-owner selfhost server and a multi-tenant SaaS on `*.dormouse.sh`,
 including the Bring-Your-Own-Tailnet (BYOT) posture that puts the relay inside a

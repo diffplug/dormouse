@@ -363,6 +363,11 @@ no end-to-end authentication (see Non-goals); the PRF-derived session key in
 
 ## Future
 
+Onboarding changes with security surface — a QR-carried setup token standing
+in for the human fingerprint comparison, and a 60-second Host-minted resume
+token — are staged in the **selfhost-onboarding** scope
+([server.md](./server.md) `## Future`).
+
 ### Revocation propagation
 
 The Server pushing revocations to Hosts. Today `HostAcl.revokeDevice` /

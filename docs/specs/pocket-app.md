@@ -426,3 +426,7 @@ code.
 3. **Theme picker in Pocket** — the app restores the persisted theme but
    exposes no picker; add the shared `ThemePicker` (and its theme-debugger
    entry) once its dropdown is phone-friendly.
+4. **Onboarding friction** — Pocket's share of the **selfhost-onboarding**
+   scope ([server.md](./server.md) `## Future`): truthful Pair/Connect
+   buttons, the first-run setup lead, install-gate placement, the
+   post-connect push prompt, and the QR setup entry point.
