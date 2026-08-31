@@ -14,4 +14,9 @@ tools:
 
   standalone-harness:
     run: pnpm dev:standalone:ab
+    # A real browser rather than an iframe, so an agent can drive the harness
+    # with `dor ab --surface surface:N <verb>`. The harness binds several ports
+    # (vite, the dev bridge, the sidecar socket); it announces which one to
+    # frame via OSC 367, and the port scan supplies the number it actually got.
+    render: ab-screencast
     prespawn_dedupe: [standalone-harness, $PROJECT_ROOT]

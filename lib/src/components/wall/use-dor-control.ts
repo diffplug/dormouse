@@ -736,6 +736,10 @@ export function useDorControl({
         let command: string;
         let key: string[] | null = null;
         let warnings: string[] = [];
+        // `iframe` unless the repo asked for a real browser. Which renderer
+        // suits a tool is a Dormouse-side judgement, so the file declares it
+        // rather than the tool announcing it.
+        let render: 'iframe' | 'ab-screencast' = 'iframe';
 
         if (toolName) {
           // Host-resolved, never CLI-resolved: the registry, the closed
@@ -757,6 +761,7 @@ export function useDorControl({
             case 'ok':
               command = lookup.run;
               key = lookup.key;
+              render = lookup.render;
               warnings = lookup.warnings;
               break;
             case 'no-file':
@@ -848,6 +853,7 @@ export function useDorControl({
             surfaceType: 'tool',
             command,
             cwd,
+            toolRender: render,
             ...(key ? { toolKey: key } : {}),
             ...(toolName ? { toolName } : {}),
           }),

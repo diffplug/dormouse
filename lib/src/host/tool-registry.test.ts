@@ -28,8 +28,18 @@ tools:
     expect(file.tools.get('storybook')).toEqual({
       name: 'storybook',
       run: 'pnpm storybook',
+      render: 'iframe',
       dedupeTemplate: ['storybook', '$PROJECT_ROOT'],
     });
+  });
+
+  it('reads an ab-screencast renderer, the one that makes a tool agent-drivable', () => {
+    const file = parse('tools:\n  harness:\n    run: pnpm dev\n    render: ab-screencast\n');
+    expect(file.tools.get('harness')?.render).toBe('ab-screencast');
+  });
+
+  it('rejects an unknown renderer', () => {
+    expect(() => parse('tools:\n  t:\n    run: x\n    render: canvas\n')).toThrow(/'render' must be one of/);
   });
 
   it('treats an absent prespawn_dedupe as no identity at all', () => {
@@ -102,7 +112,8 @@ tools:
 });
 
 describe('resolveDedupeKey', () => {
-  const entry = (dedupeTemplate: string[] | null) => ({ name: 't', run: 'x', dedupeTemplate });
+  const entry = (dedupeTemplate: string[] | null) =>
+    ({ name: 't', run: 'x', render: 'iframe' as const, dedupeTemplate });
 
   it('is null when the entry declared no template', () => {
     expect(resolveDedupeKey(entry(null), { projectRoot: '/repo', cwd: '/repo/lib' })).toBeNull();
@@ -166,6 +177,9 @@ describe("this repo's own dormouse.yml", () => {
     expect([...file.tools.keys()].sort()).toEqual(['standalone-harness', 'storybook']);
     expect(file.tools.get('storybook')?.run).toBe('pnpm storybook');
     expect(file.tools.get('standalone-harness')?.run).toBe('pnpm dev:standalone:ab');
+    // The harness is the agent-drivable one; storybook only needs framing.
+    expect(file.tools.get('standalone-harness')?.render).toBe('ab-screencast');
+    expect(file.tools.get('storybook')?.render).toBe('iframe');
   });
 
   it('scopes every key to the checkout, so parallel worktrees stay distinct', () => {

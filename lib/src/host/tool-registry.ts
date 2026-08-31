@@ -15,10 +15,20 @@ import { parse as parseYaml } from 'yaml';
 /** Where a tool file came from. `$PROJECT_ROOT` exists only for `repo`. */
 export type ToolScope = 'repo' | 'user';
 
+/** Where a tool's browser renders once it serves. `iframe` frames the page;
+ *  `ab-screencast` drives a real browser, which is what makes a tool
+ *  agent-drivable via `dor ab --surface` (`docs/specs/dor-tool.md`). The repo
+ *  declares it rather than the tool: which renderer suits a tool is a Dormouse-
+ *  side judgement, not something the tool knows about itself. */
+export type ToolRender = 'iframe' | 'ab-screencast';
+const TOOL_RENDERS: readonly ToolRender[] = ['iframe', 'ab-screencast'];
+
 export interface ToolEntry {
   readonly name: string;
   /** Command typed into the spawned shell, exactly as `dor ensure` types one. */
   readonly run: string;
+  /** Renderer for its browser; `iframe` when unstated. */
+  readonly render: ToolRender;
   /**
    * `prespawn_dedupe` before substitution; `null` when the entry declared none.
    * A null template means no key, which means no dedupe at all — never a key
@@ -52,7 +62,7 @@ const SUBSTITUTION_TOKEN = /\$[A-Za-z_][A-Za-z0-9_]*/g;
 // field: silently dropping a dedupe directive the author wrote is the
 // destructive failure (two tools, one port), where failing to parse is loud.
 const KNOWN_PRESPAWN_FIELDS = new Set(['prespawn_dedupe']);
-const KNOWN_ENTRY_FIELDS = new Set(['run', 'prespawn_dedupe']);
+const KNOWN_ENTRY_FIELDS = new Set(['run', 'render', 'prespawn_dedupe']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -151,7 +161,13 @@ export function parseToolFile(
       }
     }
 
-    tools.set(name, { name, run: run.trim(), dedupeTemplate });
+    const rawRender = rawEntry.render;
+    if (rawRender !== undefined && !(TOOL_RENDERS as readonly unknown[]).includes(rawRender)) {
+      throw new ToolFileError(`${where}: 'render' must be one of ${TOOL_RENDERS.join(', ')}`);
+    }
+    const render = (rawRender as ToolRender | undefined) ?? 'iframe';
+
+    tools.set(name, { name, run: run.trim(), render, dedupeTemplate });
   }
 
   return { scope, dir, tools, warnings };

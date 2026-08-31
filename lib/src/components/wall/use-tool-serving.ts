@@ -18,6 +18,7 @@ import { getTerminalPaneState } from '../../lib/terminal-registry';
 import { isToolParams } from './browser-surface';
 import { listenerUrlsByPort } from './port-url';
 import { getToolAnnounce } from '../../lib/tool-announce-store';
+import { sessionForKey } from 'dor-lib-common/agent-browser';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem } from './wall-types';
 
@@ -102,7 +103,35 @@ export function useToolServing({
           ? entries[0]
           : entries.find((candidate) => candidate.port === wanted);
         if (!entry) continue;
-        lath.store.updateParams(leaf.id, { url: entry.url, renderMode: 'iframe' });
+
+        const wantsAgentBrowser = leaf.params?.toolRender === 'ab-screencast';
+        if (!wantsAgentBrowser) {
+          lath.store.updateParams(leaf.id, { url: entry.url, renderMode: 'iframe' });
+          continue;
+        }
+
+        // An agent-drivable tool needs a real browser behind it. Bind the
+        // session to the tool's *own* Surface rather than creating a second
+        // one: a tool's browser is a param of its own leaf, which is what keeps
+        // its id stable while its capabilities come and go.
+        const session = sessionForKey(`tool.${leaf.id}`);
+        // Show the destination immediately; the panel's session-less branch
+        // renders `Connecting to browser session…` while the daemon boots, and
+        // cannot race it (see docs/specs/dor-browser.md -> Instant create).
+        lath.store.updateParams(leaf.id, { url: entry.url, renderMode: 'ab-screencast' });
+        if (!platform.agentBrowserCommand) continue;
+        const opened = await platform.agentBrowserCommand(session, ['open', entry.url]);
+        if (cancelled) return;
+        // Hand over the session either way: on failure the placeholder names it
+        // instead of sitting session-less, exactly as connect-port does.
+        const streamed = opened.exitCode === 0 && platform.agentBrowserStreamStatus
+          ? await platform.agentBrowserStreamStatus(session)
+          : null;
+        if (cancelled) return;
+        lath.store.updateParams(leaf.id, {
+          session,
+          ...(streamed?.wsPort ? { wsPort: streamed.wsPort } : {}),
+        });
       }
     };
 

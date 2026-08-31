@@ -24,6 +24,8 @@ export type ToolLookupResult =
       path: string;
       name: string;
       run: string;
+      /** Renderer for the tool's browser once it serves; 'iframe' by default. */
+      render: 'iframe' | 'ab-screencast';
       key: string[] | null;
       warnings: string[];
     };
