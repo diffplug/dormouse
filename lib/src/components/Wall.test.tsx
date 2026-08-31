@@ -17,6 +17,7 @@ import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import type { PlatformAdapter } from '../lib/platform/types';
 import * as terminalRegistry from '../lib/terminal-registry';
 import { UNNAMED_PANEL_TITLE } from '../lib/terminal-registry';
+import { setToolsEnabled } from '../lib/feature-flags';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -906,6 +907,91 @@ describe('Wall on the Lath engine', () => {
       expect(saved?.doors?.map((door) => door.id)).toEqual(['pane-a', response!.result!.surfaceId]);
     } finally {
       getTerminalSpy.mockRestore();
+    }
+  });
+
+  it('keeps an approved tool deferred until trust lookup and shell staging finish', async () => {
+    setToolsEnabled(true);
+    const trustGate = Promise.withResolvers<{ status: 'trust-recorded' }>();
+    const resolvedGate = Promise.withResolvers<{
+      status: 'ok';
+      projectRoot: string;
+      path: string;
+      name: string;
+      run: string;
+      render: 'iframe';
+      port: 'announced';
+      key: null;
+      warnings: string[];
+    }>();
+    const toolControl = vi.fn((request: { op: 'lookup' | 'trust' }) => {
+      if (request.op === 'trust') return trustGate.promise;
+      if (toolControl.mock.calls.length === 1) {
+        return Promise.resolve({
+          status: 'untrusted' as const,
+          projectRoot: '/repo',
+          path: '/repo/dormouse.yml',
+          name: 'storybook',
+          run: 'pnpm storybook',
+          upstreamUrl: null,
+        });
+      }
+      return resolvedGate.promise;
+    });
+    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = toolControl;
+
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      });
+      await flush();
+
+      let response: { ok: boolean; result?: { surfaceId: string } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.tool,
+            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
+            respond: (result: typeof response) => { response = result; },
+          },
+        }));
+      });
+      await flush();
+      expect(response?.ok).toBe(true);
+      const toolId = response!.result!.surfaceId;
+      expect(container.querySelector(`[data-session-id="${toolId}"]`)).toBeNull();
+
+      const allow = Array.from(container.querySelectorAll('button'))
+        .find((button) => button.textContent?.includes('Always allow for folder'));
+      expect(allow).toBeDefined();
+      await act(async () => {
+        allow!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        allow!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      expect(toolControl.mock.calls.filter(([request]) => request.op === 'trust')).toHaveLength(1);
+      expect(container.querySelector(`[data-session-id="${toolId}"]`)).toBeNull();
+
+      await act(async () => { trustGate.resolve({ status: 'trust-recorded' }); });
+      await flush();
+      expect(container.querySelector(`[data-session-id="${toolId}"]`)).toBeNull();
+
+      await act(async () => {
+        resolvedGate.resolve({
+          status: 'ok',
+          projectRoot: '/repo',
+          path: '/repo/dormouse.yml',
+          name: 'storybook',
+          run: 'pnpm storybook',
+          render: 'iframe',
+          port: 'announced',
+          key: null,
+          warnings: [],
+        });
+      });
+      await flush();
+      expect(container.querySelector(`[data-session-id="${toolId}"]`)).not.toBeNull();
+    } finally {
+      setToolsEnabled(false);
     }
   });
 

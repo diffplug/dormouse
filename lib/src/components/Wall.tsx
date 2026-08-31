@@ -365,6 +365,10 @@ export function Wall({
   const [shellSpawnNotice, setShellSpawnNotice] = useState<ShellSpawnNoticeState | null>(null);
   const shellSpawnNoticeCounterRef = useRef(0);
   const shellSpawnNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Keep the approval prompt mounted until its shell launch is fully staged.
+  // The Set suppresses duplicate button clicks without exposing the terminal
+  // half early (toolPending is the render-time no-PTY guard).
+  const toolApprovalsInFlightRef = useRef<Set<string>>(new Set());
 
   // Use refs so the capture-phase listener always sees latest state without re-registering
   const modeRef = useRef(mode);
@@ -1205,49 +1209,53 @@ export function Wall({
       killPaneImmediately(id);
       return;
     }
-    // Clear the prompt first, so a second click cannot grant twice or stage a
-    // second set of shell opts that nothing will consume.
-    lath.store.updateParams(id, { toolPending: undefined });
+    if (toolApprovalsInFlightRef.current.has(id)) return;
+    toolApprovalsInFlightRef.current.add(id);
 
-    const platform = getPlatform();
-    await platform.toolControl?.({
-      op: 'trust',
-      kind: choice,
-      projectRoot: pending.projectRoot,
-      upstreamUrl: pending.upstreamUrl,
-    });
+    try {
+      const platform = getPlatform();
+      await platform.toolControl?.({
+        op: 'trust',
+        kind: choice,
+        projectRoot: pending.projectRoot,
+        upstreamUrl: pending.upstreamUrl,
+      });
 
-    // Re-resolve now that the grant exists. The untrusted lookup deliberately
-    // withholds `render` / `port` / `key` — they live only in the `ok` arm — so
-    // asking again is what gives an approved tool the config its dormouse.yml
-    // declared, rather than silently running it as a keyless default iframe.
-    const cwd = typeof meta?.params?.cwd === 'string' ? meta.params.cwd : pending.projectRoot;
-    const resolved = await platform.toolControl?.({ op: 'lookup', name: pending.name, cwd });
-    if (resolved?.status !== 'ok') {
-      killPaneImmediately(id);
-      return;
+      // Re-resolve now that the grant exists. The untrusted lookup deliberately
+      // withholds `render` / `port` / `key` — they live only in the `ok` arm — so
+      // asking again is what gives an approved tool the config its dormouse.yml
+      // declared, rather than silently running it as a keyless default iframe.
+      const cwd = typeof meta?.params?.cwd === 'string' ? meta.params.cwd : pending.projectRoot;
+      const resolved = await platform.toolControl?.({ op: 'lookup', name: pending.name, cwd });
+      if (resolved?.status !== 'ok') {
+        killPaneImmediately(id);
+        return;
+      }
+
+      lath.store.updateParams(id, {
+        command: resolved.run,
+        toolRender: resolved.render,
+        toolPort: resolved.port,
+        ...(resolved.key ? { toolKey: namespacedToolKey(resolved.name, resolved.key) } : {}),
+      });
+      // Hand the leaf its command only now. The approval marker stays in place
+      // until after this write, so TerminalPanel cannot consume default options
+      // while the host calls above are pending.
+      const defaults = getDefaultShellOpts();
+      setPendingShellOpts(id, {
+        shell: defaults?.shell,
+        args: defaults?.args,
+        cwd,
+        untouched: false,
+        command: resolved.run,
+        requireIntegration: true,
+      });
+      lath.store.updateParams(id, { toolPending: undefined });
+      // The launch asked for this, and it was withheld so the prompt could be seen.
+      if (pending.minimized) minimizePane(id);
+    } finally {
+      toolApprovalsInFlightRef.current.delete(id);
     }
-
-    lath.store.updateParams(id, {
-      command: resolved.run,
-      toolRender: resolved.render,
-      toolPort: resolved.port,
-      ...(resolved.key ? { toolKey: namespacedToolKey(resolved.name, resolved.key) } : {}),
-    });
-    // Hand the leaf its command only now. `setPendingShellOpts` before the
-    // terminal half mounts is exactly how `createSplitSurface` starts a
-    // commanded split.
-    const defaults = getDefaultShellOpts();
-    setPendingShellOpts(id, {
-      shell: defaults?.shell,
-      args: defaults?.args,
-      cwd,
-      untouched: false,
-      command: resolved.run,
-      requireIntegration: true,
-    });
-    // The launch asked for this, and it was withheld so the prompt could be seen.
-    if (pending.minimized) minimizePane(id);
   }, [lath, killPaneImmediately, minimizePane]);
 
   // A tool grows its browser when its command starts serving.
