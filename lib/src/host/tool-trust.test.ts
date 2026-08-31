@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -174,7 +174,7 @@ describe('lookupTool', () => {
 });
 
 describe('the pre-approval read (regression: review finding 13, PR #493 review)', () => {
-  it('refuses at stat, before the file is ever read', async () => {
+  it('refuses via fstat, before the file contents are read', async () => {
     // Read before the trust check, so its size is chosen by a repo nobody has
     // approved yet; parsing a huge one would OOM the host and take every PTY.
     await writeFile(join(root, 'dormouse.yml'), `# ${'x'.repeat(300_000)}\n`);
@@ -182,7 +182,7 @@ describe('the pre-approval read (regression: review finding 13, PR #493 review)'
     expect(result).toMatchObject({ status: 'error' });
     if (result.status !== 'error') return;
     // Naming the check that fired is the assertion: a status alone is produced
-    // by the post-read fallback too, so it would stay green with the stat
+    // by the post-read fallback too, so it would stay green with the fstat
     // removed — the exact regression this block exists for.
     expect(result.message).toMatch(/larger than \d+ bytes$/);
   });
@@ -190,6 +190,17 @@ describe('the pre-approval read (regression: review finding 13, PR #493 review)'
   it('still reads a normal file', async () => {
     await writeFile(join(root, 'dormouse.yml'), YML);
     expect((await lookupTool('storybook', root, new MemoryToolTrustStore(), undefined, noUpstream)).status).toBe('untrusted');
+  });
+
+  it('refuses a symlink instead of following it before trust', async () => {
+    const target = join(root, 'repo-controlled-target.yml');
+    await writeFile(target, YML);
+    await symlink(target, join(root, 'dormouse.yml'));
+
+    const result = await lookupTool('storybook', root, new MemoryToolTrustStore(), undefined, noUpstream);
+    expect(result).toMatchObject({ status: 'error' });
+    if (result.status !== 'error') return;
+    expect(result.message).toMatch(/must be a regular file, not a symbolic link$/);
   });
 
   it('measures bytes, not UTF-16 code units', async () => {

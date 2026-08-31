@@ -9,7 +9,8 @@
  * may grant trust (`ToolApproval.tsx`). This module records the decision a
  * gesture produced and answers "is it trusted yet?".
  */
-import { chmod, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { chmod, mkdir, open, readFile, rename, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { ToolFileError, parseToolFile, type ToolEntry, type ToolFile } from './tool-registry';
@@ -17,21 +18,50 @@ import { resolveUpstreamUrl } from './git-upstream';
 
 export const TOOL_FILE_NAME = 'dormouse.yml';
 /**
- * Cap on a `dormouse.yml`, enforced by `stat` *before* the file is read. This
- * read happens before the trust check — deliberately, so the approval dialog
- * can name the command — so the size is chosen by a repo nobody has approved
- * yet, and measuring after `readFile` would already have the bytes resident.
- * A real tool file is a few hundred bytes.
+ * Cap on a `dormouse.yml`. This read happens before the trust check —
+ * deliberately, so the approval dialog can name the command — so both the file
+ * type and the bytes read are controlled by a repo nobody has approved yet. A
+ * real tool file is a few hundred bytes.
  */
 const TOOL_FILE_MAX_BYTES = 256 * 1024;
 
-/** Read a tool file, refusing an oversized one without loading it. */
+/** Read one regular tool file through one no-follow descriptor, with a hard cap. */
 async function readToolFile(path: string): Promise<string> {
-  const info = await stat(path);
-  if (info.size > TOOL_FILE_MAX_BYTES) {
-    throw new ToolFileError(`${path}: tool file is larger than ${TOOL_FILE_MAX_BYTES} bytes`);
+  let file;
+  try {
+    file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ELOOP' || code === 'EMLINK') {
+      throw new ToolFileError(`${path}: tool file must be a regular file, not a symbolic link`);
+    }
+    throw error;
   }
-  return readFile(path, 'utf-8');
+  try {
+    const info = await file.stat();
+    if (!info.isFile()) {
+      throw new ToolFileError(`${path}: tool file must be a regular file`);
+    }
+    if (info.size > TOOL_FILE_MAX_BYTES) {
+      throw new ToolFileError(`${path}: tool file is larger than ${TOOL_FILE_MAX_BYTES} bytes`);
+    }
+
+    // The file may grow after fstat. Read at most cap + 1 so that race is
+    // detected without ever allowing an unbounded allocation or readFile.
+    const bytes = Buffer.allocUnsafe(TOOL_FILE_MAX_BYTES + 1);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const { bytesRead } = await file.read(bytes, offset, bytes.length - offset, offset);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    if (offset > TOOL_FILE_MAX_BYTES) {
+      throw new ToolFileError(`${path}: tool file is larger than ${TOOL_FILE_MAX_BYTES} bytes`);
+    }
+    return bytes.subarray(0, offset).toString('utf-8');
+  } finally {
+    await file.close();
+  }
 }
 const TRUST_FILE_NAME = 'tool-trust.json';
 
