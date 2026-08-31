@@ -358,8 +358,8 @@ dependency. Source of truth: `server/src/push.ts` plus the routes in
 
 The server routes JSON envelopes between client sockets and host sockets
 (`@hono/node-ws`). Before a session is authorized it only forwards an allowlist
-of handshake types — `pair`/`connect`/`connect2` up,
-`pair-result`/`challenge`/`decision` down — and after authorization it forwards
+of handshake types — `pair`/`pair-status`/`connect`/`connect2` up,
+`pair-result`/`pair-status-result`/`challenge`/`decision` down — and after authorization it forwards
 `msg` verbatim. A session becomes established purely on the Host's authority:
 the Host sending `{ t: 'decision', allowed: true }` is what unblocks `msg` in
 both directions. `clientId` is a server-assigned secret stamped onto every
@@ -389,6 +389,19 @@ remote-api sessions, and watchers are disposed immediately.
 Client-originated `pair` and `connect2` frames are also rechecked after their
 async validation work: if the Client disconnected, rebound, or the Host socket
 was replaced while validation was pending, the stale result is dropped.
+
+**`pair-status` asks; it never binds.** A Client may ask a connected Host
+whether one (passkey credential, device key) pair is on its ACL, so Pocket
+offers Pair or Connect rather than a Connect that can only fail
+([pocket-app.md](./pocket-app.md)). Alone among frames naming a host it leaves
+the Client's binding untouched — a display question must not drop the session
+that Client holds elsewhere — so the relay routes the answer by remembering,
+single-use, which Hosts each Client asked, stamping the `hostId` on the way out
+as for `challenge`. The session token on the socket is the whole authorization:
+the query carries no signature, and `authorizeConnection` neither reads the
+answer nor is bound by it, so a wrong one costs a button tapped twice. Both
+sides run `isPairStatusQuery`; a malformed query is answered `false`, never
+left unanswered.
 
 For `connect2`, the server remembers the last Host challenge it relayed to a
 Client with a relay-local expiry derived from the server's observation time
@@ -717,8 +730,8 @@ auto-approving pairing and logging.
 
 **3. Phone** (or any other browser profile): open the server origin →
 First-time setup (password + label) creates the passkey and signs you in →
-Hosts → **Pair** → approve in the modal on the laptop → **Connect** (one
-biometric prompt) → pick a pane → type.
+Hosts → **Pair** → approve in the modal on the laptop → one biometric prompt →
+pick a pane → type.
 
 To test push, **add Pocket to the Home Screen before signing in** and do all of
 the above inside the installed app: iOS delivers Web Push only there, and the
@@ -773,29 +786,21 @@ allowlist stays `*.dormouse.sh`-only** ("Where a Host may reach a relay
 server") — self-hosting keeps requiring a source build, deliberately, so no
 item below may depend on widening the baked allowlist. Staged order:
 
-1. **Truthful Pair/Connect.** Pocket's paired marker is a localStorage guess,
-   so an unpaired Host shows a primary Connect that can only fail. A relay
-   frame lets the connected Host answer whether a (credential, device-key)
-   pair is in its ACL — advisory display truth only; `authorizeConnection`
-   still decides. Show Pair alone when unpaired, Connect alone when paired; a
-   denial naming a credential/device mismatch swaps the row to "Pair again";
-   Pair success auto-continues into Connect, so approval on the laptop lands
-   the phone in a terminal rather than back on the Hosts list.
-2. **First-run truth on the phone.** With no evidence of prior use, lead with
+1. **First-run truth on the phone.** With no evidence of prior use, lead with
    setup instead of the "Welcome back" sign-in with setup behind a disclosure.
    On iOS in a browser tab, the Home Screen guidance moves *before* setup —
    today it renders on the Hosts view, after the device key already exists in
    the wrong storage partition, the trap whose fix
    [remote-security-model.md](./remote-security-model.md) `## Future` stages.
-3. **Push as a step, not a footnote.** After the first successful connect,
+2. **Push as a step, not a footnote.** After the first successful connect,
    offer Enable alerts full-width; the per-host row stays as the ongoing
    surface.
-4. **Enrollment offer.** The installer leaves the origin plus a one-time
+3. **Enrollment offer.** The installer leaves the origin plus a one-time
    enroll token at a well-known per-user path; a Host on the same machine
    offers one-click enrollment ("A Dormouse server is installed here — enroll
    as this machine?"). The three-field form stays as the remote-server
    fallback. Touches the `SELF_HOST.md` installer contract when built.
-5. **QR-first phone setup.** The enrolled Host mints a short-TTL, single-use
+4. **QR-first phone setup.** The enrolled Host mints a short-TTL, single-use
    setup token from the server over its authenticated channel and renders
    `https://<origin>/#setup?token=…` as a QR. Scanning replaces typing the
    origin and the setup password; the token's nonce rides into the pairing
@@ -805,7 +810,7 @@ item below may depend on widening the baked allowlist. Staged order:
    collapses to one confirm. Single-use plus TTL bound the shoulder-surf
    window, and the Host announces each token's redemption. The setup password
    remains for the QR-less path.
-6. **One-minute resume.** On an approved connection the Host mints a resume
+5. **One-minute resume.** On an approved connection the Host mints a resume
    token — single-use, bound to the device key and that connection, 60-second
    TTL. A dropped WebSocket reattaches with it instead of rerunning the
    passkey ceremony; past the minute it is a full connect. Host-minted and

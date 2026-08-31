@@ -69,11 +69,15 @@ Three details the table above leaves implicit:
   the active pane (`attachableDirectoryEntries` in
   `lib/src/remote/pocket-app/wall-model.ts`).
 
-**Pocket's local "paired" host marker is optimistic cache, not authority.**
-When a connect denial reports an ACL miss (`passkey-not-paired`,
-`device-not-paired`, or `pairing-mismatch`), Pocket clears that marker and
-shows Pair again so expected Host ACL resets, revocations, or browser
-device-key loss recover through the normal pairing ceremony.
+**The Host's ACL picks a row's one action; the local marker is the fallback.**
+The Hosts view asks each online Host whether it holds a record for this Client
+(`pair-status` — [server.md](./server.md)) and offers Pair alone or Connect
+alone, never a Connect that can only fail; offline rows keep the marker. A
+denial reporting an ACL miss (`passkey-not-paired`, `device-not-paired`,
+`pairing-mismatch`) drops it and relabels the action **Pair again**, so an ACL
+reset, revocation, or device-key loss recovers through the ordinary ceremony.
+Pairing continues into connecting, so approval on the laptop lands the phone in
+a terminal.
 
 ## Design system and theming
 
@@ -427,6 +431,6 @@ code.
    exposes no picker; add the shared `ThemePicker` (and its theme-debugger
    entry) once its dropdown is phone-friendly.
 4. **Onboarding friction** — Pocket's share of the **selfhost-onboarding**
-   scope ([server.md](./server.md) `## Future`): truthful Pair/Connect
-   buttons, the first-run setup lead, install-gate placement, the
-   post-connect push prompt, and the QR setup entry point.
+   scope ([server.md](./server.md) `## Future`): the first-run setup lead,
+   install-gate placement, the post-connect push prompt, and the QR setup
+   entry point.

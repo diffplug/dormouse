@@ -25,6 +25,7 @@ import {
   type HelloResult,
   type HostAclRecord,
   type HostsResponse,
+  type PairStatusQuery,
   type PairingRequest,
   type PushChallengeResponse,
   type PushConfigResponse,
@@ -156,11 +157,14 @@ export class PocketClient {
   #onHostGone: (() => void) | null = null;
 
   /**
-   * The single in-flight handshake waiter per frame type
-   * (`pair-result`/`challenge`/`decision`). The handshake awaits exactly one of
-   * each in strict sequence and the App's single-flight guard forbids overlap,
-   * so at most one waiter per type is ever pending — {@link #expect} throws if a
-   * second is registered rather than silently queueing it.
+   * In-flight frame waiters, keyed by what identifies the answer.
+   *
+   * For the handshake (`pair-result`/`challenge`/`decision`) that is the frame
+   * type alone: it awaits exactly one of each in strict sequence and the App's
+   * single-flight guard forbids overlap, so at most one waiter per type is ever
+   * pending — {@link #expect} throws if a second is registered rather than
+   * silently queueing it. Pair-status answers key on the host as well, since
+   * the Hosts view asks every online Host at once.
    */
   readonly #waiters = new Map<string, Waiter>();
   /** In-flight remote-api requests, keyed by `requestId`. */
@@ -400,6 +404,32 @@ export class PocketClient {
     return result;
   }
 
+  /**
+   * Ask a connected Host whether it already holds an ACL record for this
+   * Client, and reconcile the local marker with the answer.
+   *
+   * The marker alone is a guess — a Host ACL reset, a hand-edited record, or a
+   * pairing approved from a different browser profile all leave it wrong — so
+   * the Host's answer wins and the cache converges on it. Advisory only: it
+   * decides which button the row offers, never whether a connection is allowed
+   * (`docs/specs/remote-security-model.md`). Rejects when the Host cannot be
+   * asked, which leaves the marker untouched as the fallback.
+   */
+  async queryPaired(hostId: string): Promise<boolean> {
+    const { credentialId } = this.#passkeyForRequest();
+    const device = await this.#getDeviceKey();
+    const query: PairStatusQuery = {
+      passkeyCredentialId: credentialId,
+      devicePublicKey: device.devicePublicKey,
+    };
+    const awaited = this.#expect(pairStatusKey(hostId));
+    this.#send({ t: 'pair-status', hostId, query });
+    const frame = (await awaited) as Extract<ServerToClientFrame, { t: 'pair-status-result' }>;
+    if (frame.paired) this.#storage.markPaired(hostId);
+    else this.#storage.unmarkPaired(hostId);
+    return frame.paired;
+  }
+
   async #sendPair(hostId: string, request: PairingRequest): Promise<PairResult> {
     const awaited = this.#expect('pair-result');
     this.#send({ t: 'pair', hostId, request });
@@ -593,10 +623,10 @@ export class PocketClient {
     this.#ws.send(JSON.stringify(frame));
   }
 
-  #expect(type: 'pair-result' | 'challenge' | 'decision'): Promise<ServerToClientFrame> {
-    if (this.#waiters.has(type)) throw new Error(`already awaiting a '${type}' frame`);
+  #expect(key: string): Promise<ServerToClientFrame> {
+    if (this.#waiters.has(key)) throw new Error(`already awaiting a '${key}' frame`);
     return new Promise((resolve, reject) => {
-      this.#waiters.set(type, { resolve, reject });
+      this.#waiters.set(key, { resolve, reject });
     });
   }
 
@@ -611,14 +641,12 @@ export class PocketClient {
     switch (frame.t) {
       case 'pair-result':
       case 'challenge':
-      case 'decision': {
-        const waiter = this.#waiters.get(frame.t);
-        if (waiter) {
-          this.#waiters.delete(frame.t);
-          waiter.resolve(frame);
-        }
+      case 'decision':
+        this.#settle(frame.t, frame);
         return;
-      }
+      case 'pair-status-result':
+        this.#settle(pairStatusKey(frame.hostId), frame);
+        return;
       case 'msg':
         this.#onMsg(frame.data);
         return;
@@ -633,6 +661,14 @@ export class PocketClient {
       default:
         return;
     }
+  }
+
+  /** Hand a frame to whoever is awaiting `key`; an unawaited answer is dropped. */
+  #settle(key: string, frame: ServerToClientFrame): void {
+    const waiter = this.#waiters.get(key);
+    if (!waiter) return;
+    this.#waiters.delete(key);
+    waiter.resolve(frame);
   }
 
   #onMsg(data: unknown): void {
@@ -753,6 +789,11 @@ export function hasRecoverablePairingFailure(
   failures: readonly ConnectionFailure[] | undefined,
 ): boolean {
   return failures?.some((failure) => RECOVERABLE_PAIRING_FAILURES.has(failure)) ?? false;
+}
+
+/** Waiter key for a pair-status answer; several hosts may be in flight at once. */
+function pairStatusKey(hostId: string): string {
+  return `pair-status:${hostId}`;
 }
 
 function uuid(): string {

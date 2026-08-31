@@ -2,11 +2,11 @@ import type { Meta, StoryObj } from '@storybook/react';
 // Importing from App.tsx runs its `index.css` side-effect import, so Tailwind's
 // utilities load for these stories. Storybook manages the theme tokens
 // (`--vscode-*`) itself.
-import { HostsView, type HostView } from '../remote/pocket-app/App';
+import { HostsView, type HostPairState, type HostView } from '../remote/pocket-app/App';
 import { PhoneFrame } from './PhoneFrame';
 
-// A paired online host, an unpaired online host (shows Pair + Connect), and an
-// offline host (dimmed row, Pair hidden, Connect disabled) — the full row
+// A paired online host (Connect alone), an unpaired online host (Pair alone),
+// and an offline host (dimmed row, its one action disabled) — the full row
 // matrix in one frame.
 const MIXED_HOSTS: HostView[] = [
   { hostId: 'host-studio', label: 'Studio iMac', online: true },
@@ -15,7 +15,8 @@ const MIXED_HOSTS: HostView[] = [
 ];
 
 const PAIRED = new Set(['host-studio']);
-const isPaired = (hostId: string) => PAIRED.has(hostId);
+const pairState = (hostId: string): HostPairState =>
+  PAIRED.has(hostId) ? 'paired' : 'unpaired';
 
 const STRESS_HOSTS: HostView[] = [
   {
@@ -37,7 +38,7 @@ const meta: Meta<typeof HostsView> = {
     hosts: MIXED_HOSTS,
     busy: null,
     error: null,
-    isPaired,
+    pairState,
     pushState: 'ready',
     pushConfigStatus: 'ready',
     isPushSubscribed: () => false,
@@ -67,7 +68,7 @@ export const Empty: Story = {
   args: { hosts: [] },
 };
 
-// Paired+online (Connect only), unpaired+online (Pair + Connect), offline (dimmed).
+// Paired+online (Connect only), unpaired+online (Pair only), offline (dimmed).
 export const MixedList: Story = {};
 
 // Canonical Pocket default theme, pinned so Chromatic captures the dark rows.
@@ -79,10 +80,19 @@ export const MixedListKimbieDark: Story = {
 export const NarrowLongLabels: Story = {
   args: {
     hosts: STRESS_HOSTS,
-    isPaired: (hostId) => hostId === 'host-paired-offline',
+    pairState: (hostId) => (hostId === 'host-paired-offline' ? 'paired' : 'unpaired'),
   },
   parameters: {
     pocketFrame: { width: 320, height: 568 },
+  },
+};
+
+// A connect the Host denied for an ACL miss. The row keeps its single action
+// and renames it, rather than re-offering the Connect that just failed.
+export const PairAgainAfterDenial: Story = {
+  args: {
+    pairState: (hostId: string) => (hostId === 'host-studio' ? 'stale' : 'unpaired'),
+    error: 'Connection denied: device-not-paired',
   },
 };
 
@@ -91,7 +101,7 @@ export const Pairing: Story = {
   args: { busy: 'pair' },
 };
 
-// Connecting in flight → Connect buttons show "…" and disable.
+// Connecting in flight → the paired row's Connect shows "…"; the rest disable.
 export const Connecting: Story = {
   args: { busy: 'connect' },
 };

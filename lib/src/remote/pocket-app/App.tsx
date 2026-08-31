@@ -2,10 +2,11 @@
  * Dormouse Pocket — the phone-side app (docs/specs/pocket-app.md).
  *
  * Auth screens over {@link PocketClient} — sign in (or first-time passkey setup)
- * → pick a host (pair once, then connect) — then, on a successful connect, the
- * real mobile experience: a {@link RemotePtyAdapter} over the session drives
- * `MobileTerminalUi`/`MobileWall` (the same composition the website playground
- * proves out with `FakePtyAdapter`). No bespoke terminal UI.
+ * → pick a host (pair once, which continues straight into connect) — then, on
+ * a successful connect, the real mobile experience: a {@link RemotePtyAdapter}
+ * over the session drives `MobileTerminalUi`/`MobileWall` (the same composition
+ * the website playground proves out with `FakePtyAdapter`). No bespoke terminal
+ * UI.
  *
  * The whole shell — auth screens included — renders on the shared `--vscode-*`
  * design tokens, restored to <body> before first paint by restorePocketTheme()
@@ -45,6 +46,15 @@ export interface HostView {
   label: string;
   online: boolean;
 }
+
+/**
+ * What a Hosts row knows about this Client's standing with one Host.
+ *
+ * `stale` is `unpaired` the user has already been bitten by — a connect the
+ * Host denied for an ACL miss — and differs only in saying "Pair again", so the
+ * row explains itself instead of re-offering the tap that just failed.
+ */
+export type HostPairState = 'paired' | 'unpaired' | 'stale';
 
 export type PushConfigStatus = 'loading' | 'ready' | 'disabled' | 'error';
 
@@ -173,7 +183,9 @@ export default function App(): React.ReactElement {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [hosts, setHosts] = useState<HostView[]>([]);
-  const [pairedIds, setPairedIds] = useState<Set<string>>(() => new Set());
+  const [pairStates, setPairStates] = useState<ReadonlyMap<string, HostPairState>>(
+    () => new Map(),
+  );
   const [activeHost, setActiveHost] = useState<HostView | null>(null);
   const [pushState, setPushState] = useState<PushAvailability | null>(null);
   const [pushSubscribedHostIds, setPushSubscribedHostIds] = useState<Set<string>>(
@@ -189,6 +201,15 @@ export default function App(): React.ReactElement {
    */
   const pushRegistrationVersionRef = useRef(0);
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
+
+  const setPairStateFor = useCallback((hostId: string, state: HostPairState) => {
+    setPairStates((prev) => {
+      if (prev.get(hostId) === state) return prev;
+      const next = new Map(prev);
+      next.set(hostId, state);
+      return next;
+    });
+  }, []);
 
   // Availability depends on browser state the app cannot change (permission,
   // whether it was launched from the Home Screen), so it is read once the hosts
@@ -288,9 +309,44 @@ export default function App(): React.ReactElement {
     await ensureSocket();
     const list = await client.listHosts();
     setHosts(list);
-    setPairedIds(new Set(list.filter((h) => client.isPaired(h.hostId)).map((h) => h.hostId)));
+    // The cached marker, as the opening guess only — the effect below replaces
+    // it with what each online Host says about its own ACL.
+    setPairStates(
+      new Map(list.map((h) => [h.hostId, client.isPaired(h.hostId) ? 'paired' : 'unpaired'])),
+    );
     setPhase('hosts');
   }, [client, ensureSocket]);
+
+  // Ask each online Host whether it holds an ACL record for this Client, so a
+  // row offers Pair or Connect but never a Connect that can only fail. The
+  // marker is a local guess that a Host ACL reset, a hand-edited record, or a
+  // pairing done from another browser profile all falsify; the Host is the
+  // party that knows. Offline and unanswered rows keep the marker — it is the
+  // only thing there is.
+  //
+  // Serially, because the relay answers a frame naming a Host that went offline
+  // with an `error` that fails every waiter in flight: one at a time, that costs
+  // the row that asked rather than every row.
+  useEffect(() => {
+    if (phase !== 'hosts') return;
+    let live = true;
+    void (async () => {
+      for (const host of hosts) {
+        if (!live) return;
+        if (!host.online) continue;
+        try {
+          const paired = await client.queryPaired(host.hostId);
+          if (live) setPairStateFor(host.hostId, paired ? 'paired' : 'unpaired');
+        } catch {
+          // Display truth is best-effort: a Host that cannot be asked keeps the
+          // cached marker, and pair/connect still report the real failure.
+        }
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [phase, hosts, client, setPairStateFor]);
 
   // Socket drop / host-gone: dispose the adapter and fall back to Hosts.
   useEffect(() => {
@@ -303,19 +359,16 @@ export default function App(): React.ReactElement {
     return () => client.setOnHostGone(null);
   }, [client, teardownAdapter]);
 
-  const onConnect = (host: HostView) =>
-    run('connect', async () => {
+  /** The connect half, shared so a fresh pairing can continue straight into it. */
+  const connectTo = useCallback(
+    async (host: HostView) => {
       await ensureSocket();
       const decision: ConnectDecision = await client.connect(host.hostId);
       if (!decision.allowed) {
-        if (decision.pairingStale) {
-          setPairedIds((prev) => {
-            if (!prev.has(host.hostId)) return prev;
-            const next = new Set(prev);
-            next.delete(host.hostId);
-            return next;
-          });
-        }
+        // The Host does not recognize this credential/device pair, whatever the
+        // marker claimed. The client has already dropped the marker; the row
+        // says Pair again rather than re-offering the tap that just failed.
+        if (decision.pairingStale) setPairStateFor(host.hostId, 'stale');
         throw new Error(`Connection denied${decision.failures ? `: ${decision.failures.join(', ')}` : ''}`);
       }
       await client.hello();
@@ -331,14 +384,25 @@ export default function App(): React.ReactElement {
 
       setActiveHost(host);
       setPhase('wall');
-    });
+    },
+    [client, ensureSocket, setPairStateFor],
+  );
+
+  const onConnect = (host: HostView) => run('connect', () => connectTo(host));
 
   const onPair = (host: HostView) =>
     run('pair', async () => {
       await ensureSocket();
       const result = await client.pair(host.hostId, deviceLabel());
       if (!result.approved) throw new Error(result.error ?? 'Pairing was denied.');
-      setPairedIds((prev) => new Set(prev).add(host.hostId));
+      // Recorded before connecting, so a connect that then fails leaves a row
+      // offering Connect rather than one asking to pair all over again.
+      setPairStateFor(host.hostId, 'paired');
+      // Approving on the laptop should land the phone in a terminal, not back
+      // on this list. Re-labelling busy is what keeps the row it swapped to
+      // showing progress instead of an idle-looking disabled Connect.
+      setBusy('connect');
+      await connectTo(host);
     });
 
   // Must stay free of network round trips before the permission prompt — see
@@ -421,7 +485,7 @@ export default function App(): React.ReactElement {
         hosts={hosts}
         busy={busy}
         error={error}
-        isPaired={(id) => pairedIds.has(id)}
+        pairState={(id) => pairStates.get(id) ?? 'unpaired'}
         isPushSubscribed={(id) => pushSubscriptionCurrent && pushSubscribedHostIds.has(id)}
         pushState={pushState}
         pushConfigStatus={pushConfig.status}
@@ -640,7 +704,7 @@ export function HostsView({
   hosts,
   busy,
   error,
-  isPaired,
+  pairState,
   isPushSubscribed,
   pushState,
   pushConfigStatus = 'ready',
@@ -654,7 +718,8 @@ export function HostsView({
   hosts: HostView[];
   busy: string | null;
   error: string | null;
-  isPaired: (hostId: string) => boolean;
+  /** The Host's own answer where it could be asked; the cached marker otherwise. */
+  pairState: (hostId: string) => HostPairState;
   /** True only after this Host's server registration succeeds in this session. */
   isPushSubscribed: (hostId: string) => boolean;
   /** Null until the browser has been asked; see the effect in `App`. */
@@ -703,7 +768,8 @@ export function HostsView({
           <div className={PK.empty}>No hosts enrolled yet. Enroll one from your laptop.</div>
         ) : (
           hosts.map((host) => {
-            const paired = isPaired(host.hostId);
+            const pairing = pairState(host.hostId);
+            const paired = pairing === 'paired';
             const hostPushState: HostPushState = isPushSubscribed(host.hostId)
               ? 'subscribed'
               : pushState ?? 'ready';
@@ -725,25 +791,29 @@ export function HostsView({
                     <div className={PK.rowTitle}>{host.label || host.hostId}</div>
                     <div className={PK.rowSecondary}>{status}</div>
                   </div>
+                  {/* One action, never both. The Host's ACL is what picks it,
+                      so Connect is offered only where it can succeed and Pair
+                      only where it is the actual next step. */}
                   <div className={PK.rowActions}>
-                    {host.online && !paired ? (
+                    {paired ? (
                       <button
                         type="button"
-                        className={pkButton({ tone: 'secondary', size: 'sm' })}
-                        disabled={busy !== null}
+                        className={pkButton({ tone: 'primary', size: 'sm' })}
+                        disabled={busy !== null || !host.online}
+                        onClick={() => onConnect(host)}
+                      >
+                        {busy === 'connect' ? '…' : 'Connect'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className={pkButton({ tone: 'primary', size: 'sm' })}
+                        disabled={busy !== null || !host.online}
                         onClick={() => onPair(host)}
                       >
-                        {busy === 'pair' ? '…' : 'Pair'}
+                        {busy === 'pair' ? '…' : pairing === 'stale' ? 'Pair again' : 'Pair'}
                       </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className={pkButton({ tone: 'primary', size: 'sm' })}
-                      disabled={busy !== null || !host.online}
-                      onClick={() => onConnect(host)}
-                    >
-                      {busy === 'connect' ? '…' : 'Connect'}
-                    </button>
+                    )}
                   </div>
                 </div>
                 {/* Push is per (host, device), so it belongs to the host row —

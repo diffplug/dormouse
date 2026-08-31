@@ -79,6 +79,37 @@ export interface PairingRequest {
 }
 
 /**
+ * What a Client asks a Host about itself: is this (passkey credential, device
+ * key) pair on your ACL?
+ *
+ * The two fields are exactly the ACL's lookup key, so the Host answers with a
+ * plain `HostAcl.findActive` — no ceremony, no challenge, no signature. It is
+ * **advisory display truth only**: it lets Pocket offer Pair or Connect rather
+ * than both, and `authorizeConnection` neither reads it nor is bound by it. A
+ * wrong answer — a compromised relay, a Host whose ACL changed mid-query —
+ * therefore costs at most a button the user has to tap twice.
+ *
+ * Not an enumeration primitive despite carrying no proof of ownership: both
+ * halves are unguessable random identifiers (a credential id, a P-256 point),
+ * so the only pairs a caller can ask about are ones it already holds.
+ */
+export interface PairStatusQuery {
+  readonly passkeyCredentialId: string;
+  readonly devicePublicKey: string;
+}
+
+/**
+ * Structural validation of a {@link PairStatusQuery} off the wire, run on both
+ * sides for the same reason {@link isPairingRequest} is: the Host does not
+ * trust the relay that hands it one.
+ */
+export function isPairStatusQuery(query: unknown): query is PairStatusQuery {
+  if (!query || typeof query !== 'object') return false;
+  const candidate = query as Record<string, unknown>;
+  return isBoundedString(candidate.passkeyCredentialId) && isBoundedString(candidate.devicePublicKey);
+}
+
+/**
  * The longest `requestedLabel` the approval modal will render, in code points.
  * Generous for a device name and far short of anything that can push the
  * Approve/Deny buttons off a laptop screen.

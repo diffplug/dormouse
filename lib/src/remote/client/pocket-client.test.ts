@@ -433,6 +433,60 @@ describe('pair', () => {
   });
 });
 
+describe('queryPaired', () => {
+  it('asks the Host with this Client identity and records a yes', async () => {
+    const { client, socket, device } = await signedIn();
+    expect(client.isPaired('h1')).toBe(false);
+
+    const asking = client.queryPaired('h1');
+    const frame = await nextSent(socket, (f) => f.t === 'pair-status');
+    expect(frame.hostId).toBe('h1');
+    const query = frame.query as Record<string, unknown>;
+    // The ACL's lookup key, and nothing else: no assertion, no signature.
+    expect(query.passkeyCredentialId).toBe(CREDENTIAL_ID);
+    expect(query.devicePublicKey).toBe((await device()).devicePublicKey);
+
+    socket.receive({ t: 'pair-status-result', hostId: 'h1', paired: true });
+    expect(await asking).toBe(true);
+    expect(client.isPaired('h1')).toBe(true);
+  });
+
+  /**
+   * The marker is a cache of a past approval, and the Host can lose the record
+   * behind it — an ACL reset, a hand-edited file. Converging on the Host's
+   * answer is what stops the row offering a Connect that can only fail.
+   */
+  it('drops a marker the Host no longer backs', async () => {
+    const { client, socket } = await signedIn();
+    await pairApproved(client, socket);
+    expect(client.isPaired('h1')).toBe(true);
+
+    const asking = client.queryPaired('h1');
+    await nextSent(socket, (f) => f.t === 'pair-status');
+    socket.receive({ t: 'pair-status-result', hostId: 'h1', paired: false });
+
+    expect(await asking).toBe(false);
+    expect(client.isPaired('h1')).toBe(false);
+  });
+
+  it('settles each answer against the host it asked, whatever the order', async () => {
+    const { client, socket } = await signedIn();
+    const first = client.queryPaired('h1');
+    const second = client.queryPaired('h2');
+    await nextSent(socket, (f) => f.t === 'pair-status' && f.hostId === 'h2');
+
+    // Answered out of order: keyed on the frame type alone, h2's answer would
+    // settle h1's question and mark the wrong Host paired.
+    socket.receive({ t: 'pair-status-result', hostId: 'h2', paired: true });
+    socket.receive({ t: 'pair-status-result', hostId: 'h1', paired: false });
+
+    expect(await first).toBe(false);
+    expect(await second).toBe(true);
+    expect(client.isPaired('h1')).toBe(false);
+    expect(client.isPaired('h2')).toBe(true);
+  });
+});
+
 describe('connect', () => {
   it('classifies ACL miss failures as recoverable stale pairing', () => {
     expect(hasRecoverablePairingFailure(['device-not-paired'])).toBe(true);

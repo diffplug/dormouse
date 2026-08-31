@@ -12,8 +12,8 @@
  * `serverUrl` may be `http(s)://…` or `ws(s)://…`. When `autoApprove` is true a
  * `pair` is approved the moment it arrives; otherwise call `approve(clientId)` /
  * `deny(clientId)` from the pairing-approval hook. Subscribe to events for logs
- * and assertions: `open`, `close`, `pair`, `paired`, `denied`, `connect`,
- * `decision`, `msg`, `client-gone`.
+ * and assertions: `open`, `close`, `pair`, `pair-status`, `paired`, `denied`,
+ * `connect`, `decision`, `msg`, `client-gone`.
  *
  * The handshake smoke test and the manual `scripts/fake-host.mjs` dev
  * stand-in both reuse this class.
@@ -103,6 +103,19 @@ export class FakeHost extends EventEmitter {
         const ticket = this.ceremony.begin(frame.request);
         this.pending.set(clientId, ticket.pairingId);
         if (this.autoApprove) this.approve(clientId);
+        return;
+      }
+      case 'pair-status': {
+        // Advisory display truth, answered straight from the ACL: no ticket, no
+        // challenge, and nothing here may influence the `connect2` decision.
+        const query = frame.query ?? {};
+        const paired =
+          this.acl.findActive({
+            passkeyCredentialId: query.passkeyCredentialId,
+            devicePublicKey: query.devicePublicKey,
+          }) !== undefined;
+        this.emit('pair-status', { clientId, query, paired });
+        this.#send({ t: 'pair-status-result', clientId, paired });
         return;
       }
       case 'connect': {
