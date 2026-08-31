@@ -6,10 +6,16 @@
  * port never transforms — that is the Dev-Server Chip's job, and panes must not
  * flip under the user (`docs/specs/dor-tool.md` -> Security).
  */
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { getPlatform } from '../../lib/platform';
 import { getTerminalPaneState } from '../../lib/terminal-registry';
-import { browserUrlFromParams, isToolParams, namespacedToolKey, toolKeysEqual } from './browser-surface';
+import {
+  browserUrlFromParams,
+  isToolParams,
+  namespacedToolKey,
+  toolKeysEqual,
+  toolPortConflictFromParams,
+} from './browser-surface';
 import { attachAgentBrowserSession } from './connect-port';
 import { listenerUrlsByPort } from './port-url';
 import { getToolAnnounce } from '../../lib/tool-announce-store';
@@ -50,6 +56,11 @@ export function useToolServing({
   lath: LathWallEngine;
   doorsRef: React.MutableRefObject<DooredItem[]>;
 }): void {
+  // Ports seen on the previous tick, per leaf — the settle check's memory.
+  // A ref, not state: it drives no render, and a leaf's entry is dropped when
+  // its command exits so a re-run settles again from scratch.
+  const seenPorts = useRef<Map<string, number[]>>(new Map());
+
   useEffect(() => {
     const platform = getPlatform();
     if (!platform.getOpenPorts) return;
@@ -78,11 +89,23 @@ export function useToolServing({
         // Command exit retires the browser and the pane flips back to a prompt
         // above the tool's dying words. Re-running revives it on the same
         // Surface, because the params, not the id, changed.
-        if (hasUrl && !running) {
-          lath.store.updateParams(leaf.id, { url: undefined, showTerminal: undefined });
+        const hasConflict = toolPortConflictFromParams(leaf.params) !== null;
+
+        // Command exit retires the browser and the pane flips back to a prompt
+        // above the tool's dying words. Re-running revives it on the same
+        // Surface, because the params, not the id, changed. A conflict is
+        // derived the same way and retires with it, so a re-run gets a fresh
+        // verdict rather than the last run's.
+        if ((hasUrl || hasConflict) && !running) {
+          lath.store.updateParams(leaf.id, {
+            url: undefined,
+            showTerminal: undefined,
+            toolPortConflict: undefined,
+          });
+          seenPorts.current.delete(leaf.id);
           continue;
         }
-        if (hasUrl || !running) continue;
+        if (hasUrl || hasConflict || !running) continue;
 
         let ports;
         try {
@@ -91,14 +114,40 @@ export function useToolServing({
           continue; // A scan that fails is a scan that finds nothing yet.
         }
         if (cancelled) return;
-        // The announcement disambiguates; the scan supplies the number, so an
-        // announced port that nothing bound frames nothing.
         const entries = listenerUrlsByPort(ports);
-        const wanted = announce?.port ?? null;
-        const entry = wanted === null
-          ? entries[0]
-          : entries.find((candidate) => candidate.port === wanted);
-        if (!entry) continue;
+        let entry;
+
+        if (announce?.port != null) {
+          // The announcement disambiguates; the scan supplies the number, so an
+          // announced port that nothing bound frames nothing.
+          entry = entries.find((candidate) => candidate.port === announce.port);
+          if (!entry) continue;
+        } else if (leaf.params?.toolPort !== 'auto') {
+          // `announced`: never guess. No announcement, no browser.
+          continue;
+        } else {
+          // Autobind. Do not commit on first sighting: ports appear one at a
+          // time during boot, so framing the first one seen would frame
+          // whichever bound earliest — for the standalone harness that is the
+          // dev bridge, not vite. Wait for the set to stop changing, which
+          // costs one tick and never has to retract a framed browser.
+          const found = entries.map((candidate) => candidate.port);
+          const previous = seenPorts.current.get(leaf.id);
+          seenPorts.current.set(leaf.id, found);
+          if (found.length === 0) continue;
+          if (!previous || previous.length !== found.length
+            || previous.some((port, index) => port !== found[index])) {
+            continue; // Still settling; re-check next tick.
+          }
+          if (found.length > 1) {
+            // Two or more is an error, never a tie-break: the rest of Dormouse
+            // declines to guess among several ports and this used to be the
+            // outlier. Shown where the browser would have gone.
+            lath.store.updateParams(leaf.id, { toolPortConflict: found });
+            continue;
+          }
+          entry = entries[0];
+        }
 
         if (leaf.params?.toolRender !== 'ab-screencast') {
           lath.store.updateParams(leaf.id, { url: entry.url, renderMode: 'iframe' });

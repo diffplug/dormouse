@@ -14,16 +14,24 @@ import { Terminal, Globe } from '@phosphor-icons/react';
 import { chromeButton } from '../design';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
-import { browserUrlFromParams, isToolParams, toolShowsBrowser } from './browser-surface';
+import {
+  browserUrlFromParams,
+  isToolParams,
+  toolFace,
+  toolPortConflictFromParams,
+} from './browser-surface';
 import { WallActionsContext } from './wall-context';
 import type { PaneProps } from './pane-props';
 
 export function ToolPaneHeader(props: PaneProps) {
   const actions = useContext(WallActionsContext);
-  const showBrowser = toolShowsBrowser(props.params);
-  // A tool that has never served has nothing to toggle to: the chip would
-  // offer a browser that does not exist yet.
-  const canToggle = isToolParams(props.params) && browserUrlFromParams(props.params) !== null;
+  const face = toolFace(props.params);
+  const secondHalfForward = face !== 'terminal';
+  // A tool that has neither served nor hit a port conflict has nothing to
+  // toggle to: the chip would offer a second half that is empty. The conflict
+  // counts, so the user can read the explanation and flip back.
+  const canToggle = isToolParams(props.params)
+    && (browserUrlFromParams(props.params) !== null || toolPortConflictFromParams(props.params) !== null);
 
   return (
     <div className="flex h-full min-w-0 flex-1 items-center">
@@ -31,20 +39,22 @@ export function ToolPaneHeader(props: PaneProps) {
         <button
           type="button"
           className={`${chromeButton()} ml-1 shrink-0`}
-          title={showBrowser ? 'Show terminal' : 'Show browser'}
-          aria-label={showBrowser ? 'Show terminal' : 'Show browser'}
-          aria-pressed={!showBrowser}
+          title={secondHalfForward ? 'Show terminal' : 'Show browser'}
+          aria-label={secondHalfForward ? 'Show terminal' : 'Show browser'}
+          aria-pressed={!secondHalfForward}
           onClick={(event) => {
             // The header row is also the drag handle and the select target.
             event.stopPropagation();
             actions.onToggleToolTerminal?.(props.id);
           }}
         >
-          {showBrowser ? <Terminal size={13} weight="bold" /> : <Globe size={13} weight="bold" />}
+          {secondHalfForward ? <Terminal size={13} weight="bold" /> : <Globe size={13} weight="bold" />}
         </button>
       ) : null}
       <div className="flex h-full min-w-0 flex-1 items-center">
-        {showBrowser ? <SurfacePaneHeader {...props} /> : <TerminalPaneHeader {...props} />}
+        {/* Browser chrome only for a real browser: a conflict has no URL to
+            edit and nothing to navigate. */}
+        {face === 'browser' ? <SurfacePaneHeader {...props} /> : <TerminalPaneHeader {...props} />}
       </div>
     </div>
   );

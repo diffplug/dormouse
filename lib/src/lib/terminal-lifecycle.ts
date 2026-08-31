@@ -503,7 +503,7 @@ export function resumeTerminal(
 // agent the host interrupted on its way down, which this pane re-runs itself.
 export function restoreTerminal(
   id: string,
-  opts: { cwd?: string | null; title?: string | null; cwdWarning?: string | null; shell?: string; args?: string[]; untouched?: boolean; resumeCommand?: string | null },
+  opts: { cwd?: string | null; title?: string | null; shell?: string; args?: string[]; untouched?: boolean; resumeCommand?: string | null },
 ): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
@@ -517,10 +517,6 @@ export function restoreTerminal(
   const trimmedTitle = opts.title?.trim();
   if (trimmedTitle && trimmedTitle !== UNNAMED_PANEL_TITLE) {
     setTerminalUserTitle(id, trimmedTitle);
-  }
-
-  if (opts.cwdWarning) {
-    entry.terminal.write(`\r\n\x1b[33m${opts.cwdWarning}\x1b[0m\r\n`);
   }
 
   const dims = entry.fit.proposeDimensions();

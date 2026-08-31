@@ -53,6 +53,7 @@ export function createToolHost(options: { stateDir?: string } = {}): ToolHost {
           name: entry.name,
           run: entry.run,
           render: entry.render,
+          port: entry.port,
           key: resolveDedupeKey(entry, { projectRoot: lookup.projectRoot, cwd: request.cwd }),
           warnings: [...lookup.file.warnings],
         };

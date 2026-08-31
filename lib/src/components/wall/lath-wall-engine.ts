@@ -109,7 +109,15 @@ export function toolLeafMeta(title: string, params: Record<string, unknown>): Le
  */
 export function persistableLeafMeta(meta: LeafMeta): LeafMeta {
   if (meta.component !== 'tool' || !meta.params) return meta;
-  const { url: _url, session: _session, wsPort: _wsPort, renderMode: _renderMode, showTerminal: _showTerminal, ...rest } = meta.params;
+  const {
+    url: _url,
+    session: _session,
+    wsPort: _wsPort,
+    renderMode: _renderMode,
+    showTerminal: _showTerminal,
+    toolPortConflict: _toolPortConflict,
+    ...rest
+  } = meta.params;
   return { ...meta, params: rest };
 }
 

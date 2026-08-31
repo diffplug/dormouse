@@ -14,6 +14,8 @@ type BrowserParamsLike = {
   url?: unknown;
   /** Tool only: the header chip pinning the terminal forward past serving. */
   showTerminal?: unknown;
+  /** Tool only: the ports found when autobind refused to choose. */
+  toolPortConflict?: unknown;
 };
 
 function asParams(params: unknown): BrowserParamsLike {
@@ -40,12 +42,37 @@ export function isToolParams(params: unknown): boolean {
   return asParams(params).surfaceType === 'tool';
 }
 
-/** Whether a tool is currently showing its browser rather than its terminal.
- *  False until it serves (no `url` yet), and false while the header's far-left
- *  chip has the terminal pinned forward. Which half is *mounted* never changes;
- *  see `ToolPanel.tsx`. */
+/** The ports autobind found when it refused to choose among them, or null.
+ *  Derived state, never persisted — see `persistableLeafMeta`. */
+export function toolPortConflictFromParams(params: unknown): number[] | null {
+  const value = asParams(params).toolPortConflict;
+  return Array.isArray(value) && value.length > 0 && value.every((p) => typeof p === 'number')
+    ? (value as number[])
+    : null;
+}
+
+/**
+ * Which of a tool's three faces is forward. A three-state answer rather than a
+ * boolean because the header and the body must agree: a port conflict occupies
+ * the browser's place (there is nothing to frame, so the pane shows *why*
+ * where the browser would have been) but has no URL to edit, so it must not
+ * get browser chrome. Which halves are *mounted* never changes; see
+ * `ToolPanel.tsx`.
+ *
+ * `browser` and `port-conflict` are mutually exclusive by construction —
+ * autobind writes a conflict only when it declined to write a URL.
+ */
+export type ToolFace = 'terminal' | 'browser' | 'port-conflict';
+
+export function toolFace(params: unknown): ToolFace {
+  if (!isToolParams(params) || asParams(params).showTerminal === true) return 'terminal';
+  if (toolPortConflictFromParams(params) !== null) return 'port-conflict';
+  return browserUrlFromParams(params) !== null ? 'browser' : 'terminal';
+}
+
+/** Whether the pane's second half is forward at all — browser or conflict. */
 export function toolShowsBrowser(params: unknown): boolean {
-  return isToolParams(params) && browserUrlFromParams(params) !== null && asParams(params).showTerminal !== true;
+  return toolFace(params) !== 'terminal';
 }
 
 /** Whether a tool Surface's params carry `key`. A null or absent key never

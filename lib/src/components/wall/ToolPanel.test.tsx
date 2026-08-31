@@ -91,3 +91,27 @@ describe('ToolPanel', () => {
     expect(half('browser').getAttribute('aria-hidden')).toBe('false');
   });
 });
+
+describe('the port-conflict face', () => {
+  const conflicted = { surfaceType: 'tool', command: 'x', cwd: '/repo', toolPortConflict: [6006, 6007] };
+
+  it('shows the conflict where the browser would have gone', () => {
+    // With several ports there is nothing to frame, so the second half explains
+    // why rather than sitting empty or framing a guess.
+    show(conflicted);
+    expect(half('terminal').style.visibility).toBe('hidden');
+    expect(container.textContent).toContain('opened 2 ports');
+    expect(container.textContent).toContain('localhost:6006');
+    expect(container.textContent).toContain('localhost:6007');
+  });
+
+  it('mounts no browser for a conflict', () => {
+    show(conflicted);
+    expect(container.querySelector('[data-testid="browser"]')).toBeNull();
+  });
+
+  it('flips back to the terminal when the chip pins it', () => {
+    show({ ...conflicted, showTerminal: true });
+    expect(half('terminal').style.visibility).toBe('visible');
+  });
+});

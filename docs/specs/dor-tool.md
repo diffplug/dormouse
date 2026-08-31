@@ -76,6 +76,11 @@ tools:
   stay renderMode-gated. **The Display modal never offers pop-out on a tool** —
   there is no third renderer to land in, so the swap would only re-derive the
   one it has.
+- **`port`** — `announced` (default) or `auto`. How Dormouse learns which port to
+  frame when the tool has not announced one. `announced` frames nothing without
+  OSC 367; `auto` autobinds. **`auto` frames a port only when exactly one is
+  bound — two or more is a refusal, never a tie-break.** An announcement, when
+  present, wins over either.
 - **`prespawn_dedupe`** — the dedupe key, evaluated before anything spawns (see
   [Identity and dedupe](#identity-and-dedupe)). Optional; absence means no
   dedupe.
@@ -177,6 +182,16 @@ feed one internal upgrade path; the atom does not care which fired.
 - **OSC 367 is the disambiguator, never the trigger.** It names *which* of a
   multi-port tool's ports to frame, plus ssh transparency, a name, and a
   runtime re-key. The hint names the port; the scan supplies the number.
+- **Autobind never chooses among ports.** With `port: auto` and no announcement,
+  exactly one bound port is framed; **two or more frames nothing** and the pane
+  shows the conflict where the browser would have gone (rationale). This is the
+  same stance as `surface.resolveOpen`, which fails and lists the candidates.
+- **Autobind waits for the port set to settle** — one unchanged tick — before it
+  commits. Ports appear one at a time during boot, so committing on first
+  sighting would frame whichever bound earliest, and a framed leaf is never
+  re-scanned. Accepted limit: a port opening long after settle is not noticed.
+- **`dor tool -- <command>` autobinds**, having nowhere to declare otherwise;
+  a declared tool opts in with one line.
 - **Upgrade requires a tool-designated Session with its spawned command still
   in the foreground** (see [Security](#security)).
 
@@ -206,7 +221,8 @@ derivation. The pane flips to the browser, terminal behind the header's
 far-left chip. Accepted: a fast tool flashes its terminal for ~100ms.
 
 **Command exit** → the browser retires and the pane flips back to a prompt
-above the tool's dying words; re-running revives it on the same Surface.
+above the tool's dying words; re-running revives it on the same Surface. A port
+conflict retires with it, so a re-run gets a fresh verdict.
 **Kill** → universal, reaping the process and the browser's resources.
 
 **`surfaceKindFromParams` must test for a tool before it tests for a browser**,

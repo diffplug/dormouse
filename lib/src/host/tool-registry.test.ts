@@ -28,6 +28,7 @@ tools:
       name: 'storybook',
       run: 'pnpm storybook',
       render: 'iframe',
+      port: 'announced',
       dedupeTemplate: ['storybook', '$PROJECT_ROOT'],
     });
   });
@@ -35,6 +36,19 @@ tools:
   it('reads an ab-screencast renderer, the one that makes a tool agent-drivable', () => {
     const file = parse('tools:\n  harness:\n    run: pnpm dev\n    render: ab-screencast\n');
     expect(file.tools.get('harness')?.render).toBe('ab-screencast');
+  });
+
+  it('defaults port selection to announced, so nothing guesses unless asked', () => {
+    expect(parse('tools:\n  t:\n    run: x\n').tools.get('t')?.port).toBe('announced');
+  });
+
+  it('reads autobind', () => {
+    expect(parse('tools:\n  t:\n    run: x\n    port: auto\n').tools.get('t')?.port).toBe('auto');
+  });
+
+  it('rejects an unknown port mode', () => {
+    expect(() => parse('tools:\n  t:\n    run: x\n    port: 6006\n')).toThrow(/'port' must be one of/);
+    expect(() => parse('tools:\n  t:\n    run: x\n    port: first\n')).toThrow(/'port' must be one of/);
   });
 
   it('rejects an unknown renderer', () => {
@@ -112,7 +126,7 @@ tools:
 
 describe('resolveDedupeKey', () => {
   const entry = (dedupeTemplate: string[] | null) =>
-    ({ name: 't', run: 'x', render: 'iframe' as const, dedupeTemplate });
+    ({ name: 't', run: 'x', render: 'iframe' as const, port: 'announced' as const, dedupeTemplate });
 
   it('is null when the entry declared no template', () => {
     expect(resolveDedupeKey(entry(null), { projectRoot: '/repo', cwd: '/repo/lib' })).toBeNull();
@@ -165,6 +179,10 @@ describe("this repo's own dormouse.yml", () => {
     // The harness is the agent-drivable one; storybook only needs framing.
     expect(file.tools.get('standalone-harness')?.render).toBe('ab-screencast');
     expect(file.tools.get('storybook')?.render).toBe('iframe');
+    // storybook autobinds (it never announces); the harness announces, because
+    // its dev bridge binds before vite.
+    expect(file.tools.get('storybook')?.port).toBe('auto');
+    expect(file.tools.get('standalone-harness')?.port).toBe('announced');
   });
 
   it('scopes every key to the checkout, so parallel worktrees stay distinct', () => {

@@ -6,6 +6,9 @@
 tools:
   storybook:
     run: pnpm storybook
+    # Storybook never announces, so autobind: frame the one port it opens. If it
+    # ever opened a second, Dormouse would show that instead of guessing.
+    port: auto
     # Scoped to the checkout: parallel worktrees each get their own Storybook,
     # and each frames the port it actually bound (6006, then 6007, ...). Without
     # $PROJECT_ROOT both worktrees would share one key and the second would
@@ -15,8 +18,11 @@ tools:
   standalone-harness:
     run: pnpm dev:standalone:ab
     # A real browser rather than an iframe, so an agent can drive the harness
-    # with `dor ab --surface surface:N <verb>`. The harness binds several ports
-    # (vite, the dev bridge, the sidecar socket); it announces which one to
-    # frame via OSC 367, and the port scan supplies the number it actually got.
+    # with `dor ab --surface surface:N <verb>`.
     render: ab-screencast
+    # The harness binds the dev bridge (1422) *before* vite (1420), so a scan can
+    # catch the bridge alone and autobind would refuse the pair a tick later.
+    # It announces vite's port via OSC 367 instead; the scan still supplies the
+    # number it actually got, which is what survives an env override.
+    port: announced
     prespawn_dedupe: [standalone-harness, $PROJECT_ROOT]

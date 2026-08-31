@@ -148,6 +148,8 @@ describe('tool persistence (regression: review findings 4 and 11)', () => {
       cwd: '/repo',
       toolKey: ['storybook', 'storybook', '/repo'],
       toolRender: 'ab-screencast',
+      toolPort: 'auto',
+      toolPortConflict: [6006, 6007],
       url: 'http://localhost:6006/',
       renderMode: 'ab-screencast',
       session: 'dormouse.w.tool.p1',
@@ -160,6 +162,7 @@ describe('tool persistence (regression: review findings 4 and 11)', () => {
       cwd: '/repo',
       toolKey: ['storybook', 'storybook', '/repo'],
       toolRender: 'ab-screencast',
+      toolPort: 'auto',
     });
   });
 

@@ -4,7 +4,8 @@
  */
 import { BrowserPanel } from './BrowserPanel';
 import { TerminalPanel } from './TerminalPanel';
-import { toolShowsBrowser } from './browser-surface';
+import { toolFace } from './browser-surface';
+import { ToolPortConflict } from './ToolPortConflict';
 import type { PaneProps } from './pane-props';
 
 /**
@@ -33,16 +34,24 @@ function Half({ shown, children }: { shown: boolean; children: React.ReactNode }
 }
 
 export function ToolPanel(props: PaneProps) {
-  const showBrowser = toolShowsBrowser(props.params);
+  const face = toolFace(props.params);
+  const showSecond = face !== 'terminal';
   return (
     <div className="relative h-full w-full">
-      <Half shown={!showBrowser}>
+      <Half shown={!showSecond}>
         <TerminalPanel {...props} />
       </Half>
-      <Half shown={showBrowser}>
-        {/* Parked while hidden, so a screencast idles instead of decoding
-            frames nobody is looking at (`useSurfaceVisibility`). */}
-        <BrowserPanel {...props} parked={props.parked || !showBrowser} />
+      <Half shown={showSecond}>
+        {/* A conflict and a browser are mutually exclusive by construction —
+            autobind writes a conflict only when it declined to write a URL — so
+            swapping the second half's content loses no browser state. */}
+        {face === 'port-conflict' ? (
+          <ToolPortConflict {...props} />
+        ) : (
+          /* Parked while hidden, so a screencast idles instead of decoding
+             frames nobody is looking at (`useSurfaceVisibility`). */
+          <BrowserPanel {...props} parked={props.parked || !showSecond} />
+        )}
       </Half>
     </div>
   );

@@ -26,6 +26,9 @@ export type ToolLookupResult =
       run: string;
       /** Renderer for the tool's browser once it serves; 'iframe' by default. */
       render: 'iframe' | 'ab-screencast';
+      /** How to pick the port to frame absent an announcement; 'announced' by
+       *  default, meaning nothing is framed without OSC 367. */
+      port: 'announced' | 'auto';
       key: string[] | null;
       warnings: string[];
     };

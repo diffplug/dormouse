@@ -19,12 +19,26 @@ export type ToolScope = 'repo' | 'user';
 export type ToolRender = 'iframe' | 'ab-screencast';
 const TOOL_RENDERS: readonly ToolRender[] = ['iframe', 'ab-screencast'];
 
+/**
+ * How Dormouse learns which port to frame when the tool has not announced one.
+ *
+ * `announced` waits for OSC 367 and frames nothing without it. `auto` autobinds:
+ * exactly one bound port is framed, and **two or more is an error, never a
+ * tie-break** — the rest of Dormouse declines to guess among several ports
+ * (`surface.resolveOpen` fails and lists them), and the tool path used to be the
+ * outlier. An announcement, when present, always wins over either.
+ */
+export type ToolPortMode = 'announced' | 'auto';
+const TOOL_PORT_MODES: readonly ToolPortMode[] = ['announced', 'auto'];
+
 export interface ToolEntry {
   readonly name: string;
   /** Command typed into the spawned shell, exactly as `dor ensure` types one. */
   readonly run: string;
   /** Renderer for its browser; `iframe` when unstated. */
   readonly render: ToolRender;
+  /** Port-selection strategy; `announced` when unstated. */
+  readonly port: ToolPortMode;
   /**
    * `prespawn_dedupe` before substitution; `null` when the entry declared none.
    * A null template means no key, which means no dedupe at all — never a key
@@ -58,7 +72,7 @@ const SUBSTITUTION_TOKEN = /\$[A-Za-z_][A-Za-z0-9_]*/g;
 // field: silently dropping a dedupe directive the author wrote is the
 // destructive failure (two tools, one port), where failing to parse is loud.
 const KNOWN_PRESPAWN_FIELDS = new Set(['prespawn_dedupe']);
-const KNOWN_ENTRY_FIELDS = new Set(['run', 'render', 'prespawn_dedupe']);
+const KNOWN_ENTRY_FIELDS = new Set(['run', 'render', 'port', 'prespawn_dedupe']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -163,7 +177,13 @@ export function parseToolFile(
     }
     const render = (rawRender as ToolRender | undefined) ?? 'iframe';
 
-    tools.set(name, { name, run: run.trim(), render, dedupeTemplate });
+    const rawPort = rawEntry.port;
+    if (rawPort !== undefined && !(TOOL_PORT_MODES as readonly unknown[]).includes(rawPort)) {
+      throw new ToolFileError(`${where}: 'port' must be one of ${TOOL_PORT_MODES.join(', ')}`);
+    }
+    const port = (rawPort as ToolPortMode | undefined) ?? 'announced';
+
+    tools.set(name, { name, run: run.trim(), render, port, dedupeTemplate });
   }
 
   return { scope, dir, tools, warnings };
