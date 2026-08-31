@@ -769,6 +769,7 @@ export function useDorControl({
           // autobinds. Safe by construction now that `auto` refuses two ports
           // rather than tie-breaking; a declared tool opts in with one line.
           let port: 'announced' | 'auto' = 'auto';
+          const toolShell = getDefaultShellOpts()?.shell;
 
           if (toolName) {
             // The registry, the closed substitution set, and the trust gate all
@@ -807,6 +808,13 @@ export function useDorControl({
                 });
                 return;
               case 'untrusted': {
+                // Approval can only lead to a command gated on OSC 633. Reject
+                // a shell known never to emit it before offering a prompt that
+                // would otherwise approve, spawn, then silently drop the command.
+                if (toolShell && shellCommandKind(toolShell, PLATFORM_STRING) === 'cmd') {
+                  detail.respond({ ok: false, error: missingIntegrationError(toolShell) });
+                  return;
+                }
                 // The pane appears now and asks; the command spawns only on
                 // approval (docs/specs/dor-tool.md -> Trust). Nothing from the
                 // repo has executed to reach this point — the file was read and
@@ -950,7 +958,6 @@ export function useDorControl({
           // A tool is a shell-hosted PTY with the command typed into it, exactly
           // as `dor ensure` spawns one — but with no command+cwd matching, and a
           // leaf that renders both capabilities.
-          const toolShell = getDefaultShellOpts()?.shell;
           if (toolShell && shellCommandKind(toolShell, PLATFORM_STRING) === 'cmd') {
             detail.respond({ ok: false, error: missingIntegrationError(toolShell) });
             return;

@@ -999,6 +999,47 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('rejects a non-integrated shell before offering tool approval', async () => {
+    setToolsEnabled(true);
+    terminalRegistry.setDefaultShellOpts({ shell: 'C:\\Windows\\System32\\cmd.exe' });
+    const toolControl = vi.fn(async () => ({
+      status: 'untrusted' as const,
+      projectRoot: 'C:\\repo',
+      path: 'C:\\repo\\dormouse.yml',
+      name: 'storybook',
+      run: 'pnpm storybook',
+      upstreamUrl: null,
+    }));
+    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = toolControl;
+
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      });
+      await flush();
+
+      let response: { ok: boolean; error?: string } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.tool,
+            params: { name: 'storybook', cwd: 'C:\\repo', minimized: false, fresh: false },
+            respond: (result: typeof response) => { response = result; },
+          },
+        }));
+      });
+      await flush();
+
+      expect(response?.ok).toBe(false);
+      expect(response?.error).toContain('requires OSC 633 shell integration');
+      expect(container.textContent).not.toContain('Always allow for folder');
+      expect(leafCount()).toBe(1);
+    } finally {
+      terminalRegistry.setDefaultShellOpts(null);
+      setToolsEnabled(false);
+    }
+  });
+
   // A Door created by `dor split` against another Door is the one Surface that never
   // was a pane, so it exercises the store's `addDoor` registration rather than the
   // meta a minimize retains. Every Door reader goes through `lath.getMeta`, so a
