@@ -50,10 +50,9 @@ export interface ServerConfig {
    */
   runtimeFile: string | null;
   /**
-   * Absolute path of the installer's `EnrollmentOffer`: the one-time token a
-   * Host on this machine redeems for an enrollment instead of the setup
-   * password. `null` — the default — refuses every `enrollToken`. Read fresh on
-   * each attempt and deleted on redemption; see the enroll route in `app.ts`.
+   * Absolute path of the installer's `EnrollmentOffer`; `null` — the default —
+   * refuses every `enrollToken`. See `enroll-token.ts` and, for the policy,
+   * `docs/specs/server.md` → "Configuration".
    */
   enrollTokenFile: string | null;
   /**
@@ -123,11 +122,8 @@ export function readConfig(env: Env = process.env): ServerConfig {
   const vapidSubject = env.DORMOUSE_VAPID_SUBJECT ?? defaultVapidSubject(origin);
 
   // Installer-supplied, and absent everywhere else.
-  const runtimeFile = installerPath(env.DORMOUSE_RUNTIME_FILE, 'DORMOUSE_RUNTIME_FILE');
-  const enrollTokenFile = installerPath(
-    env.DORMOUSE_ENROLL_TOKEN_FILE,
-    'DORMOUSE_ENROLL_TOKEN_FILE',
-  );
+  const runtimeFile = installerPath(env, 'DORMOUSE_RUNTIME_FILE');
+  const enrollTokenFile = installerPath(env, 'DORMOUSE_ENROLL_TOKEN_FILE');
   const releaseId = env.DORMOUSE_RELEASE_ID?.trim() || null;
 
   return {
@@ -147,13 +143,13 @@ export function readConfig(env: Env = process.env): ServerConfig {
 }
 
 /**
- * An installer-supplied absolute path, or `null` when unset or blank. A
- * relative value is refused rather than resolved against the cwd: the
+ * The installer-supplied absolute path at `env[name]`, or `null` when unset or
+ * blank. A relative value is refused rather than resolved against the cwd: the
  * `run-server` wrapper runs under a service manager whose working directory is
  * not the installer's, so it would land somewhere neither side can predict.
  */
-function installerPath(raw: string | undefined, name: string): string | null {
-  const value = raw?.trim() || null;
+function installerPath(env: Env, name: string): string | null {
+  const value = env[name]?.trim() || null;
   if (value !== null && !isAbsolute(value)) {
     throw new ConfigError(`${name} must be an absolute path, got '${value}'.`);
   }

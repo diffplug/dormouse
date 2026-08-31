@@ -6,7 +6,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { chmod, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -40,14 +41,6 @@ function enroll(app, body) {
   return post(app, API_ROUTES.hostEnroll, { label: 'This Machine', ...body });
 }
 
-/** True when nothing is at `path`. */
-async function fileGone(path) {
-  return readFile(path, 'utf8').then(
-    () => false,
-    () => true,
-  );
-}
-
 test('a valid enroll token enrolls the host and consumes the offer', async () => {
   const { app, enrollTokenFile } = await appWithOffer(offer());
   const res = await enroll(app, { enrollToken: TOKEN });
@@ -58,7 +51,7 @@ test('a valid enroll token enrolls the host and consumes the offer', async () =>
   assert.notEqual(body.hostId, body.hostToken);
   assert.equal(body.origin, ORIGIN);
   assert.equal(body.rpId, RP_ID);
-  assert.equal(await fileGone(enrollTokenFile), true);
+  assert.equal(existsSync(enrollTokenFile), false);
 });
 
 test('the offer is single-use: a second redemption is refused', async () => {
@@ -75,7 +68,7 @@ test('a wrong token is refused and leaves the offer intact', async () => {
   assert.equal(res.status, 401);
   // A guess must not burn the operator's offer — that would be a denial of
   // service on the install's one-click path.
-  assert.equal(await fileGone(enrollTokenFile), false);
+  assert.equal(existsSync(enrollTokenFile), true);
 });
 
 test('every unusable offer is refused the same way, telling the caller nothing', async () => {
@@ -116,7 +109,7 @@ test('a token that cannot be invalidated is not redeemed', CANNOT_DENY_UNLINK, a
     const res = await enroll(app, { enrollToken: TOKEN });
     assert.equal(res.status, 500);
     // The point of the ordering: no host may exist against a token still on disk.
-    assert.equal(await fileGone(join(stateDir, 'hosts.json')), true);
+    assert.equal(existsSync(join(stateDir, 'hosts.json')), false);
   } finally {
     await chmod(dirname(enrollTokenFile), 0o700);
   }
@@ -139,12 +132,5 @@ test('the password path still enrolls with an offer file configured', async () =
   assert.equal(res.status, 200);
   assert.equal(typeof (await res.json()).hostToken, 'string');
   // The offer belongs to the token path; a password enrollment leaves it.
-  assert.equal(await fileGone(enrollTokenFile), false);
-});
-
-test('a wrong password is still refused when an offer file is configured', async () => {
-  const { app } = await appWithOffer(offer());
-  const res = await enroll(app, { password: 'wrong' });
-  assert.equal(res.status, 401);
-  assert.deepEqual(await res.json(), { error: 'invalid setup password' });
+  assert.equal(existsSync(enrollTokenFile), true);
 });

@@ -9,13 +9,6 @@
  * which redeems the token against its own copy.
  */
 
-/**
- * `URL` exists in every runtime this package targets, but in neither the DOM
- * nor the Node typings it deliberately omits — so name the one member used
- * here, the same tactic as `webcrypto.ts`.
- */
-declare const URL: { new (input: string): { readonly origin: string } };
-
 export interface EnrollmentOffer {
   /** Where the server answers, e.g. `https://dormouse.tailnet.ts.net`. */
   readonly origin: string;

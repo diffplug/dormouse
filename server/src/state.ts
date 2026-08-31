@@ -1,11 +1,13 @@
 /** JSON-file state stores; `docs/specs/server.md` → "State files" owns their schemas and invariants. */
 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 
 import { SELFHOST_ACCOUNT_ID, toBase64Url } from 'server-lib-common';
 import type { PushSubscriptionPayload } from 'server-lib-common';
+
+import { secretEquals } from './secrets.js';
 
 /** A registered passkey as stored on disk. `publicKey` is base64url SPKI. */
 export interface StoredPasskey {
@@ -91,11 +93,6 @@ abstract class JsonFileStore {
   }
 }
 
-/** Fixed-length SHA-256 digest, so timing-safe compares never branch on length. */
-function sha256(text: string): Buffer {
-  return createHash('sha256').update(text, 'utf8').digest();
-}
-
 export class AccountStore extends JsonFileStore {
   constructor(stateDir: string, now: () => number = () => Date.now()) {
     super(stateDir, 'account.json', now);
@@ -159,8 +156,8 @@ export class HostStore extends JsonFileStore {
    * hand-editing this file is the *documented* revocation mechanism
    * (Guardrails), so a half-finished edit is an expected state, not a
    * corruption. Unguarded, a row with a null `hostToken` makes `findByToken`'s
-   * `sha256(h.hostToken)` throw, which 500s every `/ws/host` upgrade and every
-   * push route — the whole server, over one bad line. Dropping the row instead
+   * `secretEquals` throw, which 500s every `/ws/host` upgrade and every push
+   * route — the whole server, over one bad line. Dropping the row instead
    * makes that host un-enrolled, which is what the person editing it was
    * reaching for anyway.
    */
@@ -171,17 +168,15 @@ export class HostStore extends JsonFileStore {
 
   /**
    * Look up an enrolled host by its bearer token (the `/ws/host` credential).
-   * The token is a secret, so it is compared with a constant-time digest
-   * compare (mirroring the setup-password path in app.ts) rather than `===`,
-   * whose early-exit leaks byte positions. Every host is checked without an
-   * early break so the work does not depend on which entry matches.
+   * The token is a secret, so it is compared with `secretEquals` rather than
+   * `===`, whose early-exit leaks byte positions. Every host is checked without
+   * an early break so the work does not depend on which entry matches.
    */
   async findByToken(hostToken: string): Promise<StoredHost | undefined> {
     const hosts = await this.list();
-    const providedHash = sha256(hostToken);
     let match: StoredHost | undefined;
     for (const h of hosts) {
-      if (timingSafeEqual(sha256(h.hostToken), providedHash)) match = h;
+      if (secretEquals(h.hostToken, hostToken)) match = h;
     }
     return match;
   }
