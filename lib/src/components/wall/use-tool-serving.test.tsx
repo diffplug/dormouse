@@ -13,6 +13,12 @@ import { useToolServing } from './use-tool-serving';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { OpenPort } from '../../lib/platform/types';
 
+const controllerMocks = vi.hoisted(() => ({
+  disposeAgentBrowserSurfaceController: vi.fn(),
+}));
+
+vi.mock('./agent-browser-surface-controller', () => controllerMocks);
+
 const POLL_MS = 1500;
 
 function tcp(port: number): OpenPort {
@@ -78,7 +84,7 @@ async function run(params: Record<string, unknown>, scans: OpenPort[][]) {
   for (let i = 1; i < scans.length; i += 1) {
     await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
   }
-  return { state, updateParams };
+  return { state, updateParams, platform };
 }
 
 describe('port: announced', () => {
@@ -213,5 +219,37 @@ describe('the settle memory resets on any exit (regression: PR #493 review)', ()
 
     // First tick of run 2 is a first sighting again, so nothing is framed yet.
     expect(state.params.url).toBeUndefined();
+  });
+});
+
+describe('agent-browser retirement on command exit', () => {
+  it('closes the daemon session, disposes the controller, and clears its params', async () => {
+    currentCommand = null;
+    const params = {
+      surfaceType: 'tool',
+      command: 'pnpm storybook',
+      url: 'http://localhost:6006/',
+      renderMode: 'ab-screencast',
+      session: 'dormouse.1.tool-1',
+      wsPort: 43123,
+      syncEngaged: true,
+      binaryPath: '/opt/agent-browser',
+    };
+    const { state, platform } = await run(params, [[]]);
+    const close = vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 }));
+    platform.agentBrowserCommand = close;
+
+    // The first tick ran during mount before the close stub was installed; put
+    // the browser state back, then let the next poll exercise retirement.
+    Object.assign(state.params, params);
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+
+    expect(close).toHaveBeenCalledWith('dormouse.1.tool-1', ['close'], '/opt/agent-browser');
+    expect(controllerMocks.disposeAgentBrowserSurfaceController).toHaveBeenCalledWith('tool-1');
+    expect(state.params).not.toHaveProperty('url');
+    expect(state.params).not.toHaveProperty('session');
+    expect(state.params).not.toHaveProperty('wsPort');
+    expect(state.params).not.toHaveProperty('renderMode');
+    expect(state.params).not.toHaveProperty('syncEngaged');
   });
 });
