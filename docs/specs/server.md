@@ -787,21 +787,15 @@ allowlist stays `*.dormouse.sh`-only** ("Where a Host may reach a relay
 server") — self-hosting keeps requiring a source build, deliberately, so no
 item below may depend on widening the baked allowlist. Staged order:
 
-1. **First-run truth on the phone.** With no evidence of prior use, lead with
-   setup instead of the "Welcome back" sign-in with setup behind a disclosure.
-   On iOS in a browser tab, the Home Screen guidance moves *before* setup —
-   today it renders on the Hosts view, after the device key already exists in
-   the wrong storage partition, the trap whose fix
-   [remote-security-model.md](./remote-security-model.md) `## Future` stages.
-2. **Push as a step, not a footnote.** After the first successful connect,
+1. **Push as a step, not a footnote.** After the first successful connect,
    offer Enable alerts full-width; the per-host row stays as the ongoing
    surface.
-3. **Enrollment offer.** The installer leaves the origin plus a one-time
+2. **Enrollment offer.** The installer leaves the origin plus a one-time
    enroll token at a well-known per-user path; a Host on the same machine
    offers one-click enrollment ("A Dormouse server is installed here — enroll
    as this machine?"). The three-field form stays as the remote-server
    fallback. Touches the `SELF_HOST.md` installer contract when built.
-4. **QR-first phone setup.** The enrolled Host mints a short-TTL, single-use
+3. **QR-first phone setup.** The enrolled Host mints a short-TTL, single-use
    setup token from the server over its authenticated channel and renders
    `https://<origin>/#setup?token=…` as a QR. Scanning replaces typing the
    origin and the setup password; the token's nonce rides into the pairing
@@ -811,7 +805,7 @@ item below may depend on widening the baked allowlist. Staged order:
    collapses to one confirm. Single-use plus TTL bound the shoulder-surf
    window, and the Host announces each token's redemption. The setup password
    remains for the QR-less path.
-5. **One-minute resume.** On an approved connection the Host mints a resume
+4. **One-minute resume.** On an approved connection the Host mints a resume
    token — single-use, bound to the device key and that connection, 60-second
    TTL. A dropped WebSocket reattaches with it instead of rerunning the
    passkey ceremony; past the minute it is a full connect. Host-minted and

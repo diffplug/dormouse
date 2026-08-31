@@ -26,9 +26,19 @@ export function requiresInstallForPush(): boolean {
   return typeof (navigator as Navigator & { standalone?: boolean }).standalone === 'boolean';
 }
 
+/**
+ * iOS running in a browser tab. Exported on its own because it gates more than
+ * push: everything partition-bound — the device key, the cached passkey — is
+ * minted into the tab's storage, so the auth screen asks this before setup
+ * rather than waiting on the push machinery `getPushAvailability` probes.
+ */
+export function needsHomeScreenInstall(): boolean {
+  return requiresInstallForPush() && !isInstalledWebApp();
+}
+
 export async function getPushAvailability(): Promise<PushAvailability> {
   // Keep first: an iOS tab lacks the APIs below but the actionable result is install.
-  if (requiresInstallForPush() && !isInstalledWebApp()) return 'needs-install';
+  if (needsHomeScreenInstall()) return 'needs-install';
   if (
     !('serviceWorker' in navigator) ||
     typeof globalThis.Notification !== 'function' ||

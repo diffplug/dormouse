@@ -197,6 +197,23 @@ export class PocketClient {
   }
 
   /**
+   * Whether this browser has been used with Dormouse before, which decides
+   * whether the auth screen leads with setup or with sign-in
+   * (docs/specs/pocket-app.md). The evidence is stored passkey material: setup
+   * and sign-in both cache the asserted public key, so anything else this
+   * device holds — a paired marker, a push endpoint — was preceded by one of
+   * them. Storage that throws (site data blocked) reads as a first visit,
+   * the screen that can still get somewhere from nothing.
+   */
+  hasPriorUse(): boolean {
+    try {
+      return this.#storage.knownCredentialIds().length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Digest of the delivery address this device last registered, for detecting
    * a push service that rotated the endpoint behind our back. Null until the
    * first successful registration — which reads as "no opinion", so a device

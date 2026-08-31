@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   HostsView,
+  SetupOrSignin,
   refinePairState,
   type HostPairState,
   type HostView,
@@ -108,6 +109,138 @@ function enableButtonIn(row: HTMLElement): HTMLButtonElement | null {
 function retryButtonIn(row: HTMLElement): HTMLButtonElement | null {
   return [...row.querySelectorAll('button')].find((b) => b.textContent === 'Retry') ?? null;
 }
+
+function renderAuth(
+  overrides: {
+    firstRun?: boolean;
+    needsInstall?: boolean;
+    busy?: string | null;
+    error?: string | null;
+    onSignin?: () => void;
+    onSetup?: (password: string, label: string) => void;
+  } = {},
+) {
+  act(() => {
+    root.render(
+      <StrictMode>
+        <SetupOrSignin
+          busy={overrides.busy ?? null}
+          error={overrides.error ?? null}
+          firstRun={overrides.firstRun ?? true}
+          needsInstall={overrides.needsInstall ?? false}
+          onSignin={overrides.onSignin ?? (() => undefined)}
+          onSetup={overrides.onSetup ?? (() => undefined)}
+        />
+      </StrictMode>,
+    );
+  });
+}
+
+/** The setup password field, which is present only when setup is on screen. */
+function setupPasswordField(): HTMLInputElement | null {
+  return container.querySelector<HTMLInputElement>('#pocket-setup-password');
+}
+
+function buttonNamed(label: string | RegExp): HTMLButtonElement | null {
+  return (
+    [...container.querySelectorAll('button')].find((button) =>
+      typeof label === 'string' ? button.textContent === label : label.test(button.textContent ?? ''),
+    ) ?? null
+  );
+}
+
+/** The install guidance block, by its heading. */
+function installNotice(): HTMLElement | null {
+  return (
+    [...container.querySelectorAll<HTMLElement>('div')].find(
+      (el) => el.firstElementChild?.textContent === 'Add Dormouse to your Home Screen first',
+    ) ?? null
+  );
+}
+
+/** Type into a controlled input the way a user would — React listens for `input`. */
+function typeInto(input: HTMLInputElement, value: string) {
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+  act(() => {
+    setValue.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+describe('SetupOrSignin first run vs return visit', () => {
+  it('leads with setup when this browser holds no passkey material', () => {
+    // Nothing stored means nothing to sign in with by default, so the fields
+    // the visit actually needs must not be behind a disclosure tap.
+    renderAuth({ firstRun: true });
+
+    expect(setupPasswordField()).not.toBeNull();
+    expect(container.textContent).not.toContain('Welcome back');
+    expect(buttonNamed('Create passkey & sign in')).not.toBeNull();
+    expect(buttonNamed(/First-time setup/)).toBeNull();
+  });
+
+  it('keeps sign-in reachable on a first run, for a passkey that synced here', () => {
+    const onSignin = vi.fn();
+    renderAuth({ firstRun: true, onSignin });
+
+    act(() => buttonNamed('Sign in with passkey')!.click());
+
+    expect(onSignin).toHaveBeenCalledOnce();
+  });
+
+  it('leads with sign-in and keeps setup behind the disclosure on a return visit', () => {
+    renderAuth({ firstRun: false });
+
+    expect(container.textContent).toContain('Welcome back');
+    expect(buttonNamed('Sign in with passkey')).not.toBeNull();
+    expect(setupPasswordField()).toBeNull();
+
+    act(() => buttonNamed(/First-time setup/)!.click());
+
+    expect(setupPasswordField()).not.toBeNull();
+  });
+});
+
+describe('SetupOrSignin install guidance', () => {
+  it('warns before setup, not after it, when iOS needs the install first', () => {
+    // The point of moving it here: the device key and passkey this screen
+    // mints land in whichever partition creates them.
+    renderAuth({ firstRun: true, needsInstall: true });
+
+    const notice = installNotice();
+    const password = setupPasswordField();
+    expect(notice).not.toBeNull();
+    expect(
+      notice!.compareDocumentPosition(password!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('warns on the return visit too, where setup is still reachable', () => {
+    renderAuth({ firstRun: false, needsInstall: true });
+
+    expect(installNotice()).not.toBeNull();
+  });
+
+  it('stays advice rather than a gate — setup in the tab still submits', () => {
+    const onSetup = vi.fn();
+    renderAuth({ firstRun: true, needsInstall: true, onSetup });
+
+    typeInto(setupPasswordField()!, 'hunter2');
+    const submit = buttonNamed('Create passkey & sign in')!;
+    expect(submit.disabled).toBe(false);
+    act(() => submit.click());
+
+    expect(onSetup).toHaveBeenCalledWith('hunter2', 'My Phone');
+  });
+
+  it('says nothing when the app is installed, or when push is unavailable for other reasons', () => {
+    // `needsInstall` is the iOS-tab signal alone: an unsupported browser or a
+    // blocked permission is a different problem, explained on the push rows.
+    renderAuth({ firstRun: true, needsInstall: false });
+
+    expect(installNotice()).toBeNull();
+  });
+});
 
 describe('HostsView pair/connect actions', () => {
   it('offers Pair alone where the Host holds no record for this Client', () => {

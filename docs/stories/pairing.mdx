@@ -159,18 +159,21 @@ enrolling connects the machine to a server; it pairs it with nothing.
 
 ## 4. Make a passkey on the phone
 
-Open the same origin on a tailnet-connected phone. Pocket loads.
+Open the same origin on a tailnet-connected phone. Pocket loads, finds nothing
+stored, and leads with what a phone in that state actually needs: the setup
+password from `manage show-password`, plus a label for this passkey.
+
+<Canvas of={SetupOrSignin.FirstRun} />
+
+Sign in stays on the screen as the quieter second option, because passkeys sync
+— a phone that has never been here may already hold one. A phone that *has*
+been here gets the other screen instead, sign-in first with setup folded back
+behind a disclosure:
 
 <Canvas of={SetupOrSignin.Welcome} />
 
-There is nothing to sign in with yet, so the first visit goes through the
-disclosure: the setup password from `manage show-password`, plus a label for
-this passkey.
-
-<Canvas of={SetupOrSignin.SetupExpanded} story={{ autoplay: true }} />
-
-That one action creates the account's first passkey and signs in with it. Two
-things you cannot see happen at the same time:
+That one setup action creates the account's first passkey and signs in with it.
+Two things you cannot see happen at the same time:
 
 - A **device key** is minted — a non-extractable ECDSA P-256 keypair kept in
   IndexedDB. This browser can sign with it and can never export it. It is this
@@ -179,11 +182,16 @@ things you cannot see happen at the same time:
 - The session's **presence stamp** is set. Pairing requires a passkey assertion
   from the last 30 seconds, so signing in is what makes the next step possible.
 
-> **On iOS, install to the Home Screen before you do any of this.** The
-> installed app is a separate storage partition from the Safari tab, so it gets
-> its own device key and needs its own pairing approval. Setting up in the tab
-> first means doing all of it twice. iOS also delivers Web Push only to an
-> installed app.
+On iOS in a Safari tab, Pocket adds one thing above the fields, while the advice
+is still free to take:
+
+<Canvas of={SetupOrSignin.FirstRunNeedsInstall} />
+
+The installed app is a separate storage partition from the tab, so it gets its
+own device key and needs its own pairing approval. Setting up in the tab means
+doing all of it twice, and iOS delivers Web Push only to an installed app.
+Nothing stops you — it is advice, not a gate — but there is no reason to take
+it in the wrong window.
 
 ---
 
