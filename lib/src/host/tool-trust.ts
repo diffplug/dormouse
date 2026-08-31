@@ -65,7 +65,7 @@ async function readToolFile(path: string): Promise<string> {
 }
 const TRUST_FILE_NAME = 'tool-trust.json';
 const TRUST_LOCK_RETRY_MS = 20;
-const INVALID_LOCK_STALE_MS = 30_000;
+const TRUST_LOCK_STALE_MS = 30_000;
 
 /**
  * What a grant covers. `upstream` is the canonical remote URL the project's
@@ -240,17 +240,20 @@ export class FileToolTrustStore {
       if (typeof owner.pid === 'number' && Number.isInteger(owner.pid) && owner.pid > 0) {
         try {
           process.kill(owner.pid, 0);
-          return false;
         } catch (error) {
-          return (error as NodeJS.ErrnoException).code === 'ESRCH';
+          if ((error as NodeJS.ErrnoException).code === 'ESRCH') return true;
         }
+        // A live pid is not proof of a live owner: pids recycle, and a lock
+        // orphaned by an unclean shutdown can later name another process.
+        // Every real holder releases in milliseconds, so still apply the age
+        // limit before deciding this record can block grants indefinitely.
       }
     } catch {
       // An exclusive create briefly exposes an empty file before its owner JSON
       // is written. Only reclaim an invalid record once it is clearly abandoned.
     }
     try {
-      return Date.now() - (await stat(this.#lockPath)).mtimeMs > INVALID_LOCK_STALE_MS;
+      return Date.now() - (await stat(this.#lockPath)).mtimeMs > TRUST_LOCK_STALE_MS;
     } catch {
       return false;
     }

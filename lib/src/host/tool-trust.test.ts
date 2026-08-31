@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, symlink, unlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -104,6 +104,35 @@ describe('FileToolTrustStore', () => {
     // Long-lived instances also re-read the shared file instead of retaining a
     // cache that cannot observe another window's grant.
     expect(await first.isTrusted([upstream])).toBe(true);
+  });
+
+  it('reclaims an aged lock even when its pid has been recycled', async () => {
+    const stateDir = join(root, 'state');
+    const lockPath = join(stateDir, 'tool-trust.json.lock');
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(lockPath, JSON.stringify({ pid: process.pid, token: 'orphaned' }));
+    const stale = new Date(Date.now() - 31_000);
+    await utimes(lockPath, stale, stale);
+
+    const store = new FileToolTrustStore(stateDir);
+    const grant = store.grant(folderGrantKey('/repo'), 'folder');
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const reclaimed = await Promise.race([
+      grant.then(() => {
+        if (timeout) clearTimeout(timeout);
+        return true;
+      }),
+      new Promise<false>((resolve) => {
+        timeout = setTimeout(() => resolve(false), 250);
+      }),
+    ]);
+    // Keep a mutation that refuses to age out a live pid from leaving a retry
+    // loop behind after the assertion has proved the regression.
+    if (!reclaimed) await unlink(lockPath).catch(() => {});
+    await grant;
+
+    expect(reclaimed).toBe(true);
+    expect(await store.isTrusted([folderGrantKey('/repo')])).toBe(true);
   });
 
   it('starts empty on a corrupt file rather than failing every tool', async () => {
