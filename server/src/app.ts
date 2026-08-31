@@ -5,7 +5,7 @@
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, unlink } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
 import { Hono } from 'hono';
@@ -25,6 +25,7 @@ import {
   fromBase64Url,
   getWebCrypto,
   helloResponse,
+  isEnrollmentOffer,
   toBase64Url,
   utf8Decode,
   boundedPushText,
@@ -32,6 +33,7 @@ import {
   verifyPushSubscribeSignature,
 } from 'server-lib-common';
 import type {
+  EnrollmentOffer,
   HostEnrollRequest,
   HostEnrollResponse,
   HostsResponse,
@@ -87,6 +89,11 @@ export interface AppConfig {
   /** Directory holding the JSON state files (docs/specs/server.md, "State files"). */
   readonly stateDir: string;
   /**
+   * Absolute path of the installer's `EnrollmentOffer`. Absent or `null` — the
+   * default everywhere but an installed server — refuses every `enrollToken`.
+   */
+  readonly enrollTokenFile?: string | null;
+  /**
    * Directory of the built Pocket web app (`lib`'s `dist-pocket`). When it
    * exists it is served statically at `/*`; otherwise `GET /` is a stub telling
    * you how to build it. API and `/ws` routes always take precedence.
@@ -132,8 +139,8 @@ type AppEnv = { Variables: { session: Session; host: StoredHost } };
 
 /** Sessions live 12 hours (server.md: "hours-scale TTL"). */
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-/** A small fixed delay on password failure — the extent of POC brute-force hardening. */
-const PASSWORD_FAILURE_DELAY_MS = 250;
+/** A small fixed delay on a rejected credential — the extent of POC brute-force hardening. */
+const CREDENTIAL_FAILURE_DELAY_MS = 250;
 
 /**
  * In-memory session store. Exposed on the created app so the `/ws/client` path
@@ -221,18 +228,51 @@ export function createApp(config: AppConfig): CreatedApp {
   const passwordOk = (provided: unknown): boolean =>
     typeof provided === 'string' && timingSafeEqual(sha256(provided), expectedPasswordHash);
 
+  // Every rejected credential answers 401 the same way, after the same delay.
+  async function credentialFailure(c: Context<AppEnv>, error: string): Promise<Response> {
+    await delay(CREDENTIAL_FAILURE_DELAY_MS);
+    return c.json({ error }, 401);
+  }
+
   // Read a JSON body and enforce the setup password. Returns the parsed body, or
-  // a ready 401 `Response` (after the standard failure delay) the caller returns
-  // as-is — so the three password-gated routes share one policy.
+  // a ready 401 `Response` the caller returns as-is — so the password-gated
+  // routes share one policy.
   async function readPasswordGated<T extends { password: unknown }>(
     c: Context<AppEnv>,
   ): Promise<T | Response> {
     const body = await readJson<T>(c);
     if (!body || !passwordOk(body.password)) {
-      await delay(PASSWORD_FAILURE_DELAY_MS);
-      return c.json({ error: 'invalid setup password' }, 401);
+      return credentialFailure(c, 'invalid setup password');
     }
     return body;
+  }
+
+  /**
+   * Redeem the installer's one-time enroll token (server.md, Configuration ->
+   * `DORMOUSE_ENROLL_TOKEN_FILE`). Answers `null` when the caller may enroll,
+   * otherwise the `Response` to return.
+   *
+   * Unconfigured, absent, malformed, wrong-shaped and wrong-token all answer
+   * identically: none of them may tell a caller which one it hit. The offer's
+   * own `origin` is informational — it tells a *Host* where to enroll, and this
+   * server is what wrote the file — so it is not compared here.
+   */
+  async function redeemEnrollToken(c: Context<AppEnv>, supplied: string): Promise<Response | null> {
+    const path = config.enrollTokenFile ?? null;
+    // Read per attempt, never cached at boot: the installer rewrites this file
+    // on every upgrade, and a redemption deletes it.
+    const offer = path === null ? null : await readEnrollmentOffer(path);
+    if (path === null || offer === null || !secretEquals(supplied, offer.token)) {
+      return credentialFailure(c, UNAUTHORIZED_ERROR);
+    }
+    // Invalidate before enrolling: a token that cannot be deleted must not be
+    // redeemable, or a failed unlink leaves a single-use secret usable forever.
+    try {
+      await unlink(path);
+    } catch {
+      return c.json({ error: 'could not invalidate the enroll token' }, 500);
+    }
+    return null;
   }
 
   const app = new Hono<AppEnv>();
@@ -372,12 +412,25 @@ export function createApp(config: AppConfig): CreatedApp {
     return c.json(res);
   });
 
-  // --- Host enrollment: password-gated, appends to hosts.json --------------
+  // --- Host enrollment: credential-gated, appends to hosts.json ------------
 
   app.post(API_ROUTES.hostEnroll, async (c) => {
-    const body = await readPasswordGated<HostEnrollRequest>(c);
-    if (body instanceof Response) return body;
-    const label = typeof body.label === 'string' ? body.label : '';
+    const body = await readJson<HostEnrollRequest>(c);
+    const password = body?.password;
+    const enrollToken = body?.enrollToken;
+    // Exactly one credential. Trying both in turn would let a spent enroll
+    // token fall through to the password, leaving which one authorized the
+    // enrollment ambiguous on both sides.
+    if ((typeof password === 'string') === (typeof enrollToken === 'string')) {
+      return c.json({ error: 'supply exactly one of password or enrollToken' }, 400);
+    }
+    if (typeof enrollToken === 'string') {
+      const failure = await redeemEnrollToken(c, enrollToken);
+      if (failure) return failure;
+    } else if (!passwordOk(password)) {
+      return credentialFailure(c, 'invalid setup password');
+    }
+    const label = typeof body?.label === 'string' ? body.label : '';
     const host = await hostStore.enroll(label);
     // The Host enforces `origin`/`rpId` as its ConnectionPolicy (server.md).
     const res: HostEnrollResponse = {
@@ -820,6 +873,25 @@ function pocketCacheControl(requestPath: string): string {
 /** SHA-256 of a UTF-8 string, as a fixed 32-byte buffer. */
 function sha256(text: string): Buffer {
   return createHash('sha256').update(text, 'utf8').digest();
+}
+
+/** Constant-time compare of two secrets, via digests so lengths always match. */
+function secretEquals(a: string, b: string): boolean {
+  return timingSafeEqual(sha256(a), sha256(b));
+}
+
+/**
+ * The installer's enrollment offer, or `null` for every way it can fail to be
+ * one — absent, unreadable, not JSON, wrong shape. The caller answers all of
+ * those the same, so they are not distinguished here either.
+ */
+async function readEnrollmentOffer(path: string): Promise<EnrollmentOffer | null> {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(path, 'utf8'));
+    return isEnrollmentOffer(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function delay(ms: number): Promise<void> {

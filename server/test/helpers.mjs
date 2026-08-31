@@ -37,6 +37,7 @@ export async function freshApp({
   requireUserVerification,
   vapidPublicKey,
   pushSender,
+  enrollTokenFile,
 } = {}) {
   const stateDir = await mkdtemp(join(tmpdir(), 'dormouse-server-'));
   const created = createApp({
@@ -47,6 +48,7 @@ export async function freshApp({
     requireUserVerification,
     vapidPublicKey,
     pushSender,
+    enrollTokenFile,
   });
   return { ...created, stateDir, origin, rpId: new URL(origin).hostname };
 }

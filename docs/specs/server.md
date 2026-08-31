@@ -47,6 +47,7 @@ This table is the whole of what `server/src/` reads from the environment.
 | `DORMOUSE_VAPID_SUBJECT`  | `mailto:`/`https:` contact for push-service operators (RFC 8292). Defaults to `DORMOUSE_ORIGIN` when that origin is https and not loopback; otherwise there is no default and push stays off. Validated at startup — an invalid value, a loopback contact included, exits. |
 | `DORMOUSE_RUNTIME_FILE`   | Absolute path the server records `{pid, releaseId, port, origin, startedAt}` into once it has **bound**, mode `0600`. Unset — dev, containers, every test — writes nothing. A relative value is a `ConfigError`: the wrapper runs under a service manager whose working directory is not the installer's, so it would land somewhere neither side can predict. Outside `DORMOUSE_STATE_DIR`: runtime truth about one process, not durable state that gets backed up and restored. |
 | `DORMOUSE_RELEASE_ID`     | The release directory's name, supplied by the installer's `run-server` wrapper, recorded in the runtime file. `null` when the server was not started by an installer. |
+| `DORMOUSE_ENROLL_TOKEN_FILE` | Absolute path of the installer's enrollment offer — `{origin, token, mintedAt}`, the token 64 hex characters (`server-lib-common/src/remote/enroll-offer.ts`) — which `POST /api/host/enroll` accepts in place of the setup password. Unset, one-click enrollment is off. A relative value is a `ConfigError`, for the reason above. **Read fresh on every attempt**, since the installer rewrites it on upgrade. **Single-use: the file is unlinked before the Host is enrolled**, so a token that cannot be invalidated is never redeemed. Unconfigured, absent, unreadable, malformed and wrong all answer one 401 body after the same delay as a wrong password — nothing distinguishes them. |
 
 **The server itself always speaks plain HTTP**, and WebAuthn requires a secure
 context: `localhost` works for development; a real phone needs TLS in front
@@ -244,7 +245,7 @@ This table is the whole route surface. Paths and request/response shapes live in
 | `POST /api/signin/finish`        | —              | Verifies the assertion and issues a 12-hour in-memory session token |
 | `POST /api/reauth/begin`         | session token  | Issues a presence challenge for the current session |
 | `POST /api/reauth/finish`        | session token  | Verifies like sign-in and refreshes presence without replacing the token or relay socket |
-| `POST /api/host/enroll`          | setup password | Enrolls a Host, appends `hosts.json`, and mirrors the user-verification policy |
+| `POST /api/host/enroll`          | setup password or one-time enroll token | Enrolls a Host, appends `hosts.json`, and mirrors the user-verification policy. Exactly one credential — both, or neither, is a 400 |
 | `GET /api/hosts`                 | session token  | Enrolled hosts + whether each is currently connected |
 | `GET /api/push/config`           | —              | Returns the public VAPID key, or `null` when push is unconfigured |
 | `POST /api/push/challenge`       | session token  | Issues a pool-wide nonce for the device signature; Host binding lives in the signature |
@@ -272,7 +273,9 @@ token with 401 and the shared `UNAUTHORIZED_ERROR` from
 `server-lib-common/src/remote/wire.ts`. That exact string is load-bearing:
 Pocket keys its "sign in again" recovery on it, and a bare 401 is ambiguous,
 since a wrong setup password and a rejected device signature answer 401 as well
-([pocket-app.md](./pocket-app.md) -> An expired session drops to sign-in).
+([pocket-app.md](./pocket-app.md) -> An expired session drops to sign-in). A
+rejected enroll token answers the same string, which costs nothing: only a Host
+sends one, and Pocket never calls that route.
 
 ### Web Push
 
