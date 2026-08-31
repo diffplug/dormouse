@@ -5,7 +5,9 @@
  * half that is: the terminal's while the tool is booting or pinned back, the
  * browser chrome once it serves. Delegating rather than reimplementing keeps
  * one header per capability — a tool's browser gets the same URL editor, nav
- * buttons, and Display modal a plain browser Surface has.
+ * buttons, and Display modal a plain browser Surface has, minus pop-out: a
+ * tool has no third renderer to land in (`docs/specs/dor-tool.md` ->
+ * Declaring tools).
  */
 import { useContext } from 'react';
 import { Terminal, Globe } from '@phosphor-icons/react';

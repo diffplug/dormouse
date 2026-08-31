@@ -19,6 +19,7 @@ import {
   openAgentBrowserScreenModal,
 } from './agent-browser-screen';
 import { hostPathDisplay, tabDisplayTitle } from './browser-url';
+import { isToolParams } from './browser-surface';
 import { clearAgentBrowserSessionClosed, isAgentBrowserSessionClosed } from './agent-browser-sessions';
 import {
   EDIT_OPS,
@@ -293,7 +294,7 @@ export class AgentBrowserSurfaceController {
     this.id = id;
     // A Surface's kind never changes over its life (a tool's capabilities come
     // and go, its identity does not), so this is safe to seed once.
-    this.isTool = params.surfaceType === 'tool';
+    this.isTool = isToolParams(params);
     this.session = params.session;
     this.binaryPath = params.binaryPath;
     this.wsPort = params.wsPort;
