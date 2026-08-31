@@ -1255,7 +1255,13 @@ export function Wall({
       });
       lath.store.updateParams(id, { toolPending: undefined });
       // The launch asked for this, and it was withheld so the prompt could be seen.
-      if (pending.minimized) minimizePane(id);
+      if (pending.minimized) {
+        // Minimizing detaches the leaf before it can mount, so the PTY that
+        // consumes the staged opts has to be created here — the same reason
+        // `createSplitSurface` spawns before `addDoor` / `minimizePane`.
+        getOrCreateTerminal(id);
+        minimizePane(id);
+      }
     } finally {
       toolApprovalsInFlightRef.current.delete(id);
     }

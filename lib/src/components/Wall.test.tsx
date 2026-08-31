@@ -999,6 +999,82 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('starts an approved tool before applying its deferred minimize', async () => {
+    setToolsEnabled(true);
+    let toolId: string | undefined;
+    let consumedOpts: (typeof pendingShellOpts extends Map<string, infer T> ? T : never) | undefined;
+    const getTerminalSpy = vi.spyOn(terminalRegistry, 'getOrCreateTerminal').mockImplementation((id) => {
+      consumedOpts = pendingShellOpts.get(id);
+      pendingShellOpts.delete(id);
+      fake.spawnPty(id);
+      return {} as ReturnType<typeof terminalRegistry.getOrCreateTerminal>;
+    });
+    let lookupCount = 0;
+    const toolControl = vi.fn(async (request: { op: 'lookup' | 'trust' }) => {
+      if (request.op === 'trust') return { status: 'trust-recorded' as const };
+      lookupCount += 1;
+      if (lookupCount === 1) {
+        return {
+          status: 'untrusted' as const,
+          projectRoot: '/repo',
+          path: '/repo/dormouse.yml',
+          name: 'storybook',
+          run: 'pnpm storybook',
+          upstreamUrl: null,
+        };
+      }
+      return {
+        status: 'ok' as const,
+        projectRoot: '/repo',
+        path: '/repo/dormouse.yml',
+        name: 'storybook',
+        run: 'pnpm storybook',
+        render: 'iframe' as const,
+        port: 'announced' as const,
+        key: null,
+        warnings: [],
+      };
+    });
+    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = toolControl;
+
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      });
+      await flush();
+
+      let response: { ok: boolean; result?: { surfaceId: string } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.tool,
+            params: { name: 'storybook', cwd: '/repo', minimized: true, fresh: false },
+            respond: (result: typeof response) => { response = result; },
+          },
+        }));
+      });
+      await flush();
+      toolId = response!.result!.surfaceId;
+      expect(fake.hasPty(toolId)).toBe(false);
+
+      const allow = Array.from(container.querySelectorAll('button'))
+        .find((button) => button.textContent?.includes('Always allow for folder'))!;
+      await act(async () => { allow.click(); });
+      await flush();
+
+      expect(fake.hasPty(toolId)).toBe(true);
+      expect(getTerminalSpy).toHaveBeenCalledWith(toolId);
+      expect(consumedOpts).toMatchObject({ cwd: '/repo', command: 'pnpm storybook', untouched: true });
+      expect(pendingShellOpts.has(toolId)).toBe(false);
+      expect(container.querySelector(`[data-door-id="${toolId}"]`)).not.toBeNull();
+      expect(container.querySelector(`[data-lath-leaf="${toolId}"]`)?.hasAttribute('data-lath-parked')).toBe(true);
+    } finally {
+      if (toolId && fake.hasPty(toolId)) act(() => fake.killPty(toolId));
+      getTerminalSpy.mockRestore();
+      setToolsEnabled(false);
+    }
+  });
+
   it('reports a reused minimized tool as visible after reattaching it', async () => {
     setToolsEnabled(true);
     const toolId = 'tool-door';
