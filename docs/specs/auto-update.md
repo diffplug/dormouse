@@ -52,11 +52,7 @@ In Vite dev mode (`pnpm dev:standalone`), `installPendingUpdate()` drops the pen
 
 ## Sidecar teardown on Windows
 
-**On Windows `installPendingUpdate()` must `invoke` `kill_sidecar_now` and await it before `install()`** — the NSIS installer overwrites files inside the bundled sidecar, and Windows refuses to overwrite a native module (node-pty's `conpty.node`) that a live process still has loaded, so if the Node sidecar is running when NSIS reaches `node_modules`, the install fails with *"Error opening file for writing: …\_up_\sidecar\node_modules\node-pty\prebuilds\win32-x64\conpty.node"*. Rust's `RunEvent::Exit` sidecar shutdown cannot cover this: `install()` force-kills the app and NSIS starts copying immediately, so that handler either never runs or is still polling for the sidecar's exit while NSIS is already writing. (By quit time the orchestrator's graceful teardown has killed the sidecar's *PTYs*, but the sidecar process itself is still alive holding those native modules.)
-
-Because `pty-core` spawns with `useConptyDll: true` on Windows (see [terminal-escapes.md](terminal-escapes.md#osc-color-queries-on-windows-require-the-bundled-conpty)), the same hazard covers two more bundled files: the sidecar additionally `LoadLibrary`s node-pty's `conpty/conpty.dll`, and each pseudoconsole runs an `OpenConsole.exe` child process. `conpty.dll` is released when the sidecar exits (same as `conpty.node`); the `OpenConsole.exe` children run inside the sidecar's job object (`process_wrap`'s `JobObject`), so terminating the sidecar tears them down too.
-
-`kill_sidecar_now` is synchronous on the Rust side: it calls `start_kill()`, then polls `try_wait` every 20 ms (capped at ~5s) until the process has actually exited and released its file handles. **Poll `try_wait`, never the job-object `wait()`** — `wait()` consumes a completion-port message the reaper thread may already have drained, so a sidecar that had crashed earlier would block forever. The ~5s cap means a wedged sidecar cannot stall quit indefinitely. macOS and Linux can replace open files in place, so they skip the kill and rely on the existing `RunEvent::Exit` cleanup.
+**On Windows `installPendingUpdate()` must await `kill_sidecar_now` before `install()`** so NSIS can replace the sidecar's loaded node-pty modules and ConPTY children (rationale). The Rust command calls `start_kill()`, then polls `try_wait` every 20 ms for at most ~5 seconds. **Never use the job-object `wait()`**, whose completion message may already have been consumed (rationale). macOS and Linux skip this step because they can replace open files.
 
 ## Update notice in the Baseboard
 
@@ -116,42 +112,15 @@ Single key: `dormouse:update-result`
 | File | Role |
 |------|------|
 | [`standalone/src/updater.ts`](../../standalone/src/updater.ts) | State machine, update check, user-approved download, quit-time install (`hasPendingUpdate` / `installPendingUpdate`, called by the quit orchestrator), post-install markers, debug-report assembly |
-| [`standalone/src/updater.test.ts`](../../standalone/src/updater.test.ts) | Marker read/clear, the 5s probe delay, approval-gated download, marker-before-install ordering, and the Windows kill-before-install ordering |
+| [`standalone/src/updater.test.ts`](../../standalone/src/updater.test.ts) | Pins the updater lifecycle and ordering |
 | [`standalone/src/UpdateBanner.tsx`](../../standalone/src/UpdateBanner.tsx) | Pure presentational component — renders inline notice content for the Baseboard |
 | [`standalone/src/UpdateDebugModal.tsx`](../../standalone/src/UpdateDebugModal.tsx) | Failure modal: issue search + copyable report |
 | [`standalone/src/quit.ts`](../../standalone/src/quit.ts) | Quit orchestrator (owned by `docs/specs/standalone.md` §Quit flow); calls `installPendingUpdate()` as the last teardown step |
 | [`standalone/src/main.tsx`](../../standalone/src/main.tsx) | Owns `<ConnectedUpdateBanner />` (banner + modal wiring), passes it as the `baseboardNotice` prop to `<App />`, calls `startUpdateCheck()` after restore |
+| [`standalone/src-tauri/tauri.conf.json`](../../standalone/src-tauri/tauri.conf.json) | Updater endpoint, public key, artifact mode, and Windows install mode |
+| [`standalone/src-tauri/src/lib.rs`](../../standalone/src-tauri/src/lib.rs) | Plugin registration, sidecar teardown, and update-log tail |
+| [`standalone/src-tauri/capabilities/default.json`](../../standalone/src-tauri/capabilities/default.json) | Updater, version, and shell permissions |
 
 ## Configuration
 
-In `standalone/src-tauri/tauri.conf.json`:
-
-```json
-"plugins": {
-  "updater": {
-    "pubkey": "<ed25519 public key>",
-    "endpoints": ["https://dormouse.sh/standalone-latest.json"],
-    "windows": { "installMode": "passive" }
-  }
-}
-```
-
-The Rust side registers the plugin with `tauri_plugin_updater::Builder::new().build()` in `lib.rs`. The install step itself runs entirely in JS; the process exit is the quit orchestrator's `quit_proceed` (`docs/specs/standalone.md` §Quit flow). Two custom Rust commands serve the updater — `kill_sidecar_now` (shared with the quit path) and `read_update_log` — and custom commands need no capability entry. The plugin permissions the updater does need are in `standalone/src-tauri/capabilities/default.json`: `updater:default`, plus `core:app:allow-version` (marker versions, changelog URL) and `shell:default` (opening the changelog and issue search).
-
-## Dependencies
-
-- `@tauri-apps/plugin-updater` — update check, download, install
-- `@tauri-apps/api/core` — `invoke('kill_sidecar_now')` before install on Windows, `invoke('read_update_log')` for the debug report
-- `@tauri-apps/api/app` — `getVersion()` for the "from" version in markers and the changelog URL
-- `@tauri-apps/plugin-shell` — `open()` for the changelog and issue-search links
-- `tauri-plugin-updater` Rust crate — registered in `Cargo.toml` and `lib.rs`
-
-## Design decisions
-
-**Why install on quit after approval, not immediately?** Dormouse is a terminal app with running processes; a mid-session relaunch would kill every session, while at quit time the user has already decided to close their terminals.
-
-**Why no silent download?** Update bundles are large, fail for environment-specific reasons, and would surprise a user who did not opt into changing the app — so the launch probe is silent, but download and install wait for explicit approval.
-
-**Why the Baseboard, not a top banner?** A top banner pushes terminal content down; the Baseboard is already a status strip, so the notice occupies unused space in an existing element instead of adding a new one.
-
-**Why `localStorage` instead of Tauri's store plugin?** It persists across launches in Tauri's webview, needs no extra dependency, is scoped to the app, and resetting app data cleans the markers up naturally.
+The config fixes the endpoint at `https://dormouse.sh/standalone-latest.json`, pins the production Ed25519 public key that `scripts/sign-and-deploy.sh` signs releases against (`docs/specs/deploy.md`), and selects passive NSIS installation. Rust registers `tauri-plugin-updater`; the JS install step and the quit orchestrator own the lifecycle. Custom commands need no capability entry, while updater, app-version, and shell-opening calls do.

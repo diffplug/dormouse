@@ -1,21 +1,4 @@
-/**
- * Persistent state for the selfhost POC (docs/specs/server.md, "State files"):
- *
- *   $DORMOUSE_STATE_DIR/account.json
- *     { accountId: "owner", passkeys: [{ credentialId, publicKey, label, createdAt }] }
- *   $DORMOUSE_STATE_DIR/hosts.json
- *     [{ hostId, hostToken, label, enrolledAt }]
- *   $DORMOUSE_STATE_DIR/push-subscriptions.json
- *     [{ hostId, devicePublicKey, endpoint, keys, vapidPublicKey, subscribedAt }]
- *   $DORMOUSE_STATE_DIR/vapid.json
- *     { publicKey, privateKey, createdAt }   (only when not supplied by env)
- *
- * Deliberately not a database: one account, a handful of passkeys and hosts,
- * hand-editable for revocation. Writes go through a temp-file-plus-rename so a
- * crash mid-write can never leave a half-written (and therefore unparseable)
- * file, and mutations are serialized through a promise chain so two concurrent
- * appends cannot clobber each other (read-modify-write races).
- */
+/** JSON-file state stores; `docs/specs/server.md` → "State files" owns their schemas and invariants. */
 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';

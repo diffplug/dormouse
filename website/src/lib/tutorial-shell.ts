@@ -18,12 +18,8 @@ export type StartProgram = (
   onExit: () => void,
 ) => InteractiveProgram | null;
 
-// VS Code shell-integration sequences (`docs/specs/terminal-escapes.md`). The
-// fake shell reports command boundaries like a real integrated shell, so
-// playground panes get the same terminal state a native pane would. This is
-// load-bearing, not decoration: WATCHING is keyed on the running command's name
-// (`docs/specs/alert.md`), so without these no playground pane could be alerted
-// on at all — the bell would only ever report "nothing is running".
+// Report real command boundaries: WATCHING is keyed on the running command.
+// See docs/specs/tutorial.md → "Fake shell behavior".
 const OSC_PROMPT_START = '\x1b]633;A\x07';
 const OSC_PROMPT_END = '\x1b]633;B\x07';
 const OSC_COMMAND_START = '\x1b]633;C\x07';

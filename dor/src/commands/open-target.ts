@@ -1,21 +1,5 @@
-/**
- * Browser-open target resolution shared by `dor iframe` and `dor ab open`.
- *
- * Both entry points accept, wherever they take an absolute URL:
- *  - a terminal Surface handle (`surface:N`, `surface:<stable-id>`,
- *    `surface:self`, `surface:focused`) — resolved to the dev server it owns via
- *    the host port scan (`surface.resolveOpen`), collapsing the
- *    `dor list --ports` → `dor ab open http://localhost:<port>` dance;
- *  - a bare `:port` — sugar for a localhost URL (`:5173` → `http://localhost:5173/`);
- *  - a schemeless `host:port` — inferred to `http://` (`localhost:5173`,
- *    `box.ts.net:3000`, `192.168.1.5:8080`). The explicit port is the signal
- *    that this is a dev/infra server, which is http far more often than not
- *    (loopback, LAN containers, Tailnet peers); public HTTPS lives on 443 with
- *    no port. An explicit scheme is always honored, so `https://…` still works.
- *
- * A plain URL is normalized/forwarded unchanged. See docs/specs/dor-cli.md
- * (Browser Open Target Resolution) and docs/specs/dor-browser.md.
- */
+/** Target normalization shared by `dor iframe` and `dor ab open`; see
+ * docs/specs/dor-cli.md → "Browser Open Target Resolution". */
 
 import { errorMessage } from './shared.js';
 import type { ControlClient, ParseResult } from './types.js';

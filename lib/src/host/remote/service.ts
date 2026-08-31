@@ -1,21 +1,7 @@
 /**
- * The remote Host as a service in the process that owns the PTYs.
- *
- * It holds everything an access decision depends on — the relay socket, the
- * enrollment, the ACL, the pairing ceremony — and serves remote-api v1 through
- * an injected {@link HostSurfaceProvider}. The webview keeps only what a webview
- * is for: the approval modal, the console hook, and answering what its own panes
- * are called and how big they are. Nothing a webview says can widen access.
- *
- * Every dependency is injected, so this module is environment-free: it runs in
- * the Tauri sidecar (`sidecar-entry.ts`) and in the VS Code extension host
- * (`vscode-ext/src/remote-host.ts`), and its tests drive it with a fake socket
- * and an in-memory store.
- *
- * Commands arrive from the webview over the bridge in `service-protocol.ts` and
- * are dispatched in {@link RemoteHostService.handleCommand}. The two that carry
- * no reply — `answer` and `notify` — belong to whoever built the provider and
- * are settled there (`sidecar-entry.ts`), so they never reach this dispatch.
+ * Environment-free remote Host service shared by both Node hosts; see
+ * `docs/specs/server.md` → "Host side". Surface ownership is injected through
+ * {@link HostSurfaceProvider}.
  */
 
 import { MAX_PENDING_PAIRINGS } from 'server-lib-common';

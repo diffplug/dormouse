@@ -23,7 +23,7 @@ One further parse site is **strip-only**: the remote Host in the Tauri sidecar r
 
 ### `pty:data` strip semantics
 
-After parsing, supported sequences are **consumed and not re-emitted** — including the ones whose payload turns out to be empty or unparseable, and every unrecognized `OSC 1337` subcommand. `OSC 8` hyperlinks are the one exception: they stay in `pty:data` so xterm.js owns hyperlink regions and hover rendering, while Dormouse supplies the activation-confirmation handler. The [known-unimplemented](#known-unimplemented-iterm2-and-clipboard-capable-sequences) `OSC 50` / `OSC 52` are also consumed. Every other OSC family passes through to xterm.js unchanged, so xterm.js can handle standard behavior Dormouse does not model.
+After parsing, supported sequences are **consumed and not re-emitted** — including the ones whose payload turns out to be empty or unparseable, every unrecognized `OSC 1337` subcommand, and `OSC 50` / `OSC 52`. `OSC 8` hyperlinks are the one exception: they stay in `pty:data` so xterm.js owns hyperlink regions and hover rendering, while Dormouse supplies the activation-confirmation handler. Every other OSC family passes through to xterm.js unchanged, so xterm.js can handle standard behavior Dormouse does not model.
 
 The platform then sends two streams to the webview:
 
@@ -56,6 +56,9 @@ For replay (`pty:replay`) the frontend re-parses the buffered raw stream during 
 | `OSC 633 ; P ; Cwd=<cwd> ST` | CWD (VS Code) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 777 ; notify ; <title> ; <body> ST` | rxvt/WezTerm notification | [alert.md](alert.md#terminal-reports) |
 | `OSC 1337 ; CurrentDir=<cwd> ST` | CWD (iTerm2 compatibility) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
+| `OSC 1337 ; <anything else> ST` | Unsupported iTerm2 extension; consumed and ignored. | This spec |
+| `OSC 50 ; <font> ST` | Unsupported dynamic font change; consumed and ignored. | This spec |
+| `OSC 52 ; <selection> ; <data> ST` | Unsupported clipboard write; consumed and ignored. Untrusted PTY output cannot write the user's clipboard. | [mouse-and-clipboard.md](mouse-and-clipboard.md) |
 
 (`BEL` is not itself an OSC; it has a row because a standalone `BEL` is parsed and stripped at the same boundary as the OSCs. A `BEL` that terminates an OSC is part of that sequence, never a bell.)
 
@@ -124,7 +127,7 @@ Environment for spawned PTYs:
 
 The `CSI > q` answer is `DCS > | iTerm2 <version> ST`, matching iTerm2's extended device-attributes shape. **Never advertise** feature-specific support before the behavior exists.
 
-The identity provokes more iTerm2 escape codes than Dormouse implements, so **unsupported escape codes must fail inertly**: consumed or ignored, with no visible terminal garbage, privilege escalation, clipboard access, file access, or focus stealing. Applies to OSC and CSI alike (see [Known-unimplemented iTerm2 and clipboard-capable sequences](#known-unimplemented-iterm2-and-clipboard-capable-sequences) and [Pass-through and fail-inertly](#pass-through-and-fail-inertly)).
+The identity provokes more iTerm2 escape codes than Dormouse implements, so **unsupported escape codes must fail inertly**: consumed or ignored, with no visible terminal garbage, privilege escalation, clipboard access, file access, or focus stealing. Applies to OSC and CSI alike (see [Supported OSCs](#supported-oscs) and [Pass-through and fail-inertly](#pass-through-and-fail-inertly)).
 
 ## Shell-integration injection
 
@@ -153,26 +156,7 @@ Injection is wired in `applyShellIntegration`, called from `resolveSpawnConfig` 
 
 When injection isn't possible (cmd.exe, an unknown shell, scripts not present) or simply doesn't take, Dormouse falls back to its keystroke heuristic: it reads the submitted command off the rendered prompt line and synthesizes `commandStart{source:'user_input'}`, with no real exit codes and only a best-effort idle transition. The fallback rules — prompt-shape learning, submit parsing, and the per-pane promotion that retires the heuristic on the first authentic OSC boundary — are owned by [terminal-state.md](terminal-state.md#keystroke-fallback).
 
-> Packaging caveat: the zsh scripts are dotfiles (`.zshrc`, `.zshenv`, `.zprofile`). Confirm the VS Code `.vsix` actually includes `dist/shell-integration/.z*` — if a packaging step strips dotfiles, VS Code silently degrades to the keystroke fallback.
-
-## Known-unimplemented iTerm2 and clipboard-capable sequences
-
-Dormouse does not implement the following, and all of them **fail inertly** per the rule above — consumed and ignored, never forwarded to xterm.js. They are mostly iTerm2-proprietary; `OSC 50` (font) and `OSC 52` (clipboard) are standard xterm extensions listed here because the iTerm2 identity prompts tools to emit them and they have security implications.
-
-| Sequence | Purpose | Reason for non-support |
-|---|---|---|
-| `OSC 1337 ; SetMark` | Pin a navigable scrollback mark | No mark UI in Dormouse. |
-| `OSC 1337 ; CursorShape=...` | Cursor shape override | Cursor shape comes from Dormouse settings, not the PTY. |
-| `OSC 1337 ; SetBadgeFormat=...` | Display a badge string in the terminal | No badge UI. |
-| `OSC 1337 ; ClearScrollback` | Clear scrollback buffer | xterm.js handles native clear-screen sequences. |
-| `OSC 1337 ; CopyToClipboard=...` / `EndCopy` | Programmatic clipboard write | Security: untrusted PTY output cannot write the user's clipboard. See [mouse-and-clipboard.md](mouse-and-clipboard.md). |
-| `OSC 1337 ; RequestUpload=...` | Begin file upload from terminal | No file-transfer protocol. |
-| `OSC 1337 ; File=...` | Inline image protocol | No inline-image rendering. |
-| `OSC 1337 ; SetUserVar=...` | Set a per-tab user variable | No user-variable surface. |
-| `OSC 50 ; <font> ST` | Set font dynamically | Font is host-controlled. |
-| `OSC 52 ; <selection> ; <data> ST` | Programmatic clipboard write | Security: same rationale as `CopyToClipboard`. |
-
-The `OSC 1337` rows are illustrative, not a closed set: *every* `1337` payload other than `CurrentDir=` is consumed, named here or not. `OSC 50` and `OSC 52` are matched by code; every other unrecognized OSC family reaches xterm.js untouched.
+> **The VS Code `.vsix` must include zsh's dotfiles** (`dist/shell-integration/.z*`), or zsh silently degrades to the keystroke fallback.
 
 Two downstream consumers are escape-aware but do not parse the PTY boundary:
 `lib/src/lib/terminal-controls.ts` strips presentation controls under

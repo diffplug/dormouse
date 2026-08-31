@@ -126,17 +126,7 @@ Several awaits may park on one Session. They share a single claimant, so one com
 
 In VS Code the `AlertManager` lives in the extension host while `dor` control requests land in a webview, so an await crosses that boundary: the webview posts `alert:await` and, if it gives up, `alert:awaitCancel`; the host answers **exactly one** `alert:awaitResult` per request — a cancel included, so a claim is never released twice. The wait itself never leaves the host. A disposing webview **must cancel everything it had parked**, because a caller that cannot be answered must not go on absorbing, and **must answer those requests itself *synchronously*** — the cancelled outcome would otherwise arrive a microtask after the router stopped posting. `cancelled` has no wire outcome of its own — the webview reports it to `dor` as an error, which is also what forgets the in-flight control request. Source of truth: `vscode-ext/src/message-router.ts` and `VSCodeAdapter.alertAwait`; the other hosts run the `AlertManager` in-process and call `awaitCompletion` directly. The Pocket phone adapter has no `dor` and protocol-v1 carries no await, so it settles any request `cancelled` at once rather than parking a promise that can never resolve.
 
-| Situation | Outcome |
-|---|---|
-| Already ringing at call time | Resolves immediately, `waitedMs: 0`, cause = that ring's source. |
-| `quiet`, peer mid-turn and animating | Parks; resolves `quiet` on the settle. |
-| `quiet`, WATCHING ring latched but output has resumed | Parks; the stale ring is left for the human and the await resolves `quiet` on the next settle. |
-| `quiet`, peer already delivered its answer | Nothing running, no output within the grace window → `idle`. |
-| `quiet`, silent build running | A command is running, so no grace window. Resolves `exit` when it exits. |
-| `exit`, command hangs on an interactive prompt | Blocks to the ceiling → `timeout`. `quiet` is the answer for callers who want waking when a build stalls. |
-| Peer emits `OSC 9` "needs input" | `quiet` resolves `bell`; `exit` ignores it. |
-| PTY exits, or the Session is removed | Every await still parked resolves `died`. A command-exit dispatch runs first, so a peer that ends by finishing a command resolves normally instead. |
-| The manager is disposed | Everything parked resolves `cancelled`. |
+**A PTY exit or Session removal resolves every waiter still parked as `died`**, after command-finish dispatch gets first chance to resolve normally. Manager disposal resolves every waiter as `cancelled`.
 
 ## WATCHING Track
 

@@ -1,19 +1,6 @@
 /**
- * The selfhost server (docs/specs/server.md): accounts, passkeys, push, relay.
- *
- * Built as a factory — `createApp(config)` — rather than a module-level
- * singleton so tests can spin up an isolated server (its own state dir, its own
- * in-memory challenge/session stores, its own injectable clock) per case, and
- * so `index.ts` stays a thin env-to-config adapter.
- *
- * "WebAuthn without a WebAuthn library" (server.md): registration trusts the
- * browser-provided SPKI public key and only sanity-checks `clientDataJSON`;
- * assertions are verified by `verifyPasskeyAssertion` from `server-lib-common`,
- * the exact same verifier the Host uses, so Server and Host cannot disagree on
- * what a valid assertion is. Challenges are minted by `HostChallengeIssuer`
- * (a generic single-use/TTL store despite the name). Setup, sign-in and
- * push-subscribe each get their OWN issuer, so a challenge minted for one flow
- * can never be redeemed in another.
+ * Selfhost server factory (`docs/specs/server.md`). Each app owns isolated
+ * challenge/session stores and an injectable clock; `index.ts` only maps env.
  */
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';

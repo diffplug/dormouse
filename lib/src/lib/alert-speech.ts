@@ -9,53 +9,17 @@ import {
 import { getActivity, getActivitySnapshot, subscribeToActivity } from './session-activity-store';
 import { deriveSessionLabel } from './session-label';
 
-/**
- * Spoken alarms (`docs/specs/alert.md` -> Alarm settings). When a Session rings
- * and stays unattended for `speakDelayMs`, say its pane name out loud.
- *
- * The ring detection, delay, and cancellation rules live in
- * `alert-ring-watch.ts`, shared with push notifications; this module is only
- * the speech sink and its sanitizer.
- *
- * Speech uses the same derived pane label as the visible UI, passed through
- * `toSpokenText`. That intentionally includes terminal-supplied OSC 0/2/9 titles
- * when they win label derivation; `ActivityNotification` fields are not chosen
- * as a separate speech payload.
- *
- * Actual utterance callbacks publish the transient per-Session `speaking` /
- * `spoken` state rendered by Panes and Doors. It is intentionally separate from
- * persisted Activity: resolving the ring clears it, and a restore never recreates
- * evidence that this renderer spoke.
- *
- * `speak()` and `cancelSpeech()` are the only two places this module touches the
- * engine — the seam a future native `PlatformAdapter.speak?()` would slot into
- * for hosts whose webview has no speech backend (Tauri on Linux/WebKitGTK).
- */
+// Speech sink and sanitizer; alert-ring-watch owns ring timing/cancellation.
+// Engine callbacks publish transient renderer-local delivery state.
 
 /** Longest utterance we will produce. A pane title has no useful upper bound. */
 const SPEECH_LIMIT = 120;
 
-/**
- * Cap on tracked in-flight utterances. A dropped utterance (see `toSpokenText`)
- * never fires a callback to retire itself, so a wedged synthesizer would grow the
- * Set forever. Evicting the oldest bounds it *without* detaching, so an evicted
- * utterance that does still fire settles normally.
- */
+/** Bounds callback-less utterances; eviction keeps handlers so late settles work. */
 const MAX_TRACKED_UTTERANCES = 8;
 
-/**
- * Reduce a display label to something safe to hand a speech engine.
- *
- * WebKit (standalone on macOS) silently drops an utterance containing angle
- * brackets **and leaves the synthesizer wedged**, so every later utterance is
- * dropped too until the page reloads. Pane labels carry chrome like `<idle>`,
- * and terminal-supplied OSC 0/2/9 titles reach speech as well — so without this
- * any program could permanently disable spoken alarms for the session by
- * putting a `<` in its title (`docs/specs/alert.md` -> Text And Security).
- *
- * Markup metacharacters and asterisks become spaces rather than being deleted,
- * so `a<b` reads as two words instead of being run together.
- */
+/** Sanitize a display label for speech. WebKit wedges on angle brackets; replace
+ * metacharacters with spaces so adjacent words do not join. */
 export function toSpokenText(label: string): string {
   const cleaned = label
     // Control characters are meaningless aloud and arrive with untrusted
@@ -80,18 +44,8 @@ interface SpeechLifecycle {
   readonly onSettle: (utterance: SpeechSynthesisUtterance) => void;
 }
 
-/**
- * Hand one utterance to the engine.
- *
- * Nothing here may depend on `speak()` having returned. An engine is free to
- * dispatch `start` and then `end`/`error` **synchronously** inside
- * `synth.speak()` — Chrome reports `error: not-allowed` that way when speech is
- * invoked without a user gesture, which is exactly this code path. So the
- * handlers close over the utterance itself rather than reading a variable the
- * caller assigns afterward, and `onQueued` runs before dispatch. Reading a
- * caller-assigned variable instead would silently drop the settle and leave the
- * Session pinned at `speaking`.
- */
+/** Dispatch after tracking is installed; engines may synchronously start and
+ * settle inside `synth.speak()`. */
 function speak(text: string, lifecycle: SpeechLifecycle): void {
   const synth = globalThis.speechSynthesis;
   // Absent in jsdom and in webviews with no speech backend — staying silent is
@@ -126,20 +80,8 @@ function cancelSpeech(): void {
 /** What the Settings dialog's test button says. Not a pane label — nothing rang. */
 const TEST_UTTERANCE = 'Dormouse alarm test';
 
-/**
- * Say a fixed phrase so the Settings dialog can prove the alarm is audible now,
- * rather than at 3am when a build finally finishes.
- *
- * Deliberately *not* routed through `speak()`: that publishes the transient
- * per-Session `speaking` / `spoken` state that Panes and Doors render, and no
- * Session rang here. A test that made a pane light up would be lying about
- * which terminal wants attention.
- *
- * Returns `false` when this webview has no speech backend — the same
- * degradation `speak()` makes silently (jsdom, Tauri on WebKitGTK). The button
- * needs to tell those apart from a working engine, because "nothing happened"
- * is the identical observation for both.
- */
+/** Play the Settings test without publishing Session delivery state; false means
+ * this webview has no speech backend. */
 export function speakTestUtterance(): boolean {
   const synth = globalThis.speechSynthesis;
   if (!synth || typeof globalThis.SpeechSynthesisUtterance !== 'function') return false;
@@ -151,13 +93,8 @@ export function speakTestUtterance(): boolean {
     return false;
   }
   try {
-    // No `cancel()` first, tempting as it is for a double-press: the engine
-    // queue is shared with real alarms, `cancel()` empties all of it, and the
-    // engine fires no callback for an utterance dropped before it started — so
-    // another Session's queued announcement would be lost with `startAlertSpeech`
-    // never learning it needs a re-dispatch (that is `interrupt()`'s job, and
-    // only it has the queue index to do it). A short fixed phrase stacking on a
-    // double-press is the smaller problem than a real alarm going out silently.
+    // Do not cancel the shared engine queue: only `interrupt` can re-dispatch
+    // queued real alarms whose callbacks cancellation may drop.
     synth.speak(utterance);
   } catch {
     return false;
@@ -253,20 +190,8 @@ export function startAlertSpeech(): () => void {
     });
   };
 
-  /**
-   * Cut off the utterance the engine is reading aloud, because the ring that
-   * produced it was just resolved. The announcement exists to summon the user,
-   * and the user is here — finishing the sentence is noise.
-   *
-   * Web Speech has no per-utterance stop, so this empties the whole queue. Every
-   * Session that was still waiting is re-dispatched: attending one Pane must not
-   * silence another Pane's alarm. Nothing already started comes back — only the
-   * cut Session had started, and restarting an announcement is worse than losing
-   * it. Mirroring the engine's queue rather than owning one and feeding it a
-   * single utterance at a time is deliberate: an utterance the engine drops
-   * without a callback (see `MAX_TRACKED_UTTERANCES`) would block a self-owned
-   * queue forever.
-   */
+  /** Stop resolved speech. Web Speech cancels the whole queue, so re-dispatch
+   * still-ringing queued Sessions; never restart the utterance already speaking. */
   const interrupt = (): void => {
     // Same gates as the ring machine's own `fire`: a re-dispatch is a fresh
     // decision to speak, so a Session attended meanwhile — or the setting being

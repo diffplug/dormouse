@@ -1,17 +1,6 @@
 /**
- * Host enrollment against the selfhost Server (docs/specs/server.md → "Host
- * side"). Enrollment is the one-time exchange that turns a setup password into
- * the durable credentials the Host needs to hold its `/ws/host` socket:
- * `{ serverUrl, hostId, hostToken, origin, rpId }`. `origin`/`rpId` become the
- * Host's `ConnectionPolicy` — the Server tells the Host what it must enforce,
- * and the Host enforces it as final authority regardless.
- *
- * The Host that holds the socket is a service in the process that owns the
- * PTYs, and it persists this through its own store (a 0600 file in the sidecar,
- * `SecretStorage` in VS Code — `lib/src/host/remote/host-state-store.ts`).
- * What is left here of the browser's `localStorage` copy is the read path: a
- * webview that enrolled before the service existed still has one, and hands it
- * over once (`activation.ts` → adoption).
+ * Host enrollment and the legacy webview read path; `docs/specs/server.md` →
+ * "Host side" owns the exchange and persistence contracts.
  */
 
 import { API_ROUTES, type HostEnrollResponse } from 'server-lib-common';

@@ -23,17 +23,12 @@ const paneStates = new Map<string, TerminalPaneState>();
 const promptSubmitStates = new Map<string, PromptSubmitState>();
 const promptShapes = new Map<string, PromptShape>();
 const promptOutputBuffers = new Map<string, string>();
-// Panes whose shell emits real OSC 633/133 command boundaries (i.e. shell
-// integration injection took). Once a pane is here, the keystroke heuristic
-// stands down so the two don't both synthesize command starts — the keystroke
-// path is the fallback "only if injection fails". See docs/specs/terminal-escapes.md.
+// Panes with authentic OSC 633/133 boundaries; the keystroke fallback stands
+// down for each id here until the pane is reset or removed.
 const oscDrivenPanes = new Set<string>();
 const listeners = new Set<() => void>();
 
-// Events that prove the shell itself is reporting prompt/command boundaries via
-// OSC, as opposed to boundaries the keystroke heuristic synthesizes. A real
-// prompt-start (A) lands on the very first prompt — before any command is typed
-// — so this flips a pane to OSC-driven ahead of the first keystroke command.
+// Authentic shell boundaries; heuristic-synthesized prompt markers are excluded.
 function isOscDrivenBoundary(event: TerminalSemanticEvent): boolean {
   switch (event.type) {
     case 'promptStart':
@@ -87,11 +82,8 @@ export function countRunningSessions(): number {
   return count;
 }
 
-// True once the pane's shell has emitted real OSC 633/133 boundaries — i.e. its
-// shell integration injection took. `dor ensure -- <command>` types the command
-// into the shell programmatically (bypassing the keystroke heuristic), so only an
-// OSC-driven shell re-reports the running command. Without integration the
-// surface can't be matched or `--restart`ed; callers use this to warn.
+// Whether shell integration can re-report a programmatic `dor ensure` command,
+// which is required for later matching/restart.
 export function isPaneOscDriven(id: string): boolean {
   return oscDrivenPanes.has(id);
 }
@@ -194,21 +186,10 @@ export function recordTerminalUserInputByPtyId(ptyId: string, input: string, rea
   recordTerminalUserInput(resolvePaneStateIdByPtyId(ptyId), input, reader);
 }
 
-// Programmatically launched interactive commands bypass xterm's onData
-// keystroke fallback, so callers seed their semantic command state here before
-// the PTY write. `dor split/ensure -- <command>` does this at spawn, before
-// typeCommandWhenPromptReady types it. The cold-restore resume action does it
-// immediately before its direct write. For split/ensure it is also the readiness
-// sentinel:
-// typeCommandWhenPromptReady waits for this currentCommand to clear, which
-// happens when the shell draws its first prompt (OSC promptStart, or the
-// keystroke heuristic's prompt detector for shells without integration) — the
-// signal the shell can take input. It then bridges the matching window until
-// the command is typed and the integration re-reports it via OSC 633, so
-// `dor ensure` can match a surface it (or a prior ensure) created. Sourced as
-// `user_input` so it does not mark the pane OSC-driven and so the first-prompt
-// detector treats it as a finished command and clears it. `finishLaunchedCommand`
-// (on pty exit) also clears it, preserving the liveness half of the match.
+// Programmatic launches bypass onData, so seed before the PTY write. For split /
+// ensure this run is also the readiness sentinel: the first prompt clears it,
+// then typing bridges the gap until authentic OSC re-reports the command.
+// `user_input` avoids falsely promoting the pane to OSC-driven.
 export function seedLaunchedCommand(id: string, command: string, cwdPath?: string): void {
   const events: TerminalSemanticEvent[] = [];
   const cwd = cwdPath ? cwdFromManualPath(cwdPath) : null;

@@ -1,18 +1,7 @@
 /**
- * One keyed registry of this window's own PTY streams, shared by everything that
- * wants one: the Host provider serving a phone (`remote-host.ts`) and the peer
- * link forwarding a terminal to the broker window (`peer-link.ts`).
- *
- * Keyed rather than one listener pair per subscriber, because these run on every
- * chunk of every terminal in the window: a pair per attachment would tax every
- * keystroke of every PTY once per attached surface, and the two callers would
- * each pay it separately. One pair goes in at the first subscription and comes
- * out when the last one goes, so a window with nothing attached pays nothing.
- *
- * No strip parser here, unlike the sidecar: this process already runs the
- * terminal-protocol parser once per chunk and answers its queries, and
- * `onProcessedPtyData` is what comes out the other side. A second parser would
- * answer every query twice and corrupt the PTY.
+ * One keyed PTY-stream registry for this window. It installs one listener pair
+ * while anything is subscribed. Input is already protocol-processed; adding a
+ * second parser here would answer terminal queries twice.
  */
 
 import type { PtySink } from '../../lib/src/remote/host/host-surface-provider';

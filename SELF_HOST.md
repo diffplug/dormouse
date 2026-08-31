@@ -791,34 +791,21 @@ is live rather than asserting either.
 Each fails silently unless encoded in the scripts:
 
 - **`pnpm deploy --prod --legacy` poisons the workspace.** (All three.) It
-  rewrites `node_modules/.pnpm-workspace-state-v1.json` to production mode,
-  after which every pnpm command in that checkout strips the developer's
-  devDependencies. The installer snapshots the file and restores it
-  unconditionally on exit — `EXIT` trap on macOS/Linux, `finally` on Windows —
-  so even a failed install leaves the checkout as it found it.
+  rewrites pnpm's workspace-state file to production mode. **Snapshot and
+  restore that file on every exit**, including failed installs.
 - **`mv -f tmp link` follows a symlink to a directory.** (macOS, Linux.) Used
-  to swap `current`, it deposits the temp link *inside* the old release and
-  leaves `current` where it was — a silent no-op update, after which the prune
-  deletes the release nothing points at. The switch uses `rename(2)` on the
-  link path and asserts afterwards that `current` advanced.
+  to swap `current`, it silently leaves the old release selected. **Use
+  `rename(2)` on the link path and assert that `current` advanced.**
 - **`pnpm` resolves to a `.ps1` before its `.CMD`.** (Windows.) The shim cannot
   be launched as a process, so the installer takes the first
   `Application`-typed resolution rather than `(Get-Command pnpm).Source`.
 - **Redirecting a native command's stderr inline sets `$?` to false.**
-  (Windows, PowerShell 5.1: each stderr line becomes an `ErrorRecord`, so a
-  clean `exit 0` reads as failure.) Every external command in the installer's
-  control flow goes through one `Invoke-Native` helper via `Start-Process`; the
-  two deliberate bypasses (the candidate-release probe — the `env -i` analog —
-  and `run-server.ps1`'s `cmd.exe` append redirector) each need something
-  `Start-Process` cannot express.
+  (Windows, PowerShell 5.1.) **Route control-flow commands through
+  `Invoke-Native`**; only the candidate probe and `run-server.ps1` append
+  redirector bypass it because `Start-Process` cannot express their setup.
 - **Stopping a Scheduled Task does not reap its grandchildren.** (Windows.) The
-  orphaned `cmd.exe`/`node.exe` keeps `127.0.0.1:3100` and answers
-  `/api/hello` like a healthy server, so the next start cannot bind and every
-  bare health check passes against the *old* release. Two defences, both
-  required: the installer and `manage` reap every process belonging to the
-  install root before any start — matched by image path and command line, never
-  by image name, which would kill unrelated `node.exe` processes including the
-  invoking pnpm — and no health check accepts a 200 as proof (invariant above).
+  **Before every start, reap processes belonging to the install root by image
+  path and command line, never image name**, and never accept a bare health 200.
   Source of truth: `Get-DormouseProcess` / `Get-ListeningRelease`.
 - **Windows `tailscaled` serves its local API to one interactive session at a
   time.** (Windows.) On a PC with a second signed-in profile every `tailscale`
@@ -826,41 +813,15 @@ Each fails silently unless encoded in the scripts:
   installer matches that string in preflight and says which account holds it
   and what to do, rather than reporting the raw 401 as "is Tailscale signed
   in?".
-- **Linux `tailscaled` answers only root unless an operator is set.** (Linux.)
-  Its local API socket is root-owned, so an unprivileged `tailscale serve` is
-  refused. Left unchecked that refusal arrives at the Serve step — after the
-  build, and after `current` has already advanced to the new release. Preflight
-  checks the operator role instead, and prints the one-line fix
-  (`sudo tailscale set --operator=$USER`) rather than running sudo itself.
-
-  **The check reads the role, not a Serve command's exit status.** Only
-  *writes* to the local API are gated on the operator role; tailscaled serves
-  reads to everyone. So `tailscale serve status` prints `No serve config` and
-  exits 0 on exactly the machine whose Serve write is about to be denied, and a
-  preflight built on it silently passes and defers the refusal to the late step
-  it exists to avoid. The role is read from `tailscale debug prefs`
-  (`OperatorUser`) and compared against the invoking account. `debug` is an
-  unstable CLI surface, so only a *definitive* mismatch is fatal: an unreadable
-  or unparseable answer warns and proceeds, degrading to the late refusal
-  rather than blocking an install that would have worked.
-
-  **Readability is decided by a different field than the answer.**
-  `ipn.Prefs.OperatorUser` carries `json:",omitempty"`, so an unset operator
-  omits the key rather than emitting an empty string — indistinguishable from
-  an unparseable blob if the answer field doubles as the liveness probe, which
-  would route the commonest form of this bug (nobody ever ran `tailscale set
-  --operator`) into the lenient branch and reopen the exact miss the check
-  closes. `ControlURL`, which has no `omitempty`, answers "did prefs parse?";
-  absent-or-empty `OperatorUser` on a blob that parsed is then a definitive
-  unset. The `serve status` read still runs first, because a denial *there*
-  means something broader is wrong. Neither leg is reachable under
-  `DORMOUSE_INSTALL_TEST=1`, which gates the whole probe out — and CI pairs it
-  with an injected origin, which skips Tailscale altogether — so this is the
-  one preflight rule CI cannot exercise.
-
-  Because the late refusal is reached with `current` already switched and the
-  service healthy, it reports that the install is complete but unserved and
-  points at `manage serve`, which re-applies the mapping without a reinstall.
+- **Linux operator preflight must inspect the role, not a Serve read.**
+  `tailscale serve status` can succeed when the invoking user may not write the
+  config. Read `OperatorUser` from `tailscale debug prefs`; use `ControlURL` to
+  distinguish a parsed-but-unset role from an unreadable response. A definitive
+  absent/mismatched role is fatal and prints
+  `sudo tailscale set --operator=$USER`; an unreadable response warns and
+  degrades to the later Serve refusal. Test mode skips this unstable CLI probe.
+  A late refusal reports the completed install as unserved and points to
+  `manage serve`.
 - **`systemctl --user` needs a real login session, not just a shell.** (Linux.)
   Under `su`, or wherever no user manager runs, it fails with a
   `DBUS_SESSION_BUS_ADDRESS` message that does not say what to do. Preflight
@@ -898,10 +859,7 @@ Source of truth: `cmd_uninstall` / `cmd_purge` (`Invoke-Uninstall` /
 The installers carry two test-only hooks, each refused unless
 `DORMOUSE_INSTALL_TEST=1`: `DORMOUSE_INSTALL_ROOT` puts the whole install under
 a throwaway path, and — Linux only — `DORMOUSE_INSTALL_ORIGIN` supplies the
-origin so Tailscale is never consulted. That last one is what lets CI run the
-installer at all: `.github/workflows/ci.yml` installs twice into a temp root on
-every push, exercising the release build, staging, the self-contained runtime
-copy, the candidate probe, the `current` switch, the prune, and that
-`config/server.env` survives an update byte-for-byte. Test mode stops before
-systemd and Serve — and the macOS and Windows editions have no CI coverage at
-all, which is why `deploy-lint` checks all three textually.
+origin so Tailscale is never consulted. `.github/workflows/ci.yml` pins the
+Linux install/update path in a temp root. Test mode stops before systemd and
+Serve; macOS and Windows have no runtime CI coverage, so `deploy-lint` checks
+all three installers textually.

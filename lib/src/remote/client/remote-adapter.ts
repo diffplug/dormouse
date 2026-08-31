@@ -1,39 +1,7 @@
 /**
- * `RemotePtyAdapter` — a {@link PlatformAdapter} backed by a connected
- * {@link PocketClient} session, so the exact mobile terminal UI the website
- * proves out with `FakePtyAdapter` (`PocketTerminalExperience`) can render a
- * real remote Host over the remote-api v1 wire. docs/specs/pocket-app.md owns
- * this mapping:
- *
- *   onPtyList        ← directory.snapshot   (id = surfaceId)
- *   attach semantics ← surface.attach       (one attachment per session)
- *   onPtyData        ← terminal.data        (base64url utf8 → string)
- *   writePty         → terminal.write       (string → base64url utf8)
- *   resizePty        → terminal.resize
- *   onPtyExit        ← terminal.closed
- *
- * Everything outside that PTY core no-ops or is absent — the interface is built
- * for capability degradation (getCwd → null, getOpenPorts → [],
- * shells/clipboard empty, alerts no-op; alert/TODO/ringing badges instead ride
- * the directory snapshot and are read via {@link getDirectoryEntries}).
- *
- * Two things the terminal registry (`terminal-lifecycle.ts`) makes load-bearing:
- *
- * - It binds a pane purely by string id, filtering `onPtyData`/`onPtyExit` on
- *   `detail.id === id`, so this adapter must emit those events keyed by
- *   `surfaceId` and each pane's xterm must be mounted under that same id.
- *   `spawnPty` being a no-op is fine: the registry never waits on a spawn ack,
- *   and unlike `FakePtyAdapter` there is no shell registry to notify on spawn —
- *   the Host owns the shell.
- * - Nothing streams until a pane is ATTACHED, and v1 allows one attachment per
- *   session, so the UI must call {@link setActivePane} on every active-pane
- *   change (detach-old → attach-new). `writePty`/`resizePty` for a non-attached
- *   pane are dropped — the Host would reject them anyway — and the attach
- *   repaint, not a snapshot transfer, is what fills the client screen.
- *   `setActivePane` seeds the first size; the registry's `onResize → resizePty`
- *   keeps the attached pane sized afterwards. Protocol-v1 has no host-initiated
- *   resize event and `PlatformAdapter` has no inbound-resize channel;
- *   size-authority notification is staged in remote-api.md `## Future`.
+ * {@link PlatformAdapter} over remote-api v1; `docs/specs/pocket-app.md` owns
+ * the mapping. Registry events are keyed by `surfaceId`, and each active-pane
+ * change must call {@link setActivePane} because v1 streams one attachment.
  */
 
 import {

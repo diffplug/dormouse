@@ -1,26 +1,7 @@
 /**
- * Remote-api v1, terminal-only (remote-api.md → "v1 scope"). One
- * {@link RemoteApiSession} per authorized Client session translates the wire
- * protocol into the Host's existing terminal plumbing:
- *
- *   - `hello`           → capabilities (input yes, layout no).
- *   - `directory.watch` → an immediate snapshot plus coalesced re-snapshots
- *                         whenever the provider says the directory could differ.
- *   - `surface.attach`  → resize the real PTY through the existing xterm resize
- *                         path (attach-is-the-resize) and stream its output as
- *                         `terminal.data`; `terminal.closed` on PTY exit.
- *   - `terminal.write`  → the existing PTY input path.
- *   - `terminal.resize` → take size authority (last-attach-wins).
- *   - `surface.detach`  → stop streaming.
- *
- * The bytes on the wire are base64url PTY bytes; xterm on the Client renders
- * them, exactly as the Host's own xterm renders the same stream locally.
- *
- * Everything below the protocol — where a surface lives, how a PTY is read and
- * written — is a {@link HostSurfaceProvider} call, so this module is
- * environment-free: it never reaches for the platform adapter, the stores, or
- * `document`, and runs unchanged in a webview or in the process that owns the
- * PTYs (`host-surface-provider.ts`).
+ * Environment-free remote-api v1 session; `docs/specs/remote-api.md` owns the
+ * method, event, attachment, and size-authority contracts. All deployment work
+ * is delegated to {@link HostSurfaceProvider}.
  */
 
 import {

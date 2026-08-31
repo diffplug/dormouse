@@ -1,20 +1,6 @@
-// LathHost — the HTML adapter for Lath (docs/specs/tiling-engine.md → "The HTML
-// adapter (LathHost)"). The only non-headless piece of the engine: it
-// subscribes to the store, runs the pure `layout`/`sashes` per render, and paints
-// one stable absolutely-positioned div per leaf.
-//
-// Contracts it upholds (deviating from any of these needs a flagged reason):
-//   - One div per leaf, keyed by id, rendered in a STABLE DOM order (sorted by id,
-//     NOT tree order). React must never reorder keyed siblings, because moving an
-//     <iframe>'s ancestor in the DOM reloads it. Position is purely geometric
-//     (inline left/top/width/height); nothing is ever re-parented.
-//   - Layout is a pure function of the tree + container rect, recomputed each
-//     render. During a sash drag a local preview tree (core `resize` on the
-//     drag-start tree with the cumulative delta) takes precedence; the store
-//     commits only on pointerup via `onCommitResize`.
-//   - The binding never calls `.focus()` and emits no activation events. Gestures
-//     surface as proposals (`onCommitResize`, `onLeafFocused`); the Wall owns
-//     selection/focus policy.
+// Lath's HTML adapter. Leaves use stable id-sorted DOM order and geometric
+// positioning only; gestures surface as proposals and never activate/focus.
+// See docs/specs/tiling-engine.md → "The HTML adapter (LathHost)".
 
 import {
   memo,

@@ -1,26 +1,6 @@
 /**
- * Server-side handshake verification (docs/specs/server.md "Relay";
- * docs/specs/remote-security-model.md). The {@link RelayHub} stays a
- * transport-dumb pipe — this module is the policy it consults before forwarding
- * the two security-critical Client frames:
- *
- *   - `pair`:     the pairing request must be consistent with the authenticated
- *                 session — the owner account, a registered passkey credential,
- *                 and the matching stored public-key hash — and the session's
- *                 presence must be fresh: its last server-verified assertion
- *                 within PAIRING_PRESENCE_WINDOW_MS (pairing.ts). Otherwise the
- *                 server refuses to relay it to the Host at all.
- *   - `connect2`: the WebAuthn assertion must verify against the STORED passkey
- *                 public key (not the one the request carries), over the exact
- *                 Host challenge the server just relayed to this client. This is
- *                 the Server's half of "fresh user presence is validated by the
- *                 Server and the Host".
- *
- * A rejection never reaches the Host, so a forged request cannot even burn a
- * Host challenge. The relayed challenge is single-use on the server side too, so
- * a replayed `connect2` is refused here before it is forwarded. The Host's
- * `authorizeConnection` remains the final authority on everything the server
- * cannot see (the ACL, the device key, the challenge it actually issued).
+ * Server-side pairing/connect policy consulted by {@link RelayHub}; see
+ * `docs/specs/server.md` → "Relay" and `remote-security-model.md`.
  */
 
 import {

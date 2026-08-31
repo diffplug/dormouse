@@ -153,7 +153,7 @@ The OSC parsing/stripping rules that produce `pty:data` and `terminal:semanticEv
 
 ## Persisted session types
 
-Source of truth: `lib/src/lib/session-types.ts` defines the persisted-session interfaces (`PersistedSession` v3, `PersistedPane` — carrying `surfaceType` — `PersistedAlertState`, `PersistedDoor`, `PersistedSurfaceRefs`, and the container types `PersistedWorkspace` / `PersistedWindow`).
+Source of truth: the canonical persisted-session interfaces in `lib/src/lib/session-types.ts`.
 
 **The layout field.** A `PersistedSession` records the layout as `lathLayout` — the native Lath tree (`docs/specs/tiling-engine.md` → "Persistence"). Each `PersistedDoor` carries a Lath restore `token` as its sole restore payload.
 

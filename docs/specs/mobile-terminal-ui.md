@@ -254,14 +254,6 @@ Source of truth, both in `lib/src/lib/mobile-gesture-menu.ts`:
 `advanceOptionOrigin()` for the ratchet, `MOBILE_GESTURE_OPTION_DIRECTIONS` for
 exploded-option directions per group.
 
-Examples:
-
-* Right arrow: tap, drag right to `RADIUS_SELECT`; it sends immediately.
-* Enter: tap, drag down-right to choose the SE group, then drag up-left from the
-  reset center until it sends.
-* Shift+Enter: tap, drag down-right to choose the SE group, then drag up from the
-  reset center until it sends.
-
 ## Input mode selector
 
 The input mode selector controls what appears in the reserve area. It is always

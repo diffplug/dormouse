@@ -40,17 +40,11 @@ badges, accents, or button hovers unless the hierarchy cannot express a new
 rendered surface.
 
 **Never carry resting structure** with `surface-raised`, `border` (panel.border),
-`input-border`, or `muted` (descriptionForeground): themes leave those unset, and
-the resolver then hands back a generic value unrelated to the theme. Kimbie Dark
-is the cautionary case — `editorWidget.background` is near-black (`#131510`, a
-dark patch, not a gentle lift), and `panel.border` / `input.border` /
-`descriptionForeground` are all unset, so hairlines land on VSCode's flat
-`#80808059` (or `transparent`, for `input.border`, which has no registry default
-in any kind) and a card-and-border layout collapses into invisible edges.
-`surface-raised` + `border` are for *floating* surfaces only (popovers, dialogs,
-theme picker). Derive a genuinely needed hairline from a pair foreground at low
-alpha or an inset shadow (`DESIGN.md`'s Inset-Over-Border rule), never a border
-token. Reference implementation: the Pocket auth chrome in
+`input-border`, or `muted` (descriptionForeground): themes may leave those unset,
+so their resolved defaults do not form a cohesive hierarchy. `surface-raised` +
+`border` are for *floating* surfaces only (popovers, dialogs, theme picker).
+Derive a needed hairline from the pair foreground at low alpha or an inset
+shadow (`DESIGN.md`'s Inset-Over-Border rule). Reference implementation:
 `lib/src/remote/pocket-app/App.tsx`.
 
 **Never add `text-muted` inside headers** — header-internal text and buttons

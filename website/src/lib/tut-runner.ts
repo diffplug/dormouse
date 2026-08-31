@@ -20,35 +20,13 @@ import {
 } from "./tut-items";
 import type { TutorialState } from "./tutorial-state";
 
-/**
- * The fake busy task must outlast the user-attention idle window so that,
- * by the time the activity monitor's silence threshold fires, attention
- * has expired and the bell rings instead of being suppressed by the
- * "user is looking at this pane" check. The 250ms margin is a safety
- * guard against scheduler jitter — the exact value doesn't matter as
- * long as it's larger than realistic clock skew.
- */
+/** Must outlast the attention window so the fake task can ring. */
 export const BUSY_DEMO_DURATION_MS = cfg.alert.userAttention + 250;
 
-/**
- * Interval between fake-busy ticks. Must stay safely below
- * cfg.alert.busyCandidateGap so consecutive onData calls register as
- * continuous activity rather than separate bursts. Half the gap gives
- * comfortable margin against scheduler jitter; deriving from cfg means
- * tuning the gap won't silently break the demo.
- */
+/** Must stay below `busyCandidateGap` to form one activity burst. */
 export const BUSY_DEMO_INTERVAL_MS = Math.floor(cfg.alert.busyCandidateGap / 2);
 
-/**
- * How long the fake command keeps *running* after its output goes quiet.
- *
- * WATCHING rings on silence from a command that is still running — a program
- * waiting for input, not one that exited (a command exiting is the other track
- * entirely). Since watching is keyed on the running command, reporting the exit
- * the moment the busy burst ends would dispose the monitor before it could ever
- * reach ALERT_RINGING. So the fake command outlives its output by the monitor's
- * full silence chain plus margin.
- */
+/** Must outlive WATCHING's silence chain or exit disposes its monitor early. */
 export const WATCH_DEMO_COMMAND_MS =
   BUSY_DEMO_DURATION_MS
   + cfg.alert.mightNeedAttention

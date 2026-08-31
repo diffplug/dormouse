@@ -1,13 +1,5 @@
-// The Wall-facing Lath engine handle (docs/specs/tiling-engine.md → "The wall store
-// and engine"). The store (`lath-wall-store.ts`) is the state machine + geometry +
-// enter hints; the engine layers presentation, vocabulary, and persistence
-// conveniences over it — the animator (entry/exit/tween + dying state), the
-// pane-list / meta projections, the dor-direction ↔ Edge maps, the leaf-meta
-// builders, and the hydration `seed` + `serializeLayout`. Every state op and
-// geometry query goes straight to `lath.store.*`; the engine no longer re-exports
-// them.
-//
-// The engine holds NO selection/focus/mode/activation state — those stay in the Wall.
+// Wall-facing presentation/vocabulary/persistence layer over lath-wall-store.
+// State and geometry stay on `store`; selection/focus/mode stay in Wall.
 
 import {
   type Edge,
@@ -100,11 +92,7 @@ export function browserLeafMeta(title: string, params: Record<string, unknown>):
   return { component: 'browser', tabComponent: 'surface', title, params };
 }
 
-/** Rebuild a leaf's meta from a PERSISTED door row, for hydration only: a restored
- *  session's Doors have no store entry yet, and `seed` puts them back into `leafMeta`
- *  alongside the tree's own leaves. Component/tabComponent default to terminal for a
- *  row that carries neither. Nothing at runtime reads a Door record for meta — the
- *  store owns it (docs/specs/layout.md → "Minimize and reattach"). */
+/** Hydration-only Door-row projection; runtime metadata stays in the store. */
 export function leafMetaFromPersistedDoor(item: PersistedDoor): LeafMeta {
   return {
     component: item.component ?? 'terminal',

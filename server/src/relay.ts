@@ -1,27 +1,6 @@
 /**
- * The relay hub (docs/specs/server.md, "Relay"): routes JSON envelopes between
- * Client sockets and Host sockets. It is the coordinating Server's dumb pipe —
- * before a session is authorized it forwards only the handshake allowlist
- * (`pair`/`connect`/`connect2` up, `pair-result`/`challenge`/`decision` down);
- * after authorization it forwards `msg` frames verbatim.
- *
- * State is deliberately tiny and in-memory (a server restart just means everyone
- * reconnects) and the machine is kept small so connection *verification* layers
- * on top without reshaping it:
- *
- *   - one live socket per `hostId` (a reconnect replaces the old socket);
- *   - each client is bound to at most one host (`clientId → hostId`) and carries
- *     an `established` flag that gates `msg` in both directions;
- *   - the session becomes established purely on the Host's authority — when the
- *     Host sends `{ t: 'decision', allowed: true }` for that client.
- *
- * `clientId` is a server-assigned secret: it is stamped onto every host-bound
- * frame so the Host can address replies, but is never sent to the client.
- *
- * Verification layers on top without reshaping any of this: the hub
- * consults an injected {@link HandshakeGate} before relaying the two
- * security-critical Client frames (`pair`, `connect2`) and remembers each Host
- * challenge it relays, but the routing and session model are untouched.
+ * In-memory relay hub; `docs/specs/server.md` → "Relay" owns its frame gates,
+ * Host authority, replacement, and routing contracts.
  */
 
 import { randomBytes } from 'node:crypto';

@@ -407,7 +407,7 @@ through `agentBrowserCommand`.
 Source of truth: `lib/src/components/wall/AgentBrowserPanel.tsx`,
 `agent-browser-surface-controller.ts`, `agent-browser-connection.ts`,
 `agent-browser-screenshot-loop.ts`, `agent-browser-input.ts`,
-`agent-browser-tab.ts`, `use-surface-visibility.ts`, and their tests.
+`agent-browser-tab.ts`, and `use-surface-visibility.ts`.
 
 ### Pop-Out
 
@@ -530,7 +530,7 @@ Current limits:
 Source of truth: `lib/src/components/wall/IframePanel.tsx`,
 `lib/src/host/iframe-proxy.ts`, `lib/src/host/iframe-proxy-rewrite.ts`
 (`STRIP_RESPONSE_HEADERS`, `instrumentHtml`, `isBlockedAddress`),
-`lib/src/lib/platform/iframe-proxy-types.ts`, and proxy tests.
+`lib/src/lib/platform/iframe-proxy-types.ts`.
 
 ### Iframe Shim
 
@@ -613,21 +613,11 @@ Security boundaries:
   the user's own, not third-party clickjacking). The cost is real: inside the
   frame the upstream loses its own XSS policy for the duration of the embed.
 
-**Why the `Origin` rewrite is conditional.** Presenting a request as coming from
-the upstream's own origin is the proxy *vouching* for it, which is what
-origin-aware dev servers rely on. The per-grant ephemeral port is not a secret —
-the range scans in seconds — so vouching unconditionally would let any page in
-the user's browser POST here and have its `Origin: https://evil.example`
-relabelled as the upstream's own, defeating exactly the check the rewrite exists
-to satisfy. It matters most on `handleUpgrade`: WebSockets are not subject to
-CORS, so a laundered `Origin` yields a *readable* socket to a dev server or
-`openvscode-server` that would have refused the real one. A foreign `Origin` is
-forwarded untouched rather than blocked, so the upstream applies its own policy
-and the proxy grants nothing that hitting the upstream's port directly would not.
-An absent `Origin` stays absent — an ordinary top-level navigation or same-origin
-GET. `Referer` needs no such test: it only substitutes the proxy's own origin.
-The shared rule for all of Dormouse's loopback listeners lives in
-`lib/src/host/loopback-guard.ts`; `SECURITY.md` → "Loopback Listeners" audits it.
+**Must rewrite `Origin` only when it names the proxy itself.** Forward a foreign
+origin unchanged and keep an absent origin absent, on request and upgrade paths;
+`Referer` only substitutes the proxy's own origin. (rationale) The shared rule
+for all loopback listeners lives in `lib/src/host/loopback-guard.ts` and is
+audited by `SECURITY.md` → "Loopback Listeners".
 
 **Never relax** the `Host` validation or conditional `Origin` gate without
 updating that `SECURITY.md` audit.

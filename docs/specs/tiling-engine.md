@@ -7,15 +7,7 @@
 
 ## Why
 
-Dormouse used a narrow slice of dockview — binary split tree, sash resize, drag-move, maximize, serialization — yet paid a broad tax for the parts of its model that fought the product. **Never reintroduce any of the five**; each survives as a live rule in its own section (rationale).
-
-| dockview's tax | Lath's answer |
-| --- | --- |
-| Activation events conflated user intent with engine mechanics | No activation events at all (Principles) |
-| Tree rebalance re-parented DOM | The binding never re-parents (The HTML adapter) |
-| The kill animation had to fight the animation model | The animator is a pure function of time (Animation) |
-| Single-level DnD raced React's synthetic events | Pointer-only hierarchical DnD |
-| The app re-derived a shadow model of the tree | Pure `neighbors()` / `layout()` queries (Layout) |
+Dormouse needed only dockview's split tree, resize, drag-move, maximize, and serialization; the rules below eliminate the five failure modes its broader model introduced (rationale).
 
 ## Principles and non-goals
 
@@ -31,20 +23,7 @@ Lath is a **headless geometry engine**: it owns the split tree, rects, animation
 
 Source of truth: `lib/src/lib/lath/model.ts`.
 
-```ts
-type LeafId = string;                        // the Wall maps Pane id ↔ leaf id 1:1
-type Edge = 'left' | 'right' | 'top' | 'bottom';
-
-type LathNode =
-  | { kind: 'leaf'; id: LeafId }
-  | { kind: 'split'; dir: 'row' | 'col'; children: LathChild[] };
-
-type LathChild = { node: LathNode; weight: number };
-
-type LathTree = { root: LathNode | null };
-```
-
-A `'row'` split lays children left→right; `'col'` top→bottom. **Trees are immutable**: ops return fresh nodes along the mutated path and share structure elsewhere.
+`LathTree` is a nullable root of leaf or weighted split nodes; `lib/src/lib/lath/model.ts` owns the exact types. A `'row'` split lays children left→right; `'col'` top→bottom. **Trees are immutable**: ops return fresh nodes along the mutated path and share structure elsewhere.
 
 Invariants, enforced by every op and checked by `validate(tree)` (human-readable violations; used throughout the tests):
 
@@ -60,11 +39,7 @@ Nodes are addressed by **path** (`number[]` of child indexes from the root; the 
 
 Source of truth: `lib/src/lib/lath/layout.ts`.
 
-```ts
-layout(tree: LathTree, rect: Rect, opts: { gap: number; minLeaf: Size }): Map<LeafId, Rect>
-```
-
-Pure. Splits divide their axis by weight and round to integer pixels so children plus gaps tile the span exactly — **adjacent panes never seam or overlap**. Weights are clamped at layout time against `minLeaf` via a per-split waterfill (children below their recursive minimum are pinned to it and the rest redistributes by weight); **stored weights are never rewritten by layout**. A split whose minimums exceed its span degrades to min-proportional allocation — still exact tiling, minimums honored only when feasible. Zero/negative rects yield zero-size rects, never a crash. Property tests assert: rects exactly tile `rect` minus gaps, no overlap, every leaf present.
+`layout(tree, rect, opts)` is pure. Splits divide their axis by weight and round to integer pixels so children plus gaps tile the span exactly — **adjacent panes never seam or overlap**. Weights are clamped at layout time against `minLeaf` via a per-split waterfill (children below their recursive minimum are pinned to it and the rest redistributes by weight); **stored weights are never rewritten by layout**. A split whose minimums exceed its span degrades to min-proportional allocation — still exact tiling, minimums honored only when feasible. Zero/negative rects yield zero-size rects, never a crash.
 
 Derived pure queries replace DOM inspection. **Each must be called with the same `rect` + `opts` the caller renders with** — feed them anything else and their geometry diverges from the screen:
 
@@ -90,13 +65,7 @@ All ops are pure and synchronous, returning `{ tree: LathTree; ok: boolean }` pl
 | `insert` | `(tree, id, target: DropTarget, weight = 0.5)` | The insert half of `move`, public for external (Door) drops: places a NEW leaf at a drop target carrying `weight` (clamped into (0,1)). Swap targets, existing ids, empty trees, and paths off the tree are rejected. |
 | `restore` | `(tree, token, opts?)` | Reinserts a removed leaf, best effort (below). |
 
-```ts
-type DropTarget =
-  | { kind: 'edge'; path: number[]; edge: Edge }   // insert beside the node at path, at its parent's level
-  | { kind: 'swap'; leaf: LeafId };
-```
-
-`DropTarget`'s `edge`-at-ancestor-path form is what gives DnD its depth levels (Hierarchical drag and drop, below).
+`DropTarget` is either a leaf swap or an edge at an ancestor path; the latter gives DnD its depth levels. Exact types live in `lib/src/lib/lath/ops.ts`.
 
 Ops are cheap pure functions, so speculative evaluation is free — sash live-resize and DnD previews run `layout(op(tree, …).tree, …)` per frame without committing.
 
@@ -106,12 +75,7 @@ Source of truth: `lib/src/lib/lath/hit-test.ts` (core); the `DragController` in 
 
 **Pointer events only** (`pointerdown` → 5px `DRAG_THRESHOLD` → drag; no HTML5 DnD), so drags are testable from CDP and never race React's synthetic events. A live drag hit-tests the store's tree read fresh each frame, so a background `dor split` / `dor kill` commit mid-drag is reflected in the next preview.
 
-```ts
-hitTest(tree, rect, point, dragged: LeafId | null, opts): DropCandidate[]
-// DropCandidate = { target: DropTarget; previewRect: Rect; depth: number }, ordered innermost → outermost
-```
-
-`hitTest` is core: it takes a point already in Wall coordinates — LathHost feeds pointer positions, a Three.js adapter would feed raycast intersections. `dragged: null` is an external drag (a Door coming in): no `swap` candidates, previews via `insert`. Gesture mechanics and the preview overlay are adapter concerns.
+`hitTest` returns drop candidates ordered innermost→outermost, each carrying its target, committed preview rect, and depth; `lib/src/lib/lath/hit-test.ts` owns the exact types. It takes a point already in Wall coordinates — LathHost feeds pointer positions, a Three.js adapter would feed raycast intersections. `dragged: null` is an external drag (a Door coming in): no `swap` candidates, previews via `insert`. Gesture mechanics and the preview overlay are adapter concerns.
 
 The depth model:
 
@@ -211,12 +175,12 @@ Source of truth: `lib/src/components/wall/pane-props.ts`, `PaneWriteContext` in 
 
 Source of truth: the wire format + reader/writer (`LeafMeta`, `LathPersistedLayout`, `lathLayoutFromStore`, `isLathPersistedLayout`) in `lib/src/lib/lath/persistence.ts`; `lathLayout` / `token` in `lib/src/lib/session-types.ts`; the save in `use-session-persistence.ts` / `session-save.ts`; `persistedLathLayout` in `session-restore.ts`, consumed by `reconnect.ts`.
 
-The Lath layout serializes as `{ version: 1, tree, leafMeta }` (`LathPersistedLayout`) — the tree is its own wire format, and `leafMeta` carries the per-leaf `{ component, tabComponent, title, params }`. It rides **inside** `PersistedSession` as the optional field `lathLayout`. Doors carry an optional restore `token`. Saves write `lathLayout` only. `leafMeta` in the STORE also covers Doored leaves, so `lathLayoutFromStore` filters it down to the tree's own leaves; each Door's live meta is materialized into its saved row instead (`use-session-persistence.ts`), so a restart cold-loads each Surface where the user left it — **a parked document never survives a restart, only a minimize**.
+The versioned Lath layout rides inside `PersistedSession`; `lib/src/lib/lath/persistence.ts` and `lib/src/lib/session-types.ts` own its exact shape. Saves write only the native Lath layout. Store metadata also covers Doored leaves, so `lathLayoutFromStore` filters it to tree members and the save path materializes each Door's live metadata separately. A restart cold-loads every Surface where the user left it — **a parked document never survives a restart, only a minimize**.
 
 The session read boundary resolves the layout once: `persistedLathLayout` (`session-restore.ts`) returns the native `lathLayout` when present, else undefined. Everything downstream — the resume gate in `reconnect.ts` (leaf set must match the visible pane set), the `restoredLathLayout` prop threading, and the engine's `seed` — sees only a Lath layout; on an absent, structurally invalid, or empty layout, `seed` falls back to fresh panes.
 
 ## Testing
 
-Source of truth: the DOM-free suites in `lib/src/lib/lath/`, the binding suites under `lib/src/components/wall/`, and `lib/src/components/Wall.test.tsx`. They pin the core algebra, rejection identity, geometry, animator, hit testing, persistence, stable DOM identity, parking, drag/resize/zoom, and Wall integration. The standalone agent-browser acceptance run covered the corresponding live flows; its evidence is retained in the rationale.
+Source of truth: the DOM-free suites in `lib/src/lib/lath/`, the binding suites under `lib/src/components/wall/`, and `lib/src/components/Wall.test.tsx`; live acceptance evidence is retained in the rationale.
 
 Ordering constraint: the workspace-switching stages of the **workspaces-rollout** scope (defined in [layout.md](layout.md)) build on this engine — a workspace switch under Lath is "swap which tree renders." `onApiReady` (the old tiling-api ready callback) is gone and **must not come back**: the website tutorial, its last consumer, drives off the engine-neutral `WallEvent` stream (`paneAdded` for pane creation, `selectionChange` for kb-arrows).

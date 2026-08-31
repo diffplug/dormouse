@@ -2,6 +2,10 @@
 
 > Informative companion to [standalone.md](standalone.md): the evidence, measurements, and dead-approach history behind its rules, keyed by that spec's headings (AGENTS.md → "The rationale split"). Nothing here is normative.
 
+## Rust ↔ sidecar bridge
+
+The two Windows Node variants exist only because `CREATE_NO_WINDOW`, `DETACHED_PROCESS`, and `STARTUPINFO` hiding did not suppress Windows 11's DefTerm handoff from a GUI parent (verified 2026-08). If a current spawn-time option suppresses the stray Windows Terminal window, both variants can collapse back to the stock console-subsystem Node under `DORMOUSE_NODE`.
+
 ## Persistence
 
 **The WKWebView WAL measurement.** WKWebView stores `localStorage` as SQLite in WAL mode, and WebKit pins that WAL with a long-lived reader which never advances during a running session — so it is never checkpointed, and an external checkpoint is blocked by the same reader. Rewriting the multi-MB scrollback-bearing session blob on every save grew the WAL to ~1 GB within a few hours (recorded 2026-07); a days-long session made it pathological. That is what retired `localStorage` as the blob's backing store in favour of the Rust file store.

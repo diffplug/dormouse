@@ -7,16 +7,8 @@ let appliedThemeSnapshot: AppliedThemeSnapshot | null = null;
 
 const activeThemeListeners = new Set<() => void>();
 
-/**
- * Notified whenever a *different* theme is applied — the boot-time
- * `restoreActiveTheme()` of an already-applied theme is a no-op here, and so is
- * re-selecting the active theme in the picker.
- *
- * Deliberately not `onTerminalThemeChange()` (`terminal-theme.ts`), which
- * watches resolved xterm palette JSON through a `MutationObserver` and fires on
- * the first mutation after it starts. Consumers here want "the user picked a
- * theme", so pair this with a seed read of `getActiveThemeId()`.
- */
+/** Notify only when the applied theme id changes. Consumers needing initial
+ * state must seed it separately; see docs/specs/theme.md. */
 export function subscribeToActiveTheme(listener: () => void): () => void {
   activeThemeListeners.add(listener);
   return () => activeThemeListeners.delete(listener);
@@ -51,11 +43,7 @@ export function applyTheme(theme: DormouseTheme): void {
   if (typeof document === 'undefined') return;
   if (theme === appliedThemeSnapshot?.theme && hasVisibleTheme(appliedThemeSnapshot)) return;
 
-  // Captured before the write: a hydration re-apply of the *same* theme still
-  // runs the body writes below, and must not be reported as a theme change.
-  // Compared by id, not identity — `getInstalledThemes()` re-parses its JSON on
-  // every call, so an installed theme is a fresh object each time and an
-  // identity check would report every restore as a change.
+  // Hydration may reapply a fresh object for the same installed theme; compare ids.
   const previousThemeId = appliedThemeSnapshot?.theme.id ?? null;
 
   if (appliedThemeSnapshot && theme !== appliedThemeSnapshot.theme) {
@@ -68,11 +56,7 @@ export function applyTheme(theme: DormouseTheme): void {
   // them here so theme.css can read --vscode-* directly without fallbacks.
   const providedVars = { ...HOST_TYPOGRAPHY_VARS, ...theme.vars };
   const vars = completeThemeVars(providedVars, theme.type);
-  // Theme authors give list.*SelectionBackground alpha because VSCode renders
-  // it as an overlay on the sidebar. Dormouse uses it as a solid AppBar /
-  // tab fill, so flatten the alpha over sideBar.background here — otherwise
-  // whatever sits behind the surface bleeds through (Selenized Dark's bright
-  // cyan AppBar, for instance).
+  // Dormouse uses VSCode's overlay selection colors as solid fills.
   flattenSelectionAlpha(vars);
   appliedThemeSnapshot = { theme, providedVars, resolvedVars: vars };
   for (const [name, value] of Object.entries(vars)) {
@@ -87,10 +71,7 @@ export function applyTheme(theme: DormouseTheme): void {
     document.body.classList.remove('vscode-light');
   }
 
-  // Match the resolved polarity so native controls (form inputs, scrollbars,
-  // autofill) render in the theme's light/dark UA chrome rather than following
-  // the OS preference. Owned here so every non-VSCode host (standalone, website,
-  // Pocket) inherits it from one place instead of guessing in each HTML shell.
+  // Keep native-control polarity with the resolved theme, not the OS preference.
   document.body.style.colorScheme = theme.type === 'light' ? 'light' : 'dark';
 
   if (previousThemeId !== theme.id) {
@@ -100,18 +81,7 @@ export function applyTheme(theme: DormouseTheme): void {
 
 let defaultThemeId: string | null = null;
 
-/**
- * The host's preferred theme for when nothing is persisted yet — and the one
- * `restoreActiveTheme()` falls back to when the active theme stops resolving,
- * which is what uninstalling the active theme does.
- *
- * Module state, in the shape of `lib/src/lib/shell-defaults.ts`, rather than a
- * prop threaded down to each caller. Every path that re-resolves the active
- * theme has to agree on the fallback — the picker's uninstall, the store
- * dialog's Remove, a host's boot restore — and they sit at unrelated depths, so
- * a prop reaches some and misses others. Declared once by whoever boots the
- * app (`useRestoredTheme`, or a host's own entry point).
- */
+/** Set the module-wide fallback used by every restore path. */
 export function setDefaultThemeId(id: string | null): void {
   defaultThemeId = id;
 }

@@ -1,24 +1,8 @@
 /**
- * Surface-scoped, module-level controller for an agent-browser pane (see
- * docs/specs/dor-browser.md → "Agent-Browser Connection"). Mirrors
- * `terminal-lifecycle.ts`: the live non-React machinery — stream connection,
- * screenshot loop, CDP observer, viewport-sync state machine, pop-out/pop-in
- * orchestration + auto-revert, canonical-URL tracking, input bridging, params
- * persistence, and the screen/chrome registration — lives OUTSIDE React in a
- * registry keyed by surface id. `AgentBrowserPanel` becomes a thin view that
- * mounts a canvas, feeds params/visibility, and subscribes to a snapshot.
- *
- * Lifetime (deliberately surface-scoped, not panel-scoped):
- *   - created on first panel mount (`acquire…`),
- *   - SURVIVES unmount (minimize, layout churn, React StrictMode) —
- *     minimize no longer synchronously disposes the connection; the
- *     detach-as-hidden park (1s debounce) tears it down, reaching the same
- *     zero-resource end state with less thrash,
- *   - disposed only by `dispose…` at kill / render-swap in Wall.tsx.
- *
- * Disposing releases CLIENT-side resources only; it never runs
- * `agent-browser close`. Tearing down the daemon/session is a policy decision
- * owned by `closeAgentBrowserSession` in Wall.tsx.
+ * Surface-scoped browser lifecycle; see docs/specs/dor-browser.md →
+ * "Agent-Browser Connection". The registry survives panel unmount and is
+ * disposed by Wall on kill/render swap. Disposal releases client resources
+ * only; Wall owns daemon teardown.
  */
 import { getPlatform } from '../../lib/platform';
 import { readTextFromClipboard } from '../../lib/clipboard';
