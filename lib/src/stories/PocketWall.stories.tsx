@@ -112,9 +112,11 @@ function PocketWallStory({
           }}
           adapter={adapterRef.current}
           onLeave={() => {}}
-          offerPush={offerPush}
-          onEnablePush={() => {}}
-          onDismissPush={() => {}}
+          push={
+            offerPush
+              ? { busy: false, error: null, onEnable: () => {}, onDismiss: () => {} }
+              : undefined
+          }
         />
       ) : (
         <PocketWall adapter={adapterRef.current} />

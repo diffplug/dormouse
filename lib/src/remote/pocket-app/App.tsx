@@ -71,6 +71,15 @@ export function refinePairState(
 
 export type PushConfigStatus = 'loading' | 'ready' | 'disabled' | 'error';
 
+/**
+ * Whether this device is registered for push notifications with one Host.
+ *
+ * `unknown` is the honest third state: the Server's subscriptions read has not
+ * answered yet. Each surface decides what to do with it — see
+ * `hostPushRegistration` in `App`.
+ */
+export type PushRegistration = 'on' | 'off' | 'unknown';
+
 type PushConfigState =
   | { status: 'loading' }
   | { status: 'ready'; key: string }
@@ -217,7 +226,13 @@ export default function App(): React.ReactElement {
   const [needsInstall] = useState(needsHomeScreenInstall);
 
   const [phase, setPhase] = useState<Phase>('auth');
-  const [error, setError] = useState<string | null>(null);
+  /**
+   * The last failure, keyed by the operation that produced it. Screens that own
+   * the whole viewport show every message; the wall's push prompt is one control
+   * among others, so it selects its own operation rather than reporting whatever
+   * failed last.
+   */
+  const [error, setError] = useState<{ op: string; message: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [hosts, setHosts] = useState<HostView[]>([]);
   const [pairStates, setPairStates] = useState<ReadonlyMap<string, HostPairState>>(
@@ -236,6 +251,8 @@ export default function App(): React.ReactElement {
    * overtook is stale and gets dropped rather than merged.
    */
   const pushRegistrationVersionRef = useRef(0);
+  /** Advances at the start of every push load; see the effect below. */
+  const pushLoadRunRef = useRef(0);
   /**
    * The first-connect prompt, turned down for this run of the app. Deliberately
    * not persisted: it is a "not right now", not a preference, and the per-host
@@ -270,42 +287,52 @@ export default function App(): React.ReactElement {
   }, []);
 
   // Availability depends on browser state the app cannot change (permission,
-  // whether it was launched from the Home Screen), so it is read on entering an
-  // authenticated view rather than tracked as a store. Both push surfaces — the
-  // Hosts rows and the wall's first-connect prompt — read this one load; the
-  // wall must not fetch its own copy, and reading only on `hosts` would hand it
-  // whatever the connect's navigation happened to leave behind (this effect's
-  // cleanup drops results in flight). The VAPID key is fetched here too, so the
-  // Enable tap has no network round trip in front of the permission prompt —
-  // iOS drops transient activation across one.
+  // whether it was launched from the Home Screen), so it is read on entering the
+  // Hosts list rather than tracked as a store — that per-visit refresh is the
+  // authoritative one, and is what re-prunes a row the Server dropped on a 410.
+  //
+  // Keyed to `hosts` alone, so the hop onto the wall neither refetches it nor
+  // throws it away: both push surfaces — the Hosts rows and the wall's
+  // first-connect prompt — read this one load, and its answers routinely land
+  // while the user is already on the wall. What a cleanup would have done, a
+  // monotonic run token does instead: every continuation commits only if its
+  // token is still the current one, so a newer load supersedes an older one
+  // without an in-flight read being dropped at the navigation. The
+  // subscriptions read carries the second guard too — a registration that
+  // completed meanwhile holds the newer complete answer and must not be
+  // overwritten by a read it overtook. (`App` never unmounts between phases, so
+  // there is nothing to tear down on the way out.)
+  //
+  // The VAPID key is fetched here too, so the Enable tap has no network round
+  // trip in front of the permission prompt — iOS drops transient activation
+  // across one.
   useEffect(() => {
-    if (phase === 'auth') return;
-    let live = true;
+    if (phase !== 'hosts') return;
+    const run = ++pushLoadRunRef.current;
+    const current = () => pushLoadRunRef.current === run;
     setPushConfig({ status: 'loading' });
     setPushSubscriptionCurrent(false);
     void getPushAvailability().then((state) => {
-      if (live) setPushState(state);
+      if (current()) setPushState(state);
     });
     void client
       .getPushConfig()
       .then(async (key) => {
         const subscriptionCurrent =
           key !== null ? await hasCurrentPushSubscription(key, client.registeredPushEndpoint()).catch(() => false) : false;
-        if (live) {
+        if (current()) {
           setPushConfig(key === null ? { status: 'disabled' } : { status: 'ready', key });
           setPushSubscriptionCurrent(subscriptionCurrent);
         }
       })
       .catch(() => {
-        if (live) setPushConfig({ status: 'error' });
+        if (current()) setPushConfig({ status: 'error' });
       });
     // Which Hosts this device already registered with. Without it a reload
     // re-offers Enable for every Host, including ones the Server already holds
     // a row for. Authoritative rather than merged, so a row pruned after a 410
-    // stops claiming push notifications are on. Null until answered — the row
-    // treats that as "not registered" (it is offering an idempotent action),
-    // but the full-width prompt waits, since a banner shown to someone already
-    // subscribed costs more than one shown a moment late.
+    // stops claiming push notifications are on. Null means unanswered, which is
+    // a state of its own — see `hostPushRegistration` below.
     setPushSubscribedHostIds(null);
     const registrationVersionAtStart = pushRegistrationVersionRef.current;
     void client
@@ -314,7 +341,7 @@ export default function App(): React.ReactElement {
         // A registration that landed while this was in flight already answered
         // the same question about the same device, and did so later. Nothing to
         // merge — the newer complete answer simply stands.
-        if (!live || pushRegistrationVersionRef.current !== registrationVersionAtStart) return;
+        if (!current() || pushRegistrationVersionRef.current !== registrationVersionAtStart) return;
         setPushSubscribedHostIds(new Set(hostIds));
       })
       .catch(() => {
@@ -322,14 +349,28 @@ export default function App(): React.ReactElement {
         // failed read re-offers an idempotent action on both surfaces instead of
         // preserving a stale claim. Guarded like the success path, since an
         // Enable that completed meanwhile holds the newer complete answer.
-        if (live && pushRegistrationVersionRef.current === registrationVersionAtStart) {
+        if (current() && pushRegistrationVersionRef.current === registrationVersionAtStart) {
           setPushSubscribedHostIds(new Set());
         }
       });
-    return () => {
-      live = false;
-    };
   }, [phase, client]);
+
+  /**
+   * Whether this device is registered for push notifications with one Host —
+   * the single derivation both push surfaces read, so they cannot disagree about
+   * what the Server said.
+   *
+   * `unknown` until the subscriptions read answers; `on` demands both a Server
+   * row and a browser subscription that still matches it, since either half
+   * missing means the repair path has to stay offered.
+   */
+  const hostPushRegistration = useCallback(
+    (hostId: string): PushRegistration => {
+      if (pushSubscribedHostIds === null) return 'unknown';
+      return pushSubscriptionCurrent && pushSubscribedHostIds.has(hostId) ? 'on' : 'off';
+    },
+    [pushSubscribedHostIds, pushSubscriptionCurrent],
+  );
 
   // The client nulls its socket on any close, so an action taken after a
   // server restart / network drop must reopen it rather than reuse a dead
@@ -363,10 +404,10 @@ export default function App(): React.ReactElement {
           client.close();
           setActiveHost(null);
           setPhase('auth');
-          setError(err.message);
+          setError({ op: label, message: err.message });
           return;
         }
-        setError(err instanceof Error ? err.message : String(err));
+        setError({ op: label, message: err instanceof Error ? err.message : String(err) });
       } finally {
         setBusy(null);
       }
@@ -439,7 +480,7 @@ export default function App(): React.ReactElement {
   useEffect(() => {
     client.setOnHostGone(() => {
       teardownAdapter();
-      setError('The host disconnected.');
+      setError({ op: 'host-gone', message: 'The host disconnected.' });
       setActiveHost(null);
       setPhase('hosts');
     });
@@ -555,7 +596,9 @@ export default function App(): React.ReactElement {
     return (
       <SetupOrSignin
         busy={busy}
-        error={error}
+        // This screen is the whole viewport: whatever failed last is the only
+        // thing there is to report.
+        error={error?.message ?? null}
         firstRun={firstRun}
         needsInstall={needsInstall}
         onSignin={() =>
@@ -573,9 +616,11 @@ export default function App(): React.ReactElement {
       <HostsView
         hosts={hosts}
         busy={busy}
-        error={error}
+        error={error?.message ?? null}
         pairState={(id) => pairStates.get(id) ?? 'unpaired'}
-        isPushSubscribed={(id) => pushSubscriptionCurrent && (pushSubscribedHostIds?.has(id) ?? false)}
+        // Unknown reads as off: the row's Enable is idempotent, so offering it
+        // early costs nothing.
+        isPushSubscribed={(id) => hostPushRegistration(id) === 'on'}
         pushState={pushState}
         pushConfigStatus={pushConfig.status}
         onRefresh={() => run('refresh', loadHosts)}
@@ -589,26 +634,31 @@ export default function App(): React.ReactElement {
   }
 
   if (phase === 'wall' && activeHost && adapterRef.current) {
-    const host = activeHost;
+    // Unknown waits: an intrusive full-width banner must not be shown to someone
+    // who is already subscribed, so the two surfaces map it opposite ways on
+    // purpose — the row is optimistic about an idempotent action, the prompt is
+    // conservative about occupying the screen.
+    const offerPush = shouldOfferPushPrompt({
+      dismissed: pushPromptDismissed,
+      registration: hostPushRegistration(activeHost.hostId),
+      availability: pushState,
+      configStatus: pushConfig.status,
+    });
     return (
       <ConnectedView
-        host={host}
+        host={activeHost}
         adapter={adapterRef.current}
         onLeave={leaveWall}
-        offerPush={shouldOfferPushPrompt({
-          dismissed: pushPromptDismissed,
-          subscribedHostIds: pushSubscribedHostIds,
-          subscriptionCurrent: pushSubscriptionCurrent,
-          hostId: host.hostId,
-          availability: pushState,
-          configStatus: pushConfig.status,
-        })}
-        pushBusy={busy === 'push'}
-        // The wall renders no error banner of its own, and the enable tap is the
-        // only action here that can fail into `error` without also navigating.
-        pushError={error}
-        onEnablePush={() => onEnablePush(host)}
-        onDismissPush={() => setPushPromptDismissed(true)}
+        push={
+          offerPush
+            ? {
+                busy: busy === 'push',
+                error: error?.op === 'push' ? error.message : null,
+                onEnable: () => onEnablePush(activeHost),
+                onDismiss: () => setPushPromptDismissed(true),
+              }
+            : undefined
+        }
       />
     );
   }
@@ -638,26 +688,21 @@ export default function App(): React.ReactElement {
  */
 export function shouldOfferPushPrompt({
   dismissed,
-  subscribedHostIds,
-  subscriptionCurrent,
-  hostId,
+  registration,
   availability,
   configStatus,
 }: {
   dismissed: boolean;
-  /** Null while the Server has not answered; see the push effect in `App`. */
-  subscribedHostIds: ReadonlySet<string> | null;
-  /** Whether this browser still holds a subscription matching the Server's key. */
-  subscriptionCurrent: boolean;
-  hostId: string;
+  /** This Host's registration; `App` derives it — see `hostPushRegistration`. */
+  registration: PushRegistration;
   availability: PushAvailability | null;
   configStatus: PushConfigStatus;
 }): boolean {
   if (dismissed) return false;
   // Not merely `!== 'ready'`: unknown is not permission to ask.
   if (availability !== 'ready' || configStatus !== 'ready') return false;
-  if (subscribedHostIds === null) return false;
-  return !(subscriptionCurrent && subscribedHostIds.has(hostId));
+  // Neither is an unanswered registration read, for the same reason.
+  return registration === 'off';
 }
 
 /**
@@ -724,21 +769,22 @@ export function ConnectedView({
   host,
   adapter,
   onLeave,
-  offerPush = false,
-  pushBusy = false,
-  pushError = null,
-  onEnablePush,
-  onDismissPush,
+  push,
 }: {
   host: HostView;
   adapter: RemotePtyAdapter;
   onLeave: () => void;
-  /** See {@link shouldOfferPushPrompt}; `App` owns the decision. */
-  offerPush?: boolean;
-  pushBusy?: boolean;
-  pushError?: string | null;
-  onEnablePush?: () => void;
-  onDismissPush?: () => void;
+  /**
+   * The first-connect push offer, if this connect is one. Presence *is* the
+   * offer — see {@link shouldOfferPushPrompt}, which `App` owns — so an offer
+   * cannot arrive without the handlers that make it work.
+   */
+  push?: {
+    busy: boolean;
+    error: string | null;
+    onEnable: () => void;
+    onDismiss: () => void;
+  };
 }): React.ReactElement {
   return (
     <div className={PK.app}>
@@ -748,14 +794,7 @@ export function ConnectedView({
         </button>
         <h1 className={PK.headerTitle}>{host.label || host.hostId}</h1>
       </header>
-      {offerPush ? (
-        <PushPrompt
-          busy={pushBusy}
-          error={pushError ?? null}
-          onEnable={() => onEnablePush?.()}
-          onDismiss={() => onDismissPush?.()}
-        />
-      ) : null}
+      {push ? <PushPrompt {...push} /> : null}
       <div className={PK.wallHost}>
         <PocketWall adapter={adapter} />
       </div>
@@ -890,7 +929,8 @@ export function SetupOrSignin({
 
 /**
  * The one iOS install gesture, written once so the two notices cannot drift on
- * it — everything else in them differs on purpose (identity vs alerts framing).
+ * it — everything else in them differs on purpose (identity vs push-notification
+ * framing).
  */
 const INSTALL_RITUAL = (
   <>
@@ -905,15 +945,16 @@ const INSTALL_RITUAL = (
  * doing all of it, the laptop's pairing approval included, a second time.
  *
  * Guidance, not a gate: iOS offers no install prompt to fire, and someone who
- * does not want alerts and never installs is still entitled to a terminal.
+ * does not want push notifications and never installs is still entitled to a
+ * terminal.
  *
  * The second line is not optional. A tab cannot see whether the app is *also*
  * installed (separate storage, no shared signal), so this shows to someone who
  * installed it already and simply opened the wrong window.
  *
- * Alerts are deliberately not mentioned: whether they work at all depends on
- * the Server's push config, which {@link InstallNotice} and the Hosts view's
- * push rows gate on. Identity is true regardless, and carries the notice.
+ * Push notifications are deliberately not mentioned: whether they work at all
+ * depends on the Server's push config, which {@link InstallNotice} and the Hosts
+ * view's push rows gate on. Identity is true regardless, and carries the notice.
  */
 function InstallFirstNotice(): React.ReactElement {
   return (
@@ -934,9 +975,9 @@ function InstallFirstNotice(): React.ReactElement {
 // --- HostsView -------------------------------------------------------------
 
 /**
- * The same advice on the surface that offers alerts, for a tab that set up
- * anyway ({@link InstallFirstNotice} is where it is first given, before there
- * is anything to regret). Web Push is granted only to a Home Screen web app,
+ * The same advice on the surface that offers push notifications, for a tab that
+ * set up anyway ({@link InstallFirstNotice} is where it is first given, before
+ * there is anything to regret). Web Push is granted only to a Home Screen web app,
  * and there is no API to prompt for that install — it can only be described,
  * which is why the push rows below point up here.
  *

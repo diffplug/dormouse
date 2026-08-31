@@ -476,9 +476,7 @@ function offerPush(
 ): boolean {
   return shouldOfferPushPrompt({
     dismissed: false,
-    subscribedHostIds: new Set<string>(),
-    subscriptionCurrent: true,
-    hostId: 'host-1',
+    registration: 'off',
     availability: 'ready',
     configStatus: 'ready',
     ...overrides,
@@ -486,33 +484,26 @@ function offerPush(
 }
 
 describe('the first-connect push prompt appears', () => {
+  /**
+   * `off` is every way this Host is not reachable by push: no Server row at all
+   * (even beside another Host that has one — rows are per (host, device)), or a
+   * row whose browser subscription no longer matches it. `App` collapses those
+   * into the one answer; what is decided here is that any of them offers.
+   */
   it('after a connect that landed the user in a working terminal', () => {
     expect(offerPush()).toBe(true);
-  });
-
-  it('for a Host this device has not registered with, even beside one it has', () => {
-    // Server rows are per (host, device): one enabled Host says nothing about
-    // the one just connected to.
-    expect(offerPush({ subscribedHostIds: new Set(['host-2']) })).toBe(true);
-  });
-
-  it('when the browser subscription no longer matches what the Server holds', () => {
-    // A Server row alone is not "on" — the same repair path the rows expose.
-    expect(
-      offerPush({ subscribedHostIds: new Set(['host-1']), subscriptionCurrent: false }),
-    ).toBe(true);
   });
 });
 
 describe('the first-connect push prompt stays away', () => {
   it('once this Host is registered and the subscription is current', () => {
-    expect(offerPush({ subscribedHostIds: new Set(['host-1']) })).toBe(false);
+    expect(offerPush({ registration: 'on' })).toBe(false);
   });
 
   it('while the Server has not yet said which Hosts are registered', () => {
     // Waiting costs a beat; guessing shows a full-width banner to someone who
     // already enabled push, which the small row action would never have done.
-    expect(offerPush({ subscribedHostIds: null })).toBe(false);
+    expect(offerPush({ registration: 'unknown' })).toBe(false);
   });
 
   it('whenever this browser cannot receive push, for any reason', () => {

@@ -261,21 +261,22 @@ therefore leaves **Enable push notifications** available for every Host that has
 not registered; only a successful `POST /api/push/subscribe` flips that Host to
 **Push notifications on**.
 
-Which Hosts those are is read from the Server on entering an authenticated view
-— both surfaces share that one load — not remembered locally, so a reload does
-not re-offer an action already taken and a row pruned after a 410 stops claiming
-push is on. `GET /api/push/subscriptions` returns the **account's**
+Which Hosts those are is read from the Server on entering the Hosts list — the
+connect neither refetches nor drops it, so both push surfaces read one load and
+answers land on the wall — not remembered locally, so a reload does not re-offer
+an action already taken and a row pruned after a 410 stops claiming push is on.
+`GET /api/push/subscriptions` returns the **account's**
 registrations, filtered to this device by `PocketClient`. **Never parameterize
 that read by `devicePublicKey`** — an enumeration primitive over an input the
 caller need not own, where the account's own rows are already its to read (the
 scoping `GET /api/hosts` uses). `POST /api/push/subscribe` answers with the same
 thing — every Host this device is registered with after the mutation — so both
 are complete answers, never deltas: nothing to merge, only which is newer.
-Pocket counts completed registrations, captures that count when a read begins,
-and drops the read's snapshot if a registration overtook it. A read in flight is
-unanswered rather than empty — only the full-width offer waits on that; the row
-offers its idempotent Enable meanwhile, as it does after a failed read, rather
-than preserving a stale **Push notifications on** claim. Source of truth:
+Pocket drops a read that a completed registration, or a newer load of its own,
+already overtook. A read in flight is unanswered rather than empty — only the
+full-width offer waits on that; the row offers its idempotent Enable meanwhile,
+as after a failed read, rather than preserving a stale **Push notifications on**
+claim. Source of truth:
 `getPushAvailability` in
 `lib/src/remote/client/push-subscribe.ts`,
 `PocketClient.listPushSubscribedHosts`, and the push effect in

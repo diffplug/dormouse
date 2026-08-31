@@ -329,8 +329,8 @@ describe('subscribeToPushInBrowser', () => {
 
   it('reports the replaced delivery address even when subscribe throws', async () => {
     // The old endpoint is dead as soon as `unsubscribe` resolves. If the
-    // failure swallowed that fact, every other Host would keep claiming alerts
-    // through an address nothing can reach.
+    // failure swallowed that fact, every other Host would keep claiming push
+    // notifications through an address nothing can reach.
     stubBrowser({});
     (globalThis.Notification as unknown as { requestPermission: unknown }).requestPermission =
       async () => 'granted';
