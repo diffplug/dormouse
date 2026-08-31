@@ -825,10 +825,11 @@ export function useDorControl({
                 // rather than stacking prompts: dedupe cannot key on
                 // `prespawn_dedupe` yet (the untrusted lookup withholds it), so
                 // it keys on what the prompt is about.
-                const already = findSurfaceByParams((candidate) => {
+                const matchesPending = (candidate: unknown) => {
                   const waiting = toolPendingFromParams(candidate);
                   return waiting?.name === lookup.name && waiting.projectRoot === lookup.projectRoot;
-                });
+                };
+                const already = findSurfaceByParams(matchesPending);
                 if (already) {
                   revealSurface(already.id);
                   detail.respond({
@@ -839,7 +840,7 @@ export function useDorControl({
                       surfaceRef: surfaceRefForId(already.id),
                       command: lookup.run,
                       cwd,
-                      minimized: already.minimized,
+                      minimized: findSurfaceByParams(matchesPending)?.minimized ?? false,
                       key: null,
                     },
                   });

@@ -1161,6 +1161,75 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('reports a reused pending tool as visible after reattaching it', async () => {
+    setToolsEnabled(true);
+    const toolId = 'pending-tool-door';
+    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => ({
+      status: 'untrusted' as const,
+      projectRoot: '/repo',
+      path: '/repo/dormouse.yml',
+      name: 'storybook',
+      run: 'pnpm storybook',
+      upstreamUrl: null,
+    }));
+
+    try {
+      await act(async () => {
+        root.render(
+          <Wall
+            initialPaneIds={['pane-a']}
+            initialDoors={[{
+              id: toolId,
+              title: 'storybook',
+              component: 'tool',
+              tabComponent: 'tool',
+              params: {
+                surfaceType: 'tool',
+                command: 'pnpm storybook',
+                cwd: '/repo',
+                toolName: 'storybook',
+                toolPending: {
+                  name: 'storybook',
+                  run: 'pnpm storybook',
+                  path: '/repo/dormouse.yml',
+                  projectRoot: '/repo',
+                  cwd: '/repo',
+                  minimized: false,
+                  upstreamUrl: null,
+                },
+              },
+            }]}
+            initialMode="command"
+            showBaseboard
+          />,
+        );
+      });
+      await flush();
+      expect(container.querySelector(`[data-door-id="${toolId}"]`)).not.toBeNull();
+
+      let response: { ok: boolean; result?: { status: string; surfaceId: string; minimized: boolean } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.tool,
+            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
+            respond: (result: typeof response) => { response = result; },
+          },
+        }));
+      });
+      await flush();
+
+      expect(response).toMatchObject({
+        ok: true,
+        result: { status: 'pending', surfaceId: toolId, minimized: false },
+      });
+      expect(container.querySelector(`[data-door-id="${toolId}"]`)).toBeNull();
+      expect(container.querySelector(`[data-lath-leaf="${toolId}"]`)).not.toBeNull();
+    } finally {
+      setToolsEnabled(false);
+    }
+  });
+
   it('reports a reused minimized tool as visible after reattaching it', async () => {
     setToolsEnabled(true);
     const toolId = 'tool-door';
