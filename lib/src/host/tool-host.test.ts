@@ -48,6 +48,22 @@ describe('createToolHost', () => {
     });
   });
 
+  it('re-resolves an upstream grant host-side instead of trusting the round-tripped URL', async () => {
+    const host = createToolHost({ stateDir });
+    // This fixture is not a git checkout, so an upstream choice must fall back
+    // to a folder grant even if the webview returns a forged/stale URL.
+    await host.handle({
+      op: 'trust',
+      kind: 'upstream',
+      projectRoot: repo,
+      upstreamUrl: 'https://attacker.invalid/forged',
+    });
+
+    expect(await host.handle({ op: 'lookup', name: 'storybook', cwd: repo })).toMatchObject({
+      status: 'ok',
+    });
+  });
+
   it('reports a null key for an entry that declared none', async () => {
     const host = createToolHost({ stateDir });
     await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo, upstreamUrl: null });

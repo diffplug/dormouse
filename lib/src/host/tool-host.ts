@@ -9,6 +9,7 @@
  * standalone path goes through Rust.
  */
 import type { ToolControlResult, ToolHostRequest } from '../lib/platform/tool-types';
+import { resolveUpstreamUrl } from './git-upstream';
 import { resolveDedupeKey } from './tool-registry';
 import {
   FileToolTrustStore,
@@ -41,7 +42,9 @@ export function createToolHost(options: { stateDir?: string } = {}): ToolHost {
         // *which kind* the human picked, and the host owns the mapping from a
         // project to its keys. An `upstream` pick with no URL falls back to the
         // folder rather than minting a key on an empty string.
-        const upstream = request.kind === 'upstream' ? request.upstreamUrl : null;
+        const upstream = request.kind === 'upstream'
+          ? await resolveUpstreamUrl(request.projectRoot)
+          : null;
         await trust.grant(
           upstream ? upstreamGrantKey(upstream) : folderGrantKey(request.projectRoot),
           upstream ? 'upstream' : 'folder',
