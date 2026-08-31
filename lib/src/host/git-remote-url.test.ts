@@ -79,3 +79,19 @@ describe('canonicalRemoteUrl', () => {
     expect(canonicalRemoteUrl('host:/srv/repo.git')).toBeNull();
   });
 });
+
+describe('default ports (regression: PR #493 review)', () => {
+  it('collapses an explicitly-spelled default port onto the same key', () => {
+    // Without this, a worktree whose origin is spelled the long way re-prompts,
+    // defeating "every worktree and clone of one repo shares a grant".
+    const expected = canonicalRemoteUrl('git@github.com:diffplug/dormouse.git');
+    expect(canonicalRemoteUrl('ssh://git@github.com:22/diffplug/dormouse.git')).toBe(expected);
+    expect(canonicalRemoteUrl('git://github.com:9418/diffplug/dormouse.git')).toBe(expected);
+    expect(canonicalRemoteUrl('https://github.com:443/diffplug/dormouse')).toBe(expected);
+  });
+
+  it('still keeps a genuinely non-default port distinct', () => {
+    expect(canonicalRemoteUrl('ssh://git@host:2222/o/r')).toBe('https://host:2222/o/r');
+    expect(canonicalRemoteUrl('ssh://git@host:2222/o/r')).not.toBe(canonicalRemoteUrl('ssh://git@host/o/r'));
+  });
+});

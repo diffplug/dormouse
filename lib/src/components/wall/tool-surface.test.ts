@@ -7,8 +7,9 @@ import {
   namespacedToolKey,
   resolveRenderMode,
   surfaceKindFromParams,
-  toolKeysEqual,
   toolFace,
+  toolKeysEqual,
+  toolPendingFromParams,
 } from './browser-surface';
 import { persistableLeafMeta, shouldParkOnMinimize, toolLeafMeta } from './lath-wall-engine';
 import { TOOLS_FLAG_KEY, isToolsEnabled, setToolsEnabled } from '../../lib/feature-flags';
@@ -169,5 +170,55 @@ describe('tool persistence (regression: review findings 4 and 11)', () => {
   it('leaves a browser Surface’s params alone', () => {
     const meta = { component: 'browser', tabComponent: 'surface', title: 'B', params: { url: 'https://x', renderMode: 'iframe' } };
     expect(persistableLeafMeta(meta).params).toEqual({ url: 'https://x', renderMode: 'iframe' });
+  });
+});
+
+describe('the pending-approval shape (regression: PR #493 review)', () => {
+  // The producer in `use-dor-control.ts` and this reader disagreed about `cwd`,
+  // so `toolPendingFromParams` returned null in production, `toolFace` never
+  // reached `pending-approval`, and the untrusted pane mounted a live shell
+  // instead of the prompt. The producer's literal is now typed `ToolPending`,
+  // so a future divergence is a compile error rather than a silent one — these
+  // pin the runtime half.
+  const pending = {
+    name: 'storybook',
+    run: 'pnpm storybook',
+    path: '/repo/dormouse.yml',
+    projectRoot: '/repo',
+    minimized: false,
+    upstreamUrl: null,
+  };
+
+  it('accepts exactly what the producer writes', () => {
+    expect(toolPendingFromParams({ surfaceType: 'tool', toolPending: pending })).toMatchObject({
+      name: 'storybook',
+      projectRoot: '/repo',
+    });
+    expect(toolFace({ surfaceType: 'tool', toolPending: pending })).toBe('pending-approval');
+  });
+
+  it('rejects a shape missing any required field, rather than half-reading it', () => {
+    for (const field of ['name', 'run', 'path', 'projectRoot', 'minimized'] as const) {
+      const { [field]: _dropped, ...rest } = pending;
+      expect(toolPendingFromParams({ surfaceType: 'tool', toolPending: rest }), field).toBeNull();
+    }
+  });
+
+  it('allows a null upstream, which is how a repo with no remote arrives', () => {
+    expect(toolPendingFromParams({ surfaceType: 'tool', toolPending: pending })).not.toBeNull();
+  });
+});
+
+describe('a pending tool is not persisted (regression: PR #493 review)', () => {
+  it('persists as a plain terminal, so a restart cannot spawn a shell in an unapproved repo', () => {
+    const meta = toolLeafMeta('storybook', {
+      surfaceType: 'tool',
+      command: 'pnpm storybook',
+      cwd: '/repo',
+      toolPending: { name: 'storybook', run: 'pnpm storybook', path: '/p', projectRoot: '/repo', minimized: false, upstreamUrl: null },
+    });
+    const persisted = persistableLeafMeta(meta);
+    expect(persisted.component).toBe('terminal');
+    expect(persisted.params).toBeUndefined();
   });
 });

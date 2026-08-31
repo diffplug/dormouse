@@ -67,7 +67,14 @@ export function useToolServing({
     let cancelled = false;
 
     const tick = async () => {
-      for (const leaf of toolLeaves(lath, doorsRef.current)) {
+      const leaves = toolLeaves(lath, doorsRef.current);
+      // A killed tool never reaches the exit branch below, so prune by absence.
+      const live = new Set(leaves.map((leaf) => leaf.id));
+      for (const id of seenPorts.current.keys()) {
+        if (!live.has(id)) seenPorts.current.delete(id);
+      }
+
+      for (const leaf of leaves) {
         if (cancelled) return;
         const announce = getToolAnnounce(leaf.id);
 
@@ -89,13 +96,19 @@ export function useToolServing({
         // Surface, because the params, not the id, changed. A conflict is
         // derived the same way and retires with it, so a re-run gets a fresh
         // verdict rather than the last run's.
+        // Drop the settle memory on *any* exit, not only one that committed: a
+        // command that died mid-settle would otherwise leave its port list
+        // behind, and the next run's first tick would compare equal to it and
+        // commit immediately — framing whichever port bound earliest, which is
+        // the regression the settle window exists to prevent.
+        if (!running) seenPorts.current.delete(leaf.id);
+
         if ((hasUrl || hasConflict) && !running) {
           lath.store.updateParams(leaf.id, {
             url: undefined,
             showTerminal: undefined,
             toolPortConflict: undefined,
           });
-          seenPorts.current.delete(leaf.id);
           continue;
         }
         // A conflict is a verdict about *guessing*, not a final state: the
@@ -103,7 +116,14 @@ export function useToolServing({
         // has already refused must still be framed. Without the second clause
         // the pane would show the conflict for the life of the command, telling
         // the user to announce a port it had just announced.
-        if (hasUrl || (hasConflict && announce?.port == null) || !running) continue;
+        // An announcement outranks whatever autobind decided, framed or
+        // refused: OSC 367 `serve` is re-emittable and last-write-wins, so a
+        // tool that moves its port must be able to re-point the pane.
+        const announcedPort = announce?.port ?? null;
+        const alreadyOnAnnounced = announcedPort !== null
+          && browserUrlFromParams(leaf.params)?.includes(`:${announcedPort}/`) === true;
+        if (!running) continue;
+        if ((hasUrl || hasConflict) && (announcedPort === null || alreadyOnAnnounced)) continue;
 
         let ports;
         try {

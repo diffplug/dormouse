@@ -59,7 +59,9 @@ export interface ToolPending {
   readonly run: string;
   readonly path: string;
   readonly projectRoot: string;
-  readonly cwd: string;
+  /** Requested at launch; applied after approval, since a pane the user cannot
+   *  see is a pane they cannot approve. */
+  readonly minimized: boolean;
   readonly upstreamUrl: string | null;
 }
 
@@ -68,8 +70,9 @@ export function toolPendingFromParams(params: unknown): ToolPending | null {
   const value = asParams(params).toolPending;
   if (!value || typeof value !== 'object') return null;
   const pending = value as Record<string, unknown>;
-  const strings = ['name', 'run', 'path', 'projectRoot', 'cwd'] as const;
+  const strings = ['name', 'run', 'path', 'projectRoot'] as const;
   if (!strings.every((field) => typeof pending[field] === 'string')) return null;
+  if (typeof pending.minimized !== 'boolean') return null;
   if (pending.upstreamUrl !== null && typeof pending.upstreamUrl !== 'string') return null;
   return pending as unknown as ToolPending;
 }

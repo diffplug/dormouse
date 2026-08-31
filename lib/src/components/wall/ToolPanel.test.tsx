@@ -126,7 +126,7 @@ describe('the pending-approval face', () => {
       run: 'pnpm storybook',
       path: '/repo/dormouse.yml',
       projectRoot: '/repo',
-      cwd: '/repo',
+      minimized: false,
       upstreamUrl: 'https://github.com/diffplug/dormouse',
     },
   };

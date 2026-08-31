@@ -109,6 +109,14 @@ export function toolLeafMeta(title: string, params: Record<string, unknown>): Le
  */
 export function persistableLeafMeta(meta: LeafMeta): LeafMeta {
   if (meta.component !== 'tool' || !meta.params) return meta;
+  // A tool still awaiting approval persists as a plain empty terminal. Keeping
+  // it a tool would restore a pane that spawns a shell in a repo nobody
+  // approved, with no gesture at all — and the prompt cannot be restored either,
+  // since the grant it was asking for was never made
+  // (`docs/specs/dor-tool.md` -> Trust rule 3).
+  if (meta.params.toolPending !== undefined) {
+    return { component: 'terminal', tabComponent: 'terminal', title: meta.title };
+  }
   const {
     url: _url,
     session: _session,

@@ -53,7 +53,7 @@ import type { PersistedDoor, PersistedSurfaceRefs } from '../lib/session-types';
 import type { DropTarget, RestoreToken } from '../lib/lath/ops';
 import type { Edge } from '../lib/lath/model';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
-import { resolveRenderMode, agentBrowserSessionFromParams, browserUrlFromParams, isToolParams, surfaceKindFromParams, toolPendingFromParams } from './wall/browser-surface';
+import { resolveRenderMode, agentBrowserSessionFromParams, browserUrlFromParams, isToolParams, namespacedToolKey, surfaceKindFromParams, toolPendingFromParams } from './wall/browser-surface';
 import { hostPathDisplay } from './wall/browser-url';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { LathHost } from './wall/LathHost';
@@ -918,6 +918,7 @@ export function Wall({
     requireIntegration,
     focusNeutral,
     leafMeta,
+    deferTerminal,
   }: {
     command?: string;
     direction: DorResolvedSplitDirection;
@@ -934,6 +935,10 @@ export function Wall({
     // focus intact. Under Lath every add is inherently background (nothing
     // re-parents or activates).
     focusNeutral?: boolean;
+    /** Create the leaf but stage no shell and spawn no PTY. `dor tool` uses it
+     *  for a pane awaiting approval: nothing from the repo may run until a human
+     *  chooses (docs/specs/dor-tool.md -> Trust rule 3). */
+    deferTerminal?: boolean;
   }): ParseResult<{
     id: string;
     ref: string;
@@ -955,7 +960,10 @@ export function Wall({
     const sourceCwd = getTerminalPaneState(referenceId).cwd;
     const inheritedCwd = cwd ?? (sourceCwd && !sourceCwd.isRemote ? sourceCwd.path : undefined);
 
-    if (command) {
+    if (deferTerminal) {
+      // No pending shell opts at all: the terminal must not spawn when the leaf
+      // mounts, and must not inherit a cwd it will never use.
+    } else if (command) {
       // Spawn a real interactive shell and type the command into it once it
       // reaches a prompt (see typeCommandWhenPromptReady in the lifecycle), rather
       // than launching `shell -c command`. A `-c` invocation has no prompt behind
@@ -990,7 +998,7 @@ export function Wall({
         index: direction === 'left' || direction === 'up' ? 0 : 1,
         fingerprint: null,
       };
-      getOrCreateTerminal(newId);
+      if (!deferTerminal) getOrCreateTerminal(newId);
       // This Surface is born minimized — it never has a pane to detach — so register
       // its meta directly, keeping the store the authority for EVERY Door
       // (docs/specs/tiling-engine.md → "Parked leaves").
@@ -1017,7 +1025,7 @@ export function Wall({
       source: 'dor',
     });
     if (minimized) {
-      getOrCreateTerminal(newId);
+      if (!deferTerminal) getOrCreateTerminal(newId);
       minimizePane(newId, { select: selectedNew });
     }
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), minimized } };
@@ -1188,7 +1196,8 @@ export function Wall({
   // pane that has been showing the prompt. The two steps are ordered so a
   // failed write never leaves a running command in an unapproved repo.
   const resolveToolApproval = useCallback(async (id: string, choice: 'upstream' | 'folder' | 'decline') => {
-    const pending = toolPendingFromParams(lath.getMeta(id)?.params);
+    const meta = lath.getMeta(id);
+    const pending = toolPendingFromParams(meta?.params);
     if (!pending) return;
     if (choice === 'decline') {
       // A refusal writes nothing: it closes the pane and leaves no record, so a
@@ -1196,26 +1205,50 @@ export function Wall({
       killPaneImmediately(id);
       return;
     }
-    await getPlatform().toolControl?.({
+    // Clear the prompt first, so a second click cannot grant twice or stage a
+    // second set of shell opts that nothing will consume.
+    lath.store.updateParams(id, { toolPending: undefined });
+
+    const platform = getPlatform();
+    await platform.toolControl?.({
       op: 'trust',
       kind: choice,
       projectRoot: pending.projectRoot,
       upstreamUrl: pending.upstreamUrl,
     });
-    // Hand the leaf the command only now. `setPendingShellOpts` before the
+
+    // Re-resolve now that the grant exists. The untrusted lookup deliberately
+    // withholds `render` / `port` / `key` — they live only in the `ok` arm — so
+    // asking again is what gives an approved tool the config its dormouse.yml
+    // declared, rather than silently running it as a keyless default iframe.
+    const cwd = typeof meta?.params?.cwd === 'string' ? meta.params.cwd : pending.projectRoot;
+    const resolved = await platform.toolControl?.({ op: 'lookup', name: pending.name, cwd });
+    if (resolved?.status !== 'ok') {
+      killPaneImmediately(id);
+      return;
+    }
+
+    lath.store.updateParams(id, {
+      command: resolved.run,
+      toolRender: resolved.render,
+      toolPort: resolved.port,
+      ...(resolved.key ? { toolKey: namespacedToolKey(resolved.name, resolved.key) } : {}),
+    });
+    // Hand the leaf its command only now. `setPendingShellOpts` before the
     // terminal half mounts is exactly how `createSplitSurface` starts a
-    // commanded split; clearing `toolPending` is what mounts it.
+    // commanded split.
     const defaults = getDefaultShellOpts();
     setPendingShellOpts(id, {
       shell: defaults?.shell,
       args: defaults?.args,
-      cwd: pending.cwd,
+      cwd,
       untouched: false,
-      command: pending.run,
+      command: resolved.run,
       requireIntegration: true,
     });
-    lath.store.updateParams(id, { toolPending: undefined });
-  }, [lath, killPaneImmediately]);
+    // The launch asked for this, and it was withheld so the prompt could be seen.
+    if (pending.minimized) minimizePane(id);
+  }, [lath, killPaneImmediately, minimizePane]);
 
   // A tool grows its browser when its command starts serving.
   useToolServing({ lath, doorsRef });

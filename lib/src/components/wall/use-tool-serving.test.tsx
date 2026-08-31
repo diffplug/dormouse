@@ -185,3 +185,33 @@ describe('an announcement overrides a committed conflict', () => {
     expect(updateParams).toHaveBeenCalledWith('tool-1', expect.objectContaining({ toolPortConflict: undefined }));
   });
 });
+
+describe('the settle memory resets on any exit (regression: PR #493 review)', () => {
+  const auto = { surfaceType: 'tool', command: 'x', toolPort: 'auto' };
+
+  it('does not commit the first port seen after a run that died mid-settle', async () => {
+    // Run 1 sees only the bridge and dies before committing anything. Keeping
+    // that port list would make run 2's first tick compare equal and frame the
+    // bridge — the exact regression the settle window exists to prevent.
+    const { lath, state } = fakeLath(auto);
+    let call = 0;
+    const scans = [[tcp(1422)], [tcp(1422)], [tcp(1422)]];
+    const platform = new FakePtyAdapter() as FakePtyAdapter & { getOpenPorts: () => Promise<OpenPort[]> };
+    platform.getOpenPorts = vi.fn(async () => scans[Math.min(call++, scans.length - 1)]);
+    setPlatform(platform);
+
+    const doorsRef = { current: [] };
+    function Probe() {
+      useToolServing({ lath, doorsRef });
+      return null;
+    }
+    await act(async () => { root.render(<Probe />); });   // tick 1: [1422] recorded
+    currentCommand = null;                                 // the command dies
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+    currentCommand = 'x';                                  // re-run
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+
+    // First tick of run 2 is a first sighting again, so nothing is framed yet.
+    expect(state.params.url).toBeUndefined();
+  });
+});

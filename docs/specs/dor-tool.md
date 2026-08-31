@@ -157,7 +157,12 @@ the repo is trusted. The phase-C user-global file needs none of this.
    boundary (rationale). Same shape as the local-approval ceremony in
    `docs/specs/remote-security-model.md`.
 3. **Agents cannot grant trust.** `dor tool <name>` against an unapproved repo
-   creates the Surface and reports `pending`; its pane shows what would run and
+   creates the Surface and reports `pending`, never minimized — a pane the user
+   cannot see is a pane they cannot approve, so a requested `--minimize` is
+   applied after approval instead. A pending Surface is not persisted: it
+   restores as a plain terminal, since the grant it was asking for was never
+   made. Approval re-resolves the entry, so the tool runs with the `render`,
+   `port` and key its file declares. its pane shows what would run and
    waits. **Nothing from the repo executes until a human chooses** — no PTY is
    spawned, so not even a shell starts. **Declining closes the pane and records
    nothing** (rationale).

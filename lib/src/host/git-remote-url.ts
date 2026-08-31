@@ -55,7 +55,12 @@ export function canonicalRemoteUrl(raw: string): string | null {
   // Query and fragment are meaningless on a git remote and are dropped so they
   // cannot be used to mint distinct keys for one destination.
   const host = url.hostname.toLowerCase();
-  const port = url.port && url.port !== '443' && url.port !== '80' ? `:${url.port}` : '';
+  // Each scheme's own default, not just the web ones: `new URL` already strips
+  // 80/443 for http(s), so without ssh's 22 and git's 9418 the long spelling
+  // `ssh://git@host:22/o/r` would key differently from `git@host:o/r` and split
+  // one repo's grant in two.
+  const defaultPorts: Record<string, string> = { 'https:': '443', 'http:': '80', 'ssh:': '22', 'git:': '9418' };
+  const port = url.port && url.port !== defaultPorts[url.protocol] ? `:${url.port}` : '';
 
   // One trailing `.git`, and only as a suffix of the final segment — not a
   // global replace, which would rewrite a path component named `.github`.

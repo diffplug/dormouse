@@ -23,7 +23,14 @@ import {
 } from '../../lib/terminal-registry';
 import { surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { hostPathDisplay } from './browser-url';
-import { agentBrowserSessionFromParams, isAgentBrowserParams, namespacedToolKey, toolKeysEqual } from './browser-surface';
+import {
+  agentBrowserSessionFromParams,
+  isAgentBrowserParams,
+  namespacedToolKey,
+  toolKeysEqual,
+  toolPendingFromParams,
+  type ToolPending,
+} from './browser-surface';
 // One-way import: connect-port no longer depends on this module (its eager-surface
 // and refresh seams are injected as plain functions).
 import { connectPortToDefaultBrowser } from './connect-port';
@@ -406,6 +413,9 @@ export function useDorControl({
      *  tool` passes a tool leaf, which is a shell-hosted PTY exactly like a
      *  terminal but renders both capabilities. */
     leafMeta?: LeafMeta;
+    /** Create the leaf but stage no shell and spawn no PTY — a pane awaiting
+     *  approval (docs/specs/dor-tool.md -> Trust rule 3). */
+    deferTerminal?: boolean;
   }) => ParseResult<{ id: string; ref: string; minimized: boolean }>;
   createContentSurface: (args: {
     minimized: boolean;
@@ -802,26 +812,60 @@ export function useDorControl({
                 // repo has executed to reach this point — the file was read and
                 // parsed, which is inert, and is what lets the prompt name the
                 // command it is asking about.
+                //
+                // A second launch of the same tool reuses the pending pane
+                // rather than stacking prompts: dedupe cannot key on
+                // `prespawn_dedupe` yet (the untrusted lookup withholds it), so
+                // it keys on what the prompt is about.
+                const already = findSurfaceByParams((candidate) => {
+                  const waiting = toolPendingFromParams(candidate);
+                  return waiting?.name === lookup.name && waiting.projectRoot === lookup.projectRoot;
+                });
+                if (already) {
+                  revealSurface(already.id);
+                  detail.respond({
+                    ok: true,
+                    result: {
+                      status: 'pending',
+                      surfaceId: already.id,
+                      surfaceRef: surfaceRefForId(already.id),
+                      command: lookup.run,
+                      cwd,
+                      minimized: already.minimized,
+                      key: null,
+                    },
+                  });
+                  return;
+                }
                 const pendingTarget = resolveSplitTarget();
                 if (!pendingTarget) return;
+                // Deliberately not minimized, whatever was asked: a pane the
+                // user cannot see is a pane they cannot approve. The request is
+                // carried and applied once they do.
+                const pendingMeta: ToolPending = {
+                  name: lookup.name,
+                  run: lookup.run,
+                  path: lookup.path,
+                  projectRoot: lookup.projectRoot,
+                  minimized: booleanParam(params.minimized),
+                  upstreamUrl: lookup.upstreamUrl,
+                };
                 const pending = createSplitSurface({
                   direction: autoDorDirection(pendingTarget.target),
-                  minimized: booleanParam(params.minimized),
+                  minimized: false,
                   reference: pendingTarget.target,
                   cwd,
                   focusNeutral: true,
+                  // No shell until a human approves: `createSplitSurface` would
+                  // otherwise stage shell opts and, on some paths, spawn the PTY
+                  // outright (docs/specs/dor-tool.md -> Trust rule 3).
+                  deferTerminal: true,
                   leafMeta: toolLeafMeta(lookup.name, {
                     surfaceType: 'tool',
                     command: lookup.run,
                     cwd,
                     toolName: lookup.name,
-                    toolPending: {
-                      name: lookup.name,
-                      run: lookup.run,
-                      path: lookup.path,
-                      projectRoot: lookup.projectRoot,
-                      upstreamUrl: lookup.upstreamUrl,
-                    },
+                    toolPending: pendingMeta,
                   }),
                 });
                 if (!pending.ok) {
@@ -836,7 +880,7 @@ export function useDorControl({
                     surfaceRef: pending.value.ref,
                     command: lookup.run,
                     cwd,
-                    minimized: pending.value.minimized,
+                    minimized: false,
                     key: null,
                   },
                 });
