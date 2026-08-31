@@ -6,6 +6,8 @@ Invocation: `dor --help`
 USAGE
   dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface id|ref] [-- <command>...]
   dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] -- <command>...
+  dor tool [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] <name>
+  dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] -- <command>...
   dor version [--json]
   dor skill [--install] [--json]
   dor send <surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw]
@@ -14,7 +16,7 @@ USAGE
   dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json]
   dor iframe [--json] [--minimize] [--surface id|ref] <target>
   dor agent-browser [--key name|--session name|--surface handle] [args...]
-  dor list [--command text] [--cwd path] [--id-format refs|ids|both] [--json] [--kind terminal|browser] [--port number] [--ports] [--view paned|zoomed|minimized]
+  dor list [--command text] [--cwd path] [--id-format refs|ids|both] [--json] [--kind terminal|browser|tool] [--port number] [--ports] [--view paned|zoomed|minimized]
   dor --help
 
 Dormouse bundles the dor CLI into every terminal it launches.
@@ -26,6 +28,7 @@ FLAGS
 COMMANDS
   split          Create a new terminal surface by splitting an existing surface.
   ensure         Ensure one surface is running a command.
+  tool           Run a command as a Dor Tool.
   version        Print the dor CLI version.
   skill          Print the Dormouse agent skill, or install its bootstrap stub.
   send           Send text or key input to a terminal surface.

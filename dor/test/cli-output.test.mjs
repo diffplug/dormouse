@@ -139,6 +139,28 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         ...(command ? { command } : {}),
       };
     },
+    async toolSurface(request) {
+      this.requests.push({ method: 'toolSurface', request });
+      // Mirror the host: a named tool renders from the (fixture) registry, a
+      // `--` tail is quoted argv. `storybook` is the keyed entry, so it is the
+      // one that can come back as an existing match.
+      const named = typeof request.name === 'string';
+      const command = named
+        ? `pnpm ${request.name}`
+        : buildShellCommandForKind('posix', request.command);
+      const keyed = named && request.name === 'storybook' && !request.fresh;
+      return {
+        status: keyed ? 'existing' : 'created',
+        surfaceId: '44444444-4444-4444-8444-444444444444',
+        surfaceRef: 'surface:4',
+        command,
+        cwd: request.cwd,
+        minimized: request.minimized,
+        key: keyed ? ['storybook', '/work/site'] : null,
+        ...(named && request.name === 'noisy' ? { warnings: ['dormouse.yml: tools.noisy: ignoring unknown field \'colour\''] } : {}),
+      };
+    },
+
     async ensureSurface(request) {
       this.requests.push({ method: 'ensureSurface', request });
       // Mirror the host: quote the argv for the target shell, and key on the
@@ -1382,4 +1404,95 @@ test('ensure missing command output', async () => {
 
 test('split conflicting direction output', async () => {
   await snapshot('split-conflicting-direction', await runCli(['split', '--left', '--right'], { client: fixtureClient() }));
+});
+
+test('tool named form text output', async () => {
+  await snapshot(
+    'tool-named',
+    await runCli(['tool', 'storybook'], { client: fixtureClient(), env: { PWD: '/work/site' } }),
+  );
+});
+
+test('tool command form text output', async () => {
+  await snapshot(
+    'tool-command',
+    await runCli(['tool', '--', 'pnpm', 'dev'], { client: fixtureClient(), env: { PWD: '/work/site' } }),
+  );
+});
+
+test('tool json output carries the resolved key', async () => {
+  await snapshot(
+    'tool-json',
+    await runCli(['tool', '--json', 'storybook'], { client: fixtureClient(), env: { PWD: '/work/site' } }),
+  );
+});
+
+test('tool sends the name, never a command', async () => {
+  const client = fixtureClient();
+  await runCli(['tool', 'storybook'], { client, env: { PWD: '/work/site' } });
+  client.requests[0].request.cwd = smudgeWindowsPaths(client.requests[0].request.cwd);
+  assert.deepEqual(client.requests, [{
+    method: 'toolSurface',
+    request: {
+      name: 'storybook',
+      fresh: false,
+      minimized: false,
+      surface: undefined,
+      cwd: '/work/site',
+    },
+  }]);
+});
+
+test('tool rejects arguments after a name', async () => {
+  await snapshot('tool-name-args', await runCli(['tool', 'storybook', 'extra'], { client: fixtureClient() }));
+});
+
+test('tool -- sends argv as a command, never a name', async () => {
+  const client = fixtureClient();
+  await runCli(['tool', '--', 'pnpm', 'dev'], { client, env: { PWD: '/work/site' } });
+  client.requests[0].request.cwd = smudgeWindowsPaths(client.requests[0].request.cwd);
+  assert.deepEqual(client.requests, [{
+    method: 'toolSurface',
+    request: {
+      command: ['pnpm', 'dev'],
+      fresh: false,
+      minimized: false,
+      surface: undefined,
+      cwd: '/work/site',
+    },
+  }]);
+});
+
+test('tool --fresh forwards the opt-out', async () => {
+  const client = fixtureClient();
+  await runCli(['tool', '--fresh', 'storybook'], { client, env: { PWD: '/work/site' } });
+  assert.equal(client.requests[0].request.fresh, true);
+});
+
+test('tool prints dormouse.yml warnings to stderr, keeping --json parseable', async () => {
+  const result = await runCli(['tool', '--json', 'noisy'], {
+    client: fixtureClient(),
+    env: { PWD: '/work/site' },
+  });
+  assert.match(result.stderr, /ignoring unknown field 'colour'/);
+  assert.deepEqual(JSON.parse(result.stdout).status, 'created');
+});
+
+test('tool with neither a name nor a command tail', async () => {
+  await snapshot('tool-missing-target', await runCli(['tool'], { client: fixtureClient() }));
+});
+
+test('tool rejects a name and a command tail together', async () => {
+  await snapshot(
+    'tool-name-and-tail',
+    await runCli(['tool', 'storybook', '--', 'pnpm', 'dev'], { client: fixtureClient() }),
+  );
+});
+
+test('tool rejects an empty command tail', async () => {
+  await snapshot('tool-empty-tail', await runCli(['tool', '--'], { client: fixtureClient() }));
+});
+
+test('tool rejects an unknown option', async () => {
+  await snapshot('tool-unknown-option', await runCli(['tool', '--nope', 'storybook'], { client: fixtureClient() }));
 });

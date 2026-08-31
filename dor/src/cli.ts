@@ -17,6 +17,7 @@ import { readCommand } from './commands/read.js';
 import { sendCommand } from './commands/send.js';
 import { skillCommand } from './commands/skill.js';
 import { splitCommand } from './commands/split.js';
+import { toolCommand } from './commands/tool.js';
 import { versionCommand } from './commands/version.js';
 import { errorLine, errorMessage, fail } from './commands/shared.js';
 import type {
@@ -70,12 +71,15 @@ export type {
   SurfacePort,
   SurfaceRenderMode,
   SurfaceView,
+  ToolSurfaceRequest,
+  ToolSurfaceResponse,
   VersionMetadata,
 } from './commands/types.js';
 
 const COMMANDS = [
   splitCommand,
   ensureCommand,
+  toolCommand,
   versionCommand,
   skillCommand,
   sendCommand,
@@ -90,6 +94,7 @@ const COMMANDS = [
 const ROUTES = {
   split: splitCommand.command,
   ensure: ensureCommand.command,
+  tool: toolCommand.command,
   version: versionCommand.command,
   skill: skillCommand.command,
   send: sendCommand.command,
