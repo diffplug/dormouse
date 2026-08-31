@@ -67,6 +67,7 @@ export function isBrowserParams(params: unknown): boolean {
  *  kind is `use-session-persistence.ts`, where this return flows into the
  *  narrower `PersistedSurfaceType`. */
 export function surfaceKindFromParams(params: unknown): SurfaceKind {
+  if (isToolParams(params)) return 'tool';
   return isBrowserParams(params) ? 'browser' : 'terminal';
 }
 

@@ -1,0 +1,17 @@
+# Dor Tools for this repo (docs/specs/dor-tool.md).
+#
+# `dor tool <name>` runs one of these in a pane that grows a browser once the
+# command starts serving. Repo-controlled, so Dormouse asks you to approve this
+# directory once before it will run anything here.
+tools:
+  storybook:
+    run: pnpm storybook
+    # Scoped to the checkout: parallel worktrees each get their own Storybook,
+    # and each frames the port it actually bound (6006, then 6007, ...). Without
+    # $PROJECT_ROOT both worktrees would share one key and the second would
+    # reveal the first instead of starting.
+    prespawn_dedupe: [storybook, $PROJECT_ROOT]
+
+  standalone-harness:
+    run: pnpm dev:standalone:ab
+    prespawn_dedupe: [standalone-harness, $PROJECT_ROOT]

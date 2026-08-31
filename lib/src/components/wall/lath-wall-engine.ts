@@ -92,6 +92,13 @@ export function browserLeafMeta(title: string, params: Record<string, unknown>):
   return { component: 'browser', tabComponent: 'surface', title, params };
 }
 
+/** Meta for a `tool` leaf — one Session with a terminal and, once it serves, a
+ *  browser (`docs/specs/dor-tool.md`). Its own tab component, because the
+ *  header follows whichever half is forward. */
+export function toolLeafMeta(title: string, params: Record<string, unknown>): LeafMeta {
+  return { component: 'tool', tabComponent: 'tool', title, params };
+}
+
 /** Hydration-only Door-row projection; runtime metadata stays in the store. */
 export function leafMetaFromPersistedDoor(item: PersistedDoor): LeafMeta {
   return {
@@ -107,7 +114,9 @@ export function leafMetaFromPersistedDoor(item: PersistedDoor): LeafMeta {
  *  screencast canvas); terminals do not — the PTY holds their state and the registry
  *  replays it (docs/specs/tiling-engine.md → "Parked leaves"). */
 export function shouldParkOnMinimize(meta: LeafMeta): boolean {
-  return meta.component === 'browser';
+  // A tool parks for the same reason a browser does: once it serves, its
+  // framed document lives in the pane's DOM and no registry can replay it.
+  return meta.component === 'browser' || meta.component === 'tool';
 }
 
 export type LathWallEngine = {

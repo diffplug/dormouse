@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   ToolFileError,
@@ -142,5 +145,35 @@ describe('dedupeKeysEqual', () => {
     expect(dedupeKeysEqual(null, ['a'])).toBe(false);
     expect(dedupeKeysEqual(['a'], null)).toBe(false);
     expect(dedupeKeysEqual(null, null)).toBe(false);
+  });
+});
+
+describe("this repo's own dormouse.yml", () => {
+  // Pins the file shipped at the repo root against the parser, so a typo in a
+  // substitution or a stray field fails here rather than at `dor tool` time.
+  const repoRoot = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', '..');
+  const file = parseToolFile(readFileSync(join(repoRoot, 'dormouse.yml'), 'utf-8'), {
+    path: 'dormouse.yml',
+    dir: repoRoot,
+    scope: 'repo',
+  });
+
+  it('parses with no warnings', () => {
+    expect(file.warnings).toEqual([]);
+  });
+
+  it('declares the two shipped tools', () => {
+    expect([...file.tools.keys()].sort()).toEqual(['standalone-harness', 'storybook']);
+    expect(file.tools.get('storybook')?.run).toBe('pnpm storybook');
+    expect(file.tools.get('standalone-harness')?.run).toBe('pnpm dev:standalone:ab');
+  });
+
+  it('scopes every key to the checkout, so parallel worktrees stay distinct', () => {
+    for (const entry of file.tools.values()) {
+      const a = resolveDedupeKey(entry, { projectRoot: '/w/one', cwd: '/w/one' });
+      const b = resolveDedupeKey(entry, { projectRoot: '/w/two', cwd: '/w/two' });
+      expect(a).not.toBeNull();
+      expect(dedupeKeysEqual(a, b)).toBe(false);
+    }
   });
 });

@@ -66,6 +66,9 @@ import {
   edgeForDorDirection,
   directionForArrow,
 } from './wall/lath-wall-engine';
+import type { LeafMeta } from '../lib/lath/persistence';
+import { useToolServing } from './wall/use-tool-serving';
+import { ToolTrustDialog, type ToolTrustRequest } from './wall/ToolTrustDialog';
 import type { WallNav } from './wall/keyboard/types';
 import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
@@ -915,6 +918,7 @@ export function Wall({
     cwd,
     requireIntegration,
     focusNeutral,
+    leafMeta,
   }: {
     command?: string;
     direction: DorResolvedSplitDirection;
@@ -922,6 +926,10 @@ export function Wall({
     reference: DorSurface;
     cwd?: string;
     requireIntegration?: boolean;
+    /** Leaf metadata for the new Surface; defaults to a plain terminal. `dor
+     *  tool` passes a tool leaf, which is a shell-hosted PTY exactly like a
+     *  terminal but renders both capabilities. */
+    leafMeta?: LeafMeta;
     // `dor ensure` and `dor split -- <command>` must never move focus: the split
     // is created in the background, leaving the caller's selection, mode, and DOM
     // focus intact. Under Lath every add is inherently background (nothing
@@ -987,7 +995,7 @@ export function Wall({
       // This Surface is born minimized — it never has a pane to detach — so register
       // its meta directly, keeping the store the authority for EVERY Door
       // (docs/specs/tiling-engine.md → "Parked leaves").
-      lath.store.addDoor(newId, terminalLeafMeta());
+      lath.store.addDoor(newId, leafMeta ?? terminalLeafMeta());
       addMinimizedSplitDoor(referenceId, { id: newId, token }, !focusNeutral);
       onEventRef.current?.({
         type: 'split',
@@ -1002,7 +1010,7 @@ export function Wall({
     // types straight into it; `dor split -- <command>` and `dor ensure`
     // (focus-neutral) leave selection put.
     const edge = edgeForDorDirection(direction);
-    lath.store.addLeaf(newId, terminalLeafMeta(), { refId: referenceId, edge });
+    lath.store.addLeaf(newId, leafMeta ?? terminalLeafMeta(), { refId: referenceId, edge });
     const selectedNew = settleAddSelection(!!focusNeutral, false, newId);
     onEventRef.current?.({
       type: 'split',
@@ -1177,6 +1185,23 @@ export function Wall({
   }, [generatePaneId, surfaceRefForId, forgetSurfaceRef, selectPane, enterTerminalMode, showShellSpawnNotice, lath, nav]);
 
   // --- dor control plane (the `dor` CLI's webview handler) ---
+  // Only this dialog grants trust (docs/specs/dor-tool.md -> Trust). One
+  // request at a time: a second `dor tool` against the same untrusted repo
+  // fails the same way and re-raises nothing.
+  const [toolTrustRequest, setToolTrustRequest] = useState<ToolTrustRequest | null>(null);
+  const requestToolTrust = useCallback((request: ToolTrustRequest) => {
+    setToolTrustRequest((current) => current ?? request);
+  }, []);
+  const resolveToolTrust = useCallback((decision: 'trusted' | 'denied') => {
+    const request = toolTrustRequest;
+    setToolTrustRequest(null);
+    if (!request) return;
+    void getPlatform().toolControl?.({ op: 'trust', root: request.projectRoot, decision });
+  }, [toolTrustRequest]);
+
+  // A tool grows its browser when its command starts serving.
+  useToolServing({ lath, doorsRef });
+
   const { connectPort } = useDorControl({
     lath,
     nav,
@@ -1188,6 +1213,7 @@ export function Wall({
     createContentSurface,
     killPaneImmediately,
     revealSurface,
+    requestToolTrust,
     lastAgentBrowserBinaryPathRef,
   });
 
@@ -1374,6 +1400,12 @@ export function Wall({
     resolveSurfaceRef: surfaceRefForId,
     // The pane context menu's "connect a port" action: act like `dor ab open`.
     onConnectPort: connectPort,
+    // Pin the terminal forward past serving, or release it. Visibility only —
+    // ToolPanel keeps both halves mounted (docs/specs/dor-tool.md).
+    onToggleToolTerminal: (id: string) => {
+      const showing = lath.getMeta(id)?.params?.showTerminal === true;
+      lath.store.updateParams(id, { showTerminal: showing ? undefined : true });
+    },
   }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, connectPort, lath, nav]);
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
@@ -1538,6 +1570,9 @@ export function Wall({
             />
 
             <ExternalLinkModalHost onKeyboardActiveChange={setDialogKeyboardActive} />
+            {toolTrustRequest ? (
+              <ToolTrustDialog request={toolTrustRequest} onDecision={resolveToolTrust} />
+            ) : null}
             <AgentBrowserScreenModalHost
               onKeyboardActiveChange={setDialogKeyboardActive}
               resolveLabel={surfaceRefForId}
