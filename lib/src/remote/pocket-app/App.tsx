@@ -323,9 +323,16 @@ export default function App(): React.ReactElement {
     const list = await client.listHosts();
     setHosts(list);
     // The cached marker, as the opening guess only — the effect below replaces
-    // it with what each online Host says about its own ACL.
+    // it with what each online Host says about its own ACL. Reseeded through
+    // the refinement so a Refresh cannot decay "Pair again" either.
     setPairStates(
-      new Map(list.map((h) => [h.hostId, client.isPaired(h.hostId) ? 'paired' : 'unpaired'])),
+      (prev) =>
+        new Map(
+          list.map((h) => {
+            const guess: HostPairState = client.isPaired(h.hostId) ? 'paired' : 'unpaired';
+            return [h.hostId, refinePairState(prev.get(h.hostId), guess)];
+          }),
+        ),
     );
     setPhase('hosts');
   }, [client, ensureSocket]);
