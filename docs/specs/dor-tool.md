@@ -202,8 +202,9 @@ feed one internal upgrade path; the atom does not care which fired.
   **two or more frames nothing** and the pane shows the conflict where the
   browser would have gone (rationale).
 - **Autobind waits for the port set to settle** — one unchanged tick — before it
-  commits, since ports appear one at a time during boot and a framed leaf is
-  never re-scanned (rationale). Accepted limit: a port opening long after settle
+  commits, since ports appear one at a time during boot (rationale). A changed
+  OSC 367 port re-points a live browser; an unchanged one never overrides
+  URL-bar navigation. Accepted limit: an unannounced port opening after settle
   is not noticed.
 - **`dor tool -- <command>` autobinds**, having nowhere to declare otherwise;
   a declared tool opts in with one line.

@@ -102,6 +102,29 @@ describe('port: announced', () => {
     expect(state.params.url).toBe('http://localhost:6006/');
   });
 
+  it('does not undo URL-bar navigation while the announcement is unchanged', async () => {
+    recordToolAnnounce('tool-1', { port: 6006, name: null, key: null, dehydrate: false, persist: null });
+    const { state, platform } = await run(announced, [[tcp(6006)]]);
+    state.params.url = 'https://example.com/docs';
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+
+    expect(state.params.url).toBe('https://example.com/docs');
+    expect(platform.getOpenPorts).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-points a live browser when the announced port changes', async () => {
+    recordToolAnnounce('tool-1', { port: 6006, name: null, key: null, dehydrate: false, persist: null });
+    const { state, platform } = await run(announced, [[tcp(6006)]]);
+    expect(state.params.url).toBe('http://localhost:6006/');
+
+    recordToolAnnounce('tool-1', { port: 6007, name: null, key: null, dehydrate: false, persist: null });
+    platform.getOpenPorts = vi.fn(async () => [tcp(6007)]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+
+    expect(state.params.url).toBe('http://localhost:6007/');
+  });
+
   it('frames nothing when the announced port never binds', async () => {
     recordToolAnnounce('tool-1', { port: 9999, name: null, key: null, dehydrate: false, persist: null });
     const { state } = await run(announced, [[tcp(6006)], [tcp(6006)]]);
