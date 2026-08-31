@@ -296,10 +296,10 @@ export default function App(): React.ReactElement {
 
   // Availability depends on browser state the app cannot change (permission,
   // whether it was launched from the Home Screen), so it is read on entering the
-  // Hosts list rather than tracked as a store — that per-visit refresh is the
-  // authoritative one, and is what re-prunes a row the Server dropped on a 410.
+  // Hosts list rather than tracked as a store — that per-visit probe is the
+  // authoritative one.
   //
-  // Keyed to `hosts` alone, so the hop onto the wall neither refetches it nor
+  // Keyed to the `hosts` phase alone, so the hop onto the wall neither refetches it nor
   // throws it away: both push surfaces — the Hosts rows and the wall's
   // first-connect prompt — read this one load, and its answers routinely land
   // while the user is already on the wall. What a cleanup would have done, a
