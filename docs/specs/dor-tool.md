@@ -53,9 +53,9 @@ kinds remain **disjoint** for `dor list --kind`.
   semantics for its terminal, browser-column for its browser.
 - **Activity**: full machine via the PTY; WATCHING defaults off for
   tool-spawned commands (`lib/src/lib/watched-commands.ts` rules).
-- **Untouched**: input to **either** capability touches, so the first
-  browser-side interaction arms kill-confirm — an unsaved scratch tool gets the
-  confirmation letter while an idle just-opened viewer dies silently.
+- **Untouched**: input to **either** capability touches. A tool never takes the
+  untouched blank-shell kill or shell-replacement shortcuts: its command and
+  browser may already hold live resources before the first human input.
 
 ## Declaring tools
 

@@ -715,6 +715,92 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('requires confirmation before killing an untouched tool', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation((id) => id === 'tool-a');
+    try {
+      await act(async () => {
+        root.render(<Wall
+          restoredLathLayout={{
+            version: 1,
+            tree: { root: { kind: 'leaf', id: 'tool-a' } },
+            leafMeta: {
+              'tool-a': {
+                component: 'tool',
+                tabComponent: 'tool',
+                title: 'storybook',
+                params: {
+                  surfaceType: 'tool',
+                  command: 'pnpm storybook',
+                  cwd: '/repo',
+                  toolName: 'storybook',
+                  toolRender: 'iframe',
+                  toolPort: 'announced',
+                },
+              },
+            },
+          }}
+          initialMode="command"
+          showBaseboard
+        />);
+      });
+      await flush();
+
+      await act(async () => {
+        container.querySelector<HTMLButtonElement>('[data-lath-leaf="tool-a"] [aria-label="Kill"]')!.click();
+      });
+      await flush();
+
+      expect(container.textContent).toContain('Confirm kill');
+      expect(container.querySelector('[data-lath-leaf="tool-a"]')).not.toBeNull();
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it('does not shell-replace an untouched tool', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation((id) => id === 'tool-a');
+    try {
+      await act(async () => {
+        root.render(<Wall
+          restoredLathLayout={{
+            version: 1,
+            tree: { root: { kind: 'leaf', id: 'tool-a' } },
+            leafMeta: {
+              'tool-a': {
+                component: 'tool',
+                tabComponent: 'tool',
+                title: 'storybook',
+                params: {
+                  surfaceType: 'tool',
+                  command: 'pnpm storybook',
+                  cwd: '/repo',
+                  toolName: 'storybook',
+                  toolRender: 'iframe',
+                  toolPort: 'announced',
+                },
+              },
+            },
+          }}
+          initialMode="command"
+          showBaseboard
+        />);
+      });
+      await flush();
+
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:new-terminal', {
+          detail: { name: 'zsh', replaceUntouched: true },
+        }));
+      });
+      await flush();
+
+      expect(container.querySelector('[data-lath-leaf="tool-a"]')).not.toBeNull();
+      expect(leafCount()).toBe(2);
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
   it('ignores zoom keyboard requests while a door is selected', async () => {
     const onEvent = vi.fn();
     await act(async () => {

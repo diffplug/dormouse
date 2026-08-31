@@ -1155,6 +1155,7 @@ export function Wall({
       const shouldReplaceUntouched =
         detail.replaceUntouched === true &&
         selectedPaneVisible &&
+        !isToolParams(lath.getMeta(selectedPaneId!)?.params) &&
         isUntouched(selectedPaneId!);
       const shellName = detail.name?.trim() || 'terminal';
 
@@ -1169,7 +1170,12 @@ export function Wall({
         return;
       }
 
-      if (detail.replaceUntouched === true && selectedDoor && isUntouched(selectedDoor.id)) {
+      if (
+        detail.replaceUntouched === true &&
+        selectedDoor &&
+        !isToolParams(lath.getMeta(selectedDoor.id)?.params) &&
+        isUntouched(selectedDoor.id)
+      ) {
         handleReattachRef.current(selectedDoor, {
           enterPassthrough: false,
           afterRestore: {
@@ -1317,7 +1323,10 @@ export function Wall({
   const wallActions: WallActions = useMemo(() => ({
     onKill: (id: string) => {
       exitTerminalMode();
-      if (isUntouched(id)) {
+      // `untouched` makes a blank terminal disposable. A tool can already own
+      // a long-running command and browser resources before its first human
+      // input, so it always takes the conservative confirmation path.
+      if (isUntouched(id) && !isToolParams(lath.getMeta(id)?.params)) {
         killPaneImmediately(id);
         return;
       }
