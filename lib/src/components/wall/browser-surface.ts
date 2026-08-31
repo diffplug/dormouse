@@ -97,10 +97,6 @@ export function toolFace(params: unknown): ToolFace {
   return browserUrlFromParams(params) !== null ? 'browser' : 'terminal';
 }
 
-/** Whether the pane's second half is forward at all — browser or conflict. */
-export function toolShowsBrowser(params: unknown): boolean {
-  return toolFace(params) !== 'terminal';
-}
 
 /** Whether a tool Surface's params carry `key`. A null or absent key never
  *  matches — not even another null: a tool has an identity if and only if it

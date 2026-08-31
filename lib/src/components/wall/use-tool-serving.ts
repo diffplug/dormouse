@@ -86,9 +86,6 @@ export function useToolServing({
         const hasUrl = browserUrlFromParams(leaf.params) !== null;
         const running = getTerminalPaneState(leaf.id).currentCommand !== null;
 
-        // Command exit retires the browser and the pane flips back to a prompt
-        // above the tool's dying words. Re-running revives it on the same
-        // Surface, because the params, not the id, changed.
         const hasConflict = toolPortConflictFromParams(leaf.params) !== null;
 
         // Command exit retires the browser and the pane flips back to a prompt
@@ -105,7 +102,12 @@ export function useToolServing({
           seenPorts.current.delete(leaf.id);
           continue;
         }
-        if (hasUrl || hasConflict || !running) continue;
+        // A conflict is a verdict about *guessing*, not a final state: the
+        // announcement always wins, so a tool that names its port after autobind
+        // has already refused must still be framed. Without the second clause
+        // the pane would show the conflict for the life of the command, telling
+        // the user to announce a port it had just announced.
+        if (hasUrl || (hasConflict && announce?.port == null) || !running) continue;
 
         let ports;
         try {
@@ -150,7 +152,13 @@ export function useToolServing({
         }
 
         if (leaf.params?.toolRender !== 'ab-screencast') {
-          lath.store.updateParams(leaf.id, { url: entry.url, renderMode: 'iframe' });
+          lath.store.updateParams(leaf.id, {
+            url: entry.url,
+            renderMode: 'iframe',
+            // `toolFace` tests the conflict before the url, so a stale verdict
+            // would keep the conflict forward over a framed browser.
+            toolPortConflict: undefined,
+          });
           continue;
         }
 
@@ -162,7 +170,11 @@ export function useToolServing({
         // Show the destination immediately; the panel's session-less branch
         // renders `Connecting to browser session…` while the daemon boots, and
         // cannot race it (see docs/specs/dor-browser.md -> Instant create).
-        lath.store.updateParams(leaf.id, { url: entry.url, renderMode: 'ab-screencast' });
+        lath.store.updateParams(leaf.id, {
+          url: entry.url,
+          renderMode: 'ab-screencast',
+          toolPortConflict: undefined,
+        });
         const session = sessionForKey(`tool.${leaf.id}`);
         await attachAgentBrowserSession({
           url: entry.url,

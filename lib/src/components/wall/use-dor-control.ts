@@ -755,10 +755,10 @@ export function useDorControl({
           let key: string[] | null = null;
           let warnings: string[] = [];
           let render: 'iframe' | 'ab-screencast' = 'iframe';
-        // `dor tool -- <command>` has nowhere to declare a strategy, so it
-        // autobinds. Safe by construction now that `auto` refuses two ports
-        // rather than tie-breaking; a declared tool opts in with one line.
-        let port: 'announced' | 'auto' = 'auto';
+          // `dor tool -- <command>` has nowhere to declare a strategy, so it
+          // autobinds. Safe by construction now that `auto` refuses two ports
+          // rather than tie-breaking; a declared tool opts in with one line.
+          let port: 'announced' | 'auto' = 'auto';
 
           if (toolName) {
             // The registry, the closed substitution set, and the trust gate all
@@ -782,7 +782,7 @@ export function useDorControl({
                 // re-key cannot name another tool's key.
                 key = namespacedToolKey(lookup.name, lookup.key);
                 render = lookup.render;
-              port = lookup.port;
+                port = lookup.port;
                 warnings = lookup.warnings;
                 break;
               case 'no-file':
@@ -928,7 +928,7 @@ export function useDorControl({
               command,
               cwd,
               toolRender: render,
-            toolPort: port,
+              toolPort: port,
               ...(key ? { toolKey: key } : {}),
               ...(toolName ? { toolName } : {}),
             }),

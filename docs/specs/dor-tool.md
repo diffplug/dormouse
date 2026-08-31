@@ -246,7 +246,7 @@ that edit — a boolean-derived return type-checks against a widened
 
 Source of truth: `lib/src/components/wall/ToolPanel.tsx` (both halves mounted,
 visibility flipped), `ToolPaneHeader.tsx` (the leading chip plus the delegated
-header), `isToolParams` / `toolShowsBrowser` in `browser-surface.ts`,
+header), `isToolParams` / `toolFace` in `browser-surface.ts`,
 `toolLeafMeta` + `shouldParkOnMinimize` in `lath-wall-engine.ts`.
 
 ## CLI

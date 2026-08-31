@@ -150,3 +150,38 @@ describe('port: auto (autobind)', () => {
     expect(updateParams).toHaveBeenCalledWith('tool-1', expect.objectContaining({ toolPortConflict: undefined }));
   });
 });
+
+describe('an announcement overrides a committed conflict', () => {
+  const auto = { surfaceType: 'tool', command: 'x', toolPort: 'auto' };
+
+  it('frames the announced port after autobind has already refused', async () => {
+    // The spec says the announcement always wins. A tool that names its port
+    // *after* the set settled would otherwise be stuck on the conflict face for
+    // the life of the command — told to announce a port it had just announced.
+    const { lath, state, updateParams } = fakeLath(auto);
+    let call = 0;
+    const scans = [[tcp(1420), tcp(1422)], [tcp(1420), tcp(1422)], [tcp(1420), tcp(1422)]];
+    const platform = new FakePtyAdapter() as FakePtyAdapter & { getOpenPorts: () => Promise<OpenPort[]> };
+    platform.getOpenPorts = vi.fn(async () => scans[Math.min(call++, scans.length - 1)]);
+    setPlatform(platform);
+
+    const doorsRef = { current: [] };
+    function Probe() {
+      useToolServing({ lath, doorsRef });
+      return null;
+    }
+    await act(async () => { root.render(<Probe />); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+    expect(state.params.toolPortConflict).toEqual([1420, 1422]);
+
+    // The tool announces late.
+    recordToolAnnounce('tool-1', { port: 1420, name: null, key: null, dehydrate: false, persist: null });
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+
+    expect(state.params.url).toBe('http://localhost:1420/');
+    // The stale verdict must be cleared too: `toolFace` tests the conflict
+    // before the url, so leaving it would keep the conflict card forward.
+    expect(state.params.toolPortConflict).toBeUndefined();
+    expect(updateParams).toHaveBeenCalledWith('tool-1', expect.objectContaining({ toolPortConflict: undefined }));
+  });
+});

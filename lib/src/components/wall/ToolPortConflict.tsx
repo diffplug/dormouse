@@ -16,7 +16,7 @@ export function ToolPortConflict({ params }: PaneProps) {
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-terminal-bg px-6 text-center text-sm text-muted">
       <div className="text-foreground">
-        This tool opened {ports.length} ports, so Dormouse did not frame either.
+        This tool opened {ports.length} ports, so Dormouse did not frame any of them.
       </div>
       <ul className="flex flex-col gap-0.5 font-mono text-xs">
         {ports.map((port) => (

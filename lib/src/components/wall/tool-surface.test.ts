@@ -8,7 +8,7 @@ import {
   resolveRenderMode,
   surfaceKindFromParams,
   toolKeysEqual,
-  toolShowsBrowser,
+  toolFace,
 } from './browser-surface';
 import { persistableLeafMeta, shouldParkOnMinimize, toolLeafMeta } from './lath-wall-engine';
 import { TOOLS_FLAG_KEY, isToolsEnabled, setToolsEnabled } from '../../lib/feature-flags';
@@ -45,23 +45,23 @@ describe('tool params classification', () => {
 
 describe('which half of a tool is forward', () => {
   it('shows the terminal until the tool serves', () => {
-    expect(toolShowsBrowser(booting)).toBe(false);
+    expect(toolFace(booting)).toBe('terminal');
   });
 
   it('shows the browser once it serves', () => {
-    expect(toolShowsBrowser(serving)).toBe(true);
+    expect(toolFace(serving)).toBe('browser');
   });
 
   it('shows the terminal again when the header chip pins it', () => {
-    expect(toolShowsBrowser({ ...serving, showTerminal: true })).toBe(false);
+    expect(toolFace({ ...serving, showTerminal: true })).toBe('terminal');
   });
 
   it('shows the terminal after the command exits and the url is retired', () => {
-    expect(toolShowsBrowser({ ...serving, url: undefined })).toBe(false);
+    expect(toolFace({ ...serving, url: undefined })).toBe('terminal');
   });
 
   it('never claims a non-tool shows a tool browser', () => {
-    expect(toolShowsBrowser({ surfaceType: 'browser', url: 'https://x' })).toBe(false);
+    expect(toolFace({ surfaceType: 'browser', url: 'https://x' })).toBe('terminal');
   });
 
   it('defaults a tool with no explicit renderMode to the iframe', () => {
