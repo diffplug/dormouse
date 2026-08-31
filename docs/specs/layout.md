@@ -39,7 +39,7 @@ Wall
 
 **Lath owns** the split tree, per-leaf rects, sash geometry and `layout()`; sash resize, hierarchical pointer drag-and-drop, zoom geometry; and the native FLIP animation of splits/kills/restores. `docs/specs/tiling-engine.md` is the source of truth for all of it.
 
-**The Wall owns** focus and selection state (`selectedId` / `selectedType`), the passthrough/command mode system, keyboard dispatch and selection-overlay rendering, the minimize/reattach/kill lifecycle, terminal lifecycle via the registry, Activity + TODO state, and session persistence.
+**The Wall owns** focus and selection state (`selectedId` / `selectedType`), the passthrough/command mode system, keyboard dispatch and selection-overlay rendering, the minimize/reattach/kill lifecycle, terminal lifecycle via the registry, Activity + TODO state, and session persistence. Its shared types and React contexts live in `lib/src/components/wall/wall-types.ts` / `wall-context.tsx`.
 
 ## Content
 
@@ -229,8 +229,9 @@ Each pane body registers its DOM element in a `paneElements` Map on mount and re
 
 Re-measures on: selection change, `ResizeObserver` on the target, every Lath store commit (`revision` via `useSyncExternalStore`), and — while the wall streams animator frames — every frame, so the ring tracks kills, restores, and tweens frame-accurately. If the selected leaf is momentarily absent the overlay bails and holds the last rect.
 
-Source of truth: `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` and
-`lib/src/components/wall/resolve-pane-element.ts`.
+Source of truth: `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`,
+`lib/src/components/wall/resolve-pane-element.ts`, and the window-focus
+tracking in `lib/src/components/wall/use-window-focused.ts`.
 
 ## Spatial navigation
 
@@ -299,6 +300,8 @@ For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getO
 - **Dispose**: `disposeSession` kills the PTY, disposes xterm, removes the registry entry. Only called on explicit kill (`x`).
 - **Swap**: `Cmd/Ctrl+Arrow` trades two leaf identities via a Lath `swap` op; registry entries follow the ids (see [Spatial navigation](#spatial-navigation)).
 
+Source of truth: the registry maps and pending shell opts in `lib/src/lib/terminal-store.ts`, behind the `lib/src/lib/terminal-registry.ts` facade; the lifecycle ops in `lib/src/lib/terminal-lifecycle.ts`.
+
 ### Agent resume on cold restore
 
 On cold restore, a terminal pane with a host-captured recovery invocation runs it automatically; `docs/specs/transport.md` owns the restore-only gate, validation, and prompt-ready typing. Layout writes one dim `⟲ resuming agent session: <command>` line to xterm, never the PTY, to mark the discontinuity; it is a passive notice with no dismiss or lifecycle. Source of truth: `restoreTerminal` in `lib/src/lib/terminal-lifecycle.ts`, called from `lib/src/lib/session-restore.ts`.
@@ -362,11 +365,15 @@ On startup, recovery is priority-based:
 3. **Fallback/manual pane creation**: when no saved layout can be safely applied, add multiple panes as splits from the previous pane, and spawn each PTY with the current default shell selection
 4. **Empty state**: create a single new pane with the current default shell selection
 
+Source of truth: `lib/src/components/wall/use-session-persistence.ts` (save triggers and flushes), `lib/src/lib/session-save.ts` (serialization), `lib/src/lib/reconnect.ts` (recovery priority).
+
 ### Activity state
 
 Each Surface carries an `ActivityState` (`status`, `watchingEnabled`, `todo`, `notification`). Layout's stake: the store is synced to React via `useSyncExternalStore`, and state arriving from the platform *before* a registry entry exists (the resume path) is staged as **primed state** and merged in when the entry is minted — a browser surface, which never gets a registry entry, keeps its activity in a parallel local map instead.
 
 Each terminal Session also carries `TerminalPaneState` from `docs/specs/terminal-state.md`. That store is keyed by pane/session id, and PTY-originated semantic events are resolved through `ptyId`, so a swapped session keeps its CWD and command state with the terminal content.
+
+Source of truth: `lib/src/lib/session-activity-store.ts` (the React snapshot store and the primed-state merge).
 
 ## Theme
 
