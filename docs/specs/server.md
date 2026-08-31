@@ -785,15 +785,15 @@ a `*.ts.net` origin means `DORMOUSE_REMOTE_CONNECT_SRC` at build time (see
 
 ## Future
 
-**Scope: selfhost-onboarding** — collapse self-host first-run friction. Today a
-person hand-ferries five values across three surfaces: the origin typed into
-mobile Safari and again into the enroll form, the 64-hex setup password typed
-into both, and an 8-character key fingerprint compared by eye between two
-screens. The target is *run installer → click Enroll → scan QR → approve*, with
-nothing typed anywhere. One settled decision constrains every item: **the stock
-allowlist stays `*.dormouse.sh`-only** ("Where a Host may reach a relay
-server") — self-hosting keeps requiring a source build, deliberately, so no
-item below may depend on widening the baked allowlist. Staged order:
+**Scope: selfhost-onboarding** — collapse self-host first-run friction. Today
+five values are hand-ferried across three surfaces: the origin (mobile Safari
+and the enroll form), the 64-hex setup password (typed into both), and an
+8-character key fingerprint compared by eye. The target is *run installer →
+click Enroll → scan QR → approve*, with nothing typed anywhere. One settled
+decision constrains every item: **the stock allowlist stays
+`*.dormouse.sh`-only** ("Where a Host may reach a relay server") —
+self-hosting keeps requiring a source build, deliberately, so no item below
+may depend on widening it. Staged order:
 
 1. **Push as a step, not a footnote.** After the first successful connect,
    offer Enable alerts full-width; the per-host row stays as the ongoing
@@ -811,8 +811,8 @@ item below may depend on widening the baked allowlist. Staged order:
    cryptographically instead of asking a human to compare fingerprints —
    displaying the QR on the laptop *is* the local-presence act, and approval
    collapses to one confirm. Single-use plus TTL bound the shoulder-surf
-   window, and the Host announces each token's redemption. The setup password
-   remains for the QR-less path.
+   window; the Host announces each redemption. The setup password remains for
+   the QR-less path.
 4. **One-minute resume.** On an approved connection the Host mints a resume
    token — single-use, bound to the device key and that connection, 60-second
    TTL. A dropped WebSocket reattaches with it instead of rerunning the
@@ -821,8 +821,7 @@ item below may depend on widening the baked allowlist. Staged order:
    holds.
 
 Unstaged but adjacent: origin migration (re-binding the passkey and
-enrollments after a Tailscale node rename, instead of redoing everything), and
-the revocation UI already staged in
+enrollments after a Tailscale node rename), and the revocation UI staged in
 [remote-security-model.md](./remote-security-model.md) `## Future`.
 
 **Scope: saas-multitenant** — the server-side hurdles between today's
