@@ -41,7 +41,12 @@ export async function saveSession(
     title: persistedDoorTitle(door.id, door.title, door.component),
   }));
   for (const item of persistedDoors) {
-    allPanes.set(item.id, { id: item.id, title: item.title, surfaceType: item.component === 'browser' ? 'browser' : 'terminal' });
+    // A Door's component is the leaf's kind: a minimized tool must persist as
+    // 'tool', or its row round-trips as a plain terminal.
+    const doorSurfaceType = item.component === 'browser' || item.component === 'tool'
+      ? item.component
+      : 'terminal';
+    allPanes.set(item.id, { id: item.id, title: item.title, surfaceType: doorSurfaceType });
   }
 
   const persisted: PersistedPane[] = await Promise.all(

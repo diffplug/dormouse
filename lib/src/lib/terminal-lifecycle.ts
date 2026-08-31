@@ -1,3 +1,4 @@
+import { clearToolAnnounce } from './tool-announce-store';
 import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
@@ -586,6 +587,10 @@ export function disposeSession(id: string): void {
   registry.delete(id);
   removeTerminalPaneState(id);
   removeMouseSelectionState(id);
+  // A port hint must not outlive its Session: a recycled pane id would inherit
+  // the previous tenant's announced port and then frame nothing forever
+  // (docs/specs/dor-tool.md -> Serving).
+  clearToolAnnounce(id);
   notifyActivityListeners();
 }
 

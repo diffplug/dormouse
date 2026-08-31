@@ -15,6 +15,14 @@ import { dirname, join, resolve } from 'node:path';
 import { ToolFileError, parseToolFile, type ToolEntry, type ToolFile } from './tool-registry';
 
 export const TOOL_FILE_NAME = 'dormouse.yml';
+/**
+ * Cap on a `dormouse.yml` before it is parsed. This read happens *before* the
+ * trust check — deliberately, so the approval dialog can name the command — so
+ * its size is chosen by a repo nobody has approved yet. Parsing a multi-gigabyte
+ * file would OOM the host process, taking every PTY with it. A real tool file is
+ * a few hundred bytes.
+ */
+const TOOL_FILE_MAX_BYTES = 256 * 1024;
 const TRUST_FILE_NAME = 'tool-trust.json';
 
 export type TrustState = 'trusted' | 'denied' | 'unknown';
@@ -112,8 +120,13 @@ export async function findToolFile(
   for (;;) {
     const path = join(dir, TOOL_FILE_NAME);
     try {
-      return { path, dir, text: await readTextFile(path) };
-    } catch {
+      const text = await readTextFile(path);
+      if (text.length > TOOL_FILE_MAX_BYTES) {
+        throw new ToolFileError(`${path}: tool file is larger than ${TOOL_FILE_MAX_BYTES} bytes`);
+      }
+      return { path, dir, text };
+    } catch (error) {
+      if (error instanceof ToolFileError) throw error;
       // Not here (or unreadable) — keep walking.
     }
     const parent = dirname(dir);
@@ -143,7 +156,14 @@ export async function lookupTool(
   trust: ToolTrustStore,
   readTextFile?: (path: string) => Promise<string>,
 ): Promise<ToolLookup> {
-  const found = await findToolFile(cwd, readTextFile);
+  let found;
+  try {
+    found = await findToolFile(cwd, readTextFile);
+  } catch (error) {
+    // An oversized file: report it rather than letting it reach the parser.
+    if (error instanceof ToolFileError) return { status: 'error', message: error.message };
+    throw error;
+  }
   if (!found) return { status: 'no-file' };
 
   let file: ToolFile;

@@ -225,17 +225,13 @@ header), `isToolParams` / `toolShowsBrowser` in `browser-surface.ts`,
   [serving](#serving) trigger.
 - **`dor tool <name> [args]`** — run a `dormouse.yml` entry with whatever
   `prespawn_dedupe` it declares.
-- **Takes over the calling pane only when the invocation is the sole command on
-  the line, the pane is at a prompt, and the pane is not already a tool.**
-  Typing a command at a prompt runs it there; splitting would be the surprise.
-  The test is on command shape, so `dor tool storybook --fresh` qualifies.
-- **Must split focus-neutrally whenever that is unclear** — a script, an agent,
-  a compound line, a shell without integration, a busy pane — and return a
-  handle.
+- **Always splits focus-neutrally** and returns a handle. Taking over the
+  calling pane when a human types the invocation alone at a prompt is designed
+  but not built — see [Future](#future).
 - **A keyed invocation that matches reveals and reports**, in both placements,
   so the calling pane never appears to do nothing.
-- `dor list`: rows report `kind: tool` with `render_mode`; the location column
-  shows the announce name, else the command; JSON carries command + cwd + url.
+- `dor list`: rows report `kind: tool` with `render_mode`; JSON carries command
+  + cwd + url. The location column shows the cwd, pending the announce name.
 
 Source of truth: `dor/src/commands/tool.ts` and its help snapshot
 `dor/test/snapshots/help/tool.md`; `surface.tool` in `dor/src/protocol.ts`.
@@ -255,9 +251,10 @@ ESC ] 367 ; dehydrate ; {"v":1, …} ESC \
 ```
 
 - `serve` — refines what the scan found, never mints a tool. `port` names which
-  port to frame; `name` feeds the title candidates of
-  `docs/specs/terminal-state.md` (priority stays user pin > announce name >
-  command); `key` re-keys under the host's namespace; `dehydrate` capability
+  port to frame; `name` is **reserved**: parsed,
+  sanitized, and recorded, but nothing consumes it yet — it will feed the title
+  candidates of `docs/specs/terminal-state.md` (priority user pin > announce
+  name > command), see [Future](#future); `key` re-keys under the host's namespace; `dehydrate` capability
   flag; `persist` (`respawn` default | `never`); contract version.
   **Re-emittable, last-write-wins.**
 - `dehydrate` — emitted on graceful stop; captured, size-capped, stored in the
@@ -345,6 +342,14 @@ Source of truth: `PersistedSurfaceType` in `lib/src/lib/session-types.ts`;
   `DORMOUSE_DEHYDRATE`; the `dehydrate` flag is reserved in the serve payload
   from the shipped `serve` payload. The Windows graceful-stop is needed here
   only.
+- **Pane take-over.** `dor tool` typed alone at a prompt should run in that
+  pane rather than splitting — typing a command at a prompt is how a terminal
+  works. The gate is three conditions the host can already read (sole command on
+  the OSC 633 line, pane at a prompt, pane not already a tool); what it needs is
+  the handshake, since `dor` is itself the foreground process when it answers,
+  so the command can only be typed once its own shell returns to a prompt.
+- **The announced `name`.** Wire the reserved [OSC 367](#osc-367) `name` into
+  the title-candidates channel and `dor list`'s location column.
 - **Later** — `prespawn_*` beyond the dedupe literal: a computed key, and
   `prespawn_port`. Pocket/remote browser view (rides the browser-surface
   staging in `docs/specs/remote-api.md`; reserve the kind on the wire now). The

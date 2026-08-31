@@ -99,6 +99,20 @@ export function toolLeafMeta(title: string, params: Record<string, unknown>): Le
   return { component: 'tool', tabComponent: 'tool', title, params };
 }
 
+/**
+ * A tool's browser is derived, never restored: its port is whatever the command
+ * bound *this* run, so a persisted `url` would frame a dead address — and a
+ * persisted agent-browser `session` would name a daemon that is gone
+ * (`docs/specs/dor-tool.md` -> Persistence and hosts). A restored tool is a
+ * terminal running its command until it serves again, which is the same state a
+ * cold spawn passes through. Everything else about the leaf persists.
+ */
+export function persistableLeafMeta(meta: LeafMeta): LeafMeta {
+  if (meta.component !== 'tool' || !meta.params) return meta;
+  const { url: _url, session: _session, wsPort: _wsPort, renderMode: _renderMode, showTerminal: _showTerminal, ...rest } = meta.params;
+  return { ...meta, params: rest };
+}
+
 /** Hydration-only Door-row projection; runtime metadata stays in the store. */
 export function leafMetaFromPersistedDoor(item: PersistedDoor): LeafMeta {
   return {
@@ -223,7 +237,13 @@ export function createLathWallEngine(
     },
     getMeta: (id) => snapshot().leafMeta.get(id),
 
-    serializeLayout: () => lathLayoutFromStore(snapshot()),
+    serializeLayout: () => {
+      const snap = snapshot();
+      return lathLayoutFromStore({
+        tree: snap.tree,
+        leafMeta: new Map([...snap.leafMeta].map(([id, meta]) => [id, persistableLeafMeta(meta)])),
+      });
+    },
 
     seed(lathBlob, initialPaneIds, generatePaneId, doors) {
       // Doors ride into `leafMeta` beside the tree's leaves: a restored Door is a

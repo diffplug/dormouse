@@ -126,3 +126,20 @@ describe('lookupTool', () => {
     expect(result.message).toMatch(/unknown substitution '\$NOPE'/);
   });
 });
+
+describe('the pre-approval read (regression: review finding 13)', () => {
+  it('refuses an oversized dormouse.yml rather than parsing it', async () => {
+    // Read before the trust check, so its size is chosen by a repo nobody has
+    // approved yet; parsing a huge one would OOM the host and take every PTY.
+    await writeFile(join(root, 'dormouse.yml'), `# ${'x'.repeat(300_000)}\n`);
+    const result = await lookupTool('storybook', root, new MemoryToolTrustStore());
+    expect(result).toMatchObject({ status: 'error' });
+    if (result.status !== 'error') return;
+    expect(result.message).toMatch(/larger than/);
+  });
+
+  it('still reads a normal file', async () => {
+    await writeFile(join(root, 'dormouse.yml'), YML);
+    expect((await lookupTool('storybook', root, new MemoryToolTrustStore())).status).toBe('untrusted');
+  });
+});

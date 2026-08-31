@@ -9,7 +9,7 @@
 import { useEffect } from 'react';
 import { getPlatform } from '../../lib/platform';
 import { getTerminalPaneState } from '../../lib/terminal-registry';
-import { browserUrlFromParams, isToolParams, toolKeysEqual } from './browser-surface';
+import { browserUrlFromParams, isToolParams, namespacedToolKey, toolKeysEqual } from './browser-surface';
 import { attachAgentBrowserSession } from './connect-port';
 import { listenerUrlsByPort } from './port-url';
 import { getToolAnnounce } from '../../lib/tool-announce-store';
@@ -24,6 +24,12 @@ import type { DooredItem } from './wall-types';
 const POLL_MS = 1500;
 
 type ToolLeaf = { id: string; params: Record<string, unknown> | undefined };
+
+/** The registered name a tool was spawned under; null for `dor tool -- <cmd>`. */
+function toolNameFromParams(params: Record<string, unknown> | undefined): string | null {
+  const name = params?.toolName;
+  return typeof name === 'string' ? name : null;
+}
 
 function toolLeaves(lath: LathWallEngine, doors: DooredItem[]): ToolLeaf[] {
   const leaves: ToolLeaf[] = [];
@@ -57,8 +63,13 @@ export function useToolServing({
         // A runtime re-key re-labels this Surface and nothing else — it never
         // dedupes (docs/specs/dor-tool.md -> Identity and dedupe). The host
         // keeps its own namespace, so the payload cannot claim another tool.
-        if (announce?.key && !toolKeysEqual(leaf.params?.toolKey, announce.key)) {
-          lath.store.updateParams(leaf.id, { toolKey: announce.key });
+        // Namespaced under the tool name the host resolved at spawn, never the
+        // announcement's own word: the payload is process output and must not
+        // be able to claim another tool's key. An identityless tool namespaces
+        // to null, so a re-key cannot mint an identity it was never given.
+        const announcedKey = namespacedToolKey(toolNameFromParams(leaf.params), announce?.key ?? null);
+        if (announcedKey && !toolKeysEqual(leaf.params?.toolKey, announcedKey)) {
+          lath.store.updateParams(leaf.id, { toolKey: announcedKey });
         }
 
         const hasUrl = browserUrlFromParams(leaf.params) !== null;
@@ -103,21 +114,46 @@ export function useToolServing({
         // renders `Connecting to browser session…` while the daemon boots, and
         // cannot race it (see docs/specs/dor-browser.md -> Instant create).
         lath.store.updateParams(leaf.id, { url: entry.url, renderMode: 'ab-screencast' });
+        const session = sessionForKey(`tool.${leaf.id}`);
         await attachAgentBrowserSession({
           url: entry.url,
           platform,
-          session: sessionForKey(`tool.${leaf.id}`),
+          session,
           surfaceId: leaf.id,
           refreshSurface: (id, patch) => {
             if (!cancelled) lath.store.updateParams(id, patch);
           },
         });
         if (cancelled) return;
+        // The Surface can be killed while the daemon boots. Param writes no-op
+        // on a dead leaf, but the daemon would keep running with nothing bound
+        // to it and no teardown path — `closeAgentBrowserSession` reads a
+        // `session` param this leaf no longer has. Close it here instead
+        // (docs/specs/dor-tool.md -> Lifecycle: kill reaps the browser's
+        // resources).
+        if (!lath.getMeta(leaf.id)) {
+          void platform.agentBrowserCommand?.(session, ['close']).catch(() => {});
+        }
       }
     };
 
-    void tick();
-    const timer = setInterval(() => void tick(), POLL_MS);
+    // `getOpenPorts` shells out (lsof / PowerShell) and an agent-browser launch
+    // is seconds, either of which can outrun the interval. Without this guard a
+    // second tick re-enters a leaf whose `url` is not written yet and issues a
+    // duplicate `agent-browser open`.
+    let ticking = false;
+    const runTick = async () => {
+      if (ticking) return;
+      ticking = true;
+      try {
+        await tick();
+      } finally {
+        ticking = false;
+      }
+    };
+
+    void runTick();
+    const timer = setInterval(() => void runTick(), POLL_MS);
     return () => {
       cancelled = true;
       clearInterval(timer);

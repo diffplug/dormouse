@@ -57,6 +57,28 @@ export function toolKeysEqual(paramsKey: unknown, key: readonly string[] | null)
   return paramsKey.length === key.length && paramsKey.every((element, index) => element === key[index]);
 }
 
+/**
+ * Namespace a declared key under the tool identity the *host* resolved from the
+ * spawn (`docs/specs/dor-tool.md` -> Identity and dedupe).
+ *
+ * Two things depend on this, and both break without it. Scope-only keys are
+ * legal — the spec calls the declared list "scope inside that namespace" — so
+ * `docs` and `api` both declaring `[$PROJECT_ROOT]` must stay distinct. And a
+ * key that arrives at runtime over OSC 367 comes from process output: without a
+ * namespace it could name another tool's key, and the next `dor tool <that
+ * tool>` would adopt — and Ctrl+C and re-run — the announcing pane instead.
+ *
+ * `null` for an identityless tool, which never matches anything, so an OSC
+ * re-key cannot mint an identity for a `dor tool -- <command>`.
+ */
+export function namespacedToolKey(
+  toolName: string | null,
+  key: readonly string[] | null,
+): string[] | null {
+  if (!toolName || key === null) return null;
+  return [toolName, ...key];
+}
+
 /** Whether params describe a plain browser surface (vs a terminal): the unified
  *  'browser' type, or anything carrying a renderMode. A tool is neither — it is
  *  its own kind, and `isToolParams` answers for it. */

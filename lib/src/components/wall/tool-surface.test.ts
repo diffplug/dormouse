@@ -4,12 +4,13 @@ import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import {
   isBrowserParams,
   isToolParams,
+  namespacedToolKey,
   resolveRenderMode,
   surfaceKindFromParams,
   toolKeysEqual,
   toolShowsBrowser,
 } from './browser-surface';
-import { shouldParkOnMinimize, toolLeafMeta } from './lath-wall-engine';
+import { persistableLeafMeta, shouldParkOnMinimize, toolLeafMeta } from './lath-wall-engine';
 import { TOOLS_FLAG_KEY, isToolsEnabled, setToolsEnabled } from '../../lib/feature-flags';
 
 const booting = { surfaceType: 'tool', command: 'pnpm storybook', cwd: '/repo' };
@@ -109,5 +110,61 @@ describe('the tools flag', () => {
     expect(isToolsEnabled()).toBe(true);
     setToolsEnabled(false);
     expect(globalThis.localStorage.getItem(TOOLS_FLAG_KEY)).toBeNull();
+  });
+});
+
+describe('key namespacing (regression: review finding 2)', () => {
+  it('keeps two tools in one repo distinct when both declare only a scope', () => {
+    // The spec calls the declared list "scope inside that namespace", so
+    // scope-only keys are legal — and without a namespace they collide, and
+    // `dor tool docs` reports the `api` pane.
+    const docs = namespacedToolKey('docs', ['/repo']);
+    const api = namespacedToolKey('api', ['/repo']);
+    expect(toolKeysEqual(docs, api)).toBe(false);
+    expect(toolKeysEqual(docs, docs)).toBe(true);
+  });
+
+  it('stops an announcement from claiming another tool’s key', () => {
+    // A trusted tool rendering hostile bytes emits OSC 367 with storybook's
+    // key. Namespaced under the name the host resolved at spawn, it cannot
+    // match storybook's, so a later `dor tool storybook` will not adopt — and
+    // Ctrl+C — the announcing pane.
+    const storybook = namespacedToolKey('storybook', ['storybook', '/repo']);
+    const spoofed = namespacedToolKey('notes', ['storybook', '/repo']);
+    expect(toolKeysEqual(storybook, spoofed)).toBe(false);
+  });
+
+  it('gives an identityless tool no key, so a re-key cannot mint one', () => {
+    expect(namespacedToolKey(null, ['storybook', '/repo'])).toBeNull();
+    expect(namespacedToolKey('storybook', null)).toBeNull();
+  });
+});
+
+describe('tool persistence (regression: review findings 4 and 11)', () => {
+  it('strips the derived browser state, so a restart never frames a dead URL', () => {
+    const meta = toolLeafMeta('storybook', {
+      surfaceType: 'tool',
+      command: 'pnpm storybook',
+      cwd: '/repo',
+      toolKey: ['storybook', 'storybook', '/repo'],
+      toolRender: 'ab-screencast',
+      url: 'http://localhost:6006/',
+      renderMode: 'ab-screencast',
+      session: 'dormouse.w.tool.p1',
+      wsPort: 51234,
+      showTerminal: true,
+    });
+    expect(persistableLeafMeta(meta).params).toEqual({
+      surfaceType: 'tool',
+      command: 'pnpm storybook',
+      cwd: '/repo',
+      toolKey: ['storybook', 'storybook', '/repo'],
+      toolRender: 'ab-screencast',
+    });
+  });
+
+  it('leaves a browser Surface’s params alone', () => {
+    const meta = { component: 'browser', tabComponent: 'surface', title: 'B', params: { url: 'https://x', renderMode: 'iframe' } };
+    expect(persistableLeafMeta(meta).params).toEqual({ url: 'https://x', renderMode: 'iframe' });
   });
 });

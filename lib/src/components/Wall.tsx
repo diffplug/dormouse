@@ -53,7 +53,7 @@ import type { PersistedDoor, PersistedSurfaceRefs } from '../lib/session-types';
 import type { DropTarget, RestoreToken } from '../lib/lath/ops';
 import type { Edge } from '../lib/lath/model';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
-import { resolveRenderMode, agentBrowserSessionFromParams, browserUrlFromParams, surfaceKindFromParams } from './wall/browser-surface';
+import { resolveRenderMode, agentBrowserSessionFromParams, browserUrlFromParams, isToolParams, surfaceKindFromParams } from './wall/browser-surface';
 import { hostPathDisplay } from './wall/browser-url';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { LathHost } from './wall/LathHost';
@@ -1333,6 +1333,26 @@ export function Wall({
       if (!visible) return;
       const params = nav.paneParams(id);
       const currentRenderMode = surfaceRenderModeFromParams(params);
+
+      // A tool's browser is a param of the tool's own leaf, so a swap mutates
+      // `renderMode` in place and never routes through `replaceSurface`
+      // (docs/specs/dor-tool.md -> The tool capability set). Replacing would
+      // mint a new id, drop the terminal half and the tool's identity, and
+      // orphan the PTY still running the command. iframe ⇄ ab-* is a re-open of
+      // the same URL, which the serving trigger performs on the next tick.
+      if (isToolParams(params)) {
+        if (mode === currentRenderMode) return;
+        lath.store.updateParams(id, {
+          toolRender: mode === 'iframe' ? 'iframe' : 'ab-screencast',
+          // Drop the browser so `useToolServing` re-derives it under the new
+          // renderer; the URL is re-derived from the scan, never carried over.
+          renderMode: undefined,
+          url: undefined,
+          session: undefined,
+          wsPort: undefined,
+        });
+        return;
+      }
 
       // agent-browser → iframe: frame the active tab's URL, then the replace
       // closes the now-unneeded headless browser. Webview-only.
