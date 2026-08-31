@@ -214,7 +214,7 @@ export default function App(): React.ReactElement {
    * from the Home Screen, which is a different app instance (and a different
    * storage partition) than the one asking.
    */
-  const needsInstall = useMemo(() => needsHomeScreenInstall(), []);
+  const needsInstall = needsHomeScreenInstall();
 
   const [phase, setPhase] = useState<Phase>('auth');
   const [error, setError] = useState<string | null>(null);
@@ -239,8 +239,12 @@ export default function App(): React.ReactElement {
   const pushRegistrationVersionRef = useRef(0);
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
 
+  // On a *transition* back into auth only — the lazy initializer already
+  // answered for mount, so a same-phase re-run would just re-scan storage.
+  const prevPhaseRef = useRef<Phase>('auth');
   useEffect(() => {
-    if (phase === 'auth') setFirstRun(!client.hasPriorUse());
+    if (phase === 'auth' && prevPhaseRef.current !== 'auth') setFirstRun(!client.hasPriorUse());
+    prevPhaseRef.current = phase;
   }, [phase, client]);
 
   const setPairStateFor = useCallback((hostId: string, state: HostPairState) => {
@@ -642,6 +646,17 @@ export function SetupOrSignin({
       onSubmit={onSetup}
     />
   );
+  // Shared by both layouts; only its prominence differs.
+  const signinButton = (tone: 'primary' | 'outline') => (
+    <button
+      type="button"
+      className={pkButton({ tone, block: true })}
+      disabled={busy !== null}
+      onClick={onSignin}
+    >
+      {signinLabel}
+    </button>
+  );
 
   return (
     <div className={PK.app}>
@@ -670,26 +685,12 @@ export function SetupOrSignin({
                 of a browser that has never stored anything. */}
             <div className={clsx(PK.setup, PK.divided)}>
               <p className={PK.lead}>Already made a passkey? It syncs — sign in with it instead.</p>
-              <button
-                type="button"
-                className={pkButton({ tone: 'outline', block: true })}
-                disabled={busy !== null}
-                onClick={onSignin}
-              >
-                {signinLabel}
-              </button>
+              {signinButton('outline')}
             </div>
           </>
         ) : (
           <>
-            <button
-              type="button"
-              className={pkButton({ tone: 'primary', block: true })}
-              disabled={busy !== null}
-              onClick={onSignin}
-            >
-              {signinLabel}
-            </button>
+            {signinButton('primary')}
 
             <button
               type="button"
@@ -728,12 +729,22 @@ export function SetupOrSignin({
  * installed (separate storage, no shared signal), so this shows to someone who
  * installed it already and simply opened the wrong window.
  */
+/**
+ * The one iOS install gesture, written once so the two notices cannot drift on
+ * it — everything else in them differs on purpose (identity vs alerts framing).
+ */
+const INSTALL_RITUAL = (
+  <>
+    Tap Share, then <strong>Add to Home Screen</strong>
+  </>
+);
+
 function InstallFirstNotice(): React.ReactElement {
   return (
     <div className={PK.notice}>
       <div className={PK.noticeTitle}>Add Dormouse to your Home Screen first</div>
       <p className={PK.noticeBody}>
-        Tap Share, then <strong>Add to Home Screen</strong>, and set up from there. iOS keeps the
+        {INSTALL_RITUAL}, and set up from there. iOS keeps the
         installed app&rsquo;s data separate from this tab, so a passkey made here has to be made and
         approved all over again — and alerts reach only the installed app.
       </p>
@@ -763,8 +774,7 @@ function InstallNotice(): React.ReactElement {
       <div className={PK.noticeTitle}>Add Dormouse to your Home Screen</div>
       <p className={PK.noticeBody}>
         Alerts only reach you from the installed app — iOS does not deliver them to a Safari
-        tab. Tap Share, then <strong>Add to Home Screen</strong>, and open Dormouse from
-        there.
+        tab. {INSTALL_RITUAL}, and open Dormouse from there.
       </p>
       <p className={PK.noticeBody}>Already added it? Open it from your Home Screen instead of this tab.</p>
     </div>

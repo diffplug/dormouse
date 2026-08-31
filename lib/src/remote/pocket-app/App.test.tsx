@@ -14,6 +14,7 @@ import {
   type PushConfigStatus,
 } from './App';
 import type { PushAvailability } from '../client/push-subscribe';
+import { setNativeFieldValue } from '../../lib/dom';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -160,11 +161,7 @@ function installNotice(): HTMLElement | null {
 
 /** Type into a controlled input the way a user would — React listens for `input`. */
 function typeInto(input: HTMLInputElement, value: string) {
-  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
-  act(() => {
-    setValue.call(input, value);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
+  act(() => setNativeFieldValue(input, value));
 }
 
 describe('SetupOrSignin first run vs return visit', () => {
