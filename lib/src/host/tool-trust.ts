@@ -10,7 +10,7 @@
  * gesture produced and answers "is it trusted yet?".
  */
 import { constants } from 'node:fs';
-import { chmod, mkdir, open, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { ToolFileError, parseToolFile, type ToolEntry, type ToolFile } from './tool-registry';
@@ -64,6 +64,8 @@ async function readToolFile(path: string): Promise<string> {
   }
 }
 const TRUST_FILE_NAME = 'tool-trust.json';
+const TRUST_LOCK_RETRY_MS = 20;
+const INVALID_LOCK_STALE_MS = 30_000;
 
 /**
  * What a grant covers. `upstream` is the canonical remote URL the project's
@@ -146,11 +148,12 @@ function parseTrustFile(parsed: unknown): TrustFile {
 export class FileToolTrustStore {
   readonly #dir: string;
   readonly #path: string;
-  #cache: TrustFile | null = null;
+  readonly #lockPath: string;
 
   constructor(stateDir: string) {
     this.#dir = stateDir;
     this.#path = join(stateDir, TRUST_FILE_NAME);
+    this.#lockPath = `${this.#path}.lock`;
   }
 
   /** Whether any of these keys has been granted. Callers pass every key that
@@ -163,31 +166,98 @@ export class FileToolTrustStore {
 
   /** Record a grant a human made in Dormouse's chrome. */
   async grant(key: string, kind: TrustGrantKind): Promise<void> {
-    const current = await this.#read();
-    const next: TrustFile = {
-      version: 1,
-      grants: { ...current.grants, [key]: { kind, grantedAt: new Date().toISOString() } },
-    };
-    await this.#write(next);
-    this.#cache = next;
+    const release = await this.#acquireCommitLock();
+    try {
+      // Read only after acquiring the cross-process lock. Every host sharing
+      // this global directory therefore merges against the latest committed
+      // file rather than a snapshot captured before another grant.
+      const current = await this.#read();
+      const next: TrustFile = {
+        version: 1,
+        grants: { ...current.grants, [key]: { kind, grantedAt: new Date().toISOString() } },
+      };
+      await this.#write(next);
+    } finally {
+      await release();
+    }
   }
 
   async #read(): Promise<TrustFile> {
-    if (this.#cache) return this.#cache;
     try {
-      this.#cache = parseTrustFile(JSON.parse(await readFile(this.#path, 'utf-8')));
+      return parseTrustFile(JSON.parse(await readFile(this.#path, 'utf-8')));
     } catch {
       // A missing file is the common case (nothing trusted yet). A corrupt one
       // starts empty rather than throwing: failing closed here means every tool
       // stops working, and the cost of starting empty is one more approval.
-      this.#cache = emptyTrust();
+      return emptyTrust();
     }
-    return this.#cache;
+  }
+
+  async #ensureDir(): Promise<void> {
+    await mkdir(this.#dir, { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') await chmod(this.#dir, 0o700).catch(() => {});
+  }
+
+  async #acquireCommitLock(): Promise<() => Promise<void>> {
+    await this.#ensureDir();
+    const token = randomUUID();
+    for (;;) {
+      try {
+        const lock = await open(this.#lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
+        try {
+          await lock.writeFile(JSON.stringify({ pid: process.pid, token }));
+        } catch (error) {
+          await unlink(this.#lockPath).catch(() => {});
+          throw error;
+        } finally {
+          await lock.close();
+        }
+        return async () => {
+          // Only the owner may remove the path. This also protects a future
+          // stale-lock recovery from an old owner's delayed finally block.
+          try {
+            const owner = JSON.parse(await readFile(this.#lockPath, 'utf-8')) as { token?: unknown };
+            if (owner.token === token) await unlink(this.#lockPath);
+          } catch {
+            // Already released/recovered; nothing remains to unlock.
+          }
+        };
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      }
+
+      if (await this.#lockOwnerIsGone()) {
+        await unlink(this.#lockPath).catch(() => {});
+        continue;
+      }
+      await new Promise((resolve) => setTimeout(resolve, TRUST_LOCK_RETRY_MS));
+    }
+  }
+
+  async #lockOwnerIsGone(): Promise<boolean> {
+    try {
+      const owner = JSON.parse(await readFile(this.#lockPath, 'utf-8')) as { pid?: unknown };
+      if (typeof owner.pid === 'number' && Number.isInteger(owner.pid) && owner.pid > 0) {
+        try {
+          process.kill(owner.pid, 0);
+          return false;
+        } catch (error) {
+          return (error as NodeJS.ErrnoException).code === 'ESRCH';
+        }
+      }
+    } catch {
+      // An exclusive create briefly exposes an empty file before its owner JSON
+      // is written. Only reclaim an invalid record once it is clearly abandoned.
+    }
+    try {
+      return Date.now() - (await stat(this.#lockPath)).mtimeMs > INVALID_LOCK_STALE_MS;
+    } catch {
+      return false;
+    }
   }
 
   async #write(state: TrustFile): Promise<void> {
-    await mkdir(this.#dir, { recursive: true, mode: 0o700 });
-    if (process.platform !== 'win32') await chmod(this.#dir, 0o700).catch(() => {});
+    await this.#ensureDir();
     const tmp = `${this.#path}.${randomUUID()}.tmp`;
     await writeFile(tmp, JSON.stringify(state), { mode: 0o600 });
     await rename(tmp, this.#path);

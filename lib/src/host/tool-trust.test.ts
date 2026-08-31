@@ -86,6 +86,26 @@ describe('FileToolTrustStore', () => {
     expect(await store.isTrusted([upstreamGrantKey('/repo')])).toBe(false);
   });
 
+  it('serializes concurrent grants and merges each against the committed file', async () => {
+    const stateDir = join(root, 'state');
+    const first = new FileToolTrustStore(stateDir);
+    const second = new FileToolTrustStore(stateDir);
+    const folder = folderGrantKey('/repo/one');
+    const upstream = upstreamGrantKey('https://github.com/diffplug/dormouse');
+
+    await Promise.all([
+      first.grant(folder, 'folder'),
+      second.grant(upstream, 'upstream'),
+    ]);
+
+    const reader = new FileToolTrustStore(stateDir);
+    expect(await reader.isTrusted([folder])).toBe(true);
+    expect(await reader.isTrusted([upstream])).toBe(true);
+    // Long-lived instances also re-read the shared file instead of retaining a
+    // cache that cannot observe another window's grant.
+    expect(await first.isTrusted([upstream])).toBe(true);
+  });
+
   it('starts empty on a corrupt file rather than failing every tool', async () => {
     const stateDir = join(root, 'state');
     await mkdir(stateDir, { recursive: true });

@@ -177,6 +177,8 @@ the repo is trusted. The phase-C user-global file needs none of this.
    repo-controlled, so a directory shipping its own `.git` inherits whatever
    grant its claimed URL has. **Accepted risk** — cloning is unaffected, since
    there the user chose the URL (rationale).
+8. **Must serialize grants across host processes** and merge each against the
+   latest global trust file; concurrent windows cannot overwrite decisions.
 
 Source of truth: `lib/src/host/tool-trust.ts` (the record and its two key
 kinds), `lib/src/host/git-upstream.ts` + `lib/src/host/git-remote-url.ts` (how a
