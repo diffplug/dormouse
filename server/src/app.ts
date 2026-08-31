@@ -540,7 +540,7 @@ export function createApp(config: AppConfig): CreatedApp {
     // and the truthful answer is the list, not an error.
     const allSubscriptions = await pushStore.list();
     // A row registered under an old VAPID key cannot receive a send signed by
-    // the current key. Hide it from the "Alerts on" readback so Pocket offers
+    // the current key. Hide it from the "Push notifications on" readback so Pocket offers
     // the per-Host repair action. Missing keys are legacy rows and stale in the
     // same way. When push is disabled the raw rows remain readable, preserving
     // the route's diagnostic behavior without claiming they are deliverable.

@@ -16,8 +16,8 @@ the laptop, make a passkey on the phone, approve the pairing, connect.
 
 The screens below are the real components, rendered from the same stories
 Chromatic watches. They are static — nothing here is wired to a live server.
-One of them carries `autoplay` because a docs page does not run a story's `play`
-by default, and its state — a painted terminal — only exists after it runs.
+Two of them carry `autoplay` because a docs page does not run a story's `play`
+by default, and their state — a painted terminal — only exists after it runs.
 
 > **This is a walkthrough, not a spec.** It lives outside `docs/specs/`, so the
 > fold discipline in `AGENTS.md` does not apply to it and `spec-lint` does not
@@ -312,6 +312,16 @@ sessions:
 
 <Canvas of={PocketWall.ConnectedShell} story={{ autoplay: true }} />
 
+This is also where push gets asked for, rather than left as a footnote: a first
+connect to a machine this phone has not registered with opens over the terminal
+with a full-width **Enable push notifications**, and **Not now** puts it away
+for the run. Afterwards the machine's row on the Hosts view carries the offer.
+It appears only where it can work — an installed app on a server with push
+configured (§1) — so a phone in a Safari tab sees the Home Screen advice
+instead.
+
+<Canvas of={PocketWall.ConnectedShellPushPrompt} story={{ autoplay: true }} />
+
 ---
 
 ## 8. Living with it
@@ -326,7 +336,8 @@ the test goes through the same Host, the same ACL, and the same server a real
 alarm would, so a phone that buzzes is evidence of everything from §1 to §6 at
 once. Its answers are kept deliberately distinct, because they call for
 different responses: on a machine that has enrolled (§3) but has no phone with
-alerts enabled yet, "nowhere to send it" is the ordinary answer, not a failure —
+push notifications enabled yet, "nowhere to send it" is the ordinary answer, not
+a failure —
 while a fan-out that no device accepted is one worth chasing. The notification
 itself is titled to say that nothing actually needs attention, so a test that
 lands hours late, or on another paired phone, cannot masquerade as a real

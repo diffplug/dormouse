@@ -7,8 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   HostsView,
+  PushPrompt,
   SetupOrSignin,
   refinePairState,
+  shouldOfferPushPrompt,
   type HostPairState,
   type HostView,
   type PushConfigStatus,
@@ -104,7 +106,11 @@ function pushRowFor(label: string): HTMLElement {
 }
 
 function enableButtonIn(row: HTMLElement): HTMLButtonElement | null {
-  return [...row.querySelectorAll('button')].find((b) => b.textContent === 'Enable alerts') ?? null;
+  return (
+    [...row.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Enable push notifications',
+    ) ?? null
+  );
 }
 
 function retryButtonIn(row: HTMLElement): HTMLButtonElement | null {
@@ -382,19 +388,19 @@ describe('refinePairState', () => {
 });
 
 describe('HostsView push registration', () => {
-  it('shows Alerts on only for the Host whose server registration succeeded', () => {
+  it('shows Push notifications on only for the Host whose server registration succeeded', () => {
     // A PushSubscription is scope-wide, so a browser that can receive push says
     // nothing about which Hosts hold a server row. Only the registered Host may
-    // claim alerts are on; the other must still offer the button.
+    // claim push is on; the other must still offer the button.
     renderHosts({ isPushSubscribed: (hostId) => hostId === 'host-1' });
 
     const first = pushRowFor('First laptop');
     const second = pushRowFor('Second laptop');
 
-    expect(first.textContent).toContain('Alerts on.');
+    expect(first.textContent).toContain('Push notifications on.');
     expect(enableButtonIn(first)).toBeNull();
 
-    expect(second.textContent).not.toContain('Alerts on.');
+    expect(second.textContent).not.toContain('Push notifications on.');
     expect(enableButtonIn(second)).not.toBeNull();
   });
 
@@ -444,11 +450,11 @@ describe('HostsView push registration', () => {
     );
   });
 
-  it('does not offer Enable alerts until the VAPID key is cached', () => {
+  it('does not offer Enable until the VAPID key is cached', () => {
     renderHosts({ pushConfigStatus: 'loading' });
 
     const row = pushRowFor('First laptop');
-    expect(row.textContent).toContain('Checking whether this server can send alerts');
+    expect(row.textContent).toContain('Checking whether this server can send push notifications');
     expect(enableButtonIn(row)).toBeNull();
   });
 
@@ -461,5 +467,127 @@ describe('HostsView push registration', () => {
     expect(enableButtonIn(row)).toBeNull();
     act(() => retryButtonIn(row)!.click());
     expect(onRetryPushConfig).toHaveBeenCalledOnce();
+  });
+});
+
+/** `shouldOfferPushPrompt`'s inputs, with an eligible first connect as the base. */
+function offerPush(
+  overrides: Partial<Parameters<typeof shouldOfferPushPrompt>[0]> = {},
+): boolean {
+  return shouldOfferPushPrompt({
+    dismissed: false,
+    subscribedHostIds: new Set<string>(),
+    subscriptionCurrent: true,
+    hostId: 'host-1',
+    availability: 'ready',
+    configStatus: 'ready',
+    ...overrides,
+  });
+}
+
+describe('the first-connect push prompt appears', () => {
+  it('after a connect that landed the user in a working terminal', () => {
+    expect(offerPush()).toBe(true);
+  });
+
+  it('for a Host this device has not registered with, even beside one it has', () => {
+    // Server rows are per (host, device): one enabled Host says nothing about
+    // the one just connected to.
+    expect(offerPush({ subscribedHostIds: new Set(['host-2']) })).toBe(true);
+  });
+
+  it('when the browser subscription no longer matches what the Server holds', () => {
+    // A Server row alone is not "on" — the same repair path the rows expose.
+    expect(
+      offerPush({ subscribedHostIds: new Set(['host-1']), subscriptionCurrent: false }),
+    ).toBe(true);
+  });
+});
+
+describe('the first-connect push prompt stays away', () => {
+  it('once this Host is registered and the subscription is current', () => {
+    expect(offerPush({ subscribedHostIds: new Set(['host-1']) })).toBe(false);
+  });
+
+  it('while the Server has not yet said which Hosts are registered', () => {
+    // Waiting costs a beat; guessing shows a full-width banner to someone who
+    // already enabled push, which the small row action would never have done.
+    expect(offerPush({ subscribedHostIds: null })).toBe(false);
+  });
+
+  it('whenever this browser cannot receive push, for any reason', () => {
+    for (const availability of ['denied', 'unsupported', 'no-worker', 'needs-install'] as const) {
+      expect(offerPush({ availability })).toBe(false);
+    }
+    // Not asked yet is not permission to ask.
+    expect(offerPush({ availability: null })).toBe(false);
+  });
+
+  it('when the server has push disabled, or its config is loading or errored', () => {
+    for (const configStatus of ['disabled', 'loading', 'error'] as const) {
+      expect(offerPush({ configStatus })).toBe(false);
+    }
+  });
+
+  it('after Not now, for the rest of the run', () => {
+    expect(offerPush({ dismissed: true })).toBe(false);
+  });
+});
+
+function renderPushPrompt(
+  overrides: {
+    busy?: boolean;
+    error?: string | null;
+    onEnable?: () => void;
+    onDismiss?: () => void;
+  } = {},
+) {
+  act(() => {
+    root.render(
+      <StrictMode>
+        <PushPrompt
+          busy={overrides.busy ?? false}
+          error={overrides.error ?? null}
+          onEnable={overrides.onEnable ?? (() => undefined)}
+          onDismiss={overrides.onDismiss ?? (() => undefined)}
+        />
+      </StrictMode>,
+    );
+  });
+}
+
+describe('PushPrompt', () => {
+  it('subscribes on the tap, with nothing in front of the permission prompt', () => {
+    const onEnable = vi.fn();
+    renderPushPrompt({ onEnable });
+
+    act(() => buttonNamed('Enable push notifications')!.click());
+
+    expect(onEnable).toHaveBeenCalledOnce();
+  });
+
+  it('dismisses on Not now without enabling anything', () => {
+    const onEnable = vi.fn();
+    const onDismiss = vi.fn();
+    renderPushPrompt({ onEnable, onDismiss });
+
+    act(() => buttonNamed('Not now')!.click());
+
+    expect(onDismiss).toHaveBeenCalledOnce();
+    expect(onEnable).not.toHaveBeenCalled();
+  });
+
+  it('reports a failed enable, which the wall has nowhere else to show', () => {
+    renderPushPrompt({ error: 'Registration failed.' });
+
+    expect(container.querySelector('[role="alert"]')!.textContent).toBe('Registration failed.');
+  });
+
+  it('locks both actions while the subscribe is in flight', () => {
+    renderPushPrompt({ busy: true });
+
+    expect(buttonNamed('Enable push notifications')).toBeNull();
+    expect(buttonNamed('…')!.disabled).toBe(true);
+    expect(buttonNamed('Not now')!.disabled).toBe(true);
   });
 });

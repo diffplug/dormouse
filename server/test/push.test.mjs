@@ -156,7 +156,7 @@ function sendAs(app, hostToken, body) {
 /**
  * Model a Server VAPID rotation while preserving the existing state file: the
  * stored endpoints are now unusable with the current signer, and every read
- * path must treat them as absent rather than as "Alerts on".
+ * path must treat them as absent rather than as "Push notifications on".
  */
 async function rotateStoredVapidKey(stateDir) {
   const path = join(stateDir, 'push-subscriptions.json');

@@ -302,8 +302,8 @@ export class PocketClient {
    *
    * The Server answers with the whole account's registrations and the filter
    * happens here, so there is no endpoint that reports on a `devicePublicKey`
-   * the caller does not hold. Lets a reloaded Pocket show "Alerts on." instead
-   * of re-offering an action already taken.
+   * the caller does not hold. Lets a reloaded Pocket show "Push notifications
+   * on." instead of re-offering an action already taken.
    */
   async listPushSubscribedHosts(): Promise<string[]> {
     const response = await this.#api<PushSubscriptionsResponse>(
