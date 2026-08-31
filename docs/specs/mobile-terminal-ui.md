@@ -309,6 +309,12 @@ wrapper repeats that blur across a rAF and staggered timers, and cancels the
 pending retries on unmount. The only mobile UI surfaces that may open the native
 keyboard are the Type selector and the Type reserve area.
 
+Source of truth: the session composition is
+`lib/src/components/MobileWall.tsx`; coverage is
+`lib/src/components/MobileTerminalUi.test.tsx`,
+`lib/src/components/MobileWall.test.tsx`, and
+`lib/src/lib/mobile-gesture-menu.test.ts`.
+
 ## Future
 
 Potential later additions:

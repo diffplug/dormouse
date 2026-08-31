@@ -34,6 +34,11 @@ cohesive foreground/background pairs, and nothing else:
 
 Hierarchy is the background swap between these pairs; secondary text is alpha on
 the same pair's own foreground (`text-app-fg/70`), never a separate token.
+
+**Never reintroduce** a pass-through `--mt-*` layer or one-off tokens for tabs,
+badges, accents, or button hovers unless the hierarchy cannot express a new
+rendered surface.
+
 **Never carry resting structure** with `surface-raised`, `border` (panel.border),
 `input-border`, or `muted` (descriptionForeground): themes may leave those unset,
 so their resolved defaults do not form a cohesive hierarchy. `surface-raised` +
@@ -75,6 +80,9 @@ helpers are exported from `lib/src/lib/themes/index.ts`.
   computes, the first pass after a theme change reads the previous door bg; the
   `MutationObserver` re-fires on the pass's own `body.style` write, so the next
   pass corrects it.
+
+**Never fork the dynamic picks:** runtime UI and diagnostics must use
+`pickDoorPair()`, `pickFocusRing()`, and `pickAlarmColor()`.
 
 ## Runtime model
 

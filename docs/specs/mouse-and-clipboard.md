@@ -32,7 +32,9 @@ The terminal makes the current regime visible in the pane header, lets the user 
 
 **Click.** The Mouse icon activates a **temporary override** (§2); the No-Mouse icon ends the override immediately and restores mouse reporting to the inside program.
 
-Source of truth: `lib/src/components/wall/TerminalPaneHeader.tsx` — hover text for both icons, suppressed during a temporary override, where the banner carries the explanation.
+Source of truth: `lib/src/components/wall/TerminalPaneHeader.tsx` owns the icons;
+`lib/src/components/wall/MouseOverrideBanner.tsx` owns the temporary-override
+explanation and actions.
 
 ---
 
@@ -201,6 +203,10 @@ Ownership is decided at **mouse-down** and latched for the whole drag, which is 
 - Overlay and popup both subscribe to the same render-tick signal, bumped on every xterm render (scroll, resize, output), so they re-measure and re-anchor together; the popup dismisses if the selection is canceled.
 - The header icon and banner are persistent terminal chrome, unaffected by inside-program redraws.
 
+Source of truth: text extraction and normalization live in
+`lib/src/lib/selection-text.ts`; perimeter construction lives in
+`lib/src/lib/selection-geometry.ts`.
+
 ---
 
 ## 8. Paste Behavior
@@ -214,6 +220,8 @@ Paste reads the system clipboard and writes the content to the PTY. Paste keystr
 `Cmd/Ctrl (+Shift) + V` — all four combinations, on every platform — are intercepted and paste. The chord takes **either** modifier and ignores Shift (`hasPasteModifier`), so `Ctrl+V` pastes on macOS too.
 
 Copy keeps the clean macOS separation — only `⌘C` is intercepted there, `Ctrl+C` passes through (§4.2) — but paste does not, because `Ctrl+V` is the universal expectation everywhere. The price is that the raw control byte `0x16` (readline `quoted-insert`, vim literal-next) is never delivered by this key; §8.3 is the escape hatch.
+
+Source of truth: `lib/src/components/wall/keyboard/chords.ts`.
 
 ### 8.3 Sending `0x16` (Ctrl+Q)
 

@@ -259,8 +259,9 @@ Rules:
 - **In-flight tracking is bounded.** A dropped utterance (the WebKit wedge above) never fires a callback to retire itself, so the tracking set and the Session-keyed queued index evict their oldest entry past a small shared cap. An evicted utterance that does still fire settles normally; it is only no longer eligible for collateral re-dispatch.
 - `speaking` / `spoken` remains only while the originating Session is still `ALERT_RINGING`. Any deliberate action that resolves the ring clears it: clicking or entering the Pane, typing in passthrough, clicking/pressing `Enter` on its Door, dismissing the bell, or marking/clearing TODO. Mere visibility, hover, or command-mode selection does not. Killing the Session also clears it. The state is not persisted or sent to the host, so restore/reconnect never recreates it.
 
-Source of truth: `lib/src/lib/alert-speech.ts`, armed once by `useAlertSpeech` in
-`Wall`; label derivation in `lib/src/lib/session-label.ts`; delivery state in
+Source of truth: `lib/src/lib/alert-speech.ts`, armed once by
+`lib/src/components/wall/use-alert-speech.ts`; label derivation in
+`lib/src/lib/session-label.ts`; delivery state in
 `lib/src/lib/alert-speech-state.ts`.
 
 ### Push notifications
@@ -287,6 +288,9 @@ Reached from any of the controls at the far right of the baseboard; placement an
   |---|---|
   | **Play test sound** | Fixed phrase through the real sanitizer, but not `speak()` because no Session rang; unlike alarm delivery, reports a missing backend. |
   | **Send test push** | Real Host→ACL→Server path; does not swallow failures and distinguishes no targets, zero delivery, partial delivery, and success. Hidden without a Host service. |
+
+Source of truth: the shared rule list is
+`lib/src/components/WatchedCommandList.tsx`.
 
 ## Workspace union
 
@@ -322,6 +326,8 @@ Bell interactions — one transition table, in `dismissOrToggleAlert` in `lib/sr
 The dialog carries the TODO switch, the WATCHING rule switch for the running command, notification detail, and the same `WatchedCommandList` the Settings dialog renders — load-bearing, not decoration, for the reason under Settings dialog above.
 
 The TODO pill always displays `TODO`; remote notification text belongs in preview/detail surfaces, not inside the pill. Clicking the pill clears TODO. On clear, the pill briefly shows the success flourish before unmounting.
+
+Source of truth: `lib/src/components/TodoPillBody.tsx`.
 
 Spoken-alarm delivery is much louder than the bell. While the engine is actually speaking, a pointer-transparent treatment spans the whole terminal Pane: a wash, an animated high-contrast inset, and an explicit `SPEAKING` label. After the utterance settles the animation stops, but a static inset, a `SPOKEN` label, and a half-strength wash remain until the ring is resolved — `SPOKEN` is an unbounded window, so the haze stays light enough to read terminal text through. `prefers-reduced-motion` keeps the strong static treatment and suppresses only the pulse, as does `cfg.alert.ringingPaused` (the Chromatic freeze that pins the bell — an infinite opacity cycle would otherwise snapshot at an arbitrary phase). Layering, placement, and sizing belong to `docs/specs/layout.md`; source of truth: `lib/src/components/wall/AlertSpeechIndicator.tsx`.
 

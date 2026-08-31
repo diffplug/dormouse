@@ -456,6 +456,10 @@ runs the bundled copy through the sidecar/Rust adapter.
 | `agentBrowserPopOut` / `agentBrowserPopIn` | Headed/headless relaunch. |
 | `agentBrowserBringToFront` | Optional; no real host implements it today. |
 
+**Host-side validation is the security boundary:** every
+`agentBrowserCommand` implementation must enforce the shared allowlist; the CLI
+is not trusted to pre-filter arguments.
+
 **VS Code must reach the stream through a loopback relay** — the agent-browser
 stream server rejects `vscode-webview://` origins. The relay grants one
 single-use, short-TTL token bound to one stream port, and strips the Origin
@@ -503,6 +507,9 @@ What is rewritten, exactly:
 | response | hop-by-hop (RFC 7230 §6.1) | dropped |
 | response | `Location` | upstream origin rewritten back to the proxy origin, so a redirect doesn't bounce the frame at the un-instrumented upstream |
 | response body | `<meta http-equiv="content-security-policy">` | removed, for the same reason as the header |
+
+**Must update** this rewrite table and `STRIP_RESPONSE_HEADERS` together for
+every new stripped response header.
 
 **One dedicated `127.0.0.1:0` server per grant, with no token in the path**: the
 dedicated origin is the grant boundary, and it preserves root-relative
@@ -611,6 +618,9 @@ origin unchanged and keep an absent origin absent, on request and upgrade paths;
 `Referer` only substitutes the proxy's own origin. (rationale) The shared rule
 for all loopback listeners lives in `lib/src/host/loopback-guard.ts` and is
 audited by `SECURITY.md` → "Loopback Listeners".
+
+**Never relax** the `Host` validation or conditional `Origin` gate without
+updating that `SECURITY.md` audit.
 
 Source of truth: `lib/src/lib/platform/iframe-proxy-types.ts`,
 `lib/src/lib/platform/types.ts`,

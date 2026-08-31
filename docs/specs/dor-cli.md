@@ -400,10 +400,10 @@ behavior that help cannot express:
 | `ensure` | **Must have a `--` command tail.** Matching uses the exact OSC 633 command plus resolved CWD; `cmd.exe` without integration fails immediately, other unintegrated shells time out after 8s and lose their throwaway split, and restart drives the live PTY so it also works on Doors. |
 | `send` | **Must select exactly one input mode.** Text then key is the only mixed order; duplicate flags require the explicit sequence form. |
 | `read` | Returns clean, ANSI-free rendered lines; line limits count rendered lines. |
-| `await` | **Must name `--until quiet|exit`; never infer it.** Timeout is 1–86400 whole seconds, default 600; `alert.md` owns wake semantics. |
+| `await` | **Must name `--until quiet\|exit`; never infer it.** Timeout is 1–86400 whole seconds, default 600; `alert.md` owns wake semantics. |
 | `kill` | **Must select exactly one confirmation mode.** Conditional text needs four non-whitespace characters and must match `read`; browser Surfaces are killable. |
 | `iframe`, `agent-browser` / `ab` | `dor-browser.md` owns the renderers; [target resolution](#browser-open-target-resolution) and [agent-browser addressing](#agent-browser-surface-addressing) live below. The passthrough is intercepted before stricli parses it. |
-| `list` | Lists every current-Workspace Surface, including Doors, in stable ref order. Filters are ANDed client-side; `--port` filters terminals and implies the opt-in detail scan, while `--ports` only requests details. |
+| `list` | Lists every current-Workspace Surface, including Doors, in stable ref order. Filters are ANDed client-side; `--port` filters terminals (browser Surfaces never match) and implies the opt-in detail scan, while `--ports` only requests details. |
 | `skill` | Prints the bundled skill or installs its bootstrap stub; [Agent Skill](#agent-skill) owns the contract. |
 
 **`await` never prints terminal text.** Stdout is only the resolution cause;

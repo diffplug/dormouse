@@ -158,6 +158,13 @@ When injection isn't possible (cmd.exe, an unknown shell, scripts not present) o
 
 > **The VS Code `.vsix` must include zsh's dotfiles** (`dist/shell-integration/.z*`), or zsh silently degrades to the keystroke fallback.
 
+Two downstream consumers are escape-aware but do not parse the PTY boundary:
+`lib/src/lib/terminal-controls.ts` strips presentation controls under
+[transport.md](transport.md), while `lib/src/lib/terminal-state-store.ts`
+elides alternate-screen spans under [terminal-state.md](terminal-state.md).
+Both read already-stripped output as content; neither changes what reaches
+xterm.js.
+
 ## References
 
 - iTerm2 proprietary escape codes: https://iterm2.com/documentation-escape-codes.html
