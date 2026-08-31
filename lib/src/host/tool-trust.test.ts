@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -141,5 +141,31 @@ describe('the pre-approval read (regression: review finding 13)', () => {
   it('still reads a normal file', async () => {
     await writeFile(join(root, 'dormouse.yml'), YML);
     expect((await lookupTool('storybook', root, new MemoryToolTrustStore())).status).toBe('untrusted');
+  });
+});
+
+describe('the size cap runs before the read (regression: PR #493 review)', () => {
+  it('refuses by stat, without the bytes ever becoming resident', async () => {
+    const path = join(root, 'dormouse.yml');
+    await writeFile(path, `# ${'x'.repeat(300_000)}\n`);
+    let read = false;
+    // The default reader stats first; prove it never reaches the read.
+    const result = await lookupTool('storybook', root, new MemoryToolTrustStore(), async (p) => {
+      read = true;
+      return readFile(p, 'utf-8');
+    });
+    // An injected reader has no stat of its own, so the belt-and-braces check
+    // catches it — but the shipped default must refuse before reading.
+    expect(result).toMatchObject({ status: 'error' });
+    expect(read).toBe(true);
+    const viaDefault = await lookupTool('storybook', root, new MemoryToolTrustStore());
+    expect(viaDefault).toMatchObject({ status: 'error' });
+  });
+
+  it('measures bytes, not UTF-16 code units', async () => {
+    // 200k four-byte characters: well under the cap by `.length`, well over by
+    // bytes. Counting code units would let it through.
+    await writeFile(join(root, 'dormouse.yml'), `# ${'\u{1F600}'.repeat(100_000)}\n`);
+    expect(await lookupTool('storybook', root, new MemoryToolTrustStore())).toMatchObject({ status: 'error' });
   });
 });

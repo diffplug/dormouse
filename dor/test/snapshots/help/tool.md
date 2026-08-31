@@ -18,7 +18,7 @@ A tool has an identity if and only if its dormouse.yml entry gave it one, via pr
 
 A dormouse.yml is repo-controlled and its entries execute, so it is inert until you approve the repo in Dormouse itself. An unapproved repo fails with a message rather than prompting in the terminal; approve it in the app and run the command again. Declining is remembered too.
 
-Where the tool lands depends on the caller. Typed on its own at a shell prompt, it takes over that pane, because typing a command at a prompt is how a terminal works. From a script, from an agent, from a compound command line, or when the pane is busy or already a tool, it splits without taking focus and prints the new surface's handle.
+Where the tool lands: it always splits without taking focus and prints the new surface's handle, whether a human typed it or a script did. Taking over the calling pane when the invocation is typed alone at a prompt is designed but not built.
 
 --cwd sets the working directory used to find dormouse.yml and to run the command; it defaults to the directory dor was invoked from.
 

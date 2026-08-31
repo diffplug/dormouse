@@ -9,20 +9,29 @@
  * may grant trust (`ToolTrustDialog.tsx`). This module records the decision a
  * gesture produced and answers "is it trusted yet?".
  */
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { ToolFileError, parseToolFile, type ToolEntry, type ToolFile } from './tool-registry';
 
 export const TOOL_FILE_NAME = 'dormouse.yml';
 /**
- * Cap on a `dormouse.yml` before it is parsed. This read happens *before* the
- * trust check — deliberately, so the approval dialog can name the command — so
- * its size is chosen by a repo nobody has approved yet. Parsing a multi-gigabyte
- * file would OOM the host process, taking every PTY with it. A real tool file is
- * a few hundred bytes.
+ * Cap on a `dormouse.yml`, enforced by `stat` *before* the file is read. This
+ * read happens before the trust check — deliberately, so the approval dialog
+ * can name the command — so the size is chosen by a repo nobody has approved
+ * yet, and measuring after `readFile` would already have the bytes resident.
+ * A real tool file is a few hundred bytes.
  */
 const TOOL_FILE_MAX_BYTES = 256 * 1024;
+
+/** Read a tool file, refusing an oversized one without loading it. */
+async function readToolFile(path: string): Promise<string> {
+  const info = await stat(path);
+  if (info.size > TOOL_FILE_MAX_BYTES) {
+    throw new ToolFileError(`${path}: tool file is larger than ${TOOL_FILE_MAX_BYTES} bytes`);
+  }
+  return readFile(path, 'utf-8');
+}
 const TRUST_FILE_NAME = 'tool-trust.json';
 
 export type TrustState = 'trusted' | 'denied' | 'unknown';
@@ -113,7 +122,7 @@ export type ToolTrustStore = FileToolTrustStore | MemoryToolTrustStore;
  */
 export async function findToolFile(
   startDir: string,
-  readTextFile: (path: string) => Promise<string> = (path) => readFile(path, 'utf-8'),
+  readTextFile: (path: string) => Promise<string> = readToolFile,
 ): Promise<{ path: string; dir: string; text: string } | null> {
   let dir = resolve(startDir);
   // Bounded by the filesystem root; `dirname('/') === '/'` is the terminator.
@@ -121,7 +130,10 @@ export async function findToolFile(
     const path = join(dir, TOOL_FILE_NAME);
     try {
       const text = await readTextFile(path);
-      if (text.length > TOOL_FILE_MAX_BYTES) {
+      // Belt and braces for an injected reader that does no capping of its own.
+      // `byteLength`, not `.length`: the cap is bytes, and a string of
+      // multi-byte characters would otherwise pass a check it exceeds.
+      if (Buffer.byteLength(text, 'utf-8') > TOOL_FILE_MAX_BYTES) {
         throw new ToolFileError(`${path}: tool file is larger than ${TOOL_FILE_MAX_BYTES} bytes`);
       }
       return { path, dir, text };

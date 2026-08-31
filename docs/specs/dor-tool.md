@@ -223,7 +223,7 @@ header), `isToolParams` / `toolShowsBrowser` in `browser-surface.ts`,
 - **`dor tool -- <command>`** — designate an arbitrary command as a tool. No
   key, always a fresh Surface; distinct from `dor split` because it arms the
   [serving](#serving) trigger.
-- **`dor tool <name> [args]`** — run a `dormouse.yml` entry with whatever
+- **`dor tool <name>`** — run a `dormouse.yml` entry with whatever
   `prespawn_dedupe` it declares.
 - **Always splits focus-neutrally** and returns a handle. Taking over the
   calling pane when a human types the invocation alone at a prompt is designed

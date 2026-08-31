@@ -9,6 +9,7 @@ import {
   UNNAMED_PANEL_TITLE,
 } from '../../lib/terminal-registry';
 import { surfaceKindFromParams } from './browser-surface';
+import { persistableLeafMeta } from './lath-wall-engine';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem, WallSelectionKind } from './wall-types';
 import type { PersistedDoor, PersistedSurfaceRefs } from '../../lib/session-types';
@@ -51,13 +52,19 @@ export function useSessionPersistence({
     // store that owned it all along, so a Surface persists where it navigated to
     // rather than where it was minimized and a restart cold-loads it there.
     const doors: PersistedDoor[] = (doorsRef.current ?? []).map((door) => {
+      // A Doored leaf is excluded from the tree snapshot and persisted as its
+      // own row, so it never passes through `serializeLayout` — run the same
+      // projection here, or a minimized tool round-trips its dead `url` and a
+      // daemon session that died with the previous process
+      // (docs/specs/dor-tool.md -> Persistence and hosts).
       const meta = lath.getMeta(door.id);
+      const persistable = meta ? persistableLeafMeta(meta) : undefined;
       return {
         id: door.id,
-        title: meta?.title?.trim() || UNNAMED_PANEL_TITLE,
-        component: meta?.component,
-        tabComponent: meta?.tabComponent,
-        params: meta?.params,
+        title: persistable?.title?.trim() || UNNAMED_PANEL_TITLE,
+        component: persistable?.component,
+        tabComponent: persistable?.tabComponent,
+        params: persistable?.params,
         token: door.token,
       };
     });

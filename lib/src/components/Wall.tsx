@@ -1342,6 +1342,12 @@ export function Wall({
       // the same URL, which the serving trigger performs on the next tick.
       if (isToolParams(params)) {
         if (mode === currentRenderMode) return;
+        // Swapping away from an ab-rendered tool still has to release the
+        // session and the controller — `replaceSurface` does both on the
+        // non-tool path, and this branch skips it by design. Once `session` is
+        // gone from params nothing can reach the daemon again, not even a kill.
+        closeAgentBrowserSession(params);
+        disposeAgentBrowserSurfaceController(id);
         lath.store.updateParams(id, {
           toolRender: mode === 'iframe' ? 'iframe' : 'ab-screencast',
           // Drop the browser so `useToolServing` re-derives it under the new
