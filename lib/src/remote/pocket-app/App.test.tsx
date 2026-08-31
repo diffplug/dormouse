@@ -64,10 +64,21 @@ function renderHosts(
   });
 }
 
-/** The host row itself (not its push row), found through the Host's label. */
-function rowFor(label: string): HTMLElement {
+/**
+ * A Host's whole card (host row + push row), found through that Host's label
+ * rather than by document order — the assertions are about which Host owns
+ * which state, so they must not silently pass if the rows are reordered.
+ */
+function cardFor(label: string): Element {
   const title = [...container.querySelectorAll('div')].find((el) => el.textContent === label);
-  const row = title?.closest('div.flex.flex-col')?.firstElementChild;
+  const card = title?.closest('div.flex.flex-col');
+  if (!card) throw new Error(`no host card for ${label}`);
+  return card;
+}
+
+/** The host row itself (not its push row). */
+function rowFor(label: string): HTMLElement {
+  const row = cardFor(label).firstElementChild;
   if (!(row instanceof HTMLElement)) throw new Error(`no host row for ${label}`);
   return row;
 }
@@ -77,14 +88,9 @@ function actionsIn(row: HTMLElement): string[] {
   return [...row.querySelectorAll('button')].map((button) => button.textContent ?? '');
 }
 
-/**
- * The push row belonging to one Host, found through that Host's label rather
- * than by document order — the assertions are about which Host owns which
- * state, so they must not silently pass if the rows are reordered.
- */
+/** The push row belonging to one Host. */
 function pushRowFor(label: string): HTMLElement {
-  const title = [...container.querySelectorAll('div')].find((el) => el.textContent === label);
-  const row = title?.closest('div.flex.flex-col')?.lastElementChild;
+  const row = cardFor(label).lastElementChild;
   if (!(row instanceof HTMLElement)) throw new Error(`no push row for ${label}`);
   return row;
 }

@@ -239,15 +239,8 @@ export class RelayHub {
         // drop an established session, which every frame in that group does.
         // The session token on the socket is the whole authorization — the
         // answer is advisory display truth and grants nothing.
-        if (typeof frame.hostId !== 'string') {
-          this.#toClient(client, { t: 'error', error: 'missing hostId' });
-          return;
-        }
-        const host = this.#hosts.get(frame.hostId);
-        if (!host) {
-          this.#toClient(client, { t: 'error', error: `host ${frame.hostId} is offline` });
-          return;
-        }
+        const host = this.#resolveHost(client, frame.hostId);
+        if (!host) return;
         // A courtesy guard that keeps a bad frame off the wire; the Host runs
         // the same one on arrival because it does not trust the relay.
         if (!isPairStatusQuery(frame.query)) {
@@ -261,15 +254,8 @@ export class RelayHub {
       case 'pair':
       case 'connect':
       case 'connect2': {
-        if (typeof frame.hostId !== 'string') {
-          this.#toClient(client, { t: 'error', error: 'missing hostId' });
-          return;
-        }
-        const host = this.#hosts.get(frame.hostId);
-        if (!host) {
-          this.#toClient(client, { t: 'error', error: `host ${frame.hostId} is offline` });
-          return;
-        }
+        const host = this.#resolveHost(client, frame.hostId);
+        if (!host) return;
         // Binding to a (new) host, or re-attempting `connect`, drops any prior
         // established session — a client holds at most one at a time.
         if (client.hostId !== null && client.hostId !== frame.hostId) {
@@ -339,6 +325,24 @@ export class RelayHub {
       const host = this.#hosts.get(client.hostId);
       if (host) this.#toHost(host, { t: 'client-gone', clientId: client.clientId });
     }
+  }
+
+  /**
+   * Resolve the Host a client frame addresses, answering the two refusals
+   * (missing hostId, offline) itself. Resolution only — binding the client to
+   * the Host stays with the `pair`/`connect`/`connect2` group.
+   */
+  #resolveHost(client: ClientConn, hostId: unknown): HostConn | null {
+    if (typeof hostId !== 'string') {
+      this.#toClient(client, { t: 'error', error: 'missing hostId' });
+      return null;
+    }
+    const host = this.#hosts.get(hostId);
+    if (!host) {
+      this.#toClient(client, { t: 'error', error: `host ${hostId} is offline` });
+      return null;
+    }
+    return host;
   }
 
   // --- Sending --------------------------------------------------------------

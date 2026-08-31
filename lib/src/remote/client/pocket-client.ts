@@ -422,11 +422,15 @@ export class PocketClient {
       passkeyCredentialId: credentialId,
       devicePublicKey: device.devicePublicKey,
     };
-    const awaited = this.#expect(pairStatusKey(hostId));
+    const awaited = this.#expect(pairStatusKey(hostId), PAIR_STATUS_TIMEOUT_MS);
     this.#send({ t: 'pair-status', hostId, query });
     const frame = (await awaited) as Extract<ServerToClientFrame, { t: 'pair-status-result' }>;
-    if (frame.paired) this.#storage.markPaired(hostId);
-    else this.#storage.unmarkPaired(hostId);
+    // Write-on-change only: the common answer confirms the marker, and
+    // localStorage writes are synchronous.
+    if (frame.paired !== this.#storage.isPaired(hostId)) {
+      if (frame.paired) this.#storage.markPaired(hostId);
+      else this.#storage.unmarkPaired(hostId);
+    }
     return frame.paired;
   }
 
@@ -623,10 +627,31 @@ export class PocketClient {
     this.#ws.send(JSON.stringify(frame));
   }
 
-  #expect(key: string): Promise<ServerToClientFrame> {
+  #expect(key: string, timeoutMs?: number): Promise<ServerToClientFrame> {
     if (this.#waiters.has(key)) throw new Error(`already awaiting a '${key}' frame`);
     return new Promise((resolve, reject) => {
-      this.#waiters.set(key, { resolve, reject });
+      if (timeoutMs === undefined) {
+        this.#waiters.set(key, { resolve, reject });
+        return;
+      }
+      // A Host that predates the frame silently drops it, so an undeadlined
+      // waiter would strand this key (and throw on the next ask) until the
+      // socket died. The deadline reclaims the key; #settle's drop-unawaited
+      // guard absorbs an answer that arrives after it.
+      const timer = setTimeout(() => {
+        this.#waiters.delete(key);
+        reject(new Error(`timed out awaiting a '${key}' frame`));
+      }, timeoutMs);
+      this.#waiters.set(key, {
+        resolve: (frame) => {
+          clearTimeout(timer);
+          resolve(frame);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
     });
   }
 
@@ -795,6 +820,13 @@ export function hasRecoverablePairingFailure(
 function pairStatusKey(hostId: string): string {
   return `pair-status:${hostId}`;
 }
+
+/**
+ * Deadline on the advisory pair-status ask. Generous for a tailnet round trip,
+ * short enough that one unanswering Host cannot starve the serial Hosts-view
+ * sweep for the whole visit.
+ */
+const PAIR_STATUS_TIMEOUT_MS = 5_000;
 
 function uuid(): string {
   return globalThis.crypto.randomUUID();

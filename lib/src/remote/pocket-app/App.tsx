@@ -795,25 +795,16 @@ export function HostsView({
                       so Connect is offered only where it can succeed and Pair
                       only where it is the actual next step. */}
                   <div className={PK.rowActions}>
-                    {paired ? (
-                      <button
-                        type="button"
-                        className={pkButton({ tone: 'primary', size: 'sm' })}
-                        disabled={busy !== null || !host.online}
-                        onClick={() => onConnect(host)}
-                      >
-                        {busy === 'connect' ? '…' : 'Connect'}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className={pkButton({ tone: 'primary', size: 'sm' })}
-                        disabled={busy !== null || !host.online}
-                        onClick={() => onPair(host)}
-                      >
-                        {busy === 'pair' ? '…' : pairing === 'stale' ? 'Pair again' : 'Pair'}
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className={pkButton({ tone: 'primary', size: 'sm' })}
+                      disabled={busy !== null || !host.online}
+                      onClick={() => (paired ? onConnect : onPair)(host)}
+                    >
+                      {paired
+                        ? busy === 'connect' ? '…' : 'Connect'
+                        : busy === 'pair' ? '…' : pairing === 'stale' ? 'Pair again' : 'Pair'}
+                    </button>
                   </div>
                 </div>
                 {/* Push is per (host, device), so it belongs to the host row —

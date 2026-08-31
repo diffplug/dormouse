@@ -8,7 +8,7 @@
  * exercised here — `getOrCreateDeviceKey` is tested through an injected store.)
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   PAIRING_STALE_PRESENCE_ERROR,
   SELFHOST_ACCOUNT_ID,
@@ -484,6 +484,38 @@ describe('queryPaired', () => {
     expect(await second).toBe(true);
     expect(client.isPaired('h1')).toBe(false);
     expect(client.isPaired('h2')).toBe(true);
+  });
+
+  /**
+   * A Host that predates the frame silently drops it, so the ask carries a
+   * deadline: the waiter key must come back (a stranded key would throw
+   * "already awaiting" on the next visit's ask) and the marker must survive as
+   * the fallback the answer never overrode.
+   */
+  it('times out an unanswered ask, freeing the key and keeping the marker', async () => {
+    // shouldAdvanceTime keeps nextSent's real 2ms polling alive while the 5s
+    // deadline is jumped explicitly.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { client, socket } = await signedIn();
+      await pairApproved(client, socket);
+
+      const asking = client.queryPaired('h1');
+      await nextSent(socket, (f) => f.t === 'pair-status');
+      vi.advanceTimersByTime(5_000);
+      await expect(asking).rejects.toThrow(/timed out/);
+      expect(client.isPaired('h1')).toBe(true);
+
+      // The key is free again, and a late answer to the dead ask is dropped
+      // rather than settling the retry.
+      socket.receive({ t: 'pair-status-result', hostId: 'h1', paired: false });
+      const retry = client.queryPaired('h1');
+      await nextSent(socket, (f) => f.t === 'pair-status');
+      socket.receive({ t: 'pair-status-result', hostId: 'h1', paired: true });
+      expect(await retry).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

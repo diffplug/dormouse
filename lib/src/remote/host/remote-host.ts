@@ -440,12 +440,7 @@ export class RemoteHost {
     // one frame per query, so silence strands that wait until the socket dies —
     // and `false` is the safe lie: it offers Pair, whose approval is local, in
     // place of a Connect the Host would have allowed.
-    const paired =
-      isPairStatusQuery(query) &&
-      this.#acl.findActive({
-        passkeyCredentialId: query.passkeyCredentialId,
-        devicePublicKey: query.devicePublicKey,
-      }) !== undefined;
+    const paired = isPairStatusQuery(query) && this.#acl.findActive(query) !== undefined;
     this.#send({ t: 'pair-status-result', clientId, paired });
   }
 
