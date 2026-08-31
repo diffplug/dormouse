@@ -161,9 +161,9 @@ the repo is trusted. The phase-C user-global file needs none of this.
    cannot see is a pane they cannot approve, so a requested `--minimize` is
    applied after approval instead. A pending Surface is not persisted: it
    restores as a plain terminal, since the grant it was asking for was never
-   made. Approval re-resolves the entry, so the tool runs with the `render`,
-   `port` and key its file declares. its pane shows what would run and
-   waits. **Nothing from the repo executes until a human chooses** — no PTY is
+   made. Its pane shows what would run and waits; approval re-resolves the
+   entry, so the tool runs with the `render`, `port` and key its file
+   declares. **Nothing from the repo executes until a human chooses** — no PTY is
    spawned, so not even a shell starts. **Declining closes the pane and records
    nothing** (rationale).
 4. **Anything `prespawn_*` is behind the same gate**, since it executes — the
