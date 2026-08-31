@@ -141,7 +141,7 @@
   },
   {
     "name": "hono",
-    "version": "4.13.3",
+    "version": "4.13.5",
     "license": "MIT",
     "author": "Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe)",
     "homepage": "https://hono.dev"
