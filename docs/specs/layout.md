@@ -113,7 +113,7 @@ When a session is minimized, it becomes a **door** on the baseboard, showing the
 
 - **Click** (any mode) or **Enter** (command mode): restore the session into the content area as a pane and enter passthrough; the terminal gets focus immediately.
 - **m** / **d** (command mode): restore into a pane but stay in command mode — the inverse of `m`/`d` on a pane, making them toggles.
-- **x** / **k** (command mode): restore into a pane, then show the kill confirmation (an untouched Surface is killed outright — see [Kill confirmation](#kill-confirmation)).
+- **x** / **k** (command mode): restore into a pane, then show the kill confirmation (an untouched plain terminal is killed outright — see [Kill confirmation](#kill-confirmation)).
 - **Arrow keys** navigate to and between doors (see [Spatial navigation](#spatial-navigation)).
 
 A reattach that stays in command mode defers its follow-up (focus, kill, replace) to `requestAnimationFrame` and skips it if the pane vanished in between.
