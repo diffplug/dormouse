@@ -1161,6 +1161,58 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('reveals a pending approval created against a minimized reference', async () => {
+    setToolsEnabled(true);
+    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => ({
+      status: 'untrusted' as const,
+      projectRoot: '/repo',
+      path: '/repo/dormouse.yml',
+      name: 'storybook',
+      run: 'pnpm storybook',
+      upstreamUrl: null,
+    }));
+
+    try {
+      await act(async () => {
+        root.render(
+          <Wall
+            initialPaneIds={['pane-a']}
+            initialDoors={[{ id: 'reference-door', title: 'Reference' }]}
+            initialMode="command"
+            showBaseboard
+          />,
+        );
+      });
+      await flush();
+
+      let response: { ok: boolean; result?: { surfaceId: string; minimized: boolean } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.tool,
+            params: {
+              name: 'storybook',
+              cwd: '/repo',
+              surface: 'surface:2',
+              minimized: false,
+              fresh: false,
+            },
+            respond: (result: typeof response) => { response = result; },
+          },
+        }));
+      });
+      await flush();
+
+      expect(response).toMatchObject({ ok: true, result: { minimized: false } });
+      const toolId = response!.result!.surfaceId;
+      expect(container.querySelector(`[data-door-id="${toolId}"]`)).toBeNull();
+      expect(container.querySelector(`[data-lath-leaf="${toolId}"]`)?.hasAttribute('data-lath-parked')).toBe(false);
+      expect(container.textContent).toContain('Always allow for folder');
+    } finally {
+      setToolsEnabled(false);
+    }
+  });
+
   it('reports a reused pending tool as visible after reattaching it', async () => {
     setToolsEnabled(true);
     const toolId = 'pending-tool-door';

@@ -881,6 +881,10 @@ export function useDorControl({
                   detail.respond({ ok: false, error: pending.message });
                   return;
                 }
+                // A minimized reference creates its sibling as a Door even
+                // when `minimized` is false. Pending approval must stay visible,
+                // so immediately reattach that exceptional creation path.
+                if (pending.value.minimized) revealSurface(pending.value.id);
                 detail.respond({
                   ok: true,
                   result: {
@@ -889,7 +893,7 @@ export function useDorControl({
                     surfaceRef: pending.value.ref,
                     command: lookup.run,
                     cwd,
-                    minimized: false,
+                    minimized: findSurfaceByParams(matchesPending)?.minimized ?? false,
                     key: null,
                   },
                 });
