@@ -1,22 +1,4 @@
-/**
- * The VS Code extension host's binding of {@link RemoteHostService}.
- *
- * The extension host owns the PTYs, so the Host lives here rather than in a
- * webview: the relay socket, the enrollment, the ACL, and the pairing ceremony
- * are all outside any webview realm, and a webview can only answer what its own
- * panes are called and how big they are (docs/specs/remote-security-model.md).
- *
- * One extension host runs per window, so exactly one window may hold it. That
- * arbitration is `peer-link.ts`'s bind-as-lease; this module starts the service
- * only in the window that won. A losing window runs no service at all: its
- * webviews' commands are forwarded over the link and the broker's answers come
- * back the same way, so the Host behaves identically in every window while
- * existing in exactly one.
- *
- * Nothing here runs until there is a Host to run: contention starts when an
- * enrollment already exists, or on the first `enroll` command. A user who never
- * enrolls never sees a socket.
- */
+/** VS Code binding of {@link RemoteHostService}; see `docs/specs/vscode.md` → "Remote Host". */
 
 import type * as vscode from 'vscode';
 

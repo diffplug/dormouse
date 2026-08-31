@@ -10,32 +10,6 @@
 
 Two hosting modes: a `WebviewView` in the bottom panel (alongside Terminal, Problems, Output) and `WebviewPanel` editor tabs (via `dormouse.open`, multiple instances). Both restore across "Developer: Reload Window", via a `WebviewPanelSerializer` plus the `onWebviewPanel:dormouse` activation event. PTY lifecycle is fully decoupled from the webview — PTYs live in the extension host (`pty-manager.ts`), survive panel visibility toggling, and replay buffered output on **resume**. Scrollback is never persisted (`docs/specs/transport.md` → "Persistence policy"); instead `deactivate()` interrupts the live PTYs and records each pane's agent resume invocation, which the next cold restore auto-runs (`docs/specs/layout.md` → "Agent resume on cold restore").
 
-**Code map (extension host, `vscode-ext/src/`):**
-
-```
-extension.ts               — activate/deactivate, command registration, panel setup
-webview-view-provider.ts   — WebviewView in bottom panel
-message-router.ts          — webview <-> host IPC, PTY ownership, in-window peer fan-out
-message-types.ts           — bidirectional message type definitions
-pty-manager.ts             — PTY lifecycle, buffering (1M char cap), CWD queries
-pty-host.js                — forked child process wrapping standalone/sidecar/pty-core.js
-session-state.ts           — workspaceState persistence, alert merging, recovery capture
-workspace-chrome.ts        — Workspace union status (bell/TODO) → tab title / view badge
-shell-selection.ts         — persisted shell picker (`dormouse.selectedShellPath`)
-agent-browser-host.ts      — extension-host wiring + stream relay for the agent-browser surface
-iframe-proxy-host.ts       — VS Code binding for the iframe transparent proxy (injects the logger)
-webview-html.ts            — CSP injection, nonce + message-token minting, asset URI rewriting
-csp-nonce-placeholder.ts   — the one string vite.config.ts and webview-html.ts must agree on
-webview-messaging.ts       — serveWebview: pairs a document with its token, returns a WebviewChannel
-remote-host.ts             — the remote Host service in this window: provider, command routing, storage
-remote-host-store.ts       — `VsCodeHostStateStore`: enrollment in SecretStorage, ACL in globalState
-peer-link.ts               — socket between windows: bind-as-lease arbitration, broker serves clients
-peer-link-protocol.ts      — that socket's frame shapes, framing, handshake proofs, PTY route table
-processed-pty-streams.ts   — the window's one keyed registry of stripped PTY streams
-log.ts                     — extension logging
-(../scripts/esbuild.mjs)   — extension + pty-host bundles; bakes the Host's remote `connect-src`
-```
-
 The webview itself is the shared `lib/` frontend, unmodified for this host: see `docs/specs/layout.md` and `docs/specs/transport.md` for its modules. The only VS Code-specific pieces in `lib/` are `lib/src/lib/platform/vscode-adapter.ts` (the postMessage bridge), `lib/src/lib/vscode-message-token.ts`, and `lib/src/lib/vscode-keybindings.ts`.
 
 ### Invariants (VS Code-specific)
@@ -52,16 +26,7 @@ The webview itself is the shared `lib/` frontend, unmodified for this host: see 
 
 ### Extension manifest
 
-Source of truth: `vscode-ext/package.json`. Activation is `onView:dormouse.view` + `onWebviewPanel:dormouse` — nothing else wakes the extension, so a window with no Dormouse view and no restored panel stays cold until one is opened.
-
-The whole `contributes` block:
-
-| Contribution | Value |
-| --- | --- |
-| Commands | `dormouse.focus` (Focus), `dormouse.open` (Open in Editor), `dormouse.debugTheme` (Debug Theme), `dormouse.newTerminal` (New Terminal, `$(add)`), `dormouse.selectShell` (Select Shell, `$(gear)`) — all titled `Dormouse: …`, so the palette groups them |
-| `menus.view/title` | `dormouse.selectShell` then `dormouse.newTerminal`, `when: view == dormouse.view` |
-| `viewsContainers.panel` | `dormouse-panel`, title `Dormouse`, icon `$(terminal)` |
-| `views` | `dormouse.view` in `dormouse-panel`, `type: webview` |
+Source of truth: `vscode-ext/package.json`. Activation is limited to the contributed view and restored editor panels, so a window without either stays cold. The manifest contributes the panel container/view, the Focus/Open/Debug Theme/New Terminal/Select Shell commands, and the view-title actions; it owns their exact ids, titles, icons, and ordering.
 
 There is no `configuration`, no `keybindings`, and no context key: Dormouse's settings live in its own in-webview Settings dialog rather than in `settings.json`, its chords are handled inside the webview (see the workbench-mirror invariant above), and nothing in the manifest is `when`-gated on Dormouse state. Context keys are [Future](#context-keys).
 

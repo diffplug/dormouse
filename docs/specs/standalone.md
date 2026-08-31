@@ -7,26 +7,6 @@
 
 ## Architecture
 
-```
-Tauri app process (Rust — standalone/src-tauri/src/lib.rs)
-├── WebView (Vite frontend — standalone/src/)
-│   ├── main.tsx           — bootstrap: platform init, theme restore, resumeOrRestore, updater
-│   ├── AppBar.tsx         — draggable titlebar: New workspace placeholder, window controls
-│   ├── tauri-adapter.ts   — TauriAdapter (PlatformAdapter over Tauri invoke/events)
-│   ├── tauri-session-store.ts — Rust-backed session store (§Persistence)
-│   ├── quit.ts + quit-confirm-store.ts + QuitConfirmModal.tsx — quit orchestrator (§Quit flow)
-│   ├── updater.ts         — auto-update state machine (docs/specs/auto-update.md)
-│   └── browser-sidecar-{host,adapter}.ts — browser-dev harness (docs/specs/transport.md)
-└── Node sidecar (standalone/sidecar/main.js — spawned by Rust at setup)
-    ├── pty-core.js            — shared PTY manager (docs/specs/transport.md; also used by the VS Code pty-host)
-    ├── dor-control-server.js  — dor CLI control socket (docs/specs/dor-cli.md)
-    ├── iframe-proxy.cjs       — bundled from lib/src/host/iframe-proxy.ts (docs/specs/dor-browser.md)
-    ├── agent-browser-host.cjs — bundled from lib/src/host/agent-browser-host.ts (docs/specs/dor-browser.md)
-    ├── remote-host.cjs        — bundled from lib/src/host/remote/sidecar-entry.ts: the remote Host service (§Remote Host service)
-    ├── clipboard-ops.js       — OS clipboard: paste-read tiers for macOS/Linux (Windows reads go native in Rust); agent-browser clipboard writes on all platforms (docs/specs/mouse-and-clipboard.md §8.6, docs/specs/dor-browser.md)
-    └── shell-integration/     — injected shell hook scripts (docs/specs/terminal-escapes.md)
-```
-
 **Rust stays thin.** It spawns and supervises the sidecar, bridges the webview
 to it, and owns the OS-integration edges (window events, menu, file drop, dock
 icon, logging) plus the session file store. Everything with real logic runs in
@@ -77,14 +57,9 @@ The sidecar speaks JSON-lines over stdio: commands in on stdin, events out on
 stdout. **stdout is the protocol** — sidecar diagnostics go to stderr, which
 Rust appends to the log file.
 
-Webview → Rust is the Tauri `invoke` set — `pty_spawn` / `pty_write` /
-`pty_resize` / `pty_kill` / `pty_request_init` / `pty_get_cwd` /
-`pty_get_open_ports` / `pty_get_scrollback` / `pty_graceful_kill_all` /
-`get_available_shells`, `dor_control_response`, `iframe_create_proxy_url`, the
-`agent_browser_*` family, the `clipboard` readers, `read_update_log`,
-`remote_host_command` (§Remote Host service), and `kill_sidecar_now` — each a
-thin forwarder to the corresponding sidecar message. Three carve-outs are *not*
-forwarded:
+Webview → Rust uses Tauri invokes; the `#[tauri::command]` functions and
+`TauriAdapter` own the exact command set. Most are thin sidecar forwarders.
+Three carve-outs are *not* forwarded:
 
 | Not forwarded | Handled | Why |
 |---|---|---|
@@ -229,8 +204,8 @@ because the sidecar and the `dor` CLI have opposite console requirements:
 - **The sidecar must run under a GUI-subsystem node.** Spawning a
   *console-subsystem* process from a GUI app triggers Win11's DefTerm handoff —
   Windows launches Windows Terminal to host it, flashing a stray WT window
-  behind Dormouse — and neither `CREATE_NO_WINDOW` nor `DETACHED_PROCESS` opts
-  out of it (tested); only a non-console subsystem does. `build.rs` patches the
+  behind Dormouse; only a non-console subsystem suppresses it (rationale).
+  `build.rs` patches the
   bundled `node.exe` at build time (`force_windows_gui_subsystem`), and the
   sidecar's explicit piped stdio works fine under it.
 - **`dor` must run under a console-subsystem copy.** A GUI-subsystem node does
@@ -247,13 +222,6 @@ because the sidecar and the `dor` CLI have opposite console requirements:
 The byte-flip is shared with `build.rs` via
 `standalone/src-tauri/src/pe_subsystem.rs` so the load-bearing PE offsets live
 in one place.
-
-**Reconsider if the stray window can be suppressed another way.** Both variants
-exist solely to work around the DefTerm handoff, on the single load-bearing
-assumption that no spawn-time option suppresses it. Show a `CREATE_NO_WINDOW` /
-`STARTUPINFO` + `SW_HIDE` / job-object approach suppressing it on current Win11
-and both go away in favour of the stock console node under `DORMOUSE_NODE`.
-Re-verify the assumption before extending any of this.
 
 ## Sidecar lifecycle
 

@@ -1,21 +1,6 @@
 /**
- * The seam between protocol-v1 and wherever the Host's surfaces actually live.
- *
- * `RemoteApiSession` speaks the wire and nothing else: surface ids, PTY ids,
- * sizes, and bytes (docs/specs/remote-api.md). *Where* a named surface lives —
- * this webview's xterm registry, a sibling webview's, another window's, or a
- * webview the Node host service fans out to — is a deployment fact, not a
- * protocol concept, so every environment-specific answer is behind this
- * interface and the session never imports the platform adapter, the stores, or
- * `document`.
- *
- * Both implementations are Node-side: the Tauri sidecar's
- * (`lib/src/host/remote/sidecar-entry.ts`) and the VS Code extension host's
- * (`vscode-ext/src/remote-host.ts`), each answering from the process that owns
- * the PTYs with the webviews demoted to surface responders.
- *
- * Types only — this module must stay environment-free so the session and its
- * tests can be imported anywhere.
+ * Environment-free seam between protocol-v1 and surface ownership; see
+ * `docs/specs/remote-api.md` → "The provider seam". Types only.
  */
 
 import type { DirectoryEntry } from 'server-lib-common';

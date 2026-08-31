@@ -1,16 +1,7 @@
 /**
- * The Tauri sidecar's binding of {@link RemoteHostService}: bundled to
- * `standalone/sidecar/remote-host.cjs` by
- * `standalone/scripts/build-sidecar-proxy.mjs` and required from
- * `standalone/sidecar/main.js`.
- *
- * The sidecar owns the PTYs, so writes, resizes, and output go straight to
- * `pty-core`'s manager. What it does *not* own is the webview's view of itself
- * — what a pane is called, whether it is focused, how big its xterm is — so
- * those are asked over the bridge in `service-protocol.ts` and answered by the
- * surface responder in `lib/src/remote/host/peer-surfaces.ts`.
- *
- * All logging goes to stderr: stdout is the JSON-lines protocol channel.
+ * Tauri-sidecar binding of {@link RemoteHostService}; see
+ * `docs/specs/standalone.md` → "Remote Host service". Stdout is reserved for
+ * the JSON-lines bridge, so all logging goes to stderr.
  */
 
 import type { HostSurfaceProvider, PtySink } from '../../remote/host/host-surface-provider';

@@ -67,13 +67,11 @@ clientData checks, passkey assertion verification, and the Host enrollment
 policy all use that normalized origin.
 
 Source of truth: `server/src/config.ts` (`readConfig`), a pure env→config
-mapping unit-tested in `server/test/config.test.mjs`; only the disk half stays
+mapping pinned by `server/test/config.test.mjs`; only the disk half stays
 in `server/src/index.ts`, which mints and persists `vapid.json` when no keypair
 is configured, then validates the pair and subject **before** building the app.
-`server/test/runtime-file.test.mjs` and `server/test/bind-host.test.mjs` spawn
-the real entrypoint: the runtime file appears only after a bind, names that
-process, and is `0600`; the plaintext port is unreachable off-loopback under
-`DORMOUSE_BIND_HOST=127.0.0.1`.
+`server/test/runtime-file.test.mjs` and `server/test/bind-host.test.mjs` pin the
+runtime-identity and loopback controls at the process boundary.
 
 ## Where a Host may reach a relay server (self-host builds)
 
@@ -140,19 +138,9 @@ host would foreclose it.
 
 ## State files
 
-```
-$DORMOUSE_STATE_DIR/
-  account.json   { accountId: "owner",
-                   passkeys: [{ credentialId, publicKey /* SPKI b64u */,
-                                label, createdAt }] }
-  hosts.json     [{ hostId, hostToken, label, enrolledAt }]
-  push-subscriptions.json
-                 [{ hostId, devicePublicKey, endpoint, keys,
-                    vapidPublicKey, subscribedAt }]
-  vapid.json     { publicKey, privateKey, createdAt }   (only when unset by env)
-```
-
-That is the entire persistent state. **The Host's ACL is never here** — it
+The entire persistent state is `account.json`, `hosts.json`,
+`push-subscriptions.json`, and, when no keypair is configured, `vapid.json`;
+`server/src/state.ts` owns their exact schemas. **The Host's ACL is never here** — it
 lives on the Host, in the process that owns the PTYs
 (`lib/src/host/remote/host-state-store.ts`), which is the whole point of the
 security model.
@@ -503,21 +491,10 @@ extension host"). The webview holds only UI — the pairing modal, the
 `window.dormouseRemoteHost` console hook, and answering what its own panes are
 called — and reaches the service over the `remoteHost:*` bridge.
 
-**One service, two bindings.** The runtime every host shares lives in
-`lib/src/host/remote/`: the service itself (`service.ts`), the wire contract
-both ends of the bridge compile against (`service-protocol.ts`), the webview
-half of the bridge (`link-client.ts` — command correlation, the 15 s timeout,
-and the rule that an ask is *always* answered even when nothing matches), the
-ask-backed surface provider (`ask-surface-provider.ts`; the provider seam
-itself is [remote-api.md](./remote-api.md)), and `serial-queue.ts`. The
-enrollment exchange (`lib/src/remote/host/enrollment.ts`) and the
-edge-triggered webview gate (`lib/src/remote/host/enrolled-gate.ts`) sit on the
-webview side and are reached across the bridge. What remains per host
-is its store, its process plumbing, and its transport for the three bridge
-messages — specced in `docs/specs/standalone.md` → "Remote Host service" and
-`docs/specs/vscode.md` → "Remote Host: a service in the extension host", with
-the per-host message-name table in `docs/specs/transport.md` → "Message
-protocol".
+**One service, two bindings.** `lib/src/host/remote/` shares the service,
+bridge contract/client, ask-backed provider, and serialization across both
+hosts. Only the store, process plumbing, and bridge transport remain host-owned;
+their contracts live in the standalone, VS Code, transport, and remote-api specs.
 
 **The store contract.** Both stores implement `HostStateStore`
 (`lib/src/host/remote/host-state-store.ts`) under the same rules:

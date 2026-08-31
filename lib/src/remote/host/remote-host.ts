@@ -1,26 +1,7 @@
 /**
- * The Host controller: holds the `/ws/host` relay socket and speaks the Host
- * side of the wire contract (`server-lib-common/remote/wire.ts`), mirroring the
- * headless reference in `server/test/harness/fake-host.mjs`.
- *
- *   - `pair`        → begin the ceremony and surface a local approval; approval
- *                     runs `PairingCeremony.approve` (the only ACL write),
- *                     persists the ACL, and replies `pair-result` with the record.
- *   - `connect`     → issue a Host challenge.
- *   - `connect2`    → `authorizeConnection` (final authority); `failures` is
- *                     omitted from an allowed `decision`.
- *   - `msg`         → only for a client with an allowed decision; routed to the
- *                     remote-api handler.
- *   - `client-gone` → drop that client's transient state.
- *
- * A dropped socket reconnects with exponential backoff, with one exception: a
- * close carrying `WS_CLOSE_HOST_REPLACED` means the relay deliberately evicted
- * us because another Host claimed the same `hostId`. That close is terminal —
- * see `#onClose`.
- *
- * The remote-api handler is injected (`createSession`) so this controller has no
- * dependency on the terminal registry / xterm / DOM — the wiring lives in
- * `activation.ts`, and this file stays unit-testable against a fake socket.
+ * Host-side relay controller; `docs/specs/server.md` → "Relay" owns the frame
+ * sequence and `remote-security-model.md` owns authorization. The remote-api
+ * session is injected, keeping this module environment-free.
  */
 
 import {

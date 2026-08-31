@@ -1,15 +1,6 @@
 /**
- * Host ACL persistence. The ACL is the authorization primitive (see
- * `server-lib-common/security/acl.ts`) and — per the security model — it lives
- * on the Host, never the Server.
- *
- * The Host runs in the process that owns the PTYs now, and writes its records
- * through its own store (`lib/src/host/remote/host-state-store.ts`). What is
- * left here is `localStorage` as the *read* side: a webview that paired devices
- * before the service existed still holds the record array `HostAcl.records()`
- * produced, and hands it over once (`activation.ts` → adoption) before clearing
- * it. Keyed per host, so a profile that re-enrolls under a new hostId does not
- * inherit a stale ACL.
+ * Host ACL loading and the legacy webview read path; see
+ * `docs/specs/remote-security-model.md` → "Host Authorization".
  */
 
 import { HostAcl, isHostAclRecord, type HostAclRecord } from 'server-lib-common';

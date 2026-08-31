@@ -1,40 +1,7 @@
 /**
- * Which VS Code window runs the remote Host, and how the others reach it
- * (docs/specs/vscode.md → "Peer surfaces across windows").
- *
- * One extension host runs per window, so left to themselves every window would
- * start a Host against the same enrollment, all of them would connect
- * `/ws/host`, and the server's displacement would turn into an endless
- * reconnect fight. Arbitration is therefore **bind-as-lease**: the socket every
- * window would connect to *is* the lease. Its path is fixed — derived from the
- * extension's storage location — so the window that binds it first is the
- * broker and everyone else connects to it as a client.
- *
- * Roles never flip downward while a process lives. A broker stays the broker
- * until it exits, which is what makes the whole class of mid-transition races a
- * lease with a TTL had (start serving, lose the lease, tear down, win it back
- * while tearing down) unrepresentable here. A client only ever changes role
- * upward, when the broker dies and its socket closes: every client then races
- * to bind, and exactly one wins because `bind` is the arbiter.
- *
- * Traffic runs both ways over that socket, and each direction is the half its
- * end alone can do: the broker asks client windows for their directory and
- * their surfaces and streams their PTYs, and client windows forward their
- * webviews' Host commands to the broker, which is the only process running a
- * service, and take back its results and UI events.
- *
- * Trust: the path is derived, not secret — it has to be the same in every
- * window, so anything running as any user on the machine can compute it. Two
- * things stand between that and this installation's terminals. On unix the
- * sockets live in a 0700 directory of this user's own, checked before every bind
- * and every connect, so a co-resident user cannot create the path first (Windows
- * named pipes are not filesystem objects and carry their own ACL, so they skip
- * that layer). And both ends prove they hold the shared token — from a 0600 file
- * in the extension's `globalStorageUri`, the same bar as the `dor` control
- * socket — through the mutual handshake below, without the token itself ever
- * crossing the wire. The client verifies the server *before* it sends or serves
- * anything, so squatting the path buys nothing: a process that cannot prove the
- * token gets no directory, no PTY stream, and no commands.
+ * Cross-window broker/client transport for the remote Host. The bind-as-lease,
+ * monotone-role, and mutual-handshake contracts live in `docs/specs/vscode.md`
+ * → "Peer surfaces across windows".
  */
 
 import { chmod, lstat, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';

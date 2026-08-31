@@ -1,13 +1,6 @@
 /**
- * The Pocket device key: a non-extractable ECDSA P-256 keypair that is this
- * browser's long-lived Client identity (docs/specs/remote-security-model.md).
- * The `CryptoKey` objects are persisted directly in IndexedDB — never exported
- * — so the private key material never leaves the runtime, exactly as
- * `generateDeviceKeyPair`'s contract intends.
- *
- * The store is injected into {@link getOrCreateDeviceKey} so its logic is
- * unit-testable without IndexedDB (the browser default is
- * {@link indexedDbDeviceKeyStore}).
+ * IndexedDB persistence for Pocket's device key; see
+ * `docs/specs/remote-security-model.md` → "Device Keys".
  */
 
 import { generateDeviceKeyPair, type DeviceKeyPair } from 'server-lib-common';

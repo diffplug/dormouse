@@ -75,31 +75,6 @@ When a connect denial reports an ACL miss (`passkey-not-paired`,
 shows Pair again so expected Host ACL resets, revocations, or browser
 device-key loss recover through the normal pairing ceremony.
 
-## Module layout
-
-```
-lib/src/remote/
-  ws.ts            the minimal WebSocket surface both sides share
-  client/          the phone side
-    pocket-client.ts     UI-free protocol client (auth, pair, connect, msg)
-    device-key.ts        non-extractable device key in IndexedDB
-    webauthn.ts          navigator.credentials wrappers
-    remote-adapter.ts    RemotePtyAdapter (PlatformAdapter over pocket-client)
-    push-subscribe.ts    push availability + the browser half of subscribing
-  host/            the laptop side (enrollment, approval modal, ACL, bridge)
-  pocket-app/      the app shell: the three phases + the mobile wall composition
-    App.tsx / PocketWall.tsx / wall-model.ts  views, wall, snapshot→UI glue
-    pocket-theme.ts      theme boot + browser-chrome sync
-    service-worker.ts    best-effort registration of the push worker
-
-lib/pocket/        the app's HTML shell and its verbatim-copied static assets
-  index.html
-  public/          manifest, icons, sw.js — see Installable web app below
-```
-
-The server (`server/`) stays the only dynamic code: accounts, relay, and
-static serving of the built Pocket bundle.
-
 ## Design system and theming
 
 Pocket is a product surface, not a marketing page: **all of it — the auth

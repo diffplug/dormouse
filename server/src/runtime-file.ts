@@ -1,27 +1,6 @@
 /**
- * The running server's own answer to "which release is this?".
- *
- * `/api/hello` is unauthenticated, CORS-`*` and reachable through
- * `tailscale serve`, so it cannot carry release identity. But every installer
- * needs that identity: a 200 on the loopback port proves only that *something*
- * got there first, and reporting a stale orphan — or, on WSL with
- * `networkingMode=mirrored`, a Windows process sharing the same loopback — as
- * the release just installed turns a failed update into a reported success.
- *
- * Reconstructing it from outside costs a different forensic implementation per
- * platform (`lsof -d txt`, `/proc/<pid>/exe`, `Get-CimInstance Win32_Process`),
- * each with its own trap about which path form the OS reports. Writing it down
- * at bind time replaces all of them with reading one small JSON file.
- *
- * Deliberately *not* in `$DORMOUSE_STATE_DIR`: this is runtime truth about one
- * process, not durable state. It must not be backed up, restored, or survive
- * into a different machine's install, all of which the state directory's
- * contract invites. The installer picks the path and passes it as
- * `DORMOUSE_RUNTIME_FILE`; unset — a dev run, a container, a test — writes
- * nothing at all.
- *
- * Source of truth for the installers' `listening_release` /
- * `Get-ListeningRelease`.
+ * Atomic runtime release identity written after bind and kept outside durable
+ * state; see `docs/specs/server.md` → "Configuration" and `SELF_HOST.md`.
  */
 
 import { randomUUID } from 'node:crypto';

@@ -1,22 +1,7 @@
 /**
- * What the Host may ask a webview, and the answers it gives back
- * (docs/specs/vscode.md → "Peer surfaces").
- *
- * The Host runs in the process that owns the PTYs, but a window's terminals are
- * spread across its webviews and each webview has its own xterm registry. So
- * *every* webview installs the responder here: it answers what the panes this
- * webview owns are called, and drives them when the Host asks.
- *
- * This is also the one place the operations have real types. The platform
- * adapter, the extension-host broker, and the cross-window socket all treat
- * `op` as opaque, because *what* a webview can be asked belongs to the remote
- * Host and not to any of them — {@link PeerOps} is the whole vocabulary, and
- * adding an operation means one entry here plus its caller, not a parallel
- * ladder of message types at every layer.
- *
- * Deliberately light — the registry, the directory collector, and a resize. It
- * carries none of the relay, enrollment, or pairing machinery, so a webview
- * pays almost nothing to make its terminals reachable from the Host.
+ * Typed webview surface responder; `docs/specs/vscode.md` → "Peer surfaces"
+ * owns the cross-window contract. {@link PeerOps} is the sole operation map;
+ * transport layers keep `op` opaque.
  */
 
 import { clampTerminalDimension, type DirectoryEntry } from 'server-lib-common';

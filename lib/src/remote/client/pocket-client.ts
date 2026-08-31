@@ -1,18 +1,6 @@
 /**
- * The Pocket protocol client: a UI-free driver of the exact client flow the
- * server's `handshake.test.mjs` exercises (register → signin → pair → connect →
- * challenge → connect2 → msg), but with real `navigator.credentials` and a real
- * IndexedDB device key instead of the simulated harness.
- *
- * Everything external is injected — `fetch`, the {@link WebAuthnClient}, the
- * WebSocket factory, the device key, and localStorage-backed {@link PocketStorage}
- * — so vitest can fake all of it (`pocket-client.test.ts`).
- *
- * Correlation follows the Host's conventions (see `remote/host/remote-api.ts`):
- * a `msg` request is matched by `requestId`; events are matched by `subId`, and
- * for `directory.watch` / `surface.attach` the Host reuses the request's
- * `requestId` as that `subId`, so this client sends those two with
- * `requestId === subId`.
+ * UI-free Pocket protocol client; `docs/specs/server.md` owns authentication
+ * and pairing, while `remote-api.md` owns request/event correlation.
  */
 
 import {

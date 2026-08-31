@@ -351,18 +351,8 @@ paired passkey, and the new key starts unauthorized everywhere.
 
 ## Security Guarantees
 
-Dormouse is designed so that:
-
-* Adding a new passkey does not grant Host access.
-* Compromising the Server does not let it *create* an authorized Client.
-* Passkey synchronization does not automatically create trusted Clients.
-* Every trusted Client must be explicitly paired with every Host.
-* Every connection requires fresh user presence.
-* Every access decision is ultimately made by the Host — the final authority
-  throughout the system.
-
-**One honest qualification.** "Server compromise grants no Host access" bounds
-*creation*, not *action*. After a decision the Host gates `msg` frames on
+**Server compromise cannot create an authorized Client, but it can act through
+an authorized session already open.** After a decision the Host gates `msg` frames on
 `established` for a `clientId` the relay itself minted, and there is no
 per-frame authentication, so a compromised Server can fabricate frames on a
 session an authorized Client already has open — reaching `terminal.write`,
