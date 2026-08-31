@@ -331,9 +331,9 @@ platform:
 * **Android browser tab** — generally durable.
 * **Installed PWA** — the preferred mode on both, strongest on Android.
 
-Today Pocket generates the device key in whatever context it runs, having
-advised installing first on the screen before setup
-([pocket-app.md](./pocket-app.md)); storage-persistence hardening is staged
+Today Pocket generates the device key at boot, in whatever context it runs —
+the install advice on the auth screen ([pocket-app.md](./pocket-app.md))
+precedes only the passkey; storage-persistence hardening is staged
 (see [Future](#future)). Eviction is recoverable, not catastrophic: see
 [Device Key Loss](#device-key-loss).
 
