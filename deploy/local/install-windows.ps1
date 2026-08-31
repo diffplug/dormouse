@@ -557,7 +557,8 @@ if ($CERT_DOMAINS -and (",$CERT_DOMAINS," -like "*,$TS_DNS,*")) {
 
 $CONFIG_DIR = Join-Path $INSTALL_ROOT 'config'
 $ENV_FILE = Join-Path $CONFIG_DIR 'server.env'
-$ENROLL_OFFER_FILE = Join-Path $INSTALL_ROOT 'run\enroll-offer.json'
+$RUN_DIR = Join-Path $INSTALL_ROOT 'run'
+$ENROLL_OFFER_FILE = Join-Path $RUN_DIR 'enroll-offer.json'
 $STATE_DIR = Join-Path $INSTALL_ROOT 'state'
 $RELEASES_DIR = Join-Path $INSTALL_ROOT 'releases'
 $BIN_DIR = Join-Path $INSTALL_ROOT 'bin'
@@ -737,6 +738,7 @@ try {
   New-Directory $BIN_DIR
   New-Directory $CONFIG_DIR
   New-Directory $STATE_DIR
+  New-Directory $RUN_DIR
   New-Directory $LOG_DIR
   Protect-Path -Path $CONFIG_DIR -Directory
   Protect-Path -Path $STATE_DIR -Directory
@@ -860,31 +862,6 @@ try {
   if ((Get-EnvFileValue -Path $ENV_FILE -Key 'PORT') -ne "$LOOPBACK_PORT") {
     Die "config/server.env must set PORT=$LOOPBACK_PORT to match the Serve mapping."
   }
-
-  # The enrollment offer: this install's origin plus a one-time token that
-  # `POST /api/host/enroll` accepts in place of the setup password, so a Host on
-  # this machine can offer one-click enrollment (docs/specs/server.md ->
-  # Configuration -> DORMOUSE_ENROLL_TOKEN_FILE). Written on EVERY run, update
-  # included: the server unlinks it on redemption and refuses it after 7 days,
-  # so it is an offer rather than durable state. That is also why it lives in
-  # run\ -- config\ is preserved byte-for-byte across updates, and every file in
-  # state\ belongs to the server's own atomic writer.
-  New-Directory (Join-Path $INSTALL_ROOT 'run')
-  $enrollToken = New-RandomHex32
-  if ($enrollToken.Length -lt 64) {
-    Die "generated enroll token is implausibly short; refusing to write the enrollment offer."
-  }
-  # Create the file with an owner-only ACL BEFORE the token is written, so there
-  # is no window in which the secret sits under an inherited ACL.
-  [IO.File]::WriteAllText($ENROLL_OFFER_FILE, '')
-  Protect-Path -Path $ENROLL_OFFER_FILE
-  # The origin is the one this install answers on: an existing server.env that
-  # named a different one was refused above, so $ORIGIN is that file's value.
-  $mintedAt = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
-  $offer = '{{"origin":"{0}","token":"{1}","mintedAt":"{2}"}}' -f $ORIGIN, $enrollToken, $mintedAt
-  [IO.File]::WriteAllText($ENROLL_OFFER_FILE, $offer + "`r`n")
-  Remove-Variable enrollToken
-  Write-Ok "minted run\enroll-offer.json (owner-only ACL) -- a one-time enrollment offer for a Host on this machine"
 
   # ------------------------------------------------------------- bin scripts ---
 
@@ -1041,6 +1018,7 @@ while ($true) {
 
 $Root = Split-Path -Parent $PSScriptRoot
 $EnvFile = Join-Path $Root 'config\server.env'
+$OfferFile = Join-Path $Root 'run\enroll-offer.json'
 $StateDir = Join-Path $Root 'state'
 $LogDir = Join-Path $Root 'logs'
 $CurrentPointer = Join-Path $Root 'current.txt'
@@ -1605,9 +1583,8 @@ function Invoke-Verify {
   # The enrollment offer is single-use: absent means it was spent (or never
   # minted by an older installer), which is healthy. Only its ACL is this
   # command's business, and only while it is there.
-  $offerFile = Join-Path $Root 'run\enroll-offer.json'
-  if (Test-Path -LiteralPath $offerFile -PathType Leaf) {
-    $r = Test-OwnerOnly -Path $offerFile
+  if (Test-Path -LiteralPath $OfferFile -PathType Leaf) {
+    $r = Test-OwnerOnly -Path $OfferFile
     if ($r.Ok) { Pass "run\enroll-offer.json grants only this user" }
     else { Fail "run\enroll-offer.json $($r.Reason)" }
   } else {
@@ -2037,6 +2014,34 @@ rem directly.
     Die "current did not advance to $RELEASE_ID (names '$(if ($switchedTo) { $switchedTo } else { 'nothing' })')."
   }
   Write-Ok "current -> $RELEASE_ID"
+
+  # ------------------------------------------------------------ enroll offer ---
+
+  # run\enroll-offer.json, the one-time offer a Host on this machine redeems in
+  # place of the setup password (SECURITY.md -> "Credentials at rest").
+  #
+  # Minted here rather than with the rest of the runtime config: minting burns
+  # the unspent offer, so it must wait until current.txt has advanced -- a
+  # failed candidate probe must not cost a token -- and land before the task
+  # starts.
+  $enrollToken = New-RandomHex32
+  if ($enrollToken.Length -lt 64) {
+    Die "generated enroll token is implausibly short; refusing to write the enrollment offer."
+  }
+  # Create the file with an owner-only ACL BEFORE the token is written, so there
+  # is no window in which the secret sits under an inherited ACL.
+  [IO.File]::WriteAllText($ENROLL_OFFER_FILE, '')
+  Protect-Path -Path $ENROLL_OFFER_FILE
+  # mintedAt is read here, at write time, and never from $BUILT_AT: the server's
+  # 7-day expiry runs from the mint, and the build that precedes it is not free.
+  $offer = [pscustomobject]@{
+    origin   = $ORIGIN
+    token    = $enrollToken
+    mintedAt = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+  } | ConvertTo-Json -Compress
+  [IO.File]::WriteAllText($ENROLL_OFFER_FILE, $offer + "`r`n")
+  Remove-Variable enrollToken
+  Write-Ok "minted run\enroll-offer.json (owner-only ACL) -- a one-time enrollment offer for a Host on this machine"
 
   # ---------------------------------------------------------- scheduled task --
 

@@ -461,7 +461,8 @@ fi
 
 CONFIG_DIR="$INSTALL_ROOT/config"
 ENV_FILE="$CONFIG_DIR/server.env"
-ENROLL_OFFER_FILE="$INSTALL_ROOT/run/enroll-offer.json"
+RUN_DIR="$INSTALL_ROOT/run"
+ENROLL_OFFER_FILE="$RUN_DIR/enroll-offer.json"
 STATE_DIR="$INSTALL_ROOT/state"
 RELEASES_DIR="$INSTALL_ROOT/releases"
 BIN_DIR="$INSTALL_ROOT/bin"
@@ -573,8 +574,10 @@ step "Staging the new release"
 
 umask 077
 mkdir -p "$RELEASES_DIR" "$BIN_DIR"
-mkdir -p "$CONFIG_DIR" "$STATE_DIR"
-chmod 0700 "$CONFIG_DIR" "$STATE_DIR"
+mkdir -p "$CONFIG_DIR" "$STATE_DIR" "$RUN_DIR"
+# Explicit rather than left to the umask above, so a directory an earlier run
+# created looser is tightened rather than kept.
+chmod 0700 "$CONFIG_DIR" "$STATE_DIR" "$RUN_DIR"
 mkdir -p "$LOG_DIR"
 
 BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -691,29 +694,6 @@ grep -q '^DORMOUSE_BIND_HOST=127\.0\.0\.1$' "$ENV_FILE" \
 grep -q "^PORT=$LOOPBACK_PORT$" "$ENV_FILE" \
   || die "config/server.env must set PORT=$LOOPBACK_PORT to match the Serve mapping."
 
-# The enrollment offer: this install's origin plus a one-time token that
-# `POST /api/host/enroll` accepts in place of the setup password, so a Host on
-# this machine can offer one-click enrollment (docs/specs/server.md →
-# Configuration → DORMOUSE_ENROLL_TOKEN_FILE). Written on EVERY run, update
-# included: the server unlinks it on redemption and refuses it after 7 days, so
-# it is an offer rather than durable state. That is also why it lives in `run/`
-# — `config/` is preserved byte-for-byte across updates, and every file in
-# `state/` belongs to the server's own atomic writer.
-mkdir -p "$INSTALL_ROOT/run"
-ENROLL_TOKEN="$(random_hex32)"
-[ ${#ENROLL_TOKEN} -ge 64 ] || die "generated enroll token is implausibly short; refusing to write the enrollment offer."
-# Create the file and lock it down BEFORE the token is written, the same order
-# server.env uses above.
-: > "$ENROLL_OFFER_FILE"
-chmod 0600 "$ENROLL_OFFER_FILE"
-# The origin is the one this install answers on: an existing server.env that
-# named a different one was refused above, so $ORIGIN is that file's value.
-cat > "$ENROLL_OFFER_FILE" <<OFFER_EOF
-{"origin":"$ORIGIN","token":"$ENROLL_TOKEN","mintedAt":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
-OFFER_EOF
-unset ENROLL_TOKEN
-ok "minted run/enroll-offer.json (mode 0600) — a one-time enrollment offer for a Host on this machine"
-
 # ------------------------------------------------------------- bin scripts ---
 
 step "Installing the service wrapper and management helper"
@@ -779,6 +759,7 @@ LABEL="dormouse-server"
 UNIT="$LABEL.service"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$ROOT/config/server.env"
+OFFER_FILE="$ROOT/run/enroll-offer.json"
 STATE_DIR="$ROOT/state"
 # LOG_ROOT is the dormouse-owned directory the logs sit in — outside ROOT on a
 # real install, and what "purge" names so it does not leave an empty one behind.
@@ -1126,8 +1107,8 @@ cmd_verify() {
   # The enrollment offer is single-use: absent means it was spent (or never
   # minted by an older installer), which is healthy. Only its permissions are
   # this command's business, and only while it is there.
-  if [ -f "$ROOT/run/enroll-offer.json" ]; then
-    owner_only "$ROOT/run/enroll-offer.json" 600 "run/enroll-offer.json"
+  if [ -f "$OFFER_FILE" ]; then
+    owner_only "$OFFER_FILE" 600 "run/enroll-offer.json"
   else
     note "no enrollment offer on disk (spent, or minted by an older installer)"
   fi
@@ -1416,6 +1397,27 @@ atomic_symlink "$STAGE" "$CURRENT_LINK" "$STAGE/runtime/node"
 SWITCHED_TO="$(readlink "$CURRENT_LINK" 2>/dev/null || echo "")"
 [ "$SWITCHED_TO" = "$STAGE" ] || die "current did not advance to $RELEASE_ID (points at '${SWITCHED_TO:-nothing}')."
 ok "current -> $RELEASE_ID"
+
+# ------------------------------------------------------------ enroll offer ---
+
+# run/enroll-offer.json, the one-time offer a Host on this machine redeems in
+# place of the setup password (SECURITY.md → "Credentials at rest").
+#
+# Minted here rather than with the rest of the runtime config: minting burns the
+# unspent offer, so it must wait until `current` has advanced — a failed
+# candidate probe must not cost a token — and land before the service starts.
+ENROLL_TOKEN="$(random_hex32)"
+[ ${#ENROLL_TOKEN} -ge 64 ] || die "generated enroll token is implausibly short; refusing to write the enrollment offer."
+# Create the file and lock it down BEFORE the token is written, the same order
+# server.env uses above.
+: > "$ENROLL_OFFER_FILE"
+chmod 0600 "$ENROLL_OFFER_FILE"
+# mintedAt is read here, at write time, and never from BUILT_AT: the server's
+# 7-day expiry runs from the mint, and the build that precedes it is not free.
+printf '{"origin":"%s","token":"%s","mintedAt":"%s"}\n' \
+  "$ORIGIN" "$ENROLL_TOKEN" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ENROLL_OFFER_FILE"
+unset ENROLL_TOKEN
+ok "minted run/enroll-offer.json (mode 0600) — a one-time enrollment offer for a Host on this machine"
 
 # ------------------------------------------------------------ systemd unit --
 

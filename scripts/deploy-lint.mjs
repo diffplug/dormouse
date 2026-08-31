@@ -89,6 +89,18 @@ export const RULES = [
     },
   },
   {
+    // The rule above matches the generator's *body*, which the enrollment
+    // token also keeps alive — so on its own it would stay green after
+    // `SETUP_PASSWORD="$RANDOM"`. This pins the assignment, the parallel of the
+    // enroll-token rule below.
+    rule: 'Credentials at rest — the setup password comes from that named generator',
+    patterns: {
+      macOS: /SETUP_PASSWORD="\$\(random_hex32\)"/,
+      Linux: /SETUP_PASSWORD="\$\(random_hex32\)"/,
+      Windows: /\$SETUP_PASSWORD = New-RandomHex32/,
+    },
+  },
+  {
     // Anchored on each guard's own comparison, naming the secret it guards: the
     // enrollment offer's token has a guard of the same shape, so a bare
     // `-ge 64` would be satisfied by either and neither would be load-bearing.
@@ -174,24 +186,45 @@ export const RULES = [
   {
     // Two adjacent lines, matched as one span, because the control is their
     // ORDER: an empty file, restricted, and only then the token. Either line
-    // alone is satisfiable by a write that already happened.
+    // alone is satisfiable by a write that already happened. The restricting
+    // line names no file — the span is already anchored by the line above it,
+    // so repeating the identifier would pin spelling rather than order.
     rule: 'Credentials at rest — the offer file is restricted to the installing user before the token is written',
     patterns: {
-      macOS: /: > "\$ENROLL_OFFER_FILE"\nchmod 0600 "\$ENROLL_OFFER_FILE"/,
-      Linux: /: > "\$ENROLL_OFFER_FILE"\nchmod 0600 "\$ENROLL_OFFER_FILE"/,
-      Windows: /\[IO\.File\]::WriteAllText\(\$ENROLL_OFFER_FILE, ''\)\n\s*Protect-Path -Path \$ENROLL_OFFER_FILE/,
+      macOS: /: > "\$ENROLL_OFFER_FILE"\n\s*chmod 0600 /,
+      Linux: /: > "\$ENROLL_OFFER_FILE"\n\s*chmod 0600 /,
+      Windows: /\[IO\.File\]::WriteAllText\(\$ENROLL_OFFER_FILE, ''\)\n\s*Protect-Path -Path /,
     },
   },
   {
-    // The whole path, not the basename: `run/` is the claim. `config/` is
-    // preserved byte-for-byte across updates and `state/` belongs to the
-    // server's own atomic writer, so an offer re-minted per run belongs in
-    // neither, and this is the one line that decides which.
+    // The same ordering control on `config/server.env`, which SECURITY.md's
+    // FAIL IF has always required and nothing checked. macOS reaches it with
+    // `umask 077` covering the heredoc rather than a chmod on an empty file, so
+    // that is what its pattern anchors.
+    rule: 'Credentials at rest — config/server.env is restricted to the installing user before the password is written',
+    patterns: {
+      macOS: /umask 077\n\s*cat > "\$ENV_FILE"/,
+      Linux: /: > "\$ENV_FILE"\n\s*chmod 0600 /,
+      Windows: /\[IO\.File\]::WriteAllText\(\$ENV_FILE, ''\)\n\s*Protect-Path -Path /,
+    },
+  },
+  {
+    // `run/` is the whole claim — SECURITY.md's FAIL IF carries the why — so
+    // the pattern pins the path segment and not the basename: a rename is not
+    // this rule's business, and pinning it would redden the lint for the wrong
+    // reason. Two lines as one span, because what decides the placement is the
+    // offer deriving from that directory.
+    //
+    // Only half of that FAIL IF is visible here: a textual rule cannot see that
+    // the mint is unconditional. CI's Linux test-mode install is what enforces
+    // "stops re-minting it on every run" — it installs twice and requires the
+    // token to change. macOS and Windows have no automated signal for that
+    // clause at all.
     rule: 'Credentials at rest — the enrollment offer is written under run/, never config/ or state/',
     patterns: {
-      macOS: /ENROLL_OFFER_FILE="\$INSTALL_ROOT\/run\/enroll-offer\.json"/,
-      Linux: /ENROLL_OFFER_FILE="\$INSTALL_ROOT\/run\/enroll-offer\.json"/,
-      Windows: /\$ENROLL_OFFER_FILE = Join-Path \$INSTALL_ROOT 'run\\enroll-offer\.json'/,
+      macOS: /RUN_DIR="\$INSTALL_ROOT\/run"\n\s*ENROLL_OFFER_FILE="\$RUN_DIR\//,
+      Linux: /RUN_DIR="\$INSTALL_ROOT\/run"\n\s*ENROLL_OFFER_FILE="\$RUN_DIR\//,
+      Windows: /\$RUN_DIR = Join-Path \$INSTALL_ROOT 'run'\n\s*\$ENROLL_OFFER_FILE = Join-Path \$RUN_DIR /,
     },
   },
   {

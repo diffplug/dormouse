@@ -101,14 +101,15 @@ jobs:
           set -euo pipefail
           root="$(mktemp -d)/dormouse-server"
           offer="$root/run/enroll-offer.json"
-          # The enrollment offer is minted on every run and spent by the server,
-          # so what has to hold is a FRESH token each time — including the
-          # update pass that preserves config/server.env. Prints the token so
-          # the two runs can be compared.
+          # Prints the token, because the property under test is that it is
+          # FRESH on every run — and this job is the only thing checking that.
           read_offer() {
-            [ "$(stat -c '%a' "$offer")" = "600" ] || { echo "::error::$offer is not mode 0600" >&2; exit 1; }
             node -e '
-              const offer = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+              const fs = require("fs");
+              const path = process.argv[1];
+              const mode = fs.statSync(path).mode & 0o777;
+              if (mode !== 0o600) throw new Error(`${path} is mode ${mode.toString(8)}, expected 600`);
+              const offer = JSON.parse(fs.readFileSync(path, "utf8"));
               if (!/^[0-9a-f]{64}$/.test(offer.token)) throw new Error(`token is not 64 hex: ${offer.token}`);
               if (offer.origin !== process.argv[2]) throw new Error(`origin is ${offer.origin}`);
               if (Number.isNaN(Date.parse(offer.mintedAt))) throw new Error(`mintedAt is ${offer.mintedAt}`);
