@@ -266,8 +266,7 @@ export function applyTerminalProtocolEvents(
     } else if (event.kind === 'progress') {
       sink.updateProtocolProgress(id, event.progress);
     } else if (event.kind === 'toolAnnounce') {
-      // Recording, not acting: only a tool-designated Session reads this, and
-      // only to pick among ports the scan already found.
+      // Recording is not acting — see `tool-announce-store.ts`.
       recordToolAnnounce(id, event.announce);
     }
   }
@@ -571,7 +570,6 @@ function decodeBase64(input: string): string | null {
 function appendLimited(existing: string, next: string, limit: number): string {
   return truncateText(`${existing}${next}`, limit);
 }
-
 
 const DEVICE_ATTRIBUTE_PENDING_SUFFIXES = ['\x1b[>', '\x1b[', '\x1b', '\x9b>', '\x9b'];
 

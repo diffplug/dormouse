@@ -160,7 +160,6 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         ...(named && request.name === 'noisy' ? { warnings: ['dormouse.yml: tools.noisy: ignoring unknown field \'colour\''] } : {}),
       };
     },
-
     async ensureSurface(request) {
       this.requests.push({ method: 'ensureSurface', request });
       // Mirror the host: quote the argv for the target shell, and key on the

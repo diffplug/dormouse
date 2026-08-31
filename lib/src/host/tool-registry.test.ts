@@ -4,7 +4,6 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   ToolFileError,
-  dedupeKeysEqual,
   parseToolFile,
   resolveDedupeKey,
 } from './tool-registry';
@@ -135,27 +134,13 @@ describe('resolveDedupeKey', () => {
     const template = ['storybook', '$PROJECT_ROOT'];
     const a = resolveDedupeKey(entry(template), { projectRoot: '/repo', cwd: '/repo' });
     const b = resolveDedupeKey(entry(template), { projectRoot: '/repo.phase-b', cwd: '/repo.phase-b' });
-    expect(dedupeKeysEqual(a, b)).toBe(false);
+    expect(a).not.toEqual(b);
   });
 
   it('throws rather than emitting a literal $PROJECT_ROOT when none is defined', () => {
     expect(() => resolveDedupeKey(entry(['t', '$PROJECT_ROOT']), { projectRoot: null, cwd: '/x' })).toThrow(
       /\$PROJECT_ROOT is not defined/,
     );
-  });
-});
-
-describe('dedupeKeysEqual', () => {
-  it('matches element-wise', () => {
-    expect(dedupeKeysEqual(['a', '/r'], ['a', '/r'])).toBe(true);
-    expect(dedupeKeysEqual(['a', '/r'], ['a', '/s'])).toBe(false);
-    expect(dedupeKeysEqual(['a'], ['a', '/r'])).toBe(false);
-  });
-
-  it('never matches a null key against anything, including another null', () => {
-    expect(dedupeKeysEqual(null, ['a'])).toBe(false);
-    expect(dedupeKeysEqual(['a'], null)).toBe(false);
-    expect(dedupeKeysEqual(null, null)).toBe(false);
   });
 });
 
@@ -187,7 +172,7 @@ describe("this repo's own dormouse.yml", () => {
       const a = resolveDedupeKey(entry, { projectRoot: '/w/one', cwd: '/w/one' });
       const b = resolveDedupeKey(entry, { projectRoot: '/w/two', cwd: '/w/two' });
       expect(a).not.toBeNull();
-      expect(dedupeKeysEqual(a, b)).toBe(false);
+      expect(a).not.toEqual(b);
     }
   });
 });

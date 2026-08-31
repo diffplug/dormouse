@@ -42,12 +42,19 @@ export function isToolParams(params: unknown): boolean {
 
 /** Whether a tool is currently showing its browser rather than its terminal.
  *  False until it serves (no `url` yet), and false while the header's far-left
- *  chip has the terminal pinned forward. Both halves stay mounted either way —
- *  the toggle is visibility, never unmount, or the xterm buffer and the framed
- *  document would be rebuilt on every flip. */
+ *  chip has the terminal pinned forward. Which half is *mounted* never changes;
+ *  see `ToolPanel.tsx`. */
 export function toolShowsBrowser(params: unknown): boolean {
-  const p = asParams(params);
-  return isToolParams(params) && typeof p.url === 'string' && p.showTerminal !== true;
+  return isToolParams(params) && browserUrlFromParams(params) !== null && asParams(params).showTerminal !== true;
+}
+
+/** Whether a tool Surface's params carry `key`. A null or absent key never
+ *  matches — not even another null: a tool has an identity if and only if it
+ *  was given one, so two identityless tools are two tools
+ *  (`docs/specs/dor-tool.md` -> Identity and dedupe). */
+export function toolKeysEqual(paramsKey: unknown, key: readonly string[] | null): boolean {
+  if (key === null || !Array.isArray(paramsKey)) return false;
+  return paramsKey.length === key.length && paramsKey.every((element, index) => element === key[index]);
 }
 
 /** Whether params describe a plain browser surface (vs a terminal): the unified

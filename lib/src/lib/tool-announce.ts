@@ -2,16 +2,12 @@
  * OSC 367 — the Dor Tool announcement (`docs/specs/dor-tool.md` -> OSC 367).
  * `DOR` on a phone keypad; registered in `docs/specs/terminal-escapes.md`.
  *
- * **The announcement never mints a tool.** It refines what the port scan
- * already found: the scan reports the port a command actually *bound*, an
- * announcement reports what it intended, and under parallel-worktree
- * contention those diverge. `port` therefore selects among the ports the scan
- * sees; an announced port that nothing bound frames nothing.
+ * **The announcement never mints a tool.** `port` selects among the ports the
+ * scan already sees; an announced port that nothing bound frames nothing.
  *
  * Verb-multiplexed like OSC 633, so the contract can grow without burning
- * registry numbers. Payload is sanitized and size-capped under the same rules
- * `docs/specs/alert.md` applies to OSC 9/99/777 — it is untrusted process
- * output that reaches UI.
+ * registry numbers. The payload is untrusted process output that reaches UI, so
+ * it is sanitized and size-capped like OSC 9/99/777 (`docs/specs/alert.md`).
  */
 
 import { sanitizeText } from './osc-sanitize';
@@ -39,8 +35,6 @@ export type ToolAnnounce = {
   persist: 'respawn' | 'never' | null;
 };
 
-/** One sanitizer for every OSC payload, so 367 answers to the same rules as
- *  OSC 9/99/777 (`docs/specs/alert.md`). */
 function sanitize(value: unknown, limit: number): string | null {
   return typeof value === 'string' ? sanitizeText(value, limit) : null;
 }

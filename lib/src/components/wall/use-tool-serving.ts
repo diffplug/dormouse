@@ -2,12 +2,6 @@
  * The serving trigger: a tool Surface grows a browser in place once its command
  * binds a port (`docs/specs/dor-tool.md` -> Serving).
  *
- * The port scan is the primary trigger and the only one correct under
- * contention: it reports the port a command *bound*, where an announcement
- * would report what it intended. Storybook launched with `-p 6006` in a second
- * worktree lands on 6007, and framing 6006 there would frame the other
- * checkout's server.
- *
  * Only tool-designated Sessions are scanned. An ordinary terminal that opens a
  * port never transforms — that is the Dev-Server Chip's job, and panes must not
  * flip under the user (`docs/specs/dor-tool.md` -> Security).
@@ -15,7 +9,8 @@
 import { useEffect } from 'react';
 import { getPlatform } from '../../lib/platform';
 import { getTerminalPaneState } from '../../lib/terminal-registry';
-import { isToolParams } from './browser-surface';
+import { browserUrlFromParams, isToolParams, toolKeysEqual } from './browser-surface';
+import { attachAgentBrowserSession } from './connect-port';
 import { listenerUrlsByPort } from './port-url';
 import { getToolAnnounce } from '../../lib/tool-announce-store';
 import { sessionForKey } from 'dor-lib-common/agent-browser';
@@ -27,11 +22,6 @@ import type { DooredItem } from './wall-types';
 // the command runs. The scan shells out per Surface (lsof / PowerShell), so the
 // cadence is deliberately slow and only tools without a URL are scanned.
 const POLL_MS = 1500;
-
-/** Element-wise comparison; a null key never matches. */
-function toolKeysEqual(a: unknown, b: readonly string[]): boolean {
-  return Array.isArray(a) && a.length === b.length && a.every((el, i) => el === b[i]);
-}
 
 type ToolLeaf = { id: string; params: Record<string, unknown> | undefined };
 
@@ -64,21 +54,19 @@ export function useToolServing({
         if (cancelled) return;
         const announce = getToolAnnounce(leaf.id);
 
-        // A runtime re-key re-labels this Surface and nothing else. It never
-        // dedupes: by the time a key can change, both Surfaces may hold work,
-        // and a collision resolved by killing either destroys some of it
-        // (docs/specs/dor-tool.md -> Identity and dedupe). The host keeps its
-        // own namespace, so the payload cannot claim to be another tool.
+        // A runtime re-key re-labels this Surface and nothing else — it never
+        // dedupes (docs/specs/dor-tool.md -> Identity and dedupe). The host
+        // keeps its own namespace, so the payload cannot claim another tool.
         if (announce?.key && !toolKeysEqual(leaf.params?.toolKey, announce.key)) {
           lath.store.updateParams(leaf.id, { toolKey: announce.key });
         }
 
-        const hasUrl = typeof (leaf.params as { url?: unknown } | undefined)?.url === 'string';
+        const hasUrl = browserUrlFromParams(leaf.params) !== null;
         const running = getTerminalPaneState(leaf.id).currentCommand !== null;
 
         // Command exit retires the browser and the pane flips back to a prompt
-        // above the tool's dying words — the correct debugging posture. Re-running
-        // revives it on the same Surface, because the params, not the id, changed.
+        // above the tool's dying words. Re-running revives it on the same
+        // Surface, because the params, not the id, changed.
         if (hasUrl && !running) {
           lath.store.updateParams(leaf.id, { url: undefined, showTerminal: undefined });
           continue;
@@ -92,11 +80,8 @@ export function useToolServing({
           continue; // A scan that fails is a scan that finds nothing yet.
         }
         if (cancelled) return;
-        // The announcement disambiguates; the scan supplies the number. A tool
-        // that binds vite, a bridge, and a control socket says which one to
-        // frame, and an announced port nothing bound frames nothing — under
-        // worktree contention the tool's intent and its result diverge, and the
-        // scan is the one that is right.
+        // The announcement disambiguates; the scan supplies the number, so an
+        // announced port that nothing bound frames nothing.
         const entries = listenerUrlsByPort(ports);
         const wanted = announce?.port ?? null;
         const entry = wanted === null
@@ -104,8 +89,7 @@ export function useToolServing({
           : entries.find((candidate) => candidate.port === wanted);
         if (!entry) continue;
 
-        const wantsAgentBrowser = leaf.params?.toolRender === 'ab-screencast';
-        if (!wantsAgentBrowser) {
+        if (leaf.params?.toolRender !== 'ab-screencast') {
           lath.store.updateParams(leaf.id, { url: entry.url, renderMode: 'iframe' });
           continue;
         }
@@ -114,24 +98,21 @@ export function useToolServing({
         // session to the tool's *own* Surface rather than creating a second
         // one: a tool's browser is a param of its own leaf, which is what keeps
         // its id stable while its capabilities come and go.
-        const session = sessionForKey(`tool.${leaf.id}`);
+        //
         // Show the destination immediately; the panel's session-less branch
         // renders `Connecting to browser session…` while the daemon boots, and
         // cannot race it (see docs/specs/dor-browser.md -> Instant create).
         lath.store.updateParams(leaf.id, { url: entry.url, renderMode: 'ab-screencast' });
-        if (!platform.agentBrowserCommand) continue;
-        const opened = await platform.agentBrowserCommand(session, ['open', entry.url]);
-        if (cancelled) return;
-        // Hand over the session either way: on failure the placeholder names it
-        // instead of sitting session-less, exactly as connect-port does.
-        const streamed = opened.exitCode === 0 && platform.agentBrowserStreamStatus
-          ? await platform.agentBrowserStreamStatus(session)
-          : null;
-        if (cancelled) return;
-        lath.store.updateParams(leaf.id, {
-          session,
-          ...(streamed?.wsPort ? { wsPort: streamed.wsPort } : {}),
+        await attachAgentBrowserSession({
+          url: entry.url,
+          platform,
+          session: sessionForKey(`tool.${leaf.id}`),
+          surfaceId: leaf.id,
+          refreshSurface: (id, patch) => {
+            if (!cancelled) lath.store.updateParams(id, patch);
+          },
         });
+        if (cancelled) return;
       }
     };
 

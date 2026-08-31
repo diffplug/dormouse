@@ -23,7 +23,7 @@ import {
 } from '../../lib/terminal-registry';
 import { surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { hostPathDisplay } from './browser-url';
-import { agentBrowserSessionFromParams, isAgentBrowserParams } from './browser-surface';
+import { agentBrowserSessionFromParams, isAgentBrowserParams, toolKeysEqual } from './browser-surface';
 // One-way import: connect-port no longer depends on this module (its eager-surface
 // and refresh seams are injected as plain functions).
 import { connectPortToDefaultBrowser } from './connect-port';
@@ -244,21 +244,13 @@ const RESTART_POLL_INTERVAL_MS = 100;
 const RESTART_INTERRUPT_TIMEOUT_MS = 15_000;
 const RESTART_START_TIMEOUT_MS = 15_000;
 
-/** Resolve true once `predicate` holds for the surface's live state, false on timeout. */
-/** Element-wise key comparison. A null key never matches — not even another
- *  null: a tool has an identity if and only if it was given one, so two
- *  identityless tools are two tools (`docs/specs/dor-tool.md`). */
-function toolKeysEqual(a: unknown, b: readonly string[] | null): boolean {
-  if (b === null || !Array.isArray(a)) return false;
-  return a.length === b.length && a.every((element, index) => element === b[index]);
-}
-
 /** The rendered command a tool Surface is running, for the reuse note. */
 function toolCommandFromParams(params: unknown): string {
   const value = (params as { command?: unknown } | null | undefined)?.command;
   return typeof value === 'string' ? value : '';
 }
 
+/** Resolve true once `predicate` holds for the surface's live state, false on timeout. */
 function waitForTerminalState(
   id: string,
   predicate: (state: TerminalPaneState) => boolean,
@@ -746,28 +738,23 @@ export function useDorControl({
         let command: string;
         let key: string[] | null = null;
         let warnings: string[] = [];
-        // `iframe` unless the repo asked for a real browser. Which renderer
-        // suits a tool is a Dormouse-side judgement, so the file declares it
-        // rather than the tool announcing it.
         let render: 'iframe' | 'ab-screencast' = 'iframe';
 
         if (toolName) {
-          // Host-resolved, never CLI-resolved: the registry, the closed
-          // substitution set, and the trust gate all live behind this one call
-          // so a caller cannot hand us a command and claim a file authorized it
-          // (docs/specs/dor-tool.md -> Trust).
+          // The registry, the closed substitution set, and the trust gate all
+          // live behind this one host call (`dor/commands/types` ->
+          // ToolSurfaceRequest).
           const toolControl = getPlatform().toolControl;
           if (!toolControl) {
             detail.respond({ ok: false, error: 'this host cannot read a dormouse.yml; use `dor tool -- <command>`' });
             return;
           }
           const lookup = await toolControl({ op: 'lookup', name: toolName, cwd });
-          if (lookup.status === 'trust-recorded') {
-            // Only a `trust` op can produce this; a lookup never does.
-            detail.respond({ ok: false, error: 'unexpected tool host response' });
-            return;
-          }
           switch (lookup.status) {
+            case 'trust-recorded':
+              // Only a `trust` op can produce this; a lookup never does.
+              detail.respond({ ok: false, error: 'unexpected tool host response' });
+              return;
             case 'ok':
               command = lookup.run;
               key = lookup.key;
@@ -786,9 +773,6 @@ export function useDorControl({
               });
               return;
             case 'untrusted':
-              // Approval is a gesture in Dormouse's own chrome, never a prompt
-              // rendered here: `dor send` can forge terminal input, and a
-              // dialog drawn in the terminal would be forgeable with it.
               requestToolTrust({ projectRoot: lookup.projectRoot, path: lookup.path, name: lookup.name, run: lookup.run });
               detail.respond({
                 ok: false,
@@ -814,20 +798,17 @@ export function useDorControl({
           }
         }
 
-        // Dedupe is spawn-time only, and only for a tool that was given an
-        // identity: the redundant spawn never starts, so the survivor keeps
-        // whatever work it has done.
+        // Spawn-time dedupe, and only for a tool that was given an identity
+        // (docs/specs/dor-tool.md -> Identity and dedupe).
         if (key && !booleanParam(params.fresh)) {
           const match = findSurfaceByParams(
             (candidate) => toolKeysEqual((candidate as { toolKey?: unknown } | null | undefined)?.toolKey, key),
           );
           if (match) {
             const matchedCommand = toolCommandFromParams(lath.getMeta(match.id)?.params) || command;
-            // A tool Surface is dedicated, so an exited command leaves nothing
-            // ambiguous about whether the pane is free — unlike `dor ensure`,
-            // which stops matching a dead command because it targets arbitrary
-            // shells. Re-run in place, keeping the pane's position and
-            // scrollback (docs/specs/dor-tool.md -> Identity and dedupe).
+            // A dedicated Surface whose command exited is unambiguously free,
+            // so re-run in place rather than splitting — where `dor ensure`,
+            // aimed at arbitrary shells, would stop matching.
             const idle = getTerminalPaneState(match.id).currentCommand === null;
             if (idle) {
               const restarted = await restartSurfaceInPlace(match.id, matchedCommand, cwd);

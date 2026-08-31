@@ -2,13 +2,9 @@
  * `dormouse.yml` parsing and dedupe-key resolution for Dor Tools
  * (`docs/specs/dor-tool.md` -> Declaring tools, Identity and dedupe).
  *
- * Node-side on purpose: the spec makes the registry host-resolved rather than
- * CLI-resolved, so one source of truth serves `dor tool` and any later GUI
- * gesture, and so a caller cannot hand the host a command while claiming the
- * file authorized it. The YAML dependency stays in the host bundle.
- *
  * Everything here is pure given a file's text; discovery and trust live in
- * `tool-lookup.ts`.
+ * `tool-trust.ts`. Node-side so the YAML dependency stays out of the webview
+ * bundle.
  */
 import { parse as parseYaml } from 'yaml';
 
@@ -198,14 +194,4 @@ export function resolveDedupeKey(
       return token;
     }),
   );
-}
-
-/**
- * Compare two resolved keys. Element-wise exact equality; the host namespaces
- * by the tool identity it resolved from the spawn, so a key's first element is
- * never trusted as a tool name (`docs/specs/dor-tool.md` -> Identity and dedupe).
- */
-export function dedupeKeysEqual(a: readonly string[] | null, b: readonly string[] | null): boolean {
-  if (a === null || b === null) return false;
-  return a.length === b.length && a.every((element, index) => element === b[index]);
 }

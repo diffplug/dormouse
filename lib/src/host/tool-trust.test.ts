@@ -99,7 +99,7 @@ describe('lookupTool', () => {
     const result = await lookupTool('storybook', root, trust);
     expect(result.status).toBe('ok');
     if (result.status !== 'ok') return;
-    expect(result.file.tools.get('storybook')?.run).toBe('pnpm storybook');
+    expect(result.entry.run).toBe('pnpm storybook');
     expect(result.projectRoot).toBe(root);
   });
 

@@ -337,9 +337,7 @@ log(`bridge token: ${bridgeToken}`);
 log(`try: curl -H 'content-type: application/json' -d '{"cmd":"pty_request_init"}' 'http://127.0.0.1:${hostPort}/__dormouse_dev_host/send?t=${bridgeToken}'`);
 // Dor Tool announcement (docs/specs/dor-tool.md -> OSC 367). This harness binds
 // several ports — this one, vite, and the sidecar's control socket — and no
-// port scan can guess which to frame, so name it. Dormouse still supplies the
-// number from the scan, so an env-overridden vite port frames correctly and a
-// port that never binds frames nothing. Harmless outside Dormouse: a
+// port scan can guess which to frame, so name it. Harmless outside Dormouse: a
 // well-behaved terminal drops an unknown OSC.
 process.stdout.write(
   `\u001b]367;serve;${JSON.stringify({ port: vitePort, name: 'Dormouse dev', v: 1 })}\u001b\\`,

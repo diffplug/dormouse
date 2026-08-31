@@ -12,7 +12,7 @@ import { Terminal, Globe } from '@phosphor-icons/react';
 import { chromeButton } from '../design';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
-import { isToolParams, toolShowsBrowser } from './browser-surface';
+import { browserUrlFromParams, isToolParams, toolShowsBrowser } from './browser-surface';
 import { WallActionsContext } from './wall-context';
 import type { PaneProps } from './pane-props';
 
@@ -21,7 +21,7 @@ export function ToolPaneHeader(props: PaneProps) {
   const showBrowser = toolShowsBrowser(props.params);
   // A tool that has never served has nothing to toggle to: the chip would
   // offer a browser that does not exist yet.
-  const canToggle = isToolParams(props.params) && typeof (props.params as { url?: unknown }).url === 'string';
+  const canToggle = isToolParams(props.params) && browserUrlFromParams(props.params) !== null;
 
   return (
     <div className="flex h-full min-w-0 flex-1 items-center">

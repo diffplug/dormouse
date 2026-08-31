@@ -6,6 +6,7 @@ import {
   isToolParams,
   resolveRenderMode,
   surfaceKindFromParams,
+  toolKeysEqual,
   toolShowsBrowser,
 } from './browser-surface';
 import { shouldParkOnMinimize, toolLeafMeta } from './lath-wall-engine';
@@ -64,6 +65,20 @@ describe('which half of a tool is forward', () => {
 
   it('defaults a tool with no explicit renderMode to the iframe', () => {
     expect(resolveRenderMode(booting)).toBe('iframe');
+  });
+});
+
+describe('tool key matching', () => {
+  it('matches element-wise', () => {
+    expect(toolKeysEqual(['a', '/r'], ['a', '/r'])).toBe(true);
+    expect(toolKeysEqual(['a', '/r'], ['a', '/s'])).toBe(false);
+    expect(toolKeysEqual(['a'], ['a', '/r'])).toBe(false);
+  });
+
+  it('never matches a keyless tool against anything, including another keyless one', () => {
+    expect(toolKeysEqual(undefined, ['a'])).toBe(false);
+    expect(toolKeysEqual(['a'], null)).toBe(false);
+    expect(toolKeysEqual(undefined, null)).toBe(false);
   });
 });
 

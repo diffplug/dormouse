@@ -3,20 +3,16 @@
  * (`docs/specs/dor-tool.md` -> Trust).
  *
  * `dormouse.yml` is repo-controlled and its entries execute, so it is inert
- * until the repo root is trusted. Trust is path-level and never content-hashed:
- * re-prompting on every edit and every `git pull` that touches the file trains
- * the user to click through it (rationale). Denial is remembered too, so a
- * hostile repo cannot re-ask on every invocation.
+ * until the repo root is trusted — path-level, both answers remembered.
  *
- * Granting is *not* implemented here. Only a gesture in Dormouse's own chrome
- * may grant trust, because an agent holding the control token can `dor send`
- * keystrokes indistinguishable from typing; this module records the decision a
+ * Granting is *not* implemented here: only a gesture in Dormouse's own chrome
+ * may grant trust (`ToolTrustDialog.tsx`). This module records the decision a
  * gesture produced and answers "is it trusted yet?".
  */
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { dirname, join, parse as parsePath, resolve } from 'node:path';
-import { ToolFileError, parseToolFile, type ToolFile } from './tool-registry';
+import { dirname, join, resolve } from 'node:path';
+import { ToolFileError, parseToolFile, type ToolEntry, type ToolFile } from './tool-registry';
 
 export const TOOL_FILE_NAME = 'dormouse.yml';
 const TRUST_FILE_NAME = 'tool-trust.json';
@@ -112,7 +108,6 @@ export async function findToolFile(
   readTextFile: (path: string) => Promise<string> = (path) => readFile(path, 'utf-8'),
 ): Promise<{ path: string; dir: string; text: string } | null> {
   let dir = resolve(startDir);
-  const { root } = parsePath(dir);
   // Bounded by the filesystem root; `dirname('/') === '/'` is the terminator.
   for (;;) {
     const path = join(dir, TOOL_FILE_NAME);
@@ -121,7 +116,6 @@ export async function findToolFile(
     } catch {
       // Not here (or unreadable) — keep walking.
     }
-    if (dir === root) return null;
     const parent = dirname(dir);
     if (parent === dir) return null;
     dir = parent;
@@ -134,7 +128,7 @@ export type ToolLookup =
   | { status: 'untrusted'; projectRoot: string; path: string; name: string; run: string }
   | { status: 'denied'; projectRoot: string; path: string }
   | { status: 'error'; message: string }
-  | { status: 'ok'; projectRoot: string; path: string; file: ToolFile; name: string };
+  | { status: 'ok'; projectRoot: string; path: string; file: ToolFile; entry: ToolEntry };
 
 /**
  * Find, parse, and trust-check the entry named `name` for a caller in `cwd`.
@@ -181,5 +175,5 @@ export async function lookupTool(
       run: entry.run,
     };
   }
-  return { status: 'ok', projectRoot: found.dir, path: found.path, file, name: entry.name };
+  return { status: 'ok', projectRoot: found.dir, path: found.path, file, entry };
 }

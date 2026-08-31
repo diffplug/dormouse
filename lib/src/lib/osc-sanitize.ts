@@ -1,10 +1,7 @@
 /**
- * The shared sanitizer for untrusted OSC payload text
- * (`docs/specs/alert.md` -> notification protocols).
- *
- * Its own module so every payload reader answers to one rule: OSC 9/99/777
- * carry notification text and OSC 367 carries a tool's self-description, all of
- * it arbitrary process output that reaches UI.
+ * The shared sanitizer for untrusted OSC payload text — OSC 9/99/777
+ * notifications and the OSC 367 tool announcement, all arbitrary process output
+ * that reaches UI (`docs/specs/alert.md` -> notification protocols).
  */
 
 /** Clamp by code point, so a truncation cannot split a surrogate pair. */

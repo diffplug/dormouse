@@ -17,8 +17,6 @@ import {
   type ToolTrustStore,
 } from './tool-trust';
 
-export type { ToolControlResult, ToolHostRequest, ToolLookupResult } from '../lib/platform/tool-types';
-
 export interface ToolHost {
   handle(request: ToolHostRequest): Promise<ToolControlResult>;
 }
@@ -46,11 +44,7 @@ export function createToolHost(options: { stateDir?: string } = {}): ToolHost {
         // Every non-ok arm is already wire-shaped.
         return lookup;
       }
-      const entry = lookup.file.tools.get(lookup.name);
-      if (!entry) {
-        // lookupTool only reports ok for an entry it found.
-        return { status: 'error', message: `tool '${request.name}' vanished during resolution` };
-      }
+      const { entry } = lookup;
       try {
         return {
           status: 'ok',

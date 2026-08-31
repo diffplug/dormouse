@@ -133,8 +133,9 @@ every time (rationale).
 - **Races**: concurrent spawns serialize on the key; first wins.
 
 Source of truth: the `surface.tool` handler in
-`lib/src/components/wall/use-dor-control.ts`; `resolveDedupeKey` /
-`dedupeKeysEqual` in `lib/src/host/tool-registry.ts`.
+`lib/src/components/wall/use-dor-control.ts`; `resolveDedupeKey` in
+`lib/src/host/tool-registry.ts`; `toolKeysEqual` in
+`lib/src/components/wall/browser-surface.ts`.
 
 ## Trust
 

@@ -21,6 +21,15 @@ function readBoolFlag(key: string): boolean {
   }
 }
 
+function writeBoolFlag(key: string, enabled: boolean): void {
+  try {
+    if (enabled) globalThis.localStorage?.setItem(key, 'true');
+    else globalThis.localStorage?.removeItem(key);
+  } catch {
+    // No localStorage: nothing to persist.
+  }
+}
+
 /** Whether the Workspace/Window container is enabled. Off by default (dormant). */
 export function isWorkspacesEnabled(): boolean {
   return readBoolFlag(WORKSPACES_FLAG_KEY);
@@ -28,12 +37,7 @@ export function isWorkspacesEnabled(): boolean {
 
 /** Toggle the workspaces flag (used by dev tooling / the stage-3 Storybook UI). */
 export function setWorkspacesEnabled(enabled: boolean): void {
-  try {
-    if (enabled) globalThis.localStorage?.setItem(WORKSPACES_FLAG_KEY, 'true');
-    else globalThis.localStorage?.removeItem(WORKSPACES_FLAG_KEY);
-  } catch {
-    // No localStorage: nothing to persist.
-  }
+  writeBoolFlag(WORKSPACES_FLAG_KEY, enabled);
 }
 
 export const TOOLS_FLAG_KEY = 'dormouse.flags.tools';
@@ -48,12 +52,7 @@ export function isToolsEnabled(): boolean {
 
 /** Toggle the tools flag (dev tooling / Storybook). */
 export function setToolsEnabled(enabled: boolean): void {
-  try {
-    if (enabled) globalThis.localStorage?.setItem(TOOLS_FLAG_KEY, 'true');
-    else globalThis.localStorage?.removeItem(TOOLS_FLAG_KEY);
-  } catch {
-    // No localStorage: nothing to persist.
-  }
+  writeBoolFlag(TOOLS_FLAG_KEY, enabled);
 }
 
 export const AB_DEBUG_LOGS_FLAG_KEY = 'dormouse.flags.abDebugLogs';
