@@ -10,7 +10,7 @@
  * gesture produced and answers "is it trusted yet?".
  */
 import { constants } from 'node:fs';
-import { chmod, lstat, mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, open, readFile, readdir, rename, unlink, utimes, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { ToolFileError, parseToolFile, type ToolEntry, type ToolFile } from './tool-registry';
@@ -73,6 +73,11 @@ async function readToolFile(path: string): Promise<string> {
 const TRUST_FILE_NAME = 'tool-trust.json';
 const TRUST_LOCK_RETRY_MS = 20;
 const TRUST_LOCK_STALE_MS = 30_000;
+
+interface TrustLockParticipant {
+  readonly contents: string;
+  readonly mtimeMs: number;
+}
 
 /**
  * What a grant covers. `upstream` is the canonical remote URL the project's
@@ -207,63 +212,124 @@ export class FileToolTrustStore {
 
   async #acquireCommitLock(): Promise<() => Promise<void>> {
     await this.#ensureDir();
+    await mkdir(this.#lockPath, { recursive: true, mode: 0o700 });
     const token = randomUUID();
-    for (;;) {
-      try {
-        const lock = await open(this.#lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
-        try {
-          await lock.writeFile(JSON.stringify({ pid: process.pid, token }));
-        } catch (error) {
-          await unlink(this.#lockPath).catch(() => {});
-          throw error;
-        } finally {
-          await lock.close();
-        }
-        return async () => {
-          // Only the owner may remove the path. This also protects a future
-          // stale-lock recovery from an old owner's delayed finally block.
-          try {
-            const owner = JSON.parse(await readFile(this.#lockPath, 'utf-8')) as { token?: unknown };
-            if (owner.token === token) await unlink(this.#lockPath);
-          } catch {
-            // Already released/recovered; nothing remains to unlock.
-          }
-        };
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      }
+    const choosingPath = join(this.#lockPath, `choosing-${token}.json`);
+    const ticketPath = join(this.#lockPath, `ticket-${token}.json`);
+    const owner = { pid: process.pid, token };
+    await writeFile(choosingPath, JSON.stringify(owner), { flag: 'wx', mode: 0o600 });
+    let ticket: number;
+    try {
+      ticket = 1 + await this.#highestPublishedTicket();
+      await writeFile(ticketPath, JSON.stringify({ ...owner, ticket }), { flag: 'wx', mode: 0o600 });
+    } finally {
+      await unlink(choosingPath).catch(() => {});
+    }
 
-      if (await this.#lockOwnerIsGone()) {
-        await unlink(this.#lockPath).catch(() => {});
-        continue;
+    // A live participant refreshes its unique file, so a genuinely long grant
+    // keeps its lease while a crash whose pid is later recycled still ages out.
+    // Unique participant paths make recovery race-free: no waiter ever unlinks
+    // the pathname a newer owner would reuse.
+    const heartbeat = setInterval(() => {
+      const now = new Date();
+      void utimes(ticketPath, now, now).catch(() => {});
+    }, TRUST_LOCK_STALE_MS / 3);
+    heartbeat.unref?.();
+
+    try {
+      for (;;) {
+        if (!await this.#hasEarlierParticipant(token, ticket)) break;
+        await new Promise((resolve) => setTimeout(resolve, TRUST_LOCK_RETRY_MS));
       }
-      await new Promise((resolve) => setTimeout(resolve, TRUST_LOCK_RETRY_MS));
+      return async () => {
+        clearInterval(heartbeat);
+        await unlink(ticketPath).catch(() => {});
+      };
+    } catch (error) {
+      clearInterval(heartbeat);
+      await unlink(ticketPath).catch(() => {});
+      throw error;
     }
   }
 
-  async #lockOwnerIsGone(): Promise<boolean> {
-    try {
-      const owner = JSON.parse(await readFile(this.#lockPath, 'utf-8')) as { pid?: unknown };
-      if (typeof owner.pid === 'number' && Number.isInteger(owner.pid) && owner.pid > 0) {
-        try {
-          process.kill(owner.pid, 0);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === 'ESRCH') return true;
+  async #highestPublishedTicket(): Promise<number> {
+    let highest = 0;
+    for (const name of await readdir(this.#lockPath)) {
+      if (!name.startsWith('ticket-')) continue;
+      const participant = await this.#readLockParticipant(join(this.#lockPath, name));
+      if (!participant || await this.#reapIfStale(join(this.#lockPath, name), participant)) continue;
+      try {
+        const value = JSON.parse(participant.contents) as { ticket?: unknown };
+        if (typeof value.ticket === 'number' && Number.isSafeInteger(value.ticket) && value.ticket > highest) {
+          highest = value.ticket;
         }
-        // A live pid is not proof of a live owner: pids recycle, and a lock
-        // orphaned by an unclean shutdown can later name another process.
-        // Every real holder releases in milliseconds, so still apply the age
-        // limit before deciding this record can block grants indefinitely.
+      } catch {
+        // A fresh malformed participant is handled as a blocker in the wait
+        // loop; it cannot safely contribute a ticket number here.
       }
-    } catch {
-      // An exclusive create briefly exposes an empty file before its owner JSON
-      // is written. Only reclaim an invalid record once it is clearly abandoned.
     }
+    return highest;
+  }
+
+  async #hasEarlierParticipant(token: string, ticket: number): Promise<boolean> {
+    for (const name of await readdir(this.#lockPath)) {
+      const isChoosing = name.startsWith('choosing-');
+      const isTicket = name.startsWith('ticket-');
+      if (!isChoosing && !isTicket) continue;
+      const path = join(this.#lockPath, name);
+      const participant = await this.#readLockParticipant(path);
+      if (!participant || await this.#reapIfStale(path, participant)) continue;
+      let value: { token?: unknown; ticket?: unknown };
+      try {
+        value = JSON.parse(participant.contents) as typeof value;
+      } catch {
+        return true;
+      }
+      if (value.token === token) continue;
+      if (typeof value.token !== 'string') return true;
+      // Lamport's choosing marker closes the race where two processes inspect
+      // the same maximum before either publishes its ticket.
+      if (isChoosing) return true;
+      if (typeof value.ticket !== 'number' || !Number.isSafeInteger(value.ticket)) return true;
+      if (value.ticket < ticket || (value.ticket === ticket && value.token < token)) return true;
+    }
+    return false;
+  }
+
+  async #readLockParticipant(path: string): Promise<TrustLockParticipant | null> {
+    let participant;
     try {
-      return Date.now() - (await stat(this.#lockPath)).mtimeMs > TRUST_LOCK_STALE_MS;
+      participant = await open(path, constants.O_RDONLY);
+      const info = await participant.stat();
+      return { contents: await participant.readFile('utf-8'), mtimeMs: info.mtimeMs };
     } catch {
-      return false;
+      return null;
+    } finally {
+      await participant?.close().catch(() => {});
     }
+  }
+
+  async #reapIfStale(path: string, participant: TrustLockParticipant): Promise<boolean> {
+    let owner: { pid?: unknown } = {};
+    try {
+      owner = JSON.parse(participant.contents) as typeof owner;
+    } catch {
+      // A publisher exposes an empty file only while its choosing marker is
+      // present. Keep any fresh malformed record until its lease expires.
+    }
+    if (typeof owner.pid === 'number' && Number.isInteger(owner.pid) && owner.pid > 0) {
+      try {
+        process.kill(owner.pid, 0);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ESRCH') {
+          await unlink(path).catch(() => {});
+          return true;
+        }
+      }
+    }
+    if (Date.now() - participant.mtimeMs <= TRUST_LOCK_STALE_MS) return false;
+    await unlink(path).catch(() => {});
+    return true;
   }
 
   async #write(state: TrustFile): Promise<void> {

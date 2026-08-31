@@ -108,9 +108,10 @@ describe('FileToolTrustStore', () => {
 
   it('reclaims an aged lock even when its pid has been recycled', async () => {
     const stateDir = join(root, 'state');
-    const lockPath = join(stateDir, 'tool-trust.json.lock');
-    await mkdir(stateDir, { recursive: true });
-    await writeFile(lockPath, JSON.stringify({ pid: process.pid, token: 'orphaned' }));
+    const lockDir = join(stateDir, 'tool-trust.json.lock');
+    const lockPath = join(lockDir, 'ticket-orphaned.json');
+    await mkdir(lockDir, { recursive: true });
+    await writeFile(lockPath, JSON.stringify({ pid: process.pid, token: 'orphaned', ticket: 1 }));
     const stale = new Date(Date.now() - 31_000);
     await utimes(lockPath, stale, stale);
 
@@ -133,6 +134,22 @@ describe('FileToolTrustStore', () => {
 
     expect(reclaimed).toBe(true);
     expect(await store.isTrusted([folderGrantKey('/repo')])).toBe(true);
+  });
+
+  it('merges concurrent grants after reclaiming one aged lock', async () => {
+    const stateDir = join(root, 'state');
+    const lockDir = join(stateDir, 'tool-trust.json.lock');
+    const lockPath = join(lockDir, 'ticket-orphaned.json');
+    await mkdir(lockDir, { recursive: true });
+    await writeFile(lockPath, JSON.stringify({ pid: process.pid, token: 'orphaned', ticket: 1 }));
+    const stale = new Date(Date.now() - 31_000);
+    await utimes(lockPath, stale, stale);
+
+    const keys = Array.from({ length: 8 }, (_, index) => folderGrantKey(`/repo/${index}`));
+    await Promise.all(keys.map((key) => new FileToolTrustStore(stateDir).grant(key, 'folder')));
+
+    const reader = new FileToolTrustStore(stateDir);
+    for (const key of keys) expect(await reader.isTrusted([key])).toBe(true);
   });
 
   it('starts empty on a corrupt file rather than failing every tool', async () => {
