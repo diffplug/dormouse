@@ -1,5 +1,8 @@
 import type { ActivityNotification, ProtocolProgressUpdate } from './alert-manager';
 import { parseColor } from './css-color';
+import { sanitizeText, truncateText } from './osc-sanitize';
+import { recordToolAnnounce } from './tool-announce-store';
+import { parseToolAnnounce, type ToolAnnounce } from './tool-announce';
 import {
   cwdFromOsc1337,
   cwdFromOsc633,
@@ -13,6 +16,7 @@ import {
 
 export type TerminalProtocolEvent =
   | { kind: 'notification'; notification: ActivityNotification }
+  | { kind: 'toolAnnounce'; announce: ToolAnnounce }
   | { kind: 'progress'; progress: ProtocolProgressUpdate }
   | { kind: 'response'; data: string }
   | { kind: 'semantic'; event: TerminalSemanticEvent };
@@ -128,6 +132,12 @@ export class TerminalProtocolParser {
     if (content === '2' || content.startsWith('2;')) return parseOscTitle(content, 'osc2');
     if (content === '99' || content.startsWith('99;')) return this.parseOsc99(content);
     if (content === '777' || content.startsWith('777;')) return this.parseOsc777(content);
+    // OSC 367 is stripped whether or not it parses: a malformed announcement
+    // must not print itself into the user's scrollback.
+    if (content === '367' || content.startsWith('367;')) {
+      const announce = content.startsWith('367;') ? parseToolAnnounce(content.slice('367;'.length)) : null;
+      return announce ? [{ kind: 'toolAnnounce', announce }] : [];
+    }
     const colorResponse = this.parseColorQuery(content);
     if (colorResponse) return colorResponse;
     if (isKnownUnsupportedIterm2Osc(content)) return [];
@@ -255,6 +265,10 @@ export function applyTerminalProtocolEvents(
       sink.notifyFromProtocol(id, event.notification);
     } else if (event.kind === 'progress') {
       sink.updateProtocolProgress(id, event.progress);
+    } else if (event.kind === 'toolAnnounce') {
+      // Recording, not acting: only a tool-designated Session reads this, and
+      // only to pick among ports the scan already found.
+      recordToolAnnounce(id, event.announce);
     }
   }
 }
@@ -554,23 +568,10 @@ function decodeBase64(input: string): string | null {
   }
 }
 
-function sanitizeText(input: string, limit: number): string | null {
-  const collapsed = input
-    .replace(/[\x00-\x1f\x7f-\x9f]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (!collapsed) return null;
-  return truncateText(collapsed, limit);
-}
-
 function appendLimited(existing: string, next: string, limit: number): string {
   return truncateText(`${existing}${next}`, limit);
 }
 
-function truncateText(input: string, limit: number): string {
-  if (input.length <= limit) return input;
-  return Array.from(input).slice(0, limit).join('');
-}
 
 const DEVICE_ATTRIBUTE_PENDING_SUFFIXES = ['\x1b[>', '\x1b[', '\x1b', '\x9b>', '\x9b'];
 

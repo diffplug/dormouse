@@ -17,6 +17,7 @@ import { getPlatform } from '../../lib/platform';
 import { getTerminalPaneState } from '../../lib/terminal-registry';
 import { isToolParams } from './browser-surface';
 import { listenerUrlsByPort } from './port-url';
+import { getToolAnnounce } from '../../lib/tool-announce-store';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem } from './wall-types';
 
@@ -25,6 +26,11 @@ import type { DooredItem } from './wall-types';
 // the command runs. The scan shells out per Surface (lsof / PowerShell), so the
 // cadence is deliberately slow and only tools without a URL are scanned.
 const POLL_MS = 1500;
+
+/** Element-wise comparison; a null key never matches. */
+function toolKeysEqual(a: unknown, b: readonly string[]): boolean {
+  return Array.isArray(a) && a.length === b.length && a.every((el, i) => el === b[i]);
+}
 
 type ToolLeaf = { id: string; params: Record<string, unknown> | undefined };
 
@@ -55,6 +61,17 @@ export function useToolServing({
     const tick = async () => {
       for (const leaf of toolLeaves(lath, doorsRef.current)) {
         if (cancelled) return;
+        const announce = getToolAnnounce(leaf.id);
+
+        // A runtime re-key re-labels this Surface and nothing else. It never
+        // dedupes: by the time a key can change, both Surfaces may hold work,
+        // and a collision resolved by killing either destroys some of it
+        // (docs/specs/dor-tool.md -> Identity and dedupe). The host keeps its
+        // own namespace, so the payload cannot claim to be another tool.
+        if (announce?.key && !toolKeysEqual(leaf.params?.toolKey, announce.key)) {
+          lath.store.updateParams(leaf.id, { toolKey: announce.key });
+        }
+
         const hasUrl = typeof (leaf.params as { url?: unknown } | undefined)?.url === 'string';
         const running = getTerminalPaneState(leaf.id).currentCommand !== null;
 
@@ -74,11 +91,16 @@ export function useToolServing({
           continue; // A scan that fails is a scan that finds nothing yet.
         }
         if (cancelled) return;
-        // Lowest port wins when a tool binds several. B2's OSC 367 `serve` is
-        // the disambiguator for that case; until then the first port a tool
-        // opens is the best guess available, and the header's URL editor is the
-        // escape hatch.
-        const [entry] = listenerUrlsByPort(ports);
+        // The announcement disambiguates; the scan supplies the number. A tool
+        // that binds vite, a bridge, and a control socket says which one to
+        // frame, and an announced port nothing bound frames nothing — under
+        // worktree contention the tool's intent and its result diverge, and the
+        // scan is the one that is right.
+        const entries = listenerUrlsByPort(ports);
+        const wanted = announce?.port ?? null;
+        const entry = wanted === null
+          ? entries[0]
+          : entries.find((candidate) => candidate.port === wanted);
         if (!entry) continue;
         lath.store.updateParams(leaf.id, { url: entry.url, renderMode: 'iframe' });
       }
