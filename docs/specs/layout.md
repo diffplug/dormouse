@@ -300,7 +300,7 @@ For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getO
 - **Dispose**: `disposeSession` kills the PTY, disposes xterm, removes the registry entry. Only called on explicit kill (`x`).
 - **Swap**: `Cmd/Ctrl+Arrow` trades two leaf identities via a Lath `swap` op; registry entries follow the ids (see [Spatial navigation](#spatial-navigation)).
 
-Source of truth: the registry maps and pending shell opts in `lib/src/lib/terminal-store.ts`, behind the `lib/src/lib/terminal-registry.ts` facade; the lifecycle ops in `lib/src/lib/terminal-lifecycle.ts`.
+Source of truth: the registry maps and pending shell opts in `lib/src/lib/terminal-store.ts`, imported directly (including by `lib/src/remote/host/`); the lifecycle ops in `lib/src/lib/terminal-lifecycle.ts`, re-exported with the shared types through the `lib/src/lib/terminal-registry.ts` facade.
 
 ### Agent resume on cold restore
 
