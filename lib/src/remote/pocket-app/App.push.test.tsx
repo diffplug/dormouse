@@ -2,10 +2,10 @@
  * @vitest-environment jsdom
  *
  * The push flow through the whole `App`, which is where it actually lives: the
- * tri-state subscriptions read, the wall's banner, and what a failure leaves
- * behind on the way back to the Hosts view. `App.test.tsx` covers the
- * presentational pieces and the pure predicates in isolation; none of them can
- * see the state machine between them, which is where the bugs here were.
+ * subscriptions read, the one Enable that registers every paired Host, and what
+ * a denied permission leaves behind. `App.test.tsx` covers the presentational
+ * pieces and the pure predicate in isolation; neither can see the state machine
+ * between them, which is where the bugs here were.
  *
  * The doubles stop at `App`'s own module boundary — its client, its browser
  * push helpers, and the wall it renders — so the phases, effects, and error
@@ -18,7 +18,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App, { type HostView } from './App';
 import type { PushAvailability } from '../client/push-subscribe';
 
-const HOSTS: HostView[] = [{ hostId: 'host-1', label: 'First laptop', online: true }];
+const HOSTS: HostView[] = [
+  { hostId: 'host-1', label: 'First laptop', online: true },
+  { hostId: 'host-2', label: 'Second laptop', online: true },
+];
 
 /**
  * Hoisted so the `vi.mock` factories — which run before this file's own
@@ -86,6 +89,9 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const ENABLE = 'Enable push notifications';
 
+/** What the fake Server has stored for this device, across a subscribe loop. */
+const registered = new Set<string>();
+
 let container: HTMLDivElement;
 let root: Root;
 
@@ -93,7 +99,10 @@ beforeEach(() => {
   fake.availability = 'ready';
   fake.subscribeInBrowser.mockReset();
   fake.listPushSubscribedHosts.mockReset().mockResolvedValue([]);
-  fake.subscribeToPush.mockReset().mockResolvedValue({ hostIds: ['host-1'] });
+  fake.subscribeToPush
+    .mockReset()
+    .mockImplementation(async (hostId) => ({ hostIds: [...registered.add(hostId)] }));
+  registered.clear();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -121,6 +130,12 @@ function alertText(): string | null {
   return container.querySelector('[role="alert"]')?.textContent ?? null;
 }
 
+/** One Host's row text, for the per-Host `Push on` marker. */
+function rowText(label: string): string {
+  const title = [...container.querySelectorAll('div')].find((el) => el.textContent === label);
+  return title?.closest('div.rounded-lg')?.textContent ?? '';
+}
+
 async function click(label: string) {
   act(() => buttonNamed(label)!.click());
   await settle();
@@ -139,90 +154,73 @@ async function signIn() {
   await click('Sign in with passkey');
 }
 
-/** Sign in, then connect to the one Host — the moment the banner is decided. */
-async function connectToWall() {
-  await signIn();
-  await click('Connect');
-  // The wall really is on screen, so a missing Enable below means the banner
-  // stood down rather than the navigation having failed.
-  expect(buttonNamed('‹ Hosts')).not.toBeNull();
-}
-
-describe('the subscriptions read the wall banner waits on', () => {
+describe('the one Enable on the Hosts view', () => {
   /**
-   * The tri-state's whole reason to exist: an answered "off" is the only thing
-   * that may put a full-width banner over someone's terminal, and a read that
-   * threw answered nothing. Settling it at empty showed the banner to people
-   * who were already subscribed — the case the third state exists to prevent.
+   * The permission prompt and the PushSubscription it mints belong to the whole
+   * service-worker scope; only the Server rows are per (Host, device). So the
+   * browser is asked once and the rows are filled in behind it — a per-Host
+   * button would have made the user tap through the same grant twice.
    */
-  it('leaves the banner down when the read failed', async () => {
-    fake.listPushSubscribedHosts.mockRejectedValue(new Error('offline'));
-    await connectToWall();
+  it('subscribes the browser once and registers every paired Host', async () => {
+    fake.subscribeInBrowser.mockResolvedValue({ endpoint: 'https://push.example/abc' });
+    await signIn();
 
+    await click(ENABLE);
+
+    expect(fake.subscribeInBrowser).toHaveBeenCalledOnce();
+    expect(fake.subscribeToPush.mock.calls.map(([hostId]) => hostId)).toEqual([
+      'host-1',
+      'host-2',
+    ]);
+    expect(container.textContent).toContain('Push notifications on.');
     expect(buttonNamed(ENABLE)).toBeNull();
   });
 
-  it('raises the banner when the read answered, and answered empty', async () => {
-    fake.listPushSubscribedHosts.mockResolvedValue([]);
-    await connectToWall();
+  /**
+   * Each response is committed as it lands rather than after the loop, so a
+   * registration that failed on the second Host does not throw away the first.
+   */
+  it('keeps what a partly-failed loop already registered', async () => {
+    fake.subscribeInBrowser.mockResolvedValue({ endpoint: 'https://push.example/abc' });
+    fake.subscribeToPush.mockImplementation(async (hostId) => {
+      if (hostId === 'host-2') throw new Error('The host disconnected.');
+      return { hostIds: [...registered.add(hostId)] };
+    });
+    await signIn();
 
+    await click(ENABLE);
+
+    expect(alertText()).toBe('The host disconnected.');
+    // The first Host is on, so the card stays up for the second alone.
+    expect(rowText('First laptop')).toContain('Push on');
+    expect(rowText('Second laptop')).not.toContain('Push on');
     expect(buttonNamed(ENABLE)).not.toBeNull();
   });
 
   /**
-   * The other half of the tri-state, and why staying unknown costs nothing:
-   * the row's Enable is idempotent, so it re-offers rather than waits.
+   * The read is the only thing that says which Hosts hold a row. A read that
+   * threw learned nothing — and empty is not nothing — so the card re-offers
+   * its idempotent Enable rather than claiming push is on.
    */
-  it('still offers the idempotent Enable on the Host row after a failed read', async () => {
+  it('offers Enable after a subscriptions read that failed', async () => {
     fake.listPushSubscribedHosts.mockRejectedValue(new Error('offline'));
     await signIn();
 
     expect(buttonNamed(ENABLE)).not.toBeNull();
+    expect(container.textContent).not.toContain('Push notifications on.');
   });
 });
 
-describe('a push failure raised from the wall banner', () => {
-  async function failAnEnable() {
-    fake.subscribeInBrowser.mockRejectedValue(new Error('Notifications are blocked.'));
-    await connectToWall();
-    await click(ENABLE);
-    expect(alertText()).toBe('Notifications are blocked.');
-  }
-
+describe('a permission the user denies', () => {
   /**
-   * The error state is keyed by operation, but `HostsView` owns its whole
-   * viewport and reports whatever it holds — so a failure the user had already
-   * put away reappeared, context-free, over the host list. Both exits from the
-   * banner clear it.
-   */
-  it('does not follow the user to the Hosts view after Not now', async () => {
-    await failAnEnable();
-
-    await click('Not now');
-    await click('‹ Hosts');
-
-    expect(container.textContent).not.toContain('Notifications are blocked.');
-  });
-
-  it('does not follow the user to the Hosts view when the wall is simply left', async () => {
-    await failAnEnable();
-
-    await click('‹ Hosts');
-
-    expect(container.textContent).not.toContain('Notifications are blocked.');
-  });
-});
-
-describe('a permission the user denies at the banner', () => {
-  /**
-   * Availability is otherwise probed only on entering Hosts, so the banner sat
+   * Availability is otherwise probed only on entering Hosts, so the card sat
    * there offering an Enable that could do nothing but throw again. The probe
    * is fired after the error is raised rather than instead of it — hence the
    * deferred answer here, which pins that the failure gets its showing first.
    */
-  it('shows the failure, then stands the banner down and blocks the row', async () => {
+  it('shows the failure, then replaces the offer with the reason', async () => {
     fake.subscribeInBrowser.mockRejectedValue(new Error('Notifications are blocked.'));
-    await connectToWall();
+    await signIn();
 
     let denyProbe!: (state: PushAvailability) => void;
     fake.availability = new Promise<PushAvailability>((resolve) => {
@@ -232,18 +230,11 @@ describe('a permission the user denies at the banner', () => {
     await click(ENABLE);
     // Still up, still explaining itself, while the re-probe is outstanding.
     expect(alertText()).toBe('Notifications are blocked.');
-    expect(buttonNamed('Not now')).not.toBeNull();
+    expect(buttonNamed(ENABLE)).not.toBeNull();
 
     fake.availability = 'denied';
     denyProbe('denied');
     await settle();
-
-    expect(buttonNamed(ENABLE)).toBeNull();
-    expect(buttonNamed('Not now')).toBeNull();
-
-    // And the two surfaces agree: the row that would have offered Enable names
-    // the reason instead.
-    await click('‹ Hosts');
 
     expect(buttonNamed(ENABLE)).toBeNull();
     expect(container.textContent).toContain('Notifications are blocked for this site');

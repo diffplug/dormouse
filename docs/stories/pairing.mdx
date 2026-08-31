@@ -204,7 +204,8 @@ it in the wrong window.
 <Canvas of={HostsView.MixedList} />
 
 One row per enrolled Host. A row is offline when no Dormouse instance currently
-holds that server's relay slot.
+holds that server's relay slot. The card above them is push, which §7 comes back
+to.
 
 Each row offers exactly one action, and which one is not a guess. Pocket asks
 every online Host whether its ACL already holds a record for this browser, so
@@ -312,16 +313,18 @@ sessions:
 
 <Canvas of={PocketWall.ConnectedShell} story={{ autoplay: true }} />
 
-This is also where push gets asked for, rather than left as a footnote: a
-connect to a machine this phone has not registered with opens over the terminal
-with a full-width **Enable push notifications**, and **Not now** puts it away
-for the run. The machine's row on the Hosts view carries the same offer from the
-moment it is paired. Both appear only where push can work — an installed app on
-a server with push configured (§1). A phone in a Safari tab is told to add
-Dormouse to the Home Screen on the Hosts view instead, which is also where a
-server with push disabled says so.
+Push is asked for back on the Hosts view rather than over the terminal you just
+tapped Connect to reach — the card you already saw in §5, above the list from the
+moment anything is paired. It is one card and not one per machine because the
+permission prompt and the subscription it mints belong to the whole browser: the
+tap grants once and registers every paired machine. Afterwards the card collapses
+to a line and each row says **Push on** for itself:
 
-<Canvas of={PocketWall.ConnectedShellPushPrompt} story={{ autoplay: true }} />
+<Canvas of={HostsView.PushSubscribed} />
+
+The offer appears only where push can work — an installed app on a server with
+push configured (§1). A phone in a Safari tab is told to add Dormouse to the Home
+Screen instead, which is also where a server with push disabled says so.
 
 ---
 

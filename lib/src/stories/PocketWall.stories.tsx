@@ -71,13 +71,7 @@ class FakeRemoteClient implements RemoteAdapterClient {
   unsubscribe() {}
 }
 
-function PocketWallStory({
-  connected = false,
-  offerPush = false,
-}: {
-  connected?: boolean;
-  offerPush?: boolean;
-}) {
+function PocketWallStory({ connected = false }: { connected?: boolean }) {
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
   if (!adapterRef.current) {
     // Mirror App.tsx's onConnect: stand up the adapter as the platform, prep a
@@ -112,11 +106,6 @@ function PocketWallStory({
           }}
           adapter={adapterRef.current}
           onLeave={() => {}}
-          push={
-            offerPush
-              ? { busy: false, error: null, onEnable: () => {}, onDismiss: () => {} }
-              : undefined
-          }
         />
       ) : (
         <PocketWall adapter={adapterRef.current} />
@@ -151,11 +140,4 @@ export const ConnectedShell: Story = {
 export const ConnectedShellKimbieDark: Story = {
   args: { connected: true },
   globals: { theme: 'Kimbie Dark' },
-};
-
-// The first connect on a push-capable phone that has not registered this Host:
-// the offer is a full-width step here, not the footnote it becomes on the Hosts
-// view afterwards. Dismissible, because it sits over the terminal.
-export const ConnectedShellPushPrompt: Story = {
-  args: { connected: true, offerPush: true },
 };

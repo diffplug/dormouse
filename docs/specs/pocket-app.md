@@ -221,7 +221,7 @@ order, and every unavailable result is named in the UI:
 | `unsupported` | Service workers, `Notification`, or `PushManager` are unavailable after the install gate. | Explain that this browser cannot receive push. |
 | `no-worker` | The tracked registration failed or resolved empty, commonly on an insecure origin. | Explain the worker failure. |
 | `denied` | Notification permission is denied. | Direct the user to browser settings. |
-| `ready` | Worker and APIs exist and permission is not denied. | Offer the Host-specific registration action; this does not mean any Host is registered yet. |
+| `ready` | Worker and APIs exist and permission is not denied. | Offer the registration action. |
 
 **Never parse the user-agent:** iPadOS reports as a Mac; the presence of
 `navigator.standalone` is the install-required signal and stays absent on macOS
@@ -233,7 +233,7 @@ Because registration is best-effort and asynchronous, both the availability
 check and the subscribe path await the tracked registration promise from
 `lib/src/remote/pocket-app/service-worker.ts` rather than
 `navigator.serviceWorker.ready`, which never settles when registration failed —
-that would hang the button the user just tapped, with no way out.
+that would hang the button the user just tapped.
 
 The Server's VAPID public key is prefetched before Pocket offers Enable. The
 config state is explicit (`loading`, `ready`, `disabled`, or `error`): a failed
@@ -243,44 +243,43 @@ trip between an iOS user gesture and `Notification.requestPermission()` can
 consume the transient activation. Source of truth: the push-config state and
 actions in `lib/src/remote/pocket-app/App.tsx`.
 
-**Push is a step of first run, not only a footnote.** Landing in a working
-terminal is where a push notification explains itself, so a connect to an
-unregistered Host opens the wall under a full-width dismissible offer, on
-the same `canEnablePush` that puts **Enable push notifications** on that Host's row
-— plus an answered subscriptions read, since a banner shown to someone already
-subscribed costs more than one shown late. One tap subscribes directly, with no
-fetch between it and the permission prompt. **Not now** stands the offer down
-for the run and is not persisted; success removes it; the per-host row is the
-ongoing surface either way. Source of truth: `canEnablePush`,
-`shouldOfferPushPrompt` and `PushPrompt` in `lib/src/remote/pocket-app/App.tsx`.
-
 Browser availability and Host registration are separate states: a
 `PushSubscription` belongs to the service-worker scope, while the Server stores
-one row per `(hostId, devicePublicKey)`. An existing browser subscription
-therefore leaves **Enable push notifications** available for every Host that has
-not registered; only a successful `POST /api/push/subscribe` flips that Host to
-**Push notifications on**.
+one row per `(hostId, devicePublicKey)`.
+
+**Push is asked for once per device, on one card, on the Hosts view.** The
+permission prompt and the subscription it mints are scope-wide, so the per-Host
+rows are bookkeeping, not something to ask for once each. The card reads
+the paired Hosts as a set — **Enable push notifications** while any lacks a row, one
+**Push notifications on.** line once all have one — and its tap subscribes the
+browser, then registers every paired Host, repairing a rotated endpoint at once. Each response commits as it lands, so a loop that fails
+partway keeps what it registered. **Never offer push from the wall or from a Host
+row:** the terminal is what the user tapped Connect to reach. The row states
+**Push on** beside its pair state — the only thing that says *which* Host the
+card still covers.
+
+Every state the card can be in is one pure predicate over (paired set,
+registrations, availability, config); `needs-install` is the one it declines to
+render, because `InstallNotice` is the push card for that state and is on screen
+exactly then. Source of truth: `pushNoticeState` and `PushNotice` in
+`lib/src/remote/pocket-app/App.tsx`.
 
 Which Hosts those are is read from the Server on entering the Hosts list — the
-connect neither refetches nor drops it, so both push surfaces read one load and
-answers land on the wall — not remembered locally, so a reload does not re-offer
-an action already taken and a row pruned after a 410 stops claiming push is on.
-`GET /api/push/subscriptions` returns the **account's**
-registrations, filtered to this device by `PocketClient`. **Never parameterize
+connect neither refetches nor drops it — never locally, so a reload does not
+re-offer an action already taken and a row pruned after a 410 stops claiming
+push is on.
+`GET /api/push/subscriptions` returns the **account's** registrations, filtered
+to this device by `PocketClient`. **Never parameterize
 that read by `devicePublicKey`** — an enumeration primitive over an input the
 caller need not own, where the account's own rows are already its to read (the
 scoping `GET /api/hosts` uses). `POST /api/push/subscribe` answers with the same
 thing — every Host this device is registered with after the mutation — so both
 are complete answers, never deltas: nothing to merge, only which is newer.
 One run token drops any read a newer load, or a completed registration, already
-overtook. A read that is in flight or failed stays unanswered rather than
-settling at empty — only the full-width offer waits on that; the row offers its
-idempotent Enable meanwhile, rather than preserving a stale
-**Push notifications on** claim. Source of truth:
-`getPushAvailability` in
-`lib/src/remote/client/push-subscribe.ts`,
-`PocketClient.listPushSubscribedHosts`, and the push effect in
-`lib/src/remote/pocket-app/App.tsx`.
+overtook. A read in flight or failed never settles at empty on its own behalf: the card re-offers its idempotent Enable rather than preserving a stale
+**Push notifications on.** claim. Source of truth: `getPushAvailability` in
+`lib/src/remote/client/push-subscribe.ts`, `PocketClient.listPushSubscribedHosts`,
+and the push effect in `lib/src/remote/pocket-app/App.tsx`.
 
 A Server row is necessary but not sufficient for **Push notifications on**.
 Pocket also checks that permission is still granted, that the scope holds a

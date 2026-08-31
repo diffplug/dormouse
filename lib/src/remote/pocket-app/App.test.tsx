@@ -7,11 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   HostsView,
-  PushPrompt,
   SetupOrSignin,
-  canEnablePush,
+  pushNoticeState,
   refinePairState,
-  shouldOfferPushPrompt,
   type HostPairState,
   type HostView,
   type PushConfigStatus,
@@ -43,13 +41,14 @@ afterEach(() => {
 function renderHosts(
   overrides: {
     hosts?: HostView[];
+    busy?: string | null;
     pairState?: (hostId: string) => HostPairState;
     isPushSubscribed?: (hostId: string) => boolean;
     pushState?: PushAvailability | null;
     pushConfigStatus?: PushConfigStatus;
     onPair?: (host: HostView) => void;
     onConnect?: (host: HostView) => void;
-    onEnablePush?: (host: HostView) => void;
+    onEnablePush?: () => void;
     onRetryPushConfig?: () => void;
   } = {},
 ) {
@@ -58,7 +57,7 @@ function renderHosts(
       <StrictMode>
         <HostsView
           hosts={overrides.hosts ?? HOSTS}
-          busy={null}
+          busy={overrides.busy ?? null}
           error={null}
           pairState={overrides.pairState ?? (() => 'paired')}
           isPushSubscribed={overrides.isPushSubscribed ?? (() => false)}
@@ -78,20 +77,13 @@ function renderHosts(
 }
 
 /**
- * A Host's whole card (host row + push row), found through that Host's label
- * rather than by document order — the assertions are about which Host owns
- * which state, so they must not silently pass if the rows are reordered.
+ * One Host's row, found through that Host's label rather than by document
+ * order — the assertions are about which Host owns which state, so they must
+ * not silently pass if the rows are reordered.
  */
-function cardFor(label: string): Element {
-  const title = [...container.querySelectorAll('div')].find((el) => el.textContent === label);
-  const card = title?.closest('div.flex.flex-col');
-  if (!card) throw new Error(`no host card for ${label}`);
-  return card;
-}
-
-/** The host row itself (not its push row). */
 function rowFor(label: string): HTMLElement {
-  const row = cardFor(label).firstElementChild;
+  const title = [...container.querySelectorAll('div')].find((el) => el.textContent === label);
+  const row = title?.closest('div.rounded-lg');
   if (!(row instanceof HTMLElement)) throw new Error(`no host row for ${label}`);
   return row;
 }
@@ -101,23 +93,18 @@ function actionsIn(row: HTMLElement): string[] {
   return [...row.querySelectorAll('button')].map((button) => button.textContent ?? '');
 }
 
-/** The push row belonging to one Host. */
-function pushRowFor(label: string): HTMLElement {
-  const row = cardFor(label).lastElementChild;
-  if (!(row instanceof HTMLElement)) throw new Error(`no push row for ${label}`);
-  return row;
-}
-
-function enableButtonIn(row: HTMLElement): HTMLButtonElement | null {
+/**
+ * The one push card, found by its title. Both titles are matched, so a card
+ * that rendered the wrong one still fails on its body rather than on absence.
+ */
+function pushCard(): HTMLElement | null {
   return (
-    [...row.querySelectorAll('button')].find(
-      (b) => b.textContent === 'Enable push notifications',
+    [...container.querySelectorAll<HTMLElement>('div.rounded-lg')].find((el) =>
+      /^(Turn on push notifications|Push notifications are off)$/.test(
+        el.firstElementChild?.textContent ?? '',
+      ),
     ) ?? null
   );
-}
-
-function retryButtonIn(row: HTMLElement): HTMLButtonElement | null {
-  return [...row.querySelectorAll('button')].find((b) => b.textContent === 'Retry') ?? null;
 }
 
 function renderAuth(
@@ -390,152 +377,144 @@ describe('refinePairState', () => {
   });
 });
 
-describe('HostsView push registration', () => {
-  it('shows Push notifications on only for the Host whose server registration succeeded', () => {
-    // A PushSubscription is scope-wide, so a browser that can receive push says
-    // nothing about which Hosts hold a server row. Only the registered Host may
-    // claim push is on; the other must still offer the button.
-    renderHosts({ isPushSubscribed: (hostId) => hostId === 'host-1' });
-
-    const first = pushRowFor('First laptop');
-    const second = pushRowFor('Second laptop');
-
-    expect(first.textContent).toContain('Push notifications on.');
-    expect(enableButtonIn(first)).toBeNull();
-
-    expect(second.textContent).not.toContain('Push notifications on.');
-    expect(enableButtonIn(second)).not.toBeNull();
-  });
-
-  it('offers the button for every Host when none has registered', () => {
+describe('the one push card on the Hosts view', () => {
+  it('offers once for the whole device, not once per Host', () => {
+    // The permission prompt and the PushSubscription belong to the whole
+    // service-worker scope, so asking per Host asks for the same thing twice.
     renderHosts();
 
-    for (const label of ['First laptop', 'Second laptop']) {
-      expect(enableButtonIn(pushRowFor(label))).not.toBeNull();
-    }
+    expect(
+      [...container.querySelectorAll('button')].filter(
+        (b) => b.textContent === 'Enable push notifications',
+      ),
+    ).toHaveLength(1);
+    expect(actionsIn(rowFor('First laptop'))).toEqual(['Connect']);
   });
 
-  it('enables push for the Host whose button was clicked', () => {
+  it('registers every paired Host from the one tap', () => {
     const onEnablePush = vi.fn();
     renderHosts({ onEnablePush });
 
-    act(() => {
-      enableButtonIn(pushRowFor('Second laptop'))!.click();
-    });
+    act(() => buttonNamed('Enable push notifications')!.click());
 
-    expect(onEnablePush).toHaveBeenCalledWith(HOSTS[1]);
+    // No Host argument to get wrong: the handler reads the paired set itself.
+    expect(onEnablePush).toHaveBeenCalledOnce();
+    expect(onEnablePush).toHaveBeenCalledWith();
   });
 
-  it('explains an unavailable reason instead of offering a button that cannot work', () => {
+  it('keeps offering while any paired Host still lacks a Server row', () => {
+    // A PushSubscription is scope-wide, so a browser that can receive push says
+    // nothing about which Hosts hold a row. The row marker is what names the
+    // Host the card is still offering to register.
+    renderHosts({ isPushSubscribed: (hostId) => hostId === 'host-1' });
+
+    expect(buttonNamed('Enable push notifications')).not.toBeNull();
+    expect(rowFor('First laptop').textContent).toContain('Push on');
+    expect(rowFor('Second laptop').textContent).not.toContain('Push on');
+  });
+
+  it('settles to one line once every paired Host holds a row', () => {
+    renderHosts({ isPushSubscribed: () => true });
+
+    expect(container.textContent).toContain('Push notifications on.');
+    expect(pushCard()).toBeNull();
+    expect(buttonNamed('Enable push notifications')).toBeNull();
+  });
+
+  it('counts only paired Hosts, which are the only ones with a row to hold', () => {
+    renderHosts({
+      pairState: (hostId) => (hostId === 'host-1' ? 'paired' : 'unpaired'),
+      isPushSubscribed: (hostId) => hostId === 'host-1',
+    });
+
+    expect(container.textContent).toContain('Push notifications on.');
+    expect(buttonNamed('Enable push notifications')).toBeNull();
+  });
+
+  it('says nothing at all until something is paired', () => {
+    renderHosts({ pairState: () => 'unpaired' });
+
+    expect(pushCard()).toBeNull();
+    expect(container.textContent).not.toContain('Push notifications on.');
+  });
+
+  it('explains an unavailable reason instead of offering a tap that cannot work', () => {
     renderHosts({ pushState: 'denied' });
 
-    const row = pushRowFor('First laptop');
-    expect(row.textContent).toContain('blocked');
-    expect(enableButtonIn(row)).toBeNull();
+    expect(pushCard()!.textContent).toContain('blocked');
+    expect(buttonNamed('Enable push notifications')).toBeNull();
   });
 
   it('reports a server with push disabled rather than the browser state', () => {
     renderHosts({ pushConfigStatus: 'disabled' });
 
-    const row = pushRowFor('First laptop');
-    expect(row.textContent).toContain('server has push notifications disabled');
-    expect(enableButtonIn(row)).toBeNull();
+    expect(pushCard()!.textContent).toContain('server has push notifications disabled');
+    expect(buttonNamed('Enable push notifications')).toBeNull();
+  });
+
+  it('leaves needs-install to the install notice rather than doubling it', () => {
+    // The card for that state would have said "see above" and nothing else.
+    renderHosts({ pushState: 'needs-install' });
+
+    expect(container.textContent).toContain('Add Dormouse to your Home Screen');
+    expect(pushCard()).toBeNull();
   });
 
   it('does not advise installing when the server cannot push at all', () => {
     // The install ritual the notice describes would end at the same "push is
-    // disabled" copy the rows already show — advice and rows must not contradict.
+    // disabled" copy — advice and card must not contradict each other.
     renderHosts({ pushState: 'needs-install', pushConfigStatus: 'disabled' });
 
     expect(container.textContent).not.toContain('Add Dormouse to your Home Screen');
-    expect(pushRowFor('First laptop').textContent).toContain(
-      'server has push notifications disabled',
-    );
+    expect(pushCard()!.textContent).toContain('server has push notifications disabled');
   });
 
   it('does not offer Enable until the VAPID key is cached', () => {
     renderHosts({ pushConfigStatus: 'loading' });
 
-    const row = pushRowFor('First laptop');
-    expect(row.textContent).toContain('Checking whether this server can send push notifications');
-    expect(enableButtonIn(row)).toBeNull();
+    expect(pushCard()!.textContent).toContain('Checking whether this server can send push');
+    expect(buttonNamed('Enable push notifications')).toBeNull();
   });
 
   it('retries config separately from the permission-triggering Enable tap', () => {
     const onRetryPushConfig = vi.fn();
     renderHosts({ pushConfigStatus: 'error', onRetryPushConfig });
 
-    const row = pushRowFor('First laptop');
-    expect(row.textContent).toContain('Could not check');
-    expect(enableButtonIn(row)).toBeNull();
-    act(() => retryButtonIn(row)!.click());
+    expect(pushCard()!.textContent).toContain('Could not check');
+    expect(buttonNamed('Enable push notifications')).toBeNull();
+    act(() => buttonNamed('Retry')!.click());
     expect(onRetryPushConfig).toHaveBeenCalledOnce();
+  });
+
+  it('locks the tap while a subscribe is in flight', () => {
+    renderHosts({ busy: 'push' });
+
+    expect(buttonNamed('Enable push notifications')).toBeNull();
+    expect(buttonNamed('…')!.disabled).toBe(true);
   });
 });
 
-/** `shouldOfferPushPrompt`'s inputs, with an eligible first connect as the base. */
-function offerPush(
-  overrides: Partial<Parameters<typeof shouldOfferPushPrompt>[0]> = {},
-): boolean {
-  return shouldOfferPushPrompt({
-    dismissed: false,
-    registration: 'off',
+/** `pushNoticeState`'s inputs, with an eligible unregistered device as the base. */
+function noticeState(
+  overrides: Partial<Parameters<typeof pushNoticeState>[0]> = {},
+): ReturnType<typeof pushNoticeState> {
+  return pushNoticeState({
+    pairedHostIds: ['host-1'],
+    isPushSubscribed: () => false,
     availability: 'ready',
     configStatus: 'ready',
     ...overrides,
   });
 }
 
-describe('the first-connect push prompt appears', () => {
+describe('pushNoticeState', () => {
   /**
-   * `off` is every way this Host is not reachable by push: no Server row at all
-   * (even beside another Host that has one — rows are per (host, device)), or a
-   * row whose browser subscription no longer matches it. `App` collapses those
-   * into the one answer; what is decided here is that any of them offers.
+   * The wall banner and the Host row used to restate the same availability and
+   * config gate side by side, staying equal only by parallel edits — while the
+   * spec claimed they matched exactly. One card reads one predicate; this is
+   * the matrix that pins every cell of it.
    */
-  it('after a connect that landed the user in a working terminal', () => {
-    expect(offerPush()).toBe(true);
-  });
-});
-
-describe('the first-connect push prompt stays away', () => {
-  it('once this Host is registered and the subscription is current', () => {
-    expect(offerPush({ registration: 'on' })).toBe(false);
-  });
-
-  it('while the Server has not yet said which Hosts are registered', () => {
-    // Waiting costs a beat; guessing shows a full-width banner to someone who
-    // already enabled push, which the small row action would never have done.
-    expect(offerPush({ registration: 'unknown' })).toBe(false);
-  });
-
-  it('whenever this browser cannot receive push, for any reason', () => {
-    for (const availability of ['denied', 'unsupported', 'no-worker', 'needs-install'] as const) {
-      expect(offerPush({ availability })).toBe(false);
-    }
-    // Not asked yet is not permission to ask.
-    expect(offerPush({ availability: null })).toBe(false);
-  });
-
-  it('when the server has push disabled, or its config is loading or errored', () => {
-    for (const configStatus of ['disabled', 'loading', 'error'] as const) {
-      expect(offerPush({ configStatus })).toBe(false);
-    }
-  });
-
-  it('after Not now, for the rest of the run', () => {
-    expect(offerPush({ dismissed: true })).toBe(false);
-  });
-});
-
-describe('canEnablePush', () => {
-  /**
-   * The banner and the Host row used to restate the same availability/config
-   * gate side by side, staying equal only by parallel edits — while the spec
-   * claimed they matched exactly. They now read one predicate; this is what
-   * catches either of them growing its own copy again.
-   */
-  it('gates both push surfaces, over every availability and config state', () => {
+  it('offers only where a tap could reach the permission prompt', () => {
     const availabilities: (PushAvailability | null)[] = [
       'ready',
       'denied',
@@ -546,74 +525,36 @@ describe('canEnablePush', () => {
     ];
     for (const availability of availabilities) {
       for (const configStatus of ['ready', 'loading', 'disabled', 'error'] as const) {
-        const eligible = availability === 'ready' && configStatus === 'ready';
-        expect(canEnablePush(availability, configStatus)).toBe(eligible);
+        const offers = noticeState({ availability, configStatus })?.kind === 'offer';
+        expect(offers).toBe(availability === 'ready' && configStatus === 'ready');
 
-        // The wall's banner, which adds its own dismissal/registration clauses.
-        expect(offerPush({ availability, configStatus })).toBe(eligible);
-
-        // The Hosts row, which adds its own subscribed/unknown handling.
+        // And the card renders exactly what the predicate decided.
         renderHosts({ pushState: availability, pushConfigStatus: configStatus });
-        expect(enableButtonIn(pushRowFor('First laptop')) !== null).toBe(eligible);
+        expect(buttonNamed('Enable push notifications') !== null).toBe(offers);
       }
     }
   });
-});
 
-function renderPushPrompt(
-  overrides: {
-    busy?: boolean;
-    error?: string | null;
-    onEnable?: () => void;
-    onDismiss?: () => void;
-  } = {},
-) {
-  act(() => {
-    root.render(
-      <StrictMode>
-        <PushPrompt
-          busy={overrides.busy ?? false}
-          error={overrides.error ?? null}
-          onEnable={overrides.onEnable ?? (() => undefined)}
-          onDismiss={overrides.onDismiss ?? (() => undefined)}
-        />
-      </StrictMode>,
+  it('says nothing before the browser has been asked, in either direction', () => {
+    // Unprobed is not "cannot", and it is not permission to ask either.
+    expect(noticeState({ availability: null })).toBeNull();
+    expect(noticeState({ availability: null, isPushSubscribed: () => true })).toBeNull();
+  });
+
+  it('lets a push-disabled server outrank a Server row this device still holds', () => {
+    // The rows survive a server restarted without VAPID keys; the delivery does
+    // not, so "Push notifications on." would be a lie.
+    expect(noticeState({ configStatus: 'disabled', isPushSubscribed: () => true })).toEqual({
+      kind: 'blocked',
+      reason: 'This server has push notifications disabled.',
+    });
+  });
+
+  it('settles only when every paired Host holds a row', () => {
+    const isPushSubscribed = (hostId: string) => hostId === 'host-1';
+    expect(noticeState({ isPushSubscribed })?.kind).toBe('on');
+    expect(noticeState({ pairedHostIds: ['host-1', 'host-2'], isPushSubscribed })?.kind).toBe(
+      'offer',
     );
-  });
-}
-
-describe('PushPrompt', () => {
-  it('subscribes on the tap, with nothing in front of the permission prompt', () => {
-    const onEnable = vi.fn();
-    renderPushPrompt({ onEnable });
-
-    act(() => buttonNamed('Enable push notifications')!.click());
-
-    expect(onEnable).toHaveBeenCalledOnce();
-  });
-
-  it('dismisses on Not now without enabling anything', () => {
-    const onEnable = vi.fn();
-    const onDismiss = vi.fn();
-    renderPushPrompt({ onEnable, onDismiss });
-
-    act(() => buttonNamed('Not now')!.click());
-
-    expect(onDismiss).toHaveBeenCalledOnce();
-    expect(onEnable).not.toHaveBeenCalled();
-  });
-
-  it('reports a failed enable, which the wall has nowhere else to show', () => {
-    renderPushPrompt({ error: 'Registration failed.' });
-
-    expect(container.querySelector('[role="alert"]')!.textContent).toBe('Registration failed.');
-  });
-
-  it('locks both actions while the subscribe is in flight', () => {
-    renderPushPrompt({ busy: true });
-
-    expect(buttonNamed('Enable push notifications')).toBeNull();
-    expect(buttonNamed('…')!.disabled).toBe(true);
-    expect(buttonNamed('Not now')!.disabled).toBe(true);
   });
 });
