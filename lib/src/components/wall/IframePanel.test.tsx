@@ -5,6 +5,7 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
+import * as terminalRegistry from '../../lib/terminal-registry';
 import type { PlatformAdapter } from '../../lib/platform/types';
 import type { PaneProps } from './pane-props';
 import { IframePanel } from './IframePanel';
@@ -135,6 +136,31 @@ describe('IframePanel', () => {
 
     expect(updateParameters).not.toHaveBeenCalled();
     expect(getAgentBrowserScreenController('iframe-proxied')?.chrome().url).toBe('http://example.test/other/?q=1#frag');
+  });
+
+  it('marks a tool touched when its proxied browser receives input', async () => {
+    const markTouched = vi.spyOn(terminalRegistry, 'markSessionTouched').mockImplementation(() => {});
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'createIframeProxyUrl'>;
+    platform.createIframeProxyUrl = vi.fn(async () => ({
+      ok: true,
+      url: 'http://127.0.0.1:61234/app',
+      upstream: 'http://example.test/app',
+    }));
+    setPlatform(platform);
+    await renderPanel(stubActions(), {
+      id: 'iframe-tool',
+      title: 'Tool',
+      params: { surfaceType: 'tool', url: 'http://example.test/app' },
+    });
+
+    act(() => {
+      window.dispatchEvent(new MessageEvent('message', {
+        origin: 'http://127.0.0.1:61234',
+        data: { __dormouse: 'pointerdown' },
+      }));
+    });
+
+    expect(markTouched).toHaveBeenCalledWith('iframe-tool');
   });
 
   it('re-resolves the proxy on Back after an observed in-frame navigation', async () => {

@@ -17,6 +17,7 @@ import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import type { PlatformAdapter } from '../lib/platform/types';
 import * as terminalRegistry from '../lib/terminal-registry';
 import { UNNAMED_PANEL_TITLE } from '../lib/terminal-registry';
+import { pendingShellOpts } from '../lib/terminal-store';
 import { setToolsEnabled } from '../lib/feature-flags';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -912,6 +913,7 @@ describe('Wall on the Lath engine', () => {
 
   it('keeps an approved tool deferred until trust lookup and shell staging finish', async () => {
     setToolsEnabled(true);
+    let toolId: string | undefined;
     const trustGate = Promise.withResolvers<{ status: 'trust-recorded' }>();
     const resolvedGate = Promise.withResolvers<{
       status: 'ok';
@@ -958,7 +960,7 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
       expect(response?.ok).toBe(true);
-      const toolId = response!.result!.surfaceId;
+      toolId = response!.result!.surfaceId;
       expect(container.querySelector(`[data-session-id="${toolId}"]`)).toBeNull();
 
       const allow = Array.from(container.querySelectorAll('button'))
@@ -990,7 +992,9 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
       expect(container.querySelector(`[data-session-id="${toolId}"]`)).not.toBeNull();
+      expect(pendingShellOpts.get(toolId)?.untouched).toBe(true);
     } finally {
+      if (toolId) pendingShellOpts.delete(toolId);
       setToolsEnabled(false);
     }
   });

@@ -978,7 +978,10 @@ export function Wall({
         shell: defaults?.shell,
         args: defaults?.args,
         cwd: inheritedCwd,
-        untouched: false,
+        // Starting the command is Dormouse orchestration, not user input. A
+        // tool stays untouched until its terminal or browser receives input;
+        // other commanded splits retain their established conservative state.
+        untouched: leafMeta?.component === 'tool',
         command,
         ...(requireIntegration ? { requireIntegration: true } : {}),
       });
@@ -1246,7 +1249,7 @@ export function Wall({
         shell: defaults?.shell,
         args: defaults?.args,
         cwd,
-        untouched: false,
+        untouched: true,
         command: resolved.run,
         requireIntegration: true,
       });

@@ -2,7 +2,7 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'r
 import { PANE_MESSAGE_CLASS, TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
 import { registerProxyOrigin } from '../../lib/iframe-proxy-registry';
-import { registerSurfaceFocusHandle } from '../../lib/terminal-registry';
+import { markSessionTouched, registerSurfaceFocusHandle } from '../../lib/terminal-registry';
 import type { IframeProxyResult } from '../../lib/platform/types';
 import type { PaneProps } from './pane-props';
 import { usePaneChrome } from './use-pane-chrome';
@@ -260,6 +260,7 @@ export function IframePanel({ id, title, params }: PaneProps) {
       if (e.origin !== proxyOrigin) return;
       const data = e.data as { __dormouse?: unknown; url?: unknown } | null;
       if (data?.__dormouse === 'pointerdown') {
+        if (isTool) markSessionTouched(id);
         actions.onClickPanel(id);
         return;
       }
@@ -277,7 +278,7 @@ export function IframePanel({ id, title, params }: PaneProps) {
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [id, proxyOrigin, actions, liveUrl, sourceUrl, observeFrameUrl]);
+  }, [id, proxyOrigin, actions, liveUrl, sourceUrl, observeFrameUrl, isTool]);
 
   // Raw fallback frames have no injected shim, but focusing a cross-origin
   // iframe still blurs the parent window while the document itself remains
@@ -287,12 +288,13 @@ export function IframePanel({ id, title, params }: PaneProps) {
     if (resolution.kind !== 'raw') return;
     const onWindowBlur = () => {
       if (document.hasFocus() && document.activeElement === iframeRef.current) {
+        if (isTool) markSessionTouched(id);
         actions.onClickPanel(id);
       }
     };
     window.addEventListener('blur', onWindowBlur);
     return () => window.removeEventListener('blur', onWindowBlur);
-  }, [id, resolution.kind, actions]);
+  }, [id, resolution.kind, actions, isTool]);
 
   // Register a focus handle so onClickPanel → enterTerminalMode can focus the
   // frame like any other surface, and exitTerminalMode can hand focus back.
@@ -331,7 +333,10 @@ export function IframePanel({ id, title, params }: PaneProps) {
       // with the frame, collapsing the offset to ~0. It's identity, so
       // getBoundingClientRect (overlay measurement) is unaffected.
       style={{ transform: 'translateZ(0)' }}
-      onMouseDown={() => actions.onClickPanel(id)}
+      onMouseDown={() => {
+        if (isTool) markSessionTouched(id);
+        actions.onClickPanel(id);
+      }}
     >
       {src ? (
         <iframe

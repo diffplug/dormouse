@@ -5,6 +5,7 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
+import * as terminalRegistry from '../../lib/terminal-registry';
 import type { AgentBrowserPopResult, AgentBrowserStreamStatusResult, PlatformAdapter } from '../../lib/platform/types';
 import type { PaneProps } from './pane-props';
 import { AgentBrowserPanel, HIDDEN_PARK_DELAY_MS } from './AgentBrowserPanel';
@@ -783,5 +784,22 @@ describe('the pop-out affordance on a tool (regression: PR #493 review)', () => 
     withPopOutCapableHost();
     await renderPanel(paneProps('ab-tool', { surfaceType: 'tool', session: 's', renderMode: 'ab-screencast' }));
     expect(getAgentBrowserScreenController('ab-tool')?.canPopOut).toBe(false);
+  });
+
+  it('marks the Session touched on browser-side input', async () => {
+    const markTouched = vi.spyOn(terminalRegistry, 'markSessionTouched').mockImplementation(() => {});
+    withPopOutCapableHost();
+    await renderPanel(paneProps('ab-tool-input', {
+      surfaceType: 'tool',
+      session: 's',
+      renderMode: 'ab-screencast',
+    }));
+
+    const panel = container.firstElementChild as HTMLElement;
+    await act(async () => {
+      panel.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    });
+
+    expect(markTouched).toHaveBeenCalledWith('ab-tool-input');
   });
 });
