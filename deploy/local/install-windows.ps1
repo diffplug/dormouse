@@ -267,6 +267,17 @@ function Protect-Path {
   (Get-Item -LiteralPath $Path -Force).SetAccessControl($sec)
 }
 
+# 32 bytes of the platform CSPRNG as 64 lowercase hex characters. Both secrets
+# this installer mints -- the setup password and the enrollment offer's token --
+# come from here, so there is one generator to audit rather than one per secret.
+# Never substitute Get-Random, which is not a CSPRNG.
+function New-RandomHex32 {
+  $bytes = New-Object byte[] 32
+  $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+  try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+  return (-join ($bytes | ForEach-Object { $_.ToString('x2') }))
+}
+
 # The tail of whatever a failed command actually said. pnpm reports its errors
 # on STDOUT -- ERR_PNPM_INVALID_DEPLOY_TARGET never touches stderr -- so quoting
 # only stderr produces a failure message with nothing in it.
@@ -546,6 +557,7 @@ if ($CERT_DOMAINS -and (",$CERT_DOMAINS," -like "*,$TS_DNS,*")) {
 
 $CONFIG_DIR = Join-Path $INSTALL_ROOT 'config'
 $ENV_FILE = Join-Path $CONFIG_DIR 'server.env'
+$ENROLL_OFFER_FILE = Join-Path $INSTALL_ROOT 'run\enroll-offer.json'
 $STATE_DIR = Join-Path $INSTALL_ROOT 'state'
 $RELEASES_DIR = Join-Path $INSTALL_ROOT 'releases'
 $BIN_DIR = Join-Path $INSTALL_ROOT 'bin'
@@ -804,10 +816,7 @@ try {
   Write-Step "Runtime configuration"
 
   if (-not (Test-Path -LiteralPath $ENV_FILE)) {
-    $bytes = New-Object byte[] 32
-    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
-    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
-    $SETUP_PASSWORD = -join ($bytes | ForEach-Object { $_.ToString('x2') })
+    $SETUP_PASSWORD = New-RandomHex32
     # 32 random bytes is 64 hex characters. The guard counts characters, so it
     # must be 64, not 32 -- a guard reading 32 would pass a regression to half
     # the entropy SECURITY.md claims.
@@ -851,6 +860,31 @@ try {
   if ((Get-EnvFileValue -Path $ENV_FILE -Key 'PORT') -ne "$LOOPBACK_PORT") {
     Die "config/server.env must set PORT=$LOOPBACK_PORT to match the Serve mapping."
   }
+
+  # The enrollment offer: this install's origin plus a one-time token that
+  # `POST /api/host/enroll` accepts in place of the setup password, so a Host on
+  # this machine can offer one-click enrollment (docs/specs/server.md ->
+  # Configuration -> DORMOUSE_ENROLL_TOKEN_FILE). Written on EVERY run, update
+  # included: the server unlinks it on redemption and refuses it after 7 days,
+  # so it is an offer rather than durable state. That is also why it lives in
+  # run\ -- config\ is preserved byte-for-byte across updates, and every file in
+  # state\ belongs to the server's own atomic writer.
+  New-Directory (Join-Path $INSTALL_ROOT 'run')
+  $enrollToken = New-RandomHex32
+  if ($enrollToken.Length -lt 64) {
+    Die "generated enroll token is implausibly short; refusing to write the enrollment offer."
+  }
+  # Create the file with an owner-only ACL BEFORE the token is written, so there
+  # is no window in which the secret sits under an inherited ACL.
+  [IO.File]::WriteAllText($ENROLL_OFFER_FILE, '')
+  Protect-Path -Path $ENROLL_OFFER_FILE
+  # The origin is the one this install answers on: an existing server.env that
+  # named a different one was refused above, so $ORIGIN is that file's value.
+  $mintedAt = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+  $offer = '{{"origin":"{0}","token":"{1}","mintedAt":"{2}"}}' -f $ORIGIN, $enrollToken, $mintedAt
+  [IO.File]::WriteAllText($ENROLL_OFFER_FILE, $offer + "`r`n")
+  Remove-Variable enrollToken
+  Write-Ok "minted run\enroll-offer.json (owner-only ACL) -- a one-time enrollment offer for a Host on this machine"
 
   # ------------------------------------------------------------- bin scripts ---
 
@@ -968,6 +1002,8 @@ while ($true) {
   # release is answering?" without walking the process table. Set here rather
   # than in server.env because it is derived from current.txt, which moves.
   $psi.EnvironmentVariables['DORMOUSE_RUNTIME_FILE'] = (Join-Path $Root 'run\server.json')
+  # The installer re-mints this on every run; the server spends it and unlinks it.
+  $psi.EnvironmentVariables['DORMOUSE_ENROLL_TOKEN_FILE'] = (Join-Path $Root 'run\enroll-offer.json')
   $psi.EnvironmentVariables['DORMOUSE_RELEASE_ID'] = $releaseId
 
   Write-ServiceLog "starting release $releaseId"
@@ -1564,6 +1600,18 @@ function Invoke-Verify {
       Fail "state files readable by another principal:"
       foreach ($l in $leaky) { Write-Host "      $l" }
     }
+  }
+
+  # The enrollment offer is single-use: absent means it was spent (or never
+  # minted by an older installer), which is healthy. Only its ACL is this
+  # command's business, and only while it is there.
+  $offerFile = Join-Path $Root 'run\enroll-offer.json'
+  if (Test-Path -LiteralPath $offerFile -PathType Leaf) {
+    $r = Test-OwnerOnly -Path $offerFile
+    if ($r.Ok) { Pass "run\enroll-offer.json grants only this user" }
+    else { Fail "run\enroll-offer.json $($r.Reason)" }
+  } else {
+    Note "no enrollment offer on disk (spent, or minted by an older installer)"
   }
 
   if ((Get-EnvValue 'DORMOUSE_BIND_HOST') -eq '127.0.0.1') {

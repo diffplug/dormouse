@@ -179,6 +179,9 @@ rights, and lays out:
       server/
       lib/dist-pocket/
       RELEASE
+  run/
+    enroll-offer.json
+    server.json
   state/
     account.json
     hosts.json
@@ -191,6 +194,11 @@ on Windows, and `~/.local/state/dormouse-server/logs` on Linux. The service
 definition is `~/Library/LaunchAgents/sh.dormouse.server.plist`, the Scheduled
 Task `\Dormouse Server`, or
 `~/.config/systemd/user/dormouse-server.service`.
+
+Every run also leaves a one-time enrollment offer at `run/enroll-offer.json` —
+this install's origin plus a token — which a Dormouse Host on the same machine
+reads to offer one-click enrollment instead of asking you to type the origin and
+the setup password into its form.
 
 No installer will **ever**: run `git pull`, fetch, or switch branches; install a
 scheduled updater; ask for elevation; install or re-authenticate Tailscale;
@@ -243,7 +251,9 @@ shape what the user should expect day to day:
   that one user on Windows. The Windows check also covers each file in `state/`
   individually, because Node's file modes are a no-op there. The Linux check
   also asserts the *owner* of all three, since a `0700` directory owned by
-  someone else satisfies the mode and inverts the property.
+  someone else satisfies the mode and inverts the property. `run/enroll-offer.json`
+  is held to the same standard while it is there; a spent offer is gone, and
+  `verify` says so rather than failing.
 - The current release pointer resolves to a release with `RELEASE` metadata, and
   neither the service definition nor the `run-server` wrapper refers to the
   source checkout. A retained previous release is checked too, but a first
@@ -717,6 +727,18 @@ is live rather than asserting either.
   so the secret never sits under the inherited `%LOCALAPPDATA%` ACL — and
   because Node's file modes are a no-op on Windows, `manage verify` walks the
   files in `state\` individually there, where the unix editions need not.
+- **The enrollment offer is re-minted on every run.** `run/enroll-offer.json`
+  carries this install's origin and a one-time token from the same CSPRNG as the
+  setup password, guarded at 64 hex characters the same way and restricted to
+  the installing user *before* the token is written (`chmod 0600` on an empty
+  file; `Protect-Path` on Windows). Updates re-mint it too, including ones that
+  preserved `server.env`: the server refuses an offer older than 7 days and
+  unlinks it on redemption (`docs/specs/server.md` → Configuration), so it lives
+  in `run/` — which `uninstall` already removes — not in byte-for-byte-preserved
+  `config/` or in `state/`, whose files belong to the server's own atomic
+  writer. `run-server` exports `DORMOUSE_ENROLL_TOKEN_FILE` beside
+  `DORMOUSE_RUNTIME_FILE`; `manage verify` checks its permissions when it is
+  present, and absent is the healthy spent state.
 - **Loopback only, and tailnet-only.** The install pins
   `DORMOUSE_BIND_HOST=127.0.0.1` and refuses to proceed without it
   (`docs/specs/server.md` → Configuration on why the listen interface is a

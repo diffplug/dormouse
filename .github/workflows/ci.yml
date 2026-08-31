@@ -100,13 +100,31 @@ jobs:
         run: |
           set -euo pipefail
           root="$(mktemp -d)/dormouse-server"
+          offer="$root/run/enroll-offer.json"
+          # The enrollment offer is minted on every run and spent by the server,
+          # so what has to hold is a FRESH token each time — including the
+          # update pass that preserves config/server.env. Prints the token so
+          # the two runs can be compared.
+          read_offer() {
+            [ "$(stat -c '%a' "$offer")" = "600" ] || { echo "::error::$offer is not mode 0600" >&2; exit 1; }
+            node -e '
+              const offer = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+              if (!/^[0-9a-f]{64}$/.test(offer.token)) throw new Error(`token is not 64 hex: ${offer.token}`);
+              if (offer.origin !== process.argv[2]) throw new Error(`origin is ${offer.origin}`);
+              if (Number.isNaN(Date.parse(offer.mintedAt))) throw new Error(`mintedAt is ${offer.mintedAt}`);
+              process.stdout.write(offer.token);
+            ' "$offer" "$DORMOUSE_INSTALL_ORIGIN"
+          }
           # Twice: the first is a first install, the second exercises the update
           # path — previous pointer, prune, and preserving config/server.env.
           DORMOUSE_INSTALL_ROOT="$root" ./deploy/local/install-linux.sh --yes
           before="$(sha256sum "$root/config/server.env" | cut -d' ' -f1)"
+          first_token="$(read_offer)"
           DORMOUSE_INSTALL_ROOT="$root" ./deploy/local/install-linux.sh --yes
           after="$(sha256sum "$root/config/server.env" | cut -d' ' -f1)"
+          second_token="$(read_offer)"
           [ "$before" = "$after" ] || { echo "::error::server.env was not preserved across an update"; exit 1; }
+          [ "$first_token" != "$second_token" ] || { echo "::error::the enrollment offer was not re-minted on the update"; exit 1; }
           [ -L "$root/previous" ] || { echo "::error::no previous release retained after an update"; exit 1; }
           bash -n "$root/bin/manage"
           bash -n "$root/bin/run-server"

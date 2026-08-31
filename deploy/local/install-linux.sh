@@ -461,6 +461,7 @@ fi
 
 CONFIG_DIR="$INSTALL_ROOT/config"
 ENV_FILE="$CONFIG_DIR/server.env"
+ENROLL_OFFER_FILE="$INSTALL_ROOT/run/enroll-offer.json"
 STATE_DIR="$INSTALL_ROOT/state"
 RELEASES_DIR="$INSTALL_ROOT/releases"
 BIN_DIR="$INSTALL_ROOT/bin"
@@ -638,12 +639,18 @@ ok "release $RELEASE_ID staged"
 
 step "Runtime configuration"
 
+# One named CSPRNG, not a fallback chain: the release's own Node was staged a
+# few lines ago and is the binary this service will run under, so it is always
+# present and needs no probing. `crypto.randomBytes` is OpenSSL's RAND_bytes.
+# Never substitute $RANDOM, a timestamp, or any non-CSPRNG source. Both secrets
+# this installer mints — the setup password and the enrollment offer's token —
+# come from here, so there is one generator to audit rather than one per secret.
+random_hex32() {
+  "$STAGE/runtime/node" -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))'
+}
+
 if [ ! -f "$ENV_FILE" ]; then
-  # One named CSPRNG, not a fallback chain: the release's own Node was staged a
-  # few lines ago and is the binary this service will run under, so it is always
-  # present and needs no probing. `crypto.randomBytes` is OpenSSL's RAND_bytes.
-  # Never substitute $RANDOM, a timestamp, or any non-CSPRNG source.
-  SETUP_PASSWORD="$("$STAGE/runtime/node" -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"
+  SETUP_PASSWORD="$(random_hex32)"
   # 32 random bytes is 64 hex characters. The guard counts characters, so it
   # must be 64 — checking for 32 would pass a regression to 16 bytes, which is
   # half the entropy SECURITY.md claims.
@@ -683,6 +690,29 @@ grep -q '^DORMOUSE_BIND_HOST=127\.0\.0\.1$' "$ENV_FILE" \
   || die "config/server.env must set DORMOUSE_BIND_HOST=127.0.0.1. Fix it before continuing — Tailscale access control is not a reason to expose the plaintext backend."
 grep -q "^PORT=$LOOPBACK_PORT$" "$ENV_FILE" \
   || die "config/server.env must set PORT=$LOOPBACK_PORT to match the Serve mapping."
+
+# The enrollment offer: this install's origin plus a one-time token that
+# `POST /api/host/enroll` accepts in place of the setup password, so a Host on
+# this machine can offer one-click enrollment (docs/specs/server.md →
+# Configuration → DORMOUSE_ENROLL_TOKEN_FILE). Written on EVERY run, update
+# included: the server unlinks it on redemption and refuses it after 7 days, so
+# it is an offer rather than durable state. That is also why it lives in `run/`
+# — `config/` is preserved byte-for-byte across updates, and every file in
+# `state/` belongs to the server's own atomic writer.
+mkdir -p "$INSTALL_ROOT/run"
+ENROLL_TOKEN="$(random_hex32)"
+[ ${#ENROLL_TOKEN} -ge 64 ] || die "generated enroll token is implausibly short; refusing to write the enrollment offer."
+# Create the file and lock it down BEFORE the token is written, the same order
+# server.env uses above.
+: > "$ENROLL_OFFER_FILE"
+chmod 0600 "$ENROLL_OFFER_FILE"
+# The origin is the one this install answers on: an existing server.env that
+# named a different one was refused above, so $ORIGIN is that file's value.
+cat > "$ENROLL_OFFER_FILE" <<OFFER_EOF
+{"origin":"$ORIGIN","token":"$ENROLL_TOKEN","mintedAt":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+OFFER_EOF
+unset ENROLL_TOKEN
+ok "minted run/enroll-offer.json (mode 0600) — a one-time enrollment offer for a Host on this machine"
 
 # ------------------------------------------------------------- bin scripts ---
 
@@ -730,6 +760,8 @@ ENTRY="$ROOT/current/server/dist/index.js"
 # is answering?" without reconstructing it from the process table. Set here
 # rather than in server.env because it is derived from `current`, which moves.
 export DORMOUSE_RUNTIME_FILE="$ROOT/run/server.json"
+# The installer re-mints this on every run; the server spends it and unlinks it.
+export DORMOUSE_ENROLL_TOKEN_FILE="$ROOT/run/enroll-offer.json"
 RELEASE_TARGET="$(readlink "$ROOT/current" 2>/dev/null || true)"
 [ -n "$RELEASE_TARGET" ] && export DORMOUSE_RELEASE_ID="${RELEASE_TARGET##*/}"
 
@@ -1091,6 +1123,14 @@ cmd_verify() {
   owner_only "$ROOT/config" 700 "config/"
   owner_only "$STATE_DIR" 700 "state/"
   owner_only "$ENV_FILE" 600 "config/server.env"
+  # The enrollment offer is single-use: absent means it was spent (or never
+  # minted by an older installer), which is healthy. Only its permissions are
+  # this command's business, and only while it is there.
+  if [ -f "$ROOT/run/enroll-offer.json" ]; then
+    owner_only "$ROOT/run/enroll-offer.json" 600 "run/enroll-offer.json"
+  else
+    note "no enrollment offer on disk (spent, or minted by an older installer)"
+  fi
 
   if grep -q '^DORMOUSE_BIND_HOST=127\.0\.0\.1$' "$ENV_FILE" 2>/dev/null; then
     pass "DORMOUSE_BIND_HOST=127.0.0.1"

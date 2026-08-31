@@ -89,14 +89,16 @@ export const RULES = [
     },
   },
   {
-    // Anchored on each guard's own comparison. `-ge 64` occurs exactly once in
-    // either shell installer, but a bare /64/ on Windows also matched two
-    // `exit 64` argument-parse lines and the guard's *explanatory comment* —
-    // so the prose about the rule survived deleting the rule.
+    // Anchored on each guard's own comparison, naming the secret it guards: the
+    // enrollment offer's token has a guard of the same shape, so a bare
+    // `-ge 64` would be satisfied by either and neither would be load-bearing.
+    // A bare /64/ on Windows was worse still — it also matched two `exit 64`
+    // argument-parse lines and the guard's *explanatory comment*, so the prose
+    // about the rule survived deleting the rule.
     rule: 'Credentials at rest — the entropy guard counts 64 hex characters, not 32',
     patterns: {
-      macOS: /-ge 64/,
-      Linux: /-ge 64/,
+      macOS: /\$\{#SETUP_PASSWORD\} -ge 64/,
+      Linux: /\$\{#SETUP_PASSWORD\} -ge 64/,
       Windows: /\$SETUP_PASSWORD\.Length -lt 64/,
     },
   },
@@ -147,6 +149,49 @@ export const RULES = [
       macOS: /chmod 0700 "\$CONFIG_DIR" "\$STATE_DIR"/,
       Linux: /chmod 0700 "\$CONFIG_DIR" "\$STATE_DIR"/,
       Windows: /Protect-Path -Path \$CONFIG_DIR -Directory/,
+    },
+  },
+  {
+    // The token is minted by the same named generator as the setup password —
+    // one per installer, which the CSPRNG rule above matches at its definition.
+    // Anchored on the mint itself: swapping in $RANDOM, a timestamp, or a
+    // reused password would rewrite exactly this line.
+    rule: 'Credentials at rest — the enroll token comes from the same CSPRNG as the setup password',
+    patterns: {
+      macOS: /ENROLL_TOKEN="\$\(random_hex32\)"/,
+      Linux: /ENROLL_TOKEN="\$\(random_hex32\)"/,
+      Windows: /\$enrollToken = New-RandomHex32/,
+    },
+  },
+  {
+    rule: "Credentials at rest — the enroll token's entropy guard counts 64 hex characters",
+    patterns: {
+      macOS: /\$\{#ENROLL_TOKEN\} -ge 64/,
+      Linux: /\$\{#ENROLL_TOKEN\} -ge 64/,
+      Windows: /\$enrollToken\.Length -lt 64/,
+    },
+  },
+  {
+    // Two adjacent lines, matched as one span, because the control is their
+    // ORDER: an empty file, restricted, and only then the token. Either line
+    // alone is satisfiable by a write that already happened.
+    rule: 'Credentials at rest — the offer file is restricted to the installing user before the token is written',
+    patterns: {
+      macOS: /: > "\$ENROLL_OFFER_FILE"\nchmod 0600 "\$ENROLL_OFFER_FILE"/,
+      Linux: /: > "\$ENROLL_OFFER_FILE"\nchmod 0600 "\$ENROLL_OFFER_FILE"/,
+      Windows: /\[IO\.File\]::WriteAllText\(\$ENROLL_OFFER_FILE, ''\)\n\s*Protect-Path -Path \$ENROLL_OFFER_FILE/,
+    },
+  },
+  {
+    // The whole path, not the basename: `run/` is the claim. `config/` is
+    // preserved byte-for-byte across updates and `state/` belongs to the
+    // server's own atomic writer, so an offer re-minted per run belongs in
+    // neither, and this is the one line that decides which.
+    rule: 'Credentials at rest — the enrollment offer is written under run/, never config/ or state/',
+    patterns: {
+      macOS: /ENROLL_OFFER_FILE="\$INSTALL_ROOT\/run\/enroll-offer\.json"/,
+      Linux: /ENROLL_OFFER_FILE="\$INSTALL_ROOT\/run\/enroll-offer\.json"/,
+      Windows: /\$ENROLL_OFFER_FILE = Join-Path \$INSTALL_ROOT 'run\\enroll-offer\.json'/,
     },
   },
   {
