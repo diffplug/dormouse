@@ -25,6 +25,7 @@ import {
   type HelloResult,
   type HostAclRecord,
   type HostsResponse,
+  type PairStatusQuery,
   type PairingRequest,
   type PushChallengeResponse,
   type PushConfigResponse,
@@ -156,13 +157,18 @@ export class PocketClient {
   #onHostGone: (() => void) | null = null;
 
   /**
-   * The single in-flight handshake waiter per frame type
-   * (`pair-result`/`challenge`/`decision`). The handshake awaits exactly one of
-   * each in strict sequence and the App's single-flight guard forbids overlap,
-   * so at most one waiter per type is ever pending — {@link #expect} throws if a
-   * second is registered rather than silently queueing it.
+   * In-flight frame waiters, keyed by what identifies the answer.
+   *
+   * For the handshake (`pair-result`/`challenge`/`decision`) that is the frame
+   * type alone: it awaits exactly one of each in strict sequence and the App's
+   * single-flight guard forbids overlap, so at most one waiter per type is ever
+   * pending — {@link #expect} throws if a second is registered rather than
+   * silently queueing it. Pair-status answers key on the host as well, since
+   * the Hosts view asks every online Host at once.
    */
   readonly #waiters = new Map<string, Waiter>();
+  /** In-flight advisory pair-status asks, keyed by hostId, so overlapping callers join one. */
+  readonly #pairStatusAsks = new Map<string, Promise<boolean>>();
   /** In-flight remote-api requests, keyed by `requestId`. */
   readonly #pending = new Map<string, PendingRequest>();
   /** Live event subscriptions, keyed by `subId`. */
@@ -400,6 +406,82 @@ export class PocketClient {
     return result;
   }
 
+  /**
+   * Ask a connected Host whether it already holds an ACL record for this
+   * Client, and reconcile the local marker with the answer.
+   *
+   * The marker alone is a guess — a Host ACL reset, a hand-edited record, or a
+   * pairing approved from a different browser profile all leave it wrong — so
+   * the Host's answer wins and the cache converges on it. Advisory only: it
+   * decides which button the row offers, never whether a connection is allowed
+   * (`docs/specs/remote-security-model.md`). Rejects when the Host cannot be
+   * asked, which leaves the marker untouched as the fallback.
+   *
+   * Overlapping asks about one Host join the in-flight query — a re-rendered
+   * Hosts view (StrictMode's doubled effects, a Refresh mid-sweep) must not
+   * trip the single-waiter guard and lose the row's answer.
+   */
+  queryPaired(hostId: string): Promise<boolean> {
+    const inflight = this.#pairStatusAsks.get(hostId);
+    if (inflight) return inflight;
+    const ask = this.#queryPairedNow(hostId).finally(() => {
+      this.#pairStatusAsks.delete(hostId);
+    });
+    this.#pairStatusAsks.set(hostId, ask);
+    return ask;
+  }
+
+  async #queryPairedNow(hostId: string): Promise<boolean> {
+    const { credentialId } = this.#passkeyForRequest();
+    const device = await this.#getDeviceKey();
+    // Ask about every credential this browser holds a public key for — the
+    // same set `connect` scopes its assertion to — signed-in first as the
+    // near-certain hit. Asking only the signed-in one would offer Pair on a
+    // row whose Connect would succeed through an older credential.
+    const credentialIds = [
+      credentialId,
+      ...this.#storage.knownCredentialIds().filter((id) => id !== credentialId),
+    ];
+    let paired = false;
+    for (const passkeyCredentialId of credentialIds) {
+      const frame = await this.#askPairStatus(hostId, {
+        passkeyCredentialId,
+        devicePublicKey: device.devicePublicKey,
+      });
+      if (frame.paired) {
+        paired = true;
+        break;
+      }
+    }
+    // Write-on-change only: the common answer confirms the marker, and
+    // localStorage writes are synchronous.
+    if (paired !== this.#storage.isPaired(hostId)) {
+      if (paired) this.#storage.markPaired(hostId);
+      else this.#storage.unmarkPaired(hostId);
+    }
+    return paired;
+  }
+
+  async #askPairStatus(
+    hostId: string,
+    query: PairStatusQuery,
+  ): Promise<Extract<ServerToClientFrame, { t: 'pair-status-result' }>> {
+    const key = pairStatusKey(hostId);
+    const awaited = this.#expect(key, PAIR_STATUS_TIMEOUT_MS);
+    try {
+      this.#send({ t: 'pair-status', hostId, query });
+    } catch (error) {
+      // The frame never left, so nothing will settle the waiter; reclaim it
+      // (and its deadline timer) rather than leaking an unhandled rejection
+      // when the deadline fires.
+      this.#waiters.get(key)?.reject(error instanceof Error ? error : new Error(String(error)));
+      this.#waiters.delete(key);
+      void awaited.catch(() => undefined);
+      throw error;
+    }
+    return (await awaited) as Extract<ServerToClientFrame, { t: 'pair-status-result' }>;
+  }
+
   async #sendPair(hostId: string, request: PairingRequest): Promise<PairResult> {
     const awaited = this.#expect('pair-result');
     this.#send({ t: 'pair', hostId, request });
@@ -593,10 +675,31 @@ export class PocketClient {
     this.#ws.send(JSON.stringify(frame));
   }
 
-  #expect(type: 'pair-result' | 'challenge' | 'decision'): Promise<ServerToClientFrame> {
-    if (this.#waiters.has(type)) throw new Error(`already awaiting a '${type}' frame`);
+  #expect(key: string, timeoutMs?: number): Promise<ServerToClientFrame> {
+    if (this.#waiters.has(key)) throw new Error(`already awaiting a '${key}' frame`);
     return new Promise((resolve, reject) => {
-      this.#waiters.set(type, { resolve, reject });
+      if (timeoutMs === undefined) {
+        this.#waiters.set(key, { resolve, reject });
+        return;
+      }
+      // A Host that predates the frame silently drops it, so an undeadlined
+      // waiter would strand this key (and throw on the next ask) until the
+      // socket died. The deadline reclaims the key; #settle's drop-unawaited
+      // guard absorbs an answer that arrives after it.
+      const timer = setTimeout(() => {
+        this.#waiters.delete(key);
+        reject(new Error(`timed out awaiting a '${key}' frame`));
+      }, timeoutMs);
+      this.#waiters.set(key, {
+        resolve: (frame) => {
+          clearTimeout(timer);
+          resolve(frame);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
     });
   }
 
@@ -611,14 +714,12 @@ export class PocketClient {
     switch (frame.t) {
       case 'pair-result':
       case 'challenge':
-      case 'decision': {
-        const waiter = this.#waiters.get(frame.t);
-        if (waiter) {
-          this.#waiters.delete(frame.t);
-          waiter.resolve(frame);
-        }
+      case 'decision':
+        this.#settle(frame.t, frame);
         return;
-      }
+      case 'pair-status-result':
+        this.#settle(pairStatusKey(frame.hostId), frame);
+        return;
       case 'msg':
         this.#onMsg(frame.data);
         return;
@@ -633,6 +734,14 @@ export class PocketClient {
       default:
         return;
     }
+  }
+
+  /** Hand a frame to whoever is awaiting `key`; an unawaited answer is dropped. */
+  #settle(key: string, frame: ServerToClientFrame): void {
+    const waiter = this.#waiters.get(key);
+    if (!waiter) return;
+    this.#waiters.delete(key);
+    waiter.resolve(frame);
   }
 
   #onMsg(data: unknown): void {
@@ -754,6 +863,18 @@ export function hasRecoverablePairingFailure(
 ): boolean {
   return failures?.some((failure) => RECOVERABLE_PAIRING_FAILURES.has(failure)) ?? false;
 }
+
+/** Waiter key for a pair-status answer; several hosts may be in flight at once. */
+function pairStatusKey(hostId: string): string {
+  return `pair-status:${hostId}`;
+}
+
+/**
+ * Deadline on the advisory pair-status ask. Generous for a tailnet round trip,
+ * short enough that one unanswering Host cannot starve the serial Hosts-view
+ * sweep for the whole visit.
+ */
+const PAIR_STATUS_TIMEOUT_MS = 5_000;
 
 function uuid(): string {
   return globalThis.crypto.randomUUID();

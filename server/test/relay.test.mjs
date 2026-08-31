@@ -59,6 +59,86 @@ test('pair round-trips client→host with a stamped clientId, pair-result routes
   }
 });
 
+test('pair-status round-trips and answers without disturbing the client-host binding', async () => {
+  const { app, server, close } = await relay();
+  try {
+    const a = await connectHost(app, server, { label: 'Laptop A' });
+    const b = await connectHost(app, server, { label: 'Laptop B' });
+    const { socket: clientWs } = await connectClient(app, server);
+
+    // An established session with A.
+    clientWs.send({ t: 'connect', hostId: a.host.hostId });
+    const connFrame = await a.socket.take();
+    a.socket.send({ t: 'decision', clientId: connFrame.clientId, allowed: true });
+    assert.deepEqual(await clientWs.take(), { t: 'decision', allowed: true });
+
+    // Asking B a display question must not cost that session: every other
+    // client frame naming a host re-binds, and re-binding sends A client-gone.
+    const query = { passkeyCredentialId: 'cred-1', devicePublicKey: 'device-1' };
+    clientWs.send({ t: 'pair-status', hostId: b.host.hostId, query });
+    const asked = await b.socket.take();
+    assert.equal(asked.t, 'pair-status');
+    assert.equal(typeof asked.clientId, 'string');
+    assert.deepEqual(asked.query, query);
+    assert.ok(await a.socket.quiet(), 'the bound host must not be told client-gone');
+
+    b.socket.send({ t: 'pair-status-result', clientId: asked.clientId, paired: true });
+    const answer = await clientWs.take();
+    assert.deepEqual(answer, { t: 'pair-status-result', hostId: b.host.hostId, paired: true });
+    assert.equal(answer.clientId, undefined); // the clientId secret still never leaks
+
+    // A's session is intact.
+    clientWs.send({ t: 'msg', data: { up: 1 } });
+    const up = await a.socket.take();
+    assert.equal(up.t, 'msg');
+    assert.deepEqual(up.data, { up: 1 });
+  } finally {
+    await close();
+  }
+});
+
+test('a pair-status answer nobody asked for is dropped, and each query answers once', async () => {
+  const { app, server, close } = await relay();
+  try {
+    const { host, socket: hostWs } = await connectHost(app, server);
+    const { socket: clientWs } = await connectClient(app, server);
+
+    // Unasked: the host is bound to this client (a connect), which is exactly
+    // the state where routing on the binding alone would let it through.
+    clientWs.send({ t: 'connect', hostId: host.hostId });
+    const connFrame = await hostWs.take();
+    hostWs.send({ t: 'pair-status-result', clientId: connFrame.clientId, paired: true });
+    assert.ok(await clientWs.quiet(), 'an unasked pair-status answer must not reach the client');
+
+    // Asked once, answered twice: the second is as unasked as the first.
+    const query = { passkeyCredentialId: 'cred-1', devicePublicKey: 'device-1' };
+    clientWs.send({ t: 'pair-status', hostId: host.hostId, query });
+    await hostWs.take();
+    hostWs.send({ t: 'pair-status-result', clientId: connFrame.clientId, paired: false });
+    assert.equal((await clientWs.take()).t, 'pair-status-result');
+    hostWs.send({ t: 'pair-status-result', clientId: connFrame.clientId, paired: true });
+    assert.ok(await clientWs.quiet(), 'a query is single-use');
+  } finally {
+    await close();
+  }
+});
+
+test('a malformed pair-status query is refused before forwarding', async () => {
+  const { app, server, close } = await relay();
+  try {
+    const { host, socket: hostWs } = await connectHost(app, server);
+    const { socket: clientWs } = await connectClient(app, server);
+
+    clientWs.send({ t: 'pair-status', hostId: host.hostId, query: { devicePublicKey: 42 } });
+    const err = await clientWs.take();
+    assert.equal(err.t, 'error');
+    assert.match(err.error, /malformed pair-status query/);
+    assert.ok(await hostWs.quiet(), 'the host never saw the malformed query');
+  } finally {
+    await close();
+  }
+});
+
 test('connect round-trips and challenge routes back with the originating hostId', async () => {
   const { app, server, close } = await relay();
   try {

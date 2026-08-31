@@ -361,6 +361,73 @@ describe('RemoteHost frame handling', () => {
     expect(savedRecords).toEqual([]);
   });
 
+  it('answers pair-status from the ACL without minting client state', () => {
+    const host = makeHost();
+    socket.receive({
+      t: 'pair-status',
+      clientId: 'c1',
+      query: { passkeyCredentialId: 'cred-1', devicePublicKey: 'device-1' },
+    });
+
+    expect(socket.frames('pair-status-result')[0]).toMatchObject({
+      clientId: 'c1',
+      paired: false,
+    });
+    // Inert by construction: no approval surfaced, no ticket minted, and
+    // nothing tracked under the relay-chosen clientId that asking could grow.
+    expect(approvals).toHaveLength(0);
+    expect(host.trackedClientCount).toBe(0);
+  });
+
+  it('answers pair-status true only for a pair on one active record', () => {
+    makeHost();
+    socket.receive({
+      t: 'pair',
+      clientId: 'c1',
+      request: {
+        accountId: 'owner',
+        passkeyCredentialId: 'cred-1',
+        passkeyPublicKeyHash: 'hash-1',
+        devicePublicKey: 'device-1',
+        requestedLabel: 'iPhone Safari',
+      } satisfies PairingRequest,
+    });
+    approvals[0]!.approve();
+
+    socket.sent.length = 0;
+    socket.receive({
+      t: 'pair-status',
+      clientId: 'c1',
+      query: { passkeyCredentialId: 'cred-1', devicePublicKey: 'device-1' },
+    });
+    expect(socket.frames('pair-status-result')[0]!.paired).toBe(true);
+
+    // A record authorizes the PAIR, so the same passkey on a second browser is
+    // not paired — the display answer has to agree with `authorizeConnection`
+    // on that or it sends the user to a Connect the Host will deny.
+    socket.sent.length = 0;
+    socket.receive({
+      t: 'pair-status',
+      clientId: 'c1',
+      query: { passkeyCredentialId: 'cred-1', devicePublicKey: 'device-2' },
+    });
+    expect(socket.frames('pair-status-result')[0]!.paired).toBe(false);
+  });
+
+  it('answers a malformed pair-status query instead of leaving the client waiting', () => {
+    makeHost();
+    // The client awaits exactly one frame per query, so silence strands that
+    // wait until the socket dies; `false` only ever offers Pair, whose approval
+    // is local anyway.
+    socket.receive({ t: 'pair-status', clientId: 'c1', query: { devicePublicKey: 42 } });
+
+    expect(socket.frames('pair-status-result')[0]).toMatchObject({
+      clientId: 'c1',
+      paired: false,
+    });
+    expect(savedRecords).toHaveLength(0);
+  });
+
   it('connect issues a challenge frame', () => {
     makeHost();
     socket.receive({ t: 'connect', clientId: 'c1' });

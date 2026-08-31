@@ -8,6 +8,7 @@ import { randomBytes } from 'node:crypto';
 import {
   WS_CLOSE_HOST_REPLACED,
   WS_CLOSE_HOST_REPLACED_REASON,
+  isPairStatusQuery,
   toBase64Url,
 } from 'server-lib-common';
 import type {
@@ -45,6 +46,15 @@ export interface ClientConn {
   hostId: string | null;
   /** Whether `msg` frames may flow — set true only by an allowed Host decision. */
   established: boolean;
+  /**
+   * Hosts with an advisory `pair-status` query outstanding. Kept apart from
+   * `hostId` because that binding is what a query must not disturb, and needed
+   * so a `pair-status-result` is routed only to a client that asked this Host.
+   * Bounded by the number of connected Hosts: a query is forwarded only to one
+   * that is online, and its answer — or that Host's disconnect or replacement
+   * (`#dropClientsOf`) — removes the entry.
+   */
+  readonly pairStatusQueries: Set<string>;
 }
 
 export class RelayHub {
@@ -104,6 +114,19 @@ export class RelayHub {
     // there is nothing to route (and no session to establish).
     const client = this.#clients.get(frame.clientId);
     if (!client) return;
+    // The one host reply routed outside the client↔host binding, because the
+    // query that provoked it is outside it too. Gated on the client having
+    // actually asked THIS host, and single-use, so a host cannot volunteer
+    // answers about a client it was never asked by.
+    if (frame.t === 'pair-status-result') {
+      if (!client.pairStatusQueries.delete(host.hostId)) return;
+      this.#toClient(client, {
+        t: 'pair-status-result',
+        hostId: host.hostId,
+        paired: frame.paired === true,
+      });
+      return;
+    }
     // Host replies are only meaningful while the client is still bound to that
     // host. A client socket may leave host A for host B before A answers; late
     // handshake replies from A must not reach the active client or re-establish
@@ -173,6 +196,10 @@ export class RelayHub {
    */
   #dropClientsOf(hostId: string): void {
     for (const client of this.#clients.values()) {
+      // A query the departed process received can never be answered, and a
+      // replacement Host must not be able to consume the token for an ask it
+      // never saw — the entry goes with the Host.
+      client.pairStatusQueries.delete(hostId);
       if (client.hostId === hostId) {
         this.#toClient(client, { t: 'host-gone' });
         client.hostId = null;
@@ -186,7 +213,14 @@ export class RelayHub {
   /** Register a freshly-opened Client socket with a fresh secret `clientId`. */
   registerClient(socket: RelaySocket, session: PresenceSession): ClientConn {
     const clientId = toBase64Url(randomBytes(16));
-    const conn: ClientConn = { clientId, socket, session, hostId: null, established: false };
+    const conn: ClientConn = {
+      clientId,
+      socket,
+      session,
+      hostId: null,
+      established: false,
+      pairStatusQueries: new Set(),
+    };
     this.#clients.set(clientId, conn);
     return conn;
   }
@@ -204,18 +238,38 @@ export class RelayHub {
       return;
     }
     switch (frame.t) {
+      case 'pair-status': {
+        // Deliberately handled before the binding group below: this is a
+        // question about the ACL, and asking it must not re-bind the client or
+        // drop an established session, which every frame in that group does.
+        // The session token on the socket is the whole authorization — the
+        // answer is advisory display truth and grants nothing.
+        const host = this.#resolveHost(client, frame.hostId);
+        if (!host) return;
+        // A courtesy guard that keeps a bad frame off the wire; the Host runs
+        // the same one on arrival because it does not trust the relay.
+        if (!isPairStatusQuery(frame.query)) {
+          this.#toClient(client, { t: 'error', error: 'malformed pair-status query' });
+          return;
+        }
+        client.pairStatusQueries.add(frame.hostId);
+        // Forward only the two fields the guard proved, never the client's own
+        // object — no unvalidated extra properties ride into the Host process.
+        this.#toHost(host, {
+          t: 'pair-status',
+          clientId: client.clientId,
+          query: {
+            passkeyCredentialId: frame.query.passkeyCredentialId,
+            devicePublicKey: frame.query.devicePublicKey,
+          },
+        });
+        return;
+      }
       case 'pair':
       case 'connect':
       case 'connect2': {
-        if (typeof frame.hostId !== 'string') {
-          this.#toClient(client, { t: 'error', error: 'missing hostId' });
-          return;
-        }
-        const host = this.#hosts.get(frame.hostId);
-        if (!host) {
-          this.#toClient(client, { t: 'error', error: `host ${frame.hostId} is offline` });
-          return;
-        }
+        const host = this.#resolveHost(client, frame.hostId);
+        if (!host) return;
         // Binding to a (new) host, or re-attempting `connect`, drops any prior
         // established session — a client holds at most one at a time.
         if (client.hostId !== null && client.hostId !== frame.hostId) {
@@ -285,6 +339,24 @@ export class RelayHub {
       const host = this.#hosts.get(client.hostId);
       if (host) this.#toHost(host, { t: 'client-gone', clientId: client.clientId });
     }
+  }
+
+  /**
+   * Resolve the Host a client frame addresses, answering the two refusals
+   * (missing hostId, offline) itself. Resolution only — binding the client to
+   * the Host stays with the `pair`/`connect`/`connect2` group.
+   */
+  #resolveHost(client: ClientConn, hostId: unknown): HostConn | null {
+    if (typeof hostId !== 'string') {
+      this.#toClient(client, { t: 'error', error: 'missing hostId' });
+      return null;
+    }
+    const host = this.#hosts.get(hostId);
+    if (!host) {
+      this.#toClient(client, { t: 'error', error: `host ${hostId} is offline` });
+      return null;
+    }
+    return host;
   }
 
   // --- Sending --------------------------------------------------------------

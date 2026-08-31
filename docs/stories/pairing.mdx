@@ -192,8 +192,15 @@ things you cannot see happen at the same time:
 <Canvas of={HostsView.MixedList} />
 
 One row per enrolled Host. A row is offline when no Dormouse instance currently
-holds that server's relay slot. **Pair** appears only on an online, unpaired
-Host — everything else is a Connect away.
+holds that server's relay slot.
+
+Each row offers exactly one action, and which one is not a guess. Pocket asks
+every online Host whether its ACL already holds a record for this browser, so
+**Pair** appears where pairing is the actual next step and **Connect** only
+where it can succeed. The phone does keep a local note of what it has paired,
+but that note is the fallback for a Host that cannot be asked — the laptop is
+the one that knows, and its answer wins. Asking is advisory and nothing more:
+it moves a button, never a decision.
 
 ---
 
@@ -280,6 +287,13 @@ what the Server claims to have already checked.
 
 One host challenge feeds both signatures, so the whole thing costs the user a
 single Face ID prompt.
+
+A successful pairing continues straight into all of this, so the approval you
+just gave on the laptop lands the phone in a terminal rather than back on the
+Hosts list. Later sessions start here instead, at that row's **Connect** — and
+if the laptop has forgotten this browser in the meantime (an ACL reset, a
+hand-edited record), the denial says so and the row goes back to offering
+**Pair again**.
 
 Then the payoff — the same mobile terminal UI, driven by the laptop's real
 sessions:

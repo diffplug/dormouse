@@ -16,6 +16,7 @@ import {
   MAX_PENDING_PAIRINGS,
   boundedPairingAccount,
   boundedPairingLabel,
+  isPairStatusQuery,
   isPairingRequest,
   type ConnectionDecision,
   type ConnectionPolicy,
@@ -364,6 +365,8 @@ export class RemoteHost {
     switch (frame.t) {
       case 'pair':
         return this.#onPair(clientId, (frame as { request?: unknown }).request);
+      case 'pair-status':
+        return this.#onPairStatus(clientId, (frame as { query?: unknown }).query);
       case 'connect':
         return this.#onConnect(clientId);
       case 'connect2':
@@ -421,6 +424,24 @@ export class RemoteHost {
     this.#evictOldestPairingIfFull();
     this.#clientState(clientId).pending = pending;
     this.#requestApproval(pending);
+  }
+
+  /**
+   * Answer whether a (passkey credential, device key) pair is on the ACL —
+   * advisory display truth for Pocket's Pair/Connect row, nothing more.
+   *
+   * Deliberately inert: it reads the ACL, allocates no `#clients` entry, mints
+   * no ticket, burns no challenge, and cannot move a client toward
+   * `established`. `authorizeConnection` remains the only thing that decides
+   * access and never consults this answer.
+   */
+  #onPairStatus(clientId: string, query: unknown): void {
+    // A malformed query is answered rather than dropped. The client is awaiting
+    // one frame per query, so silence strands that wait until the socket dies —
+    // and `false` is the safe lie: it offers Pair, whose approval is local, in
+    // place of a Connect the Host would have allowed.
+    const paired = isPairStatusQuery(query) && this.#acl.findActive(query) !== undefined;
+    this.#send({ t: 'pair-status-result', clientId, paired });
   }
 
   /** The local approval — the ONLY path that writes the ACL. */

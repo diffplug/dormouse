@@ -7,7 +7,7 @@
 
 import type { HostAclRecord } from '../security/acl.js';
 import type { ConnectionFailure, ConnectionRequest } from '../security/connection.js';
-import type { PairingRequest } from '../security/pairing.js';
+import type { PairStatusQuery, PairingRequest } from '../security/pairing.js';
 import type { PasskeyAssertion } from '../security/passkey.js';
 
 // ---------------------------------------------------------------------------
@@ -286,9 +286,16 @@ export interface PushSendResponse {
 // `clientId` is assigned by the server per client socket; the client itself
 // never sees or sends it.
 
-/** Client → server. `msg` is only forwarded once the session is authorized. */
+/**
+ * Client → server. `msg` is only forwarded once the session is authorized.
+ *
+ * `pair-status` is the one frame that does **not** bind the client to the host
+ * it names: it asks a question about the ACL, and asking must not tear down a
+ * session the client currently holds elsewhere (see server.md "Relay").
+ */
 export type ClientFrame =
   | { t: 'pair'; hostId: string; request: PairingRequest }
+  | { t: 'pair-status'; hostId: string; query: PairStatusQuery }
   | { t: 'connect'; hostId: string }
   | { t: 'connect2'; hostId: string; request: ConnectionRequest }
   | { t: 'msg'; data: unknown };
@@ -296,6 +303,7 @@ export type ClientFrame =
 /** Server → client. */
 export type ServerToClientFrame =
   | { t: 'pair-result'; approved: boolean; record?: HostAclRecord; error?: string }
+  | { t: 'pair-status-result'; hostId: string; paired: boolean }
   | { t: 'challenge'; hostId: string; challenge: string; expiresAt: number }
   | { t: 'decision'; allowed: boolean; failures?: readonly ConnectionFailure[] }
   | { t: 'msg'; data: unknown }
@@ -305,14 +313,20 @@ export type ServerToClientFrame =
 /** Server → host. */
 export type ServerToHostFrame =
   | { t: 'pair'; clientId: string; request: PairingRequest }
+  | { t: 'pair-status'; clientId: string; query: PairStatusQuery }
   | { t: 'connect'; clientId: string }
   | { t: 'connect2'; clientId: string; request: ConnectionRequest }
   | { t: 'msg'; clientId: string; data: unknown }
   | { t: 'client-gone'; clientId: string };
 
-/** Host → server. */
+/**
+ * Host → server. `pair-status-result` carries no hostId — the relay knows which
+ * Host the socket belongs to and stamps it on the way out, exactly as it does
+ * for `challenge`.
+ */
 export type HostFrame =
   | { t: 'pair-result'; clientId: string; approved: boolean; record?: HostAclRecord; error?: string }
+  | { t: 'pair-status-result'; clientId: string; paired: boolean }
   | { t: 'challenge'; clientId: string; challenge: string; expiresAt: number }
   | { t: 'decision'; clientId: string; allowed: boolean; failures?: readonly ConnectionFailure[] }
   | { t: 'msg'; clientId: string; data: unknown };

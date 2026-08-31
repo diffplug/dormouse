@@ -8,7 +8,7 @@
  * exercised here — `getOrCreateDeviceKey` is tested through an injected store.)
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   PAIRING_STALE_PRESENCE_ERROR,
   SELFHOST_ACCOUNT_ID,
@@ -429,6 +429,135 @@ describe('pair', () => {
     for (const route of ['/api/reauth/begin', '/api/reauth/finish']) {
       const call = calls.find((c) => c.url.endsWith(route))!;
       expect(call.headers.authorization).toBe('Bearer tok-abc');
+    }
+  });
+});
+
+describe('queryPaired', () => {
+  it('asks the Host with this Client identity and records a yes', async () => {
+    const { client, socket, device } = await signedIn();
+    expect(client.isPaired('h1')).toBe(false);
+
+    const asking = client.queryPaired('h1');
+    const frame = await nextSent(socket, (f) => f.t === 'pair-status');
+    expect(frame.hostId).toBe('h1');
+    const query = frame.query as Record<string, unknown>;
+    // The ACL's lookup key, and nothing else: no assertion, no signature.
+    expect(query.passkeyCredentialId).toBe(CREDENTIAL_ID);
+    expect(query.devicePublicKey).toBe((await device()).devicePublicKey);
+
+    socket.receive({ t: 'pair-status-result', hostId: 'h1', paired: true });
+    expect(await asking).toBe(true);
+    expect(client.isPaired('h1')).toBe(true);
+  });
+
+  /**
+   * The marker is a cache of a past approval, and the Host can lose the record
+   * behind it — an ACL reset, a hand-edited file. Converging on the Host's
+   * answer is what stops the row offering a Connect that can only fail.
+   */
+  it('drops a marker the Host no longer backs', async () => {
+    const { client, socket } = await signedIn();
+    await pairApproved(client, socket);
+    expect(client.isPaired('h1')).toBe(true);
+
+    const asking = client.queryPaired('h1');
+    await nextSent(socket, (f) => f.t === 'pair-status');
+    socket.receive({ t: 'pair-status-result', hostId: 'h1', paired: false });
+
+    expect(await asking).toBe(false);
+    expect(client.isPaired('h1')).toBe(false);
+  });
+
+  it('settles each answer against the host it asked, whatever the order', async () => {
+    const { client, socket } = await signedIn();
+    const first = client.queryPaired('h1');
+    const second = client.queryPaired('h2');
+    await nextSent(socket, (f) => f.t === 'pair-status' && f.hostId === 'h2');
+
+    // Answered out of order: keyed on the frame type alone, h2's answer would
+    // settle h1's question and mark the wrong Host paired.
+    socket.receive({ t: 'pair-status-result', hostId: 'h2', paired: true });
+    socket.receive({ t: 'pair-status-result', hostId: 'h1', paired: false });
+
+    expect(await first).toBe(false);
+    expect(await second).toBe(true);
+    expect(client.isPaired('h1')).toBe(false);
+    expect(client.isPaired('h2')).toBe(true);
+  });
+
+  it('joins overlapping asks about one Host into a single query', async () => {
+    const { client, socket } = await signedIn();
+    const first = client.queryPaired('h1');
+    const second = client.queryPaired('h1');
+    await nextSent(socket, (f) => f.t === 'pair-status');
+    socket.receive({ t: 'pair-status-result', hostId: 'h1', paired: true });
+    expect(await first).toBe(true);
+    expect(await second).toBe(true);
+    // One frame for both callers: a joined ask must not re-send (the waiter
+    // key is single-flight) or double-consume the relay's routing token.
+    expect(socket.sent.filter((f) => f.t === 'pair-status')).toHaveLength(1);
+  });
+
+  /**
+   * `connect` scopes its assertion to every credential this browser holds a
+   * public key for, so the advisory ask covers the same set — asking only the
+   * signed-in one would offer Pair on a row whose Connect would succeed
+   * through an older credential.
+   */
+  it('asks about every known credential before concluding unpaired', async () => {
+    const storage = memoryStorage();
+    storage.setPasskeyPublicKey('cred-old', 'pk-old');
+    const { client, socket } = await signedIn({ storage });
+
+    const asking = client.queryPaired('h1');
+    const first = await nextSent(socket, (f) => f.t === 'pair-status');
+    expect((first.query as Record<string, unknown>).passkeyCredentialId).toBe(CREDENTIAL_ID);
+    socket.receive({ t: 'pair-status-result', hostId: 'h1', paired: false });
+
+    await nextSent(
+      socket,
+      (f) =>
+        f.t === 'pair-status' &&
+        (f.query as Record<string, unknown>).passkeyCredentialId === 'cred-old',
+    );
+    socket.receive({ t: 'pair-status-result', hostId: 'h1', paired: true });
+
+    expect(await asking).toBe(true);
+    expect(client.isPaired('h1')).toBe(true);
+  });
+
+  /**
+   * A Host that predates the frame silently drops it, so the ask carries a
+   * deadline: the waiter key must come back (a stranded key would throw
+   * "already awaiting" on the next visit's ask) and the marker must survive as
+   * the fallback the answer never overrode.
+   */
+  it('times out an unanswered ask, freeing the key and keeping the marker', async () => {
+    // shouldAdvanceTime keeps nextSent's real 2ms polling alive while the 5s
+    // deadline is jumped explicitly.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { client, socket } = await signedIn();
+      await pairApproved(client, socket);
+
+      const asking = client.queryPaired('h1');
+      await nextSent(socket, (f) => f.t === 'pair-status');
+      vi.advanceTimersByTime(5_000);
+      await expect(asking).rejects.toThrow(/timed out/);
+      expect(client.isPaired('h1')).toBe(true);
+
+      // The key is free again, and an answer arriving while nothing awaits it
+      // is dropped. (A late answer landing after a retry re-registers the key
+      // WOULD settle the retry — the ask carries no per-attempt identity; see
+      // the error-correlation follow-up.)
+      socket.receive({ t: 'pair-status-result', hostId: 'h1', paired: false });
+      const retry = client.queryPaired('h1');
+      await nextSent(socket, (f) => f.t === 'pair-status');
+      socket.receive({ t: 'pair-status-result', hostId: 'h1', paired: true });
+      expect(await retry).toBe(true);
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

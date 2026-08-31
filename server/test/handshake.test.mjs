@@ -224,6 +224,37 @@ test('connect → challenge → connect2 allowed → hello round-trips, unknown 
   }
 });
 
+test('pair-status reports the real ACL, and reporting it authorizes nothing', async () => {
+  const { app, server, host, fakeHost, close } = await boot();
+  try {
+    const p = await phone(app, server);
+    const query = {
+      passkeyCredentialId: p.authenticator.credentialId,
+      devicePublicKey: p.deviceKey.devicePublicKey,
+    };
+    const expect = (paired) => ({ t: 'pair-status-result', hostId: host.hostId, paired });
+
+    p.socket.send({ t: 'pair-status', hostId: host.hostId, query });
+    assert.deepEqual(await p.socket.take(), expect(false));
+
+    assert.equal((await pair(p, host.hostId)).approved, true);
+    p.socket.send({ t: 'pair-status', hostId: host.hostId, query });
+    assert.deepEqual(await p.socket.take(), expect(true));
+
+    // A `paired: true` is display truth and no more: it establishes nothing,
+    // so `msg` stays blocked and the connect that follows still runs the whole
+    // ceremony against a fresh Host challenge.
+    p.socket.send({ t: 'msg', data: helloRequest('blocked') });
+    assert.ok(await p.socket.quiet(), 'pair-status must not establish a session');
+    assert.equal(fakeHost.established.size, 0);
+
+    const challengeFrame = await connect(p, host.hostId);
+    assert.equal((await connect2(p, host.hostId, challengeFrame.challenge)).decision.allowed, true);
+  } finally {
+    await close();
+  }
+});
+
 // --- Host is the final authority -------------------------------------------
 
 test('unpaired device: server forwards, Host denies (device-not-paired), msg stays blocked', async () => {
