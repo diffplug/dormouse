@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { WebglAddon } from '@diffplug/xterm-addon-webgl-sdf';
 // The pristine upstream addon, pinned to the exact commit the fork's sdf branch is based on
-// (addon 0.20.0-beta.298 and core 6.1.0-beta.301 share gitHead 8c9b9fdb) — the regression
+// (addon 0.20.0-beta.300 and core 6.1.0-beta.304 share gitHead c58ea363) — the regression
 // baseline for the UpstreamVsFork story. canopy/README.md records the same triple.
 import { WebglAddon as UpstreamWebglAddon } from '@xterm/addon-webgl';
 // Read the two versions rather than restating them, so the on-screen labels cannot drift from
