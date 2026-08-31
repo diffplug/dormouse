@@ -234,22 +234,24 @@ replay protection.
 
 ## HTTP API
 
-This table is the whole of it. The paths live in `API_ROUTES` / `WS_ROUTES` /
-`HELLO_ROUTE` in `server-lib-common`, so Server, Host and Pocket cannot drift.
+This table is the whole route surface. Paths and request/response shapes live in
+`API_ROUTES` / `WS_ROUTES` and their types in
+`server-lib-common/src/remote/wire.ts`; `HELLO_ROUTE` lives in
+`server-lib-common/src/index.ts`, so Server, Host and Pocket cannot drift.
 
 | Route                            | Auth           | Does                                              |
 | -------------------------------- | -------------- | ------------------------------------------------- |
 | `GET /api/hello`                 | —              | The shared greeting. Carries no release identity: it is unauthenticated, CORS-`*` and reachable through `tailscale serve` — see the runtime file under "Installing it" |
-| `POST /api/setup/begin`          | setup password | `{ challenge }` for registration. Only the password gates it — re-presenting the password adds another passkey to the account |
-| `POST /api/setup/finish`         | setup password | `{ credentialId, publicKey, clientDataJSON }` → creates/updates `account.json` |
-| `POST /api/signin/begin`         | —              | `{ challenge }` for sign-in                        |
-| `POST /api/signin/finish`        | —              | full assertion → verified → `{ sessionToken, accountId, expiresAt, passkeyPublicKey }` (token is 32 random bytes, in-memory, 12-hour TTL) |
-| `POST /api/reauth/begin`         | session token  | `{ challenge }` to re-assert presence on the current session |
-| `POST /api/reauth/finish`        | session token  | full assertion → verified (same checks as sign-in) → refreshes the session's presence stamp; the token and relay socket are kept |
-| `POST /api/host/enroll`          | setup password | `{ label }` → `{ hostId, hostToken, origin, rpId }` (plus `requireUserVerification` when on); appends to `hosts.json` |
+| `POST /api/setup/begin`          | setup password | Issues a registration challenge. Only the password gates it, so re-presenting it adds another passkey |
+| `POST /api/setup/finish`         | setup password | Registers the passkey in `account.json`            |
+| `POST /api/signin/begin`         | —              | Issues a sign-in challenge                          |
+| `POST /api/signin/finish`        | —              | Verifies the assertion and issues a 12-hour in-memory session token |
+| `POST /api/reauth/begin`         | session token  | Issues a presence challenge for the current session |
+| `POST /api/reauth/finish`        | session token  | Verifies like sign-in and refreshes presence without replacing the token or relay socket |
+| `POST /api/host/enroll`          | setup password | Enrolls a Host, appends `hosts.json`, and mirrors the user-verification policy |
 | `GET /api/hosts`                 | session token  | Enrolled hosts + whether each is currently connected |
-| `GET /api/push/config`           | —              | `{ applicationServerKey }` — the VAPID public key, or `null` when push is unconfigured. Public by construction |
-| `POST /api/push/challenge`       | session token  | `{ challenge }` for the device signature below (no body — the challenge is a pool-wide nonce; the host binding lives in the signature) |
+| `GET /api/push/config`           | —              | Returns the public VAPID key, or `null` when push is unconfigured |
+| `POST /api/push/challenge`       | session token  | Issues a pool-wide nonce for the device signature; Host binding lives in the signature |
 | `POST /api/push/subscribe`       | session token + device signature | Upserts the `(hostId, devicePublicKey)` subscription. 404 for an unknown `hostId`, so no row can strand where no Host can read or prune it |
 | `GET /api/push/subscriptions`    | session token  | The account's registrations for the current VAPID key as identities, so a reloaded Client can tell which Hosts it already registered with. With push disabled, returns the stored identities for diagnosis |
 | `GET /api/push/devices`          | host token     | The `devicePublicKey`s subscribed to **this** Host under the current VAPID key |
@@ -677,16 +679,11 @@ its one self-authored response is the plaintext missing-build stub at `GET /`.
 
 ## Testing
 
-The security and relay layers are covered without a browser: `pnpm --filter
-server test` drives setup → pairing → connect end to end through the real server
-— `app.request()` for HTTP routes, real WebSockets against an ephemeral-port
-server for the relay — using `SimAuthenticator` (from `server-lib-common`) plus
-the `FakeHost` harness in `server/test/harness/fake-host.mjs`. `bind-host` and
-`runtime-file` instead spawn the real entrypoint, since what they assert is a
-property of the process rather than of the app. Revoked-record
-denial is covered at the unit level in `server-lib-common`'s own tests, not
-through the relay. Browser-dependent layers — the Host module and the Pocket
-terminal view — are dogfooded rather than automated.
+`pnpm --filter server test` drives setup → pairing → connect through real HTTP
+and WebSocket boundaries with `SimAuthenticator` and the `FakeHost` in
+`server/test/harness/fake-host.mjs`; process-level tests spawn the real
+entrypoint. `server-lib-common` pins revoked-record denial. Browser-dependent
+Host and Pocket UI remain dogfood coverage.
 
 ## Running it
 

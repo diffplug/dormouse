@@ -32,7 +32,9 @@ The terminal makes the current regime visible in the pane header, lets the user 
 
 **Click.** The Mouse icon activates a **temporary override** (§2); the No-Mouse icon ends the override immediately and restores mouse reporting to the inside program.
 
-Source of truth: `lib/src/components/wall/TerminalPaneHeader.tsx` — hover text for both icons, suppressed during a temporary override, where the banner carries the explanation.
+Source of truth: `lib/src/components/wall/TerminalPaneHeader.tsx` owns the icons;
+`lib/src/components/wall/MouseOverrideBanner.tsx` owns the temporary-override
+explanation and actions.
 
 ---
 
@@ -201,6 +203,10 @@ Ownership is decided at **mouse-down** and latched for the whole drag, which is 
 - Overlay and popup both subscribe to the same render-tick signal, bumped on every xterm render (scroll, resize, output), so they re-measure and re-anchor together; the popup dismisses if the selection is canceled.
 - The header icon and banner are persistent terminal chrome, unaffected by inside-program redraws.
 
+Source of truth: text extraction and normalization live in
+`lib/src/lib/selection-text.ts`; perimeter construction lives in
+`lib/src/lib/selection-geometry.ts`.
+
 ---
 
 ## 8. Paste Behavior
@@ -214,6 +220,8 @@ Paste reads the system clipboard and writes the content to the PTY. Paste keystr
 `Cmd/Ctrl (+Shift) + V` — all four combinations, on every platform — are intercepted and paste. The chord takes **either** modifier and ignores Shift (`hasPasteModifier`), so `Ctrl+V` pastes on macOS too.
 
 Copy keeps the clean macOS separation — only `⌘C` is intercepted there, `Ctrl+C` passes through (§4.2) — but paste does not, because `Ctrl+V` is the universal expectation everywhere. The price is that the raw control byte `0x16` (readline `quoted-insert`, vim literal-next) is never delivered by this key; §8.3 is the escape hatch.
+
+Source of truth: `lib/src/components/wall/keyboard/chords.ts`.
 
 ### 8.3 Sending `0x16` (Ctrl+Q)
 
@@ -274,30 +282,6 @@ Everything above is about the terminal. Dormouse also renders real `<input>`s �
 - The chord table is §8.2's: paste takes either modifier on every platform, copy/cut take `⌘` on macOS and `Ctrl` elsewhere.
 - Scope is deliberately narrow. xterm's `.xterm-helper-textarea` is excluded (the terminal owns its chords), as are read-only and disabled fields, and the handler runs only where the adapter implements the optional `readClipboardText` — today the two standalone adapters, which slightly over-reaches the menu-less macOS build it is written for (rationale). Everywhere else — VS Code, the website, Pocket — the handler never fires and the webview's own chords are untouched.
 - **Must skip the edit when the field has unmounted** during the asynchronous clipboard read (Escape, or the blur that commits a rename): `execCommand` acts on whatever is focused at that moment, usually the terminal by then, so an unguarded write would type the clipboard into the shell.
-
----
-
-## Files
-
-| File | Role |
-|------|------|
-| `lib/src/lib/mouse-selection.ts` | Per-terminal selection / override / bracketed-paste state store |
-| `lib/src/lib/mouse-mode-observer.ts` | DECSET/DECRST parser hook; syncs mouse-reporting and bracketed-paste modes |
-| `lib/src/lib/terminal-mouse-router.ts` | Drag routing (mouse + touch), smart-token hinting, temporary-override clearing |
-| `lib/src/lib/clipboard.ts` | Copy/paste entry points and the tiered paste chain |
-| `lib/src/lib/shell-escape.ts` | Per-shell path quoting for the paste/drop path (§8.6) |
-| `lib/src/components/wall/keyboard/handle-mouse-selection-keys.ts` | Drag-time key routing (§3.6), `e` extension, copy/paste chords |
-| `lib/src/components/wall/keyboard/handle-editable-clipboard.ts` | Copy/cut/paste inside Dormouse's own text fields (§8.9) |
-| `lib/src/components/wall/keyboard/chords.ts` | The copy vs. paste modifier convention (§8.2) |
-| `lib/src/lib/rewrap.ts` | Copy Rewrapped transformations |
-| `lib/src/lib/selection-text.ts` | Selected-cell text extraction + selection normalization |
-| `lib/src/lib/selection-geometry.ts` | Selected cells → visible rects → single perimeter SVG path |
-| `lib/src/lib/smart-token.ts` | URL / path / error-location patterns (`PATTERNS`) |
-| `lib/src/components/SelectionOverlay.tsx` | Perimeter outline and drag hints |
-| `lib/src/components/SelectionPopup.tsx` | Copy popup and shortcut labels |
-| `lib/src/components/wall/MouseOverrideBanner.tsx` | Temporary-override banner |
-| `standalone/sidecar/clipboard-ops.js` | OS-native clipboard tiers for VSCode and macOS/Linux Tauri (§8.6) |
-| `standalone/src-tauri/src/clipboard_win.rs` | Native Win32 clipboard tiers for Tauri on Windows (§8.6) |
 
 ---
 

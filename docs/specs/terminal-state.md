@@ -10,46 +10,10 @@ Session CWD and command execution state are separate. `cwd` means "the shell/ses
 
 ## Core Model
 
-```ts
-type TerminalPaneState = {
-  cwd: CwdState | null;
-  activity: ShellActivity;
-  pendingCommandLine: string | null;
-  currentCommand: CommandRun | null;
-  lastCommand: CommandRun | null;
-  title: TerminalTitle | null;   // latest title event, whatever its source
-  titleCandidates: Partial<Record<TerminalTitle["source"], TerminalTitle>>;
-};
-
-type CwdState = {
-  uri?: string; path: string; host?: string; scheme?: "file";
-  pathKind: "posix" | "windows" | "unknown";
-  isRemote: boolean;
-  source: "osc7" | "osc9_9" | "osc633" | "osc1337" | "process" | "manual";
-  updatedAt: number;
-};
-
-type ShellActivity =
-  | { kind: "unknown" } | { kind: "prompt" } | { kind: "editing" }
-  | { kind: "running" } | { kind: "finished"; exitCode?: number };
-
-type CommandRun = {
-  id: string;
-  rawCommandLine: string | null;  // exactly what the shell reported, or null
-  displayCommand: string;         // summarized label
-  cwdAtStart: CwdState | null;
-  startedAt: number; finishedAt?: number; exitCode?: number;
-  source: "osc633_E" | "osc633_boundaries" | "osc133_boundaries" | "user_input";
-  finalTerminalTitle?: TerminalTitle;  // set only at commandFinish; see Header Derivation
-  outputRange?: { startMarkId?: string; endMarkId?: string };  // declared, never populated
-};
-
-type TerminalTitle = {
-  title: string;
-  source: "osc0" | "osc2" | "osc9" | "osc99" | "osc777" | "user";
-  updatedAt: number;
-};
-```
+`TerminalPaneState` composes CWD, shell activity, pending/current/last command,
+and latest/per-source title state. Exact fields and unions are canonical in
+`lib/src/lib/terminal-state.ts` (`CwdState`, `ShellActivity`, `CommandRun`, and
+`TerminalTitle`).
 
 **Host identity is part of directory identity.** `file://localhost/Users/me/project` and `file://prod-box/home/me/project` are different locations even where their display labels compact to the same thing.
 
@@ -59,18 +23,8 @@ Terminal title is a label override, not a command lifecycle signal. `title` is t
 
 ## Normalized Events
 
-All protocol parsing emits normalized semantic events before feature code sees the state:
-
-```ts
-type TerminalSemanticEvent =
-  | { type: "cwd"; cwd: CwdState }
-  | { type: "promptStart" }
-  | { type: "promptEnd" }
-  | { type: "commandLine"; commandLine: string }
-  | { type: "commandStart"; source?: CommandRun["source"]; startedAt?: number }
-  | { type: "commandFinish"; exitCode?: number }
-  | { type: "title"; title: TerminalTitle };
-```
+All protocol parsing emits the canonical `TerminalSemanticEvent` union in
+`lib/src/lib/terminal-state.ts` before feature code sees the state.
 
 Feature code **must** consume `TerminalPaneState` or `TerminalSemanticEvent`, never raw OSC sequences.
 Protocol-derived semantic events are timestamped in stream order before they reach the reducer, so command-start boundaries and title candidates from the same PTY chunk remain comparable even when they were parsed in the same millisecond.
@@ -164,6 +118,11 @@ first authentic OSC boundary ──▶ pane promoted to OSC-driven; fallback ret
 - **Boundary mode, plus a trailing-boundary trim.** Stripping runs in **boundary mode** (every control becomes a line break), as resume detection does: deleting a redraw's cursor move welds text that was never adjacent on screen, so `building...\x1b[1;1HC:\Users\me>` would read as one line starting with `building` and no anchored shape would match. But a boundary is not a real line break, and the difference decides the safe direction: a **genuine** trailing newline means nothing is painted on the current line yet — no prompt — and **must** keep reading as `null`; a **boundary** at the tail means only that a control closed the line, which is what a prompt that clears to end-of-line after painting itself (`C:\Users\me>\x1b[K`) does, and reading that as an empty last line would hide every such prompt. Stripping the same text *without* boundaries leaves exactly the real breaks, which is how the two are told apart. Both directions are pinned by `lib/src/lib/terminal-state-store.test.ts`.
 - **Per-pane retirement.** The keystroke fallback and real OSC 633/133 integration are mutually exclusive per pane. The first authentic OSC boundary a pane emits (`promptStart`/`promptEnd`/`commandFinish` always, or a `commandStart` whose event source is `osc633_boundaries`/`osc133_boundaries`) promotes the pane to **OSC-driven**, after which the keystroke path stops recording: `recordTerminalUserInput` early-returns and no further `user_input` `commandStart`/`commandLine` is synthesized, so injected shells never double-count. The synthesized prompt markers the fallback itself emits carry a `keystrokeHeuristic` flag so they **must not** trigger promotion — otherwise the fallback would retire the very path that emits them. The flag is per-pane runtime state, seeded fresh and cleared on pane reset/removal, never persisted. `isPaneOscDriven()` exposes it, because `dor ensure --restart` can only match a surface whose shell re-reports its command (`docs/specs/dor-cli.md`).
 
+Source of truth: submit detection in
+`lib/src/lib/terminal-command-input.ts`, rendered-line reading in
+`lib/src/lib/terminal-buffer-read.ts`, and prompt derivation in
+`lib/src/lib/terminal-prompt-shape.ts`.
+
 ### CWD precedence
 
 - OSC-sourced CWD (`osc7`, `osc9_9`, `osc633`, `osc1337`) wins over everything. Once an OSC has reported a directory, only a later OSC can replace it.
@@ -175,15 +134,11 @@ Asynchronous process CWD query results are applied through PTY-id resolution, so
 
 ## Header Derivation
 
-```ts
-type DerivedHeader = {
-  primary: string;
-  secondary?: string;
-  lastCommandFailed?: boolean;
-};
-```
-
-The header carries the primary label, an optional secondary disambiguator, and `lastCommandFailed` — a structured flag set when `primary` ends with the fail glyph (see below). Richer activity state lives on `pane.activity`; consumers that need it (status grouping) read it from there.
+The canonical `DerivedHeader` type lives in `lib/src/lib/terminal-state.ts`. It
+carries the primary label, an optional secondary disambiguator, and
+`lastCommandFailed` — a structured flag set when `primary` ends with the fail
+glyph (see below). Richer activity state lives on `pane.activity`; consumers
+that need it (status grouping) read it from there.
 
 Header priority — first match wins:
 
@@ -218,15 +173,3 @@ Callers that show one Session's label use `deriveSurfaceLabel()` — `deriveHead
 - `prompt` and `editing` collapse into a single `idle` bucket: the distinction between "at the prompt" and "typing a command" is not load-bearing for grouping. `finished` stays distinct so a recently-completed pane can be filtered separately even though its header label carries the same `<idle>` prefix.
 
 Source of truth, both in `lib/src/lib/terminal-state.ts`: `groupTerminalPanes()` defines grouping modes (`TerminalGroupingMode`) and per-mode key derivation (directory uses `cwdAtStart ?? cwd`; command uses the running command's `displayCommand`, else the idle label); `statusBucket()` projects the 5 `ShellActivity.kind` values onto 4 buckets.
-
-## Files
-
-| File | Role |
-|------|------|
-| `lib/src/lib/terminal-state.ts` | Pure semantic model: types, reducer, CWD precedence, header derivation, grouping, `surfaceRunsCommand` (the `dor ensure` idempotency predicate — `docs/specs/dor-cli.md`) |
-| `lib/src/lib/terminal-state-store.ts` | React-facing store; PTY-id → pane-id resolution; keystroke fallback recording (`recordTerminalUserInput`) and returned-prompt detection |
-| `lib/src/lib/terminal-command-input.ts` | Submit detection: Enter vs. a newline inside a bracketed paste, with the in-paste flag surviving chunk splits |
-| `lib/src/lib/terminal-buffer-read.ts` | Reads the cursor's rendered logical line from the xterm buffer, bounded at the cursor column |
-| `lib/src/lib/terminal-prompt-shape.ts` | Prompt shape derivation and command extraction for the keystroke fallback |
-| `lib/src/lib/terminal-controls.ts` | `stripTerminalControls` — shared presentation-control stripping for consumers that read raw output as content |
-| `lib/src/lib/terminal-protocol.ts` | Semantic OSC parsing that emits `TerminalSemanticEvent` (parsing location rules in `docs/specs/terminal-escapes.md`) |

@@ -249,11 +249,18 @@ Rules:
 - One fire per ring: a Session that rings, is cleared, and rings again fires twice.
 - Sessions are independent, as are the two sinks — both fire when both are on, each on its own delay.
 
+| Contract | Speech | Push |
+|---|---|---|
+| Gate | Desktop shell, after `speakDelayMs`; a missing speech backend is a silent no-op. | Desktop shell with an enrolled Host, after `pushDelayMs`. |
+| Payload | Derived Pane label through `toSpokenText`; fallback `terminal`. | The same label through `toPushText`, plus a fixed body; fallback `terminal`. |
+| Never payload | The ringing `ActivityNotification`. | The ringing `ActivityNotification`. |
+| Delivery identity | Renderer-local generation token and `speaking` / `spoken` state while the ring remains live. | HTTP push tagged by Session id, so a newer ring replaces the prior notification. |
+| After delivery | Attending cuts off speech. | **Never recall:** another visible push would only replace one stale notice with another. |
+| Failure | A refused or unavailable engine produces no marker. | Warn on non-2xx, partial, or zero delivery; drop and **never retry** stale alarms. |
+| Authority | The renderer invokes `window.speechSynthesis`. | The webview names Session/title; the Host selects active ACL devices and the Server intersects subscriptions. |
+
 ### Spoken alarms
 
-When a Session rings and stays unattended for `speakDelayMs`, Dormouse says that Pane's name out loud. Source of truth: `lib/src/lib/alert-speech.ts`, armed once by `useAlertSpeech` in `Wall`.
-
-- **The derived Pane label is spoken, including terminal-supplied title overrides.** It comes from `deriveSessionLabel` in `lib/src/lib/session-label.ts` — the one id-keyed label derivation, shared with the dev-server chip — and falls back to `terminal`. `OSC 0`, `OSC 2`, and legacy `OSC 9` message text can therefore be spoken whenever that text wins the normal Pane-label derivation: opting into spoken alarms opts into hearing the Pane name Dormouse displays, even when a program supplied it. **The ringing `ActivityNotification` is never itself the speech payload.**
 - **The label is sanitized before it reaches the engine** (`toSpokenText` in `lib/src/lib/alert-speech.ts`): angle brackets, ampersands, asterisks, and control characters become spaces, whitespace collapses, the result is capped in code points, and an empty result falls back to `terminal`. **Security, not tidiness:** WebKit silently drops an utterance containing angle brackets **and leaves the synthesizer wedged**, so every later utterance is dropped too until the page reloads. Pane labels carry chrome like `<idle>` and terminal-supplied titles reach speech, so without this any program could permanently disable spoken alarms for the session by putting a `<` in its title. Asterisks are substituted for clarity rather than safety: `eight *` must not be announced as "eight asterisk".
 - **Delivery state follows actual engine callbacks, not queue admission.** `AlertSpeechState` in `lib/src/lib/alert-speech-state.ts` is a renderer-local `speaking | spoken` map keyed by Session. The engine's `start` event publishes `speaking`; `end`, or `error` after a real start, publishes `spoken`. An utterance that never starts publishes neither. Each utterance carries an opaque generation token, so a late callback from a resolved or older ring cannot overwrite a newer ring or resurrect a cleared marker.
 - **Nothing in the settle path may assume the callback arrives after `speak()` returns.** An engine may dispatch `start` and then `end`/`error` *synchronously* inside `speechSynthesis.speak()` (rationale). So the handlers close over the utterance itself and registration happens before dispatch; reading a variable the caller assigns afterward would drop the settle and pin the Session at `speaking` for the rest of the ring. A dispatch the engine refuses outright settles too.
@@ -261,22 +268,18 @@ When a Session rings and stays unattended for `speakDelayMs`, Dormouse says that
 - **Teardown must `cancel()` the engine, not just detach the callbacks** — detaching protects only the renderer's own state, and a webview that unmounts mid-alarm would keep reading Pane names aloud with no visible source and no UI left to stop it.
 - **In-flight tracking is bounded.** A dropped utterance (the WebKit wedge above) never fires a callback to retire itself, so the tracking set and the Session-keyed queued index evict their oldest entry past a small shared cap. An evicted utterance that does still fire settles normally; it is only no longer eligible for collateral re-dispatch.
 - `speaking` / `spoken` remains only while the originating Session is still `ALERT_RINGING`. Any deliberate action that resolves the ring clears it: clicking or entering the Pane, typing in passthrough, clicking/pressing `Enter` on its Door, dismissing the bell, or marking/clearing TODO. Mere visibility, hover, or command-mode selection does not. Killing the Session also clears it. The state is not persisted or sent to the host, so restore/reconnect never recreates it.
-- Renderer-side, via `window.speechSynthesis`. Where that is absent — Tauri on Linux (WebKitGTK ships no speech backend), or a test environment — speaking is a silent no-op rather than an error. `speak()` is the single seam a native host path would replace.
-- Desktop shell only: `MobileWall` / Pocket does not arm it and has no settings UI (no baseboard, so no Settings dialog).
+
+Source of truth: `lib/src/lib/alert-speech.ts`, armed once by
+`lib/src/components/wall/use-alert-speech.ts`; label derivation in
+`lib/src/lib/session-label.ts`; delivery state in
+`lib/src/lib/alert-speech-state.ts`.
 
 ### Push notifications
 
-When a Session rings and stays unattended for `pushDelayMs`, Dormouse sends that Pane's name to every paired phone that has enabled alerts. Desktop shell only, and only where a Host runs — a build with no enrollment has nowhere to push.
-
 **The two halves run in different processes.** Ring *detection* is webview state — the activity store, the alarm settings, the Pane's derived label — so `watchPushRings` (`lib/src/remote/host/alert-push.ts`) stays in the webview and fires one `push { sessionId, title }` command at the Host service. *Delivery* needs the enrollment and the ACL, which only the Host holds, so `sendPush` (`lib/src/remote/host/push-delivery.ts`) runs in the service's process and touches no DOM or store. **A webview cannot choose recipients:** it names the Session and what to call it; the service reads its own active ACL at send time. Watching is armed only while the service reports an enrollment (`enrolled-gate.ts`), so a machine that never enrolls pays no activity-store subscription, and a `push` arriving with no Host running is not sent. Both halves live under `remote/host/` to keep the sink inside the lazily-imported `RemotePairingModalHost` chunk, so hosts that never set `enableRemoteHost` never fetch it; the shared ring machine and the device store stay in the common bundle, since speech and the settings dialog need them everywhere.
 
-- **The derived Pane label is the payload**, on the same rule as speech: the ringing `ActivityNotification`'s title/body is not selected as the payload, but terminal-supplied `OSC 0` / `OSC 2` / `OSC 9` text can appear when it is the winning Pane label. The body is a fixed string; the Pane name carries the information.
 - **The label is sanitized by `toPushText` at send time, in the delivery half, and not by `toSpokenText`'s rule.** It keeps angle brackets — the speech restriction exists only because WebKit's synthesizer wedges on them — and instead strips control characters and the Unicode bidi and zero-width format characters (including the Arabic letter mark), which can visually reorder or hide text in an OS notification; the cap counts code points, so a cut never ships half a surrogate pair. `toPushText` is only this sink's limit and fallback over `boundedPushText`, which lives in `server-lib-common/src/security/push.ts` so the Host and the Server run the *same* rule rather than a strong copy and a weak one; `lib/pocket/public/sw.js` mirrors it a third time at the render sink, being a verbatim-copied file that can import nothing — the mirror is pinned by `lib/src/remote/pocket-app/service-worker.test.ts`.
 - **The Host names its targets; the Server rejects a send that does not.** Targets are the Host's *active* ACL records, read at send time so a revocation during the delay takes effect, and the Server intersects them with its own subscriptions. Nothing propagates a revocation today (`docs/specs/remote-security-model.md` -> Future), so a revoked Client keeps its subscription row — a Server that chose recipients itself would keep pushing Pane labels to a de-authorized phone. The Host does **not** ask which devices are subscribed first (rationale).
-- **One notification per Session at a time.** Each push carries the Session id as a collapse tag, so a Pane that rings, is cleared, and rings again replaces its own notification rather than stacking copies on the lock screen.
-- **A push already delivered is never recalled.** Attending during the delay cancels it like any sink, but once it is out, reaching the phone again means sending a second push, and `userVisibleOnly` guarantees that would itself be visible — recall would trade one stale notification for one confusing one.
-- Delivery is an HTTP POST to the Server, not a relay frame ([server.md](./server.md) -> Web Push). The relay routes between two live sockets; a push exists to reach a phone whose app is closed.
-- **A failed send warns and is dropped**, in both failure classes: a non-2xx response is checked rather than ignored, so a revoked host token cannot leave push permanently broken and silent; and a 2xx whose `PushSendResponse` counts report `failed > 0` or `delivered: 0` warns too, because the Server answers 200 even when every push service refused delivery. **Never retry** — by the next ring the alarm is already stale.
 - The settings dialog re-reads the device list when it opens (`refreshPushDevicesNow`), because a phone can enable alerts long after this machine booted and a list fetched only at Host start would name the wrong devices — or none — for the rest of the session. The list is the Host's join of the Server's subscriptions against its own ACL labels, so it comes back over the same bridge as a `pushDevices` command and answers `null` — rendered `no-host` — when no Host is running. **Writes are fenced on request order** (latest-request-wins), so a slow startup refresh cannot overwrite a newer dialog refresh. The same fence carries "the Host went away": the enrolled gate's disarm calls `invalidatePushDeviceRefreshes()` and `clearPushDevices()`, so a request already on the wire cannot land afterwards and repopulate the dialog with phones there is nothing left to push to. `clearPushDevices` returns the store to `no-host` and *keeps* the refresher installed, so the dialog can still ask on an un-enrolled machine and be told `no-host`; `resetPushDevices` drops the refresher too and is full teardown (a Storybook story, a test).
 
 
@@ -287,9 +290,17 @@ Reached from any of the controls at the far right of the baseboard; placement an
 - Lists every watched command with a remove control, and **cannot add one**. WATCHING is keyed on a running command's name, so creating a rule stays a bell click / `a` press in the tab running it; the empty state says so. This dialog and the bell dialog are the two places a rule set on a since-closed Pane can be found and removed — they render the same `WatchedCommandList`, so the list has one implementation.
 - **Delays are committed on blur or `Enter`, never per keystroke** — typing `3` on the way to `30` must not briefly install a 3-second timer. They are shown in seconds; an out-of-range or empty entry snaps back to whatever the store clamped it to.
 - The push group's device line names every device a push would reach, and otherwise states why there is none — no Host enrolled, nothing subscribed yet, or the server could not be asked. A push that silently goes nowhere is indistinguishable from a broken one.
-- Each alarm sink carries a **try it now** control — **Play test sound** and **Send test push** — because an alarm is otherwise unobservable until it fires unattended, which is the moment its being wrong costs the most. Source of truth: `lib/src/components/AlarmTestButtons.tsx`. Both sit outside the switch's dimming and stay enabled while the sink is off: checking that the speakers work, or that the phone buzzes, is most useful *before* committing to the alarm. Each reports its own outcome inline and clears it after a few seconds, because for both sinks a working path and a broken one produce the same observation — silence.
-  - **Play test sound** speaks a fixed phrase through the same sanitizer as a real alarm, but **not through `speak()`**: that publishes the transient per-Session `speaking` / `spoken` state Panes and Doors render, and no Session rang. It reports a webview with no speech backend rather than degrading silently the way the alarm path correctly does.
-  - **Send test push** goes through the real Host, ACL and server, so what it proves is what the alarm will do. It is the one caller of the push path that must **not** swallow failures — the ring path's rule that a failed push never breaks the alert path would make a test button report success over a fan-out that reached nobody. It distinguishes four outcomes: no devices targeted (the ordinary answer on a freshly enrolled machine, and not a failure), nothing delivered, a partial fan-out, and success. The button is hidden entirely where no Host service exists, matching the Remote control section ([server.md](./server.md)).
+- Each alarm sink carries a **try it now** control outside the switch's dimming;
+  both report inline and clear after a few seconds. Source of truth:
+  `lib/src/components/AlarmTestButtons.tsx`.
+
+  | Control | Path and result |
+  |---|---|
+  | **Play test sound** | Fixed phrase through the real sanitizer, but not `speak()` because no Session rang; unlike alarm delivery, reports a missing backend. |
+  | **Send test push** | Real Host→ACL→Server path; does not swallow failures and distinguishes no targets, zero delivery, partial delivery, and success. Hidden without a Host service. |
+
+Source of truth: the shared rule list is
+`lib/src/components/WatchedCommandList.tsx`.
 
 ## Workspace union
 
@@ -326,6 +337,8 @@ The dialog carries the TODO switch, the WATCHING rule switch for the running com
 
 The TODO pill always displays `TODO`; remote notification text belongs in preview/detail surfaces, not inside the pill. Clicking the pill clears TODO. On clear, the pill briefly shows the success flourish before unmounting.
 
+Source of truth: `lib/src/components/TodoPillBody.tsx`.
+
 Spoken-alarm delivery is much louder than the bell. While the engine is actually speaking, a pointer-transparent treatment spans the whole terminal Pane: a wash, an animated high-contrast inset, and an explicit `SPEAKING` label. After the utterance settles the animation stops, but a static inset, a `SPOKEN` label, and a half-strength wash remain until the ring is resolved — `SPOKEN` is an unbounded window, so the haze stays light enough to read terminal text through. `prefers-reduced-motion` keeps the strong static treatment and suppresses only the pulse, as does `cfg.alert.ringingPaused` (the Chromatic freeze that pins the bell — an infinite opacity cycle would otherwise snapshot at an arbitrary phase). Layering, placement, and sizing belong to `docs/specs/layout.md`; source of truth: `lib/src/components/wall/AlertSpeechIndicator.tsx`.
 
 ### Door
@@ -351,36 +364,3 @@ Notification text is untrusted terminal output.
 - Wherever notification text appears in visible UI or accessible labels, it is plain text, and layout must tolerate long text, CJK, RTL, combining marks, and emoji without pushing fixed controls out of bounds. Sanitized terminal-supplied `OSC 0` / `OSC 2` / `OSC 9` text also participates in normal Pane-label derivation, and that label may reach the opt-in speech and push channels — each after its own second pass, because a label safe to *render* is not automatically safe to hand a speech engine or an OS notification, and those two fail in different ways. See `toSpokenText` under Spoken alarms and `toPushText` under Push notifications.
 
 Alert-specific robustness requirements: multiple Sessions ring independently; minimize, reattach, rerender, resize, and theme changes preserve existing alert state without creating new rings; an exited Session may keep ringing until attended, dismissed, or destroyed; ringing must not rely on color alone and must respect `prefers-reduced-motion`.
-
-## Files
-
-| File | Role |
-|------|------|
-| `lib/src/lib/quiesce-detector.ts` | The always-on per-Session output/silence detector: `QuiesceStatus` timers, `onSettled`, `reset()` |
-| `lib/src/lib/alert-manager.ts` | `AlertManager`: the three tracks, the detectors, the rule set, attention, TODO, notification storage, status projection, the completion-event seam, and `awaitCompletion` |
-| `lib/src/lib/watched-commands.ts` | Persisted WATCHING rule set and its push to the host |
-| `lib/src/lib/watched-command-host.ts` | First-seed + mutation/broadcast coordinator for a host shared by multiple renderers |
-| `lib/src/lib/alert-settings.ts` | Persisted alarm settings, their validation/clamping, and their push to the host |
-| `lib/src/lib/alert-settings-host.ts` | First-seed + replace/broadcast coordinator for the settings blob |
-| `lib/src/lib/alert-ring-watch.ts` | The shared unattended-ring machine: fresh-ring detection, the delay, the re-check, cancellation |
-| `lib/src/lib/alert-speech.ts` | The speech sink and `toSpokenText` |
-| `lib/src/lib/alert-speech-state.ts` | Transient per-Session `speaking` / `spoken` delivery state |
-| `lib/src/remote/host/alert-push.ts` | Webview half: `watchPushRings` ring detection and the fenced device-list commit |
-| `lib/src/remote/host/push-delivery.ts` | Service half: `sendPush` / `loadPushDevices`, the ACL-intersected recipients, and `toPushText` over `server-lib-common`'s `boundedPushText` |
-| `lib/src/remote/host/enrolled-gate.ts` | `armWhileEnrolled`: the edge-triggered gate that arms ring watching only while the service reports an enrollment |
-| `lib/src/remote/host/activation.ts` | Arms the push sink for the lifetime of the remote Host (start, stop, re-enroll) |
-| `lib/src/lib/push-devices.ts` | Renderer-only store of the devices a push would reach, read by the settings dialog |
-| `lib/src/lib/session-label.ts` | `deriveSessionLabel`: the id-keyed Surface label over the live stores |
-| `lib/src/components/wall/use-alert-speech.ts` | Arms spoken alarms for the lifetime of the desktop shell |
-| `lib/src/lib/terminal-protocol.ts` | Notification/progress OSC parsing (`OSC 9` / `9;4` / `99` / `777`, BEL), sanitization limits, OSC 99 chunk state |
-| `lib/src/lib/session-activity-store.ts` | React activity snapshot store, primed alert state, bell transition table, platform delegates |
-| `lib/src/lib/workspace-union.ts` | `computeWorkspaceUnion` projection |
-| `lib/src/components/bell-icon-class.ts` | Bell tilt/animation mapping from public status |
-| `lib/src/components/wall/TerminalPaneHeader.tsx` | Bell button, TODO pill, notification preview |
-| `lib/src/components/TodoPillBody.tsx` | `useTodoPillContent`: the `TODO` pill body and its clear-time flourish, shared by header, Door, and mobile |
-| `lib/src/components/wall/AlertSpeechIndicator.tsx` | Whole-Pane `SPEAKING` / `SPOKEN` treatment |
-| `lib/src/components/TodoAlertDialog.tsx` | TODO + WATCHING-rule switches, notification detail, watched-command list |
-| `lib/src/components/SettingsDialog.tsx` | App-global Settings dialog: theme row (see [theme.md](./theme.md)), shell row (standalone, see [standalone.md](./standalone.md)), rule list, inactivity timeout, spoken alarms, push notifications, remote control (see [server.md](./server.md)) |
-| `lib/src/components/AlarmTestButtons.tsx` | The two alarm sinks' "try it now" controls: Play test sound, Send test push |
-| `lib/src/components/WatchedCommandList.tsx` | The WATCHING rule set with per-rule remove, shared by both dialogs |
-| `lib/src/components/Door.tsx` | Door bell + TODO display |

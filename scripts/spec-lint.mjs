@@ -31,7 +31,9 @@
  *      heading in the spec), and has no `## Future` — rationale files are
  *      informative, the fold belongs to the spec. Rationale files are not
  *      specs: they skip checks 1, 2, and 5 but ride 3 and 4.
- *   9. Word-budget ratchet: every checked file stays under its budget in
+ *   9. A spec uses one implementation map: either `## Files` / `## Code Map`
+ *      or section-local `Source of truth:` pointers, never both.
+ *  10. Word-budget ratchet: every checked file stays under its budget in
  *      scripts/spec-word-budgets.json. Growth past the budget fails; the fix
  *      is to cut, or to raise the budget deliberately in the same PR. Budgets
  *      carry small headroom so routine edits don't trip it.
@@ -271,7 +273,20 @@ for (const rat of rationaleFiles) {
   }
 }
 
-// --- Check 9: word-budget ratchet ---------------------------------------------
+// --- Check 9: one implementation map per spec -------------------------------
+for (const spec of foldCheckedFiles) {
+  const lines = proseLines(spec);
+  const mapLine = lines.findIndex((line) => /^##\s+(?:Files|Code Map)\s*$/i.test(line));
+  const sourceLine = lines.findIndex((line) => /\bSource of truth:/.test(line));
+  if (mapLine !== -1 && sourceLine !== -1) {
+    problems.push(
+      `${spec}:${sourceLine + 1}: has both "${lines[mapLine].trim()}" and ` +
+      '`Source of truth:` pointers — use one implementation map',
+    );
+  }
+}
+
+// --- Check 10: word-budget ratchet ------------------------------------------
 const BUDGETS_FILE = 'scripts/spec-word-budgets.json';
 const budgets = JSON.parse(read(BUDGETS_FILE));
 for (const rel of allFiles) {

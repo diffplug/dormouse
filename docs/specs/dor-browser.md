@@ -41,20 +41,8 @@ Source of truth: `lib/src/components/wall/BrowserPanel.tsx`,
 
 ## Canonical Params
 
-The persisted pane params are flat:
-
-```ts
-type BrowserPanelParams = {
-  surfaceType?: string;   // 'browser'
-  renderMode?: 'ab-screencast' | 'ab-popout' | 'iframe';
-  url?: string;
-  session?: string;
-  key?: string;
-  wsPort?: number;
-  binaryPath?: string;
-  syncEngaged?: boolean;
-};
-```
+The persisted `BrowserPanelParams` are flat; their canonical shape lives in
+`lib/src/components/wall/BrowserPanel.tsx`.
 
 Invariants:
 
@@ -468,6 +456,10 @@ runs the bundled copy through the sidecar/Rust adapter.
 | `agentBrowserPopOut` / `agentBrowserPopIn` | Headed/headless relaunch. |
 | `agentBrowserBringToFront` | Optional; no real host implements it today. |
 
+**Host-side validation is the security boundary:** every
+`agentBrowserCommand` implementation must enforce the shared allowlist; the CLI
+is not trusted to pre-filter arguments.
+
 **VS Code must reach the stream through a loopback relay** — the agent-browser
 stream server rejects `vscode-webview://` origins. The relay grants one
 single-use, short-TTL token bound to one stream port, and strips the Origin
@@ -515,6 +507,9 @@ What is rewritten, exactly:
 | response | hop-by-hop (RFC 7230 §6.1) | dropped |
 | response | `Location` | upstream origin rewritten back to the proxy origin, so a redirect doesn't bounce the frame at the un-instrumented upstream |
 | response body | `<meta http-equiv="content-security-policy">` | removed, for the same reason as the header |
+
+**Must update** this rewrite table and `STRIP_RESPONSE_HEADERS` together for
+every new stripped response header.
 
 **One dedicated `127.0.0.1:0` server per grant, with no token in the path**: the
 dedicated origin is the grant boundary, and it preserves root-relative
@@ -583,14 +578,9 @@ Source of truth: `IframePanel.tsx`, `lib/src/components/wall/use-window-focused.
 
 ## Iframe Host Capability And CSP
 
-The optional adapter method is:
-
-```ts
-createIframeProxyUrl?(targetUrl: string): Promise<
-  | { ok: true; url: string }
-  | { ok: false; reason: 'unreachable' | 'scheme'; detail?: string }
->;
-```
+The optional `PlatformAdapter.createIframeProxyUrl` method and
+`IframeProxyResult` union are canonical in `lib/src/lib/platform/types.ts` and
+`lib/src/lib/platform/iframe-proxy-types.ts`.
 
 Reachability is diagnosed lazily by served error pages after the iframe loads the
 proxy URL, and frame refusal is not diagnosed at all — any http upstream is
@@ -639,57 +629,14 @@ GET. `Referer` needs no such test: it only substitutes the proxy's own origin.
 The shared rule for all of Dormouse's loopback listeners lives in
 `lib/src/host/loopback-guard.ts`; `SECURITY.md` → "Loopback Listeners" audits it.
 
-Source of truth: `lib/src/lib/platform/types.ts`,
+**Never relax** the `Host` validation or conditional `Origin` gate without
+updating that `SECURITY.md` audit.
+
+Source of truth: `lib/src/lib/platform/iframe-proxy-types.ts`,
+`lib/src/lib/platform/types.ts`,
 `lib/src/lib/platform/vscode-adapter.ts`, `vscode-ext/src/message-types.ts`,
 `vscode-ext/src/message-router.ts`, `vscode-ext/src/webview-html.ts`,
 `standalone/src/tauri-adapter.ts`, `lib/src/host/iframe-proxy-rewrite.ts`.
-
-## Code Map
-
-- CLI: `dor/src/commands/agent-browser.ts`, `dor/src/commands/iframe.ts`,
-  `dor/src/commands/open-target.ts`, `dor/src/commands/types.ts`.
-- Shell/render swap/lifecycle: `lib/src/components/Wall.tsx`,
-  `lib/src/components/wall/BrowserPanel.tsx`,
-  `lib/src/components/wall/browser-surface.ts`,
-  `lib/src/components/wall/LathHost.tsx` (`BODY_COMPONENTS`).
-- Pane context-menu connect: `lib/src/components/wall/PaneHeaderContextMenu.tsx`,
-  `lib/src/components/wall/connect-port.ts`, `lib/src/components/wall/port-url.ts`.
-- Chrome/modal: `SurfacePaneHeader.tsx`, `AgentBrowserScreenModal.tsx`,
-  `agent-browser-screen.ts`, `browser-url.ts`, `use-dev-server-ports.ts`,
-  `agent-browser-ports.ts`.
-- Agent-browser renderer: `AgentBrowserPanel.tsx`,
-  `agent-browser-surface-controller.ts`, `agent-browser-connection.ts`,
-  `agent-browser-input.ts`, `agent-browser-screenshot-loop.ts`,
-  `agent-browser-tab.ts`, `agent-browser-sessions.ts`.
-- Iframe renderer/proxy: `IframePanel.tsx`, `iframe-proxy-registry.ts`,
-  `lib/src/host/iframe-proxy.ts`, `lib/src/host/iframe-proxy-rewrite.ts`,
-  `lib/src/host/loopback-guard.ts`,
-  `lib/src/lib/platform/iframe-proxy-types.ts`.
-- Host adapters: `lib/src/host/agent-browser-host.ts`,
-  `vscode-ext/src/agent-browser-host.ts`, `vscode-ext/src/iframe-proxy-host.ts`,
-  `standalone/src/tauri-adapter.ts`, `standalone/src-tauri/src/lib.rs`,
-  `standalone/sidecar/main.js`.
-
-## Maintainer checklist
-
-When changing browser-surface behavior:
-
-- Never reintroduce `surfaceType: 'iframe' | 'agent-browser'` or `poppedOut` as
-  stored state ([Canonical Params](#canonical-params)); a new render mode also
-  updates the kind-mapping table in `docs/specs/glossary.md`.
-- Never add re-parenting or reordering that moves a browser Surface's DOM
-  ([Canonical Params](#canonical-params)).
-- A new agent-browser subcommand must be added to
-  `AGENT_BROWSER_ALLOWED_SUBCOMMANDS` (`lib/src/lib/platform/types.ts`); the
-  host-side allowlist is the security boundary, not the CLI.
-- External-binary spawns go through `spawnAndCapture` (`dor-lib-common`), never
-  raw `child_process` — see `docs/specs/dor-cli.md` → Spawning External Binaries.
-- A new kill/swap/teardown path runs `closeAgentBrowserSession` **and**
-  `disposeAgentBrowserSurfaceController`, and respects the closed-session mark
-  ([Placement And Lifetime](#placement-and-lifetime)).
-- Any new proxy header rule belongs in the rewrite table above *and* in
-  `STRIP_RESPONSE_HEADERS`; the two gates (`Host`, conditional `Origin`) are the
-  boundary, so never relax one without `SECURITY.md` → "Loopback Listeners".
 
 ## Future
 

@@ -173,26 +173,12 @@ boundary.
 Each Host maintains a local authorization list. **The ACL is authoritative**;
 the Server cannot unilaterally grant access.
 
-The record schema (source of truth: `HostAclRecord` / `HostAcl` in
-`server-lib-common/src/security/acl.ts`; persisted by the Host service through
-its `HostStateStore` — a 0600 file in standalone, `globalState` in VS Code —
-never on the Server, `docs/specs/server.md`):
-
-```ts
-interface HostAclRecord {
-  hostId: string;
-  accountId: string;
-  passkeyCredentialId: string;
-  /** SHA-256 of the passkey's SPKI public key, base64url. */
-  passkeyPublicKeyHash: string;
-  /** Base64url raw P-256 point — the Client's identity. */
-  devicePublicKey: string;
-  approvedAt: number;            // epoch ms
-  approvedBy: string;            // who approved locally, e.g. `host-user`
-  label: string;                 // client name shown in Host UI, e.g. `iPhone Safari`
-  revokedAt: number | null;      // null while active
-}
-```
+`HostAclRecord` binds the Host and account to one passkey credential and public
+key hash, one device public key, approval metadata, and nullable revocation
+time. Its canonical schema and behavior live in
+`server-lib-common/src/security/acl.ts`; the Host service persists it through
+`HostStateStore` — a 0600 file in standalone, `globalState` in VS Code — never
+on the Server (`docs/specs/server.md`).
 
 A record authorizes the *pair* of a passkey credential and a device key:
 `HostAcl` reports a miss (`passkey-not-paired`, `device-not-paired`,

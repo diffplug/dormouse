@@ -34,6 +34,11 @@ cohesive foreground/background pairs, and nothing else:
 
 Hierarchy is the background swap between these pairs; secondary text is alpha on
 the same pair's own foreground (`text-app-fg/70`), never a separate token.
+
+**Never reintroduce** a pass-through `--mt-*` layer or one-off tokens for tabs,
+badges, accents, or button hovers unless the hierarchy cannot express a new
+rendered surface.
+
 **Never carry resting structure** with `surface-raised`, `border` (panel.border),
 `input-border`, or `muted` (descriptionForeground): themes leave those unset, and
 the resolver then hands back a generic value unrelated to the theme. Kimbie Dark
@@ -81,6 +86,9 @@ helpers are exported from `lib/src/lib/themes/index.ts`.
   computes, the first pass after a theme change reads the previous door bg; the
   `MutationObserver` re-fires on the pass's own `body.style` write, so the next
   pass corrects it.
+
+**Never fork the dynamic picks:** runtime UI and diagnostics must use
+`pickDoorPair()`, `pickFocusRing()`, and `pickAlarmColor()`.
 
 ## Runtime model
 
@@ -296,29 +304,3 @@ the Settings dialog on standalone and the desktop playground, in the free-floati
 Dark). `/pocket` redirects before rendering a picker. VSCode has no picker, so it
 opens the debugger through the `dormouse.debugTheme` command and the
 `dormouse:openThemeDebugger` extension-to-webview message.
-
-## Maintainer checklist
-
-When changing theme behavior:
-
-- Update `lib/src/theme.css` and `lib/src/components/design.tsx` together for any
-  chrome token change, and keep `theme.css`'s `@theme` and `body` blocks in
-  lockstep — the body block is what actually resolves at runtime.
-- Update `CONSUMED_VSCODE_KEYS` and the matching list in
-  `lib/scripts/bundle-themes.mjs` when adding or removing any `--vscode-*`
-  dependency used by chrome, terminal rendering, selection UI, theme-picker
-  inline styles, or resolver fallback paths. Adding a key only to
-  `RESOLUTION_RULES` is not enough: an unlisted key is stripped out of every
-  bundled and installed theme.
-- Keep xterm.js terminal colors sourced from `--vscode-terminal-*` variables, not
-  from Dormouse chrome tokens.
-- **Never fork** the dynamic picks in UI code: debugger reporting and runtime
-  both go through `pickDoorPair()`, `pickFocusRing()`, and `pickAlarmColor()`.
-  (The debugger does not report alarm picks today.)
-- **Never** add hardcoded color defaults or CSS variable fallback chains to
-  `lib/src/theme.css`; fix the theme data or runtime host instead.
-- **Never** reintroduce a pass-through `--mt-*` layer or one-off tokens for tabs,
-  badges, accents, or button hovers, unless a new rendered surface cannot be
-  expressed by the hierarchy above.
-- Build any new full app surface (standalone/Pocket) from the three list pairs
-  (see “Build every surface from the three list pairs”).

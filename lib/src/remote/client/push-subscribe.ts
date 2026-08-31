@@ -1,12 +1,4 @@
-/**
- * The browser half of push subscription (docs/specs/pocket-app.md ->
- * Installable web app, docs/specs/alert.md -> Push notifications).
- *
- * This module only talks to browser APIs — permission, the service worker
- * registration, and `pushManager.subscribe`. Registering the result with the
- * Server is `PocketClient.subscribeToPush`, which already holds the session
- * token and the device key the Server demands.
- */
+/** Browser-only push setup; `PocketClient.subscribeToPush` registers it with the Server. */
 
 import {
   fromBase64Url,
@@ -15,13 +7,7 @@ import {
 } from 'server-lib-common';
 import { getPushServiceWorkerRegistration } from '../pocket-app/service-worker';
 
-/**
- * Why the user cannot subscribe right now, or `ready` if they can.
- *
- * `needs-install` is the iOS rule: Web Push is granted only to a Home Screen
- * web app, never to a Safari tab. It is a *hint* for the UI, not the gate — the
- * gate is `subscribe()` failing, because only the browser knows for certain.
- */
+/** Why the user cannot subscribe now, or `ready`; see pocket-app.md. */
 export type PushAvailability =
   | 'ready'
   | 'unsupported'
@@ -29,38 +15,19 @@ export type PushAvailability =
   | 'no-worker'
   | 'denied';
 
-/**
- * True when the page is running as an installed web app rather than a tab.
- * `navigator.standalone` is the iOS signal; the media query is the standard one.
- */
 export function isInstalledWebApp(): boolean {
   const nav = navigator as Navigator & { standalone?: boolean };
   if (nav.standalone === true) return true;
   return globalThis.matchMedia?.('(display-mode: standalone)').matches ?? false;
 }
 
-/**
- * True on iOS/iPadOS, where Web Push requires a Home Screen install.
- *
- * Detected by the *presence* of the non-standard `navigator.standalone` rather
- * than by parsing a user-agent string, which iPadOS deliberately makes
- * unreliable by reporting as a Mac. The property is iOS/iPadOS Safari only and
- * `undefined` everywhere else — including macOS Safari, where Web Push works in
- * an ordinary tab and no install prompt should ever appear.
- *
- * Note the asymmetry this cannot see through: a tab cannot tell whether the
- * user has *also* installed the app, because the two have separate storage and
- * share no signal. UI copy has to allow for "already installed, wrong window".
- */
+/** `navigator.standalone` presence identifies iOS without unreliable UA parsing. */
 export function requiresInstallForPush(): boolean {
   return typeof (navigator as Navigator & { standalone?: boolean }).standalone === 'boolean';
 }
 
 export async function getPushAvailability(): Promise<PushAvailability> {
-  // Checked before any capability probe: on iOS, `Notification` and
-  // `PushManager` are both simply absent outside an installed web app, so in a
-  // Safari tab every probe below would answer `unsupported` when the actionable
-  // answer is "install".
+  // Keep first: an iOS tab lacks the APIs below but the actionable result is install.
   if (requiresInstallForPush() && !isInstalledWebApp()) return 'needs-install';
   if (
     !('serviceWorker' in navigator) ||
@@ -70,36 +37,17 @@ export async function getPushAvailability(): Promise<PushAvailability> {
     return 'unsupported';
   }
 
-  // Awaited rather than probed: registration is kicked off during boot and may
-  // still be in flight, so a bare `getRegistration()` would report a transient
-  // null as a failure.
+  // Boot starts registration asynchronously; await its tracked result.
   const registration = await getPushServiceWorkerRegistration();
   if (!registration) return 'no-worker';
 
   if (Notification.permission === 'denied') return 'denied';
-  // A PushSubscription belongs to this service-worker registration, not to a
-  // Host. Its existence says the browser can register that endpoint with a
-  // Host; only a successful `/api/push/subscribe` says a particular Host has
-  // been registered.
   return 'ready';
 }
 
 /**
- * Whether the browser can still deliver through a subscription minted for the
- * Server's current VAPID key.
- *
- * A Server row alone is not enough to claim "Alerts on": permission may have
- * been revoked, the browser subscription may have disappeared, the Server may
- * have rotated its VAPID key, or the push service may have rotated the endpoint
- * on its own. In all four cases Pocket must leave Enable available so
- * {@link subscribeToPushInBrowser} can repair the registration.
- *
- * That last case is invisible to the VAPID check — the subscription is valid
- * and minted for the right key, it just points somewhere new, leaving every
- * stored row unreachable. `registeredEndpoint` is the digest of the address
- * this device last registered: a different one means the address moved. Null
- * is "no opinion", not "mismatch", so a device that subscribed before this was
- * recorded, or one whose storage was cleared, is not made to re-register.
+ * Whether permission and the local subscription still match the Server row.
+ * A null endpoint digest is “no opinion,” preserving pre-fingerprint registrations.
  */
 export async function hasCurrentPushSubscription(
   applicationServerKey: string,
@@ -124,18 +72,9 @@ export async function hasCurrentPushSubscription(
 }
 
 /**
- * Ask for permission and subscribe. **Must be called from a user gesture** —
- * iOS rejects a permission request that is not, and there is no way to recover
- * from a denial in the same session.
- *
- * Returns the subscription in the shape the Server stores, or throws with a
- * message worth showing.
- *
- * `onDeliveryAddressReplaced` is called the moment the previously registered
- * address stops being valid, before the replacement is minted. It is required
- * rather than optional because a caller that ignored it would leave every other
- * Host claiming alerts through an endpoint that is already dead — including
- * when the `subscribe()` below throws, which no return value can report.
+ * Ask for permission and subscribe. Must run in a user gesture for iOS.
+ * `onDeliveryAddressReplaced` fires before minting because minting may fail
+ * after the old address is already invalid.
  */
 export async function subscribeToPushInBrowser(
   applicationServerKey: string,
@@ -160,10 +99,7 @@ export async function subscribeToPushInBrowser(
     );
   }
 
-  // One subscription belongs to the service-worker scope and is therefore
-  // shared by every Host. Reuse it when it was minted for this VAPID key; only
-  // a real key rotation should invalidate endpoints already registered with
-  // other Hosts.
+  // One scope subscription serves every Host; rotate only when the VAPID key changed.
   const applicationServerKeyBytes = fromBase64Url(applicationServerKey);
   let subscription = await registration.pushManager.getSubscription();
   if (
@@ -174,15 +110,10 @@ export async function subscribeToPushInBrowser(
     subscription = null;
   }
 
-  // Nullish rather than falsy so this cannot disagree with the `??=` below,
-  // which is what actually decides whether a new address gets minted. Announced
-  // before the round trip, not after: the old address is already gone (either
-  // unsubscribed above or never there), so a `subscribe()` that throws must not
-  // take that fact with it.
+  // Match the `??=` predicate and announce loss before the fallible subscribe.
   if (subscription == null) onDeliveryAddressReplaced();
   subscription ??= await registration.pushManager.subscribe({
-    // Mandatory in Chrome and on iOS: a promise that every push we receive
-    // becomes a visible notification. `sw.js` keeps it.
+    // Mandatory in Chrome/iOS; sw.js makes every delivery visible.
     userVisibleOnly: true,
     // Passed as bytes rather than the base64url string: browsers disagree about
     // accepting the string form.
@@ -199,16 +130,7 @@ export async function subscribeToPushInBrowser(
   return { endpoint, keys: { p256dh, auth } };
 }
 
-/**
- * Whether an existing subscription was minted for `expected`.
- *
- * A null key means the browser did not report which key the subscription
- * carries, so this answers false and the caller rotates. That is the safe
- * direction — a stale endpoint the Server cannot sign for is worse than a
- * needless rotation — but it does invalidate other Hosts' stored endpoints, so
- * it is only correct because every Push-capable browser populates
- * `PushSubscriptionOptions.applicationServerKey`.
- */
+/** A missing reported key mismatches, safely forcing rotation. */
 function sameBytes(actual: ArrayBuffer | null, expected: Uint8Array): boolean {
   if (!actual) return false;
   const bytes = new Uint8Array(actual);

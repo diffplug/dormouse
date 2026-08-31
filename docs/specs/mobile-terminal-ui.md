@@ -317,19 +317,11 @@ wrapper repeats that blur across a rAF and staggered timers, and cancels the
 pending retries on unmount. The only mobile UI surfaces that may open the native
 keyboard are the Type selector and the Type reserve area.
 
-## Files
-
-| File | Role |
-|------|------|
-| `lib/src/components/MobileTerminalUi.tsx` | The mobile wrapper: touch/input mode state, selectors, keyboard reserve, hidden Type input, key sequences (`MOBILE_TERMINAL_KEY_SEQUENCES`) |
-| `lib/src/components/MobileWall.tsx` | One-active-session mobile wall composition and session-row helpers (`useMobileWallSessionItems`) |
-| `lib/src/components/MobileGestureRadialMenu.tsx` | Radial menu rendering: keypad layout, group opacity, completion animation, confirm dialog |
-| `lib/src/lib/mobile-gesture-menu.ts` | Gesture state machine, geometry (radii, option directions), and root/quit action groups |
-| `lib/src/theme.css` | The `mobile-gesture-*-spawn` reveal animations and their reduced-motion opt-out |
-
-Tests: `lib/src/lib/mobile-gesture-menu.test.ts` (state machine + geometry),
-`lib/src/components/MobileTerminalUi.test.tsx` (touch-mode event routing),
-`lib/src/components/MobileWall.test.tsx`.
+Source of truth: the session composition is
+`lib/src/components/MobileWall.tsx`; coverage is
+`lib/src/components/MobileTerminalUi.test.tsx`,
+`lib/src/components/MobileWall.test.tsx`, and
+`lib/src/lib/mobile-gesture-menu.test.ts`.
 
 ## Future
 

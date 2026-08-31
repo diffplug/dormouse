@@ -225,26 +225,23 @@ Source of truth: `isInstalledWebApp` / `requiresInstallForPush` in
 `lib/src/remote/client/push-subscribe.ts`, surfaced by the notices in
 `lib/src/remote/pocket-app/App.tsx`.
 
-- **Installed** is `navigator.standalone === true` (iOS) or the standard
-  `(display-mode: standalone)` media query.
-- **Install is required** is the *presence* of `navigator.standalone`, even when
-  it is `false`. The property is iOS/iPadOS Safari only and `undefined`
-  everywhere else — including macOS Safari, where Web Push works in an ordinary
-  tab and an install prompt would be wrong. **Never parse the user-agent
-  string** here — iPadOS makes it unreliable by reporting as a Mac.
-- **A tab cannot see whether the app is also installed.** The two have separate
-  storage and share no signal, so the install notice necessarily also shows to
-  someone who installed it and opened the wrong window; the copy says so rather
-  than insisting they install it twice.
-- **iOS cannot be prompted.** There is no `beforeinstallprompt` there, so
-  installing can only be described, never triggered.
-- Every unavailable reason is named in the UI rather than left as a missing
-  button — `needs-install`, `no-worker` (registration failed, usually an
-  insecure origin), `denied`, `unsupported`. A push that silently never arrives
-  should always have a visible cause. `needs-install` is checked before any
-  capability probe: in an iOS Safari tab, `Notification` and `PushManager` are
-  themselves absent, so probing first would answer `unsupported` when the
-  actionable answer is "install".
+Installed means `navigator.standalone === true` (iOS) or the standard
+`(display-mode: standalone)` media query. Availability is evaluated in this
+order, and every unavailable result is named in the UI:
+
+| Result | Condition | UI consequence |
+|---|---|---|
+| `needs-install` | `navigator.standalone` exists but the app is not installed; checked before capability probes because iOS tabs omit those APIs. | Explain Home Screen install; iOS has no prompt API. |
+| `unsupported` | Service workers, `Notification`, or `PushManager` are unavailable after the install gate. | Explain that this browser cannot receive alerts. |
+| `no-worker` | The tracked registration failed or resolved empty, commonly on an insecure origin. | Explain the worker failure. |
+| `denied` | Notification permission is denied. | Direct the user to browser settings. |
+| `ready` | Worker and APIs exist and permission is not denied. | Offer the Host-specific registration action; this does not mean any Host is registered yet. |
+
+**Never parse the user-agent:** iPadOS reports as a Mac; the presence of
+`navigator.standalone` is the install-required signal and stays absent on macOS
+Safari. **A tab cannot detect the installed app** because their storage
+partitions share no signal, so the copy allows for “already installed, wrong
+window.”
 
 Because registration is best-effort and asynchronous, both the availability
 check and the subscribe path await the tracked registration promise from
