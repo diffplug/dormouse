@@ -117,17 +117,12 @@ export const Error: Story = {
 };
 
 // Every paired Host holds a row → the card collapses to one settled line and
-// the rows carry the marker. Driven by the per-Host registrations, not by
-// browser availability: a scope-wide PushSubscription says nothing about which
-// Hosts hold a server row.
+// the paired row carries the marker, while the unpaired rows below it stay
+// bare — they have nothing to register. Driven by the per-Host registrations,
+// not by browser availability: a scope-wide PushSubscription says nothing about
+// which Hosts hold a server row.
 export const PushSubscribed: Story = {
   args: { isPushSubscribed: () => true },
-};
-
-// Registered with the one paired Host while an unpaired Host sits below it —
-// the card is settled, because an unpaired Host has nothing to register.
-export const PushSubscribedOneHost: Story = {
-  args: { isPushSubscribed: (hostId: string) => hostId === 'host-studio' },
 };
 
 // A Host paired after push was turned on: the card comes back for it, and the

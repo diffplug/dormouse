@@ -252,8 +252,9 @@ permission prompt and the subscription it mints are scope-wide, so the per-Host
 rows are bookkeeping, not something to ask for once each. The card reads
 the paired Hosts as a set — **Enable push notifications** while any lacks a row, one
 **Push notifications on.** line once all have one — and its tap subscribes the
-browser, then registers every paired Host, repairing a rotated endpoint at once. Each response commits as it lands, so a loop that fails
-partway keeps what it registered. **Never offer push from the wall or from a Host
+browser, then registers every paired Host, repairing a rotated endpoint at
+once. Each response commits as it lands, so a loop that fails partway keeps what
+it registered. **Never offer push from the wall or from a Host
 row:** the terminal is what the user tapped Connect to reach. The row states
 **Push on** beside its pair state — the only thing that says *which* Host the
 card still covers.
@@ -276,7 +277,8 @@ scoping `GET /api/hosts` uses). `POST /api/push/subscribe` answers with the same
 thing — every Host this device is registered with after the mutation — so both
 are complete answers, never deltas: nothing to merge, only which is newer.
 One run token drops any read a newer load, or a completed registration, already
-overtook. A read in flight or failed never settles at empty on its own behalf: the card re-offers its idempotent Enable rather than preserving a stale
+overtook. A read in flight or failed never settles at empty on its own behalf:
+the card re-offers its idempotent Enable rather than preserving a stale
 **Push notifications on.** claim. Source of truth: `getPushAvailability` in
 `lib/src/remote/client/push-subscribe.ts`, `PocketClient.listPushSubscribedHosts`,
 and the push effect in `lib/src/remote/pocket-app/App.tsx`.
