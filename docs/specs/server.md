@@ -729,10 +729,10 @@ For a headless stand-in host instead:
 — it instantiates the test harness's `FakeHost` and differs only in
 auto-approving pairing and logging.
 
-**3. Phone** (or any other browser profile): open the server origin →
-First-time setup (password + label) creates the passkey and signs you in →
-Hosts → **Pair** → approve in the modal on the laptop → one biometric prompt →
-pick a pane → type.
+**3. Phone** (or any other browser profile): open the server origin → a browser
+that has never been here leads with the setup fields, and password + label
+create the passkey and sign you in → Hosts → **Pair** → approve in the modal on
+the laptop → one biometric prompt → pick a pane → type.
 
 To test push, **add Pocket to the Home Screen before signing in** and do all of
 the above inside the installed app: iOS delivers Web Push only there, and the

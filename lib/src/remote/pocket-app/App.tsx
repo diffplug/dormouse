@@ -101,8 +101,11 @@ function deviceLabel(): string {
  *  - secondary = recessed to the page bg; reads as a button when it sits on an
  *    inactive-header row via the guaranteed app↔inactive delta.
  *  - outline = the subordinate action *on* the page, where secondary would be
- *    bg-on-bg: an alpha-on-fg hairline, the same trick `PK.divided` uses,
- *    because panel-border is transparent in many themes.
+ *    bg-on-bg: an alpha-on-fg hairline, because panel-border is transparent in
+ *    many themes. Drawn as an inset shadow rather than a border (DESIGN.md,
+ *    the Inset-Over-Border Rule), and at /25 rather than `PK.divided`'s /15 —
+ *    a tappable affordance has to hold its edge, where a divider only has to
+ *    separate.
  *  - ghost = transparent, inherits the surrounding band fg (header actions).
  */
 const pkButton = tv({
@@ -111,7 +114,7 @@ const pkButton = tv({
     tone: {
       primary: 'bg-header-active-bg text-header-active-fg',
       secondary: 'bg-app-bg text-app-fg',
-      outline: 'border border-app-fg/25 text-app-fg',
+      outline: 'shadow-[inset_0_0_0_1px] shadow-app-fg/25 text-app-fg',
       ghost: 'text-inherit hover:bg-current/10',
     },
     size: {
@@ -134,6 +137,10 @@ const PK = {
   // Safe centering: the first-run screen (install notice + setup + the sign-in
   // alternative) can outgrow a small phone, and plain `justify-center` in a
   // scroll container puts the overflow above the scrollable area, unreachable.
+  // WebKit before Safari/iOS 17.6 does not parse the `safe` keyword and drops
+  // the declaration, so those devices render top-aligned — usable and
+  // scrollable, and accepted, because a plain `justify-center` fallback would
+  // reintroduce the unreachable overflow on exactly the devices that lack it.
   bodyCenter: 'justify-center-safe',
   wallHost: 'flex min-h-0 flex-1 flex-col',
   // Host row = the INACTIVE header pair (a list item lifted off the page).
@@ -202,19 +209,12 @@ export default function App(): React.ReactElement {
   }, []);
 
   /**
-   * Which auth screen leads. A browser with no stored passkey material has
-   * never completed anything here, so "Welcome back" would be a lie and the
-   * setup it needs would sit behind a disclosure. Re-read on every entry to
-   * the auth phase: a session that expires after setup must come back to the
-   * returning screen, not to the first-run one.
-   */
-  const [firstRun, setFirstRun] = useState(() => !client.hasPriorUse());
-  /**
-   * iOS in a browser tab. Fixed for this run — installing means relaunching
+   * iOS in a browser tab. Probed once at mount — installing means relaunching
    * from the Home Screen, which is a different app instance (and a different
-   * storage partition) than the one asking.
+   * storage partition) than the one asking, so the answer cannot change under
+   * this run.
    */
-  const needsInstall = needsHomeScreenInstall();
+  const [needsInstall] = useState(needsHomeScreenInstall);
 
   const [phase, setPhase] = useState<Phase>('auth');
   const [error, setError] = useState<string | null>(null);
@@ -239,13 +239,20 @@ export default function App(): React.ReactElement {
   const pushRegistrationVersionRef = useRef(0);
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
 
-  // On a *transition* back into auth only — the lazy initializer already
-  // answered for mount, so a same-phase re-run would just re-scan storage.
-  const prevPhaseRef = useRef<Phase>('auth');
-  useEffect(() => {
-    if (phase === 'auth' && prevPhaseRef.current !== 'auth') setFirstRun(!client.hasPriorUse());
-    prevPhaseRef.current = phase;
-  }, [phase, client]);
+  /**
+   * Which auth screen leads. A browser with no stored passkey material has
+   * never completed anything here, so "Welcome back" would be a lie and the
+   * setup it needs would sit behind a disclosure.
+   *
+   * Derived, never latched, because both directions of staleness are bugs a
+   * user hits: a setup that registers the passkey but then fails before
+   * leaving `auth` (a cancelled second WebAuthn prompt, a socket error) must
+   * flip the screen to "Welcome back", so the retry signs in rather than
+   * minting a second server-side passkey; and a session expiry that drops back
+   * to `auth` must paint the returning screen on the first commit, not one
+   * effect tick later.
+   */
+  const firstRun = phase === 'auth' && !client.hasPriorUse();
 
   const setPairStateFor = useCallback((hostId: string, state: HostPairState) => {
     setPairStates((prev) => {
@@ -617,7 +624,10 @@ export function ConnectedView({
  * sign-in primary and folds setup back behind the disclosure.
  *
  * The install guidance goes here rather than after sign-in because this is the
- * screen that mints the partition-bound identity it warns about.
+ * screen that mints the partition-bound *passkey* it warns about — the last
+ * point at which the advice is still free to take. Not the device key: `App`'s
+ * fingerprint effect already minted that at boot, a gap staged in
+ * `docs/specs/remote-security-model.md` -> Future.
  */
 export function SetupOrSignin({
   busy,
@@ -672,11 +682,17 @@ export function SetupOrSignin({
               : 'Sign in with your passkey to reach your enrolled hosts and pick up a terminal session.'}
           </p>
         </div>
-        {/* Above the actions, never below: a passkey and a device key belong to
-            whichever partition creates them, so guidance that arrives after
-            setup arrives after the trap. */}
-        {needsInstall ? <InstallFirstNotice /> : null}
-        {error ? <div className={PK.error}>{error}</div> : null}
+        {/* Above the actions, never below: the passkey this screen mints
+            belongs to whichever partition creates it, so guidance that arrives
+            after setup arrives after the trap. The returning layout carries
+            the same notice inside its disclosure instead — see below. */}
+        {firstRun && needsInstall ? <InstallFirstNotice /> : null}
+        {/* Announced, because a failed sign-in changes nothing else on screen. */}
+        {error ? (
+          <div className={PK.error} role="alert">
+            {error}
+          </div>
+        ) : null}
 
         {firstRun ? (
           <>
@@ -706,6 +722,11 @@ export function SetupOrSignin({
                   Create the account and register this device's passkey. Requires the server's setup
                   password.
                 </p>
+                {/* The notice is written for someone about to make a passkey,
+                    so under "Welcome back" it rides with the fields rather
+                    than the screen — this is the other place setup can happen
+                    before an install. */}
+                {needsInstall ? <InstallFirstNotice /> : null}
                 {setupFields}
               </div>
             ) : null}
@@ -715,6 +736,16 @@ export function SetupOrSignin({
     </div>
   );
 }
+
+/**
+ * The one iOS install gesture, written once so the two notices cannot drift on
+ * it — everything else in them differs on purpose (identity vs alerts framing).
+ */
+const INSTALL_RITUAL = (
+  <>
+    Tap Share, then <strong>Add to Home Screen</strong>
+  </>
+);
 
 /**
  * iOS, in a browser tab, on the screen about to mint this Client's identity.
@@ -728,17 +759,11 @@ export function SetupOrSignin({
  * The second line is not optional. A tab cannot see whether the app is *also*
  * installed (separate storage, no shared signal), so this shows to someone who
  * installed it already and simply opened the wrong window.
+ *
+ * Alerts are deliberately not mentioned: whether they work at all depends on
+ * the Server's push config, which {@link InstallNotice} and the Hosts view's
+ * push rows gate on. Identity is true regardless, and carries the notice.
  */
-/**
- * The one iOS install gesture, written once so the two notices cannot drift on
- * it — everything else in them differs on purpose (identity vs alerts framing).
- */
-const INSTALL_RITUAL = (
-  <>
-    Tap Share, then <strong>Add to Home Screen</strong>
-  </>
-);
-
 function InstallFirstNotice(): React.ReactElement {
   return (
     <div className={PK.notice}>
@@ -746,7 +771,7 @@ function InstallFirstNotice(): React.ReactElement {
       <p className={PK.noticeBody}>
         {INSTALL_RITUAL}, and set up from there. iOS keeps the
         installed app&rsquo;s data separate from this tab, so a passkey made here has to be made and
-        approved all over again — and alerts reach only the installed app.
+        approved all over again.
       </p>
       <p className={PK.noticeBody}>
         Already added it? Set up from the Home Screen app rather than this tab.
@@ -786,6 +811,13 @@ function InstallNotice(): React.ReactElement {
  * caller so the credential form's ids, autocomplete rules, and disabled logic
  * have one definition; `idPrefix` keeps those ids unique if it is ever rendered
  * more than once on a screen.
+ *
+ * A real `<form>`, so the phone keyboard's Go key submits — on the first-run
+ * screen these fields are the primary path, and a Go that does nothing reads as
+ * a broken app. `display: contents` keeps the caller's flex column owning the
+ * layout, and one `blocked` condition drives both the button's disabled state
+ * (which is what the HTML spec makes suppress implicit submission) and the
+ * handler, so no submit path can outrun a busy ceremony or an empty password.
  */
 function PasskeySetupFields({
   idPrefix,
@@ -800,9 +832,17 @@ function PasskeySetupFields({
 }): React.ReactElement {
   const [password, setPassword] = useState('');
   const [label, setLabel] = useState('My Phone');
+  const blocked = busy !== null || password.length === 0;
 
   return (
-    <>
+    <form
+      className="contents"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (blocked) return;
+        onSubmit(password, label);
+      }}
+    >
       <div className={PK.field}>
         <label className={PK.fieldLabel} htmlFor={`${idPrefix}-password`}>Setup password</label>
         <input
@@ -825,14 +865,13 @@ function PasskeySetupFields({
         />
       </div>
       <button
-        type="button"
+        type="submit"
         className={pkButton({ tone: 'primary', block: true })}
-        disabled={busy !== null || password.length === 0}
-        onClick={() => onSubmit(password, label)}
+        disabled={blocked}
       >
         {busy === 'setup' ? 'Creating…' : submitLabel}
       </button>
-    </>
+    </form>
   );
 }
 

@@ -42,18 +42,22 @@ null, shells/clipboard empty, alerts inert, `alertAwait` settling `cancelled`
 rather than handing back a promise that never resolves).
 
 **The auth screen leads with the half this browser can use.** Prior use is
-stored passkey material (`PocketClient.hasPriorUse`; throwing storage reads as a
-first visit). Without it, setup — setup password plus passkey label — is
-unfolded and sign-in secondary, since a synced passkey can reach a browser that
-stored nothing. With it, sign-in leads and setup folds behind the disclosure.
+stored passkey material (`PocketClient.hasPriorUse`), re-derived every render so
+a half-finished setup offers sign-in on the retry rather than a second passkey.
+Without it, setup — setup password plus passkey label — is unfolded and sign-in
+secondary, since a synced passkey can reach a browser that stored nothing. With
+it, sign-in leads and setup folds behind the disclosure. Blocked site data costs
+persistence, not the visit: `localStoragePocketStorage` mirrors writes in memory
+and reads the mirror first, because `setup` commits the Server's passkey
+*before* caching it and a throw there would leave every retry minting an orphan.
 
 **Pocket hides `MobileWall`'s local Kill affordance** (`showKillButton={false}`)
 — remote panes are Host-owned, and v1 grants no phone-side kill/layout
 authority. Closing a local xterm view without a Host-side close would leave the
 Host attachment live and the phone view inconsistent.
 
-Adapter-specific extras (the same pattern as `FakePtyAdapter`'s scenario
-controls): `RemotePtyAdapter` exposes `setActivePane(id)` — v1 allows one
+Adapter-specific extras (as with `FakePtyAdapter`'s scenario controls):
+`RemotePtyAdapter` exposes `setActivePane(id)` — v1 allows one
 attachment per session, so pane switching is detach → attach, and the attach
 repaint (resize) redraws the screen. Writes and resizes for a non-attached pane
 are dropped, since the Host rejects them anyway. Badges for non-attached panes
@@ -79,8 +83,8 @@ alone, never a Connect that can only fail; offline rows keep the marker. A
 denial reporting an ACL miss (`passkey-not-paired`, `device-not-paired`,
 `pairing-mismatch`) drops it and relabels the action **Pair again**, so an ACL
 reset, revocation, or device-key loss recovers through the ordinary ceremony.
-Pairing continues into connecting, so approval on the laptop lands the phone in
-a terminal.
+Pairing continues into connecting, so laptop approval lands the phone in a
+terminal.
 
 ## Design system and theming
 
@@ -90,18 +94,17 @@ tokens over `--vscode-*`; [theme.md](./theme.md), `DESIGN.md`), never the
 website's separate "homepage" system (`website/src/index.css`). No
 Pocket-specific palette: a theme change re-skins auth screens and wall together.
 
-Pocket has no VS Code host and boots into auth long before a Wall exists, so it
-restores the theme itself before first paint: `main.tsx` calls
+Pocket has no VS Code host and boots into auth long before a Wall exists, so
+`main.tsx` restores the theme itself before first paint via
 `restorePocketTheme()` (`lib/src/remote/pocket-app/pocket-theme.ts`), defaulting
-to Kimbie Dark (the homepage brand theme); `PocketWall`
-repeats it idempotently via `usePocketTheme()` for isolated consumers (stories).
-The default is one shared `POCKET_THEME_ID` constant the website playground
-imports, so the playground cannot drift from it. Restoring also syncs
-document-level browser chrome no in-app host needs: `color-scheme` on the root
-element (native form controls, scrollbars) and the `<meta name="theme-color">`
-address-bar tint, from the applied theme's type and resolved
-`sideBar.background`. The static meta values in `lib/pocket/index.html` are
-pre-boot placeholders only.
+to Kimbie Dark (the homepage brand theme); `PocketWall` repeats it idempotently
+through `usePocketTheme()` for isolated consumers (stories). That default is one
+shared `POCKET_THEME_ID` the website playground imports, so it cannot drift.
+Restoring also syncs document-level chrome no in-app host needs: root
+`color-scheme` (native form controls, scrollbars) and the
+`<meta name="theme-color">` address-bar tint, from the applied theme's type and
+resolved `sideBar.background`; the static meta values in `lib/pocket/index.html`
+are pre-boot placeholders.
 
 The chrome draws only on theme.md's three list pairs — page = app, header band =
 active-header (the "titlebar", doubling as the primary-action tone), host rows =
@@ -147,24 +150,24 @@ source, never dropped into the output by hand.
   useless without a live relay connection, so an offline cache would buy no
   working screens while fighting `registerPocketServing`, which re-reads
   `index.html` per request because a rebuild swaps in new content-hashed assets.
-  It handles `push` and `notificationclick`, plus `install`/`activate` to take
-  over immediately (`skipWaiting` + `clients.claim`,
-  which cost nothing when there is no cache to migrate), and nothing else.
-- **A push that cannot be parsed still shows a notification.** Subscribing with
+  It handles `push`, `notificationclick`, and `install`/`activate` to take over
+  immediately (`skipWaiting` + `clients.claim`, free with no cache to migrate) —
+  nothing else.
+- **A push that cannot be parsed still shows a notification.**
   `userVisibleOnly: true` promises the browser that every delivery becomes
-  visible; a browser that catches the worker showing none substitutes its own
-  "site updated in the background" notice and counts it against the
-  subscription. Malformed and payload-less pushes therefore fall back to generic
-  text rather than returning early — even when reading the raw text throws,
-  guarded separately so no payload shape can exit the handler without a
-  notification. `title`/`body` are re-bounded at this sink because the string is
-  terminal-supplied ([alert.md](./alert.md) -> Push notifications, which owns
-  the sanitizing rule the worker mirrors).
+  visible; one that catches the worker showing none substitutes its own "site
+  updated in the background" notice and counts it against the subscription.
+  Malformed and payload-less pushes therefore fall back to generic text rather
+  than returning early — reading the raw text is guarded separately, so no
+  payload shape exits the handler without a notification. `title`/`body` are
+  re-bounded at this sink because the string is terminal-supplied
+  ([alert.md](./alert.md) -> Push notifications owns the rule the worker
+  mirrors).
 - **Registration is best-effort and never awaited.** Every screen works without
-  the worker, so a failure warns and boot continues. Failure is ordinary on a
-  browser without support and on an insecure origin — service workers need a
-  secure context, and only `localhost` is exempt, the same constraint WebAuthn
-  imposes (Deployment, below).
+  the worker, so a failure warns and boot continues — ordinary on a browser
+  without support and on an insecure origin, since service workers need a secure
+  context with only `localhost` exempt, the same constraint WebAuthn imposes
+  (Deployment, below).
 - Clicking a notification focuses the app and leaves the user on the directory.
   There is no deep link to a Pane: protocol-v1 carries no routable surface ref.
 
@@ -191,8 +194,9 @@ again, and the verified response restores it on any profile. Source of truth:
 
 So the order is: install to the Home Screen **first**, then sign in, approve the
 pairing on the machine, and enable alerts from within it — **and Pocket says so
-on the auth screen, above setup**, before the passkey and device key it warns
-about exist.
+wherever setup can happen**, above the first-run fields and inside the return
+visit's disclosure. That precedes the passkey it warns about, though not the
+device key, which `App` mints at boot.
 
 Because one phone can hold two Client identities, Pocket names the mode in the
 label it suggests at pairing — `Dormouse Pocket (Home Screen)` versus
@@ -214,7 +218,7 @@ order, and every unavailable result is named in the UI:
 
 | Result | Condition | UI consequence |
 |---|---|---|
-| `needs-install` | `navigator.standalone` exists but the app is not installed; checked before capability probes because iOS tabs omit those APIs. `needsHomeScreenInstall` exports that predicate alone, so the auth gate awaits no push machinery. | Explain Home Screen install *before* setup, and again on the Hosts view; iOS has no prompt API, so it stays advice — setup in a tab must still work. |
+| `needs-install` | `navigator.standalone` exists but the app is not installed; checked before capability probes because iOS tabs omit those APIs. `needsHomeScreenInstall` exports that predicate alone, so the auth gate awaits no push machinery. | Explain Home Screen install wherever setup can happen, and again on the Hosts view; with no prompt API it stays advice — setup in a tab must still work. |
 | `unsupported` | Service workers, `Notification`, or `PushManager` are unavailable after the install gate. | Explain that this browser cannot receive alerts. |
 | `no-worker` | The tracked registration failed or resolved empty, commonly on an insecure origin. | Explain the worker failure. |
 | `denied` | Notification permission is denied. | Direct the user to browser settings. |
@@ -247,21 +251,21 @@ one row per `(hostId, devicePublicKey)`. An existing browser subscription
 therefore leaves Enable alerts available for every Host that has not registered;
 only a successful `POST /api/push/subscribe` flips that Host to Alerts on.
 
-Which Hosts those are is read back from the Server when the Hosts view opens,
-not remembered locally, so a reload does not re-offer an action already taken
-and a row pruned after a 410 stops claiming alerts are on. The read is
-`GET /api/push/subscriptions`, which returns the **account's** registrations as
-identities and is filtered to this device by `PocketClient`. **Never
-parameterize that read by `devicePublicKey`** — it would be an enumeration
-primitive over an input the caller need not own, where the account's own rows
-are already its to read (the same scoping `GET /api/hosts` uses).
-`POST /api/push/subscribe` answers with the same thing — every Host this device
-is registered with after the mutation — so both are complete answers, never
-deltas: nothing to merge, only which is newer. Pocket counts completed
-registrations, captures that count when a read begins, and discards
-the read's snapshot if a registration overtook it; it also clears the previous
-snapshot at the start of a read, so a failed read re-offers an idempotent action
-instead of preserving a stale **Alerts on** claim. Source of truth:
+Which Hosts those are is read from the Server when the Hosts view opens, not
+remembered locally, so a reload does not re-offer an action already taken and a
+row pruned after a 410 stops claiming alerts are on.
+`GET /api/push/subscriptions` returns the **account's** registrations, filtered
+to this device by `PocketClient`. **Never parameterize that read by
+`devicePublicKey`** — an enumeration primitive over an input the caller need not
+own, where the account's own rows are already its to read (the scoping
+`GET /api/hosts` uses). `POST /api/push/subscribe` answers with the same thing —
+every Host this device is registered with after the mutation — so both are
+complete answers, never deltas: nothing to merge, only which is newer. Pocket
+counts completed registrations, captures that count when a read begins, and
+drops the read's snapshot if a registration overtook it; it also clears the
+previous snapshot at the start of a read, so a failed read re-offers an
+idempotent action rather than preserving a stale **Alerts on** claim. Source of
+truth:
 `getPushAvailability` in `lib/src/remote/client/push-subscribe.ts`,
 `PocketClient.listPushSubscribedHosts`, and the hosts-phase effect in
 `lib/src/remote/pocket-app/App.tsx`.
@@ -290,12 +294,12 @@ is not forced to re-register. Source of truth: `hasCurrentPushSubscription` in
 `vapidPublicKey` field in `server/src/state.ts`, and the subscriptions read in
 `server/src/app.ts`.
 
-Repair is deferred to the next app open rather than handled by a
+Repair is deferred to the next app open rather than a
 `pushsubscriptionchange` handler in `sw.js`: a worker can open the device key (a
 non-extractable `CryptoKey` in IndexedDB) but cannot obtain a session token,
 which lives only in `PocketClient` memory behind a fresh WebAuthn assertion —
 and `navigator.credentials` does not exist in a worker. Unattended
-re-registration would need a long-lived credential that
+re-registration would need a long-lived credential
 [remote-security-model.md](./remote-security-model.md) does not grant.
 
 Registering another Host, or retrying that POST, reuses the scope's existing
@@ -334,34 +338,32 @@ heuristically cached `index.html` does not merely run stale code, it requests
 files that no longer exist and fails to boot. Two rules make it hold:
 
 - **The class comes from the request path** (`/assets/` or not), never the
-  resolved file path, which is platform-shaped. If Vite ever emits an unhashed
-  file into `assets/`, or `assetsDir` is overridden, that test silently
-  mislabels it. The header is staged on the context *before* `serveStatic` runs,
-  since its `onFound` hook fires after the Response is built and cannot add to
-  it.
+  platform-shaped resolved path. An unhashed file emitted into `assets/`, or an
+  overridden `assetsDir`, would silently mislabel it. The header is staged on
+  the context *before* `serveStatic` runs, since its `onFound` hook fires after
+  the Response is built and cannot add to it.
 - **The SPA fallback overrides that staged class, and 404s under `/assets/`.**
-  It answers with the shell whatever was asked for, and a response's cache
-  policy describes the response. The shell is never a useful answer to a
-  subresource miss: serving it stored an HTML body under a hashed-asset URL in
-  the `immutable` class, which no reload could revalidate away — so a request
-  during a deploy, the exact window this policy exists for, broke the app for
-  good.
+  It answers with the shell whatever was asked, and a response's cache policy
+  describes the response. The shell is never a useful answer to a subresource
+  miss: it stored an HTML body under a hashed-asset URL in the `immutable`
+  class, which no reload could revalidate away — so a request during a deploy,
+  the exact window this policy exists for, broke the app for good.
 
 Source of truth: `registerPocketServing` in `server/src/app.ts`.
 
 ## An expired session drops to sign-in
 
 Sessions live only in the Server's memory ([server.md](./server.md)), so they
-end on their 12h expiry *and* on every Server restart, while the passkey and the
+end on their 12h expiry *and* on every Server restart, while the passkey and
 paired-host markers in `localStorage` outlive both. Without a way back an
-installed Pocket is stuck: there is no address bar to reload from and the in-app
-Refresh re-sends the same dead token, leaving force-quitting as the only escape.
+installed Pocket is stuck: no address bar to reload from, and the in-app Refresh
+re-sends the same dead token, leaving force-quit as the only escape.
 
-So Pocket treats a dead session as actionable rather than reportable:
-`PocketClient` clears its in-memory token and throws `SessionExpiredError`, and
-the app tears down any live adapter and returns to the sign-in screen carrying
-that message. One passkey prompt then restores the Hosts list with pairing and
-push registration intact. Source of truth: `SessionExpiredError` in
+So Pocket treats a dead session as actionable, not reportable: `PocketClient`
+clears its in-memory token and throws `SessionExpiredError`; the app tears down
+any live adapter and returns to sign-in carrying that message. One passkey
+prompt restores the Hosts list, pairing and push registration intact.
+Source of truth: `SessionExpiredError` in
 `lib/src/remote/client/pocket-client.ts`, handled in `run` in
 `lib/src/remote/pocket-app/App.tsx`.
 
@@ -384,14 +386,14 @@ line: the pairing ceremony verifies no assertion
 (`docs/specs/remote-security-model.md`, Pairing Ceremony), so the human at the
 laptop's approval modal is the control — and the fingerprint that modal shows,
 of the key that is *asking*, is uncheckable unless the phone shows it too. Both
-ends call the same `pairingFingerprint` helper from
-`server-lib-common` — an 8-character slice of the base64url public point, taken
-past the two near-constant leading characters.
+ends call the same `pairingFingerprint` helper from `server-lib-common`: an
+8-character slice of the base64url public point, past the two near-constant
+leading characters.
 
 It renders whenever the key loads, paired or not, so it reads as a property of
-this browser rather than a step in a flow. A key that fails to load leaves it
-absent: the pair and connect paths already report that failure. Source of truth:
-`HostsView` in `lib/src/remote/pocket-app/App.tsx`.
+this browser rather than a step in a flow; a key that fails to load leaves it
+absent, since the pair and connect paths already report that failure. Source of
+truth: `HostsView` in `lib/src/remote/pocket-app/App.tsx`.
 
 ## Deployment: same-origin, always
 

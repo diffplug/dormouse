@@ -47,7 +47,7 @@ export const FirstRunKimbieDark: Story = {
 };
 
 // iOS in a browser tab: the Home Screen guidance sits above the setup fields,
-// where it still precedes the passkey and device key this screen mints.
+// where it still precedes the passkey this screen mints.
 export const FirstRunNeedsInstall: Story = {
   args: { needsInstall: true },
 };

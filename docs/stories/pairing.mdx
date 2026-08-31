@@ -16,9 +16,8 @@ the laptop, make a passkey on the phone, approve the pairing, connect.
 
 The screens below are the real components, rendered from the same stories
 Chromatic watches. They are static — nothing here is wired to a live server.
-Two of them carry `autoplay` because a docs page does not run a story's `play`
-by default, and their state — an expanded disclosure, a painted terminal — only
-exists after it runs.
+One of them carries `autoplay` because a docs page does not run a story's `play`
+by default, and its state — a painted terminal — only exists after it runs.
 
 > **This is a walkthrough, not a spec.** It lives outside `docs/specs/`, so the
 > fold discipline in `AGENTS.md` does not apply to it and `spec-lint` does not
@@ -159,18 +158,16 @@ enrolling connects the machine to a server; it pairs it with nothing.
 
 ## 4. Make a passkey on the phone
 
-Open the same origin on a tailnet-connected phone. Pocket loads, finds nothing
-stored, and leads with what a phone in that state actually needs: the setup
-password from `manage show-password`, plus a label for this passkey.
+Open the same origin on a tailnet-connected phone. **On iOS, install to the Home
+Screen before you do any of this** — the installed app is a separate storage
+partition from the Safari tab, so anything set up in the tab has to be set up
+again from scratch.
+
+Pocket loads, finds nothing stored, and leads with what a phone in that state
+actually needs: the setup password from `manage show-password`, plus a label for
+this passkey.
 
 <Canvas of={SetupOrSignin.FirstRun} />
-
-Sign in stays on the screen as the quieter second option, because passkeys sync
-— a phone that has never been here may already hold one. A phone that *has*
-been here gets the other screen instead, sign-in first with setup folded back
-behind a disclosure:
-
-<Canvas of={SetupOrSignin.Welcome} />
 
 That one setup action creates the account's first passkey and signs in with it.
 Two things you cannot see happen at the same time:
@@ -182,8 +179,15 @@ Two things you cannot see happen at the same time:
 - The session's **presence stamp** is set. Pairing requires a passkey assertion
   from the last 30 seconds, so signing in is what makes the next step possible.
 
-On iOS in a Safari tab, Pocket adds one thing above the fields, while the advice
-is still free to take:
+Sign in stays on the screen as the quieter second option, because passkeys sync
+— a phone that has never been here may already hold one. A phone that *has*
+been here gets the other screen instead, sign-in first with setup folded back
+behind a disclosure:
+
+<Canvas of={SetupOrSignin.Welcome} />
+
+On a first run in an iOS Safari tab, Pocket puts that install advice on the
+screen itself, above the fields, while it is still free to take:
 
 <Canvas of={SetupOrSignin.FirstRunNeedsInstall} />
 

@@ -202,8 +202,10 @@ export class PocketClient {
    * (docs/specs/pocket-app.md). The evidence is stored passkey material: setup
    * and sign-in both cache the asserted public key, so anything else this
    * device holds — a paired marker, a push endpoint — was preceded by one of
-   * them. Storage that throws (site data blocked) reads as a first visit,
-   * the screen that can still get somewhere from nothing.
+   * them. Blocked site data does not throw past
+   * {@link localStoragePocketStorage}'s mirror, so a setup completed in this
+   * tab still flips the screen; a storage that throws anyway reads as a first
+   * visit — the screen that can still get somewhere from nothing.
    */
   hasPriorUse(): boolean {
     try {
@@ -897,30 +899,91 @@ function uuid(): string {
   return globalThis.crypto.randomUUID();
 }
 
-/** localStorage-backed {@link PocketStorage}; touches storage only when called. */
+/**
+ * localStorage-backed {@link PocketStorage}, mirrored in memory so blocked site
+ * data costs persistence and nothing else.
+ *
+ * Every localStorage touch is best-effort — a browser with site data blocked
+ * (Safari's Lockdown/private modes, an enterprise policy) throws on `getItem`
+ * and `setItem` alike, and `setup` commits the Server's passkey *before* it
+ * caches the public key. Left to throw, that failure would strand the visit: the
+ * cache write blows up after the registration is already durable, and every
+ * retry mints another orphan passkey server-side.
+ *
+ * So the mirror is the primary copy — writes land there first, reads consult it
+ * before storage — and localStorage is a cache that may silently do nothing.
+ * Setup and sign-in then complete normally for the life of the tab; only
+ * surviving a reload is lost. The mirror also shadows storage on `unmarkPaired`,
+ * so a removal that could not be persisted is still honored while this instance
+ * lives.
+ */
 export function localStoragePocketStorage(): PocketStorage {
   const PASSKEY_PREFIX = 'dormouse-pocket:passkey:';
   const PAIRED_PREFIX = 'dormouse-pocket:paired:';
   const PUSH_ENDPOINT_KEY = 'dormouse-pocket:push-endpoint';
+
+  const passkeys = new Map<string, string>();
+  /** `false` records an unpair, which must outrank whatever storage still says. */
+  const paired = new Map<string, boolean>();
+  let pushEndpoint: string | undefined;
+
+  const read = (key: string): string | null => {
+    try {
+      return globalThis.localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  };
+  const write = (key: string, value: string): void => {
+    try {
+      globalThis.localStorage.setItem(key, value);
+    } catch {
+      // Persistence is the only casualty; the mirror already holds it.
+    }
+  };
+  const drop = (key: string): void => {
+    try {
+      globalThis.localStorage.removeItem(key);
+    } catch {
+      // As above.
+    }
+  };
+
   return {
     getPasskeyPublicKey: (credentialId) =>
-      globalThis.localStorage.getItem(PASSKEY_PREFIX + credentialId),
-    setPasskeyPublicKey: (credentialId, publicKey) =>
-      globalThis.localStorage.setItem(PASSKEY_PREFIX + credentialId, publicKey),
-    knownCredentialIds: () => {
-      const store = globalThis.localStorage;
-      const ids: string[] = [];
-      for (let i = 0; i < store.length; i++) {
-        const key = store.key(i);
-        if (key?.startsWith(PASSKEY_PREFIX)) ids.push(key.slice(PASSKEY_PREFIX.length));
-      }
-      return ids;
+      passkeys.get(credentialId) ?? read(PASSKEY_PREFIX + credentialId),
+    setPasskeyPublicKey: (credentialId, publicKey) => {
+      passkeys.set(credentialId, publicKey);
+      write(PASSKEY_PREFIX + credentialId, publicKey);
     },
-    isPaired: (hostId) => globalThis.localStorage.getItem(PAIRED_PREFIX + hostId) === '1',
-    markPaired: (hostId) => globalThis.localStorage.setItem(PAIRED_PREFIX + hostId, '1'),
-    unmarkPaired: (hostId) => globalThis.localStorage.removeItem(PAIRED_PREFIX + hostId),
-    getRegisteredPushEndpoint: () => globalThis.localStorage.getItem(PUSH_ENDPOINT_KEY),
-    setRegisteredPushEndpoint: (fingerprint) =>
-      globalThis.localStorage.setItem(PUSH_ENDPOINT_KEY, fingerprint),
+    knownCredentialIds: () => {
+      // Union, not either-or: storage holds earlier visits, the mirror holds
+      // this one's writes, and `connect` scopes its assertion to the whole set.
+      const ids = new Set(passkeys.keys());
+      try {
+        const store = globalThis.localStorage;
+        for (let i = 0; i < store.length; i++) {
+          const key = store.key(i);
+          if (key?.startsWith(PASSKEY_PREFIX)) ids.add(key.slice(PASSKEY_PREFIX.length));
+        }
+      } catch {
+        // Blocked storage contributes nothing; the mirror still answers.
+      }
+      return [...ids];
+    },
+    isPaired: (hostId) => paired.get(hostId) ?? read(PAIRED_PREFIX + hostId) === '1',
+    markPaired: (hostId) => {
+      paired.set(hostId, true);
+      write(PAIRED_PREFIX + hostId, '1');
+    },
+    unmarkPaired: (hostId) => {
+      paired.set(hostId, false);
+      drop(PAIRED_PREFIX + hostId);
+    },
+    getRegisteredPushEndpoint: () => pushEndpoint ?? read(PUSH_ENDPOINT_KEY),
+    setRegisteredPushEndpoint: (fingerprint) => {
+      pushEndpoint = fingerprint;
+      write(PUSH_ENDPOINT_KEY, fingerprint);
+    },
   };
 }

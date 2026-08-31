@@ -150,13 +150,35 @@ function buttonNamed(label: string | RegExp): HTMLButtonElement | null {
   );
 }
 
-/** The install guidance block, by its heading. */
+/**
+ * The install guidance block, found by its heading. Matched on containment
+ * rather than the exact string so a reworded title cannot turn the negative
+ * assertions below into vacuous passes.
+ */
 function installNotice(): HTMLElement | null {
   return (
-    [...container.querySelectorAll<HTMLElement>('div')].find(
-      (el) => el.firstElementChild?.textContent === 'Add Dormouse to your Home Screen first',
+    [...container.querySelectorAll<HTMLElement>('div')].find((el) =>
+      /Home Screen/.test(el.firstElementChild?.textContent ?? ''),
     ) ?? null
   );
+}
+
+/** The setup `<form>`, reached through the field it owns. */
+function setupForm(): HTMLFormElement {
+  const form = setupPasswordField()?.closest('form');
+  if (!form) throw new Error('setup fields are not inside a form');
+  return form;
+}
+
+/**
+ * Submit the form the way the phone keyboard's Go key does. jsdom implements no
+ * implicit submission, so the event is dispatched directly — which exercises
+ * the handler, the half a `type="button"` did not have at all.
+ */
+function submitSetupForm() {
+  act(() => {
+    setupForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  });
 }
 
 /** Type into a controlled input the way a user would — React listens for `input`. */
@@ -196,6 +218,32 @@ describe('SetupOrSignin first run vs return visit', () => {
 
     expect(setupPasswordField()).not.toBeNull();
   });
+
+  /**
+   * The Go key is the primary submit on a phone, and on the now-leading
+   * first-run screen these fields *are* the path — so the form has to own the
+   * submission rather than a lone `type="button"` click handler.
+   */
+  it('submits the typed values when the form is submitted, not only on a tap', () => {
+    const onSetup = vi.fn();
+    renderAuth({ firstRun: true, onSetup });
+
+    typeInto(setupPasswordField()!, 'hunter2');
+    typeInto(container.querySelector<HTMLInputElement>('#pocket-setup-label')!, 'Work phone');
+    submitSetupForm();
+
+    expect(onSetup).toHaveBeenCalledWith('hunter2', 'Work phone');
+  });
+
+  it('refuses a submit with no password, the same condition that disables the button', () => {
+    const onSetup = vi.fn();
+    renderAuth({ firstRun: true, onSetup });
+
+    expect(buttonNamed('Create passkey & sign in')!.disabled).toBe(true);
+    submitSetupForm();
+
+    expect(onSetup).not.toHaveBeenCalled();
+  });
 });
 
 describe('SetupOrSignin install guidance', () => {
@@ -207,15 +255,33 @@ describe('SetupOrSignin install guidance', () => {
     const notice = installNotice();
     const password = setupPasswordField();
     expect(notice).not.toBeNull();
+    // Strictly before, not merely "not after": a notice that *contained* the
+    // field would also satisfy FOLLOWING while saying nothing about order.
     expect(
       notice!.compareDocumentPosition(password!) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    expect(notice!.contains(password!)).toBe(false);
   });
 
-  it('warns on the return visit too, where setup is still reachable', () => {
+  /**
+   * Under "Welcome back" the copy ("set up from there", "a passkey made here
+   * has to be made all over again") only makes sense next to the fields, so it
+   * rides with the disclosure rather than the screen.
+   */
+  it('stays quiet on a return visit until setup is actually opened', () => {
     renderAuth({ firstRun: false, needsInstall: true });
 
-    expect(installNotice()).not.toBeNull();
+    expect(installNotice()).toBeNull();
+
+    act(() => buttonNamed(/First-time setup/)!.click());
+
+    const notice = installNotice();
+    const password = setupPasswordField();
+    expect(notice).not.toBeNull();
+    expect(
+      notice!.compareDocumentPosition(password!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(notice!.contains(password!)).toBe(false);
   });
 
   it('stays advice rather than a gate — setup in the tab still submits', () => {
