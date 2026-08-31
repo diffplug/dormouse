@@ -84,6 +84,9 @@ Activating a port row (click, digit, or `Enter` on the focused row) reproduces `
 
 The pane body paints `--color-terminal-bg` on the React pane wrapper and the `TerminalPane` mount point; the persistent xterm host element, `.xterm-screen`, and the xterm scroll container also carry the concrete background from `getTerminalTheme()`. **The host background must match the terminal screen exactly** and clip to the pane's shared rounded bottom corners — xterm.js paints only its own rendered surface, and integer row fitting can leave a sub-row remainder at the bottom of the pane.
 
+Source of truth: `lib/src/components/wall/TerminalPanel.tsx` and
+`lib/src/components/TerminalPane.tsx`.
+
 ### Spoken-alarm overlay
 
 A terminal Session with transient speech-delivery state gets a pointer-transparent overlay spanning its whole Lath leaf; browser surfaces never render it. It resolves through the tiling engine's per-leaf overlay slot (`docs/specs/tiling-engine.md`) and **must never intercept pointer/focus routing or change leaf geometry**.
@@ -134,6 +137,9 @@ Doors are measured in a hidden off-screen container first, then fitted:
 - Clicking an overflow arrow reveals one door in that direction. A longer title may push more doors off the opposite side.
 
 Extreme case: a single door with a very long title and more doors on both sides — show both arrows with counts, and as much title as fits (ellipsis for the rest).
+
+Source of truth: `lib/src/components/Baseboard.tsx` and
+`lib/src/components/Door.tsx`.
 
 ## Workspaces
 
@@ -186,7 +192,7 @@ The source cwd is read from `getTerminalPaneState(sourceId).cwd`. **Never inheri
 
 Pressing `x`/`k` (or clicking the kill button, which first leaves passthrough) shows a pane-centered semi-transparent overlay (`KillConfirmOverlay` → `KillConfirmModal`) with a random lowercase letter — both kill shortcuts (`x` and `k`) are excluded from the alphabet so a double-tap can't accept itself. Typing that letter confirms the kill. `Escape`, the `Esc to cancel` button, and clicking another panel all cancel. Any other key triggers a 400ms `shake-x` animation and then auto-dismisses.
 
-**Confirmation must be staged in a ref synchronously, not only in React state** — a second confirm keydown arriving before React flushes would otherwise pass the guard and kill twice (`lath.isDying` is the second line of defense). Source of truth: `acceptKill` in `lib/src/components/Wall.tsx`.
+**Confirmation must be staged in a ref synchronously, not only in React state** — a second confirm keydown arriving before React flushes would otherwise pass the guard and kill twice (`lath.isDying` is the second line of defense). Source of truth: `acceptKill` in `lib/src/components/Wall.tsx` and the modal in `lib/src/components/KillConfirm.tsx`.
 
 **Untouched sessions skip this confirmation.** A newly spawned shell starts `untouched: true`; the first user-originated PTY input flips it to false. Inputs that count: printable keys, Enter, control keys, keyboard CSI such as arrows/history, paste, and file-drop path insertion. Replay-shaped terminal reports and stripped mouse-report-only input do not count (the untouched gate checks `inputIsReplayTerminalReport`; the broader synthetic-report check gates input recording and alert attention, not this flag). Killing an untouched pane runs the normal kill animation/dispose path immediately; killing an untouched door first reattaches it only far enough to reuse the same pane removal path, then kills it with no overlay.
 
@@ -231,6 +237,9 @@ While travelling, each ring edge trails a soft band sized by its own motion. A l
 Each pane body registers its DOM element in a `paneElements` Map on mount and removes it on unmount (`usePaneChrome`); the overlay resolves the enclosing Lath leaf (`[data-lath-leaf]`) via `resolvePaneElement` so the ring covers the full leaf (header + body). Doors are registered by the `Baseboard` through `DoorElementsContext` (`[data-door-id]`), and only the *visible* subset — an overflowed door has no element to measure.
 
 Re-measures on: selection change, `ResizeObserver` on the target, every Lath store commit (`revision` via `useSyncExternalStore`), and — while the wall streams animator frames — every frame, so the ring tracks kills, restores, and tweens frame-accurately. If the selected leaf is momentarily absent the overlay bails and holds the last rect.
+
+Source of truth: `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` and
+`lib/src/components/wall/resolve-pane-element.ts`.
 
 ## Spatial navigation
 
@@ -280,6 +289,9 @@ The field is **controlled by its own draft state**, seeded at mount and untouche
 Clipboard chords inside the field are the wall's job on hosts whose webview has no native Edit menu — see `docs/specs/mouse-and-clipboard.md` §8.9.
 
 Submitted values are rejected when empty or when they fail the `setTerminalUserTitle` validation that also guards title seeding — no titles starting with the `<idle>` sentinel (`docs/specs/transport.md`). `<unnamed>` is the default panel placeholder but is otherwise allowed as a user pin. **On rejection the input still closes** (it is not a blocking dialog) and a small warning popover anchored under it names the offending value. The popover dismisses on the next pointerdown, scroll, resize, `Escape`, or after `cfg.overlays.warningAutoDismissMs` (3s); that delay is 0 under Chromatic (pinned in `lib/.storybook/preview.ts`).
+
+Source of truth: `lib/src/components/wall/IllegalRenameWarning.tsx` and
+`lib/src/components/wall/use-dismiss-overlay.ts`.
 
 ## Session lifecycle and terminal registry
 

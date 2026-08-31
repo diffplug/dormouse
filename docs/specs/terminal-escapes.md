@@ -174,6 +174,13 @@ Dormouse does not implement the following, and all of them **fail inertly** per 
 
 The `OSC 1337` rows are illustrative, not a closed set: *every* `1337` payload other than `CurrentDir=` is consumed, named here or not. `OSC 50` and `OSC 52` are matched by code; every other unrecognized OSC family reaches xterm.js untouched.
 
+Two downstream consumers are escape-aware but do not parse the PTY boundary:
+`lib/src/lib/terminal-controls.ts` strips presentation controls under
+[transport.md](transport.md), while `lib/src/lib/terminal-state-store.ts`
+elides alternate-screen spans under [terminal-state.md](terminal-state.md).
+Both read already-stripped output as content; neither changes what reaches
+xterm.js.
+
 ## References
 
 - iTerm2 proprietary escape codes: https://iterm2.com/documentation-escape-codes.html

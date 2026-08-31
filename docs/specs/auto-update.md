@@ -4,8 +4,6 @@
 
 The standalone app checks for updates on launch and prompts in the Baseboard when one is available. **Nothing is downloaded or installed until the user approves that prompt**; after approval the download runs in the background and the install runs when the user quits. On the next launch a brief banner confirms the update succeeded, or offers a debug report if it failed.
 
-Source of truth: `standalone/src/updater.ts`.
-
 ## How it works
 
 ```

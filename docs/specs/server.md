@@ -235,8 +235,9 @@ replay protection.
 ## HTTP API
 
 This table is the whole route surface. Paths and request/response shapes live in
-`API_ROUTES`, `WS_ROUTES`, `HELLO_ROUTE`, and their associated types in
-`server-lib-common/src/remote/wire.ts`, so Server, Host and Pocket cannot drift.
+`API_ROUTES` / `WS_ROUTES` and their types in
+`server-lib-common/src/remote/wire.ts`; `HELLO_ROUTE` lives in
+`server-lib-common/src/index.ts`, so Server, Host and Pocket cannot drift.
 
 | Route                            | Auth           | Does                                              |
 | -------------------------------- | -------------- | ------------------------------------------------- |
@@ -679,9 +680,10 @@ its one self-authored response is the plaintext missing-build stub at `GET /`.
 ## Testing
 
 `pnpm --filter server test` drives setup → pairing → connect through real HTTP
-and WebSocket boundaries with `SimAuthenticator` and `FakeHost`; process-level
-tests spawn the real entrypoint. `server-lib-common` pins revoked-record denial.
-Browser-dependent Host and Pocket UI remain dogfood coverage.
+and WebSocket boundaries with `SimAuthenticator` and the `FakeHost` in
+`server/test/harness/fake-host.mjs`; process-level tests spawn the real
+entrypoint. `server-lib-common` pins revoked-record denial. Browser-dependent
+Host and Pocket UI remain dogfood coverage.
 
 ## Running it
 

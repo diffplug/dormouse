@@ -305,6 +305,9 @@ is the only exclusive resource.
 Graded grants, layout mutations, and showing connected viewers on the Host UI
 with per-viewer disconnect are all staged — see [Future](#future).
 
+Reserved: For [Future](#future) items 2–3, clients must tolerate additive
+optional `inflight` and `blocks` fields on `TerminalAttachResult`.
+
 ## Future
 
 Staged in likely order of arrival. Each item is additive — a new method,
