@@ -8,6 +8,8 @@
 
 Mouse and clipboard behavior for the terminal across macOS, Linux, and Windows: selection, copy, paste, and their coexistence with mouse-driven TUI programs. This spec owns the mouse-override icon and banner, the selection overlay and popup, and every paste path into a terminal; `docs/specs/layout.md` owns where the header icon sits, and `docs/specs/terminal-escapes.md` registers the sequences involved.
 
+For tools, these rules apply while the terminal is forward; the browser or conflict view owns the keys otherwise.
+
 ## Background: The Two Mouse Regimes
 
 At any moment, mouse events in the terminal belong to one of two consumers:
