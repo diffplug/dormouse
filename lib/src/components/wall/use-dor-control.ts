@@ -244,7 +244,6 @@ const RESTART_POLL_INTERVAL_MS = 100;
 const RESTART_INTERRUPT_TIMEOUT_MS = 15_000;
 const RESTART_START_TIMEOUT_MS = 15_000;
 
-/** The rendered command a tool Surface is running, for the reuse note. */
 /**
  * Serializes `surface.tool` requests. A plain promise chain rather than a real
  * mutex: the critical section is "check for a key match, then create", and the
@@ -261,6 +260,7 @@ function acquireToolSpawnLock(): Promise<() => void> {
   return waited;
 }
 
+/** The rendered command a tool Surface is running, for the reuse note. */
 function toolCommandFromParams(params: unknown): string {
   const value = (params as { command?: unknown } | null | undefined)?.command;
   return typeof value === 'string' ? value : '';
