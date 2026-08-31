@@ -408,8 +408,9 @@ command line.
    value, and do not print it into the conversation.
 
 2. **The passkey.** On the phone, open `https://<laptop>.<tailnet>.ts.net` in
-   Safari → First-time setup (password + label) creates the passkey and signs
-   them in. The passkey is bound to this exact origin. If they want push
+   Safari. A browser that has never been here leads with the setup fields:
+   password + label create the passkey and sign them in, no disclosure to open.
+   The passkey is bound to this exact origin. If they want push
    notifications, add Pocket to the Home Screen *before* signing in and do all
    of this inside the installed app — iOS delivers Web Push only there, and the
    install is a separate storage partition that would otherwise need its own

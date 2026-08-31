@@ -331,8 +331,9 @@ platform:
 * **Android browser tab** — generally durable.
 * **Installed PWA** — the preferred mode on both, strongest on Android.
 
-Today Pocket generates the device key in whatever context it runs — the
-install-before-pairing guidance and storage-persistence hardening are staged
+Today Pocket generates the device key at boot, in whatever context it runs —
+the install advice on the auth screen ([pocket-app.md](./pocket-app.md))
+precedes only the passkey; storage-persistence hardening is staged
 (see [Future](#future)). Eviction is recoverable, not catastrophic: see
 [Device Key Loss](#device-key-loss).
 
@@ -394,8 +395,8 @@ changes nothing that is running.
 * Call `navigator.storage.persist()` when creating the device key, so the
   browser treats the Client's IndexedDB as persistent rather than
   best-effort.
-* On iOS, encourage PWA installation *before* pairing — generate the device
-  key only while running as an installed app. Detection recipe:
+* On iOS, generate the device key only while running as an installed app — the
+  advice to install first already ships. Detection recipe:
 
   ```ts
   const isInstalledRuntime =

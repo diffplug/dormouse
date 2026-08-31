@@ -7,12 +7,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   HostsView,
+  SetupOrSignin,
   refinePairState,
   type HostPairState,
   type HostView,
   type PushConfigStatus,
 } from './App';
 import type { PushAvailability } from '../client/push-subscribe';
+import { setNativeFieldValue } from '../../lib/dom';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -108,6 +110,200 @@ function enableButtonIn(row: HTMLElement): HTMLButtonElement | null {
 function retryButtonIn(row: HTMLElement): HTMLButtonElement | null {
   return [...row.querySelectorAll('button')].find((b) => b.textContent === 'Retry') ?? null;
 }
+
+function renderAuth(
+  overrides: {
+    firstRun?: boolean;
+    needsInstall?: boolean;
+    busy?: string | null;
+    error?: string | null;
+    onSignin?: () => void;
+    onSetup?: (password: string, label: string) => void;
+  } = {},
+) {
+  act(() => {
+    root.render(
+      <StrictMode>
+        <SetupOrSignin
+          busy={overrides.busy ?? null}
+          error={overrides.error ?? null}
+          firstRun={overrides.firstRun ?? true}
+          needsInstall={overrides.needsInstall ?? false}
+          onSignin={overrides.onSignin ?? (() => undefined)}
+          onSetup={overrides.onSetup ?? (() => undefined)}
+        />
+      </StrictMode>,
+    );
+  });
+}
+
+/** The setup password field, which is present only when setup is on screen. */
+function setupPasswordField(): HTMLInputElement | null {
+  return container.querySelector<HTMLInputElement>('#pocket-setup-password');
+}
+
+function buttonNamed(label: string | RegExp): HTMLButtonElement | null {
+  return (
+    [...container.querySelectorAll('button')].find((button) =>
+      typeof label === 'string' ? button.textContent === label : label.test(button.textContent ?? ''),
+    ) ?? null
+  );
+}
+
+/**
+ * The install guidance block, found by its heading. Matched on containment
+ * rather than the exact string so a reworded title cannot turn the negative
+ * assertions below into vacuous passes.
+ */
+function installNotice(): HTMLElement | null {
+  return (
+    [...container.querySelectorAll<HTMLElement>('div')].find((el) =>
+      /Home Screen/.test(el.firstElementChild?.textContent ?? ''),
+    ) ?? null
+  );
+}
+
+/** The setup `<form>`, reached through the field it owns. */
+function setupForm(): HTMLFormElement {
+  const form = setupPasswordField()?.closest('form');
+  if (!form) throw new Error('setup fields are not inside a form');
+  return form;
+}
+
+/**
+ * Submit the form the way the phone keyboard's Go key does. jsdom implements no
+ * implicit submission, so the event is dispatched directly — which exercises
+ * the handler, the half a `type="button"` did not have at all.
+ */
+function submitSetupForm() {
+  act(() => {
+    setupForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  });
+}
+
+/** Type into a controlled input the way a user would — React listens for `input`. */
+function typeInto(input: HTMLInputElement, value: string) {
+  act(() => setNativeFieldValue(input, value));
+}
+
+describe('SetupOrSignin first run vs return visit', () => {
+  it('leads with setup when this browser holds no passkey material', () => {
+    // Nothing stored means nothing to sign in with by default, so the fields
+    // the visit actually needs must not be behind a disclosure tap.
+    renderAuth({ firstRun: true });
+
+    expect(setupPasswordField()).not.toBeNull();
+    expect(container.textContent).not.toContain('Welcome back');
+    expect(buttonNamed('Create passkey & sign in')).not.toBeNull();
+    expect(buttonNamed(/First-time setup/)).toBeNull();
+  });
+
+  it('keeps sign-in reachable on a first run, for a passkey that synced here', () => {
+    const onSignin = vi.fn();
+    renderAuth({ firstRun: true, onSignin });
+
+    act(() => buttonNamed('Sign in with passkey')!.click());
+
+    expect(onSignin).toHaveBeenCalledOnce();
+  });
+
+  it('leads with sign-in and keeps setup behind the disclosure on a return visit', () => {
+    renderAuth({ firstRun: false });
+
+    expect(container.textContent).toContain('Welcome back');
+    expect(buttonNamed('Sign in with passkey')).not.toBeNull();
+    expect(setupPasswordField()).toBeNull();
+
+    act(() => buttonNamed(/First-time setup/)!.click());
+
+    expect(setupPasswordField()).not.toBeNull();
+  });
+
+  /**
+   * The Go key is the primary submit on a phone, and on the now-leading
+   * first-run screen these fields *are* the path — so the form has to own the
+   * submission rather than a lone `type="button"` click handler.
+   */
+  it('submits the typed values when the form is submitted, not only on a tap', () => {
+    const onSetup = vi.fn();
+    renderAuth({ firstRun: true, onSetup });
+
+    typeInto(setupPasswordField()!, 'hunter2');
+    typeInto(container.querySelector<HTMLInputElement>('#pocket-setup-label')!, 'Work phone');
+    submitSetupForm();
+
+    expect(onSetup).toHaveBeenCalledWith('hunter2', 'Work phone');
+  });
+
+  it('refuses a submit with no password, the same condition that disables the button', () => {
+    const onSetup = vi.fn();
+    renderAuth({ firstRun: true, onSetup });
+
+    expect(buttonNamed('Create passkey & sign in')!.disabled).toBe(true);
+    submitSetupForm();
+
+    expect(onSetup).not.toHaveBeenCalled();
+  });
+});
+
+describe('SetupOrSignin install guidance', () => {
+  it('warns before setup, not after it, when iOS needs the install first', () => {
+    // The point of moving it here: the device key and passkey this screen
+    // mints land in whichever partition creates them.
+    renderAuth({ firstRun: true, needsInstall: true });
+
+    const notice = installNotice();
+    const password = setupPasswordField();
+    expect(notice).not.toBeNull();
+    // Strictly before, not merely "not after": a notice that *contained* the
+    // field would also satisfy FOLLOWING while saying nothing about order.
+    expect(
+      notice!.compareDocumentPosition(password!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(notice!.contains(password!)).toBe(false);
+  });
+
+  /**
+   * Under "Welcome back" the copy ("set up from there", "a passkey made here
+   * has to be made all over again") only makes sense next to the fields, so it
+   * rides with the disclosure rather than the screen.
+   */
+  it('stays quiet on a return visit until setup is actually opened', () => {
+    renderAuth({ firstRun: false, needsInstall: true });
+
+    expect(installNotice()).toBeNull();
+
+    act(() => buttonNamed(/First-time setup/)!.click());
+
+    const notice = installNotice();
+    const password = setupPasswordField();
+    expect(notice).not.toBeNull();
+    expect(
+      notice!.compareDocumentPosition(password!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(notice!.contains(password!)).toBe(false);
+  });
+
+  it('stays advice rather than a gate — setup in the tab still submits', () => {
+    const onSetup = vi.fn();
+    renderAuth({ firstRun: true, needsInstall: true, onSetup });
+
+    typeInto(setupPasswordField()!, 'hunter2');
+    const submit = buttonNamed('Create passkey & sign in')!;
+    expect(submit.disabled).toBe(false);
+    act(() => submit.click());
+
+    expect(onSetup).toHaveBeenCalledWith('hunter2', 'My Phone');
+  });
+
+  it('says nothing when the app is installed, or when push is unavailable for other reasons', () => {
+    // `needsInstall` is the iOS-tab signal alone: an unsupported browser or a
+    // blocked permission is a different problem, explained on the push rows.
+    renderAuth({ firstRun: true, needsInstall: false });
+
+    expect(installNotice()).toBeNull();
+  });
+});
 
 describe('HostsView pair/connect actions', () => {
   it('offers Pair alone where the Host holds no record for this Client', () => {

@@ -8,7 +8,7 @@
  * exercised here — `getOrCreateDeviceKey` is tested through an injected store.)
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   PAIRING_STALE_PRESENCE_ERROR,
   SELFHOST_ACCOUNT_ID,
@@ -22,6 +22,7 @@ import {
 
 import {
   hasRecoverablePairingFailure,
+  localStoragePocketStorage,
   PASSKEY_UNAVAILABLE_MESSAGE,
   PocketClient,
   SessionExpiredError,
@@ -869,6 +870,146 @@ describe('remote-api correlation', () => {
       data: { subId: 'other', event: 'directory.snapshot', data: { entries: [{ title: 'nope' }] } },
     });
     expect(snapshots).toEqual([[{ title: 'zsh' }]]);
+  });
+});
+
+describe('hasPriorUse', () => {
+  it('is false on a browser that has stored nothing', () => {
+    const { client } = makeClient({});
+
+    expect(client.hasPriorUse()).toBe(false);
+  });
+
+  it('is true once a credential public key is cached', async () => {
+    const { client } = makeClient({ ...AUTH_ROUTES });
+    await client.setup('pw', 'My Phone');
+
+    expect(client.hasPriorUse()).toBe(true);
+  });
+
+  /**
+   * The auth screen picks its layout from this, so a storage that throws must
+   * not take the screen down with it — and "first visit" is the safe reading,
+   * because setup is the half that can still get somewhere from nothing.
+   */
+  it('reads a throwing store as a first visit', () => {
+    const storage: PocketStorage = {
+      ...memoryStorage(),
+      knownCredentialIds: () => {
+        throw new Error('site data blocked');
+      },
+    };
+    const { client } = makeClient({}, { storage });
+
+    expect(client.hasPriorUse()).toBe(false);
+  });
+});
+
+describe('localStoragePocketStorage', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** A `localStorage` that throws on every access, as blocked site data does. */
+  function blockedLocalStorage() {
+    const blocked = (): never => {
+      throw new Error('The operation is insecure.');
+    };
+    return {
+      getItem: blocked,
+      setItem: blocked,
+      removeItem: blocked,
+      key: blocked,
+      clear: blocked,
+      get length(): number {
+        return blocked();
+      },
+    };
+  }
+
+  /** A working `localStorage`, to prove the mirror did not replace persistence. */
+  function fakeLocalStorage() {
+    const map = new Map<string, string>();
+    return {
+      map,
+      store: {
+        getItem: (key: string) => map.get(key) ?? null,
+        setItem: (key: string, value: string) => void map.set(key, value),
+        removeItem: (key: string) => void map.delete(key),
+        key: (i: number) => [...map.keys()][i] ?? null,
+        clear: () => map.clear(),
+        get length() {
+          return map.size;
+        },
+      },
+    };
+  }
+
+  /**
+   * `setup` commits the Server's passkey *before* caching its public key, so a
+   * write that throws here would strand the visit past the point of no return —
+   * and every retry would mint another orphan passkey server-side.
+   */
+  it('does not throw on any write when storage is blocked', () => {
+    vi.stubGlobal('localStorage', blockedLocalStorage());
+    const storage = localStoragePocketStorage();
+
+    expect(() => {
+      storage.setPasskeyPublicKey('cred-1', 'pk-1');
+      storage.markPaired('h1');
+      storage.unmarkPaired('h2');
+      storage.setRegisteredPushEndpoint('digest');
+    }).not.toThrow();
+  });
+
+  it('answers reads from the in-session mirror when storage is blocked', () => {
+    vi.stubGlobal('localStorage', blockedLocalStorage());
+    const storage = localStoragePocketStorage();
+
+    storage.setPasskeyPublicKey('cred-1', 'pk-1');
+    storage.markPaired('h1');
+    storage.setRegisteredPushEndpoint('digest');
+
+    // Everything setup and sign-in need is still here; only surviving a reload
+    // was lost.
+    expect(storage.getPasskeyPublicKey('cred-1')).toBe('pk-1');
+    expect(storage.knownCredentialIds()).toEqual(['cred-1']);
+    expect(storage.isPaired('h1')).toBe(true);
+    expect(storage.getRegisteredPushEndpoint()).toBe('digest');
+    // Nothing was invented for what was never written.
+    expect(storage.getPasskeyPublicKey('cred-other')).toBeNull();
+    expect(storage.isPaired('h2')).toBe(false);
+  });
+
+  it('still writes through to storage when it works, and unions both on read', () => {
+    const { map, store } = fakeLocalStorage();
+    map.set('dormouse-pocket:passkey:cred-old', 'pk-old');
+    vi.stubGlobal('localStorage', store);
+    const storage = localStoragePocketStorage();
+
+    storage.setPasskeyPublicKey('cred-new', 'pk-new');
+
+    expect(map.get('dormouse-pocket:passkey:cred-new')).toBe('pk-new');
+    // `connect` scopes its assertion to this set, so an earlier visit's
+    // credential must not fall out of it.
+    expect([...storage.knownCredentialIds()].sort()).toEqual(['cred-new', 'cred-old']);
+  });
+
+  it('honors an unpair the mirror recorded but storage kept', () => {
+    const { map, store } = fakeLocalStorage();
+    map.set('dormouse-pocket:paired:h1', '1');
+    vi.stubGlobal('localStorage', store);
+    // removeItem throws (an unpair that cannot be persisted), reads still work.
+    store.removeItem = () => {
+      throw new Error('The operation is insecure.');
+    };
+    const storage = localStoragePocketStorage();
+
+    expect(storage.isPaired('h1')).toBe(true);
+    storage.unmarkPaired('h1');
+
+    // The row must not keep offering Connect for a pairing the Host dropped.
+    expect(storage.isPaired('h1')).toBe(false);
   });
 });
 
