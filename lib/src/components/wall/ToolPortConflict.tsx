@@ -4,9 +4,9 @@
  *
  * It sits where the browser would have gone on purpose: with several ports
  * bound there is nothing to frame, so the pane's second half explains why
- * rather than sitting empty or silently framing a guess. Same in-pane message
- * idiom as `IframePanel`'s `PanelMessage`.
+ * rather than sitting empty or silently framing a guess.
  */
+import { PANE_MESSAGE_CLASS } from '../design';
 import { toolPortConflictFromParams } from './browser-surface';
 import type { PaneProps } from './pane-props';
 
@@ -14,7 +14,7 @@ export function ToolPortConflict({ params }: PaneProps) {
   const ports = toolPortConflictFromParams(params) ?? [];
 
   return (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-terminal-bg px-6 text-center text-sm text-muted">
+    <div className={`${PANE_MESSAGE_CLASS} flex-col gap-3 text-muted`}>
       <div className="text-foreground">
         This tool opened {ports.length} ports, so Dormouse did not frame any of them.
       </div>

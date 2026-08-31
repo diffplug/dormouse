@@ -11,15 +11,9 @@
  *
  * The pane holds no PTY while this is showing. Nothing from the repo has run.
  */
-import { modalActionButton } from '../design';
+import { PANE_MESSAGE_CLASS, modalActionButton } from '../design';
 import { toolPendingFromParams } from './browser-surface';
 import type { PaneProps } from './pane-props';
-
-/** `~/projects/x` reads better than `/Users/me/projects/x` on a button. */
-function tildeHome(path: string): string {
-  const home = typeof process !== 'undefined' ? process.env?.HOME : undefined;
-  return home && path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
-}
 
 export function ToolApproval({ params, id, onResolve }: PaneProps & {
   onResolve: (id: string, choice: 'upstream' | 'folder' | 'decline') => void;
@@ -28,7 +22,7 @@ export function ToolApproval({ params, id, onResolve }: PaneProps & {
   if (!pending) return null;
 
   return (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-terminal-bg px-6 text-center text-sm">
+    <div className={`${PANE_MESSAGE_CLASS} flex-col gap-4`}>
       <div className="flex flex-col gap-1 font-mono text-muted">
         <div className="text-foreground">dor tool {pending.name}</div>
         <div>will launch</div>
@@ -53,7 +47,7 @@ export function ToolApproval({ params, id, onResolve }: PaneProps & {
           className={modalActionButton()}
           onClick={() => onResolve(id, 'folder')}
         >
-          Always allow for folder {tildeHome(pending.projectRoot)}
+          Always allow for folder {pending.projectRoot}
         </button>
         <button
           type="button"

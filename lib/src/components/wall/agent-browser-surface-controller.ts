@@ -412,10 +412,10 @@ export class AgentBrowserSurfaceController {
       chrome: this.chrome,
       chromeActions: this.chromeActions,
       hostCapable: !!getPlatform().agentBrowserCommand,
-      // Never for a tool: `render` is `iframe` or `ab-screencast`, so pop-out
-      // has no renderer to land in and the swap would tear the browser down and
-      // re-derive the same screencast — the user asks for a native window and
-      // gets a reload (`docs/specs/dor-tool.md` -> Declaring tools).
+      // Never for a tool, whose `render` is `iframe` or `ab-screencast`: the
+      // swap would tear the browser down and re-derive the same screencast, so
+      // asking for a native window would get a reload
+      // (`docs/specs/dor-tool.md` -> Declaring tools).
       canPopOut: !this.isTool && !!getPlatform().agentBrowserPopOut,
     });
     this.lastPublishedScreen = null;

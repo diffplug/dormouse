@@ -2,12 +2,12 @@
  * The body of a `tool` Surface: one Session with a terminal and, once it
  * serves, a browser (`docs/specs/dor-tool.md` -> Lifecycle).
  */
+import { useContext } from 'react';
 import { BrowserPanel } from './BrowserPanel';
 import { TerminalPanel } from './TerminalPanel';
-import { toolFace } from './browser-surface';
-import { ToolPortConflict } from './ToolPortConflict';
 import { ToolApproval } from './ToolApproval';
-import { useContext } from 'react';
+import { ToolPortConflict } from './ToolPortConflict';
+import { toolFace } from './browser-surface';
 import { WallActionsContext } from './wall-context';
 import type { PaneProps } from './pane-props';
 

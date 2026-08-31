@@ -76,11 +76,9 @@ tools:
   stay renderMode-gated. **The Display modal never offers pop-out on a tool** —
   there is no third renderer to land in, so the swap would only re-derive the
   one it has.
-- **`port`** — `announced` (default) or `auto`. How Dormouse learns which port to
-  frame when the tool has not announced one. `announced` frames nothing without
-  OSC 367; `auto` autobinds. **`auto` frames a port only when exactly one is
-  bound — two or more is a refusal, never a tie-break.** An announcement, when
-  present, wins over either.
+- **`port`** — `announced` (default) or `auto`, deciding how a port is chosen
+  when the tool has not announced one; an announcement always wins over either.
+  See [Serving](#serving) for what each does.
 - **`prespawn_dedupe`** — the dedupe key, evaluated before anything spawns (see
   [Identity and dedupe](#identity-and-dedupe)). Optional; absence means no
   dedupe.
@@ -161,8 +159,8 @@ the repo is trusted. The phase-C user-global file needs none of this.
 3. **Agents cannot grant trust.** `dor tool <name>` against an unapproved repo
    creates the Surface and reports `pending`; its pane shows what would run and
    waits. **Nothing from the repo executes until a human chooses** — no PTY is
-   spawned, so not even a shell starts. Declining closes the pane and records
-   nothing, so a reflexive refusal cannot permanently disable a repo's tools.
+   spawned, so not even a shell starts. **Declining closes the pane and records
+   nothing** (rationale).
 4. **Anything `prespawn_*` is behind the same gate**, since it executes — the
    natural implementation order, probe-then-prompt, is backwards.
 5. **The phase-C glob table stays user-global and may only name user-global
@@ -170,13 +168,10 @@ the repo is trusted. The phase-C user-global file needs none of this.
    `dor open README.md`-in-a-malicious-repo attack.
 6. **Never content-hashed.** A `dormouse.yml` that changes under a granted key
    does not re-prompt (rationale).
-7. **The upstream comes from the repo and is not verified.** `@{upstream}` and
-   `remote get-url` read `.git/config`, so a directory shipping its own `.git`
-   can claim any URL and inherit its grant. **Accepted risk**: cloning is
-   unaffected, since there the user chose the URL, and the vector needs someone
-   to hand you a directory rather than a repo you cloned. A cross-repo PR that
-   tracks its fork therefore prompts, while one fetched into `origin` does not —
-   a useful heuristic, not a boundary.
+7. **The upstream comes from the repo and is not verified.** `.git/config` is
+   repo-controlled, so a directory shipping its own `.git` inherits whatever
+   grant its claimed URL has. **Accepted risk** — cloning is unaffected, since
+   there the user chose the URL (rationale).
 
 Source of truth: `lib/src/host/tool-trust.ts` (the record and its two key
 kinds), `lib/src/host/git-upstream.ts` + `lib/src/host/git-remote-url.ts` (how a
@@ -195,14 +190,14 @@ feed one internal upgrade path; the atom does not care which fired.
 - **OSC 367 is the disambiguator, never the trigger.** It names *which* of a
   multi-port tool's ports to frame, plus ssh transparency, a name, and a
   runtime re-key. The hint names the port; the scan supplies the number.
-- **Autobind never chooses among ports.** With `port: auto` and no announcement,
-  exactly one bound port is framed; **two or more frames nothing** and the pane
-  shows the conflict where the browser would have gone (rationale). This is the
-  same stance as `surface.resolveOpen`, which fails and lists the candidates.
+- **`port: announced` frames nothing without OSC 367**; `port: auto` autobinds.
+- **Autobind never chooses among ports.** Exactly one bound port is framed;
+  **two or more frames nothing** and the pane shows the conflict where the
+  browser would have gone (rationale).
 - **Autobind waits for the port set to settle** — one unchanged tick — before it
-  commits. Ports appear one at a time during boot, so committing on first
-  sighting would frame whichever bound earliest, and a framed leaf is never
-  re-scanned. Accepted limit: a port opening long after settle is not noticed.
+  commits, since ports appear one at a time during boot and a framed leaf is
+  never re-scanned (rationale). Accepted limit: a port opening long after settle
+  is not noticed.
 - **`dor tool -- <command>` autobinds**, having nowhere to declare otherwise;
   a declared tool opts in with one line.
 - **Upgrade requires a tool-designated Session with its spawned command still

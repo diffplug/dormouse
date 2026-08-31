@@ -39,12 +39,13 @@ export function createToolHost(options: { stateDir?: string } = {}): ToolHost {
       if (request.op === 'trust') {
         // The key is derived here, not taken from the request: the webview says
         // *which kind* the human picked, and the host owns the mapping from a
-        // project to its keys.
-        const key = request.kind === 'upstream' && request.upstreamUrl
-          ? upstreamGrantKey(request.upstreamUrl)
-          : folderGrantKey(request.projectRoot);
-        const kind = request.kind === 'upstream' && request.upstreamUrl ? 'upstream' : 'folder';
-        await trust.grant(key, kind);
+        // project to its keys. An `upstream` pick with no URL falls back to the
+        // folder rather than minting a key on an empty string.
+        const upstream = request.kind === 'upstream' ? request.upstreamUrl : null;
+        await trust.grant(
+          upstream ? upstreamGrantKey(upstream) : folderGrantKey(request.projectRoot),
+          upstream ? 'upstream' : 'folder',
+        );
         return { status: 'trust-recorded' };
       }
 

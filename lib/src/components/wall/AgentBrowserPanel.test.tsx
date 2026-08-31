@@ -762,11 +762,10 @@ describe('AgentBrowserPanel tab strip actions', () => {
 });
 
 describe('the pop-out affordance on a tool (regression: PR #493 review)', () => {
-  // The second of the two screen-registration sites. A tool declaring
-  // `render: ab-screencast` mounts this panel, so leaving the gate off here
-  // makes pop-out one destructive click: the swap tears the browser down and
-  // re-derives the same screencast, and the user who asked for a native window
-  // gets a reload.
+  // The second of the two screen-registration sites (the other is
+  // `IframePanel`): a tool declaring `render: ab-screencast` mounts this panel,
+  // so the gate has to be here too. Why it exists is at the gate itself, in
+  // `agent-browser-surface-controller.ts`.
   function withPopOutCapableHost() {
     const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopOut'>;
     platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));

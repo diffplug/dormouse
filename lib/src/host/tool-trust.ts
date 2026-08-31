@@ -3,10 +3,10 @@
  * (`docs/specs/dor-tool.md` -> Trust).
  *
  * `dormouse.yml` is repo-controlled and its entries execute, so it is inert
- * until the repo root is trusted — path-level, both answers remembered.
+ * until the project is granted — by its upstream remote URL, or by its folder.
  *
  * Granting is *not* implemented here: only a gesture in Dormouse's own chrome
- * may grant trust (`ToolTrustDialog.tsx`). This module records the decision a
+ * may grant trust (`ToolApproval.tsx`). This module records the decision a
  * gesture produced and answers "is it trusted yet?".
  */
 import { chmod, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
@@ -194,12 +194,10 @@ export async function findToolFile(
     const path = join(dir, TOOL_FILE_NAME);
     try {
       const text = await readTextFile(path);
-      // Belt and braces for an injected reader that does no capping of its own;
-      // unreachable with the default reader, which refuses at `stat`. Its
-      // wording is deliberately distinct so a test can name which check fired
-      // without leaking a syscall into the message a user actually sees.
-      // `byteLength`, not `.length`: the cap is bytes, and a string of
-      // multi-byte characters would otherwise pass a check it exceeds.
+      // Backstop for an injected reader that caps nothing; the default reader
+      // refuses at `stat` first. Distinct wording so a test can name which
+      // check fired. `byteLength`, not `.length` — the cap is bytes, and
+      // multi-byte characters would slip past a UTF-16 count.
       if (Buffer.byteLength(text, 'utf-8') > TOOL_FILE_MAX_BYTES) {
         throw new ToolFileError(
           `${path}: tool file content exceeds ${TOOL_FILE_MAX_BYTES} bytes after reading`,

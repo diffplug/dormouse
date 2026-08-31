@@ -19,15 +19,10 @@ export type ToolScope = 'repo' | 'user';
 export type ToolRender = 'iframe' | 'ab-screencast';
 const TOOL_RENDERS: readonly ToolRender[] = ['iframe', 'ab-screencast'];
 
-/**
- * How Dormouse learns which port to frame when the tool has not announced one.
- *
- * `announced` waits for OSC 367 and frames nothing without it. `auto` autobinds:
- * exactly one bound port is framed, and **two or more is an error, never a
- * tie-break** — the rest of Dormouse declines to guess among several ports
- * (`surface.resolveOpen` fails and lists them), and the tool path used to be the
- * outlier. An announcement, when present, always wins over either.
- */
+/** How Dormouse learns which port to frame absent an announcement: `announced`
+ *  frames nothing without OSC 367, `auto` autobinds a single bound port and
+ *  refuses two (`docs/specs/dor-tool.md` -> Serving; the decision itself is
+ *  `use-tool-serving.ts`). */
 export type ToolPortMode = 'announced' | 'auto';
 const TOOL_PORT_MODES: readonly ToolPortMode[] = ['announced', 'auto'];
 

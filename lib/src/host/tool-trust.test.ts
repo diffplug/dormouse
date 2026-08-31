@@ -173,25 +173,10 @@ describe('lookupTool', () => {
   });
 });
 
-describe('the pre-approval read (regression: review finding 13)', () => {
-  it('refuses an oversized dormouse.yml rather than parsing it', async () => {
+describe('the pre-approval read (regression: review finding 13, PR #493 review)', () => {
+  it('refuses at stat, before the file is ever read', async () => {
     // Read before the trust check, so its size is chosen by a repo nobody has
     // approved yet; parsing a huge one would OOM the host and take every PTY.
-    await writeFile(join(root, 'dormouse.yml'), `# ${'x'.repeat(300_000)}\n`);
-    const result = await lookupTool('storybook', root, new MemoryToolTrustStore());
-    expect(result).toMatchObject({ status: 'error' });
-    if (result.status !== 'error') return;
-    expect(result.message).toMatch(/larger than/);
-  });
-
-  it('still reads a normal file', async () => {
-    await writeFile(join(root, 'dormouse.yml'), YML);
-    expect((await lookupTool('storybook', root, new MemoryToolTrustStore(), undefined, noUpstream)).status).toBe('untrusted');
-  });
-});
-
-describe('the size cap runs before the read (regression: PR #493 review)', () => {
-  it('refuses at stat, before the file is ever read', async () => {
     await writeFile(join(root, 'dormouse.yml'), `# ${'x'.repeat(300_000)}\n`);
     const result = await lookupTool('storybook', root, new MemoryToolTrustStore());
     expect(result).toMatchObject({ status: 'error' });
@@ -200,6 +185,11 @@ describe('the size cap runs before the read (regression: PR #493 review)', () =>
     // by the post-read fallback too, so it would stay green with the stat
     // removed — the exact regression this block exists for.
     expect(result.message).toMatch(/larger than \d+ bytes$/);
+  });
+
+  it('still reads a normal file', async () => {
+    await writeFile(join(root, 'dormouse.yml'), YML);
+    expect((await lookupTool('storybook', root, new MemoryToolTrustStore(), undefined, noUpstream)).status).toBe('untrusted');
   });
 
   it('measures bytes, not UTF-16 code units', async () => {

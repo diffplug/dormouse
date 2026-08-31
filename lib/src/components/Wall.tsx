@@ -1205,9 +1205,10 @@ export function Wall({
     // Hand the leaf the command only now. `setPendingShellOpts` before the
     // terminal half mounts is exactly how `createSplitSurface` starts a
     // commanded split; clearing `toolPending` is what mounts it.
+    const defaults = getDefaultShellOpts();
     setPendingShellOpts(id, {
-      shell: getDefaultShellOpts()?.shell,
-      args: getDefaultShellOpts()?.args,
+      shell: defaults?.shell,
+      args: defaults?.args,
       cwd: pending.cwd,
       untouched: false,
       command: pending.run,

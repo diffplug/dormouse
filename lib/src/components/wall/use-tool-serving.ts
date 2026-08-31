@@ -72,21 +72,17 @@ export function useToolServing({
         const announce = getToolAnnounce(leaf.id);
 
         // A runtime re-key re-labels this Surface and nothing else — it never
-        // dedupes (docs/specs/dor-tool.md -> Identity and dedupe). The host
-        // keeps its own namespace, so the payload cannot claim another tool.
-        // Namespaced under the tool name the host resolved at spawn, never the
-        // announcement's own word: the payload is process output and must not
-        // be able to claim another tool's key. An identityless tool namespaces
-        // to null, so a re-key cannot mint an identity it was never given.
+        // dedupes (docs/specs/dor-tool.md -> Identity and dedupe). The
+        // namespace that keeps process output from claiming another tool's key
+        // is `namespacedToolKey`'s job; see its doc comment.
         const announcedKey = namespacedToolKey(toolNameFromParams(leaf.params), announce?.key ?? null);
         if (announcedKey && !toolKeysEqual(leaf.params?.toolKey, announcedKey)) {
           lath.store.updateParams(leaf.id, { toolKey: announcedKey });
         }
 
         const hasUrl = browserUrlFromParams(leaf.params) !== null;
-        const running = getTerminalPaneState(leaf.id).currentCommand !== null;
-
         const hasConflict = toolPortConflictFromParams(leaf.params) !== null;
+        const running = getTerminalPaneState(leaf.id).currentCommand !== null;
 
         // Command exit retires the browser and the pane flips back to a prompt
         // above the tool's dying words. Re-running revives it on the same
@@ -151,30 +147,24 @@ export function useToolServing({
           entry = entries[0];
         }
 
-        if (leaf.params?.toolRender !== 'ab-screencast') {
-          lath.store.updateParams(leaf.id, {
-            url: entry.url,
-            renderMode: 'iframe',
-            // `toolFace` tests the conflict before the url, so a stale verdict
-            // would keep the conflict forward over a framed browser.
-            toolPortConflict: undefined,
-          });
-          continue;
-        }
+        // Frame it, under whichever renderer the tool declared. Show the
+        // destination immediately even for `ab-screencast`: the panel's
+        // session-less branch renders `Connecting to browser session…` while
+        // the daemon boots, and cannot race it (see docs/specs/dor-browser.md
+        // -> Instant create). `toolFace` tests the conflict before the url, so
+        // a stale verdict would keep the conflict forward over the browser.
+        const agentDrivable = leaf.params?.toolRender === 'ab-screencast';
+        lath.store.updateParams(leaf.id, {
+          url: entry.url,
+          renderMode: agentDrivable ? 'ab-screencast' : 'iframe',
+          toolPortConflict: undefined,
+        });
+        if (!agentDrivable) continue;
 
         // An agent-drivable tool needs a real browser behind it. Bind the
         // session to the tool's *own* Surface rather than creating a second
         // one: a tool's browser is a param of its own leaf, which is what keeps
         // its id stable while its capabilities come and go.
-        //
-        // Show the destination immediately; the panel's session-less branch
-        // renders `Connecting to browser session…` while the daemon boots, and
-        // cannot race it (see docs/specs/dor-browser.md -> Instant create).
-        lath.store.updateParams(leaf.id, {
-          url: entry.url,
-          renderMode: 'ab-screencast',
-          toolPortConflict: undefined,
-        });
         const session = sessionForKey(`tool.${leaf.id}`);
         await attachAgentBrowserSession({
           url: entry.url,

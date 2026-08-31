@@ -28,7 +28,7 @@
 
 **Why declining records nothing.** A remembered denial was there so a hostile repo could not re-ask on every invocation. Once the prompt lives in a pane the user closed deliberately, that pressure is gone — and a persisted denial keyed on an upstream would silently disable tools across every worktree of a repo, with nothing in the product able to list or revoke it. Re-asking is recoverable; a permanent invisible block is not.
 
-**Why trust is not content-hashed.** Hash-pinning a `dormouse.yml` re-prompts on every edit and every `git pull` that touches the file. On a repo whose maintainer edits it regularly that is a dialog seen daily, and a dialog seen daily is answered reflexively — the control stops controlling anything. The residual, a trusted repo that later gains a hostile entry, is exposure already accepted from `package.json` scripts, `.vscode/tasks.json`, and git hooks in that same repo. The gate exists for first contact, and path-level trust covers first contact.
+**Why trust is not content-hashed.** Hash-pinning a `dormouse.yml` re-prompts on every edit and every `git pull` that touches the file. On a repo whose maintainer edits it regularly that is a dialog seen daily, and a dialog seen daily is answered reflexively — the control stops controlling anything. The residual, a trusted repo that later gains a hostile entry, is exposure already accepted from `package.json` scripts, `.vscode/tasks.json`, and git hooks in that same repo. The gate exists for first contact, which a key over the whole repo already covers.
 
 ## Serving
 

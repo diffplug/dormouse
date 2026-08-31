@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
+import { PANE_MESSAGE_CLASS, TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
 import { registerProxyOrigin } from '../../lib/iframe-proxy-registry';
 import { registerSurfaceFocusHandle } from '../../lib/terminal-registry';
@@ -225,11 +225,9 @@ export function IframePanel({ id, title, params }: PaneProps) {
       hostCapable: false,
       // embed→popout spawns the new agent-browser headed and mounts it
       // popped-out, so it needs both spawn and pop-out host capabilities. Never
-      // for a tool: a tool's `render` is `iframe` or `ab-screencast`
-      // (docs/specs/dor-tool.md -> Declaring tools), so offering pop-out would
-      // silently reinterpret the request as a screencast — the swap re-derives
-      // the browser under the new renderer and there is no headed mode to land
-      // in. Show the two backends a tool actually has.
+      // for a tool, which has no third renderer to land in
+      // (docs/specs/dor-tool.md -> Declaring tools); the other registration
+      // site is `agent-browser-surface-controller.ts`.
       canPopOut: !isTool && !!getPlatform().agentBrowserPopOut,
     });
     registrationRef.current = registration;
@@ -387,7 +385,7 @@ export function IframePanel({ id, title, params }: PaneProps) {
 }
 
 function PanelMessage({ resolution, url }: { resolution: Resolution; url: string }) {
-  const base = 'flex h-full w-full items-center justify-center bg-terminal-bg px-6 text-center text-sm text-muted';
+  const base = `${PANE_MESSAGE_CLASS} text-muted`;
 
   if (resolution.kind === 'resolving') {
     return <div className={base}>Connecting to <span className="ml-1 font-semibold">{url}</span>…</div>;

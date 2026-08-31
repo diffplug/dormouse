@@ -1,12 +1,7 @@
 /**
  * Resolve a project directory's upstream remote URL, for the tool trust key
- * (`docs/specs/dor-tool.md` -> Trust).
- *
- * **This answer comes from the repo itself and is not verifiable.** `@{upstream}`
- * and `remote get-url` both read `.git/config`, so a directory that ships its own
- * `.git` can claim any remote URL and inherit whatever grant that URL has. That
- * is an accepted risk, recorded in the spec: cloning is unaffected, because there
- * the user chose the URL.
+ * (`docs/specs/dor-tool.md` -> Trust, which records the unverifiability of a
+ * `.git/config`-sourced answer as an accepted risk).
  *
  * Every failure — no git, not a repo, no upstream, no remote, unparseable URL —
  * returns `null`, which leaves the caller offering only a folder grant. Failing
@@ -15,9 +10,9 @@
 import { spawnAndCapture } from 'dor-lib-common';
 import { canonicalRemoteUrl } from './git-remote-url';
 
-/** `spawnAndCapture` exposes no `cwd` and the sidecar's is `/` under a macOS
- *  `.app`, so the directory travels in argv. `dir` is the host-resolved project
- *  root, never a raw string off the wire. */
+/** The directory travels in argv, not a `cwd` option (`docs/specs/dor-cli.md`
+ *  -> the `spawnAndCapture` rules). `dir` is the host-resolved project root,
+ *  never a raw string off the wire. */
 async function git(dir: string, args: string[]): Promise<string | null> {
   const result = await spawnAndCapture('git', ['-C', dir, ...args]);
   if (!result.ok || result.exitCode !== 0) return null;

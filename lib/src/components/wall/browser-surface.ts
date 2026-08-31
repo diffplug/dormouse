@@ -87,16 +87,23 @@ export function toolPendingFromParams(params: unknown): ToolPending | null {
  */
 export type ToolFace = 'terminal' | 'browser' | 'port-conflict' | 'pending-approval';
 
+/** What occupies the tool's second half, ignoring the terminal pin, or null
+ *  when it has none yet — the header chip's gate as well as `toolFace`'s
+ *  browser branch, so both read the mutual exclusion from one place. */
+export function toolSecondFace(params: unknown): 'browser' | 'port-conflict' | null {
+  if (!isToolParams(params)) return null;
+  if (toolPortConflictFromParams(params) !== null) return 'port-conflict';
+  return browserUrlFromParams(params) !== null ? 'browser' : null;
+}
+
 export function toolFace(params: unknown): ToolFace {
   if (!isToolParams(params)) return 'terminal';
   // Checked before everything, including the terminal pin: until the human
   // approves, there is no terminal to show — nothing has spawned.
   if (toolPendingFromParams(params) !== null) return 'pending-approval';
   if (asParams(params).showTerminal === true) return 'terminal';
-  if (toolPortConflictFromParams(params) !== null) return 'port-conflict';
-  return browserUrlFromParams(params) !== null ? 'browser' : 'terminal';
+  return toolSecondFace(params) ?? 'terminal';
 }
-
 
 /** Whether a tool Surface's params carry `key`. A null or absent key never
  *  matches — not even another null: a tool has an identity if and only if it
