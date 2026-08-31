@@ -1,6 +1,6 @@
 # Dor Tools — Rationale
 
-> Informative evidence for [dor-tool.md](dor-tool.md), keyed by its headings; nothing here is normative. Design-stage: these are the arguments behind rules that are not yet implemented.
+> Informative evidence for [dor-tool.md](dor-tool.md), keyed by its headings; nothing here is normative.
 
 ## Declaring tools
 

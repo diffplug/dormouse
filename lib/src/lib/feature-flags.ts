@@ -36,6 +36,26 @@ export function setWorkspacesEnabled(enabled: boolean): void {
   }
 }
 
+export const TOOLS_FLAG_KEY = 'dormouse.flags.tools';
+
+/** Whether Dor Tools are enabled (`docs/specs/dor-tool.md`). Off by default:
+ *  with the flag off, `dor tool` reports that tools are disabled and no
+ *  Session is ever designated, so the serving trigger has nothing to watch and
+ *  no pane can transform. */
+export function isToolsEnabled(): boolean {
+  return readBoolFlag(TOOLS_FLAG_KEY);
+}
+
+/** Toggle the tools flag (dev tooling / Storybook). */
+export function setToolsEnabled(enabled: boolean): void {
+  try {
+    if (enabled) globalThis.localStorage?.setItem(TOOLS_FLAG_KEY, 'true');
+    else globalThis.localStorage?.removeItem(TOOLS_FLAG_KEY);
+  } catch {
+    // No localStorage: nothing to persist.
+  }
+}
+
 export const AB_DEBUG_LOGS_FLAG_KEY = 'dormouse.flags.abDebugLogs';
 
 /** Whether the agent-browser high-rate `[ab-panel]`/`[agent-browser]` stream and

@@ -11,6 +11,7 @@ import type {
 } from 'dor/commands/types';
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
+import { TOOLS_FLAG_KEY, isToolsEnabled } from '../../lib/feature-flags';
 import type { OpenPort } from '../../lib/platform/types';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 import {
@@ -727,6 +728,15 @@ export function useDorControl({
       }
 
       if (detail.method === SURFACE_CONTROL_METHODS.tool) {
+        // Off by default. With the flag off nothing is ever designated a tool,
+        // so the serving trigger has nothing to watch and no pane can transform.
+        if (!isToolsEnabled()) {
+          detail.respond({
+            ok: false,
+            error: `Dor Tools are off. Enable them by setting localStorage '${TOOLS_FLAG_KEY}' to 'true'.`,
+          });
+          return;
+        }
         const cwd = stringParam(params.cwd)?.trim();
         if (!cwd) {
           detail.respond({ ok: false, error: 'cwd is required' });
@@ -812,13 +822,30 @@ export function useDorControl({
             (candidate) => toolKeysEqual((candidate as { toolKey?: unknown } | null | undefined)?.toolKey, key),
           );
           if (match) {
+            const matchedCommand = toolCommandFromParams(lath.getMeta(match.id)?.params) || command;
+            // A tool Surface is dedicated, so an exited command leaves nothing
+            // ambiguous about whether the pane is free — unlike `dor ensure`,
+            // which stops matching a dead command because it targets arbitrary
+            // shells. Re-run in place, keeping the pane's position and
+            // scrollback (docs/specs/dor-tool.md -> Identity and dedupe).
+            const idle = getTerminalPaneState(match.id).currentCommand === null;
+            if (idle) {
+              const restarted = await restartSurfaceInPlace(match.id, matchedCommand, cwd);
+              if (!restarted.ok) {
+                detail.respond({
+                  ok: false,
+                  error: `surface '${surfaceRefForId(match.id)}' ${restarted.message}`,
+                });
+                return;
+              }
+            }
             detail.respond({
               ok: true,
               result: {
-                status: 'existing',
+                status: idle ? 'adopted' : 'existing',
                 surfaceId: match.id,
                 surfaceRef: surfaceRefForId(match.id),
-                command: toolCommandFromParams(lath.getMeta(match.id)?.params) || command,
+                command: matchedCommand,
                 cwd,
                 minimized: match.minimized,
                 key,

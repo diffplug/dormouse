@@ -342,6 +342,13 @@ baseboard. `dor list` rows sort by the Workspace-stable `surface:N` ref, whose
 registry `Wall` owns and persists with the session, independent of Lath layout
 order.
 
+`dor tool` runs a command as a Dor Tool — a Surface that grows a browser in
+place once the command binds a port. It uses the `ensure` spawn path's
+mechanics but **not** its command+cwd matching: a tool has an identity only if
+a `dormouse.yml` entry gave it one. Source of truth: `dor/src/commands/tool.ts`,
+help snapshot `dor/test/snapshots/help/tool.md`; behavior is owned by
+`docs/specs/dor-tool.md`.
+
 **Port enumeration is opt-in.** When the request sets `includePorts` (`dor list
 --ports` / `--port`), the host calls `PlatformAdapter.getOpenPorts(id)`
 (`docs/specs/dor-browser.md` → Dev-Server Chip) for each terminal Surface in

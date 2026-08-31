@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import {
@@ -8,6 +9,7 @@ import {
   toolShowsBrowser,
 } from './browser-surface';
 import { shouldParkOnMinimize, toolLeafMeta } from './lath-wall-engine';
+import { TOOLS_FLAG_KEY, isToolsEnabled, setToolsEnabled } from '../../lib/feature-flags';
 
 const booting = { surfaceType: 'tool', command: 'pnpm storybook', cwd: '/repo' };
 const serving = { ...booting, url: 'http://localhost:6006/', renderMode: 'iframe' };
@@ -77,5 +79,20 @@ describe('tool leaf meta', () => {
     // ...and a terminal still does not: the PTY holds its state and the
     // registry replays it.
     expect(shouldParkOnMinimize({ component: 'terminal', tabComponent: 'terminal', title: 't' })).toBe(false);
+  });
+});
+
+describe('the tools flag', () => {
+  it('is off by default, so nothing is ever designated a tool', () => {
+    setToolsEnabled(false);
+    expect(isToolsEnabled()).toBe(false);
+  });
+
+  it('turns on and off through the documented localStorage key', () => {
+    setToolsEnabled(true);
+    expect(globalThis.localStorage.getItem(TOOLS_FLAG_KEY)).toBe('true');
+    expect(isToolsEnabled()).toBe(true);
+    setToolsEnabled(false);
+    expect(globalThis.localStorage.getItem(TOOLS_FLAG_KEY)).toBeNull();
   });
 });

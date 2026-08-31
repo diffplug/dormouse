@@ -168,7 +168,11 @@ export interface ToolSurfaceRequest {
 }
 
 export interface ToolSurfaceResponse {
-  /** `existing` is a key match: the redundant spawn never started. */
+  /**
+   * `existing` is a key match on a live tool: the redundant spawn never
+   * started. `adopted` is a key match whose command had exited — the Surface is
+   * reused and the command re-run in place, keeping its position and scrollback.
+   */
   status: 'created' | 'existing' | 'adopted';
   surfaceId: string;
   surfaceRef: string;
