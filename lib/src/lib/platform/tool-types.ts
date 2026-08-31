@@ -8,7 +8,7 @@
 
 export type ToolHostRequest =
   | { op: 'lookup'; name: string; cwd: string }
-  | { op: 'trust'; kind: 'upstream' | 'folder'; projectRoot: string; upstreamUrl: string | null };
+  | { op: 'trust'; kind: 'upstream' | 'folder'; projectRoot: string };
 
 /** Result of resolving a tool name. `ok` carries the rendered dedupe key: the
  *  host owns `$PROJECT_ROOT`, so the webview never sees a template. */

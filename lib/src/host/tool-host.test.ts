@@ -40,7 +40,7 @@ describe('createToolHost', () => {
 
   it('renders the key host-side once trusted, so the webview never sees a template', async () => {
     const host = createToolHost({ stateDir });
-    await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo, upstreamUrl: null });
+    await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo });
     expect(await host.handle({ op: 'lookup', name: 'storybook', cwd: repo })).toMatchObject({
       status: 'ok',
       run: 'pnpm storybook',
@@ -48,15 +48,14 @@ describe('createToolHost', () => {
     });
   });
 
-  it('re-resolves an upstream grant host-side instead of trusting the round-tripped URL', async () => {
+  it('resolves an upstream grant host-side', async () => {
     const host = createToolHost({ stateDir });
     // This fixture is not a git checkout, so an upstream choice must fall back
-    // to a folder grant even if the webview returns a forged/stale URL.
+    // to a folder grant.
     await host.handle({
       op: 'trust',
       kind: 'upstream',
       projectRoot: repo,
-      upstreamUrl: 'https://attacker.invalid/forged',
     });
 
     expect(await host.handle({ op: 'lookup', name: 'storybook', cwd: repo })).toMatchObject({
@@ -66,14 +65,14 @@ describe('createToolHost', () => {
 
   it('reports a null key for an entry that declared none', async () => {
     const host = createToolHost({ stateDir });
-    await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo, upstreamUrl: null });
+    await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo });
     const result = await host.handle({ op: 'lookup', name: 'scratch', cwd: repo });
     expect(result).toMatchObject({ status: 'ok', key: null });
   });
 
   it('carries lint warnings through to the caller', async () => {
     const host = createToolHost({ stateDir });
-    await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo, upstreamUrl: null });
+    await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo });
     const result = await host.handle({ op: 'lookup', name: 'noisy', cwd: repo });
     expect(result).toMatchObject({ status: 'ok' });
     if (result.status !== 'ok') return;
@@ -82,7 +81,7 @@ describe('createToolHost', () => {
 
 
   it('persists trust to the state directory, surviving a host restart', async () => {
-    await createToolHost({ stateDir }).handle({ op: 'trust', kind: 'folder', projectRoot: repo, upstreamUrl: null });
+    await createToolHost({ stateDir }).handle({ op: 'trust', kind: 'folder', projectRoot: repo });
     expect(await createToolHost({ stateDir }).handle({ op: 'lookup', name: 'storybook', cwd: repo })).toMatchObject({
       status: 'ok',
     });
@@ -90,7 +89,7 @@ describe('createToolHost', () => {
 
   it('forgets trust between runs when the host has no state directory', async () => {
     const first = createToolHost();
-    await first.handle({ op: 'trust', kind: 'folder', projectRoot: repo, upstreamUrl: null });
+    await first.handle({ op: 'trust', kind: 'folder', projectRoot: repo });
     expect(await first.handle({ op: 'lookup', name: 'storybook', cwd: repo })).toMatchObject({ status: 'ok' });
     expect(await createToolHost().handle({ op: 'lookup', name: 'storybook', cwd: repo })).toMatchObject({
       status: 'untrusted',

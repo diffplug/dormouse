@@ -1227,7 +1227,6 @@ export function Wall({
         op: 'trust',
         kind: choice,
         projectRoot: pending.projectRoot,
-        upstreamUrl: pending.upstreamUrl,
       });
 
       // Re-resolve now that the grant exists. The untrusted lookup deliberately
