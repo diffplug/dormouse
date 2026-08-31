@@ -28,9 +28,7 @@ const TOOL_FILE_MAX_BYTES = 256 * 1024;
 async function readToolFile(path: string): Promise<string> {
   const info = await stat(path);
   if (info.size > TOOL_FILE_MAX_BYTES) {
-    throw new ToolFileError(
-      `${path}: tool file is larger than ${TOOL_FILE_MAX_BYTES} bytes (stat)`,
-    );
+    throw new ToolFileError(`${path}: tool file is larger than ${TOOL_FILE_MAX_BYTES} bytes`);
   }
   return readFile(path, 'utf-8');
 }
@@ -132,12 +130,15 @@ export async function findToolFile(
     const path = join(dir, TOOL_FILE_NAME);
     try {
       const text = await readTextFile(path);
-      // Belt and braces for an injected reader that does no capping of its own.
+      // Belt and braces for an injected reader that does no capping of its own;
+      // unreachable with the default reader, which refuses at `stat`. Its
+      // wording is deliberately distinct so a test can name which check fired
+      // without leaking a syscall into the message a user actually sees.
       // `byteLength`, not `.length`: the cap is bytes, and a string of
       // multi-byte characters would otherwise pass a check it exceeds.
       if (Buffer.byteLength(text, 'utf-8') > TOOL_FILE_MAX_BYTES) {
         throw new ToolFileError(
-          `${path}: tool file is larger than ${TOOL_FILE_MAX_BYTES} bytes (read)`,
+          `${path}: tool file content exceeds ${TOOL_FILE_MAX_BYTES} bytes after reading`,
         );
       }
       return { path, dir, text };

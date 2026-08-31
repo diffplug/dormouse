@@ -73,7 +73,9 @@ tools:
 - **`render`** — `iframe` (default) or `ab-screencast`. The repo declares the
   renderer, not the tool: which one suits a tool is a Dormouse-side judgement,
   and `ab-screencast` is what makes a tool agent-drivable, since browser verbs
-  stay renderMode-gated.
+  stay renderMode-gated. **The Display modal never offers pop-out on a tool** —
+  there is no third renderer to land in, so the swap would only re-derive the
+  one it has.
 - **`prespawn_dedupe`** — the dedupe key, evaluated before anything spawns (see
   [Identity and dedupe](#identity-and-dedupe)). Optional; absence means no
   dedupe.

@@ -168,14 +168,3 @@ describe('tool persistence (regression: review findings 4 and 11)', () => {
     expect(persistableLeafMeta(meta).params).toEqual({ url: 'https://x', renderMode: 'iframe' });
   });
 });
-
-describe('a tool renders in the two backends it declares (regression: PR #493 review)', () => {
-  it('has no ab-popout renderer', () => {
-    // `render` is iframe | ab-screencast, so the Display modal must not offer
-    // pop-out on a tool-owned iframe: the swap would re-derive it as a headless
-    // screencast, silently reinterpreting the request. IframePanel gates
-    // `canPopOut` on this same predicate.
-    expect(isToolParams(booting)).toBe(true);
-    expect(isToolParams({ surfaceType: 'browser', url: 'https://x' })).toBe(false);
-  });
-});

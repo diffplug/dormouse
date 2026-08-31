@@ -169,3 +169,36 @@ describe('IframePanel', () => {
     expect(createProxy.mock.calls.length).toBeGreaterThan(callsBeforeBack);
   });
 });
+
+describe('the pop-out affordance on a tool (regression: PR #493 review)', () => {
+  // A tool's `render` is `iframe` or `ab-screencast`, so pop-out has no
+  // renderer to land in: offering it tears the browser down and re-derives the
+  // same screencast, so the user asks for a native window and gets a reload.
+  // `FakePtyAdapter` has no `agentBrowserPopOut`, so both cases would read
+  // `false` off the stock fake — attach one first, or the assertion is vacuous.
+  function withPopOutCapableHost() {
+    const platform = new FakePtyAdapter() as FakePtyAdapter & { agentBrowserPopOut: () => Promise<unknown> };
+    platform.agentBrowserPopOut = async () => ({ ok: true });
+    setPlatform(platform);
+  }
+
+  it('offers pop-out on a plain browser surface', async () => {
+    withPopOutCapableHost();
+    await renderPanel(stubActions({}), {
+      id: 'iframe-plain',
+      title: 'Plain',
+      params: { surfaceType: 'browser', url: 'http://example.test/app' },
+    });
+    expect(getAgentBrowserScreenController('iframe-plain')?.canPopOut).toBe(true);
+  });
+
+  it('never offers it on a tool', async () => {
+    withPopOutCapableHost();
+    await renderPanel(stubActions({}), {
+      id: 'iframe-tool',
+      title: 'storybook',
+      params: { surfaceType: 'tool', url: 'http://localhost:6006/' },
+    });
+    expect(getAgentBrowserScreenController('iframe-tool')?.canPopOut).toBe(false);
+  });
+});

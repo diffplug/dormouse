@@ -161,6 +161,8 @@ const EMPTY_TABS: StreamTab[] = [];
 
 export class AgentBrowserSurfaceController {
   readonly id: string;
+  /** Gates the pop-out affordance; see `ensureStarted`. */
+  private readonly isTool: boolean;
 
   // --- params (mirrors of the persisted blob) ---
   private session: string | undefined;
@@ -289,6 +291,9 @@ export class AgentBrowserSurfaceController {
 
   constructor(id: string, params: AgentBrowserSurfaceParams) {
     this.id = id;
+    // A Surface's kind never changes over its life (a tool's capabilities come
+    // and go, its identity does not), so this is safe to seed once.
+    this.isTool = params.surfaceType === 'tool';
     this.session = params.session;
     this.binaryPath = params.binaryPath;
     this.wsPort = params.wsPort;
@@ -406,7 +411,11 @@ export class AgentBrowserSurfaceController {
       chrome: this.chrome,
       chromeActions: this.chromeActions,
       hostCapable: !!getPlatform().agentBrowserCommand,
-      canPopOut: !!getPlatform().agentBrowserPopOut,
+      // Never for a tool: `render` is `iframe` or `ab-screencast`, so pop-out
+      // has no renderer to land in and the swap would tear the browser down and
+      // re-derive the same screencast — the user asks for a native window and
+      // gets a reload (`docs/specs/dor-tool.md` -> Declaring tools).
+      canPopOut: !this.isTool && !!getPlatform().agentBrowserPopOut,
     });
     this.lastPublishedScreen = null;
     this.publishScreen();

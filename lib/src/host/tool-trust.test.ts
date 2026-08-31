@@ -153,7 +153,7 @@ describe('the size cap runs before the read (regression: PR #493 review)', () =>
     // Naming the check that fired is the assertion: a status alone is produced
     // by the post-read fallback too, so it would stay green with the stat
     // removed — the exact regression this block exists for.
-    expect(result.message).toMatch(/\(stat\)$/);
+    expect(result.message).toMatch(/larger than \d+ bytes$/);
   });
 
   it('measures bytes, not UTF-16 code units', async () => {
@@ -161,10 +161,9 @@ describe('the size cap runs before the read (regression: PR #493 review)', () =>
     // check standing. 100k four-byte characters: well under the cap by
     // `.length`, well over it by bytes. Counting code units would let it through.
     const oversized = `# ${'\u{1F600}'.repeat(100_000)}\n`;
-    await writeFile(join(root, 'dormouse.yml'), 'tools: {}\n');
     const result = await lookupTool('storybook', root, new MemoryToolTrustStore(), async () => oversized);
     expect(result).toMatchObject({ status: 'error' });
     if (result.status !== 'error') return;
-    expect(result.message).toMatch(/\(read\)$/);
+    expect(result.message).toMatch(/after reading$/);
   });
 });
