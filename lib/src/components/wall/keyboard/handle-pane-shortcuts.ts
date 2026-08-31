@@ -81,17 +81,18 @@ export function handlePaneShortcuts(
   if ((e.key === 'k' || e.key === 'x') && sid) {
     e.preventDefault();
     e.stopPropagation();
+    const isTool = ctx.nav.paneParams(sid)?.surfaceType === 'tool';
     if (ctx.selectedTypeRef.current === 'door') {
       const item = ctx.doorsRef.current.find((d) => d.id === sid);
       if (item) {
         ctx.handleReattachRef.current(item, {
           enterPassthrough: false,
-          afterRestore: isUntouched(sid) ? 'kill-immediately' : 'confirm-kill',
+          afterRestore: !isTool && isUntouched(sid) ? 'kill-immediately' : 'confirm-kill',
         });
       }
       return true;
     }
-    if (isUntouched(sid)) {
+    if (!isTool && isUntouched(sid)) {
       ctx.killPaneImmediately(sid);
       return true;
     }
