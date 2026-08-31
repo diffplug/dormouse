@@ -5,6 +5,7 @@ import {
   toggleSessionTodo,
 } from '../../../lib/terminal-registry';
 import { randomKillChar } from '../../KillConfirm';
+import { isToolParams } from '../browser-surface';
 import { ARROW_OPPOSITES, isArrowKey, type NavHistoryRef, type WallKeyboardCtx } from './types';
 
 function findAlertButtonForSession(id: string): HTMLButtonElement | null {
@@ -81,7 +82,7 @@ export function handlePaneShortcuts(
   if ((e.key === 'k' || e.key === 'x') && sid) {
     e.preventDefault();
     e.stopPropagation();
-    const isTool = ctx.nav.paneParams(sid)?.surfaceType === 'tool';
+    const isTool = isToolParams(ctx.nav.paneParams(sid));
     if (ctx.selectedTypeRef.current === 'door') {
       const item = ctx.doorsRef.current.find((d) => d.id === sid);
       if (item) {
