@@ -245,7 +245,7 @@ This table is the whole route surface. Paths and request/response shapes live in
 | Route                            | Auth           | Does                                              |
 | -------------------------------- | -------------- | ------------------------------------------------- |
 | `GET /api/hello`                 | —              | The shared greeting. Carries no release identity: it is unauthenticated, CORS-`*` and reachable through `tailscale serve` — see the runtime file under "Installing it" |
-| `POST /api/setup/begin`          | setup password or setup token | Issues a registration challenge. Exactly one credential — both, or neither, is a 400 — gated exactly as `finish` is, so neither is softer. Re-presenting the **password** adds another passkey; a setup token buys one registration |
+| `POST /api/setup/begin`          | setup password or setup token | Issues a registration challenge. Exactly one credential — both, or neither, is a 400 — gated exactly as `finish` is, so neither is softer. Re-presenting the **password** adds another passkey; a setup token buys one registration. Answers with the account's credential ids, so a retry's `excludeCredentials` cannot duplicate a passkey that already signs in — an orphan the Server never registered is absent, and is still replaced |
 | `POST /api/setup/finish`         | setup password or setup token | Registers the passkey in `account.json`. A setup token is spent at the gate and put back if the registration then fails |
 | `POST /api/signin/begin`         | —              | Issues a sign-in challenge                          |
 | `POST /api/signin/finish`        | —              | Verifies the assertion and issues a 12-hour in-memory session token |

@@ -23,6 +23,10 @@ import {
   SessionExpiredError,
   SetupTokenInvalidError,
 } from '../client/pocket-client';
+import {
+  PASSKEY_ALREADY_REGISTERED_MESSAGE,
+  PasskeyAlreadyRegisteredError,
+} from '../client/webauthn';
 import { setNativeFieldValue } from '../../lib/dom';
 import { HOSTS, alertText, buttonNamed, click, rowFor, settle } from './app-test-utils';
 
@@ -83,7 +87,12 @@ vi.mock('../client/remote-adapter', () => ({
 vi.mock('../client/device-key', () => ({
   getOrCreateDeviceKey: () => Promise.reject(new Error('no device key in jsdom')),
 }));
-vi.mock('../client/webauthn', () => ({ browserWebAuthn: {} }));
+// Only the browser binding is doubled; `PasskeyAlreadyRegisteredError` and its
+// message stay real, for the reason the `pocket-client` mock keeps its own.
+vi.mock('../client/webauthn', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../client/webauthn')>()),
+  browserWebAuthn: {},
+}));
 vi.mock('./PocketWall', () => ({ PocketWall: () => null }));
 vi.mock('../../lib/platform', () => ({ setPlatform: () => undefined }));
 vi.mock('../../lib/terminal-registry', () => ({
@@ -227,6 +236,34 @@ describe('setting up from a scanned code', () => {
     expect(container.textContent).toContain('Welcome back');
     expect(passwordField()).toBeNull();
     expect(buttonNamed(container, /First-time setup/)).not.toBeNull();
+  });
+});
+
+describe('a device that already holds a registered passkey', () => {
+  /**
+   * The refusal that means the opposite of the others. `excludeCredentials`
+   * carries what the *Server* holds, so an authenticator refusing over it is
+   * proof a sign-in from this device works — the one case where prior use is
+   * certain while this browser has stored nothing. So the scan loses its
+   * standing and the screen flips to "Welcome back", rather than re-offering a
+   * setup whose every retry can only fail the same way.
+   */
+  it('drops the scanned code and leads with sign-in, on a browser that stored nothing', async () => {
+    fake.setup.mockRejectedValueOnce(new PasskeyAlreadyRegisteredError());
+    boot();
+
+    await click(container, 'Create passkey & sign in');
+
+    expect(alertText(container)).toBe(PASSKEY_ALREADY_REGISTERED_MESSAGE);
+    expect(container.textContent).toContain('Welcome back');
+    expect(passwordField()).toBeNull();
+    expect(buttonNamed(container, /First-time setup/)).not.toBeNull();
+
+    // The nonce is the run's, not the code's: the sign-in it steers to still
+    // proves the pairing the laptop displayed a code for.
+    await click(container, 'Sign in with passkey');
+    await pairFrom('First laptop');
+    expect(fake.pair).toHaveBeenLastCalledWith('host-1', DEVICE_LABEL, SCANNED.nonce);
   });
 });
 

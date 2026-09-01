@@ -34,7 +34,11 @@ import {
 } from './pocket-client';
 import { FakeSocket } from '../test-fake-socket';
 import { getOrCreateDeviceKey, type DeviceKeyStore } from './device-key';
-import type { PasskeyRegistration, WebAuthnClient } from './webauthn';
+import {
+  PasskeyAlreadyRegisteredError,
+  type PasskeyRegistration,
+  type WebAuthnClient,
+} from './webauthn';
 
 // --- Fakes -----------------------------------------------------------------
 
@@ -118,18 +122,30 @@ function memoryStorage(): PocketStorage {
 }
 
 /**
- * A {@link WebAuthnClient} that records the `allowCredentials` each
- * `getAssertion` is scoped to, so tests can assert connect narrows selection.
+ * A {@link WebAuthnClient} that records the credential lists each call is
+ * scoped to — `allowCredentials` on assertion, `excludeCredentials` on
+ * registration — so tests can assert what reaches the authenticator.
  */
 function recordingWebAuthn(): {
   webauthn: WebAuthnClient;
   assertionAllowLists: Array<readonly string[] | undefined>;
+  registrationExcludeLists: Array<readonly string[] | undefined>;
 } {
   const assertionAllowLists: Array<readonly string[] | undefined> = [];
+  const registrationExcludeLists: Array<readonly string[] | undefined> = [];
   return {
     assertionAllowLists,
+    registrationExcludeLists,
     webauthn: {
-      registerPasskey: fakeWebAuthn.registerPasskey,
+      async registerPasskey(
+        challenge,
+        rpId,
+        accountId,
+        excludeCredentialIds,
+      ): Promise<PasskeyRegistration> {
+        registrationExcludeLists.push(excludeCredentialIds);
+        return fakeWebAuthn.registerPasskey(challenge, rpId, accountId);
+      },
       async getAssertion(_challenge, _rpId, allowCredentials): Promise<PasskeyAssertion> {
         assertionAllowLists.push(allowCredentials);
         return assertion;
@@ -180,7 +196,12 @@ function makeClient(
 
 const AUTH_ROUTES = {
   '/api/setup/begin': () => ({
-    json: { challenge: b64uChallenge(1), rpId: RP_ID, accountId: SELFHOST_ACCOUNT_ID },
+    json: {
+      challenge: b64uChallenge(1),
+      rpId: RP_ID,
+      accountId: SELFHOST_ACCOUNT_ID,
+      existingCredentialIds: [],
+    },
   }),
   '/api/setup/finish': () => ({
     json: { accountId: SELFHOST_ACCOUNT_ID, credentialId: CREDENTIAL_ID },
@@ -317,6 +338,61 @@ describe('setup + signin', () => {
     await expect(atFinish.client.setup({ setupToken: 'spent' }, 'Phone')).rejects.toThrow(
       SetupTokenInvalidError,
     );
+  });
+
+  /**
+   * The exclusion list is the Server's answer, never this browser's cache: the
+   * cache is empty on a fresh install and cleared again by a refused `finish`,
+   * and the orphan it would name is the one credential that must stay
+   * replaceable.
+   */
+  it('excludes the credentials the Server says the account already holds', async () => {
+    const { webauthn, registrationExcludeLists } = recordingWebAuthn();
+    const harness = makeClient(
+      {
+        ...AUTH_ROUTES,
+        '/api/setup/begin': () => ({
+          json: {
+            challenge: b64uChallenge(1),
+            rpId: RP_ID,
+            accountId: SELFHOST_ACCOUNT_ID,
+            existingCredentialIds: ['cred-already-registered'],
+          },
+        }),
+      },
+      { webauthn },
+    );
+
+    await harness.client.setup({ password: 'pw' }, 'My Phone');
+
+    expect(registrationExcludeLists).toEqual([['cred-already-registered']]);
+  });
+
+  /**
+   * The exclusion doing its job. Named rather than generic because the app has
+   * to act on it: the list came from the Server, so an authenticator refusing
+   * over it is proof a sign-in from this very device succeeds.
+   */
+  it('names the authenticator’s refusal to duplicate a registered passkey', async () => {
+    const harness = makeClient(
+      { ...AUTH_ROUTES },
+      {
+        webauthn: {
+          ...fakeWebAuthn,
+          registerPasskey: () =>
+            // The shape a browser raises — matched on `name`, since the class
+            // itself does not survive every realm.
+            Promise.reject(new DOMException('already registered', 'InvalidStateError')),
+        },
+      },
+    );
+
+    await expect(harness.client.setup({ password: 'pw' }, 'Phone')).rejects.toBeInstanceOf(
+      PasskeyAlreadyRegisteredError,
+    );
+    // Nothing was created, so nothing is cached — this browser's own question
+    // is exactly as it was.
+    expect(harness.client.hasPriorUse()).toBe(false);
   });
 
   /**

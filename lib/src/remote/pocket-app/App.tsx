@@ -24,7 +24,7 @@ import {
   type ConnectDecision,
   type PocketSocket,
 } from '../client/pocket-client';
-import { browserWebAuthn } from '../client/webauthn';
+import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webauthn';
 import { pairingFingerprint, type SetupCredential } from 'server-lib-common';
 import type { ScannedSetup } from './setup-link';
 import { getOrCreateDeviceKey } from '../client/device-key';
@@ -249,6 +249,14 @@ export default function App({
    * behind the disclosure a returning browser would otherwise get.
    */
   const [setupRefused, setSetupRefused] = useState(false);
+  /**
+   * The authenticator refused to register because it already holds a passkey
+   * the Server has. Not stored: we learn that one exists, never its id or its
+   * key, and {@link PocketClient.hasPriorUse} answers from material this
+   * browser can actually use. So it lives here, for this screen, until the
+   * sign-in it steers to caches the real thing.
+   */
+  const [passkeyAlreadyRegistered, setPasskeyAlreadyRegistered] = useState(false);
 
   const [phase, setPhase] = useState<Phase>('auth');
   /**
@@ -610,6 +618,14 @@ export default function App({
             setSetupToken(null);
             setSetupRefused(true);
           }
+          // The other actionable one, and the opposite steer: registration can
+          // never succeed on this device, so setup is over — drop the code as
+          // any other way out of setup does (the nonce rides on) and put
+          // sign-in forward, which is now known to work.
+          if (err instanceof PasskeyAlreadyRegisteredError) {
+            setupSettled();
+            setPasskeyAlreadyRegistered(true);
+          }
           throw err;
         }
         // Spent whatever happens next — a registration consumes it Server-side.
@@ -637,6 +653,7 @@ export default function App({
         firstRun={firstRun}
         setupToken={setupToken}
         setupRefused={setupRefused}
+        passkeyAlreadyRegistered={passkeyAlreadyRegistered}
         needsInstall={needsInstall}
         onSignin={() =>
           run('signin', async () => {
@@ -719,8 +736,9 @@ export function ConnectedView({
  * actually complete — with sign-in kept as a plain secondary action, since a
  * passkey syncs and a fresh browser may already have one. **Returning** keeps
  * sign-in primary and folds setup back behind the disclosure. A live
- * `setupToken`, or one this run's Server refused, leads with setup either way
- * (docs/specs/pocket-app.md).
+ * `setupToken`, or one this run's Server refused, leads with setup either way —
+ * unless the authenticator has already told us this device holds a registered
+ * passkey, which outranks all of it (docs/specs/pocket-app.md).
  *
  * The install guidance goes here rather than after sign-in because this is the
  * screen that mints the partition-bound *passkey* it warns about — the last
@@ -734,6 +752,7 @@ export function SetupOrSignin({
   firstRun,
   setupToken,
   setupRefused = false,
+  passkeyAlreadyRegistered = false,
   needsInstall,
   onSignin,
   onSetup,
@@ -751,14 +770,21 @@ export function SetupOrSignin({
    * survives the transition.
    */
   setupRefused?: boolean;
+  /**
+   * The authenticator holds a passkey the Server already registered. The only
+   * evidence that outranks everything else on this screen: it is proof a
+   * sign-in from this device succeeds, where `firstRun` is merely the absence
+   * of evidence, so it leads with sign-in even on a scanned code.
+   */
+  passkeyAlreadyRegistered?: boolean;
   /** iOS in a browser tab; see {@link InstallFirstNotice}. */
   needsInstall: boolean;
   onSignin: () => void;
   onSetup: (credential: SetupCredential, label: string) => void;
 }): React.ReactElement {
   const [showSetup, setShowSetup] = useState(false);
-  const scanned = setupToken !== null;
-  const leadWithSetup = scanned || firstRun || setupRefused;
+  const scanned = setupToken !== null && !passkeyAlreadyRegistered;
+  const leadWithSetup = !passkeyAlreadyRegistered && (scanned || firstRun || setupRefused);
   const signinLabel = busy === 'signin' ? 'Signing in…' : 'Sign in with passkey';
   const setupFields = (
     <PasskeySetupFields

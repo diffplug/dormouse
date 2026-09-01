@@ -248,7 +248,9 @@ in with it. Two things you cannot see happen at the same time:
   from the last 30 seconds, so signing in is what makes the next step possible.
 
 With no code and nothing stored, sign in is the quieter second option, because
-passkeys sync — a phone that has never been here may already hold one. A phone
+passkeys sync — a phone that has never been here may already hold one. If such a
+phone tries setup anyway, its authenticator refuses to duplicate a passkey the
+server already registered, and Pocket puts sign-in back in front. A phone
 that *has* been here, and did not arrive by camera, gets the other screen
 instead: sign-in first, with setup folded back behind a disclosure.
 

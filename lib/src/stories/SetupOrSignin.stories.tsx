@@ -5,6 +5,7 @@ import { userEvent, within } from 'storybook/test';
 // (`--vscode-*`) itself.
 import { SetupOrSignin } from '../remote/pocket-app/App';
 import { SETUP_CODE_DEAD_MESSAGE } from '../remote/client/pocket-client';
+import { PASSKEY_ALREADY_REGISTERED_MESSAGE } from '../remote/client/webauthn';
 import { PhoneFrame } from './PhoneFrame';
 
 // On the return visit, setup is internal state (`useState(showSetup)`) behind
@@ -25,6 +26,7 @@ const meta: Meta<typeof SetupOrSignin> = {
     firstRun: true,
     setupToken: null,
     setupRefused: false,
+    passkeyAlreadyRegistered: false,
     needsInstall: false,
     onSignin: () => {},
     onSetup: () => {},
@@ -74,6 +76,18 @@ export const FromScannedCodeReturning: Story = {
 // `setupRefused` makes a returning browser render this identically.
 export const SetupAfterDeadCode: Story = {
   args: { firstRun: true, setupRefused: true, error: SETUP_CODE_DEAD_MESSAGE },
+};
+
+// The authenticator refused to duplicate a passkey the server already has. The
+// only screen where `firstRun` is true and sign-in still leads: that refusal is
+// proof this device can sign in, where a stored-nothing browser is merely
+// unproven. `App` has dropped the code, so nothing here is left of the scan.
+export const SigninAfterPasskeyExists: Story = {
+  args: {
+    firstRun: true,
+    passkeyAlreadyRegistered: true,
+    error: PASSKEY_ALREADY_REGISTERED_MESSAGE,
+  },
 };
 
 // Account creation in flight: the setup button reads "Creating…".

@@ -361,7 +361,15 @@ export function createApp(config: AppConfig): CreatedApp {
     const gated = await readSetupGated<SetupBeginRequest>(c, 'peek');
     if (gated instanceof Response) return gated;
     const { challenge } = setupChallenges.issue();
-    const res: SetupBeginResponse = { challenge, rpId, accountId: SELFHOST_ACCOUNT_ID };
+    const account = await accounts.load();
+    // The registered credential ids ride back so the browser can exclude them,
+    // and only a caller that already passed the gate above ever sees them.
+    const res: SetupBeginResponse = {
+      challenge,
+      rpId,
+      accountId: SELFHOST_ACCOUNT_ID,
+      existingCredentialIds: account?.passkeys.map((p) => p.credentialId) ?? [],
+    };
     return c.json(res);
   });
 

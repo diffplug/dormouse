@@ -68,6 +68,10 @@ malformed one is ignored rather than reported.
 * **The token is dropped on every way out of setup** — redeemed, refused, or
   left behind by a sign-in — since its only job is the first passkey; one that
   outlived it would lead a later session expiry into a *second* registration.
+* **A passkey the authenticator already holds outranks even the scan.**
+  `excludeCredentials` refusing (`PasskeyAlreadyRegisteredError`) proves this
+  device can sign in, so the code is dropped and sign-in leads instead of a
+  setup whose every retry fails the same way.
 * **A refused token is reported, and setup stays unfolded.**
   `SETUP_TOKEN_INVALID_ERROR` — expired, spent, or minted by a since-revoked
   Host — becomes `SetupTokenInvalidError`: its message goes in the alert row and

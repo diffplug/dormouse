@@ -52,6 +52,27 @@ test('a second passkey can be added by re-presenting the password', async () => 
   assert.equal(account.passkeys.length, 2);
 });
 
+test('setup/begin names the credentials the account already holds', async () => {
+  // For the browser's `excludeCredentials`: only the Server knows what is
+  // registered, so a retry cannot silently mint a duplicate of a passkey that
+  // can already sign in. Nothing new is disclosed — the gate above ran first.
+  const { app } = await freshApp();
+
+  const empty = await post(app, API_ROUTES.setupBegin, { password: PASSWORD });
+  assert.deepEqual((await empty.json()).existingCredentialIds, []);
+
+  const first = await newAuthenticator();
+  assert.equal((await register(app, first)).status, 200);
+  const second = await newAuthenticator();
+  assert.equal((await register(app, second)).status, 200);
+
+  const listed = await post(app, API_ROUTES.setupBegin, { password: PASSWORD });
+  assert.deepEqual((await listed.json()).existingCredentialIds, [
+    first.credentialId,
+    second.credentialId,
+  ]);
+});
+
 test('setup/begin rejects a wrong password', async () => {
   const { app } = await freshApp();
   const res = await post(app, API_ROUTES.setupBegin, { password: 'wrong' });

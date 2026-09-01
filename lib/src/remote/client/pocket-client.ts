@@ -47,7 +47,12 @@ import {
   type TerminalClosedEvent,
   type TerminalDataEvent,
 } from 'server-lib-common';
-import type { WebAuthnClient } from './webauthn';
+import {
+  PasskeyAlreadyRegisteredError,
+  isPasskeyAlreadyRegistered,
+  type PasskeyRegistration,
+  type WebAuthnClient,
+} from './webauthn';
 import type { RemoteWebSocket } from '../ws';
 
 /** The slice of a WebSocket the client uses; a browser `WebSocket` satisfies it. */
@@ -285,11 +290,26 @@ export class PocketClient {
   async setup(credential: SetupCredential, label: string): Promise<SetupFinishResponse> {
     const begin = await this.#setupApi<SetupBeginResponse>(API_ROUTES.setupBegin, credential);
     this.#rpId = begin.rpId;
-    const registration = await this.#webauthn.registerPasskey(
-      begin.challenge,
-      begin.rpId,
-      begin.accountId,
-    );
+    // Excluded from the Server's list, not this browser's: a retry — after a
+    // refusal, or on a device that stored nothing — must not silently mint a
+    // duplicate of a credential the account already holds, while an orphan the
+    // Server never registered is absent from it and is replaced as it should be.
+    let registration: PasskeyRegistration;
+    try {
+      registration = await this.#webauthn.registerPasskey(
+        begin.challenge,
+        begin.rpId,
+        begin.accountId,
+        begin.existingCredentialIds,
+      );
+    } catch (err) {
+      // Translated at this seam, not inside the browser wrapper, so every
+      // `WebAuthnClient` — the real one and the fakes — reports the refusal the
+      // same way. It is actionable: the list came from the Server, so the
+      // credential blocking us is one that can sign in from this device.
+      if (isPasskeyAlreadyRegistered(err)) throw new PasskeyAlreadyRegisteredError();
+      throw err;
+    }
     // Cached before `finish`, never after. Creating the authenticator credential
     // is the irreversible act and its public key is knowable the moment it
     // returns, so a `finish` whose answer is lost still leaves a browser that

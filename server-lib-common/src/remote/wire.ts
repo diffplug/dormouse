@@ -92,6 +92,13 @@ export interface SetupBeginResponse {
   challenge: string;
   rpId: string;
   accountId: string;
+  /**
+   * Base64url ids of the passkeys the account already holds, for the
+   * registration's `excludeCredentials`. The Server is the authority on what is
+   * registered, so it is the only side that can answer this — a browser's own
+   * cache is empty on a fresh install and cleared again by a refused `finish`.
+   */
+  existingCredentialIds: string[];
 }
 
 export type SetupFinishRequest = SetupCredential & {
