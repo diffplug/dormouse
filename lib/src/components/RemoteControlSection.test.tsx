@@ -709,6 +709,30 @@ describe('RemoteControlSection', () => {
     }
   });
 
+  it('refreshes by the real TTL when the Server clock is far ahead', async () => {
+    // Ten minutes of negative webview skew makes a five-minute Server token
+    // look fifteen minutes long. It still needs replacement before its real
+    // five-minute expiry, with the ordinary 20-second lead.
+    vi.useFakeTimers();
+    try {
+      const link = mintingLink(900_000);
+      platform = { remoteHost: link };
+      await render();
+      await act(async () => buttonLabelled('Set up a phone')!.click());
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(279_000);
+      });
+      expect(mintCount(link)).toBe(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(mintCount(link)).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps the old code on screen while its replacement is on the wire', async () => {
     // The refresh lead exists so a camera mid-scan still has something live to
     // read; blanking to "Getting a code…" would defeat it.

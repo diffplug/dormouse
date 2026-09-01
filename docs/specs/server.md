@@ -770,9 +770,9 @@ to honor:
   - **The panel owns its busy and error**, not the section's shared pair: a mint
     also fires on a timer, and the view's one error slot belongs to what the
     user clicked.
-  - **The refresh delay is clamped to `[30 s, 2^31-1]`**, because `expiresAt` is
-    the Server's clock and the subtraction is against the webview's; unclamped,
-    skew either way lands on an immediate re-mint loop spending real tokens.
+  - **Must clamp refresh delay to `[30 s, DEFAULT_PAIRING_TTL_MS - 20 s]`.** The
+    floor stops a fast-clock mint loop; the TTL ceiling replaces a slow-clock
+    code before its real Server expiry.
   - **The code being replaced stays on screen** until its replacement lands;
     only a first mint blanks. The refresh lead exists so a camera mid-scan keeps
     a live code.

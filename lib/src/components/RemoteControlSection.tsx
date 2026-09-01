@@ -9,6 +9,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
+import { DEFAULT_PAIRING_TTL_MS } from 'server-lib-common';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
 import type { RemoteHostConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
 import type { RemoteHostStatus } from '../remote/host/remote-host';
@@ -91,17 +92,17 @@ const SETUP_QR_REFRESH_LEAD_MS = 20_000;
 const SETUP_QR_MIN_REFRESH_MS = 30_000;
 
 /**
- * Ceiling, because `setTimeout` truncates its delay to a signed 32-bit int:
- * anything past this overflows to a negative and fires immediately, which is
- * the same re-mint loop from the other direction.
+ * Ceiling for a webview clock behind the Server. Its computed lifetime can be
+ * arbitrarily long, but the token has at most the shared TTL on the Server;
+ * keep the same lead so its replacement lands before real expiry.
  */
-const MAX_TIMEOUT_MS = 2_147_483_647;
+const SETUP_QR_MAX_REFRESH_MS = DEFAULT_PAIRING_TTL_MS - SETUP_QR_REFRESH_LEAD_MS;
 
 /** When to replace a code that expires at `expiresAt`, clock skew and all. */
 function refreshDelay(expiresAt: number, now: number): number {
   return Math.min(
     Math.max(expiresAt - now - SETUP_QR_REFRESH_LEAD_MS, SETUP_QR_MIN_REFRESH_MS),
-    MAX_TIMEOUT_MS,
+    SETUP_QR_MAX_REFRESH_MS,
   );
 }
 
