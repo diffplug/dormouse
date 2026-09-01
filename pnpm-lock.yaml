@@ -15,14 +15,14 @@ importers:
   canopy:
     dependencies:
       '@diffplug/xterm-addon-webgl-sdf':
-        specifier: https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf301.1/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf301.1.tgz
-        version: https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf301.1/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf301.1.tgz(@xterm/xterm@6.1.0-beta.301)
+        specifier: https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf304.0/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf304.0.tgz
+        version: https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf304.0/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf304.0.tgz(@xterm/xterm@6.1.0-beta.304)
       '@xterm/addon-webgl':
-        specifier: 0.20.0-beta.298
-        version: 0.20.0-beta.298(@xterm/xterm@6.1.0-beta.301)
+        specifier: 0.20.0-beta.300
+        version: 0.20.0-beta.300(@xterm/xterm@6.1.0-beta.304)
       '@xterm/xterm':
-        specifier: 6.1.0-beta.301
-        version: 6.1.0-beta.301
+        specifier: 6.1.0-beta.304
+        version: 6.1.0-beta.304
       react:
         specifier: ^19.2.6
         version: 19.2.8
@@ -90,17 +90,17 @@ importers:
         specifier: ^2.1.10
         version: 2.1.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@xterm/addon-fit':
-        specifier: 0.12.0-beta.299
-        version: 0.12.0-beta.299(@xterm/xterm@6.1.0-beta.301)
+        specifier: 0.12.0-beta.301
+        version: 0.12.0-beta.301(@xterm/xterm@6.1.0-beta.304)
       '@xterm/addon-unicode-graphemes':
-        specifier: 0.5.0-beta.299
-        version: 0.5.0-beta.299(@xterm/xterm@6.1.0-beta.301)
+        specifier: 0.5.0-beta.301
+        version: 0.5.0-beta.301(@xterm/xterm@6.1.0-beta.304)
       '@xterm/addon-webgl':
-        specifier: 0.20.0-beta.298
-        version: 0.20.0-beta.298(@xterm/xterm@6.1.0-beta.301)
+        specifier: 0.20.0-beta.300
+        version: 0.20.0-beta.300(@xterm/xterm@6.1.0-beta.304)
       '@xterm/xterm':
-        specifier: 6.1.0-beta.301
-        version: 6.1.0-beta.301
+        specifier: 6.1.0-beta.304
+        version: 6.1.0-beta.304
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
@@ -221,17 +221,17 @@ importers:
         specifier: ^2.10.1
         version: 2.10.1
       '@xterm/addon-fit':
-        specifier: 0.12.0-beta.299
-        version: 0.12.0-beta.299(@xterm/xterm@6.1.0-beta.301)
+        specifier: 0.12.0-beta.301
+        version: 0.12.0-beta.301(@xterm/xterm@6.1.0-beta.304)
       '@xterm/addon-unicode-graphemes':
-        specifier: 0.5.0-beta.299
-        version: 0.5.0-beta.299(@xterm/xterm@6.1.0-beta.301)
+        specifier: 0.5.0-beta.301
+        version: 0.5.0-beta.301(@xterm/xterm@6.1.0-beta.304)
       '@xterm/addon-webgl':
-        specifier: 0.20.0-beta.298
-        version: 0.20.0-beta.298(@xterm/xterm@6.1.0-beta.301)
+        specifier: 0.20.0-beta.300
+        version: 0.20.0-beta.300(@xterm/xterm@6.1.0-beta.304)
       '@xterm/xterm':
-        specifier: 6.1.0-beta.301
-        version: 6.1.0-beta.301
+        specifier: 6.1.0-beta.304
+        version: 6.1.0-beta.304
       dormouse-lib:
         specifier: workspace:*
         version: link:../lib
@@ -570,11 +570,11 @@ packages:
     resolution: {integrity: sha512-QxULHAm7cNu72w97JUNCBFODFaXpbDg+dP8b/oWFAZ2MTRppA3U00Y2L1HqaS4J6yBqxwa/Y3nMBaxVKbB/NsA==}
     engines: {node: '>=20.19.0'}
 
-  '@diffplug/xterm-addon-webgl-sdf@https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf301.1/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf301.1.tgz':
-    resolution: {integrity: sha512-LSK8Nd/JaWa7lQzfStzdOL1s83qLdYxWjGjwyDXQq7AMqz2GtA4/QkPxIhqeKyNYUqJPU3MFrEAJkN6DRl2aQg==, tarball: https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf301.1/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf301.1.tgz}
-    version: 0.20.0-sdf301.1
+  '@diffplug/xterm-addon-webgl-sdf@https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf304.0/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf304.0.tgz':
+    resolution: {integrity: sha512-3cKT7+u3kN+5sZ8+i7D4qmqqVR6S5SXQ8iQC9ccsFZwEy97qlTBNm2R0zOFAxbx41t6gjA3f/JjSbkGNaHcBbA==, tarball: https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf304.0/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf304.0.tgz}
+    version: 0.20.0-sdf304.0
     peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.301
+      '@xterm/xterm': ^6.1.0-beta.304
 
   '@emnapi/core@1.11.0':
     resolution: {integrity: sha512-l9Oo58x0HOP5znGzVhYW9U3e5wVuA4LAZU2AGezTmkhO1CgQRFDhDg4nneHsu/t3WniXg9QrG2nIXL/ZS8ln8Q==}
@@ -2355,23 +2355,23 @@ packages:
   '@webcontainer/env@1.1.1':
     resolution: {integrity: sha512-6aN99yL695Hi9SuIk1oC88l9o0gmxL1nGWWQ/kNy81HigJ0FoaoTXpytCj6ItzgyCEwA9kF1wixsTuv5cjsgng==}
 
-  '@xterm/addon-fit@0.12.0-beta.299':
-    resolution: {integrity: sha512-LnofeCMLCf4e3eHN6qz27OdDgcNVh/L2oMqCHHgKraNTCGyKmf1BFWQczFF4PEg63LQvNFiItK62YOQhzDyHMw==}
+  '@xterm/addon-fit@0.12.0-beta.301':
+    resolution: {integrity: sha512-MukRyJLAFQrW/++aM209jBZ8G9J/Ioe4SGS6c3ba87v+zYuX/I66JrDB7sVfykQ9t7DlT+c1MWl1jTlX2kyx1w==}
     peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.301
+      '@xterm/xterm': ^6.1.0-beta.304
 
-  '@xterm/addon-unicode-graphemes@0.5.0-beta.299':
-    resolution: {integrity: sha512-cH6D7pLGM2OCwXogBM1tO/s9sBfOIp70FeMN/FXz8eqULlImdwTrLrBEQ/qzcz59KeUCo8PCMd5UlxoDK/kfDg==}
+  '@xterm/addon-unicode-graphemes@0.5.0-beta.301':
+    resolution: {integrity: sha512-EBZIZYS6RItWTGO/KpLqV6y3IKGYyugbP07lK0x6G7185FVA61L2t0/XVtVEQNpczsbPo8zAxBhpoV72TP8CYw==}
     peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.301
+      '@xterm/xterm': ^6.1.0-beta.304
 
-  '@xterm/addon-webgl@0.20.0-beta.298':
-    resolution: {integrity: sha512-65jZWGSV3nu2jVyc/r2H31Q+oXnDX8IhcSquREVlDjqmfOINXhAufBj2zcK6BCgYT0jrdx7y64VFgVcQ3vAkRA==}
+  '@xterm/addon-webgl@0.20.0-beta.300':
+    resolution: {integrity: sha512-BJQiOx8I+zz2woe+/E9nWprRRPevo9slPgyOd43E8o18aG307ccsyaTJoIbSu99uqfDoVLWDRLTy91ZXTFsdig==}
     peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.301
+      '@xterm/xterm': ^6.1.0-beta.304
 
-  '@xterm/xterm@6.1.0-beta.301':
-    resolution: {integrity: sha512-y1pH42+Mx+h5E2xDgyilYXBKYkn8/6+anToiTmIt8gVww/2gHFqheK0vW+m9LADQsZ5AFs+SQvcK+tOyxWfRJA==}
+  '@xterm/xterm@6.1.0-beta.304':
+    resolution: {integrity: sha512-Wq9d4qFYslYQBIan+riXotdyurtREc6v+HWdAwV6Y2JSDI9eJ1dkWm/fzYb2rCGgGnM3baiYuSK4Z6OLNKLzDw==}
 
   acorn@8.18.0:
     resolution: {integrity: sha512-lGq+9yr1/GuAWaVYIHRjvvySG5/4VfKIvC8EWxStPdcDh/Ka7FG3twP6v4d5BkravUilhIAsG4Qj83t02LWUPQ==}
@@ -4939,9 +4939,9 @@ snapshots:
 
   '@csstools/css-tokenizer@4.0.0': {}
 
-  '@diffplug/xterm-addon-webgl-sdf@https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf301.1/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf301.1.tgz(@xterm/xterm@6.1.0-beta.301)':
+  '@diffplug/xterm-addon-webgl-sdf@https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf304.0/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf304.0.tgz(@xterm/xterm@6.1.0-beta.304)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.301
+      '@xterm/xterm': 6.1.0-beta.304
 
   '@emnapi/core@1.11.0':
     dependencies:
@@ -6406,19 +6406,19 @@ snapshots:
 
   '@webcontainer/env@1.1.1': {}
 
-  '@xterm/addon-fit@0.12.0-beta.299(@xterm/xterm@6.1.0-beta.301)':
+  '@xterm/addon-fit@0.12.0-beta.301(@xterm/xterm@6.1.0-beta.304)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.301
+      '@xterm/xterm': 6.1.0-beta.304
 
-  '@xterm/addon-unicode-graphemes@0.5.0-beta.299(@xterm/xterm@6.1.0-beta.301)':
+  '@xterm/addon-unicode-graphemes@0.5.0-beta.301(@xterm/xterm@6.1.0-beta.304)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.301
+      '@xterm/xterm': 6.1.0-beta.304
 
-  '@xterm/addon-webgl@0.20.0-beta.298(@xterm/xterm@6.1.0-beta.301)':
+  '@xterm/addon-webgl@0.20.0-beta.300(@xterm/xterm@6.1.0-beta.304)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.301
+      '@xterm/xterm': 6.1.0-beta.304
 
-  '@xterm/xterm@6.1.0-beta.301': {}
+  '@xterm/xterm@6.1.0-beta.304': {}
 
   acorn@8.18.0: {}
 

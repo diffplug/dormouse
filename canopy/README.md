@@ -15,9 +15,9 @@ pnpm dev:canopy   # storybook on http://localhost:6007
   no auth). pnpm records an integrity hash in the lockfile.
 - The addon bundles xterm core internals, so `@xterm/xterm` here must be the
   exact beta the fork release was built from. Two things record that base: the
-  release version encodes its counter (`0.20.0-sdf301.1` ⇒ built from
-  `@xterm/xterm@6.1.0-beta.301`), and — as of `0.20.0-sdf301.1` — the tarball
-  declares `peerDependencies: { "@xterm/xterm": "^6.1.0-beta.301" }`, the way
+  release version encodes its counter (`0.20.0-sdf304.0` ⇒ built from
+  `@xterm/xterm@6.1.0-beta.304`), and — as of `0.20.0-sdf301.1` — the tarball
+  declares `peerDependencies: { "@xterm/xterm": "^6.1.0-beta.304" }`, the way
   every upstream addon does. The peer range is the authoritative one: it names
   the full version, whereas the counter in the tag repeats across upstream
   release lines.
@@ -38,7 +38,7 @@ stacked: pristine upstream `@xterm/addon-webgl`, the fork with `sdf: false`
 (isolates the instance-layout/shader changes), and the fork with `sdf: true`
 (isolates the SDF glyph path). The upstream pin must be the same commit as the
 fork base — the `@xterm/*` beta counters are independent, so the numbers never
-match (addon `0.20.0-beta.298` == core `6.1.0-beta.301` == commit `8c9b9fdb`);
+match (addon `0.20.0-beta.300` == core `6.1.0-beta.304` == commit `c58ea363`);
 re-derive it with `npm view @xterm/addon-webgl@<ver> gitHead` when the fork
 rebases, or let `node scripts/xterm-bump.mjs --canopy <forkVersion>` pick the
 matching addon.
