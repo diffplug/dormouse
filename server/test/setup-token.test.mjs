@@ -423,6 +423,24 @@ test('restore puts a consumed token back on its original expiry', () => {
   assert.equal(issuer.peek(late.token), null);
 });
 
+test('restore stays within the Host cap after a concurrent mint fills the slot', () => {
+  const clock = makeClock();
+  const issuer = new SetupTokenIssuer({ now: clock.now });
+  const issued = Array.from({ length: MAX_TOKENS_PER_HOST }, () => issuer.issue('host-1'));
+
+  const spent = issuer.consume(issued[0].token);
+  const replacement = issuer.issue('host-1');
+  assert.equal(issuer.pendingCount, MAX_TOKENS_PER_HOST);
+
+  // Validation failed after the mint used the apparent vacancy. The failed
+  // finish gets its token back, but cannot grow this Host to nine entries.
+  issuer.restore(issued[0].token, spent);
+  assert.equal(issuer.pendingCount, MAX_TOKENS_PER_HOST);
+  assert.deepEqual(issuer.peek(issued[0].token), spent);
+  assert.equal(issuer.peek(issued[1].token), null);
+  assert.notEqual(issuer.peek(replacement.token), null);
+});
+
 test('outstanding tokens are pruned, and capped per minting Host', () => {
   const clock = makeClock();
   const issuer = new SetupTokenIssuer({ now: clock.now });

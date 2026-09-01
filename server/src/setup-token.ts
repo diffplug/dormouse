@@ -118,32 +118,43 @@ export class SetupTokenIssuer {
    * Put a consumed token back, keeping its original expiry so restoring cannot
    * extend the shoulder-surf window. ONLY for the failure paths of the route
    * that consumed it — a `finish` that spends the token and then fails must
-   * leave the QR scannable — never as a way to re-issue or refresh one.
+   * leave the QR scannable — never as a way to re-issue or refresh one. A mint
+   * may have filled its old slot while validation awaited, so restoration
+   * reapplies the Host cap before inserting it.
    */
   restore(token: string, entry: SetupTokenEntry): void {
-    if (this.#now() < entry.expiresAt) this.#tokens.set(token, entry);
+    if (this.#now() >= entry.expiresAt) return;
+    this.#tokens.delete(token);
+    this.#pruneExpired();
+    this.#trimHost(entry.hostId, MAX_TOKENS_PER_HOST - 1);
+    this.#tokens.set(token, entry);
   }
 
   /**
-   * Drop expired tokens, then evict `hostId`'s own oldest until its cap holds.
-   * Every token carries the same TTL, so insertion order is expiry order and
-   * the expired ones are a prefix (`HostChallengeIssuer.#sweepExpiredPrefix`,
-   * same reasoning) — except a {@link restore}d one, which re-enters at the
-   * tail with an older expiry, so the sweep can leave it for `peek`/`consume`
-   * to reclaim instead. Age alone only rate-bounds the map; the count cap is
-   * the actual bound.
+   * Drop expired tokens, then evict `hostId`'s own oldest to leave one mint
+   * slot. Restored entries re-enter out of issue order, so age is `expiresAt`
+   * rather than Map insertion order.
    */
   #prune(hostId: string): void {
+    this.#pruneExpired();
+    this.#trimHost(hostId, MAX_TOKENS_PER_HOST - 1);
+  }
+
+  #pruneExpired(): void {
     const now = this.#now();
     for (const [token, entry] of this.#tokens) {
-      if (now < entry.expiresAt) break;
-      this.#tokens.delete(token);
+      if (now >= entry.expiresAt) this.#tokens.delete(token);
     }
+  }
+
+  /** Keep only `limit` live tokens for one Host, oldest expiry first. */
+  #trimHost(hostId: string, limit: number): void {
     // Only this Host's rows are candidates, so a loop of mints cannot cost
     // another Host the token it is currently displaying.
-    const own = [...this.#tokens].filter(([, entry]) => entry.hostId === hostId);
-    // One is about to be added, so leave room for it.
-    for (let i = 0; i < own.length - (MAX_TOKENS_PER_HOST - 1); i++) {
+    const own = [...this.#tokens]
+      .filter(([, entry]) => entry.hostId === hostId)
+      .sort((left, right) => left[1].expiresAt - right[1].expiresAt);
+    for (let i = 0; i < own.length - limit; i++) {
       this.#tokens.delete(own[i]![0]);
     }
   }

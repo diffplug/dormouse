@@ -308,9 +308,9 @@ values base64url and percent-encoded. Source of truth: `#setupQr` in
   through to the password.
 * **`begin` peeks; `finish` consumes before it reads the body.** That delete is
   the single-use gate, so of two overlapping finishes only one registers. Every
-  failure past it restores the token on its original expiry, since an ordinary
-  rejected attempt must leave the QR scannable; only the finish that registered
-  a passkey announces (Relay below).
+  failure past it restores the token on its original expiry without exceeding
+  the per-Host cap; only the finish that registered a passkey announces (Relay
+  below).
 * **Both gates re-read `hosts.json`.** A revoked Host's outstanding tokens die
   with it, rather than staying redeemable for the rest of their TTL.
 * **The store remembers which Host minted each token, and under which
