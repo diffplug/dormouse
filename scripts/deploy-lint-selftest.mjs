@@ -35,7 +35,7 @@ import { copyFileSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
-import { INSTALLERS, RULES } from './deploy-lint.mjs';
+import { INSTALLERS, normalizeEol, RULES } from './deploy-lint.mjs';
 
 const repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
 
@@ -59,7 +59,11 @@ for (const { rule, patterns, skip = {}, exactMatches = {} } of RULES) {
     if (!pattern) continue;
 
     const path = join(repoRoot, file);
-    const original = readFileSync(path, 'utf8');
+    // Matched and edited in the same normalized form the lint reads, so a
+    // `core.autocrlf` checkout does not report every span rule as unmatched.
+    // The byte-exact backup below is what the file is restored from, so writing
+    // normalized text mid-run costs nothing.
+    const original = normalizeEol(readFileSync(path, 'utf8'));
     const match = original.match(pattern);
     if (!match) {
       weak.push(`${platform.padEnd(8)} ${rule}\n      pattern does not match the pristine file`);

@@ -14,7 +14,12 @@ export interface EnrollmentOffer {
   readonly origin: string;
   /** 64 lowercase hex characters — 32 bytes from the installer's CSPRNG. */
   readonly token: string;
-  /** ISO-8601 stamp, informational: it tells a Host how stale the offer is. */
+  /**
+   * ISO-8601 stamp of the mint. Load-bearing, not informational: the Server
+   * refuses an offer whose stamp will not `Date.parse` or is more than 7 days
+   * old (`server/src/enroll-token.ts`), so a writer that stamps this in a
+   * non-invariant format mints a token nothing can redeem.
+   */
   readonly mintedAt: string;
 }
 

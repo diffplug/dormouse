@@ -802,11 +802,11 @@ decision constrains every item: **the stock allowlist stays
 self-hosting keeps requiring a source build, deliberately, so no item below
 may depend on widening it. Staged order:
 
-1. **Enrollment offer.** The installer leaves the origin plus a one-time
-   enroll token at a well-known per-user path; a Host on the same machine
-   offers one-click enrollment ("A Dormouse server is installed here — enroll
-   as this machine?"). The three-field form stays as the remote-server
-   fallback. Touches the `SELF_HOST.md` installer contract when built.
+1. **Host-side one-click enrollment.** The offer and its redemption exist
+   (Configuration → `DORMOUSE_ENROLL_TOKEN_FILE`); the Host that reads the
+   file on the machine that wrote it, and offers enrollment from it ("A
+   Dormouse server is installed here — enroll as this machine?"), does not.
+   The three-field form stays the remote-server fallback.
 2. **QR-first phone setup.** The enrolled Host mints a short-TTL, single-use
    setup token from the server over its authenticated channel and renders
    `https://<origin>/#setup?token=…` as a QR. Scanning replaces typing the

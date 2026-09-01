@@ -850,12 +850,17 @@ cmd_verify() {
     pass "tailscale funnel is off (the origin stays tailnet-only)"
   fi
 
-  local cfg_mode state_mode env_mode offer_mode
+  local cfg_mode state_mode run_mode env_mode offer_mode
   cfg_mode="$(stat -f '%Lp' "$ROOT/config" 2>/dev/null || echo '???')"
   state_mode="$(stat -f '%Lp' "$STATE_DIR" 2>/dev/null || echo '???')"
+  # run/ is checked as a directory in its own right, not merely as the offer's
+  # parent: the directory governs who may replace or delete the one credential
+  # the server honors from disk.
+  run_mode="$(stat -f '%Lp' "$ROOT/run" 2>/dev/null || echo '???')"
   env_mode="$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || echo '???')"
   [ "$cfg_mode" = "700" ] && pass "config/ is mode 0700" || fail "config/ is mode $cfg_mode, expected 700"
   [ "$state_mode" = "700" ] && pass "state/ is mode 0700" || fail "state/ is mode $state_mode, expected 700"
+  [ "$run_mode" = "700" ] && pass "run/ is mode 0700" || fail "run/ is mode $run_mode, expected 700"
   [ "$env_mode" = "600" ] && pass "config/server.env is mode 0600" || fail "config/server.env is mode $env_mode, expected 600"
 
   # The enrollment offer is single-use: absent means it was spent (or never
@@ -1019,13 +1024,17 @@ cmd_uninstall() {
 
 cmd_purge() {
   printf '\n%sIRREVERSIBLE%s This deletes the account, enrolled Hosts, push\n' "$C_RED" "$C_OFF"
-  printf 'subscriptions, and the VAPID key:\n  %s\n  %s\n\n' "$STATE_DIR" "$ROOT/config"
+  printf 'subscriptions, the VAPID key, and any unspent enrollment offer:\n  %s\n  %s\n  %s\n\n' \
+    "$STATE_DIR" "$ROOT/config" "$ROOT/run"
   printf 'Registered passkeys and enrolled Hosts will have to be set up again.\n\n'
   printf 'Type exactly: DELETE DORMOUSE STATE\n> '
   local reply=""
   read -r reply || true
   if [ "$reply" != "DELETE DORMOUSE STATE" ]; then printf 'aborted\n'; return 1; fi
-  rm -rf "$STATE_DIR" "$ROOT/config"
+  # run/ too: an unspent enroll-offer.json redeems for a Host enrollment without
+  # any existing account, and redemption mkdir-recreates the state this command
+  # just deleted. Leaving it behind would make "IRREVERSIBLE" false for a week.
+  rm -rf "$STATE_DIR" "$ROOT/config" "$ROOT/run"
   printf 'purged.\n'
   # bin/run-server is what "uninstall" removes, so its absence means the
   # LaunchAgent and the code are already gone and this script is the last thing
@@ -1146,27 +1155,6 @@ atomic_symlink "$STAGE" "$CURRENT_LINK" "$STAGE/runtime/node"
 SWITCHED_TO="$(readlink "$CURRENT_LINK" 2>/dev/null || echo "")"
 [ "$SWITCHED_TO" = "$STAGE" ] || die "current did not advance to $RELEASE_ID (points at '${SWITCHED_TO:-nothing}')."
 ok "current -> $RELEASE_ID"
-
-# ------------------------------------------------------------ enroll offer ---
-
-# run/enroll-offer.json, the one-time offer a Host on this machine redeems in
-# place of the setup password (SECURITY.md → "Credentials at rest").
-#
-# Minted here rather than with the rest of the runtime config: minting burns the
-# unspent offer, so it must wait until `current` has advanced — a failed
-# candidate probe must not cost a token — and land before the service starts.
-ENROLL_TOKEN="$(random_hex32)"
-[ ${#ENROLL_TOKEN} -ge 64 ] || die "generated enroll token is implausibly short; refusing to write the enrollment offer."
-# Create the file and lock it down BEFORE the token is written, so the secret
-# never sits under the directory's default permissions, even briefly.
-: > "$ENROLL_OFFER_FILE"
-chmod 0600 "$ENROLL_OFFER_FILE"
-# mintedAt is read here, at write time, and never from BUILT_AT: the server's
-# 7-day expiry runs from the mint, and the build that precedes it is not free.
-printf '{"origin":"%s","token":"%s","mintedAt":"%s"}\n' \
-  "$ORIGIN" "$ENROLL_TOKEN" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ENROLL_OFFER_FILE"
-unset ENROLL_TOKEN
-ok "minted run/enroll-offer.json (mode 0600) — a one-time enrollment offer for a Host on this machine"
 
 # ------------------------------------------------------------- launchagent --
 
@@ -1324,6 +1312,32 @@ else
     die "update FAILED (Pocket index). Rollback was attempted."
   fi
 fi
+
+# ------------------------------------------------------------ enroll offer ---
+
+# run/enroll-offer.json, the one-time offer redeemed at POST /api/host/enroll in
+# place of the setup password (SECURITY.md → "Credentials at rest").
+#
+# Last of all, because minting burns the previous unspent offer and the server
+# reads this file fresh on every attempt — nothing needs it at service start. An
+# install that fails before here (a rejected candidate, a release that never
+# answered) rolls back and leaves the previous offer intact, rather than
+# stranding a fresh token against a release that is no longer running.
+#
+# Test mode reaches this line down the other branch of both skips above, which
+# is what CI asserts after each of its two test-mode installs.
+ENROLL_TOKEN="$(random_hex32)"
+[ ${#ENROLL_TOKEN} -ge 64 ] || die "generated enroll token is implausibly short; refusing to write the enrollment offer."
+# Create the file and lock it down BEFORE the token is written, so the secret
+# never sits under the directory's default permissions, even briefly.
+: > "$ENROLL_OFFER_FILE"
+chmod 0600 "$ENROLL_OFFER_FILE"
+# mintedAt is read here, at write time, and never from BUILT_AT: the server's
+# 7-day expiry runs from the mint, and the build that precedes it is not free.
+printf '{"origin":"%s","token":"%s","mintedAt":"%s"}\n' \
+  "$ORIGIN" "$ENROLL_TOKEN" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ENROLL_OFFER_FILE"
+unset ENROLL_TOKEN
+ok "minted run/enroll-offer.json (mode 0600) — a one-time enrollment offer for a Host on this machine"
 
 # -------------------------------------------------------------- serve ------
 

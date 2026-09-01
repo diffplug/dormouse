@@ -103,16 +103,28 @@ jobs:
           offer="$root/run/enroll-offer.json"
           # Prints the token, because the property under test is that it is
           # FRESH on every run — and this job is the only thing checking that.
+          #
+          # The shape check is the server's own `isEnrollmentOffer`, imported
+          # rather than restated: a CI copy of the token regex and the origin
+          # rule is free to drift from the validator the redemption path
+          # actually runs, and then agrees with itself while the server rejects
+          # what the installer writes. No build step is needed for it: the
+          # `Test` step above builds server-lib-common, as does the
+          # `pnpm --filter server build` inside every install below.
           read_offer() {
-            node -e '
-              const fs = require("fs");
-              const path = process.argv[1];
-              const mode = fs.statSync(path).mode & 0o777;
+            node --input-type=module -e '
+              import { readFileSync, statSync } from "node:fs";
+              import { isEnrollmentOffer } from "./server-lib-common/dist/index.js";
+              const [path, wantOrigin] = process.argv.slice(1);
+              const mode = statSync(path).mode & 0o777;
               if (mode !== 0o600) throw new Error(`${path} is mode ${mode.toString(8)}, expected 600`);
-              const offer = JSON.parse(fs.readFileSync(path, "utf8"));
-              if (!/^[0-9a-f]{64}$/.test(offer.token)) throw new Error(`token is not 64 hex: ${offer.token}`);
-              if (offer.origin !== process.argv[2]) throw new Error(`origin is ${offer.origin}`);
+              const offer = JSON.parse(readFileSync(path, "utf8"));
+              if (!isEnrollmentOffer(offer)) throw new Error(`not an enrollment offer: ${JSON.stringify(offer)}`);
+              // Beyond the structural guard, and nothing else checks it: the
+              // server hard-rejects a mintedAt it cannot parse, which the shape
+              // guard — a length bound — accepts.
               if (Number.isNaN(Date.parse(offer.mintedAt))) throw new Error(`mintedAt is ${offer.mintedAt}`);
+              if (offer.origin !== wantOrigin) throw new Error(`origin is ${offer.origin}`);
               process.stdout.write(offer.token);
             ' "$offer" "$DORMOUSE_INSTALL_ORIGIN"
           }

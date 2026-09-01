@@ -740,11 +740,21 @@ try {
   New-Directory $STATE_DIR
   New-Directory $RUN_DIR
   New-Directory $LOG_DIR
+  # One block, because they are one rule (deploy-lint matches all three as a
+  # single span). run\ belongs in it: it holds the enrollment offer, so it was
+  # the last credential-bearing directory still on %LOCALAPPDATA%'s inherited
+  # SYSTEM and Administrators entries, and the directory governs replace and
+  # delete of that file. The same-user Node process still writes run\server.json
+  # under the single-ACE owner DACL -- that ACE is FullControl for the account
+  # the task runs as.
   Protect-Path -Path $CONFIG_DIR -Directory
   Protect-Path -Path $STATE_DIR -Directory
+  Protect-Path -Path $RUN_DIR -Directory
 
-  $BUILT_AT = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
-  $RELEASE_ID = [DateTime]::UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'") + "-$GIT_SHORT"
+  # InvariantCulture: the user's locale must not pick the calendar or the time
+  # separator for a release id or a timestamp other tooling parses.
+  $BUILT_AT = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
+  $RELEASE_ID = [DateTime]::UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'", [Globalization.CultureInfo]::InvariantCulture) + "-$GIT_SHORT"
   if ($GIT_DIRTY -eq 'true') { $RELEASE_ID = "$RELEASE_ID-dirty" }
   $STAGE = Join-Path $RELEASES_DIR $RELEASE_ID
 
@@ -1548,9 +1558,13 @@ function Invoke-Verify {
     Pass "tailscale funnel is off (the origin stays tailnet-only)"
   }
 
+  # run\ is checked as a directory in its own right, not merely as the offer's
+  # parent: the directory governs who may replace or delete the one credential
+  # the server honors from disk.
   foreach ($pair in @(
       @{ Path = (Join-Path $Root 'config'); Label = 'config\' },
       @{ Path = $StateDir; Label = 'state\' },
+      @{ Path = (Join-Path $Root 'run'); Label = 'run\' },
       @{ Path = $EnvFile; Label = 'config\server.env' })) {
     $r = Test-OwnerOnly -Path $pair.Path
     if ($r.Ok) { Pass "$($pair.Label) grants only this user" }
@@ -1829,15 +1843,19 @@ function Invoke-Uninstall {
 function Invoke-Purge {
   Write-Host ""
   Write-Host "${C_RED}IRREVERSIBLE$C_OFF This deletes the account, enrolled Hosts, push"
-  Write-Host "subscriptions, and the VAPID key:"
+  Write-Host "subscriptions, the VAPID key, and any unspent enrollment offer:"
   Write-Host "  $StateDir"
   Write-Host "  $Root\config"
+  Write-Host "  $Root\run"
   Write-Host ""
   Write-Host "Registered passkeys and enrolled Hosts will have to be set up again."
   Write-Host ""
   $reply = Read-Host 'Type exactly: DELETE DORMOUSE STATE'
   if ($reply -cne 'DELETE DORMOUSE STATE') { Write-Host 'aborted'; return 1 }
-  foreach ($p in @($StateDir, (Join-Path $Root 'config'))) {
+  # run\ too: an unspent enroll-offer.json redeems for a Host enrollment without
+  # any existing account, and redemption recreates the state this command just
+  # deleted. Leaving it behind would make "IRREVERSIBLE" false for a week.
+  foreach ($p in @($StateDir, (Join-Path $Root 'config'), (Join-Path $Root 'run'))) {
     Remove-Tree $p
   }
   Write-Host 'purged.'
@@ -2015,34 +2033,6 @@ rem directly.
   }
   Write-Ok "current -> $RELEASE_ID"
 
-  # ------------------------------------------------------------ enroll offer ---
-
-  # run\enroll-offer.json, the one-time offer a Host on this machine redeems in
-  # place of the setup password (SECURITY.md -> "Credentials at rest").
-  #
-  # Minted here rather than with the rest of the runtime config: minting burns
-  # the unspent offer, so it must wait until current.txt has advanced -- a
-  # failed candidate probe must not cost a token -- and land before the task
-  # starts.
-  $enrollToken = New-RandomHex32
-  if ($enrollToken.Length -lt 64) {
-    Die "generated enroll token is implausibly short; refusing to write the enrollment offer."
-  }
-  # Create the file with an owner-only ACL BEFORE the token is written, so there
-  # is no window in which the secret sits under an inherited ACL.
-  [IO.File]::WriteAllText($ENROLL_OFFER_FILE, '')
-  Protect-Path -Path $ENROLL_OFFER_FILE
-  # mintedAt is read here, at write time, and never from $BUILT_AT: the server's
-  # 7-day expiry runs from the mint, and the build that precedes it is not free.
-  $offer = [pscustomobject]@{
-    origin   = $ORIGIN
-    token    = $enrollToken
-    mintedAt = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
-  } | ConvertTo-Json -Compress
-  [IO.File]::WriteAllText($ENROLL_OFFER_FILE, $offer + "`r`n")
-  Remove-Variable enrollToken
-  Write-Ok "minted run\enroll-offer.json (owner-only ACL) -- a one-time enrollment offer for a Host on this machine"
-
   # ---------------------------------------------------------- scheduled task --
 
   function Register-DormouseTask {
@@ -2175,6 +2165,43 @@ rem directly.
       Die "update FAILED (Pocket index). Rollback was attempted."
     }
   }
+
+  # ------------------------------------------------------------ enroll offer ---
+
+  # run\enroll-offer.json, the one-time offer redeemed at POST /api/host/enroll
+  # in place of the setup password (SECURITY.md -> "Credentials at rest").
+  #
+  # Last of all, because minting burns the previous unspent offer and the server
+  # reads this file fresh on every attempt -- nothing needs it when the task
+  # starts. An install that fails before here (a rejected candidate, a release
+  # that never answered) rolls back and leaves the previous offer intact, rather
+  # than stranding a fresh token against a release that is no longer running.
+  #
+  # Test mode reaches this line down the other branch of both skips above, which
+  # is what CI asserts after each of its two test-mode installs.
+  $enrollToken = New-RandomHex32
+  if ($enrollToken.Length -lt 64) {
+    Die "generated enroll token is implausibly short; refusing to write the enrollment offer."
+  }
+  # Create the file with an owner-only ACL BEFORE the token is written, so there
+  # is no window in which the secret sits under an inherited ACL.
+  [IO.File]::WriteAllText($ENROLL_OFFER_FILE, '')
+  Protect-Path -Path $ENROLL_OFFER_FILE
+  # mintedAt is read here, at write time, and never from $BUILT_AT: the server's
+  # 7-day expiry runs from the mint, and the build that precedes it is not free.
+  #
+  # InvariantCulture is load-bearing, not decoration: the server hard-rejects an
+  # offer it cannot parse as fresh, and the current culture rewrites this stamp.
+  # Under fi-FI the ':' separator becomes '.', and under th-TH the Buddhist
+  # calendar mints year 2569 -- both silently unredeemable.
+  $offer = [pscustomobject]@{
+    origin   = $ORIGIN
+    token    = $enrollToken
+    mintedAt = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
+  } | ConvertTo-Json -Compress
+  [IO.File]::WriteAllText($ENROLL_OFFER_FILE, $offer + "`r`n")
+  Remove-Variable enrollToken
+  Write-Ok "minted run\enroll-offer.json (owner-only ACL) -- a one-time enrollment offer for a Host on this machine"
 
   # -------------------------------------------------------------- serve ------
 

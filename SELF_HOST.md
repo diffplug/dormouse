@@ -195,9 +195,11 @@ definition is `~/Library/LaunchAgents/sh.dormouse.server.plist`, the Scheduled
 Task `\Dormouse Server`, or
 `~/.config/systemd/user/dormouse-server.service`.
 
-`run/enroll-offer.json` is what a Dormouse Host on this machine redeems for
-one-click enrollment, instead of asking you to type the origin and the setup
-password into its form.
+`run/enroll-offer.json` holds this install's origin and a one-time token that
+`POST /api/host/enroll` accepts in place of the setup password. Only the
+server side of that exists today; the Host that would read the file and offer
+one-click enrollment is staged (`docs/specs/server.md` -> `## Future`,
+selfhost-onboarding).
 
 No installer will **ever**: run `git pull`, fetch, or switch branches; install a
 scheduled updater; ask for elevation; install or re-authenticate Tailscale;
@@ -245,11 +247,11 @@ shape what the user should expect day to day:
   `config/server.env`, and `tailscale funnel` is **off** — a Funnel would
   publish this same origin to the public internet, which the setup password's
   hardening was never sized for (`SECURITY.md` -> "Network posture").
-- `config/`, `state/` and `config/server.env` are readable only by the
+- `config/`, `state/`, `run/` and `config/server.env` are readable only by the
   installing user: modes `0700`/`0600` on macOS and Linux, a DACL with exactly
   that one user on Windows. The Windows check also covers each file in `state/`
   individually, because Node's file modes are a no-op there. The Linux check
-  also asserts the *owner* of all three, since a `0700` directory owned by
+  also asserts the *owner* of all four, since a `0700` directory owned by
   someone else satisfies the mode and inverts the property. `run/enroll-offer.json`
   is held to the same standard while it is there; a spent offer is gone, and
   `verify` says so rather than failing.
@@ -726,17 +728,13 @@ is live rather than asserting either.
   so the secret never sits under the inherited `%LOCALAPPDATA%` ACL — and
   because Node's file modes are a no-op on Windows, `manage verify` walks the
   files in `state\` individually there, where the unix editions need not.
-- **The enrollment offer is re-minted on every run.** `run/enroll-offer.json`
-  carries this install's origin and a one-time token from the same CSPRNG as the
-  setup password, guarded at 64 hex characters the same way and restricted to
-  the installing user *before* the token is written (`chmod 0600` on an empty
-  file; `Protect-Path` on Windows). Updates re-mint it too, including ones that
-  preserved `server.env`: the server refuses an offer older than 7 days and
-  unlinks it on redemption, so it lives in `run/` — which `uninstall` already
-  removes — not in byte-for-byte-preserved `config/` or in `state/`, whose files
-  belong to the server's own atomic writer. `run-server` exports
-  `DORMOUSE_ENROLL_TOKEN_FILE`; unset, the server refuses every offer
-  (`docs/specs/server.md` → Configuration).
+- **The enrollment offer is re-minted on every run**, updates included — the
+  ones that preserved `server.env` too. It is minted *last*, once the switched-to
+  release is answering, so an update that fails and rolls back leaves the
+  previous offer unspent rather than stranding a fresh token. `run-server`
+  exports `DORMOUSE_ENROLL_TOKEN_FILE`; unset, the server refuses every offer
+  (`docs/specs/server.md` → Configuration). How the token is generated and
+  protected: `SECURITY.md` → "Credentials at rest".
 - **Loopback only, and tailnet-only.** The install pins
   `DORMOUSE_BIND_HOST=127.0.0.1` and refuses to proceed without it
   (`docs/specs/server.md` → Configuration on why the listen interface is a
@@ -758,9 +756,10 @@ is live rather than asserting either.
   service for it. The property is checked from the other side too: on unix,
   "reachable only by the installing user" is mode **and** owner, since a `0700`
   directory owned by another principal satisfies the mode and inverts the
-  property. Linux's `manage verify` asserts both legs on `config/`, `state/`
-  and `config/server.env`. *(The macOS installer checks the modes only, and not
-  yet the owner.)*
+  property. Linux's `manage verify` asserts both legs on `config/`, `state/`,
+  `run/` and `config/server.env`. *(macOS checks the modes only on all of them,
+  and Windows' `Test-OwnerOnly` reads the DACL but never the owner — two known
+  gaps, `SECURITY.md` → "Credentials at rest".)*
 - **A failed update is a failure.** The candidate release is health-checked on
   an ephemeral port against a throwaway state dir *before* `current` moves; if
   the live service then fails to answer, `current` is restored to `previous`
@@ -866,7 +865,9 @@ itself behind for the second one to be reachable at all: it removes the service
 definition, the releases, the pointers, `run/` and `bin/run-server`, but not
 the `bin` directory `manage` lives in — deleting that would strand `config/`
 and `state/`, the data the message it prints tells you to run `purge` for.
-`purge` deletes `state/` and `config/` after its typed confirmation and, when
+`purge` deletes `state/`, `config/` and `run/` after its typed confirmation —
+`run/` because an unspent offer redeems for a Host enrollment with no account in
+existence, recreating the state just deleted — and, when
 `bin/run-server` is already gone, closes by printing the one command that
 removes what is left; it cannot delete itself out from under the shell running
 it. That command names the dormouse-owned log directory alongside the install

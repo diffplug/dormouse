@@ -153,14 +153,21 @@ export const RULES = [
     },
   },
   {
-    // Anchored on the two paths that matter. A bare `chmod 0700` also matches
+    // Anchored on the three paths that matter. A bare `chmod 0700` also matches
     // `run-server`, `manage` and the probe state dir, and `Protect-Path` has
     // six hits, so relaxing config/+state/ to 0755 passed.
-    rule: 'Credentials at rest — config/ and state/ are created owner-only',
+    //
+    // Every path is named, because a pattern that stops short of the last one
+    // matches as a strict prefix of the line: `"$CONFIG_DIR" "$STATE_DIR"`
+    // stayed green after `"$RUN_DIR"` — the offer's directory — was deleted
+    // from the same chmod. Windows matches its three calls as one span for the
+    // same reason; they are written as one block on purpose.
+    rule: 'Credentials at rest — config/, state/ and run/ are created owner-only',
     patterns: {
-      macOS: /chmod 0700 "\$CONFIG_DIR" "\$STATE_DIR"/,
-      Linux: /chmod 0700 "\$CONFIG_DIR" "\$STATE_DIR"/,
-      Windows: /Protect-Path -Path \$CONFIG_DIR -Directory/,
+      macOS: /chmod 0700 "\$CONFIG_DIR" "\$STATE_DIR" "\$RUN_DIR"/,
+      Linux: /chmod 0700 "\$CONFIG_DIR" "\$STATE_DIR" "\$RUN_DIR"/,
+      Windows:
+        /Protect-Path -Path \$CONFIG_DIR -Directory\n\s*Protect-Path -Path \$STATE_DIR -Directory\n\s*Protect-Path -Path \$RUN_DIR -Directory/,
     },
   },
   {
@@ -186,26 +193,34 @@ export const RULES = [
   {
     // Two adjacent lines, matched as one span, because the control is their
     // ORDER: an empty file, restricted, and only then the token. Either line
-    // alone is satisfiable by a write that already happened. The restricting
-    // line names no file — the span is already anchored by the line above it,
-    // so repeating the identifier would pin spelling rather than order.
+    // alone is satisfiable by a write that already happened.
+    //
+    // BOTH operands are pinned. Leaving the second line's operand off — on the
+    // theory that the line above already anchors the identifier's spelling, so
+    // repeating it would pin spelling rather than order — left the rule
+    // satisfied by restricting the WRONG file: `chmod 0600 "$ENV_FILE"` on the
+    // line after the offer's truncation matched, and the offer stayed under the
+    // directory's default permissions with the lint green. The first line still
+    // carries the whole rename-fragility, so binding the second adds none.
     rule: 'Credentials at rest — the offer file is restricted to the installing user before the token is written',
     patterns: {
-      macOS: /: > "\$ENROLL_OFFER_FILE"\n\s*chmod 0600 /,
-      Linux: /: > "\$ENROLL_OFFER_FILE"\n\s*chmod 0600 /,
-      Windows: /\[IO\.File\]::WriteAllText\(\$ENROLL_OFFER_FILE, ''\)\n\s*Protect-Path -Path /,
+      macOS: /: > "\$ENROLL_OFFER_FILE"\n\s*chmod 0600 "\$ENROLL_OFFER_FILE"/,
+      Linux: /: > "\$ENROLL_OFFER_FILE"\n\s*chmod 0600 "\$ENROLL_OFFER_FILE"/,
+      Windows:
+        /\[IO\.File\]::WriteAllText\(\$ENROLL_OFFER_FILE, ''\)\n\s*Protect-Path -Path \$ENROLL_OFFER_FILE\b/,
     },
   },
   {
     // The same ordering control on `config/server.env`, which SECURITY.md's
     // FAIL IF has always required and nothing checked. macOS reaches it with
     // `umask 077` covering the heredoc rather than a chmod on an empty file, so
-    // that is what its pattern anchors.
+    // that is what its pattern anchors; the other two bind both operands, for
+    // the reason the rule above states.
     rule: 'Credentials at rest — config/server.env is restricted to the installing user before the password is written',
     patterns: {
       macOS: /umask 077\n\s*cat > "\$ENV_FILE"/,
-      Linux: /: > "\$ENV_FILE"\n\s*chmod 0600 /,
-      Windows: /\[IO\.File\]::WriteAllText\(\$ENV_FILE, ''\)\n\s*Protect-Path -Path /,
+      Linux: /: > "\$ENV_FILE"\n\s*chmod 0600 "\$ENV_FILE"/,
+      Windows: /\[IO\.File\]::WriteAllText\(\$ENV_FILE, ''\)\n\s*Protect-Path -Path \$ENV_FILE\b/,
     },
   },
   {
@@ -323,6 +338,17 @@ export const RULES = [
   },
 ];
 
+/**
+ * Line endings, normalized to `\n`. Several patterns span two adjacent lines,
+ * and a `core.autocrlf=true` checkout puts a `\r` in front of every newline —
+ * which no pattern here spells, so on such a checkout every span rule would
+ * report a missing control that is in fact present. Shared with the self-test,
+ * which matches and edits the same text.
+ */
+export function normalizeEol(text) {
+  return text.replace(/\r\n/g, '\n');
+}
+
 export function check() {
   const failures = [];
   let checked = 0;
@@ -338,7 +364,7 @@ export function check() {
     checked += 1;
     let text;
     try {
-      text = readFileSync(join(repoRoot, file), 'utf8');
+      text = normalizeEol(readFileSync(join(repoRoot, file), 'utf8'));
     } catch {
       failures.push(`${rule}\n    ${file}: missing`);
       continue;
