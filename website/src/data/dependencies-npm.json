@@ -308,6 +308,13 @@
     "homepage": "https://github.com/heroui-inc/tailwind-variants"
   },
   {
+    "name": "uqr",
+    "version": "0.1.3",
+    "license": "MIT",
+    "author": "Anthony Fu <anthonyfu117@hotmail.com>",
+    "homepage": "https://github.com/unjs/uqr#readme"
+  },
+  {
     "name": "VS Code built-in themes",
     "version": "1.95.3",
     "license": "MIT",
