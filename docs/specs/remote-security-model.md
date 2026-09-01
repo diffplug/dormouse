@@ -376,6 +376,46 @@ replacement, PWA removal. Recovery is a re-run of the normal flows:
 No security compromise occurs: the lost key authorized nothing without its
 paired passkey, and the new key starts unauthorized everywhere.
 
+## Noise suite
+
+The end-to-end protocol of the **e2e-client-host** scope ([Future](#future))
+rests on one Noise suite. It is implemented and vector-conformant, but no
+production path consumes it yet: pairing, connection, terminal, and push still
+reach the Server in plaintext as the sections above describe.
+
+- **Exactly one suite: `Noise_IK_25519_ChaChaPoly_SHA256`, Noise revision 34.**
+  No generic pattern API, cipher negotiation, protocol-name override, or suite
+  choice offered to a caller. `IK` only: pre-message `<- s`, then
+  `-> e, es, s, ss` and `<- e, ee, se`.
+- **X25519 stays WebCrypto-only** (`generateKey` / `deriveBits` / `importKey`),
+  so a long-term private key can remain a nonextractable `CryptoKey`; never a
+  JavaScript curve. **An X25519 rejection and an all-zero shared secret are one
+  terminal handshake failure** — indistinguishable, and the handshake refuses
+  every later call rather than resuming on half-mixed state. SHA-256 and HMAC
+  are WebCrypto; **HKDF is Noise's own HMAC construction** (section 4.3), never
+  WebCrypto HKDF.
+- **ChaChaPoly is bundled** from an exactly pinned `@noble/ciphers` release, as
+  no interoperable WebCrypto ChaChaPoly exists. **The module header records the
+  pin, the published audit, and what changed in the chacha path between the
+  audited and the pinned release**; a version bump rewrites that note in the
+  same commit.
+- **Handshake messages are capped at 65,535 bytes** on write and read. The
+  96-bit nonce is `00000000 || little_endian_u64(n)` with `2^64-1` reserved, so
+  **counter exhaustion is a hard error, never a wrap**, and **a failed decrypt
+  does not advance the counter** — otherwise one injected frame locks out the
+  real sender.
+- **Conformance is proven against an independent implementation**: the vendored
+  Cacophony vector, byte for byte through both handshake messages, every
+  transport message both ways, and the handshake hash, plus the RFC 7748 and
+  RFC 8439 vectors. **No expected value may come from the production state
+  machine.**
+- **The only test hook is ephemeral-key injection**, without which a published
+  vector cannot be replayed. Production callers never pass it.
+
+Source of truth: `server-lib-common/src/security/noise.ts`, proven by
+`server-lib-common/test/noise.test.mjs` against the attributed vector in
+`server-lib-common/test/vectors/`.
+
 ## Security Guarantees
 
 Each property below is established in its own section above; this is the
@@ -427,11 +467,8 @@ commit with its specs promoted above the fold, then a `/simplify` pass and a
 code review on that stage; no stage introduces a runtime selector, a dual ACL
 shape, temporary key distribution, or fallback machinery.
 
-1. **Noise suite and vectors** (infrastructure PR). Implement only
-   `Noise_IK_25519_ChaChaPoly_SHA256` in `server-lib-common`, pin
-   `@noble/ciphers` exactly and record its release-versus-audit review, and
-   prove byte-for-byte conformance against the vendored Cacophony vector.
-   Production remote paths do not consume it yet.
+1. **Noise suite and vectors** — landed ([Noise suite](#noise-suite)); the
+   numbering below is preserved because other specs cite these stages by number.
 2. **Additive identities and storage.** The X25519 capability probe (not yet
    enforced); a Host Noise static minted at enrollment and carried as optional
    enrollment fields; the Pocket IndexedDB v2 stores (`known-hosts`,
@@ -479,27 +516,9 @@ before paid SaaS may claim this model.
 
 ### Cryptographic suite
 
-- **Exactly one suite: `Noise_IK_25519_ChaChaPoly_SHA256`, implemented as
-  Noise revision 34.** No generic pattern API, cipher negotiation, AES or P-256
-  fallback, or protocol-name override. Exact `HandshakeState`,
-  `SymmetricState`, and `CipherState` transitions, `MixHash`/`MixKey`/`Split`,
-  16-byte tags, the 96-bit nonce `00000000 || little_endian_u64(n)`, handshake
-  messages capped at 65,535 bytes, and Noise's HMAC-based HKDF — never
-  WebCrypto HKDF.
-- **X25519 stays WebCrypto-only** (`generateKey`/`deriveBits`/`importKey`), so
-  Pocket's long-term private keys are nonextractable `CryptoKey`s IndexedDB
-  stores without exposing bytes to JavaScript; never a JavaScript curve. An
-  X25519 rejection or an all-zero shared secret is one terminal handshake
-  failure. SHA-256 and HMAC are WebCrypto. ChaChaPoly is the audited
-  `chacha20poly1305` from an exactly pinned `@noble/ciphers` release, bundled
-  because no interoperable WebCrypto ChaChaPoly exists and traffic keys are
-  already in memory; one implementation in Pocket, the worker, and both Host
-  runtimes.
-- **Conformance is proven against an independent implementation.** The
-  Cacophony vector for this suite is vendored under `server-lib-common` test
-  fixtures with attribution, alongside the RFC 7748 X25519 and RFC 8439 AEAD
-  vectors; the only test hook is ephemeral-key injection. No helper may reuse
-  the production state machine to generate expected values.
+The suite itself is built ([Noise suite](#noise-suite)); what it is wired to is
+not. One implementation serves Pocket, the worker, and both Host runtimes.
+
 - **Prologues are canonical and length-prefixed** (`lengthPrefixedConcat`):
   pairing binds the E2E version, ceremony kind `pairing`, `hostId`, and every
   invitation field including the setup token; connection binds the version,

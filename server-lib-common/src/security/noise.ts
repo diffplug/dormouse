@@ -1,0 +1,524 @@
+/**
+ * `Noise_IK_25519_ChaChaPoly_SHA256`, Noise revision 34
+ * (https://noiseprotocol.org/noise.html) — the one suite Dormouse speaks
+ * end to end (`docs/specs/remote-security-model.md` -> Noise suite).
+ *
+ * This module is the whole suite and nothing else: no pattern registry, no
+ * cipher negotiation, no protocol-name override. `IK` is the only pattern, so
+ * the pre-message is `<- s`, message 1 is `-> e, es, s, ss`, and message 2 is
+ * `<- e, ee, se`.
+ *
+ * X25519, SHA-256, and HMAC-SHA-256 are WebCrypto, so a Client's long-term
+ * private key can be a nonextractable `CryptoKey`. HKDF is Noise's own HMAC
+ * construction (section 4.3) — deliberately *not* WebCrypto HKDF, whose
+ * salt/info framing is a different function.
+ *
+ * ChaCha20-Poly1305 is `@noble/ciphers`, bundled because no interoperable
+ * WebCrypto ChaChaPoly exists, and pinned to exactly **2.4.0**.
+ *
+ * Audit: Cure53 audited `@noble/ciphers` **1.0.0** in **September 2024**,
+ * funded by OpenSats (the report is linked from the package README). The
+ * pinned 2.4.0 is one major and several minor releases past the audited code.
+ *
+ * What changed in the ChaCha20-Poly1305 path between 1.0.0 and 2.4.0 — read
+ * from the GitHub release notes and by diffing `src/_arx.ts`, `src/chacha.ts`,
+ * and `src/_poly1305.ts` of both published tarballs (2026-09-01): the ARX
+ * round function and the Poly1305 field arithmetic are unchanged; every
+ * difference is around them.
+ *   - Argument validation moved into `wrapCipher`, and a cipher instance may
+ *     be used only once (1.1.0).
+ *   - Output-buffer handling: unaligned outputs fixed and outputs zeroized
+ *     before use (1.1.1); input/output overlap prohibited (1.1.2, relaxed back
+ *     for chachapoly in 1.1.3); partially-overlapping output buffers rejected
+ *     (2.4.0).
+ *   - Inputs are copied before use, and MAC input must be `Uint8Array` —
+ *     strings are no longer accepted (2.0.0).
+ *   - Big-endian hosts handled explicitly (`swap32IfBE`) and zeroization
+ *     tightened (2.2.0).
+ *   - Passing AAD to a cipher that does not support it throws instead of being
+ *     silently ignored (2.3.0); ChaCha20-Poly1305 supports AAD, so this suite
+ *     is unaffected.
+ *   - Packaging and typing churn: ESM-only with `.js` specifiers, the `_micro`
+ *     reference implementation removed, `Uint8Array` generics fixed (2.0.0,
+ *     2.2.0).
+ * The maintainer records a March 2026 *self*-audit of all files in the 2.2.0
+ * notes ("no major issues found"); that is not an independent review.
+ *
+ * Conformance is proven byte for byte against the vendored Cacophony vector
+ * and the RFC 7748 / RFC 8439 fixtures in `test/noise.test.mjs`.
+ */
+
+import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
+
+import { concatBytes, utf8Encode } from './bytes.js';
+import { type CryptoKeyLike, type WebCryptoLike, getWebCrypto } from './webcrypto.js';
+
+/** The only protocol name this module implements. */
+export const NOISE_PROTOCOL_NAME = 'Noise_IK_25519_ChaChaPoly_SHA256';
+
+/** Noise's maximum message length; every handshake message is capped at it. */
+export const NOISE_MAX_MESSAGE_LENGTH = 65535;
+
+/** Raw X25519 public keys, SHA-256 digests, and ChaChaPoly keys are all 32 bytes. */
+export const NOISE_KEY_LENGTH = 32;
+
+/** Poly1305 authentication tag length. */
+export const NOISE_TAG_LENGTH = 16;
+
+/** `2^64 - 1` is reserved by the Noise spec: reaching it exhausts the counter. */
+const RESERVED_NONCE = 0xffffffffffffffffn;
+
+const X25519_ALGORITHM = { name: 'X25519' } as const;
+const HMAC_ALGORITHM = { name: 'HMAC', hash: 'SHA-256' } as const;
+
+const EMPTY = new Uint8Array(0);
+
+/** Every failure in this module — handshake, transport, or counter. */
+export class NoiseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NoiseError';
+  }
+}
+
+/**
+ * An X25519 keypair as this module uses it: a (normally nonextractable)
+ * private `CryptoKey` plus its raw 32-byte public half, which Noise puts on
+ * the wire and mixes into the transcript.
+ */
+export interface NoiseKeyPair {
+  readonly privateKey: CryptoKeyLike;
+  readonly publicKey: Uint8Array;
+}
+
+/** The two directional cipher states and the transcript hash from `Split`. */
+export interface NoiseSession {
+  readonly send: NoiseCipherState;
+  readonly receive: NoiseCipherState;
+  readonly handshakeHash: Uint8Array;
+}
+
+/** Generate an X25519 keypair whose private half never leaves WebCrypto. */
+export async function generateNoiseKeyPair(
+  crypto: WebCryptoLike = getWebCrypto(),
+): Promise<NoiseKeyPair> {
+  const pair = await crypto.subtle.generateKey(X25519_ALGORITHM, false, ['deriveBits']);
+  const publicKey = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey));
+  if (publicKey.length !== NOISE_KEY_LENGTH) {
+    throw new NoiseError('X25519 public key is not 32 bytes');
+  }
+  return { privateKey: pair.privateKey, publicKey };
+}
+
+/**
+ * The 96-bit ChaChaPoly nonce for counter `n`: four zero bytes followed by `n`
+ * little-endian. Throws once `n` reaches the reserved `2^64 - 1`, which is the
+ * single place counter exhaustion is enforced — both cipher directions call it
+ * before every operation.
+ */
+export function noiseNonceBytes(n: bigint): Uint8Array {
+  if (n < 0n) throw new NoiseError('nonce counter must not be negative');
+  if (n >= RESERVED_NONCE) throw new NoiseError('nonce counter exhausted');
+  const nonce = new Uint8Array(12);
+  new DataView(nonce.buffer).setBigUint64(4, n, true);
+  return nonce;
+}
+
+/**
+ * Noise `CipherState`: a key and a counter. A failed decrypt leaves the
+ * counter where it was, so the next well-formed message on the same state
+ * still decrypts.
+ */
+export class NoiseCipherState {
+  readonly #key: Uint8Array | undefined;
+  #n = 0n;
+
+  constructor(key?: Uint8Array) {
+    if (key !== undefined && key.length !== NOISE_KEY_LENGTH) {
+      throw new NoiseError('ChaChaPoly key must be 32 bytes');
+    }
+    this.#key = key;
+  }
+
+  /** Whether `InitializeKey` was given a key; an empty state is a passthrough. */
+  get hasKey(): boolean {
+    return this.#key !== undefined;
+  }
+
+  /** The next counter value this state will use. */
+  get nonce(): bigint {
+    return this.#n;
+  }
+
+  encryptWithAd(ad: Uint8Array, plaintext: Uint8Array): Uint8Array {
+    if (this.#key === undefined) return plaintext;
+    const nonce = noiseNonceBytes(this.#n);
+    const ciphertext = chacha20poly1305(this.#key, nonce, ad).encrypt(plaintext);
+    this.#n += 1n;
+    return ciphertext;
+  }
+
+  decryptWithAd(ad: Uint8Array, ciphertext: Uint8Array): Uint8Array {
+    if (this.#key === undefined) return ciphertext;
+    const nonce = noiseNonceBytes(this.#n);
+    let plaintext: Uint8Array;
+    try {
+      plaintext = chacha20poly1305(this.#key, nonce, ad).decrypt(ciphertext);
+    } catch {
+      // Do not advance: an attacker who can inject one bad frame must not be
+      // able to desynchronize the counter and lock out the real sender.
+      throw new NoiseError('ChaChaPoly authentication failed');
+    }
+    this.#n += 1n;
+    return plaintext;
+  }
+}
+
+async function sha256(crypto: WebCryptoLike, data: Uint8Array): Promise<Uint8Array> {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', data));
+}
+
+async function hmacSha256(
+  crypto: WebCryptoLike,
+  key: Uint8Array,
+  data: Uint8Array,
+): Promise<Uint8Array> {
+  const hmacKey = await crypto.subtle.importKey('raw', key, HMAC_ALGORITHM, false, ['sign']);
+  return new Uint8Array(await crypto.subtle.sign(HMAC_ALGORITHM, hmacKey, data));
+}
+
+/**
+ * Noise's HKDF (section 4.3) with two outputs. Not WebCrypto HKDF: the
+ * chaining key is the HMAC key and there is no info string.
+ */
+async function noiseHkdf(
+  crypto: WebCryptoLike,
+  chainingKey: Uint8Array,
+  inputKeyMaterial: Uint8Array,
+): Promise<readonly [Uint8Array, Uint8Array]> {
+  const tempKey = await hmacSha256(crypto, chainingKey, inputKeyMaterial);
+  const output1 = await hmacSha256(crypto, tempKey, Uint8Array.of(0x01));
+  const output2 = await hmacSha256(crypto, tempKey, concatBytes(output1, Uint8Array.of(0x02)));
+  return [output1, output2];
+}
+
+/** Noise `SymmetricState`, specialized to SHA-256 (so `HASHLEN` is 32). */
+class SymmetricState {
+  readonly #crypto: WebCryptoLike;
+  #chainingKey: Uint8Array;
+  #hash: Uint8Array;
+  #cipher = new NoiseCipherState();
+
+  private constructor(crypto: WebCryptoLike, hash: Uint8Array) {
+    this.#crypto = crypto;
+    this.#chainingKey = hash;
+    this.#hash = hash;
+  }
+
+  /**
+   * `InitializeSymmetric`. The spec zero-pads a protocol name up to HASHLEN
+   * and hashes anything longer; this one name is exactly HASHLEN, so both
+   * branches collapse to using its bytes verbatim. The guard exists so a name
+   * edit fails loudly instead of silently truncating.
+   */
+  static initialize(crypto: WebCryptoLike): SymmetricState {
+    const name = utf8Encode(NOISE_PROTOCOL_NAME);
+    if (name.length > NOISE_KEY_LENGTH) throw new NoiseError('protocol name exceeds HASHLEN');
+    const hash = new Uint8Array(NOISE_KEY_LENGTH);
+    hash.set(name);
+    return new SymmetricState(crypto, hash);
+  }
+
+  get handshakeHash(): Uint8Array {
+    return this.#hash;
+  }
+
+  async mixHash(data: Uint8Array): Promise<void> {
+    this.#hash = await sha256(this.#crypto, concatBytes(this.#hash, data));
+  }
+
+  async mixKey(inputKeyMaterial: Uint8Array): Promise<void> {
+    const [chainingKey, temporaryKey] = await noiseHkdf(
+      this.#crypto,
+      this.#chainingKey,
+      inputKeyMaterial,
+    );
+    this.#chainingKey = chainingKey;
+    this.#cipher = new NoiseCipherState(temporaryKey);
+  }
+
+  async encryptAndHash(plaintext: Uint8Array): Promise<Uint8Array> {
+    const ciphertext = this.#cipher.encryptWithAd(this.#hash, plaintext);
+    await this.mixHash(ciphertext);
+    return ciphertext;
+  }
+
+  async decryptAndHash(ciphertext: Uint8Array): Promise<Uint8Array> {
+    const plaintext = this.#cipher.decryptWithAd(this.#hash, ciphertext);
+    await this.mixHash(ciphertext);
+    return plaintext;
+  }
+
+  async split(initiator: boolean): Promise<NoiseSession> {
+    const [k1, k2] = await noiseHkdf(this.#crypto, this.#chainingKey, EMPTY);
+    return {
+      send: new NoiseCipherState(initiator ? k1 : k2),
+      receive: new NoiseCipherState(initiator ? k2 : k1),
+      handshakeHash: this.#hash.slice(),
+    };
+  }
+}
+
+/** Options shared by both roles. */
+export interface NoiseHandshakeOptions {
+  /** Prologue bytes; both sides must supply byte-identical values. */
+  readonly prologue: Uint8Array;
+  /** The local long-term static keypair (`s`). */
+  readonly staticKeyPair: NoiseKeyPair;
+  readonly crypto?: WebCryptoLike;
+  /**
+   * The one test hook in this module: supply `e` instead of generating it, so
+   * a published vector can be replayed. Production callers never pass it.
+   */
+  readonly ephemeralKeyPair?: NoiseKeyPair;
+}
+
+/** The initiator additionally knows the responder's static public key (`rs`). */
+export interface NoiseInitiatorOptions extends NoiseHandshakeOptions {
+  readonly remoteStaticPublicKey: Uint8Array;
+}
+
+type Role = 'initiator' | 'responder';
+
+/**
+ * One IK handshake. Exactly two messages: the initiator writes then reads, the
+ * responder reads then writes. Any failure is terminal — the object refuses
+ * every later call rather than letting a caller retry on half-mixed state.
+ */
+export class NoiseHandshake {
+  readonly #role: Role;
+  readonly #crypto: WebCryptoLike;
+  readonly #symmetric: SymmetricState;
+  readonly #static: NoiseKeyPair;
+  readonly #injectedEphemeral: NoiseKeyPair | undefined;
+  #ephemeral: NoiseKeyPair | undefined;
+  #remoteStatic: Uint8Array | undefined;
+  #remoteEphemeral: Uint8Array | undefined;
+  #messageIndex = 0;
+  #failed = false;
+  #session: NoiseSession | undefined;
+
+  /**
+   * Not the entry point — use {@link createNoiseInitiator} or
+   * {@link createNoiseResponder}. `SymmetricState` is module-private, so this
+   * signature is unreachable from outside the module.
+   */
+  constructor(
+    role: Role,
+    crypto: WebCryptoLike,
+    symmetric: SymmetricState,
+    options: NoiseHandshakeOptions,
+    remoteStatic: Uint8Array | undefined,
+  ) {
+    this.#role = role;
+    this.#crypto = crypto;
+    this.#symmetric = symmetric;
+    this.#static = options.staticKeyPair;
+    this.#injectedEphemeral = options.ephemeralKeyPair;
+    this.#remoteStatic = remoteStatic;
+  }
+
+  /** Whether both messages have been processed and `session` is available. */
+  get isComplete(): boolean {
+    return this.#session !== undefined;
+  }
+
+  /** The peer's static public key: known up front by the initiator, learned in message 1 by the responder. */
+  get remoteStaticPublicKey(): Uint8Array | undefined {
+    return this.#remoteStatic;
+  }
+
+  /** The `Split` result. Throws until the handshake completes. */
+  get session(): NoiseSession {
+    if (this.#session === undefined) throw new NoiseError('handshake is not complete');
+    return this.#session;
+  }
+
+  async writeMessage(payload: Uint8Array = EMPTY): Promise<Uint8Array> {
+    return await this.#step(async () => {
+      if (this.#role === 'initiator') {
+        if (this.#messageIndex !== 0) throw new NoiseError('the initiator writes only message 1');
+        return await this.#writeMessage1(payload);
+      }
+      if (this.#messageIndex !== 1) throw new NoiseError('the responder writes only message 2');
+      return await this.#writeMessage2(payload);
+    });
+  }
+
+  async readMessage(message: Uint8Array): Promise<Uint8Array> {
+    return await this.#step(async () => {
+      if (message.length > NOISE_MAX_MESSAGE_LENGTH) {
+        throw new NoiseError('handshake message exceeds the Noise maximum');
+      }
+      if (this.#role === 'responder') {
+        if (this.#messageIndex !== 0) throw new NoiseError('the responder reads only message 1');
+        return await this.#readMessage1(message);
+      }
+      if (this.#messageIndex !== 1) throw new NoiseError('the initiator reads only message 2');
+      return await this.#readMessage2(message);
+    });
+  }
+
+  async #step(run: () => Promise<Uint8Array>): Promise<Uint8Array> {
+    if (this.#failed) throw new NoiseError('handshake already failed');
+    if (this.#session !== undefined) throw new NoiseError('handshake already complete');
+    try {
+      return await run();
+    } catch (error) {
+      this.#failed = true;
+      throw error instanceof NoiseError ? error : new NoiseError('handshake failed');
+    }
+  }
+
+  /** `-> e, es, s, ss` */
+  async #writeMessage1(payload: Uint8Array): Promise<Uint8Array> {
+    // 32 (e) + 32 + 16 (encrypted s) + payload + 16 (tag).
+    this.#capWrite(NOISE_KEY_LENGTH * 2 + NOISE_TAG_LENGTH * 2 + payload.length);
+    const ephemeral = await this.#useEphemeral();
+    await this.#symmetric.mixHash(ephemeral.publicKey);
+    await this.#symmetric.mixKey(await this.#dh(ephemeral.privateKey, this.#remoteStatic!));
+    const encryptedStatic = await this.#symmetric.encryptAndHash(this.#static.publicKey);
+    await this.#symmetric.mixKey(await this.#dh(this.#static.privateKey, this.#remoteStatic!));
+    const encryptedPayload = await this.#symmetric.encryptAndHash(payload);
+    this.#messageIndex = 1;
+    return concatBytes(ephemeral.publicKey, encryptedStatic, encryptedPayload);
+  }
+
+  /** `-> e, es, s, ss` */
+  async #readMessage1(message: Uint8Array): Promise<Uint8Array> {
+    const staticEnd = NOISE_KEY_LENGTH * 2 + NOISE_TAG_LENGTH;
+    if (message.length < staticEnd + NOISE_TAG_LENGTH) {
+      throw new NoiseError('handshake message 1 is too short');
+    }
+    const remoteEphemeral = message.slice(0, NOISE_KEY_LENGTH);
+    this.#remoteEphemeral = remoteEphemeral;
+    await this.#symmetric.mixHash(remoteEphemeral);
+    await this.#symmetric.mixKey(await this.#dh(this.#static.privateKey, remoteEphemeral));
+    const remoteStatic = await this.#symmetric.decryptAndHash(
+      message.subarray(NOISE_KEY_LENGTH, staticEnd),
+    );
+    requireKey(remoteStatic, 'remote static public key');
+    this.#remoteStatic = remoteStatic;
+    await this.#symmetric.mixKey(await this.#dh(this.#static.privateKey, remoteStatic));
+    const payload = await this.#symmetric.decryptAndHash(message.subarray(staticEnd));
+    this.#messageIndex = 1;
+    return payload;
+  }
+
+  /** `<- e, ee, se` */
+  async #writeMessage2(payload: Uint8Array): Promise<Uint8Array> {
+    this.#capWrite(NOISE_KEY_LENGTH + NOISE_TAG_LENGTH + payload.length);
+    const ephemeral = await this.#useEphemeral();
+    await this.#symmetric.mixHash(ephemeral.publicKey);
+    await this.#symmetric.mixKey(await this.#dh(ephemeral.privateKey, this.#remoteEphemeral!));
+    await this.#symmetric.mixKey(await this.#dh(ephemeral.privateKey, this.#remoteStatic!));
+    const encryptedPayload = await this.#symmetric.encryptAndHash(payload);
+    this.#session = await this.#symmetric.split(false);
+    this.#messageIndex = 2;
+    return concatBytes(ephemeral.publicKey, encryptedPayload);
+  }
+
+  /** `<- e, ee, se` */
+  async #readMessage2(message: Uint8Array): Promise<Uint8Array> {
+    if (message.length < NOISE_KEY_LENGTH + NOISE_TAG_LENGTH) {
+      throw new NoiseError('handshake message 2 is too short');
+    }
+    const remoteEphemeral = message.slice(0, NOISE_KEY_LENGTH);
+    await this.#symmetric.mixHash(remoteEphemeral);
+    await this.#symmetric.mixKey(await this.#dh(this.#ephemeral!.privateKey, remoteEphemeral));
+    await this.#symmetric.mixKey(await this.#dh(this.#static.privateKey, remoteEphemeral));
+    const payload = await this.#symmetric.decryptAndHash(message.subarray(NOISE_KEY_LENGTH));
+    this.#session = await this.#symmetric.split(true);
+    this.#messageIndex = 2;
+    return payload;
+  }
+
+  #capWrite(length: number): void {
+    if (length > NOISE_MAX_MESSAGE_LENGTH) {
+      throw new NoiseError('handshake message exceeds the Noise maximum');
+    }
+  }
+
+  async #useEphemeral(): Promise<NoiseKeyPair> {
+    const ephemeral = this.#injectedEphemeral ?? (await generateNoiseKeyPair(this.#crypto));
+    requireKey(ephemeral.publicKey, 'ephemeral public key');
+    this.#ephemeral = ephemeral;
+    return ephemeral;
+  }
+
+  /**
+   * X25519. A rejected key, a rejected agreement, and an all-zero shared
+   * secret are one indistinguishable terminal failure.
+   */
+  async #dh(privateKey: CryptoKeyLike, publicKey: Uint8Array): Promise<Uint8Array> {
+    requireKey(publicKey, 'X25519 public key');
+    let shared: Uint8Array;
+    try {
+      const imported = await this.#crypto.subtle.importKey(
+        'raw',
+        publicKey,
+        X25519_ALGORITHM,
+        true,
+        [],
+      );
+      shared = new Uint8Array(
+        await this.#crypto.subtle.deriveBits(
+          { name: 'X25519', public: imported },
+          privateKey,
+          NOISE_KEY_LENGTH * 8,
+        ),
+      );
+    } catch {
+      throw new NoiseError('X25519 agreement failed');
+    }
+    if (shared.length !== NOISE_KEY_LENGTH) throw new NoiseError('X25519 agreement failed');
+    let bits = 0;
+    for (const byte of shared) bits |= byte;
+    if (bits === 0) throw new NoiseError('X25519 agreement failed');
+    return shared;
+  }
+}
+
+function requireKey(key: Uint8Array, what: string): void {
+  if (key.length !== NOISE_KEY_LENGTH) throw new NoiseError(`${what} must be 32 bytes`);
+}
+
+async function startHandshake(
+  role: Role,
+  options: NoiseHandshakeOptions,
+  remoteStatic: Uint8Array | undefined,
+): Promise<NoiseHandshake> {
+  const crypto = options.crypto ?? getWebCrypto();
+  requireKey(options.staticKeyPair.publicKey, 'local static public key');
+  const symmetric = SymmetricState.initialize(crypto);
+  await symmetric.mixHash(options.prologue);
+  // Pre-message `<- s`: both sides mix the responder's static public key —
+  // `rs` for the initiator, its own `s` for the responder.
+  await symmetric.mixHash(remoteStatic ?? options.staticKeyPair.publicKey);
+  return new NoiseHandshake(role, crypto, symmetric, options, remoteStatic);
+}
+
+/** Start the IK initiator: it holds `rs` up front and writes message 1. */
+export async function createNoiseInitiator(
+  options: NoiseInitiatorOptions,
+): Promise<NoiseHandshake> {
+  requireKey(options.remoteStaticPublicKey, 'remote static public key');
+  return await startHandshake('initiator', options, options.remoteStaticPublicKey.slice());
+}
+
+/** Start the IK responder: it learns `rs` from message 1 and writes message 2. */
+export async function createNoiseResponder(
+  options: NoiseHandshakeOptions,
+): Promise<NoiseHandshake> {
+  return await startHandshake('responder', options, undefined);
+}

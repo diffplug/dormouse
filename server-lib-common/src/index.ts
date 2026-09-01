@@ -18,6 +18,7 @@ export * from './remote/origin.js';
 export * from './security/webcrypto.js';
 export * from './security/bytes.js';
 export * from './security/ecdsa.js';
+export * from './security/noise.js';
 export * from './security/deviceKey.js';
 export * from './security/challenge.js';
 export * from './security/passkey.js';
