@@ -491,3 +491,70 @@ code.
    entry) once its dropdown is phone-friendly.
 4. **Onboarding friction** — Pocket carries the phone-side items of the
    **selfhost-onboarding** scope ([server.md](./server.md) `## Future`).
+5. **End-to-end pairing and connection** — the phone side of the
+   **e2e-client-host** scope ([remote-security-model.md](./remote-security-model.md)
+   `## Future`), landing in its stage 4 unless noted:
+   - **A QR opened by the native camera is origin bootstrap only.** The
+     fragment is removed with `history.replaceState` before first render,
+     nothing from it is retained in storage or state, no setup or pairing call
+     is made, the token is not spent, and the screen says *Install or open
+     Pocket, then scan this Host QR in Pocket*. On iOS the install is a
+     separate partition, so the keys must be minted where they will live.
+   - **In-app scanning, or paste.** A rear-camera scanner lazy-loads
+     `@zxing/browser` (iOS has no `BarcodeDetector`), reads the code as data
+     without navigating, and hands the text to `parsePairingInvitationUrl`
+     ([server.md](./server.md) `## Future`); a paste field feeds the same
+     parser, since a pasted invitation is not weaker than a scanned one and a
+     desktop browser or the dev loop has no camera. No typed setup password,
+     fingerprint, or QR-less path exists. On success the camera tracks stop
+     and the invitation moves into memory-only ceremony state; on cancel,
+     error, or unmount it is discarded. Ceremony state clears on every
+     terminal outcome.
+   - **Two scans on a self-hosted first run, one when the origin is known.**
+     Native camera to reach the origin, then the in-app scan in the browser or
+     installed context that will own the keys. A phone that already has the
+     Pocket origin open — including a future fixed SaaS origin — needs only the
+     in-app scan. The Host keeps a displayed invitation usable until a pairing
+     request reserves it, an outcome consumes it, or its TTL expires; if
+     installation outlasts the TTL the laptop shows a fresh code.
+   - **After the parse.** A browser with no usable passkey registers one with
+     the scanned token (`setup({ setupToken })`) and signs in; a signed-in
+     browser calls `POST /api/setup/retire` instead, and a refusal aborts with
+     *scan a new code*. Then the per-Host static is minted, Noise IK runs
+     against the invitation key, the presence proof is obtained through the
+     `pairing` reauth binding, and the two-digit waiting screen shows the code
+     the laptop must be told. The setup-password field, `hasPriorUse`'s
+     setup-versus-sign-in fold, and the auth-screen QR copy go with it; sign-in
+     stays the returning-browser action.
+   - **Hosts view.** Rows are the `KnownHostV1` records, labeled locally, with
+     online state from `GET /api/hosts`, one action each — Connect, or *Pair
+     again* on `pairing-required` — plus a *Scan a Host QR* action. The
+     device-fingerprint line, `pair-status`, and the `:paired:` markers are
+     deleted; the `:passkey:` cache and `:push-endpoint` digest stay.
+   - **Storage.** IndexedDB `dormouse-pocket` v2 adds `known-hosts` and
+     `pending-deletions` (stage 2); v3 deletes `device-key` (stage 4).
+     `navigator.storage.persist()` is requested before the first record is
+     written. The capability probe runs before any remote operation and shows
+     a fixed upgrade requirement on failure.
+   - **The worker is built, not copied** (stage 6). `sw.js` moves to a
+     TypeScript source under the Pocket app that imports the shared E2E,
+     IndexedDB, and sanitization code, bundled by a second Vite config as one
+     classic IIFE with `inlineDynamicImports`, no runtime `import`/`export`, no
+     secondary chunk, and the stable unhashed output name `dist-pocket/sw.js`,
+     run after the app build with `emptyOutDir: false`. Registration stays
+     `register('/sw.js', { scope: '/' })` with no `type: 'module'`. The worker
+     decrypts with the pinned record for the envelope's `hostId`,
+     re-validates and sanitizes, and shows a generic notification on any
+     failure. Production assertions in the Pocket build script require exactly
+     one `dist-pocket/sw.js`, classic registration, and no top-level imports,
+     exports, dynamic-import loaders, or auxiliary chunks.
+   - **Obsolete delivery mappings are retired, durably** (stage 6). A
+     `pairing-required` transition, a successful re-pair, and explicit local
+     removal of a Host each write the old `{ hostId, deliveryId }` to
+     `PendingDeliveryDeletionV1` before the record forgets it, then call the
+     idempotent deletion route; tombstones retry after sign-in, at app start,
+     and before registering a replacement, and clear only on success. This
+     deletes the delivery row only — never the scope's shared
+     `PushSubscription` or another Host's row. Push readback uses the
+     possession query with this browser's own delivery IDs; the card's
+     predicate and the endpoint-rotation repair are otherwise unchanged.

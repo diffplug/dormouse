@@ -487,12 +487,17 @@ created on the Host while the lease is held open tethered to the leaseholder.
 One lease at a time; the Host user can always reclaim it locally. Phones never
 need it.
 
-### 8. WebRTC transport and app-layer encryption
+### 8. Noise transport, then WebRTC
 
-Neither changes the API surface: WebRTC rendezvous for latency (the Server
-signals but, per the security model, is never trusted with authorization — pin
-the DTLS fingerprint inside the device-key-signed connect payload), and
-app-layer encryption so the relaying Server sees only ciphertext.
+The **e2e-client-host** scope ([remote-security-model.md](./remote-security-model.md)
+`## Future`) carries protocol-v1 unchanged inside Noise transport messages: each
+request, response, event, and terminal-data frame becomes one length-prefixed
+application message in an encrypted byte stream, reassembled up to 1 MiB, and
+the relay sees ciphertext only. Nothing here changes shape. WebRTC rendezvous
+for latency comes after and replaces only the relay transport of those same
+Noise messages, after authorization — the Server signals but is never trusted
+with authorization, and the presence protocol is inherited unless separately
+reviewed.
 
 ### 9. Audio
 

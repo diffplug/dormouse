@@ -942,19 +942,117 @@ nothing typed on the phone (Setup tokens, Host side,
 [pocket-app.md](./pocket-app.md)); the setup password remains for the QR-less
 path. One settled decision constrains what is left: **the stock allowlist stays
 `*.dormouse.sh`-only** ("Where a Host may reach a relay server") —
-self-hosting keeps requiring a source build, deliberately, so no item below
-may depend on widening it. Staged order:
-
-1. **One-minute resume.** On an approved connection the Host mints a resume
-   token — single-use, bound to the device key and that connection, 60-second
-   TTL. A dropped WebSocket reattaches with it instead of rerunning the
-   passkey ceremony; past the minute it is a full connect. Host-minted and
-   Host-verified — the Server only relays — so the final-authority invariant
-   holds.
+self-hosting keeps requiring a source build, deliberately, so nothing may depend
+on widening it. The remaining phone-side items — in-app scanning and the end of
+the setup-password path — are absorbed by the **e2e-client-host** scope
+([remote-security-model.md](./remote-security-model.md) `## Future`), which also
+rules out the one-minute resume token that used to be staged here: every new
+session requires fresh WebAuthn presence, by design.
 
 Unstaged but adjacent: origin migration (re-binding the passkey and
 enrollments after a Tailscale node rename), and the revocation UI staged in
 [remote-security-model.md](./remote-security-model.md) `## Future`.
+
+**Owned here for the e2e-client-host scope** — the syntax, routes, and state
+the trust model in [remote-security-model.md](./remote-security-model.md)
+`## Future` requires. Lands in that scope's stage 4 unless noted.
+
+- **QR grammar.** Exactly
+  `<enrolledOrigin>/#pair?<v>.<hostId>.<inviteId>.<expiry>.<setupToken>.<ephPub>`,
+  where the origin is the normalized HTTPS origin with no trailing slash and
+  appears only as the URL prefix, so a native camera reaches the right
+  self-hosted Pocket and the fragment never reaches this server. The fragment
+  is positional, dot-delimited, carries no field names, and is exactly 146
+  characters:
+
+  | Field | Encoding, exact length | Purpose |
+  | --- | --- | --- |
+  | `v` | literal `1`, one character | E2E wire version; any other value is rejected, never negotiated |
+  | `hostId` | 16 bytes as 22-character unpadded base64url | relay destination |
+  | `inviteId` | 16 bytes as 22-character unpadded base64url | single-use invitation held only in Host memory |
+  | `expiry` | unsigned 32-bit epoch seconds as exactly 10 decimal digits | advisory Client fail-fast; Host memory stays authoritative |
+  | `setupToken` | 32 bytes as 43-character unpadded base64url | credential for `/api/setup/*` and `/api/setup/retire` |
+  | `ephPub` | 32-byte X25519 public key as 43-character unpadded base64url | one-use Host Noise responder key for this invitation |
+
+  `PAIRING_QR_URL_MAX_LENGTH = 256`; a mint whose complete URL exceeds it fails
+  before `uqr` runs. The `#setup?` grammar, `SETUP_HASH_*`, `mintId`, and the
+  `setup-token-redeemed` frame are deleted with it.
+- **Parser.** One `parsePairingInvitationUrl(text, appOrigin)` boundary in
+  `server-lib-common`, run before any field is used: reject strings over 256
+  characters before URL parsing; require HTTPS, no credentials, root path, no
+  query, the `#pair?` prefix, and an origin exactly equal to the running app's;
+  exactly six fields; the literal version; canonical alphabets and exact
+  lengths; a uint32 expiry not in the past; and a 32-byte `ephPub` that X25519
+  imports. Return the complete invitation or one generic invalid result, never
+  a partial parse. Pinned by exact encode/parse vectors including the longest
+  accepted origin.
+- **Relay envelope.** The wire union becomes bounded routing envelopes only.
+  Client→Server `{ t: 'e2e', hostId, kind: 'pairing' | 'connection', id, step:
+  'init' | 'transport', ct }`; Server→Host the same plus `clientId`; Host→Server
+  `{ t: 'e2e', clientId, kind, id, step: 'response' | 'transport', ct }`;
+  Server→Client mirrors the Host frame with `hostId`. `id` is the invitation or
+  connection ID (22 characters), `ct` a base64url Noise message capped at the
+  encoding of 65,535 bytes. `client-gone`, `host-gone`, and `error` stay;
+  `pair`, `pair-status`, `connect`, `connect2`, `msg`, `pair-result`,
+  `challenge`, `decision`, and `setup-token-redeemed` go. An `init` binds the
+  Client socket to the named Host exactly as `connect` does today (the previous
+  Host gets `client-gone`); after that the relay forwards frames within the
+  binding without parsing ciphertext or learning whether the Host authorized
+  anything. Its own size and rate caps are defense in depth; the Host is
+  authoritative. `Handshake`, `checkPair`, `checkConnect2`, and the relayed
+  challenge memory are deleted. Stage 3 lands the envelope additively beside
+  the legacy union, exercised only by the harness.
+- **Routes.** `POST /api/reauth/begin` and `/finish` take the required
+  `PresenceBinding` variants and answer as the security model states, without
+  extending the session. `POST /api/setup/retire` (session token; body
+  `{ setupToken }`) consumes a live token and answers 204, or 401 with
+  `SETUP_TOKEN_INVALID_ERROR`. `/api/setup/begin` and `/finish` accept a setup
+  token only — the setup-password arm is deleted so re-presenting the
+  password can no longer register a passkey; `/api/host/enroll` keeps both
+  credentials but takes no `label`. `GET /api/hosts` returns `{ hostId,
+  online }` with no label. Push: `POST /api/push/subscribe` takes `{ hostId,
+  deliveryId, subscription }` under the session token with no challenge or
+  signature (possession of the 256-bit `deliveryId` is the proof) and answers
+  the Hosts whose rows carry the presented endpoint under the current VAPID
+  key; `POST /api/push/subscriptions/query` takes `{ deliveryIds }` and
+  reports which of *those* are registered, for which Hosts — the read is
+  parameterized by an unguessable capability the caller must hold, which is
+  proof of possession rather than the enumeration primitive a device-key
+  parameter was; `DELETE /api/push/subscriptions/:deliveryId` is idempotent and
+  answers 204 without revealing row existence, deleting only a row whose Host
+  belongs to the signed-in account; `GET /api/push/devices` answers the
+  `deliveryId`s subscribed to this Host; `POST /api/push/send` names
+  `deliveryIds` and, from stage 6, carries only the sealed envelope. `GET
+  /api/push/subscriptions` and `POST /api/push/challenge` are deleted.
+- **State files.** `hosts.json` rows lose `label`. `push-subscriptions.json`
+  rows become `{ hostId, deliveryId, endpoint, keys, vapidPublicKey,
+  subscribedAt }`; an upsert that changes a delivery's endpoint also drops
+  every row still carrying the replaced endpoint (one worker scope, one
+  address), and rows are matched on endpoint for 404/410 pruning as today.
+  Legacy rows in either file are dropped on read with one startup warning that
+  names the file and says to re-enroll or re-register — no versioned refusal,
+  no archive step. `account.json` and its passkeys are preserved. The Server
+  also deletes a delivery row when its push provider answers 404/410 and
+  cascades rows when their Host row is removed; Pocket is the normal lifecycle
+  initiator, provider and parent deletion are cleanup for clients that can no
+  longer submit tombstones.
+- **Host side.** Enrollment mints the Host Noise static and persists it with
+  the enrollment; the "name for this machine" field stays as a local label
+  delivered only inside encrypted outcomes. `adopt`, `AdoptParams`, the
+  webview `localStorage` read path, and `ACL_KEY_PREFIX` are deleted. The
+  setup-QR panel renders the invitation state the Host itself reports (`live`,
+  `reserved`, consumed, expired) and offers New code; it no longer listens for
+  a redemption frame.
+- **Testing.** The harness fake host and a fake client both speak Noise through
+  the real relay; stage 3 adds transcript, framing, teardown, opacity, and
+  tamper cases with injected statics, stage 5 the flood and malicious-relay
+  cases (record, drop, reorder, modify, inject — asserting nothing decrypts or
+  forges a decision, remote API traffic, terminal bytes, labels, or
+  notifications), and every legacy wire input must fail closed.
+- **Operator recovery** (`SELF_HOST.md`): a Host whose enrollment predates
+  the scope shows the enrollment form again; re-run the installer only if the
+  offer is wanted — it mints one solely while `state/hosts.json` is absent, so
+  remove that file first or enroll with the setup password.
 
 **Scope: saas-multitenant** — the server-side hurdles between today's
 single-owner selfhost server and a multi-tenant SaaS on `*.dormouse.sh`,
