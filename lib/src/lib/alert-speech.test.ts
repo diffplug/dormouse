@@ -117,14 +117,18 @@ describe('toSpokenText', () => {
     expect(toSpokenText('a<b>c')).toBe('a b c');
   });
 
-  it('strips ampersands and control characters from untrusted titles', () => {
-    expect(toSpokenText('make&test')).toBe('make test');
+  it('strips Unicode punctuation, symbols, and control characters', () => {
+    expect(toSpokenText('**build**: eight * & 2 + 2 = 4 ✅')).toBe('build eight 2 2 4');
     expect(toSpokenText('build\u0007done\u001b')).toBe('build done');
   });
 
-  it('drops asterisks instead of saying “asterisk” aloud', () => {
-    expect(toSpokenText('eight *')).toBe('eight');
-    expect(toSpokenText('build*finished')).toBe('build finished');
+  it('elides apostrophes rather than orphaning the letter after them', () => {
+    expect(toSpokenText("build didn't; it wasn’t finished")).toBe('build didnt it wasnt finished');
+  });
+
+  it('preserves letters, numbers, and combining marks from other scripts', () => {
+    expect(toSpokenText('构建完成。終了コード：０')).toBe('构建完成 終了コード ０');
+    expect(toSpokenText('اَلْعَرَبِيَّةُ، ٢')).toBe('اَلْعَرَبِيَّةُ ٢');
   });
 
   it('collapses the whitespace its own substitutions create', () => {
@@ -137,6 +141,7 @@ describe('toSpokenText', () => {
 
   it('falls back rather than handing the engine an empty utterance', () => {
     expect(toSpokenText('<>')).toBe('terminal');
+    expect(toSpokenText('*** ✅')).toBe('terminal');
     expect(toSpokenText('   ')).toBe('terminal');
   });
 
