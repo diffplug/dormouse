@@ -457,7 +457,7 @@ Two details this depends on:
 The Hosts screen renders this browser's own device-key fingerprint under the
 header, from a one-shot effect over `getOrCreateDeviceKey()`. It is not a status
 line: the pairing ceremony verifies no assertion
-(`docs/specs/remote-security-model.md`, Pairing Ceremony), so the human at the
+(`docs/specs/remote-security-model.md` -> Pairing), so the human at the
 laptop's approval modal is the control — and the fingerprint that modal shows,
 of the key that is *asking*, is uncheckable unless the phone shows it too. Both
 ends call the same `pairingFingerprint` helper from `server-lib-common`: an
