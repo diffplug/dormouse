@@ -172,8 +172,10 @@ export interface ToolSurfaceResponse {
    * `existing` is a key match on a live tool: the redundant spawn never
    * started. `adopted` is a key match whose command had exited — the Surface is
    * reused and the command re-run in place, keeping its position and scrollback.
+   * `takeover` is the calling pane itself becoming the tool, answered before the
+   * command is typed — `dor` has to exit before its own shell is free to run it.
    */
-  status: 'created' | 'existing' | 'adopted' | 'pending';
+  status: 'created' | 'existing' | 'adopted' | 'pending' | 'takeover';
   surfaceId: string;
   surfaceRef: string;
   /** The rendered command, as typed into the shell. */

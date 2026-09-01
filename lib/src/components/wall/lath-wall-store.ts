@@ -137,6 +137,13 @@ export type LathWallStore = {
   /** Meta write: merge `patch` into a leaf's params. No-op if the leaf is absent.
    *  Reaches parked and cap-evicted leaves too. */
   updateParams(id: LeafId, patch: Record<string, unknown>): void;
+  /** Meta write: replace a leaf's whole meta — component pair, title and params
+   *  in ONE commit. The in-place kind change behind the `dor tool` take-over
+   *  (`docs/specs/dor-tool.md` -> Take-over): the id never moves, so the Session
+   *  and its scrollback are untouched. One commit because a body swapped ahead
+   *  of its params would render a tool whose params are still a terminal's.
+   *  No-op if the leaf is absent. */
+  setMeta(id: LeafId, meta: LeafMeta): void;
 
   /** Presentation-only zoom target (the tree is untouched). No-op if unchanged. */
   setZoomed(id: LeafId | null): void;
@@ -460,6 +467,11 @@ export function createLathWallStore(): LathWallStore {
       if (!cur) return;
       const params = { ...(cur.params ?? {}), ...patch };
       commit({ leafMeta: new Map(snapshot.leafMeta).set(id, { ...cur, params }) });
+    },
+
+    setMeta(id, meta) {
+      if (!snapshot.leafMeta.has(id)) return;
+      commit({ leafMeta: new Map(snapshot.leafMeta).set(id, meta) });
     },
 
     setZoomed(id) {

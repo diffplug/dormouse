@@ -1353,6 +1353,161 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  // Pane take-over: `dor tool` typed alone at a prompt runs in that pane rather
+  // than splitting (docs/specs/dor-tool.md -> Take-over). The handshake is the
+  // point — `dor` is the pane's foreground process when the host answers, so the
+  // command may only be typed once its own shell is back at a prompt.
+  it('takes over the calling pane when `dor tool` is typed alone at a prompt', async () => {
+    setToolsEnabled(true);
+    const typed: string[] = [];
+    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => ({
+      status: 'ok' as const,
+      projectRoot: '/repo',
+      path: '/repo/dormouse.yml',
+      name: 'storybook',
+      run: 'pnpm storybook',
+      render: 'iframe' as const,
+      port: 'announced' as const,
+      key: ['/repo'],
+      warnings: [],
+    }));
+
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      });
+      await flush();
+      act(() => fake.spawnPty('pane-a'));
+      fake.setInputHandler('pane-a', (data) => typed.push(data));
+      terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
+      terminalRegistry.applyTerminalSemanticEvents('pane-a', [
+        { type: 'commandLine', commandLine: 'dor tool storybook' },
+        { type: 'commandStart', source: 'osc633_boundaries' },
+      ]);
+
+      let response: { ok: boolean; result?: { status: string; surfaceId: string; minimized: boolean } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.tool,
+            surfaceId: 'pane-a',
+            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
+            respond: (result: typeof response) => { response = result; },
+          },
+        }));
+      });
+      await flush();
+
+      // Answered before the tool starts, and nothing typed while `dor` still owns
+      // the shell: waiting for the prompt first would deadlock.
+      expect(response).toMatchObject({
+        ok: true,
+        result: { status: 'takeover', surfaceId: 'pane-a', minimized: false },
+      });
+      expect(leafCount()).toBe(1);
+      expect(typed).toEqual([]);
+
+      // `dor` exits; the shell reports its prompt back and the command lands.
+      act(() => {
+        terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'promptStart' }]);
+      });
+      await act(async () => { await new Promise((r) => setTimeout(r, 250)); });
+      expect(typed).toEqual(['pnpm storybook\r']);
+      expect(leafCount()).toBe(1);
+
+      // Same Surface, now a tool: the leaf changed kind without changing id, so
+      // the session persists as one.
+      act(() => {
+        terminalRegistry.applyTerminalSemanticEvents('pane-a', [
+          { type: 'commandLine', commandLine: 'pnpm storybook' },
+          { type: 'commandStart', source: 'osc633_boundaries' },
+        ]);
+      });
+      // The spawn lock is held until the command is live; let the handler see it.
+      await act(async () => { await new Promise((r) => setTimeout(r, 250)); });
+      await act(async () => { window.dispatchEvent(new Event('pagehide')); });
+      await flush();
+      await flush();
+      const saved = fake.getState() as {
+        panes?: Array<{ id: string; surfaceType?: string; command?: string }>;
+      } | null;
+      expect(saved?.panes?.find((pane) => pane.id === 'pane-a')).toMatchObject({
+        surfaceType: 'tool',
+        command: 'pnpm storybook',
+      });
+    } finally {
+      fake.clearInputHandler('pane-a');
+      act(() => terminalRegistry.removeTerminalPaneState('pane-a'));
+      setToolsEnabled(false);
+    }
+  });
+
+  it('splits instead of taking over when the caller is running something else', async () => {
+    setToolsEnabled(true);
+    const typed: string[] = [];
+    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => ({
+      status: 'ok' as const,
+      projectRoot: '/repo',
+      path: '/repo/dormouse.yml',
+      name: 'storybook',
+      run: 'pnpm storybook',
+      render: 'iframe' as const,
+      port: 'announced' as const,
+      key: null,
+      warnings: [],
+    }));
+    let splitId: string | undefined;
+
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      });
+      await flush();
+      act(() => fake.spawnPty('pane-a'));
+      fake.setInputHandler('pane-a', (data) => typed.push(data));
+      terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
+      // An agent's `dor tool` runs under the agent, so the pane reports that line.
+      terminalRegistry.applyTerminalSemanticEvents('pane-a', [
+        { type: 'commandLine', commandLine: 'claude' },
+        { type: 'commandStart', source: 'osc633_boundaries' },
+      ]);
+
+      let response: { ok: boolean; result?: { status: string; surfaceId: string } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.tool,
+            surfaceId: 'pane-a',
+            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
+            respond: (result: typeof response) => { response = result; },
+          },
+        }));
+      });
+      await flush();
+      // The split exists before its handle is reported: a created tool answers
+      // only once the new shell reports OSC 633.
+      expect(leafCount()).toBe(2);
+      splitId = Array.from(container.querySelectorAll('[data-lath-leaf]'))
+        .map((leaf) => leaf.getAttribute('data-lath-leaf')!)
+        .find((id) => id !== 'pane-a');
+      act(() => {
+        terminalRegistry.applyTerminalSemanticEvents(splitId!, [{ type: 'promptStart' }]);
+      });
+      await act(async () => { await new Promise((r) => setTimeout(r, 250)); });
+
+      expect(response?.result).toMatchObject({ status: 'created', surfaceId: splitId });
+      expect(typed).toEqual([]);
+    } finally {
+      if (splitId) {
+        pendingShellOpts.delete(splitId);
+        act(() => terminalRegistry.removeTerminalPaneState(splitId!));
+      }
+      fake.clearInputHandler('pane-a');
+      act(() => terminalRegistry.removeTerminalPaneState('pane-a'));
+      setToolsEnabled(false);
+    }
+  });
+
   it('rejects a non-integrated shell before offering tool approval', async () => {
     setToolsEnabled(true);
     terminalRegistry.setDefaultShellOpts({ shell: 'C:\\Windows\\System32\\cmd.exe' });

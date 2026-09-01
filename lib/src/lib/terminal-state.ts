@@ -442,6 +442,19 @@ function canonicalizeCwdForMatch(path: string): string {
 }
 
 /**
+ * Whether two reported paths name the same directory. The CLI sends a
+ * path.resolve'd cwd (trailing slashes, `..`, `.` collapsed), so the only
+ * remaining divergence to bridge is the Windows/MSYS dialect split (see
+ * canonicalizeCwdForMatch). Symlinks and true case differences are still
+ * treated as distinct, matching the exact-key intent. A missing path on either
+ * side never matches.
+ */
+export function cwdPathsEqual(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  return canonicalizeCwdForMatch(a) === canonicalizeCwdForMatch(b);
+}
+
+/**
  * The idempotency predicate for `dor ensure`: true when the pane is *currently
  * running* `command` in `cwdPath`. It matches only while the command is live
  * (`currentCommand` is set between commandStart and commandFinish) and only on
@@ -457,13 +470,7 @@ export function surfaceRunsCommand(
   const run = state.currentCommand;
   if (!run || run.rawCommandLine === null) return false;
   if (run.rawCommandLine !== command) return false;
-  // The CLI sends a path.resolve'd cwd (trailing slashes, `..`, `.` collapsed),
-  // so the only remaining divergence to bridge is the Windows/MSYS dialect split
-  // (see canonicalizeCwdForMatch). Symlinks and true case differences are still
-  // treated as distinct, matching the exact-key intent.
-  const runCwd = run.cwdAtStart?.path ?? state.cwd?.path;
-  if (runCwd === undefined) return false;
-  return canonicalizeCwdForMatch(runCwd) === canonicalizeCwdForMatch(cwdPath);
+  return cwdPathsEqual(run.cwdAtStart?.path ?? state.cwd?.path, cwdPath);
 }
 
 export function deriveFallbackCommandTitle(

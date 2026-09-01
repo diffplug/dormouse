@@ -117,13 +117,16 @@ A dormouse.yml is repo-controlled and its entries execute, so it is inert until 
 
 Approving an upstream covers every worktree and clone of that repo. Approving a folder covers that checkout only, which is what you want for a branch you have not read.
 
-Where the tool lands: it always splits without taking focus and prints the new surface's handle, whether a human typed it or a script did. Taking over the calling pane when the invocation is typed alone at a prompt is designed but not built.
+Where the tool lands: typed alone at a prompt, it takes over the pane you typed it in — no split, same surface, same scrollback — and reports "takeover". Anything else splits without taking focus and prints the new surface's handle. The take-over needs an integrated shell running \`dor tool\` as the whole command line, a plain terminal pane you can see, and the tool's directory to be that pane's own, so an agent's invocation, a compound line, --minimize, --surface, and --cwd elsewhere all split instead.
+
+Take-over answers before the tool starts: \`dor\` is the pane's foreground process, so the command can only be typed once dor itself has exited and the shell is back at a prompt.
 
 --cwd sets the working directory used to find dormouse.yml and to run the command; it defaults to the directory dor was invoked from.
 
 Text output:
   created surface:3  "pnpm storybook"
   existing surface:3  "pnpm storybook"
+  takeover surface:1  "pnpm storybook"
 
 JSON output:
   {

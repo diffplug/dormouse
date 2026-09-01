@@ -21,7 +21,12 @@ import {
   isPaneOscDriven,
   resolveTerminalSessionId,
 } from '../../lib/terminal-registry';
-import { surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
+import {
+  cwdPathsEqual,
+  surfaceRunsCommand,
+  UNNAMED_PANEL_TITLE,
+  type TerminalPaneState,
+} from '../../lib/terminal-state';
 import { hostPathDisplay } from './browser-url';
 import {
   agentBrowserSessionFromParams,
@@ -34,6 +39,7 @@ import {
 // One-way import: connect-port no longer depends on this module (its eager-surface
 // and refresh seams are injected as plain functions).
 import { connectPortToDefaultBrowser } from './connect-port';
+import { toolTakesOverCaller } from './tool-takeover';
 import { listenerUrlsByPort } from './port-url';
 import { dorDirectionForEdge, toolLeafMeta, type LathWallEngine } from './lath-wall-engine';
 import type { WallNav } from './keyboard/types';
@@ -250,6 +256,12 @@ function readSurfaceText(surfaceId: string, lines: number | undefined, scrollbac
 const RESTART_POLL_INTERVAL_MS = 100;
 const RESTART_INTERRUPT_TIMEOUT_MS = 15_000;
 const RESTART_START_TIMEOUT_MS = 15_000;
+
+// The take-over handshake's half of the same idea: `dor` exits as soon as it
+// has printed its handle, so the prompt is back within a round trip. Generous
+// anyway — the cost of waiting is nothing, and a shell still busy after this is
+// one whose pane we must leave alone.
+const TAKEOVER_PROMPT_TIMEOUT_MS = 15_000;
 
 /**
  * Serializes `surface.tool` requests. A plain promise chain rather than a real
@@ -961,6 +973,73 @@ export function useDorControl({
             }
           }
 
+          const toolParams = {
+            surfaceType: 'tool',
+            command,
+            cwd,
+            toolRender: render,
+            toolPort: port,
+            ...(key ? { toolKey: key } : {}),
+            ...(toolName ? { toolName } : {}),
+          };
+
+          // Take-over: typed alone at a prompt, the tool runs in the calling
+          // pane rather than splitting (docs/specs/dor-tool.md -> Take-over).
+          const callerId = detail.surfaceId;
+          const callerMeta = callerId ? lath.getMeta(callerId) : undefined;
+          if (callerId && toolTakesOverCaller({
+            callerId,
+            explicitSurface: stringParam(params.surface) !== undefined,
+            minimized: booleanParam(params.minimized),
+            visible: nav.hasPane(callerId),
+            component: callerMeta?.component,
+            oscDriven: isPaneOscDriven(callerId),
+            rawCommandLine: getTerminalPaneState(callerId).currentCommand?.rawCommandLine ?? null,
+            cwdMatches: cwdPathsEqual(getTerminalPaneState(callerId).cwd?.path, cwd),
+          })) {
+            detail.respond({
+              ok: true,
+              result: {
+                status: 'takeover',
+                surfaceId: callerId,
+                surfaceRef: surfaceRefForId(callerId),
+                command,
+                cwd,
+                minimized: false,
+                key,
+                ...(warnings.length > 0 ? { warnings } : {}),
+              },
+            });
+            // The handshake. `dor` is this pane's foreground process until the
+            // response above lets it exit, so the command can only be typed once
+            // its own shell is back at a prompt — respond first, then wait. A
+            // shell that never returns (or a pane killed while we wait) is left
+            // exactly as it was: nothing typed, still a plain terminal.
+            const backAtPrompt = await waitForTerminalState(
+              callerId,
+              (state) => state.currentCommand === null,
+              TAKEOVER_PROMPT_TIMEOUT_MS,
+            );
+            const meta = lath.getMeta(callerId);
+            if (!backAtPrompt || !meta) return;
+            // A rename the user made outlives the transformation; an untouched
+            // fallback title becomes the tool's, as a spawned one would be.
+            const title = meta.title === UNNAMED_PANEL_TITLE ? (toolName ?? command) : meta.title;
+            // One meta write, not a params patch plus a component swap: the
+            // Session and its scrollback stay put while the leaf changes kind.
+            lath.store.setMeta(callerId, toolLeafMeta(title, toolParams));
+            getPlatform().writePty(callerId, `${command}\r`);
+            // Still inside the spawn lock, held until the command is live so a
+            // second invocation of the same key dedupes against a running tool
+            // rather than racing this one into a duplicate.
+            await waitForTerminalState(
+              callerId,
+              (state) => surfaceRunsCommand(state, command, cwd),
+              RESTART_START_TIMEOUT_MS,
+            );
+            return;
+          }
+
           // A tool is a shell-hosted PTY with the command typed into it, exactly
           // as `dor ensure` spawns one — but with no command+cwd matching, and a
           // leaf that renders both capabilities.
@@ -980,15 +1059,7 @@ export function useDorControl({
             // Focus-neutral like `dor ensure`: a tool spawned by a script or an
             // agent must not steal the caller's selection.
             focusNeutral: true,
-            leafMeta: toolLeafMeta(toolName ?? command, {
-              surfaceType: 'tool',
-              command,
-              cwd,
-              toolRender: render,
-              toolPort: port,
-              ...(key ? { toolKey: key } : {}),
-              ...(toolName ? { toolName } : {}),
-            }),
+            leafMeta: toolLeafMeta(toolName ?? command, toolParams),
           });
           if (!created.ok) {
             detail.respond({ ok: false, error: created.message });
