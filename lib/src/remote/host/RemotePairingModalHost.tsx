@@ -38,6 +38,7 @@ export function RemotePairingModalHost({
       // re-render into whatever the previous one left.
       key={head.pairingId}
       request={head.request}
+      verified={head.verified}
       onApprove={() => head.approve()}
       onDeny={() => head.deny()}
     />

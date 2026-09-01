@@ -15,7 +15,7 @@
  * records for `wall-test-utils.ts`). Callers that want spies wrap these.
  */
 
-import type { RemoteHostConsoleStatus } from './service-protocol';
+import type { RemoteHostConsoleStatus, SetupQrResult } from './service-protocol';
 import type { RemoteHostLink } from '../../lib/platform/types';
 
 /** A machine that has never enrolled: the section shows its three-field form. */
@@ -55,6 +55,22 @@ export function enrolledStatus(
   };
 }
 
+/**
+ * A setup code as `setupQr` answers one: a `#setup?token=…` URL and its clock.
+ *
+ * The expiry is relative to *now* rather than a fixed epoch, because the panel
+ * renders the minutes left — a frozen timestamp would render "expired" in every
+ * story. `DEFAULT_PAIRING_TTL_MS` out, which is the real TTL
+ * (`server/src/setup-token.ts`), so the copy reads as it does in the app.
+ */
+export function setupQrResult(over: Partial<SetupQrResult> = {}): SetupQrResult {
+  return {
+    url: 'https://ned-mac.tail9c2f1.ts.net/#setup?token=3PkQ8sV2mYb1hZr7Lw0cJdN6xTgAeUiOpqRsFuHv9Kz',
+    expiresAt: Date.now() + 5 * 60 * 1000,
+    ...over,
+  };
+}
+
 /** What {@link makeStubRemoteHostLink} should answer. */
 export interface PrimedRemoteHost {
   /** What `status` answers. */
@@ -66,6 +82,16 @@ export interface PrimedRemoteHost {
    * render inline, in the same place and the same words.
    */
   enrollError?: string;
+  /** What `setupQr` answers; defaults to {@link setupQrResult}. */
+  setupQr?: SetupQrResult;
+  /** Make `setupQr` reject — the relay is down, or the server refused. */
+  setupQrError?: string;
+  /**
+   * Fire `setupTokenRedeemed` as soon as something subscribes, so the panel
+   * renders its scanned state. A story is one frame, so "the phone redeemed the
+   * code" has to be a starting condition rather than an event to wait for.
+   */
+  setupRedeemed?: boolean;
 }
 
 /**
@@ -87,10 +113,22 @@ export function makeStubRemoteHostLink(primed: PrimedRemoteHost): RemoteHostLink
       if ((cmd === 'enroll' || cmd === 'enrollOffer') && primed.enrollError) {
         throw new Error(primed.enrollError);
       }
+      if (cmd === 'setupQr') {
+        if (primed.setupQrError) throw new Error(primed.setupQrError);
+        return primed.setupQr ?? setupQrResult();
+      }
       return null;
     },
     respond: () => {},
     notify: () => {},
-    on: () => () => {},
+    on: (name, listener) => {
+      if (name === 'setupTokenRedeemed' && primed.setupRedeemed) {
+        // A microtask rather than inline: the panel subscribes during an effect,
+        // and setting state before that effect has returned is a no-op React
+        // warns about.
+        queueMicrotask(() => listener(undefined));
+      }
+      return () => {};
+    },
   };
 }

@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
-import type { RemoteHostConsoleStatus } from '../host/remote/service-protocol';
+import { QrCode } from './QrCode';
+import type { RemoteHostConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
 import type { RemoteHostStatus } from '../remote/host/remote-host';
 import {
   clearRemoteHostEnrollment,
   enrollOfferRemoteHost,
   enrollRemoteHost,
   getRemoteHostStatusSnapshot,
+  mintSetupQr,
   reconnectRemoteHost,
   refreshRemoteHostStatus,
   subscribeToRemoteHostStatus,
+  subscribeToSetupTokenRedeemed,
 } from '../remote/host/host-status-store';
 
 /**
@@ -44,6 +47,21 @@ const TONE_CLASS = {
 } as const;
 
 const FIELD_LABEL = 'text-xs text-muted';
+
+/**
+ * How far ahead of `expiresAt` the phone-setup panel mints a replacement code.
+ *
+ * The panel can sit open while someone goes to find their phone, and a code is
+ * short-lived by design (`docs/specs/server.md` → Setup tokens) — so it replaces
+ * its own rather than going quietly unscannable. The lead is what keeps a camera
+ * opening on the old code from redeeming one that has already died.
+ */
+const SETUP_QR_REFRESH_LEAD_MS = 20_000;
+
+/** Whole minutes until a setup code stops redeeming; never negative. */
+function minutesUntil(expiresAt: number, now: number): number {
+  return Math.max(0, Math.ceil((expiresAt - now) / 60_000));
+}
 
 /**
  * The busy/error pair every action in this section runs behind, so a rejection
@@ -279,7 +297,52 @@ function EnrolledView({
   // Disconnecting drops every paired phone until they pair again, so it asks
   // once rather than acting on the first click.
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
+  // The phone-setup panel's state lives here, not in the panel, so a failed mint
+  // renders in this view's one error slot alongside Reconnect's and
+  // Disconnect's — the same rule the offer card follows.
+  const [showSetup, setShowSetup] = useState(false);
+  const [qr, setQr] = useState<SetupQrResult | null>(null);
+  const [redeemed, setRedeemed] = useState(false);
   const described = describeConnection(connection);
+
+  const mint = useCallback(
+    () =>
+      run(async () => {
+        setRedeemed(false);
+        setQr(await mintSetupQr());
+      }),
+    [run],
+  );
+
+  // Nothing is minted until the panel is open: a code is a credential with a
+  // clock on it, and one nobody is looking at is one nobody can scan.
+  useEffect(() => {
+    if (showSetup) void mint();
+  }, [showSetup, mint]);
+
+  // Replace the code before it dies. Not after a redemption: that code is spent
+  // and the next step is on the phone, so a fresh one would only invite a second
+  // setup nobody asked for.
+  useEffect(() => {
+    if (!showSetup || !qr || redeemed) return;
+    const delay = Math.max(0, qr.expiresAt - Date.now() - SETUP_QR_REFRESH_LEAD_MS);
+    const timer = setTimeout(() => void mint(), delay);
+    return () => clearTimeout(timer);
+  }, [showSetup, qr, redeemed, mint]);
+
+  // The Server announces a spent token to the Host that minted it
+  // (`docs/specs/server.md` → Relay), which is the only way this panel can know
+  // its code was used: the redemption happens on the phone.
+  useEffect(() => {
+    if (!showSetup) return;
+    return subscribeToSetupTokenRedeemed(() => setRedeemed(true));
+  }, [showSetup]);
+
+  const closeSetup = useCallback(() => {
+    setShowSetup(false);
+    setQr(null);
+    setRedeemed(false);
+  }, []);
 
   return (
     <div className="mt-1.5 text-sm leading-relaxed">
@@ -330,15 +393,117 @@ function EnrolledView({
             </button>
           </>
         ) : (
-          <button
-            type="button"
-            disabled={busy}
-            className={modalActionButton()}
-            onClick={() => setConfirmingDisconnect(true)}
-          >
-            Disconnect
-          </button>
+          <>
+            <button
+              type="button"
+              disabled={busy}
+              aria-expanded={showSetup}
+              className={modalActionButton({ tone: showSetup ? 'secondary' : 'primary' })}
+              onClick={() => (showSetup ? closeSetup() : setShowSetup(true))}
+            >
+              Set up a phone
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              className={modalActionButton()}
+              onClick={() => setConfirmingDisconnect(true)}
+            >
+              Disconnect
+            </button>
+          </>
         )}
+      </div>
+
+      {showSetup ? (
+        <SetupPhonePanel
+          qr={qr}
+          redeemed={redeemed}
+          busy={busy}
+          onNewCode={() => void mint()}
+          onDone={closeSetup}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The QR a phone scans to set itself up against this machine's server, inline
+ * in the Settings dialog (`docs/specs/server.md` → "Remote control, in the
+ * Settings dialog").
+ *
+ * Purely what to draw: the code, its clock, and two buttons. Minting, refreshing
+ * and the redeemed edge all belong to {@link EnrolledView}, which owns the error
+ * slot they share.
+ */
+function SetupPhonePanel({
+  qr,
+  redeemed,
+  busy,
+  onNewCode,
+  onDone,
+}: {
+  qr: SetupQrResult | null;
+  redeemed: boolean;
+  busy: boolean;
+  onNewCode: () => void;
+  onDone: () => void;
+}) {
+  // Re-render once a second so the countdown is a countdown. Only while there is
+  // a live code to count down: a spent or absent one has no clock.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!qr || redeemed) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [qr, redeemed]);
+
+  const left = qr ? minutesUntil(qr.expiresAt, now) : 0;
+
+  return (
+    <div className="mt-2 rounded border border-border p-2">
+      <div className={FIELD_LABEL}>Set up a phone</div>
+      {redeemed ? (
+        <>
+          <div className="mt-1 text-sm leading-relaxed text-foreground">
+            Scanned. Finish on the phone — it registers a passkey, then asks to pair, and that
+            request interrupts you here.
+          </div>
+          <div className="mt-1 text-xs text-muted">This code is used up.</div>
+        </>
+      ) : qr ? (
+        <>
+          <div className="mt-1 text-sm leading-relaxed text-muted">
+            Point the phone’s camera at this. Nothing to type — no address, no password.
+          </div>
+          <div className="mt-2 flex justify-center">
+            <QrCode value={qr.url} label="Setup code for this machine" />
+          </div>
+          <div className="mt-1.5 text-center text-xs text-muted">
+            {left > 0
+              ? `Sets up one phone, within ${left} min.`
+              : 'This code has expired — get a new one.'}
+          </div>
+        </>
+      ) : (
+        <div className="mt-1 text-sm text-muted">
+          {busy ? 'Getting a code…' : 'No code — try again.'}
+        </div>
+      )}
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          className={modalActionButton()}
+          onClick={onNewCode}
+        >
+          New code
+        </button>
+        <button type="button" className={modalActionButton()} onClick={onDone}>
+          Done
+        </button>
       </div>
     </div>
   );

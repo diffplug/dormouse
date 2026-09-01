@@ -70,7 +70,22 @@ export interface PairingQueueItem {
   clientId: string;
   /** Immutable ceremony ticket id, echoed by approve/deny. */
   pairingId: string;
+  /**
+   * The request with its `setupNonce` **stripped**: the webview needs the
+   * verdict, not the proof. The nonce is a setup token this Host minted, and a
+   * Client holding one is what {@link PairingQueueItem.verified} attests to —
+   * mirroring it would put a bearer-ish credential in a webview realm for no
+   * gain (`RemoteHost.#onPair` in `lib/src/remote/host/remote-host.ts`).
+   */
   request: PairingRequest;
+  /**
+   * The Client proved it was set up by scanning **this** machine's setup QR, by
+   * returning a token this Host minted and had not seen spent. Drives the
+   * modal's one-confirm copy (`docs/specs/remote-security-model.md` → Pairing
+   * Ceremony); `false` is the ordinary fingerprint-compare pairing, never an
+   * error.
+   */
+  verified: boolean;
   requestedAt: number;
 }
 
@@ -92,6 +107,17 @@ export interface PairingQueueEvent {
 export interface HostStatusEvent {
   name: 'status';
   enrolled: boolean;
+}
+
+/**
+ * service → webview, unsolicited: a setup token this Host minted was just spent
+ * on the Server, so the QR showing it is stale and a phone is mid-setup
+ * (`ServerToHostFrame` `setup-token-redeemed`). Carries nothing — the panel that
+ * displayed the code is the only thing that can act on it, and what it does is
+ * stop offering a code that can no longer be redeemed.
+ */
+export interface SetupTokenRedeemedEvent {
+  name: 'setupTokenRedeemed';
 }
 
 // --- Command parameter shapes ---
@@ -163,6 +189,25 @@ export interface AnswerParams {
 export interface EnrollResult {
   hostId: string;
   serverUrl: string;
+}
+
+/**
+ * What `setupQr` answers: the URL to render as a QR, and when it stops
+ * redeeming.
+ *
+ * **The setup token rides into the webview inside `url`, on purpose.** That is
+ * the whole point of the command — the code is displayed to a person standing
+ * at this machine, and displaying it *is* the local-presence act
+ * (`docs/specs/remote-security-model.md` → Pairing Ceremony). It is the one
+ * credential in this contract that crosses that seam: `hostToken` still never
+ * does (`SECURITY.md` → the no-`hostToken`-in-a-webview FAIL IF), and neither
+ * does the installer offer's token ({@link RemoteHostConsoleStatus.offer}).
+ */
+export interface SetupQrResult {
+  /** `<enrollment origin>/#setup?token=…`, composed by the service. */
+  url: string;
+  /** Epoch ms after which the token no longer redeems. */
+  expiresAt: number;
 }
 
 /**

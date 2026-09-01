@@ -34,7 +34,7 @@ import {
   type PairingRequest,
   MAX_PENDING_PAIRINGS,
 } from 'server-lib-common';
-import { RemoteHost } from './remote-host';
+import { RemoteHost, type RemoteHostOptions } from './remote-host';
 import type { HostEnrollment } from './enrollment';
 import type { PendingPairing } from './pairing-approval';
 import { FakeSocket } from '../test-fake-socket';
@@ -140,6 +140,7 @@ describe('RemoteHost frame handling', () => {
   function makeHost(
     loadAcl: () => HostAclRecord[] = () => [],
     now: () => number = () => Date.now(),
+    hooks: Pick<RemoteHostOptions, 'verifySetupNonce' | 'onSetupTokenRedeemed'> = {},
   ) {
     savedRecords = [];
     approvals = [];
@@ -153,6 +154,7 @@ describe('RemoteHost frame handling', () => {
       },
       requestApproval: (pending) => approvals.push(pending),
       dismissApproval: () => {},
+      ...hooks,
       now,
     });
     host.start();
@@ -211,6 +213,96 @@ describe('RemoteHost frame handling', () => {
       error: 'malformed-request',
     });
     expect(savedRecords).toHaveLength(0);
+  });
+
+  it('marks a pairing verified when the injected check claims the nonce', () => {
+    const asked: string[] = [];
+    makeHost(
+      () => [],
+      () => Date.now(),
+      {
+        verifySetupNonce: (nonce) => {
+          asked.push(nonce);
+          // Single-use lives in the service; the controller just asks once.
+          return asked.length === 1;
+        },
+      },
+    );
+    const request: PairingRequest = {
+      accountId: 'owner',
+      passkeyCredentialId: 'cred-1',
+      passkeyPublicKeyHash: 'hash-1',
+      devicePublicKey: 'device-1',
+      requestedLabel: 'iPhone Safari',
+      setupNonce: 'minted-here',
+    };
+    socket.receive({ t: 'pair', clientId: 'c1', request });
+
+    expect(asked).toEqual(['minted-here']);
+    expect(approvals[0]!.verified).toBe(true);
+    // The proof is consumed here and never handed on: `verified` is what the
+    // modal and the mirrored queue get, not the token behind it.
+    expect(approvals[0]!.request.setupNonce).toBeUndefined();
+
+    // The same nonce again is an ordinary pairing, not an error — the phone may
+    // simply be re-pairing long after its code was spent.
+    socket.receive({ t: 'pair', clientId: 'c2', request });
+    expect(approvals[1]!.verified).toBe(false);
+    expect(socket.frames('pair-result')).toEqual([]);
+  });
+
+  it('pairs unverified with no nonce, and with one nothing minted', () => {
+    makeHost(
+      () => [],
+      () => Date.now(),
+      { verifySetupNonce: () => false },
+    );
+    const base: PairingRequest = {
+      accountId: 'owner',
+      passkeyCredentialId: 'cred-1',
+      passkeyPublicKeyHash: 'hash-1',
+      devicePublicKey: 'device-1',
+      requestedLabel: 'iPhone Safari',
+    };
+    socket.receive({ t: 'pair', clientId: 'c1', request: base });
+    socket.receive({ t: 'pair', clientId: 'c2', request: { ...base, setupNonce: 'forged' } });
+
+    expect(approvals.map((pending) => pending.verified)).toEqual([false, false]);
+    // Both still reach the modal: an unverifiable nonce costs the fingerprint
+    // compare, not the pairing.
+    expect(approvals).toHaveLength(2);
+    expect(socket.frames('pair-result')).toEqual([]);
+  });
+
+  it('verifies nothing when no checker is injected', () => {
+    makeHost();
+    socket.receive({
+      t: 'pair',
+      clientId: 'c1',
+      request: {
+        accountId: 'owner',
+        passkeyCredentialId: 'cred-1',
+        passkeyPublicKeyHash: 'hash-1',
+        devicePublicKey: 'device-1',
+        requestedLabel: 'iPhone Safari',
+        setupNonce: 'anything',
+      },
+    });
+    expect(approvals[0]!.verified).toBe(false);
+  });
+
+  it('routes setup-token-redeemed, the one frame that addresses no client', () => {
+    let redeemed = 0;
+    makeHost(
+      () => [],
+      () => Date.now(),
+      { onSetupTokenRedeemed: () => redeemed++ },
+    );
+    socket.receive({ t: 'setup-token-redeemed' });
+    expect(redeemed).toBe(1);
+    // It carries no clientId by design, so it must be routed before the
+    // addressed-frame narrowing rather than dropped by it.
+    expect(socket.sent).toEqual([]);
   });
 
   it('bounds and strips requestedLabel before it reaches the approval UI', () => {

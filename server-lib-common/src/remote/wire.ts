@@ -200,6 +200,26 @@ export interface SetupTokenResponse {
   expiresAt: number;
 }
 
+/**
+ * Structural validation of a {@link SetupTokenResponse}, beside the type so a
+ * field added here cannot be silently accepted by the Host that reads one.
+ *
+ * The Host runs it on the 200 body for the reason `isEnrollment` exists: a
+ * server that answers 200 with `token` missing — a version skew, a proxy that
+ * rewrote the body — would otherwise put `undefined` in the QR's URL and record
+ * it as a nonce the next pairing could match.
+ */
+export function isSetupTokenResponse(value: unknown): value is SetupTokenResponse {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.token === 'string' &&
+    candidate.token !== '' &&
+    typeof candidate.expiresAt === 'number' &&
+    Number.isFinite(candidate.expiresAt)
+  );
+}
+
 export interface HostsResponse {
   hosts: Array<{ hostId: string; label: string; online: boolean }>;
 }

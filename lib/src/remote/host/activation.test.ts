@@ -271,7 +271,15 @@ describe('remote host bridge mode', () => {
 
     link.emit('pairing-queue', {
       name: 'pairing-queue',
-      queue: [{ clientId: 'c1', pairingId: 'p1', request: PAIRING_REQUEST, requestedAt: 5 }],
+      queue: [
+        {
+          clientId: 'c1',
+          pairingId: 'p1',
+          request: PAIRING_REQUEST,
+          verified: false,
+          requestedAt: 5,
+        },
+      ],
     });
 
     const head = pairing.getPairingApprovalSnapshot()[0]!;
@@ -279,6 +287,7 @@ describe('remote host bridge mode', () => {
       clientId: 'c1',
       pairingId: 'p1',
       request: PAIRING_REQUEST,
+      verified: false,
       requestedAt: 5,
     });
 
@@ -303,6 +312,7 @@ describe('remote host bridge mode', () => {
         clientId,
         pairingId: `pairing-${clientId}`,
         request: PAIRING_REQUEST,
+        verified: false,
         requestedAt: 5,
       })),
     });
@@ -334,12 +344,22 @@ describe('remote host bridge mode', () => {
 
     link.emit('pairing-queue', {
       name: 'pairing-queue',
-      queue: [{ clientId: 'c1', pairingId: 'p1', request: PAIRING_REQUEST, requestedAt: 5 }],
+      queue: [
+        {
+          clientId: 'c1',
+          pairingId: 'p1',
+          request: PAIRING_REQUEST,
+          verified: false,
+          requestedAt: 5,
+        },
+      ],
     });
     const stale = pairing.getPairingApprovalSnapshot()[0]!;
     link.emit('pairing-queue', {
       name: 'pairing-queue',
-      queue: [{ clientId: 'c1', pairingId: 'p2', request: second, requestedAt: 9 }],
+      queue: [
+        { clientId: 'c1', pairingId: 'p2', request: second, verified: false, requestedAt: 9 },
+      ],
     });
 
     const head = pairing.getPairingApprovalSnapshot();
@@ -372,6 +392,7 @@ describe('remote host bridge mode', () => {
           clientId: 'c1',
           pairingId: 'p1',
           request: { ...PAIRING_REQUEST },
+          verified: false,
           requestedAt: 5,
         },
       ],
@@ -391,12 +412,38 @@ describe('remote host bridge mode', () => {
           clientId: 'c1',
           pairingId: 'p2',
           request: { ...PAIRING_REQUEST },
+          verified: false,
           requestedAt: 5,
         },
       ],
     });
     expect(pairing.getPairingApprovalSnapshot()[0]).not.toBe(first);
     expect(pairing.getPairingApprovalSnapshot()[0]!.pairingId).toBe('p2');
+  });
+
+  it('carries the verified flag through to the modal', async () => {
+    // The flag decides which of the modal's two copies renders, and the mirror
+    // is the only path it travels: the Host strips the nonce that produced it,
+    // so nothing downstream can re-derive it (docs/specs/remote-security-model.md).
+    const link = fakeLink();
+    const { pairing } = await installBridge(link);
+
+    link.emit('pairing-queue', {
+      name: 'pairing-queue',
+      queue: [
+        {
+          clientId: 'c1',
+          pairingId: 'p1',
+          request: PAIRING_REQUEST,
+          verified: true,
+          requestedAt: 5,
+        },
+      ],
+    });
+
+    const head = pairing.getPairingApprovalSnapshot()[0]!;
+    expect(head.verified).toBe(true);
+    expect(head.request.setupNonce).toBeUndefined();
   });
 
   it('seeds the mirror, for a webview that reloaded mid-pairing', async () => {

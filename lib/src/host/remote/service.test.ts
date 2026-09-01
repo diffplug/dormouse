@@ -7,7 +7,12 @@
 
 import { hostname } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { EnrollmentOffer, HostAclRecord, PairingRequest } from 'server-lib-common';
+import {
+  API_ROUTES,
+  type EnrollmentOffer,
+  type HostAclRecord,
+  type PairingRequest,
+} from 'server-lib-common';
 import type { HostEnrollment } from '../../remote/host/enrollment';
 import type { HostSurfaceProvider } from '../../remote/host/host-surface-provider';
 import { FakeSocket } from '../../remote/test-fake-socket';
@@ -17,6 +22,8 @@ import type {
   HostStatusEvent,
   PairingQueueEvent,
   RemoteHostConsoleStatus,
+  SetupQrResult,
+  SetupTokenRedeemedEvent,
 } from './service-protocol';
 
 const CONNECT_SRC = 'https://*.dormouse.sh wss://*.dormouse.sh';
@@ -99,11 +106,30 @@ let store: MemoryStore;
 let service: RemoteHostService;
 let commandSeq = 0;
 
-/** A server that answers enroll, push/send, and push/devices. */
+/** How many setup tokens the fake server has minted, so each one is distinct. */
+let setupTokensMinted: number;
+/** Make `POST /api/host/setup-token` answer a 200 that is not a setup token. */
+let setupTokenMalformed: boolean;
+/** What the fake server puts in `expiresAt`; a test moves it to expire one. */
+let setupTokenTtlMs: number;
+
+/** A server that answers enroll, setup-token, push/send, and push/devices. */
 function fakeFetch(): typeof globalThis.fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     requests.push({ url, init });
+    if (url.endsWith(API_ROUTES.hostSetupToken)) {
+      return {
+        ok: true,
+        json: async () =>
+          setupTokenMalformed
+            ? { expiresAt: Date.now() + setupTokenTtlMs }
+            : {
+                token: `setup-token-${++setupTokensMinted}`,
+                expiresAt: Date.now() + setupTokenTtlMs,
+              },
+      } as Response;
+    }
     if (url.endsWith('/api/host/enroll')) {
       return {
         ok: true,
@@ -192,10 +218,13 @@ function queueEvents(): PairingQueueEvent[] {
   return uiEvents().filter((event): event is PairingQueueEvent => event.name === 'pairing-queue');
 }
 
-function uiEvents(): Array<PairingQueueEvent | HostStatusEvent> {
+function uiEvents(): Array<PairingQueueEvent | HostStatusEvent | SetupTokenRedeemedEvent> {
   return sent
     .filter((message) => message.event === 'remoteHost:event')
-    .map((message) => message.data as unknown as PairingQueueEvent | HostStatusEvent);
+    .map(
+      (message) =>
+        message.data as unknown as PairingQueueEvent | HostStatusEvent | SetupTokenRedeemedEvent,
+    );
 }
 
 /** What the webviews were told about whether there is a Host, in order. */
@@ -212,6 +241,9 @@ beforeEach(() => {
   offer = null;
   offerReads = 0;
   offerGate = null;
+  setupTokensMinted = 0;
+  setupTokenMalformed = false;
+  setupTokenTtlMs = 5 * 60 * 1000;
   vi.stubGlobal('fetch', fakeFetch());
 });
 
@@ -834,6 +866,134 @@ describe('pairing queue', () => {
       approved: true,
       record: { devicePublicKey: 'device-2' },
     });
+  });
+});
+
+describe('setup QR', () => {
+  /**
+   * An enrollment whose `hostToken` cannot be confused with anything else in an
+   * assertion — the shared fixture's `tok` is a substring of `#setup?token=`,
+   * which is exactly the string this suite has to prove stays out of the webview.
+   */
+  const QR_ENROLLMENT: HostEnrollment = { ...ENROLLMENT, hostToken: 'host-bearer-secret' };
+
+  async function running(
+    enrollment: HostEnrollment = QR_ENROLLMENT,
+  ): Promise<FakeSocket> {
+    createService({ enrollment });
+    await service.start();
+    const socket = sockets[0]!;
+    socket.open();
+    return socket;
+  }
+
+  /** Mint a code and pull the token back out of the URL a phone would open. */
+  async function mint(): Promise<{ url: string; expiresAt: number; token: string }> {
+    const result = (await command('setupQr')).result as SetupQrResult;
+    const token = new URL(result.url).hash.replace('#setup?token=', '');
+    return { ...result, token: decodeURIComponent(token) };
+  }
+
+  function pair(socket: FakeSocket, clientId: string, setupNonce?: string) {
+    socket.receive({
+      t: 'pair',
+      clientId,
+      request: { ...PAIRING, devicePublicKey: `device-${clientId}`, setupNonce },
+    });
+    return queueEvents().at(-1)!.queue.find((item) => item.clientId === clientId)!;
+  }
+
+  it('mints over the Host’s own authenticated channel and composes the URL here', async () => {
+    await running();
+    const result = await mint();
+
+    const posted = requests.at(-1)!;
+    expect(posted.url).toBe(`${QR_ENROLLMENT.serverUrl}${API_ROUTES.hostSetupToken}`);
+    expect((posted.init!.headers as Record<string, string>).authorization).toBe(
+      'Bearer host-bearer-secret',
+    );
+    // An allowed origin's open redirect must not carry the bearer elsewhere.
+    expect(posted.init!.redirect).toBe('error');
+
+    // The origin is the enrollment's — the phone-facing WebAuthn origin — and
+    // the token rides in the URL, which is the whole point of the command.
+    expect(result.url).toBe(`${QR_ENROLLMENT.origin}/#setup?token=setup-token-1`);
+    expect(result.token).toBe('setup-token-1');
+    // The `hostToken` is not what crosses: only the code a human will scan does.
+    expect(JSON.stringify(sent)).not.toContain('host-bearer-secret');
+  });
+
+  it('refuses to mint on a machine with no enrollment', async () => {
+    createService();
+    await service.start();
+    expect((await command('setupQr')).error).toContain('not connected');
+    expect(requests).toEqual([]);
+  });
+
+  it('fails the mint when the server answers a 200 that is not a setup token', async () => {
+    await running();
+    setupTokenMalformed = true;
+    // An `undefined` token would go into the QR *and* into the set that decides
+    // `verified` on the next pairing.
+    expect((await command('setupQr')).error).toContain('not a setup token');
+  });
+
+  it('marks a pairing verified for a nonce it minted, and never mirrors the nonce', async () => {
+    const socket = await running();
+    const { token } = await mint();
+
+    const item = pair(socket, 'c1', token);
+    expect(item.verified).toBe(true);
+    // The webview is told the verdict, not the proof behind it. Its own copy of
+    // the code is the QR it asked for; the pairing must not hand it a second one.
+    expect(item.request.setupNonce).toBeUndefined();
+    expect(JSON.stringify(queueEvents())).not.toContain(token);
+  });
+
+  it('spends a nonce on the first pairing that uses it', async () => {
+    const socket = await running();
+    const { token } = await mint();
+
+    expect(pair(socket, 'c1', token).verified).toBe(true);
+    // Single use: one scan sets up one phone, so a replay is an ordinary
+    // fingerprint-compare pairing rather than an error.
+    expect(pair(socket, 'c2', token).verified).toBe(false);
+    expect(socket.frames('pair-result')).toEqual([]);
+  });
+
+  it('treats an unknown or expired nonce as an ordinary pairing', async () => {
+    const socket = await running();
+    expect(pair(socket, 'c1', 'never-minted-here').verified).toBe(false);
+
+    setupTokenTtlMs = -1;
+    const { token } = await mint();
+    expect(pair(socket, 'c2', token).verified).toBe(false);
+    // A nonce-less phone — the QR-less path — pairs exactly as it always did.
+    expect(pair(socket, 'c3').verified).toBe(false);
+  });
+
+  it('forgets its codes when the enrollment they belong to goes', async () => {
+    const socket = await running();
+    const { token } = await mint();
+    expect(socket.frames('pair-result')).toEqual([]);
+
+    await command('clearEnrollment');
+    await command('enroll', {
+      serverUrl: 'https://relay.dormouse.sh',
+      password: 'setup',
+      label: 'Laptop',
+    });
+    const reconnected = sockets.at(-1)!;
+    reconnected.open();
+
+    // The token was minted by the server this Host just left.
+    expect(pair(reconnected, 'c1', token).verified).toBe(false);
+  });
+
+  it('tells the webview when a code it minted is spent', async () => {
+    const socket = await running();
+    socket.receive({ t: 'setup-token-redeemed' });
+    expect(uiEvents()).toContainEqual({ name: 'setupTokenRedeemed' });
   });
 });
 

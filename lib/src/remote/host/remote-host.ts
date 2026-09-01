@@ -90,6 +90,22 @@ export interface RemoteHostOptions {
   requestApproval: (pending: PendingPairing) => void;
   /** Dismiss a surfaced request once resolved. */
   dismissApproval: (clientId: string) => void;
+  /**
+   * Whether `nonce` is a setup token this Host minted and has not seen spent,
+   * **consuming it** on a match so one QR proves one pairing. Injected because
+   * the tokens are the service's — it is the party that mints them over the
+   * Host's authenticated channel (`lib/src/host/remote/service.ts`).
+   *
+   * Optional, and absent means nothing is verified: a Host built without it
+   * (the tests, an older embedder) runs every pairing as the ordinary
+   * fingerprint-compare one.
+   */
+  verifySetupNonce?: (nonce: string) => boolean;
+  /**
+   * A setup token this Host minted was spent on the Server, so the QR showing
+   * it is stale. Announced to whoever is displaying it; nothing here acts on it.
+   */
+  onSetupTokenRedeemed?: () => void;
   now?: () => number;
   /** Auto-reconnect with backoff (default true; tests pass false). */
   reconnect?: boolean;
@@ -134,6 +150,8 @@ export class RemoteHost {
   readonly #saveAcl: (hostId: string, records: readonly HostAclRecord[]) => void;
   readonly #requestApproval: (pending: PendingPairing) => void;
   readonly #dismissApproval: (clientId: string) => void;
+  readonly #verifySetupNonce: (nonce: string) => boolean;
+  readonly #onSetupTokenRedeemed: () => void;
   readonly #now: () => number;
   readonly #reconnect: boolean;
 
@@ -174,6 +192,8 @@ export class RemoteHost {
     this.#saveAcl = options.saveAcl;
     this.#requestApproval = options.requestApproval;
     this.#dismissApproval = options.dismissApproval;
+    this.#verifySetupNonce = options.verifySetupNonce ?? (() => false);
+    this.#onSetupTokenRedeemed = options.onSetupTokenRedeemed ?? (() => {});
     this.#reconnect = options.reconnect ?? true;
   }
 
@@ -368,9 +388,9 @@ export class RemoteHost {
     }
     if (!frame || typeof (frame as { t?: unknown }).t !== 'string') return;
     if (frame.t === 'setup-token-redeemed') {
-      // Deliberately dropped for now: the phone's registration already
-      // succeeded. Tearing this Host's own QR down on it belongs to QR-first
-      // phone setup (`docs/specs/server.md` -> `## Future`).
+      // The one server→host frame that addresses no Client, so it is routed
+      // before the clientId narrowing below: it is about this Host itself.
+      this.#onSetupTokenRedeemed();
       return;
     }
     if (!isAddressedFrame(frame)) return;
@@ -407,12 +427,30 @@ export class RemoteHost {
       this.#send({ t: 'pair-result', clientId, approved: false, error: 'malformed-request' });
       return;
     }
+    // A phone set up by scanning this machine's QR returns the token it was set
+    // up with. Only this Host can check one — it minted the token over its own
+    // authenticated channel and holds the only other copy — which is what makes
+    // `verified` unforgeable by the Server or the Client
+    // (`docs/specs/remote-security-model.md` → Pairing Ceremony).
+    //
+    // A miss is **not** an error: an unknown, expired, or already-spent nonce
+    // simply pairs the ordinary way, because the phone may predate the QR path
+    // or be re-pairing long after its code was spent.
+    //
+    // A plain map lookup, not a constant-time compare: the token is 256 bits of
+    // server-chosen randomness, so a timing side channel leaks nothing an
+    // attacker could walk toward a guess.
+    const verified =
+      typeof incoming.setupNonce === 'string' && this.#verifySetupNonce(incoming.setupNonce);
     // The label is attacker-chosen free text rendered in the one dialog the
     // ACL rests on. Bound and strip it here, once, so every consumer — the
     // queue projection, the modal, and the ACL record written on approval —
-    // sees the same safe value.
+    // sees the same safe value. The nonce is dropped in the same step: `verified`
+    // is what anyone downstream needs, and the token itself is a credential that
+    // has no business in a webview realm or an ACL record.
+    const { setupNonce: _spent, ...bare } = incoming;
     const request: PairingRequest = {
-      ...incoming,
+      ...bare,
       accountId: boundedPairingAccount(incoming.accountId),
       requestedLabel: boundedPairingLabel(incoming.requestedLabel),
     };
@@ -421,6 +459,7 @@ export class RemoteHost {
       clientId,
       pairingId: ticket.pairingId,
       request,
+      verified,
       requestedAt: ticket.requestedAt,
       approve: (label) => this.#approvePairing(clientId, ticket.pairingId, label),
       deny: (error) => this.#denyPairing(clientId, ticket.pairingId, error),

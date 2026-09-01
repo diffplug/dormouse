@@ -226,6 +226,17 @@ text, reduced by `boundedPairingLabel` / `boundedPairingAccount` before display,
 so neither can overflow the dialog or carry bidi overrides that make it read as
 something else.
 
+**A setup nonce collapses approval to one confirm.** A phone set up by scanning
+a Host's QR returns that setup token as `PairingRequest.setupNonce`, and the
+Host verifies it against the codes *it* minted over its own authenticated
+channel — single-use, so neither Server nor Client can fabricate the verdict.
+Displaying the QR on the laptop *is* the local-presence act, so the verified
+modal names what proved the device instead of asking the user to vouch for it.
+A missing, unknown, expired or spent nonce is **not** an error: that pairing
+keeps the fingerprint compare, which remains the control for every nonce-less
+one. The webview is told `verified`, never the nonce. Source of truth:
+`RemoteHost.#onPair` and `RemoteHostService.#verifySetupNonce`.
+
 **The Host validates the request's shape itself** (`isPairingRequest`), never
 relying on the Server having done so: the Server is not trusted, and an
 unvalidated relayed object reaching the approval UI is both a crash surface and

@@ -6,6 +6,7 @@ import {
   enrolledStatus,
   OFFER_STATUS,
   UNENROLLED_STATUS,
+  setupQrResult,
 } from '../host/remote/test-remote-host-link';
 
 /**
@@ -169,6 +170,59 @@ export const ConfirmingDisconnect: Story = {
     const canvas = within(context.canvasElement);
     await userEvent.click(await canvas.findByRole('button', { name: 'Disconnect' }));
     await canvas.findByText('Paired phones will need to pair again.');
+  },
+};
+
+/**
+ * The QR-first path: the enrolled section mints a setup code and shows it, so a
+ * phone is set up by pointing a camera at the laptop rather than by typing an
+ * origin and a 64-hex password (`docs/specs/server.md`, Setup tokens).
+ */
+export const SetupPhoneQr: Story = {
+  parameters: {
+    primedRemoteHost: { status: enrolledStatus(), setupQr: setupQrResult() },
+    docs: { story: { height: '520px' } },
+  },
+  play: async (context) => {
+    const canvas = within(context.canvasElement);
+    await userEvent.click(await canvas.findByRole('button', { name: 'Set up a phone' }));
+    await canvas.findByRole('img', { name: 'Setup code for this machine' });
+  },
+};
+
+/**
+ * The phone redeemed the code. The Server tells the Host that minted it, which
+ * is the only way this panel can know — the redemption happened on the phone —
+ * and a spent code must stop being offered.
+ */
+export const SetupPhoneRedeemed: Story = {
+  parameters: {
+    primedRemoteHost: { status: enrolledStatus(), setupRedeemed: true },
+    docs: { story: { height: '340px' } },
+  },
+  play: async (context) => {
+    const canvas = within(context.canvasElement);
+    await userEvent.click(await canvas.findByRole('button', { name: 'Set up a phone' }));
+    await canvas.findByText(/This code is used up/);
+  },
+};
+
+/**
+ * The mint failed — a relay that is down, a server that refused. It lands in the
+ * enrolled view's one error slot, the same one Reconnect and Disconnect use.
+ */
+export const SetupPhoneRefused: Story = {
+  parameters: {
+    primedRemoteHost: {
+      status: enrolledStatus(),
+      setupQrError: 'could not mint a setup code (503)',
+    },
+    docs: { story: { height: '340px' } },
+  },
+  play: async (context) => {
+    const canvas = within(context.canvasElement);
+    await userEvent.click(await canvas.findByRole('button', { name: 'Set up a phone' }));
+    await canvas.findByText('could not mint a setup code (503)');
   },
 };
 

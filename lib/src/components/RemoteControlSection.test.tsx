@@ -21,7 +21,9 @@ import { RemoteControlSection } from './RemoteControlSection';
 import type { RemoteHostConsoleStatus } from '../host/remote/service-protocol';
 import {
   enrolledStatus,
+  makeStubRemoteHostLink,
   OFFER_STATUS,
+  setupQrResult,
   UNENROLLED_STATUS as NOT_ENROLLED,
 } from '../host/remote/test-remote-host-link';
 
@@ -46,6 +48,9 @@ function makeLink(command: (cmd: string, params?: unknown) => Promise<unknown>) 
     },
   };
 }
+
+/** Frozen only where a setup code's countdown has to read the same every run. */
+const NOW = Date.now();
 
 /** The shared fixture, keeping this file's own server/host values. */
 const enrolled = (over: Partial<RemoteHostConsoleStatus> = {}) =>
@@ -414,6 +419,92 @@ describe('RemoteControlSection', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('renders a scannable setup code once the panel is opened', async () => {
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'setupQr') {
+        return { url: 'https://laptop.tailnet.ts.net/#setup?token=abc123', expiresAt: NOW + 300_000 };
+      }
+      return enrolled();
+    });
+    platform = { remoteHost: link };
+    await render();
+
+    // Nothing is minted until someone asks: a code is a credential with a clock
+    // on it, and one nobody is looking at is one nobody can scan.
+    expect(link.command).not.toHaveBeenCalledWith('setupQr');
+    await act(async () => buttonLabelled('Set up a phone')!.click());
+
+    expect(link.command).toHaveBeenCalledWith('setupQr');
+    const qr = container.querySelector('svg[role="img"]');
+    expect(qr).toBeTruthy();
+    // The one control here that is read by a camera rather than by a person, so
+    // it paints its own light ground whatever theme is around it.
+    expect(qr!.querySelector('rect')!.getAttribute('fill')).toBe('#ffffff');
+    expect(qr!.querySelector('path')!.getAttribute('d')).toBeTruthy();
+    expect(text()).toContain('within 5 min');
+  });
+
+  it('renders a refused mint in the same slot as every other action', async () => {
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'setupQr') throw new Error('could not mint a setup code (503)');
+      return enrolled();
+    });
+    platform = { remoteHost: link };
+    await render();
+
+    await act(async () => buttonLabelled('Set up a phone')!.click());
+    expect(text()).toContain('could not mint a setup code (503)');
+    // Still enrolled, still offering the retry.
+    expect(buttonLabelled('New code')).toBeTruthy();
+  });
+
+  it('stops offering a code the phone already redeemed', async () => {
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'setupQr') {
+        return { url: 'https://laptop.tailnet.ts.net/#setup?token=abc123', expiresAt: NOW + 300_000 };
+      }
+      return enrolled();
+    });
+    platform = { remoteHost: link };
+    await render();
+
+    await act(async () => buttonLabelled('Set up a phone')!.click());
+    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
+
+    // The redemption happens on the phone; the Server tells the Host that
+    // minted the token, which is the only way this panel can learn of it.
+    await act(async () => {
+      link.emit('setupTokenRedeemed', { name: 'setupTokenRedeemed' });
+    });
+    expect(container.querySelector('svg[role="img"]')).toBeNull();
+    expect(text()).toContain('This code is used up.');
+  });
+
+  it('reaches both panel states through the shared story stub', async () => {
+    // The `SetupPhoneQr` / `SetupPhoneRedeemed` stories drive the section
+    // through `makeStubRemoteHostLink` and nothing else, so a fixture that
+    // stopped answering `setupQr` — or stopped firing the redeemed event —
+    // would fail only in Chromatic. Pin it here instead.
+    platform = {
+      remoteHost: makeStubRemoteHostLink({
+        status: enrolledStatus(),
+        setupQr: setupQrResult({ expiresAt: NOW + 300_000 }),
+      }),
+    };
+    await render();
+    await act(async () => buttonLabelled('Set up a phone')!.click());
+    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
+
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    platform = {
+      remoteHost: makeStubRemoteHostLink({ status: enrolledStatus(), setupRedeemed: true }),
+    };
+    await render();
+    await act(async () => buttonLabelled('Set up a phone')!.click());
+    expect(text()).toContain('This code is used up.');
   });
 
   it('re-reads the status when the service announces a change', async () => {

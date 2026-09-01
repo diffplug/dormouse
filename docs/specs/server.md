@@ -494,11 +494,11 @@ UI or burn a ticket. The ceremony beyond this point — `PairingCeremony`, local
 approval as the only thing that writes the ACL — is
 [remote-security-model.md](./remote-security-model.md) -> Pairing Ceremony.
 
-Reserved: a `pair` request may also carry `setupNonce`, the setup token a phone
-was set up by scanning. The relay shape-checks it with the rest of the request
-(bounded string, optional) and forwards it verbatim; **nothing on the Server
-verifies it**, because only the Host that minted the token holds a copy — see
-QR-first phone setup in `## Future`.
+A `pair` request may also carry `setupNonce`, the setup token a phone was set up
+by scanning. The relay shape-checks it with the rest of the request (bounded
+string, optional) and forwards it verbatim; **nothing on the Server verifies
+it**, because only the Host that minted the token holds a copy
+([Host side](#host-side-lib--the-two-node-hosts)).
 
 **Both sides run the shape guard.** The server's `isPairingRequest` is a
 courtesy that keeps a bad frame off the wire; the Host runs the same guard on
@@ -644,9 +644,26 @@ memo invalidation — live in that host's spec.
   `HostChallengeIssuer`, `PairingCeremony`, and `authorizeConnection` — all
   straight from `server-lib-common`, running in the service's process. Nothing a
   webview says can widen access.
+* **Setup codes**: `setupQr` — enrolled only — POSTs `/api/host/setup-token`
+  with the `hostToken` under the enroll exchange's own rules (`redirect:
+  'error'`, a 10 s timeout, the 200 body through `isSetupTokenResponse`), then
+  composes `<enrollment origin>/#setup?token=…` and answers it. **The code
+  crosses into the webview and `hostToken` never does** — being displayed to a
+  person is its whole purpose. The service keeps every token it minted in a
+  local `token → expiresAt` map and hands the `RemoteHost` a check that
+  **consumes on match**, so one code verifies one pairing; the map is cleared
+  whenever the Host stops, since tokens belong to the server being left. A
+  matching `setupNonce` marks that pairing `verified`, and **the nonce is
+  stripped before anything mirrors the request** — the webview needs the
+  verdict, not the proof. A miss is an ordinary pairing, never an error. The
+  `setup-token-redeemed` frame becomes the `{ name: 'setupTokenRedeemed' }`
+  event. Source of truth: `#setupQr` / `#verifySetupNonce` in
+  `lib/src/host/remote/service.ts`, `RemoteHost.#onPair` in
+  `lib/src/remote/host/remote-host.ts`.
 * **Pairing approval modal**: the queue is service-side; webviews mirror a
-  serializable projection (`{ clientId, pairingId, request, requestedAt }[]`,
-  pushed whole on every change) and echo both ids on Approve / Deny, so the
+  serializable projection (`{ clientId, pairingId, request, verified,
+  requestedAt }[]`, pushed whole on every change) and echo both ids on Approve /
+  Deny, so the
   approve/deny closures never leave the Host's process. **Approval is bound to
   the displayed `pairingId`, not whichever request currently occupies
   `clientId`.** The service coalesces a re-sent pair under one `clientId` by
@@ -654,7 +671,9 @@ memo invalidation — live in that host's spec.
   ticket id no longer matches; the mirror compares on `pairingId` and remounts
   keyed by it, while leaving an unchanged item alone
   (`lib/src/remote/host/activation.ts`). The modal shows the requested label +
-  account with Approve / Deny (same pattern as KillConfirm); approving after the
+  account with Approve / Deny (same pattern as KillConfirm); on a `verified`
+  item it says what proved the device instead of asking the user to vouch for it
+  ([remote-security-model.md](./remote-security-model.md)). Approving after the
   ticket expires sends `pair-result approved:false` and dismisses, ACL
   untouched. In VS Code the queue
   is broadcast to every window, since any may be the one in front of the user.
@@ -724,6 +743,19 @@ to honor:
   error is what the form renders — so the failure reads as "this build will not
   talk to that server" rather than as a wrong password — the offer card
   included.
+- **Enrolled, "Set up a phone" opens an inline QR panel**, so a phone is set up
+  by pointing a camera at the laptop rather than typing an origin and a 64-hex
+  password. It mints on open and never before — a code is a credential with a
+  clock on it — re-mints shortly before `expiresAt` while the panel stays open,
+  flips to a spent state on `setupTokenRedeemed`, and offers New code and Done.
+  A refused mint lands in the enrolled view's one error slot, beside
+  Reconnect's and Disconnect's.
+- **The code is drawn dark-on-white, whatever the theme.** `QrCode.tsx` is the
+  one place `lib/src` hardcodes a color: a camera reads this control, scanners
+  expect that polarity, and no theme token promises polarity or contrast in
+  both themes. Source of truth: `SetupPhonePanel` in
+  `lib/src/components/RemoteControlSection.tsx` over
+  `lib/src/components/QrCode.tsx` (`uqr` encodes; this draws).
 - **Disconnect asks first**, because clearing the enrollment drops every paired
   phone until each pairs again.
 - **Status is re-read, not patched, and the connection is polled.** The
@@ -743,7 +775,7 @@ to honor:
   (rationale). Source of truth: `dropInFlightRead` in
   `lib/src/remote/host/host-status-store.ts`.
 
-The `window.dormouseRemoteHost` console hook exposes the same five commands —
+The `window.dormouseRemoteHost` console hook exposes the five enrollment commands —
 `enroll(serverUrl, password, label)`, `enrollOffer(origin, label)` (its origin
 from `status().offer.origin`), `status`, `reconnect`, `clearEnrollment` — and
 remains the scripting seam. **Pairing approval is never here** — it is a modal, because
@@ -883,17 +915,13 @@ anywhere. One settled decision constrains every item: **the stock allowlist stay
 self-hosting keeps requiring a source build, deliberately, so no item below
 may depend on widening it. Staged order:
 
-1. **QR-first phone setup.** The server half is shipped (Setup tokens above).
-   What remains, in staged order: **(a)** the Host renders
-   `<origin>/#setup?token=…` as a QR and takes it down on
-   `setup-token-redeemed`, which `RemoteHost` drops today; **(b)** Pocket parses
-   the `#setup?token=` hash and sends that token as `setupToken` in place of the
-   setup password; **(c)** Pocket carries the same token into the pairing
-   request as `setupNonce` — reserved on the wire today — and the Host verifies
-   it against the one it minted, so the approval modal checks the scanning phone
-   cryptographically instead of asking a human to compare fingerprints:
-   displaying the QR on the laptop *is* the local-presence act, and approval
-   collapses to one confirm. The setup password remains for the QR-less path.
+1. **QR-first phone setup.** Server and Host are shipped (Setup tokens, Host
+   side). What remains is Pocket's half, in staged order: **(a)** parse the
+   `#setup?token=` hash and send that token as `setupToken` in place of the
+   setup password; **(b)** carry the same token into the pairing request as
+   `setupNonce`, which the Host already verifies — until Pocket sends one, every
+   pairing takes the fingerprint-compare path. The setup password remains for
+   the QR-less path.
 2. **One-minute resume.** On an approved connection the Host mints a resume
    token — single-use, bound to the device key and that connection, 60-second
    TTL. A dropped WebSocket reattaches with it instead of rerunning the

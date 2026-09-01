@@ -18,7 +18,14 @@ export interface PendingPairing {
   clientId: string;
   /** Immutable ceremony ticket id; approve/deny must name this exact request. */
   pairingId: string;
+  /** The request as the modal may render it — `setupNonce` already stripped. */
   request: PairingRequest;
+  /**
+   * The Client returned a setup token this Host minted, so it is the phone that
+   * scanned this machine's QR. Drives the modal's one-confirm copy; `false` is
+   * the ordinary pairing (`docs/specs/remote-security-model.md`).
+   */
+  verified: boolean;
   requestedAt: number;
   /** Approve locally on the Host — writes the ACL and replies `pair-result`. */
   approve: (label?: string) => void;

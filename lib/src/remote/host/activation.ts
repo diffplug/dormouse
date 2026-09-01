@@ -178,6 +178,7 @@ function mirrorPairingQueue(link: RemoteHostLink, queue: readonly PairingQueueIt
       showing &&
       showing.pairingId === item.pairingId &&
       showing.requestedAt === item.requestedAt &&
+      showing.verified === item.verified &&
       sameRequest(showing.request, item.request)
     ) {
       continue;
@@ -192,6 +193,7 @@ function mirrorPairingQueue(link: RemoteHostLink, queue: readonly PairingQueueIt
       clientId: item.clientId,
       pairingId: item.pairingId,
       request: item.request,
+      verified: item.verified,
       requestedAt: item.requestedAt,
       approve: (label) =>
         void link
@@ -214,6 +216,10 @@ function mirrorPairingQueue(link: RemoteHostLink, queue: readonly PairingQueueIt
  * would silently leave the user approving a device they were never shown
  * (docs/specs/remote-security-model.md). Naming the keys here makes that a
  * compile error rather than a silent security regression.
+ *
+ * `setupNonce` is always `undefined` on both sides — `RemoteHost.#onPair`
+ * strips it before mirroring — and stays listed because the checklist demands
+ * every field: were the strip ever dropped, the compare must already cover it.
  */
 const PAIRING_REQUEST_FIELDS = {
   accountId: true,
