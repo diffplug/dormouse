@@ -13,13 +13,19 @@
 
 import type { PairingRequest } from 'server-lib-common';
 
+/**
+ * A {@link PairingRequest} as everything past `RemoteHost.#onPair` sees one: the
+ * `setupNonce` is gone, and its type says so, so no consumer can read a proof
+ * that is not there (`SECURITY.md` → the setup-token FAIL IF).
+ */
+export type MirroredPairingRequest = Omit<PairingRequest, 'setupNonce'>;
+
 export interface PendingPairing {
   /** Server-assigned client socket id. */
   clientId: string;
   /** Immutable ceremony ticket id; approve/deny must name this exact request. */
   pairingId: string;
-  /** The request as the modal may render it — `setupNonce` already stripped. */
-  request: PairingRequest;
+  request: MirroredPairingRequest;
   /**
    * The Client returned a setup token this Host minted, so it is the phone that
    * scanned this machine's QR. Drives the modal's one-confirm copy; `false` is

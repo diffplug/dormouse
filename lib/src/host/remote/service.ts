@@ -19,6 +19,7 @@ import {
   type HostEnrollment,
 } from '../../remote/host/enrollment';
 import type { HostSurfaceProvider } from '../../remote/host/host-surface-provider';
+import { hostFetch } from '../../remote/host/host-fetch';
 import type { PendingPairing } from '../../remote/host/pairing-approval';
 import {
   loadPushDevices,
@@ -77,12 +78,6 @@ export interface RemoteHostServiceOptions {
    */
   readOffer?: () => Promise<EnrollmentOffer | null>;
 }
-
-/**
- * How long `setupQr` waits on the Server. Under the webview's own 15 s command
- * budget, same as `ENROLL_TIMEOUT_MS`, so the panel renders the real failure.
- */
-const SETUP_QR_TIMEOUT_MS = 10_000;
 
 /**
  * The hostname, or `''` where the platform will not name itself. `os.hostname`
@@ -150,17 +145,6 @@ export class RemoteHostService {
    * process.
    */
   readonly #pairings = new Map<string, PendingPairing>();
-  /**
-   * Setup tokens this Host minted and has not seen spent, `token → expiresAt`.
-   *
-   * A phone that was set up by scanning one returns it in its `PairingRequest`,
-   * and a match here is what marks that pairing `verified` — so this is the
-   * Host's own copy of a credential the Server also holds, and the reason
-   * neither Server nor Client can fabricate the verdict. Kept local and tiny
-   * rather than routed through the shared issuer primitives: nothing here needs
-   * to know which Host minted what, because there is only one.
-   */
-  readonly #setupTokens = new Map<string, number>();
 
   constructor(options: RemoteHostServiceOptions) {
     this.#store = options.store;
@@ -390,7 +374,9 @@ export class RemoteHostService {
   }
 
   /**
-   * Mint the credential behind this machine's setup QR and remember it.
+   * Mint the credential behind this machine's setup QR, over the Host's own
+   * authenticated channel — this service is the half that holds the bearer, so
+   * it mints and hands the token to the `RemoteHost` that will have to verify it.
    *
    * The URL is composed here, from the origin this Host enrolled against, for
    * the reason `SetupTokenResponse` carries the token alone: a URL minted
@@ -398,31 +384,27 @@ export class RemoteHostService {
    */
   async #setupQr(): Promise<SetupQrResult> {
     const enrollment = this.#enrollment;
-    if (!enrollment) {
+    const host = this.#host;
+    if (!enrollment || !host) {
       throw new Error('This machine is not connected to a Dormouse server.');
     }
-    const doFetch = this.#fetch ?? globalThis.fetch;
-    const response = await doFetch(`${enrollment.serverUrl}${API_ROUTES.hostSetupToken}`, {
-      method: 'POST',
-      // The same two rules `performEnrollment` runs under, for the same reasons:
-      // this Host has no browser CSP to check each redirect hop, so an allowed
-      // origin's open redirect must not forward the `hostToken`; and the request
-      // stays under the webview's own 15 s command budget so the panel shows the
-      // real error rather than a bare timeout.
-      redirect: 'error',
-      signal: AbortSignal.timeout(SETUP_QR_TIMEOUT_MS),
-      headers: { authorization: `Bearer ${enrollment.hostToken}` },
-    });
-    if (!response.ok) {
-      throw new Error(`could not mint a setup code (${response.status})`);
-    }
+    const response = await hostFetch(
+      { enrollment, fetch: this.#fetch, errorPrefix: 'could not mint a setup code' },
+      API_ROUTES.hostSetupToken,
+      // The empty POST body: this endpoint's only input is the bearer, which is
+      // what says which Host is asking.
+      {},
+    );
     const body: unknown = await response.json().catch(() => null);
     // Guarded like every other 200 off this wire: an `undefined` token would go
-    // into the QR *and* into the set that decides `verified` on the next pair.
+    // into the QR *and* into the map that decides `verified` on the next pair.
     if (!isSetupTokenResponse(body)) {
       throw new Error('could not mint a setup code: the server’s answer was not a setup token.');
     }
-    this.#rememberSetupToken(body.token, body.expiresAt);
+    // The Host captured above, not whatever `#host` holds now: a swap during the
+    // round trip means this code belongs to the server we just left, and the
+    // replacement must not be able to verify it.
+    host.rememberSetupToken(body.token, body.expiresAt);
     // `enrollment.origin` is the phone-facing WebAuthn origin — where Pocket is
     // served and where the passkey will be registered — not necessarily the
     // `serverUrl` this Host posts to.
@@ -430,28 +412,6 @@ export class RemoteHostService {
       url: `${enrollment.origin}/#setup?token=${encodeURIComponent(body.token)}`,
       expiresAt: body.expiresAt,
     };
-  }
-
-  /** Record a minted token, dropping any that can no longer be verified. */
-  #rememberSetupToken(token: string, expiresAt: number): void {
-    const now = this.#now();
-    for (const [minted, expiry] of this.#setupTokens) {
-      if (expiry <= now) this.#setupTokens.delete(minted);
-    }
-    this.#setupTokens.set(token, expiresAt);
-  }
-
-  /**
-   * Whether `nonce` is a token this Host minted and nobody has spent — and it
-   * is spent by asking. Single use, because the nonce is a proof that *this*
-   * setup happened, and one scan sets up one phone.
-   */
-  #verifySetupNonce(nonce: string): boolean {
-    const expiresAt = this.#setupTokens.get(nonce);
-    // Deleted on any hit, expired or not: it can never become valid again.
-    if (expiresAt === undefined) return false;
-    this.#setupTokens.delete(nonce);
-    return this.#now() < expiresAt;
   }
 
   #approve(params: ApproveParams): Record<string, never> {
@@ -589,7 +549,6 @@ export class RemoteHostService {
       },
       requestApproval: (pending) => this.#enqueuePairing(pending),
       dismissApproval: (clientId) => this.#resolvePairing(clientId),
-      verifySetupNonce: (nonce) => this.#verifySetupNonce(nonce),
       onSetupTokenRedeemed: () => this.#emitSetupTokenRedeemed(),
       now: this.#now,
     });
@@ -623,11 +582,9 @@ export class RemoteHostService {
 
   #stopHost(): void {
     this.#host?.stop();
+    // Setup tokens go with it: they live on the `RemoteHost` precisely so a
+    // token the old server minted cannot verify a pairing against the new one.
     this.#host = null;
-    // Setup tokens belong to the server being left. Every caller of this is
-    // either dropping the enrollment or replacing it, and a token the old
-    // server minted could otherwise verify a pairing against the new one.
-    this.#setupTokens.clear();
     // `stop()` dismisses every in-flight pairing, which empties the queue and
     // pushes the empty snapshot; clear defensively in case there was no Host.
     if (this.#pairings.size > 0) {
@@ -664,8 +621,6 @@ export class RemoteHostService {
       ({ clientId, pairingId, request, verified, requestedAt }) => ({
         clientId,
         pairingId,
-        // Already stripped of its `setupNonce` by `RemoteHost.#onPair`; the
-        // webview gets `verified` instead of the proof behind it.
         request,
         verified,
         requestedAt,

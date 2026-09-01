@@ -3,7 +3,7 @@
  */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * The store reads `getPlatform().remoteHost`, so the link is the only seam the
@@ -70,6 +70,19 @@ async function render() {
   });
 }
 
+/**
+ * Let the lazily-imported `QrCode` land. The encoder rides its own chunk so
+ * `uqr` stays out of the main bundle (`RemoteControlSection.tsx`), which puts
+ * the code one `import()` behind the render that asks for it — resolved in a
+ * microtask here only because {@link beforeAll} already made the module
+ * resident, so this is a flush rather than a wait on a real module load.
+ */
+async function settleQrChunk() {
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
+
 function text(): string {
   return container.textContent ?? '';
 }
@@ -112,6 +125,13 @@ async function type(selector: string, value: string) {
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
+
+beforeAll(async () => {
+  // Load the lazy chunk once, up front. Otherwise the first test that renders a
+  // code waits on a real module transform, and how long that takes is not
+  // something a test should be timing.
+  await import('./QrCode');
+});
 
 beforeEach(() => {
   container = document.createElement('div');
@@ -435,14 +455,12 @@ describe('RemoteControlSection', () => {
     // on it, and one nobody is looking at is one nobody can scan.
     expect(link.command).not.toHaveBeenCalledWith('setupQr');
     await act(async () => buttonLabelled('Set up a phone')!.click());
+    await settleQrChunk();
 
     expect(link.command).toHaveBeenCalledWith('setupQr');
-    const qr = container.querySelector('svg[role="img"]');
-    expect(qr).toBeTruthy();
-    // The one control here that is read by a camera rather than by a person, so
-    // it paints its own light ground whatever theme is around it.
-    expect(qr!.querySelector('rect')!.getAttribute('fill')).toBe('#ffffff');
-    expect(qr!.querySelector('path')!.getAttribute('d')).toBeTruthy();
+    // What the code *is* belongs to `QrCode.test.tsx`; this is the section's
+    // claim that a scannable one reached the panel with its clock.
+    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
     expect(text()).toContain('within 5 min');
   });
 
@@ -471,6 +489,7 @@ describe('RemoteControlSection', () => {
     await render();
 
     await act(async () => buttonLabelled('Set up a phone')!.click());
+    await settleQrChunk();
     expect(container.querySelector('svg[role="img"]')).toBeTruthy();
 
     // The redemption happens on the phone; the Server tells the Host that
@@ -482,29 +501,144 @@ describe('RemoteControlSection', () => {
     expect(text()).toContain('This code is used up.');
   });
 
-  it('reaches both panel states through the shared story stub', async () => {
+  /** A link whose `setupQr` answers a code that always dies five minutes out. */
+  function mintingLink() {
+    return makeLink(async (cmd) => {
+      if (cmd === 'setupQr') {
+        return { url: `https://x/#setup?token=t${Date.now()}`, expiresAt: Date.now() + 300_000 };
+      }
+      return enrolled();
+    });
+  }
+
+  const mintCount = (link: ReturnType<typeof makeLink>) =>
+    link.command.mock.calls.filter(([cmd]) => cmd === 'setupQr').length;
+
+  it('replaces the code once, shortly before it expires', async () => {
+    vi.useFakeTimers();
+    try {
+      const link = mintingLink();
+      platform = { remoteHost: link };
+      await render();
+      await act(async () => buttonLabelled('Set up a phone')!.click());
+      expect(mintCount(link)).toBe(1);
+
+      // The panel can sit open while someone goes to find their phone, so it
+      // replaces the code rather than going quietly unscannable — and once the
+      // lead is crossed, not once per tick from there on.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(290_000);
+      });
+      expect(mintCount(link)).toBe(2);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(mintCount(link)).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('counts down on the minute, since minutes are all it names', async () => {
+    vi.useFakeTimers();
+    try {
+      platform = { remoteHost: mintingLink() };
+      await render();
+      await act(async () => buttonLabelled('Set up a phone')!.click());
+      expect(text()).toContain('within 5 min');
+
+      // Half a minute in, there is nothing to repaint; the panel wakes on the
+      // boundary where the number actually changes rather than once a second.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(text()).toContain('within 5 min');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(text()).toContain('within 4 min');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('lets New code disarm the refresh the old code armed', async () => {
+    // Every mint spends a code on the Server, so the timer armed against the
+    // code being replaced must not fire on top of the replacement.
+    vi.useFakeTimers();
+    try {
+      const link = mintingLink();
+      platform = { remoteHost: link };
+      await render();
+      await act(async () => buttonLabelled('Set up a phone')!.click());
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100_000);
+      });
+      await act(async () => buttonLabelled('New code')!.click());
+      expect(mintCount(link)).toBe(2);
+
+      // Past where the first code's refresh was armed for, and nothing fires:
+      // that timer belongs to a code the panel no longer shows.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200_000);
+      });
+      expect(mintCount(link)).toBe(2);
+      // The replacement armed its own, on its own expiry.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100_000);
+      });
+      expect(mintCount(link)).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('paints nothing for a mint that lands after the panel closed', async () => {
+    // The token exists on the Server either way; what must not happen is a live
+    // code rendering into a panel the user already dismissed.
+    let release: (result: unknown) => void = () => {};
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'setupQr') {
+        return new Promise<unknown>((resolve) => {
+          release = resolve;
+        });
+      }
+      return enrolled();
+    });
+    platform = { remoteHost: link };
+    await render();
+
+    await act(async () => buttonLabelled('Set up a phone')!.click());
+    await act(async () => buttonLabelled('Done')!.click());
+    await act(async () => {
+      release({ url: 'https://x/#setup?token=late', expiresAt: NOW + 300_000 });
+    });
+    await settleQrChunk();
+
+    expect(container.querySelector('svg[role="img"]')).toBeNull();
+    expect(text()).not.toContain('Getting a code…');
+  });
+
+  it('pins the story stub both panel states are driven from', async () => {
     // The `SetupPhoneQr` / `SetupPhoneRedeemed` stories drive the section
     // through `makeStubRemoteHostLink` and nothing else, so a fixture that
     // stopped answering `setupQr` — or stopped firing the redeemed event —
-    // would fail only in Chromatic. Pin it here instead.
-    platform = {
-      remoteHost: makeStubRemoteHostLink({
-        status: enrolledStatus(),
-        setupQr: setupQrResult({ expiresAt: NOW + 300_000 }),
-      }),
-    };
-    await render();
-    await act(async () => buttonLabelled('Set up a phone')!.click());
-    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
+    // would fail only in Chromatic. The states themselves are covered above, so
+    // this pins the fixture rather than re-rendering them.
+    const link = makeStubRemoteHostLink({
+      status: enrolledStatus(),
+      setupQr: setupQrResult({ expiresAt: NOW + 300_000 }),
+    });
+    expect(await link.command('setupQr')).toMatchObject({ expiresAt: NOW + 300_000 });
 
-    await act(async () => root.unmount());
-    root = createRoot(container);
-    platform = {
-      remoteHost: makeStubRemoteHostLink({ status: enrolledStatus(), setupRedeemed: true }),
-    };
-    await render();
-    await act(async () => buttonLabelled('Set up a phone')!.click());
-    expect(text()).toContain('This code is used up.');
+    let redeemed = 0;
+    makeStubRemoteHostLink({ status: enrolledStatus(), setupRedeemed: true }).on(
+      'setupTokenRedeemed',
+      () => redeemed++,
+    );
+    await Promise.resolve();
+    expect(redeemed).toBe(1);
   });
 
   it('re-reads the status when the service announces a change', async () => {

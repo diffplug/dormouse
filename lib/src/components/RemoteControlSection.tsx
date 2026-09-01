@@ -1,6 +1,13 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
-import { QrCode } from './QrCode';
 import type { RemoteHostConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
 import type { RemoteHostStatus } from '../remote/host/remote-host';
 import {
@@ -14,6 +21,14 @@ import {
   subscribeToRemoteHostStatus,
   subscribeToSetupTokenRedeemed,
 } from '../remote/host/host-status-store';
+
+/**
+ * The QR encoder (`uqr`) is only ever reached by one panel inside one dialog on
+ * an enrolled machine, so it is lazy for the same reason `Wall.tsx` lazies
+ * `RemotePairingModalHost`: otherwise every build — the website included, where
+ * this section renders nothing at all — ships it in the main chunk.
+ */
+const QrCode = lazy(() => import('./QrCode').then((m) => ({ default: m.QrCode })));
 
 /**
  * How each relay-socket state reads to someone who is not holding the spec.
@@ -84,6 +99,96 @@ function useBusyAction() {
   }, []);
 
   return { busy, error, run };
+}
+
+/**
+ * Everything the phone-setup panel can be showing, as one value.
+ *
+ * `null` is the closed panel. The rest are open: waiting on a mint, holding a
+ * live code, or spent — and `failed` is the mint that was refused, whose message
+ * is in the section's shared error slot rather than here.
+ */
+type SetupQrState =
+  | null
+  | { phase: 'minting' }
+  | { phase: 'live'; qr: SetupQrResult }
+  | { phase: 'spent' }
+  | { phase: 'failed' };
+
+/**
+ * The phone-setup panel's whole lifecycle: mint on open, replace the code before
+ * it dies, and flip to spent when the Server says the phone used it.
+ *
+ * Minting runs through the caller's {@link useBusyAction} `run`, so a refusal
+ * lands in the section's one error slot beside Reconnect's and Disconnect's —
+ * but the panel's own copy comes from {@link SetupQrState}, so an unrelated
+ * action being busy never reads as "getting a code".
+ */
+function useSetupQr(run: (action: () => Promise<void>) => Promise<void>) {
+  const [state, setState] = useState<SetupQrState>(null);
+  /**
+   * Bumped synchronously by every mint and by closing. Two jobs, both about a
+   * code that exists on the Server whether or not anyone can see it: it disarms
+   * the pending auto-refresh the instant a mint starts, so the fetch window
+   * cannot produce a second one, and it gates the write below, so a mint
+   * resolving after the panel closed leaves no live-but-undisplayed token.
+   */
+  const mintSeq = useRef(0);
+
+  const mint = useCallback(() => {
+    const mine = ++mintSeq.current;
+    setState({ phase: 'minting' });
+    void run(async () => {
+      let qr: SetupQrResult;
+      try {
+        qr = await mintSetupQr();
+      } catch (error) {
+        // Superseded answers are dropped whichever way they went: the failure
+        // belongs to a request nobody is waiting on, and reporting it would put
+        // a stale message in a slot the panel may no longer even be under.
+        if (mintSeq.current !== mine) return;
+        setState({ phase: 'failed' });
+        throw error;
+      }
+      if (mintSeq.current !== mine) return;
+      setState({ phase: 'live', qr });
+    });
+  }, [run]);
+
+  const close = useCallback(() => {
+    mintSeq.current++;
+    setState(null);
+  }, []);
+
+  // Replace the code before it dies: the panel can sit open while someone goes
+  // to find their phone. Not once it is spent — that code is used and the next
+  // step is on the phone — and not while a mint is already running, which is
+  // what the sequence check is for: the timer was armed against a code the panel
+  // may no longer be showing.
+  useEffect(() => {
+    if (state?.phase !== 'live') return;
+    const armed = mintSeq.current;
+    const delay = Math.max(0, state.qr.expiresAt - Date.now() - SETUP_QR_REFRESH_LEAD_MS);
+    const timer = setTimeout(() => {
+      if (mintSeq.current === armed) mint();
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [state, mint]);
+
+  // The Server announces a spent token to the Host that minted it
+  // (`docs/specs/server.md` → Relay), which is the only way this panel can know
+  // its code was used: the redemption happens on the phone. Bumping the sequence
+  // makes it terminal — a mint that was in flight cannot paint a code over it.
+  const open = state !== null;
+  useEffect(() => {
+    if (!open) return;
+    return subscribeToSetupTokenRedeemed(() => {
+      mintSeq.current++;
+      setState({ phase: 'spent' });
+    });
+  }, [open]);
+
+  return { state, mint, close };
 }
 
 /** The one field the offer card and the typed form both ask for. */
@@ -297,52 +402,10 @@ function EnrolledView({
   // Disconnecting drops every paired phone until they pair again, so it asks
   // once rather than acting on the first click.
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
-  // The phone-setup panel's state lives here, not in the panel, so a failed mint
-  // renders in this view's one error slot alongside Reconnect's and
-  // Disconnect's — the same rule the offer card follows.
-  const [showSetup, setShowSetup] = useState(false);
-  const [qr, setQr] = useState<SetupQrResult | null>(null);
-  const [redeemed, setRedeemed] = useState(false);
+  // The mint runs on this view's busy/error pair, so a refusal renders in its one
+  // error slot — the same rule the offer card follows.
+  const setup = useSetupQr(run);
   const described = describeConnection(connection);
-
-  const mint = useCallback(
-    () =>
-      run(async () => {
-        setRedeemed(false);
-        setQr(await mintSetupQr());
-      }),
-    [run],
-  );
-
-  // Nothing is minted until the panel is open: a code is a credential with a
-  // clock on it, and one nobody is looking at is one nobody can scan.
-  useEffect(() => {
-    if (showSetup) void mint();
-  }, [showSetup, mint]);
-
-  // Replace the code before it dies. Not after a redemption: that code is spent
-  // and the next step is on the phone, so a fresh one would only invite a second
-  // setup nobody asked for.
-  useEffect(() => {
-    if (!showSetup || !qr || redeemed) return;
-    const delay = Math.max(0, qr.expiresAt - Date.now() - SETUP_QR_REFRESH_LEAD_MS);
-    const timer = setTimeout(() => void mint(), delay);
-    return () => clearTimeout(timer);
-  }, [showSetup, qr, redeemed, mint]);
-
-  // The Server announces a spent token to the Host that minted it
-  // (`docs/specs/server.md` → Relay), which is the only way this panel can know
-  // its code was used: the redemption happens on the phone.
-  useEffect(() => {
-    if (!showSetup) return;
-    return subscribeToSetupTokenRedeemed(() => setRedeemed(true));
-  }, [showSetup]);
-
-  const closeSetup = useCallback(() => {
-    setShowSetup(false);
-    setQr(null);
-    setRedeemed(false);
-  }, []);
 
   return (
     <div className="mt-1.5 text-sm leading-relaxed">
@@ -397,9 +460,9 @@ function EnrolledView({
             <button
               type="button"
               disabled={busy}
-              aria-expanded={showSetup}
-              className={modalActionButton({ tone: showSetup ? 'secondary' : 'primary' })}
-              onClick={() => (showSetup ? closeSetup() : setShowSetup(true))}
+              aria-expanded={setup.state !== null}
+              className={modalActionButton({ tone: setup.state ? 'secondary' : 'primary' })}
+              onClick={() => (setup.state ? setup.close() : setup.mint())}
             >
               Set up a phone
             </button>
@@ -415,14 +478,8 @@ function EnrolledView({
         )}
       </div>
 
-      {showSetup ? (
-        <SetupPhonePanel
-          qr={qr}
-          redeemed={redeemed}
-          busy={busy}
-          onNewCode={() => void mint()}
-          onDone={closeSetup}
-        />
+      {setup.state ? (
+        <SetupPhonePanel state={setup.state} onNewCode={setup.mint} onDone={setup.close} />
       ) : null}
     </div>
   );
@@ -433,38 +490,43 @@ function EnrolledView({
  * in the Settings dialog (`docs/specs/server.md` → "Remote control, in the
  * Settings dialog").
  *
- * Purely what to draw: the code, its clock, and two buttons. Minting, refreshing
- * and the redeemed edge all belong to {@link EnrolledView}, which owns the error
- * slot they share.
+ * Purely what to draw for a {@link SetupQrState}; {@link useSetupQr} owns every
+ * transition between them.
  */
 function SetupPhonePanel({
-  qr,
-  redeemed,
-  busy,
+  state,
   onNewCode,
   onDone,
 }: {
-  qr: SetupQrResult | null;
-  redeemed: boolean;
-  busy: boolean;
+  state: NonNullable<SetupQrState>;
   onNewCode: () => void;
   onDone: () => void;
 }) {
-  // Re-render once a second so the countdown is a countdown. Only while there is
-  // a live code to count down: a spent or absent one has no clock.
+  const expiresAt = state.phase === 'live' ? state.qr.expiresAt : null;
   const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!qr || redeemed) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [qr, redeemed]);
 
-  const left = qr ? minutesUntil(qr.expiresAt, now) : 0;
+  // The copy names whole minutes, so re-render on the minute rather than on a
+  // clock tick: a 1 Hz interval bought ~300 renders per code for five numbers,
+  // and left Storybook repainting forever after the code expired.
+  useEffect(() => {
+    if (expiresAt === null) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arm = (): void => {
+      const at = Date.now();
+      setNow(at);
+      const remaining = expiresAt - at;
+      // Expired: the number cannot change again, so nothing re-arms.
+      if (remaining <= 0) return;
+      timer = setTimeout(arm, remaining % 60_000 || 60_000);
+    };
+    arm();
+    return () => clearTimeout(timer);
+  }, [expiresAt]);
 
   return (
     <div className="mt-2 rounded border border-border p-2">
       <div className={FIELD_LABEL}>Set up a phone</div>
-      {redeemed ? (
+      {state.phase === 'spent' ? (
         <>
           <div className="mt-1 text-sm leading-relaxed text-foreground">
             Scanned. Finish on the phone — it registers a passkey, then asks to pair, and that
@@ -472,30 +534,34 @@ function SetupPhonePanel({
           </div>
           <div className="mt-1 text-xs text-muted">This code is used up.</div>
         </>
-      ) : qr ? (
+      ) : state.phase === 'live' ? (
         <>
           <div className="mt-1 text-sm leading-relaxed text-muted">
             Point the phone’s camera at this. Nothing to type — no address, no password.
           </div>
           <div className="mt-2 flex justify-center">
-            <QrCode value={qr.url} label="Setup code for this machine" />
+            {/* Nothing while the encoder chunk arrives: it is one import away,
+                and a placeholder the size of a QR would flash on every open. */}
+            <Suspense fallback={null}>
+              <QrCode value={state.qr.url} label="Setup code for this machine" />
+            </Suspense>
           </div>
           <div className="mt-1.5 text-center text-xs text-muted">
-            {left > 0
-              ? `Sets up one phone, within ${left} min.`
+            {minutesUntil(state.qr.expiresAt, now) > 0
+              ? `Sets up one phone, within ${minutesUntil(state.qr.expiresAt, now)} min.`
               : 'This code has expired — get a new one.'}
           </div>
         </>
       ) : (
         <div className="mt-1 text-sm text-muted">
-          {busy ? 'Getting a code…' : 'No code — try again.'}
+          {state.phase === 'minting' ? 'Getting a code…' : 'No code — try again.'}
         </div>
       )}
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <button
           type="button"
-          disabled={busy}
+          disabled={state.phase === 'minting'}
           className={modalActionButton()}
           onClick={onNewCode}
         >

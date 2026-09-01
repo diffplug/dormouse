@@ -644,22 +644,15 @@ memo invalidation — live in that host's spec.
   `HostChallengeIssuer`, `PairingCeremony`, and `authorizeConnection` — all
   straight from `server-lib-common`, running in the service's process. Nothing a
   webview says can widen access.
-* **Setup codes**: `setupQr` — enrolled only — POSTs `/api/host/setup-token`
-  with the `hostToken` under the enroll exchange's own rules (`redirect:
-  'error'`, a 10 s timeout, the 200 body through `isSetupTokenResponse`), then
-  composes `<enrollment origin>/#setup?token=…` and answers it. **The code
-  crosses into the webview and `hostToken` never does** — being displayed to a
-  person is its whole purpose. The service keeps every token it minted in a
-  local `token → expiresAt` map and hands the `RemoteHost` a check that
-  **consumes on match**, so one code verifies one pairing; the map is cleared
-  whenever the Host stops, since tokens belong to the server being left. A
-  matching `setupNonce` marks that pairing `verified`, and **the nonce is
-  stripped before anything mirrors the request** — the webview needs the
-  verdict, not the proof. A miss is an ordinary pairing, never an error. The
-  `setup-token-redeemed` frame becomes the `{ name: 'setupTokenRedeemed' }`
-  event. Source of truth: `#setupQr` / `#verifySetupNonce` in
-  `lib/src/host/remote/service.ts`, `RemoteHost.#onPair` in
-  `lib/src/remote/host/remote-host.ts`.
+* **Setup codes**: `setupQr` — enrolled only — mints at `/api/host/setup-token`
+  over `hostFetch`, composes `<enrollment origin>/#setup?token=…`, and hands the
+  token to the `RemoteHost` that will verify it. **The code crosses into the
+  webview and `hostToken` never does** — being displayed to a person is its whole
+  purpose. The `setup-token-redeemed` frame becomes the `setupTokenRedeemed`
+  event. Source of truth: `#setupQr` in `lib/src/host/remote/service.ts`,
+  `rememberSetupToken` / `#onPair` in `lib/src/remote/host/remote-host.ts`;
+  [remote-security-model.md](./remote-security-model.md) owns what a nonce
+  proves, and `lib/src/remote/host/host-fetch.ts` the transport rules.
 * **Pairing approval modal**: the queue is service-side; webviews mirror a
   serializable projection (`{ clientId, pairingId, request, verified,
   requestedAt }[]`, pushed whole on every change) and echo both ids on Approve /
@@ -749,13 +742,12 @@ to honor:
   clock on it — re-mints shortly before `expiresAt` while the panel stays open,
   flips to a spent state on `setupTokenRedeemed`, and offers New code and Done.
   A refused mint lands in the enrolled view's one error slot, beside
-  Reconnect's and Disconnect's.
-- **The code is drawn dark-on-white, whatever the theme.** `QrCode.tsx` is the
-  one place `lib/src` hardcodes a color: a camera reads this control, scanners
-  expect that polarity, and no theme token promises polarity or contrast in
-  both themes. Source of truth: `SetupPhonePanel` in
-  `lib/src/components/RemoteControlSection.tsx` over
-  `lib/src/components/QrCode.tsx` (`uqr` encodes; this draws).
+  Reconnect's and Disconnect's. With two windows open a redemption flips *every*
+  open panel to used-up: the frame carries no correlator, by design — telling
+  them apart would mean naming the token, which must not cross. Source of truth:
+  `useSetupQr` in `lib/src/components/RemoteControlSection.tsx`, over
+  `lib/src/components/QrCode.tsx` (`uqr` encodes; that draws, lazily, so the
+  encoder stays out of every main bundle).
 - **Disconnect asks first**, because clearing the enrollment drops every paired
   phone until each pairs again.
 - **Status is re-read, not patched, and the connection is polled.** The

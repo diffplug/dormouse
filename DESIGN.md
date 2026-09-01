@@ -139,11 +139,13 @@ This system has no "primary" accent in the brand sense. The closest analogue is 
 - **Success** (`var(--vscode-terminal-ansiGreen)`): TODO check, theme-store install confirm.
 - **Alarm** (`var(--vscode-terminal-ansiYellow)` baseline; runtime-overridden): alert tint. `computeDynamicPalette()` replaces each `--color-alarm-vs-*` token with plain white or black by the OKLab lightness of its background (active header, inactive header, Door, or terminal body), so ringing bells and the whole-Pane spoken-alarm treatment stay maximally legible on any surface.
 
-### Fixed Exception
-- **Window Close Hover** (`#b92a1b`): the only literal color in the whole system. Native OS close-button hover on Windows/Linux chrome buttons; matches the platform convention across themes.
+### Fixed Exceptions
+Every literal color the Host-Theme-Only Rule below permits, in full. Each is here because the surface it paints is not read as part of the theme; a literal anywhere else is a bug.
+- **Window Close Hover** (`#b92a1b`): native OS close-button hover on Windows/Linux chrome buttons; matches the platform convention across themes.
+- **Setup QR** (`#ffffff` ground, `#000000` modules, in `lib/src/components/QrCode.tsx`): a phone camera reads this control, not a person. Scanners expect dark-on-light and many refuse an inverted code, and no theme token promises either the polarity or the contrast ratio in both light and dark.
 
 ### Named Rules
-**The Host-Theme-Only Rule.** Never write a hex value or `oklch()` literal into `theme.css` or a component. Never use `var(..., fallback)` chains. Every color must resolve through `--vscode-*` or one of the body-published runtime picks (`--color-door-*`, `--color-focus-ring`, `--color-alarm-vs-*`). The one allowed exception is `#b92a1b` for native window-close hover.
+**The Host-Theme-Only Rule.** Never write a hex value or `oklch()` literal into `theme.css` or a component. Never use `var(..., fallback)` chains. Every color must resolve through `--vscode-*` or one of the body-published runtime picks (`--color-door-*`, `--color-focus-ring`, `--color-alarm-vs-*`). The only exceptions are the ones rostered under Fixed Exceptions above, and adding one means adding it there.
 
 **The Bg-Only Chrome Rule.** Pane headers, doors, and the baseboard convey hierarchy through background shifts only. Do not add borders or shadows to "make the hierarchy work." If a high-contrast theme makes a header look flat against the app bg, that is the user's theme speaking; do not override.
 
@@ -217,7 +219,7 @@ The flat segments inside a `PopupButtonRow` — the row owns the border, backgro
 #### Chrome Button (window controls)
 The Windows/Linux native-style window control row in the standalone app bar.
 - **Variants:** `icon` (h-5 min-w-5, hover bg-current/10), `labeled` (h-5 min-w-5 px-1.5 text-xs), `window` (w-11, hover bg-current/10), `windowClose` (w-11, hover bg `#b92a1b` text-white).
-- **The exception:** `windowClose` is the only place a literal hex color is permitted, because the platform convention is a hard red regardless of theme.
+- **The exception:** `windowClose` is one of the two rostered literal hex colors (Fixed Exceptions), because the platform convention is a hard red regardless of theme.
 
 ### Cards / Containers
 
@@ -275,7 +277,7 @@ When selection moves between panes/doors, the focus ring **glides** to the new t
 - **Do** use the spring-overshoot curve `cubic-bezier(0.34, 1.56, 0.64, 1)` only for state-resolution moments (TODO check, kill confirm, copy flash), and keep durations short (220–500ms).
 
 ### Don't:
-- **Don't** write a hex color anywhere except `#b92a1b` for the windowClose hover. No exceptions. No `oklch()` literals either; even those bypass the host theme.
+- **Don't** write a hex color outside the Fixed Exceptions roster above — and adding one is an edit to that roster, not a local judgement call. No `oklch()` literals either; even those bypass the host theme.
 - **Don't** add `var(--vscode-*, #fallback)` fallback chains in `theme.css`. The runtime host plus the resolver are responsible for providing the variable; a fallback hides a real bug.
 - **Don't** add borders or shadows to pane headers or doors to "make the hierarchy work." The hierarchy is `header-active-bg` vs. `header-inactive-bg`. If a high-contrast theme makes that look flat, accept it.
 - **Don't** introduce a `text-muted` color inside an active or inactive pane header. Header-internal text inherits the header foreground; muting inside it breaks the focus signal.

@@ -140,7 +140,7 @@ describe('RemoteHost frame handling', () => {
   function makeHost(
     loadAcl: () => HostAclRecord[] = () => [],
     now: () => number = () => Date.now(),
-    hooks: Pick<RemoteHostOptions, 'verifySetupNonce' | 'onSetupTokenRedeemed'> = {},
+    hooks: Pick<RemoteHostOptions, 'onSetupTokenRedeemed'> = {},
   ) {
     savedRecords = [];
     approvals = [];
@@ -215,19 +215,9 @@ describe('RemoteHost frame handling', () => {
     expect(savedRecords).toHaveLength(0);
   });
 
-  it('marks a pairing verified when the injected check claims the nonce', () => {
-    const asked: string[] = [];
-    makeHost(
-      () => [],
-      () => Date.now(),
-      {
-        verifySetupNonce: (nonce) => {
-          asked.push(nonce);
-          // Single-use lives in the service; the controller just asks once.
-          return asked.length === 1;
-        },
-      },
-    );
+  it('marks a pairing verified for a token it minted, and spends it', () => {
+    const host = makeHost();
+    host.rememberSetupToken('minted-here', Date.now() + 60_000);
     const request: PairingRequest = {
       accountId: 'owner',
       passkeyCredentialId: 'cred-1',
@@ -238,25 +228,42 @@ describe('RemoteHost frame handling', () => {
     };
     socket.receive({ t: 'pair', clientId: 'c1', request });
 
-    expect(asked).toEqual(['minted-here']);
     expect(approvals[0]!.verified).toBe(true);
     // The proof is consumed here and never handed on: `verified` is what the
-    // modal and the mirrored queue get, not the token behind it.
-    expect(approvals[0]!.request.setupNonce).toBeUndefined();
+    // modal and the mirrored queue get, not the token behind it. Cast because
+    // `MirroredPairingRequest` has no such field — this is the runtime half of
+    // that claim.
+    expect((approvals[0]!.request as PairingRequest).setupNonce).toBeUndefined();
 
-    // The same nonce again is an ordinary pairing, not an error — the phone may
-    // simply be re-pairing long after its code was spent.
+    // Single use — one scan sets up one phone. The same nonce again is an
+    // ordinary pairing, not an error: the phone may simply be re-pairing long
+    // after its code was spent.
     socket.receive({ t: 'pair', clientId: 'c2', request });
     expect(approvals[1]!.verified).toBe(false);
     expect(socket.frames('pair-result')).toEqual([]);
   });
 
+  it('never verifies a token that expired, and drops it on the next mint', () => {
+    const host = makeHost();
+    host.rememberSetupToken('stale', Date.now() - 1);
+    // Recording a second code prunes the first, whether or not anyone asks
+    // about it — nothing else sweeps that map.
+    host.rememberSetupToken('fresh', Date.now() + 60_000);
+    const base: PairingRequest = {
+      accountId: 'owner',
+      passkeyCredentialId: 'cred-1',
+      passkeyPublicKeyHash: 'hash-1',
+      devicePublicKey: 'device-1',
+      requestedLabel: 'iPhone Safari',
+    };
+    socket.receive({ t: 'pair', clientId: 'c1', request: { ...base, setupNonce: 'stale' } });
+    socket.receive({ t: 'pair', clientId: 'c2', request: { ...base, setupNonce: 'fresh' } });
+
+    expect(approvals.map((pending) => pending.verified)).toEqual([false, true]);
+  });
+
   it('pairs unverified with no nonce, and with one nothing minted', () => {
-    makeHost(
-      () => [],
-      () => Date.now(),
-      { verifySetupNonce: () => false },
-    );
+    makeHost();
     const base: PairingRequest = {
       accountId: 'owner',
       passkeyCredentialId: 'cred-1',
@@ -272,23 +279,6 @@ describe('RemoteHost frame handling', () => {
     // compare, not the pairing.
     expect(approvals).toHaveLength(2);
     expect(socket.frames('pair-result')).toEqual([]);
-  });
-
-  it('verifies nothing when no checker is injected', () => {
-    makeHost();
-    socket.receive({
-      t: 'pair',
-      clientId: 'c1',
-      request: {
-        accountId: 'owner',
-        passkeyCredentialId: 'cred-1',
-        passkeyPublicKeyHash: 'hash-1',
-        devicePublicKey: 'device-1',
-        requestedLabel: 'iPhone Safari',
-        setupNonce: 'anything',
-      },
-    });
-    expect(approvals[0]!.verified).toBe(false);
   });
 
   it('routes setup-token-redeemed, the one frame that addresses no client', () => {

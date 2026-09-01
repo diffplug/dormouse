@@ -946,7 +946,9 @@ describe('setup QR', () => {
     expect(item.verified).toBe(true);
     // The webview is told the verdict, not the proof behind it. Its own copy of
     // the code is the QR it asked for; the pairing must not hand it a second one.
-    expect(item.request.setupNonce).toBeUndefined();
+    // Cast because `MirroredPairingRequest` has no such field — this is the
+    // runtime half of that claim.
+    expect((item.request as PairingRequest).setupNonce).toBeUndefined();
     expect(JSON.stringify(queueEvents())).not.toContain(token);
   });
 

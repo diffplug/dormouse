@@ -21,7 +21,7 @@
  * a webview answer can never widen it.
  */
 
-import type { PairingRequest } from 'server-lib-common';
+import type { MirroredPairingRequest } from '../../remote/host/pairing-approval';
 import type { RemoteHostStatus } from '../../remote/host/remote-host';
 
 /** Transport event names for what the service sends back. */
@@ -70,14 +70,8 @@ export interface PairingQueueItem {
   clientId: string;
   /** Immutable ceremony ticket id, echoed by approve/deny. */
   pairingId: string;
-  /**
-   * The request with its `setupNonce` **stripped**: the webview needs the
-   * verdict, not the proof. The nonce is a setup token this Host minted, and a
-   * Client holding one is what {@link PairingQueueItem.verified} attests to —
-   * mirroring it would put a bearer-ish credential in a webview realm for no
-   * gain (`RemoteHost.#onPair` in `lib/src/remote/host/remote-host.ts`).
-   */
-  request: PairingRequest;
+  /** The request minus its `setupNonce`; the webview gets {@link PairingQueueItem.verified} instead. */
+  request: MirroredPairingRequest;
   /**
    * The Client proved it was set up by scanning **this** machine's setup QR, by
    * returning a token this Host minted and had not seen spent. Drives the

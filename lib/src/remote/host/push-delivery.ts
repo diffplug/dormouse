@@ -1,7 +1,8 @@
 /**
- * Delivering a push (`docs/specs/alert.md` -> Push notifications): the Host's
- * authenticated calls to the Server, and the rule that the Host's own ACL — read
- * at send time — chooses who is reached.
+ * Delivering a push (`docs/specs/alert.md` -> Push notifications): what the Host
+ * posts, and the rule that the Host's own ACL — read at send time — chooses who
+ * is reached. The transport those calls run under is `host-fetch.ts`, shared
+ * with the setup-token mint.
  *
  * Split from `alert-push.ts` because the two halves run in different processes
  * once the Host is Node-resident: ring *detection* is webview state (the
@@ -24,6 +25,7 @@ import {
 import type { PushSendSummary } from '../../host/remote/service-protocol';
 import type { PushDevice } from '../../lib/push-devices';
 import type { HostEnrollment } from './enrollment';
+import { hostFetch } from './host-fetch';
 
 /**
  * Longest label we put in a notification title. Every OS truncates well before
@@ -55,39 +57,13 @@ export function toPushText(label: string): string {
   return boundedPushText(label, { limit: PUSH_TITLE_LIMIT, fallback: 'terminal' });
 }
 
+/** A `HostFetchOptions` (`host-fetch.ts`) plus the authority on who is reached. */
 export interface AlertPushDeps {
   readonly enrollment: Pick<HostEnrollment, 'serverUrl' | 'hostToken'>;
   /** The Host's active ACL records — the authority on who may be reached. */
   readonly activeRecords: () => readonly HostAclRecord[];
   /** Injectable for tests. */
   readonly fetch?: typeof globalThis.fetch;
-}
-
-/** The Host's one authenticated call to the Server. */
-async function hostFetch(
-  deps: AlertPushDeps,
-  route: string,
-  body?: unknown,
-): Promise<Response> {
-  const doFetch = deps.fetch ?? globalThis.fetch;
-  const response = await doFetch(`${deps.enrollment.serverUrl}${route}`, {
-    ...(body === undefined
-      ? {}
-      : { method: 'POST', body: JSON.stringify(body) }),
-    // The service replaced a webview whose CSP checked every redirect target.
-    // Do not let an allowed relay bounce the bearer token or notification
-    // metadata to a destination outside the baked allowlist.
-    redirect: 'error',
-    headers: {
-      authorization: `Bearer ${deps.enrollment.hostToken}`,
-      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-    },
-  });
-  // Checked here so both call sites fail loudly. A send that swallowed a 401
-  // from a revoked host token would leave push permanently broken and silent —
-  // the failure mode this whole feature is most prone to.
-  if (!response.ok) throw new Error(`${route} failed (${response.status})`);
-  return response;
 }
 
 /**

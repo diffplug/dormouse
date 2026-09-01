@@ -24,16 +24,17 @@ const QUIET_ZONE_MODULES = 4;
 const ERROR_CORRECTION = 'M' as const;
 
 /*
- * The one place in `lib/src` that names a color literally, against DESIGN.md's
- * "never hardcode colors". A QR is read by a phone camera rather than by a
- * person: scanners expect dark modules on a light ground, many refuse an
+ * A registered exception to DESIGN.md's Host-Theme-Only Rule, listed there
+ * beside the window-close hover. A QR is read by a phone camera rather than by
+ * a person: scanners expect dark modules on a light ground, many refuse an
  * inverted code outright, and no theme token can promise either the polarity or
- * the contrast ratio in both light and dark. Painting the tile itself is what
- * makes the code scannable whatever surface it lands on — the honest trade for
- * a control whose whole job is to be machine-readable.
+ * the contrast ratio in both light and dark.
  */
 const QR_LIGHT = '#ffffff';
 const QR_DARK = '#000000';
+
+/** Rendered edge length in px, quiet zone included. */
+const QR_SIZE_PX = 168;
 
 /**
  * The dark modules as one SVG path, in module units, so the whole code is a
@@ -60,36 +61,29 @@ function modulesToPath(matrix: readonly (readonly boolean[])[]): string {
 
 export function QrCode({
   value,
-  /** Rendered edge length in px, quiet zone included. */
-  size = 168,
   label,
-  className,
 }: {
   value: string;
-  size?: number;
   /** Accessible name; the code itself is an image with no text in it. */
   label: string;
-  className?: string;
 }) {
-  const qr = useMemo(
-    () => encode(value, { border: QUIET_ZONE_MODULES, ecc: ERROR_CORRECTION }),
-    [value],
-  );
-  const path = useMemo(() => modulesToPath(qr.data), [qr]);
+  const { modules, path } = useMemo(() => {
+    const qr = encode(value, { border: QUIET_ZONE_MODULES, ecc: ERROR_CORRECTION });
+    return { modules: qr.size, path: modulesToPath(qr.data) };
+  }, [value]);
 
   return (
     <svg
       role="img"
       aria-label={label}
-      width={size}
-      height={size}
-      viewBox={`0 0 ${qr.size} ${qr.size}`}
+      width={QR_SIZE_PX}
+      height={QR_SIZE_PX}
+      viewBox={`0 0 ${modules} ${modules}`}
       // Modules are whole pixels only when the browser is told not to smooth
       // them; an antialiased edge is exactly the blur a scanner trips over.
       shapeRendering="crispEdges"
-      className={className}
     >
-      <rect width={qr.size} height={qr.size} fill={QR_LIGHT} />
+      <rect width={modules} height={modules} fill={QR_LIGHT} />
       <path d={path} fill={QR_DARK} />
     </svg>
   );

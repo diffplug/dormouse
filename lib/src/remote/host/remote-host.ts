@@ -23,13 +23,12 @@ import {
   type ConnectionRequest,
   type HostAclRecord,
   type HostFrame,
-  type PairingRequest,
   type ServerToHostFrame,
 } from 'server-lib-common';
 import type { HostEnrollment } from './enrollment';
 import type { RemoteWebSocket } from '../ws';
 import { loadHostAcl } from './acl';
-import type { PendingPairing } from './pairing-approval';
+import type { MirroredPairingRequest, PendingPairing } from './pairing-approval';
 
 /** The remote-api handler this controller drives per authorized client. */
 export interface RemoteApiSessionLike {
@@ -91,17 +90,6 @@ export interface RemoteHostOptions {
   /** Dismiss a surfaced request once resolved. */
   dismissApproval: (clientId: string) => void;
   /**
-   * Whether `nonce` is a setup token this Host minted and has not seen spent,
-   * **consuming it** on a match so one QR proves one pairing. Injected because
-   * the tokens are the service's — it is the party that mints them over the
-   * Host's authenticated channel (`lib/src/host/remote/service.ts`).
-   *
-   * Optional, and absent means nothing is verified: a Host built without it
-   * (the tests, an older embedder) runs every pairing as the ordinary
-   * fingerprint-compare one.
-   */
-  verifySetupNonce?: (nonce: string) => boolean;
-  /**
    * A setup token this Host minted was spent on the Server, so the QR showing
    * it is stale. Announced to whoever is displaying it; nothing here acts on it.
    */
@@ -150,7 +138,6 @@ export class RemoteHost {
   readonly #saveAcl: (hostId: string, records: readonly HostAclRecord[]) => void;
   readonly #requestApproval: (pending: PendingPairing) => void;
   readonly #dismissApproval: (clientId: string) => void;
-  readonly #verifySetupNonce: (nonce: string) => boolean;
   readonly #onSetupTokenRedeemed: () => void;
   readonly #now: () => number;
   readonly #reconnect: boolean;
@@ -162,6 +149,21 @@ export class RemoteHost {
    * sync.
    */
   readonly #clients = new Map<string, ClientState>();
+
+  /**
+   * Setup tokens minted for this Host and not yet seen spent, `token → expiresAt`.
+   *
+   * A phone that was set up by scanning one returns it in its `PairingRequest`,
+   * and a match here is what marks that pairing `verified` — this is the Host's
+   * own copy of a credential the Server also holds, and the reason neither
+   * Server nor Client can fabricate the verdict. Kept here rather than in the
+   * service that mints them so its lifetime *is* this Host's: a new Host starts
+   * with none, and a Host that reconnects keeps the codes its server issued.
+   * Kept local and tiny rather than routed through the shared issuer
+   * primitives: nothing here needs to know which Host minted what, because
+   * there is only one.
+   */
+  readonly #setupTokens = new Map<string, number>();
 
   #ws: WebSocketLike | null = null;
   #status: RemoteHostStatus = 'idle';
@@ -192,7 +194,6 @@ export class RemoteHost {
     this.#saveAcl = options.saveAcl;
     this.#requestApproval = options.requestApproval;
     this.#dismissApproval = options.dismissApproval;
-    this.#verifySetupNonce = options.verifySetupNonce ?? (() => false);
     this.#onSetupTokenRedeemed = options.onSetupTokenRedeemed ?? (() => {});
     this.#reconnect = options.reconnect ?? true;
   }
@@ -207,6 +208,36 @@ export class RemoteHost {
 
   get activeRecords(): HostAclRecord[] {
     return this.#acl.activeRecords();
+  }
+
+  /**
+   * Remember a setup token just minted for this Host, so the phone that scans it
+   * can prove itself (see {@link RemoteHost.#setupTokens}). Called by whoever
+   * holds the authenticated channel the token came off — the service
+   * (`lib/src/host/remote/service.ts` → `#setupQr`).
+   *
+   * Prunes on insert, since a token that can no longer be verified is only
+   * memory: nothing else sweeps this map.
+   */
+  rememberSetupToken(token: string, expiresAt: number): void {
+    const now = this.#now();
+    for (const [minted, expiry] of this.#setupTokens) {
+      if (expiry <= now) this.#setupTokens.delete(minted);
+    }
+    this.#setupTokens.set(token, expiresAt);
+  }
+
+  /**
+   * Whether `nonce` is a token minted for this Host that nobody has spent — and
+   * it is spent by asking. Single use, because the nonce proves that *this*
+   * setup happened, and one scan sets up one phone.
+   */
+  #verifySetupNonce(nonce: string): boolean {
+    const expiresAt = this.#setupTokens.get(nonce);
+    // Deleted on any hit, expired or not: it can never become valid again.
+    if (expiresAt === undefined) return false;
+    this.#setupTokens.delete(nonce);
+    return this.#now() < expiresAt;
   }
 
   /**
@@ -428,9 +459,8 @@ export class RemoteHost {
       return;
     }
     // A phone set up by scanning this machine's QR returns the token it was set
-    // up with. Only this Host can check one — it minted the token over its own
-    // authenticated channel and holds the only other copy — which is what makes
-    // `verified` unforgeable by the Server or the Client
+    // up with. Only this Host can check one — it holds the only copy outside the
+    // Server — which is what makes `verified` unforgeable by either
     // (`docs/specs/remote-security-model.md` → Pairing Ceremony).
     //
     // A miss is **not** an error: an unknown, expired, or already-spent nonce
@@ -445,11 +475,10 @@ export class RemoteHost {
     // The label is attacker-chosen free text rendered in the one dialog the
     // ACL rests on. Bound and strip it here, once, so every consumer — the
     // queue projection, the modal, and the ACL record written on approval —
-    // sees the same safe value. The nonce is dropped in the same step: `verified`
-    // is what anyone downstream needs, and the token itself is a credential that
-    // has no business in a webview realm or an ACL record.
+    // sees the same safe value. The nonce leaves in the same step; the narrowed
+    // type is what keeps it gone (`MirroredPairingRequest`).
     const { setupNonce: _spent, ...bare } = incoming;
-    const request: PairingRequest = {
+    const request: MirroredPairingRequest = {
       ...bare,
       accountId: boundedPairingAccount(incoming.accountId),
       requestedLabel: boundedPairingLabel(incoming.requestedLabel),
