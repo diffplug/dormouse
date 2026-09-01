@@ -63,11 +63,13 @@ the setup password or a bearer token, exactly as `SECURITY.md` -> "Loopback
 Listeners" requires. `scripts/loopback-lint.mjs` does not cover this socket —
 it binds from config rather than from a loopback literal (rationale).
 
-`DORMOUSE_ORIGIN` is parsed once and normalized with `URL.origin` — a trailing
-slash reads as correct in an `.env` and fails every compare it reaches, and a
-value that is not a URL with a host is a `ConfigError` naming the variable.
-WebAuthn clientData checks, passkey assertion verification, the Host enrollment
-policy and the `#setup` URL a Host composes all use that normalized origin.
+`DORMOUSE_ORIGIN` is normalized to a bare origin exactly once, in `readConfig`,
+by the shared `normalizeOrigin` in `server-lib-common` — a trailing slash reads
+as correct in an `.env` and fails every compare it reaches, and a value that is
+not a URL with a host is a `ConfigError` naming the variable. WebAuthn
+clientData checks, passkey assertion verification, the Host enrollment policy
+and the `#setup` URL a Host composes all compare against that string rather than
+re-parsing it; `createApp` parses it only to take `rpId` from the hostname.
 
 Source of truth: `server/src/config.ts` (`readConfig`), a pure env→config
 mapping pinned by `server/test/config.test.mjs`; only the disk half stays
@@ -290,17 +292,15 @@ not: Pocket sends those itself, so it answers the distinct
 
 An enrolled Host mints one over its own authenticated channel; the response
 carries the token and an opaque `mintId`, since the Host knows the origin it
-enrolled against and composes `<origin>/#setup?token=…&nonce=…` for the QR it
-renders. Scanning replaces typing that origin and the setup password. **The
-`nonce` is the Host's own and never reaches this server** —
-[remote-security-model.md](./remote-security-model.md) owns what it proves.
+enrolled against and composes the QR itself. Scanning replaces typing that
+origin and the setup password. **The `nonce` is the Host's own and never reaches
+this server** — [remote-security-model.md](./remote-security-model.md) owns what
+it proves.
 
-**The hash grammar is this spec's**: `token` and `nonce`, both base64url,
-percent-encoded. Pocket reads it before its first render and **erases the hash
-in the same act** — an address bar, a history stack and a screenshot are places
-a live credential must not sit — and ignores one that does not parse, since
-nobody typed it. Source of truth: `takeSetupHash` in
-`lib/src/remote/pocket-app/setup-link.ts`; what Pocket does with each half is
+**The hash grammar is this spec's**: `<origin>/#setup?token=…&nonce=…`, both
+values base64url and percent-encoded. Source of truth: `#setupQr` in
+`lib/src/host/remote/service.ts`, over the shared constants in
+`server-lib-common/src/remote/wire.ts`; what Pocket does with each half is
 [pocket-app.md](./pocket-app.md).
 
 * **Exactly one credential, counted by presence rather than by type**, here and

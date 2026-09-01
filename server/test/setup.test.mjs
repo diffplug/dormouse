@@ -189,8 +189,11 @@ test('origin/rpId derive from config', async () => {
   assert.equal(new URL(ORIGIN).hostname, RP_ID);
 });
 
-test('configured origin is normalized for setup and Host policy', async () => {
-  const { app } = await freshApp({ origin: 'https://Example.COM/' });
+// The configured origin — already bare, since `readConfig` normalizes it and
+// `config.test.mjs` pins that — reaching all three of setup's rpId, the
+// clientData check, and the policy a Host enrolls with.
+test('the configured origin drives setup and Host policy', async () => {
+  const { app } = await freshApp({ origin: 'https://example.com' });
   const authenticator = await newAuthenticator();
   const begin = await post(app, API_ROUTES.setupBegin, { password: PASSWORD });
   const { challenge, rpId } = await begin.json();

@@ -8,6 +8,9 @@ import { hostname } from 'node:os';
 import {
   API_ROUTES,
   MAX_PENDING_PAIRINGS,
+  SETUP_HASH_NONCE_PARAM,
+  SETUP_HASH_PREFIX,
+  SETUP_HASH_TOKEN_PARAM,
   isSetupTokenResponse,
   type EnrollmentOffer,
 } from 'server-lib-common';
@@ -418,10 +421,12 @@ export class RemoteHostService {
     // `enrollment.origin` is the phone-facing WebAuthn origin — where Pocket is
     // served and where the passkey will be registered — not necessarily the
     // `serverUrl` this Host posts to.
+    const hash = new URLSearchParams({
+      [SETUP_HASH_TOKEN_PARAM]: body.token,
+      [SETUP_HASH_NONCE_PARAM]: nonce,
+    });
     return {
-      url:
-        `${enrollment.origin}/#setup?token=${encodeURIComponent(body.token)}` +
-        `&nonce=${encodeURIComponent(nonce)}`,
+      url: `${enrollment.origin}/${SETUP_HASH_PREFIX}${hash}`,
       mintId: body.mintId,
       expiresAt: body.expiresAt,
     };

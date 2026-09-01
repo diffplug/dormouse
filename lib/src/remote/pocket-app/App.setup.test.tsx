@@ -17,18 +17,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SetupCredential } from 'server-lib-common';
 
 import App, { type HostView } from './App';
+import {
+  SESSION_EXPIRED_MESSAGE,
+  SETUP_CODE_DEAD_MESSAGE,
+  SessionExpiredError,
+  SetupTokenInvalidError,
+} from '../client/pocket-client';
 import { setNativeFieldValue } from '../../lib/dom';
-
-const HOSTS: HostView[] = [
-  { hostId: 'host-1', label: 'First laptop', online: true },
-  { hostId: 'host-2', label: 'Second laptop', online: true },
-];
+import { HOSTS, alertText, buttonNamed, click, rowFor, settle } from './app-test-utils';
 
 const SCANNED = { token: 'tok-from-the-qr', nonce: 'nonce-from-the-qr' };
 
 const fake = vi.hoisted(() => ({
   setup: vi.fn<(credential: SetupCredential, label: string) => Promise<unknown>>(),
   signin: vi.fn<() => Promise<unknown>>(),
+  listHosts: vi.fn<() => Promise<HostView[]>>(),
   pair: vi.fn<
     (hostId: string, label: string, nonce?: string | null) => Promise<{ approved: boolean }>
   >(),
@@ -44,9 +47,11 @@ vi.mock('../client/push-subscribe', () => ({
   subscribeToPushInBrowser: () => Promise.reject(new Error('not under test')),
 }));
 
-vi.mock('../client/pocket-client', () => ({
-  SessionExpiredError: class SessionExpiredError extends Error {},
-  SetupTokenInvalidError: class SetupTokenInvalidError extends Error {},
+// Only `PocketClient` is doubled: the error classes and their messages are the
+// real ones, so a test asserting on what the screen says is asserting on what
+// ships rather than on a string this file made up.
+vi.mock('../client/pocket-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../client/pocket-client')>()),
   PocketClient: class {
     socketOpen = true;
     hasPriorUse = () => fake.priorUse;
@@ -57,7 +62,7 @@ vi.mock('../client/pocket-client', () => ({
     openSocket = async () => undefined;
     setup = (credential: SetupCredential, label: string) => fake.setup(credential, label);
     signin = () => fake.signin();
-    listHosts = async () => HOSTS;
+    listHosts = () => fake.listHosts();
     queryPaired = async () => false;
     pair = (hostId: string, label: string, nonce?: string | null) =>
       fake.pair(hostId, label, nonce);
@@ -98,6 +103,7 @@ beforeEach(() => {
   fake.priorUse = false;
   fake.setup.mockReset().mockResolvedValue({});
   fake.signin.mockReset().mockResolvedValue({});
+  fake.listHosts.mockReset().mockResolvedValue(HOSTS);
   fake.pair.mockReset().mockResolvedValue({ approved: true });
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -109,15 +115,6 @@ afterEach(() => {
   container.remove();
 });
 
-/** Let every pending promise chain land and React commit what they produced. */
-async function settle() {
-  for (let pass = 0; pass < 3; pass++) {
-    await act(async () => {
-      for (let tick = 0; tick < 12; tick++) await Promise.resolve();
-    });
-  }
-}
-
 function boot(scanned: { token: string; nonce?: string } | null = SCANNED) {
   act(() => {
     root.render(
@@ -128,38 +125,13 @@ function boot(scanned: { token: string; nonce?: string } | null = SCANNED) {
   });
 }
 
-function buttonNamed(label: string | RegExp): HTMLButtonElement | null {
-  return (
-    [...container.querySelectorAll('button')].find((b) =>
-      typeof label === 'string' ? b.textContent === label : label.test(b.textContent ?? ''),
-    ) ?? null
-  );
-}
-
-async function click(label: string | RegExp) {
-  act(() => buttonNamed(label)!.click());
-  await settle();
-}
-
-/** One Host's row, found through its label so the assertions name a Host. */
-function rowFor(label: string): HTMLElement {
-  const title = [...container.querySelectorAll('div')].find((el) => el.textContent === label);
-  const row = title?.closest('div.rounded-lg');
-  if (!(row instanceof HTMLElement)) throw new Error(`no host row for ${label}`);
-  return row;
-}
-
 async function pairFrom(label: string) {
-  act(() => rowFor(label).querySelector('button')!.click());
+  act(() => rowFor(container, label).querySelector('button')!.click());
   await settle();
 }
 
 function passwordField(): HTMLInputElement | null {
   return container.querySelector<HTMLInputElement>('#pocket-setup-password');
-}
-
-function alertText(): string | null {
-  return container.querySelector('[role="alert"]')?.textContent ?? null;
 }
 
 describe('setting up from a scanned code', () => {
@@ -170,7 +142,7 @@ describe('setting up from a scanned code', () => {
     boot();
 
     expect(passwordField()).toBeNull();
-    await click('Create passkey & sign in');
+    await click(container, 'Create passkey & sign in');
 
     expect(fake.setup).toHaveBeenCalledWith({ setupToken: SCANNED.token }, 'My Phone');
     expect(fake.signin).toHaveBeenCalledOnce();
@@ -179,7 +151,7 @@ describe('setting up from a scanned code', () => {
 
   it('carries the scanned nonce into the pairing, and drops it once approved', async () => {
     boot();
-    await click('Create passkey & sign in');
+    await click(container, 'Create passkey & sign in');
 
     await pairFrom('First laptop');
     expect(fake.pair).toHaveBeenLastCalledWith('host-1', DEVICE_LABEL, SCANNED.nonce);
@@ -187,14 +159,14 @@ describe('setting up from a scanned code', () => {
     // Back to the list, and pair the other machine: the Host spent that nonce
     // when it approved the first pairing, so a second proof could only fail to
     // match — this one takes the fingerprint-compare path.
-    await click('‹ Hosts');
+    await click(container, '‹ Hosts');
     await pairFrom('Second laptop');
     expect(fake.pair).toHaveBeenLastCalledWith('host-2', DEVICE_LABEL, null);
   });
 
   it('sends no proof when the code carried no nonce', async () => {
     boot({ token: SCANNED.token });
-    await click('Create passkey & sign in');
+    await click(container, 'Create passkey & sign in');
 
     await pairFrom('First laptop');
 
@@ -214,10 +186,10 @@ describe('setting up from a scanned code', () => {
     fake.signin.mockRejectedValueOnce(new Error('passkey prompt cancelled'));
     boot();
 
-    await click('Create passkey & sign in');
+    await click(container, 'Create passkey & sign in');
 
     expect(container.textContent).toContain('Welcome back');
-    expect(alertText()).toContain('cancelled');
+    expect(alertText(container)).toContain('cancelled');
   });
 
   it('takes the ordinary password path when no code was scanned', async () => {
@@ -235,26 +207,24 @@ describe('a code the server refuses', () => {
    * password still works, and so does a synced passkey.
    */
   it('says so and hands back the password field', async () => {
-    const { SetupTokenInvalidError } = await import('../client/pocket-client');
-    fake.setup.mockRejectedValue(new SetupTokenInvalidError('That setup code has expired.'));
+    fake.setup.mockRejectedValue(new SetupTokenInvalidError());
     boot();
     expect(passwordField()).toBeNull();
 
-    await click('Create passkey & sign in');
+    await click(container, 'Create passkey & sign in');
 
-    expect(alertText()).toContain('expired');
+    expect(alertText(container)).toBe(SETUP_CODE_DEAD_MESSAGE);
     expect(passwordField()).not.toBeNull();
     expect(fake.signin).not.toHaveBeenCalled();
   });
 
   it('leaves the retry an ordinary password setup', async () => {
-    const { SetupTokenInvalidError } = await import('../client/pocket-client');
-    fake.setup.mockRejectedValueOnce(new SetupTokenInvalidError('That setup code has expired.'));
+    fake.setup.mockRejectedValueOnce(new SetupTokenInvalidError());
     boot();
-    await click('Create passkey & sign in');
+    await click(container, 'Create passkey & sign in');
 
     act(() => setNativeFieldValue(passwordField()!, 'hunter2'));
-    await click('Create passkey & sign in');
+    await click(container, 'Create passkey & sign in');
 
     expect(fake.setup).toHaveBeenLastCalledWith({ password: 'hunter2' }, 'My Phone');
   });
@@ -265,13 +235,36 @@ describe('a code the server refuses', () => {
    * displayed and still worth proving at pairing.
    */
   it('keeps the scanned nonce for pairing', async () => {
-    const { SetupTokenInvalidError } = await import('../client/pocket-client');
-    fake.setup.mockRejectedValueOnce(new SetupTokenInvalidError('That setup code has expired.'));
+    fake.setup.mockRejectedValueOnce(new SetupTokenInvalidError());
     boot();
-    await click('Create passkey & sign in');
+    await click(container, 'Create passkey & sign in');
     fake.setup.mockResolvedValue({});
-    await click('Sign in with passkey');
+    await click(container, 'Sign in with passkey');
 
+    await pairFrom('First laptop');
+
+    expect(fake.pair).toHaveBeenLastCalledWith('host-1', DEVICE_LABEL, SCANNED.nonce);
+  });
+});
+
+describe('a session that expires before the pairing', () => {
+  /**
+   * The expiry recovery tears the session down and drops to sign-in, which is
+   * the one path back through `auth` that must *not* look like a fresh visit:
+   * the nonce is this run's, not the session's, so the pairing after the
+   * re-sign-in is still the one the laptop displayed a code for.
+   */
+  it('keeps the scanned nonce across the drop back to sign-in', async () => {
+    boot();
+    await click(container, 'Create passkey & sign in');
+    expect(container.textContent).toContain('First laptop');
+
+    fake.listHosts.mockRejectedValueOnce(new SessionExpiredError());
+    await click(container, 'Refresh');
+    expect(alertText(container)).toBe(SESSION_EXPIRED_MESSAGE);
+    expect(buttonNamed(container, 'Refresh')).toBeNull();
+
+    await click(container, 'Sign in with passkey');
     await pairFrom('First laptop');
 
     expect(fake.pair).toHaveBeenLastCalledWith('host-1', DEVICE_LABEL, SCANNED.nonce);

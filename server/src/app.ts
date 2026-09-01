@@ -81,7 +81,11 @@ import { isPublicHttpsPushEndpoint } from './push-endpoint.js';
 export interface AppConfig {
   /** Gates account creation and passkey enrollment. */
   readonly setupPassword: string;
-  /** External origin, e.g. `https://dormouse.tailnet.ts.net`; source of `rpId`. */
+  /**
+   * External origin, e.g. `https://dormouse.tailnet.ts.net`; source of `rpId`.
+   * Already bare — `readConfig` normalizes it, and every compare here is a
+   * string compare against this value.
+   */
   readonly origin: string;
   /**
    * Demand the authenticator's user-verification flag (biometric/PIN) on the
@@ -215,9 +219,10 @@ export interface CreatedApp {
 
 export function createApp(config: AppConfig): CreatedApp {
   const now = config.now ?? (() => Date.now());
-  const originUrl = new URL(config.origin);
-  const origin = originUrl.origin;
-  const rpId = originUrl.hostname;
+  const origin = config.origin;
+  // The one parse, and only for the host part: `readConfig` already reduced
+  // `DORMOUSE_ORIGIN` to a bare origin.
+  const rpId = new URL(origin).hostname;
   const accounts = new AccountStore(config.stateDir, now);
   const hostStore = new HostStore(config.stateDir, now);
   const pushStore = new PushSubscriptionStore(config.stateDir, now);

@@ -435,13 +435,10 @@ export class PocketClient {
    * Send a pairing request built from this device's key + passkey; awaits the
    * Host's decision.
    *
-   * `setupNonce` is the second half of a scanned QR, when this run was opened
-   * with one. It is never sent: what rides is a MAC of it over the very device
-   * key the request asks to authorize, which is what lets the Host recognize
-   * the phone that photographed its screen and collapse the approval to one
-   * confirm (`docs/specs/remote-security-model.md` -> Pairing Ceremony).
-   * Computed once, so the stale-presence retry re-sends the same proof — the
-   * Host's match is non-consuming, so a re-delivery stays verified.
+   * `setupNonce` is a scanned QR's second half, sent as a `computeSetupProof`
+   * MAC rather than as itself (`docs/specs/remote-security-model.md` -> Pairing
+   * Ceremony). Computed once, so the stale-presence retry re-sends the same
+   * proof — the Host's match is non-consuming, so a re-delivery stays verified.
    */
   async pair(hostId: string, label: string, setupNonce?: string | null): Promise<PairResult> {
     const { credentialId, publicKey } = this.#passkeyForRequest();

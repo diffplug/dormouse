@@ -54,29 +54,24 @@ export const FirstRunNeedsInstall: Story = {
   args: { needsInstall: true },
 };
 
-/**
- * Opened from a scanned QR: the code stands in for the setup password, so the
- * password field is gone and only the passkey label is left to fill in
- * (`docs/specs/pocket-app.md` -> The auth screen).
- */
+// Opened from a scanned QR: the code stands in for the setup password, so the
+// password field is gone and only the passkey label is left to fill in
+// (`docs/specs/pocket-app.md` -> The auth screen).
 export const FromScannedCode: Story = {
   args: { setupToken: 'tok-from-the-qr' },
 };
 
-/**
- * The same scan on a phone that has been here before. Setup still leads —
- * scanning the code *is* the ask — where "Welcome back" would otherwise win.
- */
+// The same scan on a phone that has been here before. Setup still leads —
+// scanning the code *is* the ask — where "Welcome back" would otherwise win.
 export const FromScannedCodeReturning: Story = {
   args: { setupToken: 'tok-from-the-qr', firstRun: false },
 };
 
-/**
- * The code was expired or already spent. `App` drops it, which puts this screen
- * back on the setup password with the reason on it.
- */
-export const ScannedCodeExpired: Story = {
-  args: { error: SETUP_CODE_DEAD_MESSAGE },
+// After a code the server refused: `App` has dropped it, so this is the return
+// visit's ordinary screen carrying the dead code's reason. Setup is back behind
+// the disclosure, where the setup password still works.
+export const SetupAfterDeadCode: Story = {
+  args: { firstRun: false, error: SETUP_CODE_DEAD_MESSAGE },
 };
 
 // Account creation in flight: the setup button reads "Creating…".

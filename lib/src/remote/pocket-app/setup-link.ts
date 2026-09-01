@@ -1,14 +1,15 @@
 /**
- * The setup code a Host's QR carries, taken out of the URL at boot
- * (`docs/specs/server.md` -> Setup tokens owns the grammar).
- *
- * `#setup?token=…&nonce=…` holds two secrets with two verifiers: the token
- * redeems once at `/api/setup/*`, and the nonce never reaches the Server at all
- * — it is what a pairing request proves possession of
- * (`docs/specs/remote-security-model.md` -> Pairing Ceremony). Neither may be
- * left in the URL, which is read back by the address bar, the history stack,
- * the back button, and every screenshot of the phone.
+ * The `#setup` hash a Host's QR carries. `docs/specs/server.md` -> Setup tokens
+ * owns the grammar; `docs/specs/pocket-app.md` -> the auth screen owns what
+ * Pocket does with each half.
  */
+
+import {
+  SETUP_HASH_NONCE_PARAM,
+  SETUP_HASH_PREFIX,
+  SETUP_HASH_TOKEN_PARAM,
+  isSetupTokenHandle,
+} from 'server-lib-common';
 
 /** A scanned code, held in memory for this run only — never persisted. */
 export interface ScannedSetup {
@@ -19,45 +20,20 @@ export interface ScannedSetup {
 }
 
 /**
- * Both halves are base64url — 32 random bytes each today, so 43 characters —
- * bounded well past that and far short of anything worth defending against
- * downstream. A value outside it was not minted by a Host.
- */
-const SETUP_SECRET = /^[A-Za-z0-9_-]{1,128}$/;
-
-const HASH_PREFIX = '#setup?';
-
-/**
- * Read the code out of `loc` and erase the hash, in that order.
+ * Read the code out of `window.location` and erase the hash, in that order.
  *
  * **Erased whether or not it parses.** A hash saying `#setup` is a credential
  * either way, and a malformed one is worth no more in the URL than a good one.
- *
- * **A malformed code is ignored, not reported.** The person holding the phone
- * did not type this and cannot fix it, so the app falls through to the ordinary
- * password/sign-in screen rather than raising an error about a URL.
  */
-export function takeSetupHash(
-  loc: Location = window.location,
-  hist: History = window.history,
-): ScannedSetup | null {
-  const hash = loc.hash;
-  if (!hash.startsWith(HASH_PREFIX)) return null;
-  hist.replaceState(null, '', `${loc.pathname}${loc.search}`);
-  const params = new URLSearchParams(hash.slice(HASH_PREFIX.length));
-  const token = params.get('token');
-  const nonce = params.get('nonce');
-  if (token === null || !SETUP_SECRET.test(token)) return null;
+export function takeSetupHash(): ScannedSetup | null {
+  const { hash, pathname, search } = window.location;
+  if (!hash.startsWith(SETUP_HASH_PREFIX)) return null;
+  window.history.replaceState(null, '', `${pathname}${search}`);
+  const params = new URLSearchParams(hash.slice(SETUP_HASH_PREFIX.length));
+  const token = params.get(SETUP_HASH_TOKEN_PARAM);
+  const nonce = params.get(SETUP_HASH_NONCE_PARAM);
+  if (!isSetupTokenHandle(token)) return null;
   // A nonce that fails the check drops out on its own: the token still sets the
   // phone up, and pairing falls back to the fingerprint compare.
-  return nonce !== null && SETUP_SECRET.test(nonce) ? { token, nonce } : { token };
+  return isSetupTokenHandle(nonce) ? { token, nonce } : { token };
 }
-
-/**
- * The code this run was opened with, captured at module load.
- *
- * Not a `useMemo` or a `useRef` initializer: StrictMode renders a mounting tree
- * twice, and the second pass would re-read a hash the first pass had already
- * erased and conclude there was no code.
- */
-export const scannedSetup: ScannedSetup | null = takeSetupHash();

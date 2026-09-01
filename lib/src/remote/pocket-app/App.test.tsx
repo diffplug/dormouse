@@ -303,16 +303,6 @@ describe('SetupOrSignin with a scanned code', () => {
       notice!.compareDocumentPosition(label!) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
-
-  it('falls back to the ordinary password screen once the code is dropped', () => {
-    // What `App` does on a rejected token: null it out, and this screen has to
-    // be an ordinary one again rather than an unusable code path.
-    renderAuth({ firstRun: false, setupToken: null });
-
-    expect(container.textContent).toContain('Welcome back');
-    act(() => buttonNamed(/First-time setup/)!.click());
-    expect(setupPasswordField()).not.toBeNull();
-  });
 });
 
 describe('SetupOrSignin install guidance', () => {

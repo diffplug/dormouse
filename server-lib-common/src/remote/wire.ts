@@ -230,8 +230,20 @@ export const MAX_TOKENS_PER_HOST = 8;
  */
 const SETUP_TOKEN_MAX_LENGTH = 128;
 
-/** Base64url, bounded, non-empty — the shape of every handle on this wire. */
-function isSetupTokenHandle(value: unknown): value is string {
+/**
+ * The `#setup` hash a Host composes for its QR and Pocket parses at boot; one
+ * owner so the emitter and the parser cannot drift. `docs/specs/server.md` ->
+ * Setup tokens owns the grammar.
+ */
+export const SETUP_HASH_PREFIX = '#setup?';
+export const SETUP_HASH_TOKEN_PARAM = 'token';
+export const SETUP_HASH_NONCE_PARAM = 'nonce';
+
+/**
+ * Base64url, bounded, non-empty — the shape of every handle on this wire, and
+ * of both halves of the QR hash above.
+ */
+export function isSetupTokenHandle(value: unknown): value is string {
   return (
     typeof value === 'string' &&
     value.length > 0 &&

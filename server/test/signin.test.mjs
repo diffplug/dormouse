@@ -104,8 +104,8 @@ test('sign-in rejects an assertion for a foreign origin', async () => {
   assert.match((await res.json()).error, /origin/);
 });
 
-test('sign-in accepts the browser-normalized origin for a normalized config', async () => {
-  const { app } = await freshApp({ origin: 'https://Example.COM/' });
+test('sign-in checks clientData against the configured origin', async () => {
+  const { app } = await freshApp({ origin: 'https://example.com' });
   const authenticator = await SimAuthenticator.create({ rpId: 'example.com' });
   assert.equal(
     (await register(app, authenticator, { origin: 'https://example.com' })).status,

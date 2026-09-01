@@ -3,7 +3,7 @@
  * "Host side" owns the exchange and persistence contracts.
  */
 
-import { API_ROUTES, type HostEnrollResponse } from 'server-lib-common';
+import { API_ROUTES, normalizeOrigin, type HostEnrollResponse } from 'server-lib-common';
 import { loadJson, removeJson } from '../../lib/local-json-store';
 import { HOST_REQUEST_TIMEOUT_MS } from './host-fetch';
 import { ENROLLMENT_KEY } from './store';
@@ -129,7 +129,10 @@ export async function performEnrollment(
     serverUrl: base,
     hostId: enrolled?.hostId,
     hostToken: enrolled?.hostToken,
-    origin: normalizedOrigin(enrolled?.origin),
+    // Untrusted like the rest of the body, and `isEnrollment` only checks that
+    // it is a string — so it is reduced here, and anything that is not a URL
+    // with a host fails the exchange below naming `origin`.
+    origin: normalizeOrigin(enrolled?.origin) ?? undefined,
     rpId: enrolled?.rpId,
     // Only when the server actually sent a boolean: spreading `undefined` in
     // would make the key present-and-undefined, which the guard treats the
@@ -144,26 +147,6 @@ export async function performEnrollment(
     );
   }
   return enrollment;
-}
-
-/**
- * The server's `origin` reduced to a bare origin, or `undefined` where it is not
- * one — which fails the exchange through {@link isEnrollment}, naming `origin`
- * like any other field the server got wrong.
- *
- * Normalized at this boundary because everything downstream concatenates it: the
- * setup QR builds `${origin}/#setup?…`, so a configured `DORMOUSE_ORIGIN` with a
- * trailing slash yields a `//#setup` URL that scans to the wrong place. It is
- * also the `ConnectionPolicy.origin` every passkey assertion is checked against,
- * where WebAuthn's `clientData.origin` is always the bare form.
- */
-function normalizedOrigin(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  try {
-    return new URL(value).origin;
-  } catch {
-    return undefined;
-  }
 }
 
 /**

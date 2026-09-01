@@ -188,15 +188,12 @@ An enrolled machine can mint one, on request:
 
 <Canvas of={RemoteControl.SetupPhoneQr} />
 
-That code is `https://<laptop>.<tailnet>.ts.net/#setup?token=…&nonce=…` — the
-origin you would otherwise type into mobile Safari, carrying two secrets with
-two different verifiers:
-
-- The **setup token** is the server's. Single-use, five minutes, and it redeems
-  at the setup endpoints in place of the setup password.
-- The **nonce** is the *laptop's own*, and never goes near the server. It
-  travels laptop screen → phone camera and no further, which is what makes it
-  worth something in §6.
+That code is the origin you would otherwise type into mobile Safari, carrying
+two secrets: a **setup token** the server issues and will redeem in place of the
+setup password, and a **nonce** that is the *laptop's own* and never goes near
+the server — it travels laptop screen → phone camera and no further, which is
+what makes it worth something in §6. (`docs/specs/server.md` → Setup tokens owns
+the grammar.)
 
 Neither lives long: five minutes, one use. The code is shown on request rather
 than left standing on screen, and once a phone redeems it the panel says so
@@ -229,10 +226,11 @@ Sign in stays on the screen throughout. A passkey syncs, so a second phone may
 already hold one, and taking that path keeps the scanned nonce for §6 either
 way.
 
-If the code is expired or already spent, Pocket says so and hands the password
-field back rather than stranding you on a dead code:
+If the code is expired or already spent, Pocket says so and drops it rather than
+stranding you on a dead code — leaving the ordinary screen, with the setup
+password still behind its disclosure:
 
-<Canvas of={SetupOrSignin.ScannedCodeExpired} />
+<Canvas of={SetupOrSignin.SetupAfterDeadCode} />
 
 That password path is also the original one, for a phone nowhere near the
 laptop's screen: the setup password from `manage show-password`, plus the label.
@@ -313,12 +311,10 @@ so in the request, and the dialog asks for one confirm:
 
 <Canvas of={Pairing.Verified} />
 
-What it is confirming is a MAC, not a claim. The request carries
-`setupProof = HMAC-SHA256(key = nonce, message = domain || devicePublicKey)`,
-and the laptop recomputes it against every nonce it still holds. The nonce is
-the half of the QR the server never saw, and the proof is over the very device
-key the request is asking to authorize — so a server that swapped in its own key
-would need a MAC under a secret it has never had. Displaying the code was the
+What it is confirming is a MAC, not a claim: the request carries a proof keyed
+on the nonce the server never saw, and the laptop recomputes it against every
+nonce it still holds (`docs/specs/remote-security-model.md` → Pairing Ceremony
+owns the construction and what it rules out). Displaying the code was the
 local-presence act; the modal names what proved the device rather than asking
 you to vouch for it. Approving spends the nonce, and one scan sets up one phone.
 

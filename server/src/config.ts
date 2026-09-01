@@ -7,6 +7,8 @@
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { normalizeOrigin } from 'server-lib-common';
+
 import { defaultVapidSubject, type VapidKeys } from './push.js';
 
 /** Everything the entrypoint needs, resolved from the environment. */
@@ -92,7 +94,7 @@ export function readConfig(env: Env = process.env): ServerConfig {
   // as "off" rather than as "on", because turning this on without
   // UV-capable authenticators locks the account out of its own server.
   const requireUserVerification = env.DORMOUSE_REQUIRE_USER_VERIFICATION?.trim() === 'true';
-  const origin = normalizeOrigin(env.DORMOUSE_ORIGIN?.trim() || `http://localhost:${port}`);
+  const origin = requireOrigin(env.DORMOUSE_ORIGIN?.trim() || `http://localhost:${port}`);
   const stateDir = env.DORMOUSE_STATE_DIR ?? './data';
 
   // Default to `lib/dist-pocket` resolved from this compiled file's location
@@ -143,30 +145,20 @@ export function readConfig(env: Env = process.env): ServerConfig {
 }
 
 /**
- * `DORMOUSE_ORIGIN` reduced to a bare scheme-host-port, once, here.
- *
- * Everything downstream compares against this string rather than parsing it
- * again: WebAuthn `clientData.origin` checks, assertion verification, the
- * Host's `ConnectionPolicy`, and the `<origin>/#setup?…` URL a Host composes
- * for its QR. A trailing slash or a path reads as correct in an `.env` and
- * fails every one of those compares, so it is normalized rather than refused —
- * but a value that is not a URL at all cannot be guessed at.
+ * `DORMOUSE_ORIGIN` reduced to a bare scheme-host-port, once, here — everything
+ * downstream compares against this string rather than parsing it again. A
+ * trailing slash or a path reads as correct in an `.env` and fails every one of
+ * those compares, so it is normalized rather than refused; a value that is not
+ * a URL with a host cannot be guessed at.
  */
-function normalizeOrigin(raw: string): string {
-  let parsed: URL | undefined;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    // Fall through to the one error below.
-  }
-  // `origin` is the string `'null'` for a scheme with no host — `mailto:`, a
-  // bare `file:` — which would otherwise become the origin every check runs on.
-  if (!parsed || parsed.origin === 'null') {
+function requireOrigin(raw: string): string {
+  const origin = normalizeOrigin(raw);
+  if (origin === null) {
     throw new ConfigError(
       `DORMOUSE_ORIGIN must be an absolute URL with a host, e.g. https://dormouse.tailnet.ts.net, got '${raw}'.`,
     );
   }
-  return parsed.origin;
+  return origin;
 }
 
 /**

@@ -26,7 +26,7 @@ import {
 } from '../client/pocket-client';
 import { browserWebAuthn } from '../client/webauthn';
 import { pairingFingerprint, type SetupCredential } from 'server-lib-common';
-import { scannedSetup, type ScannedSetup } from './setup-link';
+import type { ScannedSetup } from './setup-link';
 import { getOrCreateDeviceKey } from '../client/device-key';
 import {
   getPushAvailability,
@@ -190,13 +190,11 @@ function ErrorRow({ message }: { message: string }): React.ReactElement {
 }
 
 export default function App({
-  /**
-   * The QR this run was opened with, read out of the URL before the first
-   * render ({@link scannedSetup}). A parameter only so tests can hand one over
-   * without going through `location`; nothing renders `App` with it.
-   */
-  scanned = scannedSetup,
-}: { scanned?: ScannedSetup | null } = {}): React.ReactElement {
+  scanned,
+}: {
+  /** The code this run was opened with, read out of the URL in `main.tsx`. */
+  scanned: ScannedSetup | null;
+}): React.ReactElement {
   const client = useMemo(
     () =>
       new PocketClient({
@@ -237,15 +235,9 @@ export default function App({
    */
   const [needsInstall] = useState(needsHomeScreenInstall);
 
-  /**
-   * The scanned code's two halves, held for this run only — a reload loses
-   * them, which is bounded anyway by the 5-minute TTL both share.
-   *
-   * The token is state because it decides what the auth screen offers, and a
-   * Server that rejects it has to flip that screen back to the password. The
-   * nonce is a ref because nothing renders from it: it rides into `pair` and is
-   * dropped once a pairing it verified is approved.
-   */
+  // The scanned code's two halves, held for this run only. The token is state
+  // because it decides what the auth screen offers; the nonce is a ref because
+  // nothing renders from it.
   const [setupToken, setSetupToken] = useState<string | null>(scanned?.token ?? null);
   const setupNonceRef = useRef<string | null>(scanned?.nonce ?? null);
 
@@ -705,13 +697,8 @@ export function ConnectedView({
  * **First run** leads with setup — the only thing a browser holding nothing can
  * actually complete — with sign-in kept as a plain secondary action, since a
  * passkey syncs and a fresh browser may already have one. **Returning** keeps
- * sign-in primary and folds setup back behind the disclosure.
- *
- * **A scanned code leads with setup whatever this browser holds.** Someone who
- * just pointed a camera at their laptop is asking for exactly this, and the
- * code buys one registration before it expires. Sign-in stays where it is on
- * that layout: a phone whose passkey synced may well prefer it, and it keeps
- * the scanned nonce for pairing either way.
+ * sign-in primary and folds setup back behind the disclosure. A live
+ * `setupToken` leads with setup either way (docs/specs/pocket-app.md).
  *
  * The install guidance goes here rather than after sign-in because this is the
  * screen that mints the partition-bound *passkey* it warns about — the last
@@ -723,7 +710,7 @@ export function SetupOrSignin({
   busy,
   error,
   firstRun,
-  setupToken = null,
+  setupToken,
   needsInstall,
   onSignin,
   onSetup,
@@ -733,7 +720,7 @@ export function SetupOrSignin({
   /** No stored passkey material — no evidence this browser was ever set up. */
   firstRun: boolean;
   /** The scanned code's token, while it is still live; null once spent or absent. */
-  setupToken?: string | null;
+  setupToken: string | null;
   /** iOS in a browser tab; see {@link InstallFirstNotice}. */
   needsInstall: boolean;
   onSignin: () => void;
@@ -906,11 +893,6 @@ function InstallNotice(): React.ReactElement {
  * caller so the credential form's ids, autocomplete rules, and disabled logic
  * have one definition; `idPrefix` keeps those ids unique if it is ever rendered
  * more than once on a screen.
- *
- * **A scanned code replaces the password field, never joins it.** The code is
- * the credential, so there is nothing to type and nothing to get wrong; the
- * note in its place is what says why the field a returning user remembers is
- * missing.
  *
  * A real `<form>`, so the phone keyboard's Go key submits — on the first-run
  * screen these fields are the primary path, and a Go that does nothing reads as

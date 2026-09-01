@@ -30,6 +30,9 @@ test('a blank DORMOUSE_BIND_HOST is treated as unset, not as an empty host', () 
 
 test('the default origin follows PORT', () => {
   assert.equal(readConfig({ ...MINIMAL, PORT: '3100' }).origin, 'http://localhost:3100');
+  // A decision, not an accident: `URL.origin` strips the scheme's default port,
+  // and that bare form is what a browser sends as `clientData.origin`.
+  assert.equal(readConfig({ ...MINIMAL, PORT: '80' }).origin, 'http://localhost');
 });
 
 test('DORMOUSE_ORIGIN wins over the port-derived default', () => {
@@ -38,13 +41,17 @@ test('DORMOUSE_ORIGIN wins over the port-derived default', () => {
 });
 
 test('DORMOUSE_ORIGIN is normalized to a bare origin', () => {
-  // A trailing slash reads as correct in an `.env` and fails every compare it
-  // reaches: the WebAuthn `clientData.origin` check, and the `<origin>/#setup?…`
-  // QR a Host composes, which would scan to `//#setup`.
+  // The only normalization there is — `createApp` compares against this string
+  // rather than re-parsing it. A trailing slash, a path, or a capitalized host
+  // reads as correct in an `.env` and fails every compare it reaches: the
+  // WebAuthn `clientData.origin` check, and the `<origin>/#setup?…` QR a Host
+  // composes, which would scan to `//#setup`.
   const trailing = readConfig({ ...MINIMAL, DORMOUSE_ORIGIN: 'https://dor.example.ts.net/' });
   assert.equal(trailing.origin, 'https://dor.example.ts.net');
   const pathed = readConfig({ ...MINIMAL, DORMOUSE_ORIGIN: 'https://dor.example.ts.net:8443/pocket?x=1' });
   assert.equal(pathed.origin, 'https://dor.example.ts.net:8443');
+  const shouted = readConfig({ ...MINIMAL, DORMOUSE_ORIGIN: 'https://Dor.Example.TS.NET/' });
+  assert.equal(shouted.origin, 'https://dor.example.ts.net');
 });
 
 test('a DORMOUSE_ORIGIN that is not a URL with a host is a ConfigError', () => {

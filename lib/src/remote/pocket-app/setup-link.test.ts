@@ -95,20 +95,3 @@ describe('takeSetupHash', () => {
     expect(takeSetupHash()).toBeNull();
   });
 });
-
-describe('scannedSetup', () => {
-  /**
-   * The capture has to happen at module load, before React renders: StrictMode
-   * runs a mounting tree twice, and a hook-time read would find the hash the
-   * first pass had already erased.
-   */
-  it('is captured when the module loads, and erases the hash then', async () => {
-    openWith(`#setup?token=${TOKEN}&nonce=${NONCE}`);
-    vi.resetModules();
-
-    const { scannedSetup } = await import('./setup-link');
-
-    expect(scannedSetup).toEqual({ token: TOKEN, nonce: NONCE });
-    expect(location.hash).toBe('');
-  });
-});

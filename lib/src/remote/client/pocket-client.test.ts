@@ -266,7 +266,12 @@ describe('setup + signin', () => {
     const harness = makeClient({
       '/api/setup/begin': () => ({ status: 401, json: { error: 'invalid setup password' } }),
     });
-    await expect(harness.client.setup({ password: 'wrong' }, 'Phone')).rejects.toThrow('invalid setup password');
+    const failed = harness.client.setup({ password: 'wrong' }, 'Phone');
+
+    await expect(failed).rejects.toThrow('invalid setup password');
+    // An ordinary failure, not a dead code: this 401 answers a wrong password,
+    // and the drop-the-code recovery keys on the body rather than the status.
+    await expect(failed).rejects.not.toBeInstanceOf(SetupTokenInvalidError);
   });
 
   /**
@@ -309,16 +314,6 @@ describe('setup + signin', () => {
 
     const atFinish = makeClient({ ...AUTH_ROUTES, '/api/setup/finish': () => dead });
     await expect(atFinish.client.setup({ setupToken: 'spent' }, 'Phone')).rejects.toThrow(
-      SetupTokenInvalidError,
-    );
-  });
-
-  it('leaves a wrong setup password an ordinary failure, not a dead code', async () => {
-    const harness = makeClient({
-      '/api/setup/begin': () => ({ status: 401, json: { error: 'invalid setup password' } }),
-    });
-
-    await expect(harness.client.setup({ password: 'wrong' }, 'Phone')).rejects.not.toBeInstanceOf(
       SetupTokenInvalidError,
     );
   });
@@ -462,12 +457,9 @@ describe('pair', () => {
     await pairing;
   });
 
-  it.each([
-    ['no code was scanned', undefined],
-    ['the nonce is already spent', null],
-  ])('sends no proof when %s', async (_case, nonce) => {
+  it('sends no proof once the nonce is spent', async () => {
     const { client, socket } = await signedIn();
-    const pairing = client.pair('h1', 'iPhone', nonce);
+    const pairing = client.pair('h1', 'iPhone', null);
 
     const frame = await nextSent(socket, (f) => f.t === 'pair');
     // Absent, not empty: the Host reads any non-string as no proof at all, and
