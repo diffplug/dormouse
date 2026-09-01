@@ -13,7 +13,7 @@
  * `pair` is approved the moment it arrives; otherwise call `approve(clientId)` /
  * `deny(clientId)` from the pairing-approval hook. Subscribe to events for logs
  * and assertions: `open`, `close`, `pair`, `pair-status`, `paired`, `denied`,
- * `connect`, `decision`, `msg`, `client-gone`.
+ * `connect`, `decision`, `msg`, `client-gone`, `setup-token-redeemed`.
  *
  * The handshake smoke test and the manual `scripts/fake-host.mjs` dev
  * stand-in both reuse this class.
@@ -96,7 +96,15 @@ export class FakeHost extends EventEmitter {
     } catch {
       return;
     }
-    if (!frame || typeof frame.t !== 'string' || typeof frame.clientId !== 'string') return;
+    if (!frame || typeof frame.t !== 'string') return;
+    if (frame.t === 'setup-token-redeemed') {
+      // The one server→host frame addressing no Client, so it is handled before
+      // the clientId guard. It names the mint, never the token — the real Host
+      // routes it to whichever panel displayed that code (remote-host.ts).
+      this.emit('setup-token-redeemed', { mintId: frame.mintId });
+      return;
+    }
+    if (typeof frame.clientId !== 'string') return;
     const { clientId } = frame;
     switch (frame.t) {
       case 'pair': {

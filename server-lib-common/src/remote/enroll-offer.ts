@@ -9,6 +9,8 @@
  * which redeems the token against its own copy.
  */
 
+import { isOrigin } from './origin.js';
+
 export interface EnrollmentOffer {
   /** Where the server answers, e.g. `https://dormouse.tailnet.ts.net`. */
   readonly origin: string;
@@ -76,19 +78,7 @@ export function parseEnrollmentOffer(text: string): EnrollmentOffer | null {
  * A future stamp passes: one machine writes and reads the file, so clock skew
  * is not evidence of anything and must not brick the one-click path.
  */
-export function isEnrollmentOfferFresh(
-  offer: EnrollmentOffer,
-  now: number = Date.now(),
-): boolean {
+export function isEnrollmentOfferFresh(offer: EnrollmentOffer, now: number = Date.now()): boolean {
   const minted = Date.parse(offer.mintedAt);
   return !Number.isNaN(minted) && now - minted <= ENROLL_OFFER_MAX_AGE_MS;
-}
-
-/** True for a bare origin — what `URL.origin` yields, with nothing after it. */
-function isOrigin(value: string): boolean {
-  try {
-    return new URL(value).origin === value;
-  } catch {
-    return false;
-  }
 }

@@ -15,7 +15,13 @@ function pairingRequest(over: Partial<PairingRequest> = {}): PairingRequest {
   };
 }
 
-function RemotePairingModalStory({ request }: { request: PairingRequest }) {
+function RemotePairingModalStory({
+  request,
+  verified,
+}: {
+  request: PairingRequest;
+  verified?: boolean;
+}) {
   return (
     <div className="relative h-[360px] w-[680px] overflow-hidden rounded bg-app-bg font-mono text-terminal-fg">
       {/* Simulated terminal content behind the viewport-scoped modal. */}
@@ -23,7 +29,12 @@ function RemotePairingModalStory({ request }: { request: PairingRequest }) {
         <div>dev@dormouse:~/repo$ dormouse remote enroll</div>
         <div className="text-muted">Waiting for a device to pair…</div>
       </div>
-      <RemotePairingModal request={request} onApprove={() => {}} onDeny={() => {}} />
+      <RemotePairingModal
+        request={request}
+        verified={verified}
+        onApprove={() => {}}
+        onDeny={() => {}}
+      />
     </div>
   );
 }
@@ -39,6 +50,16 @@ type Story = StoryObj<typeof RemotePairingModalStory>;
 // Named device, normal account, key long enough to show an `abcd1234…` fingerprint.
 export const Default: Story = {
   args: { request: pairingRequest() },
+};
+
+/**
+ * The phone returned a setup token this machine minted and displayed, so it is
+ * provably the one that scanned the QR. Nothing left to compare by eye — the
+ * dialog says what happened and asks for one confirm
+ * (`docs/specs/remote-security-model.md`, Pairing Ceremony).
+ */
+export const Verified: Story = {
+  args: { request: pairingRequest(), verified: true },
 };
 
 // Empty requested label → the `(unnamed)` fallback.

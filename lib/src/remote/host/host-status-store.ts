@@ -16,7 +16,12 @@
  * status rather than patching a field.
  */
 
-import type { PushSendSummary, RemoteHostConsoleStatus } from '../../host/remote/service-protocol';
+import type {
+  PushSendSummary,
+  RemoteHostConsoleStatus,
+  SetupQrResult,
+  SetupTokenRedeemedEvent,
+} from '../../host/remote/service-protocol';
 import { getPlatform } from '../../lib/platform';
 import type { RemoteHostLink } from '../../lib/platform/types';
 
@@ -314,6 +319,44 @@ export async function clearRemoteHostEnrollment(): Promise<void> {
   if (!active) throw new Error('This build has no remote Host service.');
   await active.command('clearEnrollment');
   await refreshAfterMutation();
+}
+
+/**
+ * Mint the code behind this machine's setup QR (`docs/specs/server.md` → Setup
+ * tokens). Unlike everything above it, this changes nothing the status reports,
+ * so it does not re-read one.
+ *
+ * The token rides back inside the URL, which is the point: it exists to be shown
+ * to whoever is standing at this machine (`service-protocol.ts` →
+ * `SetupQrResult`). Rejections propagate verbatim — a relay that is down and a
+ * server that refuses both have to read as themselves.
+ */
+export async function mintSetupQr(): Promise<SetupQrResult> {
+  const active = link();
+  if (!active) throw new Error('This build has no remote Host service.');
+  return (await active.command('setupQr')) as SetupQrResult;
+}
+
+/**
+ * Be told when a setup code this machine minted is spent, so the panel still
+ * offering *that* code can stop. Independent of the status subscription above:
+ * the event changes no status field, so there is nothing to re-read.
+ *
+ * The listener gets the `mintId`; a panel showing a different mint ignores it
+ * (`service-protocol.ts` → `SetupTokenRedeemedEvent`). An event that names no
+ * mint is dropped here rather than passed on as `undefined` — the service is
+ * typed to send one, so the only source of a malformed event is a bridge nobody
+ * should be trusting to pick a panel.
+ */
+export function subscribeToSetupTokenRedeemed(
+  listener: (mintId: string) => void,
+): () => void {
+  return (
+    link()?.on('setupTokenRedeemed', (data) => {
+      const mintId = (data as SetupTokenRedeemedEvent | undefined)?.mintId;
+      if (typeof mintId === 'string') listener(mintId);
+    }) ?? (() => {})
+  );
 }
 
 /**

@@ -3,7 +3,7 @@
  */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * The store reads `getPlatform().remoteHost`, so the link is the only seam the
@@ -18,10 +18,12 @@ vi.mock('../lib/platform', () => ({
 }));
 
 import { RemoteControlSection } from './RemoteControlSection';
-import type { RemoteHostConsoleStatus } from '../host/remote/service-protocol';
+import type { RemoteHostConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
 import {
   enrolledStatus,
+  makeStubRemoteHostLink,
   OFFER_STATUS,
+  setupQrResult,
   UNENROLLED_STATUS as NOT_ENROLLED,
 } from '../host/remote/test-remote-host-link';
 
@@ -47,6 +49,19 @@ function makeLink(command: (cmd: string, params?: unknown) => Promise<unknown>) 
   };
 }
 
+/** Frozen only where a setup code's countdown has to read the same every run. */
+const NOW = Date.now();
+
+/** A `setupQr` answer: both of the QR's secrets in the URL, plus its mint id. */
+function qr(over: Partial<SetupQrResult> = {}): SetupQrResult {
+  return {
+    url: 'https://laptop.tailnet.ts.net/#setup?token=abc123&nonce=xyz789',
+    mintId: 'mint-1',
+    expiresAt: NOW + 300_000,
+    ...over,
+  };
+}
+
 /** The shared fixture, keeping this file's own server/host values. */
 const enrolled = (over: Partial<RemoteHostConsoleStatus> = {}) =>
   enrolledStatus({
@@ -62,6 +77,19 @@ let root: Root;
 async function render() {
   await act(async () => {
     root.render(<RemoteControlSection />);
+  });
+}
+
+/**
+ * Let the lazily-imported `QrCode` land. The encoder rides its own chunk so
+ * `uqr` stays out of the main bundle (`RemoteControlSection.tsx`), which puts
+ * the code one `import()` behind the render that asks for it — resolved in a
+ * microtask here only because {@link beforeAll} already made the module
+ * resident, so this is a flush rather than a wait on a real module load.
+ */
+async function settleQrChunk() {
+  await act(async () => {
+    await Promise.resolve();
   });
 }
 
@@ -107,6 +135,13 @@ async function type(selector: string, value: string) {
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
+
+beforeAll(async () => {
+  // Load the lazy chunk once, up front. Otherwise the first test that renders a
+  // code waits on a real module transform, and how long that takes is not
+  // something a test should be timing.
+  await import('./QrCode');
+});
 
 beforeEach(() => {
   container = document.createElement('div');
@@ -452,6 +487,385 @@ describe('RemoteControlSection', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('renders a scannable setup code once the panel is opened', async () => {
+    const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : enrolled()));
+    platform = { remoteHost: link };
+    await render();
+
+    // Nothing is minted until someone asks: a code is a credential with a clock
+    // on it, and one nobody is looking at is one nobody can scan.
+    expect(link.command).not.toHaveBeenCalledWith('setupQr');
+    await act(async () => buttonLabelled('Set up a phone')!.click());
+    await settleQrChunk();
+
+    expect(link.command).toHaveBeenCalledWith('setupQr');
+    // What the code *is* belongs to `QrCode.test.tsx`; this is the section's
+    // claim that a scannable one reached the panel with its clock.
+    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
+    expect(text()).toContain('within 5 min');
+  });
+
+  it('renders a refused mint in the panel, leaving the view’s error slot alone', async () => {
+    // The mint also fires on a timer, so it must not clear the enrolled view's
+    // one error slot — where a Reconnect failure the user is reading lives.
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'setupQr') throw new Error('could not mint a setup code (503)');
+      if (cmd === 'reconnect') throw new Error('the relay refused this machine');
+      return enrolled({ connection: 'displaced' });
+    });
+    platform = { remoteHost: link };
+    await render();
+
+    await act(async () => buttonLabelled('Reconnect')!.click());
+    expect(text()).toContain('the relay refused this machine');
+
+    await act(async () => buttonLabelled('Set up a phone')!.click());
+    expect(text()).toContain('could not mint a setup code (503)');
+    expect(text()).toContain('the relay refused this machine');
+    // Still enrolled, still offering the retry.
+    expect(buttonLabelled('New code')).toBeTruthy();
+  });
+
+  it('stops offering the code the phone redeemed, and only that one', async () => {
+    const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : enrolled()));
+    platform = { remoteHost: link };
+    await render();
+
+    await act(async () => buttonLabelled('Set up a phone')!.click());
+    await settleQrChunk();
+    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
+
+    // Another window's code was scanned. Every open panel hears the frame, so
+    // one that is showing a different mint has to ignore it.
+    await act(async () => {
+      link.emit('setupTokenRedeemed', { name: 'setupTokenRedeemed', mintId: 'someone-elses' });
+    });
+    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
+
+    // The redemption happens on the phone; the Server tells the Host that
+    // minted the token, which is the only way this panel can learn of it.
+    await act(async () => {
+      link.emit('setupTokenRedeemed', { name: 'setupTokenRedeemed', mintId: 'mint-1' });
+    });
+    expect(container.querySelector('svg[role="img"]')).toBeNull();
+    expect(text()).toContain('This code is used up.');
+  });
+
+  it('drops the panel when the machine enrolls somewhere else under it', async () => {
+    // A code belongs to the server that minted it. The console hook can swap
+    // enrollments with this dialog open, and a QR left on screen would point a
+    // camera at a machine this one no longer talks to.
+    vi.useFakeTimers();
+    try {
+      let status: unknown = enrolled();
+      const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : status));
+      platform = { remoteHost: link };
+      await render();
+
+      await act(async () => buttonLabelled('Set up a phone')!.click());
+      await settleQrChunk();
+      expect(container.querySelector('svg[role="img"]')).toBeTruthy();
+
+      status = enrolled({ hostId: 'host-2', serverUrl: 'https://other.tailnet.ts.net' });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(container.querySelector('svg[role="img"]')).toBeNull();
+      expect(buttonLabelled('Set up a phone')).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /** A link whose `setupQr` answers a code that always dies `ttlMs` out. */
+  function mintingLink(ttlMs = 300_000) {
+    let minted = 0;
+    return makeLink(async (cmd) => {
+      if (cmd === 'setupQr') {
+        minted += 1;
+        return qr({
+          url: `https://x/#setup?token=t${minted}&nonce=n${minted}`,
+          mintId: `mint-${minted}`,
+          expiresAt: Date.now() + ttlMs,
+        });
+      }
+      return enrolled();
+    });
+  }
+
+  const mintCount = (link: ReturnType<typeof makeLink>) =>
+    link.command.mock.calls.filter(([cmd]) => cmd === 'setupQr').length;
+
+  it('replaces the code once, shortly before it expires', async () => {
+    vi.useFakeTimers();
+    try {
+      const link = mintingLink();
+      platform = { remoteHost: link };
+      await render();
+      await act(async () => buttonLabelled('Set up a phone')!.click());
+      expect(mintCount(link)).toBe(1);
+
+      // The panel can sit open while someone goes to find their phone, so it
+      // replaces the code rather than going quietly unscannable — and once the
+      // lead is crossed, not once per tick from there on.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(290_000);
+      });
+      expect(mintCount(link)).toBe(2);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(mintCount(link)).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('counts down on the minute, since minutes are all it names', async () => {
+    vi.useFakeTimers();
+    try {
+      platform = { remoteHost: mintingLink() };
+      await render();
+      await act(async () => buttonLabelled('Set up a phone')!.click());
+      expect(text()).toContain('within 5 min');
+
+      // Half a minute in, there is nothing to repaint; the panel wakes on the
+      // boundary where the number actually changes rather than once a second.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(text()).toContain('within 5 min');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(text()).toContain('within 4 min');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('lets New code disarm the refresh the old code armed', async () => {
+    // Every mint spends a code on the Server, so the timer armed against the
+    // code being replaced must not fire on top of the replacement.
+    vi.useFakeTimers();
+    try {
+      const link = mintingLink();
+      platform = { remoteHost: link };
+      await render();
+      await act(async () => buttonLabelled('Set up a phone')!.click());
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100_000);
+      });
+      await act(async () => buttonLabelled('New code')!.click());
+      expect(mintCount(link)).toBe(2);
+
+      // Past where the first code's refresh was armed for, and nothing fires:
+      // that timer belongs to a code the panel no longer shows.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200_000);
+      });
+      expect(mintCount(link)).toBe(2);
+      // The replacement armed its own, on its own expiry.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100_000);
+      });
+      expect(mintCount(link)).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('never re-mints in a loop when the two clocks disagree', async () => {
+    // `expiresAt` is the Server's clock and the subtraction is against this
+    // one's. A laptop minutes fast computes a delay at or below zero, and the
+    // unclamped version re-minted several times a second — each one spending a
+    // real single-use token.
+    vi.useFakeTimers();
+    try {
+      const link = mintingLink(-600_000);
+      platform = { remoteHost: link };
+      await render();
+      await act(async () => buttonLabelled('Set up a phone')!.click());
+      expect(mintCount(link)).toBe(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(29_000);
+      });
+      expect(mintCount(link)).toBe(1);
+      // One replacement on the floor, and the next not until the floor again.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(mintCount(link)).toBe(2);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(29_000);
+      });
+      expect(mintCount(link)).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('refreshes by the real TTL when the Server clock is far ahead', async () => {
+    // Ten minutes of negative webview skew makes a five-minute Server token
+    // look fifteen minutes long. It still needs replacement before its real
+    // five-minute expiry, with the ordinary 20-second lead.
+    vi.useFakeTimers();
+    try {
+      const link = mintingLink(900_000);
+      platform = { remoteHost: link };
+      await render();
+      await act(async () => buttonLabelled('Set up a phone')!.click());
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(279_000);
+      });
+      expect(mintCount(link)).toBe(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(mintCount(link)).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the old code on screen while its replacement is on the wire', async () => {
+    // The refresh lead exists so a camera mid-scan still has something live to
+    // read; blanking to "Getting a code…" would defeat it.
+    vi.useFakeTimers();
+    try {
+      let release: ((result: unknown) => void) | null = null;
+      let minted = 0;
+      const link = makeLink(async (cmd) => {
+        if (cmd !== 'setupQr') return enrolled();
+        minted += 1;
+        if (minted === 1) return qr({ expiresAt: Date.now() + 300_000 });
+        return new Promise<unknown>((resolve) => {
+          release = resolve;
+        });
+      });
+      platform = { remoteHost: link };
+      await render();
+
+      await act(async () => buttonLabelled('Set up a phone')!.click());
+      await settleQrChunk();
+      const first = container.querySelector('svg[role="img"]');
+      expect(first).toBeTruthy();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(290_000);
+      });
+      expect(mintCount(link)).toBe(2);
+      // Still the old code, still scannable, no spinner copy.
+      expect(container.querySelector('svg[role="img"]')).toBe(first);
+      expect(text()).not.toContain('Getting a code…');
+
+      await act(async () => {
+        release!(
+          qr({
+            url: 'https://x/#setup?token=t2&nonce=n2',
+            mintId: 'mint-2',
+            expiresAt: Date.now() + 300_000,
+          }),
+        );
+      });
+      await settleQrChunk();
+      expect(container.querySelector('svg[role="img"]')).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('blanks only for the first mint, which has nothing to keep up', async () => {
+    let release: (result: unknown) => void = () => {};
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'setupQr') {
+        return new Promise<unknown>((resolve) => {
+          release = resolve;
+        });
+      }
+      return enrolled();
+    });
+    platform = { remoteHost: link };
+    await render();
+
+    await act(async () => buttonLabelled('Set up a phone')!.click());
+    expect(text()).toContain('Getting a code…');
+
+    // And the token exists on the Server either way; what must not happen is a
+    // live code rendering into a panel the user already dismissed.
+    await act(async () => buttonLabelled('Done')!.click());
+    await act(async () => {
+      release(qr({ url: 'https://x/#setup?token=late&nonce=late' }));
+    });
+    await settleQrChunk();
+
+    expect(container.querySelector('svg[role="img"]')).toBeNull();
+    expect(text()).not.toContain('Getting a code…');
+  });
+
+  it('contains a code that cannot be drawn, instead of taking the window down', async () => {
+    // Drawing throws two ways — a chunk fetch that fails, and a URL past the QR
+    // format's capacity — and neither may reach the app-wide ErrorBoundary,
+    // which takes every terminal with it. The oversized URL is the one a test
+    // can produce; the boundary is the same one.
+    let oversized = true;
+    const link = makeLink(async (cmd) => {
+      if (cmd !== 'setupQr') return enrolled();
+      return oversized ? qr({ url: `https://x/#setup?token=${'A'.repeat(5000)}` }) : qr();
+    });
+    // React logs a caught render error; catching it is the point of the test.
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      platform = { remoteHost: link };
+      await render();
+      await act(async () => buttonLabelled('Set up a phone')!.click());
+      await settleQrChunk();
+
+      expect(text()).toContain('Couldn’t display the code');
+      // The panel is still a panel: only the code failed.
+      expect(buttonLabelled('New code')).toBeTruthy();
+      expect(buttonLabelled('Done')).toBeTruthy();
+
+      // Retrying the same URL cannot help, and must not pretend to.
+      await act(async () => buttonLabelled('Try again')!.click());
+      await settleQrChunk();
+      expect(text()).toContain('Couldn’t display the code');
+
+      // A new code is the recovery, so a boundary that already caught has to
+      // remount when the URL changes under it.
+      oversized = false;
+      await act(async () => buttonLabelled('New code')!.click());
+      await settleQrChunk();
+      expect(container.querySelector('svg[role="img"]')).toBeTruthy();
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
+  it('pins the story stub both panel states are driven from', async () => {
+    // The `SetupPhoneQr` / `SetupPhoneRedeemed` stories drive the section
+    // through `makeStubRemoteHostLink` and nothing else, so a fixture that
+    // stopped answering `setupQr` — or stopped firing the redeemed event —
+    // would fail only in Chromatic. The states themselves are covered above, so
+    // this pins the fixture rather than re-rendering them.
+    const link = makeStubRemoteHostLink({
+      status: enrolledStatus(),
+      setupQr: setupQrResult({ expiresAt: NOW + 300_000 }),
+    });
+    expect(await link.command('setupQr')).toMatchObject({ expiresAt: NOW + 300_000 });
+
+    let redeemed = 0;
+    makeStubRemoteHostLink({ status: enrolledStatus(), setupRedeemed: true }).on(
+      'setupTokenRedeemed',
+      () => redeemed++,
+    );
+    await Promise.resolve();
+    expect(redeemed).toBe(1);
   });
 
   it('re-reads the status when the service announces a change', async () => {

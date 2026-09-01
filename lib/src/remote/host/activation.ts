@@ -19,7 +19,6 @@
  *   window.dormouseRemoteHost.clearEnrollment()
  */
 
-import type { PairingRequest } from 'server-lib-common';
 import type {
   AdoptResult,
   PairingQueueEvent,
@@ -38,6 +37,7 @@ import {
   enqueuePairingApproval,
   getPairingApprovalSnapshot,
   resolvePairingApproval,
+  type MirroredPairingRequest,
 } from './pairing-approval';
 
 export type { RemoteHostConsoleStatus };
@@ -178,6 +178,7 @@ function mirrorPairingQueue(link: RemoteHostLink, queue: readonly PairingQueueIt
       showing &&
       showing.pairingId === item.pairingId &&
       showing.requestedAt === item.requestedAt &&
+      showing.verified === item.verified &&
       sameRequest(showing.request, item.request)
     ) {
       continue;
@@ -192,6 +193,7 @@ function mirrorPairingQueue(link: RemoteHostLink, queue: readonly PairingQueueIt
       clientId: item.clientId,
       pairingId: item.pairingId,
       request: item.request,
+      verified: item.verified,
       requestedAt: item.requestedAt,
       approve: (label) =>
         void link
@@ -206,7 +208,7 @@ function mirrorPairingQueue(link: RemoteHostLink, queue: readonly PairingQueueIt
 }
 
 /**
- * Every field of a {@link PairingRequest}, as a compile-time checklist.
+ * Every field of a {@link MirroredPairingRequest}, as a compile-time checklist.
  *
  * `satisfies` is the whole point: {@link sameRequest} decides whether the modal
  * is already showing this exact device, and approving one authorizes the *pair*
@@ -214,6 +216,9 @@ function mirrorPairingQueue(link: RemoteHostLink, queue: readonly PairingQueueIt
  * would silently leave the user approving a device they were never shown
  * (docs/specs/remote-security-model.md). Naming the keys here makes that a
  * compile error rather than a silent security regression.
+ *
+ * Mirrored fields only: `setupProof` never reaches this realm, so a compare that
+ * listed it would be comparing two `undefined`s forever.
  */
 const PAIRING_REQUEST_FIELDS = {
   accountId: true,
@@ -221,15 +226,15 @@ const PAIRING_REQUEST_FIELDS = {
   passkeyPublicKeyHash: true,
   devicePublicKey: true,
   requestedLabel: true,
-} satisfies Record<keyof PairingRequest, true>;
+} satisfies Record<keyof MirroredPairingRequest, true>;
 
 /**
  * Whether the mirror already shows exactly this request. Field by field rather
  * than by identity: every snapshot arrives as fresh JSON off the bridge, so
  * identity always differs and would re-render the modal on every event.
  */
-function sameRequest(a: PairingRequest, b: PairingRequest): boolean {
-  return (Object.keys(PAIRING_REQUEST_FIELDS) as Array<keyof PairingRequest>).every(
+function sameRequest(a: MirroredPairingRequest, b: MirroredPairingRequest): boolean {
+  return (Object.keys(PAIRING_REQUEST_FIELDS) as Array<keyof MirroredPairingRequest>).every(
     (field) => a[field] === b[field],
   );
 }

@@ -1,16 +1,43 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  Component,
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
+import { DEFAULT_PAIRING_TTL_MS } from 'server-lib-common';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
-import type { RemoteHostConsoleStatus } from '../host/remote/service-protocol';
+import type { RemoteHostConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
 import type { RemoteHostStatus } from '../remote/host/remote-host';
 import {
   clearRemoteHostEnrollment,
   enrollOfferRemoteHost,
   enrollRemoteHost,
   getRemoteHostStatusSnapshot,
+  mintSetupQr,
   reconnectRemoteHost,
   refreshRemoteHostStatus,
   subscribeToRemoteHostStatus,
+  subscribeToSetupTokenRedeemed,
 } from '../remote/host/host-status-store';
+
+/**
+ * The QR encoder (`uqr`) is only ever reached by one panel inside one dialog on
+ * an enrolled machine, so it is lazy for the same reason `Wall.tsx` lazies
+ * `RemotePairingModalHost`: otherwise every build — the website included, where
+ * this section renders nothing at all — ships it in the main chunk.
+ *
+ * A factory rather than a module constant because retry needs a *fresh* one:
+ * `lazy` memoizes the rejected promise against the component's identity, so
+ * re-rendering the same one re-throws the same chunk failure forever.
+ */
+function makeQrCode() {
+  return lazy(() => import('./QrCode').then((m) => ({ default: m.QrCode })));
+}
 
 /**
  * How each relay-socket state reads to someone who is not holding the spec.
@@ -46,6 +73,45 @@ const TONE_CLASS = {
 const FIELD_LABEL = 'text-xs text-muted';
 
 /**
+ * How far ahead of `expiresAt` the phone-setup panel mints a replacement code.
+ *
+ * The panel can sit open while someone goes to find their phone, and a code is
+ * short-lived by design (`docs/specs/server.md` → Setup tokens) — so it replaces
+ * its own rather than going quietly unscannable. The lead is what keeps a camera
+ * opening on the old code from redeeming one that has already died.
+ */
+const SETUP_QR_REFRESH_LEAD_MS = 20_000;
+
+/**
+ * Floor on that delay, because `expiresAt` is the *Server's* clock and the
+ * subtraction is against the webview's. A laptop a few minutes fast computes a
+ * delay at or below zero and re-mints in a tight loop — several POSTs a second,
+ * each spending a real single-use token on the Server. The floor turns clock
+ * skew into a slightly early refresh instead.
+ */
+const SETUP_QR_MIN_REFRESH_MS = 30_000;
+
+/**
+ * Ceiling for a webview clock behind the Server. Its computed lifetime can be
+ * arbitrarily long, but the token has at most the shared TTL on the Server;
+ * keep the same lead so its replacement lands before real expiry.
+ */
+const SETUP_QR_MAX_REFRESH_MS = DEFAULT_PAIRING_TTL_MS - SETUP_QR_REFRESH_LEAD_MS;
+
+/** When to replace a code that expires at `expiresAt`, clock skew and all. */
+function refreshDelay(expiresAt: number, now: number): number {
+  return Math.min(
+    Math.max(expiresAt - now - SETUP_QR_REFRESH_LEAD_MS, SETUP_QR_MIN_REFRESH_MS),
+    SETUP_QR_MAX_REFRESH_MS,
+  );
+}
+
+/** Whole minutes until a setup code stops redeeming; never negative. */
+function minutesUntil(expiresAt: number, now: number): number {
+  return Math.max(0, Math.ceil((expiresAt - now) / 60_000));
+}
+
+/**
  * A busy/error pair for an action surface with one error location. Enrollment
  * uses the cross-form gate below instead.
  */
@@ -66,6 +132,110 @@ function useBusyAction() {
   }, []);
 
   return { busy, error, run };
+}
+
+/**
+ * Everything the phone-setup panel can be showing, as one value.
+ *
+ * `null` is the closed panel. The rest are open: waiting on a mint, holding a
+ * live code, spent, or refused. `minting` carries the code being replaced when
+ * there is one, so an auto-refresh never blanks a QR a camera is pointed at.
+ */
+type SetupQrState =
+  | null
+  | { phase: 'minting'; prev?: SetupQrResult }
+  | { phase: 'live'; qr: SetupQrResult }
+  | { phase: 'spent' }
+  | { phase: 'failed'; message: string };
+
+/**
+ * The phone-setup panel's whole lifecycle: mint on open, replace the code before
+ * it dies, and flip to spent when the Server says the phone used it.
+ *
+ * **Its own busy and error, not the section's {@link useBusyAction}.** A mint
+ * here fires on a timer rather than on a click: running it through the shared
+ * pair would clear the enrolled view's error slot — wiping a Reconnect failure
+ * the user is still reading — on a schedule nobody asked for. `useBusyAction`
+ * stays for user actions; the re-entrancy this needs and that boolean does not
+ * have is the sequence below.
+ */
+function useSetupQr() {
+  const [state, setState] = useState<SetupQrState>(null);
+  /**
+   * Bumped synchronously by every mint and by closing. Two jobs, both about a
+   * code that exists on the Server whether or not anyone can see it: it disarms
+   * the pending auto-refresh the instant a mint starts, so the fetch window
+   * cannot produce a second one, and it gates the writes below, so a mint
+   * resolving after the panel closed leaves no live-but-undisplayed token.
+   */
+  const mintSeq = useRef(0);
+
+  const mint = useCallback(() => {
+    const mine = ++mintSeq.current;
+    // Carry the code being replaced through the round trip: the refresh lead
+    // exists precisely so a camera mid-scan keeps something live to read.
+    setState((current) => ({ phase: 'minting', prev: displayedQr(current) }));
+    void (async () => {
+      try {
+        const qr = await mintSetupQr();
+        // Superseded answers are dropped whichever way they went: they belong to
+        // a request nobody is waiting on, and painting one would put a stale
+        // code — or a stale message — under a panel that has moved on.
+        if (mintSeq.current !== mine) return;
+        setState({ phase: 'live', qr });
+      } catch (error) {
+        if (mintSeq.current !== mine) return;
+        setState({
+          phase: 'failed',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    })();
+  }, []);
+
+  const close = useCallback(() => {
+    mintSeq.current++;
+    setState(null);
+  }, []);
+
+  // Replace the code before it dies: the panel can sit open while someone goes
+  // to find their phone. Only from `live` — a spent code is used and the next
+  // step is on the phone, a failed one is waiting on the user, and a mint in
+  // flight will arm its own — and the sequence check covers the timer that was
+  // armed against a code the panel no longer shows.
+  useEffect(() => {
+    if (state?.phase !== 'live') return;
+    const armed = mintSeq.current;
+    const timer = setTimeout(() => {
+      if (mintSeq.current === armed) mint();
+    }, refreshDelay(state.qr.expiresAt, Date.now()));
+    return () => clearTimeout(timer);
+  }, [state, mint]);
+
+  // The Server announces a spent token to the Host that minted it
+  // (`docs/specs/server.md` → Relay), which is the only way this panel can know
+  // its code was used: the redemption happens on the phone. Only for the mint
+  // this panel is showing — a second window offering a different code stays
+  // live — and bumping the sequence makes it terminal, so a mint already in
+  // flight cannot paint a code over it.
+  const mintId = displayedQr(state)?.mintId;
+  useEffect(() => {
+    if (mintId === undefined) return;
+    return subscribeToSetupTokenRedeemed((redeemed) => {
+      if (redeemed !== mintId) return;
+      mintSeq.current++;
+      setState({ phase: 'spent' });
+    });
+  }, [mintId]);
+
+  return { state, mint, close };
+}
+
+/** The code the panel is actually rendering, live or held through a refresh. */
+function displayedQr(state: SetupQrState): SetupQrResult | undefined {
+  if (state?.phase === 'live') return state.qr;
+  if (state?.phase === 'minting') return state.prev;
+  return undefined;
 }
 
 type EnrollmentAction = 'offer' | 'form';
@@ -152,7 +322,11 @@ export function RemoteControlSection() {
           Could not reach this machine’s Host service: {state.message}
         </div>
       ) : state.status.enrolled ? (
+        // Keyed by which enrollment this is: a swap to another server — the
+        // console hook can do one under an open dialog — must not leave a setup
+        // code, or an error, belonging to the machine we just left.
         <EnrolledView
+          key={state.status.hostId ?? state.status.serverUrl ?? 'enrolled'}
           serverUrl={state.status.serverUrl}
           connection={state.status.connection}
           pairedClients={state.status.pairedClients}
@@ -324,6 +498,9 @@ function EnrolledView({
   // Disconnecting drops every paired phone until they pair again, so it asks
   // once rather than acting on the first click.
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
+  // Its own busy and error, unlike every other action here: the mint also fires
+  // on a timer, and this view's one error slot belongs to what the user clicked.
+  const setup = useSetupQr();
   const described = describeConnection(connection);
 
   return (
@@ -375,18 +552,187 @@ function EnrolledView({
             </button>
           </>
         ) : (
-          <button
-            type="button"
-            disabled={busy}
-            className={modalActionButton()}
-            onClick={() => setConfirmingDisconnect(true)}
-          >
-            Disconnect
-          </button>
+          <>
+            <button
+              type="button"
+              disabled={busy}
+              aria-expanded={setup.state !== null}
+              className={modalActionButton({ tone: setup.state ? 'secondary' : 'primary' })}
+              onClick={() => (setup.state ? setup.close() : setup.mint())}
+            >
+              Set up a phone
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              className={modalActionButton()}
+              onClick={() => setConfirmingDisconnect(true)}
+            >
+              Disconnect
+            </button>
+          </>
         )}
+      </div>
+
+      {setup.state ? (
+        <SetupPhonePanel state={setup.state} onNewCode={setup.mint} onDone={setup.close} />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The QR a phone scans to set itself up against this machine's server, inline
+ * in the Settings dialog (`docs/specs/server.md` → "Remote control, in the
+ * Settings dialog").
+ *
+ * Purely what to draw for a {@link SetupQrState}; {@link useSetupQr} owns every
+ * transition between them.
+ */
+function SetupPhonePanel({
+  state,
+  onNewCode,
+  onDone,
+}: {
+  state: NonNullable<SetupQrState>;
+  onNewCode: () => void;
+  onDone: () => void;
+}) {
+  const shown = displayedQr(state);
+  const expiresAt = shown?.expiresAt ?? null;
+  const [now, setNow] = useState(() => Date.now());
+
+  // The copy names whole minutes, so re-render on the minute rather than on a
+  // clock tick: a 1 Hz interval bought ~300 renders per code for five numbers,
+  // and left Storybook repainting forever after the code expired.
+  useEffect(() => {
+    if (expiresAt === null) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arm = (): void => {
+      const at = Date.now();
+      setNow(at);
+      const remaining = expiresAt - at;
+      // Expired: the number cannot change again, so nothing re-arms.
+      if (remaining <= 0) return;
+      timer = setTimeout(arm, remaining % 60_000 || 60_000);
+    };
+    arm();
+    return () => clearTimeout(timer);
+  }, [expiresAt]);
+
+  return (
+    <div className="mt-2 rounded border border-border p-2">
+      <div className={FIELD_LABEL}>Set up a phone</div>
+      {state.phase === 'spent' ? (
+        <>
+          <div className="mt-1 text-sm leading-relaxed text-foreground">
+            Scanned. Finish on the phone — it registers a passkey, then asks to pair, and that
+            request interrupts you here.
+          </div>
+          <div className="mt-1 text-xs text-muted">This code is used up.</div>
+        </>
+      ) : shown ? (
+        <>
+          <div className="mt-1 text-sm leading-relaxed text-muted">
+            Point the phone’s camera at this. Nothing to type — no address, no password.
+          </div>
+          <div className="mt-2 flex justify-center">
+            <ScannableCode url={shown.url} />
+          </div>
+          <div className="mt-1.5 text-center text-xs text-muted">
+            {minutesUntil(shown.expiresAt, now) > 0
+              ? `Sets up one phone, within ${minutesUntil(shown.expiresAt, now)} min.`
+              : 'This code has expired — get a new one.'}
+          </div>
+        </>
+      ) : state.phase === 'failed' ? (
+        // The panel's own slot, not the enrolled view's: this mint may have been
+        // fired by a timer, and a refusal must not overwrite a Reconnect failure
+        // the user is reading.
+        <div className="mt-1 text-sm leading-relaxed text-error">{state.message}</div>
+      ) : (
+        <div className="mt-1 text-sm text-muted">Getting a code…</div>
+      )}
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={state.phase === 'minting'}
+          className={modalActionButton()}
+          onClick={onNewCode}
+        >
+          New code
+        </button>
+        <button type="button" className={modalActionButton()} onClick={onDone}>
+          Done
+        </button>
       </div>
     </div>
   );
+}
+
+/**
+ * The QR itself, behind its own error boundary.
+ *
+ * Two ways drawing a code can throw, and neither may reach the app-wide
+ * ErrorBoundary, which takes every terminal in the window with it: the encoder
+ * is a lazily-imported chunk whose fetch can fail, and `encode` itself refuses
+ * data past the format's capacity. Contained here each costs a retry button.
+ *
+ * The retry mints a *fresh* `lazy`, because React caches the rejected import
+ * against the component identity — re-rendering the same one re-throws forever.
+ */
+function ScannableCode({ url }: { url: string }) {
+  const [attempt, setAttempt] = useState(0);
+  const [QrCode, setQrCode] = useState(makeQrCode);
+
+  return (
+    // Keyed, so a boundary that has already caught is remounted both by a retry
+    // and by a new code arriving — the second is the recovery for a URL this
+    // encoder refused, which retrying the same one never fixes.
+    <QrChunkBoundary
+      key={`${attempt}:${url}`}
+      fallback={
+        <div className="text-center">
+          <div className="text-sm leading-relaxed text-muted">
+            Couldn’t display the code — the encoder didn’t load.
+          </div>
+          <button
+            type="button"
+            className={`mt-1.5 ${modalActionButton()}`}
+            onClick={() => {
+              setQrCode(makeQrCode);
+              setAttempt((n) => n + 1);
+            }}
+          >
+            Try again
+          </button>
+        </div>
+      }
+    >
+      {/* Nothing while the encoder chunk arrives: it is one import away, and a
+          placeholder the size of a QR would flash on every open. */}
+      <Suspense fallback={null}>
+        <QrCode value={url} label="Setup code for this machine" />
+      </Suspense>
+    </QrChunkBoundary>
+  );
+}
+
+/** Catches a render throw from the code area, and nothing else. */
+class QrChunkBoundary extends Component<
+  { children: ReactNode; fallback: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
 }
 
 /**

@@ -76,6 +76,17 @@ export interface PairingRequest {
   readonly devicePublicKey: string;
   /** Client-suggested label; the approver may override it. */
   readonly requestedLabel: string;
+  /**
+   * `computeSetupProof` under the setup nonce this Client scanned off a Host's
+   * QR, when it was set up that way (`setup-proof.ts`). Absent on the QR-less
+   * path, so every consumer must treat it as optional.
+   *
+   * The Server checks only that it is a bounded string, and cannot do more: the
+   * nonce behind it never travels through the Server, so this is a MAC the
+   * Server can neither verify nor produce — which is what stops it from moving
+   * `verified` onto a device key of its own choosing.
+   */
+  readonly setupProof?: string;
 }
 
 /**
@@ -170,7 +181,10 @@ export function isPairingRequest(request: unknown): request is PairingRequest {
     isBoundedString(candidate.passkeyCredentialId) &&
     isBoundedString(candidate.passkeyPublicKeyHash) &&
     isBoundedString(candidate.devicePublicKey) &&
-    isBoundedString(candidate.requestedLabel)
+    isBoundedString(candidate.requestedLabel) &&
+    // Optional, so absent passes — but a present one is bounded like every
+    // other field, since it is relay-supplied text either way.
+    (candidate.setupProof === undefined || isBoundedString(candidate.setupProof))
   );
 }
 

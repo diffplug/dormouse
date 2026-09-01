@@ -15,7 +15,13 @@
  * records for `wall-test-utils.ts`). Callers that want spies wrap these.
  */
 
-import type { RemoteHostConsoleStatus } from './service-protocol';
+import {
+  SETUP_HASH_NONCE_PARAM,
+  SETUP_HASH_PREFIX,
+  SETUP_HASH_TOKEN_PARAM,
+} from 'server-lib-common';
+
+import type { RemoteHostConsoleStatus, SetupQrResult } from './service-protocol';
 import type { RemoteHostLink } from '../../lib/platform/types';
 
 /** A machine that has never enrolled: the section shows its three-field form. */
@@ -55,6 +61,29 @@ export function enrolledStatus(
   };
 }
 
+/**
+ * A setup code as `setupQr` answers one: a `#setup?token=…&nonce=…` URL, the
+ * mint it came from, and its clock. Composed from the same `wire.ts` constants
+ * the real emitter uses, so a grammar change reaches the fixture too.
+ *
+ * The expiry is relative to *now* rather than a fixed epoch, because the panel
+ * renders the minutes left — a frozen timestamp would render "expired" in every
+ * story. `DEFAULT_PAIRING_TTL_MS` out, which is the real TTL
+ * (`server/src/setup-token.ts`), so the copy reads as it does in the app.
+ */
+export function setupQrResult(over: Partial<SetupQrResult> = {}): SetupQrResult {
+  const hash = new URLSearchParams({
+    [SETUP_HASH_TOKEN_PARAM]: '3PkQ8sV2mYb1hZr7Lw0cJdN6xTgAeUiOpqRsFuHv9Kz',
+    [SETUP_HASH_NONCE_PARAM]: 'Hs4mZbC1uKq7VnP0LxDgTfE8yRjWaOiUcQtBv3MdN2s',
+  });
+  return {
+    url: `https://ned-mac.tail9c2f1.ts.net/${SETUP_HASH_PREFIX}${hash}`,
+    mintId: 'mint-story',
+    expiresAt: Date.now() + 5 * 60 * 1000,
+    ...over,
+  };
+}
+
 /** What {@link makeStubRemoteHostLink} should answer. */
 export interface PrimedRemoteHost {
   /** What `status` answers. */
@@ -66,6 +95,16 @@ export interface PrimedRemoteHost {
    * render inline, in the same place and the same words.
    */
   enrollError?: string;
+  /** What `setupQr` answers; defaults to {@link setupQrResult}. */
+  setupQr?: SetupQrResult;
+  /** Make `setupQr` reject — the relay is down, or the server refused. */
+  setupQrError?: string;
+  /**
+   * Fire `setupTokenRedeemed` as soon as something subscribes, so the panel
+   * renders its scanned state. A story is one frame, so "the phone redeemed the
+   * code" has to be a starting condition rather than an event to wait for.
+   */
+  setupRedeemed?: boolean;
 }
 
 /**
@@ -87,10 +126,25 @@ export function makeStubRemoteHostLink(primed: PrimedRemoteHost): RemoteHostLink
       if ((cmd === 'enroll' || cmd === 'enrollOffer') && primed.enrollError) {
         throw new Error(primed.enrollError);
       }
+      if (cmd === 'setupQr') {
+        if (primed.setupQrError) throw new Error(primed.setupQrError);
+        return primed.setupQr ?? setupQrResult();
+      }
       return null;
     },
     respond: () => {},
     notify: () => {},
-    on: () => () => {},
+    on: (name, listener) => {
+      if (name === 'setupTokenRedeemed' && primed.setupRedeemed) {
+        // Naming the mint the stub's own `setupQr` answered, because the panel
+        // acts only on its own code (`service-protocol.ts`).
+        const { mintId } = primed.setupQr ?? setupQrResult();
+        // A microtask rather than inline: the panel subscribes during an effect,
+        // and setting state before that effect has returned is a no-op React
+        // warns about.
+        queueMicrotask(() => listener({ name: 'setupTokenRedeemed', mintId }));
+      }
+      return () => {};
+    },
   };
 }

@@ -43,13 +43,53 @@ rather than handing back a promise that never resolves).
 
 **The auth screen leads with the half this browser can use.** Prior use is
 stored passkey material (`PocketClient.hasPriorUse`), re-derived every render so
-a half-finished setup offers sign-in on the retry rather than a second passkey.
-Without it, setup — setup password plus passkey label — is unfolded and sign-in
-secondary, since a synced passkey can reach a browser that stored nothing. With
-it, sign-in leads and setup folds behind the disclosure. Blocked site data costs
-persistence, not the visit: `localStoragePocketStorage` mirrors writes in memory
-and reads the mirror first, because `setup` commits the Server's passkey
-*before* caching it and a throw there would leave every retry minting an orphan.
+a half-finished setup retries into whichever half can still work. Without it,
+setup — setup password plus passkey label — is unfolded and sign-in secondary,
+since a synced passkey can reach a browser that stored nothing. With it, sign-in
+leads and setup folds behind the disclosure. **The local record must not lag the
+registration, nor outlive a refusal**: `setup` caches the public key between
+`registerPasskey` and `finish`, so a lost `finish` answer leaves a browser that
+can sign in rather than one minting a second passkey — while a `finish` the
+Server *answered* by rejecting clears it, that answer being proof there is
+nothing to sign in against. Blocked site data costs persistence, not the visit:
+`localStoragePocketStorage` mirrors writes in memory and reads the mirror first,
+since that write lands after the credential is already irreversible and a throw
+would leave every retry minting an orphan.
+
+**A scanned code outranks that question.** Opened from a Host's QR
+([server.md](./server.md) owns the grammar), the screen leads with setup
+whatever this browser holds — pointing a camera at the laptop *is* the ask — and
+the token replaces the password field rather than joining it. **The hash is read
+before the first render and erased in the same act**, parsed or not — an address
+bar, a history stack and a screenshot are no place for a live credential — and a
+malformed one is ignored rather than reported.
+
+* **Sign-in stays offered** — a synced passkey may be the better path.
+* **The token is dropped on every way out of setup** — redeemed, refused, or
+  left behind by a sign-in — since its only job is the first passkey; one that
+  outlived it would lead a later session expiry into a *second* registration.
+* **A passkey the authenticator already holds outranks even the scan.**
+  `excludeCredentials` refusing (`PasskeyAlreadyRegisteredError`) proves this
+  device can sign in, so the code is dropped and sign-in leads instead of a
+  setup whose every retry fails the same way.
+* **A refused token is reported, and setup stays unfolded.**
+  `SETUP_TOKEN_INVALID_ERROR` — expired, spent, or minted by a since-revoked
+  Host — becomes `SetupTokenInvalidError`: its message goes in the alert row and
+  the setup password stays on screen, whatever this browser holds. Folding it
+  behind a returning browser's disclosure would hide the field the refusal just
+  named and remount the typed label away.
+* **The nonce lives for the run, never on disk**, riding every `pair` in it:
+  only the Host that verified against it spends it, so dropping it on another
+  Host's approval would end the ceremony silently, where a spent proof merely
+  misses ([remote-security-model.md](./remote-security-model.md) owns what it
+  proves).
+* **An installed iOS Pocket can never receive a scanned hash** — Camera opens
+  Safari, a different partition, and the install launches at its own start URL.
+  "Show a fresh code" is no recovery there; the setup password is.
+
+Source of truth: `setup-link.ts` and `SetupOrSignin` in
+`lib/src/remote/pocket-app/App.tsx`, and `PocketClient.pair` in
+`lib/src/remote/client/pocket-client.ts`.
 
 **Pocket hides `MobileWall`'s local Kill affordance** (`showKillButton={false}`)
 — remote panes are Host-owned, and v1 grants no phone-side kill/layout
@@ -195,7 +235,9 @@ So the order is: install to the Home Screen **first**, then sign in, approve the
 pairing on the machine, and enable push from within it — **and Pocket says so
 wherever setup can happen**, above the first-run fields and inside the return
 visit's disclosure. That precedes the passkey it warns about, though not the
-device key, which `App` mints at boot.
+device key, which `App` mints at boot. A scanned code does not survive the
+install either: the installed app launches at `start_url`, which carries no
+hash.
 
 Because one phone can hold two Client identities, Pocket names the mode in the
 label it suggests at pairing — `Dormouse Pocket (Home Screen)` versus
@@ -418,10 +460,10 @@ from `location.origin` — and the Server enforces it: a registration or asserti
 whose `clientDataJSON.origin` is not the configured `DORMOUSE_ORIGIN` is
 rejected, so a Pocket served anywhere else cannot sign in
 ([server.md](./server.md)). CORS on `/api/*` is permissive because every route
-is gated by a bearer token or the setup password; it is not what upholds this
-rule. The bundle mounts at the origin **root**, never under a path prefix: the
-manifest's `start_url`/`scope`, the worker's registration scope, and the shell's
-manifest/icon links are all root-absolute.
+is gated by a bearer token, the setup password, or a Host-minted setup token;
+it is not what upholds this rule. The bundle mounts at the origin **root**,
+never under a path prefix: the manifest's `start_url`/`scope`, the worker's
+registration scope, and the shell's manifest/icon links are all root-absolute.
 
 One lib-owned bundle, two deployments:
 

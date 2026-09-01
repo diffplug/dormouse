@@ -20,11 +20,13 @@ import { tv } from 'tailwind-variants';
 import {
   PocketClient,
   SessionExpiredError,
+  SetupTokenInvalidError,
   type ConnectDecision,
   type PocketSocket,
 } from '../client/pocket-client';
-import { browserWebAuthn } from '../client/webauthn';
-import { pairingFingerprint } from 'server-lib-common';
+import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webauthn';
+import { pairingFingerprint, type SetupCredential } from 'server-lib-common';
+import type { ScannedSetup } from './setup-link';
 import { getOrCreateDeviceKey } from '../client/device-key';
 import {
   getPushAvailability,
@@ -187,7 +189,12 @@ function ErrorRow({ message }: { message: string }): React.ReactElement {
   );
 }
 
-export default function App(): React.ReactElement {
+export default function App({
+  scanned,
+}: {
+  /** The code this run was opened with, read out of the URL in `main.tsx`. */
+  scanned: ScannedSetup | null;
+}): React.ReactElement {
   const client = useMemo(
     () =>
       new PocketClient({
@@ -227,6 +234,29 @@ export default function App(): React.ReactElement {
    * this run.
    */
   const [needsInstall] = useState(needsHomeScreenInstall);
+
+  // The scanned code's two halves, held for this run only. The token is state
+  // because it decides what the auth screen offers; the nonce is a ref because
+  // nothing renders from it, and it rides every `pair` for the rest of the run:
+  // the Host spends it only on a pairing that verified against it, so dropping
+  // it on an unrelated Host's approval would destroy the ceremony silently. A
+  // spent proof simply misses (`docs/specs/remote-security-model.md`).
+  const [setupToken, setSetupToken] = useState<string | null>(scanned?.token ?? null);
+  const setupNonceRef = useRef<string | null>(scanned?.nonce ?? null);
+  /**
+   * A scanned code the Server refused, this run. Keeps the setup half unfolded
+   * on the screen that just promised a password field, rather than folding it
+   * behind the disclosure a returning browser would otherwise get.
+   */
+  const [setupRefused, setSetupRefused] = useState(false);
+  /**
+   * The authenticator refused to register because it already holds a passkey
+   * the Server has. Not stored: we learn that one exists, never its id or its
+   * key, and {@link PocketClient.hasPriorUse} answers from material this
+   * browser can actually use. So it lives here, for this screen, until the
+   * sign-in it steers to caches the real thing.
+   */
+  const [passkeyAlreadyRegistered, setPasskeyAlreadyRegistered] = useState(false);
 
   const [phase, setPhase] = useState<Phase>('auth');
   /**
@@ -495,7 +525,7 @@ export default function App(): React.ReactElement {
   const onPair = (host: HostView) =>
     run('pair', async () => {
       await ensureSocket();
-      const result = await client.pair(host.hostId, deviceLabel());
+      const result = await client.pair(host.hostId, deviceLabel(), setupNonceRef.current);
       if (!result.approved) throw new Error(result.error ?? 'Pairing was denied.');
       // Recorded before connecting, so a connect that then fails leaves a row
       // offering Connect rather than one asking to pair all over again.
@@ -564,14 +594,46 @@ export default function App(): React.ReactElement {
       }
     });
 
+  /**
+   * Nothing the scanned code left on the auth screen has a job once this
+   * browser holds a passkey. Called on *both* ways out of setup, so a later
+   * drop back to `auth` — an expired session — paints the ordinary returning
+   * screen rather than offering a second passkey registration.
+   */
+  const setupSettled = useCallback(() => {
+    setSetupToken(null);
+    setSetupRefused(false);
+  }, []);
+
   const onSetup = useCallback(
-    (password: string, label: string) =>
+    (credential: SetupCredential, label: string) =>
       run('setup', async () => {
-        await client.setup(password, label);
+        try {
+          await client.setup(credential, label);
+        } catch (err) {
+          // A dead code is actionable rather than reportable: drop it, and the
+          // screen keeps setup unfolded on the setup password it just promised.
+          // The error's own message is what the user reads.
+          if (err instanceof SetupTokenInvalidError) {
+            setSetupToken(null);
+            setSetupRefused(true);
+          }
+          // The other actionable one, and the opposite steer: registration can
+          // never succeed on this device, so setup is over — drop the code as
+          // any other way out of setup does (the nonce rides on) and put
+          // sign-in forward, which is now known to work.
+          if (err instanceof PasskeyAlreadyRegisteredError) {
+            setupSettled();
+            setPasskeyAlreadyRegistered(true);
+          }
+          throw err;
+        }
+        // Spent whatever happens next — a registration consumes it Server-side.
+        setupSettled();
         await client.signin();
         await loadHosts();
       }),
-    [client, loadHosts, run],
+    [client, loadHosts, run, setupSettled],
   );
 
   const leaveWall = () => {
@@ -589,10 +651,16 @@ export default function App(): React.ReactElement {
         busy={busy}
         error={error}
         firstRun={firstRun}
+        setupToken={setupToken}
+        setupRefused={setupRefused}
+        passkeyAlreadyRegistered={passkeyAlreadyRegistered}
         needsInstall={needsInstall}
         onSignin={() =>
           run('signin', async () => {
             await client.signin();
+            // The token exists to create the first passkey; this browser now
+            // has one, so it is as spent as a redeemed code — see setupSettled.
+            setupSettled();
             await loadHosts();
           })}
         onSetup={onSetup}
@@ -667,7 +735,10 @@ export function ConnectedView({
  * **First run** leads with setup — the only thing a browser holding nothing can
  * actually complete — with sign-in kept as a plain secondary action, since a
  * passkey syncs and a fresh browser may already have one. **Returning** keeps
- * sign-in primary and folds setup back behind the disclosure.
+ * sign-in primary and folds setup back behind the disclosure. A live
+ * `setupToken`, or one this run's Server refused, leads with setup either way —
+ * unless the authenticator has already told us this device holds a registered
+ * passkey, which outranks all of it (docs/specs/pocket-app.md).
  *
  * The install guidance goes here rather than after sign-in because this is the
  * screen that mints the partition-bound *passkey* it warns about — the last
@@ -679,6 +750,9 @@ export function SetupOrSignin({
   busy,
   error,
   firstRun,
+  setupToken,
+  setupRefused = false,
+  passkeyAlreadyRegistered = false,
   needsInstall,
   onSignin,
   onSetup,
@@ -687,17 +761,36 @@ export function SetupOrSignin({
   error: string | null;
   /** No stored passkey material — no evidence this browser was ever set up. */
   firstRun: boolean;
+  /** The scanned code's token, while it is still live; null once spent or absent. */
+  setupToken: string | null;
+  /**
+   * A scanned code this run's Server refused. Setup stays unfolded on the
+   * password field the refusal promised, whatever this browser holds — and,
+   * because the fields keep their place in the tree, a typed passkey label
+   * survives the transition.
+   */
+  setupRefused?: boolean;
+  /**
+   * The authenticator holds a passkey the Server already registered. The only
+   * evidence that outranks everything else on this screen: it is proof a
+   * sign-in from this device succeeds, where `firstRun` is merely the absence
+   * of evidence, so it leads with sign-in even on a scanned code.
+   */
+  passkeyAlreadyRegistered?: boolean;
   /** iOS in a browser tab; see {@link InstallFirstNotice}. */
   needsInstall: boolean;
   onSignin: () => void;
-  onSetup: (password: string, label: string) => void;
+  onSetup: (credential: SetupCredential, label: string) => void;
 }): React.ReactElement {
   const [showSetup, setShowSetup] = useState(false);
+  const scanned = setupToken !== null && !passkeyAlreadyRegistered;
+  const leadWithSetup = !passkeyAlreadyRegistered && (scanned || firstRun || setupRefused);
   const signinLabel = busy === 'signin' ? 'Signing in…' : 'Sign in with passkey';
   const setupFields = (
     <PasskeySetupFields
       idPrefix="pocket-setup"
       busy={busy}
+      setupToken={setupToken}
       submitLabel="Create passkey & sign in"
       onSubmit={onSetup}
     />
@@ -721,21 +814,26 @@ export function SetupOrSignin({
       </header>
       <div className={clsx(PK.body, PK.bodyCenter)}>
         <div>
-          <p className={PK.title}>{firstRun ? 'Set up this phone' : 'Welcome back'}</p>
+          <p className={PK.title}>{leadWithSetup ? 'Set up this phone' : 'Welcome back'}</p>
           <p className={clsx(PK.lead, 'mt-1')}>
-            {firstRun
-              ? "Register this browser's passkey with the server's setup password, then approve it from your laptop."
-              : 'Sign in with your passkey to reach your enrolled hosts and pick up a terminal session.'}
+            {/* Keyed to the layout, not to `firstRun`: a refused code leaves a
+                returning browser on the setup fields, and "sign in with your
+                passkey" above them would describe the wrong screen. */}
+            {scanned
+              ? "The code you scanned stands in for the setup password. Name this browser's passkey and create it, then confirm on the computer."
+              : leadWithSetup
+                ? "Register this browser's passkey with the server's setup password, then approve it from your laptop."
+                : 'Sign in with your passkey to reach your enrolled hosts and pick up a terminal session.'}
           </p>
         </div>
         {/* Above the actions, never below: the passkey this screen mints
             belongs to whichever partition creates it, so guidance that arrives
             after setup arrives after the trap. The returning layout carries
             the same notice inside its disclosure instead — see below. */}
-        {firstRun && needsInstall ? <InstallFirstNotice /> : null}
+        {leadWithSetup && needsInstall ? <InstallFirstNotice /> : null}
         {error ? <ErrorRow message={error} /> : null}
 
-        {firstRun ? (
+        {leadWithSetup ? (
           <>
             <div className={PK.setup}>{setupFields}</div>
             {/* Not a disclosure: a synced passkey makes sign-in a real path out
@@ -850,7 +948,7 @@ function InstallNotice(): React.ReactElement {
 }
 
 /**
- * The setup-password + label pair and its submit button. Kept separate from its
+ * The credential + label pair and its submit button. Kept separate from its
  * caller so the credential form's ids, autocomplete rules, and disabled logic
  * have one definition; `idPrefix` keeps those ids unique if it is ever rendered
  * more than once on a screen.
@@ -865,17 +963,20 @@ function InstallNotice(): React.ReactElement {
 function PasskeySetupFields({
   idPrefix,
   busy,
+  setupToken,
   submitLabel,
   onSubmit,
 }: {
   idPrefix: string;
   busy: string | null;
+  /** The scanned code's token, when this run was opened with a live one. */
+  setupToken: string | null;
   submitLabel: string;
-  onSubmit: (password: string, label: string) => void;
+  onSubmit: (credential: SetupCredential, label: string) => void;
 }): React.ReactElement {
   const [password, setPassword] = useState('');
   const [label, setLabel] = useState('My Phone');
-  const blocked = busy !== null || password.length === 0;
+  const blocked = busy !== null || (setupToken === null && password.length === 0);
 
   return (
     <form
@@ -883,20 +984,24 @@ function PasskeySetupFields({
       onSubmit={(e) => {
         e.preventDefault();
         if (blocked) return;
-        onSubmit(password, label);
+        onSubmit(setupToken !== null ? { setupToken } : { password }, label);
       }}
     >
-      <div className={PK.field}>
-        <label className={PK.fieldLabel} htmlFor={`${idPrefix}-password`}>Setup password</label>
-        <input
-          id={`${idPrefix}-password`}
-          className={PK.input}
-          type="password"
-          autoComplete="off"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-      </div>
+      {setupToken !== null ? (
+        <p className={PK.lead}>Set up from the code you scanned — no setup password needed.</p>
+      ) : (
+        <div className={PK.field}>
+          <label className={PK.fieldLabel} htmlFor={`${idPrefix}-password`}>Setup password</label>
+          <input
+            id={`${idPrefix}-password`}
+            className={PK.input}
+            type="password"
+            autoComplete="off"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </div>
+      )}
       <div className={PK.field}>
         <label className={PK.fieldLabel} htmlFor={`${idPrefix}-label`}>Passkey label</label>
         <input

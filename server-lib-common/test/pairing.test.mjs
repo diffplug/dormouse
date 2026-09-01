@@ -141,6 +141,16 @@ test('isPairingRequest bounds field length, not just type', () => {
   assert.equal(isPairingRequest({ ...REQUEST, requestedLabel: 'x'.repeat(1024) }), true);
 });
 
+test('isPairingRequest takes setupProof as optional, bounded when present', () => {
+  // Absent on the QR-less path, so its absence must not fail the guard; when a
+  // scanned phone does carry one it is relay-supplied text like every other
+  // field, and bounded the same way. Only the Host can say more about it.
+  assert.equal(isPairingRequest({ ...REQUEST, setupProof: undefined }), true);
+  assert.equal(isPairingRequest({ ...REQUEST, setupProof: 'mac-over-the-device-key' }), true);
+  assert.equal(isPairingRequest({ ...REQUEST, setupProof: 42 }), false);
+  assert.equal(isPairingRequest({ ...REQUEST, setupProof: 'x'.repeat(1025) }), false);
+});
+
 test('boundedPairingLabel and boundedPairingAccount strip bidi and cap length', () => {
   const hostile = `‮owner${'A'.repeat(500)}`;
   for (const bounded of [boundedPairingLabel(hostile), boundedPairingAccount(hostile)]) {

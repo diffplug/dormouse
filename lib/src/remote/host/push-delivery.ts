@@ -1,7 +1,8 @@
 /**
- * Delivering a push (`docs/specs/alert.md` -> Push notifications): the Host's
- * authenticated calls to the Server, and the rule that the Host's own ACL — read
- * at send time — chooses who is reached.
+ * Delivering a push (`docs/specs/alert.md` -> Push notifications): what the Host
+ * posts, and the rule that the Host's own ACL — read at send time — chooses who
+ * is reached. The transport those calls run under is `host-fetch.ts`, shared
+ * with the setup-token mint.
  *
  * Split from `alert-push.ts` because the two halves run in different processes
  * once the Host is Node-resident: ring *detection* is webview state (the
@@ -16,6 +17,7 @@
 
 import {
   API_ROUTES,
+  PUSH_SEND_DEADLINE_MS,
   boundedPushText,
   type HostAclRecord,
   type PushDevicesResponse,
@@ -24,6 +26,7 @@ import {
 import type { PushSendSummary } from '../../host/remote/service-protocol';
 import type { PushDevice } from '../../lib/push-devices';
 import type { HostEnrollment } from './enrollment';
+import { hostFetch } from './host-fetch';
 
 /**
  * Longest label we put in a notification title. Every OS truncates well before
@@ -46,6 +49,19 @@ export const PUSH_TEST_TITLE = 'Dormouse test — nothing needs attention';
 export const PUSH_TEST_TAG = 'dormouse-push-test';
 
 /**
+ * Headroom over the Server's own per-attempt deadline, covering the round trip
+ * and the fan-out's bookkeeping. Small on purpose: the timeout is still there
+ * to stop a wedged relay holding the Host.
+ *
+ * This is the one Host→Server call that runs *past* the webview's 15 s command
+ * budget, and deliberately: a send is normally fired by the alert path inside
+ * the Host process, where no webview is waiting at all. Only the Settings
+ * dialog's test push is webview-initiated, and there the button giving up first
+ * is the right answer — the send it started still finishes.
+ */
+const PUSH_SEND_MARGIN_MS = 5_000;
+
+/**
  * Apply this sink's bounds to a Pane label. The rule itself is
  * `boundedPushText` in `server-lib-common`, shared with the Server so the
  * sanitization has one implementation rather than a strong copy here and a
@@ -55,39 +71,13 @@ export function toPushText(label: string): string {
   return boundedPushText(label, { limit: PUSH_TITLE_LIMIT, fallback: 'terminal' });
 }
 
+/** A `HostFetchOptions` (`host-fetch.ts`) plus the authority on who is reached. */
 export interface AlertPushDeps {
   readonly enrollment: Pick<HostEnrollment, 'serverUrl' | 'hostToken'>;
   /** The Host's active ACL records — the authority on who may be reached. */
   readonly activeRecords: () => readonly HostAclRecord[];
   /** Injectable for tests. */
   readonly fetch?: typeof globalThis.fetch;
-}
-
-/** The Host's one authenticated call to the Server. */
-async function hostFetch(
-  deps: AlertPushDeps,
-  route: string,
-  body?: unknown,
-): Promise<Response> {
-  const doFetch = deps.fetch ?? globalThis.fetch;
-  const response = await doFetch(`${deps.enrollment.serverUrl}${route}`, {
-    ...(body === undefined
-      ? {}
-      : { method: 'POST', body: JSON.stringify(body) }),
-    // The service replaced a webview whose CSP checked every redirect target.
-    // Do not let an allowed relay bounce the bearer token or notification
-    // metadata to a destination outside the baked allowlist.
-    redirect: 'error',
-    headers: {
-      authorization: `Bearer ${deps.enrollment.hostToken}`,
-      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-    },
-  });
-  // Checked here so both call sites fail loudly. A send that swallowed a 401
-  // from a revoked host token would leave push permanently broken and silent —
-  // the failure mode this whole feature is most prone to.
-  if (!response.ok) throw new Error(`${route} failed (${response.status})`);
-  return response;
 }
 
 /**
@@ -137,15 +127,23 @@ export async function sendPush(
   const devicePublicKeys = deps.activeRecords().map((record) => record.devicePublicKey);
   if (devicePublicKeys.length === 0) return { targeted: 0, delivered: 0, failed: 0 };
 
-  const response = await hostFetch(deps, API_ROUTES.pushSend, {
-    devicePublicKeys,
-    title: toPushText(title),
-    body: PUSH_BODY,
-    // Per-Session collapse key: a Pane that rings, is cleared, and rings again
-    // replaces its own notification rather than stacking copies. Internal ids
-    // only — a tag is never displayed.
-    tag: sessionId,
-  });
+  const response = await hostFetch(
+    // The one call that outlives the shared budget: the Server holds a send open
+    // for up to `PUSH_SEND_DEADLINE_MS` per attempt, so aborting at the default
+    // 10 s would report deliveries that actually succeeded as failures. Derived
+    // from the Server's own bound plus a margin for the round trip.
+    { ...deps, timeoutMs: PUSH_SEND_DEADLINE_MS + PUSH_SEND_MARGIN_MS },
+    API_ROUTES.pushSend,
+    {
+      devicePublicKeys,
+      title: toPushText(title),
+      body: PUSH_BODY,
+      // Per-Session collapse key: a Pane that rings, is cleared, and rings again
+      // replaces its own notification rather than stacking copies. Internal ids
+      // only — a tag is never displayed.
+      tag: sessionId,
+    },
+  );
   // `hostFetch` threw on a non-2xx; this is the quieter failure class — the
   // Server accepted the send but a push service refused delivery, which it
   // reports in counts on an HTTP 200. Without this check an all-failed fan-out

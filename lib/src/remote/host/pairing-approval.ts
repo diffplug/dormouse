@@ -13,12 +13,27 @@
 
 import type { PairingRequest } from 'server-lib-common';
 
+/**
+ * A {@link PairingRequest} as everything past `RemoteHost.#onPair` sees one: the
+ * `setupProof` is gone, and its type says so, so no consumer can read a proof
+ * that is not there (`SECURITY.md` → the setup-token FAIL IF).
+ */
+export type MirroredPairingRequest = Omit<PairingRequest, 'setupProof'>;
+
 export interface PendingPairing {
   /** Server-assigned client socket id. */
   clientId: string;
   /** Immutable ceremony ticket id; approve/deny must name this exact request. */
   pairingId: string;
-  request: PairingRequest;
+  request: MirroredPairingRequest;
+  /**
+   * The Client's `setupProof` matched a setup nonce this Host minted and
+   * displayed, over the very device key it is asking to have authorized — so it
+   * is the phone that scanned this machine's QR. Drives the modal's one-confirm
+   * copy; `false` is the ordinary pairing
+   * (`docs/specs/remote-security-model.md`).
+   */
+  verified: boolean;
   requestedAt: number;
   /** Approve locally on the Host — writes the ACL and replies `pair-result`. */
   approve: (label?: string) => void;

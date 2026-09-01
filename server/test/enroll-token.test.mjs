@@ -56,9 +56,9 @@ async function captureWarnings(fn) {
  * written verbatim when it is a string, JSON-encoded when it is an object, and
  * `undefined` leaves the path with no file at all.
  */
-async function appWithOffer(contents) {
+async function appWithOffer(contents, options = {}) {
   const enrollTokenFile = await offerPath(contents);
-  const created = await freshApp({ enrollTokenFile });
+  const created = await freshApp({ enrollTokenFile, ...options });
   return { ...created, enrollTokenFile };
 }
 
@@ -130,8 +130,15 @@ const CANNOT_DENY_UNLINK = {
       : false,
 };
 
+// The one test that measures the credential-failure delay, so it injects a
+// value big enough to see and small enough to pay: the constant's real 250ms is
+// a policy choice, and asserting it here would only buy sleep.
+const MEASURABLE_DELAY_MS = 60;
+
 test('a token that cannot be invalidated is not redeemed', CANNOT_DENY_UNLINK, async () => {
-  const { app, enrollTokenFile, stateDir } = await appWithOffer(offer());
+  const { app, enrollTokenFile, stateDir } = await appWithOffer(offer(), {
+    credentialFailureDelayMs: MEASURABLE_DELAY_MS,
+  });
   await chmod(dirname(enrollTokenFile), 0o500);
   try {
     const started = Date.now();
@@ -140,7 +147,7 @@ test('a token that cannot be invalidated is not redeemed', CANNOT_DENY_UNLINK, a
     // Only a successful compare reaches this 500, so it waits out the same
     // credential-failure delay: a fast distinct answer would confirm a valid
     // token to a guesser without spending it.
-    assert.equal(Date.now() - started >= 200, true);
+    assert.equal(Date.now() - started >= MEASURABLE_DELAY_MS, true);
     // The point of the ordering: no host may exist against a token still on disk.
     assert.equal(existsSync(join(stateDir, 'hosts.json')), false);
   } finally {

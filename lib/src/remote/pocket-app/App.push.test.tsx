@@ -15,13 +15,9 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import App, { type HostView } from './App';
+import App from './App';
 import type { PushAvailability } from '../client/push-subscribe';
-
-const HOSTS: HostView[] = [
-  { hostId: 'host-1', label: 'First laptop', online: true },
-  { hostId: 'host-2', label: 'Second laptop', online: true },
-];
+import { HOSTS, alertText, buttonNamed, click, rowFor, settle } from './app-test-utils';
 
 /**
  * Hoisted so the `vi.mock` factories — which run before this file's own
@@ -44,8 +40,10 @@ vi.mock('../client/push-subscribe', () => ({
     fake.subscribeInBrowser(key, onReplaced),
 }));
 
-vi.mock('../client/pocket-client', () => ({
-  SessionExpiredError: class SessionExpiredError extends Error {},
+// Only `PocketClient` is doubled — the error classes stay the real exports, so
+// a case that drives one is driving what ships (see `App.setup.test.tsx`).
+vi.mock('../client/pocket-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../client/pocket-client')>()),
   PocketClient: class {
     socketOpen = true;
     hasPriorUse = () => true;
@@ -113,32 +111,9 @@ afterEach(() => {
   container.remove();
 });
 
-/** Let every pending promise chain land and React commit what they produced. */
-async function settle() {
-  for (let pass = 0; pass < 3; pass++) {
-    await act(async () => {
-      for (let tick = 0; tick < 12; tick++) await Promise.resolve();
-    });
-  }
-}
-
-function buttonNamed(label: string): HTMLButtonElement | null {
-  return [...container.querySelectorAll('button')].find((b) => b.textContent === label) ?? null;
-}
-
-function alertText(): string | null {
-  return container.querySelector('[role="alert"]')?.textContent ?? null;
-}
-
 /** One Host's row text, for the per-Host `Push on` marker. */
 function rowText(label: string): string {
-  const title = [...container.querySelectorAll('div')].find((el) => el.textContent === label);
-  return title?.closest('div.rounded-lg')?.textContent ?? '';
-}
-
-async function click(label: string) {
-  act(() => buttonNamed(label)!.click());
-  await settle();
+  return rowFor(container, label).textContent ?? '';
 }
 
 /** Sign in and land on the Hosts view, which is what runs the push load. */
@@ -146,12 +121,12 @@ async function signIn() {
   act(() => {
     root.render(
       <StrictMode>
-        <App />
+        <App scanned={null} />
       </StrictMode>,
     );
   });
   await settle();
-  await click('Sign in with passkey');
+  await click(container, 'Sign in with passkey');
 }
 
 describe('the one Enable on the Hosts view', () => {
@@ -165,7 +140,7 @@ describe('the one Enable on the Hosts view', () => {
     fake.subscribeInBrowser.mockResolvedValue({ endpoint: 'https://push.example/abc' });
     await signIn();
 
-    await click(ENABLE);
+    await click(container, ENABLE);
 
     expect(fake.subscribeInBrowser).toHaveBeenCalledOnce();
     expect(fake.subscribeToPush.mock.calls.map(([hostId]) => hostId)).toEqual([
@@ -173,7 +148,7 @@ describe('the one Enable on the Hosts view', () => {
       'host-2',
     ]);
     expect(container.textContent).toContain('Push notifications on.');
-    expect(buttonNamed(ENABLE)).toBeNull();
+    expect(buttonNamed(container, ENABLE)).toBeNull();
   });
 
   /**
@@ -188,13 +163,13 @@ describe('the one Enable on the Hosts view', () => {
     });
     await signIn();
 
-    await click(ENABLE);
+    await click(container, ENABLE);
 
-    expect(alertText()).toBe('The host disconnected.');
+    expect(alertText(container)).toBe('The host disconnected.');
     // The first Host is on, so the card stays up for the second alone.
     expect(rowText('First laptop')).toContain('Push on');
     expect(rowText('Second laptop')).not.toContain('Push on');
-    expect(buttonNamed(ENABLE)).not.toBeNull();
+    expect(buttonNamed(container, ENABLE)).not.toBeNull();
   });
 
   /**
@@ -206,7 +181,7 @@ describe('the one Enable on the Hosts view', () => {
     fake.listPushSubscribedHosts.mockRejectedValue(new Error('offline'));
     await signIn();
 
-    expect(buttonNamed(ENABLE)).not.toBeNull();
+    expect(buttonNamed(container, ENABLE)).not.toBeNull();
     expect(container.textContent).not.toContain('Push notifications on.');
   });
 });
@@ -227,16 +202,16 @@ describe('a permission the user denies', () => {
       denyProbe = resolve;
     });
 
-    await click(ENABLE);
+    await click(container, ENABLE);
     // Still up, still explaining itself, while the re-probe is outstanding.
-    expect(alertText()).toBe('Notifications are blocked.');
-    expect(buttonNamed(ENABLE)).not.toBeNull();
+    expect(alertText(container)).toBe('Notifications are blocked.');
+    expect(buttonNamed(container, ENABLE)).not.toBeNull();
 
     fake.availability = 'denied';
     denyProbe('denied');
     await settle();
 
-    expect(buttonNamed(ENABLE)).toBeNull();
+    expect(buttonNamed(container, ENABLE)).toBeNull();
     expect(container.textContent).toContain('Notifications are blocked for this site');
   });
 });
@@ -258,7 +233,7 @@ describe('a completed registration', () => {
     fake.subscribeInBrowser.mockResolvedValue({ endpoint: 'https://push.example/abc' });
     await signIn();
 
-    await click(ENABLE);
+    await click(container, ENABLE);
     expect(container.textContent).toContain('Push notifications on.');
 
     // The read finally lands, saying this device is registered nowhere. It was

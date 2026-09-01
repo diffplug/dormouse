@@ -226,6 +226,32 @@ text, reduced by `boundedPairingLabel` / `boundedPairingAccount` before display,
 so neither can overflow the dialog or carry bidi overrides that make it read as
 something else.
 
+**A setup proof collapses approval to one confirm.** A Host's QR carries two
+secrets with two verifiers: the Server's single-use setup token, redeemed at
+`/api/setup/*`, and a **setup nonce the Host mints itself**, which travels
+laptop screen → phone camera and never through the Server. A phone set up that
+way returns `PairingRequest.setupProof` —
+`HMAC-SHA256(key = nonce, message = domain || devicePublicKey)` — which the Host
+recomputes against each nonce it still holds. Displaying the QR *is* the
+local-presence act, so a verified modal names what proved the device rather than
+asking the user to vouch for it.
+
+- **Must bind the proof to the key being authorized.** A Server substituting its
+  own `devicePublicKey` into a relayed request would need a MAC over that key,
+  and so a nonce it has never seen: it relays a key-bound proof and nothing more.
+- **Never an error to miss.** Absent, unknown, expired or spent, the pairing
+  keeps the fingerprint compare — still the control for every proofless one.
+- **Verification does not consume; approval does.** A proof result surfaces
+  only while its request and nonce remain current; minting the ACL record
+  spends it and re-mirrors other pairings on it as unverified.
+- **The webview is told `verified`, never the proof** — `MirroredPairingRequest`
+  has no such field.
+- **A photographed QR inside its 5-minute window is accepted risk**, bounded by
+  display-on-request, the TTL, and single use at approval.
+
+Source of truth: `RemoteHost.#onPair` / `#matchSetupNonce` / `#consumeSetupNonce`
+and `server-lib-common/src/security/setup-proof.ts`.
+
 **The Host validates the request's shape itself** (`isPairingRequest`), never
 relying on the Server having done so: the Server is not trusted, and an
 unvalidated relayed object reaching the approval UI is both a crash surface and

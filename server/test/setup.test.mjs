@@ -52,6 +52,27 @@ test('a second passkey can be added by re-presenting the password', async () => 
   assert.equal(account.passkeys.length, 2);
 });
 
+test('setup/begin names the credentials the account already holds', async () => {
+  // For the browser's `excludeCredentials`: only the Server knows what is
+  // registered, so a retry cannot silently mint a duplicate of a passkey that
+  // can already sign in. Nothing new is disclosed — the gate above ran first.
+  const { app } = await freshApp();
+
+  const empty = await post(app, API_ROUTES.setupBegin, { password: PASSWORD });
+  assert.deepEqual((await empty.json()).existingCredentialIds, []);
+
+  const first = await newAuthenticator();
+  assert.equal((await register(app, first)).status, 200);
+  const second = await newAuthenticator();
+  assert.equal((await register(app, second)).status, 200);
+
+  const listed = await post(app, API_ROUTES.setupBegin, { password: PASSWORD });
+  assert.deepEqual((await listed.json()).existingCredentialIds, [
+    first.credentialId,
+    second.credentialId,
+  ]);
+});
+
 test('setup/begin rejects a wrong password', async () => {
   const { app } = await freshApp();
   const res = await post(app, API_ROUTES.setupBegin, { password: 'wrong' });
@@ -189,8 +210,11 @@ test('origin/rpId derive from config', async () => {
   assert.equal(new URL(ORIGIN).hostname, RP_ID);
 });
 
-test('configured origin is normalized for setup and Host policy', async () => {
-  const { app } = await freshApp({ origin: 'https://Example.COM/' });
+// The configured origin — already bare, since `readConfig` normalizes it and
+// `config.test.mjs` pins that — reaching all three of setup's rpId, the
+// clientData check, and the policy a Host enrolls with.
+test('the configured origin drives setup and Host policy', async () => {
+  const { app } = await freshApp({ origin: 'https://example.com' });
   const authenticator = await newAuthenticator();
   const begin = await post(app, API_ROUTES.setupBegin, { password: PASSWORD });
   const { challenge, rpId } = await begin.json();

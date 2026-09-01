@@ -21,7 +21,7 @@
  * a webview answer can never widen it.
  */
 
-import type { PairingRequest } from 'server-lib-common';
+import type { MirroredPairingRequest } from '../../remote/host/pairing-approval';
 import type { RemoteHostStatus } from '../../remote/host/remote-host';
 
 /** Transport event names for what the service sends back. */
@@ -70,7 +70,16 @@ export interface PairingQueueItem {
   clientId: string;
   /** Immutable ceremony ticket id, echoed by approve/deny. */
   pairingId: string;
-  request: PairingRequest;
+  /** The request minus its `setupProof`; the webview gets {@link PairingQueueItem.verified} instead. */
+  request: MirroredPairingRequest;
+  /**
+   * The Client proved it was set up by scanning **this** machine's setup QR: its
+   * `setupProof` matched a nonce this Host minted, computed over the very device
+   * key it is asking to have authorized. Drives the modal's one-confirm copy
+   * (`docs/specs/remote-security-model.md` → Pairing Ceremony); `false` is the
+   * ordinary fingerprint-compare pairing, never an error.
+   */
+  verified: boolean;
   requestedAt: number;
 }
 
@@ -92,6 +101,24 @@ export interface PairingQueueEvent {
 export interface HostStatusEvent {
   name: 'status';
   enrolled: boolean;
+}
+
+/**
+ * service → webview, unsolicited: a setup token this Host minted was just spent
+ * on the Server, so the QR showing it is stale and a phone is mid-setup
+ * (`ServerToHostFrame` `setup-token-redeemed`). The panel that displayed the
+ * code is the only thing that can act on it, and what it does is stop offering a
+ * code that can no longer be redeemed.
+ */
+export interface SetupTokenRedeemedEvent {
+  name: 'setupTokenRedeemed';
+  /**
+   * Which mint was spent ({@link SetupQrResult.mintId}). A panel acts only on
+   * its own and ignores any other, so two open windows do not both go used-up
+   * over one scan. Not the token: correlating must not put the credential on a
+   * wire that carries none.
+   */
+  mintId: string;
 }
 
 // --- Command parameter shapes ---
@@ -163,6 +190,34 @@ export interface AnswerParams {
 export interface EnrollResult {
   hostId: string;
   serverUrl: string;
+}
+
+/**
+ * What `setupQr` answers: the URL to render as a QR, which mint it came from,
+ * and when it stops redeeming.
+ *
+ * **Both of the QR's secrets ride into the webview inside `url`, on purpose.**
+ * That is the whole point of the command — the code is displayed to a person
+ * standing at this machine, and displaying it *is* the local-presence act
+ * (`docs/specs/remote-security-model.md` → Pairing Ceremony). They are the only
+ * credentials in this contract that cross that seam: `hostToken` still never
+ * does (`SECURITY.md` → the no-`hostToken`-in-a-webview FAIL IF), and neither
+ * does the installer offer's token ({@link RemoteHostConsoleStatus.offer}).
+ */
+export interface SetupQrResult {
+  /**
+   * `<enrollment origin>/#setup?token=…&nonce=…`, composed by the service: the
+   * Server's setup token, and the Host's own setup nonce, which the Server never
+   * sees.
+   */
+  url: string;
+  /**
+   * Names this mint, so {@link SetupTokenRedeemedEvent} can say which code was
+   * scanned without naming either secret.
+   */
+  mintId: string;
+  /** Epoch ms after which the token no longer redeems. */
+  expiresAt: number;
 }
 
 /**

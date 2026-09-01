@@ -63,9 +63,13 @@ the setup password or a bearer token, exactly as `SECURITY.md` -> "Loopback
 Listeners" requires. `scripts/loopback-lint.mjs` does not cover this socket —
 it binds from config rather than from a loopback literal (rationale).
 
-`DORMOUSE_ORIGIN` is parsed once and normalized with `URL.origin`; WebAuthn
-clientData checks, passkey assertion verification, and the Host enrollment
-policy all use that normalized origin.
+`DORMOUSE_ORIGIN` is normalized to a bare origin exactly once, in `readConfig`,
+by the shared `normalizeOrigin` in `server-lib-common` — a trailing slash reads
+as correct in an `.env` and fails every compare it reaches, and a value that is
+not a URL with a host is a `ConfigError` naming the variable. WebAuthn
+clientData checks, passkey assertion verification, the Host enrollment policy
+and the `#setup` URL a Host composes all compare against that string rather than
+re-parsing it; `createApp` parses it only to take `rpId` from the hostname.
 
 Source of truth: `server/src/config.ts` (`readConfig`), a pure env→config
 mapping pinned by `server/test/config.test.mjs`; only the disk half stays
@@ -241,13 +245,14 @@ This table is the whole route surface. Paths and request/response shapes live in
 | Route                            | Auth           | Does                                              |
 | -------------------------------- | -------------- | ------------------------------------------------- |
 | `GET /api/hello`                 | —              | The shared greeting. Carries no release identity: it is unauthenticated, CORS-`*` and reachable through `tailscale serve` — see the runtime file under "Installing it" |
-| `POST /api/setup/begin`          | setup password | Issues a registration challenge. Only the password gates it, so re-presenting it adds another passkey |
-| `POST /api/setup/finish`         | setup password | Registers the passkey in `account.json`            |
+| `POST /api/setup/begin`          | setup password or setup token | Issues a registration challenge. Exactly one credential — both, or neither, is a 400 — gated exactly as `finish` is, so neither is softer. Re-presenting the **password** adds another passkey; a setup token buys one registration. Answers with the account's credential ids, so a retry's `excludeCredentials` cannot duplicate a passkey that already signs in — an orphan the Server never registered is absent, and is still replaced |
+| `POST /api/setup/finish`         | setup password or setup token | Registers the passkey in `account.json`. A setup token is spent at the gate and put back if the registration then fails |
 | `POST /api/signin/begin`         | —              | Issues a sign-in challenge                          |
 | `POST /api/signin/finish`        | —              | Verifies the assertion and issues a 12-hour in-memory session token |
 | `POST /api/reauth/begin`         | session token  | Issues a presence challenge for the current session |
 | `POST /api/reauth/finish`        | session token  | Verifies like sign-in and refreshes presence without replacing the token or relay socket |
 | `POST /api/host/enroll`          | setup password or one-time enroll token | Enrolls a Host, appends `hosts.json`, and mirrors the user-verification policy. Exactly one credential — both, or neither, is a 400 |
+| `POST /api/host/setup-token`     | host token     | Mints the single-use, short-TTL token behind this Host's QR (below) |
 | `GET /api/hosts`                 | session token  | Enrolled hosts + whether each is currently connected |
 | `GET /api/push/config`           | —              | Returns the public VAPID key, or `null` when push is unconfigured |
 | `POST /api/push/challenge`       | session token  | Issues a pool-wide nonce for the device signature; Host binding lives in the signature |
@@ -276,8 +281,50 @@ token with 401 and the shared `UNAUTHORIZED_ERROR` from
 Pocket keys its "sign in again" recovery on it, and a bare 401 is ambiguous,
 since a wrong setup password and a rejected device signature answer 401 as well
 ([pocket-app.md](./pocket-app.md) -> An expired session drops to sign-in). A
-rejected enroll token answers that same body and delay whatever the cause, and
-only a Host sends one, so Pocket's recovery keying is unaffected.
+rejected enroll token answers that same body and delay whatever the cause,
+which stays safe because only a Host sends one. A rejected **setup** token does
+not: Pocket sends those itself, so it answers the distinct
+`SETUP_TOKEN_INVALID_ERROR` — same 401, same delay — which Pocket keys its
+"scan again, or type the password" recovery on
+([pocket-app.md](./pocket-app.md)).
+
+### Setup tokens
+
+An enrolled Host mints one over its own authenticated channel; the response
+carries the token and an opaque `mintId`, since the Host knows the origin it
+enrolled against and composes the QR itself. Scanning replaces typing that
+origin and the setup password. **The `nonce` is the Host's own and never reaches
+this server** — [remote-security-model.md](./remote-security-model.md) owns what
+it proves.
+
+**The hash grammar is this spec's**: `<origin>/#setup?token=…&nonce=…`, both
+values base64url and percent-encoded. Source of truth: `#setupQr` in
+`lib/src/host/remote/service.ts`, over the shared constants in
+`server-lib-common/src/remote/wire.ts`; what Pocket does with each half is
+[pocket-app.md](./pocket-app.md).
+
+* **Exactly one credential, counted by presence rather than by type**, here and
+  at `/api/host/enroll`: trying the two in turn would let a spent token fall
+  through to the password.
+* **`begin` peeks; `finish` consumes before it reads the body.** That delete is
+  the single-use gate, so of two overlapping finishes only one registers. Every
+  failure past it restores the token on its original expiry without exceeding
+  the per-Host cap; only the finish that registered a passkey announces (Relay
+  below).
+* **Both gates re-read `hosts.json`.** A revoked Host's outstanding tokens die
+  with it, rather than staying redeemable for the rest of their TTL.
+* **The store remembers which Host minted each token, and under which
+  `mintId`** — that is who the redemption is announced to, and which of that
+  Host's codes it was. TTL is `DEFAULT_PAIRING_TTL_MS`, since the Host nonce
+  riding the same QR must survive the passkey ceremony before pairing; it prunes
+  on every mint and caps each Host's outstanding tokens at
+  `MAX_TOKENS_PER_HOST`, that Host's own oldest first, so a Host minting in a
+  loop cannot evict another's live token (Guardrails). The cap lives in
+  `server-lib-common` because the Host bounds its own nonce map at the same
+  number.
+
+Source of truth: `server/src/setup-token.ts`, pinned by
+`server/test/setup-token.test.mjs`.
 
 ### Web Push
 
@@ -379,6 +426,16 @@ both directions. `clientId` is a server-assigned secret stamped onto every
 host-bound frame so the Host can address replies, and is never sent to the
 Client.
 
+**`setup-token-redeemed` is the one frame no Client provokes.** HTTP routes
+reach the relay through `RelayHub.notifyHost`, whose parameter admits only that
+frame, so a route cannot push handshake or `msg` frames past the state machine
+above. It goes to whichever socket owns the `hostId` now — a Host that
+*replaced* the minter must tolerate a redemption it did not mint, and an
+unrecognized `mintId` is ignored rather than retiring an unrelated code — and an
+offline `hostId` is a silent no-op: announcing work that already succeeded must
+never fail the phone. It names the **mint**, never the token: the correlator has
+to cross a wire that carries no credentials.
+
 **Only one socket may own a `hostId`.** Registering a second one for the same
 `hostId` displaces the first: clients bound to it are told `host-gone`, their
 sessions are cleared, and the old socket is closed with
@@ -453,6 +510,14 @@ answered locally never reaches the Host, so it can never appear in the approval
 UI or burn a ticket. The ceremony beyond this point — `PairingCeremony`, local
 approval as the only thing that writes the ACL — is
 [remote-security-model.md](./remote-security-model.md) -> Pairing Ceremony.
+
+A `pair` request may also carry `setupProof`, a MAC a scanning phone computes
+under the Host nonce from the QR, over its own `devicePublicKey`. The relay
+shape-checks it with the rest of the request (bounded string, optional) and
+forwards it verbatim; **nothing on the Server verifies it, and nothing here
+could** — the Server never sees the nonce, so all it relays is a key-bound proof
+it can neither check nor forge
+([Host side](#host-side-lib--the-two-node-hosts)).
 
 **Both sides run the shape guard.** The server's `isPairingRequest` is a
 courtesy that keeps a bad frame off the wire; the Host runs the same guard on
@@ -598,9 +663,24 @@ memo invalidation — live in that host's spec.
   `HostChallengeIssuer`, `PairingCeremony`, and `authorizeConnection` — all
   straight from `server-lib-common`, running in the service's process. Nothing a
   webview says can widen access.
+* **Setup codes**: `setupQr` — enrolled only — mints at `/api/host/setup-token`
+  over `hostFetch`, has the `RemoteHost` mint a nonce of its own, and composes
+  `<enrollment origin>/#setup?token=…&nonce=…`. A mint that resolves onto a
+  *different* Host is refused rather than painted: the code belongs to the server
+  this machine just left. **Both secrets cross into the webview and `hostToken`
+  never does** — being displayed to a person is their whole purpose. The
+  `setup-token-redeemed` frame becomes the `setupTokenRedeemed` event, carrying
+  its `mintId`. Source of truth: `#setupQr` in
+  `lib/src/host/remote/service.ts`, `mintSetupNonce` / `#onPair` in
+  `lib/src/remote/host/remote-host.ts`;
+  [remote-security-model.md](./remote-security-model.md) owns what a proof
+  proves, and `lib/src/remote/host/host-fetch.ts` the transport rules — including
+  that a route the Server may legitimately hold open longer than the shared
+  budget (push delivery, `PUSH_SEND_DEADLINE_MS`) passes its own timeout.
 * **Pairing approval modal**: the queue is service-side; webviews mirror a
-  serializable projection (`{ clientId, pairingId, request, requestedAt }[]`,
-  pushed whole on every change) and echo both ids on Approve / Deny, so the
+  serializable projection (`{ clientId, pairingId, request, verified,
+  requestedAt }[]`, pushed whole on every change) and echo both ids on Approve /
+  Deny, so the
   approve/deny closures never leave the Host's process. **Approval is bound to
   the displayed `pairingId`, not whichever request currently occupies
   `clientId`.** The service coalesces a re-sent pair under one `clientId` by
@@ -608,7 +688,9 @@ memo invalidation — live in that host's spec.
   ticket id no longer matches; the mirror compares on `pairingId` and remounts
   keyed by it, while leaving an unchanged item alone
   (`lib/src/remote/host/activation.ts`). The modal shows the requested label +
-  account with Approve / Deny (same pattern as KillConfirm); approving after the
+  account with Approve / Deny (same pattern as KillConfirm); on a `verified`
+  item it says what proved the device instead of asking the user to vouch for it
+  ([remote-security-model.md](./remote-security-model.md)). Approving after the
   ticket expires sends `pair-result approved:false` and dismisses, ACL
   untouched. In VS Code the queue
   is broadcast to every window, since any may be the one in front of the user.
@@ -680,6 +762,31 @@ to honor:
   error is what the form renders — so the failure reads as "this build will not
   talk to that server" rather than as a wrong password — the offer card
   included.
+- **Enrolled, "Set up a phone" opens an inline QR panel**, so a phone is set up
+  by pointing a camera at the laptop rather than typing an origin and a 64-hex
+  password. It mints on open and never before — a code is a credential with a
+  clock on it — re-mints shortly before `expiresAt` while the panel stays open,
+  and offers New code and Done. Rules it exists to honor:
+  - **The panel owns its busy and error**, not the section's shared pair: a mint
+    also fires on a timer, and the view's one error slot belongs to what the
+    user clicked.
+  - **Must clamp refresh delay to `[30 s, DEFAULT_PAIRING_TTL_MS - 20 s]`.** The
+    floor stops a fast-clock mint loop; the TTL ceiling replaces a slow-clock
+    code before its real Server expiry.
+  - **The code being replaced stays on screen** until its replacement lands;
+    only a first mint blanks. The refresh lead exists so a camera mid-scan keeps
+    a live code.
+  - **A redemption flips only the panel showing that `mintId`**, so a second
+    window offering a different code stays live.
+  - **The view is keyed by enrollment identity and the QR sits behind its own
+    error boundary**: a server swap drops the stale code, and a failed chunk
+    fetch or a refused encode costs a retry button rather than the app-wide
+    ErrorBoundary taking every terminal down.
+
+  Source of truth: `useSetupQr` and `ScannableCode` in
+  `lib/src/components/RemoteControlSection.tsx`, over
+  `lib/src/components/QrCode.tsx` (`uqr` encodes; that draws, lazily, so the
+  encoder stays out of every main bundle).
 - **Disconnect asks first**, because clearing the enrollment drops every paired
   phone until each pairs again.
 - **Status is re-read, not patched, and the connection is polled.** The
@@ -699,7 +806,7 @@ to honor:
   (rationale). Source of truth: `dropInFlightRead` in
   `lib/src/remote/host/host-status-store.ts`.
 
-The `window.dormouseRemoteHost` console hook exposes the same five commands —
+The `window.dormouseRemoteHost` console hook exposes the five enrollment commands —
 `enroll(serverUrl, password, label)`, `enrollOffer(origin, label)` (its origin
 from `status().offer.origin`), `status`, `reconnect`, `clearEnrollment` — and
 remains the scripting seam. **Pairing approval is never here** — it is a modal, because
@@ -829,27 +936,16 @@ a `*.ts.net` origin means `DORMOUSE_REMOTE_CONNECT_SRC` at build time (see
 
 ## Future
 
-**Scope: selfhost-onboarding** — collapse self-host first-run friction. What is
-still hand-ferried is the phone's half: the origin typed into mobile Safari, the
-64-hex setup password typed after it, and an 8-character key fingerprint
-compared by eye. The target
-is *run installer → click Enroll → scan QR → approve*, with nothing typed
-anywhere. One settled decision constrains every item: **the stock allowlist stays
+**Scope: selfhost-onboarding** — collapse self-host first-run friction. The
+first run is now *run installer → click Enroll → scan QR → approve*, with
+nothing typed on the phone (Setup tokens, Host side,
+[pocket-app.md](./pocket-app.md)); the setup password remains for the QR-less
+path. One settled decision constrains what is left: **the stock allowlist stays
 `*.dormouse.sh`-only** ("Where a Host may reach a relay server") —
 self-hosting keeps requiring a source build, deliberately, so no item below
 may depend on widening it. Staged order:
 
-1. **QR-first phone setup.** The enrolled Host mints a short-TTL, single-use
-   setup token from the server over its authenticated channel and renders
-   `https://<origin>/#setup?token=…` as a QR. Scanning replaces typing the
-   origin and the setup password; the token's nonce rides into the pairing
-   request, so the approval modal verifies the scanning phone
-   cryptographically instead of asking a human to compare fingerprints —
-   displaying the QR on the laptop *is* the local-presence act, and approval
-   collapses to one confirm. Single-use plus TTL bound the shoulder-surf
-   window; the Host announces each redemption. The setup password remains for
-   the QR-less path.
-2. **One-minute resume.** On an approved connection the Host mints a resume
+1. **One-minute resume.** On an approved connection the Host mints a resume
    token — single-use, bound to the device key and that connection, 60-second
    TTL. A dropped WebSocket reattaches with it instead of rerunning the
    passkey ceremony; past the minute it is a full connect. Host-minted and

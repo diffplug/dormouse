@@ -4,6 +4,8 @@ import { userEvent, within } from 'storybook/test';
 // utilities load for these stories. Storybook manages the theme tokens
 // (`--vscode-*`) itself.
 import { SetupOrSignin } from '../remote/pocket-app/App';
+import { SETUP_CODE_DEAD_MESSAGE } from '../remote/client/pocket-client';
+import { PASSKEY_ALREADY_REGISTERED_MESSAGE } from '../remote/client/webauthn';
 import { PhoneFrame } from './PhoneFrame';
 
 // On the return visit, setup is internal state (`useState(showSetup)`) behind
@@ -22,6 +24,9 @@ const meta: Meta<typeof SetupOrSignin> = {
     error: null,
     // Default to the screen a phone that has never been here gets.
     firstRun: true,
+    setupToken: null,
+    setupRefused: false,
+    passkeyAlreadyRegistered: false,
     needsInstall: false,
     onSignin: () => {},
     onSetup: () => {},
@@ -50,6 +55,39 @@ export const FirstRunKimbieDark: Story = {
 // where it still precedes the passkey this screen mints.
 export const FirstRunNeedsInstall: Story = {
   args: { needsInstall: true },
+};
+
+// Opened from a scanned QR: the code stands in for the setup password, so the
+// password field is gone and only the passkey label is left to fill in
+// (`docs/specs/pocket-app.md` -> The auth screen).
+export const FromScannedCode: Story = {
+  args: { setupToken: 'tok-from-the-qr' },
+};
+
+// The same scan on a phone that has been here before. Setup still leads —
+// scanning the code *is* the ask — where "Welcome back" would otherwise win.
+export const FromScannedCodeReturning: Story = {
+  args: { setupToken: 'tok-from-the-qr', firstRun: false },
+};
+
+// After a code the server refused: `App` has dropped the token but kept setup
+// unfolded on the setup password the refusal just promised. One story, not two:
+// a refusal caches nothing, so the real screen is `firstRun` — and
+// `setupRefused` makes a returning browser render this identically.
+export const SetupAfterDeadCode: Story = {
+  args: { firstRun: true, setupRefused: true, error: SETUP_CODE_DEAD_MESSAGE },
+};
+
+// The authenticator refused to duplicate a passkey the server already has. The
+// only screen where `firstRun` is true and sign-in still leads: that refusal is
+// proof this device can sign in, where a stored-nothing browser is merely
+// unproven. `App` has dropped the code, so nothing here is left of the scan.
+export const SigninAfterPasskeyExists: Story = {
+  args: {
+    firstRun: true,
+    passkeyAlreadyRegistered: true,
+    error: PASSKEY_ALREADY_REGISTERED_MESSAGE,
+  },
 };
 
 // Account creation in flight: the setup button reads "Creating…".

@@ -30,6 +30,9 @@ export interface RelaySocket {
   close(code?: number, reason?: string): void;
 }
 
+/** A host-bound frame no Client provoked; server.md → "Relay" owns why it is this narrow. */
+export type UnsolicitedHostFrame = Extract<ServerToHostFrame, { t: 'setup-token-redeemed' }>;
+
 /** A live Host socket. */
 export interface HostConn {
   readonly hostId: string;
@@ -69,6 +72,16 @@ export class RelayHub {
   /** True while a socket for `hostId` is connected — drives `GET /api/hosts` presence. */
   isHostOnline(hostId: string): boolean {
     return this.#hosts.has(hostId);
+  }
+
+  /**
+   * Send an unsolicited frame to whichever socket owns `hostId` now — the seam
+   * an HTTP route uses to reach the relay. Offline is a silent no-op; server.md
+   * → "Relay" owns the delivery semantics.
+   */
+  notifyHost(hostId: string, frame: UnsolicitedHostFrame): void {
+    const host = this.#hosts.get(hostId);
+    if (host) this.#toHost(host, frame);
   }
 
   // --- Host lifecycle -------------------------------------------------------

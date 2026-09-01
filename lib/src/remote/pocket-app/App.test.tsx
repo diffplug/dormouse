@@ -14,15 +14,12 @@ import {
   type HostView,
   type PushConfigStatus,
 } from './App';
+import type { SetupCredential } from 'server-lib-common';
 import type { PushAvailability } from '../client/push-subscribe';
 import { setNativeFieldValue } from '../../lib/dom';
+import { HOSTS, buttonNamed as buttonNamedIn, rowFor as rowForIn } from './app-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-
-const HOSTS: HostView[] = [
-  { hostId: 'host-1', label: 'First laptop', online: true },
-  { hostId: 'host-2', label: 'Second laptop', online: true },
-];
 
 let container: HTMLDivElement;
 let root: Root;
@@ -82,10 +79,7 @@ function renderHosts(
  * not silently pass if the rows are reordered.
  */
 function rowFor(label: string): HTMLElement {
-  const title = [...container.querySelectorAll('div')].find((el) => el.textContent === label);
-  const row = title?.closest('div.rounded-lg');
-  if (!(row instanceof HTMLElement)) throw new Error(`no host row for ${label}`);
-  return row;
+  return rowForIn(container, label);
 }
 
 /** The labels of a row's action buttons, in order. */
@@ -110,11 +104,13 @@ function pushCard(): HTMLElement | null {
 function renderAuth(
   overrides: {
     firstRun?: boolean;
+    setupToken?: string | null;
+    setupRefused?: boolean;
     needsInstall?: boolean;
     busy?: string | null;
     error?: string | null;
     onSignin?: () => void;
-    onSetup?: (password: string, label: string) => void;
+    onSetup?: (credential: SetupCredential, label: string) => void;
   } = {},
 ) {
   act(() => {
@@ -124,6 +120,8 @@ function renderAuth(
           busy={overrides.busy ?? null}
           error={overrides.error ?? null}
           firstRun={overrides.firstRun ?? true}
+          setupToken={overrides.setupToken ?? null}
+          setupRefused={overrides.setupRefused ?? false}
           needsInstall={overrides.needsInstall ?? false}
           onSignin={overrides.onSignin ?? (() => undefined)}
           onSetup={overrides.onSetup ?? (() => undefined)}
@@ -139,11 +137,7 @@ function setupPasswordField(): HTMLInputElement | null {
 }
 
 function buttonNamed(label: string | RegExp): HTMLButtonElement | null {
-  return (
-    [...container.querySelectorAll('button')].find((button) =>
-      typeof label === 'string' ? button.textContent === label : label.test(button.textContent ?? ''),
-    ) ?? null
-  );
+  return buttonNamedIn(container, label);
 }
 
 /**
@@ -159,10 +153,10 @@ function installNotice(): HTMLElement | null {
   );
 }
 
-/** The setup `<form>`, reached through the field it owns. */
+/** The setup `<form>`; the only one on the screen, password field or not. */
 function setupForm(): HTMLFormElement {
-  const form = setupPasswordField()?.closest('form');
-  if (!form) throw new Error('setup fields are not inside a form');
+  const form = container.querySelector('form');
+  if (!form) throw new Error('the setup fields are not on screen');
   return form;
 }
 
@@ -228,7 +222,7 @@ describe('SetupOrSignin first run vs return visit', () => {
     typeInto(container.querySelector<HTMLInputElement>('#pocket-setup-label')!, 'Work phone');
     submitSetupForm();
 
-    expect(onSetup).toHaveBeenCalledWith('hunter2', 'Work phone');
+    expect(onSetup).toHaveBeenCalledWith({ password: 'hunter2' }, 'Work phone');
   });
 
   it('refuses a submit with no password, the same condition that disables the button', () => {
@@ -239,6 +233,84 @@ describe('SetupOrSignin first run vs return visit', () => {
     submitSetupForm();
 
     expect(onSetup).not.toHaveBeenCalled();
+  });
+});
+
+describe('SetupOrSignin with a scanned code', () => {
+  it('leads with setup and drops the password field, whatever this browser holds', () => {
+    // `firstRun: false` is the harder half: someone who just pointed a camera
+    // at their laptop is asking for setup, and that intent outranks the stored
+    // passkey material that would otherwise say "Welcome back".
+    renderAuth({ firstRun: false, setupToken: 'scanned-token' });
+
+    expect(container.textContent).toContain('Set up this phone');
+    expect(container.textContent).not.toContain('Welcome back');
+    expect(setupPasswordField()).toBeNull();
+    expect(container.textContent).toContain('the code you scanned');
+    expect(buttonNamed(/First-time setup/)).toBeNull();
+  });
+
+  it('submits the token as the credential, with the typed label', () => {
+    const onSetup = vi.fn();
+    renderAuth({ setupToken: 'scanned-token', onSetup });
+
+    typeInto(container.querySelector<HTMLInputElement>('#pocket-setup-label')!, 'Work phone');
+    submitSetupForm();
+
+    expect(onSetup).toHaveBeenCalledWith({ setupToken: 'scanned-token' }, 'Work phone');
+  });
+
+  it('submits with nothing typed — there is no password to withhold', () => {
+    const onSetup = vi.fn();
+    renderAuth({ setupToken: 'scanned-token', onSetup });
+
+    expect(buttonNamed('Create passkey & sign in')!.disabled).toBe(false);
+    submitSetupForm();
+
+    expect(onSetup).toHaveBeenCalledWith({ setupToken: 'scanned-token' }, 'My Phone');
+  });
+
+  it('keeps sign-in offered — a synced passkey is the better path for some phones', () => {
+    const onSignin = vi.fn();
+    renderAuth({ firstRun: false, setupToken: 'scanned-token', onSignin });
+
+    act(() => buttonNamed('Sign in with passkey')!.click());
+
+    expect(onSignin).toHaveBeenCalledOnce();
+  });
+
+  /**
+   * The refusal's whole promise is "the setup password still works", and on a
+   * browser that has been here before `firstRun` is false — so without the
+   * refused flag the field it named would fold away behind the disclosure at
+   * the same moment it was offered.
+   */
+  it('keeps setup unfolded after a refusal, on a browser that has been here', () => {
+    renderAuth({ firstRun: false, setupToken: null, setupRefused: true });
+
+    expect(setupPasswordField()).not.toBeNull();
+    expect(buttonNamed(/First-time setup/)).toBeNull();
+    // And the copy follows the layout: "sign in with your passkey" above the
+    // setup fields would describe the wrong screen.
+    expect(container.textContent).toContain('Set up this phone');
+    expect(container.textContent).not.toContain('Welcome back');
+    expect(container.textContent).toContain("the server's setup password");
+  });
+
+  /**
+   * Scanning in an iOS tab and installing afterwards is a different storage
+   * partition, so the advice this screen exists to give is no less true for
+   * having arrived by camera.
+   */
+  it('still gives the install-first advice, above the fields', () => {
+    renderAuth({ firstRun: false, setupToken: 'scanned-token', needsInstall: true });
+
+    const notice = installNotice();
+    const label = container.querySelector<HTMLInputElement>('#pocket-setup-label');
+    expect(notice).not.toBeNull();
+    expect(
+      notice!.compareDocumentPosition(label!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });
 
@@ -289,7 +361,7 @@ describe('SetupOrSignin install guidance', () => {
     expect(submit.disabled).toBe(false);
     act(() => submit.click());
 
-    expect(onSetup).toHaveBeenCalledWith('hunter2', 'My Phone');
+    expect(onSetup).toHaveBeenCalledWith({ password: 'hunter2' }, 'My Phone');
   });
 
   it('says nothing when the app is installed, or when push is unavailable for other reasons', () => {

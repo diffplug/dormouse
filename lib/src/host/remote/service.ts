@@ -5,7 +5,16 @@
  */
 
 import { hostname } from 'node:os';
-import { MAX_PENDING_PAIRINGS, type EnrollmentOffer } from 'server-lib-common';
+import {
+  API_ROUTES,
+  MAX_PENDING_PAIRINGS,
+  SETUP_HASH_NONCE_PARAM,
+  SETUP_HASH_PREFIX,
+  SETUP_HASH_TOKEN_PARAM,
+  isSetupTokenResponse,
+  normalizeOrigin,
+  type EnrollmentOffer,
+} from 'server-lib-common';
 import { filterAclRecords } from '../../remote/host/acl';
 import {
   isEnrollment,
@@ -14,6 +23,7 @@ import {
   type HostEnrollment,
 } from '../../remote/host/enrollment';
 import type { HostSurfaceProvider } from '../../remote/host/host-surface-provider';
+import { hostFetch } from '../../remote/host/host-fetch';
 import type { PendingPairing } from '../../remote/host/pairing-approval';
 import {
   loadPushDevices,
@@ -46,6 +56,8 @@ import {
   type PushParams,
   type PushSendSummary,
   type RemoteHostConsoleStatus,
+  type SetupQrResult,
+  type SetupTokenRedeemedEvent,
 } from './service-protocol';
 
 export interface RemoteHostServiceOptions {
@@ -208,6 +220,8 @@ export class RemoteHostService {
         return this.#reconnect();
       case 'clearEnrollment':
         return this.#serialize(() => this.#clearEnrollment());
+      case 'setupQr':
+        return this.#setupQr();
       case 'approve':
         return this.#approve(params as ApproveParams);
       case 'deny':
@@ -363,6 +377,64 @@ export class RemoteHostService {
     return {};
   }
 
+  /**
+   * Compose this machine's setup QR: the Server's single-use setup token, minted
+   * over the Host's own authenticated channel because this service is the half
+   * that holds the bearer, plus the `RemoteHost`'s own setup nonce, which never
+   * goes near the Server.
+   *
+   * The URL is composed here, from the origin this Host enrolled against, for
+   * the reason `SetupTokenResponse` carries the token alone: a URL minted
+   * server-side would be one more place the deployment's own address is decided.
+   */
+  async #setupQr(): Promise<SetupQrResult> {
+    const enrollment = this.#enrollment;
+    const host = this.#host;
+    if (!enrollment || !host) {
+      throw new Error('This machine is not connected to a Dormouse server.');
+    }
+    const response = await hostFetch(
+      { enrollment, fetch: this.#fetch, errorPrefix: 'could not mint a setup code' },
+      API_ROUTES.hostSetupToken,
+      // The empty POST body: this endpoint's only input is the bearer, which is
+      // what says which Host is asking.
+      {},
+    );
+    const body: unknown = await response.json().catch(() => null);
+    // Guarded like every other 200 off this wire: an `undefined` token would go
+    // into the QR, and an unbounded one throws inside the encoder.
+    if (!isSetupTokenResponse(body)) {
+      throw new Error('could not mint a setup code: the server’s answer was not a setup token.');
+    }
+    // The Host captured above, not whatever `#host` holds now: a swap during the
+    // round trip means this code belongs to the server we just left, so it is
+    // dropped rather than minted onto the replacement — which could not verify
+    // it anyway, and whose panel must not paint a code for the old server.
+    if (this.#host !== host) {
+      throw new Error(
+        'could not mint a setup code: this machine reconnected to a different server.',
+      );
+    }
+    // The second secret, and the one that makes `verified` unforgeable by the
+    // Server: it exists only on this screen and on the phone that photographs it
+    // (`docs/specs/remote-security-model.md` → Pairing Ceremony). It dates
+    // itself off the Host's clock; `body.expiresAt` below is the Server's, and
+    // is returned only for the QR's own countdown.
+    const nonce = host.mintSetupNonce();
+    // `enrollment.origin` is the phone-facing WebAuthn origin — where Pocket is
+    // served and where the passkey will be registered — not necessarily the
+    // `serverUrl` this Host posts to.
+    const hash = new URLSearchParams({
+      [SETUP_HASH_TOKEN_PARAM]: body.token,
+      [SETUP_HASH_NONCE_PARAM]: nonce,
+    });
+    return {
+      url: `${enrollment.origin}/${SETUP_HASH_PREFIX}${hash}`,
+      mintId: body.mintId,
+      expiresAt: body.expiresAt,
+    };
+  }
+
   #approve(params: ApproveParams): Record<string, never> {
     this.#pendingPairing(params.clientId, params.pairingId).approve(params.label);
     return {};
@@ -458,11 +530,8 @@ export class RemoteHostService {
   // --- Host lifecycle ---
 
   #allowed(serverUrl: string): boolean {
-    try {
-      return originAllowedByConnectSrc(new URL(serverUrl).origin, this.#connectSrc);
-    } catch {
-      return false;
-    }
+    const origin = normalizeOrigin(serverUrl);
+    return origin !== null && originAllowedByConnectSrc(origin, this.#connectSrc);
   }
 
   async #startHost(enrollment: HostEnrollment): Promise<void> {
@@ -498,6 +567,7 @@ export class RemoteHostService {
       },
       requestApproval: (pending) => this.#enqueuePairing(pending),
       dismissApproval: (clientId) => this.#resolvePairing(clientId),
+      onSetupTokenRedeemed: (mintId) => this.#emitSetupTokenRedeemed(mintId),
       now: this.#now,
     });
     this.#host.start();
@@ -530,6 +600,9 @@ export class RemoteHostService {
 
   #stopHost(): void {
     this.#host?.stop();
+    // Setup nonces go with it: they live on the `RemoteHost` precisely so a
+    // code the old server's QR carried cannot verify a pairing against the new
+    // one.
     this.#host = null;
     // `stop()` dismisses every in-flight pairing, which empties the queue and
     // pushes the empty snapshot; clear defensively in case there was no Host.
@@ -563,12 +636,27 @@ export class RemoteHostService {
   }
 
   #queueSnapshot(): PairingQueueItem[] {
-    return [...this.#pairings.values()].map(({ clientId, pairingId, request, requestedAt }) => ({
-      clientId,
-      pairingId,
-      request,
-      requestedAt,
-    }));
+    return [...this.#pairings.values()].map(
+      ({ clientId, pairingId, request, verified, requestedAt }) => ({
+        clientId,
+        pairingId,
+        request,
+        verified,
+        requestedAt,
+      }),
+    );
+  }
+
+  /**
+   * Announce that the code a Settings panel may be displaying is now spent,
+   * naming the mint so a panel showing a *different* code stays live.
+   */
+  #emitSetupTokenRedeemed(mintId: string): void {
+    if (this.#disposed) return;
+    this.#sendToUi(REMOTE_HOST_EVENT_EVENT, {
+      name: 'setupTokenRedeemed',
+      mintId,
+    } satisfies SetupTokenRedeemedEvent);
   }
 
   #emitQueue(): void {

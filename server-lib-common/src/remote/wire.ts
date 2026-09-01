@@ -21,6 +21,7 @@ export const API_ROUTES = {
   reauthBegin: '/api/reauth/begin',
   reauthFinish: '/api/reauth/finish',
   hostEnroll: '/api/host/enroll',
+  hostSetupToken: '/api/host/setup-token',
   hosts: '/api/hosts',
   pushConfig: '/api/push/config',
   pushChallenge: '/api/push/challenge',
@@ -38,6 +39,15 @@ export const API_ROUTES = {
  * side without the other would silently strand users on a dead session.
  */
 export const UNAUTHORIZED_ERROR = 'unauthorized';
+
+/**
+ * The `error` the setup routes answer 401 with when a `setupToken` is mistyped,
+ * unknown, expired, already spent, or was minted by a Host since revoked.
+ * Distinct from {@link UNAUTHORIZED_ERROR} because Pocket keys recovery flows on
+ * bodies and Pocket itself sends setup tokens: a spent one means "re-scan", not
+ * "sign in again", and the shared string would drive the wrong recovery.
+ */
+export const SETUP_TOKEN_INVALID_ERROR = 'invalid setup token';
 
 export const WS_ROUTES = {
   host: '/ws/host',
@@ -66,18 +76,32 @@ export const WS_CLOSE_HOST_REPLACED_REASON = 'replaced by a newer host connectio
 /** The selfhost mode has exactly one account. */
 export const SELFHOST_ACCOUNT_ID = 'owner';
 
-export interface SetupBeginRequest {
-  password: string;
-}
+/**
+ * What gates the two setup routes: the setup password, or the single-use
+ * `token` of a {@link SetupTokenResponse} an enrolled Host minted for its QR.
+ * Exactly one must be present — both, or neither, is a 400 (why: `pickCredential`
+ * in `server/src/app.ts`), the same rule as {@link HostEnrollRequest}.
+ */
+export type SetupCredential =
+  | { password: string; setupToken?: never }
+  | { password?: never; setupToken: string };
+
+export type SetupBeginRequest = SetupCredential;
 export interface SetupBeginResponse {
   /** Base64url challenge for `navigator.credentials.create()`. */
   challenge: string;
   rpId: string;
   accountId: string;
+  /**
+   * Base64url ids of the passkeys the account already holds, for the
+   * registration's `excludeCredentials`. The Server is the authority on what is
+   * registered, so it is the only side that can answer this — a browser's own
+   * cache is empty on a fresh install and cleared again by a refused `finish`.
+   */
+  existingCredentialIds: string[];
 }
 
-export interface SetupFinishRequest {
-  password: string;
+export type SetupFinishRequest = SetupCredential & {
   /** Base64url credential id (`PublicKeyCredential.id`). */
   credentialId: string;
   /** Base64url SPKI from `response.getPublicKey()`. */
@@ -85,7 +109,7 @@ export interface SetupFinishRequest {
   /** Base64url `response.clientDataJSON` (type `webauthn.create`). */
   clientDataJSON: string;
   label: string;
-}
+};
 export interface SetupFinishResponse {
   accountId: string;
   credentialId: string;
@@ -165,6 +189,96 @@ export interface HostEnrollResponse {
    * the weaker verifier, and the Host is the one that decides access.
    */
   requireUserVerification?: boolean;
+}
+
+/**
+ * Host-token auth. The single-use setup credential an enrolled Host mints to
+ * render as a QR: the token only, since the Host composes the QR's URL itself
+ * from the origin it enrolled against, and a URL minted server-side would be
+ * one more place the deployment's own address is decided. Scanning it replaces
+ * typing the origin and the setup password; a short TTL plus single use bound
+ * the shoulder-surf window, and the Server tells the minting Host when the
+ * token is spent (`ServerToHostFrame` `setup-token-redeemed`).
+ *
+ * The Host adds a second secret of its own to that URL — the setup nonce behind
+ * `PairingRequest.setupProof` — which the Server never sees
+ * (`security/setup-proof.ts`).
+ */
+export interface SetupTokenResponse {
+  token: string;
+  /**
+   * Opaque handle naming *this* mint, so a Host displaying several codes can
+   * tell which one a `setup-token-redeemed` frame is about. Deliberately not
+   * the token: a correlator that named the credential would put it on a wire
+   * that carries no credentials, and only the minter needs to recognize it.
+   */
+  mintId: string;
+  /** Epoch ms after which the token no longer redeems. */
+  expiresAt: number;
+}
+
+/**
+ * How many unspent setup tokens ONE Host may hold, capping both sides of the
+ * credential: the Server's issuer map and the Host's own map of the nonces it
+ * paired with them. One constant, so live-on-one-side and spent-on-the-other
+ * cannot drift. A human scans one at a time, so it is far above any real use.
+ *
+ * Source of truth for the eviction rule: `server/src/setup-token.ts`.
+ */
+export const MAX_TOKENS_PER_HOST = 8;
+
+/**
+ * The longest setup token this Host will put in a QR.
+ *
+ * A real one is base64url of 32 bytes (43 characters). The bound is what keeps
+ * a 200 off a hostile or broken server from reaching the QR encoder, which
+ * throws above its capacity — inside the app-wide ErrorBoundary, taking every
+ * terminal down with it.
+ */
+const SETUP_TOKEN_MAX_LENGTH = 128;
+
+/**
+ * The `#setup` hash a Host composes for its QR and Pocket parses at boot; one
+ * owner so the emitter and the parser cannot drift. `docs/specs/server.md` ->
+ * Setup tokens owns the grammar.
+ */
+export const SETUP_HASH_PREFIX = '#setup?';
+export const SETUP_HASH_TOKEN_PARAM = 'token';
+export const SETUP_HASH_NONCE_PARAM = 'nonce';
+
+/**
+ * Base64url, bounded, non-empty — the shape of every handle on this wire, and
+ * of both halves of the QR hash above.
+ */
+export function isSetupTokenHandle(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= SETUP_TOKEN_MAX_LENGTH &&
+    /^[A-Za-z0-9_-]+$/.test(value)
+  );
+}
+
+/**
+ * Structural validation of a {@link SetupTokenResponse}, beside the type so a
+ * field added here cannot be silently accepted by the Host that reads one.
+ *
+ * The Host runs it on the 200 body for the reason `isEnrollment` exists: a
+ * server that answers 200 with `token` missing — a version skew, a proxy that
+ * rewrote the body — would otherwise put `undefined` in the QR's URL. The
+ * charset and length bounds are not hygiene: the token goes straight into a QR
+ * encoder, and `expiresAt` straight into a `setTimeout` delay.
+ */
+export function isSetupTokenResponse(value: unknown): value is SetupTokenResponse {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    isSetupTokenHandle(candidate.token) &&
+    isSetupTokenHandle(candidate.mintId) &&
+    typeof candidate.expiresAt === 'number' &&
+    Number.isFinite(candidate.expiresAt) &&
+    candidate.expiresAt > 0
+  );
 }
 
 export interface HostsResponse {
@@ -271,6 +385,18 @@ export interface PushSendRequest {
    */
   tag?: string;
 }
+/**
+ * Wall-clock bound the send route holds one delivery attempt under, so a hung
+ * push service cannot hold the handler open indefinitely
+ * (`sendWithinDeadline` in `server/src/push.ts`).
+ *
+ * Shared because it is the Host's contract too: this is how long the Server may
+ * legitimately take to answer `POST /api/push/send`, so the Host's own request
+ * timeout has to sit *above* it or a delivery that succeeded reports as a
+ * failure (`lib/src/remote/host/push-delivery.ts`).
+ */
+export const PUSH_SEND_DEADLINE_MS = 15_000;
+
 export interface PushSendResponse {
   /** How many subscriptions accepted the push. */
   delivered: number;
@@ -315,14 +441,23 @@ export type ServerToClientFrame =
   | { t: 'host-gone' }
   | { t: 'error'; error: string };
 
-/** Server → host. */
+/**
+ * Server → host. Every frame but `setup-token-redeemed` addresses one Client by
+ * its server-assigned `clientId`; that one carries none by design, because it
+ * is about the Host itself — a setup token this Host minted
+ * ({@link SetupTokenResponse}) was just spent, so the QR showing it is stale
+ * and each redemption is visible to the person who displayed it. It names the
+ * mint rather than the token, so a Host that displayed several codes can retire
+ * the right one without the credential crossing back.
+ */
 export type ServerToHostFrame =
   | { t: 'pair'; clientId: string; request: PairingRequest }
   | { t: 'pair-status'; clientId: string; query: PairStatusQuery }
   | { t: 'connect'; clientId: string }
   | { t: 'connect2'; clientId: string; request: ConnectionRequest }
   | { t: 'msg'; clientId: string; data: unknown }
-  | { t: 'client-gone'; clientId: string };
+  | { t: 'client-gone'; clientId: string }
+  | { t: 'setup-token-redeemed'; mintId: string };
 
 /**
  * Host → server. `pair-status-result` carries no hostId — the relay knows which

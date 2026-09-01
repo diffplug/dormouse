@@ -3,8 +3,9 @@
  * "Host side" owns the exchange and persistence contracts.
  */
 
-import { API_ROUTES, type HostEnrollResponse } from 'server-lib-common';
+import { API_ROUTES, normalizeOrigin, type HostEnrollResponse } from 'server-lib-common';
 import { loadJson, removeJson } from '../../lib/local-json-store';
+import { HOST_REQUEST_TIMEOUT_MS } from './host-fetch';
 import { ENROLLMENT_KEY } from './store';
 
 export interface HostEnrollment {
@@ -60,8 +61,6 @@ export function clearEnrollment(): void {
   removeJson(ENROLLMENT_KEY);
 }
 
-const ENROLL_TIMEOUT_MS = 10_000;
-
 /**
  * What proves this machine may enroll: the setup password the operator typed,
  * or the one-time token of an installer's offer for a Host on the server's own
@@ -90,13 +89,10 @@ export async function performEnrollment(
   const base = serverUrl.replace(/\/+$/, '');
   const response = await fetch(`${base}${API_ROUTES.hostEnroll}`, {
     method: 'POST',
-    // This runs on the Host service's lifecycle chain, where everything that
-    // starts or stops the Host queues behind it — so a relay that accepts the
-    // connection and then answers nothing would wedge every later command for
-    // as long as the platform's default socket timeout, which is minutes. Below
-    // the webview's own 15 s command budget (`link-client.ts`) on purpose: the
-    // console then sees "the server did not answer" rather than a bare timeout.
-    signal: AbortSignal.timeout(ENROLL_TIMEOUT_MS),
+    // The same budget every Host→Server call runs under (`host-fetch.ts`), and
+    // this is the one that most needs it: it runs on the service's lifecycle
+    // chain, where everything that starts or stops the Host queues behind it.
+    signal: AbortSignal.timeout(HOST_REQUEST_TIMEOUT_MS),
     // The Node-resident Host has no browser CSP to check each redirect hop.
     // Failing here keeps an allowed origin's open redirect from forwarding the
     // credential — the setup password or the offer's one-time token, whichever
@@ -133,7 +129,10 @@ export async function performEnrollment(
     serverUrl: base,
     hostId: enrolled?.hostId,
     hostToken: enrolled?.hostToken,
-    origin: enrolled?.origin,
+    // Untrusted like the rest of the body, and `isEnrollment` only checks that
+    // it is a string — so it is reduced here, and anything that is not a URL
+    // with a host fails the exchange below naming `origin`.
+    origin: normalizeOrigin(enrolled?.origin) ?? undefined,
     rpId: enrolled?.rpId,
     // Only when the server actually sent a boolean: spreading `undefined` in
     // would make the key present-and-undefined, which the guard treats the
