@@ -516,11 +516,12 @@ shape, temporary key distribution, or fallback machinery.
    numbering below is preserved because other specs cite these stages by number.
 2. **Additive identities and storage** — landed
    ([E2E identities and presence](#e2e-identities-and-presence)).
-3. **Relay-integrated Noise harness.** The `e2e` relay envelope accepted by the
-   Server additively and driven end to end through the real relay in
-   integration tests only, with both parties' statics injected. Proves
-   prologue/transcript binding, directional cipher states, counters, framing,
-   teardown, relay opacity, and tamper rejection before any ceremony changes.
+3. **Relay-integrated Noise harness** — landed ([server.md](./server.md) ->
+   Relay, and its E2E framing). The `e2e` envelope is routed additively and
+   driven end to end through the real relay by a fake Client and Host with both
+   statics injected; nothing in production sends one. Prologue and transcript
+   binding, directional cipher states, counters, framing, teardown, relay
+   opacity, and tamper rejection are proven before any ceremony changes.
 4. **Atomic pairing, connection, and push re-keying cutover** (cutover PR).
    The positional QR grammar and parser, native-camera bootstrap, in-app
    scanner plus paste, pairing IK against the invitation key, the presence
@@ -717,10 +718,9 @@ connection share one verifier.
   drops local push authorization, closes, and shows *Scan this Host's QR to
   pair again*. Other denials use fixed retry, sign-in, or error copy. Timers
   expiring without an authenticated outcome report unavailable, never denial.
-- **Protocol-v1 rides inside.** Remote API requests, responses, events, and
-  terminal bytes are serialized as length-prefixed application messages in a
-  byte stream carried by Noise transport messages, reassembled up to 1 MiB.
-  [remote-api.md](./remote-api.md) states this; nothing in protocol-v1 changes.
+- **Protocol-v1 rides inside**, as application messages on the session's byte
+  stream ([server.md](./server.md) -> E2E framing); nothing in protocol-v1
+  changes ([remote-api.md](./remote-api.md)).
 
 ### Host bounds
 

@@ -60,8 +60,12 @@ export const NOISE_MAX_MESSAGE_LENGTH = 65535;
 /** Raw X25519 public keys, SHA-256 digests, and ChaChaPoly keys are all 32 bytes. */
 export const NOISE_KEY_LENGTH = 32;
 
-/** Poly1305 authentication tag length. */
-const NOISE_TAG_LENGTH = 16;
+/**
+ * Poly1305 authentication tag length. Exported because the transport framing
+ * budgets against it: a stream body plus its kind byte plus this must stay
+ * inside {@link NOISE_MAX_MESSAGE_LENGTH} (`noise-transport.ts`).
+ */
+export const NOISE_TAG_LENGTH = 16;
 
 /**
  * Bytes each handshake message spends on framing, so its length is exactly

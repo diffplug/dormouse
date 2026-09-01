@@ -8,6 +8,8 @@ import { randomBytes } from 'node:crypto';
 import {
   WS_CLOSE_HOST_REPLACED,
   WS_CLOSE_HOST_REPLACED_REASON,
+  isE2eClientFrame,
+  isE2eHostFrame,
   isPairStatusQuery,
   toBase64Url,
 } from 'server-lib-common';
@@ -186,6 +188,22 @@ export class RelayHub {
           this.#toClient(client, { t: 'msg', data: frame.data });
         }
         return;
+      case 'e2e':
+        // No `established` gate: the relay never learns whether the Host
+        // authorized anything, so the binding above is the whole routing rule.
+        // The shape guard is defense in depth (the Host is authoritative), and
+        // only the fields it proved are forwarded — never the Host's own
+        // object. `hostId` is stamped from the socket, as for `challenge`.
+        if (!isE2eHostFrame(frame)) return;
+        this.#toClient(client, {
+          t: 'e2e',
+          hostId: host.hostId,
+          kind: frame.kind,
+          id: frame.id,
+          step: frame.step,
+          ct: frame.ct,
+        });
+        return;
       default:
         return; // unknown host frame type — ignore
     }
@@ -329,6 +347,45 @@ export class RelayHub {
           return;
         }
         this.#toHost(host, { t: 'connect2', clientId: client.clientId, request: frame.request });
+        return;
+      }
+      case 'e2e': {
+        // The envelope the end-to-end protocol rides in. The relay keeps no
+        // Noise state, never decodes `ct`, and has no notion of "authorized"
+        // here: an `init` binds, and everything after it is forwarded within
+        // that binding. Its guards are defense in depth — a malformed frame
+        // costs the Host nothing, and the Host runs the same guard anyway.
+        if (!isE2eClientFrame(frame)) {
+          this.#toClient(client, { t: 'error', error: 'malformed e2e frame' });
+          return;
+        }
+        const host = this.#resolveHost(client, frame.hostId);
+        if (!host) return;
+        if (frame.step === 'init') {
+          // Binds exactly as `connect` does: the previous Host is told the
+          // client is gone, and any session established with it is cleared.
+          if (client.hostId !== null && client.hostId !== frame.hostId) {
+            const previousHost = this.#hosts.get(client.hostId);
+            if (previousHost) {
+              this.#toHost(previousHost, { t: 'client-gone', clientId: client.clientId });
+            }
+          }
+          client.established = false;
+          client.hostId = frame.hostId;
+        } else if (client.hostId !== frame.hostId) {
+          // Transport outside the binding: the client is talking to a Host it
+          // is not bound to, so there is nothing to forward it to.
+          return;
+        }
+        this.#toHost(host, {
+          t: 'e2e',
+          clientId: client.clientId,
+          hostId: frame.hostId,
+          kind: frame.kind,
+          id: frame.id,
+          step: frame.step,
+          ct: frame.ct,
+        });
         return;
       }
       case 'msg':
