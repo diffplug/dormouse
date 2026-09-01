@@ -57,6 +57,8 @@ interface ClientState {
    * flight at once; only the newest may answer or re-open the gate.
    */
   authGeneration: number;
+  /** Bumped by every `pair`; only its newest async proof may reach the UI. */
+  pairGeneration: number;
   /** The in-flight pairing awaiting local approval, if any. */
   pending?: PendingPairing;
   /**
@@ -513,7 +515,7 @@ export class RemoteHost {
   #clientState(clientId: string): ClientState {
     let state = this.#clients.get(clientId);
     if (!state) {
-      state = { established: false, authGeneration: 0 };
+      state = { established: false, authGeneration: 0, pairGeneration: 0 };
       this.#clients.set(clientId, state);
     }
     return state;
@@ -575,10 +577,17 @@ export class RemoteHost {
     // approved, its fields land in a persisted ACL record. `connect2` has
     // always contained this class of failure as an ordinary denial.
     if (!isPairingRequest(incoming)) {
+      // A malformed replacement still supersedes proof work already in flight,
+      // without allocating a new state record for a hostile unique clientId.
+      const state = this.#clients.get(clientId);
+      if (state) state.pairGeneration += 1;
       console.warn('remote-host: malformed pairing request');
       this.#send({ t: 'pair-result', clientId, approved: false, error: 'malformed-request' });
       return;
     }
+    const state = this.#clientState(clientId);
+    state.pairGeneration += 1;
+    const generation = state.pairGeneration;
     // Verifying a setup proof is a MAC computation, so it cannot happen in this
     // turn. The QR-less path — every pairing until a phone has scanned, and
     // every pairing on a machine showing no code — is kept synchronous, because
@@ -598,7 +607,13 @@ export class RemoteHost {
     this.#verifying += 1;
     void this.#matchSetupNonce(incoming)
       .then((nonce) => {
-        if (this.#ws !== socket) return;
+        if (
+          this.#ws !== socket ||
+          this.#clients.get(clientId) !== state ||
+          state.pairGeneration !== generation
+        ) {
+          return;
+        }
         this.#enqueuePairing(clientId, incoming, nonce);
       })
       .finally(() => {

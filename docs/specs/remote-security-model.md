@@ -241,9 +241,9 @@ asking the user to vouch for it.
   and so a nonce it has never seen: it relays a key-bound proof and nothing more.
 - **Never an error to miss.** Absent, unknown, expired or spent, the pairing
   keeps the fingerprint compare — still the control for every proofless one.
-- **Verification does not consume; approval does.** A re-delivered request
-  stays verified only while its nonce remains live; minting the ACL record
-  spends it and re-mirrors every other pairing on it as unverified.
+- **Verification does not consume; approval does.** A proof result surfaces
+  only while its request and nonce remain current; minting the ACL record
+  spends it and re-mirrors other pairings on it as unverified.
 - **The webview is told `verified`, never the proof** — `MirroredPairingRequest`
   has no such field.
 - **A photographed QR inside its 5-minute window is accepted risk**, bounded by

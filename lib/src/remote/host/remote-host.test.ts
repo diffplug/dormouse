@@ -6,6 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * module is the real thing — the decision itself is never faked.
  */
 const authProbe = vi.hoisted(() => ({ gates: [] as Array<Promise<void> | undefined>, calls: 0 }));
+const proofProbe = vi.hoisted(() => ({
+  gates: [] as Array<Promise<void> | undefined>,
+  calls: 0,
+  completed: 0,
+}));
 vi.mock('server-lib-common', async (importOriginal) => {
   const real = await importOriginal<typeof import('server-lib-common')>();
   return {
@@ -15,6 +20,13 @@ vi.mock('server-lib-common', async (importOriginal) => {
       const decision = await real.authorizeConnection(context, request);
       await gate;
       return decision;
+    },
+    computeSetupProof: async (nonce: string, devicePublicKey: string) => {
+      const pause = proofProbe.gates[proofProbe.calls++];
+      const proof = await real.computeSetupProof(nonce, devicePublicKey);
+      if (pause) await pause;
+      proofProbe.completed += 1;
+      return proof;
     },
   };
 });
@@ -168,6 +180,9 @@ describe('RemoteHost frame handling', () => {
     socket = new FakeSocket();
     authProbe.gates.length = 0;
     authProbe.calls = 0;
+    proofProbe.gates.length = 0;
+    proofProbe.calls = 0;
+    proofProbe.completed = 0;
   });
 
   it('pair → local approval → pair-result with the ACL record, and persists', () => {
@@ -319,6 +334,45 @@ describe('RemoteHost frame handling', () => {
 
     const late = await flushUntil(() => approvals.slice(before).find((p) => p.clientId === 'c2'));
     expect(late.verified).toBe(false);
+  });
+
+  it('drops a proof result after client-gone disposes its lifecycle', async () => {
+    const host = makeHost();
+    const nonce = host.mintSetupNonce();
+    const setupProof = await computeSetupProof(nonce, PAIRING.devicePublicKey);
+    const blocked = gate();
+    proofProbe.gates[1] = blocked.promise;
+
+    socket.receive({ t: 'pair', clientId: 'c1', request: { ...PAIRING, setupProof } });
+    socket.receive({ t: 'client-gone', clientId: 'c1' });
+    blocked.release();
+    await flushUntil(() => (proofProbe.completed >= 2 ? true : undefined));
+    await settle();
+
+    expect(approvals).toEqual([]);
+    expect(host.trackedClientCount).toBe(0);
+  });
+
+  it('drops an older proof result after a newer pair for the same client', async () => {
+    const host = makeHost();
+    const nonce = host.mintSetupNonce();
+    const setupProof = await computeSetupProof(nonce, PAIRING.devicePublicKey);
+    const blocked = gate();
+    proofProbe.gates[1] = blocked.promise;
+
+    socket.receive({ t: 'pair', clientId: 'c1', request: { ...PAIRING, setupProof } });
+    socket.receive({
+      t: 'pair',
+      clientId: 'c1',
+      request: { ...PAIRING, devicePublicKey: 'replacement-key' },
+    });
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0]!.request.devicePublicKey).toBe('replacement-key');
+
+    blocked.release();
+    await flushUntil(() => (proofProbe.completed >= 2 ? true : undefined));
+    await settle();
+    expect(approvals).toHaveLength(1);
   });
 
   it('never verifies an expired nonce, and drops it on the next mint', async () => {
