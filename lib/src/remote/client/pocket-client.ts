@@ -29,11 +29,9 @@ import {
   type HostsResponse,
   type PairStatusQuery,
   type PairingRequest,
-  type PushChallengeResponse,
   type PushConfigResponse,
   type PushSubscribeResponse,
   type PushSubscriptionPayload,
-  type PushSubscriptionsResponse,
   type ReauthFinishResponse,
   type RemoteEventMsg,
   type RemoteResponse,
@@ -183,6 +181,30 @@ interface Waiter {
 interface PendingRequest {
   resolve(result: unknown): void;
   reject(error: Error): void;
+}
+
+/**
+ * STAGE-4 TRANSITIONAL: delete in 4b.
+ *
+ * The two push routes this client still calls, and the two response shapes it
+ * still reads. Both left `server-lib-common` with the delivery-id re-keying
+ * (`docs/specs/server.md` → Routes) and the Server no longer serves either, so
+ * these are spelled locally to keep Pocket compiling and its unit tests — which
+ * drive a mocked `fetch` — meaningful until Pocket switches to the
+ * possession-based query in stage 4b.
+ */
+const LEGACY_PUSH_ROUTES = {
+  challenge: '/api/push/challenge',
+  subscriptions: '/api/push/subscriptions',
+} as const;
+
+interface LegacyPushChallengeResponse {
+  challenge: string;
+  expiresAt: number;
+}
+
+interface LegacyPushSubscriptionsResponse {
+  subscriptions: Array<{ hostId: string; devicePublicKey: string; subscribedAt: number }>;
 }
 
 export class PocketClient {
@@ -410,8 +432,8 @@ export class PocketClient {
    * on." instead of re-offering an action already taken.
    */
   async listPushSubscribedHosts(): Promise<string[]> {
-    const response = await this.#api<PushSubscriptionsResponse>(
-      API_ROUTES.pushSubscriptions,
+    const response = await this.#api<LegacyPushSubscriptionsResponse>(
+      LEGACY_PUSH_ROUTES.subscriptions,
       undefined,
       { method: 'GET', headers: { authorization: `Bearer ${this.#requireToken()}` } },
     );
@@ -436,8 +458,8 @@ export class PocketClient {
   ): Promise<PushSubscribeResponse> {
     const token = this.#requireToken();
     const auth = { authorization: `Bearer ${token}` };
-    const { challenge } = await this.#api<PushChallengeResponse>(
-      API_ROUTES.pushChallenge,
+    const { challenge } = await this.#api<LegacyPushChallengeResponse>(
+      LEGACY_PUSH_ROUTES.challenge,
       undefined,
       { headers: auth },
     );

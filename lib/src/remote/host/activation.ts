@@ -20,7 +20,6 @@
  */
 
 import type {
-  AdoptResult,
   PairingQueueEvent,
   PairingQueueItem,
   PushDevicesResult,
@@ -29,15 +28,12 @@ import type {
 import { getPlatform } from '../../lib/platform';
 import type { RemoteHostLink } from '../../lib/platform/types';
 import { clearPushDevices, setPushDevicesRefresher } from '../../lib/push-devices';
-import { clearAclRecords, loadAclRecords } from './acl';
 import { commitPushDevices, invalidatePushDeviceRefreshes, watchPushRings } from './alert-push';
-import { clearEnrollment, getEnrollment } from './enrollment';
 import { armWhileEnrolled } from './enrolled-gate';
 import {
   enqueuePairingApproval,
   getPairingApprovalSnapshot,
   resolvePairingApproval,
-  type MirroredPairingRequest,
 } from './pairing-approval';
 
 export type { RemoteHostConsoleStatus };
@@ -71,8 +67,6 @@ function installBridgeMode(link: RemoteHostLink): void {
   link.on('pairing-queue', (data) => {
     mirrorPairingQueue(link, (data as PairingQueueEvent).queue);
   });
-
-  void adoptWebviewHost(link);
 
   const refresh = (): void => {
     void commitPushDevices(async () => {
@@ -131,37 +125,6 @@ function installBridgeMode(link: RemoteHostLink): void {
   };
 }
 
-/**
- * Hand a Host this webview persisted before the service existed over to it,
- * once. The service keeps whichever enrollment it already has, so this can only
- * add.
- *
- * The copy is cleared only once the service reports it is holding the Host
- * somewhere that survives a restart — leaving it otherwise would be a second
- * ACL for the same hostId, diverging from the moment the next device pairs, but
- * clearing it against an in-memory store (a dev harness with no state
- * directory) would throw the only surviving copy away.
- */
-async function adoptWebviewHost(link: RemoteHostLink): Promise<void> {
-  const enrollment = getEnrollment();
-  if (!enrollment) return;
-  let result: AdoptResult | null;
-  try {
-    result = (await link.command('adopt', {
-      enrollment,
-      aclRecords: loadAclRecords(enrollment.hostId),
-    })) as AdoptResult | null;
-  } catch (error) {
-    // Keep the local copy for the next launch rather than dropping a Host on
-    // the floor because one command failed.
-    console.warn('remote-host: could not hand the persisted Host to the service', error);
-    return;
-  }
-  if (!result?.persisted) return;
-  clearEnrollment();
-  clearAclRecords(enrollment.hostId);
-}
-
 /** Project the service's queue onto the modal's store. */
 function mirrorPairingQueue(link: RemoteHostLink, queue: readonly PairingQueueItem[]): void {
   const present = new Set(queue.map((item) => item.clientId));
@@ -178,26 +141,23 @@ function mirrorPairingQueue(link: RemoteHostLink, queue: readonly PairingQueueIt
       showing &&
       showing.pairingId === item.pairingId &&
       showing.requestedAt === item.requestedAt &&
-      showing.verified === item.verified &&
-      sameRequest(showing.request, item.request)
+      showing.label === item.label
     ) {
       continue;
     }
-    // Changed under the same id. The service coalesces a re-sent pair by
-    // replacing what it holds for that clientId, so approving authorizes the
-    // *new* device — and the modal must therefore be showing the new device.
-    // Anything else approves something the user was never shown
-    // (docs/specs/remote-security-model.md).
+    // Changed under the same id. A re-sent pairing replaces its predecessor on
+    // the Host, so confirming authorizes the *new* device — and the modal must
+    // therefore be showing the new device, with the digits typed against the
+    // old one discarded (docs/specs/remote-security-model.md).
     if (showing) resolvePairingApproval(item.clientId);
     enqueuePairingApproval({
       clientId: item.clientId,
       pairingId: item.pairingId,
-      request: item.request,
-      verified: item.verified,
+      label: item.label,
       requestedAt: item.requestedAt,
-      approve: (label) =>
+      approve: (code) =>
         void link
-          .command('approve', { clientId: item.clientId, pairingId: item.pairingId, label })
+          .command('approve', { clientId: item.clientId, pairingId: item.pairingId, code })
           .catch(() => {}),
       deny: () =>
         void link
@@ -205,36 +165,4 @@ function mirrorPairingQueue(link: RemoteHostLink, queue: readonly PairingQueueIt
           .catch(() => {}),
     });
   }
-}
-
-/**
- * Every field of a {@link MirroredPairingRequest}, as a compile-time checklist.
- *
- * `satisfies` is the whole point: {@link sameRequest} decides whether the modal
- * is already showing this exact device, and approving one authorizes the *pair*
- * — so a field added to the wire type and forgotten in a hand-written compare
- * would silently leave the user approving a device they were never shown
- * (docs/specs/remote-security-model.md). Naming the keys here makes that a
- * compile error rather than a silent security regression.
- *
- * Mirrored fields only: `setupProof` never reaches this realm, so a compare that
- * listed it would be comparing two `undefined`s forever.
- */
-const PAIRING_REQUEST_FIELDS = {
-  accountId: true,
-  passkeyCredentialId: true,
-  passkeyPublicKeyHash: true,
-  devicePublicKey: true,
-  requestedLabel: true,
-} satisfies Record<keyof MirroredPairingRequest, true>;
-
-/**
- * Whether the mirror already shows exactly this request. Field by field rather
- * than by identity: every snapshot arrives as fresh JSON off the bridge, so
- * identity always differs and would re-render the modal on every event.
- */
-function sameRequest(a: MirroredPairingRequest, b: MirroredPairingRequest): boolean {
-  return (Object.keys(PAIRING_REQUEST_FIELDS) as Array<keyof MirroredPairingRequest>).every(
-    (field) => a[field] === b[field],
-  );
 }

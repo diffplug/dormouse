@@ -82,22 +82,23 @@ export interface AlertPushDeps {
 
 /**
  * The devices the settings dialog names: subscribed on the Server **and** still
- * active in the Host's ACL, joined to the ACL's human labels.
+ * active in the Host's ACL, joined by `deliveryId` to the ACL's human labels.
  *
- * Only the Host can do this join — it holds the ACL, and the Server never
- * learns a label (`docs/specs/remote-security-model.md`). The send path does
- * not need it, and deliberately does not pay for it; see {@link sendPush}.
+ * Only the Host can do this join — it holds the records that mint delivery ids,
+ * and the Server never learns a label
+ * (`docs/specs/remote-security-model.md`). The send path does not need it, and
+ * deliberately does not pay for it; see {@link sendPush}.
  */
 export async function loadPushDevices(deps: AlertPushDeps): Promise<PushDevice[]> {
   const response = await hostFetch(deps, API_ROUTES.pushDevices);
   const body = (await response.json()) as PushDevicesResponse;
 
-  const labels = new Map(deps.activeRecords().map((r) => [r.devicePublicKey, r.label]));
+  const labels = new Map(deps.activeRecords().map((r) => [r.deliveryId, r.label]));
   return body.devices
-    .filter((device) => labels.has(device.devicePublicKey))
+    .filter((device) => labels.has(device.deliveryId))
     .map((device) => ({
-      devicePublicKey: device.devicePublicKey,
-      label: labels.get(device.devicePublicKey) || 'Unnamed device',
+      deliveryId: device.deliveryId,
+      label: labels.get(device.deliveryId) || 'Unnamed device',
     }));
 }
 
@@ -124,8 +125,8 @@ export async function sendPush(
   // revoked Client keeps its subscription row; letting the Server choose
   // recipients would keep pushing Pane labels to a de-authorized phone. Read at
   // send time, so a revocation during the delay takes effect.
-  const devicePublicKeys = deps.activeRecords().map((record) => record.devicePublicKey);
-  if (devicePublicKeys.length === 0) return { targeted: 0, delivered: 0, failed: 0 };
+  const deliveryIds = deps.activeRecords().map((record) => record.deliveryId);
+  if (deliveryIds.length === 0) return { targeted: 0, delivered: 0, failed: 0 };
 
   const response = await hostFetch(
     // The one call that outlives the shared budget: the Server holds a send open
@@ -135,7 +136,7 @@ export async function sendPush(
     { ...deps, timeoutMs: PUSH_SEND_DEADLINE_MS + PUSH_SEND_MARGIN_MS },
     API_ROUTES.pushSend,
     {
-      devicePublicKeys,
+      deliveryIds,
       title: toPushText(title),
       body: PUSH_BODY,
       // Per-Session collapse key: a Pane that rings, is cleared, and rings again
@@ -152,5 +153,5 @@ export async function sendPush(
   if (result.failed > 0 || result.delivered === 0) {
     console.warn('remote-host: push was not delivered to every device', result);
   }
-  return { targeted: devicePublicKeys.length, delivered: result.delivered, failed: result.failed };
+  return { targeted: deliveryIds.length, delivered: result.delivered, failed: result.failed };
 }

@@ -17,13 +17,31 @@ const PUSH_DELAY_MS = 20_000;
 
 const ENROLLMENT = { serverUrl: 'https://relay.example', hostToken: 'host-token' };
 
-function aclRecord(devicePublicKey: string, label: string): HostAclRecord {
+/**
+ * Base64url of exactly 32 bytes is 43 characters, and `isHostAclRecord` checks
+ * both E2E fields for that length exactly — a shorter fixture is dropped rather
+ * than tested.
+ */
+function id32(name: string): string {
+  return name.padEnd(43, '0').slice(0, 43);
+}
+
+/** Delivery is keyed on the record's `deliveryId`, never on who holds it. */
+const PHONE = id32('delivery-phone');
+const TABLET = id32('delivery-tablet');
+/** Still subscribed on the Server, no longer on this Host's ACL. */
+const REVOKED = id32('delivery-revoked');
+
+function aclRecord(deliveryId: string, label: string): HostAclRecord {
   return {
     hostId: 'host-1',
     accountId: 'owner',
     passkeyCredentialId: 'cred',
     passkeyPublicKeyHash: 'hash',
-    devicePublicKey,
+    // The browser half of the record's identity; irrelevant to push, which
+    // addresses the opaque delivery capability instead.
+    clientStaticPublicKey: id32(`static-${deliveryId}`),
+    deliveryId,
     approvedAt: 1,
     approvedBy: 'host-user',
     label,
@@ -45,7 +63,7 @@ function fakeFetch(): typeof globalThis.fetch {
       return {
         ok: true,
         json: async () => ({
-          devices: subscribed.map((devicePublicKey) => ({ devicePublicKey, subscribedAt: 1 })),
+          devices: subscribed.map((deliveryId) => ({ deliveryId, subscribedAt: 1 })),
         }),
       } as Response;
     }
@@ -94,8 +112,8 @@ function lastSend(): Record<string, unknown> | null {
 beforeEach(() => {
   vi.useFakeTimers();
   requests = [];
-  subscribed = ['device-phone'];
-  records = [aclRecord('device-phone', 'iPhone Safari')];
+  subscribed = [PHONE];
+  records = [aclRecord(PHONE, 'iPhone Safari')];
   clearPrimedActivity();
   resetPushDevices();
   applyAlertSettingsFromHost({
@@ -174,7 +192,7 @@ describe('alarm push', () => {
     expect(lastSend()).toMatchObject({
       title: 'terminal',
       tag: 'pty-1',
-      devicePublicKeys: ['device-phone'],
+      deliveryIds: [PHONE],
     });
   });
 
@@ -204,13 +222,13 @@ describe('alarm push', () => {
     // The server still holds a subscription for a revoked client — nothing
     // propagates a revocation — so the Host must not address it. It stays out
     // of the request because the ACL, not the server's list, chooses targets.
-    subscribed = ['device-phone', 'device-revoked'];
-    records = [aclRecord('device-phone', 'iPhone Safari')];
+    subscribed = [PHONE, REVOKED];
+    records = [aclRecord(PHONE, 'iPhone Safari')];
     stop = startPush(deps());
     ring('pty-1');
 
     await vi.advanceTimersByTimeAsync(PUSH_DELAY_MS);
-    expect(lastSend()).toMatchObject({ devicePublicKeys: ['device-phone'] });
+    expect(lastSend()).toMatchObject({ deliveryIds: [PHONE] });
   });
 
   it('costs one request per alarm, not a lookup then a send', async () => {
@@ -308,19 +326,19 @@ describe('alarm push', () => {
 
 describe('push device list', () => {
   it('joins server subscriptions to ACL labels', async () => {
+    // By `deliveryId`: the Server knows the capability and nothing else, so the
+    // Host is the only party that can put a human name against a row.
     await refreshPushDevices(deps());
     expect(getPushDevices()).toEqual({
       status: 'ready',
-      devices: [{ devicePublicKey: 'device-phone', label: 'iPhone Safari' }],
+      devices: [{ deliveryId: PHONE, label: 'iPhone Safari' }],
     });
   });
 
   it('omits a subscribed device that is no longer in the ACL', async () => {
-    subscribed = ['device-phone', 'device-revoked'];
+    subscribed = [PHONE, REVOKED];
     await refreshPushDevices(deps());
-    expect(getPushDevices().devices).toEqual([
-      { devicePublicKey: 'device-phone', label: 'iPhone Safari' },
-    ]);
+    expect(getPushDevices().devices).toEqual([{ deliveryId: PHONE, label: 'iPhone Safari' }]);
   });
 
   it('reports error rather than an empty list when the server is unreachable', async () => {
@@ -352,7 +370,7 @@ describe('push device list', () => {
 
     land({
       ok: true,
-      json: async () => ({ devices: [{ devicePublicKey: 'device-phone', subscribedAt: 1 }] }),
+      json: async () => ({ devices: [{ deliveryId: PHONE, subscribedAt: 1 }] }),
     } as Response);
     await inFlight;
 
@@ -360,10 +378,7 @@ describe('push device list', () => {
   });
 
   it('keeps a newer refresh when an older request resolves last', async () => {
-    records = [
-      aclRecord('device-phone', 'iPhone Safari'),
-      aclRecord('device-tablet', 'iPad'),
-    ];
+    records = [aclRecord(PHONE, 'iPhone Safari'), aclRecord(TABLET, 'iPad')];
     let resolveOlder: (response: Response) => void = () => {};
     const older = refreshPushDevices({
       enrollment: ENROLLMENT,
@@ -378,27 +393,19 @@ describe('push device list', () => {
       activeRecords: () => records,
       fetch: (async () => ({
         ok: true,
-        json: async () => ({
-          devices: [{ devicePublicKey: 'device-tablet', subscribedAt: 2 }],
-        }),
+        json: async () => ({ devices: [{ deliveryId: TABLET, subscribedAt: 2 }] }),
       })) as unknown as typeof globalThis.fetch,
     });
 
     await newer;
-    expect(getPushDevices().devices).toEqual([
-      { devicePublicKey: 'device-tablet', label: 'iPad' },
-    ]);
+    expect(getPushDevices().devices).toEqual([{ deliveryId: TABLET, label: 'iPad' }]);
 
     resolveOlder({
       ok: true,
-      json: async () => ({
-        devices: [{ devicePublicKey: 'device-phone', subscribedAt: 1 }],
-      }),
+      json: async () => ({ devices: [{ deliveryId: PHONE, subscribedAt: 1 }] }),
     } as Response);
     await older;
 
-    expect(getPushDevices().devices).toEqual([
-      { devicePublicKey: 'device-tablet', label: 'iPad' },
-    ]);
+    expect(getPushDevices().devices).toEqual([{ deliveryId: TABLET, label: 'iPad' }]);
   });
 });

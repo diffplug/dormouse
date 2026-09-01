@@ -9,36 +9,25 @@
  * immutable `pairingId` the modal displayed — so the closures that can
  * actually write the ACL never leave that process, and a stale modal cannot
  * answer a replacement request under the same client id.
+ *
+ * **The expected two-digit code is not here and cannot be.** The webview echoes
+ * the digits a person typed; the Host compares them. A mirrored code would make
+ * the confirmation a formality any webview-side attacker could satisfy
+ * (`docs/specs/remote-security-model.md` → Pairing).
  */
-
-import type { PairingRequest } from 'server-lib-common';
-
-/**
- * A {@link PairingRequest} as everything past `RemoteHost.#onPair` sees one: the
- * `setupProof` is gone, and its type says so, so no consumer can read a proof
- * that is not there (`SECURITY.md` → the setup-token FAIL IF).
- */
-export type MirroredPairingRequest = Omit<PairingRequest, 'setupProof'>;
 
 export interface PendingPairing {
   /** Server-assigned client socket id. */
   clientId: string;
-  /** Immutable ceremony ticket id; approve/deny must name this exact request. */
+  /** Immutable ceremony id; approve/deny must name this exact request. */
   pairingId: string;
-  request: MirroredPairingRequest;
-  /**
-   * The Client's `setupProof` matched a setup nonce this Host minted and
-   * displayed, over the very device key it is asking to have authorized — so it
-   * is the phone that scanned this machine's QR. Drives the modal's one-confirm
-   * copy; `false` is the ordinary pairing
-   * (`docs/specs/remote-security-model.md`).
-   */
-  verified: boolean;
+  /** The Client's own name for itself, already bounded and stripped. */
+  label: string;
   requestedAt: number;
-  /** Approve locally on the Host — writes the ACL and replies `pair-result`. */
-  approve: (label?: string) => void;
+  /** Confirm with the digits the phone is showing — the only path that writes the ACL. */
+  approve: (code: string) => void;
   /** Deny locally — the ACL is untouched. */
-  deny: (error?: string) => void;
+  deny: () => void;
 }
 
 let queue: readonly PendingPairing[] = [];
@@ -49,7 +38,7 @@ function emit(): void {
 }
 
 export function enqueuePairingApproval(pending: PendingPairing): void {
-  // Coalesce by clientId: a re-sent pair for the same client replaces the old.
+  // Coalesce by clientId: a re-sent pairing for the same client replaces the old.
   queue = [...queue.filter((p) => p.clientId !== pending.clientId), pending];
   emit();
 }

@@ -8,23 +8,24 @@
  * goes to `globalState`. Both are global rather than workspace-scoped, because
  * a Host identity belongs to the machine, not to a folder.
  *
- * The keys are the ones the webview-resident Host wrote through this module
- * before the service existed, and the values are the same JSON strings, so an
- * already-enrolled installation is picked up with no migration step.
+ * Both keys are this store's own. Records written before the end-to-end
+ * cutover are dropped on read by `isHostAclRecord`, which is the whole of the
+ * Host-state version: the machine shows the enrollment form again and every
+ * phone pairs once more.
  */
 
 import type * as vscode from 'vscode';
 
 import type { HostAclRecord, HostStateStore } from '../../lib/src/host/remote/host-state-store';
 import { createSerialQueue } from '../../lib/src/host/remote/serial-queue';
-import { ACL_KEY_PREFIX, filterAclRecords } from '../../lib/src/remote/host/acl';
+import { filterAclRecords } from '../../lib/src/remote/host/acl';
 import { isEnrollment, type HostEnrollment } from '../../lib/src/remote/host/enrollment';
 // Imported, not mirrored: a key that drifted between the two sides would strand
 // an enrollment that is still on disk.
 import { ENROLLMENT_KEY } from '../../lib/src/remote/host/store';
 
 export class VsCodeHostStateStore implements HostStateStore {
-  /** Writes here survive a restart, so an adopting webview may drop its copy. */
+  /** Writes here survive a restart (`HostStateStore.persistent`). */
   readonly persistent = true;
 
   readonly #context: vscode.ExtensionContext;
@@ -127,6 +128,13 @@ export class VsCodeHostStateStore implements HostStateStore {
     );
   }
 }
+
+/**
+ * This store's own `globalState` key prefix. It lives here rather than in `lib`
+ * because nothing else writes these entries any more: the webview-resident Host
+ * that once shared the name is gone.
+ */
+const ACL_KEY_PREFIX = 'dormouse.remote-host.acl.';
 
 /** Keyed per host so a re-enrollment cannot inherit a stale ACL. */
 function aclKey(hostId: string): string {

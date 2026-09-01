@@ -17,10 +17,10 @@
  */
 
 import type {
+  InvitationEvent,
   PushSendSummary,
   RemoteHostConsoleStatus,
   SetupQrResult,
-  SetupTokenRedeemedEvent,
 } from '../../host/remote/service-protocol';
 import { getPlatform } from '../../lib/platform';
 import type { RemoteHostLink } from '../../lib/platform/types';
@@ -338,23 +338,25 @@ export async function mintSetupQr(): Promise<SetupQrResult> {
 }
 
 /**
- * Be told when a setup code this machine minted is spent, so the panel still
- * offering *that* code can stop. Independent of the status subscription above:
- * the event changes no status field, so there is nothing to re-read.
+ * Be told when an invitation this machine minted changes state, so the panel
+ * still offering *that* code can stop. Independent of the status subscription
+ * above: the event changes no status field, so there is nothing to re-read.
  *
- * The listener gets the `mintId`; a panel showing a different mint ignores it
- * (`service-protocol.ts` → `SetupTokenRedeemedEvent`). An event that names no
- * mint is dropped here rather than passed on as `undefined` — the service is
- * typed to send one, so the only source of a malformed event is a bridge nobody
- * should be trusting to pick a panel.
+ * The listener gets the `inviteId` and the state; a panel showing a different
+ * invitation ignores it (`service-protocol.ts` → `InvitationEvent`). An event
+ * that names no invitation is dropped here rather than passed on as
+ * `undefined` — the service is typed to send one, so the only source of a
+ * malformed event is a bridge nobody should be trusting to pick a panel.
  */
-export function subscribeToSetupTokenRedeemed(
-  listener: (mintId: string) => void,
+export function subscribeToInvitation(
+  listener: (inviteId: string, state: InvitationEvent['state']) => void,
 ): () => void {
   return (
-    link()?.on('setupTokenRedeemed', (data) => {
-      const mintId = (data as SetupTokenRedeemedEvent | undefined)?.mintId;
-      if (typeof mintId === 'string') listener(mintId);
+    link()?.on('invitation', (data) => {
+      const event = data as InvitationEvent | undefined;
+      if (typeof event?.inviteId === 'string' && typeof event.state === 'string') {
+        listener(event.inviteId, event.state);
+      }
     }) ?? (() => {})
   );
 }

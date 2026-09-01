@@ -1,6 +1,6 @@
 /**
- * Host enrollment and the legacy webview read path; `docs/specs/server.md` →
- * "Host side" owns the exchange and persistence contracts.
+ * Host enrollment: the exchange, and the shape every store validates a record
+ * against. `docs/specs/server.md` → "Host side" owns the persistence contract.
  */
 
 import {
@@ -10,9 +10,7 @@ import {
   normalizeOrigin,
   type HostEnrollResponse,
 } from 'server-lib-common';
-import { loadJson, removeJson } from '../../lib/local-json-store';
 import { HOST_REQUEST_TIMEOUT_MS } from './host-fetch';
-import { ENROLLMENT_KEY } from './store';
 
 export interface HostEnrollment {
   /** Origin the Server is reachable at, e.g. `https://dormouse.tailnet.ts.net`. */
@@ -24,6 +22,16 @@ export interface HostEnrollment {
   origin: string;
   /** The Host's `ConnectionPolicy.rpId`. */
   rpId: string;
+  /**
+   * What to call this machine — the "name for this machine" the operator typed
+   * at enrollment.
+   *
+   * **Local only.** It is delivered to a Client inside the encrypted pairing and
+   * connection outcomes and nowhere else; the Server never stores or sees it
+   * past the enroll request. Optional because an enrollment persisted before
+   * this field existed must keep loading rather than reading as un-enrolled.
+   */
+  label?: string;
   /**
    * The Host's `ConnectionPolicy.requireUserVerification`, mirrored from the
    * Server at enrollment so the two cannot disagree about what a valid
@@ -51,9 +59,9 @@ export interface HostEnrollment {
 
 /**
  * The shape guard, exported because everywhere an enrollment is *read* — a
- * keychain entry, a JSON file, an `adopt` a webview sent — it arrives as
- * `unknown` and has to be checked. One copy, so a field added here cannot be
- * silently accepted by a store that never learned about it.
+ * keychain entry, a JSON file — it arrives as `unknown` and has to be checked.
+ * One copy, so a field added here cannot be silently accepted by a store that
+ * never learned about it.
  */
 export function isEnrollment(value: unknown): value is HostEnrollment {
   if (!value || typeof value !== 'object') return false;
@@ -64,6 +72,7 @@ export function isEnrollment(value: unknown): value is HostEnrollment {
     typeof v.hostToken === 'string' &&
     typeof v.origin === 'string' &&
     typeof v.rpId === 'string' &&
+    (v.label === undefined || typeof v.label === 'string') &&
     // Optional — absent is the documented default. Present-but-wrong-typed is
     // still a rejection: a store that round-trips `"false"` as truthy would be
     // the silent disagreement this field exists to prevent.
@@ -86,15 +95,6 @@ function hasValidNoiseStatic(v: Record<string, unknown>): boolean {
   if (privateKey === undefined && publicKey === undefined) return true;
   if (typeof privateKey !== 'string' || typeof publicKey !== 'string') return false;
   return isNoiseStaticMaterial(publicKey, privateKey);
-}
-
-export function getEnrollment(): HostEnrollment | null {
-  // Missing key / malformed JSON / failed guard all collapse to `null`.
-  return loadJson<HostEnrollment, null>(ENROLLMENT_KEY, null, isEnrollment);
-}
-
-export function clearEnrollment(): void {
-  removeJson(ENROLLMENT_KEY);
 }
 
 /**
@@ -170,6 +170,9 @@ export async function performEnrollment(
     // with a host fails the exchange below naming `origin`.
     origin: normalizeOrigin(enrolled?.origin) ?? undefined,
     rpId: enrolled?.rpId,
+    // Kept locally, never returned by the Server: it is the name this machine
+    // presents inside an encrypted outcome.
+    label,
     // Only when the server actually sent a boolean: spreading `undefined` in
     // would make the key present-and-undefined, which the guard treats the
     // same but a store round-trip would not.
@@ -190,36 +193,37 @@ export async function performEnrollment(
 }
 
 /**
- * This Host's Noise static, or nothing.
+ * This Host's Noise static. **A runtime that cannot mint one does not enroll.**
  *
- * Best-effort on purpose: nothing consumes the static yet, so a runtime
- * without X25519 must still be able to enroll and run remote control exactly
- * as it does today. When the end-to-end protocol becomes mandatory, the
- * capability probe is what tells that runtime it cannot take part — an
- * enrollment that fails here with no explanation is not that message
- * (`docs/specs/remote-security-model.md`).
+ * The end-to-end protocol is mandatory and the static is the Host's identity in
+ * it, so an enrollment without one would persist a `hostToken` for a machine
+ * that can never answer a pairing or a connection. Failing the exchange here is
+ * the probe gate's Host half: the message names the missing capability rather
+ * than leaving the operator with a Host that enrolled and then does nothing
+ * (`docs/specs/remote-security-model.md` → Cryptographic suite).
  */
 async function mintNoiseStatic(): Promise<{
-  noiseStaticPrivateKey?: string;
-  noiseStaticPublicKey?: string;
+  noiseStaticPrivateKey: string;
+  noiseStaticPublicKey: string;
 }> {
+  let material;
   try {
-    const material = await mintNoiseStaticKeyPair();
-    // Checked against the guard the enrollment must pass: a runtime whose
-    // PKCS#8 falls outside what `isEnrollment` accepts would otherwise fail
-    // the whole exchange, which is the opposite of best-effort.
-    if (!isNoiseStaticMaterial(material.publicKey, material.privateKeyPkcs8)) {
-      console.warn('[remote-host] the minted Noise static is not a shape this build persists');
-      return {};
-    }
-    return {
-      noiseStaticPrivateKey: material.privateKeyPkcs8,
-      noiseStaticPublicKey: material.publicKey,
-    };
+    material = await mintNoiseStaticKeyPair();
   } catch (error) {
-    console.warn('[remote-host] could not mint the Noise static key', error);
-    return {};
+    throw new Error(
+      `host enroll failed: this build cannot generate the X25519 key remote control requires (${errorMessage(error)})`,
+    );
   }
+  // Checked against the guard the enrollment must pass, so a runtime whose
+  // PKCS#8 falls outside what `isEnrollment` accepts fails here — naming the
+  // key — rather than at the next read, naming nothing.
+  if (!isNoiseStaticMaterial(material.publicKey, material.privateKeyPkcs8)) {
+    throw new Error('host enroll failed: the minted X25519 key is not a shape this build persists');
+  }
+  return {
+    noiseStaticPrivateKey: material.privateKeyPkcs8,
+    noiseStaticPublicKey: material.publicKey,
+  };
 }
 
 /**

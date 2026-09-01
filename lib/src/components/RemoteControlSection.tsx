@@ -22,7 +22,7 @@ import {
   reconnectRemoteHost,
   refreshRemoteHostStatus,
   subscribeToRemoteHostStatus,
-  subscribeToSetupTokenRedeemed,
+  subscribeToInvitation,
 } from '../remote/host/host-status-store';
 
 /**
@@ -212,21 +212,23 @@ function useSetupQr() {
     return () => clearTimeout(timer);
   }, [state, mint]);
 
-  // The Server announces a spent token to the Host that minted it
-  // (`docs/specs/server.md` → Relay), which is the only way this panel can know
-  // its code was used: the redemption happens on the phone. Only for the mint
-  // this panel is showing — a second window offering a different code stays
-  // live — and bumping the sequence makes it terminal, so a mint already in
-  // flight cannot paint a code over it.
-  const mintId = displayedQr(state)?.mintId;
+  // The Host reports its own invitation states, which is the only way this
+  // panel can know its code was used: the scan happens on the phone. Only for
+  // the invitation this panel is showing — a second window offering a different
+  // code stays live — and bumping the sequence makes it terminal, so a mint
+  // already in flight cannot paint a code over it.
+  const inviteId = displayedQr(state)?.inviteId;
   useEffect(() => {
-    if (mintId === undefined) return;
-    return subscribeToSetupTokenRedeemed((redeemed) => {
-      if (redeemed !== mintId) return;
+    if (inviteId === undefined) return;
+    return subscribeToInvitation((changed, invitationState) => {
+      // `reserved` is the flip that matters: a phone has completed the
+      // handshake against this code, so it is spent whatever the person at the
+      // laptop decides next. `live` is the only state that keeps the panel.
+      if (changed !== inviteId || invitationState === 'live') return;
       mintSeq.current++;
       setState({ phase: 'spent' });
     });
-  }, [mintId]);
+  }, [inviteId]);
 
   return { state, mint, close };
 }
@@ -626,8 +628,8 @@ function SetupPhonePanel({
       {state.phase === 'spent' ? (
         <>
           <div className="mt-1 text-sm leading-relaxed text-foreground">
-            Scanned. Finish on the phone — it registers a passkey, then asks to pair, and that
-            request interrupts you here.
+            Scanned. Finish on the phone — it asks to pair, and that request interrupts you here
+            with a two-digit code to type.
           </div>
           <div className="mt-1 text-xs text-muted">This code is used up.</div>
         </>

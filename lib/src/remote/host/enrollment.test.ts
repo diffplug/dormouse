@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fromBase64Url, mintNoiseStaticKeyPair, toBase64Url } from 'server-lib-common';
-import { clearEnrollment, getEnrollment, isEnrollment, performEnrollment } from './enrollment';
-import { ENROLLMENT_KEY } from './store';
+import { isEnrollment, performEnrollment } from './enrollment';
 
 // Only the minter is faked, and only where a test asks for it; everything else
 // in the package stays real so the guards under test are the shipped ones.
@@ -73,6 +72,10 @@ describe('remote-host enrollment', () => {
       hostToken: 'tok-xyz',
       origin: 'https://dormouse.example',
       rpId: 'dormouse.example',
+      // Kept from the caller's own argument: the Server never returns a label,
+      // and this one is what the machine calls itself inside an encrypted
+      // outcome.
+      label: 'My Laptop',
       // Minted locally, after the answer above (see the Noise-static test).
       noiseStaticPrivateKey: expect.any(String),
       noiseStaticPublicKey: expect.any(String),
@@ -120,25 +123,31 @@ describe('remote-host enrollment', () => {
     expect(body).toEqual({ password: 'hunter2', label: 'My Laptop' });
   });
 
-  it('still enrolls when the runtime mints a static this build cannot persist', async () => {
-    // Minting is best-effort: a PKCS#8 outside what `isEnrollment` accepts must
-    // cost the Host its E2E identity, not its enrollment.
-    stubLocalStorage();
+  it('refuses to enroll when the runtime cannot mint the static it needs', async () => {
+    // The probe gate's Host half. The end-to-end protocol is mandatory and the
+    // static is this Host's identity in it, so enrolling without one would
+    // persist a `hostToken` for a machine that can never answer a pairing or a
+    // connection — a Host that looks connected and does nothing.
+    const store = stubLocalStorage();
+    vi.stubGlobal('fetch', enrollResponder());
+
+    // A runtime with no X25519 at all.
+    vi.mocked(mintNoiseStaticKeyPair).mockRejectedValueOnce(new Error('unsupported curve'));
+    await expect(
+      performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'My Laptop'),
+    ).rejects.toThrow(/cannot generate the X25519 key/);
+
+    // And one whose PKCS#8 falls outside what `isEnrollment` accepts: caught
+    // here, naming the key, rather than at the next read naming nothing.
     vi.mocked(mintNoiseStaticKeyPair).mockResolvedValueOnce({
       privateKeyPkcs8: toBase64Url(new Uint8Array(256)),
       publicKey: toBase64Url(new Uint8Array(32)),
     });
-    vi.stubGlobal('fetch', enrollResponder());
+    await expect(
+      performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'My Laptop'),
+    ).rejects.toThrow(/not a shape this build persists/);
 
-    const enrollment = await performEnrollment(
-      'https://dormouse.example',
-      { password: 'hunter2' },
-      'My Laptop',
-    );
-
-    expect(enrollment.hostId).toBe('host-abc');
-    expect(enrollment.noiseStaticPrivateKey).toBeUndefined();
-    expect(enrollment.noiseStaticPublicKey).toBeUndefined();
+    expect(store.size).toBe(0);
   });
 
   it('sends the installer’s one-time token in place of the password', async () => {
@@ -292,29 +301,4 @@ describe('remote-host enrollment', () => {
     expect(isEnrollment({ ...base, noiseStaticPublicKey, noiseStaticPrivateKey: 42 })).toBe(false);
   });
 
-  it('clears and rejects malformed persisted enrollment', () => {
-    // What a webview that enrolled before the service existed still holds, and
-    // hands over once (`activation.ts` → adoption).
-    const store = stubLocalStorage();
-    expect(getEnrollment()).toBeNull();
-
-    store.set(ENROLLMENT_KEY, JSON.stringify({ serverUrl: 'x' })); // missing fields
-    expect(getEnrollment()).toBeNull();
-
-    store.set(
-      ENROLLMENT_KEY,
-      JSON.stringify({
-        serverUrl: 's',
-        hostId: 'h',
-        hostToken: 't',
-        origin: 'o',
-        rpId: 'r',
-      }),
-    );
-    expect(getEnrollment()).not.toBeNull();
-
-    clearEnrollment();
-    expect(store.has(ENROLLMENT_KEY)).toBe(false);
-    expect(getEnrollment()).toBeNull();
-  });
 });

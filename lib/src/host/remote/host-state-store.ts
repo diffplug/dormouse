@@ -25,10 +25,9 @@ export type { HostAclRecord };
 export interface HostStateStore {
   /**
    * Whether a write survives this process. Only the dev-harness store (no state
-   * directory) says `false`, and an adopting webview reads it to decide whether
-   * it may drop its own copy of the Host (`service.ts` → `#adopt`). Required
-   * rather than optional: a store that forgot to answer would be read as durable
-   * and could cost the webview the only copy that outlives the process.
+   * directory) says `false`. Required rather than optional so a store that
+   * forgot to answer is not silently read as durable — the dev loop's whole
+   * warning about a Host that vanishes at the next launch rests on it.
    */
   readonly persistent: boolean;
   loadEnrollment(): Promise<HostEnrollment | null>;
@@ -214,8 +213,8 @@ export class FileHostStateStore implements HostStateStore {
  * Held in memory rather than dropped: a Host enrolled here has to keep working
  * for the rest of the session — its ACL is what authorizes every pairing it
  * then approves, and reads that answered empty would de-pair each device the
- * moment it was approved. Nothing survives the process, which `persistent`
- * says out loud so the webview keeps its own copy of an adopted Host.
+ * moment it was approved. Nothing survives the process, which `persistent` says
+ * out loud and the dev loop warns about once.
  */
 export function createEphemeralHostStateStore(onWarn: (message: string) => void): HostStateStore {
   let warned = false;

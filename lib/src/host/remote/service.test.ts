@@ -6,53 +6,76 @@
  */
 
 import { hostname } from 'node:os';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   API_ROUTES,
-  computeSetupProof,
+  mintNoiseStaticKeyPair,
+  parsePairingInvitationUrl,
+  generateNoiseKeyPair,
+  toBase64Url,
   type EnrollmentOffer,
   type HostAclRecord,
-  type PairingRequest,
 } from 'server-lib-common';
 import type { HostEnrollment } from '../../remote/host/enrollment';
 import type { HostSurfaceProvider } from '../../remote/host/host-surface-provider';
-import { takeSetupHash, type ScannedSetup } from '../../remote/pocket-app/setup-link';
 import { FakeSocket } from '../../remote/test-fake-socket';
+import {
+  createTestAuthenticator,
+  openPairingSession,
+  pairThroughSocket,
+  readOutcome,
+  settle,
+  testRoutingId,
+  type TestAuthenticator,
+} from '../../remote/test-e2e-client';
 import { createEphemeralHostStateStore, type HostStateStore } from './host-state-store';
 import { RemoteHostService } from './service';
 import type {
   HostStatusEvent,
+  InvitationEvent,
   PairingQueueEvent,
   RemoteHostConsoleStatus,
   SetupQrResult,
-  SetupTokenRedeemedEvent,
 } from './service-protocol';
 
 const CONNECT_SRC = 'https://*.dormouse.sh wss://*.dormouse.sh';
+const HOST_ID = testRoutingId();
+const ORIGIN = 'https://relay.dormouse.sh';
 
-const ENROLLMENT: HostEnrollment = {
-  serverUrl: 'https://relay.dormouse.sh',
-  hostId: 'host-1',
-  hostToken: 'tok',
-  origin: 'https://relay.dormouse.sh',
-  rpId: 'relay.dormouse.sh',
-};
+/**
+ * The enrollment every case runs on, with a **real** Noise static: without one
+ * the service backfills and persists a fresh key on start, which is its own
+ * case below rather than a hidden write under every other.
+ */
+let ENROLLMENT: HostEnrollment;
 
-const PAIRING: PairingRequest = {
-  accountId: 'owner',
-  passkeyCredentialId: 'cred-1',
-  passkeyPublicKeyHash: 'hash-1',
-  devicePublicKey: 'device-1',
-  requestedLabel: 'iPhone Safari',
-};
+beforeAll(async () => {
+  const material = await mintNoiseStaticKeyPair();
+  ENROLLMENT = {
+    serverUrl: ORIGIN,
+    hostId: HOST_ID,
+    hostToken: 'tok',
+    origin: ORIGIN,
+    rpId: 'relay.dormouse.sh',
+    label: 'Laptop',
+    noiseStaticPrivateKey: material.privateKeyPkcs8,
+    noiseStaticPublicKey: material.publicKey,
+  };
+});
 
-function aclRecord(devicePublicKey: string, label = 'iPhone Safari'): HostAclRecord {
+/**
+ * A v2 ACL record. Both E2E fields are checked for exact length on read, so a
+ * fixture that spelled them loosely would be dropped rather than asserted on.
+ */
+function aclRecord(seed: string, label = 'iPhone Safari'): HostAclRecord {
+  const pad = (text: string): string => text.padEnd(43, 'A').slice(0, 43);
   return {
-    hostId: 'host-1',
+    hostId: HOST_ID,
     accountId: 'owner',
     passkeyCredentialId: 'cred',
     passkeyPublicKeyHash: 'hash',
-    devicePublicKey,
+    clientStaticPublicKey: pad(`client-${seed}`),
+    deliveryId: pad(`delivery-${seed}`),
     approvedAt: 1,
     approvedBy: 'host-user',
     label,
@@ -127,8 +150,9 @@ function fakeFetch(): typeof globalThis.fetch {
           setupTokenMalformed
             ? { expiresAt: Date.now() + setupTokenTtlMs }
             : {
-                token: `setup-token-${++setupTokensMinted}`,
-                mintId: `mint-${setupTokensMinted}`,
+                // A real-shaped token: it goes straight into the positional QR
+                // fragment, which pins its length.
+                token: toBase64Url(new Uint8Array(32).fill(++setupTokensMinted)),
                 expiresAt: Date.now() + setupTokenTtlMs,
               },
       } as Response;
@@ -137,7 +161,7 @@ function fakeFetch(): typeof globalThis.fetch {
       return {
         ok: true,
         json: async () => ({
-          hostId: 'host-1',
+          hostId: HOST_ID,
           hostToken: 'tok',
           origin: new URL(url).origin,
           rpId: new URL(url).hostname,
@@ -149,8 +173,8 @@ function fakeFetch(): typeof globalThis.fetch {
         ok: true,
         json: async () => ({
           devices: [
-            { devicePublicKey: 'device-1', subscribedAt: 1 },
-            { devicePublicKey: 'device-revoked', subscribedAt: 1 },
+            { deliveryId: aclRecord('1').deliveryId, subscribedAt: 1 },
+            { deliveryId: aclRecord('revoked').deliveryId, subscribedAt: 1 },
           ],
         }),
       } as Response;
@@ -221,13 +245,17 @@ function queueEvents(): PairingQueueEvent[] {
   return uiEvents().filter((event): event is PairingQueueEvent => event.name === 'pairing-queue');
 }
 
-function uiEvents(): Array<PairingQueueEvent | HostStatusEvent | SetupTokenRedeemedEvent> {
+function uiEvents(): Array<PairingQueueEvent | HostStatusEvent | InvitationEvent> {
   return sent
     .filter((message) => message.event === 'remoteHost:event')
     .map(
       (message) =>
-        message.data as unknown as PairingQueueEvent | HostStatusEvent | SetupTokenRedeemedEvent,
+        message.data as unknown as PairingQueueEvent | HostStatusEvent | InvitationEvent,
     );
+}
+
+function invitationEvents(): InvitationEvent[] {
+  return uiEvents().filter((event): event is InvitationEvent => event.name === 'invitation');
 }
 
 /** What the webviews were told about whether there is a Host, in order. */
@@ -301,14 +329,14 @@ describe('status', () => {
   });
 
   it('reports the relay socket and the paired count once running', async () => {
-    createService({ enrollment: ENROLLMENT, acl: { 'host-1': [aclRecord('device-1')] } });
+    createService({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('device-1')] } });
     await service.start();
     sockets[0]!.open();
 
     expect((await command('status')).result).toEqual({
       enrolled: true,
       serverUrl: ENROLLMENT.serverUrl,
-      hostId: 'host-1',
+      hostId: HOST_ID,
       connection: 'connected',
       pairedClients: 1,
       suggestedLabel: hostname(),
@@ -377,7 +405,7 @@ describe('enroll', () => {
       label: 'Laptop',
     });
 
-    expect(result.result).toEqual({ hostId: 'host-1', serverUrl: 'https://relay.dormouse.sh' });
+    expect(result.result).toEqual({ hostId: HOST_ID, serverUrl: ORIGIN });
     expect(store.enrollment?.hostToken).toBe('tok');
     expect(sockets).toHaveLength(1);
   });
@@ -450,7 +478,7 @@ describe('enrollOffer', () => {
 
     const result = await command('enrollOffer', { origin: OFFER.origin, label: 'Laptop' });
 
-    expect(result.result).toEqual({ hostId: 'host-1', serverUrl: OFFER.origin });
+    expect(result.result).toEqual({ hostId: HOST_ID, serverUrl: OFFER.origin });
     expect(requests).toHaveLength(1);
     expect(requestBody(0)).toEqual({ enrollToken: OFFER.token, label: 'Laptop' });
     expect(requestBody(0)).not.toHaveProperty('password');
@@ -531,7 +559,7 @@ describe('start', () => {
     expect(status).toMatchObject({ enrolled: true, connection: 'connecting' });
   });
 
-  it('builds one Host when a start and an adopt race', async () => {
+  it('builds one Host when a start and a reconnect race', async () => {
     // Both read `#host`, both await the store, and both then act on what they
     // read. Unserialized they each see no Host and each build one — and the
     // second holds a relay socket nothing has a reference to, so it can never
@@ -548,9 +576,9 @@ describe('start', () => {
     };
 
     const started = service.start();
-    const adopted = service.handleCommand({ rhId: 'race', cmd: 'adopt', params: { enrollment: ENROLLMENT, aclRecords: [] } });
+    const reconnected = service.handleCommand({ rhId: 'race', cmd: 'reconnect' });
     release();
-    await Promise.all([started, adopted]);
+    await Promise.all([started, reconnected]);
 
     expect(sockets).toHaveLength(1);
     // And the one that exists is the one `dispose()` can reach.
@@ -586,14 +614,14 @@ describe('start', () => {
   });
 
   it('clearEnrollment stops the Host and forgets it, keeping the records', async () => {
-    createService({ enrollment: ENROLLMENT, acl: { 'host-1': [aclRecord('device-1')] } });
+    createService({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('device-1')] } });
     await service.start();
 
     await command('clearEnrollment');
     expect(store.enrollment).toBeNull();
     // The records stay filed under their hostId: re-enrolling onto the same
     // host must not silently de-pair every device.
-    expect(store.acl['host-1']).toHaveLength(1);
+    expect(store.acl[HOST_ID]).toHaveLength(1);
     expect((await command('status')).result).toMatchObject({ enrolled: false, connection: 'stopped' });
   });
 
@@ -621,114 +649,6 @@ describe('start', () => {
   });
 });
 
-describe('adopt', () => {
-  it('takes a webview-persisted Host when there is none, and starts it', async () => {
-    createService();
-    const result = await command('adopt', {
-      enrollment: ENROLLMENT,
-      aclRecords: [aclRecord('device-1')],
-    });
-
-    // `persisted` is what tells the webview it may drop its own copy.
-    expect(result.result).toEqual({ persisted: true });
-    expect(store.enrollment).toEqual(ENROLLMENT);
-    expect(store.acl['host-1']).toHaveLength(1);
-    expect(sockets).toHaveLength(1);
-  });
-
-  it('keeps the Host it already has', async () => {
-    createService({ enrollment: ENROLLMENT });
-    await service.start();
-
-    const other = { ...ENROLLMENT, hostId: 'host-2', hostToken: 'other' };
-    const result = await command('adopt', { enrollment: other, aclRecords: [] });
-
-    expect(store.enrollment).toEqual(ENROLLMENT);
-    expect(sockets).toHaveLength(1);
-    // The webview's copy is obsolete regardless: a second copy of one hostId is
-    // a second ACL, and this store is holding a Host that survives a restart.
-    expect(result.result).toEqual({ persisted: true });
-  });
-
-  it('refuses an origin outside the build’s allowed sources', async () => {
-    // A Host handed over from an older build's localStorage may name a relay
-    // this build may not reach; adopting it would connect there anyway.
-    createService();
-    const result = await command('adopt', {
-      enrollment: { ...ENROLLMENT, serverUrl: 'https://relay.example.com' },
-      aclRecords: [],
-    });
-
-    expect(result.error).toContain(CONNECT_SRC);
-    expect(store.enrollment).toBeNull();
-    expect(sockets).toEqual([]);
-  });
-
-  it('persists no enrollment when the ACL write fails', async () => {
-    // Order matters: the records go first, so a failure here leaves the store
-    // with no enrollment and the next launch re-adopts from the webview's copy
-    // rather than running a Host whose devices were silently dropped.
-    createService();
-    store.saveAcl = async () => {
-      throw new Error('globalState is full');
-    };
-
-    const result = await command('adopt', {
-      enrollment: ENROLLMENT,
-      aclRecords: [aclRecord('device-1')],
-    });
-
-    expect(result.error).toContain('globalState is full');
-    expect(store.enrollment).toBeNull();
-    expect(sockets).toEqual([]);
-  });
-
-  it('runs a session Host from an in-memory store, and says it did not persist', async () => {
-    // The dev harness with no state directory: the Host has to work for the
-    // session, but the webview's copy is the only one that outlives it.
-    const warnings: string[] = [];
-    const ephemeral = createEphemeralHostStateStore((message) => warnings.push(message));
-    service = new RemoteHostService({
-      store: ephemeral,
-      provider: fakeProvider(),
-      sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
-      connectSrc: CONNECT_SRC,
-      createWebSocket: () => {
-        const socket = new FakeSocket();
-        sockets.push(socket);
-        return socket;
-      },
-      fetch: fakeFetch(),
-    });
-
-    const result = await command('adopt', {
-      enrollment: ENROLLMENT,
-      aclRecords: [aclRecord('device-1')],
-    });
-
-    expect(result.result).toEqual({ persisted: false });
-    expect(sockets).toHaveLength(1);
-    expect(await ephemeral.loadAcl('host-1')).toHaveLength(1);
-    expect(warnings).toHaveLength(1);
-  });
-
-  it('drops records that name another host', async () => {
-    createService();
-    await command('adopt', {
-      enrollment: ENROLLMENT,
-      aclRecords: [{ ...aclRecord('device-1'), hostId: 'somebody-else' }],
-    });
-    expect(store.acl['host-1']).toBeUndefined();
-  });
-
-  it('ignores an enrollment that does not have the shape', async () => {
-    createService();
-    await command('adopt', { enrollment: { hostId: 'x' }, aclRecords: [] });
-    expect(store.enrollment).toBeNull();
-    expect(sockets).toEqual([]);
-  });
-});
-
 describe('status events', () => {
   it('announces a Host that started, and one that was cleared', async () => {
     // What every webview arms its outbound work on: an installation that never
@@ -748,23 +668,20 @@ describe('status events', () => {
     expect(statusEvents()).toEqual([]);
   });
 
-  it('announces the Host an enroll and an adopt each started', async () => {
+  it('announces the Host an enroll started', async () => {
     createService();
-    await command('enroll', {
-      serverUrl: 'https://relay.dormouse.sh',
-      password: 'setup',
-      label: 'Laptop',
-    });
-    expect(statusEvents()).toEqual([true]);
-
-    createService();
-    sent.length = 0;
-    await command('adopt', { enrollment: ENROLLMENT, aclRecords: [] });
+    await command('enroll', { serverUrl: ORIGIN, password: 'setup', label: 'Laptop' });
     expect(statusEvents()).toEqual([true]);
   });
 });
 
 describe('pairing queue', () => {
+  let authenticator: TestAuthenticator;
+
+  beforeAll(async () => {
+    authenticator = await createTestAuthenticator({ rpId: ENROLLMENT.rpId, origin: ORIGIN });
+  });
+
   async function running(): Promise<FakeSocket> {
     createService({ enrollment: ENROLLMENT });
     await service.start();
@@ -773,116 +690,166 @@ describe('pairing queue', () => {
     return socket;
   }
 
+  /** Mint a code and run the Client half of a pairing against it. */
+  async function pair(socket: FakeSocket, clientId: string, over: { code?: string; label?: string } = {}) {
+    const qr = (await command('setupQr')).result as SetupQrResult;
+    const invitation = await parsePairingInvitationUrl(qr.url, ORIGIN);
+    if (!invitation) throw new Error(`the Host composed a URL Pocket cannot read: ${qr.url}`);
+    const before = queueEvents().length;
+    const paired = await pairThroughSocket({
+      socket,
+      hostId: ENROLLMENT.hostId,
+      clientId,
+      invitation,
+      authenticator,
+      ...over,
+      until: () => queueEvents().length > before,
+    });
+    const item = queueEvents().at(-1)!.queue.find((entry) => entry.clientId === clientId)!;
+    return { ...paired, invitation, item };
+  }
+
   it('pushes a snapshot when a pairing arrives, and answers a seed request', async () => {
     const socket = await running();
-    socket.receive({ t: 'pair', clientId: 'c1', request: PAIRING });
+    const { item } = await pair(socket, 'c1');
 
     const event = queueEvents().at(-1)!;
     expect(event.name).toBe('pairing-queue');
     expect(event.queue).toHaveLength(1);
-    expect(event.queue[0]).toMatchObject({ clientId: 'c1', request: PAIRING });
-    expect(typeof event.queue[0]!.pairingId).toBe('string');
-    expect(typeof event.queue[0]!.requestedAt).toBe('number');
+    // Exactly four fields cross the bridge — and the expected code is not one
+    // of them, which is the whole point of typing it on this side.
+    expect(Object.keys(item).sort()).toEqual(['clientId', 'label', 'pairingId', 'requestedAt']);
+    expect(item).toMatchObject({ clientId: 'c1', label: 'iPhone Safari' });
+    expect(typeof item.pairingId).toBe('string');
 
     // A webview that reloaded mid-pairing seeds from the same snapshot.
     expect((await command('pairingQueue')).result).toEqual(event.queue);
   });
 
-  it('approve runs the real ceremony, persists, and empties the queue', async () => {
+  it('never mirrors the code the Host is going to compare against', async () => {
     const socket = await running();
-    socket.receive({ t: 'pair', clientId: 'c1', request: PAIRING });
-    const pairingId = queueEvents().at(-1)!.queue[0]!.pairingId;
+    // A code no other value in the exchange could coincidentally equal.
+    await pair(socket, 'c1', { code: '73' });
+    const mirrored = JSON.stringify(queueEvents());
+    expect(mirrored).not.toContain('"73"');
+    expect(mirrored).not.toContain('code');
+  });
 
-    await command('approve', { clientId: 'c1', pairingId, label: 'Ned iPhone' });
+  it('approve types the code through, writes one record, and empties the queue', async () => {
+    const socket = await running();
+    const { item, session, invitation, code } = await pair(socket, 'c1');
 
-    const result = socket.frames('pair-result')[0]!;
-    expect(result).toMatchObject({ clientId: 'c1', approved: true });
-    expect((result.record as HostAclRecord).label).toBe('Ned iPhone');
-    expect(store.acl['host-1']).toHaveLength(1);
+    await command('approve', { clientId: 'c1', pairingId: item.pairingId, code });
+    await settle();
+
+    expect(await readOutcome(socket, session, 'pairing', invitation.inviteId)).toMatchObject({
+      ok: true,
+      hostLabel: ENROLLMENT.label,
+    });
+    expect(store.acl[HOST_ID]).toHaveLength(1);
+    expect(store.acl[HOST_ID]![0]).toMatchObject({ label: 'iPhone Safari', revokedAt: null });
     expect(queueEvents().at(-1)!.queue).toEqual([]);
+  });
+
+  it('a mistyped code denies, writes nothing, and spends the one attempt', async () => {
+    const socket = await running();
+    const { item, session, invitation, code } = await pair(socket, 'c1', { code: '13' });
+
+    await command('approve', { clientId: 'c1', pairingId: item.pairingId, code: '99' });
+    await settle();
+    expect(await readOutcome(socket, session, 'pairing', invitation.inviteId)).toEqual({
+      ok: false,
+      code: 'confirmation-mismatch',
+    });
+    expect(store.acl[HOST_ID]).toBeUndefined();
+    // The queue is empty, so the right code has nothing left to answer.
+    expect((await command('approve', { clientId: 'c1', pairingId: item.pairingId, code })).error)
+      .toContain('no longer pending');
   });
 
   it('deny answers the client and writes no ACL', async () => {
     const socket = await running();
-    socket.receive({ t: 'pair', clientId: 'c1', request: PAIRING });
-    const pairingId = queueEvents().at(-1)!.queue[0]!.pairingId;
+    const { item, session, invitation } = await pair(socket, 'c1');
 
-    await command('deny', { clientId: 'c1', pairingId });
+    await command('deny', { clientId: 'c1', pairingId: item.pairingId });
+    await settle();
 
-    expect(socket.frames('pair-result')[0]).toMatchObject({ approved: false });
-    expect(store.acl['host-1']).toBeUndefined();
+    expect(await readOutcome(socket, session, 'pairing', invitation.inviteId)).toEqual({
+      ok: false,
+      code: 'user-denied',
+    });
+    expect(store.acl[HOST_ID]).toBeUndefined();
     expect(queueEvents().at(-1)!.queue).toEqual([]);
   });
 
   it('drops a client that went away, and a queue the socket took with it', async () => {
     const socket = await running();
-    socket.receive({ t: 'pair', clientId: 'c1', request: PAIRING });
+    await pair(socket, 'c1');
     socket.receive({ t: 'client-gone', clientId: 'c1' });
+    await settle();
     expect(queueEvents().at(-1)!.queue).toEqual([]);
 
-    socket.receive({ t: 'pair', clientId: 'c2', request: PAIRING });
+    await pair(socket, 'c2');
     expect(queueEvents().at(-1)!.queue).toHaveLength(1);
     socket.close();
+    await settle();
     expect(queueEvents().at(-1)!.queue).toEqual([]);
   });
 
   it('rejects approval for something already resolved', async () => {
     const socket = await running();
-    socket.receive({ t: 'pair', clientId: 'c1', request: PAIRING });
-    const pairingId = queueEvents().at(-1)!.queue[0]!.pairingId;
-    await command('approve', { clientId: 'c1', pairingId });
-    expect((await command('approve', { clientId: 'c1', pairingId })).error).toContain(
-      'no longer pending',
-    );
-    expect(socket.frames('pair-result')).toHaveLength(1);
+    const { item, code } = await pair(socket, 'c1');
+    await command('approve', { clientId: 'c1', pairingId: item.pairingId, code });
+    await settle();
+    expect(
+      (await command('approve', { clientId: 'c1', pairingId: item.pairingId, code })).error,
+    ).toContain('no longer pending');
+    expect(store.acl[HOST_ID]).toHaveLength(1);
   });
 
-  it('rejects stale modal actions after the client replaces its pairing request', async () => {
+  it('rejects stale modal actions after the client replaces its pairing', async () => {
     const socket = await running();
-    socket.receive({ t: 'pair', clientId: 'c1', request: PAIRING });
-    const firstId = queueEvents().at(-1)!.queue[0]!.pairingId;
-
-    const replacement = {
-      ...PAIRING,
-      devicePublicKey: 'device-2',
-      requestedLabel: 'Android Chrome',
-    };
-    socket.receive({ t: 'pair', clientId: 'c1', request: replacement });
-    const replacementItem = queueEvents().at(-1)!.queue[0]!;
-    expect(replacementItem.pairingId).not.toBe(firstId);
+    const first = await pair(socket, 'c1', { label: 'iPhone Safari' });
+    const replacement = await pair(socket, 'c1', { label: 'Android Chrome', code: '55' });
+    expect(replacement.item.pairingId).not.toBe(first.item.pairingId);
 
     // Both buttons from the still-rendered first modal are now stale. Neither
-    // may resolve or authorize the replacement request before it is shown.
-    expect((await command('approve', { clientId: 'c1', pairingId: firstId })).error).toContain(
-      'no longer pending',
-    );
-    expect((await command('deny', { clientId: 'c1', pairingId: firstId })).error).toContain(
-      'no longer pending',
-    );
-    expect(socket.frames('pair-result')).toEqual([]);
-    expect(store.acl['host-1']).toBeUndefined();
-    expect(queueEvents().at(-1)!.queue).toEqual([replacementItem]);
+    // may resolve or authorize the replacement before it is shown.
+    expect(
+      (await command('approve', { clientId: 'c1', pairingId: first.item.pairingId, code: '55' }))
+        .error,
+    ).toContain('no longer pending');
+    expect(
+      (await command('deny', { clientId: 'c1', pairingId: first.item.pairingId })).error,
+    ).toContain('no longer pending');
+    expect(store.acl[HOST_ID]).toBeUndefined();
+    expect(queueEvents().at(-1)!.queue).toEqual([replacement.item]);
 
-    await command('approve', { clientId: 'c1', pairingId: replacementItem.pairingId });
-    expect(socket.frames('pair-result')[0]).toMatchObject({
+    await command('approve', {
       clientId: 'c1',
-      approved: true,
-      record: { devicePublicKey: 'device-2' },
+      pairingId: replacement.item.pairingId,
+      code: replacement.code,
     });
+    await settle();
+    expect(store.acl[HOST_ID]![0]).toMatchObject({ label: 'Android Chrome' });
   });
 });
 
 describe('setup QR', () => {
   /**
    * An enrollment whose `hostToken` cannot be confused with anything else in an
-   * assertion — the shared fixture's `tok` is a substring of `#setup?token=`,
-   * which is exactly the string this suite has to prove stays out of the webview.
+   * assertion — the shared fixture's `tok` is a substring of common words, and
+   * this suite has to prove the bearer stays out of the webview.
    */
-  const QR_ENROLLMENT: HostEnrollment = { ...ENROLLMENT, hostToken: 'host-bearer-secret' };
+  let QR_ENROLLMENT: HostEnrollment;
+  let authenticator: TestAuthenticator;
 
-  async function running(
-    enrollment: HostEnrollment = QR_ENROLLMENT,
-  ): Promise<FakeSocket> {
+  beforeAll(async () => {
+    QR_ENROLLMENT = { ...ENROLLMENT, hostToken: 'host-bearer-secret' };
+    authenticator = await createTestAuthenticator({ rpId: ENROLLMENT.rpId, origin: ORIGIN });
+  });
+
+  async function running(enrollment: HostEnrollment = QR_ENROLLMENT): Promise<FakeSocket> {
     createService({ enrollment });
     await service.start();
     const socket = sockets[0]!;
@@ -891,65 +858,20 @@ describe('setup QR', () => {
   }
 
   /**
-   * Read a `setupQr` URL the way the phone does — through Pocket's own
-   * `takeSetupHash` — so every case below pins this emitter against that
-   * parser rather than against a second copy of the grammar. The parser wants
-   * a `window`; this file runs in node, so it gets the two properties it
-   * reads. (`afterEach`'s `unstubAllGlobals` is the real cleanup.)
+   * Mint a code and read it back through the shared parser Pocket runs, so
+   * every case below pins this emitter against that parser rather than against
+   * a second copy of the grammar.
    */
-  function scan(url: string): ScannedSetup | null {
-    const { hash, pathname, search } = new URL(url);
-    vi.stubGlobal('window', {
-      location: { hash, pathname, search },
-      history: { replaceState: () => {} },
-    });
-    try {
-      return takeSetupHash();
-    } finally {
-      vi.stubGlobal('window', undefined);
-    }
-  }
-
-  /**
-   * Mint a code and pull both of the QR's secrets back out of the URL a phone
-   * would open: the Server's token, and the nonce this Host added.
-   */
-  async function mint(): Promise<SetupQrResult & { token: string; nonce: string }> {
-    const result = (await command('setupQr')).result as SetupQrResult;
-    const scanned = scan(result.url);
-    if (!scanned?.nonce) throw new Error(`Pocket could not read the minted URL: ${result.url}`);
-    return { ...result, token: scanned.token, nonce: scanned.nonce };
-  }
-
-  /**
-   * Pair as the phone that scanned `nonce` would — computing the proof with the
-   * shared helper, over its own device key — and wait for the queue to move.
-   * Verifying a proof is a WebCrypto HMAC, so the item lands a turn of the event
-   * loop after the frame.
-   */
-  async function pair(socket: FakeSocket, clientId: string, nonce?: string) {
-    const devicePublicKey = `device-${clientId}`;
-    const before = queueEvents().length;
-    socket.receive({
-      t: 'pair',
-      clientId,
-      request: {
-        ...PAIRING,
-        devicePublicKey,
-        ...(nonce === undefined
-          ? {}
-          : { setupProof: await computeSetupProof(nonce, devicePublicKey) }),
-      },
-    });
-    for (let i = 0; i < 50 && queueEvents().length === before; i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 1));
-    }
-    return queueEvents().at(-1)!.queue.find((item) => item.clientId === clientId)!;
+  async function mint(): Promise<{ qr: SetupQrResult; invitation: NonNullable<Awaited<ReturnType<typeof parsePairingInvitationUrl>>> }> {
+    const qr = (await command('setupQr')).result as SetupQrResult;
+    const invitation = await parsePairingInvitationUrl(qr.url, ORIGIN);
+    if (!invitation) throw new Error(`Pocket could not read the minted URL: ${qr.url}`);
+    return { qr, invitation };
   }
 
   it('mints over the Host’s own authenticated channel and composes the URL here', async () => {
     await running();
-    const result = await mint();
+    const { qr, invitation } = await mint();
 
     const posted = requests.at(-1)!;
     expect(posted.url).toBe(`${QR_ENROLLMENT.serverUrl}${API_ROUTES.hostSetupToken}`);
@@ -960,30 +882,36 @@ describe('setup QR', () => {
     expect(posted.init!.redirect).toBe('error');
 
     // The origin is the enrollment's — the phone-facing WebAuthn origin — and
-    // both secrets ride in the URL, which is the whole point of the command.
-    expect(result.token).toBe('setup-token-1');
-    expect(result.url).toBe(
-      `${QR_ENROLLMENT.origin}/#setup?token=setup-token-1&nonce=${result.nonce}`,
-    );
-    // The nonce is this Host's own, 256 bits of it, and nothing the Server sent.
-    expect(result.nonce).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(JSON.stringify(requests)).not.toContain(result.nonce);
-    // The `hostToken` is not what crosses: only the code a human will scan does.
+    // the whole invitation rides in the URL, which is the point of the command.
+    expect(qr.url.startsWith(`${QR_ENROLLMENT.origin}/#pair?`)).toBe(true);
+    expect(invitation.hostId).toBe(QR_ENROLLMENT.hostId);
+    expect(invitation.inviteId).toBe(qr.inviteId);
+    expect(invitation.setupToken).toBe(toBase64Url(new Uint8Array(32).fill(1)));
+
+    // The invitation's private half never leaves the Host, and neither does the
+    // bearer: only the code a human will scan crosses.
     expect(JSON.stringify(sent)).not.toContain('host-bearer-secret');
+    expect(JSON.stringify(requests)).not.toContain(invitation.ephPubBase64Url);
   });
 
-  /**
-   * The emitter and the parser are two files that must agree on one grammar
-   * (`SETUP_HASH_*` in `wire.ts`). This is the assertion that says so directly:
-   * the URL this Host composed, read by the code the phone actually runs.
-   */
-  it('composes a URL Pocket parses both halves back out of', async () => {
-    await running();
-    const result = (await command('setupQr')).result as SetupQrResult;
+  it('reports the invitation live until a phone reserves it', async () => {
+    const socket = await running();
+    const { qr, invitation } = await mint();
+    expect(invitationEvents()).toEqual([]);
 
-    expect(scan(result.url)).toEqual({
-      token: 'setup-token-1',
-      nonce: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+    await pairThroughSocket({
+      socket,
+      hostId: QR_ENROLLMENT.hostId,
+      clientId: 'c1',
+      invitation,
+      authenticator,
+    });
+    // The flip the panel keys on: a phone has completed the handshake, so the
+    // code is spent whatever the person at the laptop decides next.
+    expect(invitationEvents()).toContainEqual({
+      name: 'invitation',
+      inviteId: qr.inviteId,
+      state: 'reserved',
     });
   });
 
@@ -1003,87 +931,35 @@ describe('setup QR', () => {
 
   it('paints nothing for a mint that resolves onto a different Host', async () => {
     // The round trip can straddle an enroll elsewhere. The code belongs to the
-    // server we just left, so it must fail rather than mint a nonce onto a
-    // replacement that could never verify it.
+    // server we just left, so it must fail rather than mint an invitation onto
+    // a replacement that could never complete it.
     await running();
     const minting = command('setupQr');
     await command('clearEnrollment');
     expect((await minting).error).toContain('reconnected to a different server');
   });
 
-  it('marks a pairing verified for its own nonce, and never mirrors the proof', async () => {
+  it('forgets its invitations when the enrollment they belong to goes', async () => {
     const socket = await running();
-    const { nonce } = await mint();
-
-    const item = await pair(socket, 'c1', nonce);
-    expect(item.verified).toBe(true);
-    // The webview is told the verdict, not the proof behind it, and never the
-    // nonce — which the Server has not seen either.
-    // Cast because `MirroredPairingRequest` has no such field — this is the
-    // runtime half of that claim.
-    expect((item.request as PairingRequest).setupProof).toBeUndefined();
-    expect(JSON.stringify(queueEvents())).not.toContain(nonce);
-  });
-
-  it('keeps a re-delivered request verified, and spends the nonce on approval', async () => {
-    const socket = await running();
-    const { nonce } = await mint();
-
-    // Non-consuming at receipt: the relay may re-deliver the same phone's frame.
-    expect((await pair(socket, 'c1', nonce)).verified).toBe(true);
-    const second = await pair(socket, 'c2', nonce);
-    expect(second.verified).toBe(true);
-
-    // Approving is what spends it — and every other pairing standing on that
-    // nonce is re-mirrored unverified in the same step.
-    await command('approve', { clientId: 'c2', pairingId: second.pairingId });
-    expect(
-      queueEvents().at(-1)!.queue.find((item) => item.clientId === 'c1')!.verified,
-    ).toBe(false);
-    expect((await pair(socket, 'c3', nonce)).verified).toBe(false);
-  });
-
-  it('treats an unknown nonce as an ordinary pairing, and dates its own', async () => {
-    const socket = await running();
-    // Something has to be outstanding, or there is nothing to compare against.
-    await mint();
-    expect((await pair(socket, 'c1', 'never-minted-here')).verified).toBe(false);
-
-    // The Server's `expiresAt` rides along for the QR's countdown and nothing
-    // else. The nonce is minted, held and verified on the Host's clock, so a
-    // Server that disagrees about the instant cannot silently un-verify every
-    // scan (`mintSetupNonce`); its own expiry is `remote-host.test.ts`.
-    setupTokenTtlMs = -1;
-    const { nonce } = await mint();
-    expect((await pair(socket, 'c2', nonce)).verified).toBe(true);
-
-    // A proofless phone — the QR-less path — pairs exactly as it always did.
-    expect((await pair(socket, 'c3')).verified).toBe(false);
-  });
-
-  it('forgets its codes when the enrollment they belong to goes', async () => {
-    const socket = await running();
-    const { nonce } = await mint();
-    expect(socket.frames('pair-result')).toEqual([]);
+    const { invitation } = await mint();
 
     await command('clearEnrollment');
-    await command('enroll', {
-      serverUrl: 'https://relay.dormouse.sh',
-      password: 'setup',
-      label: 'Laptop',
-    });
+    await command('enroll', { serverUrl: ORIGIN, password: 'setup', label: 'Laptop' });
     const reconnected = sockets.at(-1)!;
     reconnected.open();
 
-    // The nonce belongs to the Host this service just replaced.
-    expect((await pair(reconnected, 'c1', nonce)).verified).toBe(false);
-  });
-
-  it('tells the webview which code was spent', async () => {
-    const socket = await running();
-    socket.receive({ t: 'setup-token-redeemed', mintId: 'mint-1' });
-    // The mint, never the token: a panel showing a different code stays live.
-    expect(uiEvents()).toContainEqual({ name: 'setupTokenRedeemed', mintId: 'mint-1' });
+    // The one-use key behind that code lived on the Host this service replaced,
+    // so nothing can complete a handshake against it any more.
+    expect(
+      await openPairingSession({
+        socket: reconnected,
+        hostId: ENROLLMENT.hostId,
+        clientId: 'c1',
+        invitation,
+        clientStatic: await generateNoiseKeyPair(),
+      }),
+    ).toBeNull();
+    expect(socket.readyState).toBe(3);
   });
 });
 
@@ -1096,21 +972,21 @@ describe('push', () => {
   it('addresses the Host’s own ACL, not anything the webview sent', async () => {
     createService({
       enrollment: ENROLLMENT,
-      acl: { 'host-1': [aclRecord('device-1'), aclRecord('device-2', 'iPad')] },
+      acl: { [HOST_ID]: [aclRecord('device-1'), aclRecord('device-2', 'iPad')] },
     });
     await service.start();
 
     await command('push', { sessionId: 'pty-1', title: 'pnpm dev' });
 
     expect(sendBody()).toMatchObject({
-      devicePublicKeys: ['device-1', 'device-2'],
+      deliveryIds: [aclRecord('device-1').deliveryId, aclRecord('device-2').deliveryId],
       title: 'pnpm dev',
       tag: 'pty-1',
     });
   });
 
   it('bounds the title the webview supplied', async () => {
-    createService({ enrollment: ENROLLMENT, acl: { 'host-1': [aclRecord('device-1')] } });
+    createService({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('device-1')] } });
     await service.start();
 
     await command('push', { sessionId: 'pty-1', title: 'build finished' });
@@ -1126,7 +1002,7 @@ describe('push', () => {
 
   it('warns rather than failing the command when the server rejects it', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    store = memoryStore({ enrollment: ENROLLMENT, acl: { 'host-1': [aclRecord('device-1')] } });
+    store = memoryStore({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('device-1')] } });
     service = new RemoteHostService({
       store,
       provider: fakeProvider(),
@@ -1145,12 +1021,12 @@ describe('push', () => {
 
 describe('pushDevices', () => {
   it('joins the server’s subscriptions to the ACL’s labels', async () => {
-    createService({ enrollment: ENROLLMENT, acl: { 'host-1': [aclRecord('device-1')] } });
+    createService({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('1')] } });
     await service.start();
 
-    // `device-revoked` is subscribed on the server but no longer in the ACL.
+    // The second subscribed delivery id is no longer on any ACL record.
     expect((await command('pushDevices')).result).toEqual({
-      devices: [{ devicePublicKey: 'device-1', label: 'iPhone Safari' }],
+      devices: [{ deliveryId: aclRecord('1').deliveryId, label: 'iPhone Safari' }],
     });
   });
 
@@ -1161,7 +1037,7 @@ describe('pushDevices', () => {
   });
 
   it('errors when the server cannot be asked', async () => {
-    store = memoryStore({ enrollment: ENROLLMENT, acl: { 'host-1': [aclRecord('device-1')] } });
+    store = memoryStore({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('device-1')] } });
     service = new RemoteHostService({
       store,
       provider: fakeProvider(),
@@ -1186,7 +1062,7 @@ describe('pushTest', () => {
   });
 
   it('reports that nothing was targeted when no device is authorized', async () => {
-    createService({ enrollment: ENROLLMENT, acl: { 'host-1': [] } });
+    createService({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [] } });
     await service.start();
 
     const { result } = await command('pushTest');
@@ -1196,7 +1072,7 @@ describe('pushTest', () => {
   });
 
   it('sends through the real path and reports what was delivered', async () => {
-    createService({ enrollment: ENROLLMENT, acl: { 'host-1': [aclRecord('device-1')] } });
+    createService({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('device-1')] } });
     await service.start();
 
     const { result } = await command('pushTest');
@@ -1206,14 +1082,14 @@ describe('pushTest', () => {
     expect(send).toBeTruthy();
     const body = JSON.parse(String(send!.init?.body)) as Record<string, unknown>;
     // Recipients come from the ACL, exactly as a real ring does.
-    expect(body.devicePublicKeys).toEqual(['device-1']);
+    expect(body.deliveryIds).toEqual([aclRecord('device-1').deliveryId]);
     // A fixed collapse key, so repeated presses replace rather than stack.
     expect(body.tag).toBe('dormouse-push-test');
     expect(String(body.title)).toContain('test');
   });
 
   it('surfaces a refused send instead of swallowing it', async () => {
-    store = memoryStore({ enrollment: ENROLLMENT, acl: { 'host-1': [aclRecord('device-1')] } });
+    store = memoryStore({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('device-1')] } });
     service = new RemoteHostService({
       store,
       provider: fakeProvider(),
