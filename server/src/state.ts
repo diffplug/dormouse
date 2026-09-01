@@ -182,6 +182,18 @@ export class HostStore extends JsonFileStore {
   }
 
   /**
+   * Whether `hostId` is still enrolled, read fresh off disk like
+   * {@link findByToken}: deleting a row from `hosts.json` is the documented
+   * revocation mechanism, so anything gating on a Host's continued existence —
+   * redeeming a setup token it minted, accepting a push subscription for it —
+   * must see that edit without a restart. A plain compare: a `hostId` is an
+   * identifier the account can already list, not a secret.
+   */
+  async has(hostId: string): Promise<boolean> {
+    return (await this.list()).some((h) => h.hostId === hostId);
+  }
+
+  /**
    * Enroll a new host: mint a random `hostId` (16 bytes) and `hostToken`
    * (32 bytes), both base64url, append them, and return the record. Runs under
    * the mutex.

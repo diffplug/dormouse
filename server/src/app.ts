@@ -19,6 +19,7 @@ import {
   HELLO_ROUTE,
   HostChallengeIssuer,
   SELFHOST_ACCOUNT_ID,
+  SETUP_TOKEN_INVALID_ERROR,
   UNAUTHORIZED_ERROR,
   WS_ROUTES,
   WS_TOKEN_PARAM,
@@ -63,6 +64,7 @@ import { RelayHub } from './relay.js';
 import type { ClientConn, HostConn } from './relay.js';
 import { secretEquals } from './secrets.js';
 import { SetupTokenIssuer } from './setup-token.js';
+import type { SetupTokenEntry } from './setup-token.js';
 import {
   AccountStore,
   DuplicateCredentialError,
@@ -103,6 +105,14 @@ export interface AppConfig {
   readonly pocketDir?: string;
   /** Injectable clock (epoch ms) for tests; defaults to `Date.now`. */
   readonly now?: () => number;
+  /**
+   * Delay before answering a rejected credential; defaults to
+   * {@link CREDENTIAL_FAILURE_DELAY_MS}. Injectable for the same reason as
+   * `pushSendDeadlineMs` — a suite that pays the real delay on every rejection
+   * spends most of its wall time asleep — and never mapped from env: shortening
+   * it is a test affordance, not a deployment knob.
+   */
+  readonly credentialFailureDelayMs?: number;
   /**
    * Base64url VAPID public key handed to browsers so they can subscribe. Absent
    * disables push: the config route reports `null` and subscribe/send 503,
@@ -234,9 +244,11 @@ export function createApp(config: AppConfig): CreatedApp {
   const passwordOk = (provided: unknown): boolean =>
     typeof provided === 'string' && secretEquals(provided, config.setupPassword);
 
+  const credentialFailureDelayMs = config.credentialFailureDelayMs ?? CREDENTIAL_FAILURE_DELAY_MS;
+
   // Every rejected credential answers 401 the same way, after the same delay.
   async function credentialFailure(c: Context<AppEnv>, error: string): Promise<Response> {
-    await delay(CREDENTIAL_FAILURE_DELAY_MS);
+    await delay(credentialFailureDelayMs);
     return c.json({ error }, 401);
   }
 
@@ -248,7 +260,8 @@ export function createApp(config: AppConfig): CreatedApp {
    * them in turn would let a *spent* token fall through to the password and
    * still succeed, leaving which credential authorized the request ambiguous on
    * both sides. A lone credential of the wrong type is that branch's own delayed
-   * 401, never the 400 for shape.
+   * 401 — carrying `tokenError`, since each flow's rejected token drives its own
+   * recovery on the Client — never the 400 for shape.
    *
    * Answers `{ token }` with the caller's still-unverified token — the flows
    * redeem differently, so each route verifies its own — or `{ token: null }`
@@ -259,6 +272,7 @@ export function createApp(config: AppConfig): CreatedApp {
     body: CredentialBody | null,
     c: Context<AppEnv>,
     tokenField: 'setupToken' | 'enrollToken',
+    tokenError: string,
   ): Promise<{ token: string | null } | Response> {
     const password: unknown = body?.password;
     const token: unknown = body?.[tokenField];
@@ -266,30 +280,48 @@ export function createApp(config: AppConfig): CreatedApp {
       return c.json({ error: `supply exactly one of password or ${tokenField}` }, 400);
     }
     if (token !== undefined) {
-      if (typeof token !== 'string') return credentialFailure(c, UNAUTHORIZED_ERROR);
+      if (typeof token !== 'string') return credentialFailure(c, tokenError);
       return { token };
     }
     if (!passwordOk(password)) return credentialFailure(c, BAD_PASSWORD_ERROR);
     return { token: null };
   }
 
-  // Read a JSON body and enforce the setup credential (`pickCredential`), then
-  // verify a setup token by peeking (`SetupTokenIssuer.peek`). Returns the
-  // parsed body plus the token to spend on success (`null` on the password
-  // path), or a ready `Response` the caller returns as-is, so the two setup
-  // routes share one policy and neither is the softer path.
+  /** A setup token the `finish` route has spent, kept so a failure can put it back. */
+  interface SpentSetupToken {
+    readonly token: string;
+    readonly entry: SetupTokenEntry;
+  }
+
+  /**
+   * Read a JSON body and enforce the setup credential (`pickCredential`), then
+   * resolve a setup token. `gate` is what separates the two routes: `begin`
+   * peeks, while `finish` CONSUMES up front — that delete is what makes a token
+   * single-use under concurrency, so its caller must restore the entry on every
+   * failure after this point (see the route).
+   *
+   * Either gate also re-checks that the minting Host is still enrolled, since a
+   * revoked Host's outstanding tokens must die with it rather than stay
+   * redeemable for the rest of their TTL. Mistyped, unknown, expired, spent and
+   * revoked-minter are one delayed 401: none of them may tell a caller which one
+   * it hit.
+   */
   async function readSetupGated<T extends { password?: unknown; setupToken?: unknown }>(
     c: Context<AppEnv>,
-  ): Promise<{ body: T; setupToken: string | null } | Response> {
+    gate: 'peek' | 'consume',
+  ): Promise<{ body: T; spent: SpentSetupToken | null } | Response> {
     const body = await readJson<T>(c);
-    const picked = await pickCredential(body, c, 'setupToken');
+    const picked = await pickCredential(body, c, 'setupToken', SETUP_TOKEN_INVALID_ERROR);
     if (picked instanceof Response) return picked;
-    // Mistyped, unknown and expired are one delayed 401: none of them may tell
-    // a caller which one it hit.
-    if (picked.token !== null && !setupTokens.peek(picked.token)) {
-      return credentialFailure(c, UNAUTHORIZED_ERROR);
+    const token = picked.token;
+    if (token === null) return { body: body as T, spent: null };
+    const entry = gate === 'consume' ? setupTokens.consume(token) : setupTokens.peek(token);
+    if (!entry) return credentialFailure(c, SETUP_TOKEN_INVALID_ERROR);
+    // Nothing is restored here: a revoked minter's token is dead, not unlucky.
+    if (!(await hostStore.has(entry.hostId))) {
+      return credentialFailure(c, SETUP_TOKEN_INVALID_ERROR);
     }
-    return { body: body as T, setupToken: picked.token };
+    return { body: body as T, spent: gate === 'consume' ? { token, entry } : null };
   }
 
   const app = new Hono<AppEnv>();
@@ -299,20 +331,21 @@ export function createApp(config: AppConfig): CreatedApp {
 
   // The Host (standalone webview) and dev Pocket builds call the API from
   // other origins, so preflights must succeed. Permissive CORS is safe here:
-  // every endpoint is gated by the setup password or a bearer token, and no
-  // cookies exist for a foreign origin to ride on.
+  // every endpoint is gated by a credential — the setup password, a setup
+  // token, or a bearer token — and no cookies exist for a foreign origin to
+  // ride on.
   app.use('/api/*', cors({ origin: '*', allowHeaders: ['Content-Type', 'Authorization'] }));
 
   // Shared greeting, kept from the skeleton so `lib` and `server` stay agreed.
   app.get(HELLO_ROUTE, (c) => c.json(helloResponse()));
 
   // --- Setup: credential-gated passkey registration ------------------------
-  // The credential is the setup password or a Host's single-use setup token;
-  // `begin` is what mints the WebAuthn registration challenge, so both routes
-  // gate identically and neither becomes the softer path.
+  // The credential is the setup password or a Host's single-use setup token
+  // (`pickCredential`); `begin` is what mints the WebAuthn registration
+  // challenge, so both routes gate identically and neither is the softer path.
 
   app.post(API_ROUTES.setupBegin, async (c) => {
-    const gated = await readSetupGated<SetupBeginRequest>(c);
+    const gated = await readSetupGated<SetupBeginRequest>(c, 'peek');
     if (gated instanceof Response) return gated;
     const { challenge } = setupChallenges.issue();
     const res: SetupBeginResponse = { challenge, rpId, accountId: SELFHOST_ACCOUNT_ID };
@@ -320,56 +353,63 @@ export function createApp(config: AppConfig): CreatedApp {
   });
 
   app.post(API_ROUTES.setupFinish, async (c) => {
-    const gated = await readSetupGated<SetupFinishRequest>(c);
+    // The token is spent at the gate, before any of the checks below run: that
+    // delete is what makes it single-use under concurrency, so of two finishes
+    // racing one token only one can ever reach `appendPasskey`. The cost is
+    // that every failure below has to put it back — an ordinary rejected
+    // attempt must leave the QR scannable — which the `finally` does.
+    const gated = await readSetupGated<SetupFinishRequest>(c, 'consume');
     if (gated instanceof Response) return gated;
-    const { body, setupToken } = gated;
-
-    // Decode and sanity-check clientDataJSON — we do NOT parse attestation
-    // (attestation: 'none'); the browser already handed us the public key.
-    const clientData = decodeClientData(body.clientDataJSON);
-    if (!clientData) return c.json({ error: 'malformed clientDataJSON' }, 400);
-    if (clientData.type !== 'webauthn.create') {
-      return c.json({ error: 'clientData type must be webauthn.create' }, 400);
-    }
-    const challenge = normalizeChallenge(clientData.challenge);
-    if (!challenge || !setupChallenges.consume(challenge)) {
-      return c.json({ error: 'unrecognized or expired challenge' }, 400);
-    }
-    if (clientData.origin !== origin) {
-      return c.json({ error: 'origin mismatch' }, 400);
-    }
-
-    // Reject any key we could not verify assertions against later.
-    if (!(await importableSpkiP256(body.publicKey))) {
-      return c.json({ error: 'unimportable public key' }, 400);
-    }
-
+    const { body, spent } = gated;
+    let registered = false;
     try {
-      await accounts.appendPasskey({
-        credentialId: body.credentialId,
-        publicKey: body.publicKey,
-        label: typeof body.label === 'string' ? body.label : '',
-      });
-    } catch (err) {
-      if (err instanceof DuplicateCredentialError) {
-        return c.json({ error: 'credential already registered' }, 409);
+      // Decode and sanity-check clientDataJSON — we do NOT parse attestation
+      // (attestation: 'none'); the browser already handed us the public key.
+      const clientData = decodeClientData(body.clientDataJSON);
+      if (!clientData) return c.json({ error: 'malformed clientDataJSON' }, 400);
+      if (clientData.type !== 'webauthn.create') {
+        return c.json({ error: 'clientData type must be webauthn.create' }, 400);
       }
-      throw err;
-    }
+      const challenge = normalizeChallenge(clientData.challenge);
+      if (!challenge || !setupChallenges.consume(challenge)) {
+        return c.json({ error: 'unrecognized or expired challenge' }, 400);
+      }
+      if (clientData.origin !== origin) {
+        return c.json({ error: 'origin mismatch' }, 400);
+      }
 
-    // Spend the token only here, on the one outcome that actually set the
-    // account up (`SetupTokenIssuer.peek`), and announce it to the Host that
-    // minted it so the QR it is displaying can stop being shown.
-    if (setupToken !== null) {
-      const redeemed = setupTokens.consume(setupToken);
-      if (redeemed) hub.notifyHost(redeemed.hostId, { t: 'setup-token-redeemed' });
-    }
+      // Reject any key we could not verify assertions against later.
+      if (!(await importableSpkiP256(body.publicKey))) {
+        return c.json({ error: 'unimportable public key' }, 400);
+      }
 
-    const res: SetupFinishResponse = {
-      accountId: SELFHOST_ACCOUNT_ID,
-      credentialId: body.credentialId,
-    };
-    return c.json(res);
+      try {
+        await accounts.appendPasskey({
+          credentialId: body.credentialId,
+          publicKey: body.publicKey,
+          label: typeof body.label === 'string' ? body.label : '',
+        });
+      } catch (err) {
+        if (err instanceof DuplicateCredentialError) {
+          return c.json({ error: 'credential already registered' }, 409);
+        }
+        throw err;
+      }
+      registered = true;
+
+      // Announced on the one outcome that actually set the account up, to the
+      // Host that minted the token, so the QR it is displaying can come down.
+      if (spent) hub.notifyHost(spent.entry.hostId, { t: 'setup-token-redeemed' });
+
+      const res: SetupFinishResponse = {
+        accountId: SELFHOST_ACCOUNT_ID,
+        credentialId: body.credentialId,
+      };
+      return c.json(res);
+    } finally {
+      // Its original expiry rides along, so a retry never buys extra time.
+      if (spent && !registered) setupTokens.restore(spent.token, spent.entry);
+    }
   });
 
   // --- Sign-in: passkey assertion → session token -------------------------
@@ -445,7 +485,9 @@ export function createApp(config: AppConfig): CreatedApp {
 
   app.post(API_ROUTES.hostEnroll, async (c) => {
     const body = await readJson<HostEnrollRequest>(c);
-    const picked = await pickCredential(body, c, 'enrollToken');
+    // Keeps the shared `UNAUTHORIZED_ERROR`: only a Host sends an enroll token,
+    // so no Client recovery keys on it.
+    const picked = await pickCredential(body, c, 'enrollToken', UNAUTHORIZED_ERROR);
     if (picked instanceof Response) return picked;
     if (picked.token !== null) {
       // Unconfigured, absent, malformed, expired, wrong-shaped and wrong-token
@@ -457,7 +499,7 @@ export function createApp(config: AppConfig): CreatedApp {
         // distinct body would confirm a valid token without spending it. Same
         // delay as a rejection; the 500 stays, since the operator has to learn
         // that the install cannot spend its own offer.
-        await delay(CREDENTIAL_FAILURE_DELAY_MS);
+        await delay(credentialFailureDelayMs);
         return c.json({ error: 'could not invalidate the enroll token' }, 500);
       }
     }
@@ -587,8 +629,7 @@ export function createApp(config: AppConfig): CreatedApp {
 
     // Subscribing to a host that does not exist would strand a row no Host can
     // ever read or prune.
-    const hosts = await hostStore.list();
-    if (!hosts.some((h) => h.hostId === body.hostId)) {
+    if (!(await hostStore.has(body.hostId))) {
       return c.json({ error: 'unknown host' }, 404);
     }
 

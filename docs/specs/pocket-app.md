@@ -418,10 +418,10 @@ from `location.origin` — and the Server enforces it: a registration or asserti
 whose `clientDataJSON.origin` is not the configured `DORMOUSE_ORIGIN` is
 rejected, so a Pocket served anywhere else cannot sign in
 ([server.md](./server.md)). CORS on `/api/*` is permissive because every route
-is gated by a bearer token or the setup password; it is not what upholds this
-rule. The bundle mounts at the origin **root**, never under a path prefix: the
-manifest's `start_url`/`scope`, the worker's registration scope, and the shell's
-manifest/icon links are all root-absolute.
+is gated by a bearer token, the setup password, or a Host-minted setup token;
+it is not what upholds this rule. The bundle mounts at the origin **root**,
+never under a path prefix: the manifest's `start_url`/`scope`, the worker's
+registration scope, and the shell's manifest/icon links are all root-absolute.
 
 One lib-owned bundle, two deployments:
 

@@ -30,11 +30,7 @@ export interface RelaySocket {
   close(code?: number, reason?: string): void;
 }
 
-/**
- * A host-bound frame no Client provoked. Narrowed to the one such variant so
- * an HTTP route reaching {@link RelayHub.notifyHost} cannot push a handshake or
- * `msg` frame past the state machine `onClientFrame` maintains.
- */
+/** A host-bound frame no Client provoked; server.md → "Relay" owns why it is this narrow. */
 export type UnsolicitedHostFrame = Extract<ServerToHostFrame, { t: 'setup-token-redeemed' }>;
 
 /** A live Host socket. */
@@ -79,13 +75,9 @@ export class RelayHub {
   }
 
   /**
-   * Send an unsolicited frame to a Host — the seam an HTTP route uses to reach
-   * the relay (`setup-token-redeemed`). It goes to whichever socket currently
-   * owns `hostId`, so a Host process that *replaced* the one that minted the
-   * token does receive the redemption and has to tolerate one it did not mint.
-   * A `hostId` with no live socket at all is a silent no-op, never an error:
-   * the frame announces work that already succeeded elsewhere and must never
-   * fail the phone.
+   * Send an unsolicited frame to whichever socket owns `hostId` now — the seam
+   * an HTTP route uses to reach the relay. Offline is a silent no-op; server.md
+   * → "Relay" owns the delivery semantics.
    */
   notifyHost(hostId: string, frame: UnsolicitedHostFrame): void {
     const host = this.#hosts.get(hostId);

@@ -30,6 +30,13 @@ export function makeClock(startMs = 1_700_000_000_000) {
   };
 }
 
+/**
+ * The rejected-credential delay every app here runs with. Short enough that a
+ * suite full of 401s does not spend its wall time asleep; the real
+ * `CREDENTIAL_FAILURE_DELAY_MS` is pinned by one test that injects its own.
+ */
+export const TEST_CREDENTIAL_FAILURE_DELAY_MS = 5;
+
 export async function freshApp({
   password = PASSWORD,
   origin = ORIGIN,
@@ -38,6 +45,7 @@ export async function freshApp({
   vapidPublicKey,
   pushSender,
   enrollTokenFile,
+  credentialFailureDelayMs = TEST_CREDENTIAL_FAILURE_DELAY_MS,
 } = {}) {
   const stateDir = await mkdtemp(join(tmpdir(), 'dormouse-server-'));
   const created = createApp({
@@ -49,6 +57,7 @@ export async function freshApp({
     vapidPublicKey,
     pushSender,
     enrollTokenFile,
+    credentialFailureDelayMs,
   });
   return { ...created, stateDir, origin, rpId: new URL(origin).hostname };
 }

@@ -241,14 +241,14 @@ This table is the whole route surface. Paths and request/response shapes live in
 | Route                            | Auth           | Does                                              |
 | -------------------------------- | -------------- | ------------------------------------------------- |
 | `GET /api/hello`                 | —              | The shared greeting. Carries no release identity: it is unauthenticated, CORS-`*` and reachable through `tailscale serve` — see the runtime file under "Installing it" |
-| `POST /api/setup/begin`          | setup password or setup token | Issues a registration challenge. Exactly one credential — both, or neither, is a 400 — gated exactly as `finish` is, so neither is softer. Only the credential gates it, so re-presenting one adds another passkey |
-| `POST /api/setup/finish`         | setup password or setup token | Registers the passkey in `account.json`, and spends the setup token |
+| `POST /api/setup/begin`          | setup password or setup token | Issues a registration challenge. Exactly one credential — both, or neither, is a 400 — gated exactly as `finish` is, so neither is softer. Re-presenting the **password** adds another passkey; a setup token buys one registration |
+| `POST /api/setup/finish`         | setup password or setup token | Registers the passkey in `account.json`. A setup token is spent at the gate and put back if the registration then fails |
 | `POST /api/signin/begin`         | —              | Issues a sign-in challenge                          |
 | `POST /api/signin/finish`        | —              | Verifies the assertion and issues a 12-hour in-memory session token |
 | `POST /api/reauth/begin`         | session token  | Issues a presence challenge for the current session |
 | `POST /api/reauth/finish`        | session token  | Verifies like sign-in and refreshes presence without replacing the token or relay socket |
 | `POST /api/host/enroll`          | setup password or one-time enroll token | Enrolls a Host, appends `hosts.json`, and mirrors the user-verification policy. Exactly one credential — both, or neither, is a 400 |
-| `POST /api/host/setup-token`     | host token     | Mints the single-use, short-TTL token this Host renders as a QR (below) |
+| `POST /api/host/setup-token`     | host token     | Mints the single-use, short-TTL token behind this Host's QR (below) |
 | `GET /api/hosts`                 | session token  | Enrolled hosts + whether each is currently connected |
 | `GET /api/push/config`           | —              | Returns the public VAPID key, or `null` when push is unconfigured |
 | `POST /api/push/challenge`       | session token  | Issues a pool-wide nonce for the device signature; Host binding lives in the signature |
@@ -277,28 +277,36 @@ token with 401 and the shared `UNAUTHORIZED_ERROR` from
 Pocket keys its "sign in again" recovery on it, and a bare 401 is ambiguous,
 since a wrong setup password and a rejected device signature answer 401 as well
 ([pocket-app.md](./pocket-app.md) -> An expired session drops to sign-in). A
-rejected enroll token answers that same body and delay whatever the cause, as
-does a mistyped, unknown or expired setup token; only a Host sends an enroll
-token, so Pocket's recovery keying is unaffected.
+rejected enroll token answers that same body and delay whatever the cause,
+which stays safe because only a Host sends one. A rejected **setup** token does
+not: Pocket sends those itself, so it answers the distinct
+`SETUP_TOKEN_INVALID_ERROR` — same 401, same delay — which the Client half will
+key its "re-scan" recovery on ([Future](#future)).
 
 ### Setup tokens
 
-An enrolled Host mints one over its own authenticated channel and renders
-`https://<origin>/#setup?token=…` as a QR; the response carries the token
-alone, since the Host knows the origin it enrolled against. Scanning replaces
-typing that origin and the setup password.
+An enrolled Host mints one over its own authenticated channel; the response
+carries the token alone, since the Host knows the origin it enrolled against
+and composes `<origin>/#setup?token=…` for the QR it will render
+([Future](#future)). Scanning replaces typing that origin and the setup
+password.
 
-* **Counted by presence, not by type**, here and at `/api/host/enroll`: trying
-  the two in turn would let a spent token fall through to the password.
-* **`begin` peeks; only a successful `finish` spends.** An abandoned scan
-  leaves the QR scannable, and a `finish` rejected for its clientData or a
-  duplicate credential leaves the token redeemable — registering twice off one
-  token is impossible anyway, the registration challenge being single-use.
+* **Exactly one credential, counted by presence rather than by type**, here and
+  at `/api/host/enroll`: trying the two in turn would let a spent token fall
+  through to the password.
+* **`begin` peeks; `finish` consumes before it reads the body.** That delete is
+  the single-use gate, so of two overlapping finishes only one registers. Every
+  failure past it restores the token on its original expiry, since an ordinary
+  rejected attempt must leave the QR scannable; only the finish that registered
+  a passkey announces (Relay below).
+* **Both gates re-read `hosts.json`.** A revoked Host's outstanding tokens die
+  with it, rather than staying redeemable for the rest of their TTL.
 * **The store remembers which Host minted each token** — that is who the
-  redemption is announced to (Relay below). TTL is `DEFAULT_PAIRING_TTL_MS`,
-  since the nonce it leaves behind must survive the passkey ceremony before
-  pairing; it prunes on every mint and caps outstanding tokens, oldest first,
-  because anything holding a `hostToken` can mint (Guardrails).
+  redemption is announced to. TTL is `DEFAULT_PAIRING_TTL_MS`, since the nonce
+  it leaves behind must survive the passkey ceremony before pairing; it prunes
+  on every mint and caps each Host's outstanding tokens, that Host's own oldest
+  first, so a Host minting in a loop cannot evict another's live token
+  (Guardrails).
 
 Source of truth: `server/src/setup-token.ts`, pinned by
 `server/test/setup-token.test.mjs`.
@@ -406,10 +414,10 @@ Client.
 **`setup-token-redeemed` is the one frame no Client provokes.** HTTP routes
 reach the relay through `RelayHub.notifyHost`, whose parameter admits only that
 frame, so a route cannot push handshake or `msg` frames past the state machine
-above. It goes to whichever socket owns the `hostId` now, so a Host that
-*replaced* the minter is delivered a redemption it did not mint and must
-tolerate one; only a `hostId` with no live socket is a silent no-op —
-announcing work that already succeeded must never fail the phone.
+above. It goes to whichever socket owns the `hostId` now — a Host that
+*replaced* the minter must tolerate a redemption it did not mint — and an
+offline `hostId` is a silent no-op: announcing work that already succeeded must
+never fail the phone.
 
 **Only one socket may own a `hostId`.** Registering a second one for the same
 `hostId` displaces the first: clients bound to it are told `host-gone`, their
@@ -876,10 +884,14 @@ self-hosting keeps requiring a source build, deliberately, so no item below
 may depend on widening it. Staged order:
 
 1. **QR-first phone setup.** The server half is shipped (Setup tokens above).
-   What remains is Host-side: rendering `https://<origin>/#setup?token=…` as a
-   QR and taking it down on `setup-token-redeemed`, and carrying the token's
-   nonce into the pairing request so the approval modal verifies the scanning
-   phone cryptographically instead of asking a human to compare fingerprints —
+   What remains, in staged order: **(a)** the Host renders
+   `<origin>/#setup?token=…` as a QR and takes it down on
+   `setup-token-redeemed`, which `RemoteHost` drops today; **(b)** Pocket parses
+   the `#setup?token=` hash and sends that token as `setupToken` in place of the
+   setup password; **(c)** Pocket carries the same token into the pairing
+   request as `setupNonce` — reserved on the wire today — and the Host verifies
+   it against the one it minted, so the approval modal checks the scanning phone
+   cryptographically instead of asking a human to compare fingerprints:
    displaying the QR on the laptop *is* the local-presence act, and approval
    collapses to one confirm. The setup password remains for the QR-less path.
 2. **One-minute resume.** On an approved connection the Host mints a resume

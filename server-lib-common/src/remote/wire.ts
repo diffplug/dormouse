@@ -40,6 +40,15 @@ export const API_ROUTES = {
  */
 export const UNAUTHORIZED_ERROR = 'unauthorized';
 
+/**
+ * The `error` the setup routes answer 401 with when a `setupToken` is mistyped,
+ * unknown, expired, already spent, or was minted by a Host since revoked.
+ * Distinct from {@link UNAUTHORIZED_ERROR} because Pocket keys recovery flows on
+ * bodies and Pocket itself sends setup tokens: a spent one means "re-scan", not
+ * "sign in again", and the shared string would drive the wrong recovery.
+ */
+export const SETUP_TOKEN_INVALID_ERROR = 'invalid setup token';
+
 export const WS_ROUTES = {
   host: '/ws/host',
   client: '/ws/client',
@@ -70,8 +79,8 @@ export const SELFHOST_ACCOUNT_ID = 'owner';
 /**
  * What gates the two setup routes: the setup password, or the single-use
  * `token` of a {@link SetupTokenResponse} an enrolled Host minted for its QR.
- * Exactly one must be present — both, or neither, is a 400, the same rule and
- * the same reason as {@link HostEnrollRequest}.
+ * Exactly one must be present — both, or neither, is a 400 (why: `pickCredential`
+ * in `server/src/app.ts`), the same rule as {@link HostEnrollRequest}.
  */
 export type SetupCredential =
   | { password: string; setupToken?: never }
@@ -178,12 +187,12 @@ export interface HostEnrollResponse {
 /**
  * Host-token auth. The single-use setup credential an enrolled Host mints to
  * render as a QR: the token only, since the Host composes
- * `https://<origin>/#setup?token=…` itself from the origin it enrolled
- * against, and a URL minted server-side would be one more place the
- * deployment's own address is decided. Scanning it replaces typing the origin
- * and the setup password; a short TTL plus single use bound the shoulder-surf
- * window, and the Server tells the minting Host when the token is spent
- * (`ServerToHostFrame` `setup-token-redeemed`).
+ * `<origin>/#setup?token=…` itself from the origin it enrolled against, and a
+ * URL minted server-side would be one more place the deployment's own address
+ * is decided. Scanning it replaces typing the origin and the setup password; a
+ * short TTL plus single use bound the shoulder-surf window, and the Server
+ * tells the minting Host when the token is spent (`ServerToHostFrame`
+ * `setup-token-redeemed`).
  */
 export interface SetupTokenResponse {
   token: string;

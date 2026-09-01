@@ -7,12 +7,22 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
-import { API_ROUTES, UNAUTHORIZED_ERROR } from 'server-lib-common';
+import { API_ROUTES, SETUP_TOKEN_INVALID_ERROR, UNAUTHORIZED_ERROR } from 'server-lib-common';
 
-import { SetupTokenIssuer, SETUP_TOKEN_TTL_MS } from '../dist/setup-token.js';
+import { AccountStore } from '../dist/state.js';
 import {
+  MAX_TOKENS_PER_HOST,
+  SetupTokenIssuer,
+  SETUP_TOKEN_TTL_MS,
+} from '../dist/setup-token.js';
+import { FakeHost } from './harness/fake-host.mjs';
+import {
+  ORIGIN,
   PASSWORD,
+  RP_ID,
   connectHost,
   enrollHost,
   freshApp,
@@ -23,9 +33,13 @@ import {
   readAccount,
   register,
   registrationClientData,
+  sleep,
   startServer,
   until,
 } from './helpers.mjs';
+
+/** The 401 body every rejected setup token answers with. */
+const REFUSED = { error: SETUP_TOKEN_INVALID_ERROR };
 
 /** `POST /api/host/setup-token` with a host bearer token (no body). */
 function mint(app, hostToken) {
@@ -64,6 +78,35 @@ function finish(app, authenticator, credential, { challenge, label = 'Scanned Ph
 /** begin → finish a whole registration off `token`; the finish Response. */
 async function registerWithToken(app, token) {
   return register(app, await newAuthenticator(), { credential: { setupToken: token } });
+}
+
+/** A FakeHost socket keeps the event loop alive, so teardown must close them. */
+const OPEN_FAKE_HOSTS = [];
+
+async function shutdown(server) {
+  for (const fake of OPEN_FAKE_HOSTS.splice(0)) fake.close();
+  await server.close();
+}
+
+/**
+ * Enroll a Host and connect it as a {@link FakeHost}, collecting the
+ * redemptions it is told about. The harness mirrors the real Host's frame
+ * handling, so a frame it would drop cannot pass for one it received.
+ */
+async function connectFakeHost(app, server, options) {
+  const { body: host } = await enrollHost(app, options);
+  const fake = new FakeHost({
+    serverUrl: server.wsUrl,
+    hostToken: host.hostToken,
+    hostId: host.hostId,
+    origin: ORIGIN,
+    rpId: RP_ID,
+  });
+  OPEN_FAKE_HOSTS.push(fake);
+  await fake.ready;
+  const redemptions = [];
+  fake.on('setup-token-redeemed', () => redemptions.push(host.hostId));
+  return { host, fake, redemptions };
 }
 
 test('minting requires a host token', async () => {
@@ -114,11 +157,11 @@ test('the token is single-use: a successful finish spends it', async () => {
   // Everything the spent token can still be presented to answers the same way.
   const again = await begin(app, { setupToken: token });
   assert.equal(again.status, 401);
-  assert.deepEqual(await again.json(), { error: UNAUTHORIZED_ERROR });
+  assert.deepEqual(await again.json(), REFUSED);
   const authenticator = await newAuthenticator();
   const replay = await finish(app, authenticator, { setupToken: token }, { challenge: 'x' });
   assert.equal(replay.status, 401);
-  assert.deepEqual(await replay.json(), { error: UNAUTHORIZED_ERROR });
+  assert.deepEqual(await replay.json(), REFUSED);
 });
 
 test('begin does not spend the token: an abandoned scan can be retried', async () => {
@@ -128,23 +171,35 @@ test('begin does not spend the token: an abandoned scan can be retried', async (
   assert.equal((await registerWithToken(app, token)).status, 200);
 });
 
-test('a failed finish leaves the token redeemable', async () => {
-  const { app, token } = await appWithToken();
-  const first = await newAuthenticator();
-  const began = await begin(app, { setupToken: token });
-  const { challenge } = await began.json();
+test('a failed finish restores the token, unspent and unannounced', async () => {
+  const created = await freshApp();
+  const server = await startServer(created);
+  try {
+    const { app } = created;
+    const minter = await connectFakeHost(app, server);
+    const { token } = await (await mint(app, minter.host.hostToken)).json();
+    const first = await newAuthenticator();
+    const began = await begin(app, { setupToken: token });
+    const { challenge } = await began.json();
 
-  // A finish rejected for its clientData must not cost the user the QR.
-  const rejected = await post(app, API_ROUTES.setupFinish, {
-    setupToken: token,
-    credentialId: first.credentialId,
-    publicKey: first.publicKey,
-    clientDataJSON: registrationClientData({ challenge, origin: 'http://evil.example' }),
-    label: 'x',
-  });
-  assert.equal(rejected.status, 400);
+    // `finish` consumes up front, so a rejection past that point has to put the
+    // token back: an ordinary bad attempt must not cost the user the QR.
+    const rejected = await post(app, API_ROUTES.setupFinish, {
+      setupToken: token,
+      credentialId: first.credentialId,
+      publicKey: first.publicKey,
+      clientDataJSON: registrationClientData({ challenge, origin: 'http://evil.example' }),
+      label: 'x',
+    });
+    assert.equal(rejected.status, 400);
+    // Nothing was set up, so the Host must not take its QR down.
+    assert.deepEqual(minter.redemptions, []);
 
-  assert.equal((await registerWithToken(app, token)).status, 200);
+    assert.equal((await registerWithToken(app, token)).status, 200);
+    await until(() => minter.redemptions.length === 1);
+  } finally {
+    await shutdown(server);
+  }
 });
 
 test('an expired token is refused at begin and at finish', async () => {
@@ -155,25 +210,43 @@ test('an expired token is refused at begin and at finish', async () => {
 
   const late = await begin(app, { setupToken: token });
   assert.equal(late.status, 401);
-  assert.deepEqual(await late.json(), { error: UNAUTHORIZED_ERROR });
+  assert.deepEqual(await late.json(), REFUSED);
 
   // The credential gate runs before the challenge is even looked at, so a
   // finish is refused the same way whatever challenge it carries.
   const authenticator = await newAuthenticator();
   const lateFinish = await finish(app, authenticator, { setupToken: token }, { challenge: 'x' });
   assert.equal(lateFinish.status, 401);
-  assert.deepEqual(await lateFinish.json(), { error: UNAUTHORIZED_ERROR });
+  assert.deepEqual(await lateFinish.json(), REFUSED);
 });
 
-test('a wrong token answers the shared 401 after the credential delay', async () => {
+test('a wrong token answers the one 401, distinct from the session gate', async () => {
   const { app } = await appWithToken();
-  const started = Date.now();
   const res = await begin(app, { setupToken: 'not-a-minted-token' });
   assert.equal(res.status, 401);
-  assert.deepEqual(await res.json(), { error: UNAUTHORIZED_ERROR });
-  assert.equal(Date.now() - started >= 200, true);
+  // Pocket sends setup tokens itself and keys recovery on the body, so a dead
+  // one must read as "re-scan", never as the "sign in again" sentinel.
+  assert.deepEqual(await res.json(), REFUSED);
+  assert.notEqual(SETUP_TOKEN_INVALID_ERROR, UNAUTHORIZED_ERROR);
   // A mistyped credential belongs to that branch, not to the 400 for shape.
   assert.equal((await begin(app, { setupToken: 42 })).status, 401);
+});
+
+test('revoking the minting Host kills its outstanding tokens at both gates', async () => {
+  const { app, stateDir, token } = await appWithToken();
+
+  // Revocation is editing `hosts.json` by hand (server.md, Guardrails). A
+  // token minted before that edit must not stay redeemable for its whole TTL.
+  await writeFile(join(stateDir, 'hosts.json'), '[]\n');
+
+  const began = await begin(app, { setupToken: token });
+  assert.equal(began.status, 401);
+  assert.deepEqual(await began.json(), REFUSED);
+
+  const authenticator = await newAuthenticator();
+  const finished = await finish(app, authenticator, { setupToken: token }, { challenge: 'x' });
+  assert.equal(finished.status, 401);
+  assert.deepEqual(await finished.json(), REFUSED);
 });
 
 test('exactly one credential: both or neither is a 400, on both setup routes', async () => {
@@ -200,15 +273,75 @@ test('a redemption is announced to the Host that minted the token, and to no oth
   const created = await freshApp();
   const server = await startServer(created);
   try {
-    const minter = await connectHost(created.app, server, { label: 'Laptop A' });
-    const other = await connectHost(created.app, server, { label: 'Laptop B' });
+    const minter = await connectFakeHost(created.app, server, { label: 'Laptop A' });
+    const other = await connectFakeHost(created.app, server, { label: 'Laptop B' });
 
     const { token } = await (await mint(created.app, minter.host.hostToken)).json();
     assert.equal((await registerWithToken(created.app, token)).status, 200);
 
-    assert.deepEqual(await minter.socket.take(), { t: 'setup-token-redeemed' });
-    assert.ok(await other.socket.quiet(), 'only the minting Host hears about its own token');
+    await until(() => minter.redemptions.length === 1);
+    await sleep(60);
+    assert.deepEqual(minter.redemptions, [minter.host.hostId], 'announced exactly once');
+    assert.deepEqual(other.redemptions, [], 'only the minting Host hears about its own token');
   } finally {
+    await shutdown(server);
+  }
+});
+
+test('two finishes race one token: one registers, the other is refused', async () => {
+  const created = await freshApp();
+  const server = await startServer(created);
+  const { app, stateDir } = created;
+  const appendPasskey = AccountStore.prototype.appendPasskey;
+  try {
+    const minter = await connectFakeHost(app, server);
+    const { token } = await (await mint(app, minter.host.hostToken)).json();
+
+    // Two scans of the same QR: `begin` does not spend, so both challenges live.
+    const challenges = [];
+    for (let i = 0; i < 2; i++) {
+      challenges.push((await (await begin(app, { setupToken: token })).json()).challenge);
+    }
+
+    // Suspend the first finish inside the account write, so the second runs
+    // start to finish while the first holds the token spent but unregistered —
+    // the overlap a peek-then-consume gate would let both through.
+    let reached;
+    let release;
+    const arrived = new Promise((resolve) => (reached = resolve));
+    const suspended = new Promise((resolve) => (release = resolve));
+    let firstCall = true;
+    AccountStore.prototype.appendPasskey = async function hooked(...args) {
+      if (firstCall) {
+        firstCall = false;
+        reached();
+        await suspended;
+      }
+      return appendPasskey.apply(this, args);
+    };
+
+    const credential = { setupToken: token };
+    const first = finish(app, await newAuthenticator(), credential, {
+      challenge: challenges[0],
+    });
+    await arrived;
+    const second = await finish(app, await newAuthenticator(), credential, {
+      challenge: challenges[1],
+    });
+    release();
+    const firstRes = await first;
+
+    assert.equal(firstRes.status, 200);
+    assert.equal(second.status, 401);
+    assert.deepEqual(await second.json(), REFUSED);
+
+    const account = await readAccount(stateDir);
+    assert.equal(account.passkeys.length, 1, 'exactly one passkey off one token');
+    await until(() => minter.redemptions.length === 1);
+    await sleep(60);
+    assert.equal(minter.redemptions.length, 1, 'announced once, by the winner only');
+  } finally {
+    AccountStore.prototype.appendPasskey = appendPasskey;
     await server.close();
   }
 });
@@ -227,7 +360,7 @@ test('a redemption whose Host went offline mid-scan still sets the phone up', as
 
     assert.equal((await registerWithToken(created.app, token)).status, 200);
   } finally {
-    await server.close();
+    await shutdown(server);
   }
 });
 
@@ -237,20 +370,42 @@ test('the issuer answers the minting host, once, and only while fresh', () => {
   const clock = makeClock();
   const issuer = new SetupTokenIssuer({ now: clock.now });
 
-  const { token } = issuer.issue('host-1');
-  assert.equal(issuer.peek(token), true);
-  assert.equal(issuer.peek(token), true); // peek does not spend
-  assert.deepEqual(issuer.consume(token), { hostId: 'host-1' });
+  const { token, expiresAt } = issuer.issue('host-1');
+  assert.deepEqual(issuer.peek(token), { hostId: 'host-1', expiresAt });
+  assert.deepEqual(issuer.peek(token), { hostId: 'host-1', expiresAt }); // peek does not spend
+  assert.deepEqual(issuer.consume(token), { hostId: 'host-1', expiresAt });
   assert.equal(issuer.consume(token), null);
-  assert.equal(issuer.peek('never-minted'), false);
+  assert.equal(issuer.peek('never-minted'), null);
 
   const later = issuer.issue('host-2');
   clock.advance(SETUP_TOKEN_TTL_MS);
-  assert.equal(issuer.peek(later.token), false);
+  assert.equal(issuer.peek(later.token), null);
   assert.equal(issuer.consume(later.token), null);
 });
 
-test('outstanding tokens are pruned and capped, oldest first', () => {
+test('restore puts a consumed token back on its original expiry', () => {
+  const clock = makeClock();
+  const issuer = new SetupTokenIssuer({ now: clock.now });
+
+  const { token, expiresAt } = issuer.issue('host-1');
+  const entry = issuer.consume(token);
+  clock.advance(SETUP_TOKEN_TTL_MS / 2);
+  issuer.restore(token, entry);
+  // Redeemable again, but not for a moment longer than it started with: a
+  // failed attempt must not be a way to extend the shoulder-surf window.
+  assert.deepEqual(issuer.peek(token), { hostId: 'host-1', expiresAt });
+  clock.advance(SETUP_TOKEN_TTL_MS / 2);
+  assert.equal(issuer.peek(token), null);
+
+  // A token that died while the route was failing stays dead.
+  const late = issuer.issue('host-1');
+  const lateEntry = issuer.consume(late.token);
+  clock.advance(SETUP_TOKEN_TTL_MS);
+  issuer.restore(late.token, lateEntry);
+  assert.equal(issuer.peek(late.token), null);
+});
+
+test('outstanding tokens are pruned, and capped per minting Host', () => {
   const clock = makeClock();
   const issuer = new SetupTokenIssuer({ now: clock.now });
 
@@ -259,12 +414,16 @@ test('outstanding tokens are pruned and capped, oldest first', () => {
   // Minting reclaims it: nothing else ever removes an abandoned token.
   issuer.issue('host-1');
   assert.equal(issuer.pendingCount, 1);
-  assert.equal(issuer.peek(expiring.token), false);
+  assert.equal(issuer.peek(expiring.token), null);
 
-  // A Host re-rendering its QR in a loop cannot grow the map without bound.
+  // A Host re-rendering its QR in a loop cannot grow the map without bound —
+  // and evicts only its own oldest, never the token another Host is displaying.
+  const displayed = issuer.issue('host-2').token;
   const minted = [];
   for (let i = 0; i < 200; i++) minted.push(issuer.issue('host-1').token);
-  assert.equal(issuer.pendingCount <= 64, true);
-  assert.equal(issuer.peek(minted[0]), false);
-  assert.equal(issuer.peek(minted.at(-1)), true);
+  assert.equal(issuer.peek(minted[0]), null);
+  assert.notEqual(issuer.peek(minted.at(-1)), null);
+  assert.notEqual(issuer.peek(displayed), null, "host-2's live token survives host-1's loop");
+  // host-1 at its cap, plus host-2's one: the map is bounded by hosts × cap.
+  assert.equal(issuer.pendingCount, MAX_TOKENS_PER_HOST + 1);
 });
