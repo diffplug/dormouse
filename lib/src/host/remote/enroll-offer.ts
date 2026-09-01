@@ -10,7 +10,7 @@
  * the two processes: both simply know where the installer puts it.
  *
  * Expiry is not checked here. The Server owns it — it refuses a stamp older
- * than 7 days, and unlinks the file as it redeems — so a stale or already-spent
+ * than 7 days, and claims the file as it redeems — so a stale or already-spent
  * offer fails the enrollment with the server's own 401 rather than being second-
  * guessed by a clock on this side.
  */

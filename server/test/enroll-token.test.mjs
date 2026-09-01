@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { chmod, mkdtemp, unlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, readdir, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -77,6 +77,9 @@ test('a valid enroll token enrolls the host and consumes the offer', async () =>
   assert.equal(body.origin, ORIGIN);
   assert.equal(body.rpId, RP_ID);
   assert.equal(existsSync(enrollTokenFile), false);
+  // Redemption claims by rename before it unlinks; the happy path leaves the
+  // directory empty rather than littered with a `.spent-*` file.
+  assert.deepEqual(await readdir(dirname(enrollTokenFile)), []);
 });
 
 test('the offer is single-use: a second redemption is refused', async () => {
@@ -202,18 +205,38 @@ test('the password path still enrolls with an offer file configured', async () =
   assert.equal(existsSync(enrollTokenFile), true);
 });
 
-// --- redeemEnrollToken directly: the unlink race and the operator warning ---
+// --- redeemEnrollToken directly: the claim race and the operator warning ---
 
-test('losing the unlink race rejects rather than reporting a broken install', async () => {
+test('concurrent redemptions of one offer have exactly one winner', async () => {
   const path = await offerPath(offer());
-  // Both attempts read the offer before either deletes it, so one unlink lands
-  // and the other finds nothing — the loser must not be `not-invalidated`,
-  // which is the 500 reserved for an offer that truly cannot be deleted.
-  const results = await Promise.all([
-    redeemEnrollToken(path, TOKEN),
-    redeemEnrollToken(path, TOKEN),
-  ]);
-  assert.deepEqual(results.toSorted(), ['redeemed', 'rejected']);
+  // Every one of these presents the correct token, and they all read the offer
+  // before any of them claims it. Only the rename can separate them: deleting
+  // cannot, because two concurrent unlinks of one path both report success on
+  // APFS, which would mint a Host enrollment per racer off a single-use offer.
+  const results = await Promise.all(
+    Array.from({ length: 8 }, () => redeemEnrollToken(path, TOKEN)),
+  );
+  const tally = (outcome) => results.filter((r) => r === outcome).length;
+  assert.equal(tally('redeemed'), 1);
+  // The seven losers are ordinary rejections, never `not-invalidated` — the 500
+  // reserved for an offer that truly cannot be spent.
+  assert.equal(tally('rejected'), 7);
+  assert.equal(existsSync(path), false);
+  assert.deepEqual(await readdir(dirname(path)), []);
+});
+
+test('an installer rerun between the read and the claim keeps its fresh offer', async () => {
+  const path = await offerPath(offer());
+  const fresh = offer({ token: 'f0e1d2c3'.repeat(8) });
+  // The seam fires after the supplied token is verified against the file and
+  // before the claim renames it — the one window where a redemption would
+  // otherwise spend an offer it never read.
+  const result = await redeemEnrollToken(path, TOKEN, () => writeFile(path, JSON.stringify(fresh)));
+  assert.equal(result, 'rejected');
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), fresh);
+  assert.deepEqual(await readdir(dirname(path)), ['enroll-token.json']);
+  // Restored, not merely present: the operator's new offer still redeems.
+  assert.equal(await redeemEnrollToken(path, fresh.token), 'redeemed');
 });
 
 test('an offer deleted mid-redemption rejects, whichever half lost', async () => {

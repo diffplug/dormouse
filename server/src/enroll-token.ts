@@ -3,7 +3,8 @@
  * (`docs/specs/server.md` → "Configuration" → `DORMOUSE_ENROLL_TOKEN_FILE`).
  */
 
-import { readFile, unlink } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { readFile, rename, stat, unlink } from 'node:fs/promises';
 
 import { ENROLL_TOKEN_PATTERN, parseEnrollmentOffer } from 'server-lib-common';
 import type { EnrollmentOffer } from 'server-lib-common';
@@ -54,10 +55,19 @@ function isFresh(mintedAt: string): boolean {
   return Date.now() - minted <= ENROLL_OFFER_MAX_AGE_MS;
 }
 
+/**
+ * Test-only seam, awaited between the verified read and the claim below so a
+ * test can rewrite the offer inside the window {@link claimOffer}'s re-read
+ * guards. Only `server/test/enroll-token.test.mjs` may pass it; every
+ * production caller passes two arguments.
+ */
+type BeforeClaim = () => void | Promise<void>;
+
 /** Spend the offer at `path` on `supplied`; an unconfigured path rejects. */
 export async function redeemEnrollToken(
   path: string | null | undefined,
   supplied: string,
+  beforeClaim?: BeforeClaim,
 ): Promise<'redeemed' | 'rejected' | 'not-invalidated'> {
   if (!path) return 'rejected';
   // The format is public (server.md → "Configuration"), so refusing a malformed
@@ -65,7 +75,7 @@ export async function redeemEnrollToken(
   // under a flood of junk.
   if (!ENROLL_TOKEN_PATTERN.test(supplied)) return 'rejected';
   // Read per attempt, never cached at boot: the installer rewrites this file
-  // on every upgrade, and a redemption deletes it.
+  // on every upgrade, and a redemption takes it away.
   const offer = await readEnrollmentOffer(path);
   // Only the token is compared. Whoever can write this file chooses every
   // field, so checking the offer's `origin` here would authorize nothing — it
@@ -74,18 +84,77 @@ export async function redeemEnrollToken(
   if (offer === null || !isFresh(offer.mintedAt) || !secretEquals(supplied, offer.token)) {
     return 'rejected';
   }
-  // Invalidate before enrolling: a token that cannot be deleted must not be
-  // redeemable, or a failed unlink leaves a single-use secret usable forever.
-  // An installer rerun between the read and this unlink would have its fresh
-  // offer deleted here; accepted, because the writer is an interactive
-  // same-machine installer run that can simply be run again.
+  await beforeClaim?.();
+  return claimOffer(path, offer.token);
+}
+
+/**
+ * Take the verified offer off the well-known path before anything is enrolled
+ * against it, and report whether this attempt is the one that got it.
+ */
+async function claimOffer(
+  path: string,
+  verifiedToken: string,
+): Promise<'redeemed' | 'rejected' | 'not-invalidated'> {
+  // The rename is the single-use gate — not the unlink that follows. Two
+  // concurrent unlinks of one path can *both* report success (APFS does), so
+  // deleting proves nothing about who was first; renaming one source under a
+  // per-attempt name has exactly one winner on every platform we ship.
+  const claimPath = `${path}.spent-${randomBytes(6).toString('hex')}`;
   try {
-    await unlink(path);
+    await rename(path, claimPath);
   } catch (err) {
-    // ENOENT means someone else spent (or rewrote) the file first: this attempt
-    // lost the race, which is an ordinary rejection. `not-invalidated` — the
-    // 500 that says the install is broken — is for a real failure to delete.
+    // ENOENT: another redemption claimed it first, or the installer replaced
+    // it — this attempt lost the race, an ordinary rejection. Any other errno
+    // is an install that cannot spend its own offer, which is the 500.
     return errnoOf(err) === 'ENOENT' ? 'rejected' : 'not-invalidated';
   }
+  // Claiming is exclusive, but the read above was not part of it: an installer
+  // rerun in that window leaves this attempt holding *its* fresh offer instead.
+  // Comparing tokens is how that is told apart from the offer just verified.
+  if (!(await claimHolds(claimPath, verifiedToken))) {
+    await releaseClaim(claimPath, path);
+    return 'rejected';
+  }
+  // Best-effort: a leftover `.spent-*` file is inert, since it is never at the
+  // well-known path the server reads. Worth cleaning to keep `run/` tidy, not
+  // worth failing an enrollment whose offer is already spent.
+  await unlink(claimPath).catch(() => {});
   return 'redeemed';
+}
+
+/** Whether the claimed file still holds the offer that was just verified. */
+async function claimHolds(claimPath: string, verifiedToken: string): Promise<boolean> {
+  let text: string;
+  try {
+    text = await readFile(claimPath, 'utf8');
+  } catch {
+    return false;
+  }
+  // No warn, unlike the read at the well-known path: an unparseable claim is a
+  // half-written installer file, not an install the operator has to repair.
+  const claimed = parseEnrollmentOffer(text);
+  return claimed !== null && secretEquals(verifiedToken, claimed.token);
+}
+
+/** Give back a claim on a file that turned out not to be the verified offer. */
+async function releaseClaim(claimPath: string, path: string): Promise<void> {
+  // Put it back — unless the installer has already minted a fresher offer at
+  // the well-known path, which outranks the one wrongly taken: drop the claim
+  // rather than clobber the new file.
+  if (!(await exists(path))) {
+    const restored = await rename(claimPath, path).then(
+      () => true,
+      () => false,
+    );
+    if (restored) return;
+  }
+  await unlink(claimPath).catch(() => {});
+}
+
+async function exists(path: string): Promise<boolean> {
+  return stat(path).then(
+    () => true,
+    () => false,
+  );
 }
