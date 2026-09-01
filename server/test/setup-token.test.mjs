@@ -21,8 +21,10 @@ import {
   ownerSession,
   post,
   readAccount,
+  register,
   registrationClientData,
   startServer,
+  until,
 } from './helpers.mjs';
 
 /** `POST /api/host/setup-token` with a host bearer token (no body). */
@@ -59,14 +61,9 @@ function finish(app, authenticator, credential, { challenge, label = 'Scanned Ph
   });
 }
 
-/** begin → finish a whole registration under one credential. */
-async function registerWith(app, credential, { label } = {}) {
-  const authenticator = await newAuthenticator();
-  const began = await begin(app, credential);
-  if (began.status !== 200) return { began, authenticator };
-  const { challenge } = await began.json();
-  const finished = await finish(app, authenticator, credential, { challenge, label });
-  return { began, authenticator, finished };
+/** begin → finish a whole registration off `token`; the finish Response. */
+async function registerWithToken(app, token) {
+  return register(app, await newAuthenticator(), { credential: { setupToken: token } });
 }
 
 test('minting requires a host token', async () => {
@@ -93,13 +90,12 @@ test('the minted token carries the shared TTL', async () => {
 
 test('a scanned token registers a passkey without the setup password', async () => {
   const { app, stateDir, token } = await appWithToken();
+  const authenticator = await newAuthenticator();
 
-  const { began, authenticator, finished } = await registerWith(
-    app,
-    { setupToken: token },
-    { label: 'iPhone Safari' },
-  );
-  assert.equal(began.status, 200);
+  const finished = await register(app, authenticator, {
+    credential: { setupToken: token },
+    label: 'iPhone Safari',
+  });
   assert.equal(finished.status, 200);
   assert.deepEqual(await finished.json(), {
     accountId: 'owner',
@@ -113,8 +109,7 @@ test('a scanned token registers a passkey without the setup password', async () 
 
 test('the token is single-use: a successful finish spends it', async () => {
   const { app, token } = await appWithToken();
-  const { finished } = await registerWith(app, { setupToken: token });
-  assert.equal(finished.status, 200);
+  assert.equal((await registerWithToken(app, token)).status, 200);
 
   // Everything the spent token can still be presented to answers the same way.
   const again = await begin(app, { setupToken: token });
@@ -130,8 +125,7 @@ test('begin does not spend the token: an abandoned scan can be retried', async (
   const { app, token } = await appWithToken();
   // The user scans, backs out, scans again — the QR on the laptop is still good.
   assert.equal((await begin(app, { setupToken: token })).status, 200);
-  const { finished } = await registerWith(app, { setupToken: token });
-  assert.equal(finished.status, 200);
+  assert.equal((await registerWithToken(app, token)).status, 200);
 });
 
 test('a failed finish leaves the token redeemable', async () => {
@@ -150,15 +144,12 @@ test('a failed finish leaves the token redeemable', async () => {
   });
   assert.equal(rejected.status, 400);
 
-  const { finished } = await registerWith(app, { setupToken: token });
-  assert.equal(finished.status, 200);
+  assert.equal((await registerWithToken(app, token)).status, 200);
 });
 
 test('an expired token is refused at begin and at finish', async () => {
   const clock = makeClock();
   const { app, token } = await appWithToken({ now: clock.now });
-  // Hold a live registration challenge so the finish case reaches the gate.
-  const { challenge } = await (await begin(app, { setupToken: token })).json();
 
   clock.advance(SETUP_TOKEN_TTL_MS + 1);
 
@@ -166,8 +157,10 @@ test('an expired token is refused at begin and at finish', async () => {
   assert.equal(late.status, 401);
   assert.deepEqual(await late.json(), { error: UNAUTHORIZED_ERROR });
 
+  // The credential gate runs before the challenge is even looked at, so a
+  // finish is refused the same way whatever challenge it carries.
   const authenticator = await newAuthenticator();
-  const lateFinish = await finish(app, authenticator, { setupToken: token }, { challenge });
+  const lateFinish = await finish(app, authenticator, { setupToken: token }, { challenge: 'x' });
   assert.equal(lateFinish.status, 401);
   assert.deepEqual(await lateFinish.json(), { error: UNAUTHORIZED_ERROR });
 });
@@ -193,16 +186,14 @@ test('exactly one credential: both or neither is a 400, on both setup routes', a
     assert.equal(res.status, 400);
   }
   // Neither attempt may have spent the token.
-  assert.equal((await registerWith(app, { setupToken: token })).finished.status, 200);
+  assert.equal((await registerWithToken(app, token)).status, 200);
 });
 
 test('the setup password still registers a passkey with tokens outstanding', async () => {
   const { app, token } = await appWithToken();
-  const { finished } = await registerWith(app, { password: PASSWORD });
-  assert.equal(finished.status, 200);
+  assert.equal((await register(app, await newAuthenticator())).status, 200);
   // The password path is not the token path: the QR is untouched by it.
-  const second = await registerWith(app, { setupToken: token });
-  assert.equal(second.finished.status, 200);
+  assert.equal((await registerWithToken(app, token)).status, 200);
 });
 
 test('a redemption is announced to the Host that minted the token, and to no other', async () => {
@@ -213,8 +204,7 @@ test('a redemption is announced to the Host that minted the token, and to no oth
     const other = await connectHost(created.app, server, { label: 'Laptop B' });
 
     const { token } = await (await mint(created.app, minter.host.hostToken)).json();
-    const { finished } = await registerWith(created.app, { setupToken: token });
-    assert.equal(finished.status, 200);
+    assert.equal((await registerWithToken(created.app, token)).status, 200);
 
     assert.deepEqual(await minter.socket.take(), { t: 'setup-token-redeemed' });
     assert.ok(await other.socket.quiet(), 'only the minting Host hears about its own token');
@@ -223,10 +213,22 @@ test('a redemption is announced to the Host that minted the token, and to no oth
   }
 });
 
-test('a redemption with no live Host socket still sets the phone up', async () => {
-  const { app, token } = await appWithToken();
-  const { finished } = await registerWith(app, { setupToken: token });
-  assert.equal(finished.status, 200);
+test('a redemption whose Host went offline mid-scan still sets the phone up', async () => {
+  const created = await freshApp();
+  const server = await startServer(created);
+  try {
+    const minter = await connectHost(created.app, server, { label: 'Laptop A' });
+    const { token } = await (await mint(created.app, minter.host.hostToken)).json();
+
+    // The laptop lid closes between the scan and the passkey prompt. The
+    // announcement has nowhere to go, and that must never fail the phone.
+    minter.socket.close();
+    await until(() => !created.hub.isHostOnline(minter.host.hostId));
+
+    assert.equal((await registerWithToken(created.app, token)).status, 200);
+  } finally {
+    await server.close();
+  }
 });
 
 // --- SetupTokenIssuer directly: expiry, single use, and the cap -------------
@@ -236,15 +238,15 @@ test('the issuer answers the minting host, once, and only while fresh', () => {
   const issuer = new SetupTokenIssuer({ now: clock.now });
 
   const { token } = issuer.issue('host-1');
-  assert.deepEqual(issuer.peek(token), { hostId: 'host-1' });
-  assert.deepEqual(issuer.peek(token), { hostId: 'host-1' }); // peek does not spend
+  assert.equal(issuer.peek(token), true);
+  assert.equal(issuer.peek(token), true); // peek does not spend
   assert.deepEqual(issuer.consume(token), { hostId: 'host-1' });
   assert.equal(issuer.consume(token), null);
-  assert.equal(issuer.peek('never-minted'), null);
+  assert.equal(issuer.peek('never-minted'), false);
 
   const later = issuer.issue('host-2');
   clock.advance(SETUP_TOKEN_TTL_MS);
-  assert.equal(issuer.peek(later.token), null);
+  assert.equal(issuer.peek(later.token), false);
   assert.equal(issuer.consume(later.token), null);
 });
 
@@ -257,12 +259,12 @@ test('outstanding tokens are pruned and capped, oldest first', () => {
   // Minting reclaims it: nothing else ever removes an abandoned token.
   issuer.issue('host-1');
   assert.equal(issuer.pendingCount, 1);
-  assert.equal(issuer.peek(expiring.token), null);
+  assert.equal(issuer.peek(expiring.token), false);
 
   // A Host re-rendering its QR in a loop cannot grow the map without bound.
   const minted = [];
   for (let i = 0; i < 200; i++) minted.push(issuer.issue('host-1').token);
   assert.equal(issuer.pendingCount <= 64, true);
-  assert.equal(issuer.peek(minted[0]), null);
-  assert.notEqual(issuer.peek(minted.at(-1)), null);
+  assert.equal(issuer.peek(minted[0]), false);
+  assert.equal(issuer.peek(minted.at(-1)), true);
 });

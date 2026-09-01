@@ -107,17 +107,22 @@ export function padBase64Url(text) {
   return rem === 0 ? text : `${text}${'='.repeat(4 - rem)}`;
 }
 
-/** begin → finish registration for `authenticator`; returns the finish Response. */
+/**
+ * begin → finish registration for `authenticator`; returns the finish Response.
+ * `credential` is whatever gates the two setup routes — the setup password by
+ * default, or `{ setupToken }` for the QR path.
+ */
 export async function register(
   app,
   authenticator,
-  { password = PASSWORD, origin = ORIGIN, label = 'Test Passkey' } = {},
+  { credential = { password: PASSWORD }, origin = ORIGIN, label = 'Test Passkey' } = {},
 ) {
-  const begin = await post(app, API_ROUTES.setupBegin, { password });
+  const begin = await post(app, API_ROUTES.setupBegin, credential);
+  if (begin.status !== 200) return begin;
   const { challenge } = await begin.json();
   const clientDataJSON = registrationClientData({ challenge, origin });
   return post(app, API_ROUTES.setupFinish, {
-    password,
+    ...credential,
     credentialId: authenticator.credentialId,
     publicKey: authenticator.publicKey,
     clientDataJSON,

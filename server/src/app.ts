@@ -146,6 +146,9 @@ const CREDENTIAL_FAILURE_DELAY_MS = 250;
 /** The one answer to a wrong setup password, wherever it is supplied. */
 const BAD_PASSWORD_ERROR = 'invalid setup password';
 
+/** The credential fields `pickCredential` reads, whichever route supplied them. */
+type CredentialBody = { password?: unknown; setupToken?: unknown; enrollToken?: unknown };
+
 /**
  * In-memory session store. Exposed on the created app so the `/ws/client` path
  * can validate a raw `token` query param, and the `requireSession` middleware a
@@ -237,34 +240,56 @@ export function createApp(config: AppConfig): CreatedApp {
     return c.json({ error }, 401);
   }
 
-  // Read a JSON body and enforce the setup credential: the setup password, or
-  // the single-use token behind a Host's QR. Exactly one, counted by presence
-  // rather than by type, for the reason `/api/host/enroll` counts that way —
-  // trying both in turn would let a spent token fall through to the password.
-  // Returns the parsed body plus the token to spend on success (`null` on the
-  // password path), or a ready `Response` the caller returns as-is, so the two
-  // setup routes share one policy and neither is the softer path.
+  /**
+   * The one credential ladder behind every password-or-token route: exactly one
+   * of `password` or `tokenField`, counted by presence rather than by type.
+   *
+   * Both-or-neither is a 400 rather than a try-each fallback because trying
+   * them in turn would let a *spent* token fall through to the password and
+   * still succeed, leaving which credential authorized the request ambiguous on
+   * both sides. A lone credential of the wrong type is that branch's own delayed
+   * 401, never the 400 for shape.
+   *
+   * Answers `{ token }` with the caller's still-unverified token — the flows
+   * redeem differently, so each route verifies its own — or `{ token: null }`
+   * once the password has been checked here, or a ready `Response` to return
+   * as-is.
+   */
+  async function pickCredential(
+    body: CredentialBody | null,
+    c: Context<AppEnv>,
+    tokenField: 'setupToken' | 'enrollToken',
+  ): Promise<{ token: string | null } | Response> {
+    const password: unknown = body?.password;
+    const token: unknown = body?.[tokenField];
+    if ((password !== undefined) === (token !== undefined)) {
+      return c.json({ error: `supply exactly one of password or ${tokenField}` }, 400);
+    }
+    if (token !== undefined) {
+      if (typeof token !== 'string') return credentialFailure(c, UNAUTHORIZED_ERROR);
+      return { token };
+    }
+    if (!passwordOk(password)) return credentialFailure(c, BAD_PASSWORD_ERROR);
+    return { token: null };
+  }
+
+  // Read a JSON body and enforce the setup credential (`pickCredential`), then
+  // verify a setup token by peeking (`SetupTokenIssuer.peek`). Returns the
+  // parsed body plus the token to spend on success (`null` on the password
+  // path), or a ready `Response` the caller returns as-is, so the two setup
+  // routes share one policy and neither is the softer path.
   async function readSetupGated<T extends { password?: unknown; setupToken?: unknown }>(
     c: Context<AppEnv>,
   ): Promise<{ body: T; setupToken: string | null } | Response> {
     const body = await readJson<T>(c);
-    const password: unknown = body?.password;
-    const setupToken: unknown = body?.setupToken;
-    if ((password !== undefined) === (setupToken !== undefined)) {
-      return c.json({ error: 'supply exactly one of password or setupToken' }, 400);
+    const picked = await pickCredential(body, c, 'setupToken');
+    if (picked instanceof Response) return picked;
+    // Mistyped, unknown and expired are one delayed 401: none of them may tell
+    // a caller which one it hit.
+    if (picked.token !== null && !setupTokens.peek(picked.token)) {
+      return credentialFailure(c, UNAUTHORIZED_ERROR);
     }
-    if (setupToken !== undefined) {
-      // Mistyped, unknown, and expired are one delayed 401: none of them may
-      // tell a caller which one it hit. Peeked rather than consumed — `begin`
-      // runs before the user has done anything, and an abandoned registration
-      // must leave the QR on the laptop screen still scannable.
-      if (typeof setupToken !== 'string' || !setupTokens.peek(setupToken)) {
-        return credentialFailure(c, UNAUTHORIZED_ERROR);
-      }
-      return { body: body as T, setupToken };
-    }
-    if (!passwordOk(password)) return credentialFailure(c, BAD_PASSWORD_ERROR);
-    return { body: body as T, setupToken: null };
+    return { body: body as T, setupToken: picked.token };
   }
 
   const app = new Hono<AppEnv>();
@@ -332,15 +357,11 @@ export function createApp(config: AppConfig): CreatedApp {
       throw err;
     }
 
-    // Spend the token only now, on the one outcome that actually set the
-    // account up: a finish rejected for a stale challenge or a duplicate
-    // credential leaves the QR redeemable, so the user retries instead of
-    // asking the laptop for a new one. Registering twice off one token is
-    // already impossible — the registration challenge is single-use.
+    // Spend the token only here, on the one outcome that actually set the
+    // account up (`SetupTokenIssuer.peek`), and announce it to the Host that
+    // minted it so the QR it is displaying can stop being shown.
     if (setupToken !== null) {
       const redeemed = setupTokens.consume(setupToken);
-      // Announce it to the Host that minted it, so the QR it is displaying can
-      // stop being shown and the person at the laptop sees each redemption.
       if (redeemed) hub.notifyHost(redeemed.hostId, { t: 'setup-token-redeemed' });
     }
 
@@ -424,21 +445,12 @@ export function createApp(config: AppConfig): CreatedApp {
 
   app.post(API_ROUTES.hostEnroll, async (c) => {
     const body = await readJson<HostEnrollRequest>(c);
-    const password: unknown = body?.password;
-    const enrollToken: unknown = body?.enrollToken;
-    // Exactly one credential, counted by presence rather than by type. Trying
-    // both in turn would let a spent enroll token fall through to the password,
-    // leaving which one authorized the enrollment ambiguous on both sides. A
-    // lone credential of the wrong type is that branch's own delayed 401, the
-    // same answer the password-gated setup routes give.
-    if ((password !== undefined) === (enrollToken !== undefined)) {
-      return c.json({ error: 'supply exactly one of password or enrollToken' }, 400);
-    }
-    if (enrollToken !== undefined) {
-      if (typeof enrollToken !== 'string') return credentialFailure(c, UNAUTHORIZED_ERROR);
+    const picked = await pickCredential(body, c, 'enrollToken');
+    if (picked instanceof Response) return picked;
+    if (picked.token !== null) {
       // Unconfigured, absent, malformed, expired, wrong-shaped and wrong-token
       // are one `rejected`: none of them may tell a caller which one it hit.
-      const redemption = await redeemEnrollToken(config.enrollTokenFile, enrollToken);
+      const redemption = await redeemEnrollToken(config.enrollTokenFile, picked.token);
       if (redemption === 'rejected') return credentialFailure(c, UNAUTHORIZED_ERROR);
       if (redemption === 'not-invalidated') {
         // Reached only after a *successful* compare, so answering fast with a
@@ -448,8 +460,6 @@ export function createApp(config: AppConfig): CreatedApp {
         await delay(CREDENTIAL_FAILURE_DELAY_MS);
         return c.json({ error: 'could not invalidate the enroll token' }, 500);
       }
-    } else if (!passwordOk(password)) {
-      return credentialFailure(c, BAD_PASSWORD_ERROR);
     }
     const label = typeof body?.label === 'string' ? body.label : '';
     const host = await hostStore.enroll(label);
@@ -527,9 +537,7 @@ export function createApp(config: AppConfig): CreatedApp {
   // --- Setup tokens: the credential behind a Host's QR ---------------------
 
   app.post(API_ROUTES.hostSetupToken, requireHost, (c) => {
-    // The token only. The Host composes `https://<origin>/#setup?token=…`
-    // itself — it knows the origin it enrolled against, and a URL minted here
-    // would be one more place the deployment's own address is decided.
+    // The token only; the Host composes the QR's URL (`SetupTokenResponse`).
     const { token, expiresAt } = setupTokens.issue(c.get('host').hostId);
     const res: SetupTokenResponse = { token, expiresAt };
     return c.json(res);

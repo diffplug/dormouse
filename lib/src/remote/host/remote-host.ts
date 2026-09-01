@@ -106,6 +106,19 @@ export interface RemoteHostOptions {
  */
 const MAX_CLIENT_ID_LENGTH = 256;
 
+/** The server→host frames that address one Client; the rest are handled apart. */
+type AddressedFrame = Extract<ServerToHostFrame, { clientId: string }>;
+
+/**
+ * Whether a parsed relay frame addresses a Client, with its `clientId` proved
+ * rather than assumed — the relay is not trusted to have stamped one, or to
+ * have kept it inside {@link MAX_CLIENT_ID_LENGTH}.
+ */
+function isAddressedFrame(frame: ServerToHostFrame): frame is AddressedFrame {
+  const clientId: unknown = (frame as { clientId?: unknown }).clientId;
+  return typeof clientId === 'string' && clientId.length <= MAX_CLIENT_ID_LENGTH;
+}
+
 const INITIAL_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
 
@@ -353,23 +366,20 @@ export class RemoteHost {
     } catch {
       return;
     }
-    if (
-      !frame ||
-      typeof (frame as { t?: unknown }).t !== 'string' ||
-      typeof (frame as { clientId?: unknown }).clientId !== 'string' ||
-      (frame as { clientId: string }).clientId.length > MAX_CLIENT_ID_LENGTH
-    ) {
+    if (!frame || typeof (frame as { t?: unknown }).t !== 'string') return;
+    if (frame.t === 'setup-token-redeemed') {
+      // Deliberately dropped for now: the phone's registration already
+      // succeeded. Tearing this Host's own QR down on it belongs to QR-first
+      // phone setup (`docs/specs/server.md` -> `## Future`).
       return;
     }
-    // Cast, not narrowing: the guard above already proved the field, and one
-    // `ServerToHostFrame` variant (`setup-token-redeemed`) carries no clientId
-    // at all, so it is dropped there like any frame this Host cannot address.
-    const clientId = (frame as { clientId: string }).clientId;
+    if (!isAddressedFrame(frame)) return;
+    const { clientId } = frame;
     switch (frame.t) {
       case 'pair':
-        return this.#onPair(clientId, (frame as { request?: unknown }).request);
+        return this.#onPair(clientId, frame.request);
       case 'pair-status':
-        return this.#onPairStatus(clientId, (frame as { query?: unknown }).query);
+        return this.#onPairStatus(clientId, frame.query);
       case 'connect':
         return this.#onConnect(clientId);
       case 'connect2':

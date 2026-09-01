@@ -179,9 +179,10 @@ export interface HostEnrollResponse {
  * Host-token auth. The single-use setup credential an enrolled Host mints to
  * render as a QR: the token only, since the Host composes
  * `https://<origin>/#setup?token=…` itself from the origin it enrolled
- * against. Scanning it replaces typing the origin and the setup password; a
- * short TTL plus single use bound the shoulder-surf window, and the Server
- * tells the minting Host when the token is spent
+ * against, and a URL minted server-side would be one more place the
+ * deployment's own address is decided. Scanning it replaces typing the origin
+ * and the setup password; a short TTL plus single use bound the shoulder-surf
+ * window, and the Server tells the minting Host when the token is spent
  * (`ServerToHostFrame` `setup-token-redeemed`).
  */
 export interface SetupTokenResponse {

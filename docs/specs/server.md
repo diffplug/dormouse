@@ -241,7 +241,7 @@ This table is the whole route surface. Paths and request/response shapes live in
 | Route                            | Auth           | Does                                              |
 | -------------------------------- | -------------- | ------------------------------------------------- |
 | `GET /api/hello`                 | —              | The shared greeting. Carries no release identity: it is unauthenticated, CORS-`*` and reachable through `tailscale serve` — see the runtime file under "Installing it" |
-| `POST /api/setup/begin`          | setup password or setup token | Issues a registration challenge. Only the credential gates it, so re-presenting one adds another passkey |
+| `POST /api/setup/begin`          | setup password or setup token | Issues a registration challenge. Exactly one credential — both, or neither, is a 400 — gated exactly as `finish` is, so neither is softer. Only the credential gates it, so re-presenting one adds another passkey |
 | `POST /api/setup/finish`         | setup password or setup token | Registers the passkey in `account.json`, and spends the setup token |
 | `POST /api/signin/begin`         | —              | Issues a sign-in challenge                          |
 | `POST /api/signin/finish`        | —              | Verifies the assertion and issues a 12-hour in-memory session token |
@@ -277,8 +277,9 @@ token with 401 and the shared `UNAUTHORIZED_ERROR` from
 Pocket keys its "sign in again" recovery on it, and a bare 401 is ambiguous,
 since a wrong setup password and a rejected device signature answer 401 as well
 ([pocket-app.md](./pocket-app.md) -> An expired session drops to sign-in). A
-rejected enroll token answers that same body and delay whatever the cause, and
-only a Host sends one, so Pocket's recovery keying is unaffected.
+rejected enroll token answers that same body and delay whatever the cause, as
+does a mistyped, unknown or expired setup token; only a Host sends an enroll
+token, so Pocket's recovery keying is unaffected.
 
 ### Setup tokens
 
@@ -287,22 +288,17 @@ An enrolled Host mints one over its own authenticated channel and renders
 alone, since the Host knows the origin it enrolled against. Scanning replaces
 typing that origin and the setup password.
 
-* **Exactly one credential gates each setup route** — password or `setupToken`,
-  counted by presence rather than type, both or neither a 400, exactly as
-  `/api/host/enroll` counts. `POST /api/setup/begin` mints the WebAuthn
-  registration challenge, so it gates identically and no route is softer.
+* **Counted by presence, not by type**, here and at `/api/host/enroll`: trying
+  the two in turn would let a spent token fall through to the password.
 * **`begin` peeks; only a successful `finish` spends.** An abandoned scan
   leaves the QR scannable, and a `finish` rejected for its clientData or a
   duplicate credential leaves the token redeemable — registering twice off one
   token is impossible anyway, the registration challenge being single-use.
-* **Mistyped, unknown and expired are one delayed 401** carrying
-  `UNAUTHORIZED_ERROR`; none may tell a scanner which it hit.
 * **The store remembers which Host minted each token** — that is who the
-  redemption is announced to (Relay below), and why it is not a
-  `HostChallengeIssuer`. TTL is `DEFAULT_PAIRING_TTL_MS`, since the nonce it
-  leaves behind must survive the passkey ceremony before pairing; it prunes on
-  every mint and caps outstanding tokens, oldest first, because anything
-  holding a `hostToken` can mint (Guardrails).
+  redemption is announced to (Relay below). TTL is `DEFAULT_PAIRING_TTL_MS`,
+  since the nonce it leaves behind must survive the passkey ceremony before
+  pairing; it prunes on every mint and caps outstanding tokens, oldest first,
+  because anything holding a `hostToken` can mint (Guardrails).
 
 Source of truth: `server/src/setup-token.ts`, pinned by
 `server/test/setup-token.test.mjs`.
@@ -407,11 +403,13 @@ both directions. `clientId` is a server-assigned secret stamped onto every
 host-bound frame so the Host can address replies, and is never sent to the
 Client.
 
-**`setup-token-redeemed` is the one host-bound frame with no `clientId`**: it is
-about the Host rather than a Client — a setup token that Host minted was just
-spent. HTTP routes reach the relay through `RelayHub.notifyHost`, and an
-offline or replaced Host is a silent no-op, since the frame only announces work
-that already succeeded and must never fail the phone.
+**`setup-token-redeemed` is the one frame no Client provokes.** HTTP routes
+reach the relay through `RelayHub.notifyHost`, whose parameter admits only that
+frame, so a route cannot push handshake or `msg` frames past the state machine
+above. It goes to whichever socket owns the `hostId` now, so a Host that
+*replaced* the minter is delivered a redemption it did not mint and must
+tolerate one; only a `hostId` with no live socket is a silent no-op —
+announcing work that already succeeded must never fail the phone.
 
 **Only one socket may own a `hostId`.** Registering a second one for the same
 `hostId` displaces the first: clients bound to it are told `host-gone`, their
@@ -877,16 +875,13 @@ anywhere. One settled decision constrains every item: **the stock allowlist stay
 self-hosting keeps requiring a source build, deliberately, so no item below
 may depend on widening it. Staged order:
 
-1. **QR-first phone setup.** The enrolled Host mints a short-TTL, single-use
-   setup token from the server over its authenticated channel and renders
-   `https://<origin>/#setup?token=…` as a QR. Scanning replaces typing the
-   origin and the setup password; the token's nonce rides into the pairing
-   request, so the approval modal verifies the scanning phone
-   cryptographically instead of asking a human to compare fingerprints —
+1. **QR-first phone setup.** The server half is shipped (Setup tokens above).
+   What remains is Host-side: rendering `https://<origin>/#setup?token=…` as a
+   QR and taking it down on `setup-token-redeemed`, and carrying the token's
+   nonce into the pairing request so the approval modal verifies the scanning
+   phone cryptographically instead of asking a human to compare fingerprints —
    displaying the QR on the laptop *is* the local-presence act, and approval
-   collapses to one confirm. Single-use plus TTL bound the shoulder-surf
-   window; the Host announces each redemption. The setup password remains for
-   the QR-less path.
+   collapses to one confirm. The setup password remains for the QR-less path.
 2. **One-minute resume.** On an approved connection the Host mints a resume
    token — single-use, bound to the device key and that connection, 60-second
    TTL. A dropped WebSocket reattaches with it instead of rerunning the

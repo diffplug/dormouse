@@ -9,21 +9,21 @@
 
 import { randomBytes } from 'node:crypto';
 
-import { toBase64Url } from 'server-lib-common';
+import { DEFAULT_PAIRING_TTL_MS, toBase64Url } from 'server-lib-common';
 
 /**
- * How long a minted token stays redeemable. Matches `DEFAULT_PAIRING_TTL_MS`
+ * How long a minted token stays redeemable. It *is* `DEFAULT_PAIRING_TTL_MS`
  * because the two are one window from the user's side: the nonce the token
  * leaves behind rides into the pairing request, so it must outlive the passkey
  * ceremony that stands between scanning the QR and pairing.
  */
-export const SETUP_TOKEN_TTL_MS = 5 * 60 * 1000;
+export const SETUP_TOKEN_TTL_MS = DEFAULT_PAIRING_TTL_MS;
 
 /**
- * How many unspent tokens the server will hold. Anything with a `hostToken`
- * can mint, and a Host that re-renders its QR in a loop would otherwise grow
- * this map for the process's lifetime; a human scans one at a time, so the cap
- * is far above any real use. Oldest is evicted first — same rule as
+ * How many unspent tokens the server will hold — the bound on this map, which
+ * anything holding a `hostToken` can otherwise grow for the process's lifetime
+ * by re-rendering its QR in a loop. A human scans one at a time, so the cap is
+ * far above any real use. Oldest is evicted first — same rule as
  * `MAX_PENDING_TICKETS` (`server-lib-common/src/security/pairing.ts`).
  */
 const MAX_OUTSTANDING_TOKENS = 64;
@@ -40,7 +40,6 @@ export interface IssuedSetupToken {
 export interface SetupTokenIssuerOptions {
   /** Clock returning epoch milliseconds; injectable for tests. */
   readonly now?: () => number;
-  readonly ttlMs?: number;
 }
 
 /** What a live token resolves to: the Host that minted it. */
@@ -51,11 +50,9 @@ interface SetupTokenEntry {
 
 export class SetupTokenIssuer {
   readonly #tokens = new Map<string, SetupTokenEntry>();
-  readonly #ttlMs: number;
   readonly #now: () => number;
 
   constructor(options: SetupTokenIssuerOptions = {}) {
-    this.#ttlMs = options.ttlMs ?? SETUP_TOKEN_TTL_MS;
     this.#now = options.now ?? (() => Date.now());
   }
 
@@ -63,26 +60,27 @@ export class SetupTokenIssuer {
   issue(hostId: string): IssuedSetupToken {
     this.#prune();
     const token = toBase64Url(randomBytes(SETUP_TOKEN_BYTE_LENGTH));
-    const expiresAt = this.#now() + this.#ttlMs;
+    const expiresAt = this.#now() + SETUP_TOKEN_TTL_MS;
     this.#tokens.set(token, { hostId, expiresAt });
     return { token, expiresAt };
   }
 
   /**
-   * The Host that minted `token`, or `null` if it is unknown or expired. Does
-   * NOT spend it: `POST /api/setup/begin` checks the credential before the
-   * user has done anything, and an abandoned registration must leave the QR on
-   * the laptop screen still scannable.
+   * Whether `token` is live. Does NOT spend it, which is the whole reason the
+   * two setup routes differ: `POST /api/setup/begin` checks the credential
+   * before the user has done anything, so an abandoned registration must leave
+   * the QR on the laptop screen still scannable, and only the `finish` that
+   * actually created the passkey calls {@link consume}.
    */
-  peek(token: string): { hostId: string } | null {
+  peek(token: string): boolean {
     const entry = this.#tokens.get(token);
-    if (entry === undefined) return null;
+    if (entry === undefined) return false;
     if (this.#now() >= entry.expiresAt) {
       // Reclaim it here too; an expired entry can never become valid again.
       this.#tokens.delete(token);
-      return null;
+      return false;
     }
-    return { hostId: entry.hostId };
+    return true;
   }
 
   /**
@@ -91,6 +89,9 @@ export class SetupTokenIssuer {
    * again.
    */
   consume(token: string): { hostId: string } | null {
+    // This lookup IS the concurrency check: two finishes racing one token both
+    // reach here, and only the one that finds the entry spends it. Never carry
+    // a hostId peeked earlier past this point.
     const entry = this.#tokens.get(token);
     if (entry === undefined) return null;
     this.#tokens.delete(token);
