@@ -46,10 +46,13 @@ stored passkey material (`PocketClient.hasPriorUse`), re-derived every render so
 a half-finished setup offers sign-in on the retry rather than a second passkey.
 Without it, setup — setup password plus passkey label — is unfolded and sign-in
 secondary, since a synced passkey can reach a browser that stored nothing. With
-it, sign-in leads and setup folds behind the disclosure. Blocked site data costs
-persistence, not the visit: `localStoragePocketStorage` mirrors writes in memory
-and reads the mirror first, because `setup` commits the Server's passkey
-*before* caching it and a throw there would leave every retry minting an orphan.
+it, sign-in leads and setup folds behind the disclosure. **The local record must
+not lag the registration**: `setup` caches the public key between
+`registerPasskey` and `finish`, so a `setupToken` dying in between keeps
+`hasPriorUse` honest instead of earning a second passkey. Blocked site data
+costs persistence, not the visit: `localStoragePocketStorage` mirrors writes in
+memory and reads the mirror first, since that write lands after the credential
+is already irreversible and a throw would leave every retry minting an orphan.
 
 **A scanned code outranks that question.** Opened from a Host's QR
 ([server.md](./server.md) owns the grammar), the screen leads with setup
@@ -59,15 +62,24 @@ before the first render and erased in the same act**, parsed or not — an addre
 bar, a history stack and a screenshot are no place for a live credential — and a
 malformed one is ignored rather than reported.
 
-* **Sign-in stays offered** — a synced passkey may be the better path, and it
-  keeps the scanned nonce for pairing either way.
-* **A refused token is dropped, not reported.** `SETUP_TOKEN_INVALID_ERROR` —
-  expired, spent, or minted by a since-revoked Host — becomes
-  `SetupTokenInvalidError`, which nulls the token and hands the screen back the
-  setup password.
-* **The nonce lives for the run, never on disk**, riding every `pair` until the
-  Host spends it at approval
-  ([remote-security-model.md](./remote-security-model.md) owns what it proves).
+* **Sign-in stays offered** — a synced passkey may be the better path.
+* **The token is dropped on every way out of setup** — redeemed, refused, or
+  left behind by a sign-in — since its only job is the first passkey; one that
+  outlived it would lead a later session expiry into a *second* registration.
+* **A refused token is reported, and setup stays unfolded.**
+  `SETUP_TOKEN_INVALID_ERROR` — expired, spent, or minted by a since-revoked
+  Host — becomes `SetupTokenInvalidError`: its message goes in the alert row and
+  the setup password stays on screen, whatever this browser holds. Folding it
+  behind a returning browser's disclosure would hide the field the refusal just
+  named and remount the typed label away.
+* **The nonce lives for the run, never on disk**, riding every `pair` in it:
+  only the Host that verified against it spends it, so dropping it on another
+  Host's approval would end the ceremony silently, where a spent proof merely
+  misses ([remote-security-model.md](./remote-security-model.md) owns what it
+  proves).
+* **An installed iOS Pocket can never receive a scanned hash** — Camera opens
+  Safari, a different partition, and the install launches at its own start URL.
+  "Show a fresh code" is no recovery there; the setup password is.
 
 Source of truth: `setup-link.ts` and `SetupOrSignin` in
 `lib/src/remote/pocket-app/App.tsx`, and `PocketClient.pair` in

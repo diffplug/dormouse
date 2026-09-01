@@ -317,6 +317,26 @@ describe('setup + signin', () => {
       SetupTokenInvalidError,
     );
   });
+
+  /**
+   * `finish` is what consumes the token, so a code that dies between `begin`
+   * and `finish` leaves a real authenticator credential registered with the
+   * Server refusing to record it. The local note must not lag that credential:
+   * left until after `finish`, `hasPriorUse` would answer false and the screen
+   * would offer a *second* registration rather than sign-in.
+   */
+  it('records the registration even when the server refuses it at finish', async () => {
+    const harness = makeClient({
+      ...AUTH_ROUTES,
+      '/api/setup/finish': () => ({ status: 401, json: { error: SETUP_TOKEN_INVALID_ERROR } }),
+    });
+
+    await expect(harness.client.setup({ setupToken: 'spent' }, 'Phone')).rejects.toThrow(
+      SetupTokenInvalidError,
+    );
+
+    expect(harness.client.hasPriorUse()).toBe(true);
+  });
 });
 
 describe('subscribeToPush', () => {

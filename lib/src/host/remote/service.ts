@@ -12,6 +12,7 @@ import {
   SETUP_HASH_PREFIX,
   SETUP_HASH_TOKEN_PARAM,
   isSetupTokenResponse,
+  normalizeOrigin,
   type EnrollmentOffer,
 } from 'server-lib-common';
 import { filterAclRecords } from '../../remote/host/acl';
@@ -527,11 +528,8 @@ export class RemoteHostService {
   // --- Host lifecycle ---
 
   #allowed(serverUrl: string): boolean {
-    try {
-      return originAllowedByConnectSrc(new URL(serverUrl).origin, this.#connectSrc);
-    } catch {
-      return false;
-    }
+    const origin = normalizeOrigin(serverUrl);
+    return origin !== null && originAllowedByConnectSrc(origin, this.#connectSrc);
   }
 
   async #startHost(enrollment: HostEnrollment): Promise<void> {

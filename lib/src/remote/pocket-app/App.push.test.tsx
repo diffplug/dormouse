@@ -40,8 +40,10 @@ vi.mock('../client/push-subscribe', () => ({
     fake.subscribeInBrowser(key, onReplaced),
 }));
 
-vi.mock('../client/pocket-client', () => ({
-  SessionExpiredError: class SessionExpiredError extends Error {},
+// Only `PocketClient` is doubled — the error classes stay the real exports, so
+// a case that drives one is driving what ships (see `App.setup.test.tsx`).
+vi.mock('../client/pocket-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../client/pocket-client')>()),
   PocketClient: class {
     socketOpen = true;
     hasPriorUse = () => true;

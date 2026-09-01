@@ -59,6 +59,30 @@ test('a DORMOUSE_ORIGIN that is not a URL with a host is a ConfigError', () => {
   assert.throws(() => readConfig({ ...MINIMAL, DORMOUSE_ORIGIN: 'mailto:ned@example.com' }), ConfigError);
 });
 
+test('a DORMOUSE_ORIGIN on a non-web scheme is a ConfigError', () => {
+  // `ws://…` reduces to a bare origin, so "absolute URL with a host" passes it
+  // — and the server would boot on an origin no browser can ever send as
+  // `clientData.origin`, failing every WebAuthn check with a config that reads
+  // as correct.
+  assert.throws(
+    () => readConfig({ ...MINIMAL, DORMOUSE_ORIGIN: 'ws://dor.example.ts.net' }),
+    ConfigError,
+  );
+  assert.throws(
+    () => readConfig({ ...MINIMAL, DORMOUSE_ORIGIN: 'wss://dor.example.ts.net' }),
+    ConfigError,
+  );
+  // Both web schemes still pass; https is what a real deployment runs on.
+  assert.equal(
+    readConfig({ ...MINIMAL, DORMOUSE_ORIGIN: 'https://dor.example.ts.net' }).origin,
+    'https://dor.example.ts.net',
+  );
+  assert.equal(
+    readConfig({ ...MINIMAL, DORMOUSE_ORIGIN: 'http://localhost:3000' }).origin,
+    'http://localhost:3000',
+  );
+});
+
 test('a blank DORMOUSE_ORIGIN falls back to the localhost default', () => {
   assert.equal(readConfig({ ...MINIMAL, DORMOUSE_ORIGIN: '  ' }).origin, 'http://localhost:3000');
 });

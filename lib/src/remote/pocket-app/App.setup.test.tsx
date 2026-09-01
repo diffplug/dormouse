@@ -2,9 +2,9 @@
  * @vitest-environment jsdom
  *
  * The QR path through the whole `App`: a scanned code sets the phone up without
- * a password, its nonce rides into the pairing it was scanned for and is
- * dropped once that pairing is approved, and a code the Server refuses hands
- * the screen back to the ordinary password flow.
+ * a password, its nonce rides every pairing for the rest of the run, and a code
+ * the Server refuses hands the screen back to the setup password without
+ * folding it away.
  *
  * `App.test.tsx` covers the auth screen's two layouts in isolation and
  * `setup-link.test.ts` the hash it is handed; neither can see the state machine
@@ -149,19 +149,24 @@ describe('setting up from a scanned code', () => {
     expect(container.textContent).toContain('First laptop');
   });
 
-  it('carries the scanned nonce into the pairing, and drops it once approved', async () => {
+  /**
+   * Only the Host the code was shown on can spend the nonce, and only on a
+   * pairing that verified against it — so pairing some *other* machine first
+   * must not throw the proof away. Dropping it there destroyed the ceremony
+   * silently: the machine on screen would fall back to a fingerprint compare.
+   * A spent proof simply misses, so carrying it costs nothing.
+   */
+  it('carries the scanned nonce into every pairing this run', async () => {
     boot();
     await click(container, 'Create passkey & sign in');
 
+    // The machine the phone was *not* pointed at, first.
     await pairFrom('First laptop');
     expect(fake.pair).toHaveBeenLastCalledWith('host-1', DEVICE_LABEL, SCANNED.nonce);
 
-    // Back to the list, and pair the other machine: the Host spent that nonce
-    // when it approved the first pairing, so a second proof could only fail to
-    // match — this one takes the fingerprint-compare path.
     await click(container, '‹ Hosts');
     await pairFrom('Second laptop');
-    expect(fake.pair).toHaveBeenLastCalledWith('host-2', DEVICE_LABEL, null);
+    expect(fake.pair).toHaveBeenLastCalledWith('host-2', DEVICE_LABEL, SCANNED.nonce);
   });
 
   it('sends no proof when the code carried no nonce', async () => {
@@ -198,6 +203,31 @@ describe('setting up from a scanned code', () => {
     expect(passwordField()).not.toBeNull();
     expect(fake.setup).not.toHaveBeenCalled();
   });
+
+  /**
+   * The other way out of setup. The token's whole job is to create the first
+   * passkey, so a run that reached one through sign-in instead has spent it —
+   * and a session that dies later must land on the ordinary "Welcome back",
+   * not on a screen offering a second passkey registration.
+   */
+  it('drops the code when the run signs in rather than setting up', async () => {
+    boot();
+    fake.signin.mockImplementation(async () => {
+      fake.priorUse = true;
+      return {};
+    });
+
+    await click(container, 'Sign in with passkey');
+    expect(container.textContent).toContain('First laptop');
+
+    fake.listHosts.mockRejectedValueOnce(new SessionExpiredError());
+    await click(container, 'Refresh');
+
+    expect(alertText(container)).toBe(SESSION_EXPIRED_MESSAGE);
+    expect(container.textContent).toContain('Welcome back');
+    expect(passwordField()).toBeNull();
+    expect(buttonNamed(container, /First-time setup/)).not.toBeNull();
+  });
 });
 
 describe('a code the server refuses', () => {
@@ -216,6 +246,38 @@ describe('a code the server refuses', () => {
     expect(alertText(container)).toBe(SETUP_CODE_DEAD_MESSAGE);
     expect(passwordField()).not.toBeNull();
     expect(fake.signin).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The returning browser is the case that broke: dropping the token there
+   * collapsed `leadWithSetup` to `firstRun`, so the password field the refusal
+   * had just promised folded behind the disclosure — and the remount that came
+   * with it threw away whatever label had been typed.
+   */
+  it('keeps the field unfolded, and the typed label, on a browser that has been here', async () => {
+    fake.priorUse = true;
+    fake.setup.mockRejectedValueOnce(new SetupTokenInvalidError());
+    boot();
+    act(() =>
+      setNativeFieldValue(
+        container.querySelector<HTMLInputElement>('#pocket-setup-label')!,
+        'Work phone',
+      ),
+    );
+
+    await click(container, 'Create passkey & sign in');
+
+    expect(alertText(container)).toBe(SETUP_CODE_DEAD_MESSAGE);
+    expect(passwordField()).not.toBeNull();
+    expect(buttonNamed(container, /First-time setup/)).toBeNull();
+    expect(container.querySelector<HTMLInputElement>('#pocket-setup-label')!.value).toBe(
+      'Work phone',
+    );
+
+    // And the retry carries that label, with the password now typed.
+    act(() => setNativeFieldValue(passwordField()!, 'hunter2'));
+    await click(container, 'Create passkey & sign in');
+    expect(fake.setup).toHaveBeenLastCalledWith({ password: 'hunter2' }, 'Work phone');
   });
 
   it('leaves the retry an ordinary password setup', async () => {

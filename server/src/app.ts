@@ -27,6 +27,7 @@ import {
   fromBase64Url,
   getWebCrypto,
   helloResponse,
+  isOrigin,
   toBase64Url,
   utf8Decode,
   boundedPushText,
@@ -83,8 +84,9 @@ export interface AppConfig {
   readonly setupPassword: string;
   /**
    * External origin, e.g. `https://dormouse.tailnet.ts.net`; source of `rpId`.
-   * Already bare — `readConfig` normalizes it, and every compare here is a
-   * string compare against this value.
+   * **Must already be bare** — `readConfig` normalizes it, {@link createApp}
+   * rejects anything else, and every compare here is a string compare against
+   * this value.
    */
   readonly origin: string;
   /**
@@ -220,8 +222,13 @@ export interface CreatedApp {
 export function createApp(config: AppConfig): CreatedApp {
   const now = config.now ?? (() => Date.now());
   const origin = config.origin;
-  // The one parse, and only for the host part: `readConfig` already reduced
-  // `DORMOUSE_ORIGIN` to a bare origin.
+  // Enforced, not assumed: every compare below is a string compare against this
+  // value, so a `https://host/` that slipped past `readConfig` (a direct caller,
+  // a test) would fail each of them while reading as correct.
+  if (!isOrigin(origin)) {
+    throw new Error(`createApp needs a bare origin (scheme, host, port), got '${origin}'.`);
+  }
+  // The one parse, and only for the host part.
   const rpId = new URL(origin).hostname;
   const accounts = new AccountStore(config.stateDir, now);
   const hostStore = new HostStore(config.stateDir, now);

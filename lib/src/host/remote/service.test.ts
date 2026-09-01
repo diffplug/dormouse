@@ -16,6 +16,7 @@ import {
 } from 'server-lib-common';
 import type { HostEnrollment } from '../../remote/host/enrollment';
 import type { HostSurfaceProvider } from '../../remote/host/host-surface-provider';
+import { takeSetupHash, type ScannedSetup } from '../../remote/pocket-app/setup-link';
 import { FakeSocket } from '../../remote/test-fake-socket';
 import { createEphemeralHostStateStore, type HostStateStore } from './host-state-store';
 import { RemoteHostService } from './service';
@@ -890,13 +891,34 @@ describe('setup QR', () => {
   }
 
   /**
+   * Read a `setupQr` URL the way the phone does — through Pocket's own
+   * `takeSetupHash` — so every case below pins this emitter against that
+   * parser rather than against a second copy of the grammar. The parser wants
+   * a `window`; this file runs in node, so it gets the two properties it
+   * reads. (`afterEach`'s `unstubAllGlobals` is the real cleanup.)
+   */
+  function scan(url: string): ScannedSetup | null {
+    const { hash, pathname, search } = new URL(url);
+    vi.stubGlobal('window', {
+      location: { hash, pathname, search },
+      history: { replaceState: () => {} },
+    });
+    try {
+      return takeSetupHash();
+    } finally {
+      vi.stubGlobal('window', undefined);
+    }
+  }
+
+  /**
    * Mint a code and pull both of the QR's secrets back out of the URL a phone
    * would open: the Server's token, and the nonce this Host added.
    */
   async function mint(): Promise<SetupQrResult & { token: string; nonce: string }> {
     const result = (await command('setupQr')).result as SetupQrResult;
-    const params = new URLSearchParams(new URL(result.url).hash.replace('#setup?', ''));
-    return { ...result, token: params.get('token')!, nonce: params.get('nonce')! };
+    const scanned = scan(result.url);
+    if (!scanned?.nonce) throw new Error(`Pocket could not read the minted URL: ${result.url}`);
+    return { ...result, token: scanned.token, nonce: scanned.nonce };
   }
 
   /**
@@ -948,6 +970,21 @@ describe('setup QR', () => {
     expect(JSON.stringify(requests)).not.toContain(result.nonce);
     // The `hostToken` is not what crosses: only the code a human will scan does.
     expect(JSON.stringify(sent)).not.toContain('host-bearer-secret');
+  });
+
+  /**
+   * The emitter and the parser are two files that must agree on one grammar
+   * (`SETUP_HASH_*` in `wire.ts`). This is the assertion that says so directly:
+   * the URL this Host composed, read by the code the phone actually runs.
+   */
+  it('composes a URL Pocket parses both halves back out of', async () => {
+    await running();
+    const result = (await command('setupQr')).result as SetupQrResult;
+
+    expect(scan(result.url)).toEqual({
+      token: 'setup-token-1',
+      nonce: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+    });
   });
 
   it('refuses to mint on a machine with no enrollment', async () => {

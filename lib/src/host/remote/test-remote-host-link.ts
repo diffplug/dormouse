@@ -15,6 +15,12 @@
  * records for `wall-test-utils.ts`). Callers that want spies wrap these.
  */
 
+import {
+  SETUP_HASH_NONCE_PARAM,
+  SETUP_HASH_PREFIX,
+  SETUP_HASH_TOKEN_PARAM,
+} from 'server-lib-common';
+
 import type { RemoteHostConsoleStatus, SetupQrResult } from './service-protocol';
 import type { RemoteHostLink } from '../../lib/platform/types';
 
@@ -57,7 +63,8 @@ export function enrolledStatus(
 
 /**
  * A setup code as `setupQr` answers one: a `#setup?token=…&nonce=…` URL, the
- * mint it came from, and its clock.
+ * mint it came from, and its clock. Composed from the same `wire.ts` constants
+ * the real emitter uses, so a grammar change reaches the fixture too.
  *
  * The expiry is relative to *now* rather than a fixed epoch, because the panel
  * renders the minutes left — a frozen timestamp would render "expired" in every
@@ -65,10 +72,12 @@ export function enrolledStatus(
  * (`server/src/setup-token.ts`), so the copy reads as it does in the app.
  */
 export function setupQrResult(over: Partial<SetupQrResult> = {}): SetupQrResult {
+  const hash = new URLSearchParams({
+    [SETUP_HASH_TOKEN_PARAM]: '3PkQ8sV2mYb1hZr7Lw0cJdN6xTgAeUiOpqRsFuHv9Kz',
+    [SETUP_HASH_NONCE_PARAM]: 'Hs4mZbC1uKq7VnP0LxDgTfE8yRjWaOiUcQtBv3MdN2s',
+  });
   return {
-    url:
-      'https://ned-mac.tail9c2f1.ts.net/#setup?token=3PkQ8sV2mYb1hZr7Lw0cJdN6xTgAeUiOpqRsFuHv9Kz' +
-      '&nonce=Hs4mZbC1uKq7VnP0LxDgTfE8yRjWaOiUcQtBv3MdN2s',
+    url: `https://ned-mac.tail9c2f1.ts.net/${SETUP_HASH_PREFIX}${hash}`,
     mintId: 'mint-story',
     expiresAt: Date.now() + 5 * 60 * 1000,
     ...over,

@@ -24,6 +24,7 @@ const meta: Meta<typeof SetupOrSignin> = {
     // Default to the screen a phone that has never been here gets.
     firstRun: true,
     setupToken: null,
+    setupRefused: false,
     needsInstall: false,
     onSignin: () => {},
     onSetup: () => {},
@@ -67,11 +68,12 @@ export const FromScannedCodeReturning: Story = {
   args: { setupToken: 'tok-from-the-qr', firstRun: false },
 };
 
-// After a code the server refused: `App` has dropped it, so this is the return
-// visit's ordinary screen carrying the dead code's reason. Setup is back behind
-// the disclosure, where the setup password still works.
+// After a code the server refused: `App` has dropped the token but kept setup
+// unfolded on the setup password the refusal just promised. One story, not two:
+// a refusal caches nothing, so the real screen is `firstRun` — and
+// `setupRefused` makes a returning browser render this identically.
 export const SetupAfterDeadCode: Story = {
-  args: { firstRun: false, error: SETUP_CODE_DEAD_MESSAGE },
+  args: { firstRun: true, setupRefused: true, error: SETUP_CODE_DEAD_MESSAGE },
 };
 
 // Account creation in flight: the setup button reads "Creating…".

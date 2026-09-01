@@ -22,6 +22,8 @@ import { createECDH, timingSafeEqual } from 'node:crypto';
 
 import webpush from 'web-push';
 
+import { normalizeOrigin } from 'server-lib-common';
+
 import type { StoredPushSubscription } from './state.js';
 import {
   createPublicPushAgent,
@@ -232,11 +234,7 @@ export async function sendWithinDeadline(
 }
 
 function endpointOrigin(endpoint: string): string {
-  try {
-    return new URL(endpoint).origin;
-  } catch {
-    return '<invalid endpoint>';
-  }
+  return normalizeOrigin(endpoint) ?? '<invalid endpoint>';
 }
 
 /**

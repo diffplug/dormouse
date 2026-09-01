@@ -227,8 +227,8 @@ already hold one, and taking that path keeps the scanned nonce for §6 either
 way.
 
 If the code is expired or already spent, Pocket says so and drops it rather than
-stranding you on a dead code — leaving the ordinary screen, with the setup
-password still behind its disclosure:
+stranding you on a dead code — putting the setup password on the screen in its
+place, unfolded, with whatever label you had already typed still in the field:
 
 <Canvas of={SetupOrSignin.SetupAfterDeadCode} />
 
@@ -454,6 +454,10 @@ Three limits worth knowing before they surprise you:
   a re-pair later compares fingerprints (§6) unless you show the phone a fresh
   code, and the code a reload loses is simply gone — five minutes was its whole
   life anyway.
+- **A code can never reach an installed iOS Pocket at all.** The camera opens
+  Safari, which is the other storage partition (§4), and the Home Screen app
+  launches at its own start URL with no hash on it. So "show a fresh code" is
+  not a recovery there: the setup password is the one that works.
 - **A dropped WebSocket returns the phone to the Hosts view.** Tap Connect
   again; there is no resume protocol.
 

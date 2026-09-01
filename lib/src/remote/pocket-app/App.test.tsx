@@ -17,13 +17,9 @@ import {
 import type { SetupCredential } from 'server-lib-common';
 import type { PushAvailability } from '../client/push-subscribe';
 import { setNativeFieldValue } from '../../lib/dom';
+import { HOSTS, buttonNamed as buttonNamedIn, rowFor as rowForIn } from './app-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-
-const HOSTS: HostView[] = [
-  { hostId: 'host-1', label: 'First laptop', online: true },
-  { hostId: 'host-2', label: 'Second laptop', online: true },
-];
 
 let container: HTMLDivElement;
 let root: Root;
@@ -83,10 +79,7 @@ function renderHosts(
  * not silently pass if the rows are reordered.
  */
 function rowFor(label: string): HTMLElement {
-  const title = [...container.querySelectorAll('div')].find((el) => el.textContent === label);
-  const row = title?.closest('div.rounded-lg');
-  if (!(row instanceof HTMLElement)) throw new Error(`no host row for ${label}`);
-  return row;
+  return rowForIn(container, label);
 }
 
 /** The labels of a row's action buttons, in order. */
@@ -112,6 +105,7 @@ function renderAuth(
   overrides: {
     firstRun?: boolean;
     setupToken?: string | null;
+    setupRefused?: boolean;
     needsInstall?: boolean;
     busy?: string | null;
     error?: string | null;
@@ -127,6 +121,7 @@ function renderAuth(
           error={overrides.error ?? null}
           firstRun={overrides.firstRun ?? true}
           setupToken={overrides.setupToken ?? null}
+          setupRefused={overrides.setupRefused ?? false}
           needsInstall={overrides.needsInstall ?? false}
           onSignin={overrides.onSignin ?? (() => undefined)}
           onSetup={overrides.onSetup ?? (() => undefined)}
@@ -142,11 +137,7 @@ function setupPasswordField(): HTMLInputElement | null {
 }
 
 function buttonNamed(label: string | RegExp): HTMLButtonElement | null {
-  return (
-    [...container.querySelectorAll('button')].find((button) =>
-      typeof label === 'string' ? button.textContent === label : label.test(button.textContent ?? ''),
-    ) ?? null
-  );
+  return buttonNamedIn(container, label);
 }
 
 /**
@@ -286,6 +277,24 @@ describe('SetupOrSignin with a scanned code', () => {
     act(() => buttonNamed('Sign in with passkey')!.click());
 
     expect(onSignin).toHaveBeenCalledOnce();
+  });
+
+  /**
+   * The refusal's whole promise is "the setup password still works", and on a
+   * browser that has been here before `firstRun` is false — so without the
+   * refused flag the field it named would fold away behind the disclosure at
+   * the same moment it was offered.
+   */
+  it('keeps setup unfolded after a refusal, on a browser that has been here', () => {
+    renderAuth({ firstRun: false, setupToken: null, setupRefused: true });
+
+    expect(setupPasswordField()).not.toBeNull();
+    expect(buttonNamed(/First-time setup/)).toBeNull();
+    // And the copy follows the layout: "sign in with your passkey" above the
+    // setup fields would describe the wrong screen.
+    expect(container.textContent).toContain('Set up this phone');
+    expect(container.textContent).not.toContain('Welcome back');
+    expect(container.textContent).toContain("the server's setup password");
   });
 
   /**

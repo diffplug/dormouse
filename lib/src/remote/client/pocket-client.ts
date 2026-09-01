@@ -263,25 +263,49 @@ export class PocketClient {
    * a 400 (`docs/specs/server.md` -> Setup tokens).
    */
   async setup(credential: SetupCredential, label: string): Promise<SetupFinishResponse> {
-    const begin = await this.#api<SetupBeginResponse>(API_ROUTES.setupBegin, credential);
+    const begin = await this.#setupApi<SetupBeginResponse>(API_ROUTES.setupBegin, credential);
     this.#rpId = begin.rpId;
     const registration = await this.#webauthn.registerPasskey(
       begin.challenge,
       begin.rpId,
       begin.accountId,
     );
-    const finish = await this.#api<SetupFinishResponse>(API_ROUTES.setupFinish, {
+    // Cached before `finish`, never after. Creating the authenticator credential
+    // is the irreversible act and its public key is knowable the moment it
+    // returns, so the local record must not lag it: `finish` consumes the
+    // `setupToken`, and a token that died between the two calls would otherwise
+    // leave a registered credential with nothing recorded here — `hasPriorUse`
+    // false, the screen offering setup, and the retry minting a second one.
+    this.#storage.setPasskeyPublicKey(registration.credentialId, registration.publicKey);
+    const finish = await this.#setupApi<SetupFinishResponse>(API_ROUTES.setupFinish, {
       ...credential,
       credentialId: registration.credentialId,
       publicKey: registration.publicKey,
       clientDataJSON: registration.clientDataJSON,
       label,
     });
-    // Cache immediately so this profile can build pairing/connect requests;
-    // sign-in also refreshes this value from the Server's verified response.
-    this.#storage.setPasskeyPublicKey(registration.credentialId, registration.publicKey);
+    // Only once the Server has acknowledged it: this names the credential later
+    // pair/connect requests are built from. Sign-in refreshes both from the
+    // Server's verified response.
     this.#credentialId = registration.credentialId;
     return finish;
+  }
+
+  /**
+   * The two setup routes, with the one 401 body only they can earn mapped to
+   * {@link SetupTokenInvalidError}. Classified here rather than in {@link #api}
+   * so no other route's 401 can be read as a dead code.
+   */
+  async #setupApi<T>(route: string, body: unknown): Promise<T> {
+    try {
+      return await this.#api<T>(route, body);
+    } catch (err) {
+      // What `#api` throws for a non-ok response is the body's own `error`.
+      if (err instanceof Error && err.message === SETUP_TOKEN_INVALID_ERROR) {
+        throw new SetupTokenInvalidError();
+      }
+      throw err;
+    }
   }
 
   /** Sign in with a discoverable passkey; keeps the session token in memory. */
@@ -870,11 +894,6 @@ export class PocketClient {
       this.#sessionToken = null;
       throw new SessionExpiredError();
     }
-    // The other 401 the UI has to act on. Only the two setup routes answer this
-    // body, and only Pocket sends what earns it, so it needs no route check.
-    if (response.status === 401 && parsed.error === SETUP_TOKEN_INVALID_ERROR) {
-      throw new SetupTokenInvalidError();
-    }
     if (!response.ok) throw new Error(parsed.error ?? `request failed (${response.status})`);
     return parsed;
   }
@@ -950,10 +969,10 @@ function uuid(): string {
  *
  * Every localStorage touch is best-effort — a browser with site data blocked
  * (Safari's Lockdown/private modes, an enterprise policy) throws on `getItem`
- * and `setItem` alike, and `setup` commits the Server's passkey *before* it
- * caches the public key. Left to throw, that failure would strand the visit: the
- * cache write blows up after the registration is already durable, and every
- * retry mints another orphan passkey server-side.
+ * and `setItem` alike, and `setup` caches the public key only once the
+ * authenticator credential behind it exists. Left to throw, that failure would
+ * strand the visit: the cache write blows up after the registration is already
+ * irreversible, and every retry mints another orphan passkey.
  *
  * So the mirror is the primary copy — writes land there first, reads consult it
  * before storage — and localStorage is a cache that may silently do nothing.

@@ -10,9 +10,12 @@ import { takeSetupHash } from './setup-link';
 // (docs/specs/theme.md, docs/specs/pocket-app.md).
 restorePocketTheme();
 
-// Read the scanned code before the first render, and here rather than in a hook:
-// StrictMode renders a mounting tree twice, and the second pass would re-read a
-// hash the first had already erased and conclude there was no code.
+// Read the scanned code before the first render, and here rather than inside a
+// component: taking the hash erases it, so the read has to happen exactly once
+// per page load, and module scope is the only place that is structurally
+// guaranteed. (A `useState` initializer happens to survive StrictMode's doubled
+// mount, but nothing in the component makes that true — a render-body or effect
+// read would lose the code outright.)
 const scanned = takeSetupHash();
 
 // Best-effort and never awaited: the worker only carries push, so registering

@@ -237,9 +237,18 @@ export default function App({
 
   // The scanned code's two halves, held for this run only. The token is state
   // because it decides what the auth screen offers; the nonce is a ref because
-  // nothing renders from it.
+  // nothing renders from it, and it rides every `pair` for the rest of the run:
+  // the Host spends it only on a pairing that verified against it, so dropping
+  // it on an unrelated Host's approval would destroy the ceremony silently. A
+  // spent proof simply misses (`docs/specs/remote-security-model.md`).
   const [setupToken, setSetupToken] = useState<string | null>(scanned?.token ?? null);
   const setupNonceRef = useRef<string | null>(scanned?.nonce ?? null);
+  /**
+   * A scanned code the Server refused, this run. Keeps the setup half unfolded
+   * on the screen that just promised a password field, rather than folding it
+   * behind the disclosure a returning browser would otherwise get.
+   */
+  const [setupRefused, setSetupRefused] = useState(false);
 
   const [phase, setPhase] = useState<Phase>('auth');
   /**
@@ -510,10 +519,6 @@ export default function App({
       await ensureSocket();
       const result = await client.pair(host.hostId, deviceLabel(), setupNonceRef.current);
       if (!result.approved) throw new Error(result.error ?? 'Pairing was denied.');
-      // The Host spends the nonce when it approves a pairing that verified
-      // against it, so holding on would only send a proof that can no longer
-      // match (`docs/specs/remote-security-model.md` -> Pairing Ceremony).
-      setupNonceRef.current = null;
       // Recorded before connecting, so a connect that then fails leaves a row
       // offering Connect rather than one asking to pair all over again.
       setPairStateFor(host.hostId, 'paired');
@@ -581,6 +586,17 @@ export default function App({
       }
     });
 
+  /**
+   * Nothing the scanned code left on the auth screen has a job once this
+   * browser holds a passkey. Called on *both* ways out of setup, so a later
+   * drop back to `auth` — an expired session — paints the ordinary returning
+   * screen rather than offering a second passkey registration.
+   */
+  const setupSettled = useCallback(() => {
+    setSetupToken(null);
+    setSetupRefused(false);
+  }, []);
+
   const onSetup = useCallback(
     (credential: SetupCredential, label: string) =>
       run('setup', async () => {
@@ -588,19 +604,20 @@ export default function App({
           await client.setup(credential, label);
         } catch (err) {
           // A dead code is actionable rather than reportable: drop it, and the
-          // screen re-offers the setup password as an ordinary first run. The
-          // error's own message is what the user reads.
-          if (err instanceof SetupTokenInvalidError) setSetupToken(null);
+          // screen keeps setup unfolded on the setup password it just promised.
+          // The error's own message is what the user reads.
+          if (err instanceof SetupTokenInvalidError) {
+            setSetupToken(null);
+            setSetupRefused(true);
+          }
           throw err;
         }
-        // Spent, whatever happens next: a registration consumes it Server-side,
-        // so a later drop back to this screen (an expired session) must offer
-        // sign-in rather than a code that can only be refused.
-        setSetupToken(null);
+        // Spent whatever happens next — a registration consumes it Server-side.
+        setupSettled();
         await client.signin();
         await loadHosts();
       }),
-    [client, loadHosts, run],
+    [client, loadHosts, run, setupSettled],
   );
 
   const leaveWall = () => {
@@ -619,10 +636,14 @@ export default function App({
         error={error}
         firstRun={firstRun}
         setupToken={setupToken}
+        setupRefused={setupRefused}
         needsInstall={needsInstall}
         onSignin={() =>
           run('signin', async () => {
             await client.signin();
+            // The token exists to create the first passkey; this browser now
+            // has one, so it is as spent as a redeemed code — see setupSettled.
+            setupSettled();
             await loadHosts();
           })}
         onSetup={onSetup}
@@ -698,7 +719,8 @@ export function ConnectedView({
  * actually complete — with sign-in kept as a plain secondary action, since a
  * passkey syncs and a fresh browser may already have one. **Returning** keeps
  * sign-in primary and folds setup back behind the disclosure. A live
- * `setupToken` leads with setup either way (docs/specs/pocket-app.md).
+ * `setupToken`, or one this run's Server refused, leads with setup either way
+ * (docs/specs/pocket-app.md).
  *
  * The install guidance goes here rather than after sign-in because this is the
  * screen that mints the partition-bound *passkey* it warns about — the last
@@ -711,6 +733,7 @@ export function SetupOrSignin({
   error,
   firstRun,
   setupToken,
+  setupRefused = false,
   needsInstall,
   onSignin,
   onSetup,
@@ -721,6 +744,13 @@ export function SetupOrSignin({
   firstRun: boolean;
   /** The scanned code's token, while it is still live; null once spent or absent. */
   setupToken: string | null;
+  /**
+   * A scanned code this run's Server refused. Setup stays unfolded on the
+   * password field the refusal promised, whatever this browser holds — and,
+   * because the fields keep their place in the tree, a typed passkey label
+   * survives the transition.
+   */
+  setupRefused?: boolean;
   /** iOS in a browser tab; see {@link InstallFirstNotice}. */
   needsInstall: boolean;
   onSignin: () => void;
@@ -728,7 +758,7 @@ export function SetupOrSignin({
 }): React.ReactElement {
   const [showSetup, setShowSetup] = useState(false);
   const scanned = setupToken !== null;
-  const leadWithSetup = scanned || firstRun;
+  const leadWithSetup = scanned || firstRun || setupRefused;
   const signinLabel = busy === 'signin' ? 'Signing in…' : 'Sign in with passkey';
   const setupFields = (
     <PasskeySetupFields
@@ -760,9 +790,12 @@ export function SetupOrSignin({
         <div>
           <p className={PK.title}>{leadWithSetup ? 'Set up this phone' : 'Welcome back'}</p>
           <p className={clsx(PK.lead, 'mt-1')}>
+            {/* Keyed to the layout, not to `firstRun`: a refused code leaves a
+                returning browser on the setup fields, and "sign in with your
+                passkey" above them would describe the wrong screen. */}
             {scanned
               ? "The code you scanned stands in for the setup password. Name this browser's passkey and create it, then confirm on the computer."
-              : firstRun
+              : leadWithSetup
                 ? "Register this browser's passkey with the server's setup password, then approve it from your laptop."
                 : 'Sign in with your passkey to reach your enrolled hosts and pick up a terminal session.'}
           </p>

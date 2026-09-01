@@ -22,7 +22,12 @@ export function normalizeOrigin(value: unknown): string | null {
   }
 }
 
-/** True for a value that is already bare — what {@link normalizeOrigin} yields. */
+/**
+ * True for a value that is already bare — what {@link normalizeOrigin} yields.
+ * The `typeof` guard is load-bearing: without it every non-string for which
+ * {@link normalizeOrigin} answers `null` would compare equal to itself, so a
+ * caller reading raw JSON would accept `"origin": null`.
+ */
 export function isOrigin(value: unknown): boolean {
-  return normalizeOrigin(value) === value;
+  return typeof value === 'string' && normalizeOrigin(value) === value;
 }

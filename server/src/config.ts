@@ -149,11 +149,15 @@ export function readConfig(env: Env = process.env): ServerConfig {
  * downstream compares against this string rather than parsing it again. A
  * trailing slash or a path reads as correct in an `.env` and fails every one of
  * those compares, so it is normalized rather than refused; a value that is not
- * a URL with a host cannot be guessed at.
+ * an http(s) URL with a host cannot be guessed at.
  */
 function requireOrigin(raw: string): string {
   const origin = normalizeOrigin(raw);
-  if (origin === null) {
+  // The scheme too, not merely "has a host": `ws://…` reduces to a bare origin
+  // and would boot the server on one no browser can ever send as
+  // `clientData.origin`, failing every WebAuthn check with a valid-looking
+  // config. (`origin` is bare here, so the prefix test is exact.)
+  if (origin === null || !(origin.startsWith('http://') || origin.startsWith('https://'))) {
     throw new ConfigError(
       `DORMOUSE_ORIGIN must be an absolute URL with a host, e.g. https://dormouse.tailnet.ts.net, got '${raw}'.`,
     );

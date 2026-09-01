@@ -3,7 +3,30 @@ import assert from 'node:assert/strict';
 
 import { HELLO_ROUTE } from 'server-lib-common';
 
+import { createApp } from '../dist/app.js';
 import { freshApp } from './helpers.mjs';
+
+/**
+ * `createApp` compares `config.origin` as a string — the WebAuthn
+ * `clientData.origin` check, the CORS allowlist, the enrollment `origin` a Host
+ * composes its QR from — so anything but a bare origin fails every one of them
+ * while reading as correct. `readConfig` normalizes for the entrypoint; this is
+ * the boundary refusing to be handed one that was not.
+ */
+test('createApp refuses an origin that is not already bare', () => {
+  for (const origin of [
+    'https://dor.example.ts.net/',
+    'https://dor.example.ts.net/pocket',
+    'https://Dor.Example.TS.NET',
+    'dor.example.ts.net',
+  ]) {
+    assert.throws(
+      () => createApp({ setupPassword: 'pw', origin, stateDir: '/nonexistent' }),
+      /bare origin/,
+      origin,
+    );
+  }
+});
 
 test('GET / serves the stub landing page when the Pocket app is not built', async () => {
   // freshApp configures no `pocketDir`, so this is always the stub (slice 5
