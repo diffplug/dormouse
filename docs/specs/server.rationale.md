@@ -8,7 +8,9 @@
 
 ## Configuration
 
-**Loopback-lint scope.** `SECURITY.md` -> "Loopback Listeners" carries a guard-module rule, enforced by `scripts/loopback-lint.mjs`, that covers the app's browser-reachable local proxies — listeners that bind from a loopback literal in the source. The server's socket binds from `DORMOUSE_BIND_HOST` instead, so the textual lint cannot see it; the containment argument in the spec is what stands in for the lint here.
+**Loopback-lint scope.** The lint covers browser-reachable proxies whose loopback literal appears in source. The Server binds from `DORMOUSE_BIND_HOST`, so the spec's containment argument covers what text matching cannot.
+
+**Why `hosts.json` existence closes bootstrap.** Its first atomic write commits the first enrollment. Row count would reopen bootstrap after documented revocation removes the last row; a separate marker would duplicate the transition.
 
 ## Where a Host may reach a relay server (self-host builds)
 
@@ -48,6 +50,8 @@
 **What losing the `hostToken` costs.** The alternative ordering — stop the running Host, then save — strands the machine with no Host, a status that says otherwise, and a credential that cannot be re-minted from the same password exchange. The user's only recovery is a fresh enrollment against the server.
 
 ## Remote control, in the Settings dialog
+
+**What the offer read is bounded to.** The un-enrolled state, not the dialog. The Settings dialog's 2 s poll is the loudest reader but not the only one — the enrolled-gate seeds itself from `status` too, so an un-enrolled machine pays roughly two ENOENT opens per webview activation on top of it. An enrolled machine, the one left running for days, pays nothing at all.
 
 **Why the connection is polled.** Without the 2 s poll, a machine that finished connecting a moment after the dialog opened would read as permanently "Connecting…" — the Host service emits no event for connection changes, only for `{ enrolled }`.
 

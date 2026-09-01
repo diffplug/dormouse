@@ -3,7 +3,7 @@
  * challenge/session stores and an injectable clock; `index.ts` only maps env.
  */
 
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
@@ -56,9 +56,11 @@ import type {
   SigninFinishResponse,
 } from 'server-lib-common';
 
+import { invalidateEnrollOffer, redeemEnrollToken } from './enroll-token.js';
 import { Handshake } from './handshake.js';
 import { RelayHub } from './relay.js';
 import type { ClientConn, HostConn } from './relay.js';
+import { secretEquals } from './secrets.js';
 import {
   AccountStore,
   DuplicateCredentialError,
@@ -86,6 +88,11 @@ export interface AppConfig {
   readonly requireUserVerification?: boolean;
   /** Directory holding the JSON state files (docs/specs/server.md, "State files"). */
   readonly stateDir: string;
+  /**
+   * Absolute path of the installer's `EnrollmentOffer`. Absent or `null` — the
+   * default everywhere but an installed server — refuses every `enrollToken`.
+   */
+  readonly enrollTokenFile?: string | null;
   /**
    * Directory of the built Pocket web app (`lib`'s `dist-pocket`). When it
    * exists it is served statically at `/*`; otherwise `GET /` is a stub telling
@@ -132,8 +139,14 @@ type AppEnv = { Variables: { session: Session; host: StoredHost } };
 
 /** Sessions live 12 hours (server.md: "hours-scale TTL"). */
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-/** A small fixed delay on password failure — the extent of POC brute-force hardening. */
-const PASSWORD_FAILURE_DELAY_MS = 250;
+/** A small fixed delay on a rejected credential — the extent of POC brute-force hardening. */
+const CREDENTIAL_FAILURE_DELAY_MS = 250;
+/** The one answer to a wrong setup password, wherever it is supplied. */
+const BAD_PASSWORD_ERROR = 'invalid setup password';
+
+/** Internal control flow out of HostStore's serialized pre-enrollment gate. */
+class EnrollmentCredentialRejected extends Error {}
+class EnrollmentOfferNotInvalidated extends Error {}
 
 /**
  * In-memory session store. Exposed on the created app so the `/ws/client` path
@@ -214,23 +227,24 @@ export function createApp(config: AppConfig): CreatedApp {
   // other side of the exchange is a Host challenge this server merely relayed.
   const pushChallenges = new HostChallengeIssuer({ now });
 
-  // Precompute a fixed-length digest of the expected password so the
-  // constant-time compare never has to branch on length (timingSafeEqual
-  // throws on unequal-length buffers).
-  const expectedPasswordHash = sha256(config.setupPassword);
   const passwordOk = (provided: unknown): boolean =>
-    typeof provided === 'string' && timingSafeEqual(sha256(provided), expectedPasswordHash);
+    typeof provided === 'string' && secretEquals(provided, config.setupPassword);
+
+  // Every rejected credential answers 401 the same way, after the same delay.
+  async function credentialFailure(c: Context<AppEnv>, error: string): Promise<Response> {
+    await delay(CREDENTIAL_FAILURE_DELAY_MS);
+    return c.json({ error }, 401);
+  }
 
   // Read a JSON body and enforce the setup password. Returns the parsed body, or
-  // a ready 401 `Response` (after the standard failure delay) the caller returns
-  // as-is — so the three password-gated routes share one policy.
+  // a ready 401 `Response` the caller returns as-is — so the password-gated
+  // routes share one policy.
   async function readPasswordGated<T extends { password: unknown }>(
     c: Context<AppEnv>,
   ): Promise<T | Response> {
     const body = await readJson<T>(c);
     if (!body || !passwordOk(body.password)) {
-      await delay(PASSWORD_FAILURE_DELAY_MS);
-      return c.json({ error: 'invalid setup password' }, 401);
+      return credentialFailure(c, BAD_PASSWORD_ERROR);
     }
     return body;
   }
@@ -372,13 +386,64 @@ export function createApp(config: AppConfig): CreatedApp {
     return c.json(res);
   });
 
-  // --- Host enrollment: password-gated, appends to hosts.json --------------
+  // --- Host enrollment: credential-gated, appends to hosts.json ------------
 
   app.post(API_ROUTES.hostEnroll, async (c) => {
-    const body = await readPasswordGated<HostEnrollRequest>(c);
-    if (body instanceof Response) return body;
-    const label = typeof body.label === 'string' ? body.label : '';
-    const host = await hostStore.enroll(label);
+    const body = await readJson<HostEnrollRequest>(c);
+    const password: unknown = body?.password;
+    const enrollToken: unknown = body?.enrollToken;
+    // Exactly one credential, counted by presence rather than by type. Trying
+    // both in turn would let a spent enroll token fall through to the password,
+    // leaving which one authorized the enrollment ambiguous on both sides. A
+    // lone credential of the wrong type is that branch's own delayed 401, the
+    // same answer the password-gated setup routes give.
+    if ((password !== undefined) === (enrollToken !== undefined)) {
+      return c.json({ error: 'supply exactly one of password or enrollToken' }, 400);
+    }
+    if (enrollToken !== undefined && typeof enrollToken !== 'string') {
+      return credentialFailure(c, UNAUTHORIZED_ERROR);
+    }
+    if (password !== undefined && !passwordOk(password)) {
+      return credentialFailure(c, BAD_PASSWORD_ERROR);
+    }
+    const label = typeof body?.label === 'string' ? body.label : '';
+    let host: StoredHost;
+    try {
+      host = await hostStore.enroll(label, async (firstEnrollment) => {
+        if (enrollToken !== undefined) {
+          if (!firstEnrollment) {
+            // The offer is already dead by durable Server state. Best-effort
+            // cleanup keeps an old installer file from continuing to advertise
+            // it locally, but its outcome must not distinguish token guesses.
+            await invalidateEnrollOffer(config.enrollTokenFile);
+            throw new EnrollmentCredentialRejected();
+          }
+          // Unconfigured, absent, malformed, expired, wrong-shaped and wrong-
+          // token are one rejection: none may tell a caller which one it hit.
+          const redemption = await redeemEnrollToken(config.enrollTokenFile, enrollToken);
+          if (redemption === 'rejected') throw new EnrollmentCredentialRejected();
+          if (redemption === 'not-invalidated') throw new EnrollmentOfferNotInvalidated();
+        } else if (firstEnrollment) {
+          // A setup-password enrollment can win the same first-Host race. Take
+          // the offer away before minting its sibling credential.
+          if ((await invalidateEnrollOffer(config.enrollTokenFile)) === 'not-invalidated') {
+            throw new EnrollmentOfferNotInvalidated();
+          }
+        }
+      });
+    } catch (err) {
+      if (err instanceof EnrollmentCredentialRejected) {
+        return credentialFailure(c, UNAUTHORIZED_ERROR);
+      }
+      if (err instanceof EnrollmentOfferNotInvalidated) {
+        // Reached only after a valid bootstrap credential, so answering fast
+        // would confirm it. Keep the same delay while retaining the operator-
+        // visible 500: no Host was minted against an offer still on disk.
+        await delay(CREDENTIAL_FAILURE_DELAY_MS);
+        return c.json({ error: 'could not invalidate the enroll token' }, 500);
+      }
+      throw err;
+    }
     // The Host enforces `origin`/`rpId` as its ConnectionPolicy (server.md).
     const res: HostEnrollResponse = {
       hostId: host.hostId,
@@ -816,11 +881,6 @@ function pocketCacheControl(requestPath: string): string {
 
 // ---------------------------------------------------------------------------
 // Helpers
-
-/** SHA-256 of a UTF-8 string, as a fixed 32-byte buffer. */
-function sha256(text: string): Buffer {
-  return createHash('sha256').update(text, 'utf8').digest();
-}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

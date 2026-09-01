@@ -102,6 +102,21 @@ export interface EnrollParams {
   label: string;
 }
 
+/**
+ * One-click enrollment against the offer an installer left on this machine
+ * (`docs/specs/server.md` → "Remote control, in the Settings dialog").
+ */
+export interface EnrollOfferParams {
+  /**
+   * The origin the card displayed, echoed back so the service can refuse an
+   * offer file that was rewritten between the render and the click. **Not the
+   * origin that is enrolled against** — that comes off the file, along with the
+   * token this shape deliberately does not carry.
+   */
+  origin: string;
+  label: string;
+}
+
 export interface ApproveParams {
   clientId: string;
   pairingId: string;
@@ -166,6 +181,19 @@ export interface RemoteHostConsoleStatus {
    */
   connection: RemoteHostStatus;
   pairedClients: number;
+  /** What to prefill a "name for this machine" field with: the hostname. */
+  suggestedLabel: string;
+  /**
+   * The installer's enrollment offer on this machine, when there is one and this
+   * Host has not enrolled — the Settings dialog's one-click path
+   * (`docs/specs/server.md` → "Remote control, in the Settings dialog", which
+   * owns the re-read-at-click rule and what makes the card safe to press).
+   *
+   * **The offer's `token` is never here.** This is a service→webview shape, and
+   * the token is a bearer credential exactly like `hostToken` (`SECURITY.md` →
+   * the no-`hostToken`-in-a-webview FAIL IF).
+   */
+  offer: { origin: string } | null;
 }
 
 /**

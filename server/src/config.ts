@@ -50,6 +50,12 @@ export interface ServerConfig {
    */
   runtimeFile: string | null;
   /**
+   * Absolute path of the installer's `EnrollmentOffer`; `null` — the default —
+   * refuses every `enrollToken`. See `enroll-token.ts` and, for the policy,
+   * `docs/specs/server.md` → "Configuration".
+   */
+  enrollTokenFile: string | null;
+  /**
    * The release directory's name, supplied by the installer's `run-server`
    * wrapper. `null` when the server was not started by an installer.
    */
@@ -115,16 +121,9 @@ export function readConfig(env: Env = process.env): ServerConfig {
   // delivery fail silently.
   const vapidSubject = env.DORMOUSE_VAPID_SUBJECT ?? defaultVapidSubject(origin);
 
-  // Installer-supplied, and absent everywhere else. A relative runtime path is
-  // refused rather than resolved against the cwd: the wrapper runs under a
-  // service manager whose working directory is not the installer's, so a
-  // relative path would land somewhere neither side can predict.
-  const runtimeFile = env.DORMOUSE_RUNTIME_FILE?.trim() || null;
-  if (runtimeFile !== null && !isAbsolute(runtimeFile)) {
-    throw new ConfigError(
-      `DORMOUSE_RUNTIME_FILE must be an absolute path, got '${runtimeFile}'.`,
-    );
-  }
+  // Installer-supplied, and absent everywhere else.
+  const runtimeFile = installerPath(env, 'DORMOUSE_RUNTIME_FILE');
+  const enrollTokenFile = installerPath(env, 'DORMOUSE_ENROLL_TOKEN_FILE');
   const releaseId = env.DORMOUSE_RELEASE_ID?.trim() || null;
 
   return {
@@ -138,6 +137,21 @@ export function readConfig(env: Env = process.env): ServerConfig {
     vapidKeys,
     vapidSubject,
     runtimeFile,
+    enrollTokenFile,
     releaseId,
   };
+}
+
+/**
+ * The installer-supplied absolute path at `env[name]`, or `null` when unset or
+ * blank. A relative value is refused rather than resolved against the cwd: the
+ * `run-server` wrapper runs under a service manager whose working directory is
+ * not the installer's, so it would land somewhere neither side can predict.
+ */
+function installerPath(env: Env, name: string): string | null {
+  const value = env[name]?.trim() || null;
+  if (value !== null && !isAbsolute(value)) {
+    throw new ConfigError(`${name} must be an absolute path, got '${value}'.`);
+  }
+  return value;
 }

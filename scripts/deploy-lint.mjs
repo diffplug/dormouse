@@ -89,14 +89,28 @@ export const RULES = [
     },
   },
   {
-    // Anchored on each guard's own comparison. `-ge 64` occurs exactly once in
-    // either shell installer, but a bare /64/ on Windows also matched two
-    // `exit 64` argument-parse lines and the guard's *explanatory comment* —
-    // so the prose about the rule survived deleting the rule.
+    // The rule above matches the generator's *body*, which the enrollment
+    // token also keeps alive — so on its own it would stay green after
+    // `SETUP_PASSWORD="$RANDOM"`. This pins the assignment, the parallel of the
+    // enroll-token rule below.
+    rule: 'Credentials at rest — the setup password comes from that named generator',
+    patterns: {
+      macOS: /SETUP_PASSWORD="\$\(random_hex32\)"/,
+      Linux: /SETUP_PASSWORD="\$\(random_hex32\)"/,
+      Windows: /\$SETUP_PASSWORD = New-RandomHex32/,
+    },
+  },
+  {
+    // Anchored on each guard's own comparison, naming the secret it guards: the
+    // enrollment offer's token has a guard of the same shape, so a bare
+    // `-ge 64` would be satisfied by either and neither would be load-bearing.
+    // A bare /64/ on Windows was worse still — it also matched two `exit 64`
+    // argument-parse lines and the guard's *explanatory comment*, so the prose
+    // about the rule survived deleting the rule.
     rule: 'Credentials at rest — the entropy guard counts 64 hex characters, not 32',
     patterns: {
-      macOS: /-ge 64/,
-      Linux: /-ge 64/,
+      macOS: /\$\{#SETUP_PASSWORD\} -ge 64/,
+      Linux: /\$\{#SETUP_PASSWORD\} -ge 64/,
       Windows: /\$SETUP_PASSWORD\.Length -lt 64/,
     },
   },
@@ -139,14 +153,127 @@ export const RULES = [
     },
   },
   {
-    // Anchored on the two paths that matter. A bare `chmod 0700` also matches
+    // Anchored on the three paths that matter. A bare `chmod 0700` also matches
     // `run-server`, `manage` and the probe state dir, and `Protect-Path` has
     // six hits, so relaxing config/+state/ to 0755 passed.
-    rule: 'Credentials at rest — config/ and state/ are created owner-only',
+    //
+    // Every path is named, because a pattern that stops short of the last one
+    // matches as a strict prefix of the line: `"$CONFIG_DIR" "$STATE_DIR"`
+    // stayed green after `"$RUN_DIR"` — the offer's directory — was deleted
+    // from the same chmod. Windows matches its three calls as one span for the
+    // same reason; they are written as one block on purpose.
+    rule: 'Credentials at rest — config/, state/ and run/ are created owner-only',
     patterns: {
-      macOS: /chmod 0700 "\$CONFIG_DIR" "\$STATE_DIR"/,
-      Linux: /chmod 0700 "\$CONFIG_DIR" "\$STATE_DIR"/,
-      Windows: /Protect-Path -Path \$CONFIG_DIR -Directory/,
+      macOS: /chmod 0700 "\$CONFIG_DIR" "\$STATE_DIR" "\$RUN_DIR"/,
+      Linux: /chmod 0700 "\$CONFIG_DIR" "\$STATE_DIR" "\$RUN_DIR"/,
+      Windows:
+        /Protect-Path -Path \$CONFIG_DIR -Directory\n\s*Protect-Path -Path \$STATE_DIR -Directory\n\s*Protect-Path -Path \$RUN_DIR -Directory/,
+    },
+  },
+  {
+    // The token is minted by the same named generator as the setup password —
+    // one per installer, which the CSPRNG rule above matches at its definition.
+    // Anchored on the mint itself: swapping in $RANDOM, a timestamp, or a
+    // reused password would rewrite exactly this line.
+    rule: 'Credentials at rest — the enroll token comes from the same CSPRNG as the setup password',
+    patterns: {
+      macOS: /ENROLL_TOKEN="\$\(random_hex32\)"/,
+      Linux: /ENROLL_TOKEN="\$\(random_hex32\)"/,
+      Windows: /\$enrollToken = New-RandomHex32/,
+    },
+  },
+  {
+    rule: "Credentials at rest — the enroll token's entropy guard counts 64 hex characters",
+    patterns: {
+      macOS: /\$\{#ENROLL_TOKEN\} -ge 64/,
+      Linux: /\$\{#ENROLL_TOKEN\} -ge 64/,
+      Windows: /\$enrollToken\.Length -lt 64/,
+    },
+  },
+  {
+    rule: 'Credentials at rest — hosts.json permanently closes installer offer bootstrap',
+    patterns: {
+      macOS:
+        /if \[ -e "\$STATE_DIR\/hosts\.json" \]; then\n\s*rm -f "\$ENROLL_OFFER_FILE"/,
+      Linux:
+        /if \[ -e "\$STATE_DIR\/hosts\.json" \]; then\n\s*rm -f "\$ENROLL_OFFER_FILE"/,
+      Windows:
+        /if \(Test-Path -LiteralPath \(Join-Path \$STATE_DIR 'hosts\.json'\)\) \{\n\s*Remove-Item -LiteralPath \$ENROLL_OFFER_FILE/,
+    },
+  },
+  {
+    // The offer header is adjacent to the end of pruning, making it the last
+    // state mutation before the read-only summary. Pinning that boundary catches
+    // a move back above Serve without coupling the lint to every Serve command.
+    rule: 'Credentials at rest — enrollment offer is minted after pruning and Serve',
+    patterns: {
+      macOS:
+        /ok "pruned \$PRUNED old release\(s\); config and state untouched"\nfi\n\n# -+ enroll offer/,
+      Linux:
+        /ok "pruned \$PRUNED old release\(s\); config and state untouched"\nfi\n\n# -+ enroll offer/,
+      Windows:
+        /Write-Ok "pruned \$pruned old release\(s\); config and state untouched"\n  \}\n\n  # -+ enroll offer/,
+    },
+  },
+  {
+    // Two adjacent operations, matched as one span, because the control is their
+    // ORDER: a same-directory temp file, restricted, and only then the token.
+    //
+    // BOTH operands are pinned. Leaving the second line's operand off — on the
+    // theory that the line above already anchors the identifier's spelling, so
+    // repeating it would pin spelling rather than order — left the rule
+    // satisfied by restricting the WRONG file: `chmod 0600 "$ENV_FILE"` on the
+    // line after the offer's truncation matched, and the offer stayed under the
+    // directory's default permissions with the lint green.
+    rule: 'Credentials at rest — the offer file is restricted to the installing user before the token is written',
+    patterns: {
+      macOS:
+        /ENROLL_OFFER_TMP="\$\(mktemp "\$RUN_DIR\/\.enroll-offer\.XXXXXX"\)" \\\n\s*\|\| die "could not create a temporary enrollment offer\."\n\s*chmod 0600 "\$ENROLL_OFFER_TMP"/,
+      Linux:
+        /ENROLL_OFFER_TMP="\$\(mktemp "\$RUN_DIR\/\.enroll-offer\.XXXXXX"\)" \\\n\s*\|\| die "could not create a temporary enrollment offer\."\n\s*chmod 0600 "\$ENROLL_OFFER_TMP"/,
+      Windows:
+        /\[IO\.File\]::WriteAllText\(\$offerTemp, ''\)\n\s*Protect-Path -Path \$offerTemp\b/,
+    },
+  },
+  {
+    // Same-directory rename is the publication point: the live path contains a
+    // complete old offer, a complete new offer, or nothing because redemption
+    // claimed it — never an in-progress write.
+    rule: 'Credentials at rest — the completed enrollment offer is published by atomic rename',
+    patterns: {
+      macOS: /mv -f "\$ENROLL_OFFER_TMP" "\$ENROLL_OFFER_FILE"/,
+      Linux: /mv -f "\$ENROLL_OFFER_TMP" "\$ENROLL_OFFER_FILE"/,
+      Windows: /fs\.renameSync\(process\.argv\[2\], process\.argv\[3\]\)/,
+    },
+  },
+  {
+    // The same ordering control on `config/server.env`, which SECURITY.md's
+    // FAIL IF has always required and nothing checked. macOS reaches it with
+    // `umask 077` covering the heredoc rather than a chmod on an empty file, so
+    // that is what its pattern anchors; the other two bind both operands, for
+    // the reason the rule above states.
+    rule: 'Credentials at rest — config/server.env is restricted to the installing user before the password is written',
+    patterns: {
+      macOS: /umask 077\n\s*cat > "\$ENV_FILE"/,
+      Linux: /: > "\$ENV_FILE"\n\s*chmod 0600 "\$ENV_FILE"/,
+      Windows: /\[IO\.File\]::WriteAllText\(\$ENV_FILE, ''\)\n\s*Protect-Path -Path \$ENV_FILE\b/,
+    },
+  },
+  {
+    // `run/` is the whole claim — SECURITY.md's FAIL IF carries the why — so
+    // the pattern pins the path segment and not the basename: a rename is not
+    // this rule's business, and pinning it would redden the lint for the wrong
+    // reason. Two lines as one span, because what decides the placement is the
+    // offer deriving from that directory.
+    //
+    // Placement is textual; lifecycle is executable. CI's Linux test-mode
+    // install requires rotation across two pre-enrollment runs, then creates
+    // hosts.json and requires a third run to leave no offer.
+    rule: 'Credentials at rest — the enrollment offer is written under run/, never config/ or state/',
+    patterns: {
+      macOS: /RUN_DIR="\$INSTALL_ROOT\/run"\n\s*ENROLL_OFFER_FILE="\$RUN_DIR\//,
+      Linux: /RUN_DIR="\$INSTALL_ROOT\/run"\n\s*ENROLL_OFFER_FILE="\$RUN_DIR\//,
+      Windows: /\$RUN_DIR = Join-Path \$INSTALL_ROOT 'run'\n\s*\$ENROLL_OFFER_FILE = Join-Path \$RUN_DIR /,
     },
   },
   {
@@ -245,6 +372,17 @@ export const RULES = [
   },
 ];
 
+/**
+ * Line endings, normalized to `\n`. Several patterns span two adjacent lines,
+ * and a `core.autocrlf=true` checkout puts a `\r` in front of every newline —
+ * which no pattern here spells, so on such a checkout every span rule would
+ * report a missing control that is in fact present. Shared with the self-test,
+ * which matches and edits the same text.
+ */
+export function normalizeEol(text) {
+  return text.replace(/\r\n/g, '\n');
+}
+
 export function check() {
   const failures = [];
   let checked = 0;
@@ -260,7 +398,7 @@ export function check() {
     checked += 1;
     let text;
     try {
-      text = readFileSync(join(repoRoot, file), 'utf8');
+      text = normalizeEol(readFileSync(join(repoRoot, file), 'utf8'));
     } catch {
       failures.push(`${rule}\n    ${file}: missing`);
       continue;

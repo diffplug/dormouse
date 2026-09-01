@@ -267,6 +267,17 @@ function Protect-Path {
   (Get-Item -LiteralPath $Path -Force).SetAccessControl($sec)
 }
 
+# 32 bytes of the platform CSPRNG as 64 lowercase hex characters. Both secrets
+# this installer mints -- the setup password and the enrollment offer's token --
+# come from here, so there is one generator to audit rather than one per secret.
+# Never substitute Get-Random, which is not a CSPRNG.
+function New-RandomHex32 {
+  $bytes = New-Object byte[] 32
+  $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+  try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+  return (-join ($bytes | ForEach-Object { $_.ToString('x2') }))
+}
+
 # The tail of whatever a failed command actually said. pnpm reports its errors
 # on STDOUT -- ERR_PNPM_INVALID_DEPLOY_TARGET never touches stderr -- so quoting
 # only stderr produces a failure message with nothing in it.
@@ -546,6 +557,8 @@ if ($CERT_DOMAINS -and (",$CERT_DOMAINS," -like "*,$TS_DNS,*")) {
 
 $CONFIG_DIR = Join-Path $INSTALL_ROOT 'config'
 $ENV_FILE = Join-Path $CONFIG_DIR 'server.env'
+$RUN_DIR = Join-Path $INSTALL_ROOT 'run'
+$ENROLL_OFFER_FILE = Join-Path $RUN_DIR 'enroll-offer.json'
 $STATE_DIR = Join-Path $INSTALL_ROOT 'state'
 $RELEASES_DIR = Join-Path $INSTALL_ROOT 'releases'
 $BIN_DIR = Join-Path $INSTALL_ROOT 'bin'
@@ -725,12 +738,23 @@ try {
   New-Directory $BIN_DIR
   New-Directory $CONFIG_DIR
   New-Directory $STATE_DIR
+  New-Directory $RUN_DIR
   New-Directory $LOG_DIR
+  # One block, because they are one rule (deploy-lint matches all three as a
+  # single span). run\ belongs in it: it holds the enrollment offer, so it was
+  # the last credential-bearing directory still on %LOCALAPPDATA%'s inherited
+  # SYSTEM and Administrators entries, and the directory governs replace and
+  # delete of that file. The same-user Node process still writes run\server.json
+  # under the single-ACE owner DACL -- that ACE is FullControl for the account
+  # the task runs as.
   Protect-Path -Path $CONFIG_DIR -Directory
   Protect-Path -Path $STATE_DIR -Directory
+  Protect-Path -Path $RUN_DIR -Directory
 
-  $BUILT_AT = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
-  $RELEASE_ID = [DateTime]::UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'") + "-$GIT_SHORT"
+  # InvariantCulture: the user's locale must not pick the calendar or the time
+  # separator for a release id or a timestamp other tooling parses.
+  $BUILT_AT = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
+  $RELEASE_ID = [DateTime]::UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'", [Globalization.CultureInfo]::InvariantCulture) + "-$GIT_SHORT"
   if ($GIT_DIRTY -eq 'true') { $RELEASE_ID = "$RELEASE_ID-dirty" }
   $STAGE = Join-Path $RELEASES_DIR $RELEASE_ID
 
@@ -804,10 +828,7 @@ try {
   Write-Step "Runtime configuration"
 
   if (-not (Test-Path -LiteralPath $ENV_FILE)) {
-    $bytes = New-Object byte[] 32
-    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
-    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
-    $SETUP_PASSWORD = -join ($bytes | ForEach-Object { $_.ToString('x2') })
+    $SETUP_PASSWORD = New-RandomHex32
     # 32 random bytes is 64 hex characters. The guard counts characters, so it
     # must be 64, not 32 -- a guard reading 32 would pass a regression to half
     # the entropy SECURITY.md claims.
@@ -968,6 +989,8 @@ while ($true) {
   # release is answering?" without walking the process table. Set here rather
   # than in server.env because it is derived from current.txt, which moves.
   $psi.EnvironmentVariables['DORMOUSE_RUNTIME_FILE'] = (Join-Path $Root 'run\server.json')
+  # The installer mints this only until hosts.json records the first enrollment.
+  $psi.EnvironmentVariables['DORMOUSE_ENROLL_TOKEN_FILE'] = (Join-Path $Root 'run\enroll-offer.json')
   $psi.EnvironmentVariables['DORMOUSE_RELEASE_ID'] = $releaseId
 
   Write-ServiceLog "starting release $releaseId"
@@ -1005,6 +1028,7 @@ while ($true) {
 
 $Root = Split-Path -Parent $PSScriptRoot
 $EnvFile = Join-Path $Root 'config\server.env'
+$OfferFile = Join-Path $Root 'run\enroll-offer.json'
 $StateDir = Join-Path $Root 'state'
 $LogDir = Join-Path $Root 'logs'
 $CurrentPointer = Join-Path $Root 'current.txt'
@@ -1534,9 +1558,13 @@ function Invoke-Verify {
     Pass "tailscale funnel is off (the origin stays tailnet-only)"
   }
 
+  # run\ is checked as a directory in its own right, not merely as the offer's
+  # parent: the directory governs who may replace or delete the one credential
+  # the server honors from disk.
   foreach ($pair in @(
       @{ Path = (Join-Path $Root 'config'); Label = 'config\' },
       @{ Path = $StateDir; Label = 'state\' },
+      @{ Path = (Join-Path $Root 'run'); Label = 'run\' },
       @{ Path = $EnvFile; Label = 'config\server.env' })) {
     $r = Test-OwnerOnly -Path $pair.Path
     if ($r.Ok) { Pass "$($pair.Label) grants only this user" }
@@ -1564,6 +1592,17 @@ function Invoke-Verify {
       Fail "state files readable by another principal:"
       foreach ($l in $leaky) { Write-Host "      $l" }
     }
+  }
+
+  # The enrollment offer is single-use: absent means it was spent (or never
+  # minted by an older installer), which is healthy. Only its ACL is this
+  # command's business, and only while it is there.
+  if (Test-Path -LiteralPath $OfferFile -PathType Leaf) {
+    $r = Test-OwnerOnly -Path $OfferFile
+    if ($r.Ok) { Pass "run\enroll-offer.json grants only this user" }
+    else { Fail "run\enroll-offer.json $($r.Reason)" }
+  } else {
+    Note "no enrollment offer on disk (spent, or minted by an older installer)"
   }
 
   if ((Get-EnvValue 'DORMOUSE_BIND_HOST') -eq '127.0.0.1') {
@@ -1804,15 +1843,19 @@ function Invoke-Uninstall {
 function Invoke-Purge {
   Write-Host ""
   Write-Host "${C_RED}IRREVERSIBLE$C_OFF This deletes the account, enrolled Hosts, push"
-  Write-Host "subscriptions, and the VAPID key:"
+  Write-Host "subscriptions, the VAPID key, and any unspent enrollment offer:"
   Write-Host "  $StateDir"
   Write-Host "  $Root\config"
+  Write-Host "  $Root\run"
   Write-Host ""
   Write-Host "Registered passkeys and enrolled Hosts will have to be set up again."
   Write-Host ""
   $reply = Read-Host 'Type exactly: DELETE DORMOUSE STATE'
   if ($reply -cne 'DELETE DORMOUSE STATE') { Write-Host 'aborted'; return 1 }
-  foreach ($p in @($StateDir, (Join-Path $Root 'config'))) {
+  # run\ too: an unspent enroll-offer.json redeems for a Host enrollment without
+  # any existing account, and redemption recreates the state this command just
+  # deleted. Leaving it behind would make "IRREVERSIBLE" false for a day.
+  foreach ($p in @($StateDir, (Join-Path $Root 'config'), (Join-Path $Root 'run'))) {
     Remove-Tree $p
   }
   Write-Host 'purged.'
@@ -2193,6 +2236,63 @@ rem directly.
     Write-Ok "nothing to prune (retaining current$(if ($keepPrevious) { ' and previous' }))"
   } else {
     Write-Ok "pruned $pruned old release(s); config and state untouched"
+  }
+
+  # ------------------------------------------------------------ enroll offer ---
+
+  # run\enroll-offer.json, the one-time offer redeemed at POST /api/host/enroll
+  # in place of the setup password (SECURITY.md -> "Credentials at rest").
+  #
+  # Last state mutation: minting burns the previous unspent offer, so the
+  # release, HTTPS Serve mapping, and pruning must all have succeeded first. The
+  # server reads this file fresh; nothing needs it when the task starts.
+  #
+  # hosts.json is the durable "first Host happened" marker. Emptying its rows
+  # revokes Hosts but does not silently reopen this bootstrap credential.
+  if (Test-Path -LiteralPath (Join-Path $STATE_DIR 'hosts.json')) {
+    Remove-Item -LiteralPath $ENROLL_OFFER_FILE -Force -ErrorAction SilentlyContinue
+    Write-Ok "a Host has already enrolled -- no one-click enrollment offer minted"
+  } else {
+    $enrollToken = New-RandomHex32
+    if ($enrollToken.Length -lt 64) {
+      Die "generated enroll token is implausibly short; refusing to write the enrollment offer."
+    }
+    # Build an owner-only file beside the destination, then rename it into place.
+    # Redemption may claim the live path at any instant; it must see one complete
+    # generation or the other, never the create/ACL/write steps of a mint.
+    $offerTemp = Join-Path $RUN_DIR ('.enroll-offer.' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    [IO.File]::WriteAllText($offerTemp, '')
+    Protect-Path -Path $offerTemp
+    # mintedAt is read here, at write time, and never from $BUILT_AT: the 24-hour
+    # expiry runs from the mint, and the build that precedes it is not free.
+    #
+    # InvariantCulture is load-bearing, not decoration: the server hard-rejects an
+    # offer it cannot parse as fresh, and the current culture rewrites this stamp.
+    # Under fi-FI the ':' separator becomes '.', and under th-TH the Buddhist
+    # calendar mints year 2569 -- both silently unredeemable.
+    $offer = [pscustomobject]@{
+      origin   = $ORIGIN
+      token    = $enrollToken
+      mintedAt = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
+    } | ConvertTo-Json -Compress
+    try {
+      [IO.File]::WriteAllText($offerTemp, $offer + "`r`n")
+      # Windows PowerShell 5.1 has no File.Move(overwrite) overload. Node's
+      # same-directory rename is MoveFileEx(REPLACE_EXISTING), the atomic path
+      # already used for current.txt and previous.txt above.
+      $publishOfferJs = @'
+const fs = require("fs");
+fs.renameSync(process.argv[2], process.argv[3]);
+'@
+      $published = Invoke-NodeScript -NodeBin $STAGED_NODE -Script $publishOfferJs -Arguments @($offerTemp, $ENROLL_OFFER_FILE)
+      if ($published.ExitCode -ne 0) {
+        Die "could not publish the enrollment offer: $(Get-FailureTail $published)"
+      }
+    } finally {
+      Remove-Item -LiteralPath $offerTemp -Force -ErrorAction SilentlyContinue
+    }
+    Remove-Variable enrollToken, offerTemp
+    Write-Ok "minted run\enroll-offer.json (owner-only ACL) -- a one-time enrollment offer for a Host on this machine"
   }
 
   # ---------------------------------------------------------------- summary ---

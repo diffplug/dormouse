@@ -261,6 +261,8 @@ esac
 
 CONFIG_DIR="$INSTALL_ROOT/config"
 ENV_FILE="$CONFIG_DIR/server.env"
+RUN_DIR="$INSTALL_ROOT/run"
+ENROLL_OFFER_FILE="$RUN_DIR/enroll-offer.json"
 STATE_DIR="$INSTALL_ROOT/state"
 RELEASES_DIR="$INSTALL_ROOT/releases"
 BIN_DIR="$INSTALL_ROOT/bin"
@@ -393,8 +395,11 @@ ok "pinned runtime: $NODE_BUILD_VERSION ($NODE_BUILD_ARCH)"
 step "Staging the new release"
 
 mkdir -p "$RELEASES_DIR" "$BIN_DIR"
-mkdir -p "$CONFIG_DIR" "$STATE_DIR"
-chmod 0700 "$CONFIG_DIR" "$STATE_DIR"
+mkdir -p "$CONFIG_DIR" "$STATE_DIR" "$RUN_DIR"
+# Explicit, not left to the umask: nothing has narrowed it by this point, and
+# the `umask 077` further down is scoped to the first-install branch — so an
+# update run would otherwise create these 0755.
+chmod 0700 "$CONFIG_DIR" "$STATE_DIR" "$RUN_DIR"
 mkdir -p "$LOG_DIR"
 
 BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -459,15 +464,22 @@ ok "release $RELEASE_ID staged"
 
 step "Runtime configuration"
 
-if [ ! -f "$ENV_FILE" ]; then
-  SETUP_PASSWORD=""
+# 32 bytes of the platform CSPRNG as 64 lowercase hex characters. Both secrets
+# this installer mints — the setup password and the enrollment offer's token —
+# come from here, so there is one generator to audit rather than one per secret.
+# Never substitute $RANDOM, a timestamp, or any other non-CSPRNG source.
+random_hex32() {
   if [ -x /usr/bin/xxd ]; then
-    SETUP_PASSWORD="$(/usr/bin/xxd -p -l 32 -c 32 /dev/urandom)"
+    /usr/bin/xxd -p -l 32 -c 32 /dev/urandom
   elif [ -x /usr/bin/openssl ]; then
-    SETUP_PASSWORD="$(/usr/bin/openssl rand -hex 32)"
+    /usr/bin/openssl rand -hex 32
   else
-    die "no way to generate a high-entropy password (need /usr/bin/xxd or /usr/bin/openssl)."
+    die "no way to generate a high-entropy secret (need /usr/bin/xxd or /usr/bin/openssl)."
   fi
+}
+
+if [ ! -f "$ENV_FILE" ]; then
+  SETUP_PASSWORD="$(random_hex32)"
   # Both generators above produce 32 random bytes, i.e. 64 hex characters. The
   # guard counts characters, so it must be 64 — checking for 32 would pass a
   # regression to `-l 16`, which is half the entropy SECURITY.md claims.
@@ -551,6 +563,8 @@ ENTRY="$ROOT/current/server/dist/index.js"
 # is answering?" without reconstructing it from the process table. Set here
 # rather than in server.env because it is derived from `current`, which moves.
 export DORMOUSE_RUNTIME_FILE="$ROOT/run/server.json"
+# The installer mints this only until hosts.json records the first enrollment.
+export DORMOUSE_ENROLL_TOKEN_FILE="$ROOT/run/enroll-offer.json"
 RELEASE_TARGET="$(readlink "$ROOT/current" 2>/dev/null || true)"
 [ -n "$RELEASE_TARGET" ] && export DORMOUSE_RELEASE_ID="${RELEASE_TARGET##*/}"
 
@@ -567,6 +581,7 @@ set -euo pipefail
 LABEL="sh.dormouse.server"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$ROOT/config/server.env"
+OFFER_FILE="$ROOT/run/enroll-offer.json"
 STATE_DIR="$ROOT/state"
 LOG_DIR="$HOME/Library/Logs/Dormouse Server"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -835,13 +850,28 @@ cmd_verify() {
     pass "tailscale funnel is off (the origin stays tailnet-only)"
   fi
 
-  local cfg_mode state_mode env_mode
+  local cfg_mode state_mode run_mode env_mode offer_mode
   cfg_mode="$(stat -f '%Lp' "$ROOT/config" 2>/dev/null || echo '???')"
   state_mode="$(stat -f '%Lp' "$STATE_DIR" 2>/dev/null || echo '???')"
+  # run/ is checked as a directory in its own right, not merely as the offer's
+  # parent: the directory governs who may replace or delete the one credential
+  # the server honors from disk.
+  run_mode="$(stat -f '%Lp' "$ROOT/run" 2>/dev/null || echo '???')"
   env_mode="$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || echo '???')"
   [ "$cfg_mode" = "700" ] && pass "config/ is mode 0700" || fail "config/ is mode $cfg_mode, expected 700"
   [ "$state_mode" = "700" ] && pass "state/ is mode 0700" || fail "state/ is mode $state_mode, expected 700"
+  [ "$run_mode" = "700" ] && pass "run/ is mode 0700" || fail "run/ is mode $run_mode, expected 700"
   [ "$env_mode" = "600" ] && pass "config/server.env is mode 0600" || fail "config/server.env is mode $env_mode, expected 600"
+
+  # The enrollment offer is single-use: absent means it was spent (or never
+  # minted by an older installer), which is healthy. Only its permissions are
+  # this command's business, and only while it is there.
+  if [ -f "$OFFER_FILE" ]; then
+    offer_mode="$(stat -f '%Lp' "$OFFER_FILE" 2>/dev/null || echo '???')"
+    [ "$offer_mode" = "600" ] && pass "run/enroll-offer.json is mode 0600" || fail "run/enroll-offer.json is mode $offer_mode, expected 600"
+  else
+    note "no enrollment offer on disk (spent, or minted by an older installer)"
+  fi
 
   if grep -q '^DORMOUSE_BIND_HOST=127\.0\.0\.1$' "$ENV_FILE" 2>/dev/null; then
     pass "DORMOUSE_BIND_HOST=127.0.0.1"
@@ -994,13 +1024,17 @@ cmd_uninstall() {
 
 cmd_purge() {
   printf '\n%sIRREVERSIBLE%s This deletes the account, enrolled Hosts, push\n' "$C_RED" "$C_OFF"
-  printf 'subscriptions, and the VAPID key:\n  %s\n  %s\n\n' "$STATE_DIR" "$ROOT/config"
+  printf 'subscriptions, the VAPID key, and any unspent enrollment offer:\n  %s\n  %s\n  %s\n\n' \
+    "$STATE_DIR" "$ROOT/config" "$ROOT/run"
   printf 'Registered passkeys and enrolled Hosts will have to be set up again.\n\n'
   printf 'Type exactly: DELETE DORMOUSE STATE\n> '
   local reply=""
   read -r reply || true
   if [ "$reply" != "DELETE DORMOUSE STATE" ]; then printf 'aborted\n'; return 1; fi
-  rm -rf "$STATE_DIR" "$ROOT/config"
+  # run/ too: an unspent enroll-offer.json redeems for a Host enrollment without
+  # any existing account, and redemption mkdir-recreates the state this command
+  # just deleted. Leaving it behind would make "IRREVERSIBLE" false for a day.
+  rm -rf "$STATE_DIR" "$ROOT/config" "$ROOT/run"
   printf 'purged.\n'
   # bin/run-server is what "uninstall" removes, so its absence means the
   # LaunchAgent and the code are already gone and this script is the last thing
@@ -1341,6 +1375,47 @@ if [ "$PRUNED" = "0" ]; then
   ok "nothing to prune (retaining current${KEEP_PREVIOUS:+ and previous})"
 else
   ok "pruned $PRUNED old release(s); config and state untouched"
+fi
+
+# ------------------------------------------------------------ enroll offer ---
+
+# run/enroll-offer.json, the one-time offer redeemed at POST /api/host/enroll in
+# place of the setup password (SECURITY.md → "Credentials at rest").
+#
+# Last state mutation: minting burns the previous unspent offer, so the release,
+# HTTPS Serve mapping, and pruning must all have succeeded first. The server
+# reads this file fresh; nothing needs it at service start.
+#
+# hosts.json is the durable "first Host happened" marker. Emptying its rows
+# revokes Hosts but does not silently reopen this bootstrap credential.
+if [ -e "$STATE_DIR/hosts.json" ]; then
+  rm -f "$ENROLL_OFFER_FILE"
+  ok "a Host has already enrolled — no one-click enrollment offer minted"
+else
+  ENROLL_TOKEN="$(random_hex32)"
+  [ ${#ENROLL_TOKEN} -ge 64 ] || die "generated enroll token is implausibly short; refusing to write the enrollment offer."
+  # Build an owner-only file beside the destination, then rename it into place.
+  # Redemption may claim the live path at any instant; it must see one complete
+  # generation or the other, never the truncate/chmod/write steps of a mint.
+  ENROLL_OFFER_TMP="$(mktemp "$RUN_DIR/.enroll-offer.XXXXXX")" \
+    || die "could not create a temporary enrollment offer."
+  chmod 0600 "$ENROLL_OFFER_TMP"
+  # mintedAt is read here, at write time, and never from BUILT_AT: the 24-hour
+  # expiry runs from the mint, and the build that precedes it is not free.
+  if ! printf '{"origin":"%s","token":"%s","mintedAt":"%s"}\n' \
+    "$ORIGIN" "$ENROLL_TOKEN" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ENROLL_OFFER_TMP"; then
+    rm -f "$ENROLL_OFFER_TMP"
+    unset ENROLL_TOKEN ENROLL_OFFER_TMP
+    die "could not write the temporary enrollment offer."
+  fi
+  if ! mv -f "$ENROLL_OFFER_TMP" "$ENROLL_OFFER_FILE"; then
+    rm -f "$ENROLL_OFFER_TMP"
+    unset ENROLL_TOKEN ENROLL_OFFER_TMP
+    die "could not publish the enrollment offer."
+  fi
+  unset ENROLL_OFFER_TMP
+  unset ENROLL_TOKEN
+  ok "minted run/enroll-offer.json (mode 0600) — a one-time enrollment offer for a Host on this machine"
 fi
 
 # ---------------------------------------------------------------- summary ---

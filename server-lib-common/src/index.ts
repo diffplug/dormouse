@@ -13,6 +13,7 @@
  */
 
 export * from './remote/wire.js';
+export * from './remote/enroll-offer.js';
 export * from './security/webcrypto.js';
 export * from './security/bytes.js';
 export * from './security/ecdsa.js';

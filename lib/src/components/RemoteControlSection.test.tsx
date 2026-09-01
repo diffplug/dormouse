@@ -21,6 +21,7 @@ import { RemoteControlSection } from './RemoteControlSection';
 import type { RemoteHostConsoleStatus } from '../host/remote/service-protocol';
 import {
   enrolledStatus,
+  OFFER_STATUS,
   UNENROLLED_STATUS as NOT_ENROLLED,
 } from '../host/remote/test-remote-host-link';
 
@@ -74,6 +75,26 @@ function buttonLabelled(label: string): HTMLButtonElement | undefined {
   ) as HTMLButtonElement | undefined;
 }
 
+/** The disclosure carries a `+`/`−` prefix, so match on its words rather than all of it. */
+function disclosure(): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll('button')].find((button) =>
+    button.textContent?.includes('Enroll with a different server'),
+  ) as HTMLButtonElement | undefined;
+}
+
+/**
+ * The three-field form, which is always mounted: folding it away is the
+ * `hidden` attribute, so what is typed into it survives both the disclosure and
+ * an offer appearing on disk underneath it.
+ */
+function typedForm(): HTMLFormElement {
+  const form = [...container.querySelectorAll('form')].find((candidate) =>
+    candidate.textContent?.includes('Connect this machine to a Dormouse server'),
+  );
+  if (!form) throw new Error('the typed enroll form is not mounted');
+  return form;
+}
+
 async function type(selector: string, value: string) {
   const input = container.querySelector<HTMLInputElement>(selector);
   if (!input) throw new Error(`no input for ${selector}`);
@@ -120,13 +141,18 @@ describe('RemoteControlSection', () => {
     platform = { remoteHost: makeLink(async () => NOT_ENROLLED) };
     await render();
 
+    // The name arrives prefilled from the service's suggestion — the same one
+    // the offer card uses, so the two paths cannot diverge on it.
+    const name = 'input:not([type="url"]):not([type="password"])';
+    expect(container.querySelector<HTMLInputElement>(name)!.value).toBe('ned-mac');
     expect(buttonLabelled('Connect')!.disabled).toBe(true);
     await type('input[type="url"]', 'https://laptop.tailnet.ts.net');
     expect(buttonLabelled('Connect')!.disabled).toBe(true);
     await type('input[type="password"]', 'hunter2');
-    expect(buttonLabelled('Connect')!.disabled).toBe(true);
-    await type('input:not([type="url"]):not([type="password"])', 'Work laptop');
     expect(buttonLabelled('Connect')!.disabled).toBe(false);
+    // And it is still a required field, not a decoration.
+    await type(name, '   ');
+    expect(buttonLabelled('Connect')!.disabled).toBe(true);
   });
 
   it('enrolls with trimmed values and re-reads the status', async () => {
@@ -172,6 +198,187 @@ describe('RemoteControlSection', () => {
     expect(text()).toContain('server origin is not allowed by this build');
     // Still on the form, so the user can correct the origin and retry.
     expect(buttonLabelled('Connect')).toBeTruthy();
+  });
+
+  it('leads with the installer’s offer and folds the typed form away', async () => {
+    platform = { remoteHost: makeLink(async () => OFFER_STATUS) };
+    await render();
+
+    expect(text()).toContain('A Dormouse server is installed on this machine.');
+    expect(text()).toContain('https://ned-mac.tail9c2f1.ts.net');
+    expect(buttonLabelled('Enroll')).toBeTruthy();
+    // The three-field form is behind the disclosure, not beside the card —
+    // hidden rather than unmounted, so a half-typed one survives the flip.
+    expect(typedForm().hidden).toBe(true);
+    expect(container.querySelector('input[type="password"]')).toBeTruthy();
+    // Folded, and saying so before it is clicked.
+    expect(disclosure()?.textContent).toContain('+');
+  });
+
+  it('enrolls from the offer with the name shown, which is editable', async () => {
+    let status: unknown = OFFER_STATUS;
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'enrollOffer') {
+        status = enrolled();
+        return { hostId: 'host-1', serverUrl: 'https://laptop.tailnet.ts.net' };
+      }
+      return status;
+    });
+    platform = { remoteHost: link };
+    await render();
+
+    // Prefilled from the service's suggestion, and the user overrode it.
+    const input = container.querySelector<HTMLInputElement>('input:not([type])')!;
+    expect(input.value).toBe('ned-mac');
+    await type('input:not([type])', '  Work laptop  ');
+    await act(async () => buttonLabelled('Enroll')!.click());
+
+    // The origin is an echo of what the card displayed, so the service can
+    // refuse a file rewritten since; no token, and the origin enrolled against
+    // is still the file's.
+    expect(link.command).toHaveBeenCalledWith('enrollOffer', {
+      origin: 'https://ned-mac.tail9c2f1.ts.net',
+      label: 'Work laptop',
+    });
+    expect(text()).toContain('https://laptop.tailnet.ts.net');
+    expect(text()).toContain('Connected');
+  });
+
+  it('keeps a half-typed form when an offer appears underneath it', async () => {
+    // The installer can run while this dialog is open, and the 2 s poll picks
+    // the offer up. Folding the form away must not empty it.
+    vi.useFakeTimers();
+    try {
+      let status: unknown = NOT_ENROLLED;
+      platform = { remoteHost: makeLink(async () => status) };
+      await render();
+
+      await type('input[type="url"]', 'https://elsewhere.example');
+      status = OFFER_STATUS;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+
+      expect(text()).toContain('A Dormouse server is installed on this machine.');
+      expect(typedForm().hidden).toBe(true);
+      expect(container.querySelector<HTMLInputElement>('input[type="url"]')!.value).toBe(
+        'https://elsewhere.example',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still shows a failed enroll after the offer vanished under it', async () => {
+    // Redeeming an offer unlinks it, so a poll can report no offer while the
+    // enroll that spent it is still in flight. A card that went with the file
+    // would leave a late refusal nowhere to render — silence, with a single-use
+    // token already gone.
+    vi.useFakeTimers();
+    try {
+      let status: unknown = OFFER_STATUS;
+      let failEnroll: (error: Error) => void = () => {};
+      const link = makeLink(async (cmd) => {
+        if (cmd === 'enrollOffer') {
+          status = NOT_ENROLLED;
+          return new Promise<unknown>((_resolve, reject) => {
+            failEnroll = reject;
+          });
+        }
+        return status;
+      });
+      platform = { remoteHost: link };
+      await render();
+
+      await act(async () => buttonLabelled('Enroll')!.click());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      // The card is still here, on the origin the user reviewed.
+      expect(text()).toContain('https://ned-mac.tail9c2f1.ts.net');
+
+      await act(async () => {
+        failEnroll(new Error('host enroll failed (401)'));
+        await Promise.resolve();
+      });
+      expect(text()).toContain('host enroll failed (401)');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('renders a one-click refusal where the typed form renders its own', async () => {
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'enrollOffer') throw new Error('server origin is not allowed by this build');
+      return OFFER_STATUS;
+    });
+    platform = { remoteHost: link };
+    await render();
+
+    await act(async () => buttonLabelled('Enroll')!.click());
+    expect(text()).toContain('server origin is not allowed by this build');
+    // Still on the card, and the typed form is still one click away.
+    expect(buttonLabelled('Enroll')).toBeTruthy();
+    expect(disclosure()).toBeTruthy();
+  });
+
+  it('unfolds the typed form for a server that is somewhere else', async () => {
+    platform = { remoteHost: makeLink(async () => OFFER_STATUS) };
+    await render();
+
+    await act(async () => disclosure()!.click());
+    expect(typedForm().hidden).toBe(false);
+    expect(buttonLabelled('Connect')).toBeTruthy();
+    expect(disclosure()?.textContent).toContain('−');
+    // The offer stays offered — unfolding is not a rejection of it.
+    expect(buttonLabelled('Enroll')).toBeTruthy();
+
+    // And refolding hides what was typed rather than discarding it.
+    await type('input[type="url"]', 'https://elsewhere.example');
+    await act(async () => disclosure()!.click());
+    expect(typedForm().hidden).toBe(true);
+    await act(async () => disclosure()!.click());
+    expect(container.querySelector<HTMLInputElement>('input[type="url"]')!.value).toBe(
+      'https://elsewhere.example',
+    );
+  });
+
+  it('runs only one enrollment across the offer and typed forms', async () => {
+    let finishOffer: (value: unknown) => void = () => {};
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'enrollOffer') {
+        return new Promise((resolve) => {
+          finishOffer = resolve;
+        });
+      }
+      if (cmd === 'enroll') return { hostId: 'wrong-racer', serverUrl: 'https://elsewhere' };
+      return OFFER_STATUS;
+    });
+    platform = { remoteHost: link };
+    await render();
+
+    await act(async () => disclosure()!.click());
+    await type('input[type="url"]', 'https://elsewhere.example');
+    await type('input[type="password"]', 'hunter2');
+
+    await act(async () => {
+      buttonLabelled('Enroll')!.click();
+      // A submit event bypasses the button's next-render `disabled` state and
+      // exercises the synchronous gate between the two handlers directly.
+      typedForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+
+    const enrollCommands = link.command.mock.calls.filter(([cmd]) =>
+      ['enroll', 'enrollOffer'].includes(cmd),
+    );
+    expect(enrollCommands.map(([cmd]) => cmd)).toEqual(['enrollOffer']);
+    expect(buttonLabelled('Connect')!.disabled).toBe(true);
+
+    await act(async () => {
+      finishOffer({ hostId: 'host-1', serverUrl: OFFER_STATUS.offer!.origin });
+      await Promise.resolve();
+    });
   });
 
   it('shows the server and paired-device count when enrolled', async () => {

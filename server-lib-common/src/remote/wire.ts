@@ -137,10 +137,15 @@ export interface ReauthFinishResponse {
   presenceVerifiedAt: number;
 }
 
-export interface HostEnrollRequest {
-  password: string;
-  label: string;
-}
+/**
+ * Enroll a Host. Exactly one credential must be present — the setup password,
+ * or the one-time `token` of an installer's `EnrollmentOffer` (enroll-offer.ts)
+ * for a Host on the server's own machine. Both, or neither, is a 400.
+ */
+export type HostEnrollRequest = { label: string } & (
+  | { password: string; enrollToken?: never }
+  | { password?: never; enrollToken: string }
+);
 export interface HostEnrollResponse {
   hostId: string;
   /** Bearer credential for the `token` param of /ws/host. */
