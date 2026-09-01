@@ -502,6 +502,7 @@ export class TauriAdapter implements PlatformAdapter {
 
   alertPublishSettings(settings: AlertSettings): void {
     this.alertManager.setInactivityTimeoutMs(settings.inactivityTimeoutMs);
+    this.alertManager.setDeferAlertsUntilQuiet(settings.deferAlertsUntilQuiet);
   }
 
   alertDismiss(id: string): void {

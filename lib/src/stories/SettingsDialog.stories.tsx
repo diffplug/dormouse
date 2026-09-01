@@ -45,6 +45,19 @@ export const WithRules: Story = {
   },
 };
 
+/** The animation watcher also gates terminal-report and command-exit alerts. */
+export const DeferralEnabled: Story = {
+  parameters: {
+    primedWatchedCommands: ['claude', 'codex'],
+    primedAlertSettings: { deferAlertsUntilQuiet: true },
+  },
+  play: async ({ canvasElement }) => {
+    await within(canvasElement).findByRole('switch', {
+      name: 'Defer alerts until animation stops on',
+    });
+  },
+};
+
 /**
  * Speech on. The delay field below it goes from dimmed-and-disabled to live,
  * which is the only visual difference between this and `WithRules`.

@@ -238,7 +238,10 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   alertRemove(id: string): void { this.alertManager.remove(id); }
   alertSetWatchedCommands(names: string[]): void { this.alertManager.setWatchedCommands(names); }
   alertSetCommandWatched(name: string, watched: boolean): void { this.alertManager.setCommandWatched(name, watched); }
-  alertPublishSettings(settings: AlertSettings): void { this.alertManager.setInactivityTimeoutMs(settings.inactivityTimeoutMs); }
+  alertPublishSettings(settings: AlertSettings): void {
+    this.alertManager.setInactivityTimeoutMs(settings.inactivityTimeoutMs);
+    this.alertManager.setDeferAlertsUntilQuiet(settings.deferAlertsUntilQuiet);
+  }
   alertDismiss(id: string): void { this.alertManager.dismissAlert(id); }
   alertAttend(id: string): void { this.alertManager.attend(id); }
   alertResize(id: string): void { this.alertManager.onResize(id); }
