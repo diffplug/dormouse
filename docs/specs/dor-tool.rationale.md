@@ -42,6 +42,12 @@
 
 **What the announcement is still needed for.** Multi-port tools. `pnpm dev:standalone:ab` binds vite, the dev bridge, and the sidecar's control socket, and no scan can guess which one to frame. ssh is the other case: the control socket does not exist across it, and neither does the host's view of the remote process tree.
 
+## Take-over
+
+**Why the gate is conservative in the split direction.** Every condition can be read wrong in two directions, and the two costs are nowhere near equal. Declining a take-over that should have happened costs a pane the user closes — the tool still runs, in the placement `dor tool` has always used. Taking over a pane that should have split types a command into a shell that belongs to something else: an agent's session, a line with work queued behind `dor`, a directory the tool was not asked to run in. So each condition is written to fail closed, and quoting is not unpicked — a line carrying `&&` inside quotes splits rather than being parsed for whether that `&&` is real.
+
+**Why the naked test is worth having at all, given `dor send`.** It answers "did a human ask for this *here*", not "is this trustworthy". The discrimination it actually makes is placement: an agent's `dor tool` runs under the agent's own command line, so the pane reports `claude` (or `bash script.sh`) and never matches — which is the whole point, since an agent's tool must not commandeer the pane the human is watching the agent in. Trust is a separate gate with a separate ceremony, and it is the one that carries the security weight.
+
 ## Security
 
 **Why the content-driven announce risk is accepted.** The blast radius is the containment rule applied to ports: an announce reveals and frames, never transferring input authority, grants, or state. The iframe proxy dials upstream as a fresh client with no browser cookie authority, and the link-local/cloud-metadata SSRF guard stands regardless. Two properties of this design narrow it further than an announce-triggered one: the scan supplies the port, so an announced port that nothing bound frames nothing at all, and a runtime re-key cannot dedupe, so it cannot reach another pane.

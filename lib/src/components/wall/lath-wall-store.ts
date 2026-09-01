@@ -137,6 +137,11 @@ export type LathWallStore = {
   /** Meta write: merge `patch` into a leaf's params. No-op if the leaf is absent.
    *  Reaches parked and cap-evicted leaves too. */
   updateParams(id: LeafId, patch: Record<string, unknown>): void;
+  /** Meta write: **replace** a leaf's whole meta in one commit, dropping
+   *  anything the caller does not hand back — component pair included, which is
+   *  what lets a leaf change kind without changing id (`docs/specs/dor-tool.md`
+   *  -> Take-over). No-op if the leaf is absent. */
+  setMeta(id: LeafId, meta: LeafMeta): void;
 
   /** Presentation-only zoom target (the tree is untouched). No-op if unchanged. */
   setZoomed(id: LeafId | null): void;
@@ -460,6 +465,11 @@ export function createLathWallStore(): LathWallStore {
       if (!cur) return;
       const params = { ...(cur.params ?? {}), ...patch };
       commit({ leafMeta: new Map(snapshot.leafMeta).set(id, { ...cur, params }) });
+    },
+
+    setMeta(id, meta) {
+      if (!snapshot.leafMeta.has(id)) return;
+      commit({ leafMeta: new Map(snapshot.leafMeta).set(id, meta) });
     },
 
     setZoomed(id) {

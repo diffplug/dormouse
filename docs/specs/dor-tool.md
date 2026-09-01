@@ -259,9 +259,8 @@ header), `isToolParams` / `toolFace` in `browser-surface.ts`,
   [serving](#serving) trigger.
 - **`dor tool <name>`** — run a `dormouse.yml` entry with whatever
   `prespawn_dedupe` it declares.
-- **Always splits focus-neutrally** and returns a handle. Taking over the
-  calling pane when a human types the invocation alone at a prompt is designed
-  but not built — see [Future](#future).
+- **Splits focus-neutrally** and returns a handle, except when it
+  [takes over the calling pane](#take-over).
 - **A keyed invocation that matches reveals and reports**, in both placements,
   so the calling pane never appears to do nothing.
 - `dor list`: rows report `kind: tool` with `render_mode`; JSON carries command
@@ -269,6 +268,79 @@ header), `isToolParams` / `toolFace` in `browser-surface.ts`,
 
 Source of truth: `dor/src/commands/tool.ts` and its help snapshot
 `dor/test/snapshots/help/tool.md`; `surface.tool` in `dor/src/protocol.ts`.
+
+## Take-over
+
+**`dor tool` typed alone at a prompt runs in that pane** rather than splitting —
+same Surface, same id, same scrollback. Typing a command at a prompt is how a
+terminal works. Nothing else about the invocation changes: same trust gate, same
+dedupe, same serving trigger.
+
+Every condition holds or it splits, and a split is never wrong — only more panes
+than were asked for (rationale):
+
+- **The line is naked**: the caller's OSC 633 command line is one command and
+  that command is `dor tool`. An agent's invocation runs under whatever it
+  launched, so the pane reports *that* line instead. Human intent, never a
+  security boundary — see [Trust](#trust) rule 2.
+- **The caller is a visible pane whose leaf is a plain terminal.** A Door is not
+  a pane a human is typing in; a tool or browser leaf is not one to transform.
+- **The tool's directory is that pane's own.** The command is typed into the
+  caller's shell and runs where that shell already is, so a `--cwd` naming
+  anywhere else has to spawn its own.
+- **The placement was not asked for.** `--surface` names a split reference and
+  `--minimize` asks for a background Surface.
+- **A pending approval never takes over** — it needs a pane that has spawned
+  nothing ([Trust](#trust) rule 3).
+- **A key match reveals its survivor** ([CLI](#cli)) — unless the survivor *is*
+  the calling pane, the place take-over makes normal to retype in. Its command
+  is live only when the tool spawned this `dor` itself; otherwise `dor` is what
+  its shell is running, so the tool is idle however the pane reads, and it
+  **re-runs there through the same handshake**, reported `adopted`. Never
+  through the interrupt-and-retype restart: Ctrl+C would kill the `dor` still
+  waiting for the answer.
+- **A re-run is a placement of nothing**, so only the two conditions that govern
+  typing apply — the naked line and integration. It runs in the tool's own
+  directory, like an `adopted` match from any other pane, and `--surface` /
+  `--minimize` / a `--cwd` elsewhere do not change that.
+- **A caller that is the match but cannot be typed behind fails loudly.** There
+  is no survivor to reveal — the user is sitting in it — so reporting `existing`
+  would be a silent no-op. It says so instead.
+
+**Respond, then wait for the prompt.** `dor` is the caller's foreground process
+when the host answers it, so the host answers `takeover` first, waits for the
+shell to report itself back at a prompt, and types the command only then.
+Waiting first deadlocks: the prompt cannot return until `dor` exits, and `dor`
+cannot exit until it is answered.
+
+- **The response promises the placement, not the run** — it is sent before the
+  command is typed, because the caller is gone by the time it runs. Failure
+  after it shows in the pane.
+- **A shell that never comes back to its prompt is left alone**: nothing typed,
+  leaf still a terminal. The transformation happens on the way *in* to typing,
+  so a timeout costs nothing.
+- **The spawn lock is held past the response** until the shell has processed the
+  line — the command live, or already finished. The key reaches the leaf's params
+  at the meta write, but a pane typed into and not yet reporting reads as an idle
+  tool, which a queued invocation of the same key would interrupt and retype.
+  Waiting for *live* alone would pin the lock for the full timeout on every tool
+  that dies on boot: it can start and finish between two samples.
+- **The transformation is one meta write**, so the component pair and the params
+  commit together, and the leaf id — the SessionId — never changes. That is what
+  keeps the terminal, its buffer, and its PTY untouched.
+- **The Session's [OSC 367](#osc-367) hint is cleared as it transforms.** What
+  the pane announced under an earlier command is not this tool's, and would
+  otherwise name its port or re-key it.
+- Accepted: **keystrokes in the window between `dor` exiting and the command
+  landing** interleave with it. The window is one control round trip.
+- Accepted: **a listener the taken-over shell already owned** (a backgrounded
+  server, an `ssh -L`) is in the [scan](#serving)'s process tree, so `port: auto`
+  can frame it or refuse the pair as a conflict. A shell that never ran a server
+  before — every split-spawned tool — cannot hit this.
+
+Source of truth: `lib/src/components/wall/tool-takeover.ts` (the gate), the
+take-over arm of `surface.tool` in `lib/src/components/wall/use-dor-control.ts`
+(the handshake), `setMeta` in `lib/src/components/wall/lath-wall-store.ts`.
 
 ## OSC 367
 
@@ -376,12 +448,6 @@ Source of truth: `PersistedSurfaceType` in `lib/src/lib/session-types.ts`;
   `DORMOUSE_DEHYDRATE`; the `dehydrate` flag is reserved in the serve payload
   from the shipped `serve` payload. The Windows graceful-stop is needed here
   only.
-- **Pane take-over.** `dor tool` typed alone at a prompt should run in that
-  pane rather than splitting — typing a command at a prompt is how a terminal
-  works. The gate is three conditions the host can already read (sole command on
-  the OSC 633 line, pane at a prompt, pane not already a tool); what it needs is
-  the handshake, since `dor` is itself the foreground process when it answers,
-  so the command can only be typed once its own shell returns to a prompt.
 - **The announced `name`.** Wire the reserved [OSC 367](#osc-367) `name` into
   the title-candidates channel and `dor list`'s location column.
 - **Later** — `prespawn_*` beyond the dedupe literal: a computed key, and
