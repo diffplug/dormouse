@@ -199,7 +199,7 @@ Rules:
 - If the user attends while a command is already running, mark that command as seen.
 - If attention is later lost while that same seen command is still running, set `commandExitStatus = COMMAND_EXIT_ARMED`.
 - If the same command finishes, or the PTY exits before a finish event, ring only when all are true: it was armed, the Session still lacks attention, and runtime is at least `T_USER_ATTENTION`.
-- A command-exit ring sets `todo = true` and stores the COMMAND_EXIT notification built by `setCommandExitRinging` / `formatCommandExitBody` in `lib/src/lib/alert-manager.ts` (title "Command finished", body = summarized command + exit code).
+- A command-exit ring sets `todo = true` and stores the COMMAND_EXIT notification built by `applyCommandExitRinging` / `formatCommandExitBody` in `lib/src/lib/alert-manager.ts` (title "Command finished", body = summarized command + exit code).
 - Returning to the Session before finish disarms the watch. A quick finish, a different command start, or Session destruction clears it without ringing.
 - Race rule: attention must be lost before the finish event is observed.
 - Precedence rule: a protocol ring must keep its richer `ActivityNotification`; command-exit must not overwrite it.
