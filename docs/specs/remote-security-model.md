@@ -417,6 +417,49 @@ Source of truth: `server-lib-common/src/security/noise.ts`, proven by
 `server-lib-common/test/noise.test.mjs` against the attributed vector in
 `server-lib-common/test/vectors/`.
 
+## E2E identities and presence
+
+The identities and the challenge construction the suite above is wired to in
+the **e2e-client-host** scope ([Future](#future)). They are built; no ceremony,
+relay, store, or gate consults any of them yet.
+
+- **X25519 is probed, not yet required.** `probeNoiseSupport` runs one
+  `generateKey` and one `deriveBits` and answers a boolean. **Every rejection —
+  a missing WebCrypto included — is `false`, never a throw**, because its
+  callers are boot-path gates; the gates themselves land with the cutover.
+- **Each Host mints one permanent Noise static at enrollment**, after the
+  Server answers and never in the request: `noiseStaticPrivateKey` (PKCS#8,
+  base64url) and `noiseStaticPublicKey` (raw 32 bytes, base64url) ride in the
+  enrollment record, so they land exactly where `hostToken` already does
+  (`SECURITY.md` -> "Credentials at rest"). **Both halves or neither** —
+  `isEnrollment` accepts a record from before the fields existed and rejects
+  one carrying a single half, a malformed encoding, or a wrong decoded length,
+  since a Host believing in an identity it cannot use is worse than one that
+  knows it has none. `RemoteHost` imports the private half **nonextractably at
+  `start()`**, never in its synchronous constructor, and holds it unread.
+  **Minting is best-effort while nothing consumes it**: a runtime without
+  X25519 still enrolls and still runs remote control, and the probe is what
+  will tell it otherwise.
+- **One derived WebAuthn challenge serves both ceremonies.**
+  `presenceChallenge(binding, serverNonce)` is base64url
+  `SHA-256(lengthPrefixedConcat(domain, kind, binding fields in declared order,
+  serverNonce))` under `dormouse/presence/v1`. **One encoding rule: a base64url
+  field is hashed as the bytes it encodes and everything else as UTF-8** —
+  decoded are `connectionId`, `hostChallenge`, `handshakeHash`, and the nonce;
+  text are the domain, the kind, `hostId`, and `passkeyCredentialId`. The
+  Server mints and the Host recomputes, so both run this one builder;
+  `isPresenceBinding` bounds every field of what arrives.
+- **Pocket's IndexedDB is at v2**, carrying the Client-side records beside the
+  legacy device key ([pocket-app.md](./pocket-app.md) -> What Pocket stores).
+
+Source of truth: `server-lib-common/src/security/noise-support.ts`,
+`server-lib-common/src/security/presence.ts` (pinned by a vector computed from
+`node:crypto` in `server-lib-common/test/presence.test.mjs`),
+`mintNoiseStaticKeyPair` / `importNoiseStaticPrivateKey` in
+`server-lib-common/src/security/noise.ts`, `isEnrollment` in
+`lib/src/remote/host/enrollment.ts`, and `RemoteHost.#loadNoiseStatic` in
+`lib/src/remote/host/remote-host.ts`.
+
 ## Security Guarantees
 
 Each property below is established in its own section above; this is the
@@ -470,12 +513,8 @@ shape, temporary key distribution, or fallback machinery.
 
 1. **Noise suite and vectors** — landed ([Noise suite](#noise-suite)); the
    numbering below is preserved because other specs cite these stages by number.
-2. **Additive identities and storage.** The X25519 capability probe (not yet
-   enforced); a Host Noise static minted at enrollment and carried as optional
-   enrollment fields; the Pocket IndexedDB v2 stores (`known-hosts`,
-   `pending-deletions`) beside the legacy `device-key` store; the presence
-   challenge builder. No legacy store deleted, no v1 state rejected, no
-   ceremony or relay reader switched.
+2. **Additive identities and storage** — landed
+   ([E2E identities and presence](#e2e-identities-and-presence)).
 3. **Relay-integrated Noise harness.** The `e2e` relay envelope accepted by the
    Server additively and driven end to end through the real relay in
    integration tests only, with both parties' statics injected. Proves
@@ -532,9 +571,9 @@ not. One implementation serves Pocket, the worker, and both Host runtimes.
 - **Any failure ends the session**: authentication or decryption failure,
   replay, gap, reordering, version mismatch, or counter exhaustion. Relay
   errors stay generic availability errors and never trigger a fallback.
-- **Runtimes are gated, not degraded.** Pocket and both Hosts probe X25519
-  before sign-in, setup, pairing, connection, or Host start; failure shows a
-  fixed upgrade requirement and performs no remote operation. Evidence
+- **Runtimes are gated, not degraded.** Pocket and both Hosts run the built
+  probe before sign-in, setup, pairing, connection, or Host start; failure
+  shows a fixed upgrade requirement and performs no remote operation. Evidence
   (browser and Node versions, dated) lives in the rationale file; two items
   must be verified on a real iOS device before stage 4 lands: an X25519
   `CryptoKey` survives a structured clone into IndexedDB, and `getUserMedia`
@@ -542,30 +581,26 @@ not. One implementation serves Pocket, the worker, and both Host runtimes.
 
 ### Identities and storage
 
-- **Host static.** One permanent X25519 keypair minted locally at enrollment;
-  the private half persists as PKCS#8 only in the owner-only Host state file or
-  VS Code `SecretStorage`, imported nonextractably at start. The Server never
-  receives it. The enrollment record requires both halves; a record without
-  them reads as un-enrolled and the Settings dialog offers enrollment again —
-  that shape check is the entire Host-state version.
+- **Host static.** Minted and persisted already
+  ([E2E identities and presence](#e2e-identities-and-presence)); what remains
+  is enforcement — a record without both halves reads as un-enrolled and the
+  Settings dialog offers enrollment again, and that shape check is the entire
+  Host-state version.
 - **Client static, per Host.** A fresh X25519 keypair generated at scan time
   and persisted, nonextractable, in that Host's `KnownHostV1` record only after
   approval. It replaces the device key as the browser half of the ACL identity
   and does not replace or weaken the passkey half; different Hosts never share
   a Client key.
-- **`KnownHostV1`** (IndexedDB, keyed by `hostId`): paired `accountId`, local
-  label, pinned Host static public key, the Client static keypair, the paired
-  `passkeyCredentialId` and `passkeyPublicKeyHash`, and an authorization state
-  of `{ state: 'paired', deliveryId, approvedAt }` or
-  `{ state: 'pairing-required' }`. The credential ID is the sole
-  `allowCredentials` entry for that Host. `navigator.storage.persist()` is
-  requested before the first write. An authenticated `pairing-required`
-  outcome removes local authorization without discarding the pin and never
-  falls back to an unpaired path; do not call this revocation while
-  `revokeDevice` / `revokePasskey` have no callers.
-- **`PendingDeliveryDeletionV1`** (IndexedDB): `{ hostId, deliveryId }`
-  tombstones written *before* a `KnownHostV1` forgets a delivery ID, cleared
-  only by a successful deletion ([alert.md](./alert.md) `## Future`).
+- **`KnownHostV1`.** The record and its store exist
+  ([pocket-app.md](./pocket-app.md) -> What Pocket stores); what remains is its
+  use. The paired `passkeyCredentialId` is the sole `allowCredentials` entry
+  for that Host. An authenticated `pairing-required` outcome removes local
+  authorization without discarding the pin and never falls back to an unpaired
+  path; do not call this revocation while `revokeDevice` / `revokePasskey` have
+  no callers.
+- **`PendingDeliveryDeletionV1`.** The store exists; a tombstone is written
+  *before* a `KnownHostV1` forgets a delivery ID, and cleared only by a
+  successful deletion ([alert.md](./alert.md) `## Future`).
 - **The Server session is authentication-plane only.** The bearer token stays
   memory-only with its existing absolute 12-hour life and is never reusable
   proof of presence for a Host. There is no app-session signing key: the token
@@ -577,17 +612,15 @@ not. One implementation serves Pocket, the worker, and both Host runtimes.
 Both ceremonies prove fresh user presence the same way, so pairing and
 connection share one verifier.
 
-- **The WebAuthn challenge is derived, not random.** `POST /api/reauth/begin`
-  takes a required, kind-tagged `PresenceBinding` — `pairing`:
-  `{ hostId, handshakeHash, passkeyCredentialId }`; `connection`:
-  `{ hostId, connectionId, hostChallenge, handshakeHash, passkeyCredentialId }`
-  — mints a one-use Server nonce, and answers the challenge
-  `SHA-256(lengthPrefixedConcat(domain, kind, fields in declared order,
-  serverNonce))` under `dormouse/presence/v1`, the RP ID, the nonce, and the
-  named credential as the sole `allowCredentials` entry. `finish` consumes the
-  nonce, recomputes the challenge, verifies the assertion against the stored
-  key for that exact credential, and extends nothing. The Server learns only
-  routing values and the handshake hash, which the relay already sees.
+- **The WebAuthn challenge is derived, not random** — the builder is built
+  ([E2E identities and presence](#e2e-identities-and-presence)); the routes are
+  not. `POST /api/reauth/begin` takes a required, kind-tagged
+  `PresenceBinding`, mints a one-use Server nonce, and answers
+  `presenceChallenge(binding, nonce)` under the RP ID, the nonce, and the named
+  credential as the sole `allowCredentials` entry. `finish` consumes the nonce,
+  recomputes the challenge, verifies the assertion against the stored key for
+  that exact credential, and extends nothing. The Server learns only routing
+  values and the handshake hash, which the relay already sees.
 - **`PresenceProofV1`** carries the binding, the Server nonce, `accountId`,
   `passkeyCredentialId`, the canonical SPKI public key, and the assertion. It
   travels only inside the first Client→Host Noise transport payload. The Host

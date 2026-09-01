@@ -4,6 +4,12 @@
  */
 
 import { generateDeviceKeyPair, type DeviceKeyPair } from 'server-lib-common';
+import {
+  DEVICE_KEY_STORE as STORE_NAME,
+  openPocketDb,
+  promisifyRequest,
+  promisifyTransaction,
+} from './pocket-db';
 
 /** Where a {@link DeviceKeyPair} is persisted; faked in tests. */
 export interface DeviceKeyStore {
@@ -11,8 +17,6 @@ export interface DeviceKeyStore {
   put(key: DeviceKeyPair): Promise<void>;
 }
 
-const DB_NAME = 'dormouse-pocket';
-const STORE_NAME = 'device-key';
 const RECORD_KEY = 'default';
 
 /**
@@ -34,7 +38,7 @@ export async function getOrCreateDeviceKey(
 export function indexedDbDeviceKeyStore(): DeviceKeyStore {
   return {
     async get() {
-      const db = await openDb();
+      const db = await openPocketDb();
       try {
         const value = await promisifyRequest<StoredDeviceKey | undefined>(
           db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).get(RECORD_KEY),
@@ -50,7 +54,7 @@ export function indexedDbDeviceKeyStore(): DeviceKeyStore {
       }
     },
     async put(key) {
-      const db = await openDb();
+      const db = await openPocketDb();
       try {
         const tx = db.transaction(STORE_NAME, 'readwrite');
         const record: StoredDeviceKey = {
@@ -71,30 +75,4 @@ interface StoredDeviceKey {
   readonly publicKey: CryptoKey;
   readonly privateKey: CryptoKey;
   readonly devicePublicKey: string;
-}
-
-function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => {
-      request.result.createObjectStore(STORE_NAME);
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error('failed to open IndexedDB'));
-  });
-}
-
-function promisifyRequest<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed'));
-  });
-}
-
-function promisifyTransaction(tx: IDBTransaction): Promise<void> {
-  return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction failed'));
-    tx.onabort = () => reject(tx.error ?? new Error('IndexedDB transaction aborted'));
-  });
 }

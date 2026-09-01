@@ -37,7 +37,13 @@
 
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 
-import { concatBytes, constantTimeEqual, utf8Encode } from './bytes.js';
+import {
+  concatBytes,
+  constantTimeEqual,
+  fromBase64Url,
+  toBase64Url,
+  utf8Encode,
+} from './bytes.js';
 import {
   type CryptoKeyLike,
   type CryptoKeyPairLike,
@@ -122,6 +128,88 @@ export async function generateNoiseKeyPair(
     throw new NoiseError('X25519 public key is not 32 bytes');
   }
   return { privateKey: pair.privateKey, publicKey };
+}
+
+/**
+ * A Noise static keypair in the form something has to persist it in: the
+ * private half as PKCS#8 and the public half raw, both base64url.
+ *
+ * Only a *long-term* static is ever exported. Ephemerals and imported statics
+ * stay nonextractable `CryptoKey`s; this shape exists because a Host must come
+ * back as the same party after a restart, and its state file is the only place
+ * that can remember.
+ */
+export interface NoiseStaticKeyMaterial {
+  /** PKCS#8 of the X25519 private key, base64url. Never leaves the machine. */
+  readonly privateKeyPkcs8: string;
+  /** The raw 32-byte public key, base64url. */
+  readonly publicKey: string;
+}
+
+/**
+ * The decoded byte length a stored
+ * {@link NoiseStaticKeyMaterial.privateKeyPkcs8} must fall within, for the
+ * guards that read one back out of persisted state.
+ *
+ * A canonical X25519 PKCS#8 is 48 bytes (version, the `1.3.101.110`
+ * AlgorithmIdentifier, and the 32-byte key in a nested OCTET STRING) — what
+ * every WebCrypto implementation we run on emits. The upper bound is looser
+ * than that so a runtime that also encodes the optional public-key attribute
+ * is not told its own freshly minted key is malformed; the point of checking
+ * at all is to bound what a state file can hand `importKey`.
+ */
+export const NOISE_STATIC_PKCS8_MIN_LENGTH = 48;
+export const NOISE_STATIC_PKCS8_MAX_LENGTH = 128;
+
+/**
+ * Mint a static keypair for persistence: generated extractable exactly once,
+ * exported, and never held in that form.
+ *
+ * The returned private key is the one secret in this module that exists
+ * outside WebCrypto, so the caller owns getting it to owner-only storage and
+ * nowhere else — in particular, never to the Server.
+ */
+export async function mintNoiseStaticKeyPair(
+  crypto: WebCryptoLike = getWebCrypto(),
+): Promise<NoiseStaticKeyMaterial> {
+  let pkcs8: Uint8Array;
+  let publicKey: Uint8Array;
+  try {
+    const pair = await crypto.subtle.generateKey(X25519_ALGORITHM, true, ['deriveBits']);
+    pkcs8 = new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey));
+    publicKey = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey));
+  } catch {
+    throw new NoiseError('X25519 static key generation failed');
+  }
+  if (publicKey.length !== NOISE_KEY_LENGTH) {
+    throw new NoiseError('X25519 public key is not 32 bytes');
+  }
+  return { privateKeyPkcs8: toBase64Url(pkcs8), publicKey: toBase64Url(publicKey) };
+}
+
+/**
+ * Load a persisted static back as a **nonextractable** `deriveBits` key.
+ *
+ * Nonextractable is the whole point of the round trip: the exported form
+ * exists so a restart can recover the identity, and once it is a `CryptoKey`
+ * again nothing — including a bug in the process holding it — can export it a
+ * second time.
+ */
+export async function importNoiseStaticPrivateKey(
+  pkcs8Base64Url: string,
+  crypto: WebCryptoLike = getWebCrypto(),
+): Promise<CryptoKeyLike> {
+  try {
+    return await crypto.subtle.importKey(
+      'pkcs8',
+      fromBase64Url(pkcs8Base64Url),
+      X25519_ALGORITHM,
+      false,
+      ['deriveBits'],
+    );
+  } catch {
+    throw new NoiseError('X25519 static private key could not be imported');
+  }
 }
 
 /**

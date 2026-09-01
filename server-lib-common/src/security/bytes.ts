@@ -157,6 +157,19 @@ export function lengthPrefixedConcat(parts: readonly Uint8Array[]): Uint8Array {
   return out;
 }
 
+/**
+ * Whether a relayed field is a string this side is willing to hold on to.
+ *
+ * One implementation, because every wire guard needs the same thing and a type
+ * check alone bounds nothing: a megabyte string is a `string`. Each caller
+ * brings its own limit — what a pairing field may cost is not what a presence
+ * binding may cost — while the rule that a field is checked for length at all
+ * lives in exactly one place.
+ */
+export function isBoundedString(value: unknown, limit: number): value is string {
+  return typeof value === 'string' && value.length <= limit;
+}
+
 /** Compare byte arrays without early exit on the first mismatching byte. */
 export function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;

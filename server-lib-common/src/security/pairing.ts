@@ -17,7 +17,7 @@
  * (docs/specs/remote-security-model.md, Pairing Ceremony).
  */
 
-import { toBase64Url } from './bytes.js';
+import { isBoundedString as isBounded, toBase64Url } from './bytes.js';
 import { getWebCrypto, type WebCryptoLike } from './webcrypto.js';
 import { HostAcl, type HostAclRecord } from './acl.js';
 import { boundedPushText } from './push.js';
@@ -201,7 +201,7 @@ export function isPairingRequest(request: unknown): request is PairingRequest {
 const PAIRING_FIELD_LIMIT = 1024;
 
 function isBoundedString(value: unknown): value is string {
-  return typeof value === 'string' && value.length <= PAIRING_FIELD_LIMIT;
+  return isBounded(value, PAIRING_FIELD_LIMIT);
 }
 
 /**

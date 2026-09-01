@@ -22,7 +22,11 @@ import {
   createNoiseResponder,
   fromBase64Url,
   generateNoiseKeyPair,
+  importNoiseStaticPrivateKey,
+  mintNoiseStaticKeyPair,
   noiseNonceBytes,
+  NOISE_STATIC_PKCS8_MAX_LENGTH,
+  NOISE_STATIC_PKCS8_MIN_LENGTH,
 } from '../dist/index.js';
 
 const TAG_LENGTH = 16;
@@ -453,4 +457,51 @@ test('the role follows the remote static, so it can never be mismatched', async 
     keys.respStatic.publicKey,
   );
   assert.ok((await asInitiator.writeMessage(EMPTY)).length > 0);
+});
+
+test('a minted static round-trips through its persisted form', async () => {
+  // What the Host state file holds: PKCS#8 for the private half, raw for the
+  // public one, both base64url.
+  const material = await mintNoiseStaticKeyPair();
+  assert.match(material.publicKey, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(fromBase64Url(material.publicKey).length, 32);
+  // The canonical X25519 PKCS#8 is 48 bytes; the guards accept a little more.
+  const pkcs8 = fromBase64Url(material.privateKeyPkcs8);
+  assert.ok(pkcs8.length >= NOISE_STATIC_PKCS8_MIN_LENGTH);
+  assert.ok(pkcs8.length <= NOISE_STATIC_PKCS8_MAX_LENGTH);
+
+  // The imported key is the same party: an IK handshake against the minted
+  // public key completes.
+  const staticKeyPair = {
+    privateKey: await importNoiseStaticPrivateKey(material.privateKeyPkcs8),
+    publicKey: fromBase64Url(material.publicKey),
+  };
+  const initiator = await createNoiseInitiator({
+    prologue: EMPTY,
+    staticKeyPair: keys.initStatic,
+    remoteStaticPublicKey: staticKeyPair.publicKey,
+  });
+  const responder = await createNoiseResponder({ prologue: EMPTY, staticKeyPair });
+  await responder.readMessage(await initiator.writeMessage(EMPTY));
+  await initiator.readMessage(await responder.writeMessage(EMPTY));
+  assert.deepEqual(initiator.session.handshakeHash, responder.session.handshakeHash);
+});
+
+test('a restored static is nonextractable', async () => {
+  // The exported form exists so a restart can recover the identity; once it is
+  // a CryptoKey again nothing may export it a second time.
+  const material = await mintNoiseStaticKeyPair();
+  const key = await importNoiseStaticPrivateKey(material.privateKeyPkcs8);
+  assert.equal(key.extractable, false);
+  assert.deepEqual([...key.usages], ['deriveBits']);
+  await assert.rejects(globalThis.crypto.subtle.exportKey('pkcs8', key));
+});
+
+test('a private key that is not one fails as a NoiseError', async () => {
+  // The state file is attacker-writable by anything that can write it at all,
+  // so a malformed value has to be a typed failure rather than a DOMException
+  // escaping the Host's start path.
+  await assert.rejects(importNoiseStaticPrivateKey('not base64url!'), NoiseError);
+  await assert.rejects(importNoiseStaticPrivateKey(''), NoiseError);
+  await assert.rejects(importNoiseStaticPrivateKey('AAAA'), NoiseError);
 });

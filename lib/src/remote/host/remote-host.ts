@@ -16,6 +16,7 @@ import {
   computeSetupProof,
   constantTimeEqual,
   getWebCrypto,
+  importNoiseStaticPrivateKey,
   toBase64Url,
   utf8Encode,
   MAX_PENDING_PAIRINGS,
@@ -28,6 +29,7 @@ import {
   type ConnectionDecision,
   type ConnectionPolicy,
   type ConnectionRequest,
+  type CryptoKeyLike,
   type HostAclRecord,
   type HostFrame,
   type PairingRequest,
@@ -206,6 +208,19 @@ export class RemoteHost {
    */
   #verifying = 0;
 
+  /**
+   * This Host's long-term Noise identity, imported nonextractably from the
+   * enrollment. Null until {@link RemoteHost.start} loads it, and on an
+   * enrollment minted before the field existed.
+   *
+   * **Nothing reads it yet** — the end-to-end ceremonies are staged
+   * (`docs/specs/remote-security-model.md` → Future). It is loaded here rather
+   * than in the constructor because `importKey` is async and constructing a
+   * Host must stay synchronous, and it is never re-exported: the PKCS#8 in the
+   * state file is the only copy that leaves WebCrypto.
+   */
+  #noiseStatic: CryptoKeyLike | null = null;
+
   #ws: WebSocketLike | null = null;
   #status: RemoteHostStatus = 'idle';
   #stopped = false;
@@ -372,7 +387,27 @@ export class RemoteHost {
     this.#displaced = false;
     this.#clearReconnectTimer();
     this.#backoffMs = INITIAL_BACKOFF_MS;
+    // Off the critical path: the socket does not wait on it, and a failure
+    // costs nothing that runs today.
+    void this.#loadNoiseStatic();
     this.#connect();
+  }
+
+  /**
+   * Import the enrolled Noise static once, nonextractably. Never rejects: an
+   * unusable key must not take down a Host whose shipped paths do not use one
+   * (see {@link RemoteHost.#noiseStatic}).
+   */
+  async #loadNoiseStatic(): Promise<CryptoKeyLike | null> {
+    if (this.#noiseStatic) return this.#noiseStatic;
+    const pkcs8 = this.#enrollment.noiseStaticPrivateKey;
+    if (pkcs8 === undefined) return null;
+    try {
+      this.#noiseStatic = await importNoiseStaticPrivateKey(pkcs8);
+    } catch (error) {
+      console.warn('[remote-host] could not import the Noise static key', error);
+    }
+    return this.#noiseStatic;
   }
 
   stop(): void {

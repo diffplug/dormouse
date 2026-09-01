@@ -611,7 +611,11 @@ memo invalidation — live in that host's spec.
 * **Enrollment** (Settings dialog, or the console hook, once): server URL +
   one credential → `POST /api/host/enroll` → the service persists
   `{ serverUrl, hostId, hostToken, origin, rpId }` (+ `requireUserVerification`
-  when the server sent it) through its `HostStateStore`, then opens and
+  when the server sent it, + the `noiseStaticPrivateKey` /
+  `noiseStaticPublicKey` this Host mints locally after the answer and the
+  request never carries —
+  [remote-security-model.md](./remote-security-model.md)) through its
+  `HostStateStore`, then opens and
   maintains `GET /ws/host`. `hostToken` is a bearer credential and never enters a
   webview realm. Refused outright for a server outside this build's allowlist
   (above), before the password leaves the machine. **A 200 that is not an
