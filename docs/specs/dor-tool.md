@@ -294,10 +294,18 @@ than were asked for (rationale):
   nothing ([Trust](#trust) rule 3).
 - **A key match reveals its survivor** ([CLI](#cli)) — unless the survivor *is*
   the calling pane, the place take-over makes normal to retype in. Its command
-  cannot be live (its shell is running `dor`), so it is idle by construction and
+  is live only when the tool spawned this `dor` itself; otherwise `dor` is what
+  its shell is running, so the tool is idle however the pane reads, and it
   **re-runs there through the same handshake**, reported `adopted`. Never
   through the interrupt-and-retype restart: Ctrl+C would kill the `dor` still
   waiting for the answer.
+- **A re-run is a placement of nothing**, so only the two conditions that govern
+  typing apply — the naked line and integration. It runs in the tool's own
+  directory, like an `adopted` match from any other pane, and `--surface` /
+  `--minimize` / a `--cwd` elsewhere do not change that.
+- **A caller that is the match but cannot be typed behind fails loudly.** There
+  is no survivor to reveal — the user is sitting in it — so reporting `existing`
+  would be a silent no-op. It says so instead.
 
 **Respond, then wait for the prompt.** `dor` is the caller's foreground process
 when the host answers it, so the host answers `takeover` first, waits for the
@@ -311,10 +319,12 @@ cannot exit until it is answered.
 - **A shell that never comes back to its prompt is left alone**: nothing typed,
   leaf still a terminal. The transformation happens on the way *in* to typing,
   so a timeout costs nothing.
-- **The spawn lock is held past the response** until the command is live. The
-  key reaches the leaf's params at the meta write, but a pane that has been
-  typed into and has not yet reported reads as an idle tool, which a queued
-  invocation of the same key would interrupt and retype.
+- **The spawn lock is held past the response** until the shell has processed the
+  line — the command live, or already finished. The key reaches the leaf's params
+  at the meta write, but a pane typed into and not yet reporting reads as an idle
+  tool, which a queued invocation of the same key would interrupt and retype.
+  Waiting for *live* alone would pin the lock for the full timeout on every tool
+  that dies on boot: it can start and finish between two samples.
 - **The transformation is one meta write**, so the component pair and the params
   commit together, and the leaf id — the SessionId — never changes. That is what
   keeps the terminal, its buffer, and its PTY untouched.

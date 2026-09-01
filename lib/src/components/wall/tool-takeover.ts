@@ -52,29 +52,34 @@ export interface ToolTakeoverGate {
 }
 
 /**
- * What both placements below share: a naked invocation in a visible, integrated
- * pane whose directory is the tool's. Every condition is conservative — failing
- * one is a split, which is never wrong (rationale).
+ * Whether the caller's own shell is one the host may type into: an integrated
+ * pane whose reported line is this invocation and nothing else. Both placements
+ * need it, and neither can proceed without it.
  */
-function callerMayRunTool(gate: ToolTakeoverGate): boolean {
-  return !gate.explicitSurface
+function callerTypedTool(gate: ToolTakeoverGate): boolean {
+  return gate.oscDriven && isNakedToolInvocation(gate.rawCommandLine);
+}
+
+/**
+ * Whether this `dor tool` transforms its calling pane into the tool. Every
+ * condition is conservative — failing one is a split, which is never wrong
+ * (rationale).
+ */
+export function toolTakesOverCaller(gate: ToolTakeoverGate): boolean {
+  return gate.kind === 'terminal'
+    && !gate.explicitSurface
     && !gate.minimized
     && gate.visible
     && gate.cwdMatches
-    && gate.oscDriven
-    && isNakedToolInvocation(gate.rawCommandLine);
-}
-
-/** Whether this `dor tool` transforms its calling pane into the tool. */
-export function toolTakesOverCaller(gate: ToolTakeoverGate): boolean {
-  return gate.kind === 'terminal' && callerMayRunTool(gate);
+    && callerTypedTool(gate);
 }
 
 /**
  * Whether a keyed match on the calling pane re-runs there. The caller is then
- * the tool's own Surface — the place take-over makes normal to retype in — and
- * its command cannot be live, since its shell is running `dor`.
+ * the tool's own Surface, so the placement conditions above are moot — there is
+ * nothing to place, and the tool re-runs in its own directory, exactly as an
+ * `adopted` match from any other pane does.
  */
 export function toolRerunsInCaller(gate: ToolTakeoverGate): boolean {
-  return gate.kind === 'tool' && callerMayRunTool(gate);
+  return gate.kind === 'tool' && callerTypedTool(gate);
 }

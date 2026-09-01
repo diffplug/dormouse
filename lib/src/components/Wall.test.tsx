@@ -1467,6 +1467,45 @@ describe('Wall on the Lath engine', () => {
       expect(typed).toEqual(['pnpm storybook\r', 'pnpm storybook\r']);
       expect(leafCount()).toBe(1);
 
+      // The re-run goes live (releasing the lock) and exits.
+      act(() => {
+        terminalRegistry.applyTerminalSemanticEvents('pane-a', [
+          { type: 'commandLine', commandLine: 'pnpm storybook' },
+          { type: 'commandStart', source: 'osc633_boundaries' },
+        ]);
+      });
+      await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
+      act(() => {
+        terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'promptStart' }]);
+      });
+
+      // A line the host cannot type behind says so, rather than reporting a tool
+      // that is not running as `existing` back into the pane it is sitting in.
+      act(() => {
+        terminalRegistry.applyTerminalSemanticEvents('pane-a', [
+          { type: 'commandLine', commandLine: 'dor tool storybook && open http://localhost:6006' },
+          { type: 'commandStart', source: 'osc633_boundaries' },
+        ]);
+      });
+      let compound: { ok: boolean; error?: string } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.tool,
+            surfaceId: 'pane-a',
+            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
+            respond: (result: typeof compound) => { compound = result; },
+          },
+        }));
+      });
+      await settle(() => compound !== undefined);
+      expect(compound?.ok).toBe(false);
+      expect(compound?.error).toContain("is this tool's own pane");
+      expect(typed).toHaveLength(2);
+      act(() => {
+        terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'promptStart' }]);
+      });
+
       // Same Surface throughout: the leaf changed kind without changing id, so
       // the session persists as one. The live state again outlasts a poll tick,
       // so the re-run releases its lock before the next test takes one.
