@@ -305,6 +305,22 @@ describe('RemoteHost frame handling', () => {
     expect((await pair('c3', { ...PAIRING, setupProof })).verified).toBe(false);
   });
 
+  it('does not verify against a nonce spent while its MAC is in flight', async () => {
+    const host = makeHost();
+    const nonce = host.mintSetupNonce();
+    const setupProof = await computeSetupProof(nonce, PAIRING.devicePublicKey);
+    const winner = await pair('c1', { ...PAIRING, setupProof });
+
+    // `receive` reaches the first WebCrypto await before returning. Approval
+    // spends the nonce while this second request is still verifying it.
+    const before = approvals.length;
+    socket.receive({ t: 'pair', clientId: 'c2', request: { ...PAIRING, setupProof } });
+    winner.approve();
+
+    const late = await flushUntil(() => approvals.slice(before).find((p) => p.clientId === 'c2'));
+    expect(late.verified).toBe(false);
+  });
+
   it('never verifies an expired nonce, and drops it on the next mint', async () => {
     let clock = Date.now();
     const host = makeHost(

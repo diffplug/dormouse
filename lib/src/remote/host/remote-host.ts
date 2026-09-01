@@ -322,6 +322,14 @@ export class RemoteHost {
         continue;
       }
       const expected = await computeSetupProof(nonce, request.devicePublicKey);
+      // The MAC yields to WebCrypto. Approval of another request may spend this
+      // nonce while it is in flight, and expiry may pass too; a result is valid
+      // only while the exact entry from the snapshot is still live.
+      const liveExpiry = this.#setupNonces.get(nonce);
+      if (liveExpiry !== expiresAt || expiresAt <= this.#now()) {
+        if (liveExpiry === expiresAt) this.#setupNonces.delete(nonce);
+        continue;
+      }
       // Constant-time, unlike the token lookup this replaced: a MAC compare
       // that exits on the first wrong character is a forgery oracle. The length
       // is not secret, so an early `false` on a mismatched one leaks nothing.
