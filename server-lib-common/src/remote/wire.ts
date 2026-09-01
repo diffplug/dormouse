@@ -6,7 +6,7 @@
  */
 
 import type { HostAclRecord } from '../security/acl.js';
-import { isBoundedString } from '../security/bytes.js';
+import { base64UrlLength, isBoundedBase64Url, isBoundedString } from '../security/bytes.js';
 import type { ConnectionFailure, ConnectionRequest } from '../security/connection.js';
 import { NOISE_MAX_MESSAGE_LENGTH } from '../security/noise.js';
 import type { PairStatusQuery, PairingRequest } from '../security/pairing.js';
@@ -253,12 +253,7 @@ export const SETUP_HASH_NONCE_PARAM = 'nonce';
  * of both halves of the QR hash above.
  */
 export function isSetupTokenHandle(value: unknown): value is string {
-  return (
-    typeof value === 'string' &&
-    value.length > 0 &&
-    value.length <= SETUP_TOKEN_MAX_LENGTH &&
-    /^[A-Za-z0-9_-]+$/.test(value)
-  );
+  return isBoundedBase64Url(value, SETUP_TOKEN_MAX_LENGTH);
 }
 
 /**
@@ -478,13 +473,9 @@ export type HostFrame =
   | E2eHostFrame;
 
 // ---------------------------------------------------------------------------
-// The `e2e` relay envelope (see server.md "Relay"). One end-to-end Noise
-// message per frame, in a bounded routing envelope the relay never opens.
-//
-// Additive beside the legacy union above: nothing in production sends or
-// answers one yet, and no production path distributes a Host static key. The
-// harness in `server/test/harness/` is its only speaker
-// (docs/specs/remote-security-model.md -> ## Future -> Scope: e2e-client-host).
+// The `e2e` relay envelope: one end-to-end Noise message per frame, in a
+// bounded routing envelope. Additive beside the legacy union above, with no
+// production speaker yet (server.md -> Relay).
 
 /** Which ceremony a frame belongs to; a session is scoped to one kind and id. */
 export type E2eKind = 'pairing' | 'connection';
@@ -495,33 +486,30 @@ export type E2eClientStep = 'init' | 'transport';
 /** A Host answers message 2 (`response`), then transport. */
 export type E2eHostStep = 'response' | 'transport';
 
+/** Every routing id on this envelope — `hostId`, `id`, `clientId` — is this. */
+const ROUTING_ID_BYTE_LENGTH = 16;
+
 /**
  * The invitation or connection id, base64url of 16 bytes. Exactly this long:
  * the id is a map key on both sides and appears in the prologue, so a variable
  * one would be a length the transcript does not pin.
  */
-export const E2E_ID_LENGTH = 22;
+export const E2E_ID_LENGTH = base64UrlLength(ROUTING_ID_BYTE_LENGTH);
 
 /**
  * The longest `ct` any `e2e` frame may carry: the base64url encoding of a
  * maximal Noise message. Computed from {@link NOISE_MAX_MESSAGE_LENGTH} so the
- * two cannot drift, and checked **before** any base64 decode — the point of a
- * length bound is to reject without allocating.
+ * two cannot drift.
  */
 export const MAX_E2E_CIPHERTEXT_LENGTH = base64UrlLength(NOISE_MAX_MESSAGE_LENGTH);
 
-/** Unpadded base64url characters for `byteLength` bytes. */
-function base64UrlLength(byteLength: number): number {
-  const remainder = byteLength % 3;
-  return Math.floor(byteLength / 3) * 4 + (remainder === 0 ? 0 : remainder + 1);
-}
-
 /**
  * The longest `clientId` a Host will act on. The relay mints these as base64url
- * of 16 random bytes; the headroom exists because the id is a map key on a path
- * the security model does not trust.
+ * of 16 random bytes; the headroom exists because the id is a *map key* on a
+ * hostile-relay path — bounding every other field while leaving the key free
+ * would bound only the part that was already bounded.
  */
-export const MAX_E2E_CLIENT_ID_LENGTH = 256;
+export const MAX_CLIENT_ID_LENGTH = 256;
 
 /** Client → server. */
 export interface E2eClientFrame {
@@ -550,13 +538,8 @@ export interface E2eHostFrame {
 }
 
 /** Server → client: the Host's frame with `hostId` stamped, as for `challenge`. */
-export interface E2eServerToClientFrame {
-  t: 'e2e';
+export interface E2eServerToClientFrame extends Omit<E2eHostFrame, 'clientId'> {
   hostId: string;
-  kind: E2eKind;
-  id: string;
-  step: E2eHostStep;
-  ct: string;
 }
 
 export function isE2eKind(value: unknown): value is E2eKind {
@@ -565,38 +548,28 @@ export function isE2eKind(value: unknown): value is E2eKind {
 
 /** Base64url of exactly 16 bytes. */
 export function isE2eId(value: unknown): value is string {
-  return typeof value === 'string' && value.length === E2E_ID_LENGTH && isBase64Url(value);
+  return isBoundedBase64Url(value, E2E_ID_LENGTH) && value.length === E2E_ID_LENGTH;
 }
 
 /** Base64url, bounded by {@link MAX_E2E_CIPHERTEXT_LENGTH}, non-empty. */
 export function isE2eCiphertext(value: unknown): value is string {
-  // Length first, alphabet second: the regex is the part that costs a scan.
-  return (
-    typeof value === 'string' &&
-    value.length > 0 &&
-    value.length <= MAX_E2E_CIPHERTEXT_LENGTH &&
-    isBase64Url(value)
-  );
-}
-
-function isBase64Url(value: string): boolean {
-  return /^[A-Za-z0-9_-]+$/.test(value);
+  return isBoundedBase64Url(value, MAX_E2E_CIPHERTEXT_LENGTH);
 }
 
 /**
  * The shape guard both a relay and a Host run on a Client-originated `e2e`
- * frame. The relay runs it as defense in depth — it cannot check the
- * ciphertext, so all it enforces is that the routing values are bounded — and
- * the Host runs it again on arrival because the security model does not trust
- * the relay to have run anything.
+ * frame — the both-sides rule `pair-status` already follows (server.md ->
+ * Relay). It cannot check the ciphertext, so all it enforces is that the
+ * routing values are bounded. Pinned by `server-lib-common/test/wire.test.mjs`
+ * and, against real relay-minted ids, `server/test/e2e-relay.test.mjs`.
  */
 export function isE2eClientFrame(value: unknown): value is E2eClientFrame {
   if (!value || typeof value !== 'object') return false;
   const frame = value as Record<string, unknown>;
   return (
     frame.t === 'e2e' &&
-    // A `hostId` is minted the same way an invitation or connection id is —
-    // base64url of 16 bytes — so one length rule covers every routing id here.
+    // A `hostId` is minted the same way an invitation or connection id is, so
+    // one length rule covers every routing id the Client puts on an envelope.
     isE2eId(frame.hostId) &&
     isE2eKind(frame.kind) &&
     isE2eId(frame.id) &&
@@ -605,14 +578,16 @@ export function isE2eClientFrame(value: unknown): value is E2eClientFrame {
   );
 }
 
-/** {@link isE2eClientFrame} plus the relay-stamped `clientId` a Host reads. */
+/**
+ * {@link isE2eClientFrame} plus the relay-stamped `clientId` a Host reads. The
+ * free `clientId` bound runs first: the ciphertext scan it would otherwise
+ * follow costs ~33 µs on a maximal `ct`, and a hostile relay can send those at
+ * line rate.
+ */
 export function isE2eServerToHostFrame(value: unknown): value is E2eServerToHostFrame {
   return (
-    isE2eClientFrame(value) &&
-    isBoundedString(
-      (value as E2eServerToHostFrame).clientId,
-      MAX_E2E_CLIENT_ID_LENGTH,
-    )
+    isBoundedString((value as { clientId?: unknown } | null)?.clientId, MAX_CLIENT_ID_LENGTH) &&
+    isE2eClientFrame(value)
   );
 }
 
@@ -622,7 +597,7 @@ export function isE2eHostFrame(value: unknown): value is E2eHostFrame {
   const frame = value as Record<string, unknown>;
   return (
     frame.t === 'e2e' &&
-    isBoundedString(frame.clientId, MAX_E2E_CLIENT_ID_LENGTH) &&
+    isBoundedString(frame.clientId, MAX_CLIENT_ID_LENGTH) &&
     isE2eKind(frame.kind) &&
     isE2eId(frame.id) &&
     (frame.step === 'response' || frame.step === 'transport') &&

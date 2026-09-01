@@ -1,16 +1,21 @@
 /**
  * What rides inside a Noise transport message once `Split` has run
- * (`docs/specs/server.md` -> Relay -> "E2E framing"): the kind byte, the
- * application byte stream and its 1 MiB reassembly cap, the fixed-size control
- * message, and the session wrapper that poisons itself on the first failure.
+ * (`docs/specs/server.md` -> Relay -> "E2E framing").
  *
- * Runtime-agnostic and shared: the Client, the Host, and the harness all frame
- * with this module, so none of them can disagree about what a transport
- * plaintext is. It knows nothing about the relay envelope that carries the
- * ciphertext — routing metadata is never authenticated application content.
+ * One implementation, so no two speakers can disagree about what a transport
+ * plaintext is; today the harness is the only one. It knows nothing about the
+ * relay envelope that carries the ciphertext — routing metadata is never
+ * authenticated application content.
  */
 
-import { concatBytes, utf8Decode, utf8Encode, lengthPrefixedConcat } from './bytes.js';
+import {
+  concatBytes,
+  lengthPrefixedConcat,
+  readUint32BE,
+  utf8Decode,
+  utf8Encode,
+  writeUint32BE,
+} from './bytes.js';
 import {
   NOISE_MAX_MESSAGE_LENGTH,
   NOISE_TAG_LENGTH,
@@ -30,11 +35,7 @@ export const TRANSPORT_KIND_CONTROL = 0x02;
 /** A keepalive's body: exactly this many zero bytes, so every one is identical. */
 export const KEEPALIVE_BODY_SIZE = 32;
 
-/**
- * Every control message is padded to exactly this many bytes, so the ciphertext
- * length of a pairing outcome, a denial, and a presence proof are the same
- * number and the relay learns nothing from watching one go by.
- */
+/** Control bodies pad to this, so every one is the same size on the wire. */
 export const CONTROL_PAYLOAD_SIZE = 4096;
 
 /** Each application message is `u32 big-endian length || bytes`. */
@@ -54,7 +55,7 @@ export const MAX_STREAM_BODY_LENGTH = NOISE_MAX_MESSAGE_LENGTH - NOISE_TAG_LENGT
  * The most a reassembler may hold: one maximal message and its length prefix.
  * Reached only transiently — complete messages are drained on every push.
  */
-export const MAX_REASSEMBLY_BUFFER = APP_LENGTH_PREFIX_SIZE + MAX_APP_MESSAGE_LENGTH;
+const MAX_REASSEMBLY_BUFFER = APP_LENGTH_PREFIX_SIZE + MAX_APP_MESSAGE_LENGTH;
 
 const EMPTY = new Uint8Array(0);
 
@@ -101,7 +102,13 @@ export function e2ePairingPrologue(
   return e2ePrologue('pairing', hostId, invitationFields);
 }
 
-function e2ePrologue(kind: string, hostId: string, extra: readonly string[]): Uint8Array {
+// `kind` is the `E2eKind` of the envelope this transcript binds; spelled as a
+// literal union because `remote/wire.ts` imports this layer, not the reverse.
+function e2ePrologue(
+  kind: 'connection' | 'pairing',
+  hostId: string,
+  extra: readonly string[],
+): Uint8Array {
   return lengthPrefixedConcat([
     utf8Encode(E2E_PROLOGUE_DOMAIN),
     utf8Encode(kind),
@@ -161,8 +168,8 @@ export function decodeTransportPlaintext(plaintext: Uint8Array): TransportPlaint
       if (body.length > MAX_STREAM_BODY_LENGTH) {
         throw new NoiseTransportError('stream body exceeds one Noise message');
       }
-      // Copied: Node hands a WebSocket frame over as a `Buffer`, whose
-      // `subarray` is a live view into a buffer the caller may reuse.
+      // Copied: this decoder is exported, and Node hands a WebSocket frame over
+      // as a `Buffer` whose `subarray` is a live view the caller may reuse.
       return { kind: 'stream', body: new Uint8Array(body) };
     }
     case TRANSPORT_KIND_CONTROL:
@@ -207,18 +214,18 @@ function decodeControlBody(body: Uint8Array): Record<string, unknown> {
 // The application byte stream
 
 /** Split one application message into stream bodies, length prefix included. */
-export class StreamChunker {
-  chunk(message: Uint8Array): Uint8Array[] {
-    if (message.length > MAX_APP_MESSAGE_LENGTH) {
-      throw new NoiseTransportError('application message exceeds the 1 MiB cap');
-    }
-    const framed = concatBytes(encodeUint32(message.length), message);
-    const bodies: Uint8Array[] = [];
-    for (let offset = 0; offset < framed.length; offset += MAX_STREAM_BODY_LENGTH) {
-      bodies.push(framed.subarray(offset, offset + MAX_STREAM_BODY_LENGTH));
-    }
-    return bodies;
+export function chunkAppMessage(message: Uint8Array): Uint8Array[] {
+  if (message.length > MAX_APP_MESSAGE_LENGTH) {
+    throw new NoiseTransportError('application message exceeds the 1 MiB cap');
   }
+  const framed = new Uint8Array(APP_LENGTH_PREFIX_SIZE + message.length);
+  writeUint32BE(framed, 0, message.length);
+  framed.set(message, APP_LENGTH_PREFIX_SIZE);
+  const bodies: Uint8Array[] = [];
+  for (let offset = 0; offset < framed.length; offset += MAX_STREAM_BODY_LENGTH) {
+    bodies.push(framed.subarray(offset, offset + MAX_STREAM_BODY_LENGTH));
+  }
+  return bodies;
 }
 
 /**
@@ -228,57 +235,97 @@ export class StreamChunker {
  * over the cap, or a buffer that would grow past one maximal message, means the
  * peer is not speaking this framing, and there is no resynchronization point in
  * a byte stream to recover to.
+ *
+ * Bodies are queued and copied once, when a message completes, rather than
+ * concatenated on arrival. `MAX_STREAM_BODY_LENGTH` is a maximum, not a
+ * minimum: a peer may legally split one 1 MiB message into single-byte bodies,
+ * and re-concatenating a growing buffer on each of those is quadratic —
+ * seconds of blocking memcpy on the process that also owns the terminal UI.
  */
 export class StreamReassembler {
-  #buffer: Uint8Array = EMPTY;
+  /**
+   * Bodies received and not yet drained. Consumed via {@link #head} rather than
+   * `shift()`, which memmoves the whole array and would restore the quadratic
+   * term this design exists to remove.
+   */
+  #queue: Uint8Array[] = [];
+  #head = 0;
+  /** Total undrained bytes across the live tail of {@link #queue}. */
+  #queued = 0;
 
   /** Accept one stream body; returns the messages it completed, in order. */
   push(body: Uint8Array): Uint8Array[] {
     if (body.length > MAX_STREAM_BODY_LENGTH) {
       throw new NoiseTransportError('stream body exceeds one Noise message');
     }
-    this.#buffer =
-      this.#buffer.length === 0 ? new Uint8Array(body) : concatBytes(this.#buffer, body);
+    if (body.length > 0) {
+      // Copied for the same reason `decodeTransportPlaintext` copies, and
+      // because a queued body outlives the call that delivered it.
+      this.#queue.push(new Uint8Array(body));
+      this.#queued += body.length;
+    }
     const messages: Uint8Array[] = [];
     for (;;) {
-      if (this.#buffer.length < APP_LENGTH_PREFIX_SIZE) break;
-      const length = decodeUint32(this.#buffer);
+      if (this.#queued < APP_LENGTH_PREFIX_SIZE) break;
+      const length = readUint32BE(this.#take(APP_LENGTH_PREFIX_SIZE, false));
       if (length > MAX_APP_MESSAGE_LENGTH) {
         throw new NoiseTransportError('application message exceeds the 1 MiB cap');
       }
-      const end = APP_LENGTH_PREFIX_SIZE + length;
-      if (this.#buffer.length < end) break;
-      messages.push(new Uint8Array(this.#buffer.subarray(APP_LENGTH_PREFIX_SIZE, end)));
-      this.#buffer = new Uint8Array(this.#buffer.subarray(end));
+      if (this.#queued < APP_LENGTH_PREFIX_SIZE + length) break;
+      this.#take(APP_LENGTH_PREFIX_SIZE, true);
+      messages.push(this.#take(length, true));
     }
-    if (this.#buffer.length > MAX_REASSEMBLY_BUFFER) {
+    if (this.#queued > MAX_REASSEMBLY_BUFFER) {
       throw new NoiseTransportError('reassembly buffer exceeds the 1 MiB cap');
     }
     return messages;
   }
-}
 
-function encodeUint32(value: number): Uint8Array {
-  return Uint8Array.of(
-    (value >>> 24) & 0xff,
-    (value >>> 16) & 0xff,
-    (value >>> 8) & 0xff,
-    value & 0xff,
-  );
-}
-
-function decodeUint32(bytes: Uint8Array): number {
-  return ((bytes[0]! << 24) >>> 0) + (bytes[1]! << 16) + (bytes[2]! << 8) + bytes[3]!;
+  /**
+   * The next `count` queued bytes, copied out. `consume` also removes them —
+   * the caller peeks a length prefix before it knows whether the message it
+   * announces has arrived.
+   */
+  #take(count: number, consume: boolean): Uint8Array {
+    const out = new Uint8Array(count);
+    let filled = 0;
+    let index = this.#head;
+    while (filled < count) {
+      const chunk = this.#queue[index]!;
+      const size = Math.min(chunk.length, count - filled);
+      out.set(chunk.subarray(0, size), filled);
+      filled += size;
+      if (!consume) {
+        index++;
+        continue;
+      }
+      if (size < chunk.length) {
+        this.#queue[index] = chunk.subarray(size);
+      } else {
+        this.#queue[index] = EMPTY; // release the body's buffer
+        index++;
+      }
+    }
+    if (!consume) return out;
+    this.#head = index;
+    this.#queued -= count;
+    if (this.#head === this.#queue.length) {
+      this.#queue = [];
+      this.#head = 0;
+    }
+    return out;
+  }
 }
 
 // ---------------------------------------------------------------------------
 // The session
 
-/** What one received transport message turned out to be. */
+/**
+ * What one received transport message turned out to be: a plaintext, with the
+ * `stream` arm replaced by the messages it completed (none, mid-message).
+ */
 export type TransportReceipt =
-  | { readonly kind: 'keepalive' }
-  | { readonly kind: 'control'; readonly value: Record<string, unknown> }
-  /** Zero or more complete application messages; a mid-message chunk yields none. */
+  | Exclude<TransportPlaintext, { readonly kind: 'stream' }>
   | { readonly kind: 'app'; readonly messages: readonly Uint8Array[] };
 
 /**
@@ -286,17 +333,15 @@ export type TransportReceipt =
  * the handshake hash the application authenticates against, and the framing
  * above.
  *
- * **The first failure is permanent.** A decrypt failure, a nonce gap or reorder
- * (which Noise's counter turns into a decrypt failure), or a framing violation
- * poisons the session, and every later call throws. There is no resynchronizing
- * a stream cipher, and a session that kept going after one rejected frame would
- * be one an attacker can steer by dropping frames.
+ * **The first failure is permanent** (server.md -> E2E framing): a decrypt
+ * failure, a nonce gap or reorder, or a framing violation poisons the session
+ * and every later call throws. A session that kept going after one rejected
+ * frame would be one an attacker can steer by dropping frames.
  */
 export class NoiseTransportSession {
   readonly #send: NoiseCipherState;
   readonly #receive: NoiseCipherState;
   readonly #handshakeHash: Uint8Array;
-  readonly #chunker = new StreamChunker();
   readonly #reassembler = new StreamReassembler();
   #poison: string | undefined;
 
@@ -315,10 +360,7 @@ export class NoiseTransportSession {
     return this.#poison !== undefined;
   }
 
-  /** The next counter each direction will use; the reorder evidence a test reads. */
-  get sendNonce(): bigint {
-    return this.#send.nonce;
-  }
+  /** The counter the receive direction expects next — a test's reorder evidence. */
   get receiveNonce(): bigint {
     return this.#receive.nonce;
   }
@@ -334,7 +376,7 @@ export class NoiseTransportSession {
   /** One application message as one or more transport ciphertexts, in order. */
   sendApp(message: Uint8Array): Uint8Array[] {
     return this.#guarded(() =>
-      this.#chunker.chunk(message).map((body) => this.#encrypt({ kind: 'stream', body })),
+      chunkAppMessage(message).map((body) => this.#encrypt({ kind: 'stream', body })),
     );
   }
 

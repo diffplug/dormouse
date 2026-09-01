@@ -483,27 +483,29 @@ whether or not the rest of the check passes, so a replayed `connect2` is refused
 at the relay before the Host's challenge can be burned.
 
 **The `e2e` envelope is accepted and routed additively**, beside the legacy
-frames above. Client→Server `{ t: 'e2e', hostId, kind: 'pairing' |
-'connection', id, step: 'init' | 'transport', ct }`; Server→Host the same plus
-`clientId`; Host→Server `{ t: 'e2e', clientId, kind, id, step: 'response' |
-'transport', ct }`; Server→Client mirrors the Host frame with `hostId` stamped
-from the socket, as for `challenge`. An `init` binds the Client socket to the
-named Host exactly as `connect` does — the previous Host gets `client-gone` and
-`established` is cleared — and a `transport` frame is forwarded only within that
-binding, in either direction. **The relay never parses `ct`, keeps no Noise
-state, and has no notion of "authorized" for these frames**: only the Host knows
-whether a ceremony succeeded. Its guards — the shape, every routing id base64url
-of 16 bytes, `ct` base64url bounded by `MAX_E2E_CIPHERTEXT_LENGTH` (the encoding
-of a maximal Noise message), all checked before any decode — are defense in
-depth; a malformed Client frame gets the existing `error`, a malformed Host
-frame is dropped. **Nothing in production sends one yet**: the test harness is
-the only speaker, and no production path distributes a Host static key
-([remote-security-model.md](./remote-security-model.md) `## Future`).
+frames above — four `t: 'e2e'` frames (Client→Server, Server→Host with
+`clientId` stamped, Host→Server, Server→Client with `hostId` stamped from the
+socket as for `challenge`), shapes in `server-lib-common/src/remote/wire.ts`.
+
+- **An `init` binds** the Client socket to the named Host exactly as `connect`
+  does: the previous Host gets `client-gone` and `established` is cleared.
+- **A `transport` frame is forwarded only within that binding**, in either
+  direction.
+- **Never parsed, never remembered, never authorized.** The relay does not
+  decode `ct`, keeps no Noise state, and has no notion of "authorized" here —
+  only the Host knows whether a ceremony succeeded.
+- **Its bounds are defense in depth**, on the same both-sides rule as
+  `pair-status`: `hostId` and `id` base64url of 16 bytes, `clientId` a bounded
+  string, `ct` base64url bounded by `MAX_E2E_CIPHERTEXT_LENGTH` (the encoding
+  of a maximal Noise message). A malformed Client frame gets the existing
+  `error`; a malformed Host frame is dropped.
+- **Nothing in production sends one yet**: the harness is the only speaker, and
+  no production path distributes a Host static key
+  ([remote-security-model.md](./remote-security-model.md) `## Future`).
 
 Source of truth: `server/src/relay.ts` (`registerHost`), `server/src/handshake.ts`,
 and `isE2eClientFrame` / `isE2eHostFrame` in
-`server-lib-common/src/remote/wire.ts` — written for a Host to reuse verbatim,
-since the security model does not trust the relay to have run them.
+`server-lib-common/src/remote/wire.ts`, written for a Host to reuse verbatim.
 
 ### Pairing (phone ↔ laptop, first time)
 
@@ -597,9 +599,10 @@ stages everything past it.
 
 ### E2E framing
 
-What one Noise transport message carries once `Split` has run. One
-implementation serves the Client, the Host, and the harness, so no two of them
-can disagree about what a transport plaintext is.
+What one Noise transport message carries once `Split` has run. The Client and
+the Host **must** frame with this one module when they land, so no two speakers
+can disagree about what a transport plaintext is; the harness is its only
+speaker today.
 
 - **Transport plaintext is `[kind: u8][body]`.** `0x00` keepalive — exactly 32
   zero bytes; `0x01` stream — a slice of the application byte stream; `0x02`
@@ -609,9 +612,11 @@ can disagree about what a transport plaintext is.
   not a plain object.
 - **Each application message is `u32 big-endian length || bytes`**, chunked to
   keep every Noise message inside 65,535 bytes with its kind byte and tag
-  (`MAX_STREAM_BODY_LENGTH`). Reassembly caps a declared length, and the buffer,
-  at `MAX_APP_MESSAGE_LENGTH` (1 MiB). **Every length is checked before any
-  base64 decode or JSON parse.**
+  (`MAX_STREAM_BODY_LENGTH`). Reassembly caps a declared length, and the queue,
+  at `MAX_APP_MESSAGE_LENGTH` (1 MiB), the declared length as soon as its prefix
+  arrives. **Bodies are queued and copied once, when a message completes** — a
+  peer may legally split one message into single-byte bodies, and concatenating
+  on arrival would be quadratic.
 - **The first failure poisons the session.** A decrypt failure, a nonce gap or
   reorder (which Noise's counter turns into a decrypt failure), or a framing
   violation destroys it and every later call throws — there is no
@@ -886,10 +891,10 @@ its one self-authored response is the plaintext missing-build stub at `GET /`.
 and WebSocket boundaries with `SimAuthenticator` and the `FakeHost` in
 `server/test/harness/fake-host.mjs`; process-level tests spawn the real
 entrypoint. The same `FakeHost` and the `FakeClient` in
-`server/test/harness/fake-client.mjs` speak Noise through the real relay with
-both statics injected — the only speakers of the `e2e` envelope
-(`server/test/e2e-relay.test.mjs`). `server-lib-common` pins revoked-record
-denial. Browser-dependent Host and Pocket UI remain dogfood coverage.
+`server/test/harness/fake-client.mjs` drive the `e2e` envelope through the real
+relay (`server/test/e2e-relay.test.mjs`). `server-lib-common` pins
+revoked-record denial. Browser-dependent Host and Pocket UI remain dogfood
+coverage.
 
 ## Running it
 

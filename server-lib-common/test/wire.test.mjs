@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   E2E_ID_LENGTH,
   MAX_E2E_CIPHERTEXT_LENGTH,
-  MAX_E2E_CLIENT_ID_LENGTH,
+  MAX_CLIENT_ID_LENGTH,
   MAX_TERMINAL_DIMENSION,
   NOISE_MAX_MESSAGE_LENGTH,
   clampTerminalDimension,
@@ -145,7 +145,7 @@ test('isE2eServerToHostFrame additionally proves the relay-stamped clientId', ()
   assert.equal(isE2eServerToHostFrame(E2E_CLIENT), false, 'no clientId');
   assert.equal(isE2eServerToHostFrame({ ...E2E_CLIENT, clientId: 'c-1' }), true);
   assert.equal(
-    isE2eServerToHostFrame({ ...E2E_CLIENT, clientId: 'c'.repeat(MAX_E2E_CLIENT_ID_LENGTH + 1) }),
+    isE2eServerToHostFrame({ ...E2E_CLIENT, clientId: 'c'.repeat(MAX_CLIENT_ID_LENGTH + 1) }),
     false,
     'the id is a map key on a path the model does not trust',
   );

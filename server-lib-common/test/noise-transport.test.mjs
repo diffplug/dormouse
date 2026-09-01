@@ -1,8 +1,5 @@
 /**
- * The E2E transport framing (docs/specs/server.md -> Relay -> "E2E framing"):
- * the kind byte, the application byte stream and its 1 MiB cap, the fixed-size
- * control message, and the session that poisons itself on the first failure.
- *
+ * The E2E transport framing (docs/specs/server.md -> Relay -> "E2E framing").
  * The relay-integrated half — the same framing through a real server — is
  * `server/test/e2e-relay.test.mjs`.
  */
@@ -21,11 +18,11 @@ import {
   NOISE_TAG_LENGTH,
   NoiseError,
   NoiseTransportSession,
-  StreamChunker,
   StreamReassembler,
   TRANSPORT_KIND_CONTROL,
   TRANSPORT_KIND_KEEPALIVE,
   TRANSPORT_KIND_STREAM,
+  chunkAppMessage,
   createNoiseInitiator,
   createNoiseResponder,
   decodeTransportPlaintext,
@@ -35,6 +32,7 @@ import {
   generateNoiseKeyPair,
   lengthPrefixedConcat,
   utf8Encode,
+  writeUint32BE,
 } from '../dist/index.js';
 
 /** A completed IK handshake, wrapped both ends in transport sessions. */
@@ -136,7 +134,7 @@ test('the stream body cap keeps a Noise message inside 65535 bytes', () => {
 test('a chunked message reassembles byte-exact across many bodies', () => {
   const message = new Uint8Array(300_000);
   for (let i = 0; i < message.length; i++) message[i] = (i * 7) & 0xff;
-  const bodies = new StreamChunker().chunk(message);
+  const bodies = chunkAppMessage(message);
   assert.ok(bodies.length > 4, 'a 300 KB message spans several Noise messages');
   assert.ok(bodies.every((body) => body.length <= MAX_STREAM_BODY_LENGTH));
 
@@ -148,10 +146,9 @@ test('a chunked message reassembles byte-exact across many bodies', () => {
 });
 
 test('several messages packed into one body all come out, in order', () => {
-  const chunker = new StreamChunker();
   const a = utf8Encode('first');
   const b = utf8Encode('second');
-  const packed = new Uint8Array([...chunker.chunk(a)[0], ...chunker.chunk(b)[0]]);
+  const packed = new Uint8Array([...chunkAppMessage(a)[0], ...chunkAppMessage(b)[0]]);
   const messages = new StreamReassembler().push(packed);
   assert.equal(messages.length, 2);
   assert.deepEqual(messages[0], a);
@@ -159,7 +156,7 @@ test('several messages packed into one body all come out, in order', () => {
 });
 
 test('a partial message yields nothing until it completes', () => {
-  const bodies = new StreamChunker().chunk(new Uint8Array(200_000));
+  const bodies = chunkAppMessage(new Uint8Array(200_000));
   const reassembler = new StreamReassembler();
   for (const body of bodies.slice(0, -1)) {
     assert.deepEqual(reassembler.push(body), [], 'no message before the last body');
@@ -168,29 +165,56 @@ test('a partial message yields nothing until it completes', () => {
 });
 
 test('a zero-length application message round-trips', () => {
-  const bodies = new StreamChunker().chunk(new Uint8Array(0));
+  const bodies = chunkAppMessage(new Uint8Array(0));
   assert.equal(bodies.length, 1);
   assert.equal(bodies[0].length, APP_LENGTH_PREFIX_SIZE);
   assert.deepEqual(new StreamReassembler().push(bodies[0]), [new Uint8Array(0)]);
 });
 
 test('a declared length over the 1 MiB cap is a hard failure', () => {
-  // The prefix alone is enough: the cap is enforced before a byte is buffered.
-  const overCap = MAX_APP_MESSAGE_LENGTH + 1;
-  const prefix = Uint8Array.of(
-    (overCap >>> 24) & 0xff,
-    (overCap >>> 16) & 0xff,
-    (overCap >>> 8) & 0xff,
-    overCap & 0xff,
+  // The prefix alone is enough: the declared length is rejected on the push
+  // that completes it, long before that many bytes could be queued.
+  assert.throws(
+    () => new StreamReassembler().push(lengthPrefix(MAX_APP_MESSAGE_LENGTH + 1)),
+    NoiseError,
   );
-  assert.throws(() => new StreamReassembler().push(prefix), NoiseError);
   const maxUint32 = Uint8Array.of(0xff, 0xff, 0xff, 0xff);
   assert.throws(() => new StreamReassembler().push(maxUint32), NoiseError);
 });
 
+test('a length prefix split across bodies is still read, and still capped', () => {
+  const reassembler = new StreamReassembler();
+  const prefix = lengthPrefix(MAX_APP_MESSAGE_LENGTH + 1);
+  for (const byte of prefix.subarray(0, 3)) {
+    assert.deepEqual(reassembler.push(Uint8Array.of(byte)), [], 'no verdict on a partial prefix');
+  }
+  assert.throws(() => reassembler.push(prefix.subarray(3)), NoiseError);
+});
+
+test('a message split into one-byte bodies reassembles, in linear time', () => {
+  // `MAX_STREAM_BODY_LENGTH` is a maximum, not a minimum: a peer may split one
+  // message this finely, and re-concatenating on every push would be quadratic.
+  const message = new Uint8Array(40_000);
+  for (let i = 0; i < message.length; i++) message[i] = (i * 13) & 0xff;
+  const reassembler = new StreamReassembler();
+  const out = [];
+  for (const body of chunkAppMessage(message)) {
+    for (const byte of body) out.push(...reassembler.push(Uint8Array.of(byte)));
+  }
+  assert.equal(out.length, 1);
+  assert.deepEqual(out[0], message);
+});
+
+/** The 4-byte big-endian application-message length prefix for `value`. */
+function lengthPrefix(value) {
+  const prefix = new Uint8Array(APP_LENGTH_PREFIX_SIZE);
+  writeUint32BE(prefix, 0, value);
+  return prefix;
+}
+
 test('the chunker refuses to send more than the cap', () => {
   const overCap = new Uint8Array(MAX_APP_MESSAGE_LENGTH + 1);
-  assert.throws(() => new StreamChunker().chunk(overCap), NoiseError);
+  assert.throws(() => chunkAppMessage(overCap), NoiseError);
 });
 
 test('a stream body larger than one Noise message is refused on both sides', () => {

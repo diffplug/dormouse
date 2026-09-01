@@ -27,6 +27,7 @@ import {
   boundedPairingLabel,
   isPairStatusQuery,
   isPairingRequest,
+  MAX_CLIENT_ID_LENGTH,
   type ConnectionDecision,
   type ConnectionPolicy,
   type ConnectionRequest,
@@ -123,17 +124,6 @@ export interface RemoteHostOptions {
   /** Auto-reconnect with backoff (default true; tests pass false). */
   reconnect?: boolean;
 }
-
-/**
- * The longest `clientId` this Host will act on.
- *
- * The relay mints these as base64url of 16 random bytes (~22 characters), so
- * this is an order of magnitude of headroom. It exists because the id is a
- * *map key* on a hostile-relay path: every other field of a `pair` frame is
- * capped by `PAIRING_FIELD_LIMIT`, and bounding those while leaving the key
- * free would bound only the part that was already bounded.
- */
-const MAX_CLIENT_ID_LENGTH = 256;
 
 /** The server→host frames that address one Client; the rest are handled apart. */
 type AddressedFrame = Extract<ServerToHostFrame, { clientId: string }>;

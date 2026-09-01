@@ -1,8 +1,7 @@
 /**
  * The `e2e` relay envelope driven end to end through the real server
  * (docs/specs/server.md -> Relay): one Noise IK ceremony between a fake Client
- * and a fake Host, with both statics injected by the test because nothing in
- * production distributes a Host static key yet.
+ * and a fake Host, with both statics injected by the test.
  *
  * What it proves, in the order the scope asks for it
  * (docs/specs/remote-security-model.md -> `## Future` -> **Scope:
