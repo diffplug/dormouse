@@ -51,6 +51,9 @@ import { e2ePrologueFor } from './e2e.mjs';
 import { attachFrameSocket, closeSocket, receiveFrame, sendFrame } from './frame-socket.mjs';
 
 export class FakeHost extends EventEmitter {
+  /** Frames from this socket are handled one at a time, in arrival order. */
+  #chain = Promise.resolve();
+
   constructor({
     serverUrl,
     hostToken,
@@ -90,7 +93,11 @@ export class FakeHost extends EventEmitter {
     const wsBase = serverUrl.replace(/^http/, 'ws');
     const ws = attachFrameSocket(this, `${wsBase}${WS_ROUTES.host}?${WS_TOKEN_PARAM}=${hostToken}`);
     ws.addEventListener('message', (ev) => {
-      void this.#onFrame(ev.data);
+      // Serialized through a promise chain for the reason the relay serializes
+      // its client socket (`server/src/app.ts`): `#onFrame` awaits — an `e2e`
+      // `init` three times before it records the session — so unchained
+      // handlers would let a pipelined frame overtake the one before it.
+      this.#chain = this.#chain.then(() => this.#onFrame(ev.data)).catch(() => undefined);
     });
   }
 

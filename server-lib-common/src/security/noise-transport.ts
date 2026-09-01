@@ -51,12 +51,6 @@ export const MAX_APP_MESSAGE_LENGTH = 1024 * 1024;
  */
 export const MAX_STREAM_BODY_LENGTH = NOISE_MAX_MESSAGE_LENGTH - NOISE_TAG_LENGTH - 1;
 
-/**
- * The most a reassembler may hold: one maximal message and its length prefix.
- * Reached only transiently — complete messages are drained on every push.
- */
-const MAX_REASSEMBLY_BUFFER = APP_LENGTH_PREFIX_SIZE + MAX_APP_MESSAGE_LENGTH;
-
 const EMPTY = new Uint8Array(0);
 
 /**
@@ -267,6 +261,10 @@ export class StreamReassembler {
     const messages: Uint8Array[] = [];
     for (;;) {
       if (this.#queued < APP_LENGTH_PREFIX_SIZE) break;
+      // The declared length is what bounds the queue: this loop only ever
+      // stops holding fewer than `APP_LENGTH_PREFIX_SIZE + length` bytes, so
+      // rejecting an over-cap length here is what keeps the queue under one
+      // maximal message. A separate queue check would never fire.
       const length = readUint32BE(this.#take(APP_LENGTH_PREFIX_SIZE, false));
       if (length > MAX_APP_MESSAGE_LENGTH) {
         throw new NoiseTransportError('application message exceeds the 1 MiB cap');
@@ -274,9 +272,6 @@ export class StreamReassembler {
       if (this.#queued < APP_LENGTH_PREFIX_SIZE + length) break;
       this.#take(APP_LENGTH_PREFIX_SIZE, true);
       messages.push(this.#take(length, true));
-    }
-    if (this.#queued > MAX_REASSEMBLY_BUFFER) {
-      throw new NoiseTransportError('reassembly buffer exceeds the 1 MiB cap');
     }
     return messages;
   }
@@ -337,6 +332,12 @@ export type TransportReceipt =
  * failure, a nonce gap or reorder, or a framing violation poisons the session
  * and every later call throws. A session that kept going after one rejected
  * frame would be one an attacker can steer by dropping frames.
+ *
+ * The exception is a caller handing `sendControl` or `sendApp` something too
+ * big: that is refused before the first `encryptWithAd`, so no ciphertext
+ * exists, no counter moved, and the stream is exactly as synchronized as it
+ * was. Killing the session there would turn a caller's size error into a
+ * re-handshake — which costs fresh user presence.
  */
 export class NoiseTransportSession {
   readonly #send: NoiseCipherState;
@@ -370,14 +371,18 @@ export class NoiseTransportSession {
   }
 
   sendControl(value: Record<string, unknown>): Uint8Array {
-    return this.#guarded(() => this.#encrypt({ kind: 'control', value }));
+    this.#requireLive();
+    // Encoded outside the guard: an over-size value is the caller's error, and
+    // refusing it must not destroy a session that has emitted nothing.
+    const plaintext = encodeTransportPlaintext({ kind: 'control', value });
+    return this.#guarded(() => this.#send.encryptWithAd(EMPTY, plaintext));
   }
 
   /** One application message as one or more transport ciphertexts, in order. */
   sendApp(message: Uint8Array): Uint8Array[] {
-    return this.#guarded(() =>
-      chunkAppMessage(message).map((body) => this.#encrypt({ kind: 'stream', body })),
-    );
+    this.#requireLive();
+    const bodies = chunkAppMessage(message);
+    return this.#guarded(() => bodies.map((body) => this.#encrypt({ kind: 'stream', body })));
   }
 
   receive(ciphertext: Uint8Array): TransportReceipt {
@@ -392,10 +397,14 @@ export class NoiseTransportSession {
     return this.#send.encryptWithAd(EMPTY, encodeTransportPlaintext(frame));
   }
 
-  #guarded<T>(run: () => T): T {
+  #requireLive(): void {
     if (this.#poison !== undefined) {
       throw new NoiseTransportError(`session is destroyed: ${this.#poison}`);
     }
+  }
+
+  #guarded<T>(run: () => T): T {
+    this.#requireLive();
     try {
       return run();
     } catch (error) {

@@ -612,11 +612,12 @@ speaker today.
   not a plain object.
 - **Each application message is `u32 big-endian length || bytes`**, chunked to
   keep every Noise message inside 65,535 bytes with its kind byte and tag
-  (`MAX_STREAM_BODY_LENGTH`). Reassembly caps a declared length, and the queue,
-  at `MAX_APP_MESSAGE_LENGTH` (1 MiB), the declared length as soon as its prefix
-  arrives. **Bodies are queued and copied once, when a message completes** — a
-  peer may legally split one message into single-byte bodies, and concatenating
-  on arrival would be quadratic.
+  (`MAX_STREAM_BODY_LENGTH`). **Reassembly rejects a declared length over
+  `MAX_APP_MESSAGE_LENGTH` (1 MiB) as soon as its prefix arrives**, which also
+  bounds the queue — it only ever waits on a length it accepted. **Bodies are
+  queued and copied once, when a message completes**: a peer may legally split
+  one message into single-byte bodies, and concatenating on arrival would be
+  quadratic.
 - **The first failure poisons the session.** A decrypt failure, a nonce gap or
   reorder (which Noise's counter turns into a decrypt failure), or a framing
   violation destroys it and every later call throws — there is no
@@ -1056,7 +1057,10 @@ the trust model in [remote-security-model.md](./remote-security-model.md)
   `host-gone`, and `error`. `pair`, `pair-status`, `connect`, `connect2`,
   `msg`, `pair-result`, `challenge`, `decision`, and `setup-token-redeemed`
   go, and with them `Handshake`, `checkPair`, `checkConnect2`, and the relayed
-  challenge memory.
+  challenge memory. **Enrollment must pin the `hostId` shape then**: `e2e`
+  requires base64url of 16 bytes where `isStoredHost` accepts any string, so a
+  hand-edited `state/hosts.json` row of another length becomes an unreachable
+  Host rather than a refused one.
 - **Routes.** `POST /api/reauth/begin` and `/finish` take the required
   `PresenceBinding` variants and answer as the security model states, without
   extending the session. `POST /api/setup/retire` (session token; body

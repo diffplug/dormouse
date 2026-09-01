@@ -8,6 +8,18 @@
  */
 
 /**
+ * The most frames either log keeps. A test case sends tens; `scripts/fake-host.mjs`
+ * is a long-running dev stand-in driving a live echo terminal, and would
+ * otherwise retain every relayed PTY byte for the life of the process.
+ */
+const MAX_LOGGED_FRAMES = 1000;
+
+function record(log, frame) {
+  log.push(frame);
+  if (log.length > MAX_LOGGED_FRAMES) log.shift();
+}
+
+/**
  * Attach a frame socket to `target` (an `EventEmitter`), setting `ws`,
  * `ready`, `closed`, `frames`, and `sent` on it and emitting `open`, `close`,
  * and `frame`. Returns the socket.
@@ -33,7 +45,7 @@ export function attachFrameSocket(target, url) {
 
 /** Put a frame on the wire exactly as given — the tamper tests' door. */
 export function sendFrame(target, frame) {
-  target.sent.push(frame);
+  record(target.sent, frame);
   try {
     target.ws.send(JSON.stringify(frame));
   } catch {
@@ -50,7 +62,7 @@ export function receiveFrame(target, data) {
     return undefined;
   }
   if (!frame || typeof frame.t !== 'string') return undefined;
-  target.frames.push(frame);
+  record(target.frames, frame);
   target.emit('frame', frame);
   return frame;
 }

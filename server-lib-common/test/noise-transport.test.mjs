@@ -324,6 +324,27 @@ test('a failed decrypt does not advance the receive counter', async () => {
   assert.equal(host.receiveNonce, before, 'one injected frame must not lock out the real sender');
 });
 
+test('an over-size send is refused without destroying the session', async () => {
+  // Nothing reached the wire and no counter moved, so the stream is exactly as
+  // synchronized as it was; killing it would cost a re-handshake and fresh
+  // user presence for what is a caller's size error.
+  const { client, host } = await established();
+  assert.throws(() => client.sendApp(new Uint8Array(MAX_APP_MESSAGE_LENGTH + 1)), NoiseError);
+  assert.throws(() => client.sendControl({ big: 'x'.repeat(CONTROL_PAYLOAD_SIZE) }), NoiseError);
+  assert.equal(client.isPoisoned, false);
+  assert.deepEqual(host.receive(client.sendKeepalive()), { kind: 'keepalive' });
+});
+
+test('a control message with an embedded NUL survives the padding strip', async () => {
+  // The decoder strips trailing NULs to find the JSON inside the padding. That
+  // can never truncate a legitimate message: `JSON.stringify` escapes a NUL as
+  // the six characters `\u0000`, so its output never ends in a NUL byte.
+  const { client, host } = await established();
+  const value = { note: 'a\u0000b', trailing: 'c\u0000' };
+  assert.ok(!utf8Encode(JSON.stringify(value)).includes(0), 'no NUL byte reaches the padding');
+  assert.deepEqual(host.receive(client.sendControl(value)), { kind: 'control', value });
+});
+
 test('a framing violation poisons the session even though the ciphertext was valid', async () => {
   const { client, host, clientNoise } = await established();
   // A plaintext that authenticates perfectly and is still not framing: the

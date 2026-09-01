@@ -568,6 +568,53 @@ test('the relay refuses malformed e2e frames before they reach the Host', async 
   }
 });
 
+test('a transport pipelined behind its init is handled after it, not beside it', async () => {
+  const fixture = await e2eFixture();
+  const { host, client } = fixture;
+  const seen = watch(host);
+  try {
+    // Reading message 1 awaits three times before the session is recorded. A
+    // Host that handled socket frames concurrently would run this transport
+    // against a Map that does not hold the ceremony yet and answer "no e2e
+    // session" — the wrong diagnosis, and in stage 4 a dropped first payload.
+    const id = newE2eId();
+    await client.open({ id, awaitResponse: false });
+    client.sendCiphertext(toBase64Url(new Uint8Array(64)), { id });
+
+    await until(() => seen.errors.length === 1);
+    assert.equal(seen.opens.length, 1, 'the init completed first');
+    assert.match(
+      String(seen.errors[0].error),
+      /authentication failed/,
+      'the ceremony existed by the time its transport was read',
+    );
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('a transport frame before any init is dropped, not forwarded', async () => {
+  const fixture = await e2eFixture();
+  const { host, client, enrollment } = fixture;
+  try {
+    // A well-formed transport frame from a Client that has never bound: there
+    // is no binding to forward it within, so the relay drops it silently.
+    const before = host.frames.length;
+    client.sendFrame({
+      t: 'e2e',
+      hostId: enrollment.hostId,
+      kind: 'connection',
+      id: newE2eId(),
+      step: 'transport',
+      ct: 'Zm9vYmFy',
+    });
+    assert.equal(await client.quiet(), true, 'not even an error is answered');
+    assert.equal(host.frames.length, before, 'transport never reaches an unbound Host');
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('a transport frame outside the binding is dropped, not forwarded', async () => {
   const fixture = await e2eFixture();
   const { host, client } = fixture;
