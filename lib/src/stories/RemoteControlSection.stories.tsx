@@ -2,7 +2,11 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { fireEvent, userEvent, within } from 'storybook/test';
 import { ModalSurface } from '../components/design';
 import { RemoteControlSection } from '../components/RemoteControlSection';
-import { enrolledStatus, UNENROLLED_STATUS } from '../host/remote/test-remote-host-link';
+import {
+  enrolledStatus,
+  OFFER_STATUS,
+  UNENROLLED_STATUS,
+} from '../host/remote/test-remote-host-link';
 
 /**
  * The Settings dialog's Remote control section — the one step a self-hoster
@@ -95,6 +99,42 @@ export const EnrollRefused: Story = {
     fill('Setup password', 'correct horse battery staple');
     fill('Name for this machine', 'Work laptop');
     await userEvent.click(canvas.getByRole('button', { name: 'Connect' }));
+    await canvas.findByText(/This build will not connect/);
+  },
+};
+
+/**
+ * The installer ran on this machine, so there is nothing to type: the offer
+ * card leads with the origin it found and a name already filled in, and the
+ * three-field form folds away behind "Enroll with a different server…". The
+ * one-time token is not in this frame anywhere — the service keeps it off the
+ * bridge and re-reads the file when Enroll is pressed.
+ */
+export const OfferAvailable: Story = {
+  parameters: {
+    primedRemoteHost: { status: OFFER_STATUS },
+    docs: { story: { height: '300px' } },
+  },
+  play: settled('A Dormouse server is installed on this machine.'),
+};
+
+/**
+ * The same refusal as {@link EnrollRefused}, reached from the one-click path: a
+ * server installed *here* can still sit on an origin a stock build was never
+ * compiled to reach, and the card has to say so rather than fail silently.
+ */
+export const OfferEnrollRefused: Story = {
+  parameters: {
+    primedRemoteHost: {
+      status: OFFER_STATUS,
+      enrollError:
+        'This build will not connect to https://ned-mac.tail9c2f1.ts.net. Allowed: https://*.dormouse.sh wss://*.dormouse.sh',
+    },
+    docs: { story: { height: '360px' } },
+  },
+  play: async (context) => {
+    const canvas = within(context.canvasElement);
+    await userEvent.click(await canvas.findByRole('button', { name: 'Enroll' }));
     await canvas.findByText(/This build will not connect/);
   },
 };

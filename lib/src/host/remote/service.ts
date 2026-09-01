@@ -4,9 +4,14 @@
  * {@link HostSurfaceProvider}.
  */
 
-import { MAX_PENDING_PAIRINGS } from 'server-lib-common';
+import { MAX_PENDING_PAIRINGS, type EnrollmentOffer } from 'server-lib-common';
 import { filterAclRecords } from '../../remote/host/acl';
-import { isEnrollment, performEnrollment, type HostEnrollment } from '../../remote/host/enrollment';
+import {
+  isEnrollment,
+  performEnrollment,
+  type HostEnrollCredential,
+  type HostEnrollment,
+} from '../../remote/host/enrollment';
 import type { HostSurfaceProvider } from '../../remote/host/host-surface-provider';
 import type { PendingPairing } from '../../remote/host/pairing-approval';
 import {
@@ -19,6 +24,7 @@ import {
 import { RemoteApiSession } from '../../remote/host/remote-api';
 import { RemoteHost, type WebSocketLike } from '../../remote/host/remote-host';
 import { originAllowedByConnectSrc } from './connect-src';
+import { readEnrollmentOffer, suggestedHostLabel } from './enroll-offer';
 import type { HostStateStore } from './host-state-store';
 import { createSerialQueue } from './serial-queue';
 import {
@@ -29,6 +35,7 @@ import {
   type AdoptResult,
   type ApproveParams,
   type DenyParams,
+  type EnrollOfferParams,
   type EnrollParams,
   type EnrollResult,
   type HostStatusEvent,
@@ -50,6 +57,14 @@ export interface RemoteHostServiceOptions {
   createWebSocket?: (url: string) => WebSocketLike;
   fetch?: typeof globalThis.fetch;
   now?: () => number;
+  /**
+   * The installer's enrollment offer on this machine, if any. Defaults to the
+   * real well-known path (`enroll-offer.ts`); injected by the tests, which must
+   * not depend on whether the machine running them has a server installed.
+   */
+  readOffer?: () => Promise<EnrollmentOffer | null>;
+  /** What the offer card prefills its name field with; defaults to the hostname. */
+  suggestLabel?: () => string;
 }
 
 export class RemoteHostService {
@@ -60,6 +75,8 @@ export class RemoteHostService {
   readonly #createWebSocket?: (url: string) => WebSocketLike;
   readonly #fetch?: typeof globalThis.fetch;
   readonly #now: () => number;
+  readonly #readOffer: () => Promise<EnrollmentOffer | null>;
+  readonly #suggestLabel: () => string;
 
   #host: RemoteHost | null = null;
   #enrollment: HostEnrollment | null = null;
@@ -92,6 +109,8 @@ export class RemoteHostService {
     this.#createWebSocket = options.createWebSocket;
     this.#fetch = options.fetch;
     this.#now = options.now ?? (() => Date.now());
+    this.#readOffer = options.readOffer ?? (() => readEnrollmentOffer());
+    this.#suggestLabel = options.suggestLabel ?? suggestedHostLabel;
   }
 
   /** Start from a persisted enrollment, if there is one this build may reach. */
@@ -140,10 +159,12 @@ export class RemoteHostService {
 
   async #run(cmd: string, params: unknown): Promise<unknown> {
     switch (cmd) {
-      // The four that start or stop the Host share the lifecycle chain with
+      // The five that start or stop the Host share the lifecycle chain with
       // `start()`; everything below only reads what they left.
       case 'enroll':
         return this.#serialize(() => this.#enroll(params as EnrollParams));
+      case 'enrollOffer':
+        return this.#serialize(() => this.#enrollOffer(params as EnrollOfferParams));
       case 'status':
         return this.#status();
       case 'reconnect':
@@ -171,22 +192,55 @@ export class RemoteHostService {
 
   // --- Commands ---
 
-  async #enroll(params: EnrollParams): Promise<EnrollResult> {
-    if (!this.#allowed(params.serverUrl)) {
-      // Refused before the password leaves the machine. Self-hosters widen the
-      // list in their own build (docs/specs/server.md → "Where a Host may reach a relay server").
+  #enroll(params: EnrollParams): Promise<EnrollResult> {
+    return this.#enrollWith(params.serverUrl, { password: params.password }, params.label);
+  }
+
+  /**
+   * One-click enrollment from the offer an installer left on this machine.
+   *
+   * The file is re-read here rather than trusted from the `status` the card was
+   * rendered from: minutes may have passed, and redeeming an offer unlinks it,
+   * so the copy behind the button may already be spent. Re-reading also keeps
+   * the token out of the webview entirely — the card never held it.
+   */
+  async #enrollOffer(params: EnrollOfferParams): Promise<EnrollResult> {
+    const offer = await this.#readOffer();
+    if (!offer) {
       throw new Error(
-        `${params.serverUrl} is outside this build's allowed remote sources (${this.#connectSrc}). ` +
+        'There is no enrollment offer on this machine — it may have been redeemed already. ' +
+          'Re-run the installer to mint a new one, or enroll with the setup password.',
+      );
+    }
+    return await this.#enrollWith(offer.origin, { enrollToken: offer.token }, params.label);
+  }
+
+  /**
+   * The one enrollment flow, whichever credential proves the right to it: the
+   * allowlist gate, then the exchange, then store-first persistence and the
+   * status edge the webview gate needs.
+   */
+  async #enrollWith(
+    serverUrl: string,
+    credential: HostEnrollCredential,
+    label: string,
+  ): Promise<EnrollResult> {
+    if (!this.#allowed(serverUrl)) {
+      // Refused before the credential leaves the machine — including an offer's
+      // token, which is a bearer credential like the password. Self-hosters widen
+      // the list in their own build (docs/specs/server.md → "Where a Host may reach a relay server").
+      throw new Error(
+        `${serverUrl} is outside this build's allowed remote sources (${this.#connectSrc}). ` +
           'A self-host build bakes its own via DORMOUSE_REMOTE_CONNECT_SRC.',
       );
     }
-    const enrollment = await performEnrollment(params.serverUrl, params.password, params.label);
+    const enrollment = await performEnrollment(serverUrl, credential, label);
     // Persist before touching the running Host. The credential we just minted
-    // exists nowhere else and cannot be minted again from the same password
-    // exchange, so a save that fails after the old Host had been stopped would
-    // strand the machine with no Host, a status that says otherwise, and a
-    // brand-new `hostToken` lost to the failure. Failing here instead leaves
-    // the old Host running and everything it reports still true.
+    // exists nowhere else and cannot be minted again from the same exchange — a
+    // spent offer's token least of all — so a save that fails after the old Host
+    // had been stopped would strand the machine with no Host, a status that says
+    // otherwise, and a brand-new `hostToken` lost to the failure. Failing here
+    // instead leaves the old Host running and everything it reports still true.
     await this.#store.saveEnrollment(enrollment);
     if (this.#host) {
       // Swapping one running Host for another. The gate the webviews arm their
@@ -204,14 +258,30 @@ export class RemoteHostService {
     return { hostId: enrollment.hostId, serverUrl: enrollment.serverUrl };
   }
 
-  #status(): RemoteHostConsoleStatus {
+  async #status(): Promise<RemoteHostConsoleStatus> {
     return {
       enrolled: !!this.#enrollment,
       serverUrl: this.#enrollment?.serverUrl ?? null,
       hostId: this.#enrollment?.hostId ?? null,
       connection: this.#host?.status ?? 'stopped',
       pairedClients: this.#host?.activeRecords.length ?? 0,
+      // Only while un-enrolled. An enrolled Host has nothing to offer, so it
+      // answers `null` without touching the disk — which is what keeps the
+      // Settings dialog's 2 s poll from stat-ing a file forever on the machines
+      // where the dialog is most often left open.
+      offer: this.#enrollment ? null : await this.#offer(),
     };
+  }
+
+  /**
+   * The offer as a webview may see it: origin and a suggested name, never the
+   * token (`service-protocol.ts` → `RemoteHostConsoleStatus.offer`). A read that
+   * fails is no offer, like a file that is not there.
+   */
+  async #offer(): Promise<RemoteHostConsoleStatus['offer']> {
+    const offer = await this.#readOffer().catch(() => null);
+    if (!offer) return null;
+    return { origin: offer.origin, suggestedLabel: this.#suggestLabel() };
   }
 
   /**

@@ -497,6 +497,9 @@ describe('remote host service glue', () => {
           hostId: null,
           connection: 'stopped',
           pairedClients: 0,
+          // No service in any window means nothing could redeem an offer, so
+          // none is advertised however the installer left the machine.
+          offer: null,
         },
       },
     ]);

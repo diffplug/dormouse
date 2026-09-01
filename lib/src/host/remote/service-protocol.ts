@@ -102,6 +102,16 @@ export interface EnrollParams {
   label: string;
 }
 
+/**
+ * One-click enrollment against the offer an installer left on this machine. The
+ * webview names only what to call the machine: the origin and the one-time token
+ * are re-read from the file by the service at call time, never round-tripped
+ * through a webview realm.
+ */
+export interface EnrollOfferParams {
+  label: string;
+}
+
 export interface ApproveParams {
   clientId: string;
   pairingId: string;
@@ -166,6 +176,19 @@ export interface RemoteHostConsoleStatus {
    */
   connection: RemoteHostStatus;
   pairedClients: number;
+  /**
+   * The installer's enrollment offer on this machine, when there is one and this
+   * Host has not enrolled — the Settings dialog's one-click path.
+   *
+   * **The offer's `token` is never here.** This is a service→webview shape, and
+   * the token is a bearer credential exactly like `hostToken` (`SECURITY.md` →
+   * the no-`hostToken`-in-a-webview FAIL IF): origin and suggested label are all
+   * the card needs to render, and `enrollOffer` re-reads the file itself.
+   *
+   * `null` whenever this Host is enrolled — reported without reading the file at
+   * all, which is what bounds the dialog's 2 s poll to the un-enrolled state.
+   */
+  offer: { origin: string; suggestedLabel: string } | null;
 }
 
 /**

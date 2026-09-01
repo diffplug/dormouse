@@ -67,8 +67,9 @@ let generation = 0;
  * time, so without this the section re-renders twice a minute to paint
  * identical text. The sibling store this same dialog reads guards the same way
  * (`setPushDevices` in `lib/src/lib/push-devices.ts`); comparing the fields in
- * {@link STATUS_FIELDS} is the whole of it, because `RemoteHostConsoleStatus`
- * has no nested value.
+ * {@link STATUS_FIELDS} is the whole of it, with `offer` — the one nested value
+ * — compared field-wise, since the service mints a fresh object per read and
+ * comparing it by reference would re-render on every tick.
  */
 function setState(next: RemoteHostStatusState): void {
   if (sameState(state, next)) return;
@@ -92,6 +93,8 @@ const STATUS_FIELDS = {
   hostId: true,
   connection: true,
   pairedClients: true,
+  // Nested, so `sameState` special-cases it below rather than comparing by ===.
+  offer: true,
 } satisfies Record<keyof RemoteHostConsoleStatus, true>;
 
 function sameState(a: RemoteHostStatusState, b: RemoteHostStatusState): boolean {
@@ -99,12 +102,22 @@ function sameState(a: RemoteHostStatusState, b: RemoteHostStatusState): boolean 
   if (a.kind !== b.kind) return false;
   if (a.kind === 'error' && b.kind === 'error') return a.message === b.message;
   if (a.kind === 'ready' && b.kind === 'ready') {
-    return (Object.keys(STATUS_FIELDS) as Array<keyof RemoteHostConsoleStatus>).every(
-      (field) => a.status[field] === b.status[field],
+    return (Object.keys(STATUS_FIELDS) as Array<keyof RemoteHostConsoleStatus>).every((field) =>
+      field === 'offer'
+        ? sameOffer(a.status.offer, b.status.offer)
+        : a.status[field] === b.status[field],
     );
   }
   // `unsupported` and `loading` are the two singletons, so matching kinds is all.
   return true;
+}
+
+type Offer = RemoteHostConsoleStatus['offer'];
+
+function sameOffer(a: Offer, b: Offer): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.origin === b.origin && a.suggestedLabel === b.suggestedLabel;
 }
 
 /**
@@ -236,6 +249,23 @@ export async function enrollRemoteHost(
   const active = link();
   if (!active) throw new Error('This build has no remote Host service.');
   await active.command('enroll', { serverUrl, password, label });
+  await refreshAfterMutation();
+}
+
+/**
+ * Enroll against the offer the installer left on this machine — the one-click
+ * path, where the only thing the user chooses is what to call the machine.
+ *
+ * The origin and the one-time token stay in the service, which re-reads the
+ * offer file at call time; neither has ever been in this realm. Rejections
+ * propagate verbatim, including the same allowlist refusal the typed form gets:
+ * a server installed on this machine can still be an origin this build was not
+ * compiled to reach.
+ */
+export async function enrollOfferRemoteHost(label: string): Promise<void> {
+  const active = link();
+  if (!active) throw new Error('This build has no remote Host service.');
+  await active.command('enrollOffer', { label });
   await refreshAfterMutation();
 }
 

@@ -25,6 +25,17 @@ export const UNENROLLED_STATUS: RemoteHostConsoleStatus = {
   hostId: null,
   connection: 'idle',
   pairedClients: 0,
+  offer: null,
+};
+
+/**
+ * Un-enrolled *and* a Dormouse server installed on this machine: the section
+ * leads with the one-click offer card and folds the typed form away. Never a
+ * token — the service keeps that off the wire entirely.
+ */
+export const OFFER_STATUS: RemoteHostConsoleStatus = {
+  ...UNENROLLED_STATUS,
+  offer: { origin: 'https://ned-mac.tail9c2f1.ts.net', suggestedLabel: 'ned-mac' },
 };
 
 /** An enrolled machine, with the fields a caller is likely to vary. */
@@ -37,6 +48,8 @@ export function enrolledStatus(
     hostId: 'host-6f1c2a90',
     connection: 'connected',
     pairedClients: 0,
+    // An enrolled Host reports no offer, whatever is on disk.
+    offer: null,
     ...over,
   };
 }
@@ -47,7 +60,10 @@ export interface PrimedRemoteHost {
   status?: RemoteHostConsoleStatus;
   /** Make `status` reject — "could not reach this machine's Host service". */
   statusError?: string;
-  /** Make `enroll` reject — the refused-origin case the form renders inline. */
+  /**
+   * Make `enroll` *and* `enrollOffer` reject — the refused-origin case both
+   * render inline, in the same place and the same words.
+   */
   enrollError?: string;
 }
 
@@ -55,10 +71,10 @@ export interface PrimedRemoteHost {
  * A link that answers from a fixed status rather than a real Host service.
  *
  * Deliberately not a scenario engine: a story is one frame, so `enroll`,
- * `reconnect` and `clearEnrollment` resolve without changing the answer. The
- * exception is `enrollError`, because a refused origin is a state the form must
- * render (`docs/specs/server.md`, "Remote control, in the Settings dialog") and
- * a rejected `enroll` is the only way to reach it.
+ * `enrollOffer`, `reconnect` and `clearEnrollment` resolve without changing the
+ * answer. The exception is `enrollError`, because a refused origin is a state the
+ * form must render (`docs/specs/server.md`, "Remote control, in the Settings
+ * dialog") and a rejected enroll is the only way to reach it.
  */
 export function makeStubRemoteHostLink(primed: PrimedRemoteHost): RemoteHostLink {
   return {
@@ -67,7 +83,9 @@ export function makeStubRemoteHostLink(primed: PrimedRemoteHost): RemoteHostLink
         if (primed.statusError) throw new Error(primed.statusError);
         return primed.status ?? UNENROLLED_STATUS;
       }
-      if (cmd === 'enroll' && primed.enrollError) throw new Error(primed.enrollError);
+      if ((cmd === 'enroll' || cmd === 'enrollOffer') && primed.enrollError) {
+        throw new Error(primed.enrollError);
+      }
       return null;
     },
     respond: () => {},

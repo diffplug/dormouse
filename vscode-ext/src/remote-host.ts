@@ -450,6 +450,12 @@ function idleAnswer(cmd: string): { result: unknown } | null {
           hostId: null,
           connection: 'stopped',
           pairedClients: 0,
+          // The one field that is not the idle service's answer. A service
+          // would read the installer's offer file here; reaching this means
+          // there is no service in any window, so `enrollOffer` would be
+          // refused — offering a button that cannot work is worse than not
+          // offering it.
+          offer: null,
         } satisfies RemoteHostConsoleStatus,
       };
     case 'pushDevices':

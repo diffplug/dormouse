@@ -13,6 +13,7 @@
  * Enroll from the devtools console:
  *
  *   await window.dormouseRemoteHost.enroll('https://your-server', 'SETUP_PASSWORD', 'My Laptop')
+ *   await window.dormouseRemoteHost.enrollOffer('My Laptop')   // installer's offer, this machine
  *   window.dormouseRemoteHost.status()
  *   window.dormouseRemoteHost.reconnect()      // needed after `displaced`
  *   window.dormouseRemoteHost.clearEnrollment()
@@ -118,6 +119,9 @@ function installBridgeMode(link: RemoteHostLink): void {
   target.dormouseRemoteHost = {
     enroll: (serverUrl: string, password: string, label: string) =>
       link.command('enroll', { serverUrl, password, label }),
+    // The origin and the one-time token come off the installer's file in the
+    // service; a caller supplies only what to call this machine.
+    enrollOffer: (label: string) => link.command('enrollOffer', { label }),
     status: () => link.command('status'),
     reconnect: () => link.command('reconnect'),
     clearEnrollment: () => link.command('clearEnrollment'),

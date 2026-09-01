@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { TextInput, modalActionButton } from './design';
+import type { RemoteHostConsoleStatus } from '../host/remote/service-protocol';
 import type { RemoteHostStatus } from '../remote/host/remote-host';
 import {
   clearRemoteHostEnrollment,
+  enrollOfferRemoteHost,
   enrollRemoteHost,
   getRemoteHostStatusSnapshot,
   reconnectRemoteHost,
   refreshRemoteHostStatus,
   subscribeToRemoteHostStatus,
 } from '../remote/host/host-status-store';
+
+type EnrollmentOfferSummary = NonNullable<RemoteHostConsoleStatus['offer']>;
 
 /**
  * How each relay-socket state reads to someone who is not holding the spec.
@@ -51,10 +55,10 @@ const FIELD_LABEL = 'text-xs text-muted';
  * website, the lib dev server): there is no Host to enroll, and offering the
  * form would promise something the build cannot do.
  *
- * This is the same `enroll` / `status` / `reconnect` / `clearEnrollment`
- * surface as the `window.dormouseRemoteHost` console hook, which stays as the
- * scripting seam (`docs/specs/server.md`, "Host side"). Pairing approval is
- * *not* here — it is a modal, because it must interrupt
+ * This is the same `enroll` / `enrollOffer` / `status` / `reconnect` /
+ * `clearEnrollment` surface as the `window.dormouseRemoteHost` console hook,
+ * which stays as the scripting seam (`docs/specs/server.md`, "Host side").
+ * Pairing approval is *not* here — it is a modal, because it must interrupt
  * (`docs/specs/remote-security-model.md`, Pairing Ceremony).
  */
 export function RemoteControlSection() {
@@ -82,9 +86,107 @@ export function RemoteControlSection() {
           pairedClients={state.status.pairedClients}
         />
       ) : (
-        <EnrollForm />
+        <EnrollView offer={state.status.offer} />
       )}
     </section>
+  );
+}
+
+/**
+ * Un-enrolled, with or without an installer's offer on this machine.
+ *
+ * With one, the offer leads and the typed form folds away behind a disclosure:
+ * a user who ran the installer here has nothing to type, and a server somewhere
+ * else is the rarer case. Without one, nothing about the form changes.
+ */
+function EnrollView({ offer }: { offer: RemoteHostConsoleStatus['offer'] }) {
+  const [showForm, setShowForm] = useState(false);
+
+  if (!offer) return <EnrollForm />;
+
+  return (
+    <div className="mt-1.5">
+      {/* Keyed by origin: a different offer is a different form, and its name
+          field must re-seed rather than keep what was typed for the old one. */}
+      <OfferCard key={offer.origin} offer={offer} />
+      <div className="mt-2">
+        <button
+          type="button"
+          aria-expanded={showForm}
+          className={modalActionButton()}
+          onClick={() => setShowForm((open) => !open)}
+        >
+          Enroll with a different server…
+        </button>
+      </div>
+      {showForm ? <EnrollForm /> : null}
+    </div>
+  );
+}
+
+/**
+ * One-click enrollment against the server installed on this machine.
+ *
+ * The origin is shown but not editable, and the one-time token behind it never
+ * reaches this realm at all: `enrollOffer` names only the label and the service
+ * re-reads the offer file itself (`docs/specs/server.md`, "Remote control, in
+ * the Settings dialog"). Every refusal the typed form can hit applies here too —
+ * an installed server can still sit on an origin this build was not compiled to
+ * reach — so the error renders in the same place, in the same words.
+ */
+function OfferCard({ offer }: { offer: EnrollmentOfferSummary }) {
+  const [label, setLabel] = useState(offer.suggestedLabel);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const ready = label.trim() !== '';
+
+  const submit = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await enrollOfferRemoteHost(label.trim());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusy(false);
+    }
+  }, [label]);
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (ready && !busy) void submit();
+      }}
+    >
+      <div className="text-sm leading-relaxed text-muted">
+        A Dormouse server is installed on this machine.
+      </div>
+      <div className="mt-0.5 font-mono text-sm break-all text-foreground">{offer.origin}</div>
+
+      <label className="mt-2 block">
+        <span className={FIELD_LABEL}>Name for this machine</span>
+        <TextInput
+          value={label}
+          onChange={setLabel}
+          autoComplete="off"
+          placeholder="e.g. Work laptop"
+        />
+      </label>
+
+      {error ? <div className="mt-2 text-sm leading-relaxed text-error">{error}</div> : null}
+
+      <div className="mt-2">
+        <button
+          type="submit"
+          disabled={!ready || busy}
+          className={modalActionButton({ tone: 'primary' })}
+        >
+          {busy ? 'Connecting…' : 'Enroll'}
+        </button>
+      </div>
+    </form>
   );
 }
 

@@ -544,7 +544,7 @@ and memory fallback; VS Code's SecretStorage/globalState split and cross-window
 memo invalidation — live in that host's spec.
 
 * **Enrollment** (Settings dialog, or the console hook, once): server URL +
-  setup password → `POST /api/host/enroll` → the service persists
+  one credential → `POST /api/host/enroll` → the service persists
   `{ serverUrl, hostId, hostToken, origin, rpId }` (+ `requireUserVerification`
   when the server sent it) through its `HostStateStore`, then opens and
   maintains `GET /ws/host`. `hostToken` is a bearer credential and never enters a
@@ -556,10 +556,14 @@ memo invalidation — live in that host's spec.
   `undefined` in the `ConnectionPolicy` the Host authenticates passkeys against
   (rationale). The request carries a 10 s `AbortSignal.timeout`, under the
   webview's own 15 s command budget so the console sees the real error
-  (rationale). Source of truth: `lib/src/remote/host/enrollment.ts`.
+  (rationale). **`enroll` and `enrollOffer` are one flow with two credentials** —
+  the typed setup password, or the one-time token of a local offer — so the
+  allowlist gate, the store-first ordering, and the status edge below are shared
+  rather than duplicated (`#enrollWith` in `lib/src/host/remote/service.ts`).
+  Source of truth: `lib/src/remote/host/enrollment.ts`.
 
   **Order matters, and the store goes first.** The `hostToken` exists nowhere
-  else and cannot be re-minted from the same password exchange, so the save is
+  else and cannot be re-minted from the same exchange, so the save is
   awaited before any Host is stopped — a failed write must leave the old Host
   running and every answer it gives still true (rationale). Replacing a
   *running* Host emits `{ name: 'status', enrolled: false }` between the two,
@@ -618,7 +622,9 @@ Enrolling is the one step a self-hoster cannot skip, so it is UI rather than a
 console incantation: a **Remote control** section at the bottom of the
 app-global Settings dialog ([alert.md](./alert.md) -> Settings dialog). Source
 of truth: `lib/src/components/RemoteControlSection.tsx` over
-`lib/src/remote/host/host-status-store.ts`.
+`lib/src/remote/host/host-status-store.ts`; the offer's well-known per-platform
+path is `lib/src/host/remote/enroll-offer.ts`, read by `#enrollOffer` in
+`lib/src/host/remote/service.ts`.
 
 It renders **nothing at all** where `getPlatform().remoteHost` is absent — the
 website and the lib dev server have no Host service behind them, and offering
@@ -634,18 +640,32 @@ reader at nothing. Source of truth: `describePushTargets` in
 the `PushNoHost` / `PushNotEnrolled` story pair holds the two apart.
 
 Un-enrolled it is a three-field form (server, setup password, name for this
-machine) calling the service's `enroll`; enrolled it shows the server URL, the
-relay connection state, and the paired-device count, with `Disconnect` and —
-only on `displaced` — `Reconnect`. Rules the UI exists to honor:
+machine) calling the service's `enroll` — or, where an installer left an offer
+on this machine, a **one-click card** leading the section instead; enrolled it
+shows the server URL, the relay connection state, and the paired-device count,
+with `Disconnect` and — only on `displaced` — `Reconnect`. Rules the UI exists
+to honor:
 
+- **The offer card shows only when the local offer file exists *and* this Host
+  is un-enrolled.** It names the origin it found, prefills the hostname as an
+  editable name, and enrolls on one click; the three-field form folds behind
+  "Enroll with a different server…" and is unchanged where there is no offer. An
+  enrolled service answers `offer: null` without reading disk, which bounds the
+  2 s poll below to the un-enrolled state.
+- **The offer's token never enters a webview**, exactly like `hostToken`
+  (`SECURITY.md`): `status` carries origin + suggested label only, and
+  `enrollOffer` re-reads the file itself — which is also what makes a card
+  rendered minutes ago safe to press, since redeeming an offer unlinks it.
 - **The password is passed through, never held.** It goes straight to the
   service, which is the party that talks to the server, and is cleared on
   success. `hostToken` never comes back into the webview realm: `enroll`
   answers `{ hostId, serverUrl }`.
 - **Refusals are shown, not swallowed.** An origin outside this build's baked
-  allowlist is refused before the password leaves the machine (above), and that
+  allowlist is refused before any credential leaves the machine (above), and that
   error is what the form renders — so the failure reads as "this build will not
-  talk to that server" rather than as a wrong password.
+  talk to that server" rather than as a wrong password. The offer card renders
+  it identically: a server installed *here* is still an origin a stock build may
+  not reach.
 - **Disconnect asks first**, because clearing the enrollment drops every paired
   phone until each pairs again.
 - **Status is re-read, not patched, and the connection is polled.** The
@@ -665,10 +685,11 @@ only on `displaced` — `Reconnect`. Rules the UI exists to honor:
   (rationale). Source of truth: `dropInFlightRead` in
   `lib/src/remote/host/host-status-store.ts`.
 
-The `window.dormouseRemoteHost` console hook exposes the same four commands and
-remains the scripting seam. **Pairing approval is never here** — it is a modal,
-because it must interrupt
-([remote-security-model.md](./remote-security-model.md), Pairing Ceremony).
+The `window.dormouseRemoteHost` console hook exposes the same five commands —
+`enroll`, `enrollOffer`, `status`, `reconnect`, `clearEnrollment` — and remains
+the scripting seam. **Pairing approval is never here** — it is a modal, because
+it must interrupt ([remote-security-model.md](./remote-security-model.md),
+Pairing Ceremony).
 
 `docs/stories/pairing.mdx` walks this section and the pairing modal in sequence
 with the rest of the setup, rendering the real components; it is a narrative
@@ -735,9 +756,10 @@ await window.dormouseRemoteHost.enroll('http://localhost:3000', 'hunter2', 'My L
 ```
 
 Enrollment then persists in the service's own store, and on later launches the
-Host connects by itself. (`status()` / `reconnect()` / `clearEnrollment()` on
-the same object; all four are promises, since the hook forwards to the service.)
-For a headless stand-in host instead:
+Host connects by itself. (`enrollOffer(label)` / `status()` / `reconnect()` /
+`clearEnrollment()` on the same object; all five are promises, since the hook
+forwards to the service. The dev loop has no installer offer.) For a headless
+stand-in host instead:
 `DORMOUSE_SETUP_PASSWORD=hunter2 node server/scripts/fake-host.mjs http://localhost:3000`
 — it instantiates the test harness's `FakeHost` and differs only in
 auto-approving pairing and logging.
@@ -792,22 +814,18 @@ a `*.ts.net` origin means `DORMOUSE_REMOTE_CONNECT_SRC` at build time (see
 
 ## Future
 
-**Scope: selfhost-onboarding** — collapse self-host first-run friction. Today
-five values are hand-ferried across three surfaces: the origin (mobile Safari
-and the enroll form), the 64-hex setup password (typed into both), and an
-8-character key fingerprint compared by eye. The target is *run installer →
-click Enroll → scan QR → approve*, with nothing typed anywhere. One settled
-decision constrains every item: **the stock allowlist stays
+**Scope: selfhost-onboarding** — collapse self-host first-run friction. The
+laptop's half is done: the Host enrolls in one click from the installer's offer
+("Remote control, in the Settings dialog"). The phone's half is still
+hand-ferried — the origin typed into mobile Safari, the 64-hex setup password
+typed after it, and an 8-character key fingerprint compared by eye. The target
+is *run installer → click Enroll → scan QR → approve*, with nothing typed
+anywhere. One settled decision constrains every item: **the stock allowlist stays
 `*.dormouse.sh`-only** ("Where a Host may reach a relay server") —
 self-hosting keeps requiring a source build, deliberately, so no item below
 may depend on widening it. Staged order:
 
-1. **Host-side one-click enrollment.** The offer and its redemption exist
-   (Configuration → `DORMOUSE_ENROLL_TOKEN_FILE`); the Host that reads the
-   file on the machine that wrote it, and offers enrollment from it ("A
-   Dormouse server is installed here — enroll as this machine?"), does not.
-   The three-field form stays the remote-server fallback.
-2. **QR-first phone setup.** The enrolled Host mints a short-TTL, single-use
+1. **QR-first phone setup.** The enrolled Host mints a short-TTL, single-use
    setup token from the server over its authenticated channel and renders
    `https://<origin>/#setup?token=…` as a QR. Scanning replaces typing the
    origin and the setup password; the token's nonce rides into the pairing
@@ -817,7 +835,7 @@ may depend on widening it. Staged order:
    collapses to one confirm. Single-use plus TTL bound the shoulder-surf
    window; the Host announces each redemption. The setup password remains for
    the QR-less path.
-3. **One-minute resume.** On an approved connection the Host mints a resume
+2. **One-minute resume.** On an approved connection the Host mints a resume
    token — single-use, bound to the device key and that connection, 60-second
    TTL. A dropped WebSocket reattaches with it instead of rerunning the
    passkey ceremony; past the minute it is a full connect. Host-minted and

@@ -31,7 +31,11 @@ describe('remote-host enrollment', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     // Trailing slash should be stripped before appending the route.
-    const enrollment = await performEnrollment('https://dormouse.example/', 'hunter2', 'My Laptop');
+    const enrollment = await performEnrollment(
+      'https://dormouse.example/',
+      { password: 'hunter2' },
+      'My Laptop',
+    );
 
     expect(fetchMock).toHaveBeenCalledWith(
       'https://dormouse.example/api/host/enroll',
@@ -52,6 +56,30 @@ describe('remote-host enrollment', () => {
     expect(store.size).toBe(0);
   });
 
+  it('sends the installer’s one-time token in place of the password', async () => {
+    // `HostEnrollRequest` is a union of exactly one credential, and the server
+    // answers 400 for both or neither — so the body must carry the token alone.
+    stubLocalStorage();
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          hostId: 'host-abc',
+          hostToken: 'tok-xyz',
+          origin: 'https://dormouse.example',
+          rpId: 'dormouse.example',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await performEnrollment('https://dormouse.example', { enrollToken: 'f'.repeat(64) }, 'My Laptop');
+
+    const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+    expect(body).toEqual({ enrollToken: 'f'.repeat(64), label: 'My Laptop' });
+    expect(body).not.toHaveProperty('password');
+  });
+
   it('gives up on a relay that accepts the connection and never answers', async () => {
     // This exchange runs on the Host service's lifecycle chain, where every
     // start/stop command queues behind it, so a black-holed relay must not be
@@ -70,7 +98,7 @@ describe('remote-host enrollment', () => {
       }),
     );
 
-    const pending = performEnrollment('https://dormouse.example', 'hunter2', 'x');
+    const pending = performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x');
     // Below the webview's own 15 s command budget, so the console that asked
     // sees the real error rather than a bare timeout.
     expect(timeout).toHaveBeenCalledWith(10_000);
@@ -84,7 +112,7 @@ describe('remote-host enrollment', () => {
   it('throws on a non-ok response', async () => {
     stubLocalStorage();
     vi.stubGlobal('fetch', vi.fn(async () => new Response('bad password', { status: 401 })));
-    await expect(performEnrollment('https://dormouse.example', 'wrong', 'x')).rejects.toThrow(/401/);
+    await expect(performEnrollment('https://dormouse.example', { password: 'wrong' }, 'x')).rejects.toThrow(/401/);
   });
 
   it('refuses a 200 whose body is not an enrollment', async () => {
@@ -104,7 +132,7 @@ describe('remote-host enrollment', () => {
       ),
     );
 
-    await expect(performEnrollment('https://dormouse.example', 'hunter2', 'x')).rejects.toThrow(
+    await expect(performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x')).rejects.toThrow(
       /missing or invalid: origin, rpId/,
     );
   });
@@ -124,7 +152,7 @@ describe('remote-host enrollment', () => {
       ),
     );
 
-    await expect(performEnrollment('https://dormouse.example', 'hunter2', 'x')).rejects.toThrow(
+    await expect(performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x')).rejects.toThrow(
       /missing or invalid: hostId/,
     );
   });
@@ -137,7 +165,7 @@ describe('remote-host enrollment', () => {
       vi.fn(async () => new Response('<html>not your server</html>', { status: 200 })),
     );
 
-    await expect(performEnrollment('https://dormouse.example', 'hunter2', 'x')).rejects.toThrow(
+    await expect(performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x')).rejects.toThrow(
       /did not answer JSON/,
     );
   });

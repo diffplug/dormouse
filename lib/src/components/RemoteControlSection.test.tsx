@@ -21,6 +21,7 @@ import { RemoteControlSection } from './RemoteControlSection';
 import type { RemoteHostConsoleStatus } from '../host/remote/service-protocol';
 import {
   enrolledStatus,
+  OFFER_STATUS,
   UNENROLLED_STATUS as NOT_ENROLLED,
 } from '../host/remote/test-remote-host-link';
 
@@ -172,6 +173,69 @@ describe('RemoteControlSection', () => {
     expect(text()).toContain('server origin is not allowed by this build');
     // Still on the form, so the user can correct the origin and retry.
     expect(buttonLabelled('Connect')).toBeTruthy();
+  });
+
+  it('leads with the installer’s offer and folds the typed form away', async () => {
+    platform = { remoteHost: makeLink(async () => OFFER_STATUS) };
+    await render();
+
+    expect(text()).toContain('A Dormouse server is installed on this machine.');
+    expect(text()).toContain('https://ned-mac.tail9c2f1.ts.net');
+    expect(buttonLabelled('Enroll')).toBeTruthy();
+    // The three-field form is behind the disclosure, not beside the card.
+    expect(container.querySelector('input[type="password"]')).toBeNull();
+    expect(buttonLabelled('Connect')).toBeUndefined();
+    expect(buttonLabelled('Enroll with a different server…')).toBeTruthy();
+  });
+
+  it('enrolls from the offer with the name shown, which is editable', async () => {
+    let status: unknown = OFFER_STATUS;
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'enrollOffer') {
+        status = enrolled();
+        return { hostId: 'host-1', serverUrl: 'https://laptop.tailnet.ts.net' };
+      }
+      return status;
+    });
+    platform = { remoteHost: link };
+    await render();
+
+    // Prefilled from the service's suggestion, and the user overrode it.
+    const input = container.querySelector<HTMLInputElement>('input:not([type])')!;
+    expect(input.value).toBe('ned-mac');
+    await type('input:not([type])', '  Work laptop  ');
+    await act(async () => buttonLabelled('Enroll')!.click());
+
+    expect(link.command).toHaveBeenCalledWith('enrollOffer', { label: 'Work laptop' });
+    // No origin and no token from this realm: the service re-reads the file.
+    expect(text()).toContain('https://laptop.tailnet.ts.net');
+    expect(text()).toContain('Connected');
+  });
+
+  it('renders a one-click refusal where the typed form renders its own', async () => {
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'enrollOffer') throw new Error('server origin is not allowed by this build');
+      return OFFER_STATUS;
+    });
+    platform = { remoteHost: link };
+    await render();
+
+    await act(async () => buttonLabelled('Enroll')!.click());
+    expect(text()).toContain('server origin is not allowed by this build');
+    // Still on the card, and the typed form is still one click away.
+    expect(buttonLabelled('Enroll')).toBeTruthy();
+    expect(buttonLabelled('Enroll with a different server…')).toBeTruthy();
+  });
+
+  it('unfolds the typed form for a server that is somewhere else', async () => {
+    platform = { remoteHost: makeLink(async () => OFFER_STATUS) };
+    await render();
+
+    await act(async () => buttonLabelled('Enroll with a different server…')!.click());
+    expect(container.querySelector('input[type="url"]')).toBeTruthy();
+    expect(buttonLabelled('Connect')).toBeTruthy();
+    // The offer stays offered — unfolding is not a rejection of it.
+    expect(buttonLabelled('Enroll')).toBeTruthy();
   });
 
   it('shows the server and paired-device count when enrolled', async () => {

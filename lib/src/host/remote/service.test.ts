@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { HostAclRecord, PairingRequest } from 'server-lib-common';
+import type { EnrollmentOffer, HostAclRecord, PairingRequest } from 'server-lib-common';
 import type { HostEnrollment } from '../../remote/host/enrollment';
 import type { HostSurfaceProvider } from '../../remote/host/host-surface-provider';
 import { FakeSocket } from '../../remote/test-fake-socket';
@@ -132,6 +132,21 @@ function fakeFetch(): typeof globalThis.fetch {
   }) as unknown as typeof globalThis.fetch;
 }
 
+/**
+ * The offer reader is always injected, never the real one: whether these tests
+ * pass must not depend on whether the machine running them has a Dormouse
+ * server installed. `offerReads` counts the calls, which is how the "an enrolled
+ * Host does not touch the disk" case is stated.
+ */
+let offer: EnrollmentOffer | null;
+let offerReads: number;
+
+const OFFER: EnrollmentOffer = {
+  origin: 'https://relay.dormouse.sh',
+  token: 'a'.repeat(64),
+  mintedAt: '2026-08-31T00:00:00.000Z',
+};
+
 function createService(seed?: Partial<Pick<MemoryStore, 'enrollment' | 'acl'>>): RemoteHostService {
   store = memoryStore(seed);
   service = new RemoteHostService({
@@ -145,8 +160,18 @@ function createService(seed?: Partial<Pick<MemoryStore, 'enrollment' | 'acl'>>):
       return socket;
     },
     fetch: fakeFetch(),
+    readOffer: async () => {
+      offerReads++;
+      return offer;
+    },
+    suggestLabel: () => 'ned-mac',
   });
   return service;
+}
+
+/** The JSON body of the nth request, for asserting what a credential carried. */
+function requestBody(index: number): Record<string, unknown> {
+  return JSON.parse(requests[index]!.init!.body as string) as Record<string, unknown>;
 }
 
 /** Run a command and return the `remoteHost:result` it produced. */
@@ -181,6 +206,8 @@ beforeEach(() => {
   sockets = [];
   sent = [];
   requests = [];
+  offer = null;
+  offerReads = 0;
   vi.stubGlobal('fetch', fakeFetch());
 });
 
@@ -199,7 +226,37 @@ describe('status', () => {
       hostId: null,
       connection: 'stopped',
       pairedClients: 0,
+      offer: null,
     } satisfies RemoteHostConsoleStatus);
+  });
+
+  it('offers the installer’s enrollment while un-enrolled, without its token', async () => {
+    offer = OFFER;
+    createService();
+    await service.start();
+
+    expect((await command('status')).result).toEqual({
+      enrolled: false,
+      serverUrl: null,
+      hostId: null,
+      connection: 'stopped',
+      pairedClients: 0,
+      offer: { origin: OFFER.origin, suggestedLabel: 'ned-mac' },
+    } satisfies RemoteHostConsoleStatus);
+    // The one-time token is a bearer credential and this is a service→webview
+    // shape (SECURITY.md), so it must not appear anywhere in what was sent.
+    expect(JSON.stringify(sent)).not.toContain(OFFER.token);
+  });
+
+  it('reports no offer, and reads no file, once enrolled', async () => {
+    // What bounds the Settings dialog's 2 s poll: an enrolled machine has
+    // nothing to offer, so the poll must not stat a file every tick.
+    offer = OFFER;
+    createService({ enrollment: ENROLLMENT });
+    await service.start();
+
+    expect((await command('status')).result).toMatchObject({ enrolled: true, offer: null });
+    expect(offerReads).toBe(0);
   });
 
   it('reports the relay socket and the paired count once running', async () => {
@@ -213,6 +270,7 @@ describe('status', () => {
       hostId: 'host-1',
       connection: 'connected',
       pairedClients: 1,
+      offer: null,
     } satisfies RemoteHostConsoleStatus);
   });
 
@@ -308,6 +366,54 @@ describe('enroll', () => {
     });
 
     expect(statusEvents()).toEqual([true, false, true]);
+  });
+});
+
+describe('enrollOffer', () => {
+  it('redeems the installer’s token, and sends no password', async () => {
+    offer = OFFER;
+    createService();
+
+    const result = await command('enrollOffer', { label: 'Laptop' });
+
+    expect(result.result).toEqual({ hostId: 'host-1', serverUrl: OFFER.origin });
+    expect(requests).toHaveLength(1);
+    expect(requestBody(0)).toEqual({ enrollToken: OFFER.token, label: 'Laptop' });
+    expect(requestBody(0)).not.toHaveProperty('password');
+    // Same store-first persistence and same started Host as the typed form.
+    expect(store.enrollment?.hostToken).toBe('tok');
+    expect(sockets).toHaveLength(1);
+    expect(statusEvents()).toEqual([true]);
+  });
+
+  it('re-reads the offer at the click, not at the render', async () => {
+    // Minutes pass between the card being painted and the button being pressed,
+    // and redeeming an offer unlinks it — so the copy behind the button may be
+    // spent. Nothing may leave the machine on the strength of the stale one.
+    offer = OFFER;
+    createService();
+    await command('status');
+    offer = null;
+
+    const result = await command('enrollOffer', { label: 'Laptop' });
+
+    expect(result.error).toMatch(/no enrollment offer on this machine/i);
+    expect(requests).toEqual([]);
+    expect(store.enrollment).toBeNull();
+  });
+
+  it('refuses an offer origin outside the build’s allowed sources', async () => {
+    // The allowlist gate is the typed form's, unchanged: a server installed on
+    // this machine is not thereby an origin this build may reach, and the
+    // one-time token must not leave before that is checked.
+    offer = { ...OFFER, origin: 'https://relay.example.com' };
+    createService();
+
+    const result = await command('enrollOffer', { label: 'Laptop' });
+
+    expect(result.error).toContain(CONNECT_SRC);
+    expect(requests).toEqual([]);
+    expect(store.enrollment).toBeNull();
   });
 });
 

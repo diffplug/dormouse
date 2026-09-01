@@ -196,10 +196,10 @@ Task `\Dormouse Server`, or
 `~/.config/systemd/user/dormouse-server.service`.
 
 `run/enroll-offer.json` holds this install's origin and a one-time token that
-`POST /api/host/enroll` accepts in place of the setup password. Only the
-server side of that exists today; the Host that would read the file and offer
-one-click enrollment is staged (`docs/specs/server.md` -> `## Future`,
-selfhost-onboarding).
+`POST /api/host/enroll` accepts in place of the setup password. A Dormouse Host
+on this machine reads the same file and offers one-click enrollment from it
+(checkpoint 4, step 3); redeeming it unlinks it, and re-running the installer
+mints a new one.
 
 No installer will **ever**: run `git pull`, fetch, or switch branches; install a
 scheduled updater; ask for elevation; install or re-authenticate Tailscale;
@@ -427,12 +427,17 @@ command line.
    install is a separate storage partition that would otherwise need its own
    pairing (`docs/specs/pocket-app.md` → Installable web app).
 
-3. **The Host.** Launch the standalone or VS Code build made with
-   `DORMOUSE_REMOTE_CONNECT_SRC` (see Prerequisites) and enroll once in
+3. **The Host.** On this same machine, launch the standalone or VS Code build
+   made with `DORMOUSE_REMOTE_CONNECT_SRC` (see Prerequisites) and open
    **Settings → Remote control** — the sliders icon at the far right of the
-   baseboard. Three fields: the server origin, the setup password from step 1,
-   and a name for this machine. The `window.dormouseRemoteHost` console hook
-   carries the same four commands and stays as the scripting seam
+   baseboard. It leads with the installer's one-click offer: the origin it
+   found, the machine's name already filled in (editable), and one **Enroll**
+   button. Nothing is typed, and the setup password from step 1 is not needed
+   here at all. The typed three-field form — origin, setup password, name —
+   stays one click away behind "Enroll with a different server…", for a server
+   on another machine or an offer already spent. The
+   `window.dormouseRemoteHost` console hook carries the same five commands,
+   `enrollOffer(label)` among them, and stays as the scripting seam
    (`docs/specs/server.md`, "Remote control, in the Settings dialog").
 
    Enrollment persists in the Host service's own store — a file under the
@@ -441,9 +446,10 @@ command line.
    VS Code — so later launches connect on their own. The section then shows the server, the relay
    connection, and the paired-device count.
 
-   A build without the `*.ts.net` allowlist refuses this outright, before the
-   password leaves the machine, and the form renders that refusal verbatim.
-   That is the expected symptom of a stock build, not a server problem.
+   A build without the `*.ts.net` allowlist refuses this outright, before any
+   credential leaves the machine, and both the card and the form render that
+   refusal verbatim. That is the expected symptom of a stock build, not a server
+   problem.
 
 4. **A real session.** On the phone: Hosts → **Pair** → approve the modal that
    appears on the laptop → **Connect** (one biometric prompt) → pick a pane and

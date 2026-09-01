@@ -63,12 +63,20 @@ export function clearEnrollment(): void {
 const ENROLL_TIMEOUT_MS = 10_000;
 
 /**
- * `POST /api/host/enroll` with the setup password and map the response to an
- * enrollment. Throws with the server's status text on failure — or with what the
- * response was missing when it answered 200 with something that is not one — so
- * the caller (console hook / settings UI) can surface it. What this returns has
- * passed {@link isEnrollment}, so the mint site and every read agree on what an
- * enrollment is.
+ * What proves this machine may enroll: the setup password the operator typed,
+ * or the one-time token of an installer's offer for a Host on the server's own
+ * machine (`lib/src/host/remote/enroll-offer.ts`). Exactly one — the wire type
+ * `HostEnrollRequest` is the same union, and both or neither is a 400.
+ */
+export type HostEnrollCredential = { password: string } | { enrollToken: string };
+
+/**
+ * `POST /api/host/enroll` with one {@link HostEnrollCredential} and map the
+ * response to an enrollment. Throws with the server's status text on failure —
+ * or with what the response was missing when it answered 200 with something
+ * that is not one — so the caller (console hook / settings UI) can surface it.
+ * What this returns has passed {@link isEnrollment}, so the mint site and every
+ * read agree on what an enrollment is.
  *
  * Persists nothing: the service that ran it decides where the credentials live
  * (`lib/src/host/remote/host-state-store.ts`), while the exchange itself is one
@@ -76,7 +84,7 @@ const ENROLL_TIMEOUT_MS = 10_000;
  */
 export async function performEnrollment(
   serverUrl: string,
-  password: string,
+  credential: HostEnrollCredential,
   label: string,
 ): Promise<HostEnrollment> {
   const base = serverUrl.replace(/\/+$/, '');
@@ -94,7 +102,11 @@ export async function performEnrollment(
     // setup password to a server outside the build-time allowlist.
     redirect: 'error',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ password, label }),
+    // Spread, so the body carries exactly the one credential the caller holds:
+    // sending the other key as `undefined` would be dropped by `JSON.stringify`
+    // anyway, but spelling it out keeps the "exactly one" the server enforces
+    // visible at the only place that builds the request.
+    body: JSON.stringify({ ...credential, label }),
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
