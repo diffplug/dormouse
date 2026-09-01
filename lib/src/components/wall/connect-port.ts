@@ -18,8 +18,8 @@ import type { ParseResult } from 'dor/commands/types';
 // keeps cross-spawn (the package's Node-only default export) out of the webview.
 import { sessionForKey } from 'dor-lib-common/agent-browser';
 
-/** The host capabilities `connectPortToDefaultBrowser` needs — the same two the
- *  CLI path leans on, narrowed so tests can stub them without a full adapter. */
+/** The host capabilities this module needs — the same two the CLI path leans
+ *  on, narrowed so tests can stub them without a full adapter. */
 type ConnectPlatform = Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserStreamStatus'>;
 
 export type ConnectPortResult = { ok: true } | { ok: false; message: string };
@@ -53,14 +53,47 @@ export async function connectPortToDefaultBrowser({
   // Pane appears NOW, session-less — the controller can't race the daemon boot.
   const eager = ensureEagerSurface(session);
   if (!eager.ok) return { ok: false, message: eager.message };
+  return attachAgentBrowserSession({
+    url,
+    platform,
+    session,
+    binaryPath,
+    surfaceId: eager.value.surfaceId,
+    refreshSurface,
+  });
+}
 
+/**
+ * Open `url` in `session` and hand `surfaceId` the resulting `{session, wsPort,
+ * binaryPath}` as one params write — the tail both the context-menu connect and
+ * the tool serving trigger (`use-tool-serving.ts`) share.
+ *
+ * The surface gets its `session` whether or not the open succeeded, so a failed
+ * pane's placeholder names the session instead of sitting session-less.
+ */
+export async function attachAgentBrowserSession({
+  url,
+  platform,
+  session,
+  binaryPath,
+  surfaceId,
+  refreshSurface,
+}: {
+  url: string;
+  platform: ConnectPlatform;
+  session: string;
+  binaryPath?: string;
+  surfaceId: string;
+  refreshSurface: (surfaceId: string, patch: Record<string, unknown>) => void;
+}): Promise<ConnectPortResult> {
+  if (!platform.agentBrowserCommand) {
+    return { ok: false, message: 'opening a browser surface is not supported on this host' };
+  }
   // 'open' is on the host's subcommand allowlist; the CLI boots the daemon/browser
   // if it isn't already running.
   const opened = await platform.agentBrowserCommand(session, ['open', url], binaryPath);
   if (opened.exitCode !== 0) {
-    // The pane stays; hand it the session so its placeholder names the session
-    // instead of sitting sessionless.
-    refreshSurface(eager.value.surfaceId, { session });
+    refreshSurface(surfaceId, { session });
     return { ok: false, message: opened.stderr.trim() || `agent-browser open exited ${opened.exitCode}` };
   }
   // Best-effort stream port so the panel connects straight to the live screencast;
@@ -70,9 +103,9 @@ export async function connectPortToDefaultBrowser({
     const status = await platform.agentBrowserStreamStatus(session, binaryPath);
     if (status.ok) wsPort = status.wsPort;
   }
-  // One params write reconciles the session-less pane: setting `session` connects
-  // the controller (the daemon is up now, so its recovery is safe to run).
-  refreshSurface(eager.value.surfaceId, {
+  // Setting `session` connects the controller (the daemon is up now, so its
+  // recovery is safe to run).
+  refreshSurface(surfaceId, {
     session,
     ...(wsPort !== undefined ? { wsPort } : {}),
     ...(binaryPath !== undefined ? { binaryPath } : {}),

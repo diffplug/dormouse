@@ -134,6 +134,8 @@ const invokeMap = {
     return result;
   },
   agent_browser_stream_status: ({ session, binaryPath }) => requestSidecar('agentBrowser:streamStatus', { session, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
+  tool_control: ({ request }) =>
+    requestSidecar('tool:control', { request }, 'tool:result', (data) => data.result),
   agent_browser_open: ({ url, headed, binaryPath }) => requestSidecar('agentBrowser:open', { url, headed, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   agent_browser_pop_out: ({ session, url, rect, binaryPath }) => requestSidecar('agentBrowser:popOut', { session, url, rect, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   agent_browser_pop_in: ({ session, url, binaryPath }) => requestSidecar('agentBrowser:popIn', { session, url, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
@@ -333,6 +335,14 @@ log(`starting browser dev host on http://127.0.0.1:${hostPort}`);
 // harness never runs in CI, and the token dies with the process.
 log(`bridge token: ${bridgeToken}`);
 log(`try: curl -H 'content-type: application/json' -d '{"cmd":"pty_request_init"}' 'http://127.0.0.1:${hostPort}/__dormouse_dev_host/send?t=${bridgeToken}'`);
+// Dor Tool announcement (docs/specs/dor-tool.md -> OSC 367). This harness binds
+// several ports — this one, vite, and the sidecar's control socket — and no
+// port scan can guess which to frame, so name it. Harmless outside Dormouse: a
+// well-behaved terminal drops an unknown OSC.
+process.stdout.write(
+  `\u001b]367;serve;${JSON.stringify({ port: vitePort, name: 'Dormouse dev', v: 1 })}\u001b\\`,
+);
+
 await startHostServer();
 startSidecar();
 startVite();

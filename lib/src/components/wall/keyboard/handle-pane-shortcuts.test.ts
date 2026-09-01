@@ -100,6 +100,18 @@ describe('handlePaneShortcuts kill behavior', () => {
     expect(ctx.setConfirmKill).toHaveBeenCalledWith({ id: 'pane-a', char: 'Q' });
   });
 
+  it('keeps confirmation for untouched tool panes', () => {
+    terminalRegistryMocks.isUntouched.mockReturnValue(true);
+    const ctx = makeCtx({
+      nav: makeNav({ paneParams: () => ({ surfaceType: 'tool' }) }),
+    });
+
+    expect(handlePaneShortcuts(keydown('x'), ctx, { current: null })).toBe(true);
+
+    expect(ctx.killPaneImmediately).not.toHaveBeenCalled();
+    expect(ctx.setConfirmKill).toHaveBeenCalledWith({ id: 'pane-a', char: 'Q' });
+  });
+
   it('reattaches untouched doors into an immediate kill path', () => {
     terminalRegistryMocks.isUntouched.mockReturnValue(true);
     const reattach = vi.fn();
@@ -119,6 +131,23 @@ describe('handlePaneShortcuts kill behavior', () => {
   it('reattaches touched doors into the confirmation path', () => {
     const reattach = vi.fn();
     const ctx = makeCtx({
+      selectedTypeRef: { current: 'door' },
+      handleReattachRef: { current: reattach },
+    });
+
+    expect(handlePaneShortcuts(keydown('x'), ctx, { current: null })).toBe(true);
+
+    expect(reattach).toHaveBeenCalledWith(
+      { id: 'pane-a', title: 'Pane A' },
+      { enterPassthrough: false, afterRestore: 'confirm-kill' },
+    );
+  });
+
+  it('reattaches untouched tool doors into the confirmation path', () => {
+    terminalRegistryMocks.isUntouched.mockReturnValue(true);
+    const reattach = vi.fn();
+    const ctx = makeCtx({
+      nav: makeNav({ paneParams: () => ({ surfaceType: 'tool' }) }),
       selectedTypeRef: { current: 'door' },
       handleReattachRef: { current: reattach },
     });

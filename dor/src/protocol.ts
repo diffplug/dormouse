@@ -17,6 +17,7 @@ export const SURFACE_CONTROL_METHODS = {
   list: 'surface.list',
   split: 'surface.split',
   ensure: 'surface.ensure',
+  tool: 'surface.tool',
   send: 'surface.send',
   read: 'surface.read',
   await: 'surface.await',

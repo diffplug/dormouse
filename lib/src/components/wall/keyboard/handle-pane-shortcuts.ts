@@ -5,6 +5,7 @@ import {
   toggleSessionTodo,
 } from '../../../lib/terminal-registry';
 import { randomKillChar } from '../../KillConfirm';
+import { isToolParams } from '../browser-surface';
 import { ARROW_OPPOSITES, isArrowKey, type NavHistoryRef, type WallKeyboardCtx } from './types';
 
 function findAlertButtonForSession(id: string): HTMLButtonElement | null {
@@ -81,17 +82,18 @@ export function handlePaneShortcuts(
   if ((e.key === 'k' || e.key === 'x') && sid) {
     e.preventDefault();
     e.stopPropagation();
+    const isTool = isToolParams(ctx.nav.paneParams(sid));
     if (ctx.selectedTypeRef.current === 'door') {
       const item = ctx.doorsRef.current.find((d) => d.id === sid);
       if (item) {
         ctx.handleReattachRef.current(item, {
           enterPassthrough: false,
-          afterRestore: isUntouched(sid) ? 'kill-immediately' : 'confirm-kill',
+          afterRestore: !isTool && isUntouched(sid) ? 'kill-immediately' : 'confirm-kill',
         });
       }
       return true;
     }
-    if (isUntouched(sid)) {
+    if (!isTool && isUntouched(sid)) {
       ctx.killPaneImmediately(sid);
       return true;
     }

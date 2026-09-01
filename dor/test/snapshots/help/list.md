@@ -4,7 +4,7 @@ Invocation: `dor list --help`
 
 ```text
 USAGE
-  dor list [--kind terminal|browser] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json] [--id-format refs|ids|both]
+  dor list [--kind terminal|browser|tool] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json] [--id-format refs|ids|both]
   dor list --help
 
 Lists every Surface in the current Workspace — terminals and browser Surfaces, including minimized ones (view "minimized").

@@ -1,0 +1,16 @@
+exitCode: 0
+stdout:
+{
+  "status": "existing",
+  "surface_id": "44444444-4444-4444-8444-444444444444",
+  "surface_ref": "surface:4",
+  "command": "pnpm storybook",
+  "cwd": "/work/site",
+  "minimized": false,
+  "key": [
+    "storybook",
+    "/work/site"
+  ]
+}
+
+stderr:

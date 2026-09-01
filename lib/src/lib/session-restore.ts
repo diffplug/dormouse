@@ -48,7 +48,11 @@ export function restoreSession(platform: PlatformAdapter): RestoredSession | nul
       shell: shellOpts?.shell,
       args: shellOpts?.args,
       untouched: pane.untouched,
-      resumeCommand: recoveryCommands[pane.id] ?? null,
+      // A tool command is durable, approved Session state and wins over the
+      // host's unrelated single-use agent recovery channel.
+      ...(pane.surfaceType === 'tool'
+        ? { command: pane.command ?? null, requireIntegration: true, resumeCommand: null }
+        : { resumeCommand: recoveryCommands[pane.id] ?? null }),
     });
   }
 

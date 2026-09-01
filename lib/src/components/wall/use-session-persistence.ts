@@ -9,6 +9,7 @@ import {
   UNNAMED_PANEL_TITLE,
 } from '../../lib/terminal-registry';
 import { surfaceKindFromParams } from './browser-surface';
+import { persistableLeafMeta } from './lath-wall-engine';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem, WallSelectionKind } from './wall-types';
 import type { PersistedDoor, PersistedSurfaceRefs } from '../../lib/session-types';
@@ -42,22 +43,36 @@ export function useSessionPersistence({
   const trackerRef = useRef(createSessionDirtyTracker());
 
   const doSave = useCallback((): Promise<void> => {
-    const panes = lath.listPanes().map((p) => ({
-      id: p.id,
-      title: p.title ?? UNNAMED_PANEL_TITLE,
-      surfaceType: surfaceKindFromParams(p.params),
-    }));
+    const panes = lath.listPanes().map((p) => {
+      // Apply the same projection used by the saved Lath layout. In particular,
+      // a still-pending approval becomes a plain terminal and a running tool
+      // loses only its derived browser state.
+      const meta = lath.getMeta(p.id);
+      const persistable = meta ? persistableLeafMeta(meta) : undefined;
+      return {
+        id: p.id,
+        title: persistable?.title ?? p.title ?? UNNAMED_PANEL_TITLE,
+        surfaceType: surfaceKindFromParams(persistable?.params),
+        params: persistable?.params,
+      };
+    });
     // The runtime Door is id + token; its metadata is materialized HERE, from the
     // store that owned it all along, so a Surface persists where it navigated to
     // rather than where it was minimized and a restart cold-loads it there.
     const doors: PersistedDoor[] = (doorsRef.current ?? []).map((door) => {
+      // A Doored leaf is excluded from the tree snapshot and persisted as its
+      // own row, so it never passes through `serializeLayout` — run the same
+      // projection here, or a minimized tool round-trips its dead `url` and a
+      // daemon session that died with the previous process
+      // (docs/specs/dor-tool.md -> Persistence and hosts).
       const meta = lath.getMeta(door.id);
+      const persistable = meta ? persistableLeafMeta(meta) : undefined;
       return {
         id: door.id,
-        title: meta?.title?.trim() || UNNAMED_PANEL_TITLE,
-        component: meta?.component,
-        tabComponent: meta?.tabComponent,
-        params: meta?.params,
+        title: persistable?.title?.trim() || UNNAMED_PANEL_TITLE,
+        component: persistable?.component,
+        tabComponent: persistable?.tabComponent,
+        params: persistable?.params,
         token: door.token,
       };
     });

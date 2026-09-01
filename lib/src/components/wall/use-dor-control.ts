@@ -11,6 +11,7 @@ import type {
 } from 'dor/commands/types';
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
+import { TOOLS_FLAG_KEY, isToolsEnabled } from '../../lib/feature-flags';
 import type { OpenPort } from '../../lib/platform/types';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 import {
@@ -22,13 +23,21 @@ import {
 } from '../../lib/terminal-registry';
 import { surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { hostPathDisplay } from './browser-url';
-import { agentBrowserSessionFromParams, isAgentBrowserParams } from './browser-surface';
+import {
+  agentBrowserSessionFromParams,
+  isAgentBrowserParams,
+  namespacedToolKey,
+  toolKeysEqual,
+  toolPendingFromParams,
+  type ToolPending,
+} from './browser-surface';
 // One-way import: connect-port no longer depends on this module (its eager-surface
 // and refresh seams are injected as plain functions).
 import { connectPortToDefaultBrowser } from './connect-port';
 import { listenerUrlsByPort } from './port-url';
-import { dorDirectionForEdge, type LathWallEngine } from './lath-wall-engine';
+import { dorDirectionForEdge, toolLeafMeta, type LathWallEngine } from './lath-wall-engine';
 import type { WallNav } from './keyboard/types';
+import type { LeafMeta } from '../../lib/lath/persistence';
 import type { DooredItem } from './wall-types';
 
 type DorControlParams = {
@@ -55,6 +64,8 @@ type DorControlParams = {
   window?: string;
   scrollback?: unknown;
   wsPort?: unknown;
+  name?: unknown;
+  fresh?: unknown;
 };
 
 // The webview view of a control request: the shared wire payload, but with
@@ -240,6 +251,28 @@ const RESTART_POLL_INTERVAL_MS = 100;
 const RESTART_INTERRUPT_TIMEOUT_MS = 15_000;
 const RESTART_START_TIMEOUT_MS = 15_000;
 
+/**
+ * Serializes `surface.tool` requests. A plain promise chain rather than a real
+ * mutex: the critical section is "check for a key match, then create", and the
+ * only contender is another tool request, so ordering them is enough. Module
+ * scope because each `dor` invocation arrives as its own control request.
+ */
+let toolSpawnChain: Promise<void> = Promise.resolve();
+function acquireToolSpawnLock(): Promise<() => void> {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const waited = toolSpawnChain.then(() => release);
+  // A handler that throws must not wedge every later one.
+  toolSpawnChain = toolSpawnChain.then(() => held).catch(() => {});
+  return waited;
+}
+
+/** The rendered command a tool Surface is running, for the reuse note. */
+function toolCommandFromParams(params: unknown): string {
+  const value = (params as { command?: unknown } | null | undefined)?.command;
+  return typeof value === 'string' ? value : '';
+}
+
 /** Resolve true once `predicate` holds for the surface's live state, false on timeout. */
 function waitForTerminalState(
   id: string,
@@ -376,6 +409,13 @@ export function useDorControl({
     cwd?: string;
     requireIntegration?: boolean;
     focusNeutral?: boolean;
+    /** Leaf metadata for the new Surface; defaults to a plain terminal. `dor
+     *  tool` passes a tool leaf, which is a shell-hosted PTY exactly like a
+     *  terminal but renders both capabilities. */
+    leafMeta?: LeafMeta;
+    /** Create the leaf but stage no shell and spawn no PTY — a pane awaiting
+     *  approval (docs/specs/dor-tool.md -> Trust rule 3). */
+    deferTerminal?: boolean;
   }) => ParseResult<{ id: string; ref: string; minimized: boolean }>;
   createContentSurface: (args: {
     minimized: boolean;
@@ -696,6 +736,292 @@ export function useDorControl({
           },
         });
         return;
+      }
+
+      if (detail.method === SURFACE_CONTROL_METHODS.tool) {
+        // Serialize every tool request behind the last one. Each `dor`
+        // invocation is its own socket connection, so two handlers otherwise
+        // interleave across the host lookup, both clear the key check, and both
+        // create — two panes with one key, two servers on one port. `finally`
+        // still runs on every `return` in the body below.
+        const releaseToolLock = await acquireToolSpawnLock();
+        try {
+          // Off by default. With the flag off nothing is ever designated a tool,
+          // so the serving trigger has nothing to watch and no pane can transform.
+          if (!isToolsEnabled()) {
+            detail.respond({
+              ok: false,
+              error: `Dor Tools are off. Enable them by setting localStorage '${TOOLS_FLAG_KEY}' to 'true'.`,
+            });
+            return;
+          }
+          const cwd = stringParam(params.cwd)?.trim();
+          if (!cwd) {
+            detail.respond({ ok: false, error: 'cwd is required' });
+            return;
+          }
+          const toolName = stringParam(params.name)?.trim();
+          let command: string;
+          let key: string[] | null = null;
+          let warnings: string[] = [];
+          let render: 'iframe' | 'ab-screencast' = 'iframe';
+          // `dor tool -- <command>` has nowhere to declare a strategy, so it
+          // autobinds. Safe by construction now that `auto` refuses two ports
+          // rather than tie-breaking; a declared tool opts in with one line.
+          let port: 'announced' | 'auto' = 'auto';
+          const toolShell = getDefaultShellOpts()?.shell;
+
+          if (toolName) {
+            // The registry, the closed substitution set, and the trust gate all
+            // live behind this one host call (`dor/commands/types` ->
+            // ToolSurfaceRequest).
+            const toolControl = getPlatform().toolControl;
+            if (!toolControl) {
+              detail.respond({ ok: false, error: 'this host cannot read a dormouse.yml; use `dor tool -- <command>`' });
+              return;
+            }
+            const lookup = await toolControl({ op: 'lookup', name: toolName, cwd });
+            switch (lookup.status) {
+              case 'trust-recorded':
+                // Only a `trust` op can produce this; a lookup never does.
+                detail.respond({ ok: false, error: 'unexpected tool host response' });
+                return;
+              case 'ok':
+                command = lookup.run;
+                // Namespaced under the host-resolved tool name, so two tools in
+                // one repo with scope-only keys stay distinct and a runtime
+                // re-key cannot name another tool's key.
+                key = namespacedToolKey(lookup.name, lookup.key);
+                render = lookup.render;
+                port = lookup.port;
+                warnings = lookup.warnings;
+                break;
+              case 'no-file':
+                detail.respond({ ok: false, error: `no dormouse.yml found in '${cwd}' or any parent directory` });
+                return;
+              case 'unknown-tool':
+                detail.respond({
+                  ok: false,
+                  error: lookup.names.length > 0
+                    ? `no tool '${toolName}' in ${lookup.path} (has: ${lookup.names.join(', ')})`
+                    : `no tool '${toolName}' in ${lookup.path}`,
+                });
+                return;
+              case 'untrusted': {
+                // Approval can only lead to a command gated on OSC 633. Reject
+                // a shell known never to emit it before offering a prompt that
+                // would otherwise approve, spawn, then silently drop the command.
+                if (toolShell && shellCommandKind(toolShell, PLATFORM_STRING) === 'cmd') {
+                  detail.respond({ ok: false, error: missingIntegrationError(toolShell) });
+                  return;
+                }
+                // The pane appears now and asks; the command spawns only on
+                // approval (docs/specs/dor-tool.md -> Trust). Nothing from the
+                // repo has executed to reach this point — the file was read and
+                // parsed, which is inert, and is what lets the prompt name the
+                // command it is asking about.
+                //
+                // A second launch of the same tool reuses the pending pane
+                // rather than stacking prompts: dedupe cannot key on
+                // `prespawn_dedupe` yet (the untrusted lookup withholds it), so
+                // it keys on what the prompt is about.
+                const matchesPending = (candidate: unknown) => {
+                  const waiting = toolPendingFromParams(candidate);
+                  return waiting?.name === lookup.name && waiting.projectRoot === lookup.projectRoot;
+                };
+                const already = findSurfaceByParams(matchesPending);
+                if (already) {
+                  revealSurface(already.id);
+                  detail.respond({
+                    ok: true,
+                    result: {
+                      status: 'pending',
+                      surfaceId: already.id,
+                      surfaceRef: surfaceRefForId(already.id),
+                      command: lookup.run,
+                      cwd,
+                      minimized: findSurfaceByParams(matchesPending)?.minimized ?? false,
+                      key: null,
+                    },
+                  });
+                  return;
+                }
+                const pendingTarget = resolveSplitTarget();
+                if (!pendingTarget) return;
+                // Deliberately not minimized, whatever was asked: a pane the
+                // user cannot see is a pane they cannot approve. The request is
+                // carried and applied once they do.
+                const pendingMeta: ToolPending = {
+                  name: lookup.name,
+                  run: lookup.run,
+                  path: lookup.path,
+                  projectRoot: lookup.projectRoot,
+                  minimized: booleanParam(params.minimized),
+                  upstreamUrl: lookup.upstreamUrl,
+                };
+                const pending = createSplitSurface({
+                  direction: autoDorDirection(pendingTarget.target),
+                  minimized: false,
+                  reference: pendingTarget.target,
+                  cwd,
+                  focusNeutral: true,
+                  // No shell until a human approves: `createSplitSurface` would
+                  // otherwise stage shell opts and, on some paths, spawn the PTY
+                  // outright (docs/specs/dor-tool.md -> Trust rule 3).
+                  deferTerminal: true,
+                  leafMeta: toolLeafMeta(lookup.name, {
+                    surfaceType: 'tool',
+                    command: lookup.run,
+                    cwd,
+                    toolName: lookup.name,
+                    toolPending: pendingMeta,
+                  }),
+                });
+                if (!pending.ok) {
+                  detail.respond({ ok: false, error: pending.message });
+                  return;
+                }
+                // A minimized reference creates its sibling as a Door even
+                // when `minimized` is false. Pending approval must stay visible,
+                // so immediately reattach that exceptional creation path.
+                if (pending.value.minimized) revealSurface(pending.value.id);
+                detail.respond({
+                  ok: true,
+                  result: {
+                    status: 'pending',
+                    surfaceId: pending.value.id,
+                    surfaceRef: pending.value.ref,
+                    command: lookup.run,
+                    cwd,
+                    minimized: findSurfaceByParams(matchesPending)?.minimized ?? false,
+                    key: null,
+                  },
+                });
+                return;
+              }
+              default:
+                detail.respond({ ok: false, error: lookup.message });
+                return;
+            }
+          } else {
+            const argv = stringArrayParam(params.command);
+            command = dorCommandString(argv) ?? '';
+            if (!command) {
+              detail.respond({ ok: false, error: 'command cannot be empty' });
+              return;
+            }
+          }
+
+          // Spawn-time dedupe, and only for a tool that was given an identity
+          // (docs/specs/dor-tool.md -> Identity and dedupe).
+          if (key && !booleanParam(params.fresh)) {
+            const matchesToolKey = (candidate: unknown) =>
+              toolKeysEqual((candidate as { toolKey?: unknown } | null | undefined)?.toolKey, key);
+            const match = findSurfaceByParams(matchesToolKey);
+            if (match) {
+              const matchedCommand = toolCommandFromParams(lath.getMeta(match.id)?.params) || command;
+              // A dedicated Surface whose command exited is unambiguously free,
+              // so re-run in place rather than splitting — where `dor ensure`,
+              // aimed at arbitrary shells, would stop matching.
+              const idle = getTerminalPaneState(match.id).currentCommand === null;
+              if (idle) {
+                // The tool's own cwd, not the caller's: `surfaceRunsCommand`
+                // compares against the matched Surface's `cwdAtStart`, so waiting
+                // on the caller's would never resolve when `dor tool` is run from
+                // a subdirectory — the command restarts and we report failure.
+                const matchedCwd = getTerminalPaneState(match.id).cwd?.path ?? cwd;
+                const restarted = await restartSurfaceInPlace(match.id, matchedCommand, matchedCwd);
+                if (!restarted.ok) {
+                  detail.respond({
+                    ok: false,
+                    error: `surface '${surfaceRefForId(match.id)}' ${restarted.message}`,
+                  });
+                  return;
+                }
+              }
+              // Reveal, reattaching a Door first: a match that only printed a
+              // handle would leave a minimized tool minimized, which is exactly
+              // the "appears to do nothing" the invariant is written against.
+              revealSurface(match.id);
+              const survivor = findSurfaceByParams(matchesToolKey);
+              detail.respond({
+                ok: true,
+                result: {
+                  status: idle ? 'adopted' : 'existing',
+                  surfaceId: match.id,
+                  surfaceRef: surfaceRefForId(match.id),
+                  command: matchedCommand,
+                  cwd,
+                  minimized: survivor?.minimized ?? false,
+                  key,
+                  ...(warnings.length > 0 ? { warnings } : {}),
+                },
+              });
+              return;
+            }
+          }
+
+          // A tool is a shell-hosted PTY with the command typed into it, exactly
+          // as `dor ensure` spawns one — but with no command+cwd matching, and a
+          // leaf that renders both capabilities.
+          if (toolShell && shellCommandKind(toolShell, PLATFORM_STRING) === 'cmd') {
+            detail.respond({ ok: false, error: missingIntegrationError(toolShell) });
+            return;
+          }
+          const toolTarget = resolveSplitTarget();
+          if (!toolTarget) return;
+          const created = createSplitSurface({
+            command,
+            direction: autoDorDirection(toolTarget.target),
+            minimized: booleanParam(params.minimized),
+            reference: toolTarget.target,
+            cwd,
+            requireIntegration: true,
+            // Focus-neutral like `dor ensure`: a tool spawned by a script or an
+            // agent must not steal the caller's selection.
+            focusNeutral: true,
+            leafMeta: toolLeafMeta(toolName ?? command, {
+              surfaceType: 'tool',
+              command,
+              cwd,
+              toolRender: render,
+              toolPort: port,
+              ...(key ? { toolKey: key } : {}),
+              ...(toolName ? { toolName } : {}),
+            }),
+          });
+          if (!created.ok) {
+            detail.respond({ ok: false, error: created.message });
+            return;
+          }
+          const toolIntegrated = await waitForTerminalState(
+            created.value.id,
+            () => isPaneOscDriven(created.value.id),
+            INTEGRATION_DETECT_TIMEOUT_MS,
+          );
+          if (!toolIntegrated) {
+            killPaneImmediately(created.value.id);
+            detail.respond({ ok: false, error: missingIntegrationError(toolShell) });
+            return;
+          }
+          detail.respond({
+            ok: true,
+            result: {
+              status: 'created',
+              surfaceId: created.value.id,
+              surfaceRef: created.value.ref,
+              command,
+              cwd,
+              minimized: created.value.minimized,
+              key,
+              ...(warnings.length > 0 ? { warnings } : {}),
+            },
+          });
+          return;
+      
+        } finally {
+          releaseToolLock();
+        }
       }
 
       if (detail.method === SURFACE_CONTROL_METHODS.ensure) {
@@ -1070,7 +1396,7 @@ export function useDorControl({
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
+  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceByParams, findSurfaceIdRunningCommand, killPaneImmediately, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
 
   return { connectPort };
 }

@@ -5,6 +5,7 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
+import * as terminalRegistry from '../../lib/terminal-registry';
 import type { AgentBrowserPopResult, AgentBrowserStreamStatusResult, PlatformAdapter } from '../../lib/platform/types';
 import type { PaneProps } from './pane-props';
 import { AgentBrowserPanel, HIDDEN_PARK_DELAY_MS } from './AgentBrowserPanel';
@@ -758,5 +759,47 @@ describe('AgentBrowserPanel tab strip actions', () => {
     await act(async () => { ws.emitMessage(tabs('t2', true)); });
     await new Promise((r) => setTimeout(r, 120));
     expect(screenshot).toHaveBeenCalled();
+  });
+});
+
+describe('the pop-out affordance on a tool (regression: PR #493 review)', () => {
+  // The second of the two screen-registration sites (the other is
+  // `IframePanel`): a tool declaring `render: ab-screencast` mounts this panel,
+  // so the gate has to be here too. Why it exists is at the gate itself, in
+  // `agent-browser-surface-controller.ts`.
+  function withPopOutCapableHost() {
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopOut'>;
+    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    platform.agentBrowserPopOut = vi.fn(async (): Promise<AgentBrowserPopResult> => ({ ok: true, wsPort: 1 }));
+    setPlatform(platform);
+  }
+
+  it('offers pop-out on a plain browser surface', async () => {
+    withPopOutCapableHost();
+    await renderPanel(paneProps('ab-plain', { surfaceType: 'browser', session: 's', renderMode: 'ab-screencast' }));
+    expect(getAgentBrowserScreenController('ab-plain')?.canPopOut).toBe(true);
+  });
+
+  it('never offers it on a tool', async () => {
+    withPopOutCapableHost();
+    await renderPanel(paneProps('ab-tool', { surfaceType: 'tool', session: 's', renderMode: 'ab-screencast' }));
+    expect(getAgentBrowserScreenController('ab-tool')?.canPopOut).toBe(false);
+  });
+
+  it('marks the Session touched on browser-side input', async () => {
+    const markTouched = vi.spyOn(terminalRegistry, 'markSessionTouched').mockImplementation(() => {});
+    withPopOutCapableHost();
+    await renderPanel(paneProps('ab-tool-input', {
+      surfaceType: 'tool',
+      session: 's',
+      renderMode: 'ab-screencast',
+    }));
+
+    const panel = container.firstElementChild as HTMLElement;
+    await act(async () => {
+      panel.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    });
+
+    expect(markTouched).toHaveBeenCalledWith('ab-tool-input');
   });
 });

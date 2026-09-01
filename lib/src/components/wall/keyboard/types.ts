@@ -8,7 +8,7 @@ import type { WallActions } from '../wall-context';
 export interface WallNav {
   /** Nearest pane id in the arrow's direction, or null. */
   findInDirection(id: string, dir: 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown'): string | null;
-  /** A visible pane's params (surface-type classification), or undefined. */
+  /** A Surface's params (including a Door's surface-type classification), or undefined. */
   paneParams(id: string): Record<string, unknown> | undefined;
   /** Whether `id` is a live visible pane. */
   hasPane(id: string): boolean;

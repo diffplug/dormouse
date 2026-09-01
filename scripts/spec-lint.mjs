@@ -36,7 +36,10 @@
  *  10. Word-budget ratchet: every checked file stays under its budget in
  *      scripts/spec-word-budgets.json. Growth past the budget fails; the fix
  *      is to cut, or to raise the budget deliberately in the same PR. Budgets
- *      carry small headroom so routine edits don't trip it.
+ *      carry small headroom so routine edits don't trip it. A budget may be a
+ *      number (whole file) or {prose, indexLine} — the split form AGENTS.md
+ *      uses, capping its conventions prose and each spec-index line
+ *      separately so adding a spec never costs another spec's routing line.
  */
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname, normalize } from 'node:path';
@@ -289,15 +292,60 @@ for (const spec of foldCheckedFiles) {
 // --- Check 10: word-budget ratchet ------------------------------------------
 const BUDGETS_FILE = 'scripts/spec-word-budgets.json';
 const budgets = JSON.parse(read(BUDGETS_FILE));
+const countWords = (text) => text.split(/\s+/).filter(Boolean).length;
+const raiseHint =
+  `cut, or raise the budget in ${BUDGETS_FILE} deliberately in the same PR`;
+
+/**
+ * AGENTS.md's spec index — the `- **\`path\`** — …` bullets between "## Specs"
+ * and "## Design". Scoped to that slice on purpose: the Architecture section
+ * uses the same bullet shape for package paths.
+ */
+function specIndexLines(text) {
+  const slice = text.split('\n## Specs')[1]?.split('\n## Design')[0] ?? '';
+  return slice.split('\n').filter((l) => /^- \*\*`/.test(l));
+}
+
+/**
+ * A split budget caps AGENTS.md's two halves independently, because they grow
+ * for unrelated reasons and the pooled form made them compete: the index grows
+ * only when a spec is added and every line of it is routing an agent uses, so
+ * charging a new spec's line against convention prose taxed the wrong half —
+ * and the cheapest way to pay was to make the line vaguer, not the file smaller.
+ */
+function checkSplitBudget(rel, text, budget) {
+  const index = specIndexLines(text);
+  const prose = countWords(text) - index.reduce((n, l) => n + countWords(l), 0);
+  if (prose > budget.prose) {
+    problems.push(
+      `${rel}: ${prose} words of prose (excluding the ${index.length}-line spec ` +
+      `index) exceeds its ${budget.prose}-word budget — ${raiseHint}`,
+    );
+  }
+  for (const line of index) {
+    const words = countWords(line);
+    if (words > budget.indexLine) {
+      const name = /`([^`]+)`/.exec(line)?.[1] ?? line.slice(0, 40);
+      problems.push(
+        `${rel}: spec-index line for ${name} is ${words} words, over the ` +
+        `${budget.indexLine}-word per-line cap — ${raiseHint}`,
+      );
+    }
+  }
+}
+
 for (const rel of allFiles) {
-  const words = read(rel).split(/\s+/).filter(Boolean).length;
+  const text = read(rel);
   const budget = budgets[rel];
   if (budget === undefined) {
-    problems.push(`${BUDGETS_FILE}: no budget for ${rel} — add one (currently ${words} words)`);
-  } else if (words > budget) {
     problems.push(
-      `${rel}: ${words} words exceeds its ${budget}-word budget — cut, ` +
-      `or raise the budget in ${BUDGETS_FILE} deliberately in the same PR`,
+      `${BUDGETS_FILE}: no budget for ${rel} — add one (currently ${countWords(text)} words)`,
+    );
+  } else if (typeof budget === 'object') {
+    checkSplitBudget(rel, text, budget);
+  } else if (countWords(text) > budget) {
+    problems.push(
+      `${rel}: ${countWords(text)} words exceeds its ${budget}-word budget — ${raiseHint}`,
     );
   }
 }

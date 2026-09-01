@@ -5,9 +5,10 @@ import { clsx } from 'clsx';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
 import { isEditableTarget } from '../../lib/dom';
+import { markSessionTouched } from '../../lib/terminal-registry';
 import type { RenderMode } from './agent-browser-screen';
 import { tabDisplayTitle } from './browser-url';
-import { resolveRenderMode } from './browser-surface';
+import { isToolParams, resolveRenderMode } from './browser-surface';
 import { MOUSE_BUTTONS, MOUSE_BUTTON_MASKS, modifiers } from './agent-browser-input';
 import {
   acquireAgentBrowserSurfaceController,
@@ -32,6 +33,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   // The engine-tracked `title` prop is unused here: the live title is derived
   // from the stream (controller → paneWrite.setTitle), never read back.
   const params = rawParams as AgentBrowserPanelParams | undefined;
+  const isTool = isToolParams(params);
   const actions = useContext(WallActionsContext);
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
@@ -232,6 +234,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     if (!canvas) return;
     const onWheel = (e: WheelEvent) => {
       if (!interactiveRef.current) return;
+      if (isTool) markSessionTouched(id);
       e.preventDefault();
       const point = toDevice(e);
       if (!point) return;
@@ -249,10 +252,11 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     };
     canvas.addEventListener('wheel', onWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', onWheel);
-  }, [controller, toDevice]);
+  }, [controller, id, isTool, toDevice]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!interactiveRef.current) return;
+    if (isTool) markSessionTouched(id);
     e.preventDefault();
     controller.handleKeyDownLike(e);
   };
@@ -288,7 +292,10 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       // lives outside the pane — notably the header's URL editor.
       if (isEditableTarget(e.target)) return;
       e.preventDefault();
-      if (e.type === 'keydown') controller.handleKeyDownLike(e);
+      if (e.type === 'keydown') {
+        if (isTool) markSessionTouched(id);
+        controller.handleKeyDownLike(e);
+      }
       else controller.sendKeyUp(e);
     };
     window.addEventListener('keydown', forward, true);
@@ -297,7 +304,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       window.removeEventListener('keydown', forward, true);
       window.removeEventListener('keyup', forward, true);
     };
-  }, [controller, interactive]);
+  }, [controller, id, interactive, isTool]);
 
   // Focus the swap-confirm overlay when it appears so it captures the typed
   // confirm/cancel keys (the pane's key-forwarder skips in-pane targets).
@@ -331,6 +338,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       tabIndex={-1}
       className={`flex h-full w-full flex-col overflow-hidden bg-terminal-bg outline-none ${TERMINAL_BOTTOM_RADIUS_CLASS}`}
       onMouseDown={() => {
+        if (isTool) markSessionTouched(id);
         actions.onClickPanel(id);
         // Deferred so it lands after the browser's own focus handling for this
         // mousedown (same trick as enterTerminalMode's focusSession).

@@ -20,13 +20,13 @@ vi.mock('../../../lib/mouse-selection', () => ({
   setSelection: vi.fn(),
 }));
 
-function makeCtx(overrides: { surfaceType?: string } = {}): WallKeyboardCtx {
+function makeCtx(params?: Record<string, unknown>): WallKeyboardCtx {
   return {
     selectedIdRef: { current: 'pane-a' },
     // Surface-type lookup now flows through the engine-neutral `nav` seam; an
     // absent params reads as a terminal.
     nav: {
-      paneParams: () => (overrides.surfaceType ? { surfaceType: overrides.surfaceType } : undefined),
+      paneParams: () => params,
       findInDirection: () => null,
       hasPane: () => false,
       panes: () => [],
@@ -81,11 +81,31 @@ describe('handleMouseSelectionKeys', () => {
     vi.mocked(doPaste).mockClear();
     const e = fakeEvent(document.createElement('div'), { key: 'v', metaKey: true });
 
-    const handled = handleMouseSelectionKeys(e, makeCtx({ surfaceType: 'agent-browser' }));
+    const handled = handleMouseSelectionKeys(e, makeCtx({ surfaceType: 'browser' }));
 
     expect(handled).toBe(false);
     expect(e.defaultPrevented).toBe(false);
     expect(doPaste).not.toHaveBeenCalled();
+  });
+
+  it('routes clipboard keys only when a tool has its terminal forward', async () => {
+    const { doPaste } = await import('../../../lib/clipboard');
+    vi.mocked(doPaste).mockClear();
+    const terminal = { surfaceType: 'tool', command: 'pnpm storybook' };
+    const browser = { ...terminal, url: 'http://localhost:6006/', renderMode: 'iframe' };
+
+    const terminalEvent = fakeEvent(document.createElement('div'), { key: 'v', metaKey: true });
+    expect(handleMouseSelectionKeys(terminalEvent, makeCtx(terminal))).toBe(true);
+    expect(doPaste).toHaveBeenCalledWith('pane-a');
+
+    vi.mocked(doPaste).mockClear();
+    const browserEvent = fakeEvent(document.createElement('div'), { key: 'v', metaKey: true });
+    expect(handleMouseSelectionKeys(browserEvent, makeCtx(browser))).toBe(false);
+    expect(doPaste).not.toHaveBeenCalled();
+
+    const pinnedEvent = fakeEvent(document.createElement('div'), { key: 'v', metaKey: true });
+    expect(handleMouseSelectionKeys(pinnedEvent, makeCtx({ ...browser, showTerminal: true }))).toBe(true);
+    expect(doPaste).toHaveBeenCalledWith('pane-a');
   });
 
   it('extends the selection to the hint token on "e" during a drag', async () => {

@@ -119,6 +119,12 @@ on `dor-lib-common`. It owns three concerns:
   argument containing a literal `%VAR%`** — `cmd.exe` expands it on the way
   through a `.cmd` shim, an unavoidable batch limitation. Today's forwarded
   arguments (URLs, selectors, the host's hardcoded `eval` scripts) carry none.
+- **`git` is the second caller.** The host resolves a project's upstream for the
+  Dor Tools trust key (`docs/specs/dor-tool.md` -> Trust). `spawnAndCapture`
+  exposes no `cwd` and the sidecar's is `/` under a macOS `.app`, so the
+  directory travels in argv as `git -C <absolute path>` — a host-resolved
+  project root, never a raw string off the wire. Both subcommands are
+  repository-local, so no credential prompt can block on the closed stdin.
 - **`windowsHide`.** cross-spawn runs `.cmd` shims through `cmd.exe`; without it
   each spawn flashes a focus-stealing console window — and the panel's
   screenshot loop spawns one per stream-frame pulse, so a live page would
@@ -341,6 +347,13 @@ reference adds a new pane in Lath; a minimized one adds a sibling Door in the
 baseboard. `dor list` rows sort by the Workspace-stable `surface:N` ref, whose
 registry `Wall` owns and persists with the session, independent of Lath layout
 order.
+
+`dor tool` runs a command as a Dor Tool — a Surface that grows a browser in
+place once the command binds a port. It uses the `ensure` spawn path's
+mechanics but **not** its command+cwd matching: a tool has an identity only if
+a `dormouse.yml` entry gave it one. Source of truth: `dor/src/commands/tool.ts`,
+help snapshot `dor/test/snapshots/help/tool.md`; behavior is owned by
+`docs/specs/dor-tool.md`.
 
 **Port enumeration is opt-in.** When the request sets `includePorts` (`dor list
 --ports` / `--port`), the host calls `PlatformAdapter.getOpenPorts(id)`

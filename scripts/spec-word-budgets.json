@@ -1,5 +1,8 @@
 {
-  "AGENTS.md": 2750,
+  "AGENTS.md": {
+    "prose": 2050,
+    "indexLine": 55
+  },
   "SELF_HOST.md": 7100,
   "docs/specs/alert.md": 7350,
   "docs/specs/alert.rationale.md": 850,
@@ -8,9 +11,10 @@
   "docs/specs/deploy.md": 2450,
   "docs/specs/dor-browser.md": 4850,
   "docs/specs/dor-browser.rationale.md": 650,
-  "docs/specs/dor-cli.md": 5900,
+  "docs/specs/dor-cli.md": 6050,
   "docs/specs/dor-cli.rationale.md": 600,
-  "docs/specs/dor-tool.md": 2450,
+  "docs/specs/dor-tool.md": 3350,
+  "docs/specs/dor-tool.rationale.md": 1560,
   "docs/specs/glossary.md": 3325,
   "docs/specs/layout.md": 9150,
   "docs/specs/layout.rationale.md": 700,
@@ -25,7 +29,7 @@
   "docs/specs/shortcuts.md": 1550,
   "docs/specs/standalone.md": 5100,
   "docs/specs/standalone.rationale.md": 375,
-  "docs/specs/terminal-escapes.md": 3950,
+  "docs/specs/terminal-escapes.md": 4000,
   "docs/specs/terminal-escapes.rationale.md": 350,
   "docs/specs/terminal-state.md": 2725,
   "docs/specs/theme.md": 2350,

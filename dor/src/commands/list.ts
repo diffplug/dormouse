@@ -119,7 +119,7 @@ function buildListCommand(): Command['command'] {
   return buildCommand<ListFlags, [], DorCommandContext>({
     docs: {
       brief: 'List Dormouse Surfaces.',
-      customUsage: ['[--kind terminal|browser] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json] [--id-format refs|ids|both]'],
+      customUsage: [`[--kind ${SURFACE_KINDS.join('|')}] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json] [--id-format refs|ids|both]`],
       fullDescription: FULL_DESCRIPTION,
     },
     parameters: { flags },

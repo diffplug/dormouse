@@ -24,7 +24,7 @@ A focused cross-origin iframe surface swallows the gesture before the window lis
 | `-` or `"` | Split top/bottom | Create a pane below, select it, and enter passthrough. |
 | `z` | Zoom and focus | Elevate the selected pane and enter passthrough; leaving passthrough or focusing elsewhere ends zoom. Pressing it on the pane that already owns zoom unzooms instead. |
 | `m` or `d` | Minimize / reattach | Minimize the selected pane to the baseboard, or reattach a minimized door (staying in command mode). |
-| `k` or `x` | Kill | Kill the selected pane or door. Prompts for a random letter to confirm; untouched (never-typed-in) panes and doors are killed immediately without the prompt. |
+| `k` or `x` | Kill | Kill the selected pane or door. Prompts for a random letter to confirm; an untouched (never-typed-in) plain terminal — pane or door — is killed immediately without the prompt. |
 | `,` | Rename | Enter rename mode for the selected pane's title. |
 | `a` | Toggle alert | Dismiss or toggle the bell alert for the selected pane. Meaningful only for a terminal Surface — a browser surface has no bell to ring (`docs/specs/glossary.md`). Doors are excluded. |
 | `t` | Toggle todo | Toggle the TODO marker on or off for the selected pane's Surface — a terminal Session or a browser surface. Doors are excluded. |

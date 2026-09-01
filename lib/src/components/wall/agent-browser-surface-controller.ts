@@ -19,6 +19,7 @@ import {
   openAgentBrowserScreenModal,
 } from './agent-browser-screen';
 import { hostPathDisplay, tabDisplayTitle } from './browser-url';
+import { isToolParams } from './browser-surface';
 import { clearAgentBrowserSessionClosed, isAgentBrowserSessionClosed } from './agent-browser-sessions';
 import {
   EDIT_OPS,
@@ -161,6 +162,8 @@ const EMPTY_TABS: StreamTab[] = [];
 
 export class AgentBrowserSurfaceController {
   readonly id: string;
+  /** Gates the pop-out affordance; see `ensureStarted`. */
+  private readonly isTool: boolean;
 
   // --- params (mirrors of the persisted blob) ---
   private session: string | undefined;
@@ -289,6 +292,9 @@ export class AgentBrowserSurfaceController {
 
   constructor(id: string, params: AgentBrowserSurfaceParams) {
     this.id = id;
+    // A Surface's kind never changes over its life (a tool's capabilities come
+    // and go, its identity does not), so this is safe to seed once.
+    this.isTool = isToolParams(params);
     this.session = params.session;
     this.binaryPath = params.binaryPath;
     this.wsPort = params.wsPort;
@@ -406,7 +412,11 @@ export class AgentBrowserSurfaceController {
       chrome: this.chrome,
       chromeActions: this.chromeActions,
       hostCapable: !!getPlatform().agentBrowserCommand,
-      canPopOut: !!getPlatform().agentBrowserPopOut,
+      // Never for a tool, whose `render` is `iframe` or `ab-screencast`: the
+      // swap would tear the browser down and re-derive the same screencast, so
+      // asking for a native window would get a reload
+      // (`docs/specs/dor-tool.md` -> Declaring tools).
+      canPopOut: !this.isTool && !!getPlatform().agentBrowserPopOut,
     });
     this.lastPublishedScreen = null;
     this.publishScreen();

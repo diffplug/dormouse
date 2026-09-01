@@ -53,7 +53,7 @@ import type { PersistedDoor, PersistedSurfaceRefs } from '../lib/session-types';
 import type { DropTarget, RestoreToken } from '../lib/lath/ops';
 import type { Edge } from '../lib/lath/model';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
-import { resolveRenderMode, agentBrowserSessionFromParams, browserUrlFromParams, surfaceKindFromParams } from './wall/browser-surface';
+import { resolveRenderMode, agentBrowserSessionFromParams, browserUrlFromParams, isToolParams, namespacedToolKey, surfaceKindFromParams, toolPendingFromParams } from './wall/browser-surface';
 import { hostPathDisplay } from './wall/browser-url';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { LathHost } from './wall/LathHost';
@@ -66,6 +66,8 @@ import {
   edgeForDorDirection,
   directionForArrow,
 } from './wall/lath-wall-engine';
+import type { LeafMeta } from '../lib/lath/persistence';
+import { useToolServing } from './wall/use-tool-serving';
 import type { WallNav } from './wall/keyboard/types';
 import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
@@ -363,6 +365,10 @@ export function Wall({
   const [shellSpawnNotice, setShellSpawnNotice] = useState<ShellSpawnNoticeState | null>(null);
   const shellSpawnNoticeCounterRef = useRef(0);
   const shellSpawnNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Keep the approval prompt mounted until its shell launch is fully staged.
+  // The Set suppresses duplicate button clicks without exposing the terminal
+  // half early (toolPending is the render-time no-PTY guard).
+  const toolApprovalsInFlightRef = useRef<Set<string>>(new Set());
 
   // Use refs so the capture-phase listener always sees latest state without re-registering
   const modeRef = useRef(mode);
@@ -915,6 +921,8 @@ export function Wall({
     cwd,
     requireIntegration,
     focusNeutral,
+    leafMeta,
+    deferTerminal,
   }: {
     command?: string;
     direction: DorResolvedSplitDirection;
@@ -922,11 +930,19 @@ export function Wall({
     reference: DorSurface;
     cwd?: string;
     requireIntegration?: boolean;
+    /** Leaf metadata for the new Surface; defaults to a plain terminal. `dor
+     *  tool` passes a tool leaf, which is a shell-hosted PTY exactly like a
+     *  terminal but renders both capabilities. */
+    leafMeta?: LeafMeta;
     // `dor ensure` and `dor split -- <command>` must never move focus: the split
     // is created in the background, leaving the caller's selection, mode, and DOM
     // focus intact. Under Lath every add is inherently background (nothing
     // re-parents or activates).
     focusNeutral?: boolean;
+    /** Create the leaf but stage no shell and spawn no PTY. `dor tool` uses it
+     *  for a pane awaiting approval: nothing from the repo may run until a human
+     *  chooses (docs/specs/dor-tool.md -> Trust rule 3). */
+    deferTerminal?: boolean;
   }): ParseResult<{
     id: string;
     ref: string;
@@ -948,7 +964,10 @@ export function Wall({
     const sourceCwd = getTerminalPaneState(referenceId).cwd;
     const inheritedCwd = cwd ?? (sourceCwd && !sourceCwd.isRemote ? sourceCwd.path : undefined);
 
-    if (command) {
+    if (deferTerminal) {
+      // No pending shell opts at all: the terminal must not spawn when the leaf
+      // mounts, and must not inherit a cwd it will never use.
+    } else if (command) {
       // Spawn a real interactive shell and type the command into it once it
       // reaches a prompt (see typeCommandWhenPromptReady in the lifecycle), rather
       // than launching `shell -c command`. A `-c` invocation has no prompt behind
@@ -959,7 +978,10 @@ export function Wall({
         shell: defaults?.shell,
         args: defaults?.args,
         cwd: inheritedCwd,
-        untouched: false,
+        // Starting the command is Dormouse orchestration, not user input. A
+        // tool stays untouched until its terminal or browser receives input;
+        // other commanded splits retain their established conservative state.
+        untouched: leafMeta?.component === 'tool',
         command,
         ...(requireIntegration ? { requireIntegration: true } : {}),
       });
@@ -983,11 +1005,11 @@ export function Wall({
         index: direction === 'left' || direction === 'up' ? 0 : 1,
         fingerprint: null,
       };
-      getOrCreateTerminal(newId);
+      if (!deferTerminal) getOrCreateTerminal(newId);
       // This Surface is born minimized — it never has a pane to detach — so register
       // its meta directly, keeping the store the authority for EVERY Door
       // (docs/specs/tiling-engine.md → "Parked leaves").
-      lath.store.addDoor(newId, terminalLeafMeta());
+      lath.store.addDoor(newId, leafMeta ?? terminalLeafMeta());
       addMinimizedSplitDoor(referenceId, { id: newId, token }, !focusNeutral);
       onEventRef.current?.({
         type: 'split',
@@ -1002,7 +1024,7 @@ export function Wall({
     // types straight into it; `dor split -- <command>` and `dor ensure`
     // (focus-neutral) leave selection put.
     const edge = edgeForDorDirection(direction);
-    lath.store.addLeaf(newId, terminalLeafMeta(), { refId: referenceId, edge });
+    lath.store.addLeaf(newId, leafMeta ?? terminalLeafMeta(), { refId: referenceId, edge });
     const selectedNew = settleAddSelection(!!focusNeutral, false, newId);
     onEventRef.current?.({
       type: 'split',
@@ -1010,7 +1032,7 @@ export function Wall({
       source: 'dor',
     });
     if (minimized) {
-      getOrCreateTerminal(newId);
+      if (!deferTerminal) getOrCreateTerminal(newId);
       minimizePane(newId, { select: selectedNew });
     }
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), minimized } };
@@ -1133,6 +1155,7 @@ export function Wall({
       const shouldReplaceUntouched =
         detail.replaceUntouched === true &&
         selectedPaneVisible &&
+        !isToolParams(lath.getMeta(selectedPaneId!)?.params) &&
         isUntouched(selectedPaneId!);
       const shellName = detail.name?.trim() || 'terminal';
 
@@ -1147,7 +1170,12 @@ export function Wall({
         return;
       }
 
-      if (detail.replaceUntouched === true && selectedDoor && isUntouched(selectedDoor.id)) {
+      if (
+        detail.replaceUntouched === true &&
+        selectedDoor &&
+        !isToolParams(lath.getMeta(selectedDoor.id)?.params) &&
+        isUntouched(selectedDoor.id)
+      ) {
         handleReattachRef.current(selectedDoor, {
           enterPassthrough: false,
           afterRestore: {
@@ -1177,6 +1205,76 @@ export function Wall({
   }, [generatePaneId, surfaceRefForId, forgetSurfaceRef, selectPane, enterTerminalMode, showShellSpawnNotice, lath, nav]);
 
   // --- dor control plane (the `dor` CLI's webview handler) ---
+  // Approving a pending tool: record the grant, then start the command in the
+  // pane that has been showing the prompt. The two steps are ordered so a
+  // failed write never leaves a running command in an unapproved repo.
+  const resolveToolApproval = useCallback(async (id: string, choice: 'upstream' | 'folder' | 'decline') => {
+    const meta = lath.getMeta(id);
+    const pending = toolPendingFromParams(meta?.params);
+    if (!pending) return;
+    if (choice === 'decline') {
+      // A refusal writes nothing: it closes the pane and leaves no record, so a
+      // reflexive decline cannot permanently disable tools for this repo.
+      killPaneImmediately(id);
+      return;
+    }
+    if (toolApprovalsInFlightRef.current.has(id)) return;
+    toolApprovalsInFlightRef.current.add(id);
+
+    try {
+      const platform = getPlatform();
+      await platform.toolControl?.({
+        op: 'trust',
+        kind: choice,
+        projectRoot: pending.projectRoot,
+      });
+
+      // Re-resolve now that the grant exists. The untrusted lookup deliberately
+      // withholds `render` / `port` / `key` — they live only in the `ok` arm — so
+      // asking again is what gives an approved tool the config its dormouse.yml
+      // declared, rather than silently running it as a keyless default iframe.
+      const cwd = typeof meta?.params?.cwd === 'string' ? meta.params.cwd : pending.projectRoot;
+      const resolved = await platform.toolControl?.({ op: 'lookup', name: pending.name, cwd });
+      if (resolved?.status !== 'ok') {
+        killPaneImmediately(id);
+        return;
+      }
+
+      lath.store.updateParams(id, {
+        command: resolved.run,
+        toolRender: resolved.render,
+        toolPort: resolved.port,
+        ...(resolved.key ? { toolKey: namespacedToolKey(resolved.name, resolved.key) } : {}),
+      });
+      // Hand the leaf its command only now. The approval marker stays in place
+      // until after this write, so TerminalPanel cannot consume default options
+      // while the host calls above are pending.
+      const defaults = getDefaultShellOpts();
+      setPendingShellOpts(id, {
+        shell: defaults?.shell,
+        args: defaults?.args,
+        cwd,
+        untouched: true,
+        command: resolved.run,
+        requireIntegration: true,
+      });
+      lath.store.updateParams(id, { toolPending: undefined });
+      // The launch asked for this, and it was withheld so the prompt could be seen.
+      if (pending.minimized) {
+        // Minimizing detaches the leaf before it can mount, so the PTY that
+        // consumes the staged opts has to be created here — the same reason
+        // `createSplitSurface` spawns before `addDoor` / `minimizePane`.
+        getOrCreateTerminal(id);
+        minimizePane(id);
+      }
+    } finally {
+      toolApprovalsInFlightRef.current.delete(id);
+    }
+  }, [lath, killPaneImmediately, minimizePane]);
+
+  // A tool grows its browser when its command starts serving.
+  useToolServing({ lath, doorsRef });
+
   const { connectPort } = useDorControl({
     lath,
     nav,
@@ -1224,7 +1322,10 @@ export function Wall({
   const wallActions: WallActions = useMemo(() => ({
     onKill: (id: string) => {
       exitTerminalMode();
-      if (isUntouched(id)) {
+      // `untouched` makes a blank terminal disposable. A tool can already own
+      // a long-running command and browser resources before its first human
+      // input, so it always takes the conservative confirmation path.
+      if (isUntouched(id) && !isToolParams(lath.getMeta(id)?.params)) {
         killPaneImmediately(id);
         return;
       }
@@ -1308,6 +1409,32 @@ export function Wall({
       const params = nav.paneParams(id);
       const currentRenderMode = surfaceRenderModeFromParams(params);
 
+      // A tool's browser is a param of the tool's own leaf, so a swap mutates
+      // `renderMode` in place and never routes through `replaceSurface`
+      // (docs/specs/dor-tool.md -> The tool capability set). Replacing would
+      // mint a new id, drop the terminal half and the tool's identity, and
+      // orphan the PTY still running the command. iframe ⇄ ab-* is a re-open of
+      // the same URL, which the serving trigger performs on the next tick.
+      if (isToolParams(params)) {
+        if (mode === currentRenderMode) return;
+        // Swapping away from an ab-rendered tool still has to release the
+        // session and the controller — `replaceSurface` does both on the
+        // non-tool path, and this branch skips it by design. Once `session` is
+        // gone from params nothing can reach the daemon again, not even a kill.
+        closeAgentBrowserSession(params);
+        disposeAgentBrowserSurfaceController(id);
+        lath.store.updateParams(id, {
+          toolRender: mode === 'iframe' ? 'iframe' : 'ab-screencast',
+          // Drop the browser so `useToolServing` re-derives it under the new
+          // renderer; the URL is re-derived from the scan, never carried over.
+          renderMode: undefined,
+          url: undefined,
+          session: undefined,
+          wsPort: undefined,
+        });
+        return;
+      }
+
       // agent-browser → iframe: frame the active tab's URL, then the replace
       // closes the now-unneeded headless browser. Webview-only.
       if ((currentRenderMode === 'ab-screencast' || currentRenderMode === 'ab-popout') && mode === 'iframe') {
@@ -1374,7 +1501,16 @@ export function Wall({
     resolveSurfaceRef: surfaceRefForId,
     // The pane context menu's "connect a port" action: act like `dor ab open`.
     onConnectPort: connectPort,
-  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, connectPort, lath, nav]);
+    // Pin the terminal forward past serving, or release it. Visibility only —
+    // ToolPanel keeps both halves mounted (docs/specs/dor-tool.md).
+    onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline') => {
+      void resolveToolApproval(id, choice);
+    },
+    onToggleToolTerminal: (id: string) => {
+      const showing = lath.getMeta(id)?.params?.showTerminal === true;
+      lath.store.updateParams(id, { showTerminal: showing ? undefined : true });
+    },
+  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, connectPort, resolveToolApproval, lath, nav]);
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
 

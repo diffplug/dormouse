@@ -1,8 +1,8 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
+import { PANE_MESSAGE_CLASS, TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
 import { registerProxyOrigin } from '../../lib/iframe-proxy-registry';
-import { registerSurfaceFocusHandle } from '../../lib/terminal-registry';
+import { markSessionTouched, registerSurfaceFocusHandle } from '../../lib/terminal-registry';
 import type { IframeProxyResult } from '../../lib/platform/types';
 import type { PaneProps } from './pane-props';
 import { usePaneChrome } from './use-pane-chrome';
@@ -14,6 +14,7 @@ import {
   type ScreenActions,
   type ScreenRegistration,
 } from './agent-browser-screen';
+import { isToolParams } from './browser-surface';
 import { hostPathDisplay } from './browser-url';
 
 // Sandbox the proxied frame so a tool's `if (top !== self) top.location = …`
@@ -83,6 +84,7 @@ export function IframePanel({ id, title, params }: PaneProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   usePaneChrome(id, elRef);
   const sourceUrl = typeof params?.url === 'string' ? params.url : '';
+  const isTool = isToolParams(params);
   const [liveUrl, setLiveUrl] = useState(sourceUrl);
   // A new-tab/window request from the proxy shim, pending the user's choice to
   // open it as a new pane (docs/specs/dor-browser.md → "Iframe Shim").
@@ -222,12 +224,15 @@ export function IframePanel({ id, title, params }: PaneProps) {
       chromeActions,
       hostCapable: false,
       // embed→popout spawns the new agent-browser headed and mounts it
-      // popped-out, so it needs both spawn and pop-out host capabilities.
-      canPopOut: !!getPlatform().agentBrowserPopOut,
+      // popped-out, so it needs both spawn and pop-out host capabilities. Never
+      // for a tool, which has no third renderer to land in
+      // (docs/specs/dor-tool.md -> Declaring tools); the other registration
+      // site is `agent-browser-surface-controller.ts`.
+      canPopOut: !isTool && !!getPlatform().agentBrowserPopOut,
     });
     registrationRef.current = registration;
     return () => { registration.dispose(); registrationRef.current = null; };
-  }, [id, swapCapable, screenActions, chromeActions]);
+  }, [id, swapCapable, screenActions, chromeActions, isTool]);
   // Keep the header's URL current as navigation and in-frame location changes
   // land. The iframe src is still driven only by sourceUrl.
   useEffect(() => {
@@ -255,6 +260,7 @@ export function IframePanel({ id, title, params }: PaneProps) {
       if (e.origin !== proxyOrigin) return;
       const data = e.data as { __dormouse?: unknown; url?: unknown } | null;
       if (data?.__dormouse === 'pointerdown') {
+        if (isTool) markSessionTouched(id);
         actions.onClickPanel(id);
         return;
       }
@@ -272,7 +278,7 @@ export function IframePanel({ id, title, params }: PaneProps) {
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [id, proxyOrigin, actions, liveUrl, sourceUrl, observeFrameUrl]);
+  }, [id, proxyOrigin, actions, liveUrl, sourceUrl, observeFrameUrl, isTool]);
 
   // Raw fallback frames have no injected shim, but focusing a cross-origin
   // iframe still blurs the parent window while the document itself remains
@@ -282,12 +288,13 @@ export function IframePanel({ id, title, params }: PaneProps) {
     if (resolution.kind !== 'raw') return;
     const onWindowBlur = () => {
       if (document.hasFocus() && document.activeElement === iframeRef.current) {
+        if (isTool) markSessionTouched(id);
         actions.onClickPanel(id);
       }
     };
     window.addEventListener('blur', onWindowBlur);
     return () => window.removeEventListener('blur', onWindowBlur);
-  }, [id, resolution.kind, actions]);
+  }, [id, resolution.kind, actions, isTool]);
 
   // Register a focus handle so onClickPanel → enterTerminalMode can focus the
   // frame like any other surface, and exitTerminalMode can hand focus back.
@@ -326,7 +333,10 @@ export function IframePanel({ id, title, params }: PaneProps) {
       // with the frame, collapsing the offset to ~0. It's identity, so
       // getBoundingClientRect (overlay measurement) is unaffected.
       style={{ transform: 'translateZ(0)' }}
-      onMouseDown={() => actions.onClickPanel(id)}
+      onMouseDown={() => {
+        if (isTool) markSessionTouched(id);
+        actions.onClickPanel(id);
+      }}
     >
       {src ? (
         <iframe
@@ -380,7 +390,7 @@ export function IframePanel({ id, title, params }: PaneProps) {
 }
 
 function PanelMessage({ resolution, url }: { resolution: Resolution; url: string }) {
-  const base = 'flex h-full w-full items-center justify-center bg-terminal-bg px-6 text-center text-sm text-muted';
+  const base = `${PANE_MESSAGE_CLASS} text-muted`;
 
   if (resolution.kind === 'resolving') {
     return <div className={base}>Connecting to <span className="ml-1 font-semibold">{url}</span>…</div>;

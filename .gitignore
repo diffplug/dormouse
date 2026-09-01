@@ -33,6 +33,7 @@ standalone/sidecar/dor-cli/
 standalone/sidecar/iframe-proxy.cjs
 standalone/sidecar/agent-browser-host.cjs
 standalone/sidecar/remote-host.cjs
+standalone/sidecar/tool-host.cjs
 standalone/sidecar/node_modules/
 standalone/node_modules/
 

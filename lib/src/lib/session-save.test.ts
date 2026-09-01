@@ -228,6 +228,39 @@ describe('saveSession', () => {
     expect(platform.getCwd).not.toHaveBeenCalledWith('door-web');
   });
 
+  it('persists a tool command and stable metadata for cold respawn', async () => {
+    const platform = createPlatform(null);
+
+    await saveSession(platform, [{
+      id: 'pane-tool',
+      title: 'storybook',
+      surfaceType: 'tool',
+      params: {
+        surfaceType: 'tool',
+        command: 'pnpm storybook',
+        toolName: 'storybook',
+        toolRender: 'ab-screencast',
+        toolPort: 'auto',
+        toolKey: ['storybook', '/repo'],
+        // Derived state must stay in the Lath projection, never this row.
+        url: 'http://localhost:6006/',
+        session: 'dormouse.1.tool',
+      },
+    }]);
+
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    expect(saved.panes.find((pane) => pane.id === 'pane-tool')).toMatchObject({
+      surfaceType: 'tool',
+      command: 'pnpm storybook',
+      tool: {
+        name: 'storybook',
+        render: 'ab-screencast',
+        port: 'auto',
+        key: ['storybook', '/repo'],
+      },
+    });
+  });
+
   it('persists neither a transcript nor a recovery command', async () => {
     // Both are absent by construction now: `PlatformAdapter` has no scrollback
     // reader, and the recovery command is host-owned and rides the boot payload

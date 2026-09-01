@@ -79,6 +79,12 @@ export const ALERT_SPEECH_TRACKING_CLASS = 'tracking-[0.12em]';
 // stay at the call site; the surface recipe is shared so they can't drift.
 export const POPUP_SURFACE_CLASS = 'z-[1000] rounded border border-border bg-surface-raised font-mono text-foreground shadow-md';
 
+// A pane filling its whole area with a centered message instead of content: the
+// iframe surface's connecting/error states, a tool's port conflict, and a tool
+// awaiting approval. They sit on the terminal ground because they stand in for
+// a surface, not for chrome. Stacking direction and gap stay at the call site.
+export const PANE_MESSAGE_CLASS = 'flex h-full w-full items-center justify-center bg-terminal-bg px-6 text-center text-sm';
+
 // `ComponentProps<'div'>` rather than `HTMLAttributes<HTMLDivElement>` so `ref`
 // is among the props (React 19 ref-as-prop): an anchored menu needs the row
 // itself measured, not a wrapper around it.

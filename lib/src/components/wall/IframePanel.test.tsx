@@ -5,6 +5,7 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
+import * as terminalRegistry from '../../lib/terminal-registry';
 import type { PlatformAdapter } from '../../lib/platform/types';
 import type { PaneProps } from './pane-props';
 import { IframePanel } from './IframePanel';
@@ -137,6 +138,31 @@ describe('IframePanel', () => {
     expect(getAgentBrowserScreenController('iframe-proxied')?.chrome().url).toBe('http://example.test/other/?q=1#frag');
   });
 
+  it('marks a tool touched when its proxied browser receives input', async () => {
+    const markTouched = vi.spyOn(terminalRegistry, 'markSessionTouched').mockImplementation(() => {});
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'createIframeProxyUrl'>;
+    platform.createIframeProxyUrl = vi.fn(async () => ({
+      ok: true,
+      url: 'http://127.0.0.1:61234/app',
+      upstream: 'http://example.test/app',
+    }));
+    setPlatform(platform);
+    await renderPanel(stubActions(), {
+      id: 'iframe-tool',
+      title: 'Tool',
+      params: { surfaceType: 'tool', url: 'http://example.test/app' },
+    });
+
+    act(() => {
+      window.dispatchEvent(new MessageEvent('message', {
+        origin: 'http://127.0.0.1:61234',
+        data: { __dormouse: 'pointerdown' },
+      }));
+    });
+
+    expect(markTouched).toHaveBeenCalledWith('iframe-tool');
+  });
+
   it('re-resolves the proxy on Back after an observed in-frame navigation', async () => {
     const updateParameters = vi.fn();
     const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserOpen' | 'createIframeProxyUrl'>;
@@ -167,5 +193,38 @@ describe('IframePanel', () => {
     // showing /other while the chrome shows /app.
     expect(updateParameters).toHaveBeenLastCalledWith({ url: 'http://example.test/app' });
     expect(createProxy.mock.calls.length).toBeGreaterThan(callsBeforeBack);
+  });
+});
+
+describe('the pop-out affordance on a tool (regression: PR #493 review)', () => {
+  // A tool's `render` is `iframe` or `ab-screencast`, so pop-out has no
+  // renderer to land in: offering it tears the browser down and re-derives the
+  // same screencast, so the user asks for a native window and gets a reload.
+  // `FakePtyAdapter` has no `agentBrowserPopOut`, so both cases would read
+  // `false` off the stock fake — attach one first, or the assertion is vacuous.
+  function withPopOutCapableHost() {
+    const platform = new FakePtyAdapter() as FakePtyAdapter & { agentBrowserPopOut: () => Promise<unknown> };
+    platform.agentBrowserPopOut = async () => ({ ok: true });
+    setPlatform(platform);
+  }
+
+  it('offers pop-out on a plain browser surface', async () => {
+    withPopOutCapableHost();
+    await renderPanel(stubActions({}), {
+      id: 'iframe-plain',
+      title: 'Plain',
+      params: { surfaceType: 'browser', url: 'http://example.test/app' },
+    });
+    expect(getAgentBrowserScreenController('iframe-plain')?.canPopOut).toBe(true);
+  });
+
+  it('never offers it on a tool', async () => {
+    withPopOutCapableHost();
+    await renderPanel(stubActions({}), {
+      id: 'iframe-tool',
+      title: 'storybook',
+      params: { surfaceType: 'tool', url: 'http://localhost:6006/' },
+    });
+    expect(getAgentBrowserScreenController('iframe-tool')?.canPopOut).toBe(false);
   });
 });

@@ -1,0 +1,492 @@
+/**
+ * Tool-file discovery and the repo-trust record
+ * (`docs/specs/dor-tool.md` -> Trust).
+ *
+ * `dormouse.yml` is repo-controlled and its entries execute, so it is inert
+ * until the project is granted — by its upstream remote URL, or by its folder.
+ *
+ * Granting is *not* implemented here: only a gesture in Dormouse's own chrome
+ * may grant trust (`ToolApproval.tsx`). This module records the decision a
+ * gesture produced and answers "is it trusted yet?".
+ */
+import { constants } from 'node:fs';
+import { chmod, lstat, mkdir, open, readFile, readdir, rename, unlink, utimes, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { dirname, join, resolve } from 'node:path';
+import { ToolFileError, parseToolFile, type ToolEntry, type ToolFile } from './tool-registry';
+import { resolveUpstreamUrl } from './git-upstream';
+
+export const TOOL_FILE_NAME = 'dormouse.yml';
+/**
+ * Cap on a `dormouse.yml`. This read happens before the trust check —
+ * deliberately, so the approval dialog can name the command — so both the file
+ * type and the bytes read are controlled by a repo nobody has approved yet. A
+ * real tool file is a few hundred bytes.
+ */
+const TOOL_FILE_MAX_BYTES = 256 * 1024;
+
+/** Refuse stable symlinks on every host, then fstat and cap one descriptor.
+ *  POSIX also opens no-follow, closing the lstat/open replacement race there. */
+async function readToolFile(path: string): Promise<string> {
+  const entry = await lstat(path);
+  if (entry.isSymbolicLink()) {
+    throw new ToolFileError(`${path}: tool file must be a regular file, not a symbolic link`);
+  }
+
+  let file;
+  try {
+    const noFollow = typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0;
+    file = await open(path, constants.O_RDONLY | noFollow);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ELOOP' || code === 'EMLINK') {
+      throw new ToolFileError(`${path}: tool file must be a regular file, not a symbolic link`);
+    }
+    throw error;
+  }
+  try {
+    const info = await file.stat();
+    if (!info.isFile()) {
+      throw new ToolFileError(`${path}: tool file must be a regular file`);
+    }
+    if (info.size > TOOL_FILE_MAX_BYTES) {
+      throw new ToolFileError(`${path}: tool file is larger than ${TOOL_FILE_MAX_BYTES} bytes`);
+    }
+
+    // The file may grow after fstat. Read at most cap + 1 so that race is
+    // detected without ever allowing an unbounded allocation or readFile.
+    const bytes = Buffer.allocUnsafe(TOOL_FILE_MAX_BYTES + 1);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const { bytesRead } = await file.read(bytes, offset, bytes.length - offset, offset);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    if (offset > TOOL_FILE_MAX_BYTES) {
+      throw new ToolFileError(`${path}: tool file is larger than ${TOOL_FILE_MAX_BYTES} bytes`);
+    }
+    return bytes.subarray(0, offset).toString('utf-8');
+  } finally {
+    await file.close();
+  }
+}
+const TRUST_FILE_NAME = 'tool-trust.json';
+const TRUST_LOCK_RETRY_MS = 20;
+const TRUST_LOCK_STALE_MS = 30_000;
+
+interface TrustLockParticipant {
+  readonly contents: string;
+  readonly mtimeMs: number;
+}
+
+/**
+ * What a grant covers. `upstream` is the canonical remote URL the project's
+ * branch tracks, so every worktree and clone of one repo shares it; `folder` is
+ * a single project root, for a repo with no resolvable remote or one the user
+ * wants scoped to this checkout only.
+ */
+export type TrustGrantKind = 'upstream' | 'folder';
+
+/** A grant key: kind-prefixed so one map holds both without collisions. */
+export function upstreamGrantKey(canonicalUrl: string): string {
+  return `upstream:${canonicalUrl}`;
+}
+export function folderGrantKey(root: string): string {
+  return `folder:${resolve(root)}`;
+}
+
+interface TrustGrant {
+  readonly kind: TrustGrantKind;
+  /** ISO timestamp. Not read by anything yet; see the schema note below. */
+  readonly grantedAt: string;
+}
+
+/**
+ * There is no `denied`. A refusal closes the tool's pane and writes nothing, so
+ * a reflexive decline cannot permanently disable tools for every checkout of a
+ * repo — which would be unrecoverable, since nothing can revoke or even list a
+ * decision (`docs/specs/dor-tool.md` -> Trust).
+ *
+ * The entry is an object rather than a bare `true` on purpose:
+ * `docs/specs/remote-security-model.md` designed revocation into its ACL record
+ * from the start and still shipped without callers, but the *field* was there.
+ * A flat boolean map has nowhere to put one, so adding revocation later would be
+ * a schema change on a security file.
+ */
+interface TrustFile {
+  readonly version: 1;
+  readonly grants: Record<string, TrustGrant>;
+}
+
+function emptyTrust(): TrustFile {
+  return { version: 1, grants: {} };
+}
+
+/**
+ * Read a stored file, migrating the pre-versioned shape.
+ *
+ * v0 was `{ roots: Record<absPath, 'trusted' | 'denied'> }`. Its trusted entries
+ * become folder grants; its denials are dropped, because the state no longer
+ * exists and a stored denial would otherwise be permanent and invisible.
+ */
+function parseTrustFile(parsed: unknown): TrustFile {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return emptyTrust();
+  const record = parsed as { version?: unknown; grants?: unknown; roots?: unknown };
+
+  if (record.version === 1 && record.grants && typeof record.grants === 'object' && !Array.isArray(record.grants)) {
+    const grants: Record<string, TrustGrant> = {};
+    for (const [key, value] of Object.entries(record.grants as Record<string, unknown>)) {
+      const grant = value as { kind?: unknown; grantedAt?: unknown };
+      if (grant?.kind !== 'upstream' && grant?.kind !== 'folder') continue;
+      grants[key] = { kind: grant.kind, grantedAt: typeof grant.grantedAt === 'string' ? grant.grantedAt : '' };
+    }
+    return { version: 1, grants };
+  }
+
+  if (record.roots && typeof record.roots === 'object' && !Array.isArray(record.roots)) {
+    const grants: Record<string, TrustGrant> = {};
+    for (const [root, decision] of Object.entries(record.roots as Record<string, unknown>)) {
+      if (decision !== 'trusted') continue;
+      grants[folderGrantKey(root)] = { kind: 'folder', grantedAt: '' };
+    }
+    return { version: 1, grants };
+  }
+
+  return emptyTrust();
+}
+
+/** Records grants. One small JSON file, written temp-then-rename so a crash
+ *  mid-write cannot leave a truncated file that reads as "nothing is trusted". */
+export class FileToolTrustStore {
+  readonly #dir: string;
+  readonly #path: string;
+  readonly #lockPath: string;
+
+  constructor(stateDir: string) {
+    this.#dir = stateDir;
+    this.#path = join(stateDir, TRUST_FILE_NAME);
+    this.#lockPath = `${this.#path}.lock`;
+  }
+
+  /** Whether any of these keys has been granted. Callers pass every key that
+   *  would cover this project — the upstream and the folder — so one lookup
+   *  answers "may this run?". */
+  async isTrusted(keys: readonly string[]): Promise<boolean> {
+    const { grants } = await this.#read();
+    return keys.some((key) => grants[key] !== undefined);
+  }
+
+  /** Record a grant a human made in Dormouse's chrome. */
+  async grant(key: string, kind: TrustGrantKind): Promise<void> {
+    const release = await this.#acquireCommitLock();
+    try {
+      // Read only after acquiring the cross-process lock. Every host sharing
+      // this global directory therefore merges against the latest committed
+      // file rather than a snapshot captured before another grant.
+      const current = await this.#read();
+      const next: TrustFile = {
+        version: 1,
+        grants: { ...current.grants, [key]: { kind, grantedAt: new Date().toISOString() } },
+      };
+      await this.#write(next);
+    } finally {
+      await release();
+    }
+  }
+
+  async #read(): Promise<TrustFile> {
+    try {
+      return parseTrustFile(JSON.parse(await readFile(this.#path, 'utf-8')));
+    } catch {
+      // A missing file is the common case (nothing trusted yet). A corrupt one
+      // starts empty rather than throwing: failing closed here means every tool
+      // stops working, and the cost of starting empty is one more approval.
+      return emptyTrust();
+    }
+  }
+
+  async #ensureDir(): Promise<void> {
+    await mkdir(this.#dir, { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') await chmod(this.#dir, 0o700).catch(() => {});
+  }
+
+  async #ensureLockDirectory(): Promise<void> {
+    for (;;) {
+      try {
+        await mkdir(this.#lockPath, { recursive: true, mode: 0o700 });
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      }
+
+      // The lock was one file before it became a directory of participants.
+      // `recursive` tolerates an existing directory but not that leftover file,
+      // so remove the obsolete shape before trying the directory create again.
+      try {
+        await unlink(this.#lockPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        // Another new host may have won the migration between our failed mkdir
+        // and unlink. In that case the desired directory already exists.
+        const entry = await lstat(this.#lockPath).catch(() => null);
+        if (entry?.isDirectory()) return;
+        throw error;
+      }
+    }
+  }
+
+  async #acquireCommitLock(): Promise<() => Promise<void>> {
+    await this.#ensureDir();
+    await this.#ensureLockDirectory();
+    const token = randomUUID();
+    const choosingPath = join(this.#lockPath, `choosing-${token}.json`);
+    const ticketPath = join(this.#lockPath, `ticket-${token}.json`);
+    const owner = { pid: process.pid, token };
+    await writeFile(choosingPath, JSON.stringify(owner), { flag: 'wx', mode: 0o600 });
+    let ticket: number;
+    try {
+      ticket = 1 + await this.#highestPublishedTicket();
+      await writeFile(ticketPath, JSON.stringify({ ...owner, ticket }), { flag: 'wx', mode: 0o600 });
+    } finally {
+      await unlink(choosingPath).catch(() => {});
+    }
+
+    // A live participant refreshes its unique file, so a genuinely long grant
+    // keeps its lease while a crash whose pid is later recycled still ages out.
+    // Unique participant paths make recovery race-free: no waiter ever unlinks
+    // the pathname a newer owner would reuse.
+    const heartbeat = setInterval(() => {
+      const now = new Date();
+      void utimes(ticketPath, now, now).catch(() => {});
+    }, TRUST_LOCK_STALE_MS / 3);
+    heartbeat.unref?.();
+
+    try {
+      for (;;) {
+        if (!await this.#hasEarlierParticipant(token, ticket)) break;
+        await new Promise((resolve) => setTimeout(resolve, TRUST_LOCK_RETRY_MS));
+      }
+      return async () => {
+        clearInterval(heartbeat);
+        await unlink(ticketPath).catch(() => {});
+      };
+    } catch (error) {
+      clearInterval(heartbeat);
+      await unlink(ticketPath).catch(() => {});
+      throw error;
+    }
+  }
+
+  async #highestPublishedTicket(): Promise<number> {
+    let highest = 0;
+    for (const name of await readdir(this.#lockPath)) {
+      if (!name.startsWith('ticket-')) continue;
+      const participant = await this.#readLockParticipant(join(this.#lockPath, name));
+      if (!participant || await this.#reapIfStale(join(this.#lockPath, name), participant)) continue;
+      try {
+        const value = JSON.parse(participant.contents) as { ticket?: unknown };
+        if (typeof value.ticket === 'number' && Number.isSafeInteger(value.ticket) && value.ticket > highest) {
+          highest = value.ticket;
+        }
+      } catch {
+        // A fresh malformed participant is handled as a blocker in the wait
+        // loop; it cannot safely contribute a ticket number here.
+      }
+    }
+    return highest;
+  }
+
+  async #hasEarlierParticipant(token: string, ticket: number): Promise<boolean> {
+    for (const name of await readdir(this.#lockPath)) {
+      const isChoosing = name.startsWith('choosing-');
+      const isTicket = name.startsWith('ticket-');
+      if (!isChoosing && !isTicket) continue;
+      const path = join(this.#lockPath, name);
+      const participant = await this.#readLockParticipant(path);
+      if (!participant || await this.#reapIfStale(path, participant)) continue;
+      let value: { token?: unknown; ticket?: unknown };
+      try {
+        value = JSON.parse(participant.contents) as typeof value;
+      } catch {
+        return true;
+      }
+      if (value.token === token) continue;
+      if (typeof value.token !== 'string') return true;
+      // Lamport's choosing marker closes the race where two processes inspect
+      // the same maximum before either publishes its ticket.
+      if (isChoosing) return true;
+      if (typeof value.ticket !== 'number' || !Number.isSafeInteger(value.ticket)) return true;
+      if (value.ticket < ticket || (value.ticket === ticket && value.token < token)) return true;
+    }
+    return false;
+  }
+
+  async #readLockParticipant(path: string): Promise<TrustLockParticipant | null> {
+    let participant;
+    try {
+      participant = await open(path, constants.O_RDONLY);
+      const info = await participant.stat();
+      return { contents: await participant.readFile('utf-8'), mtimeMs: info.mtimeMs };
+    } catch {
+      return null;
+    } finally {
+      await participant?.close().catch(() => {});
+    }
+  }
+
+  async #reapIfStale(path: string, participant: TrustLockParticipant): Promise<boolean> {
+    let owner: { pid?: unknown } = {};
+    try {
+      owner = JSON.parse(participant.contents) as typeof owner;
+    } catch {
+      // A publisher exposes an empty file only while its choosing marker is
+      // present. Keep any fresh malformed record until its lease expires.
+    }
+    if (typeof owner.pid === 'number' && Number.isInteger(owner.pid) && owner.pid > 0) {
+      try {
+        process.kill(owner.pid, 0);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ESRCH') {
+          await unlink(path).catch(() => {});
+          return true;
+        }
+      }
+    }
+    if (Date.now() - participant.mtimeMs <= TRUST_LOCK_STALE_MS) return false;
+    await unlink(path).catch(() => {});
+    return true;
+  }
+
+  async #write(state: TrustFile): Promise<void> {
+    await this.#ensureDir();
+    const tmp = `${this.#path}.${randomUUID()}.tmp`;
+    await writeFile(tmp, JSON.stringify(state), { mode: 0o600 });
+    await rename(tmp, this.#path);
+  }
+}
+
+/** An in-memory store, for hosts with no state directory and for tests. */
+export class MemoryToolTrustStore {
+  readonly #grants = new Map<string, TrustGrant>();
+
+  async isTrusted(keys: readonly string[]): Promise<boolean> {
+    return keys.some((key) => this.#grants.has(key));
+  }
+
+  async grant(key: string, kind: TrustGrantKind): Promise<void> {
+    this.#grants.set(key, { kind, grantedAt: new Date().toISOString() });
+  }
+}
+
+export type ToolTrustStore = FileToolTrustStore | MemoryToolTrustStore;
+
+/**
+ * Walk up from `startDir` for the nearest `dormouse.yml`. Its directory is
+ * `$PROJECT_ROOT` — free, since the host knows where it found the file, and
+ * more robust than shelling out to git (it works in a non-git directory).
+ */
+export async function findToolFile(
+  startDir: string,
+  readTextFile: (path: string) => Promise<string> = readToolFile,
+): Promise<{ path: string; dir: string; text: string } | null> {
+  let dir = resolve(startDir);
+  // Bounded by the filesystem root; `dirname('/') === '/'` is the terminator.
+  for (;;) {
+    const path = join(dir, TOOL_FILE_NAME);
+    try {
+      const text = await readTextFile(path);
+      // Backstop for an injected reader that caps nothing; the default reader
+      // refuses at `stat` first. Distinct wording so a test can name which
+      // check fired. `byteLength`, not `.length` — the cap is bytes, and
+      // multi-byte characters would slip past a UTF-16 count.
+      if (Buffer.byteLength(text, 'utf-8') > TOOL_FILE_MAX_BYTES) {
+        throw new ToolFileError(
+          `${path}: tool file content exceeds ${TOOL_FILE_MAX_BYTES} bytes after reading`,
+        );
+      }
+      return { path, dir, text };
+    } catch (error) {
+      if (error instanceof ToolFileError) throw error;
+      // Not here (or unreadable) — keep walking.
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+export type ToolLookup =
+  | { status: 'no-file' }
+  | { status: 'unknown-tool'; projectRoot: string; path: string; names: string[] }
+  | {
+      status: 'untrusted';
+      projectRoot: string;
+      path: string;
+      name: string;
+      run: string;
+      /** Canonical upstream URL, or null when there is no resolvable remote —
+       *  the approval UI then offers only the folder grant. */
+      upstreamUrl: string | null;
+    }
+  | { status: 'error'; message: string }
+  | { status: 'ok'; projectRoot: string; path: string; file: ToolFile; entry: ToolEntry };
+
+/**
+ * Find, parse, and trust-check the entry named `name` for a caller in `cwd`.
+ *
+ * Parsing precedes the trust check on purpose: parsing is inert, and the
+ * approval dialog has to name the command it is approving. Nothing from the
+ * file executes on this path.
+ */
+export async function lookupTool(
+  name: string,
+  cwd: string,
+  trust: ToolTrustStore,
+  readTextFile?: (path: string) => Promise<string>,
+  resolveUpstream: (dir: string) => Promise<string | null> = resolveUpstreamUrl,
+): Promise<ToolLookup> {
+  let found;
+  try {
+    found = await findToolFile(cwd, readTextFile);
+  } catch (error) {
+    // An oversized file: report it rather than letting it reach the parser.
+    if (error instanceof ToolFileError) return { status: 'error', message: error.message };
+    throw error;
+  }
+  if (!found) return { status: 'no-file' };
+
+  let file: ToolFile;
+  try {
+    file = parseToolFile(found.text, { path: found.path, dir: found.dir, scope: 'repo' });
+  } catch (error) {
+    if (error instanceof ToolFileError) return { status: 'error', message: error.message };
+    throw error;
+  }
+
+  const entry = file.tools.get(name);
+  if (!entry) {
+    return {
+      status: 'unknown-tool',
+      projectRoot: found.dir,
+      path: found.path,
+      names: [...file.tools.keys()].sort(),
+    };
+  }
+
+  // Either grant covers this project: the upstream every worktree shares, or
+  // this folder alone. Resolved before the check so the approval UI can offer
+  // both, and so a hit on either short-circuits identically.
+  const upstreamUrl = await resolveUpstream(found.dir);
+  const keys = [folderGrantKey(found.dir), ...(upstreamUrl ? [upstreamGrantKey(upstreamUrl)] : [])];
+  if (await trust.isTrusted(keys)) {
+    return { status: 'ok', projectRoot: found.dir, path: found.path, file, entry };
+  }
+  return {
+    status: 'untrusted',
+    projectRoot: found.dir,
+    path: found.path,
+    name: entry.name,
+    run: entry.run,
+    upstreamUrl,
+  };
+}

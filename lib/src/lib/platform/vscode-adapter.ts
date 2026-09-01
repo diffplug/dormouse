@@ -1,4 +1,4 @@
-import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo, RemoteHostLink } from './types';
+import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo, RemoteHostLink, ToolControlResult, ToolHostRequest } from './types';
 import { OPEN_PORT_TIMEOUT_MS } from './types';
 import { createRemoteHostLinkClient } from '../../host/remote/link-client';
 import type { AwaitHandle, AwaitOptions, AwaitOutcome } from '../alert-manager';
@@ -391,6 +391,17 @@ export class VSCodeAdapter implements PlatformAdapter {
       15000,
     );
     return result ?? { ok: false, error: 'agent-browser pop-in timed out' };
+  }
+
+  async toolControl(request: ToolHostRequest): Promise<ToolControlResult> {
+    // The extension host owns the filesystem (vscode-ext/src/tool-host.ts). A
+    // timeout reports an error rather than hanging `dor tool`, which blocks on it.
+    const result = await this.requestResponse<ToolControlResult>(
+      'tool:control', 'tool:result', { request },
+      (msg) => msg.result,
+      5000,
+    );
+    return result ?? { status: 'error', message: 'tool request timed out' };
   }
 
   async createIframeProxyUrl(url: string): Promise<IframeProxyResult> {

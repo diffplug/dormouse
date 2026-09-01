@@ -6,6 +6,7 @@ import { attachRouter, flushAllSessions, getAlertStates } from './message-router
 import { closePoppedOutSessions } from './agent-browser-host';
 import { serveWebview } from './webview-messaging';
 import { log } from './log';
+import { initToolHost } from './tool-host';
 import { captureAgentRecoveryCommands, mergeAlertStates, refreshSavedSessionStateFromPtys, takeRecoveryCommands } from './session-state';
 import { readPersistedSession } from '../../lib/src/lib/session-types';
 import { workspaceTitle } from './workspace-chrome';
@@ -81,6 +82,9 @@ export function activate(context: vscode.ExtensionContext) {
   // The remote Host runs here, in the extension host that owns the PTYs — in
   // whichever window wins the bind (remote-host.ts).
   context.subscriptions.push(initRemoteHost(context));
+  // Dor Tools: the trust record lives in the extension's global storage, so an
+  // approved repo stays approved across windows and restarts.
+  initToolHost(context.globalStorageUri?.fsPath);
   log.init();
   extensionContext = context;
   ptyManager.setExtensionPath(context.extensionPath);

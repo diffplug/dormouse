@@ -24,6 +24,8 @@ import type {
   SendSurfaceResponse,
   SplitSurfaceRequest,
   SplitSurfaceResponse,
+  ToolSurfaceRequest,
+  ToolSurfaceResponse,
 } from './commands/types.js';
 import { SURFACE_CONTROL_METHODS, type SurfaceControlMethod } from './protocol.js';
 import type { DorControlResult } from './protocol.js';
@@ -91,6 +93,10 @@ export class SocketControlClient implements ControlClient {
 
   ensureSurface(request: EnsureSurfaceRequest): Promise<EnsureSurfaceResponse> {
     return this.request<EnsureSurfaceResponse>(SURFACE_CONTROL_METHODS.ensure, request);
+  }
+
+  toolSurface(request: ToolSurfaceRequest): Promise<ToolSurfaceResponse> {
+    return this.request<ToolSurfaceResponse>(SURFACE_CONTROL_METHODS.tool, request);
   }
 
   sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse> {
