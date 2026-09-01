@@ -8,7 +8,9 @@
 
 ## Configuration
 
-**Loopback-lint scope.** `SECURITY.md` -> "Loopback Listeners" carries a guard-module rule, enforced by `scripts/loopback-lint.mjs`, that covers the app's browser-reachable local proxies — listeners that bind from a loopback literal in the source. The server's socket binds from `DORMOUSE_BIND_HOST` instead, so the textual lint cannot see it; the containment argument in the spec is what stands in for the lint here.
+**Loopback-lint scope.** The lint covers browser-reachable proxies whose loopback literal appears in source. The Server binds from `DORMOUSE_BIND_HOST`, so the spec's containment argument covers what text matching cannot.
+
+**Why `hosts.json` existence closes bootstrap.** Its first atomic write commits the first enrollment. Row count would reopen bootstrap after documented revocation removes the last row; a separate marker would duplicate the transition.
 
 ## Where a Host may reach a relay server (self-host builds)
 

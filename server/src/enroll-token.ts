@@ -4,15 +4,16 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { readFile, rename, stat, unlink } from 'node:fs/promises';
+import { link, readFile, rename, unlink } from 'node:fs/promises';
 
-import { ENROLL_TOKEN_PATTERN, parseEnrollmentOffer } from 'server-lib-common';
+import {
+  ENROLL_TOKEN_PATTERN,
+  isEnrollmentOfferFresh,
+  parseEnrollmentOffer,
+} from 'server-lib-common';
 import type { EnrollmentOffer } from 'server-lib-common';
 
 import { secretEquals } from './secrets.js';
-
-/** How long an offer stays redeemable; the installer mints a fresh one per run. */
-const ENROLL_OFFER_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 function errnoOf(err: unknown): string | undefined {
   return (err as NodeJS.ErrnoException | null)?.code;
@@ -46,20 +47,10 @@ function warnUnusable(path: string): void {
   );
 }
 
-/** A stamp that will not parse, or is a week old, is no longer redeemable. */
-function isFresh(mintedAt: string): boolean {
-  const minted = Date.parse(mintedAt);
-  if (Number.isNaN(minted)) return false;
-  // A future stamp passes: one machine writes and reads this file, so clock
-  // skew is not evidence of anything and must not brick the one-click path.
-  return Date.now() - minted <= ENROLL_OFFER_MAX_AGE_MS;
-}
-
 /**
- * Test-only seam, awaited between the verified read and the claim below so a
- * test can rewrite the offer inside the window {@link claimOffer}'s re-read
- * guards. Only `server/test/enroll-token.test.mjs` may pass it; every
- * production caller passes two arguments.
+ * Test-only seam. Production callers pass two arguments; the enrollment-offer
+ * tests use these callbacks to place installer writes at either side of the
+ * claim and prove which generation survives.
  */
 type BeforeClaim = () => void | Promise<void>;
 
@@ -68,6 +59,7 @@ export async function redeemEnrollToken(
   path: string | null | undefined,
   supplied: string,
   beforeClaim?: BeforeClaim,
+  beforeRelease?: BeforeClaim,
 ): Promise<'redeemed' | 'rejected' | 'not-invalidated'> {
   if (!path) return 'rejected';
   // The format is public (server.md → "Configuration"), so refusing a malformed
@@ -81,11 +73,31 @@ export async function redeemEnrollToken(
   // field, so checking the offer's `origin` here would authorize nothing — it
   // is for the Host-side reader (`lib/src/host/remote/enroll-offer.ts`), which
   // uses it to name the server it is about to enroll against.
-  if (offer === null || !isFresh(offer.mintedAt) || !secretEquals(supplied, offer.token)) {
+  if (offer === null || !isEnrollmentOfferFresh(offer) || !secretEquals(supplied, offer.token)) {
     return 'rejected';
   }
   await beforeClaim?.();
-  return claimOffer(path, offer.token);
+  return claimOffer(path, offer.token, beforeRelease);
+}
+
+/**
+ * Remove any offer before a setup-password enrollment becomes the first Host.
+ * Absence is already the desired state; every other rename failure means the
+ * first enrollment must stop rather than leave a second bootstrap credential.
+ */
+export async function invalidateEnrollOffer(
+  path: string | null | undefined,
+): Promise<'invalidated' | 'not-invalidated'> {
+  if (!path) return 'invalidated';
+  const claimPath = `${path}.spent-${randomBytes(6).toString('hex')}`;
+  try {
+    await rename(path, claimPath);
+  } catch (err) {
+    return errnoOf(err) === 'ENOENT' ? 'invalidated' : 'not-invalidated';
+  }
+  // As in redemption, a cleanup failure leaves only an inert `.spent-*` path.
+  await unlink(claimPath).catch(() => {});
+  return 'invalidated';
 }
 
 /**
@@ -95,6 +107,7 @@ export async function redeemEnrollToken(
 async function claimOffer(
   path: string,
   verifiedToken: string,
+  beforeRelease?: BeforeClaim,
 ): Promise<'redeemed' | 'rejected' | 'not-invalidated'> {
   // The rename is the single-use gate — not the unlink that follows. Two
   // concurrent unlinks of one path can *both* report success (APFS does), so
@@ -113,6 +126,7 @@ async function claimOffer(
   // rerun in that window leaves this attempt holding *its* fresh offer instead.
   // Comparing tokens is how that is told apart from the offer just verified.
   if (!(await claimHolds(claimPath, verifiedToken))) {
+    await beforeRelease?.();
     await releaseClaim(claimPath, path);
     return 'rejected';
   }
@@ -139,22 +153,19 @@ async function claimHolds(claimPath: string, verifiedToken: string): Promise<boo
 
 /** Give back a claim on a file that turned out not to be the verified offer. */
 async function releaseClaim(claimPath: string, path: string): Promise<void> {
-  // Put it back — unless the installer has already minted a fresher offer at
-  // the well-known path, which outranks the one wrongly taken: drop the claim
-  // rather than clobber the new file.
-  if (!(await exists(path))) {
-    const restored = await rename(claimPath, path).then(
-      () => true,
-      () => false,
-    );
-    if (restored) return;
-  }
-  await unlink(claimPath).catch(() => {});
-}
-
-async function exists(path: string): Promise<boolean> {
-  return stat(path).then(
+  // A hard link is an atomic no-clobber publication: it restores this inode
+  // only if the well-known path is still absent. `stat` followed by `rename`
+  // cannot make that promise on POSIX, where rename would overwrite an offer
+  // the installer published between those two calls.
+  const restored = await link(claimPath, path).then(
     () => true,
     () => false,
   );
+  if (restored) {
+    // Both names refer to the same inode; removing the inert claim leaves the
+    // restored well-known link and its owner-only permissions intact.
+    await unlink(claimPath).catch(() => {});
+    return;
+  }
+  await unlink(claimPath).catch(() => {});
 }

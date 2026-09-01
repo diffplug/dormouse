@@ -18,8 +18,8 @@ export interface EnrollmentOffer {
   readonly token: string;
   /**
    * ISO-8601 stamp of the mint. Load-bearing, not informational: the Server
-   * refuses an offer whose stamp will not `Date.parse` or is more than 7 days
-   * old (`server/src/enroll-token.ts`), so a writer that stamps this in a
+   * refuses an offer whose stamp will not `Date.parse` or is more than 24 hours
+   * old, so a writer that stamps this in a
    * non-invariant format mints a token nothing can redeem.
    */
   readonly mintedAt: string;
@@ -27,6 +27,9 @@ export interface EnrollmentOffer {
 
 /** The token's public format, so a redeemer can refuse junk before reading disk. */
 export const ENROLL_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
+
+/** How long a bootstrap offer stays redeemable before the first Host enrolls. */
+export const ENROLL_OFFER_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** Bound on the displayed `mintedAt`; an ISO-8601 stamp needs about 30. */
 const MINTED_AT_MAX_LENGTH = 64;
@@ -68,4 +71,14 @@ export function parseEnrollmentOffer(text: string): EnrollmentOffer | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Whether an offer is still inside the shared Server/Host display window.
+ * A future stamp passes: one machine writes and reads the file, so clock skew
+ * is not evidence of anything and must not brick the one-click path.
+ */
+export function isEnrollmentOfferFresh(offer: EnrollmentOffer, now: number = Date.now()): boolean {
+  const minted = Date.parse(offer.mintedAt);
+  return !Number.isNaN(minted) && now - minted <= ENROLL_OFFER_MAX_AGE_MS;
 }

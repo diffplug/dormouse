@@ -60,7 +60,7 @@ import type {
   SigninFinishResponse,
 } from 'server-lib-common';
 
-import { redeemEnrollToken } from './enroll-token.js';
+import { invalidateEnrollOffer, redeemEnrollToken } from './enroll-token.js';
 import { Handshake } from './handshake.js';
 import { RelayHub } from './relay.js';
 import type { ClientConn, HostConn } from './relay.js';
@@ -165,6 +165,10 @@ const BAD_PASSWORD_ERROR = 'invalid setup password';
 
 /** The credential fields `pickCredential` reads, whichever route supplied them. */
 type CredentialBody = { password?: unknown; setupToken?: unknown; enrollToken?: unknown };
+
+/** Internal control flow out of HostStore's serialized pre-enrollment gate. */
+class EnrollmentCredentialRejected extends Error {}
+class EnrollmentOfferNotInvalidated extends Error {}
 
 /**
  * In-memory session store. Exposed on the created app so the `/ws/client` path
@@ -514,25 +518,49 @@ export function createApp(config: AppConfig): CreatedApp {
   app.post(API_ROUTES.hostEnroll, async (c) => {
     const body = await readJson<HostEnrollRequest>(c);
     // Keeps the shared `UNAUTHORIZED_ERROR`: only a Host sends an enroll token,
-    // so no Client recovery keys on it.
+    // so no Client recovery keys on it. The shape ladder runs out here, ahead of
+    // the gate below, which holds only the redemption that has to be serialized.
     const picked = await pickCredential(body, c, 'enrollToken', UNAUTHORIZED_ERROR);
     if (picked instanceof Response) return picked;
-    if (picked.token !== null) {
-      // Unconfigured, absent, malformed, expired, wrong-shaped and wrong-token
-      // are one `rejected`: none of them may tell a caller which one it hit.
-      const redemption = await redeemEnrollToken(config.enrollTokenFile, picked.token);
-      if (redemption === 'rejected') return credentialFailure(c, UNAUTHORIZED_ERROR);
-      if (redemption === 'not-invalidated') {
-        // Reached only after a *successful* compare, so answering fast with a
-        // distinct body would confirm a valid token without spending it. Same
-        // delay as a rejection; the 500 stays, since the operator has to learn
-        // that the install cannot spend its own offer.
+    const enrollToken = picked.token;
+    const label = typeof body?.label === 'string' ? body.label : '';
+    let host: StoredHost;
+    try {
+      host = await hostStore.enroll(label, async (firstEnrollment) => {
+        if (enrollToken !== null) {
+          if (!firstEnrollment) {
+            // The offer is already dead by durable Server state. Best-effort
+            // cleanup keeps an old installer file from continuing to advertise
+            // it locally, but its outcome must not distinguish token guesses.
+            await invalidateEnrollOffer(config.enrollTokenFile);
+            throw new EnrollmentCredentialRejected();
+          }
+          // Unconfigured, absent, malformed, expired, wrong-shaped and wrong-
+          // token are one rejection: none may tell a caller which one it hit.
+          const redemption = await redeemEnrollToken(config.enrollTokenFile, enrollToken);
+          if (redemption === 'rejected') throw new EnrollmentCredentialRejected();
+          if (redemption === 'not-invalidated') throw new EnrollmentOfferNotInvalidated();
+        } else if (firstEnrollment) {
+          // A setup-password enrollment can win the same first-Host race. Take
+          // the offer away before minting its sibling credential.
+          if ((await invalidateEnrollOffer(config.enrollTokenFile)) === 'not-invalidated') {
+            throw new EnrollmentOfferNotInvalidated();
+          }
+        }
+      });
+    } catch (err) {
+      if (err instanceof EnrollmentCredentialRejected) {
+        return credentialFailure(c, UNAUTHORIZED_ERROR);
+      }
+      if (err instanceof EnrollmentOfferNotInvalidated) {
+        // Reached only after a valid bootstrap credential, so answering fast
+        // would confirm it. Keep the same delay while retaining the operator-
+        // visible 500: no Host was minted against an offer still on disk.
         await delay(credentialFailureDelayMs);
         return c.json({ error: 'could not invalidate the enroll token' }, 500);
       }
+      throw err;
     }
-    const label = typeof body?.label === 'string' ? body.label : '';
-    const host = await hostStore.enroll(label);
     // The Host enforces `origin`/`rpId` as its ConnectionPolicy (server.md).
     const res: HostEnrollResponse = {
       hostId: host.hostId,
