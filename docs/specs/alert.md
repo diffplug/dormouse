@@ -76,7 +76,7 @@ Two ordering rules:
 - **Clear the progress cycle *before* dispatch**, so a completion or error ends the cycle whether or not the event is claimed and `OSC_NOTIF_BUSY` falls back either way.
 - **Dispatch a command finish for every watch that existed**, including the short, unarmed, and attended ones the ring rule then discards.
 
-Source of truth: `registerCompletionClaimant` / `dispatchCompletion` in `lib/src/lib/alert-manager.ts`.
+Source of truth: `registerCompletionClaimant` / `dispatchCompletion` and the deferral block (`deferOrDeliverHumanAlert` / `flushDeferredHumanAlerts`) in `lib/src/lib/alert-manager.ts`; the quiet deadline itself is `QuiesceDetector.quietAt` in `lib/src/lib/quiesce-detector.ts`, which owns the settle timing the deferral schedules against.
 
 ## Await
 

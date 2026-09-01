@@ -1,8 +1,5 @@
-import {
-  QUIESCE_AFTER_OUTPUT_MS,
-  QuiesceDetector,
-  type QuiesceStatus,
-} from './quiesce-detector';
+import { QuiesceDetector, type QuiesceStatus } from './quiesce-detector';
+import type { AlertSettings } from './alert-settings';
 import { cfg } from '../cfg';
 import {
   commandArgv0,
@@ -60,17 +57,6 @@ interface CommandExitWatch {
   seenWithAttentionAt: number | null;
 }
 
-type HumanAlert =
-  | { kind: 'protocol'; notification: ActivityNotification }
-  | { kind: 'commandExit'; displayCommand: string; exitCode: number | undefined };
-
-interface DeferredHumanAlerts {
-  /** Latest wins, matching repeated notifications on an already-ringing track. */
-  protocol: ActivityNotification | null;
-  /** A Session has only one completed foreground command at a time. */
-  commandExit: Extract<HumanAlert, { kind: 'commandExit' }> | null;
-}
-
 export function normalizeActivityNotification(value: unknown): ActivityNotification | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
@@ -107,6 +93,17 @@ export type CompletionEvent =
       armed: boolean;
     }
   | { kind: 'notification'; notification: ActivityNotification };
+
+/** The two completions that summon a human. `settled` rings only through the
+ * WATCHING rule, which animation deferral never delays. */
+type HumanAlert = Extract<CompletionEvent, { kind: 'notification' | 'commandFinished' }>;
+
+interface DeferredHumanAlerts {
+  /** Latest wins, matching repeated notifications on an already-ringing track. */
+  notification: Extract<HumanAlert, { kind: 'notification' }> | null;
+  /** A Session has only one completed foreground command at a time. */
+  commandFinished: Extract<HumanAlert, { kind: 'commandFinished' }> | null;
+}
 
 /** Return true to claim the event. A claimed event never reaches the ring rules. */
 export type CompletionClaimant = (event: CompletionEvent) => boolean;
@@ -207,8 +204,6 @@ interface AlertEntry {
   todo: TodoState;
   notification: ActivityNotification | null;
   attentionDismissedRing: boolean;
-  /** Last PTY output the detector accepted (resize redraw noise is excluded). */
-  lastMeaningfulOutputAt: number | null;
   /** Human delivery deferred behind a detector cycle; never public or persisted. */
   deferredHumanAlerts: DeferredHumanAlerts | null;
   deferredHumanAlertTimer: ReturnType<typeof setTimeout> | null;
@@ -233,6 +228,17 @@ export class AlertManager {
 
   // --- Settings ---
 
+  /**
+   * The whole of what this manager consumes from the settings blob, so a new
+   * host-owned field is one edit here rather than one per host — where a miss
+   * would silently disable it on that host alone. Callers pass an
+   * already-normalized blob; the sinks below revalidate anyway.
+   */
+  applySettings(settings: AlertSettings): void {
+    this.setInactivityTimeoutMs(settings.inactivityTimeoutMs);
+    this.setDeferAlertsUntilQuiet(settings.deferAlertsUntilQuiet);
+  }
+
   /** Walk-away and command-exit minimum-runtime window. Revalidate at this timer sink. */
   setInactivityTimeoutMs(ms: number): void {
     if (!Number.isFinite(ms) || ms <= 0 || ms === this.inactivityTimeoutMs) return;
@@ -246,7 +252,7 @@ export class AlertManager {
 
   /** Let confirmed terminal activity finish before terminal-report/exit rings. */
   setDeferAlertsUntilQuiet(enabled: boolean): void {
-    if (typeof enabled !== 'boolean' || enabled === this.deferAlertsUntilQuiet) return;
+    if (enabled === this.deferAlertsUntilQuiet) return;
     this.deferAlertsUntilQuiet = enabled;
     if (enabled) return;
 
@@ -269,11 +275,7 @@ export class AlertManager {
     // produced a semantic or protocol event, so output creates the entry.
     const entry = this.streamEntry(id);
     if (!entry) return;
-    const meaningful = entry.detector.onData();
-    if (meaningful) {
-      entry.lastMeaningfulOutputAt = Date.now();
-      if (entry.deferredHumanAlerts !== null) this.scheduleDeferredHumanAlerts(id, entry);
-    }
+    entry.detector.onData();
     // Only meaningful while a ring is latched: `consumeAwaitableRing` reads it
     // to tell a ring that still describes the present from one whose quiet has
     // already ended.
@@ -367,6 +369,8 @@ export class AlertManager {
     this.dispatchCompletion(id, entry, { kind: 'settled' });
     // The settle completion gets first refusal before delivery held from an
     // earlier event. Never re-offer that historical event to current claimants.
+    // Unconditional: a claimant taking *this* settle says nothing about the
+    // earlier completion it never saw, which is now quiet and due.
     this.flushDeferredHumanAlerts(id, entry);
   }
 
@@ -417,11 +421,7 @@ export class AlertManager {
         break;
       case 'commandFinished':
         if (!event.armed || this.hasAttention(id) || event.ranMs < this.inactivityTimeoutMs) break;
-        this.deferOrDeliverHumanAlert(id, entry, {
-          kind: 'commandExit',
-          displayCommand: event.displayCommand,
-          exitCode: event.exitCode,
-        });
+        this.deferOrDeliverHumanAlert(id, entry, event);
         break;
       case 'notification':
         if (this.hasAttention(id)) {
@@ -430,10 +430,7 @@ export class AlertManager {
           this.notify(id);
           break;
         }
-        this.deferOrDeliverHumanAlert(id, entry, {
-          kind: 'protocol',
-          notification: event.notification,
-        });
+        this.deferOrDeliverHumanAlert(id, entry, event);
         break;
     }
     return false;
@@ -848,71 +845,79 @@ export class AlertManager {
 
   private deferOrDeliverHumanAlert(id: string, entry: AlertEntry, alert: HumanAlert): void {
     // Once any track rings, another source only enriches the same summons. There
-    // is no fresh transition left for animation deferral to suppress.
+    // is no fresh transition left for animation deferral to suppress. An already
+    // pending deferral keeps deferring: a command boundary resets the detector,
+    // so `isConfirmedBusy` alone would drop the exit receipt it just held.
     if (
       this.deferAlertsUntilQuiet
       && !this.hasActiveRing(entry)
       && (entry.deferredHumanAlerts !== null || entry.detector.isConfirmedBusy())
     ) {
-      const deferred = entry.deferredHumanAlerts ?? { protocol: null, commandExit: null };
-      if (alert.kind === 'protocol') deferred.protocol = alert.notification;
-      else deferred.commandExit = alert;
+      const deferred = entry.deferredHumanAlerts ?? { notification: null, commandFinished: null };
+      if (alert.kind === 'notification') deferred.notification = alert;
+      else deferred.commandFinished = alert;
       entry.deferredHumanAlerts = deferred;
       this.scheduleDeferredHumanAlerts(id, entry);
-      // The caller may have cleared a publicly visible cycle and delegated the
-      // publish to the ring rules; deferring the ring must not swallow it.
-      this.notify(id);
-      return;
+    } else {
+      this.applyHumanAlert(entry, alert);
     }
-
-    this.applyHumanAlert(entry, alert);
+    // The caller may have cleared a publicly visible cycle and delegated the
+    // publish to the ring rules; deferring the ring must not swallow it.
     this.notify(id);
   }
 
   private applyHumanAlert(entry: AlertEntry, alert: HumanAlert): void {
-    if (alert.kind === 'protocol') this.applyProtocolRinging(entry, alert.notification);
+    if (alert.kind === 'notification') this.applyProtocolRinging(entry, alert.notification);
     else this.applyCommandExitRinging(entry, alert.displayCommand, alert.exitCode);
   }
 
+  /**
+   * Wake at the detector's quiet deadline, re-arming for the remainder if
+   * output moved it — so continuing output costs one timer per quiet window
+   * rather than one per PTY chunk. Mostly the detector's own settle gets there
+   * first and this is a no-op; it is load-bearing only after a command boundary
+   * resets the detector, which kills the settle that would have flushed.
+   */
   private scheduleDeferredHumanAlerts(id: string, entry: AlertEntry): void {
     if (entry.deferredHumanAlertTimer !== null) clearTimeout(entry.deferredHumanAlertTimer);
-    const quietAt = (entry.lastMeaningfulOutputAt ?? Date.now()) + QUIESCE_AFTER_OUTPUT_MS;
     entry.deferredHumanAlertTimer = setTimeout(() => {
       entry.deferredHumanAlertTimer = null;
-      this.flushDeferredHumanAlerts(id, entry);
-    }, Math.max(0, quietAt - Date.now()));
+      if (entry.detector.quietAt() > Date.now()) this.scheduleDeferredHumanAlerts(id, entry);
+      else this.flushDeferredHumanAlerts(id, entry);
+    }, Math.max(0, entry.detector.quietAt() - Date.now()));
   }
 
-  private flushDeferredHumanAlerts(id: string, entry: AlertEntry): boolean {
+  private flushDeferredHumanAlerts(id: string, entry: AlertEntry): void {
     const deferred = entry.deferredHumanAlerts;
-    if (deferred === null) return false;
+    if (deferred === null) return;
     this.clearDeferredHumanAlerts(entry);
 
     // Attending the Session clears this eagerly too; retain the recheck as the
     // timer-side safety rule shared by every delayed alarm path.
-    if (this.hasAttention(id)) return true;
+    if (this.hasAttention(id)) return;
 
-    if (deferred.commandExit) this.applyHumanAlert(entry, deferred.commandExit);
+    if (deferred.commandFinished) this.applyHumanAlert(entry, deferred.commandFinished);
     // Protocol text is richer and wins over the generic command-exit receipt.
-    if (deferred.protocol) {
-      this.applyHumanAlert(entry, { kind: 'protocol', notification: deferred.protocol });
-    }
+    if (deferred.notification) this.applyHumanAlert(entry, deferred.notification);
     this.notify(id);
-    return true;
   }
 
-  private clearDeferredHumanAlerts(entry: AlertEntry): boolean {
+  private clearDeferredHumanAlerts(entry: AlertEntry): void {
     if (entry.deferredHumanAlertTimer !== null) {
       clearTimeout(entry.deferredHumanAlertTimer);
       entry.deferredHumanAlertTimer = null;
     }
-    if (entry.deferredHumanAlerts === null) return false;
     entry.deferredHumanAlerts = null;
-    return true;
   }
 
-  /** Release every latched ring across the three tracks. Returns whether any was active. */
+  /**
+   * Release every latched ring across the three tracks, plus any delivery still
+   * deferred behind animation — a path that stops summoning the user must never
+   * leave a timer that summons them a second later. Returns whether a ring was
+   * actually active; a cancelled deferral was never visible and does not count.
+   */
   private clearAllRingsIfActive(entry: AlertEntry): boolean {
+    this.clearDeferredHumanAlerts(entry);
     // Release all three, no short-circuit.
     const released = [
       this.releaseRing(entry, 'protocol'),
@@ -985,7 +990,6 @@ export class AlertManager {
   attend(id: string): void {
     const entry = this.getOrCreateEntry(id);
     this.setAttention(id);
-    this.clearDeferredHumanAlerts(entry);
 
     if (this.clearAllRingsIfActive(entry)) {
       entry.attentionDismissedRing = true;
@@ -1012,7 +1016,6 @@ export class AlertManager {
     if (!entry) return;
 
     const dismissed = this.clearAllRingsIfActive(entry);
-    this.clearDeferredHumanAlerts(entry);
     if (dismissed) entry.todo = true;
     // The flag exists so the next bell click opens the dialog instead of
     // silently changing a rule; an explicit dismiss *is* that next click.
@@ -1026,7 +1029,6 @@ export class AlertManager {
 
   toggleTodo(id: string): void {
     const entry = this.getOrCreateEntry(id);
-    this.clearDeferredHumanAlerts(entry);
     entry.todo = !entry.todo;
     if (!entry.todo) entry.notification = null;
     this.clearAllRingsIfActive(entry);
@@ -1035,7 +1037,6 @@ export class AlertManager {
 
   markTodo(id: string): void {
     const entry = this.getOrCreateEntry(id);
-    this.clearDeferredHumanAlerts(entry);
     const cleared = this.clearAllRingsIfActive(entry);
     if (entry.todo && !cleared) return;
     entry.todo = true;
@@ -1044,6 +1045,7 @@ export class AlertManager {
 
   clearTodo(id: string): void {
     const entry = this.getOrCreateEntry(id);
+    // Explicit: the early return below skips `clearAllRingsIfActive`.
     this.clearDeferredHumanAlerts(entry);
     if (!entry.todo) return;
     entry.todo = false;
@@ -1112,7 +1114,6 @@ export class AlertManager {
     entry.commandExitStatus = 'IDLE';
     entry.commandExitWatch = null;
     entry.pendingCommandLine = null;
-    entry.lastMeaningfulOutputAt = null;
     this.clearDeferredHumanAlerts(entry);
     // Restore must never carry detector state either.
     entry.detector.reset();
@@ -1187,7 +1188,6 @@ export class AlertManager {
         todo: false,
         notification: null,
         attentionDismissedRing: false,
-        lastMeaningfulOutputAt: null,
         deferredHumanAlerts: null,
         deferredHumanAlertTimer: null,
       };

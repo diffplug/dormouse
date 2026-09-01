@@ -832,9 +832,12 @@ describe('AlertManager in isolation', () => {
   });
 
   describe('defer alerts until quiet', () => {
+    beforeEach(() => {
+      manager.setDeferAlertsUntilQuiet(true);
+    });
+
     it('defers a protocol alert behind an unwatched confirmed-busy detector', () => {
       const id = 'defer-unwatched-protocol';
-      manager.setDeferAlertsUntilQuiet(true);
       driveToBusy(id);
       // The detector is private while no WATCHING rule matches.
       expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
@@ -862,7 +865,6 @@ describe('AlertManager in isolation', () => {
       manager.onStateChange((_id, state) => {
         if (_id === id) seen.push(state.status);
       });
-      manager.setDeferAlertsUntilQuiet(true);
       driveToBusy(id);
 
       manager.updateProtocolProgress(id, { state: 'normal', percent: 40 });
@@ -877,7 +879,6 @@ describe('AlertManager in isolation', () => {
 
     it('counts MIGHT_NEED_ATTENTION as confirmed busy and keeps its remaining deadline', () => {
       const id = 'defer-might-need-attention';
-      manager.setDeferAlertsUntilQuiet(true);
       driveToBusy(id);
       vi.advanceTimersByTime(2_000);
 
@@ -890,7 +891,6 @@ describe('AlertManager in isolation', () => {
 
     it('does not defer from MIGHT_BE_BUSY, which has not confirmed activity', () => {
       const id = 'do-not-defer-candidate';
-      manager.setDeferAlertsUntilQuiet(true);
       manager.onData(id);
       vi.advanceTimersByTime(1_600);
       manager.onData(id);
@@ -901,7 +901,6 @@ describe('AlertManager in isolation', () => {
 
     it('extends the quiet deadline when meaningful output resumes', () => {
       const id = 'defer-output-extension';
-      manager.setDeferAlertsUntilQuiet(true);
       driveToBusy(id);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
 
@@ -915,7 +914,6 @@ describe('AlertManager in isolation', () => {
 
     it('carries a deferred command-exit alert across the command-boundary reset', () => {
       const id = 'defer-command-exit';
-      manager.setDeferAlertsUntilQuiet(true);
       manager.attend(id);
       manager.applyTerminalSemanticEvents(id, [
         { type: 'commandLine', commandLine: 'pnpm build' },
@@ -941,7 +939,6 @@ describe('AlertManager in isolation', () => {
 
     it('cancels deferred delivery when the user attends, even after attention expires', () => {
       const id = 'defer-attended';
-      manager.setDeferAlertsUntilQuiet(true);
       driveToBusy(id);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
 
@@ -956,7 +953,6 @@ describe('AlertManager in isolation', () => {
 
     it('releases rather than drops deferred delivery when the setting is disabled', () => {
       const id = 'defer-disable';
-      manager.setDeferAlertsUntilQuiet(true);
       driveToBusy(id);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
 
@@ -966,7 +962,6 @@ describe('AlertManager in isolation', () => {
 
     it('coalesces repeated protocol alerts to the latest detail', () => {
       const id = 'defer-latest-protocol';
-      manager.setDeferAlertsUntilQuiet(true);
       driveToBusy(id);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'First' });
       manager.notifyFromProtocol(id, { source: 'OSC 777', title: 'Second', body: null });
@@ -981,7 +976,6 @@ describe('AlertManager in isolation', () => {
 
     it('offers a completion once and queues nothing when a claimant takes it', () => {
       const id = 'defer-claimed';
-      manager.setDeferAlertsUntilQuiet(true);
       driveToBusy(id);
       const seen = recordingClaimant(id, true);
 
@@ -1001,7 +995,6 @@ describe('AlertManager in isolation', () => {
 
     it('drops deferred delivery when the Session is removed', () => {
       const id = 'defer-remove';
-      manager.setDeferAlertsUntilQuiet(true);
       driveToBusy(id);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
 

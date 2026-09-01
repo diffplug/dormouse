@@ -4,10 +4,7 @@ import { AlertSettingsHost } from './alert-settings-host';
 import { DEFAULT_ALERT_SETTINGS } from './alert-settings';
 
 function createHost() {
-  const target = {
-    setInactivityTimeoutMs: vi.fn(),
-    setDeferAlertsUntilQuiet: vi.fn(),
-  };
+  const target = { applySettings: vi.fn() };
   return { host: new AlertSettingsHost(target), target };
 }
 
@@ -19,22 +16,26 @@ describe('AlertSettingsHost', () => {
 
     host.initialize({ inactivityTimeoutMs: 3_000, deferAlertsUntilQuiet: true });
 
-    expect(target.setInactivityTimeoutMs).toHaveBeenCalledWith(3_000);
-    expect(target.setDeferAlertsUntilQuiet).toHaveBeenCalledWith(true);
-    expect(listener).toHaveBeenCalledWith({
+    const expected = {
       ...DEFAULT_ALERT_SETTINGS,
       inactivityTimeoutMs: 3_000,
       deferAlertsUntilQuiet: true,
-    });
+    };
+    // The manager sees the normalized blob, not the partial the renderer sent.
+    expect(target.applySettings).toHaveBeenCalledWith(expected);
+    expect(listener).toHaveBeenCalledWith(expected);
   });
 
   it('keeps the first startup seed but always applies an explicit update', () => {
     const { host, target } = createHost();
     host.initialize({ deferAlertsUntilQuiet: true });
     host.initialize({ deferAlertsUntilQuiet: false });
-    expect(target.setDeferAlertsUntilQuiet).toHaveBeenCalledTimes(1);
+    expect(target.applySettings).toHaveBeenCalledTimes(1);
 
     host.update({ deferAlertsUntilQuiet: false });
-    expect(target.setDeferAlertsUntilQuiet).toHaveBeenNthCalledWith(2, false);
+    expect(target.applySettings).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ deferAlertsUntilQuiet: false }),
+    );
   });
 });
