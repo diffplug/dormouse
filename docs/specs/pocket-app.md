@@ -43,16 +43,18 @@ rather than handing back a promise that never resolves).
 
 **The auth screen leads with the half this browser can use.** Prior use is
 stored passkey material (`PocketClient.hasPriorUse`), re-derived every render so
-a half-finished setup offers sign-in on the retry rather than a second passkey.
-Without it, setup — setup password plus passkey label — is unfolded and sign-in
-secondary, since a synced passkey can reach a browser that stored nothing. With
-it, sign-in leads and setup folds behind the disclosure. **The local record must
-not lag the registration**: `setup` caches the public key between
-`registerPasskey` and `finish`, so a `setupToken` dying in between keeps
-`hasPriorUse` honest instead of earning a second passkey. Blocked site data
-costs persistence, not the visit: `localStoragePocketStorage` mirrors writes in
-memory and reads the mirror first, since that write lands after the credential
-is already irreversible and a throw would leave every retry minting an orphan.
+a half-finished setup retries into whichever half can still work. Without it,
+setup — setup password plus passkey label — is unfolded and sign-in secondary,
+since a synced passkey can reach a browser that stored nothing. With it, sign-in
+leads and setup folds behind the disclosure. **The local record must not lag the
+registration, nor outlive a refusal**: `setup` caches the public key between
+`registerPasskey` and `finish`, so a lost `finish` answer leaves a browser that
+can sign in rather than one minting a second passkey — while a `finish` the
+Server *answered* by rejecting clears it, that answer being proof there is
+nothing to sign in against. Blocked site data costs persistence, not the visit:
+`localStoragePocketStorage` mirrors writes in memory and reads the mirror first,
+since that write lands after the credential is already irreversible and a throw
+would leave every retry minting an orphan.
 
 **A scanned code outranks that question.** Opened from a Host's QR
 ([server.md](./server.md) owns the grammar), the screen leads with setup

@@ -1043,15 +1043,20 @@ describe('setup QR', () => {
     expect((await pair(socket, 'c3', nonce)).verified).toBe(false);
   });
 
-  it('treats an unknown or expired nonce as an ordinary pairing', async () => {
+  it('treats an unknown nonce as an ordinary pairing, and dates its own', async () => {
     const socket = await running();
     // Something has to be outstanding, or there is nothing to compare against.
     await mint();
     expect((await pair(socket, 'c1', 'never-minted-here')).verified).toBe(false);
 
+    // The Server's `expiresAt` rides along for the QR's countdown and nothing
+    // else. The nonce is minted, held and verified on the Host's clock, so a
+    // Server that disagrees about the instant cannot silently un-verify every
+    // scan (`mintSetupNonce`); its own expiry is `remote-host.test.ts`.
     setupTokenTtlMs = -1;
     const { nonce } = await mint();
-    expect((await pair(socket, 'c2', nonce)).verified).toBe(false);
+    expect((await pair(socket, 'c2', nonce)).verified).toBe(true);
+
     // A proofless phone — the QR-less path — pairs exactly as it always did.
     expect((await pair(socket, 'c3')).verified).toBe(false);
   });

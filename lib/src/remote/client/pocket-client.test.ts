@@ -107,6 +107,7 @@ function memoryStorage(): PocketStorage {
   return {
     getPasskeyPublicKey: (id) => passkeys.get(id) ?? null,
     setPasskeyPublicKey: (id, pk) => void passkeys.set(id, pk),
+    forgetPasskeyPublicKey: (id) => void passkeys.delete(id),
     knownCredentialIds: () => [...passkeys.keys()],
     isPaired: (hostId) => paired.has(hostId),
     markPaired: (hostId) => void paired.add(hostId),
@@ -319,23 +320,43 @@ describe('setup + signin', () => {
   });
 
   /**
-   * `finish` is what consumes the token, so a code that dies between `begin`
-   * and `finish` leaves a real authenticator credential registered with the
-   * Server refusing to record it. The local note must not lag that credential:
-   * left until after `finish`, `hasPriorUse` would answer false and the screen
-   * would offer a *second* registration rather than sign-in.
+   * The two halves of the cache-before-`finish` rule: a refusal is proof the
+   * Server has nothing, a lost answer is not.
    */
-  it('records the registration even when the server refuses it at finish', async () => {
-    const harness = makeClient({
-      ...AUTH_ROUTES,
-      '/api/setup/finish': () => ({ status: 401, json: { error: SETUP_TOKEN_INVALID_ERROR } }),
+  describe('the passkey cached between registerPasskey and finish', () => {
+    it('is dropped when finish is refused, since the Server registered nothing', async () => {
+      // The credential exists in the authenticator, but the Server never
+      // recorded it — so a kept cache would leave the screen leading with a
+      // sign-in that cannot succeed.
+      const harness = makeClient({
+        ...AUTH_ROUTES,
+        '/api/setup/finish': () => ({ status: 401, json: { error: SETUP_TOKEN_INVALID_ERROR } }),
+      });
+
+      await expect(harness.client.setup({ setupToken: 'spent' }, 'Phone')).rejects.toThrow(
+        SetupTokenInvalidError,
+      );
+
+      expect(harness.client.hasPriorUse()).toBe(false);
     });
 
-    await expect(harness.client.setup({ setupToken: 'spent' }, 'Phone')).rejects.toThrow(
-      SetupTokenInvalidError,
-    );
+    it('survives a finish whose answer never arrived, since the Server may hold it', async () => {
+      // Nothing here says the registration failed — the request may well have
+      // landed. Dropping the cache would send the retry into `registerPasskey`
+      // for a second credential instead of offering the sign-in that works.
+      const harness = makeClient({
+        ...AUTH_ROUTES,
+        '/api/setup/finish': () => {
+          throw new TypeError('Load failed');
+        },
+      });
 
-    expect(harness.client.hasPriorUse()).toBe(true);
+      await expect(harness.client.setup({ setupToken: 'live' }, 'Phone')).rejects.toThrow(
+        'Load failed',
+      );
+
+      expect(harness.client.hasPriorUse()).toBe(true);
+    });
   });
 });
 

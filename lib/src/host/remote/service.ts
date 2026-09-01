@@ -417,8 +417,10 @@ export class RemoteHostService {
     }
     // The second secret, and the one that makes `verified` unforgeable by the
     // Server: it exists only on this screen and on the phone that photographs it
-    // (`docs/specs/remote-security-model.md` → Pairing Ceremony).
-    const nonce = host.mintSetupNonce(body.expiresAt);
+    // (`docs/specs/remote-security-model.md` → Pairing Ceremony). It dates
+    // itself off the Host's clock; `body.expiresAt` below is the Server's, and
+    // is returned only for the QR's own countdown.
+    const nonce = host.mintSetupNonce();
     // `enrollment.origin` is the phone-facing WebAuthn origin — where Pocket is
     // served and where the passkey will be registered — not necessarily the
     // `serverUrl` this Host posts to.

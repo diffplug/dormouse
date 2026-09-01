@@ -62,6 +62,12 @@ export type PocketSocket = RemoteWebSocket;
 export interface PocketStorage {
   getPasskeyPublicKey(credentialId: string): string | null;
   setPasskeyPublicKey(credentialId: string, publicKey: string): void;
+  /**
+   * Drop a cached key again. Only {@link PocketClient.setup} calls it, for a
+   * credential it cached moments earlier and the Server then refused, so it
+   * never has an older visit's key to lose.
+   */
+  forgetPasskeyPublicKey(credentialId: string): void;
   /** Credential ids this device has stored a public key for (may be empty). */
   knownCredentialIds(): string[];
   isPaired(hostId: string): boolean;
@@ -110,6 +116,20 @@ export interface PairResult {
   readonly error?: string;
 }
 
+/**
+ * A failure the Server *answered* with — any response it rejected — as opposed
+ * to a request that never got an answer at all (DNS, TLS, the radio), which
+ * leaves `fetch`'s own `TypeError` to propagate untouched. The distinction is
+ * load-bearing exactly once, in {@link PocketClient.setup}: it decides whether
+ * the Server can be assumed to hold nothing.
+ */
+export class ServerRefusalError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ServerRefusalError';
+  }
+}
+
 /** Shown when the Server no longer accepts our session token. */
 export const SESSION_EXPIRED_MESSAGE = 'Your session expired. Sign in again to continue.';
 
@@ -124,7 +144,7 @@ export const SESSION_EXPIRED_MESSAGE = 'Your session expired. Sign in again to c
  * {@link PocketClient} clears the token before throwing this, so recovery is
  * exactly "sign in again" with the passkey and paired-host markers intact.
  */
-export class SessionExpiredError extends Error {
+export class SessionExpiredError extends ServerRefusalError {
   constructor() {
     super(SESSION_EXPIRED_MESSAGE);
     this.name = 'SessionExpiredError';
@@ -143,7 +163,7 @@ export const SETUP_CODE_DEAD_MESSAGE =
  * a wrong password and a rejected device signature too, so only the body
  * separates them ({@link SETUP_CODE_DEAD_MESSAGE} is what the user reads).
  */
-export class SetupTokenInvalidError extends Error {
+export class SetupTokenInvalidError extends ServerRefusalError {
   constructor() {
     super(SETUP_CODE_DEAD_MESSAGE);
     this.name = 'SetupTokenInvalidError';
@@ -272,18 +292,29 @@ export class PocketClient {
     );
     // Cached before `finish`, never after. Creating the authenticator credential
     // is the irreversible act and its public key is knowable the moment it
-    // returns, so the local record must not lag it: `finish` consumes the
-    // `setupToken`, and a token that died between the two calls would otherwise
-    // leave a registered credential with nothing recorded here — `hasPriorUse`
-    // false, the screen offering setup, and the retry minting a second one.
+    // returns, so a `finish` whose answer is lost still leaves a browser that
+    // reads as returning and can sign in, rather than one minting a second
+    // passkey.
     this.#storage.setPasskeyPublicKey(registration.credentialId, registration.publicKey);
-    const finish = await this.#setupApi<SetupFinishResponse>(API_ROUTES.setupFinish, {
-      ...credential,
-      credentialId: registration.credentialId,
-      publicKey: registration.publicKey,
-      clientDataJSON: registration.clientDataJSON,
-      label,
-    });
+    let finish: SetupFinishResponse;
+    try {
+      finish = await this.#setupApi<SetupFinishResponse>(API_ROUTES.setupFinish, {
+        ...credential,
+        credentialId: registration.credentialId,
+        publicKey: registration.publicKey,
+        clientDataJSON: registration.clientDataJSON,
+        label,
+      });
+    } catch (err) {
+      // A refusal is proof the Server has nothing; a lost answer is not. So a
+      // rejected `finish` (a dead `setupToken`, any answered error) takes the
+      // cache back down — kept, it would make `hasPriorUse` promise a sign-in
+      // that cannot succeed — while an unanswered one leaves it standing.
+      if (err instanceof ServerRefusalError) {
+        this.#storage.forgetPasskeyPublicKey(registration.credentialId);
+      }
+      throw err;
+    }
     // Only once the Server has acknowledged it: this names the credential later
     // pair/connect requests are built from. Sign-in refreshes both from the
     // Server's verified response.
@@ -894,7 +925,11 @@ export class PocketClient {
       this.#sessionToken = null;
       throw new SessionExpiredError();
     }
-    if (!response.ok) throw new Error(parsed.error ?? `request failed (${response.status})`);
+    // A refusal, not a bare Error: an answer arrived, which is what `setup`
+    // reads to decide whether the Server can be assumed to hold nothing.
+    if (!response.ok) {
+      throw new ServerRefusalError(parsed.error ?? `request failed (${response.status})`);
+    }
     return parsed;
   }
 
@@ -1019,6 +1054,13 @@ export function localStoragePocketStorage(): PocketStorage {
     setPasskeyPublicKey: (credentialId, publicKey) => {
       passkeys.set(credentialId, publicKey);
       write(PASSKEY_PREFIX + credentialId, publicKey);
+    },
+    // No tombstone, unlike `unmarkPaired`: the only key ever forgotten was
+    // written by this same run, so storage holds it only if that write worked —
+    // in which case this removal does too.
+    forgetPasskeyPublicKey: (credentialId) => {
+      passkeys.delete(credentialId);
+      drop(PASSKEY_PREFIX + credentialId);
     },
     knownCredentialIds: () => {
       // Union, not either-or: storage holds earlier visits, the mirror holds

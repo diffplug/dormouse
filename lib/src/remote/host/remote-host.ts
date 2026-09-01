@@ -20,6 +20,7 @@ import {
   utf8Encode,
   MAX_PENDING_PAIRINGS,
   MAX_TOKENS_PER_HOST,
+  DEFAULT_PAIRING_TTL_MS,
   boundedPairingAccount,
   boundedPairingLabel,
   isPairStatusQuery,
@@ -251,14 +252,20 @@ export class RemoteHost {
   /**
    * Mint the second secret of a setup QR — the one the Server never sees — for
    * whoever is composing that QR (`lib/src/host/remote/service.ts` →
-   * `#setupQr`). Shares the Server token's `expiresAt`, because the two are one
-   * window from the user's side.
+   * `#setupQr`).
+   *
+   * **One clock.** The expiry is this Host's own `now` plus the shared TTL,
+   * never the Server's `expiresAt`: everything that reads it — the prune below,
+   * {@link RemoteHost.#matchSetupNonce} — compares against `this.#now()`, so a
+   * Server-minted instant would let clock skew mint nonces born expired and
+   * silently downgrade every scan to the fingerprint compare.
    *
    * Prunes on insert, since nothing else sweeps this map, and the count cap
    * matches the Server's so a nonce cannot outlive the token it rode with.
    */
-  mintSetupNonce(expiresAt: number): string {
+  mintSetupNonce(): string {
     const now = this.#now();
+    const expiresAt = now + DEFAULT_PAIRING_TTL_MS;
     for (const [nonce, expiry] of this.#setupNonces) {
       if (expiry <= now) this.#setupNonces.delete(nonce);
     }

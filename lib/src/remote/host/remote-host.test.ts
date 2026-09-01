@@ -242,7 +242,7 @@ describe('RemoteHost frame handling', () => {
 
   it('verifies a proof over its own nonce, and does not spend it on arrival', async () => {
     const host = makeHost();
-    const nonce = host.mintSetupNonce(Date.now() + 60_000);
+    const nonce = host.mintSetupNonce();
     const setupProof = await computeSetupProof(nonce, PAIRING.devicePublicKey);
 
     const first = await pair('c1', { ...PAIRING, setupProof });
@@ -265,7 +265,7 @@ describe('RemoteHost frame handling', () => {
     // but the proof it can copy was computed over the phone's key — and it has
     // never seen the nonce, so it cannot compute one over its own.
     const host = makeHost();
-    const nonce = host.mintSetupNonce(Date.now() + 60_000);
+    const nonce = host.mintSetupNonce();
     const phonesProof = await computeSetupProof(nonce, 'phone-key');
 
     const substituted = await pair('c1', {
@@ -284,7 +284,7 @@ describe('RemoteHost frame handling', () => {
 
   it('spends the nonce when a verified pairing is approved, and downgrades the rest', async () => {
     const host = makeHost();
-    const nonce = host.mintSetupNonce(Date.now() + 60_000);
+    const nonce = host.mintSetupNonce();
     const setupProof = await computeSetupProof(nonce, PAIRING.devicePublicKey);
 
     const winner = await pair('c1', { ...PAIRING, setupProof });
@@ -306,11 +306,16 @@ describe('RemoteHost frame handling', () => {
   });
 
   it('never verifies an expired nonce, and drops it on the next mint', async () => {
-    const host = makeHost();
-    const stale = host.mintSetupNonce(Date.now() - 1);
+    let clock = Date.now();
+    const host = makeHost(
+      () => [],
+      () => clock,
+    );
+    const stale = host.mintSetupNonce();
+    clock += DEFAULT_PAIRING_TTL_MS + 1;
     // Minting a second code prunes the first, whether or not anyone asks about
     // it — nothing else sweeps that map.
-    const fresh = host.mintSetupNonce(Date.now() + 60_000);
+    const fresh = host.mintSetupNonce();
 
     expect(
       (await pair('c1', { ...PAIRING, setupProof: await computeSetupProof(stale, 'device-1') }))
@@ -322,12 +327,32 @@ describe('RemoteHost frame handling', () => {
     ).toBe(true);
   });
 
+  it('dates the nonce by its own clock, not the Server’s', async () => {
+    // The nonce is minted, held and verified entirely Host-side, so its expiry
+    // must come from the clock that compares against it. Dated off the Server's
+    // `expiresAt` instead, a Host running fast mints nonces born expired —
+    // every scanned phone silently drops to the fingerprint compare, with
+    // nothing anywhere reporting why.
+    const skewed = Date.now() + 6 * 60 * 60 * 1000;
+    const host = makeHost(
+      () => [],
+      () => skewed,
+    );
+    const nonce = host.mintSetupNonce();
+
+    const verified = await pair('c1', {
+      ...PAIRING,
+      setupProof: await computeSetupProof(nonce, PAIRING.devicePublicKey),
+    });
+    expect(verified.verified).toBe(true);
+  });
+
   it('pairs unverified with no proof, and with one nothing minted', async () => {
     const host = makeHost();
     expect((await pair('c1', PAIRING)).verified).toBe(false);
     // Nothing minted, so nothing to compute against — and no MAC is computed.
     expect((await pair('c2', { ...PAIRING, setupProof: 'forged' })).verified).toBe(false);
-    host.mintSetupNonce(Date.now() + 60_000);
+    host.mintSetupNonce();
     expect((await pair('c3', { ...PAIRING, setupProof: 'forged' })).verified).toBe(false);
 
     // All three still reach the modal: an unverifiable proof costs the
@@ -342,7 +367,7 @@ describe('RemoteHost frame handling', () => {
     // while a QR is up buys concurrent MAC computations in the process that
     // owns every PTY.
     const host = makeHost();
-    const nonce = host.mintSetupNonce(Date.now() + 60_000);
+    const nonce = host.mintSetupNonce();
     const setupProof = await computeSetupProof(nonce, PAIRING.devicePublicKey);
 
     const flood = 200;
@@ -367,9 +392,7 @@ describe('RemoteHost frame handling', () => {
     // already evicted would mark a pairing verified against a token that can no
     // longer be redeemed.
     const host = makeHost();
-    const nonces = Array.from({ length: MAX_TOKENS_PER_HOST + 2 }, () =>
-      host.mintSetupNonce(Date.now() + 60_000),
-    );
+    const nonces = Array.from({ length: MAX_TOKENS_PER_HOST + 2 }, () => host.mintSetupNonce());
     expect(new Set(nonces).size).toBe(nonces.length);
     expect(host.outstandingSetupNonceCount).toBe(MAX_TOKENS_PER_HOST);
   });
