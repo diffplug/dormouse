@@ -1656,14 +1656,26 @@ if [ -e "$STATE_DIR/hosts.json" ]; then
 else
   ENROLL_TOKEN="$(random_hex32)"
   [ ${#ENROLL_TOKEN} -ge 64 ] || die "generated enroll token is implausibly short; refusing to write the enrollment offer."
-  # Create the file and lock it down BEFORE the token is written, the same order
-  # server.env uses above.
-  : > "$ENROLL_OFFER_FILE"
-  chmod 0600 "$ENROLL_OFFER_FILE"
+  # Build an owner-only file beside the destination, then rename it into place.
+  # Redemption may claim the live path at any instant; it must see one complete
+  # generation or the other, never the truncate/chmod/write steps of a mint.
+  ENROLL_OFFER_TMP="$(mktemp "$RUN_DIR/.enroll-offer.XXXXXX")" \
+    || die "could not create a temporary enrollment offer."
+  chmod 0600 "$ENROLL_OFFER_TMP"
   # mintedAt is read here, at write time, and never from BUILT_AT: the 24-hour
   # expiry runs from the mint, and the build that precedes it is not free.
-  printf '{"origin":"%s","token":"%s","mintedAt":"%s"}\n' \
-    "$ORIGIN" "$ENROLL_TOKEN" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ENROLL_OFFER_FILE"
+  if ! printf '{"origin":"%s","token":"%s","mintedAt":"%s"}\n' \
+    "$ORIGIN" "$ENROLL_TOKEN" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ENROLL_OFFER_TMP"; then
+    rm -f "$ENROLL_OFFER_TMP"
+    unset ENROLL_TOKEN ENROLL_OFFER_TMP
+    die "could not write the temporary enrollment offer."
+  fi
+  if ! mv -f "$ENROLL_OFFER_TMP" "$ENROLL_OFFER_FILE"; then
+    rm -f "$ENROLL_OFFER_TMP"
+    unset ENROLL_TOKEN ENROLL_OFFER_TMP
+    die "could not publish the enrollment offer."
+  fi
+  unset ENROLL_OFFER_TMP
   unset ENROLL_TOKEN
   ok "minted run/enroll-offer.json (mode 0600) — a one-time enrollment offer for a Host on this machine"
 fi

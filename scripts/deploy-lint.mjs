@@ -216,23 +216,34 @@ export const RULES = [
     },
   },
   {
-    // Two adjacent lines, matched as one span, because the control is their
-    // ORDER: an empty file, restricted, and only then the token. Either line
-    // alone is satisfiable by a write that already happened.
+    // Two adjacent operations, matched as one span, because the control is their
+    // ORDER: a same-directory temp file, restricted, and only then the token.
     //
     // BOTH operands are pinned. Leaving the second line's operand off — on the
     // theory that the line above already anchors the identifier's spelling, so
     // repeating it would pin spelling rather than order — left the rule
     // satisfied by restricting the WRONG file: `chmod 0600 "$ENV_FILE"` on the
     // line after the offer's truncation matched, and the offer stayed under the
-    // directory's default permissions with the lint green. The first line still
-    // carries the whole rename-fragility, so binding the second adds none.
+    // directory's default permissions with the lint green.
     rule: 'Credentials at rest — the offer file is restricted to the installing user before the token is written',
     patterns: {
-      macOS: /: > "\$ENROLL_OFFER_FILE"\n\s*chmod 0600 "\$ENROLL_OFFER_FILE"/,
-      Linux: /: > "\$ENROLL_OFFER_FILE"\n\s*chmod 0600 "\$ENROLL_OFFER_FILE"/,
+      macOS:
+        /ENROLL_OFFER_TMP="\$\(mktemp "\$RUN_DIR\/\.enroll-offer\.XXXXXX"\)" \\\n\s*\|\| die "could not create a temporary enrollment offer\."\n\s*chmod 0600 "\$ENROLL_OFFER_TMP"/,
+      Linux:
+        /ENROLL_OFFER_TMP="\$\(mktemp "\$RUN_DIR\/\.enroll-offer\.XXXXXX"\)" \\\n\s*\|\| die "could not create a temporary enrollment offer\."\n\s*chmod 0600 "\$ENROLL_OFFER_TMP"/,
       Windows:
-        /\[IO\.File\]::WriteAllText\(\$ENROLL_OFFER_FILE, ''\)\n\s*Protect-Path -Path \$ENROLL_OFFER_FILE\b/,
+        /\[IO\.File\]::WriteAllText\(\$offerTemp, ''\)\n\s*Protect-Path -Path \$offerTemp\b/,
+    },
+  },
+  {
+    // Same-directory rename is the publication point: the live path contains a
+    // complete old offer, a complete new offer, or nothing because redemption
+    // claimed it — never an in-progress write.
+    rule: 'Credentials at rest — the completed enrollment offer is published by atomic rename',
+    patterns: {
+      macOS: /mv -f "\$ENROLL_OFFER_TMP" "\$ENROLL_OFFER_FILE"/,
+      Linux: /mv -f "\$ENROLL_OFFER_TMP" "\$ENROLL_OFFER_FILE"/,
+      Windows: /fs\.renameSync\(process\.argv\[2\], process\.argv\[3\]\)/,
     },
   },
   {

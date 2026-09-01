@@ -2257,10 +2257,12 @@ rem directly.
     if ($enrollToken.Length -lt 64) {
       Die "generated enroll token is implausibly short; refusing to write the enrollment offer."
     }
-    # Create the file with an owner-only ACL BEFORE the token is written, so there
-    # is no window in which the secret sits under an inherited ACL.
-    [IO.File]::WriteAllText($ENROLL_OFFER_FILE, '')
-    Protect-Path -Path $ENROLL_OFFER_FILE
+    # Build an owner-only file beside the destination, then rename it into place.
+    # Redemption may claim the live path at any instant; it must see one complete
+    # generation or the other, never the create/ACL/write steps of a mint.
+    $offerTemp = Join-Path $RUN_DIR ('.enroll-offer.' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    [IO.File]::WriteAllText($offerTemp, '')
+    Protect-Path -Path $offerTemp
     # mintedAt is read here, at write time, and never from $BUILT_AT: the 24-hour
     # expiry runs from the mint, and the build that precedes it is not free.
     #
@@ -2273,8 +2275,23 @@ rem directly.
       token    = $enrollToken
       mintedAt = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
     } | ConvertTo-Json -Compress
-    [IO.File]::WriteAllText($ENROLL_OFFER_FILE, $offer + "`r`n")
-    Remove-Variable enrollToken
+    try {
+      [IO.File]::WriteAllText($offerTemp, $offer + "`r`n")
+      # Windows PowerShell 5.1 has no File.Move(overwrite) overload. Node's
+      # same-directory rename is MoveFileEx(REPLACE_EXISTING), the atomic path
+      # already used for current.txt and previous.txt above.
+      $publishOfferJs = @'
+const fs = require("fs");
+fs.renameSync(process.argv[2], process.argv[3]);
+'@
+      $published = Invoke-NodeScript -NodeBin $STAGED_NODE -Script $publishOfferJs -Arguments @($offerTemp, $ENROLL_OFFER_FILE)
+      if ($published.ExitCode -ne 0) {
+        Die "could not publish the enrollment offer: $(Get-FailureTail $published)"
+      }
+    } finally {
+      Remove-Item -LiteralPath $offerTemp -Force -ErrorAction SilentlyContinue
+    }
+    Remove-Variable enrollToken, offerTemp
     Write-Ok "minted run\enroll-offer.json (owner-only ACL) -- a one-time enrollment offer for a Host on this machine"
   }
 
