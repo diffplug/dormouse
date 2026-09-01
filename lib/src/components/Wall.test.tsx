@@ -1467,16 +1467,16 @@ describe('Wall on the Lath engine', () => {
       expect(typed).toEqual(['pnpm storybook\r', 'pnpm storybook\r']);
       expect(leafCount()).toBe(1);
 
-      // The re-run goes live (releasing the lock) and exits.
+      // The re-run starts and dies inside one 100ms sample, so no poll ever sees
+      // it live: the lock has to release on the finished run instead. Without
+      // that, the request below waits out the 15s timeout and `settle` gives up.
       act(() => {
         terminalRegistry.applyTerminalSemanticEvents('pane-a', [
           { type: 'commandLine', commandLine: 'pnpm storybook' },
           { type: 'commandStart', source: 'osc633_boundaries' },
+          { type: 'commandFinish', exitCode: 1 },
+          { type: 'promptStart' },
         ]);
-      });
-      await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
-      act(() => {
-        terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'promptStart' }]);
       });
 
       // A line the host cannot type behind says so, rather than reporting a tool
@@ -1507,15 +1507,7 @@ describe('Wall on the Lath engine', () => {
       });
 
       // Same Surface throughout: the leaf changed kind without changing id, so
-      // the session persists as one. The live state again outlasts a poll tick,
-      // so the re-run releases its lock before the next test takes one.
-      act(() => {
-        terminalRegistry.applyTerminalSemanticEvents('pane-a', [
-          { type: 'commandLine', commandLine: 'pnpm storybook' },
-          { type: 'commandStart', source: 'osc633_boundaries' },
-        ]);
-      });
-      await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
+      // the session persists as one.
       await act(async () => { window.dispatchEvent(new Event('pagehide')); });
       await flush();
       await flush();
