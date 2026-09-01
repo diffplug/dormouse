@@ -32,6 +32,14 @@
 
 **Why the keystroke fallback is not routed into the manager.** The fallback in `docs/specs/terminal-state.md` is renderer-side and lower confidence than a shell-reported command boundary. Wiring it in would buy integration-less shells a worse version of WATCHING at the price of a second command-tracking path to keep in sync with the real one.
 
+## Alarm settings
+
+**Why animation deferral defaults off.** BEL and notification OSCs explicitly ask to alert now, while continuously changing output may never become quiet. Opt-in preserves their established timing and makes indefinite deferral a deliberate choice.
+
+**Why the gate reads private detector state.** The detector runs for unwatched commands, while protocol progress and command-exit status can mask it in the public projection. The gate needs the underlying evidence, not whichever bell state wins display precedence.
+
+**Why a deferred event is not dispatched again.** Claimants already received first refusal when the completion happened. Re-offering it at quiet time would let an await registered later consume history and would report one completion twice.
+
 ## Spoken alarms
 
 **Why the settle path cannot assume an async callback.** Chrome dispatches `start` and then `error` with `not-allowed` *synchronously* inside `speechSynthesis.speak()` when speech is invoked without a user gesture — which is exactly this call site, since an alarm fires on a timer while the user is away.
