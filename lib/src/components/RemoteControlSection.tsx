@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
-import { TextInput, modalActionButton } from './design';
+import { ModalReviewBlock, TextInput, modalActionButton } from './design';
 import type { RemoteHostConsoleStatus } from '../host/remote/service-protocol';
 import type { RemoteHostStatus } from '../remote/host/remote-host';
 import {
@@ -11,8 +11,6 @@ import {
   refreshRemoteHostStatus,
   subscribeToRemoteHostStatus,
 } from '../remote/host/host-status-store';
-
-type EnrollmentOfferSummary = NonNullable<RemoteHostConsoleStatus['offer']>;
 
 /**
  * How each relay-socket state reads to someone who is not holding the spec.
@@ -46,6 +44,50 @@ const TONE_CLASS = {
 } as const;
 
 const FIELD_LABEL = 'text-xs text-muted';
+
+/**
+ * The busy/error pair every action in this section runs behind, so a rejection
+ * from any of them lands in the same place and reads in the same words.
+ */
+function useBusyAction() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = useCallback(async (action: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  return { busy, error, run };
+}
+
+/** The one field the offer card and the typed form both ask for. */
+function MachineNameField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="mt-2 block">
+      <span className={FIELD_LABEL}>Name for this machine</span>
+      <TextInput
+        value={value}
+        onChange={onChange}
+        autoComplete="off"
+        placeholder="e.g. Work laptop"
+      />
+    </label>
+  );
+}
 
 /**
  * Connect this machine to a coordinating server, so a phone running Dormouse
@@ -86,7 +128,7 @@ export function RemoteControlSection() {
           pairedClients={state.status.pairedClients}
         />
       ) : (
-        <EnrollView offer={state.status.offer} />
+        <EnrollView offer={state.status.offer} suggestedLabel={state.status.suggestedLabel} />
       )}
     </section>
   );
@@ -99,16 +141,22 @@ export function RemoteControlSection() {
  * a user who ran the installer here has nothing to type, and a server somewhere
  * else is the rarer case. Without one, nothing about the form changes.
  */
-function EnrollView({ offer }: { offer: RemoteHostConsoleStatus['offer'] }) {
+function EnrollView({
+  offer,
+  suggestedLabel,
+}: {
+  offer: RemoteHostConsoleStatus['offer'];
+  suggestedLabel: string;
+}) {
   const [showForm, setShowForm] = useState(false);
 
-  if (!offer) return <EnrollForm />;
+  if (!offer) return <EnrollForm suggestedLabel={suggestedLabel} />;
 
   return (
     <div className="mt-1.5">
       {/* Keyed by origin: a different offer is a different form, and its name
           field must re-seed rather than keep what was typed for the old one. */}
-      <OfferCard key={offer.origin} offer={offer} />
+      <OfferCard key={offer.origin} origin={offer.origin} suggestedLabel={suggestedLabel} />
       <div className="mt-2">
         <button
           type="button"
@@ -116,10 +164,12 @@ function EnrollView({ offer }: { offer: RemoteHostConsoleStatus['offer'] }) {
           className={modalActionButton()}
           onClick={() => setShowForm((open) => !open)}
         >
-          Enroll with a different server…
+          {/* The same `+`/`−` affordance as Pocket's "First-time setup"
+              disclosure, so a fold reads as one before it is clicked. */}
+          {showForm ? '− ' : '+ '}Enroll with a different server…
         </button>
       </div>
-      {showForm ? <EnrollForm /> : null}
+      {showForm ? <EnrollForm suggestedLabel={suggestedLabel} /> : null}
     </div>
   );
 }
@@ -127,53 +177,36 @@ function EnrollView({ offer }: { offer: RemoteHostConsoleStatus['offer'] }) {
 /**
  * One-click enrollment against the server installed on this machine.
  *
- * The origin is shown but not editable, and the one-time token behind it never
- * reaches this realm at all: `enrollOffer` names only the label and the service
- * re-reads the offer file itself (`docs/specs/server.md`, "Remote control, in
- * the Settings dialog"). Every refusal the typed form can hit applies here too —
- * an installed server can still sit on an origin this build was not compiled to
- * reach — so the error renders in the same place, in the same words.
+ * The origin is shown but not editable, and the label is all this realm sends
+ * (`service-protocol.ts` → `RemoteHostConsoleStatus.offer`). Every refusal the
+ * typed form can hit applies here too — an installed server can still sit on an
+ * origin this build was not compiled to reach — so the error renders in the same
+ * place, in the same words.
  */
-function OfferCard({ offer }: { offer: EnrollmentOfferSummary }) {
-  const [label, setLabel] = useState(offer.suggestedLabel);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+function OfferCard({ origin, suggestedLabel }: { origin: string; suggestedLabel: string }) {
+  const [label, setLabel] = useState(suggestedLabel);
+  const { busy, error, run } = useBusyAction();
 
   const ready = label.trim() !== '';
-
-  const submit = useCallback(async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await enrollOfferRemoteHost(label.trim());
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setBusy(false);
-    }
-  }, [label]);
 
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        if (ready && !busy) void submit();
+        if (ready && !busy) void run(() => enrollOfferRemoteHost(label.trim()));
       }}
     >
       <div className="text-sm leading-relaxed text-muted">
         A Dormouse server is installed on this machine.
       </div>
-      <div className="mt-0.5 font-mono text-sm break-all text-foreground">{offer.origin}</div>
+      {/* The origin is the value the user is about to act on, so it gets the
+          same framed review block as the other two places that show one
+          (ExternalLinkModal, RemotePairingModal). */}
+      <ModalReviewBlock className="mt-1.5" wrap="breakAll">
+        {origin}
+      </ModalReviewBlock>
 
-      <label className="mt-2 block">
-        <span className={FIELD_LABEL}>Name for this machine</span>
-        <TextInput
-          value={label}
-          onChange={setLabel}
-          autoComplete="off"
-          placeholder="e.g. Work laptop"
-        />
-      </label>
+      <MachineNameField value={label} onChange={setLabel} />
 
       {error ? <div className="mt-2 text-sm leading-relaxed text-error">{error}</div> : null}
 
@@ -199,24 +232,11 @@ function EnrolledView({
   connection: RemoteHostStatus;
   pairedClients: number;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run } = useBusyAction();
   // Disconnecting drops every paired phone until they pair again, so it asks
   // once rather than acting on the first click.
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
   const described = describeConnection(connection);
-
-  const run = useCallback(async (action: () => Promise<void>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await action();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setBusy(false);
-    }
-  }, []);
 
   return (
     <div className="mt-1.5 text-sm leading-relaxed">
@@ -281,30 +301,26 @@ function EnrolledView({
   );
 }
 
-function EnrollForm() {
+/** The three-field form, prefilled with the same suggested name the card uses. */
+function EnrollForm({ suggestedLabel }: { suggestedLabel: string }) {
   const [serverUrl, setServerUrl] = useState('');
   const [password, setPassword] = useState('');
-  const [label, setLabel] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [label, setLabel] = useState(suggestedLabel);
+  const { busy, error, run } = useBusyAction();
 
   const ready = serverUrl.trim() !== '' && password !== '' && label.trim() !== '';
 
-  const submit = useCallback(async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await enrollRemoteHost(serverUrl.trim(), password, label.trim());
-      // Only on success: a failed enroll is usually a typo in one of the other
-      // fields, and clearing the password would make every retry a re-fetch
-      // from the password manager.
-      setPassword('');
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setBusy(false);
-    }
-  }, [serverUrl, password, label]);
+  const submit = useCallback(
+    () =>
+      run(async () => {
+        await enrollRemoteHost(serverUrl.trim(), password, label.trim());
+        // Only on success: a failed enroll is usually a typo in one of the other
+        // fields, and clearing the password would make every retry a re-fetch
+        // from the password manager.
+        setPassword('');
+      }),
+    [run, serverUrl, password, label],
+  );
 
   return (
     <form
@@ -341,15 +357,7 @@ function EnrollForm() {
         />
       </label>
 
-      <label className="mt-2 block">
-        <span className={FIELD_LABEL}>Name for this machine</span>
-        <TextInput
-          value={label}
-          onChange={setLabel}
-          autoComplete="off"
-          placeholder="e.g. Work laptop"
-        />
-      </label>
+      <MachineNameField value={label} onChange={setLabel} />
 
       {error ? <div className="mt-2 text-sm leading-relaxed text-error">{error}</div> : null}
 

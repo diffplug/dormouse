@@ -25,17 +25,17 @@ export const UNENROLLED_STATUS: RemoteHostConsoleStatus = {
   hostId: null,
   connection: 'idle',
   pairedClients: 0,
+  suggestedLabel: 'ned-mac',
   offer: null,
 };
 
 /**
  * Un-enrolled *and* a Dormouse server installed on this machine: the section
- * leads with the one-click offer card and folds the typed form away. Never a
- * token — the service keeps that off the wire entirely.
+ * leads with the one-click offer card and folds the typed form away.
  */
 export const OFFER_STATUS: RemoteHostConsoleStatus = {
   ...UNENROLLED_STATUS,
-  offer: { origin: 'https://ned-mac.tail9c2f1.ts.net', suggestedLabel: 'ned-mac' },
+  offer: { origin: 'https://ned-mac.tail9c2f1.ts.net' },
 };
 
 /** An enrolled machine, with the fields a caller is likely to vary. */
@@ -48,6 +48,7 @@ export function enrolledStatus(
     hostId: 'host-6f1c2a90',
     connection: 'connected',
     pairedClients: 0,
+    suggestedLabel: 'ned-mac',
     // An enrolled Host reports no offer, whatever is on disk.
     offer: null,
     ...over,

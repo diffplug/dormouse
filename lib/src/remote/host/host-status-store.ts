@@ -67,9 +67,7 @@ let generation = 0;
  * time, so without this the section re-renders twice a minute to paint
  * identical text. The sibling store this same dialog reads guards the same way
  * (`setPushDevices` in `lib/src/lib/push-devices.ts`); comparing the fields in
- * {@link STATUS_FIELDS} is the whole of it, with `offer` — the one nested value
- * — compared field-wise, since the service mints a fresh object per read and
- * comparing it by reference would re-render on every tick.
+ * {@link STATUS_FIELDS} is the whole of it.
  */
 function setState(next: RemoteHostStatusState): void {
   if (sameState(state, next)) return;
@@ -78,46 +76,50 @@ function setState(next: RemoteHostStatusState): void {
 }
 
 /**
- * Every field of a {@link RemoteHostConsoleStatus}, as a compile-time checklist.
+ * How to tell whether each field of a {@link RemoteHostConsoleStatus} changed —
+ * one comparator per field, which is also the compile-time checklist that every
+ * field has one.
  *
  * The same guard `sameRequest` uses in `activation.ts`, for the same reason: a
- * field added to the interface and forgotten in {@link sameState} would be
- * polled but never published, so the section would paint that field from
- * whenever one of the others last changed — stale for as long as the dialog
- * stays open, and nothing else would catch it. `satisfies` makes the omission a
- * compile error instead.
+ * field added to the interface and forgotten here would be polled but never
+ * published, so the section would paint that field from whenever one of the
+ * others last changed — stale for as long as the dialog stays open, and nothing
+ * else would catch it. The mapped type makes the omission a compile error, and
+ * makes a *nested* field's comparator a decision rather than an oversight: the
+ * service mints a fresh object per read, so `offer` compared by reference would
+ * re-render on every tick.
  */
-const STATUS_FIELDS = {
-  enrolled: true,
-  serverUrl: true,
-  hostId: true,
-  connection: true,
-  pairedClients: true,
-  // Nested, so `sameState` special-cases it below rather than comparing by ===.
-  offer: true,
-} satisfies Record<keyof RemoteHostConsoleStatus, true>;
+const STATUS_FIELDS: {
+  [K in keyof RemoteHostConsoleStatus]: (
+    a: RemoteHostConsoleStatus[K],
+    b: RemoteHostConsoleStatus[K],
+  ) => boolean;
+} = {
+  enrolled: Object.is,
+  serverUrl: Object.is,
+  hostId: Object.is,
+  connection: Object.is,
+  pairedClients: Object.is,
+  suggestedLabel: Object.is,
+  offer: (a, b) => a?.origin === b?.origin,
+};
 
 function sameState(a: RemoteHostStatusState, b: RemoteHostStatusState): boolean {
   if (a === b) return true;
   if (a.kind !== b.kind) return false;
   if (a.kind === 'error' && b.kind === 'error') return a.message === b.message;
   if (a.kind === 'ready' && b.kind === 'ready') {
-    return (Object.keys(STATUS_FIELDS) as Array<keyof RemoteHostConsoleStatus>).every((field) =>
-      field === 'offer'
-        ? sameOffer(a.status.offer, b.status.offer)
-        : a.status[field] === b.status[field],
-    );
+    const left = a.status;
+    const right = b.status;
+    return (Object.keys(STATUS_FIELDS) as Array<keyof RemoteHostConsoleStatus>).every((field) => {
+      // One cast, because TypeScript cannot correlate the key with its own
+      // comparator's parameter types while iterating the map.
+      const same = STATUS_FIELDS[field] as (x: unknown, y: unknown) => boolean;
+      return same(left[field], right[field]);
+    });
   }
   // `unsupported` and `loading` are the two singletons, so matching kinds is all.
   return true;
-}
-
-type Offer = RemoteHostConsoleStatus['offer'];
-
-function sameOffer(a: Offer, b: Offer): boolean {
-  if (a === b) return true;
-  if (!a || !b) return false;
-  return a.origin === b.origin && a.suggestedLabel === b.suggestedLabel;
 }
 
 /**
@@ -254,13 +256,12 @@ export async function enrollRemoteHost(
 
 /**
  * Enroll against the offer the installer left on this machine — the one-click
- * path, where the only thing the user chooses is what to call the machine.
+ * path, where the only thing the user chooses is what to call the machine
+ * (`service-protocol.ts` → `RemoteHostConsoleStatus.offer`).
  *
- * The origin and the one-time token stay in the service, which re-reads the
- * offer file at call time; neither has ever been in this realm. Rejections
- * propagate verbatim, including the same allowlist refusal the typed form gets:
- * a server installed on this machine can still be an origin this build was not
- * compiled to reach.
+ * Rejections propagate verbatim, including the same allowlist refusal the typed
+ * form gets: a server installed on this machine can still be an origin this
+ * build was not compiled to reach.
  */
 export async function enrollOfferRemoteHost(label: string): Promise<void> {
   const active = link();

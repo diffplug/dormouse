@@ -107,8 +107,8 @@ export const EnrollRefused: Story = {
  * The installer ran on this machine, so there is nothing to type: the offer
  * card leads with the origin it found and a name already filled in, and the
  * three-field form folds away behind "Enroll with a different server…". The
- * one-time token is not in this frame anywhere — the service keeps it off the
- * bridge and re-reads the file when Enroll is pressed.
+ * refusal {@link EnrollRefused} shows reaches this card in the same words —
+ * `RemoteControlSection.test.tsx` pins that.
  */
 export const OfferAvailable: Story = {
   parameters: {
@@ -116,27 +116,6 @@ export const OfferAvailable: Story = {
     docs: { story: { height: '300px' } },
   },
   play: settled('A Dormouse server is installed on this machine.'),
-};
-
-/**
- * The same refusal as {@link EnrollRefused}, reached from the one-click path: a
- * server installed *here* can still sit on an origin a stock build was never
- * compiled to reach, and the card has to say so rather than fail silently.
- */
-export const OfferEnrollRefused: Story = {
-  parameters: {
-    primedRemoteHost: {
-      status: OFFER_STATUS,
-      enrollError:
-        'This build will not connect to https://ned-mac.tail9c2f1.ts.net. Allowed: https://*.dormouse.sh wss://*.dormouse.sh',
-    },
-    docs: { story: { height: '360px' } },
-  },
-  play: async (context) => {
-    const canvas = within(context.canvasElement);
-    await userEvent.click(await canvas.findByRole('button', { name: 'Enroll' }));
-    await canvas.findByText(/This build will not connect/);
-  },
 };
 
 /** Enrolled, relay socket still opening. No event fires for this → the 2 s poll. */

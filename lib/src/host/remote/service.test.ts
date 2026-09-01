@@ -5,6 +5,7 @@
  * access — recipients, the ACL, and the allowlist are all read on this side.
  */
 
+import { hostname } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EnrollmentOffer, HostAclRecord, PairingRequest } from 'server-lib-common';
 import type { HostEnrollment } from '../../remote/host/enrollment';
@@ -164,7 +165,6 @@ function createService(seed?: Partial<Pick<MemoryStore, 'enrollment' | 'acl'>>):
       offerReads++;
       return offer;
     },
-    suggestLabel: () => 'ned-mac',
   });
   return service;
 }
@@ -226,6 +226,7 @@ describe('status', () => {
       hostId: null,
       connection: 'stopped',
       pairedClients: 0,
+      suggestedLabel: hostname(),
       offer: null,
     } satisfies RemoteHostConsoleStatus);
   });
@@ -241,7 +242,8 @@ describe('status', () => {
       hostId: null,
       connection: 'stopped',
       pairedClients: 0,
-      offer: { origin: OFFER.origin, suggestedLabel: 'ned-mac' },
+      suggestedLabel: hostname(),
+      offer: { origin: OFFER.origin },
     } satisfies RemoteHostConsoleStatus);
     // The one-time token is a bearer credential and this is a service→webview
     // shape (SECURITY.md), so it must not appear anywhere in what was sent.
@@ -249,8 +251,8 @@ describe('status', () => {
   });
 
   it('reports no offer, and reads no file, once enrolled', async () => {
-    // What bounds the Settings dialog's 2 s poll: an enrolled machine has
-    // nothing to offer, so the poll must not stat a file every tick.
+    // What bounds the read to the un-enrolled state: an enrolled machine has
+    // nothing to offer, so the 2 s poll must not stat a file every tick.
     offer = OFFER;
     createService({ enrollment: ENROLLMENT });
     await service.start();
@@ -270,6 +272,7 @@ describe('status', () => {
       hostId: 'host-1',
       connection: 'connected',
       pairedClients: 1,
+      suggestedLabel: hostname(),
       offer: null,
     } satisfies RemoteHostConsoleStatus);
   });

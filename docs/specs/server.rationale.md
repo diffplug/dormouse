@@ -49,6 +49,8 @@
 
 ## Remote control, in the Settings dialog
 
+**What the offer read is bounded to.** The un-enrolled state, not the dialog. The Settings dialog's 2 s poll is the loudest reader but not the only one — the enrolled-gate seeds itself from `status` too, so an un-enrolled machine pays roughly two ENOENT opens per webview activation on top of it. An enrolled machine, the one left running for days, pays nothing at all.
+
 **Why the connection is polled.** Without the 2 s poll, a machine that finished connecting a moment after the dialog opened would read as permanently "Connecting…" — the Host service emits no event for connection changes, only for `{ enrolled }`.
 
 **Why the poll's answer is compared field-wise.** The service returns a fresh object on every poll, so an identity comparison publishes a change every 2 s and the section re-renders twice a minute to paint identical text.

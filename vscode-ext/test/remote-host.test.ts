@@ -8,7 +8,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server, type Socket } from 'node:net';
 import { mkdir } from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { dirname } from 'node:path';
+import type { EnrollmentOffer } from 'server-lib-common';
 
 import { ENROLLMENT_KEY } from '../../lib/src/remote/host/store';
 import type { ExtensionMessage } from '../src/message-types';
@@ -27,6 +29,25 @@ import {
 
 type HostModule = typeof import('../src/remote-host');
 type LinkModule = typeof import('../src/peer-link');
+
+/**
+ * The installer's offer file is the one thing an idle `status` reads off the
+ * real disk, and whether the machine running these tests happens to have a
+ * Dormouse server installed must not decide whether they pass. Mocked at the
+ * module both readers share — the glue's `idleStatus` and the service's own
+ * default `readOffer`.
+ */
+let offer: EnrollmentOffer | null = null;
+vi.mock('../../lib/src/host/remote/enroll-offer', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/src/host/remote/enroll-offer')>()),
+  readEnrollmentOffer: () => Promise.resolve(offer),
+}));
+
+const OFFER: EnrollmentOffer = {
+  origin: 'https://ned-mac.tail9c2f1.ts.net',
+  token: 'a'.repeat(64),
+  mintedAt: '2026-08-31T00:00:00.000Z',
+};
 
 let dir: string;
 let realTmp: string | undefined;
@@ -256,6 +277,7 @@ beforeEach(async () => {
   dir = await tempStorageDir();
   realTmp = process.env.TMPDIR;
   process.env.TMPDIR = dir;
+  offer = null;
 });
 
 afterEach(async () => {
@@ -476,6 +498,29 @@ describe('remote host service glue', () => {
     });
   });
 
+  it('bootstraps the contention on enrollOffer too, or the card cannot be pressed', async () => {
+    // The one-click card renders off the idle `status` above, on a machine with
+    // no Host in any window. If only `enroll` bootstrapped, pressing Enroll
+    // would be refused "no remote Host is reachable" every time.
+    offer = OFFER;
+    const mod = await freshHost();
+    const bound = fakeDeps();
+    mod.configureRemoteHost(bound.deps());
+    mod.initRemoteHost(fakeContext().context);
+    expect(opened!.isPeerBroker()).toBe(false);
+
+    mod.handleRemoteHostCommand({ rhId: 'rh-1', cmd: 'enrollOffer', params: { label: 'Laptop' } });
+
+    await waitFor(() => results(bound.posted).length > 0);
+    expect(opened!.isPeerBroker()).toBe(true);
+    // The service ran it and refused the origin this build was not built for —
+    // which is the proof it reached a service at all.
+    expect(results(bound.posted)[0]).toMatchObject({
+      rhId: 'rh-1',
+      error: expect.stringContaining('allowed remote sources'),
+    });
+  });
+
   it('forwards a command to the window that holds the Host', async () => {
     const squat = await otherWindowHoldsTheHost();
     const mod = await freshHost();
@@ -487,7 +532,11 @@ describe('remote host service glue', () => {
     // reach one through. `status` is answered as an idle service would rather
     // than refused: this window sees no enrollment, which is what "not enrolled"
     // *is*, and an error there tells `enrolled-gate.ts` nothing it can act on.
+    // The offer is read from the disk of this same process, so the one-click
+    // card renders on exactly the machines it is for — un-enrolled ones.
+    offer = OFFER;
     mod.handleRemoteHostCommand({ rhId: 'rh-1', cmd: 'status' });
+    await waitFor(() => results(bound.posted).length > 0);
     expect(results(bound.posted)).toEqual([
       {
         rhId: 'rh-1',
@@ -497,12 +546,13 @@ describe('remote host service glue', () => {
           hostId: null,
           connection: 'stopped',
           pairedClients: 0,
-          // No service in any window means nothing could redeem an offer, so
-          // none is advertised however the installer left the machine.
-          offer: null,
+          suggestedLabel: hostname(),
+          offer: { origin: OFFER.origin },
         },
       },
     ]);
+    // A service→webview shape: the one-time token is not in it (SECURITY.md).
+    expect(JSON.stringify(bound.posted)).not.toContain(OFFER.token);
 
     // `enroll` bootstraps the contention, which this window loses — so even the
     // bootstrap ends up forwarded rather than starting a second Host.
@@ -616,6 +666,8 @@ describe('remote host service glue', () => {
     mod.initRemoteHost(fakeContext().context);
     await tick();
 
+    // Including the offer, which both sides read from the same file.
+    offer = OFFER;
     mod.handleRemoteHostCommand({ rhId: 'rh-status', cmd: 'status' });
     mod.handleRemoteHostCommand({ rhId: 'rh-pushDevices', cmd: 'pushDevices' });
     mod.handleRemoteHostCommand({ rhId: 'rh-pairingQueue', cmd: 'pairingQueue' });
@@ -651,6 +703,9 @@ describe('remote host service glue', () => {
       await idle.handleCommand({ rhId: `rh-${cmd}`, cmd });
     }
     idle.dispose();
+    // The glue's `status` is the one idle answer that reads a file, so it
+    // settles a tick later than the two that do not.
+    await waitFor(() => results(bound.posted).length === 4);
 
     const byId = (entries: Array<{ rhId: string; result?: unknown }>) =>
       Object.fromEntries(

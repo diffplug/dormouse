@@ -136,20 +136,14 @@ section 1 is installed on this very laptop, there is nothing to type:
 The installer left a `run/enroll-offer.json` next to its state — this install's
 origin plus a one-time token the server redeems in place of the setup password
 — and the Host reads that same file from the well-known path for the platform.
-Press **Enroll** and the machine is connected. Two things the card is careful
-about:
+Press **Enroll** and the machine is connected.
 
-- **The token never reaches the webview.** The status the card renders from
-  carries the origin and a suggested name and nothing else; pressing Enroll
-  sends only the name, and the Host service re-reads the file itself. That
-  re-read is also why a card left on screen for an hour is safe to press:
-  redeeming an offer unlinks it, so a spent one fails with a message saying so
-  rather than half-enrolling.
-- **Refusals are shown, not swallowed.** This is section 2's symptom, and a
-  server installed *here* is no exception — a stock build still refuses a
-  `*.ts.net` origin before anything leaves the machine:
-
-<Canvas of={RemoteControl.OfferEnrollRefused} />
+The one thing the card is careful about: **the token never reaches the webview.**
+The status the card renders from carries the origin and nothing else; pressing
+Enroll sends only the name, and the Host service re-reads the file itself. That
+re-read is also why a card left on screen for an hour is safe to press:
+redeeming an offer unlinks it, so a spent one fails with a message saying so
+rather than half-enrolling.
 
 ### The typed form, for a server somewhere else
 

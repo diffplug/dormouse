@@ -16,7 +16,7 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { homedir, hostname } from 'node:os';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { isEnrollmentOffer, type EnrollmentOffer } from 'server-lib-common';
 
@@ -26,11 +26,14 @@ const OFFER_FILE = join('run', 'enroll-offer.json');
 
 /**
  * Where each installer's offer lands, mirroring the install root that installer
- * picks (`deploy/local/install-{macos,windows,linux}`). `null` means "there is
- * no path to look at", which reads the same as no offer.
+ * picks (`deploy/local/install-{macos,windows,linux}`) — pinned against those
+ * three scripts by `lib/src/lib/mirrored-constants.test.ts`, since nothing links
+ * the two sides at build time and a drift is a one-click enrollment that
+ * silently never appears. `null` means "there is no path to look at", which
+ * reads the same as no offer.
  *
- * Exported for its test; callers want {@link readEnrollmentOffer}. The
- * parameters exist so that test can cover all three platforms from one, and are
+ * Exported for its tests; callers want {@link readEnrollmentOffer}. The
+ * parameters exist so those can cover all three platforms from one, and are
  * defaulted rather than injected everywhere else.
  */
 export function enrollmentOfferPath(
@@ -74,9 +77,4 @@ export async function readEnrollmentOffer(
   } catch {
     return null;
   }
-}
-
-/** What the offer card prefills its name field with. */
-export function suggestedHostLabel(): string {
-  return hostname();
 }

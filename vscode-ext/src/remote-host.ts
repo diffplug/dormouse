@@ -1,5 +1,6 @@
 /** VS Code binding of {@link RemoteHostService}; see `docs/specs/vscode.md` → "Remote Host". */
 
+import { hostname } from 'node:os';
 import type * as vscode from 'vscode';
 
 import {
@@ -7,6 +8,7 @@ import {
   type AskSurfaceProvider,
 } from '../../lib/src/host/remote/ask-surface-provider';
 import { bakedConnectSrc } from '../../lib/src/host/remote/connect-src';
+import { readEnrollmentOffer } from '../../lib/src/host/remote/enroll-offer';
 import { REMOTE_HOST_COMMAND_TIMEOUT_MS } from '../../lib/src/host/remote/link-client';
 import { RemoteHostService } from '../../lib/src/host/remote/service';
 import {
@@ -341,10 +343,11 @@ function drainQueuedCommands(): void {
  * an enrolled machine's webview it has no Host moments before it gets one,
  * leaving the gates that arm on that answer down.
  *
- * `enroll` is the one command that may start the contention: it is how an
- * installation with no Host at all bootstraps. Everything else refuses only
- * where there is genuinely nothing to reach — never contending, or settled with
- * no service and no broker.
+ * `enroll` and `enrollOffer` are the two commands that may start the contention:
+ * they are how an installation with no Host at all bootstraps, the second from
+ * the one-click card an idle `status` advertises ({@link idleStatus}).
+ * Everything else refuses only where there is genuinely nothing to reach — never
+ * contending, or settled with no service and no broker.
  */
 export function handleRemoteHostCommand(payload: RemoteHostCommand | undefined): void {
   if (!isRemoteHostCommand(payload)) return;
@@ -353,7 +356,7 @@ export function handleRemoteHostCommand(payload: RemoteHostCommand | undefined):
     return;
   }
   if (forwardCommand(payload)) return;
-  if (payload.cmd === 'enroll') {
+  if (payload.cmd === 'enroll' || payload.cmd === 'enrollOffer') {
     // Held rather than run inline once the contention settles: if some other
     // window enrolled first, this window is a client and the command belongs
     // on the link, which is exactly what the drain does.
@@ -427,7 +430,8 @@ function refuse(rhId: string): void {
 
 /**
  * What an idle service answers, for the read-only commands a window with no
- * Host at all is still asked.
+ * Host at all is still asked. `status` is the third of them and lives in
+ * {@link idleStatus}, which needs the disk.
  *
  * Reaching the refusal below means this window sees no enrollment — it contends
  * at activation when there is one, and again the moment another window writes
@@ -442,22 +446,6 @@ function refuse(rhId: string): void {
  */
 function idleAnswer(cmd: string): { result: unknown } | null {
   switch (cmd) {
-    case 'status':
-      return {
-        result: {
-          enrolled: false,
-          serverUrl: null,
-          hostId: null,
-          connection: 'stopped',
-          pairedClients: 0,
-          // The one field that is not the idle service's answer. A service
-          // would read the installer's offer file here; reaching this means
-          // there is no service in any window, so `enrollOffer` would be
-          // refused — offering a button that cannot work is worse than not
-          // offering it.
-          offer: null,
-        } satisfies RemoteHostConsoleStatus,
-      };
     case 'pushDevices':
       return { result: null satisfies PushDevicesResult };
     case 'pairingQueue':
@@ -467,17 +455,48 @@ function idleAnswer(cmd: string): { result: unknown } | null {
   }
 }
 
+/**
+ * The idle `status` — the one that has to look at the disk, and the reason it is
+ * async where the rest of {@link idleAnswer} is not.
+ *
+ * This process is the same kind of process the service runs in, so it can read
+ * the installer's offer itself (`lib/src/host/remote/enroll-offer.ts`) and
+ * answer exactly what a service with nothing in its store would. Without that,
+ * a machine that has never enrolled — which is precisely where the one-click
+ * card belongs — would be told there is no offer and never render it. A file
+ * read is not a socket, so "a user who never enrolls never sees a socket"
+ * (`docs/specs/vscode.md`) still holds, and pressing Enroll runs `enrollOffer`,
+ * which bootstraps the contention like `enroll`.
+ */
+async function idleStatus(): Promise<RemoteHostConsoleStatus> {
+  const offer = await readEnrollmentOffer().catch(() => null);
+  return {
+    enrolled: false,
+    serverUrl: null,
+    hostId: null,
+    connection: 'stopped',
+    pairedClients: 0,
+    suggestedLabel: hostname(),
+    offer: offer ? { origin: offer.origin } : null,
+  };
+}
+
 /** Refuse one command — or answer it as an idle service would ({@link idleAnswer}). */
 function refuseCommand(payload: RemoteHostCommand): void {
+  if (payload.cmd === 'status') {
+    void idleStatus().then((result) => answerIdle(payload.rhId, result));
+    return;
+  }
   const idle = idleAnswer(payload.cmd);
   if (!idle) {
     refuse(payload.rhId);
     return;
   }
-  deps?.broadcastToWebviews({
-    type: 'remoteHost:result',
-    payload: { rhId: payload.rhId, result: idle.result },
-  });
+  answerIdle(payload.rhId, idle.result);
+}
+
+function answerIdle(rhId: string, result: unknown): void {
+  deps?.broadcastToWebviews({ type: 'remoteHost:result', payload: { rhId, result } });
 }
 
 /**

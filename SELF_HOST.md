@@ -430,14 +430,9 @@ command line.
 3. **The Host.** On this same machine, launch the standalone or VS Code build
    made with `DORMOUSE_REMOTE_CONNECT_SRC` (see Prerequisites) and open
    **Settings → Remote control** — the sliders icon at the far right of the
-   baseboard. It leads with the installer's one-click offer: the origin it
-   found, the machine's name already filled in (editable), and one **Enroll**
-   button. Nothing is typed, and the setup password from step 1 is not needed
-   here at all. The typed three-field form — origin, setup password, name —
-   stays one click away behind "Enroll with a different server…", for a server
-   on another machine or an offer already spent. The
-   `window.dormouseRemoteHost` console hook carries the same five commands,
-   `enrollOffer(label)` among them, and stays as the scripting seam
+   baseboard. The installer's offer card leads: origin found, name prefilled,
+   one **Enroll**, no setup password. "Enroll with a different server…" unfolds
+   the typed form, for a server elsewhere or an offer already spent
    (`docs/specs/server.md`, "Remote control, in the Settings dialog").
 
    Enrollment persists in the Host service's own store — a file under the

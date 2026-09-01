@@ -24,34 +24,17 @@ afterEach(async () => {
 });
 
 describe('enrollmentOfferPath', () => {
-  // The paths are the install roots the three installers pick
-  // (`deploy/local/install-{macos,windows,linux}`). Nothing links the two sides
-  // at build time, so a drift here is a one-click enrollment that silently
-  // never appears.
-  it('follows the macOS install root', () => {
-    expect(enrollmentOfferPath('darwin', {}, '/Users/ned')).toBe(
-      '/Users/ned/Library/Application Support/Dormouse Server/run/enroll-offer.json',
-    );
-  });
-
-  it('follows %LOCALAPPDATA% on Windows, and has no answer without it', () => {
-    const local = 'C:\\Users\\ned\\AppData\\Local';
-    expect(enrollmentOfferPath('win32', { LOCALAPPDATA: local }, 'C:\\Users\\ned')).toContain(
-      'Dormouse Server',
-    );
+  // That these paths track the three installers' own install roots is pinned by
+  // `lib/src/lib/mirrored-constants.test.ts`, which reads the scripts. What is
+  // left here is the policy for an environment those roots do not describe.
+  it('has no answer on Windows without %LOCALAPPDATA%', () => {
     // The installer joins onto that variable, so without it the install root is
     // unknown — which reads as no offer, not as a guessed path.
     expect(enrollmentOfferPath('win32', {}, 'C:\\Users\\ned')).toBeNull();
   });
 
-  it('honors XDG_DATA_HOME on Linux, treating empty as unset', () => {
-    expect(enrollmentOfferPath('linux', { XDG_DATA_HOME: '/data' }, '/home/ned')).toBe(
-      '/data/dormouse-server/run/enroll-offer.json',
-    );
-    expect(enrollmentOfferPath('linux', {}, '/home/ned')).toBe(
-      '/home/ned/.local/share/dormouse-server/run/enroll-offer.json',
-    );
-    // `${XDG_DATA_HOME:-…}` in the installer: empty is unset, not the root.
+  it('treats an empty XDG_DATA_HOME as unset, not as the filesystem root', () => {
+    // `${XDG_DATA_HOME:-…}` in the installer, which is `||` and not `??`.
     expect(enrollmentOfferPath('linux', { XDG_DATA_HOME: '' }, '/home/ned')).toBe(
       '/home/ned/.local/share/dormouse-server/run/enroll-offer.json',
     );

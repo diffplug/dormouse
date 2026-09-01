@@ -75,6 +75,13 @@ function buttonLabelled(label: string): HTMLButtonElement | undefined {
   ) as HTMLButtonElement | undefined;
 }
 
+/** The disclosure carries a `+`/`−` prefix, so match on its words rather than all of it. */
+function disclosure(): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll('button')].find((button) =>
+    button.textContent?.includes('Enroll with a different server'),
+  ) as HTMLButtonElement | undefined;
+}
+
 async function type(selector: string, value: string) {
   const input = container.querySelector<HTMLInputElement>(selector);
   if (!input) throw new Error(`no input for ${selector}`);
@@ -121,13 +128,18 @@ describe('RemoteControlSection', () => {
     platform = { remoteHost: makeLink(async () => NOT_ENROLLED) };
     await render();
 
+    // The name arrives prefilled from the service's suggestion — the same one
+    // the offer card uses, so the two paths cannot diverge on it.
+    const name = 'input:not([type="url"]):not([type="password"])';
+    expect(container.querySelector<HTMLInputElement>(name)!.value).toBe('ned-mac');
     expect(buttonLabelled('Connect')!.disabled).toBe(true);
     await type('input[type="url"]', 'https://laptop.tailnet.ts.net');
     expect(buttonLabelled('Connect')!.disabled).toBe(true);
     await type('input[type="password"]', 'hunter2');
-    expect(buttonLabelled('Connect')!.disabled).toBe(true);
-    await type('input:not([type="url"]):not([type="password"])', 'Work laptop');
     expect(buttonLabelled('Connect')!.disabled).toBe(false);
+    // And it is still a required field, not a decoration.
+    await type(name, '   ');
+    expect(buttonLabelled('Connect')!.disabled).toBe(true);
   });
 
   it('enrolls with trimmed values and re-reads the status', async () => {
@@ -185,7 +197,8 @@ describe('RemoteControlSection', () => {
     // The three-field form is behind the disclosure, not beside the card.
     expect(container.querySelector('input[type="password"]')).toBeNull();
     expect(buttonLabelled('Connect')).toBeUndefined();
-    expect(buttonLabelled('Enroll with a different server…')).toBeTruthy();
+    // Folded, and saying so before it is clicked.
+    expect(disclosure()?.textContent).toContain('+');
   });
 
   it('enrolls from the offer with the name shown, which is editable', async () => {
@@ -224,16 +237,17 @@ describe('RemoteControlSection', () => {
     expect(text()).toContain('server origin is not allowed by this build');
     // Still on the card, and the typed form is still one click away.
     expect(buttonLabelled('Enroll')).toBeTruthy();
-    expect(buttonLabelled('Enroll with a different server…')).toBeTruthy();
+    expect(disclosure()).toBeTruthy();
   });
 
   it('unfolds the typed form for a server that is somewhere else', async () => {
     platform = { remoteHost: makeLink(async () => OFFER_STATUS) };
     await render();
 
-    await act(async () => buttonLabelled('Enroll with a different server…')!.click());
+    await act(async () => disclosure()!.click());
     expect(container.querySelector('input[type="url"]')).toBeTruthy();
     expect(buttonLabelled('Connect')).toBeTruthy();
+    expect(disclosure()?.textContent).toContain('−');
     // The offer stays offered — unfolding is not a rejection of it.
     expect(buttonLabelled('Enroll')).toBeTruthy();
   });

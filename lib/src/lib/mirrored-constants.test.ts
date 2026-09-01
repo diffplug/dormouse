@@ -1,13 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { enrollmentOfferPath } from '../host/remote/enroll-offer';
 import { ITERM2_COMPAT_VERSION } from './terminal-protocol';
 import { OPEN_PORT_TIMEOUT_MS } from './platform/types';
 
 // Pins for constants defined in more than one language/runtime, where an
-// import is impossible (the sidecar is plain CJS, the Tauri backend is Rust)
-// and only a "keep in sync" comment tied the copies together. Each test
+// import is impossible (the sidecar is plain CJS, the Tauri backend is Rust,
+// the installers are sh and PowerShell) and only a "keep in sync" comment tied
+// the copies together. Each test
 // fs-reads the sibling definition and compares values, so drifting one copy
 // fails loudly. Pattern per AGENTS.md — a "must stay in sync" claim names the
 // test that pins it.
@@ -46,6 +48,46 @@ describe('dor control-socket proof-domain mirrors', () => {
       expect(extract(clientSrc, client, re)).toBe(extract(serverSrc, server, re));
     });
   }
+});
+
+// docs/specs/server.md -> "Remote control, in the Settings dialog". The Host
+// reads the installer's enrollment offer from under the install root each
+// installer picks, and nothing links the two sides at build time — a drift is a
+// one-click enrollment that silently never appears.
+describe('enrollment-offer path mirrors the installers', () => {
+  const OFFER_FILE = ['run', 'enroll-offer.json'];
+  const HOME = '/home/ned';
+
+  /** The two shell forms the installers' `INSTALL_ROOT` uses, and nothing else. */
+  const expand = (expr: string, env: Record<string, string> = {}) =>
+    expr
+      .replace(/\$\{(\w+):-([^}]*)\}/g, (_, name: string, fallback: string) => env[name] || fallback)
+      .replace(/\$HOME/g, HOME);
+
+  it('follows the macOS install root', () => {
+    const file = 'deploy/local/install-macos.sh';
+    const root = extract(readRepoFile(file), file, /^INSTALL_ROOT="([^"]+)"$/m);
+    expect(enrollmentOfferPath('darwin', {}, HOME)).toBe(join(expand(root), ...OFFER_FILE));
+  });
+
+  it('follows the Linux install root, XDG_DATA_HOME set or not', () => {
+    const file = 'deploy/local/install-linux.sh';
+    const root = extract(readRepoFile(file), file, /^INSTALL_ROOT="([^"]+)"$/m);
+    const env = { XDG_DATA_HOME: '/data' };
+    expect(enrollmentOfferPath('linux', env, HOME)).toBe(join(expand(root, env), ...OFFER_FILE));
+    expect(enrollmentOfferPath('linux', {}, HOME)).toBe(join(expand(root), ...OFFER_FILE));
+  });
+
+  it('follows the Windows install root', () => {
+    const file = 'deploy/local/install-windows.ps1';
+    const source = readRepoFile(file);
+    const variable = extract(source, file, /^\$INSTALL_ROOT = Join-Path \$env:(\w+) '[^']+'$/m);
+    const leaf = extract(source, file, /^\$INSTALL_ROOT = Join-Path \$env:\w+ '([^']+)'$/m);
+    const local = 'C:\\Users\\ned\\AppData\\Local';
+    expect(enrollmentOfferPath('win32', { [variable]: local }, HOME)).toBe(
+      join(local, leaf, ...OFFER_FILE),
+    );
+  });
 });
 
 // docs/specs/standalone.md -> "Rust <-> sidecar bridge"
