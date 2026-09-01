@@ -87,9 +87,9 @@ function setState(next: RemoteHostStatusState): void {
  * else would catch it. The mapped type makes the *omission* a compile error;
  * it cannot make a nested field's comparator right, since `Object.is`
  * type-checks for one of those too. `offer` is compared by its origin because
- * the service mints a fresh object per read, and "does not notify when a poll
- * answers the same status again" in `host-status-store.test.ts` is what pins
- * that.
+ * the service mints a fresh object per read, and "compares the offer by its
+ * origin, not by the object the poll minted" in `host-status-store.test.ts` is
+ * what pins that.
  */
 const STATUS_FIELDS: {
   [K in keyof RemoteHostConsoleStatus]: (
