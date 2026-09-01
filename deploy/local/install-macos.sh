@@ -1313,37 +1313,6 @@ else
   fi
 fi
 
-# ------------------------------------------------------------ enroll offer ---
-
-# run/enroll-offer.json, the one-time offer redeemed at POST /api/host/enroll in
-# place of the setup password (SECURITY.md → "Credentials at rest").
-#
-# Last of all, because minting burns the previous unspent offer and the server
-# reads this file fresh on every attempt — nothing needs it at service start. An
-# install that fails before here (a rejected candidate, a release that never
-# answered) rolls back and leaves the previous offer intact, rather than
-# stranding a fresh token against a release that is no longer running.
-#
-# hosts.json is the durable "first Host happened" marker. Emptying its rows
-# revokes Hosts but does not silently reopen this bootstrap credential.
-if [ -e "$STATE_DIR/hosts.json" ]; then
-  rm -f "$ENROLL_OFFER_FILE"
-  ok "a Host has already enrolled — no one-click enrollment offer minted"
-else
-  ENROLL_TOKEN="$(random_hex32)"
-  [ ${#ENROLL_TOKEN} -ge 64 ] || die "generated enroll token is implausibly short; refusing to write the enrollment offer."
-  # Create the file and lock it down BEFORE the token is written, so the secret
-  # never sits under the directory's default permissions, even briefly.
-  : > "$ENROLL_OFFER_FILE"
-  chmod 0600 "$ENROLL_OFFER_FILE"
-  # mintedAt is read here, at write time, and never from BUILT_AT: the 24-hour
-  # expiry runs from the mint, and the build that precedes it is not free.
-  printf '{"origin":"%s","token":"%s","mintedAt":"%s"}\n' \
-    "$ORIGIN" "$ENROLL_TOKEN" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ENROLL_OFFER_FILE"
-  unset ENROLL_TOKEN
-  ok "minted run/enroll-offer.json (mode 0600) — a one-time enrollment offer for a Host on this machine"
-fi
-
 # -------------------------------------------------------------- serve ------
 
 step "Configuring Tailscale Serve"
@@ -1406,6 +1375,35 @@ if [ "$PRUNED" = "0" ]; then
   ok "nothing to prune (retaining current${KEEP_PREVIOUS:+ and previous})"
 else
   ok "pruned $PRUNED old release(s); config and state untouched"
+fi
+
+# ------------------------------------------------------------ enroll offer ---
+
+# run/enroll-offer.json, the one-time offer redeemed at POST /api/host/enroll in
+# place of the setup password (SECURITY.md → "Credentials at rest").
+#
+# Last state mutation: minting burns the previous unspent offer, so the release,
+# HTTPS Serve mapping, and pruning must all have succeeded first. The server
+# reads this file fresh; nothing needs it at service start.
+#
+# hosts.json is the durable "first Host happened" marker. Emptying its rows
+# revokes Hosts but does not silently reopen this bootstrap credential.
+if [ -e "$STATE_DIR/hosts.json" ]; then
+  rm -f "$ENROLL_OFFER_FILE"
+  ok "a Host has already enrolled — no one-click enrollment offer minted"
+else
+  ENROLL_TOKEN="$(random_hex32)"
+  [ ${#ENROLL_TOKEN} -ge 64 ] || die "generated enroll token is implausibly short; refusing to write the enrollment offer."
+  # Create the file and lock it down BEFORE the token is written, so the secret
+  # never sits under the directory's default permissions, even briefly.
+  : > "$ENROLL_OFFER_FILE"
+  chmod 0600 "$ENROLL_OFFER_FILE"
+  # mintedAt is read here, at write time, and never from BUILT_AT: the 24-hour
+  # expiry runs from the mint, and the build that precedes it is not free.
+  printf '{"origin":"%s","token":"%s","mintedAt":"%s"}\n' \
+    "$ORIGIN" "$ENROLL_TOKEN" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ENROLL_OFFER_FILE"
+  unset ENROLL_TOKEN
+  ok "minted run/enroll-offer.json (mode 0600) — a one-time enrollment offer for a Host on this machine"
 fi
 
 # ---------------------------------------------------------------- summary ---

@@ -2166,48 +2166,6 @@ rem directly.
     }
   }
 
-  # ------------------------------------------------------------ enroll offer ---
-
-  # run\enroll-offer.json, the one-time offer redeemed at POST /api/host/enroll
-  # in place of the setup password (SECURITY.md -> "Credentials at rest").
-  #
-  # Last of all, because minting burns the previous unspent offer and the server
-  # reads this file fresh on every attempt -- nothing needs it when the task
-  # starts. An install that fails before here (a rejected candidate, a release
-  # that never answered) rolls back and leaves the previous offer intact, rather
-  # than stranding a fresh token against a release that is no longer running.
-  #
-  # hosts.json is the durable "first Host happened" marker. Emptying its rows
-  # revokes Hosts but does not silently reopen this bootstrap credential.
-  if (Test-Path -LiteralPath (Join-Path $STATE_DIR 'hosts.json')) {
-    Remove-Item -LiteralPath $ENROLL_OFFER_FILE -Force -ErrorAction SilentlyContinue
-    Write-Ok "a Host has already enrolled -- no one-click enrollment offer minted"
-  } else {
-    $enrollToken = New-RandomHex32
-    if ($enrollToken.Length -lt 64) {
-      Die "generated enroll token is implausibly short; refusing to write the enrollment offer."
-    }
-    # Create the file with an owner-only ACL BEFORE the token is written, so there
-    # is no window in which the secret sits under an inherited ACL.
-    [IO.File]::WriteAllText($ENROLL_OFFER_FILE, '')
-    Protect-Path -Path $ENROLL_OFFER_FILE
-    # mintedAt is read here, at write time, and never from $BUILT_AT: the 24-hour
-    # expiry runs from the mint, and the build that precedes it is not free.
-    #
-    # InvariantCulture is load-bearing, not decoration: the server hard-rejects an
-    # offer it cannot parse as fresh, and the current culture rewrites this stamp.
-    # Under fi-FI the ':' separator becomes '.', and under th-TH the Buddhist
-    # calendar mints year 2569 -- both silently unredeemable.
-    $offer = [pscustomobject]@{
-      origin   = $ORIGIN
-      token    = $enrollToken
-      mintedAt = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
-    } | ConvertTo-Json -Compress
-    [IO.File]::WriteAllText($ENROLL_OFFER_FILE, $offer + "`r`n")
-    Remove-Variable enrollToken
-    Write-Ok "minted run\enroll-offer.json (owner-only ACL) -- a one-time enrollment offer for a Host on this machine"
-  }
-
   # -------------------------------------------------------------- serve ------
 
   Write-Step "Configuring Tailscale Serve"
@@ -2278,6 +2236,46 @@ rem directly.
     Write-Ok "nothing to prune (retaining current$(if ($keepPrevious) { ' and previous' }))"
   } else {
     Write-Ok "pruned $pruned old release(s); config and state untouched"
+  }
+
+  # ------------------------------------------------------------ enroll offer ---
+
+  # run\enroll-offer.json, the one-time offer redeemed at POST /api/host/enroll
+  # in place of the setup password (SECURITY.md -> "Credentials at rest").
+  #
+  # Last state mutation: minting burns the previous unspent offer, so the
+  # release, HTTPS Serve mapping, and pruning must all have succeeded first. The
+  # server reads this file fresh; nothing needs it when the task starts.
+  #
+  # hosts.json is the durable "first Host happened" marker. Emptying its rows
+  # revokes Hosts but does not silently reopen this bootstrap credential.
+  if (Test-Path -LiteralPath (Join-Path $STATE_DIR 'hosts.json')) {
+    Remove-Item -LiteralPath $ENROLL_OFFER_FILE -Force -ErrorAction SilentlyContinue
+    Write-Ok "a Host has already enrolled -- no one-click enrollment offer minted"
+  } else {
+    $enrollToken = New-RandomHex32
+    if ($enrollToken.Length -lt 64) {
+      Die "generated enroll token is implausibly short; refusing to write the enrollment offer."
+    }
+    # Create the file with an owner-only ACL BEFORE the token is written, so there
+    # is no window in which the secret sits under an inherited ACL.
+    [IO.File]::WriteAllText($ENROLL_OFFER_FILE, '')
+    Protect-Path -Path $ENROLL_OFFER_FILE
+    # mintedAt is read here, at write time, and never from $BUILT_AT: the 24-hour
+    # expiry runs from the mint, and the build that precedes it is not free.
+    #
+    # InvariantCulture is load-bearing, not decoration: the server hard-rejects an
+    # offer it cannot parse as fresh, and the current culture rewrites this stamp.
+    # Under fi-FI the ':' separator becomes '.', and under th-TH the Buddhist
+    # calendar mints year 2569 -- both silently unredeemable.
+    $offer = [pscustomobject]@{
+      origin   = $ORIGIN
+      token    = $enrollToken
+      mintedAt = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
+    } | ConvertTo-Json -Compress
+    [IO.File]::WriteAllText($ENROLL_OFFER_FILE, $offer + "`r`n")
+    Remove-Variable enrollToken
+    Write-Ok "minted run\enroll-offer.json (owner-only ACL) -- a one-time enrollment offer for a Host on this machine"
   }
 
   # ---------------------------------------------------------------- summary ---

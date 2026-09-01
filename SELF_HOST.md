@@ -732,8 +732,8 @@ is live rather than asserting either.
   files in `state\` individually there, where the unix editions need not.
 - **The enrollment offer rotates on every run before the first Host enrolls**,
   including updates that preserve `server.env`; `state/hosts.json` then disables
-  it permanently until a state purge. It is minted *last*, once the switched-to
-  release is answering, so a failed update leaves the previous offer unspent.
+  it permanently until a state purge. Minted last after release, Serve, and
+  pruning succeed, it leaves the previous offer unspent on failure.
   `run-server`
   exports `DORMOUSE_ENROLL_TOKEN_FILE`; unset, the server refuses every offer
   (`docs/specs/server.md` → Configuration). How the token is generated and

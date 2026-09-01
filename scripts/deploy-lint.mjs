@@ -202,6 +202,20 @@ export const RULES = [
     },
   },
   {
+    // The offer header is adjacent to the end of pruning, making it the last
+    // state mutation before the read-only summary. Pinning that boundary catches
+    // a move back above Serve without coupling the lint to every Serve command.
+    rule: 'Credentials at rest — enrollment offer is minted after pruning and Serve',
+    patterns: {
+      macOS:
+        /ok "pruned \$PRUNED old release\(s\); config and state untouched"\nfi\n\n# -+ enroll offer/,
+      Linux:
+        /ok "pruned \$PRUNED old release\(s\); config and state untouched"\nfi\n\n# -+ enroll offer/,
+      Windows:
+        /Write-Ok "pruned \$pruned old release\(s\); config and state untouched"\n  \}\n\n  # -+ enroll offer/,
+    },
+  },
+  {
     // Two adjacent lines, matched as one span, because the control is their
     // ORDER: an empty file, restricted, and only then the token. Either line
     // alone is satisfiable by a write that already happened.
