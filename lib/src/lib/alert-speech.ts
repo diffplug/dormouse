@@ -19,13 +19,12 @@ const SPEECH_LIMIT = 120;
 const MAX_TRACKED_UTTERANCES = 8;
 
 /** Sanitize a display label for speech. WebKit wedges on angle brackets; replace
- * metacharacters with spaces so adjacent words do not join. */
+ * punctuation, symbols, and controls with spaces so adjacent words do not join. */
 export function toSpokenText(label: string): string {
   const cleaned = label
-    // Control characters are meaningless aloud and arrive with untrusted
-    // terminal titles.
-    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
-    .replace(/[<>&*]/g, ' ')
+    // Unicode properties preserve letters, numbers, and combining marks from
+    // every script while dropping characters a speech engine may announce.
+    .replace(/[\p{P}\p{S}\p{C}]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   // Capped in code points, matching `boundedPushText`: a cut mid-surrogate
