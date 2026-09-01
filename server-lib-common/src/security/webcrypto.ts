@@ -21,12 +21,6 @@ export interface CryptoKeyPairLike {
   readonly privateKey: CryptoKeyLike;
 }
 
-/**
- * Key material as `importKey` accepts it: raw/PKCS#8/SPKI bytes, or a JWK
- * object. Structural, so a real `JsonWebKey` satisfies it.
- */
-export type KeyDataLike = Uint8Array | { readonly [field: string]: unknown };
-
 /** The subset of `SubtleCrypto` used by this package (asymmetric keys only). */
 export interface SubtleCryptoLike {
   generateKey(
@@ -37,7 +31,7 @@ export interface SubtleCryptoLike {
   exportKey(format: string, key: CryptoKeyLike): Promise<ArrayBuffer>;
   importKey(
     format: string,
-    keyData: KeyDataLike,
+    keyData: Uint8Array,
     algorithm: object,
     extractable: boolean,
     keyUsages: readonly string[],

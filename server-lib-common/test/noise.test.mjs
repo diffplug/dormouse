@@ -4,8 +4,6 @@
  *
  * Every expected value here comes from an independent source — the vendored
  * Cacophony vector, RFC 7748, RFC 8439 — never from our own state machine.
- * The one production affordance the tests use is ephemeral-key injection,
- * without which a published vector cannot be replayed.
  */
 
 import { test } from 'node:test';
@@ -125,7 +123,6 @@ test('both handshake messages match the Cacophony vector byte for byte', async (
 
 test('every transport message matches the vector in both directions', async () => {
   const { initiator, responder } = await completeHandshake();
-  // Cacophony's transport messages alternate, initiator first.
   for (let i = 2; i < VECTOR.messages.length; i++) {
     const fromInitiator = i % 2 === 0;
     const sender = fromInitiator ? initiator.session.send : responder.session.send;
@@ -135,7 +132,6 @@ test('every transport message matches the vector in both directions', async () =
     assert.equal(hex(sender.encryptWithAd(EMPTY, unhex(payload))), ciphertext, `message ${i}`);
     assert.equal(hex(receiver.decryptWithAd(EMPTY, unhex(ciphertext))), payload, `message ${i}`);
   }
-  // Two messages each way, from nonce zero.
   assert.equal(initiator.session.send.nonce, 2n);
   assert.equal(responder.session.send.nonce, 2n);
 });
@@ -195,11 +191,9 @@ test('the nonce is four zero bytes then the counter little-endian', () => {
 });
 
 test('counter exhaustion is a hard error at the reserved 2^64-1', () => {
-  // 2^64-1 is reserved by the spec, so the last usable counter is 2^64-2.
-  // Both cipher directions route every operation through this one function,
-  // which is why exhaustion is pinned here: reaching it through a
-  // `NoiseCipherState` would need a nonce-setting hook, and ephemeral
-  // injection is the only hook this module has.
+  // Pinned on the nonce function, not a `NoiseCipherState`: reaching 2^64-2
+  // through a cipher would need a nonce-setting hook, and ephemeral injection
+  // is the only hook this module has.
   assert.equal(hex(noiseNonceBytes(2n ** 64n - 2n)), '00000000feffffffffffffff');
   assert.throws(() => noiseNonceBytes(2n ** 64n - 1n), NoiseError);
   assert.throws(() => noiseNonceBytes(2n ** 64n), NoiseError);
@@ -270,8 +264,6 @@ test('an initiator pointed at the wrong static key fails the handshake', async (
 test('an all-zero remote static is one terminal handshake failure', async () => {
   const initiator = await newInitiator({ remoteStaticPublicKey: new Uint8Array(32) });
   await assert.rejects(initiator.writeMessage(EMPTY), NoiseError);
-  // Terminal: the object refuses every later call rather than retrying on
-  // half-mixed state.
   await assert.rejects(initiator.writeMessage(EMPTY), NoiseError);
   assert.equal(initiator.isComplete, false);
   assert.throws(() => initiator.session, NoiseError);
