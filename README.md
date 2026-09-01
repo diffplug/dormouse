@@ -16,7 +16,7 @@
 - **Copy-paste that works.** Click and drag selects text the way you'd expect, even in mouse-aware TUIs that normally swallow it as escape codes.
 - **Sleep/wake panes.** Minimize a terminal to a compact status indicator. It keeps running and you can still see whether its task finished.
 - **Dual distribution.** Standalone desktop app (Mac/Windows/Linux) or VS Code extension.
-- **Pocket (coming soon).** Tether your sessions to your phone over WebRTC — walk away, keep working.
+- **Pocket (coming soon).** Tether your sessions to your phone over a relay you can self-host — walk away, keep working.
 
 ## Development
 

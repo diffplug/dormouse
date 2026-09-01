@@ -940,9 +940,10 @@ export default function Home() {
             </h2>
             <p className="mb-4 text-lg leading-relaxed opacity-70">
               Coming next: <a href="/playground/pocket" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">Dormouse Pocket</a>.
-              Tether a terminal session to your phone over WebRTC and take a stroll — Dormouse
-              buzzes your phone when something needs attention. A hosted auto-pairing service comes
-              later, so you can close the laptop and walk away, no setup dance.
+              Tether a terminal session to your phone over a relay you can self-host and take a
+              stroll — Dormouse buzzes your phone when something needs attention. A hosted
+              auto-pairing service comes later, so you can close the laptop and walk away, no
+              setup dance.
             </p>
             <p className="mb-4 text-lg leading-relaxed opacity-70">
               Open source and free to self-host, or pay a small monthly fee for our hosted version. Early adopters get a launch discount.

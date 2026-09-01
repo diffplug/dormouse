@@ -44,9 +44,10 @@ function DesktopPocketPlaygroundPage() {
             to try it out! (WIP)
           </p>
           <p className="mb-4 text-lg leading-relaxed opacity-70">
-            Tether a terminal session to your phone over WebRTC and take a stroll. Dormouse
-            buzzes your phone when something needs attention. A hosted auto-pairing service comes
-            later, so you can close the laptop and walk away, no setup dance.
+            Tether a terminal session to your phone over a relay you can self-host and take a
+            stroll. Dormouse buzzes your phone when something needs attention. A hosted
+            auto-pairing service comes later, so you can close the laptop and walk away, no
+            setup dance.
           </p>
           <p className="mb-4 text-lg leading-relaxed opacity-70">
             Open source and free to self-host, or pay a small monthly fee for our hosted version.
