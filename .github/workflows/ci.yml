@@ -100,13 +100,51 @@ jobs:
         run: |
           set -euo pipefail
           root="$(mktemp -d)/dormouse-server"
+          offer="$root/run/enroll-offer.json"
+          # Prints the token, because it must rotate on every run before the
+          # first Host enrollment — and this job is the only executable check.
+          #
+          # The shape check is the server's own `isEnrollmentOffer`, imported
+          # rather than restated: a CI copy of the token regex and the origin
+          # rule is free to drift from the validator the redemption path
+          # actually runs, and then agrees with itself while the server rejects
+          # what the installer writes. No build step is needed for it: the
+          # `Test` step above builds server-lib-common, as does the
+          # `pnpm --filter server build` inside every install below.
+          read_offer() {
+            node --input-type=module -e '
+              import { readFileSync, statSync } from "node:fs";
+              import { isEnrollmentOffer } from "./server-lib-common/dist/index.js";
+              const [path, wantOrigin] = process.argv.slice(1);
+              const mode = statSync(path).mode & 0o777;
+              if (mode !== 0o600) throw new Error(`${path} is mode ${mode.toString(8)}, expected 600`);
+              const offer = JSON.parse(readFileSync(path, "utf8"));
+              if (!isEnrollmentOffer(offer)) throw new Error(`not an enrollment offer: ${JSON.stringify(offer)}`);
+              // Beyond the structural guard, and nothing else checks it: the
+              // server hard-rejects a mintedAt it cannot parse, which the shape
+              // guard — a length bound — accepts.
+              if (Number.isNaN(Date.parse(offer.mintedAt))) throw new Error(`mintedAt is ${offer.mintedAt}`);
+              if (offer.origin !== wantOrigin) throw new Error(`origin is ${offer.origin}`);
+              process.stdout.write(offer.token);
+            ' "$offer" "$DORMOUSE_INSTALL_ORIGIN"
+          }
           # Twice: the first is a first install, the second exercises the update
           # path — previous pointer, prune, and preserving config/server.env.
           DORMOUSE_INSTALL_ROOT="$root" ./deploy/local/install-linux.sh --yes
           before="$(sha256sum "$root/config/server.env" | cut -d' ' -f1)"
+          first_token="$(read_offer)"
           DORMOUSE_INSTALL_ROOT="$root" ./deploy/local/install-linux.sh --yes
           after="$(sha256sum "$root/config/server.env" | cut -d' ' -f1)"
+          second_token="$(read_offer)"
           [ "$before" = "$after" ] || { echo "::error::server.env was not preserved across an update"; exit 1; }
+          [ "$first_token" != "$second_token" ] || { echo "::error::the enrollment offer was not re-minted on the update"; exit 1; }
+          # hosts.json existence, not its current row count, is the durable
+          # "first Host happened" marker. Even an empty hand-edited file keeps
+          # a later installer run from reopening bootstrap.
+          printf '[]\n' > "$root/state/hosts.json"
+          chmod 0600 "$root/state/hosts.json"
+          DORMOUSE_INSTALL_ROOT="$root" ./deploy/local/install-linux.sh --yes
+          [ ! -e "$offer" ] || { echo "::error::the enrollment offer survived after hosts.json existed"; exit 1; }
           [ -L "$root/previous" ] || { echo "::error::no previous release retained after an update"; exit 1; }
           bash -n "$root/bin/manage"
           bash -n "$root/bin/run-server"

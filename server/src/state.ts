@@ -1,11 +1,13 @@
 /** JSON-file state stores; `docs/specs/server.md` → "State files" owns their schemas and invariants. */
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 
 import { SELFHOST_ACCOUNT_ID, toBase64Url } from 'server-lib-common';
 import type { PushSubscriptionPayload } from 'server-lib-common';
+
+import { secretEquals } from './secrets.js';
 
 /** A registered passkey as stored on disk. `publicKey` is base64url SPKI. */
 export interface StoredPasskey {
@@ -79,6 +81,17 @@ abstract class JsonFileStore {
     await rename(tmp, this.#path);
   }
 
+  /** Whether this store's durable file has ever been written. */
+  protected exists(): Promise<boolean> {
+    return stat(this.#path).then(
+      () => true,
+      (err: NodeJS.ErrnoException) => {
+        if (err.code === 'ENOENT') return false;
+        throw err;
+      },
+    );
+  }
+
   /**
    * Run `mutate` under the mutex. It is chained onto the tail regardless of
    * whether the previous op resolved or rejected, so one failure cannot wedge
@@ -89,11 +102,6 @@ abstract class JsonFileStore {
     this.#tail = result.catch(() => undefined);
     return result;
   }
-}
-
-/** Fixed-length SHA-256 digest, so timing-safe compares never branch on length. */
-function sha256(text: string): Buffer {
-  return createHash('sha256').update(text, 'utf8').digest();
 }
 
 export class AccountStore extends JsonFileStore {
@@ -159,8 +167,8 @@ export class HostStore extends JsonFileStore {
    * hand-editing this file is the *documented* revocation mechanism
    * (Guardrails), so a half-finished edit is an expected state, not a
    * corruption. Unguarded, a row with a null `hostToken` makes `findByToken`'s
-   * `sha256(h.hostToken)` throw, which 500s every `/ws/host` upgrade and every
-   * push route — the whole server, over one bad line. Dropping the row instead
+   * `secretEquals` throw, which 500s every `/ws/host` upgrade and every push
+   * route — the whole server, over one bad line. Dropping the row instead
    * makes that host un-enrolled, which is what the person editing it was
    * reaching for anyway.
    */
@@ -171,28 +179,35 @@ export class HostStore extends JsonFileStore {
 
   /**
    * Look up an enrolled host by its bearer token (the `/ws/host` credential).
-   * The token is a secret, so it is compared with a constant-time digest
-   * compare (mirroring the setup-password path in app.ts) rather than `===`,
-   * whose early-exit leaks byte positions. Every host is checked without an
-   * early break so the work does not depend on which entry matches.
+   * The token is a secret, so it is compared with `secretEquals` rather than
+   * `===`, whose early-exit leaks byte positions. Every host is checked without
+   * an early break so the work does not depend on which entry matches.
    */
   async findByToken(hostToken: string): Promise<StoredHost | undefined> {
     const hosts = await this.list();
-    const providedHash = sha256(hostToken);
     let match: StoredHost | undefined;
     for (const h of hosts) {
-      if (timingSafeEqual(sha256(h.hostToken), providedHash)) match = h;
+      if (secretEquals(h.hostToken, hostToken)) match = h;
     }
     return match;
   }
 
   /**
-   * Enroll a new host: mint a random `hostId` (16 bytes) and `hostToken`
-   * (32 bytes), both base64url, append them, and return the record. Runs under
-   * the mutex.
+   * Enroll a new host: run `beforeEnroll` with whether this is the first Host
+   * ever persisted, mint a random `hostId` (16 bytes) and `hostToken` (32
+   * bytes), append them, and return the record. The callback and write share
+   * the mutex, so two credential paths cannot both authorize themselves as the
+   * first enrollment.
+   *
+   * File existence, not the current row count, is the durable boundary: hand-
+   * editing every row away revokes those Hosts but does not reopen bootstrap.
    */
-  enroll(label: string): Promise<StoredHost> {
+  enroll(
+    label: string,
+    beforeEnroll: (firstEnrollment: boolean) => void | Promise<void> = () => {},
+  ): Promise<StoredHost> {
     return this.mutate(async () => {
+      await beforeEnroll(!(await this.exists()));
       const hosts = await this.list();
       const host: StoredHost = {
         hostId: toBase64Url(randomBytes(16)),

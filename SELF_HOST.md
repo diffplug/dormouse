@@ -179,6 +179,9 @@ rights, and lays out:
       server/
       lib/dist-pocket/
       RELEASE
+  run/
+    enroll-offer.json
+    server.json
   state/
     account.json
     hosts.json
@@ -191,6 +194,12 @@ on Windows, and `~/.local/state/dormouse-server/logs` on Linux. The service
 definition is `~/Library/LaunchAgents/sh.dormouse.server.plist`, the Scheduled
 Task `\Dormouse Server`, or
 `~/.config/systemd/user/dormouse-server.service`.
+
+Before first Host enrollment, `run/enroll-offer.json` holds origin and a token that
+`POST /api/host/enroll` accepts in place of the setup password. A Dormouse Host
+on this machine reads the same file and offers one-click enrollment from it
+(checkpoint 4, step 3). It expires after 24 hours; either credential path's
+first Host enrollment removes it, and later installer runs do not recreate it.
 
 No installer will **ever**: run `git pull`, fetch, or switch branches; install a
 scheduled updater; ask for elevation; install or re-authenticate Tailscale;
@@ -238,12 +247,14 @@ shape what the user should expect day to day:
   `config/server.env`, and `tailscale funnel` is **off** — a Funnel would
   publish this same origin to the public internet, which the setup password's
   hardening was never sized for (`SECURITY.md` -> "Network posture").
-- `config/`, `state/` and `config/server.env` are readable only by the
+- `config/`, `state/`, `run/` and `config/server.env` are readable only by the
   installing user: modes `0700`/`0600` on macOS and Linux, a DACL with exactly
   that one user on Windows. The Windows check also covers each file in `state/`
   individually, because Node's file modes are a no-op there. The Linux check
-  also asserts the *owner* of all three, since a `0700` directory owned by
-  someone else satisfies the mode and inverts the property.
+  also asserts the *owner* of all four, since a `0700` directory owned by
+  someone else satisfies the mode and inverts the property. `run/enroll-offer.json`
+  is held to the same standard while it is there; a spent offer is gone, and
+  `verify` says so rather than failing.
 - The current release pointer resolves to a release with `RELEASE` metadata, and
   neither the service definition nor the `run-server` wrapper refers to the
   source checkout. A retained previous release is checked too, but a first
@@ -416,12 +427,13 @@ command line.
    install is a separate storage partition that would otherwise need its own
    pairing (`docs/specs/pocket-app.md` → Installable web app).
 
-3. **The Host.** Launch the standalone or VS Code build made with
-   `DORMOUSE_REMOTE_CONNECT_SRC` (see Prerequisites) and enroll once in
+3. **The Host.** On this same machine, launch the standalone or VS Code build
+   made with `DORMOUSE_REMOTE_CONNECT_SRC` (see Prerequisites) and open
    **Settings → Remote control** — the sliders icon at the far right of the
-   baseboard. Three fields: the server origin, the setup password from step 1,
-   and a name for this machine. The `window.dormouseRemoteHost` console hook
-   carries the same four commands and stays as the scripting seam
+   baseboard. Until its 24-hour limit or another Host enrollment, the offer
+   card leads: origin found, name prefilled,
+   one **Enroll**, no setup password. "Enroll with a different server…" unfolds
+   the typed form, for a server elsewhere or an offer already spent
    (`docs/specs/server.md`, "Remote control, in the Settings dialog").
 
    Enrollment persists in the Host service's own store — a file under the
@@ -430,9 +442,10 @@ command line.
    VS Code — so later launches connect on their own. The section then shows the server, the relay
    connection, and the paired-device count.
 
-   A build without the `*.ts.net` allowlist refuses this outright, before the
-   password leaves the machine, and the form renders that refusal verbatim.
-   That is the expected symptom of a stock build, not a server problem.
+   A build without the `*.ts.net` allowlist refuses this outright, before any
+   credential leaves the machine, and both the card and the form render that
+   refusal verbatim. That is the expected symptom of a stock build, not a server
+   problem.
 
 4. **A real session.** On the phone: Hosts → **Pair** → approve the modal that
    appears on the laptop → **Connect** (one biometric prompt) → pick a pane and
@@ -717,6 +730,14 @@ is live rather than asserting either.
   so the secret never sits under the inherited `%LOCALAPPDATA%` ACL — and
   because Node's file modes are a no-op on Windows, `manage verify` walks the
   files in `state\` individually there, where the unix editions need not.
+- **The enrollment offer rotates on every run before the first Host enrolls**,
+  including updates that preserve `server.env`; `state/hosts.json` then disables
+  it permanently until a state purge. Minted last after release, Serve, and
+  pruning succeed, it leaves the previous offer unspent on failure.
+  `run-server`
+  exports `DORMOUSE_ENROLL_TOKEN_FILE`; unset, the server refuses every offer
+  (`docs/specs/server.md` → Configuration). How the token is generated and
+  protected: `SECURITY.md` → "Credentials at rest".
 - **Loopback only, and tailnet-only.** The install pins
   `DORMOUSE_BIND_HOST=127.0.0.1` and refuses to proceed without it
   (`docs/specs/server.md` → Configuration on why the listen interface is a
@@ -738,9 +759,10 @@ is live rather than asserting either.
   service for it. The property is checked from the other side too: on unix,
   "reachable only by the installing user" is mode **and** owner, since a `0700`
   directory owned by another principal satisfies the mode and inverts the
-  property. Linux's `manage verify` asserts both legs on `config/`, `state/`
-  and `config/server.env`. *(The macOS installer checks the modes only, and not
-  yet the owner.)*
+  property. Linux's `manage verify` asserts both legs on `config/`, `state/`,
+  `run/` and `config/server.env`. *(macOS checks the modes only on all of them,
+  and Windows' `Test-OwnerOnly` reads the DACL but never the owner — two known
+  gaps, `SECURITY.md` → "Credentials at rest".)*
 - **A failed update is a failure.** The candidate release is health-checked on
   an ephemeral port against a throwaway state dir *before* `current` moves; if
   the live service then fails to answer, `current` is restored to `previous`
@@ -846,7 +868,9 @@ itself behind for the second one to be reachable at all: it removes the service
 definition, the releases, the pointers, `run/` and `bin/run-server`, but not
 the `bin` directory `manage` lives in — deleting that would strand `config/`
 and `state/`, the data the message it prints tells you to run `purge` for.
-`purge` deletes `state/` and `config/` after its typed confirmation and, when
+`purge` deletes `state/`, `config/` and `run/` after its typed confirmation —
+`run/` because an unspent offer redeems for a Host enrollment with no account in
+existence, recreating the state just deleted — and, when
 `bin/run-server` is already gone, closes by printing the one command that
 removes what is left; it cannot delete itself out from under the shell running
 it. That command names the dormouse-owned log directory alongside the install

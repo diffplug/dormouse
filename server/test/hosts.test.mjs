@@ -1,7 +1,8 @@
 /**
  * Slice-2 host enrollment and presence (docs/specs/server.md, "Relay & host
- * enrollment"): the password-gated `POST /api/host/enroll`, the session-gated
- * `GET /api/hosts` presence flag, and WS token rejection on both relay routes.
+ * enrollment"): the password path of the credential-gated `POST
+ * /api/host/enroll`, the session-gated `GET /api/hosts` presence flag, and WS
+ * token rejection on both relay routes.
  */
 
 import { test } from 'node:test';

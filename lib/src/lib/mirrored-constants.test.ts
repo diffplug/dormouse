@@ -1,13 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { enrollmentOfferPath } from '../host/remote/enroll-offer';
 import { ITERM2_COMPAT_VERSION } from './terminal-protocol';
 import { OPEN_PORT_TIMEOUT_MS } from './platform/types';
 
 // Pins for constants defined in more than one language/runtime, where an
-// import is impossible (the sidecar is plain CJS, the Tauri backend is Rust)
-// and only a "keep in sync" comment tied the copies together. Each test
+// import is impossible (the sidecar is plain CJS, the Tauri backend is Rust,
+// the installers are sh and PowerShell) and only a "keep in sync" comment tied
+// the copies together. Each test
 // fs-reads the sibling definition and compares values, so drifting one copy
 // fails loudly. Pattern per AGENTS.md — a "must stay in sync" claim names the
 // test that pins it.
@@ -46,6 +48,64 @@ describe('dor control-socket proof-domain mirrors', () => {
       expect(extract(clientSrc, client, re)).toBe(extract(serverSrc, server, re));
     });
   }
+});
+
+// docs/specs/server.md -> "Remote control, in the Settings dialog". The Host
+// reads the installer's enrollment offer from the path each installer writes it
+// to, and nothing links the two sides at build time — a drift is a one-click
+// enrollment that silently never appears. The whole path is followed, root and
+// leaf: the file name is as much of a shared constant as the directory.
+describe('enrollment-offer path mirrors the installers', () => {
+  const HOME = '/home/ned';
+
+  /** The shell forms the installers' path variables use, and nothing else. */
+  const expand = (expr: string, vars: Record<string, string>) =>
+    expr
+      .replace(/\$\{(\w+):-([^}]*)\}/g, (_, name: string, fallback: string) => vars[name] || fallback)
+      .replace(/\$(\w+)/g, (whole: string, name: string) => vars[name] ?? whole);
+
+  /** `ENROLL_OFFER_FILE` as one of the `sh` installers assembles it. */
+  const shellOfferFile = (file: string, env: Record<string, string> = {}) => {
+    const source = readRepoFile(file);
+    const vars: Record<string, string> = { HOME, ...env };
+    let resolved = '';
+    // Each one is defined in terms of the one before it, so they resolve in order.
+    for (const name of ['INSTALL_ROOT', 'RUN_DIR', 'ENROLL_OFFER_FILE'] as const) {
+      resolved = expand(extract(source, file, new RegExp(`^${name}="([^"]+)"$`, 'm')), vars);
+      vars[name] = resolved;
+    }
+    return resolved;
+  };
+
+  it('follows the macOS offer path', () => {
+    expect(enrollmentOfferPath('darwin', {}, HOME)).toBe(
+      shellOfferFile('deploy/local/install-macos.sh'),
+    );
+  });
+
+  it('follows the Linux offer path, XDG_DATA_HOME set or not', () => {
+    const file = 'deploy/local/install-linux.sh';
+    const env = { XDG_DATA_HOME: '/data' };
+    expect(enrollmentOfferPath('linux', env, HOME)).toBe(shellOfferFile(file, env));
+    expect(enrollmentOfferPath('linux', {}, HOME)).toBe(shellOfferFile(file));
+  });
+
+  it('follows the Windows offer path', () => {
+    const file = 'deploy/local/install-windows.ps1';
+    const source = readRepoFile(file);
+    const variable = extract(source, file, /^\$INSTALL_ROOT = Join-Path \$env:(\w+) '[^']+'$/m);
+    const local = 'C:\\Users\\ned\\AppData\\Local';
+    const root = join(
+      local,
+      extract(source, file, /^\$INSTALL_ROOT = Join-Path \$env:\w+ '([^']+)'$/m),
+    );
+    const run = join(root, extract(source, file, /^\$RUN_DIR = Join-Path \$INSTALL_ROOT '([^']+)'$/m));
+    const offerFile = join(
+      run,
+      extract(source, file, /^\$ENROLL_OFFER_FILE = Join-Path \$RUN_DIR '([^']+)'$/m),
+    );
+    expect(enrollmentOfferPath('win32', { [variable]: local }, HOME)).toBe(offerFile);
+  });
 });
 
 // docs/specs/standalone.md -> "Rust <-> sidecar bridge"

@@ -1,6 +1,6 @@
 {
   "AGENTS.md": 2750,
-  "SELF_HOST.md": 7100,
+  "SELF_HOST.md": 7290,
   "docs/specs/alert.md": 7600,
   "docs/specs/alert.rationale.md": 950,
   "docs/specs/auto-update.md": 1500,
@@ -20,8 +20,8 @@
   "docs/specs/pocket-app.md": 3825,
   "docs/specs/remote-api.md": 3825,
   "docs/specs/remote-security-model.md": 3025,
-  "docs/specs/server.md": 8350,
-  "docs/specs/server.rationale.md": 1100,
+  "docs/specs/server.md": 8800,
+  "docs/specs/server.rationale.md": 1150,
   "docs/specs/shortcuts.md": 1550,
   "docs/specs/standalone.md": 5100,
   "docs/specs/standalone.rationale.md": 375,
@@ -34,7 +34,7 @@
   "docs/specs/transport.md": 5275,
   "docs/specs/transport.rationale.md": 850,
   "docs/specs/tutorial.md": 2475,
-  "docs/specs/vscode.md": 9350,
+  "docs/specs/vscode.md": 9380,
   "docs/specs/vscode.rationale.md": 950,
   "docs/specs/webgl-text.md": 1600
 }

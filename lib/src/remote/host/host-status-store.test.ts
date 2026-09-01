@@ -220,5 +220,55 @@ describe('publishing', () => {
       unsubscribe();
     }
   });
+
+  /**
+   * `offer` is the one nested field, so it is the one the mapped type cannot
+   * help with — `Object.is` type-checks there too, and would re-render the
+   * section every 2 s on an un-enrolled machine that has an offer, since the
+   * service mints a fresh `{ origin }` per read. This test is the guard.
+   */
+  it('compares the offer by its origin, not by the object the poll minted', async () => {
+    vi.useFakeTimers();
+    let origin: string | null = 'https://ned-mac.tail9c2f1.ts.net';
+    const command = vi.fn(async () => ({
+      enrolled: false,
+      serverUrl: null,
+      hostId: null,
+      connection: 'stopped',
+      pairedClients: 0,
+      suggestedLabel: 'ned-mac',
+      // A new object every read, exactly as a round trip through the service gives.
+      offer: origin === null ? null : { origin },
+    }));
+    remoteHostLink = {
+      command,
+      respond: () => {},
+      notify: () => {},
+      on: () => () => {},
+    };
+
+    const listener = vi.fn();
+    const unsubscribe = subscribeToRemoteHostStatus(listener);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(3 * 2000);
+      expect(command.mock.calls.length).toBeGreaterThan(1);
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      // A different origin is a different offer, and must reach the card.
+      origin = 'https://ned-mac-2.tail9c2f1.ts.net';
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(listener).toHaveBeenCalledTimes(2);
+
+      // And so is one that went away — redeeming an offer unlinks the file.
+      origin = null;
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(listener).toHaveBeenCalledTimes(3);
+    } finally {
+      unsubscribe();
+    }
+  });
 });
 

@@ -461,6 +461,8 @@ fi
 
 CONFIG_DIR="$INSTALL_ROOT/config"
 ENV_FILE="$CONFIG_DIR/server.env"
+RUN_DIR="$INSTALL_ROOT/run"
+ENROLL_OFFER_FILE="$RUN_DIR/enroll-offer.json"
 STATE_DIR="$INSTALL_ROOT/state"
 RELEASES_DIR="$INSTALL_ROOT/releases"
 BIN_DIR="$INSTALL_ROOT/bin"
@@ -572,8 +574,10 @@ step "Staging the new release"
 
 umask 077
 mkdir -p "$RELEASES_DIR" "$BIN_DIR"
-mkdir -p "$CONFIG_DIR" "$STATE_DIR"
-chmod 0700 "$CONFIG_DIR" "$STATE_DIR"
+mkdir -p "$CONFIG_DIR" "$STATE_DIR" "$RUN_DIR"
+# Explicit rather than left to the umask above, so a directory an earlier run
+# created looser is tightened rather than kept.
+chmod 0700 "$CONFIG_DIR" "$STATE_DIR" "$RUN_DIR"
 mkdir -p "$LOG_DIR"
 
 BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -638,12 +642,18 @@ ok "release $RELEASE_ID staged"
 
 step "Runtime configuration"
 
+# One named CSPRNG, not a fallback chain: the release's own Node was staged a
+# few lines ago and is the binary this service will run under, so it is always
+# present and needs no probing. `crypto.randomBytes` is OpenSSL's RAND_bytes.
+# Never substitute $RANDOM, a timestamp, or any non-CSPRNG source. Both secrets
+# this installer mints — the setup password and the enrollment offer's token —
+# come from here, so there is one generator to audit rather than one per secret.
+random_hex32() {
+  "$STAGE/runtime/node" -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))'
+}
+
 if [ ! -f "$ENV_FILE" ]; then
-  # One named CSPRNG, not a fallback chain: the release's own Node was staged a
-  # few lines ago and is the binary this service will run under, so it is always
-  # present and needs no probing. `crypto.randomBytes` is OpenSSL's RAND_bytes.
-  # Never substitute $RANDOM, a timestamp, or any non-CSPRNG source.
-  SETUP_PASSWORD="$("$STAGE/runtime/node" -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"
+  SETUP_PASSWORD="$(random_hex32)"
   # 32 random bytes is 64 hex characters. The guard counts characters, so it
   # must be 64 — checking for 32 would pass a regression to 16 bytes, which is
   # half the entropy SECURITY.md claims.
@@ -730,6 +740,8 @@ ENTRY="$ROOT/current/server/dist/index.js"
 # is answering?" without reconstructing it from the process table. Set here
 # rather than in server.env because it is derived from `current`, which moves.
 export DORMOUSE_RUNTIME_FILE="$ROOT/run/server.json"
+# The installer mints this only until hosts.json records the first enrollment.
+export DORMOUSE_ENROLL_TOKEN_FILE="$ROOT/run/enroll-offer.json"
 RELEASE_TARGET="$(readlink "$ROOT/current" 2>/dev/null || true)"
 [ -n "$RELEASE_TARGET" ] && export DORMOUSE_RELEASE_ID="${RELEASE_TARGET##*/}"
 
@@ -747,6 +759,7 @@ LABEL="dormouse-server"
 UNIT="$LABEL.service"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$ROOT/config/server.env"
+OFFER_FILE="$ROOT/run/enroll-offer.json"
 STATE_DIR="$ROOT/state"
 # LOG_ROOT is the dormouse-owned directory the logs sit in — outside ROOT on a
 # real install, and what "purge" names so it does not leave an empty one behind.
@@ -1087,10 +1100,22 @@ cmd_verify() {
 
   # The property is "reachable only by the installing user", and on unix that
   # is mode AND owner: a 0700 directory owned by someone else satisfies the mode
-  # and inverts the property. Both legs, all three paths, one stat each.
+  # and inverts the property. Both legs, every path below, one stat each.
   owner_only "$ROOT/config" 700 "config/"
   owner_only "$STATE_DIR" 700 "state/"
+  # run/ is checked as a directory in its own right, not merely as the offer's
+  # parent: the directory governs who may replace or delete the one credential
+  # the server honors from disk.
+  owner_only "$ROOT/run" 700 "run/"
   owner_only "$ENV_FILE" 600 "config/server.env"
+  # The enrollment offer is single-use: absent means it was spent (or never
+  # minted by an older installer), which is healthy. Only its permissions are
+  # this command's business, and only while it is there.
+  if [ -f "$OFFER_FILE" ]; then
+    owner_only "$OFFER_FILE" 600 "run/enroll-offer.json"
+  else
+    note "no enrollment offer on disk (spent, or minted by an older installer)"
+  fi
 
   if grep -q '^DORMOUSE_BIND_HOST=127\.0\.0\.1$' "$ENV_FILE" 2>/dev/null; then
     pass "DORMOUSE_BIND_HOST=127.0.0.1"
@@ -1250,13 +1275,17 @@ cmd_uninstall() {
 
 cmd_purge() {
   printf '\n%sIRREVERSIBLE%s This deletes the account, enrolled Hosts, push\n' "$C_RED" "$C_OFF"
-  printf 'subscriptions, and the VAPID key:\n  %s\n  %s\n\n' "$STATE_DIR" "$ROOT/config"
+  printf 'subscriptions, the VAPID key, and any unspent enrollment offer:\n  %s\n  %s\n  %s\n\n' \
+    "$STATE_DIR" "$ROOT/config" "$ROOT/run"
   printf 'Registered passkeys and enrolled Hosts will have to be set up again.\n\n'
   printf 'Type exactly: DELETE DORMOUSE STATE\n> '
   local reply=""
   read -r reply || true
   if [ "$reply" != "DELETE DORMOUSE STATE" ]; then printf 'aborted\n'; return 1; fi
-  rm -rf "$STATE_DIR" "$ROOT/config"
+  # run/ too: an unspent enroll-offer.json redeems for a Host enrollment without
+  # any existing account, and redemption mkdir-recreates the state this command
+  # just deleted. Leaving it behind would make "IRREVERSIBLE" false for a day.
+  rm -rf "$STATE_DIR" "$ROOT/config" "$ROOT/run"
   printf 'purged.\n'
   # bin/run-server is what "uninstall" removes, so its absence means the service
   # and the code are already gone and this script is the last thing standing. It
@@ -1608,6 +1637,47 @@ if [ "$PRUNED" = "0" ]; then
   ok "nothing to prune (retaining current${KEEP_PREVIOUS:+ and previous})"
 else
   ok "pruned $PRUNED old release(s); config and state untouched"
+fi
+
+# ------------------------------------------------------------ enroll offer ---
+
+# run/enroll-offer.json, the one-time offer redeemed at POST /api/host/enroll in
+# place of the setup password (SECURITY.md → "Credentials at rest").
+#
+# Last state mutation: minting burns the previous unspent offer, so the release,
+# HTTPS Serve mapping, and pruning must all have succeeded first. The server
+# reads this file fresh; nothing needs it at service start.
+#
+# hosts.json is the durable "first Host happened" marker. Emptying its rows
+# revokes Hosts but does not silently reopen this bootstrap credential.
+if [ -e "$STATE_DIR/hosts.json" ]; then
+  rm -f "$ENROLL_OFFER_FILE"
+  ok "a Host has already enrolled — no one-click enrollment offer minted"
+else
+  ENROLL_TOKEN="$(random_hex32)"
+  [ ${#ENROLL_TOKEN} -ge 64 ] || die "generated enroll token is implausibly short; refusing to write the enrollment offer."
+  # Build an owner-only file beside the destination, then rename it into place.
+  # Redemption may claim the live path at any instant; it must see one complete
+  # generation or the other, never the truncate/chmod/write steps of a mint.
+  ENROLL_OFFER_TMP="$(mktemp "$RUN_DIR/.enroll-offer.XXXXXX")" \
+    || die "could not create a temporary enrollment offer."
+  chmod 0600 "$ENROLL_OFFER_TMP"
+  # mintedAt is read here, at write time, and never from BUILT_AT: the 24-hour
+  # expiry runs from the mint, and the build that precedes it is not free.
+  if ! printf '{"origin":"%s","token":"%s","mintedAt":"%s"}\n' \
+    "$ORIGIN" "$ENROLL_TOKEN" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ENROLL_OFFER_TMP"; then
+    rm -f "$ENROLL_OFFER_TMP"
+    unset ENROLL_TOKEN ENROLL_OFFER_TMP
+    die "could not write the temporary enrollment offer."
+  fi
+  if ! mv -f "$ENROLL_OFFER_TMP" "$ENROLL_OFFER_FILE"; then
+    rm -f "$ENROLL_OFFER_TMP"
+    unset ENROLL_TOKEN ENROLL_OFFER_TMP
+    die "could not publish the enrollment offer."
+  fi
+  unset ENROLL_OFFER_TMP
+  unset ENROLL_TOKEN
+  ok "minted run/enroll-offer.json (mode 0600) — a one-time enrollment offer for a Host on this machine"
 fi
 
 # ---------------------------------------------------------------- summary ---

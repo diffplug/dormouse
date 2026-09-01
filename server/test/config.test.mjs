@@ -94,6 +94,22 @@ test('DORMOUSE_VAPID_SUBJECT wins over the origin-derived default', () => {
   assert.equal(config.vapidSubject, 'mailto:admin@example.com');
 });
 
+test('the enroll token file is an absolute installer path, or nothing', () => {
+  // Unset means one-click enrollment is simply off — the case for dev, for
+  // containers, and for every test that does not opt in.
+  assert.equal(readConfig({ ...MINIMAL }).enrollTokenFile, null);
+  assert.equal(readConfig({ ...MINIMAL, DORMOUSE_ENROLL_TOKEN_FILE: '   ' }).enrollTokenFile, null);
+  assert.equal(
+    readConfig({ ...MINIMAL, DORMOUSE_ENROLL_TOKEN_FILE: '/var/lib/dormouse/enroll.json' })
+      .enrollTokenFile,
+    '/var/lib/dormouse/enroll.json',
+  );
+  assert.throws(
+    () => readConfig({ ...MINIMAL, DORMOUSE_ENROLL_TOKEN_FILE: 'run/enroll.json' }),
+    /must be an absolute path/,
+  );
+});
+
 test('the VAPID subject falls back to a routable origin, and to nothing on loopback', () => {
   assert.equal(
     readConfig({ ...MINIMAL, DORMOUSE_ORIGIN: 'https://dor.example.ts.net' }).vapidSubject,
