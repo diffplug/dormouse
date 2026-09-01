@@ -22,6 +22,9 @@ const MAX_TRACKED_UTTERANCES = 8;
  * punctuation, symbols, and controls with spaces so adjacent words do not join. */
 export function toSpokenText(label: string): string {
   const cleaned = label
+    // Elide apostrophes so contractions stay intact: spacing `didn't` would
+    // leave a lone `t` for the engine to announce.
+    .replace(/['’]/gu, '')
     // Unicode properties preserve letters, numbers, and combining marks from
     // every script while dropping characters a speech engine may announce.
     .replace(/[\p{P}\p{S}\p{C}]/gu, ' ')

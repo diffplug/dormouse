@@ -122,6 +122,10 @@ describe('toSpokenText', () => {
     expect(toSpokenText('build\u0007done\u001b')).toBe('build done');
   });
 
+  it('elides apostrophes rather than orphaning the letter after them', () => {
+    expect(toSpokenText("build didn't; it wasn’t finished")).toBe('build didnt it wasnt finished');
+  });
+
   it('preserves letters, numbers, and combining marks from other scripts', () => {
     expect(toSpokenText('构建完成。終了コード：０')).toBe('构建完成 終了コード ０');
     expect(toSpokenText('اَلْعَرَبِيَّةُ، ٢')).toBe('اَلْعَرَبِيَّةُ ٢');
