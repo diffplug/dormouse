@@ -384,10 +384,20 @@ export function summarizeCommandLine(raw: string): string {
  * This is the key WATCHING rules are stored under — see `docs/specs/alert.md`.
  */
 export function commandArgv0(raw: string): string | null {
-  const commandTokens = takePrimaryCommandTokens(tokenizeCommand(raw.trim()));
+  const commandTokens = primaryCommandTokens(raw);
   const command = commandTokens[0];
   if (!command) return null;
   return command.split(/[\\/]/).pop() || null;
+}
+
+/**
+ * The tokens of the first command on a line: quote- and escape-aware, truncated
+ * at the first pipeline/compound boundary, with leading `VAR=value` assignments
+ * and a leading `env` skipped. `commandArgv0` is this reduced to a program name;
+ * `dor tool`'s take-over gate reads the verb after it.
+ */
+export function primaryCommandTokens(raw: string): string[] {
+  return takePrimaryCommandTokens(tokenizeCommand(raw.trim()));
 }
 
 export interface ResolvedCommandStart {

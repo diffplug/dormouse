@@ -8,7 +8,9 @@ describe('isNakedToolInvocation', () => {
     expect(isNakedToolInvocation('dor tool -- pnpm storybook')).toBe(true);
     expect(isNakedToolInvocation('dor tool --fresh storybook')).toBe(true);
     expect(isNakedToolInvocation('/usr/local/bin/dor tool storybook')).toBe(true);
-    expect(isNakedToolInvocation('C:\\tools\\dor.cmd tool storybook')).toBe(true);
+    expect(isNakedToolInvocation('dor.cmd tool storybook')).toBe(true);
+    // The shared tokenizer skips a leading assignment, as `commandArgv0` does.
+    expect(isNakedToolInvocation('DEBUG=1 dor tool storybook')).toBe(true);
   });
 
   it('rejects a line that is not a bare `dor tool`', () => {
@@ -36,11 +38,10 @@ describe('isNakedToolInvocation', () => {
 
 describe('toolTakesOverCaller', () => {
   const passing: ToolTakeoverGate = {
-    callerId: 'pane-a',
     explicitSurface: false,
     minimized: false,
     visible: true,
-    component: 'terminal',
+    kind: 'terminal',
     oscDriven: true,
     rawCommandLine: 'dor tool storybook',
     cwdMatches: true,
@@ -52,12 +53,11 @@ describe('toolTakesOverCaller', () => {
 
   it('splits when any condition fails', () => {
     const splits: Array<[string, Partial<ToolTakeoverGate>]> = [
-      ['no caller (dor ran outside Dormouse)', { callerId: undefined }],
       ['--surface named a reference', { explicitSurface: true }],
       ['--minimize asked for a background surface', { minimized: true }],
       ['the caller is minimized', { visible: false }],
-      ['the caller is already a tool', { component: 'tool' }],
-      ['the caller is a browser', { component: 'browser' }],
+      ['the caller is already a tool', { kind: 'tool' }],
+      ['the caller is a browser', { kind: 'browser' }],
       ['the shell reports no OSC 633', { oscDriven: false }],
       ['the line is not naked', { rawCommandLine: 'claude' }],
       ['--cwd named another directory', { cwdMatches: false }],

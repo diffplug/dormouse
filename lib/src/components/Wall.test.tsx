@@ -83,6 +83,15 @@ async function flush(): Promise<void> {
   await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 }
 
+/** Poll until `ready()` — for the host's own 100ms state waits (a tool taking
+ *  over a pane, a split waiting on OSC 633), which no event can flush. */
+async function settle(ready: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!ready() && Date.now() < deadline) {
+    await act(async () => { await new Promise((r) => setTimeout(r, 25)); });
+  }
+}
+
 async function flushFrame(): Promise<void> {
   await act(async () => { await new Promise((r) => requestAnimationFrame(() => r(undefined))); });
 }
@@ -1411,20 +1420,12 @@ describe('Wall on the Lath engine', () => {
       act(() => {
         terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'promptStart' }]);
       });
-      await act(async () => { await new Promise((r) => setTimeout(r, 250)); });
+      await settle(() => typed.length > 0);
       expect(typed).toEqual(['pnpm storybook\r']);
       expect(leafCount()).toBe(1);
 
       // Same Surface, now a tool: the leaf changed kind without changing id, so
       // the session persists as one.
-      act(() => {
-        terminalRegistry.applyTerminalSemanticEvents('pane-a', [
-          { type: 'commandLine', commandLine: 'pnpm storybook' },
-          { type: 'commandStart', source: 'osc633_boundaries' },
-        ]);
-      });
-      // The spawn lock is held until the command is live; let the handler see it.
-      await act(async () => { await new Promise((r) => setTimeout(r, 250)); });
       await act(async () => { window.dispatchEvent(new Event('pagehide')); });
       await flush();
       await flush();
@@ -1493,7 +1494,7 @@ describe('Wall on the Lath engine', () => {
       act(() => {
         terminalRegistry.applyTerminalSemanticEvents(splitId!, [{ type: 'promptStart' }]);
       });
-      await act(async () => { await new Promise((r) => setTimeout(r, 250)); });
+      await settle(() => response !== undefined);
 
       expect(response?.result).toMatchObject({ status: 'created', surfaceId: splitId });
       expect(typed).toEqual([]);

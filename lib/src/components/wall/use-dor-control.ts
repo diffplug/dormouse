@@ -32,6 +32,7 @@ import {
   agentBrowserSessionFromParams,
   isAgentBrowserParams,
   namespacedToolKey,
+  surfaceKindFromParams,
   toolKeysEqual,
   toolPendingFromParams,
   type ToolPending,
@@ -254,14 +255,10 @@ function readSurfaceText(surfaceId: string, lines: number | undefined, scrollbac
 // terminal state: a command is gone once `currentCommand` clears (commandFinish
 // → prompt) and back once the surface reports the same command live again.
 const RESTART_POLL_INTERVAL_MS = 100;
-const RESTART_INTERRUPT_TIMEOUT_MS = 15_000;
+// How long a shell gets to come back to its prompt — after `dor ensure
+// --restart` interrupts a command, or after a taken-over pane's `dor` exits.
+const PROMPT_RETURN_TIMEOUT_MS = 15_000;
 const RESTART_START_TIMEOUT_MS = 15_000;
-
-// The take-over handshake's half of the same idea: `dor` exits as soon as it
-// has printed its handle, so the prompt is back within a round trip. Generous
-// anyway — the cost of waiting is nothing, and a shell still busy after this is
-// one whose pane we must leave alone.
-const TAKEOVER_PROMPT_TIMEOUT_MS = 15_000;
 
 /**
  * Serializes `surface.tool` requests. A plain promise chain rather than a real
@@ -323,7 +320,7 @@ async function restartSurfaceInPlace(id: string, command: string, cwd: string): 
   const interrupted = await waitForTerminalState(
     id,
     (state) => state.currentCommand === null,
-    RESTART_INTERRUPT_TIMEOUT_MS,
+    PROMPT_RETURN_TIMEOUT_MS,
   );
   if (!interrupted) return { ok: false, message: 'did not return to a prompt after interrupt' };
   platform.writePty(id, `${command}\r`);
@@ -334,6 +331,30 @@ async function restartSurfaceInPlace(id: string, command: string, cwd: string): 
   );
   if (!restarted) return { ok: false, message: 'command did not restart' };
   return { ok: true, value: undefined };
+}
+
+/**
+ * The take-over handshake (docs/specs/dor-tool.md -> Take-over): `dor` is the
+ * pane's foreground process until the host answers it, so the command can only
+ * be typed once its own shell is back at a prompt. A shell that never comes back
+ * — or a pane killed while we wait — is left exactly as it was.
+ */
+async function takeOverPaneWithTool(
+  lath: LathWallEngine,
+  id: string,
+  tool: { params: Record<string, unknown>; title: string; command: string },
+): Promise<void> {
+  const backAtPrompt = await waitForTerminalState(
+    id,
+    (state) => state.currentCommand === null,
+    PROMPT_RETURN_TIMEOUT_MS,
+  );
+  const meta = lath.getMeta(id);
+  if (!backAtPrompt || !meta) return;
+  // A rename the user made outlives the transformation; an untouched fallback
+  // title becomes the tool's, as a spawned one would be.
+  lath.store.setMeta(id, toolLeafMeta(meta.title === UNNAMED_PANEL_TITLE ? tool.title : meta.title, tool.params));
+  getPlatform().writePty(id, `${tool.command}\r`);
 }
 
 // A `dor ensure -- <command>` command is typed into the shell programmatically,
@@ -983,20 +1004,23 @@ export function useDorControl({
             ...(toolName ? { toolName } : {}),
           };
 
-          // Take-over: typed alone at a prompt, the tool runs in the calling
-          // pane rather than splitting (docs/specs/dor-tool.md -> Take-over).
+          // Take-over: typed alone at a prompt, the tool runs in the calling pane
+          // rather than splitting (docs/specs/dor-tool.md -> Take-over). Must stay
+          // below the pending-approval and key-match returns above: both of those
+          // placements win over this one.
           const callerId = detail.surfaceId;
-          const callerMeta = callerId ? lath.getMeta(callerId) : undefined;
-          if (callerId && toolTakesOverCaller({
-            callerId,
+          const callerState = callerId ? getTerminalPaneState(callerId) : null;
+          if (callerId && callerState && toolTakesOverCaller({
             explicitSurface: stringParam(params.surface) !== undefined,
             minimized: booleanParam(params.minimized),
             visible: nav.hasPane(callerId),
-            component: callerMeta?.component,
+            kind: surfaceKindFromParams(lath.getMeta(callerId)?.params),
             oscDriven: isPaneOscDriven(callerId),
-            rawCommandLine: getTerminalPaneState(callerId).currentCommand?.rawCommandLine ?? null,
-            cwdMatches: cwdPathsEqual(getTerminalPaneState(callerId).cwd?.path, cwd),
+            rawCommandLine: callerState.currentCommand?.rawCommandLine ?? null,
+            cwdMatches: cwdPathsEqual(callerState.cwd?.path, cwd),
           })) {
+            // Answered before the tool starts, because answering is what frees
+            // the shell to run it.
             detail.respond({
               ok: true,
               result: {
@@ -1010,33 +1034,13 @@ export function useDorControl({
                 ...(warnings.length > 0 ? { warnings } : {}),
               },
             });
-            // The handshake. `dor` is this pane's foreground process until the
-            // response above lets it exit, so the command can only be typed once
-            // its own shell is back at a prompt — respond first, then wait. A
-            // shell that never returns (or a pane killed while we wait) is left
-            // exactly as it was: nothing typed, still a plain terminal.
-            const backAtPrompt = await waitForTerminalState(
-              callerId,
-              (state) => state.currentCommand === null,
-              TAKEOVER_PROMPT_TIMEOUT_MS,
-            );
-            const meta = lath.getMeta(callerId);
-            if (!backAtPrompt || !meta) return;
-            // A rename the user made outlives the transformation; an untouched
-            // fallback title becomes the tool's, as a spawned one would be.
-            const title = meta.title === UNNAMED_PANEL_TITLE ? (toolName ?? command) : meta.title;
-            // One meta write, not a params patch plus a component swap: the
-            // Session and its scrollback stay put while the leaf changes kind.
-            lath.store.setMeta(callerId, toolLeafMeta(title, toolParams));
-            getPlatform().writePty(callerId, `${command}\r`);
-            // Still inside the spawn lock, held until the command is live so a
-            // second invocation of the same key dedupes against a running tool
-            // rather than racing this one into a duplicate.
-            await waitForTerminalState(
-              callerId,
-              (state) => surfaceRunsCommand(state, command, cwd),
-              RESTART_START_TIMEOUT_MS,
-            );
+            // Awaited inside the spawn lock: the key reaches the leaf's params in
+            // there, and until it does a second invocation of it would not dedupe.
+            await takeOverPaneWithTool(lath, callerId, {
+              params: toolParams,
+              title: toolName ?? command,
+              command,
+            });
             return;
           }
 

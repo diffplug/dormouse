@@ -306,13 +306,12 @@ cannot exit until it is answered.
 - **A shell that never comes back to its prompt is left alone**: nothing typed,
   leaf still a terminal. The transformation happens on the way *in* to typing,
   so a timeout costs nothing.
-- **The spawn lock is held past the response** until the command is live, so a
-  second invocation of the same key dedupes against a running tool instead of
-  racing this one.
-- **The transformation is one meta write.** Component pair and params commit
-  together — a body swapped ahead of its params would render a tool whose params
-  are still a terminal's — and the leaf id, which is the SessionId, never
-  changes. That is what keeps the terminal, its buffer, and its PTY untouched.
+- **The spawn lock is held past the response** until the pane is the tool: the
+  key reaches the leaf's params in the same write, and until it does a second
+  invocation of that key would not dedupe.
+- **The transformation is one meta write**, so the component pair and the params
+  commit together, and the leaf id — the SessionId — never changes. That is what
+  keeps the terminal, its buffer, and its PTY untouched.
 - Accepted: **keystrokes in the window between `dor` exiting and the command
   landing** interleave with it. The window is one control round trip.
 
