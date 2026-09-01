@@ -255,6 +255,23 @@ test('an installer rerun between the read and the claim keeps its fresh offer', 
   assert.equal(await redeemEnrollToken(path, fresh.token), 'redeemed');
 });
 
+test('releasing a claim never clobbers a still-newer installer offer', async () => {
+  const path = await offerPath(offer());
+  const fresh = offer({ token: 'f0e1d2c3'.repeat(8) });
+  const newest = offer({ token: '01234567'.repeat(8) });
+  const result = await redeemEnrollToken(
+    path,
+    TOKEN,
+    () => writeFile(path, JSON.stringify(fresh)),
+    // Runs after `fresh` has been claimed and found not to match the original,
+    // exactly where a second atomic installer publication can land.
+    () => writeFile(path, JSON.stringify(newest)),
+  );
+  assert.equal(result, 'rejected');
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), newest);
+  assert.equal(await redeemEnrollToken(path, newest.token), 'redeemed');
+});
+
 test('an offer deleted mid-redemption rejects, whichever half lost', async () => {
   const path = await offerPath(offer());
   const redemption = redeemEnrollToken(path, TOKEN);
