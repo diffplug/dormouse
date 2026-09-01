@@ -46,8 +46,8 @@ const TONE_CLASS = {
 const FIELD_LABEL = 'text-xs text-muted';
 
 /**
- * The busy/error pair every action in this section runs behind, so a rejection
- * from any of them lands in the same place and reads in the same words.
+ * A busy/error pair for an action surface with one error location. Enrollment
+ * uses the cross-form gate below instead.
  */
 function useBusyAction() {
   const [busy, setBusy] = useState(false);
@@ -62,6 +62,36 @@ function useBusyAction() {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setBusy(false);
+    }
+  }, []);
+
+  return { busy, error, run };
+}
+
+type EnrollmentAction = 'offer' | 'form';
+
+/** One synchronous gate shared by both ways an un-enrolled Host can enroll. */
+function useEnrollmentActions() {
+  const running = useRef(false);
+  const [busy, setBusy] = useState<EnrollmentAction | null>(null);
+  const [error, setError] = useState<{ action: EnrollmentAction; message: string } | null>(null);
+
+  const run = useCallback(async (action: EnrollmentAction, work: () => Promise<void>) => {
+    // State disables the buttons on the next render; the ref closes the smaller
+    // window where two click handlers can run before that render happens.
+    if (running.current) return false;
+    running.current = true;
+    setBusy(action);
+    setError(null);
+    try {
+      await work();
+      return true;
+    } catch (caught) {
+      setError({ action, message: caught instanceof Error ? caught.message : String(caught) });
+      return false;
+    } finally {
+      running.current = false;
+      setBusy(null);
     }
   }, []);
 
@@ -157,9 +187,11 @@ function EnrollView({
   suggestedLabel: string;
 }) {
   const [showForm, setShowForm] = useState(false);
-  // Hoisted out of the card so it outlives the offer: this is the state that
-  // has to still be here when a rejected enroll lands after the file went away.
-  const { busy, error, run } = useBusyAction();
+  // Hoisted out of both forms so they share one synchronous enrollment gate,
+  // and so an offer failure still has somewhere to render after its file goes.
+  const { busy, error, run } = useEnrollmentActions();
+  const offerError = error?.action === 'offer' ? error.message : null;
+  const formError = error?.action === 'form' ? error.message : null;
 
   // The origin the card is rendering, which is the offer's while there is one
   // and the last one otherwise — kept only while that card still has something
@@ -167,7 +199,8 @@ function EnrollView({
   // the card is gone and the typed form is all that is left, unfolded.
   const shown = useRef<string | null>(null);
   if (offer) shown.current = offer.origin;
-  const origin = offer?.origin ?? (busy || error !== null ? shown.current : null);
+  const origin =
+    offer?.origin ?? (busy === 'offer' || offerError !== null ? shown.current : null);
 
   return (
     <div>
@@ -179,9 +212,10 @@ function EnrollView({
             key={origin}
             origin={origin}
             suggestedLabel={suggestedLabel}
-            busy={busy}
-            error={error}
-            onEnroll={(label) => void run(() => enrollOfferRemoteHost(origin, label))}
+            busy={busy === 'offer'}
+            disabled={busy !== null}
+            error={offerError}
+            onEnroll={(label) => void run('offer', () => enrollOfferRemoteHost(origin, label))}
           />
           <div className="mt-2">
             <button
@@ -198,7 +232,16 @@ function EnrollView({
         </>
       ) : null}
       {/* Hidden, never unmounted — see the note above. */}
-      <EnrollForm suggestedLabel={suggestedLabel} hidden={origin !== null && !showForm} />
+      <EnrollForm
+        suggestedLabel={suggestedLabel}
+        hidden={origin !== null && !showForm}
+        busy={busy === 'form'}
+        disabled={busy !== null}
+        error={formError}
+        onEnroll={(serverUrl, password, label) =>
+          run('form', () => enrollRemoteHost(serverUrl, password, label))
+        }
+      />
     </div>
   );
 }
@@ -218,12 +261,14 @@ function OfferCard({
   origin,
   suggestedLabel,
   busy,
+  disabled,
   error,
   onEnroll,
 }: {
   origin: string;
   suggestedLabel: string;
   busy: boolean;
+  disabled: boolean;
   error: string | null;
   onEnroll: (label: string) => void;
 }) {
@@ -236,7 +281,7 @@ function OfferCard({
       className="mt-1.5"
       onSubmit={(e) => {
         e.preventDefault();
-        if (ready && !busy) onEnroll(label.trim());
+        if (ready && !disabled) onEnroll(label.trim());
       }}
     >
       <div className="text-sm leading-relaxed text-muted">
@@ -256,7 +301,7 @@ function OfferCard({
       <div className="mt-2">
         <button
           type="submit"
-          disabled={!ready || busy}
+          disabled={!ready || disabled}
           className={modalActionButton({ tone: 'primary' })}
         >
           {busy ? 'Connecting…' : 'Enroll'}
@@ -351,24 +396,37 @@ function EnrolledView({
  * both of the things that fold it away: refolding the disclosure, and an offer
  * file appearing on disk mid-typing ({@link EnrollView}).
  */
-function EnrollForm({ suggestedLabel, hidden }: { suggestedLabel: string; hidden?: boolean }) {
+function EnrollForm({
+  suggestedLabel,
+  hidden,
+  busy,
+  disabled,
+  error,
+  onEnroll,
+}: {
+  suggestedLabel: string;
+  hidden?: boolean;
+  busy: boolean;
+  disabled: boolean;
+  error: string | null;
+  onEnroll: (serverUrl: string, password: string, label: string) => Promise<boolean>;
+}) {
   const [serverUrl, setServerUrl] = useState('');
   const [password, setPassword] = useState('');
   const [label, setLabel] = useState(suggestedLabel);
-  const { busy, error, run } = useBusyAction();
 
   const ready = serverUrl.trim() !== '' && password !== '' && label.trim() !== '';
 
   const submit = useCallback(
     () =>
-      run(async () => {
-        await enrollRemoteHost(serverUrl.trim(), password, label.trim());
+      onEnroll(serverUrl.trim(), password, label.trim()).then((succeeded) => {
+        if (!succeeded) return;
         // Only on success: a failed enroll is usually a typo in one of the other
         // fields, and clearing the password would make every retry a re-fetch
         // from the password manager.
         setPassword('');
       }),
-    [run, serverUrl, password, label],
+    [onEnroll, serverUrl, password, label],
   );
 
   return (
@@ -377,7 +435,7 @@ function EnrollForm({ suggestedLabel, hidden }: { suggestedLabel: string; hidden
       hidden={hidden}
       onSubmit={(e) => {
         e.preventDefault();
-        if (ready && !busy) void submit();
+        if (ready && !disabled) void submit();
       }}
     >
       <div className="text-sm leading-relaxed text-muted">
@@ -414,7 +472,7 @@ function EnrollForm({ suggestedLabel, hidden }: { suggestedLabel: string; hidden
       <div className="mt-2">
         <button
           type="submit"
-          disabled={!ready || busy}
+          disabled={!ready || disabled}
           className={modalActionButton({ tone: 'primary' })}
         >
           {busy ? 'Connecting…' : 'Connect'}

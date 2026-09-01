@@ -343,6 +343,44 @@ describe('RemoteControlSection', () => {
     );
   });
 
+  it('runs only one enrollment across the offer and typed forms', async () => {
+    let finishOffer: (value: unknown) => void = () => {};
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'enrollOffer') {
+        return new Promise((resolve) => {
+          finishOffer = resolve;
+        });
+      }
+      if (cmd === 'enroll') return { hostId: 'wrong-racer', serverUrl: 'https://elsewhere' };
+      return OFFER_STATUS;
+    });
+    platform = { remoteHost: link };
+    await render();
+
+    await act(async () => disclosure()!.click());
+    await type('input[type="url"]', 'https://elsewhere.example');
+    await type('input[type="password"]', 'hunter2');
+
+    await act(async () => {
+      buttonLabelled('Enroll')!.click();
+      // A submit event bypasses the button's next-render `disabled` state and
+      // exercises the synchronous gate between the two handlers directly.
+      typedForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+
+    const enrollCommands = link.command.mock.calls.filter(([cmd]) =>
+      ['enroll', 'enrollOffer'].includes(cmd),
+    );
+    expect(enrollCommands.map(([cmd]) => cmd)).toEqual(['enrollOffer']);
+    expect(buttonLabelled('Connect')!.disabled).toBe(true);
+
+    await act(async () => {
+      finishOffer({ hostId: 'host-1', serverUrl: OFFER_STATUS.offer!.origin });
+      await Promise.resolve();
+    });
+  });
+
   it('shows the server and paired-device count when enrolled', async () => {
     platform = { remoteHost: makeLink(async () => enrolled({ pairedClients: 2 })) };
     await render();

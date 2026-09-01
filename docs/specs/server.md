@@ -658,10 +658,9 @@ to honor:
   offer appearing underneath it — and unchanged where there is no offer. Reading
   the file is bounded to the un-enrolled state — an enrolled service answers
   `offer: null` without touching disk (rationale).
-- **The offer's token never enters a webview**, exactly like `hostToken`
-  (`SECURITY.md`): `status` carries the origin only, and `enrollOffer` re-reads
-  the file itself — which is also what makes a card rendered minutes ago safe to
-  press, since redeeming an offer unlinks it.
+- **The offer's token never enters a webview.** `status` carries only the origin;
+  `enrollOffer` re-reads the file in the Host service, so an old card cannot
+  reuse a spent offer (`SECURITY.md`).
 - **The click echoes the origin the card displayed**, and the service refuses a
   file that no longer names it: an installer rerun rewrites the offer, and that
   new origin is one nobody reviewed. `enrollOffer` takes `{ origin, label }` —
@@ -670,9 +669,11 @@ to honor:
   enroll redeems it, so the card keeps rendering while that enroll is in flight
   or holding an error: a refusal landing after the card went away is silence
   over a spent token.
+- **Only one enrollment may run.** One synchronous gate covers both forms and
+  pre-render double clicks.
 - **The password is passed through, never held.** It goes straight to the
-  service, which is the party that talks to the server, and is cleared on
-  success. `hostToken` never comes back into the webview realm: `enroll`
+  service and is cleared on success. `hostToken` never comes back into the
+  webview realm: `enroll`
   answers `{ hostId, serverUrl }`.
 - **Refusals are shown, not swallowed.** An origin outside this build's baked
   allowlist is refused before any credential leaves the machine (above), and that
