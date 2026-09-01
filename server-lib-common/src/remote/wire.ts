@@ -21,6 +21,7 @@ export const API_ROUTES = {
   reauthBegin: '/api/reauth/begin',
   reauthFinish: '/api/reauth/finish',
   hostEnroll: '/api/host/enroll',
+  hostSetupToken: '/api/host/setup-token',
   hosts: '/api/hosts',
   pushConfig: '/api/push/config',
   pushChallenge: '/api/push/challenge',
@@ -66,9 +67,17 @@ export const WS_CLOSE_HOST_REPLACED_REASON = 'replaced by a newer host connectio
 /** The selfhost mode has exactly one account. */
 export const SELFHOST_ACCOUNT_ID = 'owner';
 
-export interface SetupBeginRequest {
-  password: string;
-}
+/**
+ * What gates the two setup routes: the setup password, or the single-use
+ * `token` of a {@link SetupTokenResponse} an enrolled Host minted for its QR.
+ * Exactly one must be present — both, or neither, is a 400, the same rule and
+ * the same reason as {@link HostEnrollRequest}.
+ */
+export type SetupCredential =
+  | { password: string; setupToken?: never }
+  | { password?: never; setupToken: string };
+
+export type SetupBeginRequest = SetupCredential;
 export interface SetupBeginResponse {
   /** Base64url challenge for `navigator.credentials.create()`. */
   challenge: string;
@@ -76,8 +85,7 @@ export interface SetupBeginResponse {
   accountId: string;
 }
 
-export interface SetupFinishRequest {
-  password: string;
+export type SetupFinishRequest = SetupCredential & {
   /** Base64url credential id (`PublicKeyCredential.id`). */
   credentialId: string;
   /** Base64url SPKI from `response.getPublicKey()`. */
@@ -85,7 +93,7 @@ export interface SetupFinishRequest {
   /** Base64url `response.clientDataJSON` (type `webauthn.create`). */
   clientDataJSON: string;
   label: string;
-}
+};
 export interface SetupFinishResponse {
   accountId: string;
   credentialId: string;
@@ -165,6 +173,21 @@ export interface HostEnrollResponse {
    * the weaker verifier, and the Host is the one that decides access.
    */
   requireUserVerification?: boolean;
+}
+
+/**
+ * Host-token auth. The single-use setup credential an enrolled Host mints to
+ * render as a QR: the token only, since the Host composes
+ * `https://<origin>/#setup?token=…` itself from the origin it enrolled
+ * against. Scanning it replaces typing the origin and the setup password; a
+ * short TTL plus single use bound the shoulder-surf window, and the Server
+ * tells the minting Host when the token is spent
+ * (`ServerToHostFrame` `setup-token-redeemed`).
+ */
+export interface SetupTokenResponse {
+  token: string;
+  /** Epoch ms after which the token no longer redeems. */
+  expiresAt: number;
 }
 
 export interface HostsResponse {
@@ -315,14 +338,21 @@ export type ServerToClientFrame =
   | { t: 'host-gone' }
   | { t: 'error'; error: string };
 
-/** Server → host. */
+/**
+ * Server → host. Every frame but `setup-token-redeemed` addresses one Client by
+ * its server-assigned `clientId`; that one carries none by design, because it
+ * is about the Host itself — a setup token this Host minted
+ * ({@link SetupTokenResponse}) was just spent, so the QR showing it is stale
+ * and each redemption is visible to the person who displayed it.
+ */
 export type ServerToHostFrame =
   | { t: 'pair'; clientId: string; request: PairingRequest }
   | { t: 'pair-status'; clientId: string; query: PairStatusQuery }
   | { t: 'connect'; clientId: string }
   | { t: 'connect2'; clientId: string; request: ConnectionRequest }
   | { t: 'msg'; clientId: string; data: unknown }
-  | { t: 'client-gone'; clientId: string };
+  | { t: 'client-gone'; clientId: string }
+  | { t: 'setup-token-redeemed' };
 
 /**
  * Host → server. `pair-status-result` carries no hostId — the relay knows which

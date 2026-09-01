@@ -51,6 +51,7 @@ import type {
   SetupBeginResponse,
   SetupFinishRequest,
   SetupFinishResponse,
+  SetupTokenResponse,
   SigninBeginResponse,
   SigninFinishRequest,
   SigninFinishResponse,
@@ -61,6 +62,7 @@ import { Handshake } from './handshake.js';
 import { RelayHub } from './relay.js';
 import type { ClientConn, HostConn } from './relay.js';
 import { secretEquals } from './secrets.js';
+import { SetupTokenIssuer } from './setup-token.js';
 import {
   AccountStore,
   DuplicateCredentialError,
@@ -222,6 +224,9 @@ export function createApp(config: AppConfig): CreatedApp {
   // domain tag (PUSH_SUBSCRIBE_DOMAIN), which is the half that matters when the
   // other side of the exchange is a Host challenge this server merely relayed.
   const pushChallenges = new HostChallengeIssuer({ now });
+  // Not an issuer: a setup token remembers the Host that minted it, so its
+  // redemption can be announced back to that Host.
+  const setupTokens = new SetupTokenIssuer({ now });
 
   const passwordOk = (provided: unknown): boolean =>
     typeof provided === 'string' && secretEquals(provided, config.setupPassword);
@@ -232,17 +237,34 @@ export function createApp(config: AppConfig): CreatedApp {
     return c.json({ error }, 401);
   }
 
-  // Read a JSON body and enforce the setup password. Returns the parsed body, or
-  // a ready 401 `Response` the caller returns as-is — so the password-gated
-  // routes share one policy.
-  async function readPasswordGated<T extends { password: unknown }>(
+  // Read a JSON body and enforce the setup credential: the setup password, or
+  // the single-use token behind a Host's QR. Exactly one, counted by presence
+  // rather than by type, for the reason `/api/host/enroll` counts that way —
+  // trying both in turn would let a spent token fall through to the password.
+  // Returns the parsed body plus the token to spend on success (`null` on the
+  // password path), or a ready `Response` the caller returns as-is, so the two
+  // setup routes share one policy and neither is the softer path.
+  async function readSetupGated<T extends { password?: unknown; setupToken?: unknown }>(
     c: Context<AppEnv>,
-  ): Promise<T | Response> {
+  ): Promise<{ body: T; setupToken: string | null } | Response> {
     const body = await readJson<T>(c);
-    if (!body || !passwordOk(body.password)) {
-      return credentialFailure(c, BAD_PASSWORD_ERROR);
+    const password: unknown = body?.password;
+    const setupToken: unknown = body?.setupToken;
+    if ((password !== undefined) === (setupToken !== undefined)) {
+      return c.json({ error: 'supply exactly one of password or setupToken' }, 400);
     }
-    return body;
+    if (setupToken !== undefined) {
+      // Mistyped, unknown, and expired are one delayed 401: none of them may
+      // tell a caller which one it hit. Peeked rather than consumed — `begin`
+      // runs before the user has done anything, and an abandoned registration
+      // must leave the QR on the laptop screen still scannable.
+      if (typeof setupToken !== 'string' || !setupTokens.peek(setupToken)) {
+        return credentialFailure(c, UNAUTHORIZED_ERROR);
+      }
+      return { body: body as T, setupToken };
+    }
+    if (!passwordOk(password)) return credentialFailure(c, BAD_PASSWORD_ERROR);
+    return { body: body as T, setupToken: null };
   }
 
   const app = new Hono<AppEnv>();
@@ -259,19 +281,23 @@ export function createApp(config: AppConfig): CreatedApp {
   // Shared greeting, kept from the skeleton so `lib` and `server` stay agreed.
   app.get(HELLO_ROUTE, (c) => c.json(helloResponse()));
 
-  // --- Setup: password-gated passkey registration -------------------------
+  // --- Setup: credential-gated passkey registration ------------------------
+  // The credential is the setup password or a Host's single-use setup token;
+  // `begin` is what mints the WebAuthn registration challenge, so both routes
+  // gate identically and neither becomes the softer path.
 
   app.post(API_ROUTES.setupBegin, async (c) => {
-    const body = await readPasswordGated<SetupBeginRequest>(c);
-    if (body instanceof Response) return body;
+    const gated = await readSetupGated<SetupBeginRequest>(c);
+    if (gated instanceof Response) return gated;
     const { challenge } = setupChallenges.issue();
     const res: SetupBeginResponse = { challenge, rpId, accountId: SELFHOST_ACCOUNT_ID };
     return c.json(res);
   });
 
   app.post(API_ROUTES.setupFinish, async (c) => {
-    const body = await readPasswordGated<SetupFinishRequest>(c);
-    if (body instanceof Response) return body;
+    const gated = await readSetupGated<SetupFinishRequest>(c);
+    if (gated instanceof Response) return gated;
+    const { body, setupToken } = gated;
 
     // Decode and sanity-check clientDataJSON — we do NOT parse attestation
     // (attestation: 'none'); the browser already handed us the public key.
@@ -304,6 +330,18 @@ export function createApp(config: AppConfig): CreatedApp {
         return c.json({ error: 'credential already registered' }, 409);
       }
       throw err;
+    }
+
+    // Spend the token only now, on the one outcome that actually set the
+    // account up: a finish rejected for a stale challenge or a duplicate
+    // credential leaves the QR redeemable, so the user retries instead of
+    // asking the laptop for a new one. Registering twice off one token is
+    // already impossible — the registration challenge is single-use.
+    if (setupToken !== null) {
+      const redeemed = setupTokens.consume(setupToken);
+      // Announce it to the Host that minted it, so the QR it is displaying can
+      // stop being shown and the person at the laptop sees each redemption.
+      if (redeemed) hub.notifyHost(redeemed.hostId, { t: 'setup-token-redeemed' });
     }
 
     const res: SetupFinishResponse = {
@@ -438,6 +476,16 @@ export function createApp(config: AppConfig): CreatedApp {
     await next();
   };
 
+  // Gate a route on a valid `Authorization: Bearer` host token. Mirrors
+  // `requireSession`, resolving through the constant-time `findByToken`.
+  const requireHost: MiddlewareHandler<AppEnv> = async (c, next) => {
+    const token = bearerToken(c);
+    const host = token ? await hostStore.findByToken(token) : undefined;
+    if (!host) return c.json({ error: 'unauthorized' }, 401);
+    c.set('host', host);
+    await next();
+  };
+
   // --- Re-auth: refresh an existing session's verified-presence stamp ------
   // Pairing requires a recent server-verified assertion (PAIRING_PRESENCE_WINDOW_MS;
   // remote-security-model.md, Pairing Ceremony). When the stamp is stale the
@@ -476,20 +524,21 @@ export function createApp(config: AppConfig): CreatedApp {
     return c.json(res);
   });
 
+  // --- Setup tokens: the credential behind a Host's QR ---------------------
+
+  app.post(API_ROUTES.hostSetupToken, requireHost, (c) => {
+    // The token only. The Host composes `https://<origin>/#setup?token=…`
+    // itself — it knows the origin it enrolled against, and a URL minted here
+    // would be one more place the deployment's own address is decided.
+    const { token, expiresAt } = setupTokens.issue(c.get('host').hostId);
+    const res: SetupTokenResponse = { token, expiresAt };
+    return c.json(res);
+  });
+
   // --- Web Push: subscriptions (client-facing) and delivery (host-facing) --
   // See alert.md "Push notifications". Two audiences, two credentials: a
   // Client registers its own subscription with a session token plus a device
   // signature; a Host reads and sends with its `hostToken`.
-
-  // Gate a route on a valid `Authorization: Bearer` host token. Mirrors
-  // `requireSession`, resolving through the constant-time `findByToken`.
-  const requireHost: MiddlewareHandler<AppEnv> = async (c, next) => {
-    const token = bearerToken(c);
-    const host = token ? await hostStore.findByToken(token) : undefined;
-    if (!host) return c.json({ error: 'unauthorized' }, 401);
-    c.set('host', host);
-    await next();
-  };
 
   app.get(API_ROUTES.pushConfig, (c) => {
     // The VAPID public key is public by construction — it ships to every

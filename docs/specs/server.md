@@ -241,13 +241,14 @@ This table is the whole route surface. Paths and request/response shapes live in
 | Route                            | Auth           | Does                                              |
 | -------------------------------- | -------------- | ------------------------------------------------- |
 | `GET /api/hello`                 | —              | The shared greeting. Carries no release identity: it is unauthenticated, CORS-`*` and reachable through `tailscale serve` — see the runtime file under "Installing it" |
-| `POST /api/setup/begin`          | setup password | Issues a registration challenge. Only the password gates it, so re-presenting it adds another passkey |
-| `POST /api/setup/finish`         | setup password | Registers the passkey in `account.json`            |
+| `POST /api/setup/begin`          | setup password or setup token | Issues a registration challenge. Only the credential gates it, so re-presenting one adds another passkey |
+| `POST /api/setup/finish`         | setup password or setup token | Registers the passkey in `account.json`, and spends the setup token |
 | `POST /api/signin/begin`         | —              | Issues a sign-in challenge                          |
 | `POST /api/signin/finish`        | —              | Verifies the assertion and issues a 12-hour in-memory session token |
 | `POST /api/reauth/begin`         | session token  | Issues a presence challenge for the current session |
 | `POST /api/reauth/finish`        | session token  | Verifies like sign-in and refreshes presence without replacing the token or relay socket |
 | `POST /api/host/enroll`          | setup password or one-time enroll token | Enrolls a Host, appends `hosts.json`, and mirrors the user-verification policy. Exactly one credential — both, or neither, is a 400 |
+| `POST /api/host/setup-token`     | host token     | Mints the single-use, short-TTL token this Host renders as a QR (below) |
 | `GET /api/hosts`                 | session token  | Enrolled hosts + whether each is currently connected |
 | `GET /api/push/config`           | —              | Returns the public VAPID key, or `null` when push is unconfigured |
 | `POST /api/push/challenge`       | session token  | Issues a pool-wide nonce for the device signature; Host binding lives in the signature |
@@ -278,6 +279,33 @@ since a wrong setup password and a rejected device signature answer 401 as well
 ([pocket-app.md](./pocket-app.md) -> An expired session drops to sign-in). A
 rejected enroll token answers that same body and delay whatever the cause, and
 only a Host sends one, so Pocket's recovery keying is unaffected.
+
+### Setup tokens
+
+An enrolled Host mints one over its own authenticated channel and renders
+`https://<origin>/#setup?token=…` as a QR; the response carries the token
+alone, since the Host knows the origin it enrolled against. Scanning replaces
+typing that origin and the setup password.
+
+* **Exactly one credential gates each setup route** — password or `setupToken`,
+  counted by presence rather than type, both or neither a 400, exactly as
+  `/api/host/enroll` counts. `POST /api/setup/begin` mints the WebAuthn
+  registration challenge, so it gates identically and no route is softer.
+* **`begin` peeks; only a successful `finish` spends.** An abandoned scan
+  leaves the QR scannable, and a `finish` rejected for its clientData or a
+  duplicate credential leaves the token redeemable — registering twice off one
+  token is impossible anyway, the registration challenge being single-use.
+* **Mistyped, unknown and expired are one delayed 401** carrying
+  `UNAUTHORIZED_ERROR`; none may tell a scanner which it hit.
+* **The store remembers which Host minted each token** — that is who the
+  redemption is announced to (Relay below), and why it is not a
+  `HostChallengeIssuer`. TTL is `DEFAULT_PAIRING_TTL_MS`, since the nonce it
+  leaves behind must survive the passkey ceremony before pairing; it prunes on
+  every mint and caps outstanding tokens, oldest first, because anything
+  holding a `hostToken` can mint (Guardrails).
+
+Source of truth: `server/src/setup-token.ts`, pinned by
+`server/test/setup-token.test.mjs`.
 
 ### Web Push
 
@@ -379,6 +407,12 @@ both directions. `clientId` is a server-assigned secret stamped onto every
 host-bound frame so the Host can address replies, and is never sent to the
 Client.
 
+**`setup-token-redeemed` is the one host-bound frame with no `clientId`**: it is
+about the Host rather than a Client — a setup token that Host minted was just
+spent. HTTP routes reach the relay through `RelayHub.notifyHost`, and an
+offline or replaced Host is a silent no-op, since the frame only announces work
+that already succeeded and must never fail the phone.
+
 **Only one socket may own a `hostId`.** Registering a second one for the same
 `hostId` displaces the first: clients bound to it are told `host-gone`, their
 sessions are cleared, and the old socket is closed with
@@ -453,6 +487,12 @@ answered locally never reaches the Host, so it can never appear in the approval
 UI or burn a ticket. The ceremony beyond this point — `PairingCeremony`, local
 approval as the only thing that writes the ACL — is
 [remote-security-model.md](./remote-security-model.md) -> Pairing Ceremony.
+
+Reserved: a `pair` request may also carry `setupNonce`, the setup token a phone
+was set up by scanning. The relay shape-checks it with the rest of the request
+(bounded string, optional) and forwards it verbatim; **nothing on the Server
+verifies it**, because only the Host that minted the token holds a copy — see
+QR-first phone setup in `## Future`.
 
 **Both sides run the shape guard.** The server's `isPairingRequest` is a
 courtesy that keeps a bad frame off the wire; the Host runs the same guard on

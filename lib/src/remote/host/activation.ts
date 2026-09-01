@@ -221,6 +221,7 @@ const PAIRING_REQUEST_FIELDS = {
   passkeyPublicKeyHash: true,
   devicePublicKey: true,
   requestedLabel: true,
+  setupNonce: true,
 } satisfies Record<keyof PairingRequest, true>;
 
 /**

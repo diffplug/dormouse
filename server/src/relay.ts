@@ -71,6 +71,17 @@ export class RelayHub {
     return this.#hosts.has(hostId);
   }
 
+  /**
+   * Send an unsolicited frame to a Host, if it has a live socket. The seam an
+   * HTTP route uses to reach the relay (`setup-token-redeemed`); a Host that is
+   * offline or has since been replaced is a silent no-op, never an error, since
+   * the frame is a notification about work that already succeeded elsewhere.
+   */
+  notifyHost(hostId: string, frame: ServerToHostFrame): void {
+    const host = this.#hosts.get(hostId);
+    if (host) this.#toHost(host, frame);
+  }
+
   // --- Host lifecycle -------------------------------------------------------
 
   /**

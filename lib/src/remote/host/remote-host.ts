@@ -361,7 +361,10 @@ export class RemoteHost {
     ) {
       return;
     }
-    const clientId = frame.clientId;
+    // Cast, not narrowing: the guard above already proved the field, and one
+    // `ServerToHostFrame` variant (`setup-token-redeemed`) carries no clientId
+    // at all, so it is dropped there like any frame this Host cannot address.
+    const clientId = (frame as { clientId: string }).clientId;
     switch (frame.t) {
       case 'pair':
         return this.#onPair(clientId, (frame as { request?: unknown }).request);
