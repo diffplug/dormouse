@@ -12,6 +12,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   PAIRING_STALE_PRESENCE_ERROR,
   SELFHOST_ACCOUNT_ID,
+  SETUP_TOKEN_INVALID_ERROR,
+  computeSetupProof,
   generateDeviceKeyPair,
   hashPasskeyPublicKey,
   pushEndpointFingerprint,
@@ -26,6 +28,7 @@ import {
   PASSKEY_UNAVAILABLE_MESSAGE,
   PocketClient,
   SessionExpiredError,
+  SetupTokenInvalidError,
   type PocketStorage,
   type PocketClientDeps,
 } from './pocket-client';
@@ -196,7 +199,7 @@ const AUTH_ROUTES = {
 /** Setup + sign-in + open the relay socket, ready for pair/connect. */
 async function signedIn(overrides: Partial<PocketClientDeps> = {}): Promise<Harness> {
   const harness = makeClient({ ...AUTH_ROUTES }, overrides);
-  await harness.client.setup('pw', 'My Phone');
+  await harness.client.setup({ password: 'pw' }, 'My Phone');
   await harness.client.signin();
   const open = harness.client.openSocket();
   harness.socket.open();
@@ -216,7 +219,7 @@ async function pairApproved(client: PocketClient, socket: FakeSocket): Promise<v
 describe('setup + signin', () => {
   it('registers, signs in, keeps the token, and sends it as a bearer', async () => {
     const harness = makeClient({ ...AUTH_ROUTES });
-    const setup = await harness.client.setup('pw', 'My Phone');
+    const setup = await harness.client.setup({ password: 'pw' }, 'My Phone');
     expect(setup.credentialId).toBe(CREDENTIAL_ID);
 
     const signin = await harness.client.signin();
@@ -263,7 +266,61 @@ describe('setup + signin', () => {
     const harness = makeClient({
       '/api/setup/begin': () => ({ status: 401, json: { error: 'invalid setup password' } }),
     });
-    await expect(harness.client.setup('wrong', 'Phone')).rejects.toThrow('invalid setup password');
+    await expect(harness.client.setup({ password: 'wrong' }, 'Phone')).rejects.toThrow('invalid setup password');
+  });
+
+  /**
+   * Exactly one credential per request, on both routes: presenting the password
+   * *and* a token is a 400, since trying the two in turn would let a spent
+   * token fall through to the password (`docs/specs/server.md` -> Setup tokens).
+   */
+  it.each([
+    ['the setup password', { password: 'pw' } as const, 'password', 'setupToken'],
+    ['a scanned setup token', { setupToken: 'tok-qr' } as const, 'setupToken', 'password'],
+  ])('sends %s alone, on begin and finish', async (_case, credential, sent, absent) => {
+    const harness = makeClient({ ...AUTH_ROUTES });
+
+    await harness.client.setup(credential, 'My Phone');
+
+    for (const route of ['/api/setup/begin', '/api/setup/finish']) {
+      const body = harness.calls.find((c) => c.url.endsWith(route))!.body as Record<string, unknown>;
+      expect(body[sent]).toBe(Object.values(credential)[0]);
+      expect(body).not.toHaveProperty(absent);
+    }
+    const finish = harness.calls.find((c) => c.url.endsWith('/api/setup/finish'))!.body as Record<
+      string,
+      unknown
+    >;
+    expect(finish.credentialId).toBe(CREDENTIAL_ID);
+    expect(finish.label).toBe('My Phone');
+  });
+
+  /**
+   * Its own error class, because Pocket has to react rather than report: a
+   * spent code means "re-scan or type the password", where the shared
+   * `UNAUTHORIZED_ERROR` would drive the sign-in recovery instead.
+   */
+  it('raises a distinct error for a dead setup token, on either setup route', async () => {
+    const dead = { status: 401, json: { error: SETUP_TOKEN_INVALID_ERROR } };
+    const atBegin = makeClient({ '/api/setup/begin': () => dead });
+    await expect(atBegin.client.setup({ setupToken: 'spent' }, 'Phone')).rejects.toThrow(
+      SetupTokenInvalidError,
+    );
+
+    const atFinish = makeClient({ ...AUTH_ROUTES, '/api/setup/finish': () => dead });
+    await expect(atFinish.client.setup({ setupToken: 'spent' }, 'Phone')).rejects.toThrow(
+      SetupTokenInvalidError,
+    );
+  });
+
+  it('leaves a wrong setup password an ordinary failure, not a dead code', async () => {
+    const harness = makeClient({
+      '/api/setup/begin': () => ({ status: 401, json: { error: 'invalid setup password' } }),
+    });
+
+    await expect(harness.client.setup({ password: 'wrong' }, 'Phone')).rejects.not.toBeInstanceOf(
+      SetupTokenInvalidError,
+    );
   });
 });
 
@@ -286,7 +343,7 @@ describe('subscribeToPush', () => {
    */
   it('records the registered delivery address so a later rotation is detectable', async () => {
     const harness = makeClient(PUSH_ROUTES);
-    await harness.client.setup('pw', 'My Phone');
+    await harness.client.setup({ password: 'pw' }, 'My Phone');
     await harness.client.signin();
     expect(harness.client.registeredPushEndpoint()).toBeNull();
 
@@ -305,7 +362,7 @@ describe('subscribeToPush', () => {
       ...PUSH_ROUTES,
       '/api/push/subscribe': () => ({ status: 401, json: { error: 'device signature rejected' } }),
     });
-    await harness.client.setup('pw', 'My Phone');
+    await harness.client.setup({ password: 'pw' }, 'My Phone');
     await harness.client.signin();
 
     await expect(harness.client.subscribeToPush('h1', SUBSCRIPTION)).rejects.toThrow();
@@ -336,7 +393,7 @@ describe('listPushSubscribedHosts', () => {
       },
       { deviceKey: async () => device },
     );
-    await harness.client.setup('pw', 'My Phone');
+    await harness.client.setup({ password: 'pw' }, 'My Phone');
     await harness.client.signin();
 
     expect(await harness.client.listPushSubscribedHosts()).toEqual(['h1', 'h3']);
@@ -354,7 +411,7 @@ describe('listPushSubscribedHosts', () => {
         json: { subscriptions: [{ hostId: 'h1', devicePublicKey: 'other', subscribedAt: 1 }] },
       }),
     });
-    await harness.client.setup('pw', 'My Phone');
+    await harness.client.setup({ password: 'pw' }, 'My Phone');
     await harness.client.signin();
     expect(await harness.client.listPushSubscribedHosts()).toEqual([]);
   });
@@ -382,6 +439,45 @@ describe('pair', () => {
     expect(client.isPaired('h1')).toBe(true);
   });
 
+  /**
+   * The nonce itself never leaves the phone — what rides is a MAC of it over
+   * the device key this very request asks the Host to authorize, which is what
+   * a relay cannot re-key onto a substituted one
+   * (`docs/specs/remote-security-model.md` -> Pairing Ceremony).
+   */
+  it('proves the scanned nonce over the device key it is asking to authorize', async () => {
+    const { client, socket, device } = await signedIn();
+    const pairing = client.pair('h1', 'iPhone', 'nonce-from-the-qr');
+
+    const frame = await nextSent(socket, (f) => f.t === 'pair');
+    const request = frame.request as Record<string, unknown>;
+    const { devicePublicKey } = await device();
+    expect(request.devicePublicKey).toBe(devicePublicKey);
+    expect(request.setupProof).toBe(
+      await computeSetupProof('nonce-from-the-qr', devicePublicKey),
+    );
+    expect(JSON.stringify(request)).not.toContain('nonce-from-the-qr');
+
+    socket.receive({ t: 'pair-result', approved: true, record: { hostId: 'h1' } });
+    await pairing;
+  });
+
+  it.each([
+    ['no code was scanned', undefined],
+    ['the nonce is already spent', null],
+  ])('sends no proof when %s', async (_case, nonce) => {
+    const { client, socket } = await signedIn();
+    const pairing = client.pair('h1', 'iPhone', nonce);
+
+    const frame = await nextSent(socket, (f) => f.t === 'pair');
+    // Absent, not empty: the Host reads any non-string as no proof at all, and
+    // an empty one could not be a MAC anyway.
+    expect(frame.request as Record<string, unknown>).not.toHaveProperty('setupProof');
+
+    socket.receive({ t: 'pair-result', approved: true, record: { hostId: 'h1' } });
+    await pairing;
+  });
+
   it('surfaces a denial and does not mark the host paired', async () => {
     const { client, socket } = await signedIn();
     const pairing = client.pair('h1', 'iPhone');
@@ -400,7 +496,7 @@ describe('pair', () => {
       '/api/reauth/finish': () => ({ json: { presenceVerifiedAt: 123 } }),
     });
     const { client, socket, calls } = harness;
-    await client.setup('pw', 'My Phone');
+    await client.setup({ password: 'pw' }, 'My Phone');
     await client.signin();
     const open = client.openSocket();
     socket.open();
@@ -682,7 +778,7 @@ describe('session expiry', () => {
     response: () => { status?: number; json: unknown },
   ): Promise<Harness> {
     const harness = makeClient({ ...AUTH_ROUTES, '/api/hosts': response });
-    await harness.client.setup('pw', 'My Phone');
+    await harness.client.setup({ password: 'pw' }, 'My Phone');
     await harness.client.signin();
     return harness;
   }
@@ -791,7 +887,7 @@ describe('socket lifecycle', () => {
     const first = sockets[0]!;
     const second = sockets[1]!;
 
-    await harness.client.setup('pw', 'My Phone');
+    await harness.client.setup({ password: 'pw' }, 'My Phone');
     await harness.client.signin();
 
     const firstOpen = harness.client.openSocket();
@@ -882,7 +978,7 @@ describe('hasPriorUse', () => {
 
   it('is true once a credential public key is cached', async () => {
     const { client } = makeClient({ ...AUTH_ROUTES });
-    await client.setup('pw', 'My Phone');
+    await client.setup({ password: 'pw' }, 'My Phone');
 
     expect(client.hasPriorUse()).toBe(true);
   });

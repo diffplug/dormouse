@@ -12,7 +12,7 @@ import * as PocketWall from '../../lib/src/stories/PocketWall.stories';
 
 Everything it takes to control a laptop's terminals from a phone, in the order
 you meet it: stand up a server, build a Host that is allowed to reach it, enroll
-the laptop, make a passkey on the phone, approve the pairing, connect.
+the laptop, scan its code with the phone, approve the pairing, connect.
 
 The screens below are the real components, rendered from the same stories
 Chromatic watches. They are static — nothing here is wired to a live server.
@@ -102,8 +102,10 @@ Two things to carry forward:
 
 The setup password gates exactly two things: creating the one account, and
 enrolling a Host from somewhere else. It never leaves your machine except to
-those two endpoints — and a Host on *this* laptop does not need it at all, because
-the installer also leaves it a one-time enrollment offer (section 3).
+those two endpoints — and on a happy path you never read it out at all: a Host
+on *this* laptop enrolls from the one-time offer the installer leaves it
+(section 3), and the phone sets itself up from a scanned code (section 4).
+`show-password` is the fallback both of those have.
 
 ---
 
@@ -180,23 +182,65 @@ enrolling connects the machine to a server; it pairs it with nothing.
 
 <Canvas of={RemoteControl.ConnectedNoDevices} />
 
+### Show the phone a code
+
+An enrolled machine can mint one, on request:
+
+<Canvas of={RemoteControl.SetupPhoneQr} />
+
+That code is `https://<laptop>.<tailnet>.ts.net/#setup?token=…&nonce=…` — the
+origin you would otherwise type into mobile Safari, carrying two secrets with
+two different verifiers:
+
+- The **setup token** is the server's. Single-use, five minutes, and it redeems
+  at the setup endpoints in place of the setup password.
+- The **nonce** is the *laptop's own*, and never goes near the server. It
+  travels laptop screen → phone camera and no further, which is what makes it
+  worth something in §6.
+
+Neither lives long: five minutes, one use. The code is shown on request rather
+than left standing on screen, and once a phone redeems it the panel says so
+rather than going on offering a code that can no longer work — the server tells
+the Host that minted it, since the redemption happened on the phone.
+
 ---
 
 ## 4. Make a passkey on the phone
 
-Open the same origin on a tailnet-connected phone. **On iOS, install to the Home
-Screen before you do any of this** — the installed app is a separate storage
-partition from the Safari tab, so anything set up in the tab has to be set up
-again from scratch.
+Point the phone's camera at that code. It opens the same origin on the phone,
+and Pocket has read both secrets before it paints anything: the hash is taken
+out of the URL in the same act, so neither is left in the address bar, the
+history stack, or a screenshot.
 
-Pocket loads, finds nothing stored, and leads with what a phone in that state
-actually needs: the setup password from `manage show-password`, plus a label for
-this passkey.
+<Canvas of={SetupOrSignin.FromScannedCode} />
+
+**On iOS, install to the Home Screen before you do any of this** — the installed
+app is a separate storage partition from the Safari tab, so anything set up in
+the tab has to be set up again from scratch, and the code does not follow you
+across (the installed app launches at its own start URL, with no hash on it).
+
+There is no password field, because the code is the credential; all that is left
+is a label for the passkey. Setup also leads on a phone that *has* been here
+before — pointing a camera at a laptop is not an ambiguous request:
+
+<Canvas of={SetupOrSignin.FromScannedCodeReturning} />
+
+Sign in stays on the screen throughout. A passkey syncs, so a second phone may
+already hold one, and taking that path keeps the scanned nonce for §6 either
+way.
+
+If the code is expired or already spent, Pocket says so and hands the password
+field back rather than stranding you on a dead code:
+
+<Canvas of={SetupOrSignin.ScannedCodeExpired} />
+
+That password path is also the original one, for a phone nowhere near the
+laptop's screen: the setup password from `manage show-password`, plus the label.
 
 <Canvas of={SetupOrSignin.FirstRun} />
 
-That one setup action creates the account's first passkey and signs in with it.
-Two things you cannot see happen at the same time:
+Either way, that one setup action creates the account's first passkey and signs
+in with it. Two things you cannot see happen at the same time:
 
 - A **device key** is minted — a non-extractable ECDSA P-256 keypair kept in
   IndexedDB. This browser can sign with it and can never export it. It is this
@@ -205,15 +249,15 @@ Two things you cannot see happen at the same time:
 - The session's **presence stamp** is set. Pairing requires a passkey assertion
   from the last 30 seconds, so signing in is what makes the next step possible.
 
-Sign in stays on the screen as the quieter second option, because passkeys sync
-— a phone that has never been here may already hold one. A phone that *has*
-been here gets the other screen instead, sign-in first with setup folded back
-behind a disclosure:
+With no code and nothing stored, sign in is the quieter second option, because
+passkeys sync — a phone that has never been here may already hold one. A phone
+that *has* been here, and did not arrive by camera, gets the other screen
+instead: sign-in first, with setup folded back behind a disclosure.
 
 <Canvas of={SetupOrSignin.Welcome} />
 
-On a first run in an iOS Safari tab, Pocket puts that install advice on the
-screen itself, above the fields, while it is still free to take:
+In an iOS Safari tab, Pocket puts that install advice on the screen itself,
+above the fields, while it is still free to take:
 
 <Canvas of={SetupOrSignin.FirstRunNeedsInstall} />
 
@@ -252,7 +296,7 @@ laptop:
 phone                        server                        host (laptop)
   |-- signin (passkey) -------->|                              |
   |   generate device key       |                              |
-  |-- pair -------------------->|-- pair --------------------->|  approval modal
+  |-- pair + setupProof ------->|-- pair --------------------->|  approval modal
   |                             |                              |  user clicks Approve
   |<-- pair-result -------------|<-- pair-result --------------|  ACL record saved
 ```
@@ -264,11 +308,27 @@ request is answered there and **never reaches the approval modal** — so what a
 person is asked to look at is always a real, fresh request. (A stale one costs
 the phone one extra biometric prompt and a retry, not a restart.)
 
-Then the laptop interrupts:
+Then the laptop interrupts. A phone set up from the code on *this* screen says
+so in the request, and the dialog asks for one confirm:
+
+<Canvas of={Pairing.Verified} />
+
+What it is confirming is a MAC, not a claim. The request carries
+`setupProof = HMAC-SHA256(key = nonce, message = domain || devicePublicKey)`,
+and the laptop recomputes it against every nonce it still holds. The nonce is
+the half of the QR the server never saw, and the proof is over the very device
+key the request is asking to authorize — so a server that swapped in its own key
+would need a MAC under a secret it has never had. Displaying the code was the
+local-presence act; the modal names what proved the device rather than asking
+you to vouch for it. Approving spends the nonce, and one scan sets up one phone.
+
+Without a proof — a phone set up by typing the password, a second browser on the
+same phone, a code already spent — the dialog is the other one, and eight
+characters of key are the control:
 
 <Canvas of={Pairing.Default} />
 
-This modal is the whole security model in one screen, which is why it is a
+Either modal is the whole security model in one screen, which is why it is a
 modal and not a settings row.
 
 - **Local approval is the only path into the ACL.** Not signing in, not owning
@@ -281,7 +341,9 @@ modal and not a settings row.
 - **The three rows are the identity being authorized.** Device is the label the
   phone suggested, Account is who signed in, and Key is the first 8 characters
   of that browser's device public key — the part that distinguishes two
-  Clients on the same physical phone.
+  Clients on the same physical phone. Unproved, that is the row to compare
+  against the one Pocket shows on its own Hosts screen (§5); a proof is what
+  replaces that comparison rather than dressing it up.
 - **"Adds it to this machine only"** is doing real work. The ACL is per-Host
   and local; your other laptops are unaffected and will each ask separately.
 
@@ -387,11 +449,15 @@ phone until each pairs again.
 
 <Canvas of={RemoteControl.ConfirmingDisconnect} />
 
-Two limits worth knowing before they surprise you:
+Three limits worth knowing before they surprise you:
 
 - **Clearing site data destroys the device key.** That is a re-pair, by design:
   the identity the laptop authorized is gone — and the storage partition the
   key lives in is per-browser, as §4 warns.
+- **A scanned code is good for one setup, and its nonce for one approval.** So
+  a re-pair later compares fingerprints (§6) unless you show the phone a fresh
+  code, and the code a reload loses is simply gone — five minutes was its whole
+  life anyway.
 - **A dropped WebSocket returns the phone to the Hosts view.** Tap Connect
   again; there is no resume protocol.
 

@@ -9,9 +9,11 @@ import {
   REMOTE_EVENTS,
   REMOTE_METHODS,
   SELFHOST_ACCOUNT_ID,
+  SETUP_TOKEN_INVALID_ERROR,
   UNAUTHORIZED_ERROR,
   WS_ROUTES,
   WS_TOKEN_PARAM,
+  computeSetupProof,
   hashPasskeyPublicKey,
   pushEndpointFingerprint,
   signDeviceChallenge,
@@ -37,6 +39,7 @@ import {
   type RemoteResponse,
   type ServerToClientFrame,
   type SetupBeginResponse,
+  type SetupCredential,
   type SetupFinishResponse,
   type SigninBeginResponse,
   type SigninFinishResponse,
@@ -125,6 +128,25 @@ export class SessionExpiredError extends Error {
   constructor() {
     super(SESSION_EXPIRED_MESSAGE);
     this.name = 'SessionExpiredError';
+  }
+}
+
+/** Shown when the scanned code is expired, spent, or otherwise unknown. */
+export const SETUP_CODE_DEAD_MESSAGE =
+  'That setup code has expired. Show a new one on the computer, or set up with the setup password.';
+
+/**
+ * The Server refused the `setupToken` this run was opened with
+ * ({@link SETUP_TOKEN_INVALID_ERROR}). Its own class for the reason
+ * {@link SessionExpiredError} is: the UI must react rather than report — drop
+ * the dead code and offer the setup password — and the Server answers 401 for
+ * a wrong password and a rejected device signature too, so only the body
+ * separates them ({@link SETUP_CODE_DEAD_MESSAGE} is what the user reads).
+ */
+export class SetupTokenInvalidError extends Error {
+  constructor() {
+    super(SETUP_CODE_DEAD_MESSAGE);
+    this.name = 'SetupTokenInvalidError';
   }
 }
 
@@ -232,9 +254,16 @@ export class PocketClient {
 
   // --- Account: first-time setup + sign-in ---------------------------------
 
-  /** First-time setup: password-gated passkey registration. Follow with {@link signin}. */
-  async setup(password: string, label: string): Promise<SetupFinishResponse> {
-    const begin = await this.#api<SetupBeginResponse>(API_ROUTES.setupBegin, { password });
+  /**
+   * First-time setup: gated passkey registration. Follow with {@link signin}.
+   *
+   * The credential is the setup password or the single-use `setupToken` off a
+   * scanned QR, and both requests carry exactly the one they were given —
+   * spreading the union rather than naming its arms, since presenting both is
+   * a 400 (`docs/specs/server.md` -> Setup tokens).
+   */
+  async setup(credential: SetupCredential, label: string): Promise<SetupFinishResponse> {
+    const begin = await this.#api<SetupBeginResponse>(API_ROUTES.setupBegin, credential);
     this.#rpId = begin.rpId;
     const registration = await this.#webauthn.registerPasskey(
       begin.challenge,
@@ -242,7 +271,7 @@ export class PocketClient {
       begin.accountId,
     );
     const finish = await this.#api<SetupFinishResponse>(API_ROUTES.setupFinish, {
-      password,
+      ...credential,
       credentialId: registration.credentialId,
       publicKey: registration.publicKey,
       clientDataJSON: registration.clientDataJSON,
@@ -402,8 +431,19 @@ export class PocketClient {
 
   // --- Pairing + connect handshake -----------------------------------------
 
-  /** Send a pairing request built from this device's key + passkey; awaits the Host's decision. */
-  async pair(hostId: string, label: string): Promise<PairResult> {
+  /**
+   * Send a pairing request built from this device's key + passkey; awaits the
+   * Host's decision.
+   *
+   * `setupNonce` is the second half of a scanned QR, when this run was opened
+   * with one. It is never sent: what rides is a MAC of it over the very device
+   * key the request asks to authorize, which is what lets the Host recognize
+   * the phone that photographed its screen and collapse the approval to one
+   * confirm (`docs/specs/remote-security-model.md` -> Pairing Ceremony).
+   * Computed once, so the stale-presence retry re-sends the same proof — the
+   * Host's match is non-consuming, so a re-delivery stays verified.
+   */
+  async pair(hostId: string, label: string, setupNonce?: string | null): Promise<PairResult> {
     const { credentialId, publicKey } = this.#passkeyForRequest();
     const device = await this.#getDeviceKey();
     const request: PairingRequest = {
@@ -412,6 +452,9 @@ export class PocketClient {
       passkeyPublicKeyHash: await hashPasskeyPublicKey(publicKey),
       devicePublicKey: device.devicePublicKey,
       requestedLabel: label,
+      ...(setupNonce
+        ? { setupProof: await computeSetupProof(setupNonce, device.devicePublicKey) }
+        : {}),
     };
     let result = await this.#sendPair(hostId, request);
     if (!result.approved && result.error === PAIRING_STALE_PRESENCE_ERROR) {
@@ -829,6 +872,11 @@ export class PocketClient {
       // let the UI believe it is still signed in.
       this.#sessionToken = null;
       throw new SessionExpiredError();
+    }
+    // The other 401 the UI has to act on. Only the two setup routes answer this
+    // body, and only Pocket sends what earns it, so it needs no route check.
+    if (response.status === 401 && parsed.error === SETUP_TOKEN_INVALID_ERROR) {
+      throw new SetupTokenInvalidError();
     }
     if (!response.ok) throw new Error(parsed.error ?? `request failed (${response.status})`);
     return parsed;

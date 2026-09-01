@@ -51,6 +51,31 @@ persistence, not the visit: `localStoragePocketStorage` mirrors writes in memory
 and reads the mirror first, because `setup` commits the Server's passkey
 *before* caching it and a throw there would leave every retry minting an orphan.
 
+**A scanned code outranks that question.** Opened from a Host's QR
+(`#setup?token=…&nonce=…`; [server.md](./server.md) owns the grammar and the
+erase-at-boot rule), the screen leads with setup whatever this browser holds —
+pointing a camera at the laptop *is* the ask — and the token replaces the
+password field rather than joining it:
+
+* **Sign-in stays offered** — a synced passkey may be the better path, and it
+  keeps the scanned nonce for pairing either way.
+* **A refused token is dropped, not reported.** `SETUP_TOKEN_INVALID_ERROR` —
+  expired, spent, or minted by a since-revoked Host — becomes
+  `SetupTokenInvalidError`, which nulls the token and hands the screen back the
+  setup password; its own class for the reason `SessionExpiredError` is one,
+  since a bare 401 drives the wrong recovery.
+* **The nonce lives for the run, never on disk.** Every `pair` carries
+  `computeSetupProof(nonce, devicePublicKey)` until a pairing it verified is
+  approved, which spends it Host-side; a reload loses it, bounded by the
+  5-minute TTL it shares with the token
+  ([remote-security-model.md](./remote-security-model.md) owns what it proves).
+* **Install-first advice still leads.** A code scanned in an iOS tab sets up
+  that partition, not the Home Screen app's — and does not survive the install,
+  since the installed app launches at `start_url` with no hash.
+
+Source of truth: `setup-link.ts` and `SetupOrSignin` in
+`lib/src/remote/pocket-app/App.tsx`.
+
 **Pocket hides `MobileWall`'s local Kill affordance** (`showKillButton={false}`)
 — remote panes are Host-owned, and v1 grants no phone-side kill/layout
 authority. Closing a local xterm view without a Host-side close would leave the

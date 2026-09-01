@@ -37,6 +37,25 @@ test('DORMOUSE_ORIGIN wins over the port-derived default', () => {
   assert.equal(config.origin, 'https://dor.example.ts.net');
 });
 
+test('DORMOUSE_ORIGIN is normalized to a bare origin', () => {
+  // A trailing slash reads as correct in an `.env` and fails every compare it
+  // reaches: the WebAuthn `clientData.origin` check, and the `<origin>/#setup?…`
+  // QR a Host composes, which would scan to `//#setup`.
+  const trailing = readConfig({ ...MINIMAL, DORMOUSE_ORIGIN: 'https://dor.example.ts.net/' });
+  assert.equal(trailing.origin, 'https://dor.example.ts.net');
+  const pathed = readConfig({ ...MINIMAL, DORMOUSE_ORIGIN: 'https://dor.example.ts.net:8443/pocket?x=1' });
+  assert.equal(pathed.origin, 'https://dor.example.ts.net:8443');
+});
+
+test('a DORMOUSE_ORIGIN that is not a URL with a host is a ConfigError', () => {
+  assert.throws(() => readConfig({ ...MINIMAL, DORMOUSE_ORIGIN: 'dor.example.ts.net' }), ConfigError);
+  assert.throws(() => readConfig({ ...MINIMAL, DORMOUSE_ORIGIN: 'mailto:ned@example.com' }), ConfigError);
+});
+
+test('a blank DORMOUSE_ORIGIN falls back to the localhost default', () => {
+  assert.equal(readConfig({ ...MINIMAL, DORMOUSE_ORIGIN: '  ' }).origin, 'http://localhost:3000');
+});
+
 test('a missing setup password is a ConfigError, not a silent start', () => {
   assert.throws(() => readConfig({}), ConfigError);
 });

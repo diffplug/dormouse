@@ -63,9 +63,11 @@ the setup password or a bearer token, exactly as `SECURITY.md` -> "Loopback
 Listeners" requires. `scripts/loopback-lint.mjs` does not cover this socket —
 it binds from config rather than from a loopback literal (rationale).
 
-`DORMOUSE_ORIGIN` is parsed once and normalized with `URL.origin`; WebAuthn
-clientData checks, passkey assertion verification, and the Host enrollment
-policy all use that normalized origin.
+`DORMOUSE_ORIGIN` is parsed once and normalized with `URL.origin` — a trailing
+slash reads as correct in an `.env` and fails every compare it reaches, and a
+value that is not a URL with a host is a `ConfigError` naming the variable.
+WebAuthn clientData checks, passkey assertion verification, the Host enrollment
+policy and the `#setup` URL a Host composes all use that normalized origin.
 
 Source of truth: `server/src/config.ts` (`readConfig`), a pure env→config
 mapping pinned by `server/test/config.test.mjs`; only the disk half stays
@@ -280,17 +282,26 @@ since a wrong setup password and a rejected device signature answer 401 as well
 rejected enroll token answers that same body and delay whatever the cause,
 which stays safe because only a Host sends one. A rejected **setup** token does
 not: Pocket sends those itself, so it answers the distinct
-`SETUP_TOKEN_INVALID_ERROR` — same 401, same delay — which the Client half will
-key its "re-scan" recovery on ([Future](#future)).
+`SETUP_TOKEN_INVALID_ERROR` — same 401, same delay — which Pocket keys its
+"scan again, or type the password" recovery on
+([pocket-app.md](./pocket-app.md)).
 
 ### Setup tokens
 
 An enrolled Host mints one over its own authenticated channel; the response
 carries the token and an opaque `mintId`, since the Host knows the origin it
 enrolled against and composes `<origin>/#setup?token=…&nonce=…` for the QR it
-will render ([Future](#future)). Scanning replaces typing that origin and the
-setup password. **The `nonce` is the Host's own and never reaches this server**
-— [remote-security-model.md](./remote-security-model.md) owns what it proves.
+renders. Scanning replaces typing that origin and the setup password. **The
+`nonce` is the Host's own and never reaches this server** —
+[remote-security-model.md](./remote-security-model.md) owns what it proves.
+
+**The hash grammar is this spec's**: `token` and `nonce`, both base64url,
+percent-encoded. Pocket reads it before its first render and **erases the hash
+in the same act** — an address bar, a history stack and a screenshot are places
+a live credential must not sit — and ignores one that does not parse, since
+nobody typed it. Source of truth: `takeSetupHash` in
+`lib/src/remote/pocket-app/setup-link.ts`; what Pocket does with each half is
+[pocket-app.md](./pocket-app.md).
 
 * **Exactly one credential, counted by presence rather than by type**, here and
   at `/api/host/enroll`: trying the two in turn would let a spent token fall
@@ -923,24 +934,16 @@ a `*.ts.net` origin means `DORMOUSE_REMOTE_CONNECT_SRC` at build time (see
 
 ## Future
 
-**Scope: selfhost-onboarding** — collapse self-host first-run friction. What is
-still hand-ferried is the phone's half: the origin typed into mobile Safari, the
-64-hex setup password typed after it, and an 8-character key fingerprint
-compared by eye. The target
-is *run installer → click Enroll → scan QR → approve*, with nothing typed
-anywhere. One settled decision constrains every item: **the stock allowlist stays
+**Scope: selfhost-onboarding** — collapse self-host first-run friction. The
+first run is now *run installer → click Enroll → scan QR → approve*, with
+nothing typed on the phone (Setup tokens, Host side,
+[pocket-app.md](./pocket-app.md)); the setup password remains for the QR-less
+path. One settled decision constrains what is left: **the stock allowlist stays
 `*.dormouse.sh`-only** ("Where a Host may reach a relay server") —
 self-hosting keeps requiring a source build, deliberately, so no item below
 may depend on widening it. Staged order:
 
-1. **QR-first phone setup.** Server and Host are shipped (Setup tokens, Host
-   side). What remains is Pocket's half, in staged order: **(a)** parse the
-   `#setup?token=…&nonce=…` hash and send that token as `setupToken` in place of
-   the setup password; **(b)** compute `computeSetupProof(nonce, devicePublicKey)`
-   from the scanned nonce and send it as the pairing request's `setupProof`,
-   which the Host already verifies — until Pocket sends one, every pairing takes
-   the fingerprint-compare path. The setup password remains for the QR-less path.
-2. **One-minute resume.** On an approved connection the Host mints a resume
+1. **One-minute resume.** On an approved connection the Host mints a resume
    token — single-use, bound to the device key and that connection, 60-second
    TTL. A dropped WebSocket reattaches with it instead of rerunning the
    passkey ceremony; past the minute it is a full connect. Host-minted and
