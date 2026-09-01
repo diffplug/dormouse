@@ -16,8 +16,10 @@ import type { NodeWebSocket } from '@hono/node-ws';
 import { serveStatic } from '@hono/node-server/serve-static';
 import {
   API_ROUTES,
+  DELIVERY_ID_LENGTH,
   HELLO_ROUTE,
   HostChallengeIssuer,
+  MAX_PUSH_QUERY_DELIVERY_IDS,
   SELFHOST_ACCOUNT_ID,
   SETUP_TOKEN_INVALID_ERROR,
   UNAUTHORIZED_ERROR,
@@ -27,19 +29,21 @@ import {
   fromBase64Url,
   getWebCrypto,
   helloResponse,
+  isBoundedBase64Url,
   isOrigin,
+  isPresenceBinding,
+  presenceChallenge,
   toBase64Url,
   utf8Decode,
   boundedPushText,
   verifyPasskeyAssertion,
-  verifyPushSubscribeSignature,
 } from 'server-lib-common';
 import type {
   HostEnrollRequest,
   HostEnrollResponse,
   HostsResponse,
   PasskeyAssertion,
-  PushChallengeResponse,
+  PresenceBinding,
   PushConfigResponse,
   PushDevicesResponse,
   PushSendRequest,
@@ -47,13 +51,17 @@ import type {
   PushSubscribeRequest,
   PushSubscribeResponse,
   PushSubscriptionPayload,
-  PushSubscriptionsResponse,
+  PushSubscriptionsQueryRequest,
+  PushSubscriptionsQueryResponse,
+  ReauthBeginRequest,
+  ReauthBeginResponse,
   ReauthFinishRequest,
   ReauthFinishResponse,
   SetupBeginRequest,
   SetupBeginResponse,
   SetupFinishRequest,
   SetupFinishResponse,
+  SetupRetireRequest,
   SetupTokenResponse,
   SigninBeginResponse,
   SigninFinishRequest,
@@ -158,6 +166,22 @@ type AppEnv = { Variables: { session: Session; host: StoredHost } };
 
 /** Sessions live 12 hours (server.md: "hours-scale TTL"). */
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+/**
+ * How long a presence nonce stays redeemable. The same two minutes a Host
+ * challenge lasts: both bound one ceremony's WebAuthn prompt, and a longer
+ * window would only widen the gap between "the user touched the sensor" and
+ * "the Host believed it".
+ */
+const REAUTH_NONCE_TTL_MS = 2 * 60 * 1000;
+/**
+ * How many unredeemed presence nonces the process will hold.
+ *
+ * `POST /api/reauth/begin` needs only a session token, so without a cap one
+ * signed-in caller can grow this map for the process's lifetime by asking —
+ * exactly the reason `HostChallengeIssuer.issue` sweeps. Far above any real
+ * use: a phone holds one nonce at a time, per ceremony.
+ */
+const MAX_PENDING_REAUTH_NONCES = 64;
 /** A small fixed delay on a rejected credential — the extent of POC brute-force hardening. */
 const CREDENTIAL_FAILURE_DELAY_MS = 250;
 /** The one answer to a wrong setup password, wherever it is supplied. */
@@ -207,6 +231,60 @@ export class SessionStore {
   }
 }
 
+/** One outstanding presence nonce and the ceremony it was minted for. */
+interface PendingPresenceNonce {
+  readonly binding: PresenceBinding;
+  readonly expiresAt: number;
+}
+
+/**
+ * The server nonces `POST /api/reauth/begin` mints and `finish` consumes
+ * (`docs/specs/remote-security-model.md` → Presence proofs).
+ *
+ * Not a {@link HostChallengeIssuer}: the entry has to carry the binding, so
+ * `finish` recomputes the challenge from what `begin` actually signed off on
+ * rather than from whatever the caller sends back. Bounded the same way —
+ * expired entries are swept on every mint, and the map is capped — because the
+ * route that fills it needs only a session token.
+ */
+class PresenceNonceStore {
+  readonly #pending = new Map<string, PendingPresenceNonce>();
+  readonly #now: () => number;
+
+  constructor(now: () => number) {
+    this.#now = now;
+  }
+
+  /** Hold `binding` against `serverNonce` for {@link REAUTH_NONCE_TTL_MS}. */
+  remember(serverNonce: string, binding: PresenceBinding): void {
+    const now = this.#now();
+    for (const [nonce, entry] of this.#pending) {
+      if (now >= entry.expiresAt) this.#pending.delete(nonce);
+    }
+    // Oldest first: Map iterates in insertion order and every entry carries the
+    // same TTL, so the front of the map is the closest to expiring anyway.
+    while (this.#pending.size >= MAX_PENDING_REAUTH_NONCES) {
+      const oldest = this.#pending.keys().next();
+      if (oldest.done) break;
+      this.#pending.delete(oldest.value);
+    }
+    this.#pending.set(serverNonce, { binding, expiresAt: now + REAUTH_NONCE_TTL_MS });
+  }
+
+  /**
+   * Spend `serverNonce`, or `null` when it is unknown or expired. Removed
+   * either way, so it can never become valid again — single use is what stops
+   * one WebAuthn prompt from proving presence for two ceremonies.
+   */
+  consume(serverNonce: unknown): PendingPresenceNonce | null {
+    if (typeof serverNonce !== 'string') return null;
+    const entry = this.#pending.get(serverNonce);
+    if (entry === undefined) return null;
+    this.#pending.delete(serverNonce);
+    return this.#now() < entry.expiresAt ? entry : null;
+  }
+}
+
 /** What {@link createApp} hands back: the Hono app plus its auth internals. */
 export interface CreatedApp {
   readonly app: Hono<AppEnv>;
@@ -249,13 +327,13 @@ export function createApp(config: AppConfig): CreatedApp {
   // Separate issuers per flow: a setup challenge cannot be redeemed at sign-in.
   const setupChallenges = new HostChallengeIssuer({ now });
   const signinChallenges = new HostChallengeIssuer({ now });
-  // Push subscribe gets its own issuer too, so a challenge minted for one flow
-  // can never be redeemed in another. Its signature also carries a distinct
-  // domain tag (PUSH_SUBSCRIBE_DOMAIN), which is the half that matters when the
-  // other side of the exchange is a Host challenge this server merely relayed.
-  const pushChallenges = new HostChallengeIssuer({ now });
-  // Not an issuer: a setup token remembers the Host that minted it, so its
-  // redemption can be announced back to that Host.
+  // The presence nonces of `/api/reauth/*`. Its own store for the same reason
+  // the issuers above are separate — a nonce minted for one flow may never be
+  // redeemed in another — and it holds the binding the challenge was derived
+  // from, which an issuer cannot.
+  const presenceNonces = new PresenceNonceStore(now);
+  // Not an issuer: a setup token remembers the Host that minted it, so a
+  // revoked Host's outstanding tokens die with it.
   const setupTokens = new SetupTokenIssuer({ now });
 
   const passwordOk = (provided: unknown): boolean =>
@@ -422,17 +500,6 @@ export function createApp(config: AppConfig): CreatedApp {
       }
       registered = true;
 
-      // Announced on the one outcome that actually set the account up, to the
-      // Host that minted the token, so the QR it is displaying can come down.
-      // By mint id, never by token: a Host may be showing several codes, and
-      // the credential must not come back over the relay to tell them apart.
-      if (spent) {
-        hub.notifyHost(spent.entry.hostId, {
-          t: 'setup-token-redeemed',
-          mintId: spent.entry.mintId,
-        });
-      }
-
       const res: SetupFinishResponse = {
         accountId: SELFHOST_ACCOUNT_ID,
         credentialId: body.credentialId,
@@ -594,27 +661,97 @@ export function createApp(config: AppConfig): CreatedApp {
     await next();
   };
 
-  // --- Re-auth: refresh an existing session's verified-presence stamp ------
-  // Pairing requires a recent server-verified assertion (PAIRING_PRESENCE_WINDOW_MS;
-  // remote-security-model.md, Pairing Ceremony). When the stamp is stale the
-  // Pocket client calls these to re-assert with one WebAuthn prompt — the same
-  // verification as sign-in, but the session (and the relay socket opened with
-  // its token) is kept rather than re-minted.
+  // --- Re-auth: the presence proof for one end-to-end ceremony -------------
+  // The challenge is derived, not random: `presenceChallenge(binding, nonce)`,
+  // so an assertion produced for one pairing or connection authenticates
+  // nothing anywhere else (remote-security-model.md, Presence proofs). The
+  // Server learns only routing values and a handshake hash — which the relay
+  // already sees — and the exchange extends nothing: the session's life and its
+  // relay socket are untouched.
 
-  app.post(API_ROUTES.reauthBegin, requireSession, (c) => {
-    const { challenge } = signinChallenges.issue();
-    const res: SigninBeginResponse = { challenge, rpId };
+  app.post(API_ROUTES.reauthBegin, requireSession, async (c) => {
+    const body = await readJson<Partial<ReauthBeginRequest>>(c);
+    const binding: unknown = body?.binding;
+    if (binding === undefined) {
+      // STAGE-4 TRANSITIONAL: delete in 4c. The binding arm below is the real
+      // one; this answers the legacy Pocket, which asks for a random sign-in
+      // challenge and refreshes `lastVerifiedPresence` at `finish` so the
+      // legacy `pair` gate passes.
+      const { challenge } = signinChallenges.issue();
+      const legacy: SigninBeginResponse = { challenge, rpId };
+      return c.json(legacy);
+    }
+    if (!isPresenceBinding(binding)) {
+      return c.json({ error: 'malformed presence binding' }, 400);
+    }
+    // The binding's credential must be one this account can actually assert
+    // with: it is the sole `allowCredentials` entry, so naming an unregistered
+    // one could only ever produce an assertion `finish` has no key to check.
+    if (!(await accounts.findPasskey(binding.passkeyCredentialId))) {
+      return c.json({ error: 'unknown credential' }, 404);
+    }
+    const serverNonce = toBase64Url(randomBytes(32));
+    let challenge: string;
+    try {
+      challenge = await presenceChallenge(binding, serverNonce);
+    } catch {
+      // A bounded-but-not-base64url field: the builder throws, and nothing is
+      // remembered, so a broken binding costs a 400 rather than a map entry.
+      return c.json({ error: 'malformed presence binding' }, 400);
+    }
+    presenceNonces.remember(serverNonce, binding);
+    const res: ReauthBeginResponse = {
+      challenge,
+      rpId,
+      serverNonce,
+      // The one credential this ceremony may assert with. A `get()` that could
+      // answer with any of the account's passkeys would let a synced credential
+      // the Host never paired satisfy a proof bound to one it did.
+      allowCredentials: [binding.passkeyCredentialId],
+    };
     return c.json(res);
   });
 
   app.post(API_ROUTES.reauthFinish, requireSession, async (c) => {
-    const body = await readJson<ReauthFinishRequest>(c);
-    const verdict = await verifyFreshAssertion(body?.assertion);
-    if (!verdict.ok) return c.json({ error: verdict.error }, verdict.status);
-
-    const session = c.get('session');
-    session.lastVerifiedPresence = now();
-    const res: ReauthFinishResponse = { presenceVerifiedAt: session.lastVerifiedPresence };
+    const body = await readJson<Partial<ReauthFinishRequest>>(c);
+    if (body?.serverNonce === undefined) {
+      // STAGE-4 TRANSITIONAL: delete in 4c. The nonce arm below is the real
+      // one; this is the legacy Pocket's `{ assertion }`-only re-assert, and
+      // the only path that still touches `lastVerifiedPresence`.
+      const verdict = await verifyFreshAssertion(body?.assertion);
+      if (!verdict.ok) return c.json({ error: verdict.error }, verdict.status);
+      const session = c.get('session');
+      session.lastVerifiedPresence = now();
+      return c.json({ presenceVerifiedAt: session.lastVerifiedPresence });
+    }
+    // Consumed FIRST, whatever the rest of this decides: single use is what
+    // stops one WebAuthn prompt proving presence for a second ceremony.
+    const pending = presenceNonces.consume(body.serverNonce);
+    if (!pending) return c.json({ error: 'unrecognized or expired nonce' }, 400);
+    const assertion = body.assertion;
+    if (!assertion || typeof assertion.credentialId !== 'string') {
+      return c.json({ error: 'malformed assertion' }, 400);
+    }
+    // The assertion must be by the credential the binding named — the one the
+    // Host will check the ACL against — not merely by some registered passkey.
+    if (assertion.credentialId !== pending.binding.passkeyCredentialId) {
+      return c.json({ error: 'assertion is for a different credential' }, 401);
+    }
+    const stored = await accounts.findPasskey(pending.binding.passkeyCredentialId);
+    if (!stored) return c.json({ error: 'unknown credential' }, 404);
+    // Recomputed from the binding this server stored, never from anything the
+    // caller sent back with the assertion.
+    const challenge = await presenceChallenge(pending.binding, body.serverNonce);
+    const result = await verifyPasskeyAssertion(assertion, stored.publicKey, {
+      challenge,
+      origin,
+      rpId,
+      requireUserVerification: config.requireUserVerification,
+    });
+    if (!result.ok) return c.json({ error: `assertion rejected: ${result.reason}` }, 401);
+    // It extends nothing: no session TTL, no presence stamp. The Host is what
+    // consumes this proof, and it verifies the assertion itself.
+    const res: ReauthFinishResponse = { verifiedAt: now() };
     return c.json(res);
   });
 
@@ -635,31 +772,50 @@ export function createApp(config: AppConfig): CreatedApp {
   // --- Setup tokens: the credential behind a Host's QR ---------------------
 
   app.post(API_ROUTES.hostSetupToken, requireHost, (c) => {
-    // The token only; the Host composes the QR's URL (`SetupTokenResponse`),
-    // and adds a nonce of its own that never comes back here.
-    const { token, mintId, expiresAt } = setupTokens.issue(c.get('host').hostId);
-    const res: SetupTokenResponse = { token, mintId, expiresAt };
+    // The token only; the Host composes the QR's URL (`SetupTokenResponse`)
+    // around the invitation it holds in memory, and redemption here no longer
+    // flips anything on that side.
+    const { token, expiresAt } = setupTokens.issue(c.get('host').hostId);
+    const res: SetupTokenResponse = { token, expiresAt };
     return c.json(res);
+  });
+
+  /**
+   * Retire a scanned token without registering anything: a phone that already
+   * holds a session spends the code itself, so a photographed QR cannot
+   * register a passkey afterwards.
+   *
+   * Every refusal — mistyped, unknown, expired, already spent, or minted by a
+   * since-revoked Host — is the one delayed 401 the setup gates answer with,
+   * for the same reason: none of them may tell a caller which one it hit.
+   */
+  app.post(API_ROUTES.setupRetire, requireSession, async (c) => {
+    const body = await readJson<SetupRetireRequest>(c);
+    const token: unknown = body?.setupToken;
+    if (typeof token !== 'string') return credentialFailure(c, SETUP_TOKEN_INVALID_ERROR);
+    const entry = setupTokens.consume(token);
+    if (!entry) return credentialFailure(c, SETUP_TOKEN_INVALID_ERROR);
+    // Re-read `hosts.json`, exactly as `readSetupGated` does. Nothing is
+    // restored: a revoked minter's token is dead, and retiring it is the
+    // outcome the caller wanted anyway.
+    if (!(await hostStore.has(entry.hostId))) {
+      return credentialFailure(c, SETUP_TOKEN_INVALID_ERROR);
+    }
+    return c.body(null, 204);
   });
 
   // --- Web Push: subscriptions (client-facing) and delivery (host-facing) --
   // See alert.md "Push notifications". Two audiences, two credentials: a
-  // Client registers its own subscription with a session token plus a device
-  // signature; a Host reads and sends with its `hostToken`.
+  // Client registers, queries and deletes its own rows with a session token
+  // plus the `deliveryId` the Host minted for it; a Host reads and sends with
+  // its `hostToken`. The delivery id is 256 unguessable bits known only to the
+  // Host's ACL record and that Client, so possession IS the authorization —
+  // there is no challenge and no signature, and the Server never lists one.
 
   app.get(API_ROUTES.pushConfig, (c) => {
     // The VAPID public key is public by construction — it ships to every
     // browser that subscribes — so this needs no auth.
     const res: PushConfigResponse = { applicationServerKey: config.vapidPublicKey ?? null };
-    return c.json(res);
-  });
-
-  // No body: the challenge is a pool-wide single-use nonce. What binds it to a
-  // host is the signature verified at subscribe, not anything stated here.
-  app.post(API_ROUTES.pushChallenge, requireSession, (c) => {
-    if (!config.vapidPublicKey) return c.json({ error: 'push is not configured' }, 503);
-    const { challenge, expiresAt } = pushChallenges.issue();
-    const res: PushChallengeResponse = { challenge, expiresAt };
     return c.json(res);
   });
 
@@ -669,9 +825,7 @@ export function createApp(config: AppConfig): CreatedApp {
     if (
       !body ||
       typeof body.hostId !== 'string' ||
-      typeof body.devicePublicKey !== 'string' ||
-      typeof body.challenge !== 'string' ||
-      typeof body.signature !== 'string' ||
+      !isDeliveryId(body.deliveryId) ||
       !isSubscriptionPayload(body.subscription)
     ) {
       return c.json({ error: 'malformed request' }, 400);
@@ -690,74 +844,72 @@ export function createApp(config: AppConfig): CreatedApp {
       return c.json({ error: 'unknown host' }, 404);
     }
 
-    // Single-use, consumed BEFORE verifying, so a captured request can never be
-    // replayed even when the signature is good (same rule as sign-in).
-    if (!pushChallenges.consume(body.challenge)) {
-      return c.json({ error: 'unrecognized or expired challenge' }, 400);
-    }
-
-    const verified = await verifyPushSubscribeSignature(
-      {
-        hostId: body.hostId,
-        challenge: body.challenge,
-        devicePublicKey: body.devicePublicKey,
-        endpoint: body.subscription.endpoint,
-      },
-      body.signature,
-    );
-    if (!verified) return c.json({ error: 'device signature rejected' }, 401);
-
     const stored = await pushStore.upsert({
       hostId: body.hostId,
-      devicePublicKey: body.devicePublicKey,
+      deliveryId: body.deliveryId,
       endpoint: body.subscription.endpoint,
       keys: body.subscription.keys,
       vapidPublicKey: config.vapidPublicKey,
     });
+    // The state the mutation left behind, not the delta: a committed POST whose
+    // response was lost is repaired by its own idempotent retry, which cannot
+    // re-announce a deletion but can always answer what is there now.
     const res: PushSubscribeResponse = {
       subscribedAt: stored.subscription.subscribedAt,
-      hostIds: [...stored.deviceHostIds],
+      hostIds: [...stored.endpointHostIds],
     };
     return c.json(res);
   });
 
-  app.get(API_ROUTES.pushSubscriptions, requireSession, async (c) => {
-    // Not filtered by a caller-supplied devicePublicKey: that would be an
-    // enumeration primitive over an input the caller need not own. The account
-    // owns these rows, so the account's session may read them and the Client
-    // filters to its own device.
-    //
-    // No 503 when push is unconfigured — rows can outlive a key being removed,
-    // and the truthful answer is the list, not an error.
-    const allSubscriptions = await pushStore.list();
-    // A row registered under an old VAPID key cannot receive a send signed by
-    // the current key. Hide it from the "Push notifications on" readback so
-    // Pocket returns the one card to Enable, which re-registers every paired
-    // Host. Missing keys are legacy rows and stale in the same way. When push
-    // is disabled the raw rows remain readable, preserving the route's
-    // diagnostic behavior without claiming they are deliverable.
-    const subscriptions = config.vapidPublicKey
-      ? allSubscriptions.filter(isVapidCurrent)
-      : allSubscriptions;
-    // Identities only: the endpoint and its keys are a bearer capability to
-    // notify that phone, and never leave the Server.
-    const res: PushSubscriptionsResponse = {
-      subscriptions: subscriptions.map((s) => ({
-        hostId: s.hostId,
-        devicePublicKey: s.devicePublicKey,
-        subscribedAt: s.subscribedAt,
-      })),
+  // Registered before the `:deliveryId` route below. They differ by method, so
+  // neither can shadow the other, but keeping the literal path first means a
+  // future GET or POST on the parameterized route cannot silently swallow it.
+  app.post(API_ROUTES.pushSubscriptionsQuery, requireSession, async (c) => {
+    const body = await readJson<PushSubscriptionsQueryRequest>(c);
+    const deliveryIds: unknown = body?.deliveryIds;
+    if (
+      !Array.isArray(deliveryIds) ||
+      deliveryIds.length === 0 ||
+      deliveryIds.length > MAX_PUSH_QUERY_DELIVERY_IDS ||
+      deliveryIds.some((id) => typeof id !== 'string')
+    ) {
+      return c.json(
+        { error: `deliveryIds must be 1..${MAX_PUSH_QUERY_DELIVERY_IDS} strings` },
+        400,
+      );
+    }
+    // Parameterized by capability, never by identity: only rows whose id the
+    // caller PRESENTED are reported, so this can never enumerate a row the
+    // caller does not already hold the capability for. Current-VAPID only, for
+    // the same reason the Host views are — a row under a rotated key cannot
+    // receive a send signed by the current one, so reporting it would leave
+    // Pocket believing push is on.
+    const rows = await pushStore.listForDeliveryIds(deliveryIds as string[]);
+    const res: PushSubscriptionsQueryResponse = {
+      registered: rows
+        .filter(isVapidCurrent)
+        .map((s) => ({ hostId: s.hostId, deliveryId: s.deliveryId })),
     };
     return c.json(res);
+  });
+
+  /**
+   * Idempotent, and **always 204** — for an id that never existed, one already
+   * deleted, and one that was live. Answering differently would turn the route
+   * into an oracle for whether a guessed delivery id names a row.
+   */
+  app.delete(API_ROUTES.pushSubscriptionDelete, requireSession, async (c) => {
+    await pushStore.removeDelivery(c.req.param('deliveryId'));
+    return c.body(null, 204);
   });
 
   app.get(API_ROUTES.pushDevices, requireHost, async (c) => {
     const subscriptions = await currentPushSubscriptionsForHost(c.get('host').hostId);
-    // Identities only. The Host holds the ACL and is the only side that can turn
-    // a devicePublicKey into a human label, so the Server never learns one.
+    // Delivery ids only. The Host holds the ACL and is the only side that can
+    // turn one into a human label, so the Server never learns one.
     const res: PushDevicesResponse = {
       devices: subscriptions.map((s) => ({
-        devicePublicKey: s.devicePublicKey,
+        deliveryId: s.deliveryId,
         subscribedAt: s.subscribedAt,
       })),
     };
@@ -775,15 +927,15 @@ export function createApp(config: AppConfig): CreatedApp {
     // may decide who a push reaches; a Server that fanned out on its own would
     // keep notifying a Client the Host had revoked, since nothing propagates a
     // revocation today (docs/specs/remote-security-model.md).
-    const names = body.devicePublicKeys;
+    const names: unknown = body.deliveryIds;
     if (!Array.isArray(names) || names.length === 0 || names.some((n) => typeof n !== 'string')) {
-      return c.json({ error: 'devicePublicKeys must be a non-empty array' }, 400);
+      return c.json({ error: 'deliveryIds must be a non-empty array' }, 400);
     }
 
     // The Host is identified by its token, never by the body: a Host can only
     // ever reach subscriptions registered against itself.
     const subscriptions = await currentPushSubscriptionsForHost(c.get('host').hostId);
-    const targets = subscriptions.filter((s) => names.includes(s.devicePublicKey));
+    const targets = subscriptions.filter((s) => names.includes(s.deliveryId));
 
     // Title and body originate in a renderer and are ultimately Pane-derived,
     // so they are re-bounded here rather than trusted — the same
@@ -825,7 +977,7 @@ export function createApp(config: AppConfig): CreatedApp {
     const res: PushSendResponse = {
       delivered: results.filter((r) => r.result === 'delivered').length,
       expired: expired.length,
-      unknown: names.filter((n) => !targets.some((t) => t.devicePublicKey === n)).length,
+      unknown: names.filter((n) => !targets.some((t) => t.deliveryId === n)).length,
       failed: results.filter((r) => r.result === 'failed').length,
     };
     return c.json(res);
@@ -1027,6 +1179,15 @@ const PUSH_TEXT_LIMIT = 200;
 function bearerToken(c: Context<AppEnv>): string | null {
   const match = /^Bearer (.+)$/.exec(c.req.header('Authorization') ?? '');
   return match ? match[1]! : null;
+}
+
+/**
+ * Base64url of exactly {@link DELIVERY_ID_LENGTH} characters — the Host mints
+ * 32 random bytes, so anything else is not an id any Host ever issued and must
+ * be refused before it becomes a row key.
+ */
+function isDeliveryId(value: unknown): value is string {
+  return isBoundedBase64Url(value, DELIVERY_ID_LENGTH) && value.length === DELIVERY_ID_LENGTH;
 }
 
 /** True if `value` is a `PushSubscriptionPayload` with both encryption keys. */

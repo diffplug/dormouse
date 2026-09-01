@@ -13,9 +13,10 @@ import { e2eConnectionPrologue, e2ePairingPrologue, toBase64Url } from 'server-l
  * The prologue for one ceremony: the E2E version, the kind, the `hostId`, and —
  * for a connection — the connection id.
  *
- * Pairing binds no extra field yet. The invitation (its id, expiry, setup
- * token, and one-use public key) lands with the pairing ceremony in stage 4 of
- * **Scope: e2e-client-host**, which fills in `e2ePairingPrologue`'s field list.
+ * The low-level door only: a real pairing binds every invitation field through
+ * `pairingInvitationPrologue`, which both halves of the harness call directly.
+ * The empty field list here is what a transcript-binding test wants — a
+ * prologue neither side's ceremony would ever build.
  */
 export function e2ePrologueFor({ kind, hostId, id }) {
   return kind === 'connection' ? e2eConnectionPrologue(hostId, id) : e2ePairingPrologue(hostId, []);

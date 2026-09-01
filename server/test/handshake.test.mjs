@@ -182,7 +182,7 @@ test('pair (autoApprove) → approved with an ACL record for this phone', async 
     assert.equal(result.record.devicePublicKey, p.deviceKey.devicePublicKey);
     assert.equal(result.record.label, 'iPhone Safari');
     // The Host actually wrote it.
-    assert.equal(fakeHost.acl.activeRecords().length, 1);
+    assert.equal(fakeHost.legacyAcl.activeRecords().length, 1);
   } finally {
     await close();
   }

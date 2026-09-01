@@ -44,6 +44,9 @@ export async function freshApp({
   requireUserVerification,
   vapidPublicKey,
   pushSender,
+  // Forwarded, or a wedged-push-service case waits out the real 15-second
+  // deadline it is meant to be proving.
+  pushSendDeadlineMs,
   enrollTokenFile,
   credentialFailureDelayMs = TEST_CREDENTIAL_FAILURE_DELAY_MS,
 } = {}) {
@@ -56,6 +59,7 @@ export async function freshApp({
     requireUserVerification,
     vapidPublicKey,
     pushSender,
+    pushSendDeadlineMs,
     enrollTokenFile,
     credentialFailureDelayMs,
   });
