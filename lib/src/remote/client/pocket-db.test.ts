@@ -20,8 +20,6 @@ import {
   POCKET_DB_VERSION,
   indexedDbKnownHostStore,
   indexedDbPendingDeletionStore,
-  memoryKnownHostStore,
-  memoryPendingDeletionStore,
   openPocketDb,
   pendingDeletionKey,
   persistStorage,
@@ -187,22 +185,5 @@ describe('the pocket database', () => {
     // Deleting one that is not there is not an error: the queue is drained by
     // retry, and a duplicate drain must not fail.
     await store.delete('host-1', 'delivery-1');
-  });
-
-  it('the in-memory fakes answer like the real stores', async () => {
-    const hosts = memoryKnownHostStore();
-    expect(await hosts.get('host-1')).toBeNull();
-    await hosts.put(knownHost('host-1'));
-    expect((await hosts.get('host-1'))?.hostId).toBe('host-1');
-    expect(await hosts.list()).toHaveLength(1);
-    await hosts.delete('host-1');
-    expect(await hosts.get('host-1')).toBeNull();
-
-    const deletions = memoryPendingDeletionStore();
-    await deletions.put({ hostId: 'host-1', deliveryId: 'delivery-1', queuedAt: 1 });
-    await deletions.put({ hostId: 'host-1', deliveryId: 'delivery-1', queuedAt: 2 });
-    expect(await deletions.list()).toHaveLength(1);
-    await deletions.delete('host-1', 'delivery-1');
-    expect(await deletions.list()).toEqual([]);
   });
 });

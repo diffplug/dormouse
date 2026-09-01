@@ -6,9 +6,9 @@
 import { generateDeviceKeyPair, type DeviceKeyPair } from 'server-lib-common';
 import {
   DEVICE_KEY_STORE as STORE_NAME,
-  openPocketDb,
   promisifyRequest,
   promisifyTransaction,
+  withPocketStore,
 } from './pocket-db';
 
 /** Where a {@link DeviceKeyPair} is persisted; faked in tests. */
@@ -37,37 +37,26 @@ export async function getOrCreateDeviceKey(
 /** A tiny one-object-store IndexedDB wrapper holding the `CryptoKey` objects. */
 export function indexedDbDeviceKeyStore(): DeviceKeyStore {
   return {
-    async get() {
-      const db = await openPocketDb();
-      try {
-        const value = await promisifyRequest<StoredDeviceKey | undefined>(
-          db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).get(RECORD_KEY),
-        );
+    get: () =>
+      withPocketStore(STORE_NAME, 'readonly', async (store) => {
+        const value = await promisifyRequest<StoredDeviceKey | undefined>(store.get(RECORD_KEY));
         if (!value) return null;
         return {
           publicKey: value.publicKey,
           privateKey: value.privateKey,
           devicePublicKey: value.devicePublicKey,
         };
-      } finally {
-        db.close();
-      }
-    },
-    async put(key) {
-      const db = await openPocketDb();
-      try {
-        const tx = db.transaction(STORE_NAME, 'readwrite');
+      }),
+    put: (key) =>
+      withPocketStore(STORE_NAME, 'readwrite', (store) => {
         const record: StoredDeviceKey = {
           publicKey: key.publicKey as CryptoKey,
           privateKey: key.privateKey as CryptoKey,
           devicePublicKey: key.devicePublicKey,
         };
-        tx.objectStore(STORE_NAME).put(record, RECORD_KEY);
-        await promisifyTransaction(tx);
-      } finally {
-        db.close();
-      }
-    },
+        store.put(record, RECORD_KEY);
+        return promisifyTransaction(store.transaction);
+      }),
   };
 }
 

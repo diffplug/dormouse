@@ -452,13 +452,13 @@ relay, store, or gate consults any of them yet.
 - **Pocket's IndexedDB is at v2**, carrying the Client-side records beside the
   legacy device key ([pocket-app.md](./pocket-app.md) -> What Pocket stores).
 
-Source of truth: `server-lib-common/src/security/noise-support.ts`,
-`server-lib-common/src/security/presence.ts` (pinned by a vector computed from
-`node:crypto` in `server-lib-common/test/presence.test.mjs`),
-`mintNoiseStaticKeyPair` / `importNoiseStaticPrivateKey` in
-`server-lib-common/src/security/noise.ts`, `isEnrollment` in
-`lib/src/remote/host/enrollment.ts`, and `RemoteHost.#loadNoiseStatic` in
-`lib/src/remote/host/remote-host.ts`.
+Source of truth: `server-lib-common/src/security/presence.ts` (pinned by a
+vector computed from `node:crypto` in
+`server-lib-common/test/presence.test.mjs`), `probeNoiseSupport` /
+`mintNoiseStaticKeyPair` / `importNoiseStaticPrivateKey` /
+`isNoiseStaticMaterial` in `server-lib-common/src/security/noise.ts`,
+`isEnrollment` in `lib/src/remote/host/enrollment.ts`, and
+`RemoteHost.#loadNoiseStatic` in `lib/src/remote/host/remote-host.ts`.
 
 ## Security Guarantees
 
@@ -583,9 +583,9 @@ not. One implementation serves Pocket, the worker, and both Host runtimes.
 
 - **Host static.** Minted and persisted already
   ([E2E identities and presence](#e2e-identities-and-presence)); what remains
-  is enforcement — a record without both halves reads as un-enrolled and the
-  Settings dialog offers enrollment again, and that shape check is the entire
-  Host-state version.
+  is enforcement — an enrollment carrying no static reads as un-enrolled and
+  the Settings dialog offers enrollment again, and that shape check is the
+  entire Host-state version.
 - **Client static, per Host.** A fresh X25519 keypair generated at scan time
   and persisted, nonextractable, in that Host's `KnownHostV1` record only after
   approval. It replaces the device key as the browser half of the ACL identity

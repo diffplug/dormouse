@@ -81,18 +81,10 @@ function bounded(value: unknown): value is string {
 /**
  * The WebAuthn challenge for one presence assertion:
  * `SHA-256(lengthPrefixedConcat(domain, kind, …binding fields in declared
- * order, serverNonce))`, base64url.
- *
- * **One encoding rule, applied everywhere: a base64url field is hashed as the
- * bytes it encodes, and everything else as UTF-8.** The decoded fields are
- * `connectionId`, `hostChallenge`, `handshakeHash`, and the Server nonce; the
- * domain, the kind, `hostId`, and `passkeyCredentialId` are opaque strings and
- * go in as text. Both sides compute the same bytes only if they agree about
- * this, so it is stated once here and pinned by an independently computed test
- * vector.
- *
- * `lengthPrefixedConcat` is what keeps the fields from sliding past each
- * other — no value can be split differently and hash the same.
+ * order, serverNonce))`, base64url. Which fields go in decoded and which as
+ * UTF-8 is the spec's rule, listed there and pinned by an independently
+ * computed vector in `server-lib-common/test/presence.test.mjs`;
+ * {@link bindingFields} is where it is applied.
  *
  * **Throws on a field that is not base64url.** Callers run
  * {@link isPresenceBinding} first and treat a throw as a failed presence

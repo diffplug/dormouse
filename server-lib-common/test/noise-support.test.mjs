@@ -13,9 +13,6 @@ test('a runtime with X25519 says yes', async () => {
 });
 
 test('a runtime that cannot generate an X25519 key says no rather than throwing', async () => {
-  // What the gate has to survive: the whole reason the answer is a boolean is
-  // that the caller is deciding whether to offer remote control at all, and a
-  // rejected promise there is an unhandled failure on a boot path.
   const crypto = {
     subtle: {
       generateKey: () => Promise.reject(new Error('NotSupportedError')),

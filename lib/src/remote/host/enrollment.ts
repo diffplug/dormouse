@@ -5,9 +5,7 @@
 
 import {
   API_ROUTES,
-  NOISE_STATIC_PKCS8_MAX_LENGTH,
-  NOISE_STATIC_PKCS8_MIN_LENGTH,
-  fromBase64Url,
+  isNoiseStaticMaterial,
   mintNoiseStaticKeyPair,
   normalizeOrigin,
   type HostEnrollResponse,
@@ -51,9 +49,6 @@ export interface HostEnrollment {
   noiseStaticPublicKey?: string;
 }
 
-/** Base64url of a raw 32-byte X25519 public key. */
-const NOISE_STATIC_PUBLIC_KEY_LENGTH = 43;
-
 /**
  * The shape guard, exported because everywhere an enrollment is *read* — a
  * keychain entry, a JSON file, an `adopt` a webview sent — it arrives as
@@ -81,27 +76,16 @@ export function isEnrollment(value: unknown): value is HostEnrollment {
  * **Both halves of the Noise static, or neither.** Absent is an enrollment
  * from before the field existed; one half alone is a truncated write or a
  * hand-edited file, and accepting it would leave a Host that believes it has
- * an identity it cannot use. Each present half is checked for a well-formed
- * base64url of the right decoded length, since this value goes straight to
- * `importKey` and the file is writable by anything running as the user.
+ * an identity it cannot use. What a well-formed half looks like is
+ * `isNoiseStaticMaterial`'s to say — the value goes straight to `importKey`
+ * from a file writable by anything running as this user.
  */
 function hasValidNoiseStatic(v: Record<string, unknown>): boolean {
   const privateKey = v.noiseStaticPrivateKey;
   const publicKey = v.noiseStaticPublicKey;
   if (privateKey === undefined && publicKey === undefined) return true;
   if (typeof privateKey !== 'string' || typeof publicKey !== 'string') return false;
-  if (publicKey.length !== NOISE_STATIC_PUBLIC_KEY_LENGTH) return false;
-  let privateLength: number;
-  try {
-    if (fromBase64Url(publicKey).length !== 32) return false;
-    privateLength = fromBase64Url(privateKey).length;
-  } catch {
-    return false;
-  }
-  return (
-    privateLength >= NOISE_STATIC_PKCS8_MIN_LENGTH &&
-    privateLength <= NOISE_STATIC_PKCS8_MAX_LENGTH
-  );
+  return isNoiseStaticMaterial(publicKey, privateKey);
 }
 
 export function getEnrollment(): HostEnrollment | null {

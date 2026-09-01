@@ -171,52 +171,49 @@ async function requestPersistenceOnce(): Promise<void> {
   await persistStorage();
 }
 
+/**
+ * Run one transaction against one store, closing the connection on every path.
+ * A leaked handle blocks the next version upgrade, so no caller opens the
+ * database itself.
+ */
+export async function withPocketStore<T>(
+  storeName: string,
+  mode: IDBTransactionMode,
+  run: (store: IDBObjectStore) => Promise<T>,
+): Promise<T> {
+  const db = await openPocketDb();
+  try {
+    return await run(db.transaction(storeName, mode).objectStore(storeName));
+  } finally {
+    db.close();
+  }
+}
+
 /** The IndexedDB-backed {@link KnownHostStore}. */
 export function indexedDbKnownHostStore(): KnownHostStore {
   return {
-    async get(hostId) {
-      const db = await openPocketDb();
-      try {
-        const value = await promisifyRequest<KnownHostV1 | undefined>(
-          db.transaction(KNOWN_HOSTS_STORE, 'readonly').objectStore(KNOWN_HOSTS_STORE).get(hostId),
-        );
+    get: (hostId) =>
+      withPocketStore(KNOWN_HOSTS_STORE, 'readonly', async (store) => {
+        const value = await promisifyRequest<KnownHostV1 | undefined>(store.get(hostId));
         return value ?? null;
-      } finally {
-        db.close();
-      }
-    },
+      }),
     async put(record) {
       // Before the first write, per the storage-durability rule.
       await requestPersistenceOnce();
-      const db = await openPocketDb();
-      try {
-        const tx = db.transaction(KNOWN_HOSTS_STORE, 'readwrite');
-        tx.objectStore(KNOWN_HOSTS_STORE).put(record);
-        await promisifyTransaction(tx);
-      } finally {
-        db.close();
-      }
+      await withPocketStore(KNOWN_HOSTS_STORE, 'readwrite', (store) => {
+        store.put(record);
+        return promisifyTransaction(store.transaction);
+      });
     },
-    async delete(hostId) {
-      const db = await openPocketDb();
-      try {
-        const tx = db.transaction(KNOWN_HOSTS_STORE, 'readwrite');
-        tx.objectStore(KNOWN_HOSTS_STORE).delete(hostId);
-        await promisifyTransaction(tx);
-      } finally {
-        db.close();
-      }
-    },
-    async list() {
-      const db = await openPocketDb();
-      try {
-        return await promisifyRequest<KnownHostV1[]>(
-          db.transaction(KNOWN_HOSTS_STORE, 'readonly').objectStore(KNOWN_HOSTS_STORE).getAll(),
-        );
-      } finally {
-        db.close();
-      }
-    },
+    delete: (hostId) =>
+      withPocketStore(KNOWN_HOSTS_STORE, 'readwrite', (store) => {
+        store.delete(hostId);
+        return promisifyTransaction(store.transaction);
+      }),
+    list: () =>
+      withPocketStore(KNOWN_HOSTS_STORE, 'readonly', (store) =>
+        promisifyRequest<KnownHostV1[]>(store.getAll()),
+      ),
   };
 }
 
@@ -225,61 +222,19 @@ export function indexedDbPendingDeletionStore(): PendingDeletionStore {
   return {
     async put(record) {
       await requestPersistenceOnce();
-      const db = await openPocketDb();
-      try {
-        const tx = db.transaction(PENDING_DELETIONS_STORE, 'readwrite');
-        tx.objectStore(PENDING_DELETIONS_STORE)
-          .put(record, pendingDeletionKey(record.hostId, record.deliveryId));
-        await promisifyTransaction(tx);
-      } finally {
-        db.close();
-      }
+      await withPocketStore(PENDING_DELETIONS_STORE, 'readwrite', (store) => {
+        store.put(record, pendingDeletionKey(record.hostId, record.deliveryId));
+        return promisifyTransaction(store.transaction);
+      });
     },
-    async delete(hostId, deliveryId) {
-      const db = await openPocketDb();
-      try {
-        const tx = db.transaction(PENDING_DELETIONS_STORE, 'readwrite');
-        tx.objectStore(PENDING_DELETIONS_STORE).delete(pendingDeletionKey(hostId, deliveryId));
-        await promisifyTransaction(tx);
-      } finally {
-        db.close();
-      }
-    },
-    async list() {
-      const db = await openPocketDb();
-      try {
-        return await promisifyRequest<PendingDeliveryDeletionV1[]>(
-          db
-            .transaction(PENDING_DELETIONS_STORE, 'readonly')
-            .objectStore(PENDING_DELETIONS_STORE)
-            .getAll(),
-        );
-      } finally {
-        db.close();
-      }
-    },
-  };
-}
-
-/** An in-memory {@link KnownHostStore} for tests and for a browser with no IndexedDB. */
-export function memoryKnownHostStore(): KnownHostStore {
-  const records = new Map<string, KnownHostV1>();
-  return {
-    get: async (hostId) => records.get(hostId) ?? null,
-    put: async (record) => void records.set(record.hostId, record),
-    delete: async (hostId) => void records.delete(hostId),
-    list: async () => [...records.values()],
-  };
-}
-
-/** An in-memory {@link PendingDeletionStore}, same rationale. */
-export function memoryPendingDeletionStore(): PendingDeletionStore {
-  const records = new Map<string, PendingDeliveryDeletionV1>();
-  return {
-    put: async (record) =>
-      void records.set(pendingDeletionKey(record.hostId, record.deliveryId), record),
-    delete: async (hostId, deliveryId) =>
-      void records.delete(pendingDeletionKey(hostId, deliveryId)),
-    list: async () => [...records.values()],
+    delete: (hostId, deliveryId) =>
+      withPocketStore(PENDING_DELETIONS_STORE, 'readwrite', (store) => {
+        store.delete(pendingDeletionKey(hostId, deliveryId));
+        return promisifyTransaction(store.transaction);
+      }),
+    list: () =>
+      withPocketStore(PENDING_DELETIONS_STORE, 'readonly', (store) =>
+        promisifyRequest<PendingDeliveryDeletionV1[]>(store.getAll()),
+      ),
   };
 }

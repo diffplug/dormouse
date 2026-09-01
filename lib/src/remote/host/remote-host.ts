@@ -17,6 +17,7 @@ import {
   constantTimeEqual,
   getWebCrypto,
   importNoiseStaticPrivateKey,
+  isBoundedString,
   toBase64Url,
   utf8Encode,
   MAX_PENDING_PAIRINGS,
@@ -144,7 +145,7 @@ type AddressedFrame = Extract<ServerToHostFrame, { clientId: string }>;
  */
 function isAddressedFrame(frame: ServerToHostFrame): frame is AddressedFrame {
   const clientId: unknown = (frame as { clientId?: unknown }).clientId;
-  return typeof clientId === 'string' && clientId.length <= MAX_CLIENT_ID_LENGTH;
+  return isBoundedString(clientId, MAX_CLIENT_ID_LENGTH);
 }
 
 const INITIAL_BACKOFF_MS = 1_000;
@@ -398,16 +399,15 @@ export class RemoteHost {
    * unusable key must not take down a Host whose shipped paths do not use one
    * (see {@link RemoteHost.#noiseStatic}).
    */
-  async #loadNoiseStatic(): Promise<CryptoKeyLike | null> {
-    if (this.#noiseStatic) return this.#noiseStatic;
+  async #loadNoiseStatic(): Promise<void> {
+    if (this.#noiseStatic) return;
     const pkcs8 = this.#enrollment.noiseStaticPrivateKey;
-    if (pkcs8 === undefined) return null;
+    if (pkcs8 === undefined) return;
     try {
       this.#noiseStatic = await importNoiseStaticPrivateKey(pkcs8);
     } catch (error) {
       console.warn('[remote-host] could not import the Noise static key', error);
     }
-    return this.#noiseStatic;
   }
 
   stop(): void {

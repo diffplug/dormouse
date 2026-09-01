@@ -23,10 +23,9 @@ import {
   fromBase64Url,
   generateNoiseKeyPair,
   importNoiseStaticPrivateKey,
+  isNoiseStaticMaterial,
   mintNoiseStaticKeyPair,
   noiseNonceBytes,
-  NOISE_STATIC_PKCS8_MAX_LENGTH,
-  NOISE_STATIC_PKCS8_MIN_LENGTH,
 } from '../dist/index.js';
 
 const TAG_LENGTH = 16;
@@ -465,10 +464,8 @@ test('a minted static round-trips through its persisted form', async () => {
   const material = await mintNoiseStaticKeyPair();
   assert.match(material.publicKey, /^[A-Za-z0-9_-]{43}$/);
   assert.equal(fromBase64Url(material.publicKey).length, 32);
-  // The canonical X25519 PKCS#8 is 48 bytes; the guards accept a little more.
-  const pkcs8 = fromBase64Url(material.privateKeyPkcs8);
-  assert.ok(pkcs8.length >= NOISE_STATIC_PKCS8_MIN_LENGTH);
-  assert.ok(pkcs8.length <= NOISE_STATIC_PKCS8_MAX_LENGTH);
+  // What a persisted-state guard accepts has to accept what the minter emits.
+  assert.equal(isNoiseStaticMaterial(material.publicKey, material.privateKeyPkcs8), true);
 
   // The imported key is the same party: an IK handshake against the minted
   // public key completes.

@@ -58,7 +58,7 @@ export const NOISE_PROTOCOL_NAME = 'Noise_IK_25519_ChaChaPoly_SHA256';
 export const NOISE_MAX_MESSAGE_LENGTH = 65535;
 
 /** Raw X25519 public keys, SHA-256 digests, and ChaChaPoly keys are all 32 bytes. */
-const NOISE_KEY_LENGTH = 32;
+export const NOISE_KEY_LENGTH = 32;
 
 /** Poly1305 authentication tag length. */
 const NOISE_TAG_LENGTH = 16;
@@ -108,6 +108,34 @@ export interface NoiseSession {
 }
 
 /**
+ * Whether X25519 `generateKey` and `deriveBits` both work here — the one
+ * primitive the suite cannot do without, so a runtime answering `false` cannot
+ * run the protocol at all.
+ *
+ * **Never throws and never rejects**, a missing `globalThis.crypto` included:
+ * the callers this exists for are boot-path gates that show a fixed upgrade
+ * requirement and perform no remote operation
+ * (`docs/specs/remote-security-model.md` -> E2E identities and presence). The
+ * default is resolved inside the guard for the same reason.
+ */
+export async function probeNoiseSupport(crypto?: WebCryptoLike): Promise<boolean> {
+  try {
+    const webCrypto = crypto ?? getWebCrypto();
+    // Agreeing with its own public half is a real X25519 operation, so the
+    // exact pair the handshake needs is covered without a second keypair.
+    const { pair } = await generateX25519(webCrypto, false);
+    const shared = await webCrypto.subtle.deriveBits(
+      { ...X25519_ALGORITHM, public: pair.publicKey },
+      pair.privateKey,
+      NOISE_KEY_LENGTH * 8,
+    );
+    return shared.byteLength === NOISE_KEY_LENGTH;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Generate an X25519 keypair whose private half never leaves WebCrypto. A
  * runtime without X25519 rejects here, so the failure is a `NoiseError` like
  * every other in this module rather than a bare `DOMException` a caller's
@@ -116,10 +144,23 @@ export interface NoiseSession {
 export async function generateNoiseKeyPair(
   crypto: WebCryptoLike = getWebCrypto(),
 ): Promise<NoiseKeyPair> {
+  const { pair, publicKey } = await generateX25519(crypto, false);
+  return { privateKey: pair.privateKey, publicKey };
+}
+
+/**
+ * One X25519 keypair with its public half already raw. `extractable` is the
+ * only axis callers differ on, and it is `true` for exactly one of them
+ * ({@link mintNoiseStaticKeyPair}).
+ */
+async function generateX25519(
+  crypto: WebCryptoLike,
+  extractable: boolean,
+): Promise<{ pair: CryptoKeyPairLike; publicKey: Uint8Array }> {
   let pair: CryptoKeyPairLike;
   let publicKey: Uint8Array;
   try {
-    pair = await crypto.subtle.generateKey(X25519_ALGORITHM, false, ['deriveBits']);
+    pair = await crypto.subtle.generateKey(X25519_ALGORITHM, extractable, ['deriveBits']);
     publicKey = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey));
   } catch {
     throw new NoiseError('X25519 key generation failed');
@@ -127,7 +168,7 @@ export async function generateNoiseKeyPair(
   if (publicKey.length !== NOISE_KEY_LENGTH) {
     throw new NoiseError('X25519 public key is not 32 bytes');
   }
-  return { privateKey: pair.privateKey, publicKey };
+  return { pair, publicKey };
 }
 
 /**
@@ -148,18 +189,13 @@ export interface NoiseStaticKeyMaterial {
 
 /**
  * The decoded byte length a stored
- * {@link NoiseStaticKeyMaterial.privateKeyPkcs8} must fall within, for the
- * guards that read one back out of persisted state.
- *
- * A canonical X25519 PKCS#8 is 48 bytes (version, the `1.3.101.110`
- * AlgorithmIdentifier, and the 32-byte key in a nested OCTET STRING) — what
- * every WebCrypto implementation we run on emits. The upper bound is looser
- * than that so a runtime that also encodes the optional public-key attribute
- * is not told its own freshly minted key is malformed; the point of checking
- * at all is to bound what a state file can hand `importKey`.
+ * {@link NoiseStaticKeyMaterial.privateKeyPkcs8} must fall within: canonical
+ * X25519 PKCS#8 is 48 bytes, and the ceiling leaves room for a runtime that
+ * also encodes the optional public-key attribute. The point of checking is to
+ * bound what a state file can hand `importKey`.
  */
-export const NOISE_STATIC_PKCS8_MIN_LENGTH = 48;
-export const NOISE_STATIC_PKCS8_MAX_LENGTH = 128;
+const NOISE_STATIC_PKCS8_MIN_LENGTH = 48;
+const NOISE_STATIC_PKCS8_MAX_LENGTH = 128;
 
 /**
  * Mint a static keypair for persistence: generated extractable exactly once,
@@ -172,19 +208,35 @@ export const NOISE_STATIC_PKCS8_MAX_LENGTH = 128;
 export async function mintNoiseStaticKeyPair(
   crypto: WebCryptoLike = getWebCrypto(),
 ): Promise<NoiseStaticKeyMaterial> {
+  const { pair, publicKey } = await generateX25519(crypto, true);
   let pkcs8: Uint8Array;
-  let publicKey: Uint8Array;
   try {
-    const pair = await crypto.subtle.generateKey(X25519_ALGORITHM, true, ['deriveBits']);
     pkcs8 = new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey));
-    publicKey = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey));
   } catch {
     throw new NoiseError('X25519 static key generation failed');
   }
-  if (publicKey.length !== NOISE_KEY_LENGTH) {
-    throw new NoiseError('X25519 public key is not 32 bytes');
-  }
   return { privateKeyPkcs8: toBase64Url(pkcs8), publicKey: toBase64Url(publicKey) };
+}
+
+/**
+ * Whether a persisted {@link NoiseStaticKeyMaterial} is well-formed enough to
+ * hand back to {@link importNoiseStaticPrivateKey}: both halves base64url, the
+ * public one 32 bytes, the private one a PKCS#8-sized blob.
+ *
+ * Lives here, beside what mints and imports it, so every store that persists a
+ * static checks it the same way rather than growing its own copy.
+ */
+export function isNoiseStaticMaterial(publicKey: string, privateKeyPkcs8: string): boolean {
+  try {
+    const pkcs8Length = fromBase64Url(privateKeyPkcs8).length;
+    return (
+      fromBase64Url(publicKey).length === NOISE_KEY_LENGTH &&
+      pkcs8Length >= NOISE_STATIC_PKCS8_MIN_LENGTH &&
+      pkcs8Length <= NOISE_STATIC_PKCS8_MAX_LENGTH
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**

@@ -19,7 +19,6 @@ export * from './security/webcrypto.js';
 export * from './security/bytes.js';
 export * from './security/ecdsa.js';
 export * from './security/noise.js';
-export * from './security/noise-support.js';
 export * from './security/presence.js';
 export * from './security/deviceKey.js';
 export * from './security/challenge.js';

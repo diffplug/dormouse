@@ -17,7 +17,7 @@
  * (docs/specs/remote-security-model.md, Pairing Ceremony).
  */
 
-import { isBoundedString as isBounded, toBase64Url } from './bytes.js';
+import { isBoundedString, toBase64Url } from './bytes.js';
 import { getWebCrypto, type WebCryptoLike } from './webcrypto.js';
 import { HostAcl, type HostAclRecord } from './acl.js';
 import { boundedPushText } from './push.js';
@@ -120,7 +120,7 @@ export interface PairStatusQuery {
 export function isPairStatusQuery(query: unknown): query is PairStatusQuery {
   if (!query || typeof query !== 'object') return false;
   const candidate = query as Record<string, unknown>;
-  return isBoundedString(candidate.passkeyCredentialId) && isBoundedString(candidate.devicePublicKey);
+  return bounded(candidate.passkeyCredentialId) && bounded(candidate.devicePublicKey);
 }
 
 /**
@@ -177,14 +177,14 @@ export function isPairingRequest(request: unknown): request is PairingRequest {
   if (!request || typeof request !== 'object') return false;
   const candidate = request as Record<string, unknown>;
   return (
-    isBoundedString(candidate.accountId) &&
-    isBoundedString(candidate.passkeyCredentialId) &&
-    isBoundedString(candidate.passkeyPublicKeyHash) &&
-    isBoundedString(candidate.devicePublicKey) &&
-    isBoundedString(candidate.requestedLabel) &&
+    bounded(candidate.accountId) &&
+    bounded(candidate.passkeyCredentialId) &&
+    bounded(candidate.passkeyPublicKeyHash) &&
+    bounded(candidate.devicePublicKey) &&
+    bounded(candidate.requestedLabel) &&
     // Optional, so absent passes — but a present one is bounded like every
     // other field, since it is relay-supplied text either way.
-    (candidate.setupProof === undefined || isBoundedString(candidate.setupProof))
+    (candidate.setupProof === undefined || bounded(candidate.setupProof))
   );
 }
 
@@ -200,8 +200,8 @@ export function isPairingRequest(request: unknown): request is PairingRequest {
  */
 const PAIRING_FIELD_LIMIT = 1024;
 
-function isBoundedString(value: unknown): value is string {
-  return isBounded(value, PAIRING_FIELD_LIMIT);
+function bounded(value: unknown): value is string {
+  return isBoundedString(value, PAIRING_FIELD_LIMIT);
 }
 
 /**

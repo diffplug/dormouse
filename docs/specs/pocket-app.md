@@ -379,18 +379,17 @@ one is minted, so a `subscribe()` that throws cannot take the fact with it
 
 ## What Pocket stores
 
-**One module owns the IndexedDB name, its version, and its stores**, so nothing
-can open the database at a stale version — a second `indexedDB.open` at the old
-one fails outright once the first has upgraded. `dormouse-pocket` is at **v2**:
-`device-key` (the shipped Client identity, one record), `known-hosts`
-(`KnownHostV1`, keyed by `hostId`), and `pending-deletions`
-(`PendingDeliveryDeletionV1`, keyed `hostId:deliveryId`). The upgrade creates
-whatever is absent rather than stepping v1→v2, so a phone arriving from v1 keeps
-its device key untouched. `navigator.storage.persist()` is requested once,
-before the first record is written, and **never throws**: a browser with no
-storage manager gets ordinary eviction-prone storage, which device-key loss
-already survives ([remote-security-model.md](./remote-security-model.md) →
-Device Key Loss).
+**One module owns the IndexedDB name, its version, its upgrade, and every open**,
+so no two stores can disagree about the version and no caller can leak a
+connection past the next upgrade. `dormouse-pocket` is at **v2**: `device-key`
+(the shipped Client identity, one record), `known-hosts` (`KnownHostV1`, keyed
+by `hostId`), and `pending-deletions` (`PendingDeliveryDeletionV1`, keyed
+`hostId:deliveryId`). A phone arriving from v1 keeps its device key untouched.
+`navigator.storage.persist()` is requested once before the first write to either
+new store, and **never throws** — a browser that has no storage manager or
+refuses gets ordinary eviction-prone storage, which device-key loss already
+survives ([remote-security-model.md](./remote-security-model.md) → Device Key
+Loss).
 
 **Nothing reads the two new stores yet** — they hold the end-to-end identities
 of the **e2e-client-host** scope. Source of truth:
