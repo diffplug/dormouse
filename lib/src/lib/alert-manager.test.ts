@@ -856,6 +856,25 @@ describe('AlertManager in isolation', () => {
       });
     });
 
+    it('publishes the OSC_NOTIF_BUSY fallback when a progress cycle completes under deferral', () => {
+      const id = 'progress-defer';
+      const seen: string[] = [];
+      manager.onStateChange((_id, state) => {
+        if (_id === id) seen.push(state.status);
+      });
+      manager.setDeferAlertsUntilQuiet(true);
+      driveToBusy(id);
+
+      manager.updateProtocolProgress(id, { state: 'normal', percent: 40 });
+      expect(manager.getState(id).status).toBe('OSC_NOTIF_BUSY');
+      seen.length = 0;
+
+      manager.updateProtocolProgress(id, { state: 'normal', percent: 100 });
+
+      expect(manager.getState(id).status).not.toBe('OSC_NOTIF_BUSY');
+      expect(seen).not.toEqual([]);
+    });
+
     it('counts MIGHT_NEED_ATTENTION as confirmed busy and keeps its remaining deadline', () => {
       const id = 'defer-might-need-attention';
       manager.setDeferAlertsUntilQuiet(true);

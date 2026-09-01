@@ -230,7 +230,7 @@ Source of truth: `AlertSettings` in `lib/src/lib/alert-settings.ts` (renderer mi
 | Field | Meaning |
 |---|---|
 | `inactivityTimeoutMs` | `T_USER_ATTENTION` — the walk-away window defined under Attention above. |
-| `deferAlertsUntilQuiet` | Defer eligible terminal-report and command-exit rings while the animation watcher is fully armed. Default off. |
+| `deferAlertsUntilQuiet` | Defer eligible terminal-report and command-exit rings while the animation watcher is fully armed. Default off. (rationale) |
 | `speakEnabled` / `speakDelayMs` | Spoken alarms, below. |
 | `pushEnabled` / `pushDelayMs` | Push notifications, below. |
 

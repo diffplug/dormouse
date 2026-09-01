@@ -859,6 +859,9 @@ export class AlertManager {
       else deferred.commandExit = alert;
       entry.deferredHumanAlerts = deferred;
       this.scheduleDeferredHumanAlerts(id, entry);
+      // The caller may have cleared a publicly visible cycle and delegated the
+      // publish to the ring rules; deferring the ring must not swallow it.
+      this.notify(id);
       return;
     }
 
@@ -1041,11 +1044,8 @@ export class AlertManager {
 
   clearTodo(id: string): void {
     const entry = this.getOrCreateEntry(id);
-    const clearedDeferred = this.clearDeferredHumanAlerts(entry);
-    if (!entry.todo) {
-      if (clearedDeferred) this.notify(id);
-      return;
-    }
+    this.clearDeferredHumanAlerts(entry);
+    if (!entry.todo) return;
     entry.todo = false;
     entry.notification = null;
     this.clearAllRingsIfActive(entry);
