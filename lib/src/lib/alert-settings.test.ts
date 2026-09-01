@@ -76,14 +76,19 @@ describe('normalizeAlertSettings', () => {
   it('rejects non-boolean flags', () => {
     expect(normalizeAlertSettings({ speakEnabled: 'yes' }).speakEnabled).toBe(false);
     expect(normalizeAlertSettings({ speakEnabled: 1 }).speakEnabled).toBe(false);
+    expect(normalizeAlertSettings({ deferAlertsUntilQuiet: 'yes' }).deferAlertsUntilQuiet).toBe(false);
   });
 });
 
 describe('updateAlertSettings', () => {
   it('merges a patch, persists it, and pushes it to the host', () => {
-    updateAlertSettings({ speakEnabled: true });
+    updateAlertSettings({ speakEnabled: true, deferAlertsUntilQuiet: true });
 
-    expect(getAlertSettings()).toEqual({ ...DEFAULT_ALERT_SETTINGS, speakEnabled: true });
+    expect(getAlertSettings()).toEqual({
+      ...DEFAULT_ALERT_SETTINGS,
+      speakEnabled: true,
+      deferAlertsUntilQuiet: true,
+    });
     expect(JSON.parse(store.get(STORAGE_KEY)!)).toEqual(getAlertSettings());
     expect(alertPublishSettings).toHaveBeenCalledWith(getAlertSettings(), { seed: false });
   });

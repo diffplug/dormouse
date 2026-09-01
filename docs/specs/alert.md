@@ -63,12 +63,21 @@ Every completion — a detector settle, a command finish, a direct notification,
 
 Claimants are registered per Session and get first refusal, in registration order; the first to return `true` claims the event and the rest are not offered it. **A claimed event never rings, never sets TODO, and never stores an `ActivityNotification`** — it stops before the ring rules. An unclaimed event falls through to its track's ring rule, which is where the attention suppression above and the command-exit armed and minimum-runtime checks live.
 
+With `deferAlertsUntilQuiet` enabled:
+
+- **Must defer an eligible unattended terminal-notification ring while the private detector is fully armed** — `BUSY` or `MIGHT_NEED_ATTENTION`, including when WATCHING is off or another track masks that projection.
+- **Never defer `MIGHT_BE_BUSY`, a detector settle, or a command-finish ring** — the first is unconfirmed, the second already quiet, and a shell-reported exit authoritative. (rationale)
+- **Must fold a pending terminal notification into an eligible command-finish ring immediately** — once another track rings, protocol detail enriches it instead of publishing stale detail later.
+- **Must defer after claimants and ring eligibility, never redispatch the historical `CompletionEvent`** — `dor await` receives the real completion promptly and a later claimant cannot consume old news.
+- **Keep pending intent live-only and bounded** to the latest protocol notification. Meaningful output moves its quiet deadline; command-boundary detector resets do not drop it.
+- **Cancel pending delivery on attendance, dismissal, TODO changes, removal, seeding, or teardown.** Disabling the setting releases it immediately; otherwise confirmed quiet latches the protocol track in one fresh ring, after which speech/push begin their own delays. Continuous output may defer forever. (rationale)
+
 Two ordering rules:
 
 - **Clear the progress cycle *before* dispatch**, so a completion or error ends the cycle whether or not the event is claimed and `OSC_NOTIF_BUSY` falls back either way.
 - **Dispatch a command finish for every watch that existed**, including the short, unarmed, and attended ones the ring rule then discards.
 
-Source of truth: `registerCompletionClaimant` / `dispatchCompletion` in `lib/src/lib/alert-manager.ts`.
+Source of truth: `registerCompletionClaimant` / `dispatchCompletion` and the deferral block (`deferOrDeliverNotification` / `flushDeferredNotification`) in `lib/src/lib/alert-manager.ts`; the quiet deadline itself is `QuiesceDetector.quietAt` in `lib/src/lib/quiesce-detector.ts`, which owns the settle timing the deferral schedules against.
 
 ## Await
 
@@ -190,7 +199,7 @@ Rules:
 - If the user attends while a command is already running, mark that command as seen.
 - If attention is later lost while that same seen command is still running, set `commandExitStatus = COMMAND_EXIT_ARMED`.
 - If the same command finishes, or the PTY exits before a finish event, ring only when all are true: it was armed, the Session still lacks attention, and runtime is at least `T_USER_ATTENTION`.
-- A command-exit ring sets `todo = true` and stores the COMMAND_EXIT notification built by `setCommandExitRinging` / `formatCommandExitBody` in `lib/src/lib/alert-manager.ts` (title "Command finished", body = summarized command + exit code).
+- A command-exit ring sets `todo = true` and stores the COMMAND_EXIT notification built by `applyCommandExitRinging` / `formatCommandExitBody` in `lib/src/lib/alert-manager.ts` (title "Command finished", body = summarized command + exit code).
 - Returning to the Session before finish disarms the watch. A quick finish, a different command start, or Session destruction clears it without ringing.
 - Race rule: attention must be lost before the finish event is observed.
 - Precedence rule: a protocol ring must keep its richer `ActivityNotification`; command-exit must not overwrite it.
@@ -222,12 +231,13 @@ Source of truth: `AlertSettings` in `lib/src/lib/alert-settings.ts` (renderer mi
 | Field | Meaning |
 |---|---|
 | `inactivityTimeoutMs` | `T_USER_ATTENTION` — the walk-away window defined under Attention above. |
+| `deferAlertsUntilQuiet` | Defer eligible terminal-notification rings while the animation watcher is fully armed. Default off. (rationale) |
 | `speakEnabled` / `speakDelayMs` | Spoken alarms, below. |
 | `pushEnabled` / `pushDelayMs` | Push notifications, below. |
 
 Rules:
 
-- **Validate and clamp every field on read *and* on write** (`normalizeAlertSettings`), so a hand-edited `localStorage` blob or a hostile message can never install a `NaN` or absurd timer. Unknown keys are dropped and missing keys defaulted, so the blob evolves additively with no version field. The shipped defaults come from `cfg.alert`, keeping `lib/src/cfg.ts` the one place a default is written down.
+- **Validate and clamp every field on read *and* on write** (`normalizeAlertSettings`), so a hand-edited `localStorage` blob or a hostile message can never install a `NaN` or absurd timer. Unknown keys are dropped and missing keys defaulted, so the blob evolves additively with no version field. `cfg.alert` owns the inactivity default; `DEFAULT_ALERT_SETTINGS` owns the sink and boolean defaults.
 - Distribution follows the WATCHING rule set's seed/broadcast shape, and for the same reason: each VS Code webview has its own origin and therefore its own `localStorage`, while the `AlertManager` is shared. The one difference is that an edit **relays the whole blob** rather than a per-command delta, so two webviews cannot disagree about whether alarms speak. The host revalidates everything it receives.
 - Single-webview hosts (standalone, browser sidecar, Storybook) own the `AlertManager` in the renderer, so they apply the settings inline and broadcast nothing back.
 
@@ -278,6 +288,7 @@ Source of truth: `lib/src/lib/alert-speech.ts`, armed once by
 Reached from any of the controls at the far right of the baseboard; placement and the baseboard's right cluster belong to `docs/specs/layout.md`. Source of truth: `lib/src/components/SettingsDialog.tsx`. The alarm sections below sit under the theme and shell rows; when both are hidden (VS Code owns the theme and the shells), the rule list is first and drops its section divider.
 
 - Lists every watched command with a remove control, and **cannot add one**. WATCHING is keyed on a running command's name, so creating a rule stays a bell click / `a` press in the tab running it; the empty state says so. This dialog and the bell dialog are the two places a rule set on a since-closed Pane can be found and removed — they render the same `WatchedCommandList`, so the list has one implementation.
+- The watcher group carries the **Defer alerts until animation stops** switch and explains that only a fully armed watcher delays terminal notifications.
 - **Delays are committed on blur or `Enter`, never per keystroke** — typing `3` on the way to `30` must not briefly install a 3-second timer. They are shown in seconds; an out-of-range or empty entry snaps back to whatever the store clamped it to.
 - The push group's device line names every device a push would reach, and otherwise states why there is none — no Host enrolled, nothing subscribed yet, or the server could not be asked. A push that silently goes nowhere is indistinguishable from a broken one.
 - Each alarm sink carries a **try it now** control outside the switch's dimming;

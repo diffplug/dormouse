@@ -5,7 +5,7 @@ import {
   type AlertSettings,
 } from './alert-settings';
 
-type AlertSettingsTarget = Pick<AlertManager, 'setInactivityTimeoutMs'>;
+type AlertSettingsTarget = Pick<AlertManager, 'applySettings'>;
 
 /**
  * Coordinates one host-authoritative alarm-settings blob across multiple
@@ -13,9 +13,9 @@ type AlertSettingsTarget = Pick<AlertManager, 'setInactivityTimeoutMs'>;
  * The first renderer seeds persisted settings after a fresh host start; later
  * renderers receive that canonical state instead of replacing it.
  *
- * Only `inactivityTimeoutMs` means anything to the host's `AlertManager`. The
- * renderer-only fields are held purely so every webview reads back the same
- * values (`docs/specs/alert.md` -> Alarm settings).
+ * `AlertManager.applySettings` takes the host-owned fields. Renderer-only sink
+ * fields are held so every webview reads back the same values
+ * (`docs/specs/alert.md` -> Alarm settings).
  */
 export class AlertSettingsHost {
   private initialized = false;
@@ -51,7 +51,7 @@ export class AlertSettingsHost {
     // Renderer input is revalidated here: the host must never install a NaN or
     // absurd timer because a webview sent one (`docs/specs/transport.md`).
     this.settings = normalizeAlertSettings(value);
-    this.target.setInactivityTimeoutMs(this.settings.inactivityTimeoutMs);
+    this.target.applySettings(this.settings);
   }
 
   private publish(): void {

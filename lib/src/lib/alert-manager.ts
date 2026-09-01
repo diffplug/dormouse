@@ -1,4 +1,5 @@
 import { QuiesceDetector, type QuiesceStatus } from './quiesce-detector';
+import type { AlertSettings } from './alert-settings';
 import { cfg } from '../cfg';
 import {
   commandArgv0,
@@ -192,6 +193,9 @@ interface AlertEntry {
   todo: TodoState;
   notification: ActivityNotification | null;
   attentionDismissedRing: boolean;
+  /** Latest terminal notification deferred behind animation; never public or persisted. */
+  deferredNotification: ActivityNotification | null;
+  deferredNotificationTimer: ReturnType<typeof setTimeout> | null;
 }
 
 /** Portable Session Activity manager. `dispatchCompletion` is the single
@@ -209,8 +213,20 @@ export class AlertManager {
   private lastEmitted = new Map<string, AlertState>();
   private watchedCommands = new Set<string>();
   private inactivityTimeoutMs = cfg.alert.userAttention;
+  private deferAlertsUntilQuiet = false;
 
   // --- Settings ---
+
+  /**
+   * The whole of what this manager consumes from the settings blob, so a new
+   * host-owned field is one edit here rather than one per host — where a miss
+   * would silently disable it on that host alone. Callers pass an
+   * already-normalized blob; the sinks below revalidate anyway.
+   */
+  applySettings(settings: AlertSettings): void {
+    this.setInactivityTimeoutMs(settings.inactivityTimeoutMs);
+    this.setDeferAlertsUntilQuiet(settings.deferAlertsUntilQuiet);
+  }
 
   /** Walk-away and command-exit minimum-runtime window. Revalidate at this timer sink. */
   setInactivityTimeoutMs(ms: number): void {
@@ -221,6 +237,17 @@ export class AlertManager {
     if (this.attentionTimer !== null && this.attentionId !== null) {
       this.setAttention(this.attentionId);
     }
+  }
+
+  /** Let confirmed terminal activity finish before terminal-notification rings. */
+  setDeferAlertsUntilQuiet(enabled: boolean): void {
+    if (enabled === this.deferAlertsUntilQuiet) return;
+    this.deferAlertsUntilQuiet = enabled;
+    if (enabled) return;
+
+    // Turning the gate off releases news it was holding; dropping it would turn
+    // a timing preference into alert loss.
+    for (const [id, entry] of this.entries) this.flushDeferredNotification(id, entry);
   }
 
   // --- State change subscription ---
@@ -329,6 +356,11 @@ export class AlertManager {
     const entry = this.entries.get(id);
     if (!entry) return;
     this.dispatchCompletion(id, entry, { kind: 'settled' });
+    // The settle completion gets first refusal before delivery held from an
+    // earlier event. Never re-offer that historical event to current claimants.
+    // Unconditional: a claimant taking *this* settle says nothing about the
+    // earlier completion it never saw, which is now quiet and due.
+    this.flushDeferredNotification(id, entry);
   }
 
   // --- Completion events ---
@@ -378,7 +410,13 @@ export class AlertManager {
         break;
       case 'commandFinished':
         if (!event.armed || this.hasAttention(id) || event.ranMs < this.inactivityTimeoutMs) break;
-        this.setCommandExitRinging(id, entry, event.displayCommand, event.exitCode);
+        // A shell-reported exit is authoritative, so recent animation never
+        // delays it. The detector only gates in-band terminal notifications.
+        this.applyCommandExitRinging(entry, event.displayCommand, event.exitCode);
+        // If a terminal notification was already waiting, it can enrich this
+        // ring immediately; keeping its timer would publish stale detail later.
+        if (entry.deferredNotification !== null) this.flushDeferredNotification(id, entry);
+        else this.notify(id);
         break;
       case 'notification':
         if (this.hasAttention(id)) {
@@ -387,7 +425,7 @@ export class AlertManager {
           this.notify(id);
           break;
         }
-        this.setProtocolRinging(id, entry, event.notification);
+        this.deferOrDeliverNotification(id, entry, event.notification);
         break;
     }
     return false;
@@ -663,12 +701,11 @@ export class AlertManager {
     if (claimed) this.notify(id);
   }
 
-  private setProtocolRinging(id: string, entry: AlertEntry, notification: ActivityNotification): void {
+  private applyProtocolRinging(entry: AlertEntry, notification: ActivityNotification): void {
     entry.notification = notification;
     entry.todo = true;
     entry.protocolStatus = 'ALERT_RINGING';
     entry.progress = null;
-    this.notify(id);
   }
 
   // --- Command-exit track ---
@@ -782,8 +819,7 @@ export class AlertManager {
   }
 
   /** The watch record is already gone by the time this runs, so it takes the text it needs. */
-  private setCommandExitRinging(
-    id: string,
+  private applyCommandExitRinging(
     entry: AlertEntry,
     displayCommand: string,
     exitCode: number | undefined,
@@ -798,11 +834,83 @@ export class AlertManager {
         body: formatCommandExitBody(displayCommand, exitCode),
       };
     }
+  }
+
+  // --- Deferred terminal notifications ---
+
+  private deferOrDeliverNotification(
+    id: string,
+    entry: AlertEntry,
+    notification: ActivityNotification,
+  ): void {
+    // Once any track rings, another source only enriches the same summons. There
+    // is no fresh transition left for animation deferral to suppress. An already
+    // pending deferral keeps deferring: a command boundary resets the detector,
+    // so `isConfirmedBusy` alone could release a notification before quiet.
+    if (
+      this.deferAlertsUntilQuiet
+      && !this.hasActiveRing(entry)
+      && (entry.deferredNotification !== null || entry.detector.isConfirmedBusy())
+    ) {
+      // Latest wins, matching repeated notifications on an already-ringing track.
+      entry.deferredNotification = notification;
+      this.scheduleDeferredNotification(id, entry);
+    } else {
+      // An existing ring means this is enrichment, not a fresh summons. Cancel
+      // any older pending detail so it cannot overwrite this notification later.
+      this.clearDeferredNotification(entry);
+      this.applyProtocolRinging(entry, notification);
+    }
+    // The caller may have cleared a publicly visible cycle and delegated the
+    // publish to the ring rules; deferring the ring must not swallow it.
     this.notify(id);
   }
 
-  /** Release every latched ring across the three tracks. Returns whether any was active. */
+  /**
+   * Wake at the detector's quiet deadline, re-arming for the remainder if
+   * output moved it — so continuing output costs one timer per quiet window
+   * rather than one per PTY chunk. Mostly the detector's own settle gets there
+   * first and this is a no-op; it is load-bearing only after a command boundary
+   * resets the detector, which kills the settle that would have flushed.
+   */
+  private scheduleDeferredNotification(id: string, entry: AlertEntry): void {
+    if (entry.deferredNotificationTimer !== null) clearTimeout(entry.deferredNotificationTimer);
+    entry.deferredNotificationTimer = setTimeout(() => {
+      entry.deferredNotificationTimer = null;
+      if (entry.detector.quietAt() > Date.now()) this.scheduleDeferredNotification(id, entry);
+      else this.flushDeferredNotification(id, entry);
+    }, Math.max(0, entry.detector.quietAt() - Date.now()));
+  }
+
+  private flushDeferredNotification(id: string, entry: AlertEntry): void {
+    const notification = entry.deferredNotification;
+    if (notification === null) return;
+    this.clearDeferredNotification(entry);
+
+    // Attending the Session clears this eagerly too; retain the recheck as the
+    // timer-side safety rule shared by every delayed alarm path.
+    if (this.hasAttention(id)) return;
+
+    this.applyProtocolRinging(entry, notification);
+    this.notify(id);
+  }
+
+  private clearDeferredNotification(entry: AlertEntry): void {
+    if (entry.deferredNotificationTimer !== null) {
+      clearTimeout(entry.deferredNotificationTimer);
+      entry.deferredNotificationTimer = null;
+    }
+    entry.deferredNotification = null;
+  }
+
+  /**
+   * Release every latched ring across the three tracks, plus any delivery still
+   * deferred behind animation — a path that stops summoning the user must never
+   * leave a timer that summons them a second later. Returns whether a ring was
+   * actually active; a cancelled deferral was never visible and does not count.
+   */
   private clearAllRingsIfActive(entry: AlertEntry): boolean {
+    this.clearDeferredNotification(entry);
     // Release all three, no short-circuit.
     const released = [
       this.releaseRing(entry, 'protocol'),
@@ -810,6 +918,12 @@ export class AlertManager {
       this.releaseRing(entry, 'watching'),
     ];
     return released.includes(true);
+  }
+
+  private hasActiveRing(entry: AlertEntry): boolean {
+    return entry.protocolStatus === 'ALERT_RINGING'
+      || entry.commandExitStatus === 'ALERT_RINGING'
+      || entry.watchingRingingCommand !== null;
   }
 
   /** Release one track's latched ring. Returns whether it was ringing. */
@@ -924,6 +1038,8 @@ export class AlertManager {
 
   clearTodo(id: string): void {
     const entry = this.getOrCreateEntry(id);
+    // Explicit: the early return below skips `clearAllRingsIfActive`.
+    this.clearDeferredNotification(entry);
     if (!entry.todo) return;
     entry.todo = false;
     entry.notification = null;
@@ -964,6 +1080,7 @@ export class AlertManager {
     this.claimants.delete(id);
     const entry = this.entries.get(id);
     if (!entry) return;
+    this.clearDeferredNotification(entry);
     entry.detector.dispose();
     this.entries.delete(id);
     if (this.attentionId === id) {
@@ -990,6 +1107,7 @@ export class AlertManager {
     entry.commandExitStatus = 'IDLE';
     entry.commandExitWatch = null;
     entry.pendingCommandLine = null;
+    this.clearDeferredNotification(entry);
     // Restore must never carry detector state either.
     entry.detector.reset();
     this.notify(id);
@@ -1000,6 +1118,7 @@ export class AlertManager {
     // never hears an outcome absorbed a completion it never delivered.
     for (const id of [...this.awaits.keys()]) this.settleWaiters(id, 'cancelled');
     for (const entry of this.entries.values()) {
+      this.clearDeferredNotification(entry);
       entry.detector.dispose();
     }
     this.entries.clear();
@@ -1036,11 +1155,7 @@ export class AlertManager {
   }
 
   private getProjectedStatus(entry: AlertEntry): SessionStatus {
-    if (
-      entry.protocolStatus === 'ALERT_RINGING'
-      || entry.commandExitStatus === 'ALERT_RINGING'
-      || entry.watchingRingingCommand !== null
-    ) return 'ALERT_RINGING';
+    if (this.hasActiveRing(entry)) return 'ALERT_RINGING';
     if (entry.protocolStatus === 'OSC_NOTIF_BUSY') return 'OSC_NOTIF_BUSY';
     // WATCHING outranks the command-exit arm: a watched command is by
     // definition running, so COMMAND_EXIT_ARMED would otherwise mask the
@@ -1066,6 +1181,8 @@ export class AlertManager {
         todo: false,
         notification: null,
         attentionDismissedRing: false,
+        deferredNotification: null,
+        deferredNotificationTimer: null,
       };
       this.entries.set(id, entry);
     }

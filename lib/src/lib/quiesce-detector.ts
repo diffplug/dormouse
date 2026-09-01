@@ -27,6 +27,9 @@ const T_MIGHT_NEED_ATTENTION = cfg.alert.mightNeedAttention;
 const T_SETTLED_CONFIRM = cfg.alert.needsAttentionConfirm;
 const T_RESIZE_DEBOUNCE = cfg.alert.resizeDebounce;
 
+/** Silence from the last accepted output through a confirmed settle. */
+const QUIESCE_AFTER_OUTPUT_MS = T_MIGHT_NEED_ATTENTION + T_SETTLED_CONFIRM;
+
 /**
  * Watches one Session's PTY output and reports busy/quiet transitions.
  *
@@ -45,6 +48,13 @@ export class QuiesceDetector {
   private disposed = false;
   private firstOutputAt: number | null = null;
   private lastOutputAt: number | null = null;
+  /**
+   * Last output that got past the resize grace window. Deliberately outlives
+   * `reset()`: "how long since this pane last printed" is a fact about the PTY,
+   * not state-machine history, and an owner timing quiet across a command
+   * boundary still needs it after the boundary has reset the machine.
+   */
+  private lastAcceptedOutputAt: number | null = null;
   private outputCountSinceReset = 0;
   private readonly onChange: ((status: QuiesceStatus) => void) | null;
   private readonly onSettled: (() => void) | null;
@@ -58,7 +68,22 @@ export class QuiesceDetector {
     return this.status;
   }
 
-  /** Start over from `NOTHING_TO_SHOW`, forgetting all output history. */
+  /** The detector has confirmed ongoing output and is now waiting for quiet. */
+  isConfirmedBusy(): boolean {
+    return this.status === 'BUSY' || this.status === 'MIGHT_NEED_ATTENTION';
+  }
+
+  /**
+   * When the pane counts as quiet if nothing more arrives — the instant a
+   * settle would confirm. The one place that composition is written down, so an
+   * owner scheduling against quiet never restates the settle path's stages.
+   */
+  quietAt(): number {
+    return (this.lastAcceptedOutputAt ?? Date.now()) + QUIESCE_AFTER_OUTPUT_MS;
+  }
+
+  /** Start over from `NOTHING_TO_SHOW`, forgetting the state machine's output
+   * history. The `quietAt` clock is not history and survives (see above). */
   reset(): void {
     if (this.disposed) return;
     this.clearActivityTimers();
@@ -71,6 +96,7 @@ export class QuiesceDetector {
 
     const now = Date.now();
     this.lastOutputAt = now;
+    this.lastAcceptedOutputAt = now;
 
     switch (this.status) {
       case 'NOTHING_TO_SHOW':

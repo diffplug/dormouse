@@ -17,6 +17,8 @@ import { getPlatform } from './platform';
 export interface AlertSettings {
   /** ms — how long "looking at this pane" lasts before the user counts as away. */
   inactivityTimeoutMs: number;
+  /** Delay terminal-notification rings behind confirmed animation. */
+  deferAlertsUntilQuiet: boolean;
   /** Speak an unattended alarm out loud after `speakDelayMs`. */
   speakEnabled: boolean;
   /** ms after a ring before speaking, if the ring is still unattended. */
@@ -36,6 +38,7 @@ export const MAX_DELAY_MS = 600_000;
 export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
   // cfg.ts stays the single source of the shipped default.
   inactivityTimeoutMs: cfg.alert.userAttention,
+  deferAlertsUntilQuiet: false,
   speakEnabled: false,
   speakDelayMs: 10_000,
   pushEnabled: false,
@@ -66,6 +69,7 @@ export function normalizeAlertSettings(value: unknown): AlertSettings {
   const raw = (typeof value === 'object' && value !== null ? value : {}) as Partial<Record<keyof AlertSettings, unknown>>;
   return {
     inactivityTimeoutMs: clampDelay(raw.inactivityTimeoutMs, DEFAULT_ALERT_SETTINGS.inactivityTimeoutMs),
+    deferAlertsUntilQuiet: bool(raw.deferAlertsUntilQuiet, DEFAULT_ALERT_SETTINGS.deferAlertsUntilQuiet),
     speakEnabled: bool(raw.speakEnabled, DEFAULT_ALERT_SETTINGS.speakEnabled),
     speakDelayMs: clampDelay(raw.speakDelayMs, DEFAULT_ALERT_SETTINGS.speakDelayMs),
     pushEnabled: bool(raw.pushEnabled, DEFAULT_ALERT_SETTINGS.pushEnabled),
@@ -75,6 +79,7 @@ export function normalizeAlertSettings(value: unknown): AlertSettings {
 
 function alertSettingsEqual(a: AlertSettings, b: AlertSettings): boolean {
   return a.inactivityTimeoutMs === b.inactivityTimeoutMs
+    && a.deferAlertsUntilQuiet === b.deferAlertsUntilQuiet
     && a.speakEnabled === b.speakEnabled
     && a.speakDelayMs === b.speakDelayMs
     && a.pushEnabled === b.pushEnabled

@@ -28,9 +28,21 @@
 
 **Why the timeout ceiling exists at all.** Like the inactivity timeout, `timeoutMs` originates a process away and ends up in `setTimeout`, whose delay is a signed 32-bit millisecond count. Anything past ~24.9 days overflows and fires immediately, turning a long park into an instant `timeout` — the opposite of what the caller asked for.
 
+## Completion events
+
+**Why the gate reads private detector state.** The detector runs for unwatched commands, while protocol progress and command-exit status can mask it in the public projection. The gate needs the underlying evidence, not whichever bell state wins display precedence.
+
+**Why command finishes bypass animation deferral.** A shell-reported exit is authoritative evidence that the foreground command ended, while animation detection is only a recent-output heuristic. Letting the heuristic overrule the lifecycle event would add latency and could let unrelated background output defer a certain completion indefinitely.
+
+**Why a deferred event is not dispatched again.** Claimants already received first refusal when the completion happened. Re-offering it at quiet time would let an await registered later consume history and would report one completion twice.
+
 ## WATCHING Track
 
 **Why the keystroke fallback is not routed into the manager.** The fallback in `docs/specs/terminal-state.md` is renderer-side and lower confidence than a shell-reported command boundary. Wiring it in would buy integration-less shells a worse version of WATCHING at the price of a second command-tracking path to keep in sync with the real one.
+
+## Alarm settings
+
+**Why animation deferral defaults off.** BEL and notification OSCs explicitly ask to alert now, while continuously changing output may never become quiet. Opt-in preserves their established timing and makes indefinite deferral a deliberate choice.
 
 ## Spoken alarms
 

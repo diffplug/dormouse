@@ -500,9 +500,7 @@ export class TauriAdapter implements PlatformAdapter {
     this.alertManager.setCommandWatched(name, watched);
   }
 
-  alertPublishSettings(settings: AlertSettings): void {
-    this.alertManager.setInactivityTimeoutMs(settings.inactivityTimeoutMs);
-  }
+  alertPublishSettings(settings: AlertSettings): void { this.alertManager.applySettings(settings); }
 
   alertDismiss(id: string): void {
     this.alertManager.dismissAlert(id);

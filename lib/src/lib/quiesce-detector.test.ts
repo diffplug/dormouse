@@ -78,6 +78,7 @@ describe('QuiesceDetector', () => {
     monitor.onData();
     expect(monitor.getStatus()).toBe('BUSY');
     expect(changes).toEqual(['MIGHT_BE_BUSY', 'BUSY']);
+    expect(monitor.isConfirmedBusy()).toBe(true);
   });
 
   it('falls back from MIGHT_BE_BUSY to NOTHING_TO_SHOW if work is not confirmed', () => {
@@ -97,6 +98,7 @@ describe('QuiesceDetector', () => {
     const { monitor, changes, settled } = createMonitor();
     driveMonitorToMightNeedAttention(monitor);
     expect(changes).toEqual(['MIGHT_BE_BUSY', 'BUSY', 'MIGHT_NEED_ATTENTION']);
+    expect(monitor.isConfirmedBusy()).toBe(true);
     expect(settled).not.toHaveBeenCalled();
   });
 
@@ -238,6 +240,30 @@ describe('QuiesceDetector', () => {
     monitor.onData();
     expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
     expect(changes).toEqual([]);
+  });
+
+  it('quietAt counts from the last accepted output and outlives reset', () => {
+    const { monitor } = createMonitor();
+    monitor.onData();
+    const quietAt = monitor.quietAt();
+    expect(quietAt).toBe(Date.now() + 5_000);
+
+    vi.advanceTimersByTime(1_000);
+    monitor.reset();
+    // A command boundary resets the state machine, but "how long since this
+    // pane printed" is the fact an owner timing quiet across it still needs.
+    expect(monitor.quietAt()).toBe(quietAt);
+  });
+
+  it('a resize-suppressed output does not move quietAt', () => {
+    const { monitor } = createMonitor();
+    monitor.onData();
+    const quietAt = monitor.quietAt();
+
+    monitor.onResize();
+    vi.advanceTimersByTime(100);
+    monitor.onData();
+    expect(monitor.quietAt()).toBe(quietAt);
   });
 
   it('onResize suppresses output detection for 500ms', () => {
