@@ -25,6 +25,8 @@ import {
   noiseNonceBytes,
 } from '../dist/index.js';
 
+const TAG_LENGTH = 16;
+
 const VECTOR = JSON.parse(
   readFileSync(new URL('./vectors/noise-ik-25519-chachapoly-sha256.json', import.meta.url), 'utf8'),
 );
@@ -270,14 +272,19 @@ test('an all-zero remote static is one terminal handshake failure', async () => 
 });
 
 test('a remote static of the wrong length is rejected before any crypto', async () => {
-  await assert.rejects(
-    createNoiseInitiator({
-      prologue: EMPTY,
-      staticKeyPair: keys.initStatic,
-      remoteStaticPublicKey: new Uint8Array(31),
-    }),
-    NoiseError,
-  );
+  // Both directions: an over-long key must not be accepted as its first 32
+  // bytes, which is what validating the truncating copy would do.
+  for (const length of [31, 33]) {
+    await assert.rejects(
+      createNoiseInitiator({
+        prologue: EMPTY,
+        staticKeyPair: keys.initStatic,
+        remoteStaticPublicKey: new Uint8Array(length),
+      }),
+      NoiseError,
+      `length ${length}`,
+    );
+  }
 });
 
 test('handshake messages are capped at 65,535 bytes on write and read', async () => {
@@ -345,4 +352,105 @@ test('a generated keypair round-trips through a real handshake', async () => {
   );
   const wire = initiator.session.send.encryptWithAd(EMPTY, hello);
   assert.equal(hex(responder.session.receive.decryptWithAd(EMPTY, wire)), '0102');
+});
+
+// --- Regressions pinned by the stage-1 code review ---
+
+test('a Buffer message is copied, not aliased, before the handshake needs it again', async () => {
+  // Node aliases `Buffer.prototype.slice` to `subarray`, so a host reading a
+  // WebSocket frame into a reused buffer would otherwise have its `re` change
+  // underneath the `ee` DH that message 2 still owes.
+  const initiator = await newInitiator();
+  const responder = await newResponder();
+  const wire = Buffer.from(await initiator.writeMessage(unhex(VECTOR.messages[0].payload)));
+  await responder.readMessage(wire);
+
+  const remoteStatic = responder.remoteStaticPublicKey;
+  wire.fill(0); // the host recycles its read buffer
+  assert.equal(hex(remoteStatic), hex(keys.initStatic.publicKey));
+
+  // Message 2 still matches the vector: `re` was copied out of the recycled buffer.
+  const message2 = await responder.writeMessage(unhex(VECTOR.messages[1].payload));
+  assert.equal(hex(message2), VECTOR.messages[1].ciphertext);
+});
+
+test('a Buffer remote static is copied when the initiator is created', async () => {
+  const rs = Buffer.from(unhex(VECTOR.init_remote_static));
+  const initiator = await newInitiator({ remoteStaticPublicKey: rs });
+  rs.fill(0);
+  assert.equal(hex(await initiator.writeMessage(unhex(VECTOR.messages[0].payload))),
+    VECTOR.messages[0].ciphertext);
+});
+
+test('mutating the returned remote static does not change the handshake', async () => {
+  const initiator = await newInitiator();
+  const responder = await newResponder();
+  await responder.readMessage(await initiator.writeMessage(unhex(VECTOR.messages[0].payload)));
+
+  responder.remoteStaticPublicKey.fill(0);
+  assert.equal(hex(responder.remoteStaticPublicKey), hex(keys.initStatic.publicKey));
+  assert.equal(
+    hex(await responder.writeMessage(unhex(VECTOR.messages[1].payload))),
+    VECTOR.messages[1].ciphertext,
+  );
+});
+
+test('transport messages are capped at 65,535 bytes on write and read', async () => {
+  // Noise's cap is on every message, not just the handshake, and the tag counts.
+  const { initiator, responder } = await completeHandshake();
+  const send = initiator.session.send;
+
+  const biggest = send.encryptWithAd(EMPTY, new Uint8Array(NOISE_MAX_MESSAGE_LENGTH - TAG_LENGTH));
+  assert.equal(biggest.length, NOISE_MAX_MESSAGE_LENGTH);
+  assert.equal(responder.session.receive.decryptWithAd(EMPTY, biggest).length,
+    NOISE_MAX_MESSAGE_LENGTH - TAG_LENGTH);
+
+  assert.throws(
+    () => send.encryptWithAd(EMPTY, new Uint8Array(NOISE_MAX_MESSAGE_LENGTH - TAG_LENGTH + 1)),
+    NoiseError,
+  );
+  assert.throws(
+    () => responder.session.receive.decryptWithAd(EMPTY, new Uint8Array(NOISE_MAX_MESSAGE_LENGTH + 1)),
+    NoiseError,
+  );
+  // The rejected write did not burn a counter value.
+  assert.equal(send.nonce, 1n);
+});
+
+test('an over-length write through a keyless CipherState is rejected too', () => {
+  const empty = new NoiseCipherState();
+  assert.equal(hex(empty.encryptWithAd(EMPTY, Uint8Array.of(7))), '07');
+  assert.throws(
+    () => empty.encryptWithAd(EMPTY, new Uint8Array(NOISE_MAX_MESSAGE_LENGTH + 1)),
+    NoiseError,
+  );
+});
+
+test('a runtime without X25519 fails as a NoiseError, not a DOMException', async () => {
+  const broken = {
+    subtle: {
+      generateKey: async () => {
+        throw new DOMException('X25519 unsupported', 'NotSupportedError');
+      },
+    },
+  };
+  await assert.rejects(generateNoiseKeyPair(broken), NoiseError);
+});
+
+test('the role follows the remote static, so it can never be mismatched', async () => {
+  // `NoiseHandshake.start` is reachable from the barrel; passing `rs` must
+  // yield an initiator and omitting it a responder, so no caller can build an
+  // initiator with no `rs` for `#writeMessage1` to dereference.
+  const { NoiseHandshake } = await import('../dist/index.js');
+  const asResponder = await NoiseHandshake.start(
+    { prologue: EMPTY, staticKeyPair: keys.respStatic },
+    undefined,
+  );
+  await assert.rejects(asResponder.writeMessage(EMPTY), NoiseError);
+
+  const asInitiator = await NoiseHandshake.start(
+    { prologue: EMPTY, staticKeyPair: keys.initStatic },
+    keys.respStatic.publicKey,
+  );
+  assert.ok((await asInitiator.writeMessage(EMPTY)).length > 0);
 });

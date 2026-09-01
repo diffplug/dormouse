@@ -381,11 +381,11 @@ paired passkey, and the new key starts unauthorized everywhere.
 The end-to-end protocol of the **e2e-client-host** scope ([Future](#future))
 rests on one Noise suite. It is implemented and vector-conformant, but no
 production path consumes it yet: pairing, connection, terminal, and push still
-reach the Server in plaintext as the sections above describe.
+reach the Server in plaintext.
 
 - **Exactly one suite: `Noise_IK_25519_ChaChaPoly_SHA256`, Noise revision 34.**
-  No generic pattern API, cipher negotiation, protocol-name override, or suite
-  choice offered to a caller. `IK` only: pre-message `<- s`, then
+  No generic pattern API, cipher negotiation, protocol-name override, or
+  caller-selectable suite. `IK` only: pre-message `<- s`, then
   `-> e, es, s, ss` and `<- e, ee, se`.
 - **X25519 stays WebCrypto-only** (`generateKey` / `deriveBits` / `importKey`),
   so a long-term private key can remain a nonextractable `CryptoKey`; never a
@@ -399,7 +399,8 @@ reach the Server in plaintext as the sections above describe.
   pin, the published audit, and what changed in the chacha path between the
   audited and the pinned release**; a version bump rewrites that note in the
   same commit.
-- **Handshake messages are capped at 65,535 bytes** on write and read. The
+- **Every message — handshake and transport — is capped at 65,535 bytes** on
+  write and read, the tag counted. The
   96-bit nonce is `00000000 || little_endian_u64(n)` with `2^64-1` reserved, so
   **counter exhaustion is a hard error, never a wrap**, and **a failed decrypt
   does not advance the counter** — otherwise one injected frame locks out the

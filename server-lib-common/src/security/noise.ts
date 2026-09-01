@@ -38,7 +38,12 @@
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 
 import { concatBytes, constantTimeEqual, utf8Encode } from './bytes.js';
-import { type CryptoKeyLike, type WebCryptoLike, getWebCrypto } from './webcrypto.js';
+import {
+  type CryptoKeyLike,
+  type CryptoKeyPairLike,
+  type WebCryptoLike,
+  getWebCrypto,
+} from './webcrypto.js';
 
 /** The only protocol name this module implements. */
 export const NOISE_PROTOCOL_NAME = 'Noise_IK_25519_ChaChaPoly_SHA256';
@@ -96,12 +101,23 @@ export interface NoiseSession {
   readonly handshakeHash: Uint8Array;
 }
 
-/** Generate an X25519 keypair whose private half never leaves WebCrypto. */
+/**
+ * Generate an X25519 keypair whose private half never leaves WebCrypto. A
+ * runtime without X25519 rejects here, so the failure is a `NoiseError` like
+ * every other in this module rather than a bare `DOMException` a caller's
+ * `instanceof NoiseError` branch would miss.
+ */
 export async function generateNoiseKeyPair(
   crypto: WebCryptoLike = getWebCrypto(),
 ): Promise<NoiseKeyPair> {
-  const pair = await crypto.subtle.generateKey(X25519_ALGORITHM, false, ['deriveBits']);
-  const publicKey = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey));
+  let pair: CryptoKeyPairLike;
+  let publicKey: Uint8Array;
+  try {
+    pair = await crypto.subtle.generateKey(X25519_ALGORITHM, false, ['deriveBits']);
+    publicKey = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey));
+  } catch {
+    throw new NoiseError('X25519 key generation failed');
+  }
   if (publicKey.length !== NOISE_KEY_LENGTH) {
     throw new NoiseError('X25519 public key is not 32 bytes');
   }
@@ -144,6 +160,10 @@ export class NoiseCipherState {
   }
 
   encryptWithAd(ad: Uint8Array, plaintext: Uint8Array): Uint8Array {
+    // Noise's 65535-byte cap is on the message, so the tag counts. Enforced on
+    // the sending side because an over-length frame is silent here and only
+    // fails at the conformant peer, which cannot tell the sender why.
+    requireMaxMessageLength(plaintext.length + (this.#key === undefined ? 0 : NOISE_TAG_LENGTH));
     if (this.#key === undefined) return plaintext;
     const nonce = noiseNonceBytes(this.#n);
     const ciphertext = chacha20poly1305(this.#key, nonce, ad).encrypt(plaintext);
@@ -152,6 +172,7 @@ export class NoiseCipherState {
   }
 
   decryptWithAd(ad: Uint8Array, ciphertext: Uint8Array): Uint8Array {
+    requireMaxMessageLength(ciphertext.length);
     if (this.#key === undefined) return ciphertext;
     const nonce = noiseNonceBytes(this.#n);
     let plaintext: Uint8Array;
@@ -308,13 +329,15 @@ export class NoiseHandshake {
   #session: NoiseSession | undefined;
 
   private constructor(
-    role: Role,
     crypto: WebCryptoLike,
     symmetric: SymmetricState,
     options: NoiseHandshakeOptions,
     remoteStatic: Uint8Array | undefined,
   ) {
-    this.#role = role;
+    // In IK the initiator is exactly the side that knows `rs` before speaking,
+    // so deriving the role makes a role/`rs` mismatch unrepresentable — and
+    // `#writeMessage1`'s `#remoteStatic!` sound.
+    this.#role = remoteStatic === undefined ? 'responder' : 'initiator';
     this.#crypto = crypto;
     this.#symmetric = symmetric;
     this.#static = options.staticKeyPair;
@@ -324,11 +347,11 @@ export class NoiseHandshake {
 
   /**
    * Shared by {@link createNoiseInitiator} and {@link createNoiseResponder}.
-   * Every key this handshake will ever use is length-checked here, so no
-   * caller can reach the private constructor with an unvalidated one.
+   * Passing `rs` starts an initiator, omitting it a responder; every key this
+   * handshake will ever use is length-checked here, so no caller can reach the
+   * private constructor with an unvalidated one.
    */
   static async start(
-    role: Role,
     options: NoiseHandshakeOptions,
     remoteStatic: Uint8Array | undefined,
   ): Promise<NoiseHandshake> {
@@ -343,7 +366,7 @@ export class NoiseHandshake {
     // Pre-message `<- s`: both sides mix the responder's static public key —
     // `rs` for the initiator, its own `s` for the responder.
     await symmetric.mixHash(remoteStatic ?? options.staticKeyPair.publicKey);
-    return new NoiseHandshake(role, crypto, symmetric, options, remoteStatic);
+    return new NoiseHandshake(crypto, symmetric, options, remoteStatic);
   }
 
   /** Whether both messages have been processed and `session` is available. */
@@ -353,7 +376,8 @@ export class NoiseHandshake {
 
   /** The peer's static public key: known up front by the initiator, learned in message 1 by the responder. */
   get remoteStaticPublicKey(): Uint8Array | undefined {
-    return this.#remoteStatic;
+    // Copied: the responder still owes an `se` DH against these bytes.
+    return this.#remoteStatic === undefined ? undefined : copyKey(this.#remoteStatic, 0);
   }
 
   /** The `Split` result. Throws until the handshake completes. */
@@ -412,7 +436,7 @@ export class NoiseHandshake {
   async #readMessage1(message: Uint8Array): Promise<Uint8Array> {
     requireMessageLength(message.length, 1);
     const staticEnd = MESSAGE_1_OVERHEAD - NOISE_TAG_LENGTH;
-    const remoteEphemeral = message.slice(0, NOISE_KEY_LENGTH);
+    const remoteEphemeral = copyKey(message, 0);
     this.#remoteEphemeral = remoteEphemeral;
     await this.#symmetric.mixHash(remoteEphemeral);
     await this.#symmetric.mixKey(await this.#dh(this.#static.privateKey, remoteEphemeral));
@@ -442,7 +466,7 @@ export class NoiseHandshake {
   /** `<- e, ee, se` */
   async #readMessage2(message: Uint8Array): Promise<Uint8Array> {
     requireMessageLength(message.length, 2);
-    const remoteEphemeral = message.slice(0, NOISE_KEY_LENGTH);
+    const remoteEphemeral = copyKey(message, 0);
     await this.#symmetric.mixHash(remoteEphemeral);
     await this.#symmetric.mixKey(await this.#dh(this.#ephemeral!.privateKey, remoteEphemeral));
     await this.#symmetric.mixKey(await this.#dh(this.#static.privateKey, remoteEphemeral));
@@ -496,25 +520,43 @@ function requireKey(key: Uint8Array, what: string): void {
   if (key.length !== NOISE_KEY_LENGTH) throw new NoiseError(`${what} must be 32 bytes`);
 }
 
-/** Both ends of one message's length contract: never under its framing, never over Noise's cap. */
+/**
+ * The 32 bytes at `offset`, always copied. Never `.slice()`: Node aliases
+ * `Buffer.prototype.slice` to `subarray`, so a `Buffer` argument — what a
+ * Node host gets from a WebSocket frame — would hand back a live view that
+ * changes under us if the caller reuses its read buffer.
+ */
+function copyKey(source: Uint8Array, offset: number): Uint8Array {
+  return new Uint8Array(source.subarray(offset, offset + NOISE_KEY_LENGTH));
+}
+
+/** Noise's cap, which applies to every message — handshake and transport alike. */
+function requireMaxMessageLength(length: number): void {
+  if (length > NOISE_MAX_MESSAGE_LENGTH) {
+    throw new NoiseError('message exceeds the Noise maximum');
+  }
+}
+
+/** Both ends of one handshake message's length contract. */
 function requireMessageLength(length: number, message: 1 | 2): void {
   const overhead = message === 1 ? MESSAGE_1_OVERHEAD : MESSAGE_2_OVERHEAD;
   if (length < overhead) throw new NoiseError(`handshake message ${message} is too short`);
-  if (length > NOISE_MAX_MESSAGE_LENGTH) {
-    throw new NoiseError('handshake message exceeds the Noise maximum');
-  }
+  requireMaxMessageLength(length);
 }
 
 /** Start the IK initiator: it holds `rs` up front and writes message 1. */
 export async function createNoiseInitiator(
   options: NoiseInitiatorOptions,
 ): Promise<NoiseHandshake> {
-  return await NoiseHandshake.start('initiator', options, options.remoteStaticPublicKey.slice());
+  // Length-checked before the copy: `copyKey` truncates, so validating the
+  // copy would silently accept an over-long key as its first 32 bytes.
+  requireKey(options.remoteStaticPublicKey, 'remote static public key');
+  return await NoiseHandshake.start(options, copyKey(options.remoteStaticPublicKey, 0));
 }
 
 /** Start the IK responder: it learns `rs` from message 1 and writes message 2. */
 export async function createNoiseResponder(
   options: NoiseHandshakeOptions,
 ): Promise<NoiseHandshake> {
-  return await NoiseHandshake.start('responder', options, undefined);
+  return await NoiseHandshake.start(options, undefined);
 }
