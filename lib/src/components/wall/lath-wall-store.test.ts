@@ -364,6 +364,31 @@ describe('meta writes', () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
+  // The in-place kind change behind the `dor tool` take-over: one commit, so a
+  // body never renders against the previous kind's params.
+  it('setMeta replaces a leaf\'s whole meta, dropping what it is not handed', () => {
+    const store = seeded();
+    store.updateParams('a', { stale: true });
+    const before = store.getSnapshot();
+    store.setMeta('a', { component: 'tool', tabComponent: 'tool', title: 'storybook', params: { surfaceType: 'tool' } });
+    const after = store.getSnapshot();
+    expect(after.leafMeta.get('a')).toEqual({
+      component: 'tool',
+      tabComponent: 'tool',
+      title: 'storybook',
+      params: { surfaceType: 'tool' },
+    });
+    expect(before.leafMeta.get('a')?.component).toBe('terminal');
+    expect(after.leafMeta).not.toBe(before.leafMeta);
+  });
+
+  it('setMeta is a no-op on an absent id', () => {
+    const store = seeded();
+    const before = store.getSnapshot();
+    store.setMeta('missing', { component: 'tool', tabComponent: 'tool', title: 'x' });
+    expect(store.getSnapshot()).toBe(before);
+  });
+
   it('updateParams merges a patch into params', () => {
     const store = seeded();
     store.updateParams('b', { url: 'https://example.com' });

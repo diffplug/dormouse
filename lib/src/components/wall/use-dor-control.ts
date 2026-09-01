@@ -40,8 +40,9 @@ import {
 // One-way import: connect-port no longer depends on this module (its eager-surface
 // and refresh seams are injected as plain functions).
 import { connectPortToDefaultBrowser } from './connect-port';
-import { toolTakesOverCaller } from './tool-takeover';
+import { toolRerunsInCaller, toolTakesOverCaller, type ToolTakeoverGate } from './tool-takeover';
 import { listenerUrlsByPort } from './port-url';
+import { clearToolAnnounce } from '../../lib/tool-announce-store';
 import { dorDirectionForEdge, toolLeafMeta, type LathWallEngine } from './lath-wall-engine';
 import type { WallNav } from './keyboard/types';
 import type { LeafMeta } from '../../lib/lath/persistence';
@@ -342,7 +343,7 @@ async function restartSurfaceInPlace(id: string, command: string, cwd: string): 
 async function takeOverPaneWithTool(
   lath: LathWallEngine,
   id: string,
-  tool: { params: Record<string, unknown>; title: string; command: string },
+  tool: { params: Record<string, unknown>; title: string; command: string; cwd: string },
 ): Promise<void> {
   const backAtPrompt = await waitForTerminalState(
     id,
@@ -350,11 +351,25 @@ async function takeOverPaneWithTool(
     PROMPT_RETURN_TIMEOUT_MS,
   );
   const meta = lath.getMeta(id);
-  if (!backAtPrompt || !meta) return;
+  // Re-checked after the wait, not only before it: the pane can be killed or
+  // minimized while `dor` exits, and a Door keeps its meta — `store.has` is
+  // membership of the tree, so it answers both.
+  if (!backAtPrompt || !meta || !lath.store.has(id)) return;
+  // Whatever this Session announced under its previous command is not this
+  // tool's: a stale OSC 367 would hand the new tool that port, or re-key it.
+  clearToolAnnounce(id);
   // A rename the user made outlives the transformation; an untouched fallback
   // title becomes the tool's, as a spawned one would be.
   lath.store.setMeta(id, toolLeafMeta(meta.title === UNNAMED_PANEL_TITLE ? tool.title : meta.title, tool.params));
   getPlatform().writePty(id, `${tool.command}\r`);
+  // The caller holds the spawn lock until this resolves: until the shell reports
+  // the command, a queued invocation of the same key reads this pane as idle and
+  // interrupts what was just typed.
+  await waitForTerminalState(
+    id,
+    (state) => surfaceRunsCommand(state, tool.command, tool.cwd),
+    RESTART_START_TIMEOUT_MS,
+  );
 }
 
 // A `dor ensure -- <command>` command is typed into the shell programmatically,
@@ -945,6 +960,32 @@ export function useDorControl({
             }
           }
 
+          const toolParams = {
+            surfaceType: 'tool',
+            command,
+            cwd,
+            toolRender: render,
+            toolPort: port,
+            ...(key ? { toolKey: key } : {}),
+            ...(toolName ? { toolName } : {}),
+          };
+
+          // What both placements below read of the pane `dor` ran in
+          // (docs/specs/dor-tool.md -> Take-over).
+          const callerId = detail.surfaceId;
+          const callerGate = callerId === undefined ? null : ((): ToolTakeoverGate => {
+            const state = getTerminalPaneState(callerId);
+            return {
+              explicitSurface: stringParam(params.surface) !== undefined,
+              minimized: booleanParam(params.minimized),
+              visible: nav.hasPane(callerId),
+              kind: surfaceKindFromParams(lath.getMeta(callerId)?.params),
+              oscDriven: isPaneOscDriven(callerId),
+              rawCommandLine: state.currentCommand?.rawCommandLine ?? null,
+              cwdMatches: cwdPathsEqual(state.cwd?.path, cwd),
+            };
+          })();
+
           // Spawn-time dedupe, and only for a tool that was given an identity
           // (docs/specs/dor-tool.md -> Identity and dedupe).
           if (key && !booleanParam(params.fresh)) {
@@ -953,6 +994,34 @@ export function useDorControl({
             const match = findSurfaceByParams(matchesToolKey);
             if (match) {
               const matchedCommand = toolCommandFromParams(lath.getMeta(match.id)?.params) || command;
+              // A match that is the calling pane is the tool's own Surface, which
+              // take-over makes the normal place to retype in. Its command cannot
+              // be live — `dor` is what its shell is running — so it is idle by
+              // construction, and it re-runs through the take-over handshake:
+              // `restartSurfaceInPlace` would fire Ctrl+C into the `dor` still
+              // waiting for this answer.
+              if (match.id === callerId && callerGate && toolRerunsInCaller(callerGate)) {
+                detail.respond({
+                  ok: true,
+                  result: {
+                    status: 'adopted',
+                    surfaceId: match.id,
+                    surfaceRef: surfaceRefForId(match.id),
+                    command,
+                    cwd,
+                    minimized: false,
+                    key,
+                    ...(warnings.length > 0 ? { warnings } : {}),
+                  },
+                });
+                await takeOverPaneWithTool(lath, match.id, {
+                  params: toolParams,
+                  title: toolName ?? command,
+                  command,
+                  cwd,
+                });
+                return;
+              }
               // A dedicated Surface whose command exited is unambiguously free,
               // so re-run in place rather than splitting — where `dor ensure`,
               // aimed at arbitrary shells, would stop matching.
@@ -994,31 +1063,11 @@ export function useDorControl({
             }
           }
 
-          const toolParams = {
-            surfaceType: 'tool',
-            command,
-            cwd,
-            toolRender: render,
-            toolPort: port,
-            ...(key ? { toolKey: key } : {}),
-            ...(toolName ? { toolName } : {}),
-          };
-
           // Take-over: typed alone at a prompt, the tool runs in the calling pane
           // rather than splitting (docs/specs/dor-tool.md -> Take-over). Must stay
           // below the pending-approval and key-match returns above: both of those
           // placements win over this one.
-          const callerId = detail.surfaceId;
-          const callerState = callerId ? getTerminalPaneState(callerId) : null;
-          if (callerId && callerState && toolTakesOverCaller({
-            explicitSurface: stringParam(params.surface) !== undefined,
-            minimized: booleanParam(params.minimized),
-            visible: nav.hasPane(callerId),
-            kind: surfaceKindFromParams(lath.getMeta(callerId)?.params),
-            oscDriven: isPaneOscDriven(callerId),
-            rawCommandLine: callerState.currentCommand?.rawCommandLine ?? null,
-            cwdMatches: cwdPathsEqual(callerState.cwd?.path, cwd),
-          })) {
+          if (callerId && callerGate && toolTakesOverCaller(callerGate)) {
             // Answered before the tool starts, because answering is what frees
             // the shell to run it.
             detail.respond({
@@ -1035,11 +1084,12 @@ export function useDorControl({
               },
             });
             // Awaited inside the spawn lock: the key reaches the leaf's params in
-            // there, and until it does a second invocation of it would not dedupe.
+            // there, and a queued invocation of it must find a running tool.
             await takeOverPaneWithTool(lath, callerId, {
               params: toolParams,
               title: toolName ?? command,
               command,
+              cwd,
             });
             return;
           }

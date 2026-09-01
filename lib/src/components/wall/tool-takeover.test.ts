@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isNakedToolInvocation, toolTakesOverCaller, type ToolTakeoverGate } from './tool-takeover';
+import {
+  isNakedToolInvocation,
+  toolRerunsInCaller,
+  toolTakesOverCaller,
+  type ToolTakeoverGate,
+} from './tool-takeover';
 
 describe('isNakedToolInvocation', () => {
   it('accepts a `dor tool` line typed on its own', () => {
@@ -65,5 +70,14 @@ describe('toolTakesOverCaller', () => {
     for (const [why, override] of splits) {
       expect(toolTakesOverCaller({ ...passing, ...override }), why).toBe(false);
     }
+  });
+
+  // The two placements are the same conditions over different caller kinds: a
+  // plain terminal becomes the tool, the tool's own pane re-runs it.
+  it('re-runs in the caller only when the caller is that tool', () => {
+    expect(toolRerunsInCaller({ ...passing, kind: 'tool' })).toBe(true);
+    expect(toolRerunsInCaller(passing)).toBe(false);
+    expect(toolRerunsInCaller({ ...passing, kind: 'tool', rawCommandLine: 'claude' })).toBe(false);
+    expect(toolRerunsInCaller({ ...passing, kind: 'tool', visible: false })).toBe(false);
   });
 });

@@ -290,9 +290,14 @@ than were asked for (rationale):
   anywhere else has to spawn its own.
 - **The placement was not asked for.** `--surface` names a split reference and
   `--minimize` asks for a background Surface.
-- **A pending approval never takes over**, and neither does a key match: the
-  first needs a pane that has spawned nothing ([Trust](#trust) rule 3), the
-  second reveals its survivor ([CLI](#cli)).
+- **A pending approval never takes over** — it needs a pane that has spawned
+  nothing ([Trust](#trust) rule 3).
+- **A key match reveals its survivor** ([CLI](#cli)) — unless the survivor *is*
+  the calling pane, the place take-over makes normal to retype in. Its command
+  cannot be live (its shell is running `dor`), so it is idle by construction and
+  **re-runs there through the same handshake**, reported `adopted`. Never
+  through the interrupt-and-retype restart: Ctrl+C would kill the `dor` still
+  waiting for the answer.
 
 **Respond, then wait for the prompt.** `dor` is the caller's foreground process
 when the host answers it, so the host answers `takeover` first, waits for the
@@ -306,14 +311,22 @@ cannot exit until it is answered.
 - **A shell that never comes back to its prompt is left alone**: nothing typed,
   leaf still a terminal. The transformation happens on the way *in* to typing,
   so a timeout costs nothing.
-- **The spawn lock is held past the response** until the pane is the tool: the
-  key reaches the leaf's params in the same write, and until it does a second
-  invocation of that key would not dedupe.
+- **The spawn lock is held past the response** until the command is live. The
+  key reaches the leaf's params at the meta write, but a pane that has been
+  typed into and has not yet reported reads as an idle tool, which a queued
+  invocation of the same key would interrupt and retype.
 - **The transformation is one meta write**, so the component pair and the params
   commit together, and the leaf id — the SessionId — never changes. That is what
   keeps the terminal, its buffer, and its PTY untouched.
+- **The Session's [OSC 367](#osc-367) hint is cleared as it transforms.** What
+  the pane announced under an earlier command is not this tool's, and would
+  otherwise name its port or re-key it.
 - Accepted: **keystrokes in the window between `dor` exiting and the command
   landing** interleave with it. The window is one control round trip.
+- Accepted: **a listener the taken-over shell already owned** (a backgrounded
+  server, an `ssh -L`) is in the [scan](#serving)'s process tree, so `port: auto`
+  can frame it or refuse the pair as a conflict. A shell that never ran a server
+  before — every split-spawned tool — cannot hit this.
 
 Source of truth: `lib/src/components/wall/tool-takeover.ts` (the gate), the
 take-over arm of `surface.tool` in `lib/src/components/wall/use-dor-control.ts`

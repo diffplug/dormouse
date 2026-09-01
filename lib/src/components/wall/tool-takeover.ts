@@ -12,21 +12,16 @@ import { commandArgv0, primaryCommandTokens } from '../../lib/terminal-state';
 /** The launcher names `dor/bin/` ships, lowercased. */
 const DOR_ARGV0 = new Set(['dor', 'dor.cmd']);
 
-/**
- * Shell syntax that can make one line more than one command: separators,
- * pipelines, backgrounding, redirection, and substitution. Tested against the
- * raw line, so quoting is not unpicked — a `dor tool -- sh -c "a && b"` that
- * splits is a wrong *placement*, where typing into a shell that still has work
- * queued behind `dor` is a wrong *command*.
- */
+/** Shell syntax that can make one line more than one command: separators,
+ *  pipelines, backgrounding, redirection, substitution. Tested against the raw
+ *  line, so quoting is not unpicked (rationale). */
 const COMPOUND_SYNTAX = /[;&|<>()`\n\r]/;
 
 /**
  * Whether the shell reported running exactly one command and that command is
- * `dor tool`. This is the human-intent signal: an agent's `dor tool` runs under
- * whatever it launched (`claude`, `bash script.sh`), which reports that line
- * instead. It is **not** a security boundary — `dor send` can type bytes
- * identical to a human's (`docs/specs/dor-tool.md` -> Trust rule 2).
+ * `dor tool` — the human-intent signal, not a security boundary
+ * (`docs/specs/dor-tool.md` -> Take-over). Case folds on the launcher, which is
+ * a filename, and not on the verb, which stricli parses case-sensitively.
  */
 export function isNakedToolInvocation(rawCommandLine: string | null | undefined): boolean {
   const line = rawCommandLine?.trim();
@@ -57,15 +52,29 @@ export interface ToolTakeoverGate {
 }
 
 /**
- * Whether this `dor tool` runs in its calling pane. Every condition is
- * conservative: failing one is a split, which is never wrong (rationale).
+ * What both placements below share: a naked invocation in a visible, integrated
+ * pane whose directory is the tool's. Every condition is conservative — failing
+ * one is a split, which is never wrong (rationale).
  */
-export function toolTakesOverCaller(gate: ToolTakeoverGate): boolean {
+function callerMayRunTool(gate: ToolTakeoverGate): boolean {
   return !gate.explicitSurface
     && !gate.minimized
     && gate.visible
-    && gate.kind === 'terminal'
     && gate.cwdMatches
     && gate.oscDriven
     && isNakedToolInvocation(gate.rawCommandLine);
+}
+
+/** Whether this `dor tool` transforms its calling pane into the tool. */
+export function toolTakesOverCaller(gate: ToolTakeoverGate): boolean {
+  return gate.kind === 'terminal' && callerMayRunTool(gate);
+}
+
+/**
+ * Whether a keyed match on the calling pane re-runs there. The caller is then
+ * the tool's own Surface — the place take-over makes normal to retype in — and
+ * its command cannot be live, since its shell is running `dor`.
+ */
+export function toolRerunsInCaller(gate: ToolTakeoverGate): boolean {
+  return gate.kind === 'tool' && callerMayRunTool(gate);
 }

@@ -1424,8 +1424,59 @@ describe('Wall on the Lath engine', () => {
       expect(typed).toEqual(['pnpm storybook\r']);
       expect(leafCount()).toBe(1);
 
-      // Same Surface, now a tool: the leaf changed kind without changing id, so
-      // the session persists as one.
+      // The tool goes live, which releases the spawn lock, and then exits. The
+      // host learns that from its own 100ms state poll, so the live state has to
+      // outlast one tick.
+      act(() => {
+        terminalRegistry.applyTerminalSemanticEvents('pane-a', [
+          { type: 'commandLine', commandLine: 'pnpm storybook' },
+          { type: 'commandStart', source: 'osc633_boundaries' },
+        ]);
+      });
+      await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
+      act(() => {
+        terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'promptStart' }]);
+      });
+
+      // Retyped in the tool's own pane: a key match on the caller re-runs there
+      // through the same handshake, never an interrupt — Ctrl+C would kill the
+      // `dor` still waiting for the answer.
+      act(() => {
+        terminalRegistry.applyTerminalSemanticEvents('pane-a', [
+          { type: 'commandLine', commandLine: 'dor tool storybook' },
+          { type: 'commandStart', source: 'osc633_boundaries' },
+        ]);
+      });
+      let rerun: { ok: boolean; result?: { status: string; surfaceId: string } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.tool,
+            surfaceId: 'pane-a',
+            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
+            respond: (result: typeof rerun) => { rerun = result; },
+          },
+        }));
+      });
+      await settle(() => rerun !== undefined);
+      expect(rerun).toMatchObject({ ok: true, result: { status: 'adopted', surfaceId: 'pane-a' } });
+      act(() => {
+        terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'promptStart' }]);
+      });
+      await settle(() => typed.length > 1);
+      expect(typed).toEqual(['pnpm storybook\r', 'pnpm storybook\r']);
+      expect(leafCount()).toBe(1);
+
+      // Same Surface throughout: the leaf changed kind without changing id, so
+      // the session persists as one. The live state again outlasts a poll tick,
+      // so the re-run releases its lock before the next test takes one.
+      act(() => {
+        terminalRegistry.applyTerminalSemanticEvents('pane-a', [
+          { type: 'commandLine', commandLine: 'pnpm storybook' },
+          { type: 'commandStart', source: 'osc633_boundaries' },
+        ]);
+      });
+      await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
       await act(async () => { window.dispatchEvent(new Event('pagehide')); });
       await flush();
       await flush();
