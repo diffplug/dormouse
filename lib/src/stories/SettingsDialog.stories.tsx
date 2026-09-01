@@ -45,7 +45,7 @@ export const WithRules: Story = {
   },
 };
 
-/** The animation watcher also gates terminal-report and command-exit alerts. */
+/** The animation watcher gates terminal-notification alerts. */
 export const DeferralEnabled: Story = {
   parameters: {
     primedWatchedCommands: ['claude', 'codex'],

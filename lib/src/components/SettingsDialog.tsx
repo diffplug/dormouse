@@ -175,8 +175,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             onChange={(deferAlertsUntilQuiet) => updateAlertSettings({ deferAlertsUntilQuiet })}
           />
           <div className={`${UNDER_SWITCH_INDENT} mt-1 text-sm leading-relaxed text-muted`}>
-            When the animation watcher is fully armed, terminal notifications and
-            command-finished alerts wait for the pane to become quiet.
+            When the animation watcher is fully armed, terminal notifications wait
+            for the pane to become quiet.
           </div>
         </div>
       </section>

@@ -94,17 +94,6 @@ export type CompletionEvent =
     }
   | { kind: 'notification'; notification: ActivityNotification };
 
-/** The two completions that summon a human. `settled` rings only through the
- * WATCHING rule, which animation deferral never delays. */
-type HumanAlert = Extract<CompletionEvent, { kind: 'notification' | 'commandFinished' }>;
-
-interface DeferredHumanAlerts {
-  /** Latest wins, matching repeated notifications on an already-ringing track. */
-  notification: Extract<HumanAlert, { kind: 'notification' }> | null;
-  /** A Session has only one completed foreground command at a time. */
-  commandFinished: Extract<HumanAlert, { kind: 'commandFinished' }> | null;
-}
-
 /** Return true to claim the event. A claimed event never reaches the ring rules. */
 export type CompletionClaimant = (event: CompletionEvent) => boolean;
 
@@ -204,9 +193,9 @@ interface AlertEntry {
   todo: TodoState;
   notification: ActivityNotification | null;
   attentionDismissedRing: boolean;
-  /** Human delivery deferred behind a detector cycle; never public or persisted. */
-  deferredHumanAlerts: DeferredHumanAlerts | null;
-  deferredHumanAlertTimer: ReturnType<typeof setTimeout> | null;
+  /** Latest terminal notification deferred behind animation; never public or persisted. */
+  deferredNotification: ActivityNotification | null;
+  deferredNotificationTimer: ReturnType<typeof setTimeout> | null;
 }
 
 /** Portable Session Activity manager. `dispatchCompletion` is the single
@@ -250,7 +239,7 @@ export class AlertManager {
     }
   }
 
-  /** Let confirmed terminal activity finish before terminal-report/exit rings. */
+  /** Let confirmed terminal activity finish before terminal-notification rings. */
   setDeferAlertsUntilQuiet(enabled: boolean): void {
     if (enabled === this.deferAlertsUntilQuiet) return;
     this.deferAlertsUntilQuiet = enabled;
@@ -258,7 +247,7 @@ export class AlertManager {
 
     // Turning the gate off releases news it was holding; dropping it would turn
     // a timing preference into alert loss.
-    for (const [id, entry] of this.entries) this.flushDeferredHumanAlerts(id, entry);
+    for (const [id, entry] of this.entries) this.flushDeferredNotification(id, entry);
   }
 
   // --- State change subscription ---
@@ -371,7 +360,7 @@ export class AlertManager {
     // earlier event. Never re-offer that historical event to current claimants.
     // Unconditional: a claimant taking *this* settle says nothing about the
     // earlier completion it never saw, which is now quiet and due.
-    this.flushDeferredHumanAlerts(id, entry);
+    this.flushDeferredNotification(id, entry);
   }
 
   // --- Completion events ---
@@ -421,7 +410,13 @@ export class AlertManager {
         break;
       case 'commandFinished':
         if (!event.armed || this.hasAttention(id) || event.ranMs < this.inactivityTimeoutMs) break;
-        this.deferOrDeliverHumanAlert(id, entry, event);
+        // A shell-reported exit is authoritative, so recent animation never
+        // delays it. The detector only gates in-band terminal notifications.
+        this.applyCommandExitRinging(entry, event.displayCommand, event.exitCode);
+        // If a terminal notification was already waiting, it can enrich this
+        // ring immediately; keeping its timer would publish stale detail later.
+        if (entry.deferredNotification !== null) this.flushDeferredNotification(id, entry);
+        else this.notify(id);
         break;
       case 'notification':
         if (this.hasAttention(id)) {
@@ -430,7 +425,7 @@ export class AlertManager {
           this.notify(id);
           break;
         }
-        this.deferOrDeliverHumanAlert(id, entry, event);
+        this.deferOrDeliverNotification(id, entry, event.notification);
         break;
     }
     return false;
@@ -841,34 +836,34 @@ export class AlertManager {
     }
   }
 
-  // --- Deferred human delivery ---
+  // --- Deferred terminal notifications ---
 
-  private deferOrDeliverHumanAlert(id: string, entry: AlertEntry, alert: HumanAlert): void {
+  private deferOrDeliverNotification(
+    id: string,
+    entry: AlertEntry,
+    notification: ActivityNotification,
+  ): void {
     // Once any track rings, another source only enriches the same summons. There
     // is no fresh transition left for animation deferral to suppress. An already
     // pending deferral keeps deferring: a command boundary resets the detector,
-    // so `isConfirmedBusy` alone would drop the exit receipt it just held.
+    // so `isConfirmedBusy` alone could release a notification before quiet.
     if (
       this.deferAlertsUntilQuiet
       && !this.hasActiveRing(entry)
-      && (entry.deferredHumanAlerts !== null || entry.detector.isConfirmedBusy())
+      && (entry.deferredNotification !== null || entry.detector.isConfirmedBusy())
     ) {
-      const deferred = entry.deferredHumanAlerts ?? { notification: null, commandFinished: null };
-      if (alert.kind === 'notification') deferred.notification = alert;
-      else deferred.commandFinished = alert;
-      entry.deferredHumanAlerts = deferred;
-      this.scheduleDeferredHumanAlerts(id, entry);
+      // Latest wins, matching repeated notifications on an already-ringing track.
+      entry.deferredNotification = notification;
+      this.scheduleDeferredNotification(id, entry);
     } else {
-      this.applyHumanAlert(entry, alert);
+      // An existing ring means this is enrichment, not a fresh summons. Cancel
+      // any older pending detail so it cannot overwrite this notification later.
+      this.clearDeferredNotification(entry);
+      this.applyProtocolRinging(entry, notification);
     }
     // The caller may have cleared a publicly visible cycle and delegated the
     // publish to the ring rules; deferring the ring must not swallow it.
     this.notify(id);
-  }
-
-  private applyHumanAlert(entry: AlertEntry, alert: HumanAlert): void {
-    if (alert.kind === 'notification') this.applyProtocolRinging(entry, alert.notification);
-    else this.applyCommandExitRinging(entry, alert.displayCommand, alert.exitCode);
   }
 
   /**
@@ -878,36 +873,34 @@ export class AlertManager {
    * first and this is a no-op; it is load-bearing only after a command boundary
    * resets the detector, which kills the settle that would have flushed.
    */
-  private scheduleDeferredHumanAlerts(id: string, entry: AlertEntry): void {
-    if (entry.deferredHumanAlertTimer !== null) clearTimeout(entry.deferredHumanAlertTimer);
-    entry.deferredHumanAlertTimer = setTimeout(() => {
-      entry.deferredHumanAlertTimer = null;
-      if (entry.detector.quietAt() > Date.now()) this.scheduleDeferredHumanAlerts(id, entry);
-      else this.flushDeferredHumanAlerts(id, entry);
+  private scheduleDeferredNotification(id: string, entry: AlertEntry): void {
+    if (entry.deferredNotificationTimer !== null) clearTimeout(entry.deferredNotificationTimer);
+    entry.deferredNotificationTimer = setTimeout(() => {
+      entry.deferredNotificationTimer = null;
+      if (entry.detector.quietAt() > Date.now()) this.scheduleDeferredNotification(id, entry);
+      else this.flushDeferredNotification(id, entry);
     }, Math.max(0, entry.detector.quietAt() - Date.now()));
   }
 
-  private flushDeferredHumanAlerts(id: string, entry: AlertEntry): void {
-    const deferred = entry.deferredHumanAlerts;
-    if (deferred === null) return;
-    this.clearDeferredHumanAlerts(entry);
+  private flushDeferredNotification(id: string, entry: AlertEntry): void {
+    const notification = entry.deferredNotification;
+    if (notification === null) return;
+    this.clearDeferredNotification(entry);
 
     // Attending the Session clears this eagerly too; retain the recheck as the
     // timer-side safety rule shared by every delayed alarm path.
     if (this.hasAttention(id)) return;
 
-    if (deferred.commandFinished) this.applyHumanAlert(entry, deferred.commandFinished);
-    // Protocol text is richer and wins over the generic command-exit receipt.
-    if (deferred.notification) this.applyHumanAlert(entry, deferred.notification);
+    this.applyProtocolRinging(entry, notification);
     this.notify(id);
   }
 
-  private clearDeferredHumanAlerts(entry: AlertEntry): void {
-    if (entry.deferredHumanAlertTimer !== null) {
-      clearTimeout(entry.deferredHumanAlertTimer);
-      entry.deferredHumanAlertTimer = null;
+  private clearDeferredNotification(entry: AlertEntry): void {
+    if (entry.deferredNotificationTimer !== null) {
+      clearTimeout(entry.deferredNotificationTimer);
+      entry.deferredNotificationTimer = null;
     }
-    entry.deferredHumanAlerts = null;
+    entry.deferredNotification = null;
   }
 
   /**
@@ -917,7 +910,7 @@ export class AlertManager {
    * actually active; a cancelled deferral was never visible and does not count.
    */
   private clearAllRingsIfActive(entry: AlertEntry): boolean {
-    this.clearDeferredHumanAlerts(entry);
+    this.clearDeferredNotification(entry);
     // Release all three, no short-circuit.
     const released = [
       this.releaseRing(entry, 'protocol'),
@@ -1046,7 +1039,7 @@ export class AlertManager {
   clearTodo(id: string): void {
     const entry = this.getOrCreateEntry(id);
     // Explicit: the early return below skips `clearAllRingsIfActive`.
-    this.clearDeferredHumanAlerts(entry);
+    this.clearDeferredNotification(entry);
     if (!entry.todo) return;
     entry.todo = false;
     entry.notification = null;
@@ -1087,7 +1080,7 @@ export class AlertManager {
     this.claimants.delete(id);
     const entry = this.entries.get(id);
     if (!entry) return;
-    this.clearDeferredHumanAlerts(entry);
+    this.clearDeferredNotification(entry);
     entry.detector.dispose();
     this.entries.delete(id);
     if (this.attentionId === id) {
@@ -1114,7 +1107,7 @@ export class AlertManager {
     entry.commandExitStatus = 'IDLE';
     entry.commandExitWatch = null;
     entry.pendingCommandLine = null;
-    this.clearDeferredHumanAlerts(entry);
+    this.clearDeferredNotification(entry);
     // Restore must never carry detector state either.
     entry.detector.reset();
     this.notify(id);
@@ -1125,7 +1118,7 @@ export class AlertManager {
     // never hears an outcome absorbed a completion it never delivered.
     for (const id of [...this.awaits.keys()]) this.settleWaiters(id, 'cancelled');
     for (const entry of this.entries.values()) {
-      this.clearDeferredHumanAlerts(entry);
+      this.clearDeferredNotification(entry);
       entry.detector.dispose();
     }
     this.entries.clear();
@@ -1188,8 +1181,8 @@ export class AlertManager {
         todo: false,
         notification: null,
         attentionDismissedRing: false,
-        deferredHumanAlerts: null,
-        deferredHumanAlertTimer: null,
+        deferredNotification: null,
+        deferredNotificationTimer: null,
       };
       this.entries.set(id, entry);
     }

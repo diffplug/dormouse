@@ -17,7 +17,7 @@ import { getPlatform } from './platform';
 export interface AlertSettings {
   /** ms — how long "looking at this pane" lasts before the user counts as away. */
   inactivityTimeoutMs: number;
-  /** Delay terminal-report and command-exit rings behind confirmed animation. */
+  /** Delay terminal-notification rings behind confirmed animation. */
   deferAlertsUntilQuiet: boolean;
   /** Speak an unattended alarm out loud after `speakDelayMs`. */
   speakEnabled: boolean;

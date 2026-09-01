@@ -831,7 +831,7 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  describe('defer alerts until quiet', () => {
+  describe('defer terminal notifications until quiet', () => {
     beforeEach(() => {
       manager.setDeferAlertsUntilQuiet(true);
     });
@@ -912,8 +912,8 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(id).status).toBe('ALERT_RINGING');
     });
 
-    it('carries a deferred command-exit alert across the command-boundary reset', () => {
-      const id = 'defer-command-exit';
+    it('does not defer an authoritative command-exit alert', () => {
+      const id = 'immediate-command-exit';
       manager.attend(id);
       manager.applyTerminalSemanticEvents(id, [
         { type: 'commandLine', commandLine: 'pnpm build' },
@@ -922,6 +922,46 @@ describe('AlertManager in isolation', () => {
       vi.advanceTimersByTime(15_000);
       driveToBusy(id);
 
+      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      expect(manager.getState(id)).toMatchObject({
+        status: 'ALERT_RINGING',
+        todo: true,
+        notification: { source: 'COMMAND_EXIT', title: 'Command finished', body: 'pnpm build exited 0' },
+      });
+    });
+
+    it('folds a pending terminal notification into an immediate command-exit ring', () => {
+      const id = 'command-exit-with-pending-notification';
+      manager.attend(id);
+      manager.applyTerminalSemanticEvents(id, [
+        { type: 'commandLine', commandLine: 'pnpm build' },
+        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+      ]);
+      vi.advanceTimersByTime(15_000);
+      driveToBusy(id);
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build done' });
+
+      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+
+      expect(manager.getState(id)).toMatchObject({
+        status: 'ALERT_RINGING',
+        todo: true,
+        // Protocol detail is richer than the generic command-exit receipt.
+        notification: { source: 'OSC 9', title: null, body: 'Build done' },
+      });
+    });
+
+    it('carries a deferred terminal notification across a command-boundary reset', () => {
+      const id = 'defer-notification-across-finish';
+      manager.applyTerminalSemanticEvents(id, [
+        { type: 'commandLine', commandLine: 'pnpm build' },
+        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+      ]);
+      driveToBusy(id);
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
+
+      // This unarmed command finish resets the detector but is not itself an
+      // alert; the pending terminal notification still owns its quiet deadline.
       manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
       expect(manager.getState(id)).toMatchObject({
         status: 'WATCHING_DISABLED',
@@ -933,7 +973,7 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(id)).toMatchObject({
         status: 'ALERT_RINGING',
         todo: true,
-        notification: { source: 'COMMAND_EXIT', title: 'Command finished', body: 'pnpm build exited 0' },
+        notification: { source: 'OSC 9', title: null, body: 'Done' },
       });
     });
 

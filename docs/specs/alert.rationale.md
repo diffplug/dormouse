@@ -32,6 +32,8 @@
 
 **Why the gate reads private detector state.** The detector runs for unwatched commands, while protocol progress and command-exit status can mask it in the public projection. The gate needs the underlying evidence, not whichever bell state wins display precedence.
 
+**Why command finishes bypass animation deferral.** A shell-reported exit is authoritative evidence that the foreground command ended, while animation detection is only a recent-output heuristic. Letting the heuristic overrule the lifecycle event would add latency and could let unrelated background output defer a certain completion indefinitely.
+
 **Why a deferred event is not dispatched again.** Claimants already received first refusal when the completion happened. Re-offering it at quiet time would let an await registered later consume history and would report one completion twice.
 
 ## WATCHING Track
