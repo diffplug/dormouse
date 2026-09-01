@@ -9,6 +9,7 @@ const OFFER = {
   token: 'a'.repeat(64),
   mintedAt: '2026-08-31T00:00:00.000Z',
 };
+const MINTED_AT = Date.parse(OFFER.mintedAt);
 
 const dirs: string[] = [];
 
@@ -46,25 +47,33 @@ describe('readEnrollmentOffer', () => {
     const dir = await tempDir();
     const file = join(dir, 'enroll-offer.json');
     await writeFile(file, JSON.stringify(OFFER));
-    expect(await readEnrollmentOffer(file)).toEqual(OFFER);
+    expect(await readEnrollmentOffer(file, MINTED_AT + 60_000)).toEqual(OFFER);
+  });
+
+  it('hides an offer after 24 hours', async () => {
+    const dir = await tempDir();
+    const file = join(dir, 'enroll-offer.json');
+    await writeFile(file, JSON.stringify(OFFER));
+    expect(await readEnrollmentOffer(file, MINTED_AT + 24 * 60 * 60 * 1000)).toEqual(OFFER);
+    expect(await readEnrollmentOffer(file, MINTED_AT + 24 * 60 * 60 * 1000 + 1)).toBeNull();
   });
 
   it('is silently null for every failure', async () => {
     const dir = await tempDir();
     // The normal answer on almost every machine: no server installed.
-    expect(await readEnrollmentOffer(join(dir, 'absent.json'))).toBeNull();
+    expect(await readEnrollmentOffer(join(dir, 'absent.json'), MINTED_AT)).toBeNull();
     // A path this platform has no answer for.
-    expect(await readEnrollmentOffer(null)).toBeNull();
+    expect(await readEnrollmentOffer(null, MINTED_AT)).toBeNull();
     // A half-written file, or one truncated by a crash mid-mint.
     const truncated = join(dir, 'truncated.json');
     await writeFile(truncated, '{"origin":');
-    expect(await readEnrollmentOffer(truncated)).toBeNull();
+    expect(await readEnrollmentOffer(truncated, MINTED_AT)).toBeNull();
     // Parses, but is not an offer — the shared guard is what rejects it, so a
     // malformed origin or a short token never reaches the enroll exchange.
     const wrong = join(dir, 'wrong.json');
     await writeFile(wrong, JSON.stringify({ ...OFFER, token: 'nope' }));
-    expect(await readEnrollmentOffer(wrong)).toBeNull();
+    expect(await readEnrollmentOffer(wrong, MINTED_AT)).toBeNull();
     // A directory where the file should be.
-    expect(await readEnrollmentOffer(dir)).toBeNull();
+    expect(await readEnrollmentOffer(dir, MINTED_AT)).toBeNull();
   });
 });

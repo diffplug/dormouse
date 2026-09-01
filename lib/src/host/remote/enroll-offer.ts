@@ -9,16 +9,19 @@
  * `server-lib-common/src/remote/enroll-offer.ts`. There is no handshake between
  * the two processes: both simply know where the installer puts it.
  *
- * Expiry is not checked here. The Server owns it — it refuses a stamp older
- * than 7 days, and claims the file as it redeems — so a stale or already-spent
- * offer fails the enrollment with the server's own 401 rather than being second-
- * guessed by a clock on this side.
+ * Freshness is shared with the Server. This process reads the file from the
+ * same machine that stamped it, so an expired offer disappears from Settings
+ * instead of leading with a button the Server can only reject.
  */
 
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { parseEnrollmentOffer, type EnrollmentOffer } from 'server-lib-common';
+import {
+  isEnrollmentOfferFresh,
+  parseEnrollmentOffer,
+  type EnrollmentOffer,
+} from 'server-lib-common';
 
 export type { EnrollmentOffer };
 
@@ -71,13 +74,15 @@ export function enrollmentOfferPath(
  */
 export async function readEnrollmentOffer(
   path: string | null = enrollmentOfferPath(),
+  now: number = Date.now(),
 ): Promise<EnrollmentOffer | null> {
   if (!path) return null;
   try {
     // Whoever can write the file chooses every field, so the shared parse
     // authorizes nothing — it only keeps a malformed origin or token from
     // reaching the enrollment exchange as though it were one.
-    return parseEnrollmentOffer(await readFile(path, 'utf8'));
+    const offer = parseEnrollmentOffer(await readFile(path, 'utf8'));
+    return offer !== null && isEnrollmentOfferFresh(offer, now) ? offer : null;
   } catch {
     return null;
   }

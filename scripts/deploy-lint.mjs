@@ -191,6 +191,17 @@ export const RULES = [
     },
   },
   {
+    rule: 'Credentials at rest — hosts.json permanently closes installer offer bootstrap',
+    patterns: {
+      macOS:
+        /if \[ -e "\$STATE_DIR\/hosts\.json" \]; then\n\s*rm -f "\$ENROLL_OFFER_FILE"/,
+      Linux:
+        /if \[ -e "\$STATE_DIR\/hosts\.json" \]; then\n\s*rm -f "\$ENROLL_OFFER_FILE"/,
+      Windows:
+        /if \(Test-Path -LiteralPath \(Join-Path \$STATE_DIR 'hosts\.json'\)\) \{\n\s*Remove-Item -LiteralPath \$ENROLL_OFFER_FILE/,
+    },
+  },
+  {
     // Two adjacent lines, matched as one span, because the control is their
     // ORDER: an empty file, restricted, and only then the token. Either line
     // alone is satisfiable by a write that already happened.
@@ -230,11 +241,9 @@ export const RULES = [
     // reason. Two lines as one span, because what decides the placement is the
     // offer deriving from that directory.
     //
-    // Only half of that FAIL IF is visible here: a textual rule cannot see that
-    // the mint is unconditional. CI's Linux test-mode install is what enforces
-    // "stops re-minting it on every run" — it installs twice and requires the
-    // token to change. macOS and Windows have no automated signal for that
-    // clause at all.
+    // Placement is textual; lifecycle is executable. CI's Linux test-mode
+    // install requires rotation across two pre-enrollment runs, then creates
+    // hosts.json and requires a third run to leave no offer.
     rule: 'Credentials at rest — the enrollment offer is written under run/, never config/ or state/',
     patterns: {
       macOS: /RUN_DIR="\$INSTALL_ROOT\/run"\n\s*ENROLL_OFFER_FILE="\$RUN_DIR\//,

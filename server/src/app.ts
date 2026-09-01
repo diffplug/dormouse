@@ -56,7 +56,7 @@ import type {
   SigninFinishResponse,
 } from 'server-lib-common';
 
-import { redeemEnrollToken } from './enroll-token.js';
+import { invalidateEnrollOffer, redeemEnrollToken } from './enroll-token.js';
 import { Handshake } from './handshake.js';
 import { RelayHub } from './relay.js';
 import type { ClientConn, HostConn } from './relay.js';
@@ -143,6 +143,10 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const CREDENTIAL_FAILURE_DELAY_MS = 250;
 /** The one answer to a wrong setup password, wherever it is supplied. */
 const BAD_PASSWORD_ERROR = 'invalid setup password';
+
+/** Internal control flow out of HostStore's serialized pre-enrollment gate. */
+class EnrollmentCredentialRejected extends Error {}
+class EnrollmentOfferNotInvalidated extends Error {}
 
 /**
  * In-memory session store. Exposed on the created app so the `/ws/client` path
@@ -396,25 +400,50 @@ export function createApp(config: AppConfig): CreatedApp {
     if ((password !== undefined) === (enrollToken !== undefined)) {
       return c.json({ error: 'supply exactly one of password or enrollToken' }, 400);
     }
-    if (enrollToken !== undefined) {
-      if (typeof enrollToken !== 'string') return credentialFailure(c, UNAUTHORIZED_ERROR);
-      // Unconfigured, absent, malformed, expired, wrong-shaped and wrong-token
-      // are one `rejected`: none of them may tell a caller which one it hit.
-      const redemption = await redeemEnrollToken(config.enrollTokenFile, enrollToken);
-      if (redemption === 'rejected') return credentialFailure(c, UNAUTHORIZED_ERROR);
-      if (redemption === 'not-invalidated') {
-        // Reached only after a *successful* compare, so answering fast with a
-        // distinct body would confirm a valid token without spending it. Same
-        // delay as a rejection; the 500 stays, since the operator has to learn
-        // that the install cannot spend its own offer.
-        await delay(CREDENTIAL_FAILURE_DELAY_MS);
-        return c.json({ error: 'could not invalidate the enroll token' }, 500);
-      }
-    } else if (!passwordOk(password)) {
+    if (enrollToken !== undefined && typeof enrollToken !== 'string') {
+      return credentialFailure(c, UNAUTHORIZED_ERROR);
+    }
+    if (password !== undefined && !passwordOk(password)) {
       return credentialFailure(c, BAD_PASSWORD_ERROR);
     }
     const label = typeof body?.label === 'string' ? body.label : '';
-    const host = await hostStore.enroll(label);
+    let host: StoredHost;
+    try {
+      host = await hostStore.enroll(label, async (firstEnrollment) => {
+        if (enrollToken !== undefined) {
+          if (!firstEnrollment) {
+            // The offer is already dead by durable Server state. Best-effort
+            // cleanup keeps an old installer file from continuing to advertise
+            // it locally, but its outcome must not distinguish token guesses.
+            await invalidateEnrollOffer(config.enrollTokenFile);
+            throw new EnrollmentCredentialRejected();
+          }
+          // Unconfigured, absent, malformed, expired, wrong-shaped and wrong-
+          // token are one rejection: none may tell a caller which one it hit.
+          const redemption = await redeemEnrollToken(config.enrollTokenFile, enrollToken);
+          if (redemption === 'rejected') throw new EnrollmentCredentialRejected();
+          if (redemption === 'not-invalidated') throw new EnrollmentOfferNotInvalidated();
+        } else if (firstEnrollment) {
+          // A setup-password enrollment can win the same first-Host race. Take
+          // the offer away before minting its sibling credential.
+          if ((await invalidateEnrollOffer(config.enrollTokenFile)) === 'not-invalidated') {
+            throw new EnrollmentOfferNotInvalidated();
+          }
+        }
+      });
+    } catch (err) {
+      if (err instanceof EnrollmentCredentialRejected) {
+        return credentialFailure(c, UNAUTHORIZED_ERROR);
+      }
+      if (err instanceof EnrollmentOfferNotInvalidated) {
+        // Reached only after a valid bootstrap credential, so answering fast
+        // would confirm it. Keep the same delay while retaining the operator-
+        // visible 500: no Host was minted against an offer still on disk.
+        await delay(CREDENTIAL_FAILURE_DELAY_MS);
+        return c.json({ error: 'could not invalidate the enroll token' }, 500);
+      }
+      throw err;
+    }
     // The Host enforces `origin`/`rpId` as its ConnectionPolicy (server.md).
     const res: HostEnrollResponse = {
       hostId: host.hostId,

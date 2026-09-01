@@ -6,13 +6,14 @@
 import { randomBytes } from 'node:crypto';
 import { readFile, rename, stat, unlink } from 'node:fs/promises';
 
-import { ENROLL_TOKEN_PATTERN, parseEnrollmentOffer } from 'server-lib-common';
+import {
+  ENROLL_TOKEN_PATTERN,
+  isEnrollmentOfferFresh,
+  parseEnrollmentOffer,
+} from 'server-lib-common';
 import type { EnrollmentOffer } from 'server-lib-common';
 
 import { secretEquals } from './secrets.js';
-
-/** How long an offer stays redeemable; the installer mints a fresh one per run. */
-const ENROLL_OFFER_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 function errnoOf(err: unknown): string | undefined {
   return (err as NodeJS.ErrnoException | null)?.code;
@@ -46,15 +47,6 @@ function warnUnusable(path: string): void {
   );
 }
 
-/** A stamp that will not parse, or is a week old, is no longer redeemable. */
-function isFresh(mintedAt: string): boolean {
-  const minted = Date.parse(mintedAt);
-  if (Number.isNaN(minted)) return false;
-  // A future stamp passes: one machine writes and reads this file, so clock
-  // skew is not evidence of anything and must not brick the one-click path.
-  return Date.now() - minted <= ENROLL_OFFER_MAX_AGE_MS;
-}
-
 /**
  * Test-only seam, awaited between the verified read and the claim below so a
  * test can rewrite the offer inside the window {@link claimOffer}'s re-read
@@ -81,11 +73,31 @@ export async function redeemEnrollToken(
   // field, so checking the offer's `origin` here would authorize nothing — it
   // is for the Host-side reader (`lib/src/host/remote/enroll-offer.ts`), which
   // uses it to name the server it is about to enroll against.
-  if (offer === null || !isFresh(offer.mintedAt) || !secretEquals(supplied, offer.token)) {
+  if (offer === null || !isEnrollmentOfferFresh(offer) || !secretEquals(supplied, offer.token)) {
     return 'rejected';
   }
   await beforeClaim?.();
   return claimOffer(path, offer.token);
+}
+
+/**
+ * Remove any offer before a setup-password enrollment becomes the first Host.
+ * Absence is already the desired state; every other rename failure means the
+ * first enrollment must stop rather than leave a second bootstrap credential.
+ */
+export async function invalidateEnrollOffer(
+  path: string | null | undefined,
+): Promise<'invalidated' | 'not-invalidated'> {
+  if (!path) return 'invalidated';
+  const claimPath = `${path}.spent-${randomBytes(6).toString('hex')}`;
+  try {
+    await rename(path, claimPath);
+  } catch (err) {
+    return errnoOf(err) === 'ENOENT' ? 'invalidated' : 'not-invalidated';
+  }
+  // As in redemption, a cleanup failure leaves only an inert `.spent-*` path.
+  await unlink(claimPath).catch(() => {});
+  return 'invalidated';
 }
 
 /**

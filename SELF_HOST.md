@@ -195,11 +195,11 @@ definition is `~/Library/LaunchAgents/sh.dormouse.server.plist`, the Scheduled
 Task `\Dormouse Server`, or
 `~/.config/systemd/user/dormouse-server.service`.
 
-`run/enroll-offer.json` holds this install's origin and a one-time token that
+Before first Host enrollment, `run/enroll-offer.json` holds origin and a token that
 `POST /api/host/enroll` accepts in place of the setup password. A Dormouse Host
 on this machine reads the same file and offers one-click enrollment from it
-(checkpoint 4, step 3); redeeming it unlinks it, and re-running the installer
-mints a new one.
+(checkpoint 4, step 3). It expires after 24 hours; either credential path's
+first Host enrollment removes it, and later installer runs do not recreate it.
 
 No installer will **ever**: run `git pull`, fetch, or switch branches; install a
 scheduled updater; ask for elevation; install or re-authenticate Tailscale;
@@ -430,7 +430,8 @@ command line.
 3. **The Host.** On this same machine, launch the standalone or VS Code build
    made with `DORMOUSE_REMOTE_CONNECT_SRC` (see Prerequisites) and open
    **Settings → Remote control** — the sliders icon at the far right of the
-   baseboard. The installer's offer card leads: origin found, name prefilled,
+   baseboard. Until its 24-hour limit or another Host enrollment, the offer
+   card leads: origin found, name prefilled,
    one **Enroll**, no setup password. "Enroll with a different server…" unfolds
    the typed form, for a server elsewhere or an offer already spent
    (`docs/specs/server.md`, "Remote control, in the Settings dialog").
@@ -729,10 +730,11 @@ is live rather than asserting either.
   so the secret never sits under the inherited `%LOCALAPPDATA%` ACL — and
   because Node's file modes are a no-op on Windows, `manage verify` walks the
   files in `state\` individually there, where the unix editions need not.
-- **The enrollment offer is re-minted on every run**, updates included — the
-  ones that preserved `server.env` too. It is minted *last*, once the switched-to
-  release is answering, so an update that fails and rolls back leaves the
-  previous offer unspent rather than stranding a fresh token. `run-server`
+- **The enrollment offer rotates on every run before the first Host enrolls**,
+  including updates that preserve `server.env`; `state/hosts.json` then disables
+  it permanently until a state purge. It is minted *last*, once the switched-to
+  release is answering, so a failed update leaves the previous offer unspent.
+  `run-server`
   exports `DORMOUSE_ENROLL_TOKEN_FILE`; unset, the server refuses every offer
   (`docs/specs/server.md` → Configuration). How the token is generated and
   protected: `SECURITY.md` → "Credentials at rest".

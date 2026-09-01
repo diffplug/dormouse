@@ -1,7 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isEnrollmentOffer } from '../dist/index.js';
+import {
+  ENROLL_OFFER_MAX_AGE_MS,
+  isEnrollmentOffer,
+  isEnrollmentOfferFresh,
+} from '../dist/index.js';
 
 const TOKEN = 'a1b2c3d4'.repeat(8);
 
@@ -52,6 +56,14 @@ test('mintedAt is a bounded, non-empty string', () => {
   assert.equal(isEnrollmentOffer({ ...OFFER, mintedAt: '' }), false);
   assert.equal(isEnrollmentOffer({ ...OFFER, mintedAt: 'x'.repeat(64) }), true);
   assert.equal(isEnrollmentOffer({ ...OFFER, mintedAt: 'x'.repeat(65) }), false);
+});
+
+test('freshness lasts exactly 24 hours and tolerates a future stamp', () => {
+  const minted = Date.parse(OFFER.mintedAt);
+  assert.equal(isEnrollmentOfferFresh(OFFER, minted + ENROLL_OFFER_MAX_AGE_MS), true);
+  assert.equal(isEnrollmentOfferFresh(OFFER, minted + ENROLL_OFFER_MAX_AGE_MS + 1), false);
+  assert.equal(isEnrollmentOfferFresh(OFFER, minted - 1), true);
+  assert.equal(isEnrollmentOfferFresh({ ...OFFER, mintedAt: 'last Tuesday' }, minted), false);
 });
 
 test('every field is required, and none may be mistyped', () => {

@@ -1,6 +1,6 @@
 /** JSON-file state stores; `docs/specs/server.md` → "State files" owns their schemas and invariants. */
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 
@@ -79,6 +79,17 @@ abstract class JsonFileStore {
     const tmp = `${this.#path}.${randomUUID()}.tmp`;
     await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
     await rename(tmp, this.#path);
+  }
+
+  /** Whether this store's durable file has ever been written. */
+  protected exists(): Promise<boolean> {
+    return stat(this.#path).then(
+      () => true,
+      (err: NodeJS.ErrnoException) => {
+        if (err.code === 'ENOENT') return false;
+        throw err;
+      },
+    );
   }
 
   /**
@@ -182,12 +193,21 @@ export class HostStore extends JsonFileStore {
   }
 
   /**
-   * Enroll a new host: mint a random `hostId` (16 bytes) and `hostToken`
-   * (32 bytes), both base64url, append them, and return the record. Runs under
-   * the mutex.
+   * Enroll a new host: run `beforeEnroll` with whether this is the first Host
+   * ever persisted, mint a random `hostId` (16 bytes) and `hostToken` (32
+   * bytes), append them, and return the record. The callback and write share
+   * the mutex, so two credential paths cannot both authorize themselves as the
+   * first enrollment.
+   *
+   * File existence, not the current row count, is the durable boundary: hand-
+   * editing every row away revokes those Hosts but does not reopen bootstrap.
    */
-  enroll(label: string): Promise<StoredHost> {
+  enroll(
+    label: string,
+    beforeEnroll: (firstEnrollment: boolean) => void | Promise<void> = () => {},
+  ): Promise<StoredHost> {
     return this.mutate(async () => {
+      await beforeEnroll(!(await this.exists()));
       const hosts = await this.list();
       const host: StoredHost = {
         hostId: toBase64Url(randomBytes(16)),

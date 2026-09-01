@@ -148,8 +148,8 @@ test('a token that cannot be invalidated is not redeemed', CANNOT_DENY_UNLINK, a
   }
 });
 
-test('an offer goes stale: a week-old or unparseable stamp is refused', async () => {
-  for (const mintedAt of [ago(8 * DAY_MS), 'last Tuesday']) {
+test('an offer goes stale: a day-old or unparseable stamp is refused', async () => {
+  for (const mintedAt of [ago(DAY_MS + 1_000), 'last Tuesday']) {
     const { app, enrollTokenFile } = await appWithOffer(offer({ mintedAt }));
     const res = await enroll(app, { enrollToken: TOKEN });
     assert.equal(res.status, 401, mintedAt);
@@ -196,13 +196,29 @@ test('a token that is not 64 hex characters is refused, offer untouched', async 
   assert.equal(existsSync(enrollTokenFile), true);
 });
 
-test('the password path still enrolls with an offer file configured', async () => {
+test('the first password enrollment consumes the offer', async () => {
   const { app, enrollTokenFile } = await appWithOffer(offer());
   const res = await enroll(app, { password: PASSWORD });
   assert.equal(res.status, 200);
   assert.equal(typeof (await res.json()).hostToken, 'string');
-  // The offer belongs to the token path; a password enrollment leaves it.
-  assert.equal(existsSync(enrollTokenFile), true);
+  assert.equal(existsSync(enrollTokenFile), false);
+  // Recreating the file cannot reopen bootstrap: hosts.json records that the
+  // first enrollment already happened, and the stale file is cleaned up.
+  await writeFile(enrollTokenFile, JSON.stringify(offer()));
+  assert.equal((await enroll(app, { enrollToken: TOKEN })).status, 401);
+  assert.equal(existsSync(enrollTokenFile), false);
+});
+
+test('a first password enrollment stops if the offer cannot be invalidated', CANNOT_DENY_UNLINK, async () => {
+  const { app, enrollTokenFile, stateDir } = await appWithOffer(offer());
+  await chmod(dirname(enrollTokenFile), 0o500);
+  try {
+    const res = await enroll(app, { password: PASSWORD });
+    assert.equal(res.status, 500);
+    assert.equal(existsSync(join(stateDir, 'hosts.json')), false);
+  } finally {
+    await chmod(dirname(enrollTokenFile), 0o700);
+  }
 });
 
 // --- redeemEnrollToken directly: the claim race and the operator warning ---

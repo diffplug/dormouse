@@ -47,7 +47,7 @@ This table is the whole of what `server/src/` reads from the environment.
 | `DORMOUSE_VAPID_SUBJECT`  | `mailto:`/`https:` contact for push-service operators (RFC 8292). Defaults to `DORMOUSE_ORIGIN` when that origin is https and not loopback; otherwise there is no default and push stays off. Validated at startup — an invalid value, a loopback contact included, exits. |
 | `DORMOUSE_RUNTIME_FILE`   | Absolute path the server records `{pid, releaseId, port, origin, startedAt}` into once it has **bound**, mode `0600`. Unset — dev, containers, every test — writes nothing. A relative value is a `ConfigError`: the wrapper runs under a service manager whose working directory is not the installer's, so it would land somewhere neither side can predict. Outside `DORMOUSE_STATE_DIR`: runtime truth about one process, not durable state that gets backed up and restored. |
 | `DORMOUSE_RELEASE_ID`     | The release directory's name, supplied by the installer's `run-server` wrapper, recorded in the runtime file. `null` when the server was not started by an installer. |
-| `DORMOUSE_ENROLL_TOKEN_FILE` | Absolute path of the installer's enrollment offer — `{origin, token, mintedAt}`, the token 64 hex characters, shape in `server-lib-common/src/remote/enroll-offer.ts` — which `POST /api/host/enroll` accepts in place of the setup password. Unset, one-click enrollment is off. A relative value is a `ConfigError`, for the reason above. **Single-use — claimed by atomic rename before the Host is enrolled, so exactly one concurrent redemption can win — and read fresh on every attempt.** Offers expire after 7 days; the installer re-mints on every run. An enrollment that fails after the claim has still spent the offer — re-running the installer mints a new one. |
+| `DORMOUSE_ENROLL_TOKEN_FILE` | Absolute path of the installer's enrollment offer — `{origin, token, mintedAt}`, the token 64 hex characters, shape in `server-lib-common/src/remote/enroll-offer.ts` — which `POST /api/host/enroll` accepts in place of the setup password. Unset, one-click enrollment is off. A relative value is a `ConfigError`, for the reason above. **The offer lasts until the first Host enrollment or 24 hours, whichever comes first.** `hosts.json` existence is the durable first-enrollment marker; the Host-store mutex serializes that decision across password and token requests. Token redemption claims the file by atomic rename before minting the Host, so exactly one concurrent redemption wins. The installer rotates offers only before `hosts.json` exists. |
 
 **The server itself always speaks plain HTTP**, and WebAuthn requires a secure
 context: `localhost` works for development; a real phone needs TLS in front
@@ -649,8 +649,9 @@ shows the server URL, the relay connection state, and the paired-device count,
 with `Disconnect` and — only on `displaced` — `Reconnect`. Rules the UI exists
 to honor:
 
-- **The offer leads, but only where it can be pressed.** The card shows when the
-  local offer file exists and this Host is un-enrolled: it names the origin it
+- **The offer leads, but only where it can be pressed.** The card shows when an
+  unexpired local offer file exists and this Host is un-enrolled: it names the
+  origin it
   found, prefills the same editable name, and enrolls on one click, with the
   three-field form folded behind "Enroll with a different server…" — folded with
   `hidden`, never unmounted, so typed input survives both the disclosure and an

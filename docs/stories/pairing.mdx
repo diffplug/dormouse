@@ -136,6 +136,7 @@ section 1 is installed on this very laptop, there is nothing to type:
 The installer left a `run/enroll-offer.json` next to its state — this install's
 origin plus a one-time token the server redeems in place of the setup password
 — and the Host reads that same file from the well-known path for the platform.
+It lasts for 24 hours or until the first Host enrolls, whichever comes first.
 Press **Enroll** and the machine is connected.
 
 The one thing the card is careful about: **the token never reaches the webview.**

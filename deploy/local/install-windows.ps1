@@ -989,7 +989,7 @@ while ($true) {
   # release is answering?" without walking the process table. Set here rather
   # than in server.env because it is derived from current.txt, which moves.
   $psi.EnvironmentVariables['DORMOUSE_RUNTIME_FILE'] = (Join-Path $Root 'run\server.json')
-  # The installer re-mints this on every run; the server spends it and unlinks it.
+  # The installer mints this only until hosts.json records the first enrollment.
   $psi.EnvironmentVariables['DORMOUSE_ENROLL_TOKEN_FILE'] = (Join-Path $Root 'run\enroll-offer.json')
   $psi.EnvironmentVariables['DORMOUSE_RELEASE_ID'] = $releaseId
 
@@ -1854,7 +1854,7 @@ function Invoke-Purge {
   if ($reply -cne 'DELETE DORMOUSE STATE') { Write-Host 'aborted'; return 1 }
   # run\ too: an unspent enroll-offer.json redeems for a Host enrollment without
   # any existing account, and redemption recreates the state this command just
-  # deleted. Leaving it behind would make "IRREVERSIBLE" false for a week.
+  # deleted. Leaving it behind would make "IRREVERSIBLE" false for a day.
   foreach ($p in @($StateDir, (Join-Path $Root 'config'), (Join-Path $Root 'run'))) {
     Remove-Tree $p
   }
@@ -2177,31 +2177,36 @@ rem directly.
   # that never answered) rolls back and leaves the previous offer intact, rather
   # than stranding a fresh token against a release that is no longer running.
   #
-  # Test mode reaches this line down the other branch of both skips above, which
-  # is what CI asserts after each of its two test-mode installs.
-  $enrollToken = New-RandomHex32
-  if ($enrollToken.Length -lt 64) {
-    Die "generated enroll token is implausibly short; refusing to write the enrollment offer."
+  # hosts.json is the durable "first Host happened" marker. Emptying its rows
+  # revokes Hosts but does not silently reopen this bootstrap credential.
+  if (Test-Path -LiteralPath (Join-Path $STATE_DIR 'hosts.json')) {
+    Remove-Item -LiteralPath $ENROLL_OFFER_FILE -Force -ErrorAction SilentlyContinue
+    Write-Ok "a Host has already enrolled -- no one-click enrollment offer minted"
+  } else {
+    $enrollToken = New-RandomHex32
+    if ($enrollToken.Length -lt 64) {
+      Die "generated enroll token is implausibly short; refusing to write the enrollment offer."
+    }
+    # Create the file with an owner-only ACL BEFORE the token is written, so there
+    # is no window in which the secret sits under an inherited ACL.
+    [IO.File]::WriteAllText($ENROLL_OFFER_FILE, '')
+    Protect-Path -Path $ENROLL_OFFER_FILE
+    # mintedAt is read here, at write time, and never from $BUILT_AT: the 24-hour
+    # expiry runs from the mint, and the build that precedes it is not free.
+    #
+    # InvariantCulture is load-bearing, not decoration: the server hard-rejects an
+    # offer it cannot parse as fresh, and the current culture rewrites this stamp.
+    # Under fi-FI the ':' separator becomes '.', and under th-TH the Buddhist
+    # calendar mints year 2569 -- both silently unredeemable.
+    $offer = [pscustomobject]@{
+      origin   = $ORIGIN
+      token    = $enrollToken
+      mintedAt = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
+    } | ConvertTo-Json -Compress
+    [IO.File]::WriteAllText($ENROLL_OFFER_FILE, $offer + "`r`n")
+    Remove-Variable enrollToken
+    Write-Ok "minted run\enroll-offer.json (owner-only ACL) -- a one-time enrollment offer for a Host on this machine"
   }
-  # Create the file with an owner-only ACL BEFORE the token is written, so there
-  # is no window in which the secret sits under an inherited ACL.
-  [IO.File]::WriteAllText($ENROLL_OFFER_FILE, '')
-  Protect-Path -Path $ENROLL_OFFER_FILE
-  # mintedAt is read here, at write time, and never from $BUILT_AT: the server's
-  # 7-day expiry runs from the mint, and the build that precedes it is not free.
-  #
-  # InvariantCulture is load-bearing, not decoration: the server hard-rejects an
-  # offer it cannot parse as fresh, and the current culture rewrites this stamp.
-  # Under fi-FI the ':' separator becomes '.', and under th-TH the Buddhist
-  # calendar mints year 2569 -- both silently unredeemable.
-  $offer = [pscustomobject]@{
-    origin   = $ORIGIN
-    token    = $enrollToken
-    mintedAt = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
-  } | ConvertTo-Json -Compress
-  [IO.File]::WriteAllText($ENROLL_OFFER_FILE, $offer + "`r`n")
-  Remove-Variable enrollToken
-  Write-Ok "minted run\enroll-offer.json (owner-only ACL) -- a one-time enrollment offer for a Host on this machine"
 
   # -------------------------------------------------------------- serve ------
 
