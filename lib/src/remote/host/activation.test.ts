@@ -423,7 +423,7 @@ describe('remote host bridge mode', () => {
 
   it('carries the verified flag through to the modal', async () => {
     // The flag decides which of the modal's two copies renders, and the mirror
-    // is the only path it travels: the Host strips the nonce that produced it,
+    // is the only path it travels: the Host strips the proof that produced it,
     // so nothing downstream can re-derive it (docs/specs/remote-security-model.md).
     const link = fakeLink();
     const { pairing } = await installBridge(link);
@@ -443,7 +443,7 @@ describe('remote host bridge mode', () => {
 
     const head = pairing.getPairingApprovalSnapshot()[0]!;
     expect(head.verified).toBe(true);
-    expect(head.request.setupNonce).toBeUndefined();
+    expect((head.request as PairingRequest).setupProof).toBeUndefined();
   });
 
   it('seeds the mirror, for a webview that reloaded mid-pairing', async () => {

@@ -77,15 +77,16 @@ export interface PairingRequest {
   /** Client-suggested label; the approver may override it. */
   readonly requestedLabel: string;
   /**
-   * The setup token this Client was set up by scanning, when it reached the
-   * server through a Host's QR (`docs/specs/server.md`). Absent on the
-   * QR-less path, so every consumer must treat it as optional.
+   * `computeSetupProof` under the setup nonce this Client scanned off a Host's
+   * QR, when it was set up that way (`setup-proof.ts`). Absent on the QR-less
+   * path, so every consumer must treat it as optional.
    *
-   * The Server checks only that it is a bounded string: the Host minted the
-   * token and holds its own copy, so it is the only party that can verify one,
-   * exactly as it is the only party that may write the ACL.
+   * The Server checks only that it is a bounded string, and cannot do more: the
+   * nonce behind it never travels through the Server, so this is a MAC the
+   * Server can neither verify nor produce — which is what stops it from moving
+   * `verified` onto a device key of its own choosing.
    */
-  readonly setupNonce?: string;
+  readonly setupProof?: string;
 }
 
 /**
@@ -183,7 +184,7 @@ export function isPairingRequest(request: unknown): request is PairingRequest {
     isBoundedString(candidate.requestedLabel) &&
     // Optional, so absent passes — but a present one is bounded like every
     // other field, since it is relay-supplied text either way.
-    (candidate.setupNonce === undefined || isBoundedString(candidate.setupNonce))
+    (candidate.setupProof === undefined || isBoundedString(candidate.setupProof))
   );
 }
 

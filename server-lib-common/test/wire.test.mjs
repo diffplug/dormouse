@@ -32,26 +32,43 @@ test('clampTerminalDimension bounds the top, not just the bottom', () => {
   assert.equal(clampTerminalDimension(400, 24), 400);
 });
 
+const MINT = { token: 'aZ0-_abc', mintId: 'mint-1', expiresAt: 1 };
+
 test('isSetupTokenResponse accepts a real mint', () => {
-  assert.equal(isSetupTokenResponse({ token: 'abc', expiresAt: 1 }), true);
+  assert.equal(isSetupTokenResponse(MINT), true);
   // Additive fields are fine: an older Host reading a newer server still works.
-  assert.equal(isSetupTokenResponse({ token: 'abc', expiresAt: 1, extra: true }), true);
+  assert.equal(isSetupTokenResponse({ ...MINT, extra: true }), true);
+  // A real token is base64url of 32 bytes, comfortably inside the bound.
+  assert.equal(isSetupTokenResponse({ ...MINT, token: 'a'.repeat(128) }), true);
 });
 
 test('isSetupTokenResponse rejects a 200 that is not one', () => {
-  // The Host puts the token straight into its QR and into the set that decides
-  // `verified` on the next pairing, so a missing or mistyped field has to fail
-  // the exchange rather than mint an `undefined`.
+  // The Host puts the token straight into a QR encoder and `expiresAt` straight
+  // into a `setTimeout` delay, so a missing, mistyped, oversized, or
+  // out-of-charset field has to fail the exchange rather than reach either.
   for (const body of [
     null,
     'nope',
     {},
     { token: 'abc' },
     { expiresAt: 1 },
-    { token: '', expiresAt: 1 },
-    { token: 42, expiresAt: 1 },
-    { token: 'abc', expiresAt: '1' },
-    { token: 'abc', expiresAt: Number.NaN },
+    { token: 'abc', mintId: 'm' },
+    { ...MINT, token: '' },
+    { ...MINT, token: 42 },
+    // An oversized token throws inside the QR encoder, under the app-wide
+    // ErrorBoundary, which takes every terminal down with it.
+    { ...MINT, token: 'a'.repeat(129) },
+    { ...MINT, token: 'has spaces' },
+    { ...MINT, token: 'not/base64url+' },
+    { ...MINT, mintId: '' },
+    { ...MINT, mintId: 42 },
+    { ...MINT, expiresAt: '1' },
+    { ...MINT, expiresAt: Number.NaN },
+    { ...MINT, expiresAt: Number.POSITIVE_INFINITY },
+    // Epoch ms is always positive; zero or negative is a broken clock, and it
+    // would make every refresh delay compute as "already expired".
+    { ...MINT, expiresAt: 0 },
+    { ...MINT, expiresAt: -1 },
   ]) {
     assert.equal(isSetupTokenResponse(body), false, JSON.stringify(body));
   }

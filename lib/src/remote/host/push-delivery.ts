@@ -17,6 +17,7 @@
 
 import {
   API_ROUTES,
+  PUSH_SEND_DEADLINE_MS,
   boundedPushText,
   type HostAclRecord,
   type PushDevicesResponse,
@@ -46,6 +47,19 @@ export const PUSH_TEST_TITLE = 'Dormouse test — nothing needs attention';
 
 /** Collapse key for the test, so repeated presses replace rather than stack. */
 export const PUSH_TEST_TAG = 'dormouse-push-test';
+
+/**
+ * Headroom over the Server's own per-attempt deadline, covering the round trip
+ * and the fan-out's bookkeeping. Small on purpose: the timeout is still there
+ * to stop a wedged relay holding the Host.
+ *
+ * This is the one Host→Server call that runs *past* the webview's 15 s command
+ * budget, and deliberately: a send is normally fired by the alert path inside
+ * the Host process, where no webview is waiting at all. Only the Settings
+ * dialog's test push is webview-initiated, and there the button giving up first
+ * is the right answer — the send it started still finishes.
+ */
+const PUSH_SEND_MARGIN_MS = 5_000;
 
 /**
  * Apply this sink's bounds to a Pane label. The rule itself is
@@ -113,15 +127,23 @@ export async function sendPush(
   const devicePublicKeys = deps.activeRecords().map((record) => record.devicePublicKey);
   if (devicePublicKeys.length === 0) return { targeted: 0, delivered: 0, failed: 0 };
 
-  const response = await hostFetch(deps, API_ROUTES.pushSend, {
-    devicePublicKeys,
-    title: toPushText(title),
-    body: PUSH_BODY,
-    // Per-Session collapse key: a Pane that rings, is cleared, and rings again
-    // replaces its own notification rather than stacking copies. Internal ids
-    // only — a tag is never displayed.
-    tag: sessionId,
-  });
+  const response = await hostFetch(
+    // The one call that outlives the shared budget: the Server holds a send open
+    // for up to `PUSH_SEND_DEADLINE_MS` per attempt, so aborting at the default
+    // 10 s would report deliveries that actually succeeded as failures. Derived
+    // from the Server's own bound plus a margin for the round trip.
+    { ...deps, timeoutMs: PUSH_SEND_DEADLINE_MS + PUSH_SEND_MARGIN_MS },
+    API_ROUTES.pushSend,
+    {
+      devicePublicKeys,
+      title: toPushText(title),
+      body: PUSH_BODY,
+      // Per-Session collapse key: a Pane that rings, is cleared, and rings again
+      // replaces its own notification rather than stacking copies. Internal ids
+      // only — a tag is never displayed.
+      tag: sessionId,
+    },
+  );
   // `hostFetch` threw on a non-2xx; this is the quieter failure class — the
   // Server accepted the send but a push service refused delivery, which it
   // reports in counts on an HTTP 200. Without this check an all-failed fan-out

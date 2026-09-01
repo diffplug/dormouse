@@ -22,6 +22,7 @@ import {
   SETUP_TOKEN_INVALID_ERROR,
   UNAUTHORIZED_ERROR,
   WS_ROUTES,
+  PUSH_SEND_DEADLINE_MS,
   WS_TOKEN_PARAM,
   fromBase64Url,
   getWebCrypto,
@@ -72,7 +73,7 @@ import {
   PushSubscriptionStore,
 } from './state.js';
 import type { StoredHost, StoredPushSubscription } from './state.js';
-import { PUSH_SEND_DEADLINE_MS, sendWithinDeadline } from './push.js';
+import { sendWithinDeadline } from './push.js';
 import type { PushSender } from './push.js';
 import { isPublicHttpsPushEndpoint } from './push-endpoint.js';
 
@@ -399,7 +400,14 @@ export function createApp(config: AppConfig): CreatedApp {
 
       // Announced on the one outcome that actually set the account up, to the
       // Host that minted the token, so the QR it is displaying can come down.
-      if (spent) hub.notifyHost(spent.entry.hostId, { t: 'setup-token-redeemed' });
+      // By mint id, never by token: a Host may be showing several codes, and
+      // the credential must not come back over the relay to tell them apart.
+      if (spent) {
+        hub.notifyHost(spent.entry.hostId, {
+          t: 'setup-token-redeemed',
+          mintId: spent.entry.mintId,
+        });
+      }
 
       const res: SetupFinishResponse = {
         accountId: SELFHOST_ACCOUNT_ID,
@@ -579,9 +587,10 @@ export function createApp(config: AppConfig): CreatedApp {
   // --- Setup tokens: the credential behind a Host's QR ---------------------
 
   app.post(API_ROUTES.hostSetupToken, requireHost, (c) => {
-    // The token only; the Host composes the QR's URL (`SetupTokenResponse`).
-    const { token, expiresAt } = setupTokens.issue(c.get('host').hostId);
-    const res: SetupTokenResponse = { token, expiresAt };
+    // The token only; the Host composes the QR's URL (`SetupTokenResponse`),
+    // and adds a nonce of its own that never comes back here.
+    const { token, mintId, expiresAt } = setupTokens.issue(c.get('host').hostId);
+    const res: SetupTokenResponse = { token, mintId, expiresAt };
     return c.json(res);
   });
 

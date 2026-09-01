@@ -226,17 +226,31 @@ text, reduced by `boundedPairingLabel` / `boundedPairingAccount` before display,
 so neither can overflow the dialog or carry bidi overrides that make it read as
 something else.
 
-**A setup nonce collapses approval to one confirm.** A phone set up by scanning
-a Host's QR returns that setup token as `PairingRequest.setupNonce`, and the
-Host verifies it against the codes minted for *it* over its own authenticated
-channel — single-use, so neither Server nor Client can fabricate the verdict.
-Displaying the QR on the laptop *is* the local-presence act, so the verified
-modal names what proved the device instead of asking the user to vouch for it.
-A missing, unknown, expired or spent nonce is **not** an error: that pairing
-keeps the fingerprint compare, which remains the control for every nonce-less
-one. The webview is told `verified`, never the nonce — the type it mirrors,
-`MirroredPairingRequest`, has no such field. Source of truth:
-`RemoteHost.#onPair` and `RemoteHost.#verifySetupNonce`.
+**A setup proof collapses approval to one confirm.** A Host's QR carries two
+secrets with two verifiers: the Server's single-use setup token, redeemed at
+`/api/setup/*`, and a **setup nonce the Host mints itself**, which travels
+laptop screen → phone camera and never through the Server. A phone set up that
+way returns `PairingRequest.setupProof` —
+`HMAC-SHA256(key = nonce, message = domain || devicePublicKey)` — which the Host
+recomputes against each nonce it still holds. Displaying the QR *is* the
+local-presence act, so a verified modal names what proved the device rather than
+asking the user to vouch for it.
+
+- **Must bind the proof to the key being authorized.** A Server substituting its
+  own `devicePublicKey` into a relayed request would need a MAC over that key,
+  and so a nonce it has never seen: it relays a key-bound proof and nothing more.
+- **Never an error to miss.** Absent, unknown, expired or spent, the pairing
+  keeps the fingerprint compare — still the control for every proofless one.
+- **Verification does not consume; approval does.** A re-delivered frame from
+  the same phone stays verified; minting the ACL record spends the nonce and
+  re-mirrors every other pairing that stood on it as unverified.
+- **The webview is told `verified`, never the proof** — `MirroredPairingRequest`
+  has no such field.
+- **A photographed QR inside its 5-minute window is accepted risk**, bounded by
+  display-on-request, the TTL, and single use at approval.
+
+Source of truth: `RemoteHost.#onPair` / `#matchSetupNonce` / `#consumeSetupNonce`
+and `server-lib-common/src/security/setup-proof.ts`.
 
 **The Host validates the request's shape itself** (`isPairingRequest`), never
 relying on the Server having done so: the Server is not trusted, and an

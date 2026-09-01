@@ -217,7 +217,7 @@ function mirrorPairingQueue(link: RemoteHostLink, queue: readonly PairingQueueIt
  * (docs/specs/remote-security-model.md). Naming the keys here makes that a
  * compile error rather than a silent security regression.
  *
- * Mirrored fields only: `setupNonce` never reaches this realm, so a compare that
+ * Mirrored fields only: `setupProof` never reaches this realm, so a compare that
  * listed it would be comparing two `undefined`s forever.
  */
 const PAIRING_REQUEST_FIELDS = {

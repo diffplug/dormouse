@@ -13,7 +13,13 @@ import {
   WS_ROUTES,
   WS_TOKEN_PARAM,
   authorizeConnection,
+  computeSetupProof,
+  constantTimeEqual,
+  getWebCrypto,
+  toBase64Url,
+  utf8Encode,
   MAX_PENDING_PAIRINGS,
+  MAX_TOKENS_PER_HOST,
   boundedPairingAccount,
   boundedPairingLabel,
   isPairStatusQuery,
@@ -23,6 +29,7 @@ import {
   type ConnectionRequest,
   type HostAclRecord,
   type HostFrame,
+  type PairingRequest,
   type ServerToHostFrame,
 } from 'server-lib-common';
 import type { HostEnrollment } from './enrollment';
@@ -51,6 +58,17 @@ interface ClientState {
   authGeneration: number;
   /** The in-flight pairing awaiting local approval, if any. */
   pending?: PendingPairing;
+  /**
+   * Which outstanding setup nonce {@link ClientState.pending}'s `verified`
+   * rests on, so approving one pairing can retire that nonce and downgrade
+   * every other pairing standing on it (see
+   * {@link RemoteHost.#consumeSetupNonce}).
+   *
+   * **Host-side only.** It lives here rather than on `PendingPairing` because
+   * that shape is mirrored to the webview, and the nonce must never cross
+   * (`SECURITY.md` → the setup-token FAIL IF).
+   */
+  verifiedNonce?: string;
   /** The remote-api handler, created on the first authorized `msg`. */
   session?: RemoteApiSessionLike;
 }
@@ -91,9 +109,10 @@ export interface RemoteHostOptions {
   dismissApproval: (clientId: string) => void;
   /**
    * A setup token this Host minted was spent on the Server, so the QR showing
-   * it is stale. Announced to whoever is displaying it; nothing here acts on it.
+   * it is stale. `mintId` names which mint, never the token. Announced to
+   * whoever is displaying it; nothing here acts on it.
    */
-  onSetupTokenRedeemed?: () => void;
+  onSetupTokenRedeemed?: (mintId: string) => void;
   now?: () => number;
   /** Auto-reconnect with backoff (default true; tests pass false). */
   reconnect?: boolean;
@@ -126,6 +145,9 @@ function isAddressedFrame(frame: ServerToHostFrame): frame is AddressedFrame {
 const INITIAL_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
 
+/** 256 bits, like every other unguessable handle in this system. */
+const SETUP_NONCE_BYTE_LENGTH = 32;
+
 export class RemoteHost {
   readonly #enrollment: HostEnrollment;
   readonly #policy: ConnectionPolicy;
@@ -138,7 +160,7 @@ export class RemoteHost {
   readonly #saveAcl: (hostId: string, records: readonly HostAclRecord[]) => void;
   readonly #requestApproval: (pending: PendingPairing) => void;
   readonly #dismissApproval: (clientId: string) => void;
-  readonly #onSetupTokenRedeemed: () => void;
+  readonly #onSetupTokenRedeemed: (mintId: string) => void;
   readonly #now: () => number;
   readonly #reconnect: boolean;
 
@@ -151,19 +173,35 @@ export class RemoteHost {
   readonly #clients = new Map<string, ClientState>();
 
   /**
-   * Setup tokens minted for this Host and not yet seen spent, `token → expiresAt`.
+   * Setup nonces this Host minted into its own QRs and has not spent,
+   * `nonce → expiresAt`.
    *
-   * A phone that was set up by scanning one returns it in its `PairingRequest`,
-   * and a match here is what marks that pairing `verified` — this is the Host's
-   * own copy of a credential the Server also holds, and the reason neither
-   * Server nor Client can fabricate the verdict. Kept here rather than in the
-   * service that mints them so its lifetime *is* this Host's: a new Host starts
-   * with none, and a Host that reconnects keeps the codes its server issued.
-   * Kept local and tiny rather than routed through the shared issuer
-   * primitives: nothing here needs to know which Host minted what, because
-   * there is only one.
+   * **The Server never sees one.** It rides the QR beside the Server's setup
+   * token, laptop screen to phone camera and no further, and a phone set up by
+   * scanning returns only `computeSetupProof(nonce, its device key)` — so
+   * verifying is recomputing that MAC over the key the request is asking to
+   * authorize (`docs/specs/remote-security-model.md` → Pairing Ceremony).
+   *
+   * Kept here rather than in the service that composes the QR so its lifetime
+   * *is* this Host's: a new Host starts with none, and a Host that reconnects
+   * keeps the codes still on screen. Local rather than routed through the
+   * shared issuer primitives, which the old comment declined for the wrong
+   * reason: verification iterates this map computing a MAC per entry, and
+   * approval consumes an entry by name — neither is an API `SetupTokenIssuer`
+   * has. Capped at {@link MAX_TOKENS_PER_HOST}, the Server's own bound on the
+   * tokens these are paired with, so the two sides agree on live-versus-spent.
    */
-  readonly #setupTokens = new Map<string, number>();
+  readonly #setupNonces = new Map<string, number>();
+
+  /**
+   * Setup proofs being checked right now. Bounded like everything else a `pair`
+   * frame can allocate: verification is async, so the `#clients` cap cannot see
+   * a request that has not landed yet, and a relay flooding proof-carrying
+   * frames while a QR is up would otherwise buy unbounded concurrent MACs.
+   * Past the cap a frame skips verification entirely, which is the safe
+   * degradation — it pairs the ordinary fingerprint-compare way.
+   */
+  #verifying = 0;
 
   #ws: WebSocketLike | null = null;
   #status: RemoteHostStatus = 'idle';
@@ -211,33 +249,99 @@ export class RemoteHost {
   }
 
   /**
-   * Remember a setup token just minted for this Host, so the phone that scans it
-   * can prove itself (see {@link RemoteHost.#setupTokens}). Called by whoever
-   * holds the authenticated channel the token came off — the service
-   * (`lib/src/host/remote/service.ts` → `#setupQr`).
+   * Mint the second secret of a setup QR — the one the Server never sees — for
+   * whoever is composing that QR (`lib/src/host/remote/service.ts` →
+   * `#setupQr`). Shares the Server token's `expiresAt`, because the two are one
+   * window from the user's side.
    *
-   * Prunes on insert, since a token that can no longer be verified is only
-   * memory: nothing else sweeps this map.
+   * Prunes on insert, since nothing else sweeps this map, and the count cap
+   * matches the Server's so a nonce cannot outlive the token it rode with.
    */
-  rememberSetupToken(token: string, expiresAt: number): void {
+  mintSetupNonce(expiresAt: number): string {
     const now = this.#now();
-    for (const [minted, expiry] of this.#setupTokens) {
-      if (expiry <= now) this.#setupTokens.delete(minted);
+    for (const [nonce, expiry] of this.#setupNonces) {
+      if (expiry <= now) this.#setupNonces.delete(nonce);
     }
-    this.#setupTokens.set(token, expiresAt);
+    // Oldest first, as on the Server: the code longest on screen is the one
+    // whose scanner has most likely given up.
+    while (this.#setupNonces.size >= MAX_TOKENS_PER_HOST) {
+      const oldest = this.#setupNonces.keys().next();
+      if (oldest.done) break;
+      this.#setupNonces.delete(oldest.value);
+    }
+    const nonce = toBase64Url(
+      getWebCrypto().getRandomValues(new Uint8Array(SETUP_NONCE_BYTE_LENGTH)),
+    );
+    this.#setupNonces.set(nonce, expiresAt);
+    return nonce;
   }
 
   /**
-   * Whether `nonce` is a token minted for this Host that nobody has spent — and
-   * it is spent by asking. Single use, because the nonce proves that *this*
-   * setup happened, and one scan sets up one phone.
+   * How many setup nonces this Host is still holding. Exists for the cap's own
+   * test, for the reason {@link RemoteHost.trackedClientCount} does: a bound
+   * nothing can observe is one that passes its test while the map grows.
    */
-  #verifySetupNonce(nonce: string): boolean {
-    const expiresAt = this.#setupTokens.get(nonce);
-    // Deleted on any hit, expired or not: it can never become valid again.
-    if (expiresAt === undefined) return false;
-    this.#setupTokens.delete(nonce);
-    return this.#now() < expiresAt;
+  get outstandingSetupNonceCount(): number {
+    return this.#setupNonces.size;
+  }
+
+  /**
+   * Which outstanding nonce this request's `setupProof` was computed under, or
+   * `null` when none was — an unknown, expired, or absent proof, and a proof
+   * bound to some *other* device key.
+   *
+   * That last case is the point of the whole scheme. The proof is a MAC over
+   * the request's own `devicePublicKey`, so a Server that substituted its key
+   * into a relayed request would have to produce a MAC under a nonce it has
+   * never seen; there is no proof it can copy from the real phone that still
+   * matches.
+   *
+   * **Non-consuming.** The nonce is spent when a pairing it verified is
+   * approved ({@link RemoteHost.#consumeSetupNonce}), not on arrival: the relay
+   * may re-deliver the same phone's frame, and a replay carrying the same
+   * device key asks for exactly what the user is about to approve anyway.
+   *
+   * A handful of entries at most, and only while a QR is on screen — a Host
+   * showing no code does no work here at all, which is what keeps a hostile
+   * relay from turning `pair` frames into MAC computations.
+   */
+  async #matchSetupNonce(request: PairingRequest): Promise<string | null> {
+    const proof = request.setupProof;
+    if (typeof proof !== 'string') return null;
+    const now = this.#now();
+    for (const [nonce, expiresAt] of [...this.#setupNonces]) {
+      if (expiresAt <= now) {
+        this.#setupNonces.delete(nonce);
+        continue;
+      }
+      const expected = await computeSetupProof(nonce, request.devicePublicKey);
+      // Constant-time, unlike the token lookup this replaced: a MAC compare
+      // that exits on the first wrong character is a forgery oracle. The length
+      // is not secret, so an early `false` on a mismatched one leaks nothing.
+      if (constantTimeEqual(utf8Encode(expected), utf8Encode(proof))) return nonce;
+    }
+    return null;
+  }
+
+  /**
+   * Spend the nonce a just-approved pairing verified against, and downgrade
+   * every other pending pairing that was standing on the same one.
+   *
+   * Single use is enforced here rather than at receipt because this is the act
+   * the nonce authorizes: one scan sets up one phone, and once that phone's key
+   * is on the ACL a second request holding the same proof is a different device
+   * asking, which must go back to the fingerprint compare.
+   */
+  #consumeSetupNonce(nonce: string): void {
+    this.#setupNonces.delete(nonce);
+    for (const state of this.#clients.values()) {
+      if (state.verifiedNonce !== nonce || !state.pending) continue;
+      state.verifiedNonce = undefined;
+      // A fresh object, not a mutation: the service holds the one it was handed
+      // and mirrors it whole, so the downgrade has to arrive as a new request.
+      state.pending = { ...state.pending, verified: false };
+      this.#requestApproval(state.pending);
+    }
   }
 
   /**
@@ -420,8 +524,10 @@ export class RemoteHost {
     if (!frame || typeof (frame as { t?: unknown }).t !== 'string') return;
     if (frame.t === 'setup-token-redeemed') {
       // The one server→host frame that addresses no Client, so it is routed
-      // before the clientId narrowing below: it is about this Host itself.
-      this.#onSetupTokenRedeemed();
+      // before the clientId narrowing below: it is about this Host itself. The
+      // relay is not trusted to have stamped a `mintId`, and an unrecognized
+      // one is ignored downstream rather than retiring an unrelated code.
+      if (typeof frame.mintId === 'string') this.#onSetupTokenRedeemed(frame.mintId);
       return;
     }
     if (!isAddressedFrame(frame)) return;
@@ -458,29 +564,56 @@ export class RemoteHost {
       this.#send({ t: 'pair-result', clientId, approved: false, error: 'malformed-request' });
       return;
     }
-    // A phone set up by scanning this machine's QR returns the token it was set
-    // up with. Only this Host can check one — it holds the only copy outside the
-    // Server — which is what makes `verified` unforgeable by either
-    // (`docs/specs/remote-security-model.md` → Pairing Ceremony).
-    //
-    // A miss is **not** an error: an unknown, expired, or already-spent nonce
-    // simply pairs the ordinary way, because the phone may predate the QR path
-    // or be re-pairing long after its code was spent.
-    //
-    // A plain map lookup, not a constant-time compare: the token is 256 bits of
-    // server-chosen randomness, so a timing side channel leaks nothing an
-    // attacker could walk toward a guess.
-    const verified =
-      typeof incoming.setupNonce === 'string' && this.#verifySetupNonce(incoming.setupNonce);
+    // Verifying a setup proof is a MAC computation, so it cannot happen in this
+    // turn. The QR-less path — every pairing until a phone has scanned, and
+    // every pairing on a machine showing no code — is kept synchronous, because
+    // a Host holding no nonces has nothing to compute against anyway.
+    if (
+      typeof incoming.setupProof !== 'string' ||
+      this.#setupNonces.size === 0 ||
+      this.#verifying >= MAX_PENDING_PAIRINGS
+    ) {
+      this.#enqueuePairing(clientId, incoming, null);
+      return;
+    }
+    // A superseded socket must not enqueue: `#dropTransientState` cleared the
+    // client map on the way down, and landing here afterwards would recreate an
+    // entry under a relay-chosen key with a modal nobody can answer.
+    const socket = this.#ws;
+    this.#verifying += 1;
+    void this.#matchSetupNonce(incoming)
+      .then((nonce) => {
+        if (this.#ws !== socket) return;
+        this.#enqueuePairing(clientId, incoming, nonce);
+      })
+      .finally(() => {
+        this.#verifying -= 1;
+      });
+  }
+
+  /**
+   * Turn a shape-checked `pair` request into the pending approval, having
+   * settled which setup nonce (if any) proved it.
+   *
+   * A miss is **not** an error: an absent, unknown, expired or already-spent
+   * proof simply pairs the ordinary way, because the phone may predate the QR
+   * path or be re-pairing long after its code was spent.
+   */
+  #enqueuePairing(clientId: string, incoming: PairingRequest, nonce: string | null): void {
     // The label is attacker-chosen free text rendered in the one dialog the
     // ACL rests on. Bound and strip it here, once, so every consumer — the
     // queue projection, the modal, and the ACL record written on approval —
-    // sees the same safe value. The nonce leaves in the same step; the narrowed
-    // type is what keeps it gone (`MirroredPairingRequest`).
-    const { setupNonce: _spent, ...bare } = incoming;
+    // sees the same safe value.
+    //
+    // Field by field rather than a spread: `isPairingRequest` allows extras, and
+    // a spread would forward whatever else the relay attached into the mirrored
+    // queue and into the persisted ACL record. Naming the five is what makes an
+    // unknown field fail closed.
     const request: MirroredPairingRequest = {
-      ...bare,
       accountId: boundedPairingAccount(incoming.accountId),
+      passkeyCredentialId: incoming.passkeyCredentialId,
+      passkeyPublicKeyHash: incoming.passkeyPublicKeyHash,
+      devicePublicKey: incoming.devicePublicKey,
       requestedLabel: boundedPairingLabel(incoming.requestedLabel),
     };
     const ticket = this.#ceremony.begin(request);
@@ -488,7 +621,7 @@ export class RemoteHost {
       clientId,
       pairingId: ticket.pairingId,
       request,
-      verified,
+      verified: nonce !== null,
       requestedAt: ticket.requestedAt,
       approve: (label) => this.#approvePairing(clientId, ticket.pairingId, label),
       deny: (error) => this.#denyPairing(clientId, ticket.pairingId, error),
@@ -503,7 +636,9 @@ export class RemoteHost {
     // a synced or stolen passkey is documented as buying only "the ability to
     // ask", and this is what stops asking from being a denial of service.
     this.#evictOldestPairingIfFull();
-    this.#clientState(clientId).pending = pending;
+    const state = this.#clientState(clientId);
+    state.pending = pending;
+    state.verifiedNonce = nonce ?? undefined;
     this.#requestApproval(pending);
   }
 
@@ -533,6 +668,8 @@ export class RemoteHost {
     // an older callback.
     if (!state?.pending || state.pending.pairingId !== pairingId) return;
     state.pending = undefined;
+    const nonce = state.verifiedNonce;
+    state.verifiedNonce = undefined;
     let record: HostAclRecord;
     try {
       record = this.#ceremony.approve(pairingId, { approvedBy: 'host-user', label });
@@ -546,6 +683,9 @@ export class RemoteHost {
       this.#dismissApproval(clientId);
       return;
     }
+    // The ACL write is what the nonce authorized, so it is spent here and only
+    // here — after the write, so a ceremony that threw leaves the code live.
+    if (nonce !== undefined) this.#consumeSetupNonce(nonce);
     this.#saveAcl(this.#enrollment.hostId, this.#acl.records());
     this.#send({ t: 'pair-result', clientId, approved: true, record });
     this.#dismissApproval(clientId);
@@ -555,6 +695,9 @@ export class RemoteHost {
     const state = this.#clients.get(clientId);
     if (!state?.pending || state.pending.pairingId !== pairingId) return;
     state.pending = undefined;
+    // A denial spends nothing: the person turned this device away, and the code
+    // on their screen is still theirs to hand to the phone they meant.
+    state.verifiedNonce = undefined;
     try {
       this.#ceremony.deny(pairingId);
     } catch {

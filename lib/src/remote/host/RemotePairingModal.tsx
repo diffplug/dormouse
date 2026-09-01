@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { ModalFrame, ModalReviewBlock, modalActionButton } from '../../components/design';
-import { pairingFingerprint, type PairingRequest } from 'server-lib-common';
+import { pairingFingerprint } from 'server-lib-common';
+import type { MirroredPairingRequest } from './pairing-approval';
 
 /**
  * The Host's local pairing-approval modal (server.md → "Pairing approval
@@ -13,8 +14,9 @@ import { pairingFingerprint, type PairingRequest } from 'server-lib-common';
  * Unverified, the fingerprint is the control: the ceremony verifies no
  * assertion, so a person comparing eight characters against the phone is what
  * stands between the ACL and a substituted request. Verified, that comparison
- * has already happened by other means — the phone returned a setup token this
- * machine minted and displayed — so the dialog says so and asks for one confirm
+ * has already happened by other means — the phone returned a proof under the
+ * nonce on this machine's own screen, computed over this very device key — so
+ * the dialog says so and asks for one confirm
  * (`docs/specs/remote-security-model.md` → Pairing Ceremony).
  */
 export function RemotePairingModal({
@@ -23,8 +25,12 @@ export function RemotePairingModal({
   onApprove,
   onDeny,
 }: {
-  request: PairingRequest;
-  /** The Client returned a setup token this Host minted; see the module note. */
+  request: MirroredPairingRequest;
+  /**
+   * The Client's setup proof matched a nonce this machine minted and displayed;
+   * see the module note. The proof itself is not here and cannot be — the type
+   * of `request` is what says so.
+   */
   verified?: boolean;
   onApprove: () => void;
   onDeny: () => void;

@@ -105,8 +105,13 @@ async function connectFakeHost(app, server, options) {
   OPEN_FAKE_HOSTS.push(fake);
   await fake.ready;
   const redemptions = [];
-  fake.on('setup-token-redeemed', () => redemptions.push(host.hostId));
-  return { host, fake, redemptions };
+  /** The mint each announcement named, so the correlator is pinned too. */
+  const redeemedMints = [];
+  fake.on('setup-token-redeemed', (frame) => {
+    redemptions.push(host.hostId);
+    redeemedMints.push(frame.mintId);
+  });
+  return { host, fake, redemptions, redeemedMints };
 }
 
 test('minting requires a host token', async () => {
@@ -276,12 +281,18 @@ test('a redemption is announced to the Host that minted the token, and to no oth
     const minter = await connectFakeHost(created.app, server, { label: 'Laptop A' });
     const other = await connectFakeHost(created.app, server, { label: 'Laptop B' });
 
-    const { token } = await (await mint(created.app, minter.host.hostToken)).json();
+    // Two outstanding codes on the same laptop, so the announcement has to say
+    // which: a Host with several panels open retires only the one that was
+    // scanned, and it is told by mint id because the token must not come back.
+    const stillLive = await (await mint(created.app, minter.host.hostToken)).json();
+    const { token, mintId } = await (await mint(created.app, minter.host.hostToken)).json();
+    assert.notEqual(mintId, stillLive.mintId);
     assert.equal((await registerWithToken(created.app, token)).status, 200);
 
     await until(() => minter.redemptions.length === 1);
     await sleep(60);
     assert.deepEqual(minter.redemptions, [minter.host.hostId], 'announced exactly once');
+    assert.deepEqual(minter.redeemedMints, [mintId], 'the mint that was scanned, not the other');
     assert.deepEqual(other.redemptions, [], 'only the minting Host hears about its own token');
   } finally {
     await shutdown(server);
@@ -370,10 +381,17 @@ test('the issuer answers the minting host, once, and only while fresh', () => {
   const clock = makeClock();
   const issuer = new SetupTokenIssuer({ now: clock.now });
 
-  const { token, expiresAt } = issuer.issue('host-1');
-  assert.deepEqual(issuer.peek(token), { hostId: 'host-1', expiresAt });
-  assert.deepEqual(issuer.peek(token), { hostId: 'host-1', expiresAt }); // peek does not spend
-  assert.deepEqual(issuer.consume(token), { hostId: 'host-1', expiresAt });
+  const { token, mintId, expiresAt } = issuer.issue('host-1');
+  // The mint id names this mint without naming the token: it is what rides back
+  // to the Host on redemption, so a laptop showing several codes retires the
+  // right one and no credential crosses the relay to say which.
+  assert.match(mintId, /^[A-Za-z0-9_-]+$/);
+  assert.notEqual(mintId, token);
+  assert.notEqual(issuer.issue('host-1').mintId, mintId);
+  const entry = { hostId: 'host-1', mintId, expiresAt };
+  assert.deepEqual(issuer.peek(token), entry);
+  assert.deepEqual(issuer.peek(token), entry); // peek does not spend
+  assert.deepEqual(issuer.consume(token), entry);
   assert.equal(issuer.consume(token), null);
   assert.equal(issuer.peek('never-minted'), null);
 
@@ -387,13 +405,13 @@ test('restore puts a consumed token back on its original expiry', () => {
   const clock = makeClock();
   const issuer = new SetupTokenIssuer({ now: clock.now });
 
-  const { token, expiresAt } = issuer.issue('host-1');
+  const { token, mintId, expiresAt } = issuer.issue('host-1');
   const entry = issuer.consume(token);
   clock.advance(SETUP_TOKEN_TTL_MS / 2);
   issuer.restore(token, entry);
   // Redeemable again, but not for a moment longer than it started with: a
   // failed attempt must not be a way to extend the shoulder-surf window.
-  assert.deepEqual(issuer.peek(token), { hostId: 'host-1', expiresAt });
+  assert.deepEqual(issuer.peek(token), { hostId: 'host-1', mintId, expiresAt });
   clock.advance(SETUP_TOKEN_TTL_MS / 2);
   assert.equal(issuer.peek(token), null);
 

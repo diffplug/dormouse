@@ -129,7 +129,7 @@ export async function performEnrollment(
     serverUrl: base,
     hostId: enrolled?.hostId,
     hostToken: enrolled?.hostToken,
-    origin: enrolled?.origin,
+    origin: normalizedOrigin(enrolled?.origin),
     rpId: enrolled?.rpId,
     // Only when the server actually sent a boolean: spreading `undefined` in
     // would make the key present-and-undefined, which the guard treats the
@@ -144,6 +144,26 @@ export async function performEnrollment(
     );
   }
   return enrollment;
+}
+
+/**
+ * The server's `origin` reduced to a bare origin, or `undefined` where it is not
+ * one — which fails the exchange through {@link isEnrollment}, naming `origin`
+ * like any other field the server got wrong.
+ *
+ * Normalized at this boundary because everything downstream concatenates it: the
+ * setup QR builds `${origin}/#setup?…`, so a configured `DORMOUSE_ORIGIN` with a
+ * trailing slash yields a `//#setup` URL that scans to the wrong place. It is
+ * also the `ConnectionPolicy.origin` every passkey assertion is checked against,
+ * where WebAuthn's `clientData.origin` is always the bare form.
+ */
+function normalizedOrigin(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  try {
+    return new URL(value).origin;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

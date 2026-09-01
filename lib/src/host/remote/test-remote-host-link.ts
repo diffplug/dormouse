@@ -56,7 +56,8 @@ export function enrolledStatus(
 }
 
 /**
- * A setup code as `setupQr` answers one: a `#setup?token=…` URL and its clock.
+ * A setup code as `setupQr` answers one: a `#setup?token=…&nonce=…` URL, the
+ * mint it came from, and its clock.
  *
  * The expiry is relative to *now* rather than a fixed epoch, because the panel
  * renders the minutes left — a frozen timestamp would render "expired" in every
@@ -65,7 +66,10 @@ export function enrolledStatus(
  */
 export function setupQrResult(over: Partial<SetupQrResult> = {}): SetupQrResult {
   return {
-    url: 'https://ned-mac.tail9c2f1.ts.net/#setup?token=3PkQ8sV2mYb1hZr7Lw0cJdN6xTgAeUiOpqRsFuHv9Kz',
+    url:
+      'https://ned-mac.tail9c2f1.ts.net/#setup?token=3PkQ8sV2mYb1hZr7Lw0cJdN6xTgAeUiOpqRsFuHv9Kz' +
+      '&nonce=Hs4mZbC1uKq7VnP0LxDgTfE8yRjWaOiUcQtBv3MdN2s',
+    mintId: 'mint-story',
     expiresAt: Date.now() + 5 * 60 * 1000,
     ...over,
   };
@@ -123,10 +127,13 @@ export function makeStubRemoteHostLink(primed: PrimedRemoteHost): RemoteHostLink
     notify: () => {},
     on: (name, listener) => {
       if (name === 'setupTokenRedeemed' && primed.setupRedeemed) {
+        // Naming the mint the stub's own `setupQr` answered, because the panel
+        // acts only on its own code (`service-protocol.ts`).
+        const { mintId } = primed.setupQr ?? setupQrResult();
         // A microtask rather than inline: the panel subscribes during an effect,
         // and setting state before that effect has returned is a no-op React
         // warns about.
-        queueMicrotask(() => listener(undefined));
+        queueMicrotask(() => listener({ name: 'setupTokenRedeemed', mintId }));
       }
       return () => {};
     },

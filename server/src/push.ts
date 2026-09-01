@@ -186,15 +186,10 @@ function decodeVapidKey(value: string, name: 'public' | 'private', length: numbe
 export const PUSH_TTL_SECONDS = 300;
 export const PUSH_REQUEST_TIMEOUT_MS = 10_000;
 
-/**
- * Wall-clock bound on one delivery attempt, deliberately above
- * {@link PUSH_REQUEST_TIMEOUT_MS} so it only fires where socket inactivity
- * cannot: a push service that trickles bytes, or stalls mid-handshake, keeps
- * resetting the inactivity timer forever. Far below {@link PUSH_TTL_SECONDS},
- * since a delivery still in flight after this long has already missed the
- * alarm it was carrying.
- */
-export const PUSH_SEND_DEADLINE_MS = 15_000;
+// The third bound of the trio, `PUSH_SEND_DEADLINE_MS`, lives in
+// `server-lib-common` rather than here: it is deliberately above
+// PUSH_REQUEST_TIMEOUT_MS so it only fires where socket inactivity cannot, and
+// the Host has to size its own request timeout above it in turn.
 
 /**
  * Run one send under a wall-clock deadline, reporting `failed` if it does not

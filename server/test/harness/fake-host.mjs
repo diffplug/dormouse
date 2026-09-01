@@ -99,9 +99,9 @@ export class FakeHost extends EventEmitter {
     if (!frame || typeof frame.t !== 'string') return;
     if (frame.t === 'setup-token-redeemed') {
       // The one server→host frame addressing no Client, so it is handled before
-      // the clientId guard. The real Host drops it for now (remote-host.ts);
-      // here it becomes an event so a test can see the announcement arrive.
-      this.emit('setup-token-redeemed');
+      // the clientId guard. It names the mint, never the token — the real Host
+      // routes it to whichever panel displayed that code (remote-host.ts).
+      this.emit('setup-token-redeemed', { mintId: frame.mintId });
       return;
     }
     if (typeof frame.clientId !== 'string') return;

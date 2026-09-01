@@ -10,13 +10,18 @@
 import type { HostEnrollment } from './enrollment';
 
 /**
- * How long any Host→Server call waits before it gives up.
+ * How long a Host→Server call waits before it gives up, unless the caller names
+ * its own budget.
  *
  * Under the webview's own 15 s command budget (`link-client.ts`), so a command
  * that ran one of these surfaces the real failure rather than a bare timeout —
  * and, for the calls that run on the service's lifecycle chain, so a server that
  * accepts the connection and then answers nothing cannot wedge every later
  * command for the platform's default socket timeout, which is minutes.
+ *
+ * **A route the Server may legitimately hold open for longer needs its own
+ * `timeoutMs`**, or a request that succeeded reports as a failure: push delivery
+ * is the one such route today (`push-delivery.ts`).
  */
 export const HOST_REQUEST_TIMEOUT_MS = 10_000;
 

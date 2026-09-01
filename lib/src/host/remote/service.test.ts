@@ -9,6 +9,7 @@ import { hostname } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   API_ROUTES,
+  computeSetupProof,
   type EnrollmentOffer,
   type HostAclRecord,
   type PairingRequest,
@@ -126,6 +127,7 @@ function fakeFetch(): typeof globalThis.fetch {
             ? { expiresAt: Date.now() + setupTokenTtlMs }
             : {
                 token: `setup-token-${++setupTokensMinted}`,
+                mintId: `mint-${setupTokensMinted}`,
                 expiresAt: Date.now() + setupTokenTtlMs,
               },
       } as Response;
@@ -887,19 +889,39 @@ describe('setup QR', () => {
     return socket;
   }
 
-  /** Mint a code and pull the token back out of the URL a phone would open. */
-  async function mint(): Promise<{ url: string; expiresAt: number; token: string }> {
+  /**
+   * Mint a code and pull both of the QR's secrets back out of the URL a phone
+   * would open: the Server's token, and the nonce this Host added.
+   */
+  async function mint(): Promise<SetupQrResult & { token: string; nonce: string }> {
     const result = (await command('setupQr')).result as SetupQrResult;
-    const token = new URL(result.url).hash.replace('#setup?token=', '');
-    return { ...result, token: decodeURIComponent(token) };
+    const params = new URLSearchParams(new URL(result.url).hash.replace('#setup?', ''));
+    return { ...result, token: params.get('token')!, nonce: params.get('nonce')! };
   }
 
-  function pair(socket: FakeSocket, clientId: string, setupNonce?: string) {
+  /**
+   * Pair as the phone that scanned `nonce` would — computing the proof with the
+   * shared helper, over its own device key — and wait for the queue to move.
+   * Verifying a proof is a WebCrypto HMAC, so the item lands a turn of the event
+   * loop after the frame.
+   */
+  async function pair(socket: FakeSocket, clientId: string, nonce?: string) {
+    const devicePublicKey = `device-${clientId}`;
+    const before = queueEvents().length;
     socket.receive({
       t: 'pair',
       clientId,
-      request: { ...PAIRING, devicePublicKey: `device-${clientId}`, setupNonce },
+      request: {
+        ...PAIRING,
+        devicePublicKey,
+        ...(nonce === undefined
+          ? {}
+          : { setupProof: await computeSetupProof(nonce, devicePublicKey) }),
+      },
     });
+    for (let i = 0; i < 50 && queueEvents().length === before; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
     return queueEvents().at(-1)!.queue.find((item) => item.clientId === clientId)!;
   }
 
@@ -916,9 +938,14 @@ describe('setup QR', () => {
     expect(posted.init!.redirect).toBe('error');
 
     // The origin is the enrollment's — the phone-facing WebAuthn origin — and
-    // the token rides in the URL, which is the whole point of the command.
-    expect(result.url).toBe(`${QR_ENROLLMENT.origin}/#setup?token=setup-token-1`);
+    // both secrets ride in the URL, which is the whole point of the command.
     expect(result.token).toBe('setup-token-1');
+    expect(result.url).toBe(
+      `${QR_ENROLLMENT.origin}/#setup?token=setup-token-1&nonce=${result.nonce}`,
+    );
+    // The nonce is this Host's own, 256 bits of it, and nothing the Server sent.
+    expect(result.nonce).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(JSON.stringify(requests)).not.toContain(result.nonce);
     // The `hostToken` is not what crosses: only the code a human will scan does.
     expect(JSON.stringify(sent)).not.toContain('host-bearer-secret');
   });
@@ -933,50 +960,68 @@ describe('setup QR', () => {
   it('fails the mint when the server answers a 200 that is not a setup token', async () => {
     await running();
     setupTokenMalformed = true;
-    // An `undefined` token would go into the QR *and* into the set that decides
-    // `verified` on the next pairing.
+    // An `undefined` token would go straight into the QR encoder.
     expect((await command('setupQr')).error).toContain('not a setup token');
   });
 
-  it('marks a pairing verified for a nonce it minted, and never mirrors the nonce', async () => {
-    const socket = await running();
-    const { token } = await mint();
-
-    const item = pair(socket, 'c1', token);
-    expect(item.verified).toBe(true);
-    // The webview is told the verdict, not the proof behind it. Its own copy of
-    // the code is the QR it asked for; the pairing must not hand it a second one.
-    // Cast because `MirroredPairingRequest` has no such field — this is the
-    // runtime half of that claim.
-    expect((item.request as PairingRequest).setupNonce).toBeUndefined();
-    expect(JSON.stringify(queueEvents())).not.toContain(token);
+  it('paints nothing for a mint that resolves onto a different Host', async () => {
+    // The round trip can straddle an enroll elsewhere. The code belongs to the
+    // server we just left, so it must fail rather than mint a nonce onto a
+    // replacement that could never verify it.
+    await running();
+    const minting = command('setupQr');
+    await command('clearEnrollment');
+    expect((await minting).error).toContain('reconnected to a different server');
   });
 
-  it('spends a nonce on the first pairing that uses it', async () => {
+  it('marks a pairing verified for its own nonce, and never mirrors the proof', async () => {
     const socket = await running();
-    const { token } = await mint();
+    const { nonce } = await mint();
 
-    expect(pair(socket, 'c1', token).verified).toBe(true);
-    // Single use: one scan sets up one phone, so a replay is an ordinary
-    // fingerprint-compare pairing rather than an error.
-    expect(pair(socket, 'c2', token).verified).toBe(false);
-    expect(socket.frames('pair-result')).toEqual([]);
+    const item = await pair(socket, 'c1', nonce);
+    expect(item.verified).toBe(true);
+    // The webview is told the verdict, not the proof behind it, and never the
+    // nonce — which the Server has not seen either.
+    // Cast because `MirroredPairingRequest` has no such field — this is the
+    // runtime half of that claim.
+    expect((item.request as PairingRequest).setupProof).toBeUndefined();
+    expect(JSON.stringify(queueEvents())).not.toContain(nonce);
+  });
+
+  it('keeps a re-delivered request verified, and spends the nonce on approval', async () => {
+    const socket = await running();
+    const { nonce } = await mint();
+
+    // Non-consuming at receipt: the relay may re-deliver the same phone's frame.
+    expect((await pair(socket, 'c1', nonce)).verified).toBe(true);
+    const second = await pair(socket, 'c2', nonce);
+    expect(second.verified).toBe(true);
+
+    // Approving is what spends it — and every other pairing standing on that
+    // nonce is re-mirrored unverified in the same step.
+    await command('approve', { clientId: 'c2', pairingId: second.pairingId });
+    expect(
+      queueEvents().at(-1)!.queue.find((item) => item.clientId === 'c1')!.verified,
+    ).toBe(false);
+    expect((await pair(socket, 'c3', nonce)).verified).toBe(false);
   });
 
   it('treats an unknown or expired nonce as an ordinary pairing', async () => {
     const socket = await running();
-    expect(pair(socket, 'c1', 'never-minted-here').verified).toBe(false);
+    // Something has to be outstanding, or there is nothing to compare against.
+    await mint();
+    expect((await pair(socket, 'c1', 'never-minted-here')).verified).toBe(false);
 
     setupTokenTtlMs = -1;
-    const { token } = await mint();
-    expect(pair(socket, 'c2', token).verified).toBe(false);
-    // A nonce-less phone — the QR-less path — pairs exactly as it always did.
-    expect(pair(socket, 'c3').verified).toBe(false);
+    const { nonce } = await mint();
+    expect((await pair(socket, 'c2', nonce)).verified).toBe(false);
+    // A proofless phone — the QR-less path — pairs exactly as it always did.
+    expect((await pair(socket, 'c3')).verified).toBe(false);
   });
 
   it('forgets its codes when the enrollment they belong to goes', async () => {
     const socket = await running();
-    const { token } = await mint();
+    const { nonce } = await mint();
     expect(socket.frames('pair-result')).toEqual([]);
 
     await command('clearEnrollment');
@@ -988,14 +1033,15 @@ describe('setup QR', () => {
     const reconnected = sockets.at(-1)!;
     reconnected.open();
 
-    // The token was minted by the server this Host just left.
-    expect(pair(reconnected, 'c1', token).verified).toBe(false);
+    // The nonce belongs to the Host this service just replaced.
+    expect((await pair(reconnected, 'c1', nonce)).verified).toBe(false);
   });
 
-  it('tells the webview when a code it minted is spent', async () => {
+  it('tells the webview which code was spent', async () => {
     const socket = await running();
-    socket.receive({ t: 'setup-token-redeemed' });
-    expect(uiEvents()).toContainEqual({ name: 'setupTokenRedeemed' });
+    socket.receive({ t: 'setup-token-redeemed', mintId: 'mint-1' });
+    // The mint, never the token: a panel showing a different code stays live.
+    expect(uiEvents()).toContainEqual({ name: 'setupTokenRedeemed', mintId: 'mint-1' });
   });
 });
 

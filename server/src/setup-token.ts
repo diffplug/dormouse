@@ -9,7 +9,9 @@
 
 import { randomBytes } from 'node:crypto';
 
-import { DEFAULT_PAIRING_TTL_MS, toBase64Url } from 'server-lib-common';
+import { DEFAULT_PAIRING_TTL_MS, MAX_TOKENS_PER_HOST, toBase64Url } from 'server-lib-common';
+
+export { MAX_TOKENS_PER_HOST };
 
 /**
  * How long a minted token stays redeemable. It *is* `DEFAULT_PAIRING_TTL_MS`
@@ -19,24 +21,30 @@ import { DEFAULT_PAIRING_TTL_MS, toBase64Url } from 'server-lib-common';
  */
 export const SETUP_TOKEN_TTL_MS = DEFAULT_PAIRING_TTL_MS;
 
-/**
- * How many unspent tokens ONE Host may hold — the bound on this map, which
- * anything holding a `hostToken` can otherwise grow for the process's lifetime
- * by re-rendering its QR in a loop. A human scans one at a time, so the cap is
- * far above any real use, and total memory stays bounded by enrolled hosts ×
- * this. Per-host rather than global: a global cap makes one Host's minting loop
- * evict another Host's live token mid-scan. A Host's own oldest goes first —
- * same rule as `MAX_PENDING_TICKETS`
- * (`server-lib-common/src/security/pairing.ts`).
- */
-export const MAX_TOKENS_PER_HOST = 8;
+// `MAX_TOKENS_PER_HOST` bounds this map, which anything holding a `hostToken`
+// can otherwise grow for the process's lifetime by re-rendering its QR in a
+// loop. Per-host rather than global: a global cap makes one Host's minting loop
+// evict another Host's live token mid-scan. A Host's own oldest goes first —
+// same rule as `MAX_PENDING_TICKETS`
+// (`server-lib-common/src/security/pairing.ts`). It is defined in
+// `server-lib-common` because the Host caps its own map of paired nonces at the
+// same number.
 
 /** 256 bits, like every other unguessable handle in this system. */
 const SETUP_TOKEN_BYTE_LENGTH = 32;
 
+/**
+ * How many bytes name a mint. Not a credential — it is echoed to the Host on
+ * redemption so a laptop showing several codes can retire the right one — so it
+ * needs only to be unguessable enough that no other mint collides with it.
+ */
+const MINT_ID_BYTE_LENGTH = 16;
+
 export interface IssuedSetupToken {
   /** Base64url token bytes; also the handle used to peek/consume it. */
   readonly token: string;
+  /** Opaque handle for this mint, echoed by `setup-token-redeemed`. */
+  readonly mintId: string;
   readonly expiresAt: number;
 }
 
@@ -48,6 +56,8 @@ export interface SetupTokenIssuerOptions {
 /** What a live token resolves to: the Host that minted it, and when it dies. */
 export interface SetupTokenEntry {
   readonly hostId: string;
+  /** Which mint this token came from; the redemption announcement names it. */
+  readonly mintId: string;
   readonly expiresAt: number;
 }
 
@@ -63,9 +73,13 @@ export class SetupTokenIssuer {
   issue(hostId: string): IssuedSetupToken {
     this.#prune(hostId);
     const token = toBase64Url(randomBytes(SETUP_TOKEN_BYTE_LENGTH));
+    // Random rather than derived from the token: the mint id is echoed back to
+    // the Host in the clear, and anything derived from a credential is one
+    // preimage away from being it.
+    const mintId = toBase64Url(randomBytes(MINT_ID_BYTE_LENGTH));
     const expiresAt = this.#now() + SETUP_TOKEN_TTL_MS;
-    this.#tokens.set(token, { hostId, expiresAt });
-    return { token, expiresAt };
+    this.#tokens.set(token, { hostId, mintId, expiresAt });
+    return { token, mintId, expiresAt };
   }
 
   /**

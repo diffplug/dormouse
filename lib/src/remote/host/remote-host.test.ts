@@ -29,10 +29,12 @@ import {
   signDeviceChallenge,
   toBase64Url,
   utf8Encode,
+  computeSetupProof,
   type ConnectionRequest,
   type HostAclRecord,
   type PairingRequest,
   MAX_PENDING_PAIRINGS,
+  MAX_TOKENS_PER_HOST,
 } from 'server-lib-common';
 import { RemoteHost, type RemoteHostOptions } from './remote-host';
 import type { HostEnrollment } from './enrollment';
@@ -215,81 +217,194 @@ describe('RemoteHost frame handling', () => {
     expect(savedRecords).toHaveLength(0);
   });
 
-  it('marks a pairing verified for a token it minted, and spends it', () => {
+  /** The QR-less pairing every setup-proof test varies from. */
+  const PAIRING: PairingRequest = {
+    accountId: 'owner',
+    passkeyCredentialId: 'cred-1',
+    passkeyPublicKeyHash: 'hash-1',
+    devicePublicKey: 'device-1',
+    requestedLabel: 'iPhone Safari',
+  };
+
+  /**
+   * Send a `pair` and wait for it to land. Verifying a setup proof is a
+   * WebCrypto HMAC, so an approval carrying one arrives a turn of the event loop
+   * after `receive` rather than inside it.
+   */
+  async function pair(clientId: string, request: unknown): Promise<PendingPairing> {
+    const before = approvals.length;
+    socket.receive({ t: 'pair', clientId, request });
+    for (let i = 0; i < 50 && approvals.length === before; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    return approvals.at(-1)!;
+  }
+
+  it('verifies a proof over its own nonce, and does not spend it on arrival', async () => {
     const host = makeHost();
-    host.rememberSetupToken('minted-here', Date.now() + 60_000);
-    const request: PairingRequest = {
-      accountId: 'owner',
-      passkeyCredentialId: 'cred-1',
-      passkeyPublicKeyHash: 'hash-1',
-      devicePublicKey: 'device-1',
-      requestedLabel: 'iPhone Safari',
-      setupNonce: 'minted-here',
-    };
-    socket.receive({ t: 'pair', clientId: 'c1', request });
+    const nonce = host.mintSetupNonce(Date.now() + 60_000);
+    const setupProof = await computeSetupProof(nonce, PAIRING.devicePublicKey);
 
-    expect(approvals[0]!.verified).toBe(true);
-    // The proof is consumed here and never handed on: `verified` is what the
-    // modal and the mirrored queue get, not the token behind it. Cast because
-    // `MirroredPairingRequest` has no such field — this is the runtime half of
-    // that claim.
-    expect((approvals[0]!.request as PairingRequest).setupNonce).toBeUndefined();
+    const first = await pair('c1', { ...PAIRING, setupProof });
+    expect(first.verified).toBe(true);
+    // The proof never travels on: `verified` is what the modal and the mirrored
+    // queue get. Cast because `MirroredPairingRequest` has no such field — this
+    // is the runtime half of that claim.
+    expect((first.request as PairingRequest).setupProof).toBeUndefined();
 
-    // Single use — one scan sets up one phone. The same nonce again is an
-    // ordinary pairing, not an error: the phone may simply be re-pairing long
-    // after its code was spent.
-    socket.receive({ t: 'pair', clientId: 'c2', request });
-    expect(approvals[1]!.verified).toBe(false);
+    // Verification is non-consuming. The relay may re-deliver the same phone's
+    // frame, and a replay carrying the same device key is asking for exactly
+    // what the user is about to approve — so it must not silently downgrade.
+    expect((await pair('c2', { ...PAIRING, setupProof })).verified).toBe(true);
     expect(socket.frames('pair-result')).toEqual([]);
   });
 
-  it('never verifies a token that expired, and drops it on the next mint', () => {
+  it('never verifies a proof bound to a different device key', async () => {
+    // The security property the whole scheme exists for. A hostile Server sees
+    // the relayed pairing request and can substitute its own `devicePublicKey`,
+    // but the proof it can copy was computed over the phone's key — and it has
+    // never seen the nonce, so it cannot compute one over its own.
     const host = makeHost();
-    host.rememberSetupToken('stale', Date.now() - 1);
-    // Recording a second code prunes the first, whether or not anyone asks
-    // about it — nothing else sweeps that map.
-    host.rememberSetupToken('fresh', Date.now() + 60_000);
-    const base: PairingRequest = {
-      accountId: 'owner',
-      passkeyCredentialId: 'cred-1',
-      passkeyPublicKeyHash: 'hash-1',
-      devicePublicKey: 'device-1',
-      requestedLabel: 'iPhone Safari',
-    };
-    socket.receive({ t: 'pair', clientId: 'c1', request: { ...base, setupNonce: 'stale' } });
-    socket.receive({ t: 'pair', clientId: 'c2', request: { ...base, setupNonce: 'fresh' } });
+    const nonce = host.mintSetupNonce(Date.now() + 60_000);
+    const phonesProof = await computeSetupProof(nonce, 'phone-key');
 
-    expect(approvals.map((pending) => pending.verified)).toEqual([false, true]);
+    const substituted = await pair('c1', {
+      ...PAIRING,
+      devicePublicKey: 'server-key',
+      setupProof: phonesProof,
+    });
+    expect(substituted.verified).toBe(false);
+    // The real phone's own request still verifies, so this is a rejection of
+    // the substitution rather than of the ceremony.
+    expect(
+      (await pair('c2', { ...PAIRING, devicePublicKey: 'phone-key', setupProof: phonesProof }))
+        .verified,
+    ).toBe(true);
   });
 
-  it('pairs unverified with no nonce, and with one nothing minted', () => {
+  it('spends the nonce when a verified pairing is approved, and downgrades the rest', async () => {
+    const host = makeHost();
+    const nonce = host.mintSetupNonce(Date.now() + 60_000);
+    const setupProof = await computeSetupProof(nonce, PAIRING.devicePublicKey);
+
+    const winner = await pair('c1', { ...PAIRING, setupProof });
+    const other = await pair('c2', { ...PAIRING, setupProof });
+    expect([winner.verified, other.verified]).toEqual([true, true]);
+
+    // One scan sets up one phone: approving is what the nonce authorized, so
+    // that is where it is spent.
+    winner.approve();
+    // Everything still standing on it is re-surfaced unverified, so the modal
+    // goes back to asking for the fingerprint compare rather than keeping copy
+    // that is no longer true.
+    const downgraded = approvals.at(-1)!;
+    expect(downgraded.clientId).toBe('c2');
+    expect(downgraded.verified).toBe(false);
+    expect(downgraded.pairingId).toBe(other.pairingId);
+    // And a later request holding the same proof is an ordinary pairing.
+    expect((await pair('c3', { ...PAIRING, setupProof })).verified).toBe(false);
+  });
+
+  it('never verifies an expired nonce, and drops it on the next mint', async () => {
+    const host = makeHost();
+    const stale = host.mintSetupNonce(Date.now() - 1);
+    // Minting a second code prunes the first, whether or not anyone asks about
+    // it — nothing else sweeps that map.
+    const fresh = host.mintSetupNonce(Date.now() + 60_000);
+
+    expect(
+      (await pair('c1', { ...PAIRING, setupProof: await computeSetupProof(stale, 'device-1') }))
+        .verified,
+    ).toBe(false);
+    expect(
+      (await pair('c2', { ...PAIRING, setupProof: await computeSetupProof(fresh, 'device-1') }))
+        .verified,
+    ).toBe(true);
+  });
+
+  it('pairs unverified with no proof, and with one nothing minted', async () => {
+    const host = makeHost();
+    expect((await pair('c1', PAIRING)).verified).toBe(false);
+    // Nothing minted, so nothing to compute against — and no MAC is computed.
+    expect((await pair('c2', { ...PAIRING, setupProof: 'forged' })).verified).toBe(false);
+    host.mintSetupNonce(Date.now() + 60_000);
+    expect((await pair('c3', { ...PAIRING, setupProof: 'forged' })).verified).toBe(false);
+
+    // All three still reach the modal: an unverifiable proof costs the
+    // fingerprint compare, not the pairing.
+    expect(approvals).toHaveLength(3);
+    expect(socket.frames('pair-result')).toEqual([]);
+  });
+
+  it('bounds proofs in flight, since a verification is not on the queue yet', async () => {
+    // Verification is async, so the pending-pairing cap cannot see a request
+    // that has not landed. Unbounded, a relay flooding proof-carrying frames
+    // while a QR is up buys concurrent MAC computations in the process that
+    // owns every PTY.
+    const host = makeHost();
+    const nonce = host.mintSetupNonce(Date.now() + 60_000);
+    const setupProof = await computeSetupProof(nonce, PAIRING.devicePublicKey);
+
+    const flood = 200;
+    for (let i = 0; i < flood; i += 1) {
+      socket.receive({ t: 'pair', clientId: `f${i}`, request: { ...PAIRING, setupProof } });
+    }
+    for (let i = 0; i < 50 && approvals.length < flood; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    // Every frame still pairs; past the cap it simply skips verification, which
+    // is the safe degradation — the fingerprint compare.
+    expect(approvals).toHaveLength(flood);
+    expect(approvals.filter((pending) => pending.verified).length).toBeLessThanOrEqual(
+      MAX_PENDING_PAIRINGS,
+    );
+    // And the modal queue itself is still capped.
+    expect(host.trackedClientCount).toBeLessThanOrEqual(MAX_PENDING_PAIRINGS);
+  });
+
+  it('caps the nonces it holds at the Server’s own bound', () => {
+    // The two sides of one credential: a Host that kept nonces the Server had
+    // already evicted would mark a pairing verified against a token that can no
+    // longer be redeemed.
+    const host = makeHost();
+    const nonces = Array.from({ length: MAX_TOKENS_PER_HOST + 2 }, () =>
+      host.mintSetupNonce(Date.now() + 60_000),
+    );
+    expect(new Set(nonces).size).toBe(nonces.length);
+    expect(host.outstandingSetupNonceCount).toBe(MAX_TOKENS_PER_HOST);
+  });
+
+  it('builds the mirrored request from the fields it knows, and no others', async () => {
+    // `isPairingRequest` allows extras, so a spread would forward whatever else
+    // the relay attached into the mirrored queue and the persisted ACL record.
     makeHost();
-    const base: PairingRequest = {
-      accountId: 'owner',
-      passkeyCredentialId: 'cred-1',
-      passkeyPublicKeyHash: 'hash-1',
-      devicePublicKey: 'device-1',
-      requestedLabel: 'iPhone Safari',
-    };
-    socket.receive({ t: 'pair', clientId: 'c1', request: base });
-    socket.receive({ t: 'pair', clientId: 'c2', request: { ...base, setupNonce: 'forged' } });
+    const pending = await pair('c1', { ...PAIRING, injected: 'from-the-relay' });
 
-    expect(approvals.map((pending) => pending.verified)).toEqual([false, false]);
-    // Both still reach the modal: an unverifiable nonce costs the fingerprint
-    // compare, not the pairing.
-    expect(approvals).toHaveLength(2);
-    expect(socket.frames('pair-result')).toEqual([]);
+    expect(Object.keys(pending.request).sort()).toEqual([
+      'accountId',
+      'devicePublicKey',
+      'passkeyCredentialId',
+      'passkeyPublicKeyHash',
+      'requestedLabel',
+    ]);
+    pending.approve();
+    expect(JSON.stringify(savedRecords)).not.toContain('from-the-relay');
   });
 
   it('routes setup-token-redeemed, the one frame that addresses no client', () => {
-    let redeemed = 0;
+    const redeemed: string[] = [];
     makeHost(
       () => [],
       () => Date.now(),
-      { onSetupTokenRedeemed: () => redeemed++ },
+      { onSetupTokenRedeemed: (mintId) => redeemed.push(mintId) },
     );
+    socket.receive({ t: 'setup-token-redeemed', mintId: 'mint-1' });
+    // It names the mint, never the token, so a Host showing several codes can
+    // retire the right one.
+    expect(redeemed).toEqual(['mint-1']);
+    // The relay is not trusted to have stamped one.
     socket.receive({ t: 'setup-token-redeemed' });
-    expect(redeemed).toBe(1);
+    expect(redeemed).toEqual(['mint-1']);
     // It carries no clientId by design, so it must be routed before the
     // addressed-frame narrowing rather than dropped by it.
     expect(socket.sent).toEqual([]);

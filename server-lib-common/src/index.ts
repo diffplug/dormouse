@@ -23,6 +23,7 @@ export * from './security/passkey.js';
 export * from './security/acl.js';
 export * from './security/push.js';
 export * from './security/pairing.js';
+export * from './security/setup-proof.js';
 export * from './security/connection.js';
 
 /** Path of the greeting endpoint that `server` serves and `lib` can call. */

@@ -374,9 +374,10 @@ export class RemoteHostService {
   }
 
   /**
-   * Mint the credential behind this machine's setup QR, over the Host's own
-   * authenticated channel — this service is the half that holds the bearer, so
-   * it mints and hands the token to the `RemoteHost` that will have to verify it.
+   * Compose this machine's setup QR: the Server's single-use setup token, minted
+   * over the Host's own authenticated channel because this service is the half
+   * that holds the bearer, plus the `RemoteHost`'s own setup nonce, which never
+   * goes near the Server.
    *
    * The URL is composed here, from the origin this Host enrolled against, for
    * the reason `SetupTokenResponse` carries the token alone: a URL minted
@@ -397,19 +398,31 @@ export class RemoteHostService {
     );
     const body: unknown = await response.json().catch(() => null);
     // Guarded like every other 200 off this wire: an `undefined` token would go
-    // into the QR *and* into the map that decides `verified` on the next pair.
+    // into the QR, and an unbounded one throws inside the encoder.
     if (!isSetupTokenResponse(body)) {
       throw new Error('could not mint a setup code: the server’s answer was not a setup token.');
     }
     // The Host captured above, not whatever `#host` holds now: a swap during the
-    // round trip means this code belongs to the server we just left, and the
-    // replacement must not be able to verify it.
-    host.rememberSetupToken(body.token, body.expiresAt);
+    // round trip means this code belongs to the server we just left, so it is
+    // dropped rather than minted onto the replacement — which could not verify
+    // it anyway, and whose panel must not paint a code for the old server.
+    if (this.#host !== host) {
+      throw new Error(
+        'could not mint a setup code: this machine reconnected to a different server.',
+      );
+    }
+    // The second secret, and the one that makes `verified` unforgeable by the
+    // Server: it exists only on this screen and on the phone that photographs it
+    // (`docs/specs/remote-security-model.md` → Pairing Ceremony).
+    const nonce = host.mintSetupNonce(body.expiresAt);
     // `enrollment.origin` is the phone-facing WebAuthn origin — where Pocket is
     // served and where the passkey will be registered — not necessarily the
     // `serverUrl` this Host posts to.
     return {
-      url: `${enrollment.origin}/#setup?token=${encodeURIComponent(body.token)}`,
+      url:
+        `${enrollment.origin}/#setup?token=${encodeURIComponent(body.token)}` +
+        `&nonce=${encodeURIComponent(nonce)}`,
+      mintId: body.mintId,
       expiresAt: body.expiresAt,
     };
   }
@@ -549,7 +562,7 @@ export class RemoteHostService {
       },
       requestApproval: (pending) => this.#enqueuePairing(pending),
       dismissApproval: (clientId) => this.#resolvePairing(clientId),
-      onSetupTokenRedeemed: () => this.#emitSetupTokenRedeemed(),
+      onSetupTokenRedeemed: (mintId) => this.#emitSetupTokenRedeemed(mintId),
       now: this.#now,
     });
     this.#host.start();
@@ -582,8 +595,9 @@ export class RemoteHostService {
 
   #stopHost(): void {
     this.#host?.stop();
-    // Setup tokens go with it: they live on the `RemoteHost` precisely so a
-    // token the old server minted cannot verify a pairing against the new one.
+    // Setup nonces go with it: they live on the `RemoteHost` precisely so a
+    // code the old server's QR carried cannot verify a pairing against the new
+    // one.
     this.#host = null;
     // `stop()` dismisses every in-flight pairing, which empties the queue and
     // pushes the empty snapshot; clear defensively in case there was no Host.
@@ -628,11 +642,15 @@ export class RemoteHostService {
     );
   }
 
-  /** Announce that the code a Settings panel may be displaying is now spent. */
-  #emitSetupTokenRedeemed(): void {
+  /**
+   * Announce that the code a Settings panel may be displaying is now spent,
+   * naming the mint so a panel showing a *different* code stays live.
+   */
+  #emitSetupTokenRedeemed(mintId: string): void {
     if (this.#disposed) return;
     this.#sendToUi(REMOTE_HOST_EVENT_EVENT, {
       name: 'setupTokenRedeemed',
+      mintId,
     } satisfies SetupTokenRedeemedEvent);
   }
 

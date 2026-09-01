@@ -40,17 +40,18 @@ test('pair round-trips client→host with a stamped clientId, pair-result routes
       passkeyPublicKeyHash: await hashPasskeyPublicKey(authenticator.publicKey),
       devicePublicKey: 'device-1',
       requestedLabel: 'iPhone Safari',
-      // A phone set up by scanning the Host's QR carries that token's nonce.
-      // The server shape-checks it and nothing more — only the Host that
-      // minted the token can verify one — so it must arrive untouched.
-      setupNonce: 'nonce-from-the-qr',
+      // A phone set up by scanning the Host's QR carries a MAC under the nonce
+      // it scanned. The server shape-checks it and nothing more — it never saw
+      // the nonce, so it can neither verify nor forge one — and must forward it
+      // untouched.
+      setupProof: 'mac-over-the-device-key',
     };
     clientWs.send({ t: 'pair', hostId: host.hostId, request: pairingRequest });
     const forwarded = await hostWs.take();
     assert.equal(forwarded.t, 'pair');
     assert.equal(typeof forwarded.clientId, 'string');
     assert.deepEqual(forwarded.request, pairingRequest);
-    assert.equal(forwarded.request.setupNonce, 'nonce-from-the-qr');
+    assert.equal(forwarded.request.setupProof, 'mac-over-the-device-key');
 
     const record = { hostId: host.hostId, accountId: 'owner' };
     hostWs.send({ t: 'pair-result', clientId: forwarded.clientId, approved: true, record });

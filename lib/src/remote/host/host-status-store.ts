@@ -20,6 +20,7 @@ import type {
   PushSendSummary,
   RemoteHostConsoleStatus,
   SetupQrResult,
+  SetupTokenRedeemedEvent,
 } from '../../host/remote/service-protocol';
 import { getPlatform } from '../../lib/platform';
 import type { RemoteHostLink } from '../../lib/platform/types';
@@ -337,12 +338,25 @@ export async function mintSetupQr(): Promise<SetupQrResult> {
 }
 
 /**
- * Be told when a setup code this machine minted is spent, so a panel still
- * offering it can stop. Independent of the status subscription above: the event
- * carries nothing and changes no status field, so there is nothing to re-read.
+ * Be told when a setup code this machine minted is spent, so the panel still
+ * offering *that* code can stop. Independent of the status subscription above:
+ * the event changes no status field, so there is nothing to re-read.
+ *
+ * The listener gets the `mintId`; a panel showing a different mint ignores it
+ * (`service-protocol.ts` → `SetupTokenRedeemedEvent`). An event that names no
+ * mint is dropped here rather than passed on as `undefined` — the service is
+ * typed to send one, so the only source of a malformed event is a bridge nobody
+ * should be trusting to pick a panel.
  */
-export function subscribeToSetupTokenRedeemed(listener: () => void): () => void {
-  return link()?.on('setupTokenRedeemed', () => listener()) ?? (() => {});
+export function subscribeToSetupTokenRedeemed(
+  listener: (mintId: string) => void,
+): () => void {
+  return (
+    link()?.on('setupTokenRedeemed', (data) => {
+      const mintId = (data as SetupTokenRedeemedEvent | undefined)?.mintId;
+      if (typeof mintId === 'string') listener(mintId);
+    }) ?? (() => {})
+  );
 }
 
 /**
