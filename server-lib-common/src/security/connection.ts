@@ -1,31 +1,18 @@
 /**
- * Connection establishment: the Host's final access decision.
+ * The legacy connect2 request shape and the policy both verifiers share.
  *
- * A connection succeeds only if (spec: docs/specs/remote-security-model.md):
+ * The Host's own connection decision is now the end-to-end ceremony —
+ * `e2e-ceremony.ts` (`ConnectionRequestV1`, `verifyPresenceProof`,
+ * `ConnectionOutcomeV1`) over the ACL conjunction in `acl.ts`.
+ * {@link ConnectionPolicy} stays here because it is what a Host enrolls with
+ * and what both the Server and the Host demand of an assertion.
  *
- *   1. The passkey proves fresh user presence.
- *   2. The Server recognizes the account.       (Server-side; not decided here.)
- *   3. The Host recognizes the passkey credential.
- *   4. The Host recognizes the device key.
- *   5. The Client signed a fresh Host challenge with its device key.
- *
- * {@link authorizeConnection} is the Host side of that decision. It evaluates
- * every layer — never short-circuiting on the first failure — and allows only
- * when ALL of them pass. Requirement 2 belongs to the Server; the Host
- * repeats the account binding anyway by checking the ACL record's account,
- * because the Server is not trusted with the final decision.
+ * STAGE-4 TRANSITIONAL: {@link ConnectionRequest} and {@link ConnectionFailure}
+ * remain only for the legacy relay path (`server/src/handshake.ts`) and the
+ * Pocket client that has not switched yet; both are deleted in 4c.
  */
 
-import { HostAcl, type HostAclRecord } from './acl.js';
-import { HostChallengeIssuer } from './challenge.js';
-import { verifyDeviceChallengeSignature } from './deviceKey.js';
-import {
-  hashPasskeyPublicKey,
-  verifyPasskeyAssertion,
-  type PasskeyAssertion,
-  type PasskeyAssertionResult,
-} from './passkey.js';
-import { getWebCrypto, type WebCryptoLike } from './webcrypto.js';
+import type { PasskeyAssertion } from './passkey.js';
 
 /** What a Client submits to open a session (all binary fields base64url). */
 export interface ConnectionRequest {
@@ -42,14 +29,6 @@ export interface ConnectionRequest {
     /** WebAuthn assertion bound to the same Host challenge. */
     readonly assertion: PasskeyAssertion;
   };
-}
-
-/** The Host-side state and policy that decide a connection. */
-export interface HostAuthority {
-  readonly hostId: string;
-  readonly acl: HostAcl;
-  readonly challenges: HostChallengeIssuer;
-  readonly policy: ConnectionPolicy;
 }
 
 export interface ConnectionPolicy {
@@ -78,86 +57,3 @@ export type ConnectionFailure =
   | 'account-mismatch'
   /** Device-key signature over the Host challenge did not verify. */
   | 'device-signature-invalid';
-
-export interface ConnectionDecision {
-  readonly allowed: boolean;
-  /** Empty when allowed; otherwise every layer that failed. */
-  readonly failures: readonly ConnectionFailure[];
-  /** The authorizing ACL record; null unless allowed. */
-  readonly record: HostAclRecord | null;
-  /** Passkey verification detail (e.g. `userVerified`), for logging/UI. */
-  readonly passkey: PasskeyAssertionResult;
-}
-
-/**
- * The Host's final access decision. The challenge is consumed up front —
- * success or failure, a challenge can only ever be presented once.
- */
-export async function authorizeConnection(
-  host: HostAuthority,
-  request: ConnectionRequest,
-  crypto: WebCryptoLike = getWebCrypto(),
-): Promise<ConnectionDecision> {
-  // 5 (freshness half): burn the challenge before any other work, so it can
-  // never be presented twice whatever the rest of the decision does.
-  const challengeValid = host.challenges.consume(request.challenge);
-
-  // 3 + 4: both identities must sit on the same active ACL record.
-  const auth = host.acl.authorize({
-    passkeyCredentialId: request.passkey.assertion.credentialId,
-    devicePublicKey: request.devicePublicKey,
-  });
-
-  // The remaining checks are independent and every layer is always evaluated
-  // (we never short-circuit on the first failure), so run the crypto
-  // concurrently rather than in series. Hashing the presented passkey key only
-  // means anything against a matched record, so it is skipped otherwise.
-  // The challenge must come after the spread so nothing on the policy object
-  // can ever override the freshness binding.
-  const passkeyPromise = verifyPasskeyAssertion(
-    request.passkey.assertion,
-    request.passkey.publicKey,
-    { ...host.policy, challenge: request.challenge },
-    crypto,
-  );
-  const signaturePromise = verifyDeviceChallengeSignature(
-    { hostId: host.hostId, challenge: request.challenge, devicePublicKey: request.devicePublicKey },
-    request.deviceSignature,
-    crypto,
-  );
-  // The catch is attached at creation: this promise is attacker-rejectable (a
-  // malformed publicKey is not base64url), and it must never sit rejected and
-  // unhandled while the earlier awaits run. null can't equal the stored hash,
-  // so a malformed key denies as a mismatch.
-  const keyHashPromise = auth.record
-    ? hashPasskeyPublicKey(request.passkey.publicKey, crypto).catch(() => null)
-    : undefined;
-
-  const passkey = await passkeyPromise;
-  const signatureValid = await signaturePromise;
-  const presentedKeyHash = await keyHashPromise;
-
-  // Assemble every failure, in spec order.
-  const failures: ConnectionFailure[] = [];
-  if (!challengeValid) failures.push('challenge-invalid');
-  if (!passkey.ok) failures.push('passkey-assertion-invalid');
-  if (auth.record === null) {
-    failures.push(...auth.reasons);
-  } else {
-    if (presentedKeyHash !== auth.record.passkeyPublicKeyHash) {
-      failures.push('passkey-key-mismatch');
-    }
-    if (auth.record.accountId !== request.accountId) {
-      failures.push('account-mismatch');
-    }
-  }
-  if (!signatureValid) failures.push('device-signature-invalid');
-
-  const allowed = failures.length === 0;
-  return {
-    allowed,
-    failures,
-    record: allowed ? auth.record : null,
-    passkey,
-  };
-}

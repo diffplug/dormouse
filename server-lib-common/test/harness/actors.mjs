@@ -1,8 +1,13 @@
 /**
  * In-memory actors simulating the three parties of the remote security model
  * (docs/specs/remote-security-model.md): Client (Dormouse Pocket), Host
- * (Dormouse Terminal), and coordinating Server. Everything runs on real
- * WebCrypto; only the transport is imaginary.
+ * (Dormouse Terminal), and coordinating Server.
+ *
+ * Everything here runs the *real* primitives — the QR grammar and its parser,
+ * the IK handshake against the invitation key and then the pinned Host static,
+ * the fixed-size padded control messages, the one presence verifier, the Host
+ * challenge issuer, and the Host ACL. Only the relay is imaginary: a Client
+ * hands its Noise messages straight to a Host object.
  *
  * Tampering is a first-class feature: every actor accepts overrides so tests
  * can forge exactly one field at a time and assert the precise deny reason.
@@ -11,21 +16,52 @@
 import {
   HostAcl,
   HostChallengeIssuer,
-  PairingCeremony,
-  authorizeConnection,
+  NoiseTransportSession,
+  boundedPairingLabel,
   concatBytes,
+  createNoiseInitiator,
+  createNoiseResponder,
+  e2eConnectionPrologue,
   ecdsaRawToDer,
-  generateDeviceKeyPair,
-  hashPasskeyPublicKey,
-  signDeviceChallenge,
+  formatPairingInvitationUrl,
+  fromBase64Url,
+  generateNoiseKeyPair,
+  isConnectionOutcomeV1,
+  isConnectionRequestV1,
+  isPairingOutcomeV1,
+  isPairingRequestV1,
+  pairingInvitationPrologue,
+  parsePairingInvitationUrl,
+  presenceChallenge,
+  samplePairingCode,
   toBase64Url,
   utf8Encode,
+  verifyPresenceProof,
 } from '../../dist/index.js';
 
 const subtle = globalThis.crypto.subtle;
 
 async function sha256(bytes) {
   return new Uint8Array(await subtle.digest('SHA-256', bytes));
+}
+
+function randomBytes(count) {
+  return globalThis.crypto.getRandomValues(new Uint8Array(count));
+}
+
+/** Base64url of 16 random bytes — the shape of every routing id on this wire. */
+export function randomRoutingId() {
+  return toBase64Url(randomBytes(16));
+}
+
+/** Base64url of 32 random bytes — setup tokens, delivery ids, Server nonces. */
+export function randomSecret() {
+  return toBase64Url(randomBytes(32));
+}
+
+/** A SimHost, or a bare hostId string; both name one Host to these actors. */
+function hostIdOf(host) {
+  return typeof host === 'string' ? host : host.hostId;
 }
 
 /** Deterministic, manually-advanced clock shared by actors in a scenario. */
@@ -126,7 +162,12 @@ export class SimAuthenticator {
   }
 }
 
-/** The coordinating Server: accounts and passkey registration. Never authoritative. */
+/**
+ * The coordinating Server: accounts, passkey registration, and the presence
+ * challenge it mints for one ceremony (`POST /api/reauth/begin`). Never
+ * authoritative — it learns only routing values and a handshake hash, and its
+ * answer authorizes nothing.
+ */
 export class SimServer {
   #accounts = new Map(); // accountId -> Set of credentialIds
 
@@ -147,116 +188,525 @@ export class SimServer {
       throw new Error(`server: credential ${credentialId} not registered to ${accountId}`);
     }
   }
+
+  /**
+   * Mint the WebAuthn challenge for one presence proof. The challenge is
+   * derived from the binding, so an assertion produced here authenticates only
+   * the ceremony that binding names.
+   */
+  async beginReauth({ accountId, credentialId, binding }) {
+    this.validateAccount(accountId, credentialId);
+    const serverNonce = randomSecret();
+    return {
+      serverNonce,
+      challenge: await presenceChallenge(binding, serverNonce),
+      allowCredentials: [credentialId],
+    };
+  }
 }
 
 /**
  * A compromised coordinating Server: vouches for anyone. Used to prove the
- * Host denies access even when the Server-side checks are attacker-controlled.
+ * Host denies access even when every Server-side check is attacker-controlled.
  */
 export class CompromisedServer extends SimServer {
   validateAccount() {}
 }
 
-/** The Host (Dormouse Terminal): ACL + challenges + pairing + final decision. */
+/**
+ * The Host (Dormouse Terminal): the ACL, the challenge issuer, one long-term
+ * Noise static, and the per-invitation one-use keypairs. It is the only party
+ * that writes the ACL, and the only one that decides a connection.
+ */
 export class SimHost {
-  constructor({ hostId, rpId, origin, clock = new FakeClock(), policy = {}, ttlMs } = {}) {
+  static async create({
+    hostId = randomRoutingId(),
+    label = 'Laptop',
+    rpId,
+    origin,
+    clock = new FakeClock(),
+    policy = {},
+    ttlMs,
+    invitationTtlSeconds = 300,
+  } = {}) {
+    const host = new SimHost({ hostId, label, rpId, origin, clock, policy, ttlMs, invitationTtlSeconds });
+    // The long-term static a paired Client pins and every later connection
+    // runs IK against. Public: the Host hands it out in every PairingOutcomeV1.
+    host.staticKeyPair = await generateNoiseKeyPair();
+    host.staticPublicKey = toBase64Url(host.staticKeyPair.publicKey);
+    return host;
+  }
+
+  /** inviteId -> { invitation, keyPair, state, session, clientStaticPublicKey } */
+  #invitations = new Map();
+  /** connectionId -> { session, clientStaticPublicKey, challenge } */
+  #connections = new Map();
+
+  constructor({ hostId, label, rpId, origin, clock, policy, ttlMs, invitationTtlSeconds }) {
     this.hostId = hostId;
+    this.label = label;
     this.clock = clock;
+    this.invitationTtlSeconds = invitationTtlSeconds;
     this.policy = { rpId, origin, ...policy };
+    // The origin the Host enrolled against, and the only prefix its QR carries.
+    this.appOrigin =
+      typeof this.policy.origin === 'string' ? this.policy.origin : this.policy.origin[0];
     this.acl = new HostAcl(hostId, { now: clock.now });
     this.challenges = new HostChallengeIssuer({ now: clock.now, ttlMs });
-    this.ceremony = new PairingCeremony(this.acl, { now: clock.now });
   }
 
   issueChallenge() {
     return this.challenges.issue();
   }
 
-  beginPairing(request) {
-    return this.ceremony.begin(request);
-  }
-
-  approvePairing(pairingId, { approvedBy = 'host-user', label } = {}) {
-    return this.ceremony.approve(pairingId, { approvedBy, label });
-  }
-
-  denyPairing(pairingId) {
-    this.ceremony.deny(pairingId);
-  }
-
-  handleConnect(request) {
-    return authorizeConnection(
-      { hostId: this.hostId, acl: this.acl, challenges: this.challenges, policy: this.policy },
-      request,
-    );
-  }
-}
-
-/** A Client (Dormouse Pocket): one browser profile holding one device key. */
-export class SimClient {
-  static async create({ label = 'Test Client', origin } = {}) {
-    const client = new SimClient({ label, origin });
-    client.deviceKey = await generateDeviceKeyPair();
-    return client;
-  }
-
-  constructor({ label, origin }) {
-    this.label = label;
-    this.origin = origin;
-  }
-
-  /** Simulate browser-data loss: the old key is gone, a fresh one replaces it. */
-  async loseDeviceKey() {
-    const previous = this.deviceKey.devicePublicKey;
-    this.deviceKey = await generateDeviceKeyPair();
-    return previous;
-  }
-
-  /** Run the pairing ceremony against a host; resolves to the ACL record. */
-  async pair(host, { accountId, authenticator, approvedBy = 'host-user', label } = {}) {
-    const ticket = host.beginPairing({
-      accountId,
-      passkeyCredentialId: authenticator.credentialId,
-      passkeyPublicKeyHash: await hashPasskeyPublicKey(authenticator.publicKey),
-      devicePublicKey: this.deviceKey.devicePublicKey,
-      requestedLabel: this.label,
-    });
-    return host.approvePairing(ticket.pairingId, { approvedBy, label });
+  /** The state the QR panel renders: `live`, `reserved`, `consumed`, or absent. */
+  invitationState(inviteId) {
+    return this.#invitations.get(inviteId)?.state;
   }
 
   /**
-   * Build the connection request a real client would send: fetch a Host
-   * challenge, assert with the passkey over it, sign it with the device key.
-   * `tamper.request` overrides request fields; `tamper.assertion` is passed
-   * through to the authenticator.
+   * Mint one invitation: a 16-byte id, an expiry, the Server's setup token, and
+   * a one-use X25519 responder keypair. The long-term static is deliberately
+   * absent — a first-time Client has no key to check a signature with, so IK
+   * possession of the scanned key is what it gets instead.
    */
-  async buildConnectRequest(host, { accountId, authenticator, tamper = {} }) {
-    const { challenge } = host.issueChallenge();
+  async mintInvitation({ ttlSeconds = this.invitationTtlSeconds } = {}) {
+    const keyPair = await generateNoiseKeyPair();
+    const invitation = {
+      hostId: this.hostId,
+      inviteId: randomRoutingId(),
+      expiry: Math.floor(this.clock.now() / 1000) + ttlSeconds,
+      setupToken: randomSecret(),
+      ephPub: keyPair.publicKey,
+      ephPubBase64Url: toBase64Url(keyPair.publicKey),
+    };
+    this.#invitations.set(invitation.inviteId, { invitation, keyPair, state: 'live' });
+    return invitation;
+  }
+
+  /** The URL the Host renders as its QR. */
+  invitationUrl(invitation) {
+    return formatPairingInvitationUrl(this.appOrigin, invitation);
+  }
+
+  /**
+   * Noise message 1 against one invitation; answers message 2 with an empty
+   * payload. The invitation moves to `reserved`: it accepts one request.
+   */
+  async readPairingInit(inviteId, message1) {
+    const pending = this.#invitations.get(inviteId);
+    if (!pending || pending.state !== 'live') throw new Error(`no live invitation ${inviteId}`);
+    pending.state = 'reserved';
+    const responder = await createNoiseResponder({
+      prologue: pairingInvitationPrologue(pending.invitation),
+      staticKeyPair: pending.keyPair,
+    });
+    await responder.readMessage(message1);
+    const message2 = await responder.writeMessage();
+    // IK authenticated this static: the Client proved possession of its private
+    // half inside the handshake, so it is what the ACL record may bind.
+    pending.clientStaticPublicKey = toBase64Url(responder.remoteStaticPublicKey);
+    pending.session = new NoiseTransportSession(responder.session);
+    return message2;
+  }
+
+  /**
+   * The Client's first control message, the local approval, and the single
+   * outcome that ends the pairing either way.
+   *
+   * `detail` is the owner-local reason — never on the wire: the `PairingOutcomeV1`
+   * carries only one of the six fixed denial codes.
+   */
+  async handlePairingRequest(
+    inviteId,
+    ciphertext,
+    { approve = true, typedCode, approvedBy = 'host-user', label } = {},
+  ) {
+    const pending = this.#invitations.get(inviteId);
+    if (!pending || pending.state !== 'reserved') throw new Error(`no reserved invitation ${inviteId}`);
+    const answer = (outcome, extra = {}) => ({
+      ciphertext: pending.session.isPoisoned ? null : pending.session.sendControl(outcome),
+      outcome,
+      record: null,
+      detail: null,
+      ...extra,
+    });
+    const deny = (code, detail = null) => answer({ ok: false, code }, { detail });
+
+    let request = null;
+    try {
+      const receipt = pending.session.receive(ciphertext);
+      if (receipt.kind === 'control') request = receipt.value;
+    } catch {
+      // A ciphertext that does not authenticate poisons the session, so there
+      // is nothing left to answer on.
+      pending.state = 'consumed';
+      return { ciphertext: null, outcome: null, record: null, detail: 'transport-failed' };
+    }
+    // Exactly one attempt: the invitation is spent whatever happens next.
+    pending.state = 'consumed';
+    if (!isPairingRequestV1(request)) return deny('host-error', 'malformed-request');
+
+    const expected = {
+      kind: 'pairing',
+      hostId: this.hostId,
+      handshakeHash: toBase64Url(pending.session.handshakeHash),
+      // The one binding field that is not Host state. The verifier requires the
+      // assertion and the proof to name this same credential, which is what
+      // keeps the verified key and the bound identity one identity.
+      passkeyCredentialId: request.presence.binding.passkeyCredentialId,
+    };
+    const proof = await verifyPresenceProof(request.presence, expected, this.policy);
+    if (!proof.ok) return deny('presence-rejected', proof.reason);
+    if (!approve) return deny('user-denied');
+    // The human types what the phone displays; compare once, no retry.
+    if ((typedCode ?? request.code) !== request.code) return deny('confirmation-mismatch');
+
+    const record = this.acl.approve({
+      accountId: request.presence.accountId,
+      passkeyCredentialId: expected.passkeyCredentialId,
+      passkeyPublicKeyHash: proof.passkeyPublicKeyHash,
+      clientStaticPublicKey: pending.clientStaticPublicKey,
+      deliveryId: randomSecret(),
+      approvedBy,
+      label: label ?? boundedPairingLabel(request.label),
+    });
+    return answer(
+      {
+        ok: true,
+        hostStaticPublicKey: this.staticPublicKey,
+        hostLabel: this.label,
+        accountId: record.accountId,
+        passkeyCredentialId: record.passkeyCredentialId,
+        passkeyPublicKeyHash: record.passkeyPublicKeyHash,
+        deliveryId: record.deliveryId,
+      },
+      { record },
+    );
+  }
+
+  /**
+   * Noise message 1 of a connection against the long-term static; answers
+   * message 2 carrying a fresh 32-byte Host challenge as its payload.
+   */
+  async readConnectionInit(connectionId, message1) {
+    const responder = await createNoiseResponder({
+      prologue: e2eConnectionPrologue(this.hostId, connectionId),
+      staticKeyPair: this.staticKeyPair,
+    });
+    await responder.readMessage(message1);
+    const issued = this.challenges.issue();
+    const message2 = await responder.writeMessage(fromBase64Url(issued.challenge));
+    this.#connections.set(connectionId, {
+      session: new NoiseTransportSession(responder.session),
+      clientStaticPublicKey: toBase64Url(responder.remoteStaticPublicKey),
+      challenge: issued.challenge,
+    });
+    return message2;
+  }
+
+  /**
+   * Authorization = proof ∧ conjunction. The specific miss is reported on the
+   * returned object — the owner-local log — while the `ConnectionOutcomeV1`
+   * itself carries only `pairing-required`. That separation is the point:
+   * which half of the conjunction failed never leaves the Host.
+   */
+  async handleConnectionRequest(connectionId, ciphertext) {
+    const pending = this.#connections.get(connectionId);
+    if (!pending) throw new Error(`no pending connection ${connectionId}`);
+    const answer = (outcome, extra = {}) => ({
+      ciphertext: pending.session.isPoisoned ? null : pending.session.sendControl(outcome),
+      outcome,
+      detail: null,
+      misses: [],
+      ...extra,
+    });
+    const deny = (code, extra) => answer({ ok: false, code }, extra);
+
+    let request = null;
+    try {
+      const receipt = pending.session.receive(ciphertext);
+      if (receipt.kind === 'control') request = receipt.value;
+    } catch {
+      this.#connections.delete(connectionId);
+      return { ciphertext: null, outcome: null, detail: 'transport-failed', misses: [] };
+    }
+    // Consumed before anything is verified, and whether or not the rest
+    // succeeds: a captured request must never be retryable against a live
+    // challenge.
+    const fresh = this.challenges.consume(pending.challenge);
+    this.#connections.delete(connectionId);
+    if (!isConnectionRequestV1(request)) return deny('protocol-rejected', { detail: 'malformed-request' });
+    if (!fresh) return deny('presence-rejected', { detail: 'challenge-invalid' });
+
+    const expected = {
+      kind: 'connection',
+      hostId: this.hostId,
+      connectionId,
+      hostChallenge: pending.challenge,
+      handshakeHash: toBase64Url(pending.session.handshakeHash),
+      passkeyCredentialId: request.presence.binding.passkeyCredentialId,
+    };
+    const proof = await verifyPresenceProof(request.presence, expected, this.policy);
+    if (!proof.ok) return deny('presence-rejected', { detail: proof.reason });
+
+    const auth = this.acl.authorize({
+      passkeyCredentialId: expected.passkeyCredentialId,
+      clientStaticPublicKey: pending.clientStaticPublicKey,
+    });
+    if (!auth.record) return deny('pairing-required', { misses: auth.reasons });
+    // The record is the conjunction of four values, not two: the account and
+    // the passkey key hash are checked against the same row the two identities
+    // selected, so a Server that swapped either grants nothing.
+    if (auth.record.accountId !== request.presence.accountId) {
+      return deny('pairing-required', { misses: ['account-mismatch'] });
+    }
+    if (auth.record.passkeyPublicKeyHash !== proof.passkeyPublicKeyHash) {
+      return deny('pairing-required', { misses: ['passkey-key-mismatch'] });
+    }
+    return answer({ ok: true, hostLabel: this.label }, { record: auth.record });
+  }
+}
+
+/**
+ * A Client (Dormouse Pocket): one browser profile holding one X25519 static
+ * **per Host**, the Host statics it has pinned, and the passkey it signs with.
+ */
+export class SimClient {
+  static async create({ label = 'Test Client', origin, server } = {}) {
+    return new SimClient({ label, origin, server });
+  }
+
+  /** hostId -> NoiseKeyPair; different Hosts never share a Client key. */
+  #statics = new Map();
+
+  constructor({ label, origin, server }) {
+    this.label = label;
+    this.origin = origin;
+    this.server = server;
+    /** hostId -> the Host static this Client pinned at pairing, base64url. */
+    this.pins = new Map();
+    /** hostId -> the fields a `KnownHostV1` keeps after a successful pairing. */
+    this.knownHosts = new Map();
+  }
+
+  async #staticFor(hostId) {
+    let pair = this.#statics.get(hostId);
+    if (!pair) {
+      pair = await generateNoiseKeyPair();
+      this.#statics.set(hostId, pair);
+    }
+    return pair;
+  }
+
+  /** This Client's static for one Host, base64url, or undefined if unscanned. */
+  staticPublicKeyFor(host) {
+    const pair = this.#statics.get(hostIdOf(host));
+    return pair ? toBase64Url(pair.publicKey) : undefined;
+  }
+
+  /**
+   * Browser-data loss: this Host's static is gone and a fresh one replaces it.
+   * Returns the lost public key so a test can revoke the stranded record.
+   */
+  async losePerHostStatic(host) {
+    const hostId = hostIdOf(host);
+    const previous = this.staticPublicKeyFor(hostId);
+    this.#statics.delete(hostId);
+    await this.#staticFor(hostId);
+    return previous;
+  }
+
+  /**
+   * The proof both ceremonies carry: ask the Server for a nonce over this
+   * binding, then assert with the passkey over the challenge it derives.
+   */
+  async presenceProof({ binding, accountId, authenticator, rpId, server = this.server, tamper = {} }) {
+    const { serverNonce, challenge } = await server.beginReauth({
+      accountId,
+      credentialId: authenticator.credentialId,
+      binding,
+    });
     const assertion = await authenticator.assert({
       challenge,
       origin: this.origin,
-      rpId: host.policy.rpId,
+      rpId,
       tamper: tamper.assertion ?? {},
     });
-    const deviceSignature = await signDeviceChallenge(this.deviceKey.privateKey, {
-      hostId: tamper.signForHostId ?? host.hostId,
-      challenge,
-      devicePublicKey: this.deviceKey.devicePublicKey,
-    });
     return {
+      binding,
+      serverNonce,
       accountId,
-      devicePublicKey: this.deviceKey.devicePublicKey,
-      challenge,
-      deviceSignature,
-      passkey: { publicKey: authenticator.publicKey, assertion },
-      ...(tamper.request ?? {}),
+      passkeyCredentialId: authenticator.credentialId,
+      passkeyPublicKey: authenticator.publicKey,
+      assertion,
+      ...(tamper.proof ?? {}),
     };
   }
 
-  /** Full connection flow: server account check, then the Host's decision. */
-  async connect(host, { server, accountId, authenticator, tamper = {} }) {
-    server.validateAccount(accountId, authenticator.credentialId);
-    const request = await this.buildConnectRequest(host, { accountId, authenticator, tamper });
-    return host.handleConnect(request);
+  /**
+   * The whole pairing ceremony: scan the QR, IK against the invitation key,
+   * one control message carrying the proof and the displayed code, and the
+   * single outcome.
+   *
+   * `record` on the result is the Host's own row — a simulation convenience for
+   * assertions, never something the Client is sent.
+   */
+  async pair(
+    host,
+    {
+      accountId,
+      authenticator,
+      server = this.server,
+      approve = true,
+      approvedBy = 'host-user',
+      label,
+      code = samplePairingCode(),
+      typedCode,
+      invitation,
+      tamper = {},
+    } = {},
+  ) {
+    const minted = invitation ?? (await host.mintInvitation());
+    // The real scan path: the Host renders a URL, the Client parses it back.
+    // Anything the parser rejects never reaches a handshake.
+    const scanned = await parsePairingInvitationUrl(
+      host.invitationUrl(minted),
+      this.origin,
+      host.clock.now(),
+    );
+    if (!scanned) throw new Error('the Host minted a QR its own Client cannot parse');
+
+    const staticKeyPair = await this.#staticFor(scanned.hostId);
+    const initiator = await createNoiseInitiator({
+      prologue: pairingInvitationPrologue(scanned),
+      staticKeyPair,
+      remoteStaticPublicKey: scanned.ephPub,
+    });
+    const message1 = await initiator.writeMessage();
+    await initiator.readMessage(await host.readPairingInit(scanned.inviteId, message1));
+    const session = new NoiseTransportSession(initiator.session);
+
+    const binding = {
+      kind: 'pairing',
+      hostId: scanned.hostId,
+      handshakeHash: toBase64Url(session.handshakeHash),
+      passkeyCredentialId: authenticator.credentialId,
+    };
+    const presence =
+      tamper.presence ??
+      (await this.presenceProof({
+        binding,
+        accountId,
+        authenticator,
+        rpId: host.policy.rpId,
+        server,
+        tamper,
+      }));
+    // Pocket samples the two digits it displays; the person reads them off the
+    // phone and types them on the Host, which is what `typedCode` models.
+    const request = { code, label: this.label, presence, ...(tamper.request ?? {}) };
+    const answered = await host.handlePairingRequest(scanned.inviteId, session.sendControl(request), {
+      approve,
+      typedCode: typedCode ?? code,
+      approvedBy,
+      label,
+    });
+    if (answered.ciphertext === null) {
+      return { ok: false, outcome: null, presence, code, detail: answered.detail, record: null };
+    }
+
+    // Pocket accepts an outcome only after decrypting it on the session it
+    // built, and only when it is one of the two shapes.
+    const receipt = session.receive(answered.ciphertext);
+    const outcome = receipt.kind === 'control' && isPairingOutcomeV1(receipt.value) ? receipt.value : null;
+    if (outcome?.ok === true) {
+      const pinned = this.pins.get(scanned.hostId);
+      if (pinned !== undefined && pinned !== outcome.hostStaticPublicKey) {
+        throw new Error('the Host static changed under an existing pin');
+      }
+      this.pins.set(scanned.hostId, outcome.hostStaticPublicKey);
+      this.knownHosts.set(scanned.hostId, {
+        deliveryId: outcome.deliveryId,
+        accountId: outcome.accountId,
+        passkeyCredentialId: outcome.passkeyCredentialId,
+        passkeyPublicKeyHash: outcome.passkeyPublicKeyHash,
+      });
+    }
+    return {
+      ok: outcome?.ok === true,
+      outcome,
+      presence,
+      code,
+      detail: answered.detail,
+      record: answered.record,
+    };
+  }
+
+  /**
+   * The whole connection ceremony: IK against the pinned Host static, the
+   * challenge that arrives in message 2, one control message carrying the
+   * proof, and the single outcome.
+   *
+   * `misses` is the Host's owner-local reason list; the outcome the Client is
+   * actually sent never names it.
+   */
+  async connect(
+    host,
+    { accountId, authenticator, server = this.server, connectionId = randomRoutingId(), tamper = {} } = {},
+  ) {
+    if (server) server.validateAccount(accountId, authenticator.credentialId);
+    const staticKeyPair = await this.#staticFor(host.hostId);
+    // An unpaired Client has no pin, so it uses the Host's public static
+    // directly. That models an attacker who already knows it — which every
+    // paired Client does — and makes the denial strictly stronger evidence.
+    const remoteStatic = fromBase64Url(this.pins.get(host.hostId) ?? host.staticPublicKey);
+    const initiator = await createNoiseInitiator({
+      prologue: e2eConnectionPrologue(host.hostId, connectionId),
+      staticKeyPair,
+      remoteStaticPublicKey: remoteStatic,
+    });
+    const message1 = await initiator.writeMessage();
+    const challengeBytes = await initiator.readMessage(
+      await host.readConnectionInit(connectionId, message1),
+    );
+    const session = new NoiseTransportSession(initiator.session);
+
+    const binding = {
+      kind: 'connection',
+      hostId: host.hostId,
+      connectionId,
+      hostChallenge: toBase64Url(challengeBytes),
+      handshakeHash: toBase64Url(session.handshakeHash),
+      passkeyCredentialId: authenticator.credentialId,
+    };
+    const presence =
+      tamper.presence ??
+      (await this.presenceProof({
+        binding,
+        accountId,
+        authenticator,
+        rpId: host.policy.rpId,
+        server,
+        tamper,
+      }));
+    const answered = await host.handleConnectionRequest(
+      connectionId,
+      session.sendControl({ presence, ...(tamper.request ?? {}) }),
+    );
+    if (answered.ciphertext === null) {
+      return { ok: false, outcome: null, presence, binding, detail: answered.detail, misses: [] };
+    }
+    const receipt = session.receive(answered.ciphertext);
+    const outcome =
+      receipt.kind === 'control' && isConnectionOutcomeV1(receipt.value) ? receipt.value : null;
+    return {
+      ok: outcome?.ok === true,
+      outcome,
+      presence,
+      binding,
+      detail: answered.detail,
+      misses: answered.misses,
+    };
   }
 }

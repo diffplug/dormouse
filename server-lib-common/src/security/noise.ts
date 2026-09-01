@@ -249,6 +249,47 @@ export function isNoiseStaticMaterial(publicKey: string, privateKeyPkcs8: string
 }
 
 /**
+ * The public half of a persisted static, derived from the private one.
+ *
+ * Whatever first consumes a Host static checks that its halves correspond: two
+ * halves of different keypairs pass {@link isNoiseStaticMaterial}, which is
+ * shape only, and a mismatch would read as a *changed Host identity* at every
+ * paired Client rather than as the corrupt state file it is
+ * (`docs/specs/remote-security-model.md` → Identities and storage).
+ *
+ * The private key is imported extractable for exactly this call and discarded;
+ * the copy the Host actually holds still comes from
+ * {@link importNoiseStaticPrivateKey}. JWK is the only WebCrypto route from an
+ * X25519 private key to its public point — `deriveBits` yields a shared secret,
+ * never the point — and `x` is the raw public key in unpadded base64url, which
+ * is the encoding this module already persists.
+ */
+export async function deriveNoiseStaticPublicKey(
+  privateKeyPkcs8: string,
+  crypto: WebCryptoLike = getWebCrypto(),
+): Promise<string> {
+  try {
+    const temporary = await crypto.subtle.importKey(
+      'pkcs8',
+      fromBase64Url(privateKeyPkcs8),
+      X25519_ALGORITHM,
+      true,
+      ['deriveBits'],
+    );
+    const jwk = await crypto.subtle.exportKey('jwk', temporary);
+    if (typeof jwk.x !== 'string' || fromBase64Url(jwk.x).length !== NOISE_KEY_LENGTH) {
+      throw new Error('no public point');
+    }
+    // Re-encoded rather than returned as the runtime spelled it: a JWK `x` is
+    // base64url by contract, but only this round trip makes it the same
+    // canonical string the enrollment stored.
+    return toBase64Url(fromBase64Url(jwk.x));
+  } catch {
+    throw new NoiseError('X25519 static public key could not be derived');
+  }
+}
+
+/**
  * Load a persisted static back as a **nonextractable** `deriveBits` key.
  *
  * Nonextractable is the whole point of the round trip: the exported form

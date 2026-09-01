@@ -28,6 +28,8 @@ export interface SubtleCryptoLike {
     extractable: boolean,
     keyUsages: readonly string[],
   ): Promise<CryptoKeyPairLike>;
+  /** `jwk` answers an object; every other format answers bytes. */
+  exportKey(format: 'jwk', key: CryptoKeyLike): Promise<Record<string, unknown>>;
   exportKey(format: string, key: CryptoKeyLike): Promise<ArrayBuffer>;
   importKey(
     format: string,

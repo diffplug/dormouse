@@ -2,9 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  API_ROUTES,
   E2E_ID_LENGTH,
   MAX_E2E_CIPHERTEXT_LENGTH,
   MAX_CLIENT_ID_LENGTH,
+  MAX_PUSH_QUERY_DELIVERY_IDS,
   MAX_TERMINAL_DIMENSION,
   NOISE_MAX_MESSAGE_LENGTH,
   clampTerminalDimension,
@@ -14,6 +16,7 @@ import {
   isE2eId,
   isE2eServerToHostFrame,
   isSetupTokenResponse,
+  pushSubscriptionDeletePath,
 } from '../dist/index.js';
 
 test('clampTerminalDimension falls back on absent or non-finite values', () => {
@@ -41,7 +44,7 @@ test('clampTerminalDimension bounds the top, not just the bottom', () => {
   assert.equal(clampTerminalDimension(400, 24), 400);
 });
 
-const MINT = { token: 'aZ0-_abc', mintId: 'mint-1', expiresAt: 1 };
+const MINT = { token: 'aZ0-_abc', expiresAt: 1 };
 
 test('isSetupTokenResponse accepts a real mint', () => {
   assert.equal(isSetupTokenResponse(MINT), true);
@@ -49,6 +52,16 @@ test('isSetupTokenResponse accepts a real mint', () => {
   assert.equal(isSetupTokenResponse({ ...MINT, extra: true }), true);
   // A real token is base64url of 32 bytes, comfortably inside the bound.
   assert.equal(isSetupTokenResponse({ ...MINT, token: 'a'.repeat(128) }), true);
+});
+
+test('isSetupTokenResponse no longer demands a mint handle', () => {
+  // Redemption at the Server flips nothing on the Host any more — the
+  // invitation the same QR carries is Host memory, and its state is what the
+  // panel renders — so `mintId` is gone from the response and from the guard. A
+  // server that still sends one is accepted as any other additive field.
+  assert.equal(isSetupTokenResponse({ token: 'aZ0-_abc', expiresAt: 1 }), true);
+  assert.equal(isSetupTokenResponse({ ...MINT, mintId: 'mint-1' }), true);
+  assert.equal(isSetupTokenResponse({ ...MINT, mintId: 42 }), true);
 });
 
 test('isSetupTokenResponse rejects a 200 that is not one', () => {
@@ -61,7 +74,6 @@ test('isSetupTokenResponse rejects a 200 that is not one', () => {
     {},
     { token: 'abc' },
     { expiresAt: 1 },
-    { token: 'abc', mintId: 'm' },
     { ...MINT, token: '' },
     { ...MINT, token: 42 },
     // An oversized token throws inside the QR encoder, under the app-wide
@@ -69,8 +81,6 @@ test('isSetupTokenResponse rejects a 200 that is not one', () => {
     { ...MINT, token: 'a'.repeat(129) },
     { ...MINT, token: 'has spaces' },
     { ...MINT, token: 'not/base64url+' },
-    { ...MINT, mintId: '' },
-    { ...MINT, mintId: 42 },
     { ...MINT, expiresAt: '1' },
     { ...MINT, expiresAt: Number.NaN },
     { ...MINT, expiresAt: Number.POSITIVE_INFINITY },
@@ -81,6 +91,48 @@ test('isSetupTokenResponse rejects a 200 that is not one', () => {
   ]) {
     assert.equal(isSetupTokenResponse(body), false, JSON.stringify(body));
   }
+});
+
+// --- Routes ----------------------------------------------------------------
+
+test('the route table carries the E2E surface and nothing it replaced', () => {
+  // The push challenge and the device-key-parameterized subscription list are
+  // deleted: possession of a 256-bit `deliveryId` is the whole proof now, so
+  // there is no challenge to sign and no identity to enumerate by.
+  assert.equal(API_ROUTES.pushChallenge, undefined);
+  assert.equal(API_ROUTES.pushSubscriptions, undefined);
+  assert.equal(API_ROUTES.setupRetire, '/api/setup/retire');
+  assert.equal(API_ROUTES.reauthBegin, '/api/reauth/begin');
+  assert.equal(API_ROUTES.reauthFinish, '/api/reauth/finish');
+  assert.equal(API_ROUTES.pushSubscriptionsQuery, '/api/push/subscriptions/query');
+  assert.equal(API_ROUTES.pushSubscriptionDelete, '/api/push/subscriptions/:deliveryId');
+});
+
+test('pushSubscriptionDeletePath fills the route pattern the server registers', () => {
+  // One builder, so the server's registration and the client's fetch cannot
+  // spell the parameter differently.
+  const deliveryId = 'aZ0-_'.repeat(9).slice(0, 43);
+  assert.equal(
+    pushSubscriptionDeletePath(deliveryId),
+    API_ROUTES.pushSubscriptionDelete.replace(':deliveryId', deliveryId),
+  );
+  // base64url is entirely unreserved, so a real id survives verbatim.
+  assert.equal(pushSubscriptionDeletePath(deliveryId).endsWith(deliveryId), true);
+});
+
+test('pushSubscriptionDeletePath encodes an id that would otherwise be a path', () => {
+  // The id is a bearer capability rather than an enumerable identifier, so it
+  // rides the path; encoding here — not at each caller — is what stops a
+  // hostile value from naming a different route.
+  assert.equal(pushSubscriptionDeletePath('../devices'), '/api/push/subscriptions/..%2Fdevices');
+  assert.equal(pushSubscriptionDeletePath('a b'), '/api/push/subscriptions/a%20b');
+  assert.equal(pushSubscriptionDeletePath(''), '/api/push/subscriptions/');
+});
+
+test('a subscriptions query is bounded, so the route is not a bulk oracle', () => {
+  // A browser holds one delivery id per paired Host; the cap is far above any
+  // real use and is what keeps the readback from being an enumeration.
+  assert.equal(MAX_PUSH_QUERY_DELIVERY_IDS, 64);
 });
 
 // --- The `e2e` relay envelope ---------------------------------------------

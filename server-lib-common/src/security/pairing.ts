@@ -1,25 +1,19 @@
 /**
- * The pairing ceremony: how a Client earns a Host ACL record.
+ * Pairing constants and the shape guards the legacy relay frames still run.
  *
- * Pairing is the only path into the ACL, and its critical step — `approve` —
- * models the local approval UI on the Host. The Server can relay a pairing
- * *request*, but only someone at the Host can turn it into authorization.
+ * The Host's ceremony itself is `e2e-ceremony.ts` — `PairingRequestV1`,
+ * `PairingOutcomeV1`, and the presence proof — over the invitation grammar in
+ * `pairing-invitation.ts`. What remains here is the vocabulary the *Server*
+ * still speaks on the legacy `pair` path plus the bounds and labels both
+ * ceremonies share.
  *
- * Integration contract: presence for pairing is server-attested plus
- * Host-approved. The Server relays a pairing request only while the session's
- * last server-verified passkey assertion is within
- * {@link PAIRING_PRESENCE_WINDOW_MS} (sign-in, re-auth, and the connect2
- * handshake all refresh the stamp); a stale session is answered with
- * {@link PAIRING_STALE_PRESENCE_ERROR} and the Client re-asserts with one
- * WebAuthn prompt, then retries. The Host does not re-verify an assertion at
- * pairing time — its stronger control is the mandatory local approval below,
- * unlike connect, where `authorizeConnection` verifies presence itself
- * (docs/specs/remote-security-model.md, Pairing Ceremony).
+ * STAGE-4 TRANSITIONAL: `PairingRequest`, `isPairingRequest`, `PairStatusQuery`,
+ * `isPairStatusQuery`, `pairingFingerprint`, `PAIRING_PRESENCE_WINDOW_MS`, and
+ * `PAIRING_STALE_PRESENCE_ERROR` exist only for the legacy relay path and the
+ * Pocket client that has not switched yet; they are deleted in 4c.
  */
 
-import { isBoundedString, toBase64Url } from './bytes.js';
-import { getWebCrypto, type WebCryptoLike } from './webcrypto.js';
-import { HostAcl, type HostAclRecord } from './acl.js';
+import { isBoundedString } from './bytes.js';
 import { boundedPushText } from './push.js';
 
 export const DEFAULT_PAIRING_TTL_MS = 5 * 60 * 1000;
@@ -64,7 +58,6 @@ export const PAIRING_PRESENCE_WINDOW_MS = 30_000;
 
 /** `pair-result.error` code telling the Client to re-assert presence and retry. */
 export const PAIRING_STALE_PRESENCE_ERROR = 'stale-presence';
-const PAIRING_ID_BYTE_LENGTH = 16;
 
 /** What a Client submits to request pairing (after passkey authentication). */
 export interface PairingRequest {
@@ -96,7 +89,7 @@ export interface PairingRequest {
  * The two fields are exactly the ACL's lookup key, so the Host answers with a
  * plain `HostAcl.findActive` — no ceremony, no challenge, no signature. It is
  * **advisory display truth only**: it lets Pocket offer Pair or Connect rather
- * than both, and `authorizeConnection` neither reads it nor is bound by it. A
+ * than both, and the connection ceremony neither reads it nor is bound by it. A
  * wrong answer — a compromised relay, a Host whose ACL changed mid-query —
  * therefore costs at most a button the user has to tap twice.
  *
@@ -170,8 +163,8 @@ export function pairingFingerprint(devicePublicKey: string): string {
  * Server. A guard that ran only on the Server would leave the Host — the party
  * that actually writes the ACL and renders the approval UI — taking a
  * relay-supplied object on faith. `connect2` has always been defended this way
- * (`authorizeConnection` contains a malformed request as a denial); this is
- * the same rule for `pair`.
+ * (a malformed connection request is contained as a denial); this is the same
+ * rule for `pair`.
  */
 export function isPairingRequest(request: unknown): request is PairingRequest {
   if (!request || typeof request !== 'object') return false;
@@ -226,156 +219,4 @@ export function boundedPairingLabel(value: unknown): string {
  */
 export function boundedPairingAccount(value: unknown): string {
   return boundedPushText(value, { limit: PAIRING_LABEL_LIMIT, fallback: '(unknown)' });
-}
-
-export type PairingState = 'pending' | 'approved' | 'denied' | 'expired';
-
-/** A snapshot of one pairing attempt, e.g. for the Host's approval UI. */
-export interface PairingTicket {
-  readonly pairingId: string;
-  readonly state: PairingState;
-  readonly request: PairingRequest;
-  readonly requestedAt: number;
-  readonly expiresAt: number;
-}
-
-export type PairingErrorCode = 'unknown-pairing' | 'not-pending' | 'expired';
-
-export class PairingError extends Error {
-  readonly code: PairingErrorCode;
-
-  constructor(code: PairingErrorCode, message: string) {
-    super(message);
-    this.name = 'PairingError';
-    this.code = code;
-  }
-}
-
-export interface PairingCeremonyOptions {
-  readonly ttlMs?: number;
-  /** Clock returning epoch milliseconds; injectable for tests. */
-  readonly now?: () => number;
-  readonly crypto?: WebCryptoLike;
-}
-
-export class PairingCeremony {
-  readonly #acl: HostAcl;
-  readonly #tickets = new Map<string, Ticket>();
-  readonly #ttlMs: number;
-  readonly #now: () => number;
-  readonly #crypto: WebCryptoLike;
-
-  constructor(acl: HostAcl, options: PairingCeremonyOptions = {}) {
-    this.#acl = acl;
-    this.#ttlMs = options.ttlMs ?? DEFAULT_PAIRING_TTL_MS;
-    this.#now = options.now ?? (() => Date.now());
-    this.#crypto = options.crypto ?? getWebCrypto();
-  }
-
-  /** Register a pairing request and hand back the ticket to show for approval. */
-  begin(request: PairingRequest): PairingTicket {
-    const pairingId = toBase64Url(
-      this.#crypto.getRandomValues(new Uint8Array(PAIRING_ID_BYTE_LENGTH)),
-    );
-    const requestedAt = this.#now();
-    const ticket: Ticket = {
-      pairingId,
-      state: 'pending',
-      request: { ...request },
-      requestedAt,
-      expiresAt: requestedAt + this.#ttlMs,
-    };
-    this.#pruneTickets();
-    this.#tickets.set(pairingId, ticket);
-    return this.#snapshot(ticket);
-  }
-
-  get(pairingId: string): PairingTicket | undefined {
-    const ticket = this.#tickets.get(pairingId);
-    return ticket ? this.#snapshot(ticket) : undefined;
-  }
-
-  /**
-   * The local user approval on the Host. This is the ONLY call that writes to
-   * the ACL. Throws {@link PairingError} unless the ticket is pending and
-   * unexpired.
-   */
-  approve(pairingId: string, approval: { approvedBy: string; label?: string }): HostAclRecord {
-    const ticket = this.#requirePending(pairingId);
-    ticket.state = 'approved';
-    return this.#acl.approve({
-      accountId: ticket.request.accountId,
-      passkeyCredentialId: ticket.request.passkeyCredentialId,
-      passkeyPublicKeyHash: ticket.request.passkeyPublicKeyHash,
-      devicePublicKey: ticket.request.devicePublicKey,
-      approvedBy: approval.approvedBy,
-      label: approval.label ?? ticket.request.requestedLabel,
-    });
-  }
-
-  /** Reject a pending pairing request; the ACL is untouched. */
-  deny(pairingId: string): void {
-    const ticket = this.#requirePending(pairingId);
-    ticket.state = 'denied';
-  }
-
-  #requirePending(pairingId: string): Ticket {
-    const ticket = this.#tickets.get(pairingId);
-    if (!ticket) throw new PairingError('unknown-pairing', `unknown pairing ${pairingId}`);
-    this.#reapExpiry(ticket);
-    if (ticket.state === 'expired') {
-      throw new PairingError('expired', `pairing ${pairingId} expired`);
-    }
-    if (ticket.state !== 'pending') {
-      throw new PairingError('not-pending', `pairing ${pairingId} is already ${ticket.state}`);
-    }
-    return ticket;
-  }
-
-  /**
-   * Bound the ticket map. Every `pair` frame the relay forwards mints a
-   * ticket, and nothing else ever removed one — a signed-in account can send
-   * them faster than the 30-second presence window closes, and they accumulate
-   * in the Host process on the user's laptop.
-   *
-   * Resolved and expired tickets are kept for one extra TTL rather than
-   * dropped on resolution, so a second approve on a ticket the user just acted
-   * on still fails as `not-pending` / `expired` — the error the UI and the
-   * spec describe — instead of degrading to `unknown-pairing`.
-   */
-  #pruneTickets(): void {
-    const cutoff = this.#now() - this.#ttlMs;
-    for (const [pairingId, ticket] of this.#tickets) {
-      if (ticket.expiresAt <= cutoff) this.#tickets.delete(pairingId);
-    }
-    // Age alone is rate-bounded, not bounded: a relay that sends pair frames
-    // faster than they expire still grows this map for one whole grace window.
-    // A count cap is the actual bound. Oldest first — `Map` iterates in
-    // insertion order, and the oldest pending request is the one whose human
-    // is least likely to still be looking at the modal.
-    while (this.#tickets.size >= MAX_PENDING_TICKETS) {
-      const oldest = this.#tickets.keys().next();
-      if (oldest.done) break;
-      this.#tickets.delete(oldest.value);
-    }
-  }
-
-  #reapExpiry(ticket: Ticket): void {
-    if (ticket.state === 'pending' && this.#now() >= ticket.expiresAt) {
-      ticket.state = 'expired';
-    }
-  }
-
-  #snapshot(ticket: Ticket): PairingTicket {
-    this.#reapExpiry(ticket);
-    return { ...ticket, request: { ...ticket.request } };
-  }
-}
-
-interface Ticket {
-  readonly pairingId: string;
-  state: PairingState;
-  readonly request: PairingRequest;
-  readonly requestedAt: number;
-  readonly expiresAt: number;
 }

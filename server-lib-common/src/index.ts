@@ -7,9 +7,9 @@
  * DOM globals. That is why `tsconfig.json` sets `"types": []`.
  *
  * The `security/` modules implement the primitives of
- * `docs/specs/remote-security-model.md`: device keys, host challenges,
- * passkey assertion verification, the Host ACL, the pairing ceremony, and
- * connection authorization.
+ * `docs/specs/remote-security-model.md`: the Noise suite and its transport
+ * framing, presence proofs, pairing invitations, the two ceremonies' control
+ * messages, host challenges, passkey assertion verification, and the Host ACL.
  */
 
 export * from './remote/wire.js';
@@ -27,6 +27,8 @@ export * from './security/passkey.js';
 export * from './security/acl.js';
 export * from './security/push.js';
 export * from './security/pairing.js';
+export * from './security/pairing-invitation.js';
+export * from './security/e2e-ceremony.js';
 export * from './security/setup-proof.js';
 export * from './security/connection.js';
 

@@ -11,6 +11,7 @@ import type { ConnectionFailure, ConnectionRequest } from '../security/connectio
 import { NOISE_MAX_MESSAGE_LENGTH } from '../security/noise.js';
 import type { PairStatusQuery, PairingRequest } from '../security/pairing.js';
 import type { PasskeyAssertion } from '../security/passkey.js';
+import type { PresenceBinding } from '../security/presence.js';
 
 // ---------------------------------------------------------------------------
 // HTTP API (see server.md "HTTP API")
@@ -18,6 +19,7 @@ import type { PasskeyAssertion } from '../security/passkey.js';
 export const API_ROUTES = {
   setupBegin: '/api/setup/begin',
   setupFinish: '/api/setup/finish',
+  setupRetire: '/api/setup/retire',
   signinBegin: '/api/signin/begin',
   signinFinish: '/api/signin/finish',
   reauthBegin: '/api/reauth/begin',
@@ -26,12 +28,26 @@ export const API_ROUTES = {
   hostSetupToken: '/api/host/setup-token',
   hosts: '/api/hosts',
   pushConfig: '/api/push/config',
-  pushChallenge: '/api/push/challenge',
   pushSubscribe: '/api/push/subscribe',
-  pushSubscriptions: '/api/push/subscriptions',
+  pushSubscriptionsQuery: '/api/push/subscriptions/query',
+  /**
+   * The route *pattern* one delivery row is deleted at. The concrete path comes
+   * from {@link pushSubscriptionDeletePath}, so the server's registration and
+   * the client's fetch cannot spell the parameter differently.
+   */
+  pushSubscriptionDelete: '/api/push/subscriptions/:deliveryId',
   pushDevices: '/api/push/devices',
   pushSend: '/api/push/send',
 } as const;
+
+/**
+ * `DELETE` path for one delivery row. The id is a bearer capability rather than
+ * an enumerable identifier, so it rides the path and is percent-encoded here
+ * even though base64url never needs it — one encoder, no caller deciding.
+ */
+export function pushSubscriptionDeletePath(deliveryId: string): string {
+  return `/api/push/subscriptions/${encodeURIComponent(deliveryId)}`;
+}
 
 /**
  * The `error` a session-gated route answers 401 with when the session token is
@@ -149,18 +165,40 @@ export interface SigninFinishResponse {
 }
 
 /**
- * Re-assert presence on an existing session (session-token auth; begin reuses
- * the {@link SigninBeginResponse} shape). Used when pairing reports
- * `PAIRING_STALE_PRESENCE_ERROR` (pairing.ts): one WebAuthn prompt refreshes
- * the session's presence stamp without re-minting the token or the relay
- * socket.
+ * Mint the WebAuthn challenge for one ceremony's presence proof (session-token
+ * auth). The binding is **required** and kind-tagged: the challenge is
+ * `presenceChallenge(binding, serverNonce)`, so an assertion produced for one
+ * pairing or connection authenticates nothing anywhere else
+ * (`docs/specs/remote-security-model.md` → Presence proofs).
+ *
+ * The Server learns only routing values and a handshake hash, which the relay
+ * already sees, and the exchange extends nothing: the session's life and the
+ * relay socket are untouched.
  */
+export interface ReauthBeginRequest {
+  binding: PresenceBinding;
+}
+export interface ReauthBeginResponse {
+  /** Base64url `presenceChallenge(binding, serverNonce)`. */
+  challenge: string;
+  rpId: string;
+  /** Single-use, short-TTL; echoed back by `finish` and carried in the proof. */
+  serverNonce: string;
+  /**
+   * The one credential the ceremony may assert with — the binding's own. A
+   * `get()` that could answer with any of the account's passkeys would let a
+   * synced credential the Host never paired satisfy a proof bound to one it did.
+   */
+  allowCredentials: string[];
+}
+
 export interface ReauthFinishRequest {
+  serverNonce: string;
   assertion: PasskeyAssertion;
 }
 export interface ReauthFinishResponse {
-  /** Epoch ms the session's presence stamp was refreshed to. */
-  presenceVerifiedAt: number;
+  /** Epoch ms the Server verified this assertion at. */
+  verifiedAt: number;
 }
 
 /**
@@ -194,29 +232,30 @@ export interface HostEnrollResponse {
 }
 
 /**
- * Host-token auth. The single-use setup credential an enrolled Host mints to
- * render as a QR: the token only, since the Host composes the QR's URL itself
- * from the origin it enrolled against, and a URL minted server-side would be
- * one more place the deployment's own address is decided. Scanning it replaces
- * typing the origin and the setup password; a short TTL plus single use bound
- * the shoulder-surf window, and the Server tells the minting Host when the
- * token is spent (`ServerToHostFrame` `setup-token-redeemed`).
+ * Host-token auth. The single-use setup credential an enrolled Host mints for
+ * its pairing QR: the token only, since the Host composes the URL itself from
+ * the origin it enrolled against, and a URL minted server-side would be one
+ * more place the deployment's own address is decided.
  *
- * The Host adds a second secret of its own to that URL — the setup nonce behind
- * `PairingRequest.setupProof` — which the Server never sees
- * (`security/setup-proof.ts`).
+ * **No mint handle.** Redemption at the Server no longer flips anything on the
+ * Host: the invitation the same QR carries is Host memory, and its state — not
+ * the token's — is what the QR panel renders
+ * (`docs/specs/remote-security-model.md` → Pairing). A phone that already holds
+ * a session retires the token itself through `POST /api/setup/retire`.
  */
 export interface SetupTokenResponse {
   token: string;
-  /**
-   * Opaque handle naming *this* mint, so a Host displaying several codes can
-   * tell which one a `setup-token-redeemed` frame is about. Deliberately not
-   * the token: a correlator that named the credential would put it on a wire
-   * that carries no credentials, and only the minter needs to recognize it.
-   */
-  mintId: string;
   /** Epoch ms after which the token no longer redeems. */
   expiresAt: number;
+}
+
+/**
+ * Session auth. A signed-in phone that scanned a QR it will not register a
+ * passkey with retires the token, so a photographed code cannot register one
+ * afterwards. Answers 204, or 401 with {@link SETUP_TOKEN_INVALID_ERROR}.
+ */
+export interface SetupRetireRequest {
+  setupToken: string;
 }
 
 /**
@@ -271,7 +310,6 @@ export function isSetupTokenResponse(value: unknown): value is SetupTokenRespons
   const candidate = value as Record<string, unknown>;
   return (
     isSetupTokenHandle(candidate.token) &&
-    isSetupTokenHandle(candidate.mintId) &&
     typeof candidate.expiresAt === 'number' &&
     Number.isFinite(candidate.expiresAt) &&
     candidate.expiresAt > 0
@@ -285,22 +323,21 @@ export interface HostsResponse {
 // ---------------------------------------------------------------------------
 // Web Push (see alert.md "Push notifications" and server.md "HTTP API").
 //
-// Two audiences with different credentials: the Pocket Client registers its own
-// subscription with a session token plus a device signature, and the Host reads
-// and sends with its `hostToken`. Subscriptions are keyed on the PAIR
-// (hostId, devicePublicKey), so a Client subscribes once per Host it is paired
-// with and a Host can only ever see or reach its own subscribers.
+// Two audiences with different credentials: the Pocket Client registers, queries
+// and deletes its own rows with a session token plus the `deliveryId` the Host
+// minted for it; the Host reads and sends with its `hostToken`. Rows are keyed
+// on the PAIR (hostId, deliveryId), so a Client subscribes once per Host it is
+// paired with and a Host can only ever see or reach its own subscribers.
+//
+// **The delivery id is the proof.** It is 256 unguessable bits known only to
+// the Host's ACL record and that Client's own pinned record, so possession is
+// what authorizes registering, querying, and deleting — there is no challenge
+// and no signature, and the Server never lists ids to a session.
 
 /** Public VAPID key, needed by the browser before it can subscribe. */
 export interface PushConfigResponse {
   /** Base64url VAPID application server key, or null when push is unconfigured. */
   applicationServerKey: string | null;
-}
-
-export interface PushChallengeResponse {
-  /** Base64url challenge to sign with the device key. */
-  challenge: string;
-  expiresAt: number;
 }
 
 /** The browser's `PushSubscription`, narrowed to what delivery needs. */
@@ -311,68 +348,71 @@ export interface PushSubscriptionPayload {
 
 export interface PushSubscribeRequest {
   hostId: string;
-  /** Base64url raw P-256 point — the Client identity in the Host's ACL. */
-  devicePublicKey: string;
-  challenge: string;
-  /** Base64url device signature over `pushSubscribePayload`. */
-  signature: string;
+  /** Base64url of 32 bytes — the capability this Host minted for this Client. */
+  deliveryId: string;
   subscription: PushSubscriptionPayload;
 }
 export interface PushSubscribeResponse {
   subscribedAt: number;
   /**
-   * Every Host this device is registered with after the mutation — the state,
-   * not the delta. One service-worker scope has one subscription, so a changed
-   * delivery address drops the device's other Host rows in the same mutation
-   * and this is what survives it.
+   * Every Host whose rows carry the presented endpoint after the mutation — the
+   * state, not the delta. One service-worker scope has one subscription, so a
+   * changed delivery address drops every row still on the old endpoint in the
+   * same mutation and this is what survives it.
    *
    * Reporting the result rather than the event is what makes a lost response
    * self-healing: the idempotent retry cannot re-announce a deletion it already
    * performed, but it can always answer what is there now, so the Client needs
    * no memory of what it did.
-   *
-   * Safe to scope to the device even though `PushSubscriptionsResponse`
-   * deliberately is not: this request carries a device signature, so the caller
-   * has proven it owns the identity being reported on.
    */
   hostIds: string[];
 }
 
 /**
- * Session auth. The account's push registrations, so a Client that reloaded can
- * tell which Hosts it is already registered with instead of re-offering the
- * action for all of them.
+ * Session auth. Which of the caller's **own** delivery ids are registered, and
+ * for which Host — the readback a reloaded Client uses instead of re-offering
+ * Enable for every Host.
  *
- * Deliberately **not** parameterized by `devicePublicKey`: an endpoint that
- * answered "which Hosts is device X registered with" would be an enumeration
- * primitive over an input the caller need not own. This returns what the
- * account owns and the Client filters to its own device — the same scoping
- * `GET /api/hosts` already uses, and correct per-tenant if the SaaS mode in
- * `## Future` lands.
- *
- * Identities only. The endpoint and its keys are a bearer capability to notify
- * that phone and never leave the Server.
+ * Parameterized by capability rather than by identity: the caller must already
+ * hold each id it asks about, so this is proof of possession rather than the
+ * enumeration primitive a device-key parameter was.
  */
-export interface PushSubscriptionsResponse {
-  subscriptions: Array<{ hostId: string; devicePublicKey: string; subscribedAt: number }>;
+export interface PushSubscriptionsQueryRequest {
+  deliveryIds: string[];
+}
+export interface PushSubscriptionsQueryResponse {
+  /** Only rows matching a presented id, and only under the current VAPID key. */
+  registered: Array<{ hostId: string; deliveryId: string }>;
 }
 
 /**
- * Host-token auth. Returns identities only — the Host holds the ACL and is the
- * only side that can turn a `devicePublicKey` into a human label, so the Server
- * never learns one (docs/specs/remote-security-model.md).
+ * The most delivery ids one query may name. A browser holds one per paired
+ * Host, so this is far above any real use and is what keeps the route from
+ * being a bulk oracle.
+ */
+export const MAX_PUSH_QUERY_DELIVERY_IDS = 64;
+
+/**
+ * Host-token auth. Returns delivery ids only — the Host holds the ACL and is
+ * the only side that can turn one into a human label, so the Server never
+ * learns one (docs/specs/remote-security-model.md).
  */
 export interface PushDevicesResponse {
-  devices: Array<{ devicePublicKey: string; subscribedAt: number }>;
+  devices: Array<{ deliveryId: string; subscribedAt: number }>;
 }
 
 /**
- * Host-token auth. `devicePublicKeys` is required and non-empty: the Host holds
- * the ACL and is the only party that may decide who a push reaches, so the
- * Server never selects recipients itself.
+ * Host-token auth. `deliveryIds` is required and non-empty: the Host holds the
+ * ACL and is the only party that may decide who a push reaches, so the Server
+ * never selects recipients itself.
+ *
+ * Reserved: the payload is still plaintext `title`/`body`/`tag`. Stage 6 of
+ * **Scope: e2e-client-host** (`docs/specs/remote-security-model.md` →
+ * `## Future` → Push sealing) replaces it with the sealed envelope; nothing
+ * else about this route changes then.
  */
 export interface PushSendRequest {
-  devicePublicKeys: string[];
+  deliveryIds: string[];
   title: string;
   body: string;
   /**
@@ -399,7 +439,7 @@ export interface PushSendResponse {
   delivered: number;
   /** Subscriptions the push service rejected as gone; these are now dropped. */
   expired: number;
-  /** Named devices with no subscription for this Host. */
+  /** Named delivery ids with no subscription for this Host. */
   unknown: number;
   /**
    * Deliveries the push service refused for a transient-looking reason; the
@@ -440,15 +480,7 @@ export type ServerToClientFrame =
   | { t: 'error'; error: string }
   | E2eServerToClientFrame;
 
-/**
- * Server → host. Every frame but `setup-token-redeemed` addresses one Client by
- * its server-assigned `clientId`; that one carries none by design, because it
- * is about the Host itself — a setup token this Host minted
- * ({@link SetupTokenResponse}) was just spent, so the QR showing it is stale
- * and each redemption is visible to the person who displayed it. It names the
- * mint rather than the token, so a Host that displayed several codes can retire
- * the right one without the credential crossing back.
- */
+/** Server → host. Every frame addresses one Client by its server-assigned `clientId`. */
 export type ServerToHostFrame =
   | { t: 'pair'; clientId: string; request: PairingRequest }
   | { t: 'pair-status'; clientId: string; query: PairStatusQuery }
@@ -456,7 +488,6 @@ export type ServerToHostFrame =
   | { t: 'connect2'; clientId: string; request: ConnectionRequest }
   | { t: 'msg'; clientId: string; data: unknown }
   | { t: 'client-gone'; clientId: string }
-  | { t: 'setup-token-redeemed'; mintId: string }
   | E2eServerToHostFrame;
 
 /**
