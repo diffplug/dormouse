@@ -1,6 +1,5 @@
 /** VS Code binding of {@link RemoteHostService}; see `docs/specs/vscode.md` → "Remote Host". */
 
-import { hostname } from 'node:os';
 import type * as vscode from 'vscode';
 
 import {
@@ -10,7 +9,7 @@ import {
 import { bakedConnectSrc } from '../../lib/src/host/remote/connect-src';
 import { readEnrollmentOffer } from '../../lib/src/host/remote/enroll-offer';
 import { REMOTE_HOST_COMMAND_TIMEOUT_MS } from '../../lib/src/host/remote/link-client';
-import { RemoteHostService } from '../../lib/src/host/remote/service';
+import { RemoteHostService, unenrolledStatus } from '../../lib/src/host/remote/service';
 import {
   REMOTE_HOST_EVENT_EVENT,
   REMOTE_HOST_RESULT_EVENT,
@@ -469,22 +468,21 @@ function idleAnswer(cmd: string): { result: unknown } | null {
  * which bootstraps the contention like `enroll`.
  */
 async function idleStatus(): Promise<RemoteHostConsoleStatus> {
-  const offer = await readEnrollmentOffer().catch(() => null);
-  return {
-    enrolled: false,
-    serverUrl: null,
-    hostId: null,
-    connection: 'stopped',
-    pairedClients: 0,
-    suggestedLabel: hostname(),
-    offer: offer ? { origin: offer.origin } : null,
-  };
+  // The snapshot itself is the service's own builder, so the two answers to the
+  // same question — including the offer's origin-only projection — cannot drift.
+  // `readEnrollmentOffer` never rejects (its own doc), hence no guard here.
+  return unenrolledStatus(await readEnrollmentOffer());
 }
 
 /** Refuse one command — or answer it as an idle service would ({@link idleAnswer}). */
 function refuseCommand(payload: RemoteHostCommand): void {
   if (payload.cmd === 'status') {
-    void idleStatus().then((result) => answerIdle(payload.rhId, result));
+    // Neither half can reject, but this is the extension host: an unhandled
+    // rejection here is a crash, so the ordinary refusal is the fallback.
+    void idleStatus().then(
+      (result) => answerIdle(payload.rhId, result),
+      () => refuse(payload.rhId),
+    );
     return;
   }
   const idle = idleAnswer(payload.cmd);

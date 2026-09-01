@@ -18,7 +18,7 @@
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { isEnrollmentOffer, type EnrollmentOffer } from 'server-lib-common';
+import { parseEnrollmentOffer, type EnrollmentOffer } from 'server-lib-common';
 
 export type { EnrollmentOffer };
 
@@ -60,6 +60,11 @@ export function enrollmentOfferPath(
  * the ENOENT that is the *normal* answer: most machines run no server, and a
  * Host that logged about a missing file would log it on every status read.
  *
+ * **Never rejects.** Both call sites are status paths that have no better
+ * answer than "no offer" for a failed read, so callers may await it bare rather
+ * than each guarding a rejection that cannot arrive — pinned by "is silently
+ * null for every failure" in `enroll-offer.test.ts`.
+ *
  * Resolves the path per call rather than caching it, because the answer changes
  * under a running Host: the installer mints an offer, and redeeming one unlinks
  * the file.
@@ -69,11 +74,10 @@ export async function readEnrollmentOffer(
 ): Promise<EnrollmentOffer | null> {
   if (!path) return null;
   try {
-    const parsed: unknown = JSON.parse(await readFile(path, 'utf8'));
-    // Whoever can write the file chooses every field, so the guard authorizes
-    // nothing — it only keeps a malformed origin or token from reaching the
-    // enrollment exchange as though it were one.
-    return isEnrollmentOffer(parsed) ? parsed : null;
+    // Whoever can write the file chooses every field, so the shared parse
+    // authorizes nothing — it only keeps a malformed origin or token from
+    // reaching the enrollment exchange as though it were one.
+    return parseEnrollmentOffer(await readFile(path, 'utf8'));
   } catch {
     return null;
   }

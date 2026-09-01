@@ -82,6 +82,19 @@ function disclosure(): HTMLButtonElement | undefined {
   ) as HTMLButtonElement | undefined;
 }
 
+/**
+ * The three-field form, which is always mounted: folding it away is the
+ * `hidden` attribute, so what is typed into it survives both the disclosure and
+ * an offer appearing on disk underneath it.
+ */
+function typedForm(): HTMLFormElement {
+  const form = [...container.querySelectorAll('form')].find((candidate) =>
+    candidate.textContent?.includes('Connect this machine to a Dormouse server'),
+  );
+  if (!form) throw new Error('the typed enroll form is not mounted');
+  return form;
+}
+
 async function type(selector: string, value: string) {
   const input = container.querySelector<HTMLInputElement>(selector);
   if (!input) throw new Error(`no input for ${selector}`);
@@ -194,9 +207,10 @@ describe('RemoteControlSection', () => {
     expect(text()).toContain('A Dormouse server is installed on this machine.');
     expect(text()).toContain('https://ned-mac.tail9c2f1.ts.net');
     expect(buttonLabelled('Enroll')).toBeTruthy();
-    // The three-field form is behind the disclosure, not beside the card.
-    expect(container.querySelector('input[type="password"]')).toBeNull();
-    expect(buttonLabelled('Connect')).toBeUndefined();
+    // The three-field form is behind the disclosure, not beside the card —
+    // hidden rather than unmounted, so a half-typed one survives the flip.
+    expect(typedForm().hidden).toBe(true);
+    expect(container.querySelector('input[type="password"]')).toBeTruthy();
     // Folded, and saying so before it is clicked.
     expect(disclosure()?.textContent).toContain('+');
   });
@@ -219,10 +233,78 @@ describe('RemoteControlSection', () => {
     await type('input:not([type])', '  Work laptop  ');
     await act(async () => buttonLabelled('Enroll')!.click());
 
-    expect(link.command).toHaveBeenCalledWith('enrollOffer', { label: 'Work laptop' });
-    // No origin and no token from this realm: the service re-reads the file.
+    // The origin is an echo of what the card displayed, so the service can
+    // refuse a file rewritten since; no token, and the origin enrolled against
+    // is still the file's.
+    expect(link.command).toHaveBeenCalledWith('enrollOffer', {
+      origin: 'https://ned-mac.tail9c2f1.ts.net',
+      label: 'Work laptop',
+    });
     expect(text()).toContain('https://laptop.tailnet.ts.net');
     expect(text()).toContain('Connected');
+  });
+
+  it('keeps a half-typed form when an offer appears underneath it', async () => {
+    // The installer can run while this dialog is open, and the 2 s poll picks
+    // the offer up. Folding the form away must not empty it.
+    vi.useFakeTimers();
+    try {
+      let status: unknown = NOT_ENROLLED;
+      platform = { remoteHost: makeLink(async () => status) };
+      await render();
+
+      await type('input[type="url"]', 'https://elsewhere.example');
+      status = OFFER_STATUS;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+
+      expect(text()).toContain('A Dormouse server is installed on this machine.');
+      expect(typedForm().hidden).toBe(true);
+      expect(container.querySelector<HTMLInputElement>('input[type="url"]')!.value).toBe(
+        'https://elsewhere.example',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still shows a failed enroll after the offer vanished under it', async () => {
+    // Redeeming an offer unlinks it, so a poll can report no offer while the
+    // enroll that spent it is still in flight. A card that went with the file
+    // would leave a late refusal nowhere to render — silence, with a single-use
+    // token already gone.
+    vi.useFakeTimers();
+    try {
+      let status: unknown = OFFER_STATUS;
+      let failEnroll: (error: Error) => void = () => {};
+      const link = makeLink(async (cmd) => {
+        if (cmd === 'enrollOffer') {
+          status = NOT_ENROLLED;
+          return new Promise<unknown>((_resolve, reject) => {
+            failEnroll = reject;
+          });
+        }
+        return status;
+      });
+      platform = { remoteHost: link };
+      await render();
+
+      await act(async () => buttonLabelled('Enroll')!.click());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      // The card is still here, on the origin the user reviewed.
+      expect(text()).toContain('https://ned-mac.tail9c2f1.ts.net');
+
+      await act(async () => {
+        failEnroll(new Error('host enroll failed (401)'));
+        await Promise.resolve();
+      });
+      expect(text()).toContain('host enroll failed (401)');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('renders a one-click refusal where the typed form renders its own', async () => {
@@ -245,11 +327,20 @@ describe('RemoteControlSection', () => {
     await render();
 
     await act(async () => disclosure()!.click());
-    expect(container.querySelector('input[type="url"]')).toBeTruthy();
+    expect(typedForm().hidden).toBe(false);
     expect(buttonLabelled('Connect')).toBeTruthy();
     expect(disclosure()?.textContent).toContain('−');
     // The offer stays offered — unfolding is not a rejection of it.
     expect(buttonLabelled('Enroll')).toBeTruthy();
+
+    // And refolding hides what was typed rather than discarding it.
+    await type('input[type="url"]', 'https://elsewhere.example');
+    await act(async () => disclosure()!.click());
+    expect(typedForm().hidden).toBe(true);
+    await act(async () => disclosure()!.click());
+    expect(container.querySelector<HTMLInputElement>('input[type="url"]')!.value).toBe(
+      'https://elsewhere.example',
+    );
   });
 
   it('shows the server and paired-device count when enrolled', async () => {

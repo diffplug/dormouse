@@ -140,10 +140,13 @@ Press **Enroll** and the machine is connected.
 
 The one thing the card is careful about: **the token never reaches the webview.**
 The status the card renders from carries the origin and nothing else; pressing
-Enroll sends only the name, and the Host service re-reads the file itself. That
-re-read is also why a card left on screen for an hour is safe to press:
-redeeming an offer unlinks it, so a spent one fails with a message saying so
-rather than half-enrolling.
+Enroll sends the name and an echo of that origin, and the Host service re-reads
+the file itself. That re-read is also why a card left on screen for an hour is
+safe to press: redeeming an offer unlinks it, so a spent one fails with a
+message saying so rather than half-enrolling. The echo covers the other half of
+the same hour — if the installer ran again and rewrote the offer, the origin on
+disk no longer matches the one you read, and the service refuses rather than
+spend a one-time token on a server you were never shown.
 
 ### The typed form, for a server somewhere else
 

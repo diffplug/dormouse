@@ -49,6 +49,25 @@ export function isEnrollmentOffer(value: unknown): value is EnrollmentOffer {
   );
 }
 
+/**
+ * One offer file's text as an offer, or `null` for every way it can fail to be
+ * one — not JSON, wrong shape. Never throws.
+ *
+ * Here rather than in either reader because both of them parse the same file:
+ * the Server redeeming the token (`server/src/enroll-token.ts`) and the Host
+ * offering one-click enrollment from it (`lib/src/host/remote/enroll-offer.ts`).
+ * Each keeps its own `fs` handling — and the Server its warn-on-unusable — but
+ * one format has one parser.
+ */
+export function parseEnrollmentOffer(text: string): EnrollmentOffer | null {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return isEnrollmentOffer(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 /** True for a bare origin — what `URL.origin` yields, with nothing after it. */
 function isOrigin(value: string): boolean {
   try {

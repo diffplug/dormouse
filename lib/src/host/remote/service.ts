@@ -62,8 +62,47 @@ export interface RemoteHostServiceOptions {
    * The installer's enrollment offer on this machine, if any. Defaults to the
    * real well-known path (`enroll-offer.ts`); injected by the tests, which must
    * not depend on whether the machine running them has a server installed.
+   *
+   * **Must never reject** — a failed read is `null`, like a file that is not
+   * there. That contract is what lets the status path await it bare, so the
+   * spent-offer error in `#enrollOffer` stays the one thing a caller can see go
+   * wrong here.
    */
   readOffer?: () => Promise<EnrollmentOffer | null>;
+}
+
+/**
+ * The hostname, or `''` where the platform will not name itself. `os.hostname`
+ * throws on a machine whose name cannot be resolved, and a status read is the
+ * last place that may fail — it is what the webview's enrolled gate seeds from.
+ */
+function safeHostname(): string {
+  try {
+    return hostname();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * What a Host with no enrollment reports. One builder, because two processes
+ * answer this: the service's own `status`, and the VS Code glue for a window
+ * that has no service at all (`vscode-ext/src/remote-host.ts` → `idleStatus`).
+ * The origin-only projection of the offer is the security-relevant half — the
+ * one-time token is a bearer credential and never enters a webview
+ * (`service-protocol.ts` → `RemoteHostConsoleStatus.offer`) — so the two must
+ * not drift.
+ */
+export function unenrolledStatus(offer: EnrollmentOffer | null): RemoteHostConsoleStatus {
+  return {
+    enrolled: false,
+    serverUrl: null,
+    hostId: null,
+    connection: 'stopped',
+    pairedClients: 0,
+    suggestedLabel: safeHostname(),
+    offer: offer ? { origin: offer.origin } : null,
+  };
 }
 
 export class RemoteHostService {
@@ -195,12 +234,8 @@ export class RemoteHostService {
   }
 
   /**
-   * One-click enrollment from the offer an installer left on this machine.
-   *
-   * The file is re-read here rather than trusted from the `status` the card was
-   * rendered from: minutes may have passed, and redeeming an offer unlinks it,
-   * so the copy behind the button may already be spent
-   * (`service-protocol.ts` → `RemoteHostConsoleStatus.offer`).
+   * One-click enrollment from the offer an installer left on this machine
+   * (`docs/specs/server.md` → "Remote control, in the Settings dialog").
    */
   async #enrollOffer(params: EnrollOfferParams): Promise<EnrollResult> {
     const offer = await this.#readOffer();
@@ -208,6 +243,16 @@ export class RemoteHostService {
       throw new Error(
         'There is no enrollment offer on this machine — it may have been redeemed already. ' +
           'Re-run the installer to mint a new one, or enroll with the setup password.',
+      );
+    }
+    if (offer.origin !== params.origin) {
+      // The webview echoes the origin its card displayed, and this is where that
+      // echo is spent: an installer re-run between the render and the click
+      // rewrites the file, and enrolling against the new origin would spend a
+      // one-time token on a server the user never reviewed.
+      throw new Error(
+        `The enrollment offer changed — it now names ${offer.origin}, not ${params.origin}. ` +
+          'Reopen this dialog to review the new one.',
       );
     }
     return await this.#enrollWith(offer.origin, { enrollToken: offer.token }, params.label);
@@ -256,28 +301,32 @@ export class RemoteHostService {
     return { hostId: enrollment.hostId, serverUrl: enrollment.serverUrl };
   }
 
+  /**
+   * **Every await comes first; the snapshot is built after the last suspension
+   * point.** A seed `status` that started while un-enrolled can be sitting in
+   * the offer-file read when an enroll completes, and the webview's gate is
+   * last-writer-wins over the `{ enrolled: true }` event — so a snapshot
+   * assembled from an `#enrollment` sampled *before* the read would disarm that
+   * gate for a poll interval (`lib/src/remote/host/enrolled-gate.ts`). Reading
+   * `#enrollment` only below the read makes the answer name whichever
+   * enrollment exists when the answer is made.
+   *
+   * The read itself is still skipped while enrolled — an enrolled Host has
+   * nothing to offer, so the 2 s poll must not stat a file every tick.
+   */
   async #status(): Promise<RemoteHostConsoleStatus> {
+    const offer = this.#enrollment ? null : await this.#readOffer();
+    const enrollment = this.#enrollment;
+    if (!enrollment) return unenrolledStatus(offer);
     return {
-      enrolled: !!this.#enrollment,
-      serverUrl: this.#enrollment?.serverUrl ?? null,
-      hostId: this.#enrollment?.hostId ?? null,
+      enrolled: true,
+      serverUrl: enrollment.serverUrl,
+      hostId: enrollment.hostId,
       connection: this.#host?.status ?? 'stopped',
       pairedClients: this.#host?.activeRecords.length ?? 0,
-      suggestedLabel: hostname(),
-      // Only while un-enrolled: an enrolled Host has nothing to offer, so it
-      // answers `null` without touching the disk at all.
-      offer: this.#enrollment ? null : await this.#offer(),
+      suggestedLabel: safeHostname(),
+      offer: null,
     };
-  }
-
-  /**
-   * The offer as a webview may see it, which is the origin and nothing else
-   * (`service-protocol.ts` → `RemoteHostConsoleStatus.offer`). A read that fails
-   * is no offer, like a file that is not there.
-   */
-  async #offer(): Promise<RemoteHostConsoleStatus['offer']> {
-    const offer = await this.#readOffer().catch(() => null);
-    return offer ? { origin: offer.origin } : null;
   }
 
   /**

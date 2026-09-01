@@ -103,12 +103,17 @@ export interface EnrollParams {
 }
 
 /**
- * One-click enrollment against the offer an installer left on this machine. The
- * webview names only what to call the machine; the service re-reads the origin
- * and the one-time token from the file itself (see
- * {@link RemoteHostConsoleStatus.offer}).
+ * One-click enrollment against the offer an installer left on this machine
+ * (`docs/specs/server.md` → "Remote control, in the Settings dialog").
  */
 export interface EnrollOfferParams {
+  /**
+   * The origin the card displayed, echoed back so the service can refuse an
+   * offer file that was rewritten between the render and the click. **Not the
+   * origin that is enrolled against** — that comes off the file, along with the
+   * token this shape deliberately does not carry.
+   */
+  origin: string;
   label: string;
 }
 
@@ -180,17 +185,13 @@ export interface RemoteHostConsoleStatus {
   suggestedLabel: string;
   /**
    * The installer's enrollment offer on this machine, when there is one and this
-   * Host has not enrolled — the Settings dialog's one-click path.
+   * Host has not enrolled — the Settings dialog's one-click path
+   * (`docs/specs/server.md` → "Remote control, in the Settings dialog", which
+   * owns the re-read-at-click rule and what makes the card safe to press).
    *
    * **The offer's `token` is never here.** This is a service→webview shape, and
    * the token is a bearer credential exactly like `hostToken` (`SECURITY.md` →
-   * the no-`hostToken`-in-a-webview FAIL IF): the origin is all the card needs
-   * to render, and `enrollOffer` re-reads the file itself — which is also what
-   * makes a card rendered minutes ago safe to press, since redeeming an offer
-   * unlinks it.
-   *
-   * `null` whenever this Host is enrolled — reported without reading the file at
-   * all, which bounds the read to the un-enrolled state.
+   * the no-`hostToken`-in-a-webview FAIL IF).
    */
   offer: { origin: string } | null;
 }

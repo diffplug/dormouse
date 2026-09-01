@@ -5,7 +5,7 @@
 
 import { readFile, unlink } from 'node:fs/promises';
 
-import { ENROLL_TOKEN_PATTERN, isEnrollmentOffer } from 'server-lib-common';
+import { ENROLL_TOKEN_PATTERN, parseEnrollmentOffer } from 'server-lib-common';
 import type { EnrollmentOffer } from 'server-lib-common';
 
 import { secretEquals } from './secrets.js';
@@ -31,18 +31,11 @@ async function readEnrollmentOffer(path: string): Promise<EnrollmentOffer | null
     if (errnoOf(err) !== 'ENOENT') warnUnusable(path);
     return null;
   }
+  // The parse itself is shared with the Host-side reader of the same file
+  // (`server-lib-common/src/remote/enroll-offer.ts`); the warn is this side's.
   const offer = parseEnrollmentOffer(text);
   if (offer === null) warnUnusable(path);
   return offer;
-}
-
-function parseEnrollmentOffer(text: string): EnrollmentOffer | null {
-  try {
-    const parsed: unknown = JSON.parse(text);
-    return isEnrollmentOffer(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
 }
 
 function warnUnusable(path: string): void {
@@ -76,8 +69,8 @@ export async function redeemEnrollToken(
   const offer = await readEnrollmentOffer(path);
   // Only the token is compared. Whoever can write this file chooses every
   // field, so checking the offer's `origin` here would authorize nothing — it
-  // is for the Host-side reader, which is staged (server.md `## Future`,
-  // selfhost-onboarding item 1).
+  // is for the Host-side reader (`lib/src/host/remote/enroll-offer.ts`), which
+  // uses it to name the server it is about to enroll against.
   if (offer === null || !isFresh(offer.mintedAt) || !secretEquals(supplied, offer.token)) {
     return 'rejected';
   }

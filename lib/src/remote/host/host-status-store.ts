@@ -84,10 +84,12 @@ function setState(next: RemoteHostStatusState): void {
  * field added to the interface and forgotten here would be polled but never
  * published, so the section would paint that field from whenever one of the
  * others last changed — stale for as long as the dialog stays open, and nothing
- * else would catch it. The mapped type makes the omission a compile error, and
- * makes a *nested* field's comparator a decision rather than an oversight: the
- * service mints a fresh object per read, so `offer` compared by reference would
- * re-render on every tick.
+ * else would catch it. The mapped type makes the *omission* a compile error;
+ * it cannot make a nested field's comparator right, since `Object.is`
+ * type-checks for one of those too. `offer` is compared by its origin because
+ * the service mints a fresh object per read, and "does not notify when a poll
+ * answers the same status again" in `host-status-store.test.ts` is what pins
+ * that.
  */
 const STATUS_FIELDS: {
   [K in keyof RemoteHostConsoleStatus]: (
@@ -216,6 +218,22 @@ function refreshAfterMutation(): Promise<void> {
   return refreshRemoteHostStatus();
 }
 
+/**
+ * The answer as *this* build's shape, whoever answered it.
+ *
+ * The cast above is a claim about a value from another process, and in VS Code
+ * that process may be an older build than the webview asking it: a broker window
+ * running the extension from before a field was added answers without it
+ * (`docs/specs/vscode.md` → the peer link). `suggestedLabel` reaches
+ * `label.trim()` while the enroll form renders, where an `undefined` throws the
+ * whole section away rather than degrading, so it is defaulted here — at the
+ * seam where the untrusted shape becomes the typed one — instead of at each of
+ * the two forms that read it.
+ */
+function normalizeStatus(status: RemoteHostConsoleStatus): RemoteHostConsoleStatus {
+  return { ...status, suggestedLabel: status.suggestedLabel ?? '' };
+}
+
 async function readRemoteHostStatus(): Promise<void> {
   const active = link();
   if (!active) {
@@ -226,7 +244,7 @@ async function readRemoteHostStatus(): Promise<void> {
   try {
     const status = (await active.command('status')) as RemoteHostConsoleStatus | null;
     if (mine !== generation) return;
-    setState(status ? { kind: 'ready', status } : UNSUPPORTED);
+    setState(status ? { kind: 'ready', status: normalizeStatus(status) } : UNSUPPORTED);
   } catch (error) {
     if (mine !== generation) return;
     setState({ kind: 'error', message: describeError(error) });
@@ -259,14 +277,18 @@ export async function enrollRemoteHost(
  * path, where the only thing the user chooses is what to call the machine
  * (`service-protocol.ts` → `RemoteHostConsoleStatus.offer`).
  *
+ * `origin` is the one the card *displayed*, echoed so the service can refuse a
+ * file rewritten since — it is not what gets enrolled against, which comes off
+ * the file along with the token this realm never sees.
+ *
  * Rejections propagate verbatim, including the same allowlist refusal the typed
  * form gets: a server installed on this machine can still be an origin this
  * build was not compiled to reach.
  */
-export async function enrollOfferRemoteHost(label: string): Promise<void> {
+export async function enrollOfferRemoteHost(origin: string, label: string): Promise<void> {
   const active = link();
   if (!active) throw new Error('This build has no remote Host service.');
-  await active.command('enrollOffer', { label });
+  await active.command('enrollOffer', { origin, label });
   await refreshAfterMutation();
 }
 

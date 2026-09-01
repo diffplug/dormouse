@@ -141,6 +141,8 @@ function fakeFetch(): typeof globalThis.fetch {
  */
 let offer: EnrollmentOffer | null;
 let offerReads: number;
+/** Set to suspend the injected reader mid-read, so a status can be raced. */
+let offerGate: Promise<void> | null;
 
 const OFFER: EnrollmentOffer = {
   origin: 'https://relay.dormouse.sh',
@@ -163,6 +165,7 @@ function createService(seed?: Partial<Pick<MemoryStore, 'enrollment' | 'acl'>>):
     fetch: fakeFetch(),
     readOffer: async () => {
       offerReads++;
+      if (offerGate) await offerGate;
       return offer;
     },
   });
@@ -208,6 +211,7 @@ beforeEach(() => {
   requests = [];
   offer = null;
   offerReads = 0;
+  offerGate = null;
   vi.stubGlobal('fetch', fakeFetch());
 });
 
@@ -275,6 +279,38 @@ describe('status', () => {
       suggestedLabel: hostname(),
       offer: null,
     } satisfies RemoteHostConsoleStatus);
+  });
+
+  it('cannot answer un-enrolled from a read an enroll finished under', async () => {
+    // The seed `status` a webview issues on load reads the offer file, and an
+    // enroll can complete during that await. The webview's gate is
+    // last-writer-wins over the `{ enrolled: true }` event, so a snapshot built
+    // from an `#enrollment` sampled *before* the read would disarm it — the
+    // machine is enrolled and every gated behaviour is off until the next poll.
+    offer = OFFER;
+    createService();
+    let release: () => void = () => {};
+    offerGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    // In flight and suspended inside the reader.
+    const status = command('status');
+    await Promise.resolve();
+    expect(offerReads).toBe(1);
+
+    // Now enroll, all the way through the `{ enrolled: true }` event...
+    offerGate = null;
+    await command('enroll', {
+      serverUrl: 'https://relay.dormouse.sh',
+      password: 'setup',
+      label: 'Laptop',
+    });
+    expect(statusEvents()).toEqual([true]);
+
+    // ...and only then let the status read finish.
+    release();
+    expect((await status).result).toMatchObject({ enrolled: true, offer: null });
   });
 
   it('rejects a command it does not know', async () => {
@@ -377,7 +413,7 @@ describe('enrollOffer', () => {
     offer = OFFER;
     createService();
 
-    const result = await command('enrollOffer', { label: 'Laptop' });
+    const result = await command('enrollOffer', { origin: OFFER.origin, label: 'Laptop' });
 
     expect(result.result).toEqual({ hostId: 'host-1', serverUrl: OFFER.origin });
     expect(requests).toHaveLength(1);
@@ -398,9 +434,27 @@ describe('enrollOffer', () => {
     await command('status');
     offer = null;
 
-    const result = await command('enrollOffer', { label: 'Laptop' });
+    const result = await command('enrollOffer', { origin: OFFER.origin, label: 'Laptop' });
 
     expect(result.error).toMatch(/no enrollment offer on this machine/i);
+    expect(requests).toEqual([]);
+    expect(store.enrollment).toBeNull();
+  });
+
+  it('refuses an offer whose origin is not the one the card displayed', async () => {
+    // An installer rerun between the render and the click rewrites the file.
+    // Enrolling against the new origin would spend a one-time token on a server
+    // the user was never shown, so the webview's echo is what authorizes it.
+    offer = OFFER;
+    createService();
+    await command('status');
+    offer = { ...OFFER, origin: 'https://elsewhere.dormouse.sh' };
+
+    const result = await command('enrollOffer', { origin: OFFER.origin, label: 'Laptop' });
+
+    expect(result.error).toMatch(/offer changed/i);
+    expect(result.error).toContain('https://elsewhere.dormouse.sh');
+    // Nothing left the machine: not the token, and not against either origin.
     expect(requests).toEqual([]);
     expect(store.enrollment).toBeNull();
   });
@@ -412,7 +466,10 @@ describe('enrollOffer', () => {
     offer = { ...OFFER, origin: 'https://relay.example.com' };
     createService();
 
-    const result = await command('enrollOffer', { label: 'Laptop' });
+    const result = await command('enrollOffer', {
+      origin: 'https://relay.example.com',
+      label: 'Laptop',
+    });
 
     expect(result.error).toContain(CONNECT_SRC);
     expect(requests).toEqual([]);

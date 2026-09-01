@@ -557,9 +557,13 @@ memo invalidation — live in that host's spec.
   (rationale). The request carries a 10 s `AbortSignal.timeout`, under the
   webview's own 15 s command budget so the console sees the real error
   (rationale). `enrollOffer` is the same flow with the offer's one-time token in
-  place of the password.
-  Source of truth: `lib/src/remote/host/enrollment.ts`,
-  `#enrollWith` in `lib/src/host/remote/service.ts`.
+  place of the password. **A `status` snapshot is built after its last await**:
+  it reads the offer file, and an enroll finishing under that read would answer
+  `enrolled: false` after the `{ enrolled: true }` event, disarming the
+  edge-triggered webview gate. The un-enrolled snapshot is one exported builder,
+  `unenrolledStatus`, shared with the VS Code glue ([vscode.md](./vscode.md)).
+  Source of truth: `lib/src/remote/host/enrollment.ts`, `#enrollWith` and
+  `#status` in `lib/src/host/remote/service.ts`.
 
   **Order matters, and the store goes first.** The `hostToken` exists nowhere
   else and cannot be re-minted from the same exchange, so the save is
@@ -648,13 +652,23 @@ to honor:
 - **The offer leads, but only where it can be pressed.** The card shows when the
   local offer file exists and this Host is un-enrolled: it names the origin it
   found, prefills the same editable name, and enrolls on one click, with the
-  three-field form folded behind "Enroll with a different server…" and unchanged
-  where there is no offer. Reading the file is bounded to the un-enrolled state —
-  an enrolled service answers `offer: null` without touching disk (rationale).
+  three-field form folded behind "Enroll with a different server…" — folded with
+  `hidden`, never unmounted, so typed input survives both the disclosure and an
+  offer appearing underneath it — and unchanged where there is no offer. Reading
+  the file is bounded to the un-enrolled state — an enrolled service answers
+  `offer: null` without touching disk (rationale).
 - **The offer's token never enters a webview**, exactly like `hostToken`
   (`SECURITY.md`): `status` carries the origin only, and `enrollOffer` re-reads
   the file itself — which is also what makes a card rendered minutes ago safe to
   press, since redeeming an offer unlinks it.
+- **The click echoes the origin the card displayed**, and the service refuses a
+  file that no longer names it: an installer rerun rewrites the offer, and that
+  new origin is one nobody reviewed. `enrollOffer` takes `{ origin, label }` —
+  the origin reviewed, never the one enrolled against, which stays the file's.
+- **The card outlives its offer.** The poll sees the file unlinked the moment an
+  enroll redeems it, so the card keeps rendering while that enroll is in flight
+  or holding an error: a refusal landing after the card went away is silence
+  over a spent token.
 - **The password is passed through, never held.** It goes straight to the
   service, which is the party that talks to the server, and is cleared on
   success. `hostToken` never comes back into the webview realm: `enroll`
@@ -684,8 +698,9 @@ to honor:
   `lib/src/remote/host/host-status-store.ts`.
 
 The `window.dormouseRemoteHost` console hook exposes the same five commands —
-`enroll`, `enrollOffer`, `status`, `reconnect`, `clearEnrollment` — and remains
-the scripting seam. **Pairing approval is never here** — it is a modal, because
+`enroll(serverUrl, password, label)`, `enrollOffer(origin, label)` (its origin
+from `status().offer.origin`), `status`, `reconnect`, `clearEnrollment` — and
+remains the scripting seam. **Pairing approval is never here** — it is a modal, because
 it must interrupt ([remote-security-model.md](./remote-security-model.md),
 Pairing Ceremony).
 

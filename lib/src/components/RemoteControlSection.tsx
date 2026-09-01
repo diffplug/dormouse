@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
 import type { RemoteHostConsoleStatus } from '../host/remote/service-protocol';
 import type { RemoteHostStatus } from '../remote/host/remote-host';
@@ -140,6 +140,14 @@ export function RemoteControlSection() {
  * With one, the offer leads and the typed form folds away behind a disclosure:
  * a user who ran the installer here has nothing to type, and a server somewhere
  * else is the rarer case. Without one, nothing about the form changes.
+ *
+ * **One tree, whichever of those it is.** `offer` flips underneath this
+ * component — the 2 s poll sees the installer mint one, and sees the file
+ * unlinked the moment an enroll redeems it — and a shape that changed with it
+ * would unmount whatever the user was in the middle of: a failure landing after
+ * the flip would have nowhere to render, leaving silence over a spent
+ * single-use token, and a half-typed server URL would vanish because a file
+ * appeared on disk (`docs/specs/server.md`).
  */
 function EnrollView({
   offer,
@@ -149,27 +157,48 @@ function EnrollView({
   suggestedLabel: string;
 }) {
   const [showForm, setShowForm] = useState(false);
+  // Hoisted out of the card so it outlives the offer: this is the state that
+  // has to still be here when a rejected enroll lands after the file went away.
+  const { busy, error, run } = useBusyAction();
 
-  if (!offer) return <EnrollForm suggestedLabel={suggestedLabel} />;
+  // The origin the card is rendering, which is the offer's while there is one
+  // and the last one otherwise — kept only while that card still has something
+  // to say (in flight, or holding an error). Once it goes idle with no offer,
+  // the card is gone and the typed form is all that is left, unfolded.
+  const shown = useRef<string | null>(null);
+  if (offer) shown.current = offer.origin;
+  const origin = offer?.origin ?? (busy || error !== null ? shown.current : null);
 
   return (
-    <div className="mt-1.5">
-      {/* Keyed by origin: a different offer is a different form, and its name
-          field must re-seed rather than keep what was typed for the old one. */}
-      <OfferCard key={offer.origin} origin={offer.origin} suggestedLabel={suggestedLabel} />
-      <div className="mt-2">
-        <button
-          type="button"
-          aria-expanded={showForm}
-          className={modalActionButton()}
-          onClick={() => setShowForm((open) => !open)}
-        >
-          {/* The same `+`/`−` affordance as Pocket's "First-time setup"
-              disclosure, so a fold reads as one before it is clicked. */}
-          {showForm ? '− ' : '+ '}Enroll with a different server…
-        </button>
-      </div>
-      {showForm ? <EnrollForm suggestedLabel={suggestedLabel} /> : null}
+    <div>
+      {origin !== null ? (
+        <>
+          {/* Keyed by origin: a different offer is a different form, and its name
+              field must re-seed rather than keep what was typed for the old one. */}
+          <OfferCard
+            key={origin}
+            origin={origin}
+            suggestedLabel={suggestedLabel}
+            busy={busy}
+            error={error}
+            onEnroll={(label) => void run(() => enrollOfferRemoteHost(origin, label))}
+          />
+          <div className="mt-2">
+            <button
+              type="button"
+              aria-expanded={showForm}
+              className={modalActionButton()}
+              onClick={() => setShowForm((open) => !open)}
+            >
+              {/* The same `+`/`−` affordance as Pocket's "First-time setup"
+                  disclosure, so a fold reads as one before it is clicked. */}
+              {showForm ? '− ' : '+ '}Enroll with a different server…
+            </button>
+          </div>
+        </>
+      ) : null}
+      {/* Hidden, never unmounted — see the note above. */}
+      <EnrollForm suggestedLabel={suggestedLabel} hidden={origin !== null && !showForm} />
     </div>
   );
 }
@@ -177,23 +206,37 @@ function EnrollView({
 /**
  * One-click enrollment against the server installed on this machine.
  *
- * The origin is shown but not editable, and the label is all this realm sends
+ * The origin is shown but not editable, and the label is all the user chooses
  * (`service-protocol.ts` → `RemoteHostConsoleStatus.offer`). Every refusal the
  * typed form can hit applies here too — an installed server can still sit on an
  * origin this build was not compiled to reach — so the error renders in the same
- * place, in the same words.
+ * place, in the same words. The busy/error pair belongs to {@link EnrollView},
+ * because this card is unmounted by a successful enroll and must not be by an
+ * offer file that vanished under a failing one.
  */
-function OfferCard({ origin, suggestedLabel }: { origin: string; suggestedLabel: string }) {
+function OfferCard({
+  origin,
+  suggestedLabel,
+  busy,
+  error,
+  onEnroll,
+}: {
+  origin: string;
+  suggestedLabel: string;
+  busy: boolean;
+  error: string | null;
+  onEnroll: (label: string) => void;
+}) {
   const [label, setLabel] = useState(suggestedLabel);
-  const { busy, error, run } = useBusyAction();
 
   const ready = label.trim() !== '';
 
   return (
     <form
+      className="mt-1.5"
       onSubmit={(e) => {
         e.preventDefault();
-        if (ready && !busy) void run(() => enrollOfferRemoteHost(label.trim()));
+        if (ready && !busy) onEnroll(label.trim());
       }}
     >
       <div className="text-sm leading-relaxed text-muted">
@@ -301,8 +344,14 @@ function EnrolledView({
   );
 }
 
-/** The three-field form, prefilled with the same suggested name the card uses. */
-function EnrollForm({ suggestedLabel }: { suggestedLabel: string }) {
+/**
+ * The three-field form, prefilled with the same suggested name the card uses.
+ *
+ * `hidden` rather than an unmount, because what is typed here has to survive
+ * both of the things that fold it away: refolding the disclosure, and an offer
+ * file appearing on disk mid-typing ({@link EnrollView}).
+ */
+function EnrollForm({ suggestedLabel, hidden }: { suggestedLabel: string; hidden?: boolean }) {
   const [serverUrl, setServerUrl] = useState('');
   const [password, setPassword] = useState('');
   const [label, setLabel] = useState(suggestedLabel);
@@ -325,6 +374,7 @@ function EnrollForm({ suggestedLabel }: { suggestedLabel: string }) {
   return (
     <form
       className="mt-1.5"
+      hidden={hidden}
       onSubmit={(e) => {
         e.preventDefault();
         if (ready && !busy) void submit();

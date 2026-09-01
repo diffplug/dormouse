@@ -509,7 +509,11 @@ describe('remote host service glue', () => {
     mod.initRemoteHost(fakeContext().context);
     expect(opened!.isPeerBroker()).toBe(false);
 
-    mod.handleRemoteHostCommand({ rhId: 'rh-1', cmd: 'enrollOffer', params: { label: 'Laptop' } });
+    mod.handleRemoteHostCommand({
+      rhId: 'rh-1',
+      cmd: 'enrollOffer',
+      params: { origin: OFFER.origin, label: 'Laptop' },
+    });
 
     await waitFor(() => results(bound.posted).length > 0);
     expect(opened!.isPeerBroker()).toBe(true);
