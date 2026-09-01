@@ -420,26 +420,25 @@ Source of truth: `server-lib-common/src/security/noise.ts`, proven by
 ## E2E identities and presence
 
 The identities and the challenge construction the suite above is wired to in
-the **e2e-client-host** scope ([Future](#future)). They are built; no ceremony,
+the **e2e-client-host** scope ([Future](#future)) — built, but no ceremony,
 relay, store, or gate consults any of them yet.
 
 - **X25519 is probed, not yet required.** `probeNoiseSupport` runs one
-  `generateKey` and one `deriveBits` and answers a boolean. **Every rejection —
-  a missing WebCrypto included — is `false`, never a throw**, because its
-  callers are boot-path gates; the gates themselves land with the cutover.
+  `generateKey` and one `deriveBits`. **Every rejection — a missing WebCrypto
+  included — is `false`, never a throw**, because its callers are boot-path
+  gates; the gates land with the cutover.
 - **Each Host mints one permanent Noise static at enrollment**, after the
   Server answers and never in the request: `noiseStaticPrivateKey` (PKCS#8,
   base64url) and `noiseStaticPublicKey` (raw 32 bytes, base64url) ride in the
   enrollment record, so they land exactly where `hostToken` already does
   (`SECURITY.md` -> "Credentials at rest"). **Both halves or neither** —
-  `isEnrollment` accepts a record from before the fields existed and rejects
-  one carrying a single half, a malformed encoding, or a wrong decoded length,
-  since a Host believing in an identity it cannot use is worse than one that
-  knows it has none. `RemoteHost` imports the private half **nonextractably at
-  `start()`**, never in its synchronous constructor, and holds it unread.
-  **Minting is best-effort while nothing consumes it**: a runtime without
-  X25519 still enrolls and still runs remote control, and the probe is what
-  will tell it otherwise.
+  `isEnrollment` rejects a single half, a malformed encoding, or a wrong
+  decoded length, and accepts a record from before the fields existed; the
+  check is shape only, never a derive-and-compare. `RemoteHost` imports the
+  private half **nonextractably at `start()`**, never in its synchronous
+  constructor, and holds it unread. **Minting is best-effort while nothing
+  consumes it**: a runtime that cannot produce a static this build would
+  persist still enrolls and still runs remote control.
 - **One derived WebAuthn challenge serves both ceremonies.**
   `presenceChallenge(binding, serverNonce)` is base64url
   `SHA-256(lengthPrefixedConcat(domain, kind, binding fields in declared order,
@@ -447,10 +446,12 @@ relay, store, or gate consults any of them yet.
   field is hashed as the bytes it encodes and everything else as UTF-8** —
   decoded are `connectionId`, `hostChallenge`, `handshakeHash`, and the nonce;
   text are the domain, the kind, `hostId`, and `passkeyCredentialId`. The
-  Server mints and the Host recomputes, so both run this one builder;
-  `isPresenceBinding` bounds every field of what arrives.
-- **Pocket's IndexedDB is at v2**, carrying the Client-side records beside the
-  legacy device key ([pocket-app.md](./pocket-app.md) -> What Pocket stores).
+  Server mints and the Host recomputes, so both run this builder.
+  `isPresenceBinding` takes **exactly one kind's fields, each bounded**, and
+  the builder bounds the nonce — anything the challenge does not cover must not
+  reach the Host inside a verified binding.
+- **Pocket's IndexedDB is at v2**, holding the Client-side records
+  ([pocket-app.md](./pocket-app.md) -> What Pocket stores).
 
 Source of truth: `server-lib-common/src/security/presence.ts` (pinned by a
 vector computed from `node:crypto` in
@@ -584,13 +585,16 @@ not. One implementation serves Pocket, the worker, and both Host runtimes.
 - **Host static.** Minted and persisted already
   ([E2E identities and presence](#e2e-identities-and-presence)); what remains
   is enforcement — an enrollment carrying no static reads as un-enrolled and
-  the Settings dialog offers enrollment again, and that shape check is the
-  entire Host-state version.
+  the Settings dialog offers enrollment again, which is the entire Host-state
+  version. **A Host missing one mints it at `start()`**:
+  minting today is never retried, so a gate without that backfill un-enrolls a
+  machine over one transient failure. **Whatever first consumes the static
+  checks that the halves correspond**: a mismatch otherwise reads as a changed
+  Host identity at every Client, not the corrupt state file it is.
 - **Client static, per Host.** A fresh X25519 keypair generated at scan time
   and persisted, nonextractable, in that Host's `KnownHostV1` record only after
   approval. It replaces the device key as the browser half of the ACL identity
-  and does not replace or weaken the passkey half; different Hosts never share
-  a Client key.
+  without weakening the passkey half; different Hosts never share a Client key.
 - **`KnownHostV1`.** The record and its store exist
   ([pocket-app.md](./pocket-app.md) -> What Pocket stores); what remains is its
   use. The paired `passkeyCredentialId` is the sole `allowCredentials` entry

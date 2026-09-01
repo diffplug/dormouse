@@ -205,6 +205,13 @@ async function mintNoiseStatic(): Promise<{
 }> {
   try {
     const material = await mintNoiseStaticKeyPair();
+    // Checked against the guard the enrollment must pass: a runtime whose
+    // PKCS#8 falls outside what `isEnrollment` accepts would otherwise fail
+    // the whole exchange, which is the opposite of best-effort.
+    if (!isNoiseStaticMaterial(material.publicKey, material.privateKeyPkcs8)) {
+      console.warn('[remote-host] the minted Noise static is not a shape this build persists');
+      return {};
+    }
     return {
       noiseStaticPrivateKey: material.privateKeyPkcs8,
       noiseStaticPublicKey: material.publicKey,

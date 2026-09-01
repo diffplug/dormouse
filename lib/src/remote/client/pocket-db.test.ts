@@ -119,6 +119,37 @@ describe('the pocket database', () => {
     }
   });
 
+  it('releases an open handle when another tab asks for a newer version', async () => {
+    // v3 deletes `device-key`. A connection this tab left open would block that
+    // upgrade with no timeout, so the handle has to yield on `versionchange`.
+    const held = await openPocketDb();
+    const upgraded = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(POCKET_DB_NAME, POCKET_DB_VERSION + 1);
+      request.onblocked = () => reject(new Error('blocked: the open handle was never released'));
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    expect(upgraded.version).toBe(POCKET_DB_VERSION + 1);
+    upgraded.close();
+    held.close();
+  });
+
+  it('names the blocker instead of hanging when an old tab holds v1 open', async () => {
+    // A pre-v2 connection has no `versionchange` handler of its own, so the
+    // upgrade cannot proceed and neither `success` nor `error` ever fires.
+    const stale = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(POCKET_DB_NAME, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore(DEVICE_KEY_STORE);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      await expect(openPocketDb()).rejects.toThrow(/older version/);
+    } finally {
+      stale.close();
+    }
+  });
+
   it('creates every store on a browser that has no database yet', async () => {
     const db = await openPocketDb();
     try {

@@ -129,10 +129,31 @@ test('the guard takes both kinds and refuses everything else', () => {
   assert.equal(isPresenceBinding('pairing'), false);
 });
 
+test('the guard takes exactly one kind\'s fields, never an extra one', () => {
+  // Only what `presenceChallenge` hashes is covered by the assertion, so a
+  // field it does not hash must not ride along inside a verified binding.
+  assert.equal(isPresenceBinding({ ...PAIRING, connectionId: CONNECTION_ID }), false);
+  assert.equal(isPresenceBinding({ ...PAIRING, hostChallenge: HOST_CHALLENGE }), false);
+  assert.equal(isPresenceBinding({ ...PAIRING, note: 'anything' }), false);
+  assert.equal(isPresenceBinding({ ...CONNECTION, note: 'anything' }), false);
+  // A connection binding is not a pairing binding wearing the other tag.
+  assert.equal(isPresenceBinding({ ...CONNECTION, kind: 'pairing' }), false);
+});
+
 test('the guard bounds every field, because a megabyte string is a string', () => {
   assert.equal(isPresenceBinding({ ...PAIRING, hostId: 'h'.repeat(1024) }), true);
   assert.equal(isPresenceBinding({ ...PAIRING, hostId: 'h'.repeat(1025) }), false);
   assert.equal(isPresenceBinding({ ...CONNECTION, hostChallenge: 'c'.repeat(1025) }), false);
+});
+
+test('the nonce is bounded too, since no binding guard covers it', async () => {
+  // On the Host's recompute path the nonce arrives from the Client, and
+  // `isPresenceBinding` never sees it.
+  // Well-formed base64url on both sides of the limit, so only the bound can
+  // be what rejects: 1028 characters decode cleanly, 1024 is the last allowed.
+  await assert.rejects(presenceChallenge(PAIRING, 'A'.repeat(1028)));
+  await assert.rejects(presenceChallenge(PAIRING, undefined));
+  assert.equal(typeof (await presenceChallenge(PAIRING, 'A'.repeat(1024))), 'string');
 });
 
 test('a field that is not base64url throws rather than hashing garbage', async () => {

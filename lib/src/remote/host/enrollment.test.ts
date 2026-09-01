@@ -1,7 +1,29 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fromBase64Url, toBase64Url } from 'server-lib-common';
+import { fromBase64Url, mintNoiseStaticKeyPair, toBase64Url } from 'server-lib-common';
 import { clearEnrollment, getEnrollment, isEnrollment, performEnrollment } from './enrollment';
 import { ENROLLMENT_KEY } from './store';
+
+// Only the minter is faked, and only where a test asks for it; everything else
+// in the package stays real so the guards under test are the shipped ones.
+vi.mock('server-lib-common', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('server-lib-common')>();
+  return { ...actual, mintNoiseStaticKeyPair: vi.fn(actual.mintNoiseStaticKeyPair) };
+});
+
+/** A server answering a well-formed enrollment; the body is what varies. */
+function enrollResponder(): ReturnType<typeof vi.fn> {
+  return vi.fn(async () =>
+    new Response(
+      JSON.stringify({
+        hostId: 'host-abc',
+        hostToken: 'tok-xyz',
+        origin: 'https://dormouse.example',
+        rpId: 'dormouse.example',
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ),
+  );
+}
 
 function stubLocalStorage(): Map<string, string> {
   const store = new Map<string, string>();
@@ -96,6 +118,27 @@ describe('remote-host enrollment', () => {
       unknown
     >;
     expect(body).toEqual({ password: 'hunter2', label: 'My Laptop' });
+  });
+
+  it('still enrolls when the runtime mints a static this build cannot persist', async () => {
+    // Minting is best-effort: a PKCS#8 outside what `isEnrollment` accepts must
+    // cost the Host its E2E identity, not its enrollment.
+    stubLocalStorage();
+    vi.mocked(mintNoiseStaticKeyPair).mockResolvedValueOnce({
+      privateKeyPkcs8: toBase64Url(new Uint8Array(256)),
+      publicKey: toBase64Url(new Uint8Array(32)),
+    });
+    vi.stubGlobal('fetch', enrollResponder());
+
+    const enrollment = await performEnrollment(
+      'https://dormouse.example',
+      { password: 'hunter2' },
+      'My Laptop',
+    );
+
+    expect(enrollment.hostId).toBe('host-abc');
+    expect(enrollment.noiseStaticPrivateKey).toBeUndefined();
+    expect(enrollment.noiseStaticPublicKey).toBeUndefined();
   });
 
   it('sends the installer’s one-time token in place of the password', async () => {

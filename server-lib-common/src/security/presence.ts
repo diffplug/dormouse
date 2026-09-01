@@ -62,17 +62,32 @@ export type PresenceBinding =
  * every side that receives one: the Server takes it from a Client, and the
  * Host takes it from inside a transport payload it has decrypted but not yet
  * believed.
+ *
+ * **Exactly the fields of one kind — no more.** Only what
+ * {@link presenceChallenge} hashes is covered by the assertion, so a binding
+ * carrying an extra key would hand the Host unauthenticated data inside a
+ * structure it has just verified.
  */
 export function isPresenceBinding(value: unknown): value is PresenceBinding {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
-  if (!bounded(v.hostId) || !bounded(v.handshakeHash) || !bounded(v.passkeyCredentialId)) {
-    return false;
-  }
-  if (v.kind === 'pairing') return true;
-  if (v.kind === 'connection') return bounded(v.connectionId) && bounded(v.hostChallenge);
-  return false;
+  const fields =
+    v.kind === 'pairing' ? PAIRING_FIELDS : v.kind === 'connection' ? CONNECTION_FIELDS : null;
+  if (!fields) return false;
+  const keys = Object.keys(v);
+  return keys.length === fields.length && fields.every((field) => bounded(v[field]));
 }
+
+/** Every key one binding may carry, `kind` included, in declared order. */
+const PAIRING_FIELDS = ['hostId', 'handshakeHash', 'passkeyCredentialId', 'kind'] as const;
+const CONNECTION_FIELDS = [
+  'hostId',
+  'connectionId',
+  'hostChallenge',
+  'handshakeHash',
+  'passkeyCredentialId',
+  'kind',
+] as const;
 
 function bounded(value: unknown): value is string {
   return isBoundedString(value, PRESENCE_FIELD_LIMIT);
@@ -86,15 +101,19 @@ function bounded(value: unknown): value is string {
  * computed vector in `server-lib-common/test/presence.test.mjs`;
  * {@link bindingFields} is where it is applied.
  *
- * **Throws on a field that is not base64url.** Callers run
- * {@link isPresenceBinding} first and treat a throw as a failed presence
- * check, the same as a mismatch.
+ * **Throws on a field that is not base64url, and on an unbounded nonce.**
+ * Callers run {@link isPresenceBinding} first and treat a throw as a failed
+ * presence check, the same as a mismatch. The nonce is checked here rather
+ * than there because it is not part of the binding: on the Host's recompute
+ * path it arrives from the Client, and nothing else would stop a megabyte of
+ * base64url from being decoded and hashed.
  */
 export async function presenceChallenge(
   binding: PresenceBinding,
   serverNonce: string,
   crypto: WebCryptoLike = getWebCrypto(),
 ): Promise<string> {
+  if (!bounded(serverNonce)) throw new Error('presence nonce is missing or over the field limit');
   const digest = await crypto.subtle.digest(
     'SHA-256',
     lengthPrefixedConcat([

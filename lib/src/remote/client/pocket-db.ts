@@ -90,6 +90,11 @@ export interface PendingDeletionStore {
  * The key one tombstone is filed under. A pair rather than the `hostId` alone,
  * because a Host that has been re-paired can owe deletions for more than one
  * delivery id at a time.
+ *
+ * **Neither half may contain `:`**, or two different pairs could file under one
+ * key. Both are base64url today — a `hostId` is `toBase64Url(randomBytes(16))`
+ * from the Server — so the separator is unambiguous; a component that stops
+ * being base64url needs a framed key, not a longer separator.
  */
 export function pendingDeletionKey(hostId: string, deliveryId: string): string {
   return `${hostId}:${deliveryId}`;
@@ -119,7 +124,22 @@ export function openPocketDb(): Promise<IDBDatabase> {
         db.createObjectStore(PENDING_DELETIONS_STORE);
       }
     };
-    request.onsuccess = () => resolve(request.result);
+    // A connection on the pre-v2 build has no `versionchange` handler, so it
+    // can hold the upgrade off; neither `success` nor `error` follows while it
+    // does. Naming the failure beats an unbounded wait — the caller can tell
+    // the user to close the other tab, which nothing can do from a hang.
+    request.onblocked = () =>
+      reject(new Error('another tab is holding the Pocket database at an older version'));
+    request.onsuccess = () => {
+      const db = request.result;
+      // Another tab asking for a newer version is blocked for as long as this
+      // connection is open, and the block has no timeout. Closing on the
+      // `versionchange` notice is what lets v3 land while this tab is up;
+      // every operation here already closes its own handle, so the only reader
+      // this can interrupt is one that never released it.
+      db.onversionchange = () => db.close();
+      resolve(db);
+    };
     request.onerror = () => reject(request.error ?? new Error('failed to open IndexedDB'));
   });
 }

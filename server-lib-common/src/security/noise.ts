@@ -223,6 +223,11 @@ export async function mintNoiseStaticKeyPair(
  * hand back to {@link importNoiseStaticPrivateKey}: both halves base64url, the
  * public one 32 bytes, the private one a PKCS#8-sized blob.
  *
+ * **Shape only.** It does not derive the public point from the private half,
+ * so two halves of different keypairs pass — a synchronous guard cannot do the
+ * agreement, and what it is defending against is a truncated write, not a
+ * forger who already has write access to the state file.
+ *
  * Lives here, beside what mints and imports it, so every store that persists a
  * static checks it the same way rather than growing its own copy.
  */
