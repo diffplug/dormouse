@@ -78,6 +78,7 @@ describe('QuiesceDetector', () => {
     monitor.onData();
     expect(monitor.getStatus()).toBe('BUSY');
     expect(changes).toEqual(['MIGHT_BE_BUSY', 'BUSY']);
+    expect(monitor.isConfirmedBusy()).toBe(true);
   });
 
   it('falls back from MIGHT_BE_BUSY to NOTHING_TO_SHOW if work is not confirmed', () => {
@@ -97,6 +98,7 @@ describe('QuiesceDetector', () => {
     const { monitor, changes, settled } = createMonitor();
     driveMonitorToMightNeedAttention(monitor);
     expect(changes).toEqual(['MIGHT_BE_BUSY', 'BUSY', 'MIGHT_NEED_ATTENTION']);
+    expect(monitor.isConfirmedBusy()).toBe(true);
     expect(settled).not.toHaveBeenCalled();
   });
 
@@ -243,7 +245,7 @@ describe('QuiesceDetector', () => {
   it('onResize suppresses output detection for 500ms', () => {
     const { monitor, changes } = createMonitor();
     monitor.onResize();
-    monitor.onData();
+    expect(monitor.onData()).toBe(false);
     expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
     expect(changes).toEqual([]);
   });
@@ -252,7 +254,7 @@ describe('QuiesceDetector', () => {
     const { monitor, changes } = createMonitor();
     monitor.onResize();
     vi.advanceTimersByTime(500);
-    monitor.onData();
+    expect(monitor.onData()).toBe(true);
     vi.advanceTimersByTime(1_500);
     monitor.onData();
     expect(monitor.getStatus()).toBe('MIGHT_BE_BUSY');

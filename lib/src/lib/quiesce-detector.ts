@@ -27,6 +27,9 @@ const T_MIGHT_NEED_ATTENTION = cfg.alert.mightNeedAttention;
 const T_SETTLED_CONFIRM = cfg.alert.needsAttentionConfirm;
 const T_RESIZE_DEBOUNCE = cfg.alert.resizeDebounce;
 
+/** Silence from the last meaningful output through a confirmed settle. */
+export const QUIESCE_AFTER_OUTPUT_MS = T_MIGHT_NEED_ATTENTION + T_SETTLED_CONFIRM;
+
 /**
  * Watches one Session's PTY output and reports busy/quiet transitions.
  *
@@ -58,6 +61,11 @@ export class QuiesceDetector {
     return this.status;
   }
 
+  /** The detector has confirmed ongoing output and is now waiting for quiet. */
+  isConfirmedBusy(): boolean {
+    return this.status === 'BUSY' || this.status === 'MIGHT_NEED_ATTENTION';
+  }
+
   /** Start over from `NOTHING_TO_SHOW`, forgetting all output history. */
   reset(): void {
     if (this.disposed) return;
@@ -66,8 +74,8 @@ export class QuiesceDetector {
     this.setStatus('NOTHING_TO_SHOW');
   }
 
-  onData(): void {
-    if (this.disposed || this.resizeGrace) return;
+  onData(): boolean {
+    if (this.disposed || this.resizeGrace) return false;
 
     const now = Date.now();
     this.lastOutputAt = now;
@@ -86,6 +94,7 @@ export class QuiesceDetector {
         this.enterBusy();
         break;
     }
+    return true;
   }
 
   onResize(): void {

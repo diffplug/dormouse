@@ -831,6 +831,167 @@ describe('AlertManager in isolation', () => {
     });
   });
 
+  describe('defer alerts until quiet', () => {
+    it('defers a protocol alert behind an unwatched confirmed-busy detector', () => {
+      const id = 'defer-unwatched-protocol';
+      manager.setDeferAlertsUntilQuiet(true);
+      driveToBusy(id);
+      // The detector is private while no WATCHING rule matches.
+      expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
+
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
+      expect(manager.getState(id)).toMatchObject({
+        status: 'WATCHING_DISABLED',
+        todo: false,
+        notification: null,
+      });
+
+      vi.advanceTimersByTime(4_999);
+      expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
+      vi.advanceTimersByTime(1);
+      expect(manager.getState(id)).toMatchObject({
+        status: 'ALERT_RINGING',
+        todo: true,
+        notification: { source: 'OSC 9', title: null, body: 'Done' },
+      });
+    });
+
+    it('counts MIGHT_NEED_ATTENTION as confirmed busy and keeps its remaining deadline', () => {
+      const id = 'defer-might-need-attention';
+      manager.setDeferAlertsUntilQuiet(true);
+      driveToBusy(id);
+      vi.advanceTimersByTime(2_000);
+
+      manager.notifyFromProtocol(id, { source: 'OSC 777', title: 'Done', body: null });
+      vi.advanceTimersByTime(2_999);
+      expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
+      vi.advanceTimersByTime(1);
+      expect(manager.getState(id).status).toBe('ALERT_RINGING');
+    });
+
+    it('does not defer from MIGHT_BE_BUSY, which has not confirmed activity', () => {
+      const id = 'do-not-defer-candidate';
+      manager.setDeferAlertsUntilQuiet(true);
+      manager.onData(id);
+      vi.advanceTimersByTime(1_600);
+      manager.onData(id);
+
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
+      expect(manager.getState(id).status).toBe('ALERT_RINGING');
+    });
+
+    it('extends the quiet deadline when meaningful output resumes', () => {
+      const id = 'defer-output-extension';
+      manager.setDeferAlertsUntilQuiet(true);
+      driveToBusy(id);
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
+
+      vi.advanceTimersByTime(4_000);
+      manager.onData(id);
+      vi.advanceTimersByTime(4_999);
+      expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
+      vi.advanceTimersByTime(1);
+      expect(manager.getState(id).status).toBe('ALERT_RINGING');
+    });
+
+    it('carries a deferred command-exit alert across the command-boundary reset', () => {
+      const id = 'defer-command-exit';
+      manager.setDeferAlertsUntilQuiet(true);
+      manager.attend(id);
+      manager.applyTerminalSemanticEvents(id, [
+        { type: 'commandLine', commandLine: 'pnpm build' },
+        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+      ]);
+      vi.advanceTimersByTime(15_000);
+      driveToBusy(id);
+
+      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      expect(manager.getState(id)).toMatchObject({
+        status: 'WATCHING_DISABLED',
+        todo: false,
+        notification: null,
+      });
+
+      vi.advanceTimersByTime(5_000);
+      expect(manager.getState(id)).toMatchObject({
+        status: 'ALERT_RINGING',
+        todo: true,
+        notification: { source: 'COMMAND_EXIT', title: 'Command finished', body: 'pnpm build exited 0' },
+      });
+    });
+
+    it('cancels deferred delivery when the user attends, even after attention expires', () => {
+      const id = 'defer-attended';
+      manager.setDeferAlertsUntilQuiet(true);
+      driveToBusy(id);
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
+
+      manager.attend(id);
+      vi.advanceTimersByTime(60_000);
+      expect(manager.getState(id)).toMatchObject({
+        status: 'WATCHING_DISABLED',
+        todo: false,
+        notification: null,
+      });
+    });
+
+    it('releases rather than drops deferred delivery when the setting is disabled', () => {
+      const id = 'defer-disable';
+      manager.setDeferAlertsUntilQuiet(true);
+      driveToBusy(id);
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
+
+      manager.setDeferAlertsUntilQuiet(false);
+      expect(manager.getState(id).status).toBe('ALERT_RINGING');
+    });
+
+    it('coalesces repeated protocol alerts to the latest detail', () => {
+      const id = 'defer-latest-protocol';
+      manager.setDeferAlertsUntilQuiet(true);
+      driveToBusy(id);
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'First' });
+      manager.notifyFromProtocol(id, { source: 'OSC 777', title: 'Second', body: null });
+
+      vi.advanceTimersByTime(5_000);
+      expect(manager.getState(id).notification).toEqual({
+        source: 'OSC 777',
+        title: 'Second',
+        body: null,
+      });
+    });
+
+    it('offers a completion once and queues nothing when a claimant takes it', () => {
+      const id = 'defer-claimed';
+      manager.setDeferAlertsUntilQuiet(true);
+      driveToBusy(id);
+      const seen = recordingClaimant(id, true);
+
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
+      vi.advanceTimersByTime(60_000);
+
+      expect(seen).toEqual([
+        { kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'Done' } },
+        { kind: 'settled' },
+      ]);
+      expect(manager.getState(id)).toMatchObject({
+        status: 'WATCHING_DISABLED',
+        todo: false,
+        notification: null,
+      });
+    });
+
+    it('drops deferred delivery when the Session is removed', () => {
+      const id = 'defer-remove';
+      manager.setDeferAlertsUntilQuiet(true);
+      driveToBusy(id);
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
+
+      manager.remove(id);
+      vi.advanceTimersByTime(60_000);
+      expect(manager.getState(id)).toEqual(DEFAULT_ALERT_STATE);
+    });
+  });
+
   // --- Completion events (`docs/specs/alert.md` -> Completion events) ---
 
   describe('completion events', () => {
