@@ -154,6 +154,17 @@ visible text at that moment, with anything announced (`role="alert"`,
 `aria-live`) repeated under a rule. A pass that critiques the copy a user meets
 on this path cannot read a PNG; this is its raw material.
 
+### Warnings a green run leaves behind
+
+Three, every time. None is a symptom of anything, and a run that lacks them is
+not healthier than one that has them.
+
+| Where | What | Why |
+| --- | --- | --- |
+| `pocket-console.log` | `publicKey.pubKeyCredParams is missing at least one of the default algorithm identifiers: ES256 and RS256` | Deliberate: the verifier is ES256-only, so offering RS256 would mint keys that fail at the first assertion (`lib/src/remote/client/webauthn.ts`). |
+| `pocket-console.log`, twice | `Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute` | `@zxing/browser` reading camera frames; not ours to set, and one decode per run is not a performance question. |
+| `server.log`, `host.log` | `[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] … Command failed with signal "SIGTERM"` | The last line of a clean teardown. `pnpm` reports a SIGTERMed child as a failed script; the harness sent that signal on purpose. |
+
 `summary.json` also carries what only a run can know: the decoded pairing URL
 and how much of its TTL was left, the round trip from Enter to the file the
 laptop's shell wrote (`terminal.roundTripMs`, ~220 ms here), the Enter-to-bell
