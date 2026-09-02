@@ -30,28 +30,31 @@ by default, and its state — a painted terminal — only exists after it runs.
 
 ---
 
-## 0. Three parties, four layers
+## 0. Three parties, five layers
 
 | Term | Who that is here |
 | --- | --- |
 | **Client** (Dormouse Pocket) | the phone. Holds a passkey and one X25519 key per paired Host. |
 | **Host** (Dormouse Terminal) | the laptop being controlled. Holds the ACL. **Final authority for access decisions.** |
-| **Server** | the coordinating service: accounts, passkey registration, challenges, and relay. *Not* the authority for Host access. |
+| **Server** | the coordinating service: accounts, passkey registration, challenges, and relay. *Not* the authority for Host access, and it reads none of what it relays. |
 
-Access is deliberately split across four layers, and a connection needs all of
+Access is deliberately split across five layers, and a connection needs all of
 them to agree:
 
 | Layer | Responsibility |
 | --- | --- |
-| Passkey | Fresh user presence |
-| Device Key | Long-lived client identity |
+| Noise channel | Confidentiality, and both endpoints' long-term keys |
+| Passkey | Fresh user presence, *inside* that channel |
+| Client static | Long-lived client identity, one X25519 key per Host |
 | Host ACL | Authorization |
 | Host | Final access decision |
 
-The consequence that shapes every screen after this one: **adding a passkey to
-your account does not grant a new phone access to any machine.** Passkeys sync;
-authorization does not. Each browser must be approved on each laptop, in person,
-once.
+Two consequences shape every screen after this one. **Adding a passkey to your
+account does not grant a new phone access to any machine** — passkeys sync,
+authorization does not, so each browser must be approved on each laptop, in
+person, once. And **the server is a ciphertext pipe**: it never learns a pairing
+decision, a machine's name, a keystroke, or a notification's text, so nothing
+below asks you to trust it with any of them.
 
 ---
 
@@ -400,6 +403,14 @@ The offer appears only where push can work — an installed app on a server with
 push configured (§1). A phone in a Safari tab is told to add Dormouse to the Home
 Screen instead, which is also where a server with push disabled says so.
 
+A notification is the one message the two ends exchange with no live session
+between them, so it gets the same treatment as everything else: the laptop seals
+each one to that phone's own key, and the server forwards a sealed envelope it
+holds no key for. The service worker on the phone is what opens it — and if
+anything about that fails, it shows a content-free "something needs attention"
+rather than nothing, because a worker that shows nothing gets the browser's own
+"site updated in the background" notice instead.
+
 ---
 
 ## 8. Living with it
@@ -435,7 +446,7 @@ phone until each pairs again.
 
 <Canvas of={RemoteControl.ConfirmingDisconnect} />
 
-Three limits worth knowing before they surprise you:
+Four limits worth knowing before they surprise you:
 
 - **Clearing site data destroys the per-Host keys.** That is a re-pair, by
   design: the identity the laptop authorized is gone — and the storage partition
