@@ -151,12 +151,14 @@ function cases(platform, env) {
       `if has_off_loopback 3100 ${pad(loopback)}; then echo detected; else echo clean; fi`,
       'clean',
     ],
-    // These three are the ONLY executable pin on `serve_proxies_root`'s root
-    // scoping and port bound — the two controls this branch opened on. They
-    // read like a restatement of `deploy-lint`'s pattern and are not: that
-    // pattern holds the `<<<` spelling, and drops green when the scoping or
-    // the `([^0-9]|$)` goes while the herestring stays. Deleting these as
-    // redundant takes the pin off entirely.
+    // These three are the only pin that RUNS `serve_proxies_root`, and the only
+    // one that catches a weakening which keeps the spelling: an
+    // `|| grep -qE '127\.0\.0\.1:'"$1" <<<"$2"` fallback beside the scoped match
+    // leaves `deploy-lint` at 3x and green — 73 checks — while the two negative
+    // cases below go red, which is the `/api`-on-our-port config this branch
+    // opened on passing again. The lint counts the helper's text, so a straight
+    // revert of the root scoping or the `([^0-9]|$)` reddens it too; the `<<<`
+    // is what it alone holds.
     [
       'serve_proxies_root: a foreign root with our port on another path is not a pass',
       `if serve_proxies_root 3100 "$(printf '%s\\n%s\\n' "${SERVE_ROOT_FOREIGN}" "${SERVE_OUR_PORT_OTHER_PATH}")"; then echo pass; else echo fail; fi`,
