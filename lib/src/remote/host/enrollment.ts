@@ -141,11 +141,9 @@ export async function performEnrollment(
     // this body carries — to a server outside the build-time allowlist.
     redirect: 'error',
     headers: { 'content-type': 'application/json' },
-    // The credential and nothing else. The `label` stays here: it is the name
-    // this machine presents inside an encrypted ceremony outcome, and the
-    // Server keeps no copy of it (`docs/specs/remote-security-model.md` -> Host
-    // identity).
-    body: JSON.stringify({ ...credential }),
+    // The credential and nothing else — in particular no `label`, which stays
+    // local (`docs/specs/remote-security-model.md` -> Host identity).
+    body: JSON.stringify(credential),
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
@@ -176,8 +174,7 @@ export async function performEnrollment(
     // with a host fails the exchange below naming `origin`.
     origin: normalizeOrigin(enrolled?.origin) ?? undefined,
     rpId: enrolled?.rpId,
-    // Local only: never sent, never returned. It is the name this machine
-    // presents inside an encrypted outcome.
+    // Never sent, never returned: the operator's answer, kept here.
     label,
     // Only when the server actually sent a boolean: spreading `undefined` in
     // would make the key present-and-undefined, which the guard treats the
@@ -185,9 +182,8 @@ export async function performEnrollment(
     ...(typeof enrolled?.requireUserVerification === 'boolean'
       ? { requireUserVerification: enrolled.requireUserVerification }
       : {}),
-    // Minted above and never sent to the Server: the request body carries the
-    // credential and nothing else. Persisting it is the caller's job, alongside
-    // `hostToken`.
+    // Minted above and never sent to the Server. Persisting it is the caller's
+    // job, alongside `hostToken`.
     ...noiseStatic,
   };
   if (!isEnrollment(enrollment)) {

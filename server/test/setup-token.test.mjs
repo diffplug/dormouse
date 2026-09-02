@@ -97,8 +97,8 @@ async function shutdown(server) {
  * relay delivered to it. The harness mirrors the real Host's frame handling, so
  * a frame it would drop cannot pass for one it received.
  */
-async function connectFakeHost(app, server, options) {
-  const { body: host } = await enrollHost(app, options);
+async function connectFakeHost(app, server) {
+  const { body: host } = await enrollHost(app);
   const fake = new FakeHost({
     serverUrl: server.wsUrl,
     hostToken: host.hostToken,
@@ -260,7 +260,7 @@ test('a redemption tells the minting Host nothing: the invitation is its own sta
   const created = await freshApp();
   const server = await startServer(created);
   try {
-    const minter = await connectFakeHost(created.app, server, { label: 'Laptop A' });
+    const minter = await connectFakeHost(created.app, server);
     const { token } = await (await mint(created.app, minter.host.hostToken)).json();
     assert.equal((await registerWithToken(created.app, token)).status, 200);
 
@@ -327,7 +327,7 @@ test('a scan whose Host went offline mid-ceremony still sets the phone up', asyn
   const created = await freshApp();
   const server = await startServer(created);
   try {
-    const minter = await connectHost(created.app, server, { label: 'Laptop A' });
+    const minter = await connectHost(created.app, server);
     const { token } = await (await mint(created.app, minter.host.hostToken)).json();
 
     // The laptop lid closes between the scan and the passkey prompt. Setting the

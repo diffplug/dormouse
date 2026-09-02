@@ -268,8 +268,8 @@ export function wsConnect(url) {
 }
 
 /** POST /api/host/enroll with the setup password; returns the JSON body. */
-export async function enrollHost(app, { password = PASSWORD } = {}) {
-  const res = await post(app, API_ROUTES.hostEnroll, { password });
+export async function enrollHost(app) {
+  const res = await post(app, API_ROUTES.hostEnroll, { password: PASSWORD });
   return { res, body: await res.json() };
 }
 
@@ -283,8 +283,8 @@ export async function ownerSession(app) {
 }
 
 /** Enroll a host and open its `/ws/host` socket (awaiting the upgrade). */
-export async function connectHost(app, server, opts) {
-  const { body } = await enrollHost(app, opts);
+export async function connectHost(app, server) {
+  const { body } = await enrollHost(app);
   const socket = wsConnect(`${server.wsUrl}${WS_ROUTES.host}?${WS_TOKEN_PARAM}=${body.hostToken}`);
   await socket.ready;
   return { host: body, socket };

@@ -13,9 +13,12 @@ import {
   MAX_TOKENS_PER_HOST,
   NoiseTransportSession,
   WS_CLOSE_HOST_REPLACED,
+  createNoiseInitiator,
+  e2eConnectionPrologue,
   fromBase64Url,
   generateNoiseKeyPair,
   mintNoiseStaticKeyPair,
+  pairingInvitationPrologue,
   toBase64Url,
   utf8Decode,
   utf8Encode,
@@ -24,11 +27,6 @@ import {
   type PairingInvitation,
   type PresenceBinding,
   type PresenceProofV1,
-} from 'server-lib-common';
-import {
-  createNoiseInitiator,
-  e2eConnectionPrologue,
-  pairingInvitationPrologue,
 } from 'server-lib-common';
 import { RemoteHost, type RemoteApiSessionLike } from './remote-host';
 import type { HostEnrollment } from './enrollment';

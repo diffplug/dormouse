@@ -10,7 +10,12 @@ import { QrCode } from './QrCode';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-const URL_UNDER_TEST = 'https://ned-mac.tail9c2f1.ts.net/#pair?1.3PkQ8sV2mYb1hZr7Lw0c';
+// A real pairing code's shape — six dot-separated fields — so the fixture is a
+// URL `parsePairingInvitationUrl` would actually accept, not just one that
+// starts like it (`server-lib-common/src/security/pairing-invitation.ts`).
+const URL_UNDER_TEST =
+  'https://ned-mac.tail9c2f1.ts.net/#pair?1.S6kyjjqOS7mw3l8ye89U3g.LnExjA-KKeADf221aLlYyw' +
+  '.1788317358.QcD_OlD0nL7T4Ztg3Y09GjzTf1g6jTIxjgpLwj-fsAE.CIjNbWm_wyeIKYCmV4R66fqxde05rMwq7sFd1Ss9FAQ';
 
 let container: HTMLDivElement;
 let root: Root;

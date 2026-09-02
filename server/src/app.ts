@@ -347,7 +347,6 @@ export function createApp(config: AppConfig): CreatedApp {
   async function pickCredential(
     body: CredentialBody | null,
     c: Context<AppEnv>,
-    tokenError: string,
   ): Promise<{ token: string | null } | Response> {
     const password: unknown = body?.password;
     const token: unknown = body?.enrollToken;
@@ -355,7 +354,9 @@ export function createApp(config: AppConfig): CreatedApp {
       return c.json({ error: 'supply exactly one of password or enrollToken' }, 400);
     }
     if (token !== undefined) {
-      if (typeof token !== 'string') return credentialFailure(c, tokenError);
+      // The shared `UNAUTHORIZED_ERROR`: only a Host sends an enroll token, so
+      // no Client recovery keys on it.
+      if (typeof token !== 'string') return credentialFailure(c, UNAUTHORIZED_ERROR);
       return { token };
     }
     if (!passwordOk(password)) return credentialFailure(c, BAD_PASSWORD_ERROR);
@@ -564,10 +565,9 @@ export function createApp(config: AppConfig): CreatedApp {
 
   app.post(API_ROUTES.hostEnroll, async (c) => {
     const body = await readJson<HostEnrollRequest>(c);
-    // Keeps the shared `UNAUTHORIZED_ERROR`: only a Host sends an enroll token,
-    // so no Client recovery keys on it. The shape ladder runs out here, ahead of
-    // the gate below, which holds only the redemption that has to be serialized.
-    const picked = await pickCredential(body, c, UNAUTHORIZED_ERROR);
+    // The shape ladder runs out here, ahead of the gate below, which holds only
+    // the redemption that has to be serialized.
+    const picked = await pickCredential(body, c);
     if (picked instanceof Response) return picked;
     const enrollToken = picked.token;
     let host: StoredHost;
@@ -684,13 +684,16 @@ export function createApp(config: AppConfig): CreatedApp {
 
   app.post(API_ROUTES.reauthFinish, requireSession, async (c) => {
     const body = await readJson<Partial<ReauthFinishRequest>>(c);
-    const serverNonce = body?.serverNonce;
+    const serverNonce: unknown = body?.serverNonce;
+    // The shape first, so nothing below has to re-narrow it; every value that
+    // could possibly be a nonce still reaches `consume`.
+    if (typeof serverNonce !== 'string') {
+      return c.json({ error: 'unrecognized or expired nonce' }, 400);
+    }
     // Consumed FIRST, whatever the rest of this decides: single use is what
     // stops one WebAuthn prompt proving presence for a second ceremony.
     const pending = presenceNonces.consume(serverNonce);
-    if (!pending || serverNonce === undefined) {
-      return c.json({ error: 'unrecognized or expired nonce' }, 400);
-    }
+    if (!pending) return c.json({ error: 'unrecognized or expired nonce' }, 400);
     const assertion = body?.assertion;
     if (!assertion || typeof assertion.credentialId !== 'string') {
       return c.json({ error: 'malformed assertion' }, 400);
@@ -749,17 +752,11 @@ export function createApp(config: AppConfig): CreatedApp {
    * for the same reason: none of them may tell a caller which one it hit.
    */
   app.post(API_ROUTES.setupRetire, requireSession, async (c) => {
-    const body = await readJson<SetupRetireRequest>(c);
-    const token: unknown = body?.setupToken;
-    if (typeof token !== 'string') return credentialFailure(c, SETUP_TOKEN_INVALID_ERROR);
-    const entry = setupTokens.consume(token);
-    if (!entry) return credentialFailure(c, SETUP_TOKEN_INVALID_ERROR);
-    // Re-read `hosts.json`, exactly as `readSetupGated` does. Nothing is
-    // restored: a revoked minter's token is dead, and retiring it is the
-    // outcome the caller wanted anyway.
-    if (!(await hostStore.has(entry.hostId))) {
-      return credentialFailure(c, SETUP_TOKEN_INVALID_ERROR);
-    }
+    // The same gate `finish` runs, so the two cannot drift on what a spendable
+    // token is. The spent entry is dropped rather than kept: retiring it is the
+    // outcome the caller wanted, so there is no failure left to restore it for.
+    const gated = await readSetupGated<SetupRetireRequest>(c, 'consume');
+    if (gated instanceof Response) return gated;
     return c.body(null, 204);
   });
 

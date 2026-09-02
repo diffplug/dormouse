@@ -55,7 +55,7 @@ function foreignHash() {
 async function ceremonyFixture({ autoApprove = false } = {}) {
   const created = await freshApp();
   const server = await startServer(created);
-  const { body: enrollment } = await enrollHost(created.app, { label: 'Laptop' });
+  const { body: enrollment } = await enrollHost(created.app);
   const hostStatic = await generateNoiseKeyPair();
   const host = new FakeHost({
     serverUrl: server.wsUrl,

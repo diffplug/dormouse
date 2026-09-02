@@ -147,11 +147,9 @@ test('finish verifies the assertion, extends nothing, and spends the nonce', asy
   assert.deepEqual(await res.json(), { verifiedAt: clock.now() });
 
   // The session is authentication-plane only: this exchange is not reusable
-  // proof of presence for a Host, so it moves neither the token's life nor the
-  // legacy presence stamp.
+  // proof of presence for a Host, so it does not extend the token's life.
   const after = sessions.validate(sessionToken);
   assert.equal(after.expiresAt, before.expiresAt);
-  assert.equal(after.lastVerifiedPresence, before.lastVerifiedPresence);
 
   // Single use: one WebAuthn prompt may not prove presence for two ceremonies.
   const replay = await finish(app, sessionToken, {

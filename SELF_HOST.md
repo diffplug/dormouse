@@ -450,9 +450,8 @@ Host displays (`docs/specs/server.md` → Setup tokens and the pairing QR).
    add Pocket to the Home Screen *before* scanning and do all of this inside the
    installed app: iOS delivers Web Push only there, and the install is a
    separate storage partition that would otherwise need its own pairing
-   (`docs/specs/pocket-app.md` → Installable web app). The phone's own camera
-   only opens the right origin — iOS opens Safari, not the installed app — so
-   Pocket erases the fragment, spends nothing, and asks them to scan again.
+   (`docs/specs/pocket-app.md` → Installable web app, which also covers what
+   happens if they reach for the phone's own camera instead).
 
 4. **A real session.** The scan runs straight into pairing: read the two digits
    off the phone, type them into the modal on the laptop, then **Connect** (one

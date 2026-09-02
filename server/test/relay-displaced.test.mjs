@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { RelayHub } from '../dist/relay.js';
-import { newE2eId } from './harness/e2e.mjs';
+import { e2eClientFrame, e2eHostFrame, newE2eId } from './harness/e2e.mjs';
 
 /**
  * Unit tests for the displaced-host-socket guard, driving RelayHub directly
@@ -27,31 +27,9 @@ function fakeSocket() {
   };
 }
 
-/** A well-formed client envelope; the relay never decodes `ct`. */
-function clientFrame(hostId, overrides = {}) {
-  return JSON.stringify({
-    t: 'e2e',
-    hostId,
-    kind: 'pairing',
-    id: newE2eId(),
-    step: 'init',
-    ct: 'Zm9v',
-    ...overrides,
-  });
-}
-
-/** A well-formed host envelope addressed to `clientId`. */
-function hostFrame(clientId, overrides = {}) {
-  return JSON.stringify({
-    t: 'e2e',
-    clientId,
-    kind: 'pairing',
-    id: newE2eId(),
-    step: 'response',
-    ct: 'YmFy',
-    ...overrides,
-  });
-}
+// `RelayHub` is driven with raw strings here, one level below the socket.
+const clientFrame = (hostId, overrides) => JSON.stringify(e2eClientFrame(hostId, overrides));
+const hostFrame = (clientId, overrides) => JSON.stringify(e2eHostFrame(clientId, overrides));
 
 /** Register a client and bind it to `hostId`. */
 function boundClient(hub, hostId) {

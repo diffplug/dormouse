@@ -213,15 +213,12 @@ export class RelayHub {
   }
 
   /**
-   * Resolve the Host a client frame addresses, answering the two refusals
-   * (missing hostId, offline) itself. Resolution only — binding is
+   * Resolve the Host a client frame addresses, answering the one refusal
+   * (offline) itself. The shape is already proved — only `isE2eClientFrame`
+   * reaches here — so resolution is the whole job; binding is
    * {@link RelayHub.#bindClientToHost}.
    */
-  #resolveHost(client: ClientConn, hostId: unknown): HostConn | null {
-    if (typeof hostId !== 'string') {
-      this.#toClient(client, { t: 'error', error: 'missing hostId' });
-      return null;
-    }
+  #resolveHost(client: ClientConn, hostId: string): HostConn | null {
     const host = this.#hosts.get(hostId);
     if (!host) {
       this.#toClient(client, { t: 'error', error: `host ${hostId} is offline` });
@@ -245,7 +242,7 @@ export class RelayHub {
 // Helpers
 
 /** Parse a raw WS text frame; `null` if it is not a JSON object. */
-function parseFrame<T>(raw: string): (T & { t?: unknown; clientId?: unknown; hostId?: unknown }) | null {
+function parseFrame<T>(raw: string): (T & { t?: unknown }) | null {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null) return null;

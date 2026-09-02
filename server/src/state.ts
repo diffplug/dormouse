@@ -211,7 +211,7 @@ export class HostStore extends JsonFileStore {
 
   /**
    * Enroll a new host: run `beforeEnroll` with whether this is the first Host
-   * ever persisted, mint a random `hostId` ({@link HOST_ID_BYTE_LENGTH} bytes)
+   * ever persisted, mint a random `hostId` ({@link E2E_ID_BYTE_LENGTH} bytes)
    * and `hostToken` (32 bytes), append them, and return the record. The
    * callback and write share the mutex, so two credential paths cannot both
    * authorize themselves as the first enrollment.
@@ -226,7 +226,7 @@ export class HostStore extends JsonFileStore {
       await beforeEnroll(!(await this.exists()));
       const hosts = await this.list();
       const host: StoredHost = {
-        hostId: toBase64Url(randomBytes(HOST_ID_BYTE_LENGTH)),
+        hostId: toBase64Url(randomBytes(E2E_ID_BYTE_LENGTH)),
         hostToken: toBase64Url(randomBytes(32)),
         enrolledAt: this.now(),
       };
@@ -237,18 +237,8 @@ export class HostStore extends JsonFileStore {
   }
 }
 
-/**
- * A `hostId` is base64url of exactly this many bytes, minted here and enforced
- * on read.
- *
- * **The shape is load-bearing, not cosmetic.** Every `e2e` envelope carries the
- * `hostId` as a routing id, and `isE2eId` accepts only this length — so a
- * hand-edited row of another length would enroll a Host the relay can reach and
- * no Client can ever address. Dropping it here makes that row an un-enrolled
- * Host, which is what the person editing the file was reaching for anyway.
- */
-const HOST_ID_BYTE_LENGTH = E2E_ID_BYTE_LENGTH;
-
+// Minted and read at the one shape `isE2eId` accepts, since a `hostId` is the
+// routing id every `e2e` envelope carries (docs/specs/server.md -> State files).
 function isStoredHost(row: unknown): row is StoredHost {
   if (!row || typeof row !== 'object') return false;
   const candidate = row as Record<string, unknown>;
@@ -348,25 +338,17 @@ export class PushSubscriptionStore extends JsonFileStore {
   /**
    * Replace any existing subscription for this (host, delivery), or add one.
    *
-   * A service-worker scope has one subscription shared by every Host, so when
-   * this delivery's address changes every row still carrying an address it is
-   * moving off is stale — whichever delivery id that row belongs to — and goes
-   * in the same mutation. Two keys do that work, and both are needed:
+   * A service-worker scope has one subscription shared by every Host, so an
+   * address this delivery is moving off is dead under every Host at once and
+   * goes in the same mutation. Two keys, because they reach different rows:
    *
-   * * **The addresses being replaced come from every row carrying this
-   *   `deliveryId`**, not only the one for this Host. A delivery id names one
-   *   Client's pairing, so any row holding it speaks for the same worker scope;
-   *   reading only `(hostId, deliveryId)` left a sibling Host's row sitting on
-   *   an address this Client had already moved off, which the possession query
-   *   then reported as registered.
-   * * **The rows dropped are matched on the endpoint**, which is what reaches
-   *   the siblings — they carry delivery ids this request never names.
+   * * **Read the replaced addresses from every row carrying this
+   *   `deliveryId`**, not only this Host's — one delivery id speaks for one
+   *   worker scope.
+   * * **Drop rows matched on the endpoint**, which is what reaches siblings
+   *   holding delivery ids this request never names.
    *
-   * What it cannot do: a *brand-new* delivery id (a re-pair) has no row to read
-   * a previous address from, so rows for that scope's old endpoint survive
-   * until the push service 404/410s them. `docs/specs/server.md` -> State files
-   * states that limit; nothing in the request can close it, since the Server
-   * holds no cross-Host device identity linking the two ids.
+   * `docs/specs/server.md` -> State files owns the rule and the gap it leaves.
    */
   upsert(
     record: Omit<StoredPushSubscription, 'subscribedAt'>,

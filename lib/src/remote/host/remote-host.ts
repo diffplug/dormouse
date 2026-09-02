@@ -333,12 +333,9 @@ export class RemoteHost {
     while (this.#invitations.size >= MAX_TOKENS_PER_HOST) {
       const oldest = this.#invitations.entries().next();
       if (oldest.done) break;
-      const [inviteId, held] = oldest.value;
-      // The state table, not the cause: eviction reaches the oldest by
-      // insertion whatever it is doing, and a `reserved` one has been scanned —
-      // reporting that as `dropped` would tell the panel nobody asked, when a
-      // phone is mid-ceremony against it.
-      this.#retireInvitation(inviteId, held.state === 'reserved' ? 'consumed' : 'dropped');
+      // Unstated, so the entry's own state decides: eviction reaches the oldest
+      // by insertion whatever it happens to be doing.
+      this.#retireInvitation(oldest.value[0]);
     }
     const expiresAt = Math.min(now + DEFAULT_PAIRING_TTL_MS, serverExpiresAtMs);
     const keyPair = await generateNoiseKeyPair();
@@ -390,10 +387,26 @@ export class RemoteHost {
     }
   }
 
-  /** Drop an invitation and its key, announcing the state it ended in. */
-  #retireInvitation(inviteId: string, state: Exclude<InvitationState, 'live' | 'reserved'>): void {
-    if (!this.#invitations.delete(inviteId)) return;
-    this.#onInvitationChanged(inviteId, state);
+  /**
+   * Drop an invitation and its key, announcing the state it ended in.
+   *
+   * **With no `state` the entry's own decides it**, so a retirement that is not
+   * about a cause cannot mislabel one: `reserved` means a phone completed
+   * message 1 and the code really is spent, while anything still `live` is one
+   * nobody ever scanned. A caller passes a state only when the cause *is* the
+   * fact.
+   */
+  #retireInvitation(
+    inviteId: string,
+    state?: Exclude<InvitationState, 'live' | 'reserved'>,
+  ): void {
+    const held = this.#invitations.get(inviteId);
+    if (!held) return;
+    this.#invitations.delete(inviteId);
+    this.#onInvitationChanged(
+      inviteId,
+      state ?? (held.state === 'reserved' ? 'consumed' : 'dropped'),
+    );
   }
 
   // --- Socket lifecycle ----------------------------------------------------
@@ -525,11 +538,7 @@ export class RemoteHost {
     // First, so a ceremony step already awaiting sees it the moment it resumes.
     this.#epoch += 1;
     for (const clientId of [...this.#clients.keys()]) this.#disposeClient(clientId);
-    for (const [inviteId, held] of [...this.#invitations]) {
-      // `reserved` means a phone completed message 1 against it, so it really is
-      // spent; anything still `live` is one nobody ever scanned.
-      this.#retireInvitation(inviteId, held.state === 'reserved' ? 'consumed' : 'dropped');
-    }
+    for (const inviteId of [...this.#invitations.keys()]) this.#retireInvitation(inviteId);
   }
 
   /**
