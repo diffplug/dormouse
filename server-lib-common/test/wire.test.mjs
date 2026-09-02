@@ -13,6 +13,7 @@ import {
   isE2eCiphertext,
   isE2eClientFrame,
   isE2eHostFrame,
+  isE2eServerToClientFrame,
   isE2eId,
   isE2eServerToHostFrame,
   isSetupTokenResponse,
@@ -214,5 +215,27 @@ test('isE2eHostFrame takes the host steps and no hostId', () => {
     { ...E2E_HOST, ct: 'has spaces' },
   ]) {
     assert.equal(isE2eHostFrame(frame), false, JSON.stringify(frame));
+  }
+});
+
+test('isE2eServerToClientFrame takes the host steps with a stamped hostId', () => {
+  // The mirror of the Host's guard: the relay stamps `hostId` on the way out,
+  // and the Client trusts the relay no further than the Host does.
+  const stamped = { t: 'e2e', hostId: E2E_CLIENT.hostId, kind: 'connection', id: E2E_CLIENT.id, step: 'response', ct: E2E_CLIENT.ct };
+  assert.equal(isE2eServerToClientFrame(stamped), true);
+  assert.equal(isE2eServerToClientFrame({ ...stamped, step: 'transport' }), true);
+  for (const frame of [
+    null,
+    'nope',
+    { ...stamped, t: 'msg' },
+    // `init` is the Client's own step; the relay never sends one back.
+    { ...stamped, step: 'init' },
+    { ...stamped, hostId: 'short' },
+    { ...stamped, kind: 'terminal' },
+    { ...stamped, id: 'short' },
+    { ...stamped, ct: '' },
+    { ...stamped, ct: 'a'.repeat(MAX_E2E_CIPHERTEXT_LENGTH + 1) },
+  ]) {
+    assert.equal(isE2eServerToClientFrame(frame), false, JSON.stringify(frame));
   }
 });

@@ -629,6 +629,25 @@ export function isE2eServerToHostFrame(value: unknown): value is E2eServerToHost
   );
 }
 
+/**
+ * The shape guard a **Client** runs on what the relay hands it — the mirror of
+ * {@link isE2eServerToHostFrame}, and run for the same reason: the Client does
+ * not trust the relay to have bounded anything, and every value here is a map
+ * key or a base64url decode away from being work.
+ */
+export function isE2eServerToClientFrame(value: unknown): value is E2eServerToClientFrame {
+  if (!value || typeof value !== 'object') return false;
+  const frame = value as Record<string, unknown>;
+  return (
+    frame.t === 'e2e' &&
+    isE2eId(frame.hostId) &&
+    isE2eKind(frame.kind) &&
+    isE2eId(frame.id) &&
+    (frame.step === 'response' || frame.step === 'transport') &&
+    isE2eCiphertext(frame.ct)
+  );
+}
+
 /** The shape guard a relay runs on a Host-originated `e2e` frame. */
 export function isE2eHostFrame(value: unknown): value is E2eHostFrame {
   if (!value || typeof value !== 'object') return false;

@@ -38,6 +38,13 @@ const EXPIRY_PATTERN = new RegExp(`^[0-9]{${EXPIRY_DIGITS}}$`);
 /** The largest epoch-seconds value a uint32 expiry may carry. */
 const MAX_UINT32 = 0xffff_ffff;
 
+/**
+ * The hosts a browser already treats as a secure context over plain HTTP, and
+ * the whole of the parser's HTTPS exemption. `URL.hostname` spells the IPv6
+ * loopback bracketed, so that is the form matched.
+ */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
 /** How many dot-delimited fields the fragment carries. */
 const FRAGMENT_FIELD_COUNT = 6;
 
@@ -165,6 +172,10 @@ export function formatPairingInvitationUrl(origin: string, invitation: PairingIn
  * equal it exactly: a fragment is invisible to the Server, so the only thing
  * that keeps a code from bootstrapping a *different* deployment's Pocket is
  * this compare.
+ *
+ * **HTTPS, or a plain-HTTP loopback host.** That exemption is exactly the set
+ * a browser already treats as a secure context, so it admits no origin the
+ * platform would refuse to run WebAuthn or a service worker on.
  */
 export async function parsePairingInvitationUrl(
   text: unknown,
@@ -176,7 +187,13 @@ export async function parsePairingInvitationUrl(
   if (typeof text !== 'string' || text.length > PAIRING_QR_URL_MAX_LENGTH) return null;
   const url = parseUrl(text);
   if (!url) return null;
-  if (url.protocol !== 'https:') return null;
+  // HTTPS, or the one plain-HTTP origin a browser already calls a secure
+  // context — the documented `http://localhost:3000` dev loop, which WebAuthn
+  // and service workers are exempted for by the same rule. The origin compare
+  // below still has to pass, so this widens nothing a remote code could reach.
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname))) {
+    return null;
+  }
   // Credentials in the authority would let a code name an origin the compare
   // below accepts while the browser navigates somewhere else entirely.
   if (url.username !== '' || url.password !== '') return null;

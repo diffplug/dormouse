@@ -193,6 +193,23 @@ test('the parser refuses a URL that is not this app, served over HTTPS, at the r
   }
 });
 
+test('plain HTTP is accepted on a loopback host, and nowhere else', async () => {
+  // The documented dev loop serves Pocket on `http://localhost:3000`, which is
+  // a secure context by the platform's own rule — the same exemption WebAuthn
+  // and service workers get. Every other plain-HTTP origin stays refused.
+  for (const origin of ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://[::1]:3000']) {
+    const url = `${origin}/${PAIRING_HASH_PREFIX}${FIELDS.join('.')}`;
+    const parsed = await parsePairingInvitationUrl(url, origin, NOW);
+    assert.equal(parsed?.hostId, HOST_ID, origin);
+  }
+  // By host, never by suffix: a name that merely ends in `localhost` is an
+  // ordinary remote origin a self-hoster could be pointed at.
+  for (const origin of ['http://evil.localhost', 'http://127.0.0.1.evil.example', 'http://pocket.example']) {
+    const url = `${origin}/${PAIRING_HASH_PREFIX}${FIELDS.join('.')}`;
+    assert.equal(await parsePairingInvitationUrl(url, origin, NOW), null, origin);
+  }
+});
+
 test('the fragment is six fields, no more and no fewer', async () => {
   // Both counts are built at exactly 146 characters, so the length check
   // passes and the field count is what refuses them. Five: the last separator

@@ -8,6 +8,7 @@ declare const URL: {
     readonly protocol: string;
     readonly username: string;
     readonly password: string;
+    readonly hostname: string;
     readonly pathname: string;
     readonly search: string;
     readonly hash: string;
