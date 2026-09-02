@@ -333,6 +333,20 @@ setup password or a bearer token and no cookies exist for a foreign origin to
 ride on; the Host and dev Pocket builds call from other origins. WS auth rides
 the `token` query param, since browsers cannot set WebSocket headers.
 
+**Every request body is bounded before any route runs**, at
+`MAX_REQUEST_BODY_BYTES` (64 KiB), answering 413. The unauthenticated routes —
+`/api/host/enroll`, `/api/setup/*`, `/api/signin/finish` — read their body
+*before* the credential gate, so an unbounded reader would let any page on the
+tailnet make the process buffer whatever it liked with no auth, no rate limit,
+and no delay. The bound is on the body, never on the caller: a correct
+credential inside an over-long body is still 413. One route is exempt because
+its legitimate body is larger — `/api/push/send`, whose
+`MAX_PUSH_SEND_BODY_BYTES` is *derived* from `MAX_PUSH_QUERY_DELIVERY_IDS` and
+`MAX_SEALED_PUSH_LENGTH` so it cannot drift from what a maximal fan-out costs.
+The limit is staged after CORS, so a 413 carries the headers a browser needs to
+read it. Source of truth: `server/src/app.ts`, pinned by
+`server/test/body-limit.test.mjs`.
+
 The setup password is compared in constant time (SHA-256 digests, so length
 never branches) with a small fixed delay on failure; host tokens are resolved
 the same way, checking every row without an early break. That is the extent of

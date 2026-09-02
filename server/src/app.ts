@@ -9,6 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
 import type { Context, MiddlewareHandler } from 'hono';
 import { createNodeWebSocket } from '@hono/node-ws';
@@ -21,6 +22,7 @@ import {
   HELLO_ROUTE,
   HostChallengeIssuer,
   MAX_PUSH_QUERY_DELIVERY_IDS,
+  MAX_SEALED_PUSH_LENGTH,
   SELFHOST_ACCOUNT_ID,
   SETUP_TOKEN_INVALID_ERROR,
   BAD_PASSWORD_ERROR,
@@ -208,6 +210,36 @@ const MAX_REAUTH_NONCE_SESSIONS = 32;
 export const HOST_REVOCATION_SWEEP_MS = 60_000;
 /** A small fixed delay on a rejected credential — the extent of POC brute-force hardening. */
 const CREDENTIAL_FAILURE_DELAY_MS = 250;
+
+/**
+ * Longest request body any route but `/api/push/send` will read.
+ *
+ * Unauthenticated routes — `/api/host/enroll`, `/api/setup/*`,
+ * `/api/signin/finish` — read their body BEFORE the credential gate, so
+ * without this any page on the tailnet could make the process buffer gigabytes
+ * with no auth, no rate limit, and no delay. Every body this server actually
+ * takes is a handful of base64url fields, so 64 KiB is orders of magnitude
+ * above real use.
+ */
+export const MAX_REQUEST_BODY_BYTES = 64 * 1024;
+
+/**
+ * The one route whose legitimate body outgrows {@link MAX_REQUEST_BODY_BYTES}:
+ * a fan-out of `MAX_PUSH_QUERY_DELIVERY_IDS` sealed envelopes, each already
+ * bounded by `MAX_SEALED_PUSH_LENGTH`. Derived from those two rather than
+ * written out, so tightening either tightens this with it; the per-recipient
+ * allowance covers the delivery id, the salt, and the JSON around them.
+ */
+const PUSH_SEND_RECIPIENT_OVERHEAD_BYTES = 256;
+export const MAX_PUSH_SEND_BODY_BYTES =
+  MAX_PUSH_QUERY_DELIVERY_IDS *
+    (DELIVERY_ID_LENGTH + MAX_SEALED_PUSH_LENGTH + PUSH_SEND_RECIPIENT_OVERHEAD_BYTES) +
+  PUSH_SEND_RECIPIENT_OVERHEAD_BYTES;
+
+/** The one answer to an over-long body: 413, before any route has run. */
+function tooLarge(c: Context<AppEnv>): Response {
+  return c.json({ error: 'request body too large' }, 413);
+}
 
 /** The credential fields `pickCredential` reads. */
 type CredentialBody = { password?: unknown; enrollToken?: unknown };
@@ -494,6 +526,15 @@ export function createApp(config: AppConfig): CreatedApp {
   // token, or a bearer token — and no cookies exist for a foreign origin to
   // ride on.
   app.use('/api/*', cors({ origin: '*', allowHeaders: ['Content-Type', 'Authorization'] }));
+
+  // Staged after CORS so a 413 carries the headers a browser needs to read it,
+  // and before every route so no credential gate is reached by way of a body
+  // the process already buffered.
+  const smallBodies = bodyLimit({ maxSize: MAX_REQUEST_BODY_BYTES, onError: tooLarge });
+  const sendBodies = bodyLimit({ maxSize: MAX_PUSH_SEND_BODY_BYTES, onError: tooLarge });
+  app.use('*', (c, next) =>
+    (c.req.path === API_ROUTES.pushSend ? sendBodies : smallBodies)(c, next),
+  );
 
   // Shared greeting, kept from the skeleton so `lib` and `server` stay agreed.
   app.get(HELLO_ROUTE, (c) => c.json(helloResponse()));

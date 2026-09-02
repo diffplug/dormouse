@@ -796,7 +796,10 @@ test('a named delivery with no subscription counts as unknown, not delivered', a
 // hashed into a Set and compared against every stored row.
 test('every delivery-id route refuses an id no Host could have minted', async () => {
   const { app, host, sessionToken } = await pushApp();
-  const oversized = 'A'.repeat(100_000);
+  // Hundreds of times the legal length, but inside `MAX_REQUEST_BODY_BYTES`:
+  // past that the body limit refuses it with a 413 first, which is what
+  // `body-limit.test.mjs` covers.
+  const oversized = 'A'.repeat(10_000);
   for (const bad of ['never-subscribed', oversized, `${newDeliveryId()}x`]) {
     assert.equal((await query(app, sessionToken, [bad])).status, 400, `query ${bad.length}`);
     const sent = await sendAs(app, host.hostToken, to(bad));
