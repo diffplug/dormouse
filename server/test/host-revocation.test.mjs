@@ -9,15 +9,9 @@ import { enrollHost, freshApp } from './helpers.mjs';
 import { e2eClientFrame } from './harness/e2e.mjs';
 
 /**
- * Revoking a Host is deleting its row from `hosts.json` — the *documented*
- * mechanism, with no management UI behind it (`docs/specs/server.md` ->
- * Guardrails). The `/ws/host` bearer is checked once, at the upgrade, and the
- * relay never consults the store again, so without the sweep a revoked Host
- * kept relaying for as long as it stayed connected. "Until it happens to
- * reconnect" is not a bound anyone editing a file can act on.
- *
- * Driven through `sweepRevokedHosts` rather than its interval: the timer is
- * `unref`'d wall-clock plumbing, and what needs proving is the decision.
+ * `docs/specs/server.md` -> Guardrails owns the rule. Driven through
+ * `sweepRevokedHosts` rather than its interval, which `index.ts` owns: the
+ * timer is wall-clock plumbing, and what needs proving is the decision.
  */
 
 function fakeSocket() {
@@ -33,7 +27,7 @@ function fakeSocket() {
   };
 }
 
-async function hostsPath(stateDir) {
+function hostsPath(stateDir) {
   return join(stateDir, 'hosts.json');
 }
 
@@ -53,7 +47,7 @@ test('a Host whose row is deleted loses its relay socket, and its clients are to
   assert.equal(hub.isHostOnline(host.hostId), true, 'precondition: online');
 
   // Revocation, exactly as an operator performs it.
-  await writeFile(await hostsPath(stateDir), '[]');
+  await writeFile(hostsPath(stateDir), '[]');
 
   assert.equal(await created.sweepRevokedHosts(), 1);
   assert.equal(hostSocket.closeCode, WS_CLOSE_HOST_REVOKED);
@@ -85,9 +79,9 @@ test('one Host revoked out of two closes only that one', async () => {
   hub.registerHost(first.hostId, firstSocket);
   hub.registerHost(second.hostId, secondSocket);
 
-  const rows = JSON.parse(await readFile(await hostsPath(stateDir), 'utf8'));
+  const rows = JSON.parse(await readFile(hostsPath(stateDir), 'utf8'));
   await writeFile(
-    await hostsPath(stateDir),
+    hostsPath(stateDir),
     JSON.stringify(rows.filter((row) => row.hostId !== first.hostId)),
   );
 

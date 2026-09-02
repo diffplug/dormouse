@@ -120,13 +120,12 @@ export function openPocketDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(POCKET_DB_NAME, POCKET_DB_VERSION);
     /**
-     * Whether `blocked` already answered this caller. `blocked` is not
-     * terminal: the other tab can still close, and the open then *succeeds* —
-     * handing back a connection nobody is holding a reference to. One leaked
-     * connection is exactly what blocks the next upgrade, so a late success is
-     * closed rather than resolved.
+     * Whether `blocked` already rejected. It is not a terminal state: the other
+     * tab can still close, and the open then *succeeds* — handing back a
+     * connection nobody is holding a reference to, which is exactly what blocks
+     * the next upgrade. So a late success is closed rather than resolved.
      */
-    let settled = false;
+    let rejected = false;
     request.onupgradeneeded = () => {
       const db = request.result;
       // The idiom holds only while no upgrade transforms *data*: the first one
@@ -149,7 +148,7 @@ export function openPocketDb(): Promise<IDBDatabase> {
     // wait — the caller can tell the user to close the other tab, which nothing
     // can do from a hang.
     request.onblocked = () => {
-      settled = true;
+      rejected = true;
       reject(new Error('another tab is holding the Pocket database at an older version'));
     };
     request.onsuccess = () => {
@@ -160,16 +159,13 @@ export function openPocketDb(): Promise<IDBDatabase> {
       // tab is up; every operation here already closes its own handle, so the
       // only reader this can interrupt is one that never released it.
       db.onversionchange = () => db.close();
-      if (settled) {
+      if (rejected) {
         db.close();
         return;
       }
       resolve(db);
     };
-    request.onerror = () => {
-      settled = true;
-      reject(request.error ?? new Error('failed to open IndexedDB'));
-    };
+    request.onerror = () => reject(request.error ?? new Error('failed to open IndexedDB'));
   });
 }
 

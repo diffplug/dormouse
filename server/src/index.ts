@@ -7,7 +7,7 @@
 
 import { serve } from '@hono/node-server';
 
-import { createApp } from './app.js';
+import { createApp, HOST_REVOCATION_SWEEP_MS } from './app.js';
 import { ConfigError, readConfig } from './config.js';
 import {
   assertVapidKeyPair,
@@ -51,7 +51,7 @@ if (vapidSubject === null) {
   );
 }
 
-const { app, injectWebSocket } = createApp({
+const { app, injectWebSocket, sweepRevokedHosts } = createApp({
   ...appConfig,
   // Both together or neither: advertising a key the server has no subject to
   // sign with would let a phone register against a push it can never receive.
@@ -105,3 +105,14 @@ if (runtimeFile !== null) {
 
 // Bind the relay's WS upgrade handler onto the running server (@hono/node-ws).
 injectWebSocket(server);
+
+// Revocation is hand-editing `hosts.json`, and the `/ws/host` token is checked
+// only at the upgrade, so a connected Host has to be re-checked on a clock
+// (`docs/specs/server.md` -> Guardrails). `unref`'d: nothing here is work the
+// server owes anyone, so it must not be a reason the process stays alive.
+setInterval(() => {
+  void sweepRevokedHosts().catch(() => {
+    // A `hosts.json` caught mid-edit is an expected state (State files); the
+    // next sweep reads it again.
+  });
+}, HOST_REVOCATION_SWEEP_MS).unref();

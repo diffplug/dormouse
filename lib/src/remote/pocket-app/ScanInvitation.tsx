@@ -131,6 +131,9 @@ export function ScanInvitation({
    * React StrictMode's double-invoked effect makes it the ordinary mount path
    * rather than a rare race. Serializing costs nothing here: a superseded run
    * checks `live` after the wait and never opens a camera at all.
+   *
+   * **Never a rejected promise**, or the next run would inherit the throw
+   * instead of taking its turn and this screen would never open a camera again.
    */
   const chainRef = useRef<Promise<void>>(Promise.resolve());
   const [camera, setCamera] = useState<CameraState>('starting');
@@ -185,8 +188,8 @@ export function ScanInvitation({
     const previous = chainRef.current;
     const run = (async () => {
       // Queued behind whatever the last run left doing, so this start owns the
-      // element outright. A run superseded before it got that far stops here
-      // and never opens a camera — which is the whole StrictMode case.
+      // element outright (see `chainRef`). A run superseded before it got that
+      // far stops here and never opens a camera.
       await previous;
       if (!live) return;
       try {
@@ -212,7 +215,7 @@ export function ScanInvitation({
         setCamera(isPermissionDenied(err) ? 'denied' : 'unsupported');
       }
     })();
-    chainRef.current = run;
+    chainRef.current = run.catch(() => undefined);
     return () => {
       live = false;
       release(controlsRef.current, video);
@@ -265,7 +268,6 @@ export function ScanInvitation({
           onSubmit={(e) => {
             e.preventDefault();
             if (busy !== null || pasted.trim().length === 0) return;
-            setRejected(false);
             void accept(pasted.trim());
           }}
         >

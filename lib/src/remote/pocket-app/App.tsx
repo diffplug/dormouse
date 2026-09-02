@@ -271,6 +271,19 @@ export default function App({
     disposeAllSessions();
   }, []);
 
+  /**
+   * End the session outright: **no adapter without a socket, and no socket
+   * without an adapter.** Every way out of a live wall lands here — leaving it,
+   * an expired session, an adapter that could not stand up — so the three
+   * cannot drift into different ideas of what "ended" means. The two paths that
+   * deliberately do only half are `setOnHostGone` (the socket is already gone)
+   * and `onCancelPairing` (there is no adapter yet).
+   */
+  const endSession = useCallback(() => {
+    teardownAdapter();
+    client.close();
+  }, [client, teardownAdapter]);
+
   const run = useCallback(
     async (label: string, fn: () => Promise<void>) => {
       setError(null);
@@ -284,8 +297,7 @@ export default function App({
         // Drop to sign-in, where one passkey prompt restores everything —
         // the pinned Hosts and push registration both outlive the session.
         if (err instanceof SessionExpiredError) {
-          teardownAdapter();
-          client.close();
+          endSession();
           setPhase({ at: 'auth' });
           setError(err.message);
           return;
@@ -295,7 +307,7 @@ export default function App({
         setBusy(null);
       }
     },
-    [client, teardownAdapter],
+    [endSession],
   );
 
   /**
@@ -352,16 +364,14 @@ export default function App({
         // to the Hosts list — where nothing can end it. Leaving it up keeps
         // this phone keepaliving a Host it is not attached to and holding one
         // of the Host's session slots, while the next Connect handshakes over
-        // the top of it. So a failed init leaves exactly what leaving the wall
-        // leaves: no adapter, no socket.
-        teardownAdapter();
-        client.close();
+        // the top of it.
+        endSession();
         throw err;
       }
 
       setPhase({ at: 'wall', host });
     },
-    [client, loadHosts, teardownAdapter],
+    [client, endSession, loadHosts],
   );
 
   const onConnect = (host: HostView) => run('connect', () => connectTo(host));
@@ -526,8 +536,7 @@ export default function App({
   const onRetryPushConfig = () => run('push-config', () => loadPushConfig(() => true));
 
   const leaveWall = () => {
-    teardownAdapter();
-    client.close();
+    endSession();
     setPhase({ at: 'hosts' });
   };
 

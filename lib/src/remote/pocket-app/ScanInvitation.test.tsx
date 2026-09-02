@@ -311,12 +311,7 @@ describe('the camera is stopped on every way out', () => {
   });
 });
 
-/**
- * The `<video>` is one element shared by every effect run, and `startScan`
- * attaches its stream to it — so two overlapping starts race for `srcObject`
- * and the loser's teardown takes the winner's preview down with it. StrictMode
- * double-invokes the effect, which makes that the ordinary mount path.
- */
+/** StrictMode's double-invoked effect is the `chainRef` case, on the mount path. */
 it('opens one camera under StrictMode, and leaves it running', async () => {
   const attached: Array<{ stopped: boolean }> = [];
   let starts = 0;

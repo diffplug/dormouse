@@ -133,8 +133,7 @@ Server-only compromise, from granting Host access.
 non-extractably in that Host's local record only after the Host approves, and
 never shared between Hosts. The raw 32-byte public half, base64url, is the
 Client identifier on the ACL, and **Noise IK is what proves possession of the
-private half**: a Client that cannot complete the handshake never reaches the
-authorization step (rationale).
+private half** (rationale).
 
 It is non-extractable through normal browser APIs and durable across restarts,
 but active XSS can *use* it, browser or OS compromise defeats the model, and
@@ -275,8 +274,8 @@ newly-added passkey is not automatically trusted — the Client must still pair.
   one size on the wire.
 - **An unparseable first control is terminal**, not a retry: it spends the code
   (rationale).
-- **A resumed handshake re-checks that its invitation is still the live one**,
-  because a code can be retired while message 1 is mid-flight (rationale).
+- **A resumed handshake re-checks that its invitation is still the live one**
+  (rationale).
 
 Before storing the record, Pocket verifies the passkey fields match its ceremony
 and compares the Host static to any existing pin for that `hostId` — **a

@@ -431,15 +431,20 @@ describe('RemoteHost end-to-end ceremonies', () => {
     expect(host.outstandingInvitationCount).toBe(MAX_TOKENS_PER_HOST);
   });
 
-  it('refuses to mint onto a Host stopped while the keygen was in flight', async () => {
+  it('refuses to mint onto a Host torn down while the keygen was in flight', async () => {
     // A QR the panel paints `live` over a relay socket that is gone, plus a
     // re-armed reaper on a Host that holds nothing — both from the same window.
-    makeHost();
-    const minting = host.mintInvitation(randomBase64Url(32), clock + DEFAULT_PAIRING_TTL_MS);
-    host.stop();
+    // Both teardowns, because invitations go with the *socket*: a close retires
+    // them without stopping the Host, so a guard that only knew about `stop()`
+    // would leave the far more common trigger open.
+    for (const teardown of [() => host.stop(), () => socket.closeWith(1006)]) {
+      makeHost();
+      const minting = host.mintInvitation(randomBase64Url(32), clock + DEFAULT_PAIRING_TTL_MS);
+      teardown();
 
-    await expect(minting).rejects.toThrow(/no longer connected/);
-    expect(host.outstandingInvitationCount).toBe(0);
+      await expect(minting).rejects.toThrow(/no longer connected/);
+      expect(host.outstandingInvitationCount).toBe(0);
+    }
   });
 
   it('reports an invitation expired once its TTL passes', async () => {

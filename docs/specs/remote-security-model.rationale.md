@@ -19,13 +19,6 @@ cross-Host correlator: two Hosts comparing ACLs could tell they were looking at
 the same phone. Per-Host keys cost one `generateKey` at scan time and remove
 that link. The Host side is unchanged either way — it only ever sees one key.
 
-**Why the old sign-in public-key argument no longer appears.** Sign-in used to
-return the asserted passkey's public key so a browser that had not *registered*
-the passkey could still build pair and connect requests, and the spec argued at
-length that handing out a public key costs nothing. The presence proof carries
-that key inside the encrypted channel and the Host checks it against a stored
-hash, so the argument is now about a field nobody asks the Server for.
-
 ## Host Authorization
 
 **Why a delivery id is possession-only, and why that is not anonymity.** The
@@ -33,9 +26,8 @@ Client-facing push routes have no session-scoped alternative: a session is
 authenticated to an *account*, and an account may hold several Clients, so a
 route keyed on the session would let one phone read or delete another's rows. A
 256-bit id the Host mints at approval and hands to exactly one Client makes that
-capability the only thing the route consults, which is why the Server must never
-*list* one — listing turns a capability into a directory. What it buys is access
-control and nothing else: the Server still sees which endpoint each id
+capability the only thing the route consults; listing one would turn a
+capability into a directory. What it buys is access control and nothing else: the Server still sees which endpoint each id
 registers, when, and against which Host, so it hides nothing about who a
 subscription belongs to. Treating it as an anonymity mechanism would be a
 category error, and the shared-endpoint correlation under
@@ -128,11 +120,10 @@ who can reach the relay could fill it and lock out the phones that are actually
 paired. Applied after the presence proof and the ACL conjunction, the only thing
 that can fill it is authorized phones.
 
-**Why so little refreshes the idle deadline.** Host output, a relay envelope, a
-socket ping, and a frame that failed to decrypt are all things a Client that has
-gone silent still produces — a phone in a pocket, a relay replaying, a socket a
-proxy is keeping warm. Only a message this Host decrypted on the session's own
-cipher is evidence the paired phone is still there.
+**Why so little refreshes the idle deadline.** Everything the spec excludes is
+something a Client that has gone silent still produces — a phone in a pocket, a
+relay replaying, a socket a proxy is keeping warm. Only a message this Host
+decrypted on the session's own cipher is evidence the paired phone is there.
 
 ## Noise suite
 
@@ -150,18 +141,16 @@ the runtimes this ships to:
 
 **Why the vector comes from Cacophony.** An expected value computed by the
 implementation under test proves only that it is self-consistent. Cacophony is
-an independent Haskell implementation; its published `IK_25519_ChaChaPoly_SHA256`
-vector pins both handshake messages, every transport message in both
-directions, and the final handshake hash, so a mistake anywhere in the mixing
-order fails the test rather than propagating into the expectation.
+an independent Haskell implementation, so a mistake anywhere in the mixing order
+fails against its published vector rather than propagating into the
+expectation.
 
 **Why the `@noble/ciphers` pin is exact, and why the note lives in the module.**
 The pin's audit status is a property of one release, not of the package, so the
 delta between the audited release and the pinned one is what a reader actually
 needs — and they need it at the import, where a version bump is written. Keeping
-the delta here as well would give a bump two places to update and one place to
-forget; `server-lib-common/src/security/noise.ts`'s header is the single copy,
-and the spec's rule is only that a bump rewrites it in the same commit.
+the delta here as well would give a bump two places to update and one to forget,
+so `server-lib-common/src/security/noise.ts`'s header is the single copy.
 
 ## Host identity
 

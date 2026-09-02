@@ -8,6 +8,8 @@ import { randomBytes } from 'node:crypto';
 import {
   WS_CLOSE_HOST_REPLACED,
   WS_CLOSE_HOST_REPLACED_REASON,
+  WS_CLOSE_HOST_REVOKED,
+  WS_CLOSE_HOST_REVOKED_REASON,
   isE2eClientFrame,
   isE2eHostFrame,
   toBase64Url,
@@ -58,18 +60,15 @@ export class RelayHub {
   }
 
   /**
-   * Close a Host's socket and drop its clients, as if it had disconnected.
-   *
-   * The `/ws/host` token is checked once, at the upgrade, so nothing here
-   * notices a Host whose `hosts.json` row was later deleted — the documented
-   * revocation. `createApp`'s sweep is what calls this; see
-   * `docs/specs/server.md` -> Guardrails.
+   * Evict a revoked Host: close its socket and drop its clients, exactly as a
+   * disconnect would. `createApp`'s sweep is the one caller
+   * (`docs/specs/server.md` -> Guardrails).
    */
-  closeHost(hostId: string, code: number, reason: string): boolean {
+  closeHost(hostId: string): boolean {
     const conn = this.#hosts.get(hostId);
     if (!conn) return false;
     this.unregisterHost(conn);
-    safeClose(conn.socket, code, reason);
+    safeClose(conn.socket, WS_CLOSE_HOST_REVOKED, WS_CLOSE_HOST_REVOKED_REASON);
     return true;
   }
 

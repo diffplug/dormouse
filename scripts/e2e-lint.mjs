@@ -39,19 +39,18 @@
  * re-introduces each forbidden thing in turn and requires this lint to fail.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+import { readRepoFile, repoRoot, trackedFiles } from './lint-kit.mjs';
 
 /**
  * The one suite. Spelled here rather than imported, because importing the
  * constant from the module under test would make the rule self-satisfying:
  * renaming the suite would rename the expectation with it.
  */
-export const NOISE_PROTOCOL_NAME = 'Noise_IK_25519_ChaChaPoly_SHA256';
+const NOISE_PROTOCOL_NAME = 'Noise_IK_25519_ChaChaPoly_SHA256';
 
 /**
  * The modules that carry the end-to-end boundary. Scoped explicitly rather than
@@ -60,7 +59,7 @@ export const NOISE_PROTOCOL_NAME = 'Noise_IK_25519_ChaChaPoly_SHA256';
  * curve rule that swept the whole `security/` directory would flag the one
  * place those strings *belong*.
  */
-export const E2E_MODULES = [
+const E2E_MODULES = [
   'server-lib-common/src/security/noise.ts',
   'server-lib-common/src/security/noise-transport.ts',
   'server-lib-common/src/security/push-seal.ts',
@@ -76,7 +75,7 @@ export const E2E_MODULES = [
 ];
 
 /** The two modules that own the Noise suite itself. */
-export const NOISE_MODULES = [
+const NOISE_MODULES = [
   'server-lib-common/src/security/noise.ts',
   'server-lib-common/src/security/noise-transport.ts',
 ];
@@ -85,7 +84,7 @@ export const NOISE_MODULES = [
  * The four files that decide what a relay frame is. A retired discriminant
  * anywhere here is a path something could still answer.
  */
-export const FRAME_MODULES = [
+const FRAME_MODULES = [
   'server-lib-common/src/remote/wire.ts',
   'server/src/relay.ts',
   'lib/src/remote/host/remote-host.ts',
@@ -93,7 +92,7 @@ export const FRAME_MODULES = [
 ];
 
 /** The three shipped source trees, scanned whole for the dependency rules. */
-export const SOURCE_TREES = ['server-lib-common/src/', 'lib/src/', 'server/src/'];
+const SOURCE_TREES = ['server-lib-common/src/', 'lib/src/', 'server/src/'];
 
 /**
  * One entry per structural property. Every rule states the `SECURITY.md` line
@@ -109,8 +108,10 @@ export const SOURCE_TREES = ['server-lib-common/src/', 'lib/src/', 'server/src/'
  *                  means a site was added and the count must be bumped
  *                  deliberately in the same commit.
  *
- * `violation` is what `scripts/e2e-lint-selftest.mjs` appends (or, for
- * `absent`, writes; for `require`, deletes) to prove the rule load-bearing.
+ * `violation` is the text `scripts/e2e-lint-selftest.mjs` puts back — appended
+ * to `violationFile`, or written as `path` for an `absent` rule — to prove the
+ * rule load-bearing. A `require` rule needs none: its violation is deleting
+ * whatever the pattern matched.
  */
 export const RULES = [
   {
@@ -267,30 +268,15 @@ export const RULES = [
   },
 ];
 
-/** Line endings normalized, so a `core.autocrlf` checkout reads the same. */
-export function normalizeEol(text) {
-  return text.replace(/\r\n/g, '\n');
-}
-
-function read(relative) {
-  return normalizeEol(readFileSync(join(repoRoot, relative), 'utf8'));
-}
-
 /**
- * Every tracked file under one of `trees`, excluding tests. Tracked rather than
- * walked, so build output — `server-lib-common/dist/` holds a compiled copy of
- * every module here — cannot make the answer depend on whether someone ran a
- * build.
+ * Every tracked source file under one of `trees`, excluding tests.
  *
  * The test exclusion covers the three shapes this repo actually uses: a
  * `.test.` infix, a `test/` directory, and the `test-*.ts` helpers that live in
  * `lib/src/remote/` beside the code they drive.
  */
-export function sourceFilesUnder(trees) {
-  const tracked = execFileSync('git', ['ls-files'], { cwd: repoRoot, encoding: 'utf8' })
-    .split('\n')
-    .filter(Boolean);
-  return tracked.filter(
+function sourceFilesUnder(trees) {
+  return trackedFiles().filter(
     (file) =>
       trees.some((tree) => file.startsWith(tree)) &&
       /\.(?:ts|tsx|mjs|js)$/.test(file) &&
@@ -303,14 +289,20 @@ export function sourceFilesUnder(trees) {
 
 /** The files a rule scans: an explicit list, or every source file under its trees. */
 export function filesFor(rule) {
-  if (rule.files) return rule.files;
-  if (rule.trees) return sourceFilesUnder(rule.trees);
-  return [];
+  return rule.files ?? sourceFilesUnder(rule.trees);
 }
 
 export function check() {
   const failures = [];
   let checked = 0;
+  // One read per file for the whole run: four rules scan the same three trees,
+  // so without this the same ~300 files are read four times over.
+  const texts = new Map();
+  const read = (relative) => {
+    let text = texts.get(relative);
+    if (text === undefined) texts.set(relative, (text = readRepoFile(relative)));
+    return text;
+  };
 
   const security = existsSync(join(repoRoot, 'SECURITY.md')) ? read('SECURITY.md') : '';
 

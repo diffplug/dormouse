@@ -395,13 +395,18 @@ export class RemoteHost {
    * and two mints overlapping across it would each evict against the same
    * pre-await size and then both insert — leaving `MAX_TOKENS_PER_HOST + 1`
    * live invitations, which is the cap the Server's own setup-token bound is
-   * shared with. A `stop()` in that same window is the other half: re-arming
-   * the reaper and returning a QR the panel paints `live` would advertise a
-   * code over a relay socket that is gone.
+   * shared with. A teardown in that same window is the other half, and it is
+   * guarded by the epoch {@link RemoteHost.#enqueue} uses rather than by
+   * `#stopped`: invitations go with the socket, so a close — not only a
+   * `stop()` — retires them, and inserting afterwards would re-arm the reaper
+   * and return a QR the panel paints `live` over a relay socket that is gone.
    */
   async mintInvitation(setupToken: string, serverExpiresAtMs: number): Promise<PairingInvitation> {
+    const epoch = this.#epoch;
     const keyPair = await generateNoiseKeyPair();
-    if (this.#stopped) throw new Error('this machine is no longer connected to a Dormouse server.');
+    if (this.#epoch !== epoch) {
+      throw new Error('this machine is no longer connected to a Dormouse server.');
+    }
     this.#reap();
     const now = this.#now();
     while (this.#invitations.size >= MAX_TOKENS_PER_HOST) {

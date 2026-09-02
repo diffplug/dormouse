@@ -24,8 +24,6 @@ import {
   SELFHOST_ACCOUNT_ID,
   SETUP_TOKEN_INVALID_ERROR,
   UNAUTHORIZED_ERROR,
-  WS_CLOSE_HOST_REVOKED,
-  WS_CLOSE_HOST_REVOKED_REASON,
   WS_ROUTES,
   PUSH_SEND_DEADLINE_MS,
   WS_TOKEN_PARAM,
@@ -155,13 +153,6 @@ export interface AppConfig {
    * cannot wait out the real one.
    */
   readonly pushSendDeadlineMs?: number;
-  /**
-   * How often the relay re-reads `hosts.json` to drop the socket of a Host
-   * whose row was deleted; defaults to {@link HOST_REVOCATION_SWEEP_MS}.
-   * Injectable so a test can drive {@link CreatedApp.sweepRevokedHosts}
-   * directly instead of waiting out the interval.
-   */
-  readonly hostRevocationSweepMs?: number;
 }
 
 /** A live sign-in session held in memory (server.md: everything transient is in memory). */
@@ -191,18 +182,15 @@ const REAUTH_NONCE_TTL_MS = 2 * 60 * 1000;
  */
 const MAX_PENDING_REAUTH_NONCES = 64;
 /**
- * How often the relay checks that every connected Host is still enrolled.
+ * How often {@link CreatedApp.sweepRevokedHosts} should be run. `index.ts` owns
+ * the timer — `createApp` starts no background work of its own.
  *
- * The `/ws/host` token is verified once, at the upgrade, and nothing after that
- * consults the store — so deleting a row from `hosts.json`, which is the
- * *documented* revocation mechanism, left the revoked Host's socket open and
- * relaying for as long as it stayed connected. A minute is chosen against what
- * revocation is: a person editing a file after losing a machine, for whom the
- * difference between instant and a minute is nothing, while the alternative —
- * re-reading the store on every relayed frame — puts a disk read on the path
- * every keystroke takes.
+ * A minute is chosen against what revocation is: a person editing a file after
+ * losing a machine, for whom the difference between instant and a minute is
+ * nothing, while the alternative — re-reading the store on every relayed frame
+ * — puts a disk read on the path every keystroke takes.
  */
-const HOST_REVOCATION_SWEEP_MS = 60_000;
+export const HOST_REVOCATION_SWEEP_MS = 60_000;
 /** A small fixed delay on a rejected credential — the extent of POC brute-force hardening. */
 const CREDENTIAL_FAILURE_DELAY_MS = 250;
 /** The one answer to a wrong setup password, wherever it is supplied. */
@@ -317,9 +305,10 @@ export interface CreatedApp {
   readonly injectWebSocket: NodeWebSocket['injectWebSocket'];
   /**
    * Close the relay socket of every connected Host whose `hosts.json` row is
-   * gone, and report how many. Runs on its own interval; exposed so a test can
-   * drive it without one, and so a caller that revokes a Host can make the
-   * effect immediate.
+   * gone, and report how many. `index.ts` runs it every
+   * {@link HOST_REVOCATION_SWEEP_MS}; exposed rather than scheduled here so
+   * `createApp` starts no background work, and so a test drives the decision
+   * instead of a timer.
    */
   readonly sweepRevokedHosts: () => Promise<number>;
 }
@@ -1078,38 +1067,22 @@ export function createApp(config: AppConfig): CreatedApp {
     }),
   );
 
-  /**
-   * Drop the socket of any connected Host that `hosts.json` no longer lists.
-   *
-   * The upgrade above authenticates once and the hub never asks again, so
-   * without this a revoked Host keeps relaying until it happens to disconnect —
-   * and revoking is *editing that file*, so "until it reconnects" is not a
-   * bound anyone can act on. Closing the socket also tells every Client bound
-   * to it `host-gone`, which is the same teardown a real disconnect performs.
-   */
+  /** `docs/specs/server.md` -> Guardrails owns the rule this enforces. */
   async function sweepRevokedHosts(): Promise<number> {
     const online = hub.onlineHostIds();
     if (online.length === 0) return 0;
     // One read for the whole sweep: `has()` reads the file per call, and a Host
-    // deleted mid-sweep is caught by the next one.
+    // deleted mid-sweep is caught by the next one. A `hosts.json` caught
+    // mid-edit throws out of `list()` rather than reading as empty, so a
+    // half-written file cannot close every socket.
     const enrolled = new Set((await hostStore.list()).map((h) => h.hostId));
     let closed = 0;
     for (const hostId of online) {
       if (enrolled.has(hostId)) continue;
-      if (hub.closeHost(hostId, WS_CLOSE_HOST_REVOKED, WS_CLOSE_HOST_REVOKED_REASON)) closed += 1;
+      if (hub.closeHost(hostId)) closed += 1;
     }
     return closed;
   }
-
-  // `unref`, so this timer is not a reason the process stays alive: nothing
-  // here is work the server owes anyone, and `createApp` has no disposer for a
-  // test to call.
-  setInterval(() => {
-    void sweepRevokedHosts().catch(() => {
-      // A `hosts.json` mid-edit is an expected state (State files); the next
-      // sweep reads it again.
-    });
-  }, config.hostRevocationSweepMs ?? HOST_REVOCATION_SWEEP_MS).unref();
 
   // --- Static Pocket app: GET /* fallback, registered LAST so every API and
   //     /ws route above wins. Missing build → a stub with the build command.
