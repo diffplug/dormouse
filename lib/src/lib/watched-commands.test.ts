@@ -57,18 +57,30 @@ describe('watched-commands store', () => {
   it('drops a key no command line can ever produce', () => {
     // Written by the pre-fix tokenizer, which ate the backslashes in
     // `C:\tools\claude.exe`. A real key is a basename, so it holds no separator.
-    applyWatchedCommandsFromHost(['C:toolsclaude.exe', 'claude', '/usr/bin/claude']);
-    expect(getWatchedCommands()).toEqual(['claude']);
+    // A colon outside a leading drive prefix is legal in a POSIX basename.
+    applyWatchedCommandsFromHost([
+      'C:toolsclaude.exe',
+      'claude',
+      'foo:bar',
+      '/usr/bin/claude',
+    ]);
+    expect(getWatchedCommands()).toEqual(['claude', 'foo:bar']);
     // Same gate on the write path — a drive-relative invocation is the one
     // shape `commandArgv0` can still return with a `:` in it.
     setCommandWatched('C:foo.exe', true);
-    expect(getWatchedCommands()).toEqual(['claude']);
+    expect(getWatchedCommands()).toEqual(['claude', 'foo:bar']);
     // A launcher suffix is the other tell: a relative invocation had no
     // separator to eat (`tools\\dor.cmd` -> `toolsdor.cmd`), and a bare
     // `npm.cmd` stored cleanly — but `commandProgramName` strips the suffix, so
     // neither can match again.
-    applyWatchedCommandsFromHost(['npm.cmd', 'toolsdor.cmd', '.build.ps1', 'claude']);
-    expect(getWatchedCommands()).toEqual(['claude']);
+    applyWatchedCommandsFromHost([
+      'npm.cmd',
+      'toolsdor.cmd',
+      '.build.ps1',
+      'claude',
+      'foo:bar',
+    ]);
+    expect(getWatchedCommands()).toEqual(['claude', 'foo:bar']);
   });
 
   it('adds, reports, and removes rules', () => {

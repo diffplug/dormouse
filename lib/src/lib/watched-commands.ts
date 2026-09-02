@@ -21,19 +21,23 @@ function isStringArray(value: unknown): value is string[] {
 
 /**
  * Whether a stored key is one `commandArgv0` can still produce. It is a bare
- * program name, so it holds no separator or `:`, and it never ends in a
- * launcher suffix — `commandProgramName` strips those. Keys written before this
- * module's fixes fail one test or the other: a full path mangled to
- * `C:toolsclaude.exe`, a relative one to `toolsdor.cmd`, and a bare launcher
- * stored cleanly as `npm.cmd`. Each can only sit in the rule list as a row that
- * matches nothing, so it is dropped rather than shown.
+ * program name, so it holds no separator or legacy Windows drive prefix, and it
+ * never ends in a launcher suffix — `commandProgramName` strips those. Keys
+ * written before this module's fixes fail one test or the other: a full path
+ * mangled to `C:toolsclaude.exe`, a relative one to `toolsdor.cmd`, and a bare
+ * launcher stored cleanly as `npm.cmd`. Each can only sit in the rule list as
+ * a row that matches nothing, so it is dropped rather than shown.
  *
  * Residual: a mangled *relative* path with no suffix (`bin\claude` ->
  * `binclaude`) is indistinguishable from a program actually named that, and
  * survives. The user deletes it from the rule list.
  */
 function isKeyableName(name: string): boolean {
-  return !/[\\/:]/.test(name) && !WINDOWS_EXECUTABLE_SUFFIX.test(name);
+  return (
+    !/[\\/]/.test(name) &&
+    !/^[A-Za-z]:/.test(name) &&
+    !WINDOWS_EXECUTABLE_SUFFIX.test(name)
+  );
 }
 
 function readStored(): string[] {

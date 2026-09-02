@@ -316,6 +316,10 @@ describe('command tokenizer dialects', () => {
     expect(commandArgv0('"C:\\Program Files\\Git\\bin\\bash" scripts\\bootstrap.cmd')).toBe('bash');
   });
 
+  it('pins the ordinary POSIX argv[0] escape cost of dialect-free tokenizing', () => {
+    expect(commandArgv0('foo\\-bar')).toBe('-bar');
+  });
+
   // `POSIX_ESCAPABLE` is `shellEscapePosix`'s set; the tokenizer unescapes it.
   // The two halves must name the same characters or a path Dormouse escaped for
   // a drag-and-drop paste renders with stray backslashes in the pane header.

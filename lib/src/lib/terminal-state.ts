@@ -803,10 +803,10 @@ function withRequiredHostPrefixes(
  * separators to split on. Two accepted costs of one dialect-free set: a Windows
  * segment that starts with a metacharacter (`C:\$Recycle.Bin`) still loses its
  * separator, and a POSIX escape of an ordinary character (`grep \-v`) keeps a
- * backslash bash would drop. The second is display-only; so is the first,
- * unless the mangled segment is the last one (`C:\tools\$claude.exe` ->
- * `tools$claude.exe`), where the separator the basename split needed is the
- * one that was eaten.
+ * backslash bash would drop. Outside argv[0] both costs are display-only. Inside
+ * it, the retained POSIX backslash becomes a basename separator (`foo\-bar` ->
+ * `-bar`), while an eaten Windows separator leaves `C:\tools\$claude.exe`
+ * keyed as `tools$claude.exe`.
  */
 function tokenizeCommand(input: string): string[] {
   const tokens: string[] = [];
