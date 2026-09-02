@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { WS_CLOSE_HOST_REVOKED } from 'server-lib-common';
@@ -67,6 +67,48 @@ test('an enrolled Host is left alone, however often the sweep runs', async () =>
   assert.equal(await created.sweepRevokedHosts(), 0);
   assert.equal(hostSocket.closeCode, null);
   assert.equal(hub.isHostOnline(host.hostId), true);
+});
+
+test('a `hosts.json` caught mid-edit revokes nobody', async () => {
+  // The file this reads is the one an operator edits by hand, so a partial
+  // write is a real state — and it must never read as "no Host is enrolled",
+  // which would close every socket on the server over a half-saved buffer. The
+  // sweep rejects instead, and `index.ts`'s interval swallows that and reads
+  // again a minute later.
+  const created = await freshApp();
+  const { hub, stateDir } = created;
+  const { body: host } = await enrollHost(created.app);
+  const hostSocket = fakeSocket();
+  hub.registerHost(host.hostId, hostSocket);
+
+  await writeFile(hostsPath(stateDir), '[{"hostId": "half-writ');
+
+  await assert.rejects(created.sweepRevokedHosts());
+  assert.equal(hostSocket.closeCode, null);
+  assert.equal(hub.isHostOnline(host.hostId), true);
+});
+
+test('a `hosts.json` absent for an instant revokes nobody', async () => {
+  // The other half of a hand edit: an editor that saves by rename unlinks the
+  // file first, so it is genuinely gone for a moment. `list()` answers `[]`
+  // there — which is what revoking everyone also looks like — so the sweep
+  // asks the question that keeps them apart.
+  const created = await freshApp();
+  const { hub, stateDir } = created;
+  const { body: host } = await enrollHost(created.app);
+  const hostSocket = fakeSocket();
+  hub.registerHost(host.hostId, hostSocket);
+
+  await rm(hostsPath(stateDir));
+
+  assert.equal(await created.sweepRevokedHosts(), 0);
+  assert.equal(hostSocket.closeCode, null);
+  assert.equal(hub.isHostOnline(host.hostId), true);
+
+  // And an array that is present and empty still means what it says.
+  await writeFile(hostsPath(stateDir), '[]');
+  assert.equal(await created.sweepRevokedHosts(), 1);
+  assert.equal(hostSocket.closeCode, WS_CLOSE_HOST_REVOKED);
 });
 
 test('one Host revoked out of two closes only that one', async () => {

@@ -349,6 +349,37 @@ it('opens one camera under StrictMode, and leaves it running', async () => {
   expect(container.querySelector('video')?.srcObject).not.toBeNull();
 });
 
+it('starts again after a run that threw on its way out', async () => {
+  // The chain tail must never be a rejected promise: the next run awaits it
+  // *before* its own try, so one throw would be inherited by every start after
+  // it and this screen would never open a camera again. The reachable throw is
+  // the release inside the catch — a track whose `stop()` raises.
+  let starts = 0;
+  let reads = 0;
+  const startScan = async (video: HTMLVideoElement) => {
+    starts++;
+    (video as unknown as { srcObject: unknown }).srcObject = {
+      // Only the release *inside the catch* throws; the effect cleanup's own
+      // release runs after it and must still find a stream it can put down.
+      getTracks: () => {
+        if (++reads === 1) throw new Error('the stream went away mid-teardown');
+        return [];
+      },
+    };
+    throw new DOMException('no camera', 'NotFoundError');
+  };
+
+  render({ startScan });
+  await settle();
+  expect(starts).toBe(1);
+
+  // A second mount, which is what a `busy` cycle or a remount performs.
+  render({ startScan });
+  await settle();
+
+  expect(starts).toBe(2);
+});
+
 it('drops a stale rejection when a real code is accepted, so one row shows at a time', async () => {
   const camera = fakeCamera();
   render({ startScan: camera.startScan });

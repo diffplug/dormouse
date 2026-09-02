@@ -1072,10 +1072,16 @@ export function createApp(config: AppConfig): CreatedApp {
     const online = hub.onlineHostIds();
     if (online.length === 0) return 0;
     // One read for the whole sweep: `has()` reads the file per call, and a Host
-    // deleted mid-sweep is caught by the next one. A `hosts.json` caught
-    // mid-edit throws out of `list()` rather than reading as empty, so a
-    // half-written file cannot close every socket.
-    const enrolled = new Set((await hostStore.list()).map((h) => h.hostId));
+    // deleted mid-sweep is caught by the next one.
+    //
+    // **Nothing is closed on an answer this sweep did not actually read.**
+    // Unparseable JSON throws out of here and the interval swallows it;
+    // `listIfPresent` is what covers the other half, an absent file — both are
+    // ordinary states for a file whose editing *is* the revocation mechanism,
+    // and reading either as "nobody is enrolled" would drop every session.
+    const rows = await hostStore.listIfPresent();
+    if (rows === null) return 0;
+    const enrolled = new Set(rows.map((h) => h.hostId));
     let closed = 0;
     for (const hostId of online) {
       if (enrolled.has(hostId)) continue;

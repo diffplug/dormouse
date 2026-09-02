@@ -66,6 +66,9 @@ const E2E_MODULES = [
   'server-lib-common/src/security/e2e-ceremony.ts',
   'server-lib-common/src/security/e2e-bounds.ts',
   'server-lib-common/src/security/pairing-invitation.ts',
+  // Presence *derives* a challenge and never verifies an assertion itself —
+  // `passkey.ts` does, which is why that one is out of scope and this one is in.
+  'server-lib-common/src/security/presence.ts',
   'server-lib-common/src/security/acl.ts',
   'server-lib-common/src/remote/wire.ts',
   'lib/src/remote/host/remote-host.ts',
@@ -131,9 +134,12 @@ export const RULES = [
     security: 'no negotiation, no cipher or pattern selector',
     kind: 'forbid',
     files: NOISE_MODULES,
-    // Shaped as a TS member or object key, so the words may still be used in
-    // prose: a doc-comment line starts with `*`, which breaks the anchor.
-    pattern: /(?:^|[{,;])[ \t]*(?:readonly[ \t]+)?(?:pattern|suite|cipherSuite|protocolName|dhFunction|hashFunction)[ \t]*\??[ \t]*:/gm,
+    // Shaped as a TS member, object key, parameter, or type argument, so the
+    // words may still be used in prose: a doc-comment line starts with `*`,
+    // which breaks the anchor. `(` and `<` are in the class because a selector
+    // does not have to arrive as a member — `deriveKey(pattern: string, …)` is
+    // the same rule broken, and anchoring only on `{,;` left it invisible.
+    pattern: /(?:^|[{,;(<])[ \t]*(?:readonly[ \t]+)?(?:pattern|suite|cipherSuite|protocolName|dhFunction|hashFunction)[ \t]*\??[ \t]*:/gm,
     violationFile: 'server-lib-common/src/security/noise.ts',
     violation: '\nexport interface SelftestOptions {\n  readonly pattern: string;\n}\n',
   },

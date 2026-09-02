@@ -469,8 +469,10 @@ Four limits worth knowing before they surprise you:
 So nothing above reads as a promise:
 
 - **Revocation is editing a JSON file by hand.** There is no management UI and
-  no relay frame carries a revocation; a removed record takes effect after the
-  Host is restarted.
+  no relay frame carries a revocation. Deleting a *machine* takes effect within
+  a minute — the server re-reads the file and drops that machine's socket — but
+  withdrawing one *phone's* approval is the laptop's own list, and takes effect
+  when that laptop restarts.
 - **Approval is Approve/Deny only.** Choosing a standing grant at pairing time
   — observe-only versus interactive — is designed but not built. Every paired
   session today gets full input.

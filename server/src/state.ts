@@ -53,16 +53,27 @@ abstract class JsonFileStore {
     this.now = now;
   }
 
-  /** Read and parse the file, or `fallback` if it does not exist yet. */
-  protected async read<T>(fallback: T): Promise<T> {
+  /**
+   * Read and parse the file, or `null` if it is not there.
+   *
+   * Separate from {@link read} because one caller needs the distinction that
+   * one erases: a file that is absent for an instant — a rename in flight —
+   * is not the same fact as a file that lists nobody.
+   */
+  protected async readIfPresent<T>(): Promise<T | null> {
     let raw: string;
     try {
       raw = await readFile(this.#path, 'utf8');
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return fallback;
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
       throw err;
     }
     return JSON.parse(raw) as T;
+  }
+
+  /** Read and parse the file, or `fallback` if it does not exist yet. */
+  protected async read<T>(fallback: T): Promise<T> {
+    return (await this.readIfPresent<T>()) ?? fallback;
   }
 
   /**
@@ -178,7 +189,22 @@ export class HostStore extends JsonFileStore {
    * reaching for anyway.
    */
   async list(): Promise<StoredHost[]> {
-    const rows = await this.read<unknown[]>([]);
+    return (await this.listIfPresent()) ?? [];
+  }
+
+  /**
+   * The enrolled set, or `null` when `hosts.json` is not there at all.
+   *
+   * **An absent file is not an empty one.** The relay's revocation sweep closes
+   * the socket of every Host the answer omits, and a file is briefly absent
+   * whenever it is replaced by rename rather than truncated in place — which is
+   * how an editor saves. Reading that instant as "nobody is enrolled" would
+   * drop every live session over it. Revoking is emptying the *array*, which
+   * still answers an enrolled set of zero and still closes everything.
+   */
+  async listIfPresent(): Promise<StoredHost[] | null> {
+    const rows = await this.readIfPresent<unknown[]>();
+    if (rows === null) return null;
     return Array.isArray(rows) ? rows.filter(isStoredHost) : [];
   }
 

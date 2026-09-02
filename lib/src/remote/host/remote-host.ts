@@ -404,8 +404,14 @@ export class RemoteHost {
   async mintInvitation(setupToken: string, serverExpiresAtMs: number): Promise<PairingInvitation> {
     const epoch = this.#epoch;
     const keyPair = await generateNoiseKeyPair();
+    // Worded for every teardown the epoch covers, not only `stop()`: a dropped
+    // socket reaches here too, and on that one the panel is about to read
+    // connected again. Prefixed like `#setupQr`'s other refusals, since this
+    // string is what the person tapping *Show a code* is shown.
     if (this.#epoch !== epoch) {
-      throw new Error('this machine is no longer connected to a Dormouse server.');
+      throw new Error(
+        'could not mint a setup code: this machine’s connection to the server dropped. Try again.',
+      );
     }
     this.#reap();
     const now = this.#now();

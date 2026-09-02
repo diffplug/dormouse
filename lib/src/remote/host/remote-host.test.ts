@@ -442,7 +442,7 @@ describe('RemoteHost end-to-end ceremonies', () => {
       const minting = host.mintInvitation(randomBase64Url(32), clock + DEFAULT_PAIRING_TTL_MS);
       teardown();
 
-      await expect(minting).rejects.toThrow(/no longer connected/);
+      await expect(minting).rejects.toThrow(/could not mint a setup code/);
       expect(host.outstandingInvitationCount).toBe(0);
     }
   });

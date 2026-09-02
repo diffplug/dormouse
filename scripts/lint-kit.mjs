@@ -77,33 +77,33 @@ export function lintFails(script) {
 export function makeSelftest(script, backupSuffix) {
   const weak = [];
   let held = 0;
+
+  /** Edit `relative` with `mutate`, run the lint, restore, and record. */
+  function withMutation(relative, mutate, label) {
+    const path = join(repoRoot, relative);
+    const existed = existsSync(path);
+    const backup = `${path}${backupSuffix}`;
+    if (existed) copyFileSync(path, backup);
+    try {
+      mutate(path);
+      if (lintFails(script)) held += 1;
+      else weak.push(label);
+    } finally {
+      if (existed) {
+        copyFileSync(backup, path);
+        rmSync(backup, { force: true });
+      } else {
+        rmSync(path, { force: true });
+      }
+    }
+  }
+
   return {
     weak,
-    get held() {
-      return held;
-    },
-    /** Edit `relative` with `mutate`, run the lint, restore, and record. */
-    withMutation(relative, mutate, label) {
-      const path = join(repoRoot, relative);
-      const existed = existsSync(path);
-      const backup = `${path}${backupSuffix}`;
-      if (existed) copyFileSync(path, backup);
-      try {
-        mutate(path);
-        if (lintFails(script)) held += 1;
-        else weak.push(label);
-      } finally {
-        if (existed) {
-          copyFileSync(backup, path);
-          rmSync(backup, { force: true });
-        } else {
-          rmSync(path, { force: true });
-        }
-      }
-    },
+    withMutation,
     /** Append `text` to `relative` — the shape every "put it back" case takes. */
     withAppended(relative, text, label) {
-      this.withMutation(
+      withMutation(
         relative,
         (path) => writeFileSync(path, (existsSync(path) ? readFileSync(path, 'utf8') : '') + text),
         label,
