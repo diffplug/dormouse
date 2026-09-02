@@ -392,6 +392,9 @@ export class PushSubscriptionStore extends JsonFileStore {
    * * **Drop rows matched on the endpoint**, which is what reaches siblings
    *   holding delivery ids this request never names.
    *
+   * The committed set is then capped ({@link capSubscriptions}), because a
+   * self-chosen `deliveryId` makes every request a fresh row otherwise.
+   *
    * `docs/specs/server.md` -> State files owns the rule and the gap it leaves.
    */
   upsert(
@@ -405,12 +408,14 @@ export class PushSubscriptionStore extends JsonFileStore {
           .filter((s) => s.deliveryId === record.deliveryId && s.endpoint !== record.endpoint)
           .map((s) => s.endpoint),
       );
-      const kept = all.filter(
-        (s) =>
-          !(s.hostId === record.hostId && s.deliveryId === record.deliveryId) &&
-          !replacedEndpoints.has(s.endpoint),
+      const kept = capSubscriptions(
+        all.filter(
+          (s) =>
+            !(s.hostId === record.hostId && s.deliveryId === record.deliveryId) &&
+            !replacedEndpoints.has(s.endpoint),
+        ),
+        stored,
       );
-      kept.push(stored);
       await this.writeAtomic(kept);
       const endpointHostIds = [
         ...new Set(
@@ -464,6 +469,55 @@ export class PushSubscriptionStore extends JsonFileStore {
       return all.length - kept.length;
     });
   }
+}
+
+/**
+ * How many subscription rows one Host, and the whole file, may hold.
+ *
+ * `POST /api/push/subscribe` needs a session token and a `deliveryId` the
+ * caller picks for itself — the Server cannot check one against a Host's ACL,
+ * by design — so without a cap one signed-in caller appends a durable row per
+ * request, and every push route thereafter re-reads and re-parses the file.
+ * Every sibling transient store is capped (`MAX_PENDING_REAUTH_NONCES`,
+ * `MAX_TOKENS_PER_HOST`); this is the durable one, so it matters more.
+ *
+ * Far above any real use: the per-Host cap is phones paired with one laptop,
+ * the total is that across every laptop an account enrolled.
+ */
+export const MAX_PUSH_SUBSCRIPTIONS_PER_HOST = 32;
+export const MAX_PUSH_SUBSCRIPTIONS_TOTAL = 256;
+
+/**
+ * Drop the oldest rows until both caps hold, never `keep` — the row this
+ * mutation just committed, which the caller is about to be told about.
+ *
+ * Oldest `subscribedAt` first, and applied to every Host rather than only
+ * `keep`'s, so a hand-edited file over the cap converges on the next write. An
+ * evicted Client reads as un-registered and repairs by pressing Enable again,
+ * which is the same recovery a dropped row already has
+ * (`docs/specs/server.md` -> State files).
+ */
+function capSubscriptions(
+  rows: readonly StoredPushSubscription[],
+  keep: StoredPushSubscription,
+): StoredPushSubscription[] {
+  const all = [...rows, keep];
+  if (all.length <= MAX_PUSH_SUBSCRIPTIONS_PER_HOST) return all;
+  const perHost = new Map<string, number>();
+  for (const row of all) perHost.set(row.hostId, (perHost.get(row.hostId) ?? 0) + 1);
+  let total = all.length;
+  const dropped = new Set<StoredPushSubscription>();
+  for (const row of [...all].sort((a, b) => a.subscribedAt - b.subscribedAt)) {
+    if (row === keep) continue;
+    const forHost = perHost.get(row.hostId) ?? 0;
+    if (total <= MAX_PUSH_SUBSCRIPTIONS_TOTAL && forHost <= MAX_PUSH_SUBSCRIPTIONS_PER_HOST) {
+      continue;
+    }
+    dropped.add(row);
+    perHost.set(row.hostId, forHost - 1);
+    total -= 1;
+  }
+  return all.filter((row) => !dropped.has(row));
 }
 
 /**

@@ -235,6 +235,19 @@ rotation:
   `listForHost` answers nothing for a `hostId` that is gone, so its subscription
   rows are unreachable the moment the edit lands, and they leave disk on the
   next 404/410 prune or when the Client deletes them.
+* **Every stored field is bounded and the row count is capped.** A `deliveryId`
+  is the caller's own choice and no Server can check one against a Host's ACL,
+  so this is the one *durable* store a session token can grow, and every push
+  route re-reads and re-parses the whole file. `endpoint` is capped at
+  `MAX_PUSH_ENDPOINT_LENGTH` (1024) on admission; both `keys` at the base64
+  lengths RFC 8291 fixes — `p256dh` an uncompressed P-256 point, `auth` the
+  16-byte secret — each at its *padded* encoding, so a browser that pads still
+  registers. An upsert then caps the committed set at
+  `MAX_PUSH_SUBSCRIPTIONS_PER_HOST` (32) and `MAX_PUSH_SUBSCRIPTIONS_TOTAL`
+  (256), **evicting the oldest `subscribedAt` first and never the row it just
+  wrote**. Eviction covers every Host, so a hand-edited file over the cap
+  converges on the next write; an evicted Client reads as un-registered and
+  repairs by pressing Enable, which is the recovery a dropped row already has.
 
 `hosts.json` stores `hostToken` — the host↔server relay bearer secret — in
 plaintext, and `vapid.json` a private key, so both files are written owner-only:

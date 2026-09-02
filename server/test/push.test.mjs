@@ -37,7 +37,12 @@ import {
   defaultVapidSubject,
   generateVapidKeys,
 } from '../dist/push.js';
-import { HostStore, PushSubscriptionStore } from '../dist/state.js';
+import { MAX_PUSH_ENDPOINT_LENGTH } from '../dist/push-endpoint.js';
+import {
+  HostStore,
+  MAX_PUSH_SUBSCRIPTIONS_PER_HOST,
+  PushSubscriptionStore,
+} from '../dist/state.js';
 import { enrollHost, fakePushSender, freshApp, ownerSession, post } from './helpers.mjs';
 
 const VAPID_PUBLIC = 'BJxKIjEEuJH0dLHTAcMFVYRnLsIBWcuMt5S1FCdDLbxCkmpUuLfHTFzWSFCPFTFsFvT8sVFTFxKIjEE';
@@ -300,6 +305,88 @@ test('subscribing to an unknown host is rejected', async () => {
     deliveryId: newDeliveryId(),
   });
   assert.equal(res.status, 404);
+});
+
+// --- every stored field is bounded, and so is the row count ----------------
+// A durable row of unknown size is re-read and re-parsed by every push route,
+// and `deliveryId` is the caller's own choice, so an unbounded field or an
+// uncapped file turns one signed-in request into permanent degradation
+// (`docs/specs/server.md` -> State files).
+
+test('an over-long endpoint is refused before it becomes a durable row', async () => {
+  const { app, stateDir, host, sessionToken } = await pushApp();
+  const endpoint = `https://push.example.com/sub/${'a'.repeat(MAX_PUSH_ENDPOINT_LENGTH)}`;
+
+  const res = await subscribe(app, {
+    sessionToken,
+    host,
+    deliveryId: newDeliveryId(),
+    sub: subscription(endpoint),
+  });
+
+  assert.equal(res.status, 400);
+  await assert.rejects(storedRows(stateDir), 'nothing was written');
+});
+
+test('over-long encryption keys are refused; RFC 8291 fixes both lengths', async () => {
+  const { app, stateDir, host, sessionToken } = await pushApp();
+  const long = 'A'.repeat(4096);
+
+  for (const keys of [
+    { p256dh: long, auth: 'FakeAuthSecret' },
+    { p256dh: 'BFakeP256dhKey', auth: long },
+    // Empty is not a key `web-push` could ever encrypt to.
+    { p256dh: '', auth: 'FakeAuthSecret' },
+    { p256dh: 'BFakeP256dhKey', auth: '' },
+  ]) {
+    const res = await subscribe(app, {
+      sessionToken,
+      host,
+      deliveryId: newDeliveryId(),
+      sub: { endpoint: 'https://push.example.com/sub/abc', keys },
+    });
+    assert.equal(res.status, 400, JSON.stringify(keys).slice(0, 40));
+  }
+  await assert.rejects(storedRows(stateDir), 'nothing was written');
+});
+
+test('a padded base64 p256dh still registers — browsers serialize both ways', async () => {
+  const { app, host, sessionToken } = await pushApp();
+  const res = await subscribe(app, {
+    sessionToken,
+    host,
+    deliveryId: newDeliveryId(),
+    // 65 and 16 raw bytes as PADDED base64: the longest either can really be.
+    sub: {
+      endpoint: 'https://push.example.com/sub/abc',
+      keys: { p256dh: `${'B'.repeat(87)}=`, auth: `${'C'.repeat(23)}=` },
+    },
+  });
+  assert.equal(res.status, 200);
+});
+
+test('the per-host row cap evicts the oldest subscription, never the new one', async () => {
+  const { app, stateDir, host, sessionToken } = await pushApp();
+  const ids = [];
+  // One past the cap, each a fresh delivery id and a fresh endpoint — the shape
+  // a caller minting its own ids produces.
+  for (let i = 0; i <= MAX_PUSH_SUBSCRIPTIONS_PER_HOST; i += 1) {
+    const deliveryId = newDeliveryId();
+    ids.push(deliveryId);
+    const res = await subscribe(app, {
+      sessionToken,
+      host,
+      deliveryId,
+      sub: subscription(`https://push.example.com/sub/${i}`),
+    });
+    assert.equal(res.status, 200);
+  }
+
+  const stored = await storedRows(stateDir);
+  assert.equal(stored.length, MAX_PUSH_SUBSCRIPTIONS_PER_HOST);
+  const kept = new Set(stored.map((row) => row.deliveryId));
+  assert.equal(kept.has(ids[0]), false, 'the oldest row was evicted');
+  assert.equal(kept.has(ids.at(-1)), true, 'the row just committed survives');
 });
 
 test('re-subscribing replaces the row rather than accumulating one per rotation', async () => {

@@ -88,7 +88,7 @@ import {
 import type { StoredHost, StoredPushSubscription } from './state.js';
 import { sendWithinDeadline } from './push.js';
 import type { PushSender } from './push.js';
-import { isPublicHttpsPushEndpoint } from './push-endpoint.js';
+import { MAX_PUSH_ENDPOINT_LENGTH, isPublicHttpsPushEndpoint } from './push-endpoint.js';
 
 /** Runtime configuration; see `index.ts` for how env maps onto this. */
 export interface AppConfig {
@@ -1211,17 +1211,40 @@ function isSealedPushRecipient(value: unknown): value is SealedPushRecipient {
   return isDeliveryId(v.deliveryId) && isSealedPushV1(v.sealed);
 }
 
-/** True if `value` is a `PushSubscriptionPayload` with both encryption keys. */
+/**
+ * Longest `keys.p256dh` / `keys.auth` this Server will store. RFC 8291 fixes
+ * both: `p256dh` is an uncompressed P-256 point (65 bytes) and `auth` is the
+ * 16-byte auth secret, so the caps are their base64 encodings *with* padding —
+ * browsers emit unpadded base64url, and a padded serialization must not be the
+ * thing that breaks a real subscription.
+ *
+ * **Every stored field is bounded.** These two plus
+ * {@link MAX_PUSH_ENDPOINT_LENGTH} are the whole row, and a durable row of
+ * unknown size is re-read and re-parsed by every push route
+ * (`docs/specs/server.md` -> State files).
+ */
+const MAX_PUSH_KEY_P256DH_LENGTH = 88;
+const MAX_PUSH_KEY_AUTH_LENGTH = 24;
+
+/**
+ * True if `value` is a `PushSubscriptionPayload` with both encryption keys,
+ * each of a length RFC 8291 could actually have produced. Non-empty, because a
+ * blank key is a row `web-push` can never encrypt to.
+ */
 function isSubscriptionPayload(value: unknown): value is PushSubscriptionPayload {
   if (!value || typeof value !== 'object') return false;
   const v = value as PushSubscriptionPayload;
   return (
-    typeof v.endpoint === 'string' &&
+    isBoundedNonEmptyString(v.endpoint, MAX_PUSH_ENDPOINT_LENGTH) &&
     !!v.keys &&
     typeof v.keys === 'object' &&
-    typeof v.keys.p256dh === 'string' &&
-    typeof v.keys.auth === 'string'
+    isBoundedNonEmptyString(v.keys.p256dh, MAX_PUSH_KEY_P256DH_LENGTH) &&
+    isBoundedNonEmptyString(v.keys.auth, MAX_PUSH_KEY_AUTH_LENGTH)
   );
+}
+
+function isBoundedNonEmptyString(value: unknown, max: number): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= max;
 }
 
 /** Decode base64url clientDataJSON to its parsed object, or `null` if malformed. */
