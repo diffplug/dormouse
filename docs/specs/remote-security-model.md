@@ -279,6 +279,10 @@ newly-added passkey is not automatically trusted — the Client must still pair.
 - **An unparseable first control is terminal**, not a retry: the invitation is
   single-use and a person is about to be interrupted, so a peer that cannot
   produce the one message this step expects spends the code.
+- **A resumed handshake re-checks that its invitation is still the live one.**
+  Minting runs off the frame chain and reaps synchronously, so a code can be
+  retired while message 1 is mid-flight; reserving it afterwards would report a
+  state change for one already gone.
 
 Pocket verifies the passkey fields match its ceremony and compares the Host
 static to any existing pin for that `hostId` — a mismatch is a terminal security

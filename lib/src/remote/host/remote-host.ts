@@ -677,10 +677,14 @@ export class RemoteHost {
     // Nothing above allocated a client entry: a handshake that fails must cost
     // a WebCrypto call and no map slot under a relay-chosen key.
     //
-    // A teardown that ran while it did retired `held` and dropped every client,
-    // so `held` is a detached object and anything allocated below would outlive
-    // the socket that asked for it — with no later close to clean it up.
-    if (this.#epoch !== epoch) return;
+    // `held` must still be the entry this id names, on both counts. A teardown
+    // retired it and dropped every client (the epoch), and `mintInvitation`
+    // runs *off* this chain — the panel can reap it or evict it at the cap
+    // while the WebCrypto above is in flight. Either way it is now a detached
+    // object: writing `reserved` onto it would announce a state change for an
+    // id already reported gone, and the entry below would name an invitation
+    // no later dispose can retire.
+    if (this.#epoch !== epoch || this.#invitations.get(frame.id) !== held) return;
     // A replacement from the same client supersedes its predecessor, which is
     // told so over its own session before the material is erased.
     if (this.#clients.get(frame.clientId)?.pairing) {

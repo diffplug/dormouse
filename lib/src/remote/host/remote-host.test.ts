@@ -804,6 +804,31 @@ describe('RemoteHost end-to-end ceremonies', () => {
     expect(host.outstandingInvitationCount).toBe(0);
   });
 
+  it('a mint that retires the invitation mid-handshake allocates nothing', async () => {
+    // `mintInvitation` is the panel's, not the relay's: it runs off the frame
+    // chain and reaps synchronously, so it can retire the very entry a
+    // suspended `#onPairingInit` is holding. Resuming onto that detached object
+    // would announce `reserved` for an id already reported gone, and leave a
+    // client entry naming an invitation no dispose can retire.
+    makeHost();
+    const invitation = await mintInvitation();
+    await sendPairingInit('c1', invitation);
+    // No await between the two: the init's WebCrypto is still in flight when
+    // the clock moves past the TTL and the next mint reaps it.
+    clock += DEFAULT_PAIRING_TTL_MS + 1;
+    await mintInvitation();
+    await settle();
+
+    expect(invitationEvents).toContainEqual({
+      inviteId: invitation.inviteId,
+      state: 'expired',
+    });
+    // Nothing after the terminal event: the resumed handshake stood down.
+    expect(invitationEvents.filter((e) => e.inviteId === invitation.inviteId)).toHaveLength(1);
+    expect(host.trackedClientCount).toBe(0);
+    expect(approvals).toEqual([]);
+  });
+
   /** Send pairing message 1 without awaiting the Host's answer. */
   async function sendPairingInit(clientId: string, invitation: PairingInvitation): Promise<void> {
     const handshake = await createNoiseInitiator({
