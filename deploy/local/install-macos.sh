@@ -1407,7 +1407,12 @@ step "Configuring Tailscale Serve"
 # took NEITHER branch — so the `confirm` below never ran and the install
 # repointed the operator's root path silently.
 serve_state() {
-  if grep -q "127.0.0.1:$1" <<<"$2"; then
+  # Both arms are scoped to the root line, because that is the path this
+  # function answers about. A bare `127.0.0.1:$1` anywhere in the output said
+  # `loopback` for a config whose ROOT was foreign and whose /api happened to
+  # sit on this port: the confirm was skipped, the mutation was skipped, and
+  # the install ended reporting the origin as ours while / served someone else.
+  if grep -qE '^\|-- / +proxy .*127\.0\.0\.1:'"$1" <<<"$2"; then
     printf 'loopback\n'
   elif grep -qE '^\|-- / +proxy' <<<"$2"; then
     printf 'conflict\n'

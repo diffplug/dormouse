@@ -21,9 +21,11 @@
  *
  * How: the functions are extracted from each installer — the real text, not a
  * copy — and driven under the same `set -euo pipefail` those scripts run
- * under. Extraction takes the LAST definition of a name, because several
- * helpers exist twice in these files, once in the installer body and once
- * inside the `MANAGE_EOF` heredoc.
+ * under. Extraction takes the LAST definition of a name, so it keeps working
+ * if a helper ever exists twice — once in the installer body and once inside
+ * the `MANAGE_EOF` heredoc. Today each is defined once: `funnel_state` and
+ * `has_off_loopback` in the heredoc (the `manage` copy), `env_missing_keys`,
+ * `serve_state` and `serve_root_target` in the installer body.
  *
  * The cases labelled `witness` are not tests of shipped code: each runs an old
  * piped idiom over the same input and requires it to get the answer wrong. If
@@ -71,6 +73,7 @@ const FUNNEL_ON = 'Funnel on for laptop.tail.ts.net (tcp 443)';
 const SERVE_ROOT_FOREIGN = '|-- / proxy http://127.0.0.1:9999';
 const SERVE_ROOT_OURS = '|-- / proxy http://127.0.0.1:3100';
 const SERVE_OTHER_PATH = '|-- /elsewhere proxy http://127.0.0.1:8888';
+const SERVE_OUR_PORT_OTHER_PATH = '|-- /api proxy http://127.0.0.1:3100';
 
 /**
  * `lsof` and `ss` print different shapes, and each platform's check reads its
@@ -204,6 +207,16 @@ function cases(platform, env) {
       "serve_state: a foreign root mapping, ahead of 1 MiB — the gate the confirm hangs off",
       `serve_state 3100 "$(printf '%s\\n' "${SERVE_ROOT_FOREIGN}"; awk 'BEGIN{for(i=0;i<20000;i++) print "${SERVE_OTHER_PATH}"}')"`,
       'conflict',
+    ],
+    [
+      'serve_state: a foreign root with our own port on another path is still a conflict',
+      `serve_state 3100 "$(printf '%s\\n%s\\n' "${SERVE_ROOT_FOREIGN}" "${SERVE_OUR_PORT_OTHER_PATH}")"`,
+      'conflict',
+    ],
+    [
+      'serve_state: our root mapping, with other paths around it',
+      `serve_state 3100 "$(printf '%s\\n%s\\n' "${SERVE_ROOT_OURS}" "${SERVE_OTHER_PATH}")"`,
+      'loopback',
     ],
     [
       'serve_state: 1 MiB of serve status with no root mapping at all',
