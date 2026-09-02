@@ -559,6 +559,28 @@ describe('RemoteControlSection', () => {
     expect(text()).toContain('This code is used up.');
   });
 
+  it('does not call a dropped invitation a scan', async () => {
+    // The Host discards every held invitation when its relay socket goes, so a
+    // wifi blip must not tell the user to finish on a phone that never asked
+    // (`docs/specs/remote-security-model.md` → Pairing).
+    const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : enrolled()));
+    platform = { remoteHost: link };
+    await render();
+
+    await act(async () => buttonLabelled('Set up a phone')!.click());
+    await settleQrChunk();
+    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
+
+    await act(async () => {
+      link.emit('invitation', { name: 'invitation', inviteId: 'invite-1', state: 'dropped' });
+    });
+    expect(container.querySelector('svg[role="img"]')).toBeNull();
+    expect(text()).toContain('no longer valid');
+    expect(text()).not.toContain('Scanned.');
+    // And the way out is still one click away.
+    expect(buttonLabelled('New code')).toBeTruthy();
+  });
+
   it('drops the panel when the machine enrolls somewhere else under it', async () => {
     // A code belongs to the server that minted it. The console hook can swap
     // enrollments with this dialog open, and a QR left on screen would point a

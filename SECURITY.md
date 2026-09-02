@@ -105,7 +105,7 @@ Web Push is the one path where the Server makes an outbound request to an addres
 - FAIL IF `server/src/push-endpoint.ts` stops rejecting non-public push endpoints at registration, stops applying `createPublicLookup`/`createPublicPushAgent` to delivery, or stops rejecting a hostname whose DNS answers are mixed public and blocked.
 - FAIL IF `/api/push/send` stops taking the `hostId` from the Host's own token, begins selecting recipients when `deliveryIds` is absent or empty, or if any read endpoint begins reporting on a delivery id the caller did not present. Possession of the 256-bit `deliveryId` is the whole authorization for the Client-facing push routes, so the Server must never *list* one to a session.
 - FAIL IF push text stops being sanitized with the shared `boundedPushText` on both the Host and the Server.
-- FAIL IF the relay routes a Host-originated frame from a socket that is not the Client's current Host binding, or begins decoding, remembering, or acting on an `e2e` ciphertext.
+- FAIL IF the relay routes a Host-originated frame from a socket that is not the Client's current Host binding, or begins decoding, remembering, or acting on an `e2e` ciphertext. Until 4c deletes the legacy path, also FAIL IF the relay forwards a legacy `msg` frame before that Client's session is authorized (`server/src/relay.ts`).
 
 ### Revocation and the audit trail
 

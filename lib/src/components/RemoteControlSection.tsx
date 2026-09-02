@@ -138,14 +138,22 @@ function useBusyAction() {
  * Everything the phone-setup panel can be showing, as one value.
  *
  * `null` is the closed panel. The rest are open: waiting on a mint, holding a
- * live code, spent, or refused. `minting` carries the code being replaced when
- * there is one, so an auto-refresh never blanks a QR a camera is pointed at.
+ * live code, spent, dropped, or refused. `minting` carries the code being
+ * replaced when there is one, so an auto-refresh never blanks a QR a camera is
+ * pointed at.
+ *
+ * **`spent` and `dropped` are different facts and read differently.** `spent`
+ * means a phone completed the handshake and the next step is on that phone;
+ * `dropped` means this Host discarded the code un-scanned — the relay socket
+ * went, or a newer mint evicted it — and the next step is a new code here
+ * (`docs/specs/remote-security-model.md` → Pairing).
  */
 type SetupQrState =
   | null
   | { phase: 'minting'; prev?: SetupQrResult }
   | { phase: 'live'; qr: SetupQrResult }
   | { phase: 'spent' }
+  | { phase: 'dropped' }
   | { phase: 'failed'; message: string };
 
 /**
@@ -226,7 +234,7 @@ function useSetupQr() {
       // laptop decides next. `live` is the only state that keeps the panel.
       if (changed !== inviteId || invitationState === 'live') return;
       mintSeq.current++;
-      setState({ phase: 'spent' });
+      setState({ phase: invitationState === 'dropped' ? 'dropped' : 'spent' });
     });
   }, [inviteId]);
 
@@ -632,6 +640,17 @@ function SetupPhonePanel({
             with a two-digit code to type.
           </div>
           <div className="mt-1 text-xs text-muted">This code is used up.</div>
+        </>
+      ) : state.phase === 'dropped' ? (
+        // Nobody scanned it: this machine let it go. Saying "scanned" here sends
+        // the user to a phone that never asked.
+        <>
+          <div className="mt-1 text-sm leading-relaxed text-foreground">
+            This code is no longer valid — nobody scanned it.
+          </div>
+          <div className="mt-1 text-xs text-muted">
+            This machine lost its connection to the server, or replaced the code. Get a new one.
+          </div>
         </>
       ) : shown ? (
         <>

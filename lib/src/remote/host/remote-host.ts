@@ -24,9 +24,11 @@ import {
   fromBase64Url,
   generateNoiseKeyPair,
   importNoiseStaticPrivateKey,
+  isBoundedString,
   isConnectionRequestV1,
   isE2eServerToHostFrame,
   isPairingRequestV1,
+  MAX_CLIENT_ID_LENGTH,
   pairingInvitationPrologue,
   e2eConnectionPrologue,
   randomBase64Url,
@@ -71,8 +73,14 @@ export type WebSocketLike = RemoteWebSocket;
  */
 export const MAX_PENDING_CONNECTION_HANDSHAKES = 8;
 
-/** What one invitation is doing, as the QR panel renders it. */
-export type InvitationState = 'live' | 'reserved' | 'consumed' | 'expired';
+/**
+ * What one invitation is doing, as the QR panel renders it.
+ *
+ * **`dropped` is not `consumed`.** A code the Host discarded un-scanned — its
+ * relay socket went, or a newer mint evicted it — must not be reported as a
+ * scan, or the panel tells the user to finish on a phone that never asked.
+ */
+export type InvitationState = 'live' | 'reserved' | 'consumed' | 'expired' | 'dropped';
 
 /**
  * How many bytes name one thing this Host mints locally: the invitation id the
@@ -309,7 +317,7 @@ export class RemoteHost {
     while (this.#invitations.size >= MAX_TOKENS_PER_HOST) {
       const oldest = this.#invitations.keys().next();
       if (oldest.done) break;
-      this.#retireInvitation(oldest.value, 'consumed');
+      this.#retireInvitation(oldest.value, 'dropped');
     }
     const expiresAt = Math.min(now + DEFAULT_PAIRING_TTL_MS, serverExpiresAtMs);
     const keyPair = await generateNoiseKeyPair();
@@ -346,6 +354,15 @@ export class RemoteHost {
     return this.#invitations.size;
   }
 
+  /**
+   * Unredeemed connection challenges. Exists for the same reason
+   * {@link trackedClientCount} does: "a rejected handshake allocates nothing"
+   * is not a property a test can check through the wire.
+   */
+  get pendingChallengeCount(): number {
+    return this.#challenges.pendingCount;
+  }
+
   #reapInvitations(now: number): void {
     for (const [inviteId, held] of this.#invitations) {
       if (held.expiresAt <= now) this.#retireInvitation(inviteId, 'expired');
@@ -353,7 +370,7 @@ export class RemoteHost {
   }
 
   /** Drop an invitation and its key, announcing the state it ended in. */
-  #retireInvitation(inviteId: string, state: 'consumed' | 'expired'): void {
+  #retireInvitation(inviteId: string, state: Exclude<InvitationState, 'live' | 'reserved'>): void {
     if (!this.#invitations.delete(inviteId)) return;
     this.#onInvitationChanged(inviteId, state);
   }
@@ -485,8 +502,10 @@ export class RemoteHost {
    */
   #dropTransientState(): void {
     for (const clientId of [...this.#clients.keys()]) this.#disposeClient(clientId);
-    for (const inviteId of [...this.#invitations.keys()]) {
-      this.#retireInvitation(inviteId, 'consumed');
+    for (const [inviteId, held] of [...this.#invitations]) {
+      // `reserved` means a phone completed message 1 against it, so it really is
+      // spent; anything still `live` is one nobody ever scanned.
+      this.#retireInvitation(inviteId, held.state === 'reserved' ? 'consumed' : 'dropped');
     }
   }
 
@@ -541,7 +560,9 @@ export class RemoteHost {
     if (frame.t === 'client-gone') {
       // Bounded before it is used as a map key: the relay chooses it, and this
       // is the only frame that reaches the map without the `e2e` guard.
-      if (typeof frame.clientId === 'string') this.#onClientGone(frame.clientId);
+      if (isBoundedString(frame.clientId, MAX_CLIENT_ID_LENGTH)) {
+        this.#onClientGone(frame.clientId);
+      }
       return;
     }
     if (frame.t !== 'e2e') return;
@@ -644,7 +665,7 @@ export class RemoteHost {
     } catch {
       // The first invalid ciphertext destroys its session, and nothing can be
       // said over a poisoned one.
-      this.#disposePairing(frame.clientId, 'consumed');
+      this.#disposePairing(frame.clientId);
       return;
     }
     if (receipt.kind === 'keepalive') return;
@@ -704,6 +725,17 @@ export class RemoteHost {
       this.#finishPairing(clientId, 'invitation-expired');
       return;
     }
+    const hostStaticPublicKey = this.#enrollment.noiseStaticPublicKey;
+    if (hostStaticPublicKey === undefined) {
+      // There is nothing for the Client to pin. Writing a record here would
+      // authorize a Client whose very next connection cannot complete IK
+      // against a static this Host does not have — a pairing into a dead end,
+      // reported as success. The service refuses to start such a Host
+      // (`lib/src/host/remote/service.ts`), so this is the belt to that brace.
+      console.warn('[remote-host] refusing to pair: this Host has no Noise static to present');
+      this.#finishPairing(clientId, 'host-error');
+      return;
+    }
     if (!constantTimeEqual(utf8Encode(code), utf8Encode(pending.approval.code))) {
       this.#finishPairing(clientId, 'confirmation-mismatch');
       return;
@@ -721,14 +753,14 @@ export class RemoteHost {
     this.#saveAcl(this.#enrollment.hostId, this.#acl.records());
     this.#sendPairingOutcome(clientId, pending, {
       ok: true,
-      hostStaticPublicKey: this.#enrollment.noiseStaticPublicKey ?? '',
+      hostStaticPublicKey,
       hostLabel: this.#enrollment.label ?? '',
       accountId: record.accountId,
       passkeyCredentialId: record.passkeyCredentialId,
       passkeyPublicKeyHash: record.passkeyPublicKeyHash,
       deliveryId,
     });
-    this.#disposePairing(clientId, 'consumed');
+    this.#disposePairing(clientId);
   }
 
   #denyPairing(clientId: string, pairingId: string): void {
@@ -742,7 +774,7 @@ export class RemoteHost {
     const pending = this.#clients.get(clientId)?.pairing;
     if (!pending) return;
     this.#sendPairingOutcome(clientId, pending, { ok: false, code });
-    this.#disposePairing(clientId, 'consumed');
+    this.#disposePairing(clientId);
   }
 
   #sendPairingOutcome(
@@ -757,12 +789,14 @@ export class RemoteHost {
    * Erase a pairing's handshake material and spend its invitation — both, on
    * every terminal outcome (`docs/specs/remote-security-model.md` → Pairing).
    */
-  #disposePairing(clientId: string, invitationState: 'consumed' | 'expired'): void {
+  #disposePairing(clientId: string): void {
     const state = this.#clients.get(clientId);
     const pending = state?.pairing;
     if (!state || !pending) return;
     state.pairing = undefined;
-    this.#retireInvitation(pending.inviteId, invitationState);
+    // Always `consumed`: reaching here means a phone completed message 1
+    // against this invitation, whatever ended the ceremony afterwards.
+    this.#retireInvitation(pending.inviteId, 'consumed');
     this.#dismissApproval(clientId);
     this.#pruneClient(clientId);
   }
@@ -795,10 +829,11 @@ export class RemoteHost {
   async #onConnectionInit(frame: E2eServerToHostFrame): Promise<void> {
     const staticKeyPair = await this.#loadNoiseStatic();
     if (!staticKeyPair) return;
-    const { challenge, expiresAt } = this.#challenges.issue();
     let session: NoiseTransportSession;
     let message2: Uint8Array;
     let clientStaticPublicKey: string;
+    let challenge: string;
+    let expiresAt: number;
     try {
       const handshake = await createNoiseResponder({
         prologue: e2eConnectionPrologue(this.#enrollment.hostId, frame.id),
@@ -806,6 +841,10 @@ export class RemoteHost {
       });
       const payload = await handshake.readMessage(fromBase64Url(frame.ct));
       if (payload.length !== 0) throw new NoiseError('connection message 1 carries a payload');
+      // Issued only once message 1 has decrypted. Nothing but its own TTL
+      // reclaims a challenge, so minting one per *attempted* `init` would let a
+      // relay grow the issuer with frames that never authenticated at all.
+      ({ challenge, expiresAt } = this.#challenges.issue());
       message2 = await handshake.writeMessage(fromBase64Url(challenge));
       const remoteStatic = handshake.remoteStaticPublicKey;
       if (!remoteStatic) throw new NoiseError('IK did not authenticate a Client static');
@@ -915,12 +954,21 @@ export class RemoteHost {
   #promoteConnection(clientId: string, pending: PendingConnectionSession): void {
     const state = this.#clientState(clientId);
     state.connection = undefined;
+    // Cleared with the dispose, not merely overwritten below: without a session
+    // factory there is no replacement, and a leftover reference would route the
+    // next frame on the old id into a handler that has already been disposed.
     state.established?.api.dispose();
+    state.established = undefined;
     this.#sendControl(clientId, 'connection', pending.connectionId, pending.session, {
       ok: true,
       hostLabel: this.#enrollment.label ?? '',
     } satisfies ConnectionOutcomeV1);
-    if (!this.#createSession) return;
+    if (!this.#createSession) {
+      // No remote-api behind this Host: the outcome is the whole answer, and
+      // the entry holds nothing, so it must not stay under a relay-chosen key.
+      this.#pruneClient(clientId);
+      return;
+    }
     // Destructured, so the `send` closure retains only what an established
     // session is — the id and the two cipher states — and not the pending
     // record, whose handshake hash, Client static and challenge are spent.
@@ -1081,7 +1129,7 @@ export class RemoteHost {
    */
   #disposeClient(clientId: string): void {
     if (!this.#clients.has(clientId)) return;
-    this.#disposePairing(clientId, 'consumed');
+    this.#disposePairing(clientId);
     this.#disposeConnection(clientId);
     this.#disposeEstablished(clientId);
     this.#clients.delete(clientId);

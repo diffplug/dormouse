@@ -101,21 +101,19 @@ multiple physical devices:
 > authenticates a user account; it grants access to no Host.
 
 **Presence, or verification.** The default demand is the authenticator's
-user-*presence* flag. A deployment raises it to user *verification* (biometric
-or PIN) with `DORMOUSE_REQUIRE_USER_VERIFICATION=true`; the Server mirrors the
-flag into every Host's enrollment response, and the Host copies it into the
-policy it verifies proofs under. **Both verifiers must demand the same thing** —
-they evaluate the same assertion, so a Server demanding UV while the Host does
-not leaves the weaker verifier deciding, which inverts "the Host is the final
-authority". Pocket asks for `userVerification: 'preferred'` either way, so
-platform authenticators prompt for biometrics in practice even where neither
-side requires it; that is convention, not a guarantee.
+user-*presence* flag. `DORMOUSE_REQUIRE_USER_VERIFICATION=true` raises it to user
+*verification*; the Server mirrors the flag into every Host's enrollment response
+and the Host copies it into its policy. **Both verifiers must demand the same
+thing** — they evaluate the same assertion, so a Server demanding UV while the
+Host does not leaves the weaker verifier deciding, inverting "the Host is the
+final authority". Pocket asks for `userVerification: 'preferred'` either way, so
+platform authenticators prompt for biometrics in practice; that is convention,
+not a guarantee.
 
-**The Host stores only a hash of each paired passkey's public key.** The Client
-presents the full key inside the channel and the Host checks it against the
-stored hash, so a compromised Server cannot substitute a different passkey; the
-Server likewise verifies against its own *stored* key, never against the one a
-request carries.
+**The Host stores only a hash of each paired passkey's public key**, checked
+against the full key presented inside the channel — so a compromised Server
+cannot substitute a passkey. The Server likewise verifies against its own
+*stored* key, never the one a request carries.
 
 Source of truth: `verifyPasskeyAssertion` / `hashPasskeyPublicKey` in
 `server-lib-common/src/security/passkey.ts`, run by the Server
@@ -127,22 +125,19 @@ mandatory-to-implement WebAuthn algorithm.
 ## Client statics
 
 A Client static establishes long-lived Client identity — the capability the
-Host actually authorizes. It prevents newly-added passkeys from inheriting Host
-access, synced passkeys from automatically becoming trusted devices, and
-Server-only compromise from granting Host access.
+Host actually authorizes. It is what stops newly-added or synced passkeys, and
+Server-only compromise, from granting Host access.
 
-**One X25519 keypair per Host, generated at scan time**, and persisted
-non-extractably in that Host's local record only after the Host approves.
-Different Hosts never share a Client key, so nothing about one pairing is
-visible in another. The raw 32-byte public half, base64url, is the Client
-identifier on the ACL, and **Noise IK is what proves possession of the private
-half**: a Client that cannot complete the handshake never reaches the
-authorization step at all (rationale).
+**One X25519 keypair per Host, generated at scan time**, persisted
+non-extractably in that Host's local record only after the Host approves, and
+never shared between Hosts. The raw 32-byte public half, base64url, is the
+Client identifier on the ACL, and **Noise IK is what proves possession of the
+private half**: a Client that cannot complete the handshake never reaches the
+authorization step (rationale).
 
 It is non-extractable through normal browser APIs and durable across restarts,
 but active XSS can *use* it, browser or OS compromise defeats the model, and
-clearing browser data destroys it — a recoverable event (see
-[Client static loss](#client-static-loss)).
+clearing browser data destroys it ([Client static loss](#client-static-loss)).
 
 Source of truth: `generateNoiseKeyPair` in
 `server-lib-common/src/security/noise.ts`; what Pocket stores is
@@ -177,11 +172,10 @@ attacker-choosable by anything that can write the store at all; the local
 approval that minted the record is the authorization.
 
 **Delivery IDs are opaque bearer capabilities**, minted by the Host at approval
-and known only to the record and the Client's own pinned copy. Possession is
-what authorizes registering, querying, and deleting a push subscription, and
-the Server never lists them to a session ([server.md](./server.md) -> Web Push).
-They decouple Server state from the ACL identity key and are not an anonymity
-mechanism.
+and known only to the record and the Client's own pinned copy. Possession
+authorizes registering, querying, and deleting a push subscription, and the
+Server never lists them to a session ([server.md](./server.md) -> Web Push).
+They are not an anonymity mechanism.
 
 ## Presence proofs
 
@@ -201,7 +195,9 @@ connection share one verifier.
   verified binding.
 - **`POST /api/reauth/begin` takes a required, kind-tagged binding**, mints a
   one-use Server nonce, and answers the derived challenge under the RP ID, the
-  nonce, and the named credential as the sole `allowCredentials` entry.
+  nonce, and the named credential as the sole `allowCredentials` entry. Until 4c
+  both routes keep a `STAGE-4 TRANSITIONAL` legacy arm, selected by an absent
+  field; it fails closed, answering no `serverNonce`.
   `finish` consumes the nonce, recomputes the challenge, verifies the assertion
   against the stored key for that exact credential, and **extends nothing** —
   not the session's life, not the relay socket.
@@ -240,10 +236,12 @@ newly-added passkey is not automatically trusted — the Client must still pair.
   has no key to check a signature with, and the IK responder proves possession
   of the scanned key.
 - **Invitation lifecycle, Host-owned.** `live` until a valid Noise message 1
-  decrypts against it (`reserved`), then consumed by the terminal outcome, or
-  expired by TTL. **Each invitation accepts one request**, and a message 1 that
-  fails to decrypt leaves it live — nothing has been spent. The QR panel renders
-  that state and offers a new code; redemption at the Server flips nothing.
+  decrypts against it (`reserved`), then `consumed` by the terminal outcome,
+  `expired` by TTL, or `dropped` when the Host discards it un-scanned — lost
+  relay socket, or evicted at the cap. **Each invitation accepts one request**,
+  and a message 1 that fails to decrypt leaves it live. The QR panel renders that
+  state and offers a new code; **`dropped` must not read as a scan**, or it sends
+  the user to a phone that never asked. Redemption at the Server flips nothing.
 - **IK against the invitation key.** Client initiator, fresh per-Host static as
   `s`, invitation public key as `rs`. **Both handshake payloads are empty**, and
   `Split` yields the pairing channel; no ACL, delivery ID, or resumable state
@@ -408,16 +406,17 @@ Source of truth: `server-lib-common/src/security/noise.ts` and
 
 ## Host identity
 
-**Each Host mints one permanent Noise static at enrollment**, after the Server
-answers and never in the request: `noiseStaticPrivateKey` (PKCS#8, base64url)
+**Each Host mints one permanent Noise static at enrollment**, before the
+request and never in it: `noiseStaticPrivateKey` (PKCS#8, base64url)
 and `noiseStaticPublicKey` (raw 32 bytes, base64url) ride in the enrollment
 record, so they land exactly where `hostToken` already does (`SECURITY.md` ->
 "Credentials at rest"). The Host's local label rides there too, and reaches a
 Client only inside an encrypted outcome.
 
-- **A runtime that cannot mint one does not enroll.** The static is the Host's
-  identity in a mandatory protocol, so enrolling without it would persist a
-  bearer token for a machine that can never answer a ceremony.
+- **A runtime that cannot mint one does not enroll, and the mint runs *before*
+  the exchange.** A successful `POST /api/host/enroll` appends a `hosts.json` row
+  and spends the installer's single-use token, neither of which the Host can
+  undo, so a failure has to land while the Server still has nothing to forget.
 - **Both halves or neither.** `isEnrollment` rejects a single half, a malformed
   encoding, or a wrong decoded length, and accepts a record from before the
   fields existed.

@@ -375,6 +375,12 @@ export class PushSubscriptionStore extends JsonFileStore {
    * Forget every row carrying `deliveryId`, across Hosts. The Client holding
    * the capability is the normal lifecycle initiator; the route answers 204
    * whatever this returns, so the count is for tests and logs only.
+   *
+   * **Not scoped to an account**, and correct only because selfhost has exactly
+   * one (`SELFHOST_ACCOUNT_ID`, which `SECURITY.md` pins). A delivery id is
+   * unguessable, so possession is the authorization — but multi-tenant would
+   * still have to key the delete on the calling account, since a leaked id
+   * would otherwise reach across tenants (`docs/specs/server.md` `## Future`).
    */
   removeDelivery(deliveryId: string): Promise<number> {
     return this.mutate(async () => {

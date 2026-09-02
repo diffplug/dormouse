@@ -76,7 +76,7 @@ describe('remote-host enrollment', () => {
       // and this one is what the machine calls itself inside an encrypted
       // outcome.
       label: 'My Laptop',
-      // Minted locally, after the answer above (see the Noise-static test).
+      // Minted locally, before the request and never in it (see below).
       noiseStaticPrivateKey: expect.any(String),
       noiseStaticPublicKey: expect.any(String),
     });
@@ -174,6 +174,21 @@ describe('remote-host enrollment', () => {
     expect(body).not.toHaveProperty('password');
   });
 
+  it('mints the Noise static before the exchange, so a failure costs nothing', async () => {
+    stubLocalStorage();
+    const fetchMock = enrollResponder();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.mocked(mintNoiseStaticKeyPair).mockRejectedValueOnce(new Error('no X25519 here'));
+
+    await expect(
+      performEnrollment('https://dormouse.example', { enrollToken: 'one-time' }, 'My Laptop'),
+    ).rejects.toThrow(/cannot generate the X25519 key/);
+    // A successful POST appends a `hosts.json` row and spends the installer's
+    // single-use token, neither of which this side can undo — so a runtime that
+    // cannot mint must fail while the Server still has nothing to forget.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('gives up on a relay that accepts the connection and never answers', async () => {
     // This exchange runs on the Host service's lifecycle chain, where every
     // start/stop command queues behind it, so a black-holed relay must not be
@@ -193,6 +208,10 @@ describe('remote-host enrollment', () => {
     );
 
     const pending = performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x');
+    // Awaited rather than asserted synchronously: the X25519 mint runs before
+    // the exchange (see "mints the Noise static before the exchange"), so the
+    // request is one WebCrypto round trip away rather than in this tick.
+    await vi.waitFor(() => expect(seen).toBeDefined());
     // Below the webview's own 15 s command budget, so the console that asked
     // sees the real error rather than a bare timeout.
     expect(timeout).toHaveBeenCalledWith(10_000);

@@ -89,7 +89,11 @@ describe('RemoteHost end-to-end ceremonies', () => {
     clock = 1_700_000_000_000;
   });
 
-  function makeHost(loadAcl: () => HostAclRecord[] = () => []): RemoteHost {
+  function makeHost(
+    loadAcl: () => HostAclRecord[] = () => [],
+    options: { withSession?: boolean } = {},
+  ): RemoteHost {
+    const withSession = options.withSession ?? true;
     const created = new RemoteHost({
       enrollment,
       reconnect: false,
@@ -101,16 +105,18 @@ describe('RemoteHost end-to-end ceremonies', () => {
       requestApproval: (pending) => approvals.push(pending),
       dismissApproval: (clientId) => dismissed.push(clientId),
       onInvitationChanged: (inviteId, state) => invitationEvents.push({ inviteId, state }),
-      createSession: ({ send }) => {
-        const entry = { handled: [] as unknown[], disposed: false, send };
-        sessions.push(entry);
-        return {
-          handle: (data) => entry.handled.push(data),
-          dispose: () => {
-            entry.disposed = true;
-          },
-        } satisfies RemoteApiSessionLike;
-      },
+      createSession: withSession
+        ? ({ send }) => {
+            const entry = { handled: [] as unknown[], disposed: false, send };
+            sessions.push(entry);
+            return {
+              handle: (data) => entry.handled.push(data),
+              dispose: () => {
+                entry.disposed = true;
+              },
+            } satisfies RemoteApiSessionLike;
+          }
+        : undefined,
       now: () => clock,
     });
     created.start();
@@ -394,6 +400,9 @@ describe('RemoteHost end-to-end ceremonies', () => {
     await mintInvitation();
     expect(host.outstandingInvitationCount).toBe(MAX_TOKENS_PER_HOST);
     expect(host.invitationState(first.inviteId)).toBe('consumed');
+    // Evicted un-scanned, so the panel showing it is told to get a new code
+    // rather than to finish on a phone that never asked.
+    expect(invitationEvents).toContainEqual({ inviteId: first.inviteId, state: 'dropped' });
   });
 
   it('reports an invitation expired once its TTL passes', async () => {
@@ -766,6 +775,10 @@ describe('RemoteHost end-to-end ceremonies', () => {
     // over: its one-use key lived only in the Host that just lost the relay.
     expect(host.invitationState(spare.inviteId)).toBe('consumed');
     expect(dismissed).toContain('c1');
+    // But nobody scanned it, so the panel must not be told it was: `dropped`
+    // and `consumed` are different facts, and only the reserved one is spent.
+    expect(invitationEvents).toContainEqual({ inviteId: spare.inviteId, state: 'dropped' });
+    expect(invitationEvents.filter((e) => e.state === 'dropped')).toHaveLength(1);
   });
 
   it('stands down for good on a displacement close', async () => {
@@ -783,6 +796,100 @@ describe('RemoteHost end-to-end ceremonies', () => {
     await settle();
     expect(socket.sent).toEqual([]);
     expect(host.trackedClientCount).toBe(0);
+  });
+
+  it('ignores a client-gone whose clientId is past the wire bound', async () => {
+    makeHost();
+    await requestPairing('c1', await newAuthenticator());
+    expect(host.trackedClientCount).toBe(1);
+    // The relay chooses this value and this is the one frame that reaches the
+    // client map without the `e2e` guard, so the Host bounds it itself.
+    socket.receive({ t: 'client-gone', clientId: 'x'.repeat(257) });
+    socket.receive({ t: 'client-gone', clientId: 42 });
+    await settle();
+    expect(host.trackedClientCount).toBe(1);
+    socket.receive({ t: 'client-gone', clientId: 'c1' });
+    await settle();
+    expect(host.trackedClientCount).toBe(0);
+  });
+
+  it('allocates no challenge for a connection init that never authenticates', async () => {
+    makeHost();
+    const { clientStatic } = await pairedClient();
+    expect(host.pendingChallengeCount).toBe(0);
+    // Nothing but its own TTL reclaims a challenge, so a garbage `init` must
+    // not leave one behind: the relay can send those at line rate.
+    for (let i = 0; i < 5; i += 1) {
+      sendE2e('c2', 'connection', testRoutingId(), 'init', toBase64Url(new Uint8Array(96)));
+    }
+    await settle();
+    expect(host.pendingChallengeCount).toBe(0);
+    // A real message 1 does allocate one — otherwise the assertion above would
+    // pass against a Host that never issues at all.
+    await openConnection('c1', clientStatic, testRoutingId());
+    expect(host.pendingChallengeCount).toBe(1);
+  });
+
+  it('leaves no established session behind when there is no remote-api to build', async () => {
+    // A Host with no session factory answers the outcome and holds nothing.
+    // Leaving the previous `established` in place would route the next frame on
+    // the old id into a handler that has already been disposed.
+    makeHost(() => [], { withSession: false });
+    const { authenticator, clientStatic } = await pairedClient();
+    for (const connectionId of [testRoutingId(), testRoutingId()]) {
+      const { session, hostChallenge } = await openConnection('c1', clientStatic, connectionId);
+      const binding = connectionBinding(connectionId, hostChallenge, session, authenticator.credentialId);
+      sendE2e(
+        'c1',
+        'connection',
+        connectionId,
+        'transport',
+        toBase64Url(session.sendControl({ presence: await presenceProofFor(authenticator, binding) })),
+      );
+      expect(await outcome(session, 'connection', connectionId)).toEqual({
+        ok: true,
+        hostLabel: HOST_LABEL,
+      });
+    }
+    await settle();
+    expect(host.trackedClientCount).toBe(0);
+  });
+
+  it('refuses to pair when this Host has no Noise static to present', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const created = new RemoteHost({
+      // Every other field is a real enrollment; only the static is missing,
+      // which is the state a corrupt store leaves behind.
+      enrollment: {
+        ...enrollment,
+        noiseStaticPrivateKey: undefined,
+        noiseStaticPublicKey: undefined,
+      },
+      reconnect: false,
+      createWebSocket: () => (socket = new FakeSocket()),
+      loadAcl: () => [],
+      saveAcl: (_hostId, records) => {
+        savedRecords = [...records];
+      },
+      requestApproval: (pending) => approvals.push(pending),
+      dismissApproval: (clientId) => dismissed.push(clientId),
+      onInvitationChanged: (inviteId, state) => invitationEvents.push({ inviteId, state }),
+      now: () => clock,
+    });
+    created.start();
+    socket.open();
+    host = created;
+
+    const { invitation, session, code } = await requestPairing('c1', await newAuthenticator());
+    approvals[0]!.approve(code);
+    // A record written here would authorize a Client that could never complete
+    // a connection IK, and its `hostStaticPublicKey` pin would be empty.
+    expect(await outcome(session, 'pairing', invitation.inviteId)).toEqual({
+      ok: false,
+      code: 'host-error',
+    });
+    expect(savedRecords).toEqual([]);
+    warn.mockRestore();
   });
 
   it('drops a frame whose routing values are out of shape, before any crypto', async () => {

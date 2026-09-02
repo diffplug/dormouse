@@ -552,11 +552,29 @@ test('send addresses only the named deliveries', async () => {
 test('a named delivery with no subscription counts as unknown, not delivered', async () => {
   const { app, host } = await pushApp();
   const res = await sendAs(app, host.hostToken, {
-    deliveryIds: ['never-subscribed'],
+    deliveryIds: [newDeliveryId()],
     title: 'x',
     body: 'y',
   });
   assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 1, failed: 0 });
+});
+
+// Every route that names a delivery id bounds it the way subscribe does. A
+// value no Host could have minted names no row, and `readJson` caps nothing —
+// so the bound is what keeps a session-holder from posting megabytes that get
+// hashed into a Set and compared against every stored row.
+test('every delivery-id route refuses an id no Host could have minted', async () => {
+  const { app, host, sessionToken } = await pushApp();
+  const oversized = 'A'.repeat(100_000);
+  for (const bad of ['never-subscribed', oversized, `${newDeliveryId()}x`]) {
+    assert.equal((await query(app, sessionToken, [bad])).status, 400, `query ${bad.length}`);
+    const sent = await sendAs(app, host.hostToken, { deliveryIds: [bad], title: 'x', body: 'y' });
+    assert.equal(sent.status, 400, `send ${bad.length}`);
+  }
+  // The delete stays idempotent-and-silent whatever it is handed: answering a
+  // malformed id differently would make the route an oracle.
+  const deleted = await removeDelivery(app, sessionToken, 'never-subscribed');
+  assert.equal(deleted.status, 204);
 });
 
 test('send treats a subscription registered under an old VAPID key as unknown', async () => {

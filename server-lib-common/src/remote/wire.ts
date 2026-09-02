@@ -361,9 +361,11 @@ export interface PushSubscribeResponse {
   subscribedAt: number;
   /**
    * Every Host whose rows carry the presented endpoint after the mutation — the
-   * state, not the delta. One service-worker scope has one subscription, so a
-   * changed delivery address drops every row still on the old endpoint in the
-   * same mutation and this is what survives it.
+   * state, not the delta. When *this* delivery's own row changes address, every
+   * row still on the endpoint it replaced goes in the same mutation; a row for
+   * some other delivery whose phone rotated without re-registering is left to
+   * the provider's own 404/410 pruning, since the Server holds no cross-Host
+   * device identity that could link the two.
    *
    * Reporting the result rather than the event is what makes a lost response
    * self-healing: the idempotent retry cannot re-announce a deletion it already

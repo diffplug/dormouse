@@ -123,6 +123,12 @@ export async function performEnrollment(
   label: string,
 ): Promise<HostEnrollment> {
   const base = serverUrl.replace(/\/+$/, '');
+  // Minted BEFORE the exchange. A successful POST appends a `hosts.json` row
+  // and spends the installer's single-use `enrollToken`, neither of which this
+  // side can undo — so a runtime that cannot produce an X25519 key must fail
+  // while the Server still has nothing to forget. Nothing about it reaches the
+  // request body below.
+  const noiseStatic = await mintNoiseStatic();
   const response = await fetch(`${base}${API_ROUTES.hostEnroll}`, {
     method: 'POST',
     // The same budget every Host→Server call runs under (`host-fetch.ts`), and
@@ -179,10 +185,10 @@ export async function performEnrollment(
     ...(typeof enrolled?.requireUserVerification === 'boolean'
       ? { requireUserVerification: enrolled.requireUserVerification }
       : {}),
-    // Minted here, after the Server answered, and never sent to it: the
-    // request body above carries the credential and the label, nothing else.
-    // Persisting it is the caller's job, alongside `hostToken`.
-    ...(await mintNoiseStatic()),
+    // Minted above and never sent to the Server: the request body carries the
+    // credential and the label, nothing else. Persisting it is the caller's
+    // job, alongside `hostToken`.
+    ...noiseStatic,
   };
   if (!isEnrollment(enrollment)) {
     throw new Error(

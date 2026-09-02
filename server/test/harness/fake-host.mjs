@@ -533,7 +533,6 @@ export class FakeHost extends EventEmitter {
       });
       return;
     }
-    const { challenge, expiresAt } = this.challenges.issue();
     let entry;
     try {
       const handshake = await createNoiseResponder({
@@ -542,6 +541,9 @@ export class FakeHost extends EventEmitter {
       });
       const payload = await handshake.readMessage(fromBase64Url(frame.ct));
       if (payload.length !== 0) throw new Error('connection message 1 carries a payload');
+      // Issued only once message 1 has decrypted, as `RemoteHost` does: nothing
+      // but its own TTL reclaims a challenge.
+      const { challenge, expiresAt } = this.challenges.issue();
       const message2 = await handshake.writeMessage(fromBase64Url(challenge));
       const remoteStatic = handshake.remoteStaticPublicKey;
       if (!remoteStatic) throw new Error('IK did not authenticate a Client static');

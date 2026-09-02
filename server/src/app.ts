@@ -868,10 +868,12 @@ export function createApp(config: AppConfig): CreatedApp {
       !Array.isArray(deliveryIds) ||
       deliveryIds.length === 0 ||
       deliveryIds.length > MAX_PUSH_QUERY_DELIVERY_IDS ||
-      deliveryIds.some((id) => typeof id !== 'string')
+      // Every id is bounded here, as it is at subscribe: `readJson` caps
+      // nothing, and a value no Host ever minted cannot match a row anyway.
+      deliveryIds.some((id) => !isDeliveryId(id))
     ) {
       return c.json(
-        { error: `deliveryIds must be 1..${MAX_PUSH_QUERY_DELIVERY_IDS} strings` },
+        { error: `deliveryIds must be 1..${MAX_PUSH_QUERY_DELIVERY_IDS} delivery ids` },
         400,
       );
     }
@@ -896,7 +898,11 @@ export function createApp(config: AppConfig): CreatedApp {
    * into an oracle for whether a guessed delivery id names a row.
    */
   app.delete(API_ROUTES.pushSubscriptionDelete, requireSession, async (c) => {
-    await pushStore.removeDelivery(c.req.param('deliveryId'));
+    // Bounded like every other delivery id, and still 204: an id no Host could
+    // have minted names no row, so refusing it early only avoids reading the
+    // file for a value that cannot match.
+    const deliveryId = c.req.param('deliveryId');
+    if (isDeliveryId(deliveryId)) await pushStore.removeDelivery(deliveryId);
     return c.body(null, 204);
   });
 
@@ -925,8 +931,8 @@ export function createApp(config: AppConfig): CreatedApp {
     // keep notifying a Client the Host had revoked, since nothing propagates a
     // revocation today (docs/specs/remote-security-model.md).
     const names: unknown = body.deliveryIds;
-    if (!Array.isArray(names) || names.length === 0 || names.some((n) => typeof n !== 'string')) {
-      return c.json({ error: 'deliveryIds must be a non-empty array' }, 400);
+    if (!Array.isArray(names) || names.length === 0 || names.some((n) => !isDeliveryId(n))) {
+      return c.json({ error: 'deliveryIds must be a non-empty array of delivery ids' }, 400);
     }
 
     // The Host is identified by its token, never by the body: a Host can only
