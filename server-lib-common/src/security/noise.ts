@@ -530,6 +530,8 @@ export class NoiseHandshake {
   #remoteEphemeral: Uint8Array | undefined;
   #firstMessageDone = false;
   #failed = false;
+  /** True from the first line of {@link NoiseHandshake.#step} to its last. */
+  #inFlight = false;
   #session: NoiseSession | undefined;
 
   private constructor(
@@ -612,14 +614,33 @@ export class NoiseHandshake {
     });
   }
 
+  /**
+   * Run one handshake message, at most one at a time.
+   *
+   * **A second call while one is in flight fails the handshake**, rather than
+   * queueing behind it. A step is a dozen awaited WebCrypto calls that mutate
+   * the symmetric state in order; two interleaved would mix the same key twice
+   * or read `h` between two of its writes, producing a transcript neither peer
+   * can reproduce. The message-order guards above cannot see that, because they
+   * read `#firstMessageDone` — which the step sets at its *end*. Failing is the
+   * whole recovery: a caller reaching here has a bug, and the handshake is
+   * cheap to redo but impossible to resynchronize.
+   */
   async #step(run: () => Promise<Uint8Array>): Promise<Uint8Array> {
     if (this.#failed) throw new NoiseError('handshake already failed');
     if (this.#session !== undefined) throw new NoiseError('handshake already complete');
+    if (this.#inFlight) {
+      this.#failed = true;
+      throw new NoiseError('handshake step is already in flight');
+    }
+    this.#inFlight = true;
     try {
       return await run();
     } catch (error) {
       this.#failed = true;
       throw error instanceof NoiseError ? error : new NoiseError('handshake failed');
+    } finally {
+      this.#inFlight = false;
     }
   }
 

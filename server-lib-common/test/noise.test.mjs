@@ -320,6 +320,19 @@ test('handshake steps only run in their pattern order', async () => {
   await assert.rejects(done.writeMessage(EMPTY), NoiseError);
 });
 
+test('a second step while one is in flight fails the handshake', async () => {
+  // A step is a dozen awaited WebCrypto calls mutating the symmetric state in
+  // order; two interleaved would mix the same key twice or read `h` between two
+  // of its writes. The pattern-order guards above cannot catch it — they read a
+  // flag the step sets at its end — so the guard is its own, and terminal.
+  const initiator = await newInitiator();
+  const first = initiator.writeMessage(EMPTY);
+  await assert.rejects(initiator.writeMessage(EMPTY), NoiseError);
+  await first;
+  // Terminal: the handshake is poisoned for the legitimate next step too.
+  await assert.rejects(initiator.readMessage(new Uint8Array(48)), NoiseError);
+});
+
 test('a keyless CipherState is a passthrough, and a keyed one needs 32 bytes', () => {
   const empty = new NoiseCipherState();
   assert.equal(empty.hasKey, false);
