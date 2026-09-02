@@ -62,6 +62,7 @@ export class FakeClient extends EventEmitter {
     origin,
     rpId,
     label = 'Fake Phone',
+    socket,
   }) {
     super();
     this.hostId = hostId;
@@ -94,6 +95,7 @@ export class FakeClient extends EventEmitter {
     const ws = attachFrameSocket(
       this,
       `${wsBase}${WS_ROUTES.client}?${WS_TOKEN_PARAM}=${encodeURIComponent(sessionToken)}`,
+      socket,
     );
     ws.addEventListener('message', (ev) => receiveFrame(this, ev.data));
   }

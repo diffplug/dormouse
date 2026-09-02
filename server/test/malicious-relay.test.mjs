@@ -1,0 +1,330 @@
+/**
+ * The relay, hostile: what an operator who records, drops, reorders,
+ * duplicates, modifies, and invents frames can actually obtain
+ * (docs/specs/remote-security-model.md -> Host bounds, Security Guarantees).
+ *
+ * `e2e-relay.test.mjs` drives the same two peers through the *honest* relay;
+ * this file replaces it with one that is trying, so the assertions are about
+ * what stays impossible rather than what still works. The relay wraps the real
+ * `RelayHub` — its routing is the shipped routing — and the last case removes
+ * its own `ct`/`id`/shape guards to show they are defense in depth: the Host
+ * runs the same guard on arrival and its bounds do not move.
+ *
+ * HTTP is a real server, because the presence proofs go through the real
+ * `/api/reauth/*` routes; only the relay is in memory.
+ */
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+
+import {
+  MAX_CLIENT_ID_LENGTH,
+  MAX_E2E_CIPHERTEXT_LENGTH,
+  fromBase64Url,
+  generateNoiseKeyPair,
+  isE2eClientFrame,
+  isE2eServerToHostFrame,
+  toBase64Url,
+  utf8Encode,
+} from 'server-lib-common';
+
+import { enrollHost, freshApp, ownerSession, startServer, until } from './helpers.mjs';
+import { FakeClient } from './harness/fake-client.mjs';
+import { FakeHost } from './harness/fake-host.mjs';
+import { newE2eId } from './harness/e2e.mjs';
+import { createMaliciousRelay } from './harness/malicious-relay.mjs';
+
+/** A live HTTP server, one Host and one Client, joined by a relay we control. */
+async function hostileFixture({ guards = true } = {}) {
+  const created = await freshApp();
+  const server = await startServer(created);
+  const { body: enrollment } = await enrollHost(created.app);
+  const hostStatic = await generateNoiseKeyPair();
+  const clientStatic = await generateNoiseKeyPair();
+  const relay = createMaliciousRelay({ hostId: enrollment.hostId, guards });
+  const host = new FakeHost({
+    serverUrl: server.wsUrl,
+    hostToken: enrollment.hostToken,
+    hostId: enrollment.hostId,
+    origin: created.origin,
+    rpId: created.rpId,
+    noiseStaticKeyPair: hostStatic,
+    socket: relay.hostSocket,
+  });
+  await host.ready;
+  const { sessionToken, authenticator } = await ownerSession(created.app);
+  const client = new FakeClient({
+    serverUrl: server.wsUrl,
+    sessionToken,
+    hostId: enrollment.hostId,
+    staticKeyPair: clientStatic,
+    hostStaticPublicKey: hostStatic.publicKey,
+    origin: created.origin,
+    rpId: created.rpId,
+    socket: relay.clientSocket,
+  });
+  await client.ready;
+  return {
+    server,
+    host,
+    client,
+    relay,
+    authenticator,
+    enrollment,
+    hostStatic,
+    clientStatic,
+    close: async () => {
+      relay.close();
+      await server.close();
+    },
+  };
+}
+
+/** Pair and connect through this fixture's relay, leaving an authorized session. */
+async function establish(fixture) {
+  const invitation = await fixture.host.mintInvitation();
+  const paired = await fixture.client.pair({
+    invitation,
+    authenticator: fixture.authenticator,
+  });
+  assert.equal(paired.ok, true, JSON.stringify(paired.outcome));
+  const connected = await fixture.client.connect({ authenticator: fixture.authenticator });
+  assert.equal(connected.ok, true, JSON.stringify(connected.outcome));
+  return connected;
+}
+
+/** Record the Host's e2e outcomes so a test can await one. */
+function watch(host) {
+  const receipts = [];
+  const errors = [];
+  const opens = [];
+  host.on('e2e-receive', (ev) => receipts.push(ev));
+  host.on('e2e-error', (ev) => errors.push(ev));
+  host.on('e2e-open', (ev) => opens.push(ev));
+  return { receipts, errors, opens };
+}
+
+/** Flip one byte of a base64url ciphertext. */
+function flip(ct) {
+  const bytes = fromBase64Url(ct);
+  bytes[bytes.length - 1] ^= 0x01;
+  return toBase64Url(bytes);
+}
+
+test('a recording relay learns no decision, label, api message, or terminal byte', async () => {
+  const fixture = await hostileFixture();
+  const { host, client, relay, hostStatic, clientStatic } = fixture;
+  const MARKER = 'DORMOUSE-HOSTILE-RELAY-ORACLE-4c1d';
+  try {
+    await establish(fixture);
+    const seen = watch(host);
+    const entry = host.e2eEntry(relay.clientId);
+
+    client.sendApp(utf8Encode(`terminal.write ${MARKER}`));
+    host.e2eSendApp(relay.clientId, utf8Encode(`terminal.data ${MARKER}`));
+    await until(() => seen.receipts.length >= 1);
+    await client.nextTransport();
+
+    const view = relay.view();
+    for (const [what, secret] of [
+      ['plaintext', MARKER],
+      ["the Host's label", host.label],
+      ['the pairing code', client.knownHost.deliveryId],
+      ['the host static', toBase64Url(hostStatic.publicKey)],
+      ['the client static', toBase64Url(clientStatic.publicKey)],
+      ['the handshake hash', toBase64Url(entry.session.handshakeHash)],
+    ]) {
+      assert.equal(view.includes(secret), false, `${what} must never cross the relay`);
+    }
+    // What it does see is routing: the hostId it is already routing by.
+    assert.ok(view.includes(fixture.enrollment.hostId));
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('a relay that forges a pairing outcome is not believed', async () => {
+  const fixture = await hostileFixture();
+  const { host, client, relay } = fixture;
+  try {
+    const invitation = await host.mintInvitation();
+    // Every Host->Client transport frame is rewritten: the relay cannot produce
+    // a ciphertext the Client's own receive state accepts, so the best it can
+    // do is corrupt one.
+    relay.tamper = (frame, to) =>
+      to === 'client' && frame.t === 'e2e' && frame.step === 'transport'
+        ? [{ ...frame, ct: flip(frame.ct) }]
+        : [frame];
+
+    await assert.rejects(
+      () => client.pair({ invitation, authenticator: fixture.authenticator }),
+      /authentication failed/,
+      'a forged outcome does not decrypt',
+    );
+    assert.equal(client.session.isPoisoned, true);
+    assert.equal(client.pin, null, 'nothing was pinned');
+    assert.equal(client.knownHost, null);
+    // The Host really did approve — so the only thing the relay achieved is
+    // denying its own user a pairing, which is availability, not authorization.
+    assert.equal(host.acl.activeRecords().length, 1);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('a relay that invents a control message poisons the session and nothing else', async () => {
+  const fixture = await hostileFixture();
+  const { host, client, relay } = fixture;
+  const seen = watch(host);
+  try {
+    await establish(fixture);
+    const before = host.attachments.size;
+
+    // A frame the relay made up entirely, on the live connection: the only
+    // thing it can choose is the ciphertext, and it cannot choose a valid one.
+    relay.injectTo('host', {
+      t: 'e2e',
+      clientId: relay.clientId,
+      hostId: fixture.enrollment.hostId,
+      kind: 'connection',
+      id: client.id,
+      step: 'transport',
+      ct: toBase64Url(new Uint8Array(64)),
+    });
+    await until(() => seen.errors.length === 1);
+    assert.match(String(seen.errors[0].error), /authentication failed/);
+    assert.equal(host.e2eEntry(relay.clientId).session.isPoisoned, true);
+    assert.equal(host.attachments.size, before, 'no remote-api call was made');
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('duplicating, reordering, or dropping a transport frame is terminal, not steerable', async () => {
+  for (const mode of ['duplicate', 'reorder', 'modify']) {
+    const fixture = await hostileFixture();
+    const { host, client, relay } = fixture;
+    const seen = watch(host);
+    try {
+      await establish(fixture);
+      const held = [];
+      relay.tamper = (frame, to) => {
+        if (to !== 'host' || frame.t !== 'e2e' || frame.step !== 'transport') return [frame];
+        if (mode === 'duplicate') return [frame, frame];
+        if (mode === 'modify') return [{ ...frame, ct: flip(frame.ct) }];
+        // Reorder: hold the first, release it behind the second.
+        held.push(frame);
+        return held.length < 2 ? [] : [held[1], held[0]];
+      };
+
+      const errorsBefore = seen.errors.length;
+      client.sendKeepalive();
+      if (mode === 'reorder') client.sendKeepalive();
+      await until(() => seen.errors.length > errorsBefore);
+      assert.equal(host.e2eEntry(relay.clientId).session.isPoisoned, true, mode);
+
+      // And it stays dead for traffic that would otherwise be valid: there is
+      // no resynchronization point for the relay to steer the stream back to.
+      relay.tamper = null;
+      const receiptsBefore = seen.receipts.length;
+      client.sendApp(utf8Encode('after the tamper'));
+      await until(() => seen.errors.length > errorsBefore + 1);
+      assert.equal(seen.receipts.length, receiptsBefore, mode);
+    } finally {
+      await fixture.close();
+    }
+  }
+});
+
+test('dropping every frame denies service and nothing more', async () => {
+  const fixture = await hostileFixture();
+  const { host, client, relay } = fixture;
+  try {
+    relay.tamper = () => [];
+    const invitation = await host.mintInvitation();
+    await assert.rejects(
+      () => client.pair({ invitation, authenticator: fixture.authenticator }),
+      /no matching frame in time/,
+    );
+    // The Host never saw a scan, so the code on its screen is still live and
+    // the ACL is still empty: a silent relay authorizes nothing.
+    assert.equal(host.invitationState(invitation.inviteId), 'live');
+    assert.equal(host.acl.activeRecords().length, 0);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('a relay with no guards at all weakens no Host bound', async () => {
+  // The relay's `ct` / `id` / shape checks are defense in depth: the Host runs
+  // the same guard on arrival because the routing values become map keys and
+  // the ciphertext becomes WebCrypto work. Here the relay has none, so every
+  // refusal below is the Host's own.
+  const fixture = await hostileFixture({ guards: false });
+  const { host, client, relay, enrollment } = fixture;
+  const seen = watch(host);
+  try {
+    const invitation = await host.mintInvitation();
+    const base = {
+      t: 'e2e',
+      clientId: relay.clientId,
+      hostId: enrollment.hostId,
+      kind: 'pairing',
+      id: invitation.inviteId,
+      step: 'init',
+      ct: 'AAAA',
+    };
+    const refused = [
+      { ...base, ct: 'a'.repeat(MAX_E2E_CIPHERTEXT_LENGTH + 1) },
+      { ...base, ct: '' },
+      { ...base, ct: 'not base64url!' },
+      { ...base, id: `${newE2eId()}x` },
+      { ...base, id: 'short' },
+      // The two only a relay can choose: the `clientId` it stamps itself.
+      { ...base, clientId: 'x'.repeat(MAX_CLIENT_ID_LENGTH + 1) },
+      { ...base, clientId: 42 },
+      { ...base, hostId: 'not-a-host-id' },
+      { ...base, kind: 'terminal' },
+      { ...base, step: 'response' },
+    ];
+    for (const frame of refused) {
+      assert.equal(isE2eServerToHostFrame(frame), false, JSON.stringify(frame));
+      relay.injectTo('host', frame);
+    }
+    // Plus the two a guard would have let through and the Host still drops
+    // without decrypting: an id nothing is pending under, and transport before
+    // any handshake.
+    const dropped = {
+      ...base,
+      id: newE2eId(),
+      kind: 'connection',
+      step: 'transport',
+      ct: toBase64Url(new Uint8Array(64)),
+    };
+    assert.equal(isE2eServerToHostFrame(dropped), true, 'well-formed, and still refused');
+    relay.injectTo('host', dropped);
+
+    await until(() => seen.errors.length >= refused.length);
+    assert.equal(seen.errors.length, refused.length, 'one refusal each, and no decrypt');
+    for (const error of seen.errors) assert.match(String(error.error), /malformed e2e frame/);
+    assert.equal(seen.opens.length, 0, 'nothing established');
+    assert.equal(host.clients.size, 0, 'no entry under a relay-chosen key');
+    assert.equal(host.invitationState(invitation.inviteId), 'live', 'no scanner was spent');
+
+    // A Client sending a malformed frame through the same relay reaches the
+    // Host unfiltered — the leg `isE2eClientFrame` would have stopped — and is
+    // refused there too.
+    const fromClient = { t: 'e2e', hostId: enrollment.hostId, kind: 'pairing', id: 'short', step: 'init', ct: 'AAAA' };
+    assert.equal(isE2eClientFrame(fromClient), false);
+    client.sendFrame(fromClient);
+    await until(() => seen.errors.length === refused.length + 1);
+    assert.equal(host.clients.size, 0);
+
+    // And the honest ceremony still completes through the same guard-less
+    // relay, so the assertions above are about refusal, not about a dead wire.
+    const paired = await client.pair({ invitation, authenticator: fixture.authenticator });
+    assert.equal(paired.ok, true, JSON.stringify(paired.outcome));
+  } finally {
+    await fixture.close();
+  }
+});

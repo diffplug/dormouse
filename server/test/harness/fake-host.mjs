@@ -72,6 +72,7 @@ export class FakeHost extends EventEmitter {
     autoApprove = true,
     requireUserVerification,
     noiseStaticKeyPair,
+    socket,
   }) {
     super();
     this.hostId = hostId;
@@ -102,7 +103,11 @@ export class FakeHost extends EventEmitter {
     this.attachments = new Map();
 
     const wsBase = serverUrl.replace(/^http/, 'ws');
-    const ws = attachFrameSocket(this, `${wsBase}${WS_ROUTES.host}?${WS_TOKEN_PARAM}=${hostToken}`);
+    const ws = attachFrameSocket(
+      this,
+      `${wsBase}${WS_ROUTES.host}?${WS_TOKEN_PARAM}=${hostToken}`,
+      socket,
+    );
     ws.addEventListener('message', (ev) => {
       // Serialized through a promise chain for the reason the relay serializes
       // its client socket (`server/src/app.ts`): every `e2e` step awaits
