@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, promises as fsp, rmSync, statSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, promises as fsp, statSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -134,13 +134,9 @@ describe('agent-browser host screenshot transport', () => {
     expect(result.ok).toBe(true);
     expect(result.mime).toBe('image/jpeg');
     expect(Array.from(result.bytes ?? [])).toEqual(Array.from(payload));
-    rmSync(located.path, { force: true });
+    await host.closePoppedOut(); // drops the capture directory
   });
 
-  // `binaryPath` crosses from the webview realm and off the persisted session
-  // blob, so an unchecked one is arbitrary local execution in the extension host
-  // or the Tauri sidecar. The gate is at the spawn, so it covers streamStatus /
-  // open / popOut too — the entry points the subcommand allowlist never saw.
   it('drops the capture directory on shutdown', async () => {
     enqueueSpawnResults([{}]);
     const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
@@ -188,6 +184,10 @@ describe('agent-browser host screenshot transport', () => {
     await host.closePoppedOut();
   });
 
+  // `binaryPath` crosses from the webview realm and off the persisted session
+  // blob, so an unchecked one is arbitrary local execution in the extension host
+  // or the Tauri sidecar. The gate is at the spawn, so it covers streamStatus /
+  // open / popOut too — the entry points the subcommand allowlist never saw.
   it('refuses a caller-supplied binary path that is not an agent-browser', async () => {
     enqueueSpawnResults([{}]);
     const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
