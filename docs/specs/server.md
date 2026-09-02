@@ -960,7 +960,7 @@ stand-in host instead:
 into Pocket, and differs from a real Host only in auto-approving and logging.
 
 **3. Phone** (or any other browser profile): show a code on the laptop
-(**Settings → Remote control → Show a pairing code**) and open the server origin
+(**Settings → Remote control → Set up a phone**) and open the server origin
 on the phone. A browser that has never been here leads with **Scan a Host QR**;
 scan or paste the code, which creates the passkey and signs you in, then read
 the two digits off the phone and type them into the laptop's modal → one
@@ -990,6 +990,9 @@ therefore needs its own Host pairing, even when a synced passkey signs it in;
 clearing site data destroys them → re-pair, per the security model; a dropped
 WebSocket sends you back to the Hosts view — reconnect by tapping Connect
 again.
+
+`scripts/pairing-walkthrough/` drives all three in real browsers, ending at a
+command typed from Pocket. Not in CI.
 
 ## Installing it
 
