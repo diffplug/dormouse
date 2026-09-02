@@ -16,6 +16,7 @@
  */
 
 import {
+  DEFAULT_PAIRING_TTL_MS,
   SETUP_HASH_NONCE_PARAM,
   SETUP_HASH_PREFIX,
   SETUP_HASH_TOKEN_PARAM,
@@ -79,7 +80,7 @@ export function setupQrResult(over: Partial<SetupQrResult> = {}): SetupQrResult 
   return {
     url: `https://ned-mac.tail9c2f1.ts.net/${SETUP_HASH_PREFIX}${hash}`,
     mintId: 'mint-story',
-    expiresAt: Date.now() + 5 * 60 * 1000,
+    expiresAt: Date.now() + DEFAULT_PAIRING_TTL_MS,
     ...over,
   };
 }
