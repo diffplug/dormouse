@@ -19,6 +19,13 @@ export class FakeSocket implements RemoteWebSocket {
    */
   closeEmits = true;
   readonly sent: Array<Record<string, unknown>> = [];
+  /**
+   * Called with every frame this socket is asked to send. The seam the relay
+   * stub (`test-relay.ts`) bridges two of these sockets through; without it a
+   * test would have to poll {@link sent}, which turns a routing rule into a
+   * timing one.
+   */
+  onSend: ((frame: Record<string, unknown>) => void) | null = null;
   readonly #handlers = new Map<string, Array<(ev: unknown) => void>>();
 
   addEventListener(type: string, handler: (ev: unknown) => void): void {
@@ -28,7 +35,9 @@ export class FakeSocket implements RemoteWebSocket {
   }
 
   send(data: string): void {
-    this.sent.push(JSON.parse(data) as Record<string, unknown>);
+    const frame = JSON.parse(data) as Record<string, unknown>;
+    this.sent.push(frame);
+    this.onSend?.(frame);
   }
 
   close(): void {

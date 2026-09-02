@@ -1,6 +1,6 @@
 /**
  * Pocket's IndexedDB layout (`docs/specs/pocket-app.md` → "What Pocket
- * stores"): the v2 upgrade, and the two stores it adds.
+ * stores"): the v3 upgrade, and the two stores that survive it.
  *
  * `fake-indexeddb` structured-clones what it is handed, and a `CryptoKey` is
  * not cloneable there, so the records below carry plain stand-ins where the
@@ -35,9 +35,8 @@ function knownHost(hostId: string, overrides: Partial<KnownHostV1> = {}): KnownH
     label: 'Laptop',
     hostStaticPublicKey: 'aG9zdC1zdGF0aWM',
     clientStaticKeyPair: {
-      // Stand-ins: see the file header.
+      // A stand-in: see the file header.
       privateKey: { kind: 'private' } as unknown as CryptoKey,
-      publicKey: { kind: 'public' } as unknown as CryptoKey,
       publicKeyRaw: 'Y2xpZW50LXN0YXRpYw',
     },
     passkeyCredentialId: 'cred-1',
@@ -89,39 +88,46 @@ describe('the pocket database', () => {
     expect(await persistStorage()).toBe(false);
   });
 
-  it('upgrades a v1 database without disturbing the device key', async () => {
-    // What a phone that paired before the end-to-end work already holds.
-    const v1 = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(POCKET_DB_NAME, 1);
-      request.onupgradeneeded = () => request.result.createObjectStore(DEVICE_KEY_STORE);
+  /**
+   * Both earlier versions land in the same shape. The device key is gone with
+   * the protocol that used it, and a key nothing can use is only a credential
+   * left lying about.
+   */
+  it.each([1, 2])('upgrades a v%i database by deleting the device key', async (from) => {
+    const older = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(POCKET_DB_NAME, from);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        db.createObjectStore(DEVICE_KEY_STORE);
+        if (from >= 2) {
+          db.createObjectStore(KNOWN_HOSTS_STORE, { keyPath: 'hostId' });
+          db.createObjectStore(PENDING_DELETIONS_STORE);
+        }
+      };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    const seed = v1.transaction(DEVICE_KEY_STORE, 'readwrite');
+    const seed = older.transaction(DEVICE_KEY_STORE, 'readwrite');
     seed.objectStore(DEVICE_KEY_STORE).put({ devicePublicKey: 'BDevice' }, 'default');
     await promisifyTransaction(seed);
-    v1.close();
+    older.close();
 
     const db = await openPocketDb();
     try {
       expect(db.version).toBe(POCKET_DB_VERSION);
       expect([...db.objectStoreNames].sort()).toEqual([
-        DEVICE_KEY_STORE,
         KNOWN_HOSTS_STORE,
         PENDING_DELETIONS_STORE,
       ]);
-      const kept = await promisifyRequest<{ devicePublicKey: string } | undefined>(
-        db.transaction(DEVICE_KEY_STORE, 'readonly').objectStore(DEVICE_KEY_STORE).get('default'),
-      );
-      expect(kept?.devicePublicKey).toBe('BDevice');
+      expect(db.objectStoreNames.contains(DEVICE_KEY_STORE)).toBe(false);
     } finally {
       db.close();
     }
   });
 
   it('releases an open handle when another tab asks for a newer version', async () => {
-    // v3 deletes `device-key`. A connection this tab left open would block that
-    // upgrade with no timeout, so the handle has to yield on `versionchange`.
+    // A connection this tab left open would block the next version's upgrade
+    // with no timeout, so the handle has to yield on `versionchange`.
     const held = await openPocketDb();
     const upgraded = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(POCKET_DB_NAME, POCKET_DB_VERSION + 1);
@@ -155,7 +161,6 @@ describe('the pocket database', () => {
     try {
       expect(db.version).toBe(POCKET_DB_VERSION);
       expect([...db.objectStoreNames].sort()).toEqual([
-        DEVICE_KEY_STORE,
         KNOWN_HOSTS_STORE,
         PENDING_DELETIONS_STORE,
       ]);
