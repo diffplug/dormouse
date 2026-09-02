@@ -1,11 +1,20 @@
 /**
- * UI-free Pocket protocol client; `docs/specs/server.md` owns authentication
- * and pairing, while `remote-api.md` owns request/event correlation.
+ * UI-free Pocket protocol client. It speaks exactly one wire: the `e2e`
+ * envelope of `docs/specs/server.md` → Relay, carrying the two end-to-end
+ * ceremonies of `docs/specs/remote-security-model.md` (Pairing, Connection) and
+ * — once a connection is established — protocol-v1 as application messages on
+ * the same Noise session (`docs/specs/remote-api.md` owns their correlation).
+ *
+ * There is no plaintext path, no fallback, and no runtime selector: a Host that
+ * cannot complete a ceremony is a Host this Client cannot reach.
  */
 
 import {
   API_ROUTES,
-  PAIRING_STALE_PRESENCE_ERROR,
+  DEFAULT_CHALLENGE_TTL_MS,
+  DEFAULT_PAIRING_TTL_MS,
+  MAX_PUSH_QUERY_DELIVERY_IDS,
+  NoiseTransportSession,
   REMOTE_EVENTS,
   REMOTE_METHODS,
   SELFHOST_ACCOUNT_ID,
@@ -13,31 +22,46 @@ import {
   UNAUTHORIZED_ERROR,
   WS_ROUTES,
   WS_TOKEN_PARAM,
-  computeSetupProof,
+  createNoiseInitiator,
+  e2eConnectionPrologue,
+  fromBase64Url,
+  generateNoiseKeyPair,
   hashPasskeyPublicKey,
+  isConnectionOutcomeV1,
+  isE2eServerToClientFrame,
+  isPairingOutcomeV1,
+  pairingInvitationPrologue,
   pushEndpointFingerprint,
-  signDeviceChallenge,
-  signPushSubscribe,
-  type ClientFrame,
-  type ConnectionFailure,
-  type ConnectionRequest,
-  type DeviceKeyPair,
+  pushSubscriptionDeletePath,
+  randomBase64Url,
+  samplePairingCode,
+  toBase64Url,
+  utf8Decode,
+  utf8Encode,
+  type ConnectionDenialCode,
+  type ConnectionRequestV1,
   type DirectoryEntry,
   type DirectorySnapshot,
+  type E2eClientFrame,
+  type E2eKind,
+  type E2eServerToClientFrame,
   type HelloResult,
-  type HostAclRecord,
   type HostsResponse,
-  type PairStatusQuery,
-  type PairingRequest,
+  type PairingDenialCode,
+  type PairingInvitation,
+  type PairingRequestV1,
+  type PresenceBinding,
+  type PresenceProofV1,
   type PushConfigResponse,
   type PushSubscribeResponse,
   type PushSubscriptionPayload,
+  type PushSubscriptionsQueryResponse,
+  type ReauthBeginResponse,
   type ReauthFinishResponse,
   type RemoteEventMsg,
   type RemoteResponse,
   type ServerToClientFrame,
   type SetupBeginResponse,
-  type SetupCredential,
   type SetupFinishResponse,
   type SigninBeginResponse,
   type SigninFinishResponse,
@@ -51,16 +75,22 @@ import {
   type PasskeyRegistration,
   type WebAuthnClient,
 } from './webauthn';
+import {
+  type KnownHostStore,
+  type KnownHostV1,
+  type PendingDeletionStore,
+} from './pocket-db';
 import type { RemoteWebSocket } from '../ws';
 
 /** The slice of a WebSocket the client uses; a browser `WebSocket` satisfies it. */
 export type PocketSocket = RemoteWebSocket;
 
 /**
- * Persistent per-device state. Passkey public keys are cached by credential id
- * at registration *and* at sign-in — the Server returns the asserted key — so
- * any browser profile holding a synced passkey can build pair and connect
- * requests, not only the one that performed the registration.
+ * Persistent per-device state that is *not* an end-to-end identity — those live
+ * in IndexedDB ({@link KnownHostStore}). Passkey public keys are cached by
+ * credential id at registration *and* at sign-in — the Server returns the
+ * asserted key — so any browser profile holding a synced passkey can build a
+ * presence proof, not only the one that performed the registration.
  */
 export interface PocketStorage {
   getPasskeyPublicKey(credentialId: string): string | null;
@@ -73,9 +103,6 @@ export interface PocketStorage {
   forgetPasskeyPublicKey(credentialId: string): void;
   /** Credential ids this device has stored a public key for (may be empty). */
   knownCredentialIds(): string[];
-  isPaired(hostId: string): boolean;
-  markPaired(hostId: string): void;
-  unmarkPaired(hostId: string): void;
   /**
    * Digest of the delivery address last registered with the Server, or null if
    * this device has never registered one. Per device, not per Host: one
@@ -94,9 +121,12 @@ export interface PocketClientDeps {
   readonly fetch: typeof fetch;
   readonly webauthn: WebAuthnClient;
   readonly createWebSocket: (url: string) => PocketSocket;
-  /** This device's key; memoized after the first call. */
-  readonly deviceKey: () => Promise<DeviceKeyPair>;
+  /** The pinned per-Host records: this Client's whole authorization state. */
+  readonly knownHosts: KnownHostStore;
+  /** Delivery ids owed a deletion; see {@link PocketClient.retirePendingDeletions}. */
+  readonly pendingDeletions: PendingDeletionStore;
   readonly storage?: PocketStorage;
+  readonly now?: () => number;
 }
 
 /** Terminal stream callbacks for {@link PocketClient.attach}. */
@@ -104,19 +134,6 @@ export interface TerminalHandlers {
   /** Base64url PTY output bytes. */
   onData(bytes: string): void;
   onClosed?(exitCode?: number): void;
-}
-
-export interface ConnectDecision {
-  readonly allowed: boolean;
-  readonly failures?: readonly ConnectionFailure[];
-  /** True when a denial means the local paired marker is stale and the user can re-pair. */
-  readonly pairingStale?: boolean;
-}
-
-export interface PairResult {
-  readonly approved: boolean;
-  readonly record?: HostAclRecord;
-  readonly error?: string;
 }
 
 /**
@@ -145,7 +162,7 @@ export const SESSION_EXPIRED_MESSAGE = 'Your session expired. Sign in again to c
  * stuck holding a dead token with force-quitting the app as the only way out.
  *
  * {@link PocketClient} clears the token before throwing this, so recovery is
- * exactly "sign in again" with the passkey and paired-host markers intact.
+ * exactly "sign in again" with the passkey cache and the pinned Hosts intact.
  */
 export class SessionExpiredError extends ServerRefusalError {
   constructor() {
@@ -156,14 +173,14 @@ export class SessionExpiredError extends ServerRefusalError {
 
 /** Shown when the scanned code is expired, spent, or otherwise unknown. */
 export const SETUP_CODE_DEAD_MESSAGE =
-  'That setup code has expired. Show a new one on the computer, or set up with the setup password.';
+  'That pairing code has expired. Show a new one on the computer and scan it again.';
 
 /**
- * The Server refused the `setupToken` this run was opened with
+ * The Server refused the `setupToken` off a scanned code
  * ({@link SETUP_TOKEN_INVALID_ERROR}). Its own class for the reason
  * {@link SessionExpiredError} is: the UI must react rather than report — drop
- * the dead code and offer the setup password — and the Server answers 401 for
- * a wrong password and a rejected device signature too, so only the body
+ * the dead code and send the user back to the computer for a fresh one — and
+ * the Server answers 401 for an unknown session too, so only the body
  * separates them ({@link SETUP_CODE_DEAD_MESSAGE} is what the user reads).
  */
 export class SetupTokenInvalidError extends ServerRefusalError {
@@ -173,8 +190,77 @@ export class SetupTokenInvalidError extends ServerRefusalError {
   }
 }
 
-interface Waiter {
-  resolve(frame: ServerToClientFrame): void;
+/** Shown when a Host presents a static this Client has already pinned differently. */
+export const HOST_IDENTITY_MISMATCH_MESSAGE =
+  'This computer is presenting a different identity than the one this phone paired with. ' +
+  'Pairing was stopped. Remove it from this phone only if you know why it changed.';
+
+/**
+ * The Host answered a pairing with a static that is not the one already pinned
+ * for that `hostId`. Terminal, and the old record is left exactly as it was:
+ * the pin is what a connection authenticates against, so replacing it on the
+ * word of the party that failed the compare would be the whole attack
+ * (`docs/specs/remote-security-model.md` → Pairing).
+ */
+export class HostIdentityMismatchError extends Error {
+  constructor() {
+    super(HOST_IDENTITY_MISMATCH_MESSAGE);
+    this.name = 'HostIdentityMismatchError';
+  }
+}
+
+export const PASSKEY_UNAVAILABLE_MESSAGE =
+  "This app no longer has the signed-in passkey's public key, so it cannot pair or connect. " +
+  'Sign in again to restore it.';
+
+/**
+ * What the user reads for each Host-sent denial.
+ *
+ * **Fixed copy, never Host- or relay-supplied text.** The outcome is
+ * authenticated but its contents are still a remote party's, and a denial is
+ * one of a closed set — so the code selects a sentence written here rather than
+ * rendering one that arrived on the wire.
+ */
+export const PAIRING_DENIAL_MESSAGES: Record<PairingDenialCode, string> = {
+  'user-denied': 'The pairing was refused on the computer.',
+  'confirmation-mismatch': 'The digits typed on the computer did not match. Show a new code and scan it again.',
+  'presence-rejected': 'The computer could not verify your passkey. Sign in again, then scan a new code.',
+  'invitation-expired': SETUP_CODE_DEAD_MESSAGE,
+  superseded: 'Another pairing request replaced this one. Show a new code and scan it again.',
+  'host-error': 'The computer could not finish pairing. Show a new code and scan it again.',
+};
+
+export const CONNECTION_DENIAL_MESSAGES: Record<ConnectionDenialCode, string> = {
+  'pairing-required': 'This computer no longer recognizes this phone. Scan a new code to pair again.',
+  'presence-rejected': 'The computer could not verify your passkey. Sign in again and try Connect.',
+  'protocol-rejected': 'The computer refused this connection.',
+  'host-busy': 'The computer is already handling as many phones as it can. Try again shortly.',
+  'host-error': 'The computer could not finish the connection.',
+};
+
+/**
+ * What a ceremony that simply never answered reports.
+ *
+ * **A timer expiring is unavailability, not a denial.** A Host that is asleep,
+ * a relay that dropped the frame, and a person who never looked at the laptop
+ * are indistinguishable from here, and calling any of them a refusal would send
+ * the user to fix the wrong thing.
+ */
+export const HOST_UNAVAILABLE_MESSAGE =
+  'The computer did not answer. Check that it is awake and connected, then try again.';
+
+/** Where a pairing ended, as the UI reports it. */
+export type PairingResult =
+  | { readonly ok: true; readonly record: KnownHostV1 }
+  | { readonly ok: false; readonly message: string };
+
+/** Where a connection attempt ended, as the UI reports it. */
+export type ConnectResult =
+  | { readonly ok: true; readonly hostLabel: string }
+  | { readonly ok: false; readonly message: string; readonly pairingRequired: boolean };
+
+interface CiphertextWaiter {
+  resolve(ct: string): void;
   reject(error: Error): void;
 }
 
@@ -183,28 +269,10 @@ interface PendingRequest {
   reject(error: Error): void;
 }
 
-/**
- * STAGE-4 TRANSITIONAL: delete in 4b.
- *
- * The two push routes this client still calls, and the two response shapes it
- * still reads. Both left `server-lib-common` with the delivery-id re-keying
- * (`docs/specs/server.md` → Routes) and the Server no longer serves either, so
- * these are spelled locally to keep Pocket compiling and its unit tests — which
- * drive a mocked `fetch` — meaningful until Pocket switches to the
- * possession-based query in stage 4b.
- */
-const LEGACY_PUSH_ROUTES = {
-  challenge: '/api/push/challenge',
-  subscriptions: '/api/push/subscriptions',
-} as const;
-
-interface LegacyPushChallengeResponse {
-  challenge: string;
-  expiresAt: number;
-}
-
-interface LegacyPushSubscriptionsResponse {
-  subscriptions: Array<{ hostId: string; devicePublicKey: string; subscribedAt: number }>;
+/** An authorized session: the connection's id and its two cipher states. */
+interface EstablishedSession {
+  readonly connectionId: string;
+  readonly session: NoiseTransportSession;
 }
 
 export class PocketClient {
@@ -213,31 +281,27 @@ export class PocketClient {
   readonly #fetch: typeof fetch;
   readonly #webauthn: WebAuthnClient;
   readonly #createWebSocket: (url: string) => PocketSocket;
-  readonly #deviceKeyFactory: () => Promise<DeviceKeyPair>;
+  readonly #knownHosts: KnownHostStore;
+  readonly #pendingDeletions: PendingDeletionStore;
   readonly #storage: PocketStorage;
+  readonly #now: () => number;
 
   #ws: PocketSocket | null = null;
   #sessionToken: string | null = null;
-  #rpId: string | null = null;
   /** The credential id from the most recent sign-in (or registration). */
   #credentialId: string | null = null;
+  #established: EstablishedSession | null = null;
   #connectedHostId: string | null = null;
-  #deviceKey: DeviceKeyPair | null = null;
   #onHostGone: (() => void) | null = null;
 
   /**
-   * In-flight frame waiters, keyed by what identifies the answer.
+   * In-flight `e2e` waiters, keyed by `${kind}:${id}:${step}`.
    *
-   * For the handshake (`pair-result`/`challenge`/`decision`) that is the frame
-   * type alone: it awaits exactly one of each in strict sequence and the App's
-   * single-flight guard forbids overlap, so at most one waiter per type is ever
-   * pending — {@link #expect} throws if a second is registered rather than
-   * silently queueing it. Pair-status answers key on the host as well, since
-   * the Hosts view asks every online Host at once.
+   * A ceremony awaits exactly one frame at a time and every id is fresh, so at
+   * most one waiter per key is ever pending — {@link #expect} throws if a
+   * second is registered rather than silently queueing it.
    */
-  readonly #waiters = new Map<string, Waiter>();
-  /** In-flight advisory pair-status asks, keyed by hostId, so overlapping callers join one. */
-  readonly #pairStatusAsks = new Map<string, Promise<boolean>>();
+  readonly #waiters = new Map<string, CiphertextWaiter>();
   /** In-flight remote-api requests, keyed by `requestId`. */
   readonly #pending = new Map<string, PendingRequest>();
   /** Live event subscriptions, keyed by `subId`. */
@@ -249,8 +313,10 @@ export class PocketClient {
     this.#fetch = deps.fetch;
     this.#webauthn = deps.webauthn;
     this.#createWebSocket = deps.createWebSocket;
-    this.#deviceKeyFactory = deps.deviceKey;
+    this.#knownHosts = deps.knownHosts;
+    this.#pendingDeletions = deps.pendingDeletions;
     this.#storage = deps.storage ?? localStoragePocketStorage();
+    this.#now = deps.now ?? (() => Date.now());
   }
 
   get sessionToken(): string | null {
@@ -261,20 +327,14 @@ export class PocketClient {
     return this.#connectedHostId;
   }
 
-  isPaired(hostId: string): boolean {
-    return this.#storage.isPaired(hostId);
-  }
-
   /**
    * Whether this browser has been used with Dormouse before, which decides
-   * whether the auth screen leads with setup or with sign-in
+   * whether the auth screen offers sign-in at all
    * (docs/specs/pocket-app.md). The evidence is stored passkey material: setup
-   * and sign-in both cache the asserted public key, so anything else this
-   * device holds — a paired marker, a push endpoint — was preceded by one of
-   * them. Blocked site data does not throw past
-   * {@link localStoragePocketStorage}'s mirror, so a setup completed in this
-   * tab still flips the screen; a storage that throws anyway reads as a first
-   * visit — the screen that can still get somewhere from nothing.
+   * and sign-in both cache the asserted public key. Blocked site data does not
+   * throw past {@link localStoragePocketStorage}'s mirror, so a setup completed
+   * in this tab still flips the screen; a storage that throws anyway reads as a
+   * first visit — the screen that can still get somewhere from nothing.
    */
   hasPriorUse(): boolean {
     try {
@@ -302,16 +362,11 @@ export class PocketClient {
   // --- Account: first-time setup + sign-in ---------------------------------
 
   /**
-   * First-time setup: gated passkey registration. Follow with {@link signin}.
-   *
-   * The credential is the setup password or the single-use `setupToken` off a
-   * scanned QR, and both requests carry exactly the one they were given —
-   * spreading the union rather than naming its arms, since presenting both is
-   * a 400 (`docs/specs/server.md` -> Setup tokens).
+   * First-time setup: passkey registration gated by the single-use `setupToken`
+   * off a scanned pairing code. Follow with {@link signin}.
    */
-  async setup(credential: SetupCredential, label: string): Promise<SetupFinishResponse> {
-    const begin = await this.#setupApi<SetupBeginResponse>(API_ROUTES.setupBegin, credential);
-    this.#rpId = begin.rpId;
+  async setup({ setupToken }: { setupToken: string }, label: string): Promise<SetupFinishResponse> {
+    const begin = await this.#setupApi<SetupBeginResponse>(API_ROUTES.setupBegin, { setupToken });
     // Excluded from the Server's list, not this browser's: a retry — after a
     // refusal, or on a device that stored nothing — must not silently mint a
     // duplicate of a credential the account already holds, while an orphan the
@@ -341,7 +396,7 @@ export class PocketClient {
     let finish: SetupFinishResponse;
     try {
       finish = await this.#setupApi<SetupFinishResponse>(API_ROUTES.setupFinish, {
-        ...credential,
+        setupToken,
         credentialId: registration.credentialId,
         publicKey: registration.publicKey,
         clientDataJSON: registration.clientDataJSON,
@@ -357,21 +412,31 @@ export class PocketClient {
       }
       throw err;
     }
-    // Only once the Server has acknowledged it: this names the credential later
-    // pair/connect requests are built from. Sign-in refreshes both from the
-    // Server's verified response.
+    // Only once the Server has acknowledged it: this names the credential a
+    // pairing's presence proof is built from. Sign-in refreshes it.
     this.#credentialId = registration.credentialId;
     return finish;
   }
 
   /**
-   * The two setup routes, with the one 401 body only they can earn mapped to
+   * Spend a scanned setup token without registering anything.
+   *
+   * A phone that is already signed in has no passkey to create, and a code left
+   * redeemable is one a photograph of the laptop's screen could still register
+   * with (`docs/specs/server.md` → Setup tokens).
+   */
+  async retireSetupToken(setupToken: string): Promise<void> {
+    await this.#setupApi<unknown>(API_ROUTES.setupRetire, { setupToken }, this.#auth());
+  }
+
+  /**
+   * The setup-gated routes, with the one 401 body only they can earn mapped to
    * {@link SetupTokenInvalidError}. Classified here rather than in {@link #api}
    * so no other route's 401 can be read as a dead code.
    */
-  async #setupApi<T>(route: string, body: unknown): Promise<T> {
+  async #setupApi<T>(route: string, body: unknown, init?: RequestInit): Promise<T> {
     try {
-      return await this.#api<T>(route, body);
+      return await this.#api<T>(route, body, init);
     } catch (err) {
       // What `#api` throws for a non-ok response is the body's own `error`.
       if (err instanceof Error && err.message === SETUP_TOKEN_INVALID_ERROR) {
@@ -384,7 +449,6 @@ export class PocketClient {
   /** Sign in with a discoverable passkey; keeps the session token in memory. */
   async signin(): Promise<SigninFinishResponse> {
     const begin = await this.#api<SigninBeginResponse>(API_ROUTES.signinBegin, {});
-    this.#rpId = begin.rpId;
     const assertion = await this.#webauthn.getAssertion(begin.challenge, begin.rpId);
     const finish = await this.#api<SigninFinishResponse>(API_ROUTES.signinFinish, { assertion });
     this.#sessionToken = finish.sessionToken;
@@ -392,19 +456,43 @@ export class PocketClient {
     // Signing in is enough to pair from here. The Server returns the asserted
     // passkey's public key, so a browser profile that never performed the
     // registration — an iOS Home Screen install, a second browser — can still
-    // build pair and connect requests instead of being pushed into creating a
-    // redundant second passkey.
+    // build presence proofs instead of being pushed into creating a redundant
+    // second passkey.
     this.#storage.setPasskeyPublicKey(assertion.credentialId, finish.passkeyPublicKey);
     return finish;
   }
 
   async listHosts(): Promise<HostsResponse['hosts']> {
-    const response = await this.#api<HostsResponse>(
-      API_ROUTES.hosts,
-      undefined,
-      { method: 'GET', headers: { authorization: `Bearer ${this.#requireToken()}` } },
-    );
+    const response = await this.#api<HostsResponse>(API_ROUTES.hosts, undefined, {
+      method: 'GET',
+      ...this.#auth(),
+    });
     return response.hosts;
+  }
+
+  // --- The pinned Hosts ----------------------------------------------------
+
+  /** Every Host this browser holds a record for, paired or not. */
+  listKnownHosts(): Promise<KnownHostV1[]> {
+    return this.#knownHosts.list();
+  }
+
+  knownHost(hostId: string): Promise<KnownHostV1 | null> {
+    return this.#knownHosts.get(hostId);
+  }
+
+  /**
+   * Forget one Host locally: the tombstone is written *before* the record that
+   * holds the delivery id is deleted, so an unreachable Server cannot strand a
+   * push row nothing can name again.
+   */
+  async forgetHost(hostId: string): Promise<void> {
+    const record = await this.#knownHosts.get(hostId);
+    if (record?.authorization.state === 'paired') {
+      await this.#tombstone(hostId, record.authorization.deliveryId);
+    }
+    await this.#knownHosts.delete(hostId);
+    await this.retirePendingDeletions();
   }
 
   // --- Web Push ------------------------------------------------------------
@@ -415,73 +503,93 @@ export class PocketClient {
    * construction.
    */
   async getPushConfig(): Promise<string | null> {
-    const response = await this.#api<PushConfigResponse>(
-      API_ROUTES.pushConfig,
-      undefined,
-      { method: 'GET' },
-    );
+    const response = await this.#api<PushConfigResponse>(API_ROUTES.pushConfig, undefined, {
+      method: 'GET',
+    });
     return response.applicationServerKey;
   }
 
   /**
    * The Hosts **this device** is already registered to receive push from.
    *
-   * The Server answers with the whole account's registrations and the filter
-   * happens here, so there is no endpoint that reports on a `devicePublicKey`
-   * the caller does not hold. Lets a reloaded Pocket show "Push notifications
-   * on." instead of re-offering an action already taken.
+   * Asked by capability rather than by identity: the query names this browser's
+   * own delivery ids and the Server reports only on those, so there is no
+   * endpoint that reports on a row the caller does not already hold the
+   * capability for (`docs/specs/server.md` → Web Push).
    */
   async listPushSubscribedHosts(): Promise<string[]> {
-    const response = await this.#api<LegacyPushSubscriptionsResponse>(
-      LEGACY_PUSH_ROUTES.subscriptions,
-      undefined,
-      { method: 'GET', headers: { authorization: `Bearer ${this.#requireToken()}` } },
+    const deliveryIds = (await this.#knownHosts.list())
+      .flatMap((record) =>
+        record.authorization.state === 'paired' ? [record.authorization.deliveryId] : [],
+      )
+      // The route refuses more than this, and a browser holding that many
+      // paired Hosts has bigger problems than a truncated readback.
+      .slice(0, MAX_PUSH_QUERY_DELIVERY_IDS);
+    if (deliveryIds.length === 0) return [];
+    const response = await this.#api<PushSubscriptionsQueryResponse>(
+      API_ROUTES.pushSubscriptionsQuery,
+      { deliveryIds },
+      this.#auth(),
     );
-    const { devicePublicKey } = await this.#getDeviceKey();
-    return response.subscriptions
-      .filter((s) => s.devicePublicKey === devicePublicKey)
-      .map((s) => s.hostId);
+    return response.registered.map((row) => row.hostId);
   }
 
   /**
-   * Register a browser push subscription against `hostId`, signing it with this
-   * device's key so the Server can bind it to the same Client identity the
-   * Host's ACL records. Subscriptions are per (host, device): a phone paired
-   * with two laptops subscribes twice.
-   *
-   * The signature covers the endpoint, so a captured one cannot be reused to
-   * register a different endpoint under this identity.
+   * Register a browser push subscription against `hostId`, presenting the
+   * delivery id that Host minted for this Client at pairing. Possession of the
+   * id is the whole authorization — there is no challenge and no signature.
    */
   async subscribeToPush(
     hostId: string,
     subscription: PushSubscriptionPayload,
   ): Promise<PushSubscribeResponse> {
-    const token = this.#requireToken();
-    const auth = { authorization: `Bearer ${token}` };
-    const { challenge } = await this.#api<LegacyPushChallengeResponse>(
-      LEGACY_PUSH_ROUTES.challenge,
-      undefined,
-      { headers: auth },
-    );
-    const deviceKey = await this.#getDeviceKey();
-    const signature = await signPushSubscribe(deviceKey.privateKey, {
-      hostId,
-      challenge,
-      devicePublicKey: deviceKey.devicePublicKey,
-      endpoint: subscription.endpoint,
-    });
+    const record = await this.#knownHosts.get(hostId);
+    if (record?.authorization.state !== 'paired') {
+      throw new Error('this phone is not paired with that computer');
+    }
     const result = await this.#api<PushSubscribeResponse>(
       API_ROUTES.pushSubscribe,
-      { hostId, devicePublicKey: deviceKey.devicePublicKey, challenge, signature, subscription },
-      { headers: auth },
+      { hostId, deliveryId: record.authorization.deliveryId, subscription },
+      this.#auth(),
     );
-    // Recorded only once the Server has the row, mirroring how `pair` marks a
-    // Host paired: this is a note about what the Server holds, not about what
-    // the browser minted.
-    this.#storage.setRegisteredPushEndpoint(
-      await pushEndpointFingerprint(subscription.endpoint),
-    );
+    // Recorded only once the Server has the row: this is a note about what the
+    // Server holds, not about what the browser minted.
+    this.#storage.setRegisteredPushEndpoint(await pushEndpointFingerprint(subscription.endpoint));
     return result;
+  }
+
+  /** Idempotent, and the Server always answers 204. */
+  async deletePushSubscription(deliveryId: string): Promise<void> {
+    await this.#api<unknown>(pushSubscriptionDeletePath(deliveryId), undefined, {
+      method: 'DELETE',
+      ...this.#auth(),
+    });
+  }
+
+  /**
+   * Drain the tombstone queue, clearing each entry only on a Server answer.
+   *
+   * Best-effort and never throws: its callers are boot, sign-in, and the step
+   * before registering a replacement, none of which may fail over a deletion
+   * that can simply be retried on the next one.
+   */
+  async retirePendingDeletions(): Promise<void> {
+    if (this.#sessionToken === null) return;
+    let queued;
+    try {
+      queued = await this.#pendingDeletions.list();
+    } catch {
+      return;
+    }
+    for (const tombstone of queued) {
+      try {
+        await this.deletePushSubscription(tombstone.deliveryId);
+        await this.#pendingDeletions.delete(tombstone.hostId, tombstone.deliveryId);
+      } catch {
+        // Kept for the next drain: the id in the tombstone is the only handle
+        // that can ever delete this row.
+      }
+    }
   }
 
   // --- Relay socket --------------------------------------------------------
@@ -526,190 +634,214 @@ export class PocketClient {
     });
   }
 
-  // --- Pairing + connect handshake -----------------------------------------
+  // --- Pairing -------------------------------------------------------------
 
   /**
-   * Send a pairing request built from this device's key + passkey; awaits the
-   * Host's decision.
+   * The whole pairing ceremony against one scanned invitation
+   * (`docs/specs/remote-security-model.md` → Pairing).
    *
-   * `setupNonce` is a scanned QR's second half, sent as a `computeSetupProof`
-   * MAC rather than as itself (`docs/specs/remote-security-model.md` -> Pairing
-   * Ceremony). Computed once, so the stale-presence retry re-sends the same
-   * proof — the Host's match is non-consuming, so a re-delivery stays verified.
+   * The per-Host static is minted here and held only in memory until the Host
+   * approves: a key persisted for a pairing that was denied would be a Client
+   * identity nothing authorized. `onCode` fires the moment the two digits
+   * exist, because the screen has to show them while the outcome is pending.
    */
-  async pair(hostId: string, label: string, setupNonce?: string | null): Promise<PairResult> {
-    const { credentialId, publicKey } = this.#passkeyForRequest();
-    const device = await this.#getDeviceKey();
-    const request: PairingRequest = {
-      accountId: SELFHOST_ACCOUNT_ID,
-      passkeyCredentialId: credentialId,
-      passkeyPublicKeyHash: await hashPasskeyPublicKey(publicKey),
-      devicePublicKey: device.devicePublicKey,
-      requestedLabel: label,
-      ...(setupNonce
-        ? { setupProof: await computeSetupProof(setupNonce, device.devicePublicKey) }
-        : {}),
-    };
-    let result = await this.#sendPair(hostId, request);
-    if (!result.approved && result.error === PAIRING_STALE_PRESENCE_ERROR) {
-      // Pairing presence went stale (> PAIRING_PRESENCE_WINDOW_MS since the
-      // last server-verified assertion). One WebAuthn prompt refreshes the
-      // session's stamp; then retry once. (remote-security-model.md, Pairing.)
-      await this.#reauth();
-      result = await this.#sendPair(hostId, request);
-    }
-    if (result.approved) this.#storage.markPaired(hostId);
-    return result;
-  }
-
-  /**
-   * Ask a connected Host whether it already holds an ACL record for this
-   * Client, and reconcile the local marker with the answer.
-   *
-   * The marker alone is a guess — a Host ACL reset, a hand-edited record, or a
-   * pairing approved from a different browser profile all leave it wrong — so
-   * the Host's answer wins and the cache converges on it. Advisory only: it
-   * decides which button the row offers, never whether a connection is allowed
-   * (`docs/specs/remote-security-model.md`). Rejects when the Host cannot be
-   * asked, which leaves the marker untouched as the fallback.
-   *
-   * Overlapping asks about one Host join the in-flight query — a re-rendered
-   * Hosts view (StrictMode's doubled effects, a Refresh mid-sweep) must not
-   * trip the single-waiter guard and lose the row's answer.
-   */
-  queryPaired(hostId: string): Promise<boolean> {
-    const inflight = this.#pairStatusAsks.get(hostId);
-    if (inflight) return inflight;
-    const ask = this.#queryPairedNow(hostId).finally(() => {
-      this.#pairStatusAsks.delete(hostId);
+  async pair(
+    invitation: PairingInvitation,
+    label: string,
+    onCode?: (code: string) => void,
+  ): Promise<PairingResult> {
+    await this.#ensureSocket();
+    const deadline = this.#now() + DEFAULT_PAIRING_TTL_MS;
+    const { hostId, inviteId } = invitation;
+    const clientStatic = await generateNoiseKeyPair();
+    const handshake = await createNoiseInitiator({
+      prologue: pairingInvitationPrologue(invitation),
+      staticKeyPair: clientStatic,
+      remoteStaticPublicKey: invitation.ephPub,
     });
-    this.#pairStatusAsks.set(hostId, ask);
-    return ask;
-  }
-
-  async #queryPairedNow(hostId: string): Promise<boolean> {
-    const { credentialId } = this.#passkeyForRequest();
-    const device = await this.#getDeviceKey();
-    // Ask about every credential this browser holds a public key for — the
-    // same set `connect` scopes its assertion to — signed-in first as the
-    // near-certain hit. Asking only the signed-in one would offer Pair on a
-    // row whose Connect would succeed through an older credential.
-    const credentialIds = [
-      credentialId,
-      ...this.#storage.knownCredentialIds().filter((id) => id !== credentialId),
-    ];
-    let paired = false;
-    for (const passkeyCredentialId of credentialIds) {
-      const frame = await this.#askPairStatus(hostId, {
-        passkeyCredentialId,
-        devicePublicKey: device.devicePublicKey,
-      });
-      if (frame.paired) {
-        paired = true;
-        break;
-      }
-    }
-    // Write-on-change only: the common answer confirms the marker, and
-    // localStorage writes are synchronous.
-    if (paired !== this.#storage.isPaired(hostId)) {
-      if (paired) this.#storage.markPaired(hostId);
-      else this.#storage.unmarkPaired(hostId);
-    }
-    return paired;
-  }
-
-  async #askPairStatus(
-    hostId: string,
-    query: PairStatusQuery,
-  ): Promise<Extract<ServerToClientFrame, { t: 'pair-status-result' }>> {
-    const key = pairStatusKey(hostId);
-    const awaited = this.#expect(key, PAIR_STATUS_TIMEOUT_MS);
+    const message1 = await handshake.writeMessage();
+    let session: NoiseTransportSession;
     try {
-      this.#send({ t: 'pair-status', hostId, query });
-    } catch (error) {
-      // The frame never left, so nothing will settle the waiter; reclaim it
-      // (and its deadline timer) rather than leaking an unhandled rejection
-      // when the deadline fires.
-      this.#waiters.get(key)?.reject(error instanceof Error ? error : new Error(String(error)));
-      this.#waiters.delete(key);
-      void awaited.catch(() => undefined);
-      throw error;
+      const response = await this.#exchange(
+        { kind: 'pairing', id: inviteId, hostId },
+        message1,
+        deadline,
+      );
+      // Both handshake payloads are empty; anything else is a peer this Client
+      // does not speak the same protocol as.
+      const payload = await handshake.readMessage(fromBase64Url(response));
+      if (payload.length !== 0) throw new Error('pairing message 2 carries a payload');
+      session = new NoiseTransportSession(handshake.session);
+    } catch (err) {
+      return this.#unavailable(err);
     }
-    return (await awaited) as Extract<ServerToClientFrame, { t: 'pair-status-result' }>;
+    const handshakeHash = toBase64Url(session.handshakeHash);
+    const code = samplePairingCode();
+    // Before the WebAuthn prompt: the person is about to be asked for a
+    // biometric *and* to read two digits off this screen, and the digits have
+    // to already be there when they look.
+    onCode?.(code);
+
+    const passkeyCredentialId = this.#requireCredentialId();
+    const presence = await this.#provePresence({
+      kind: 'pairing',
+      hostId,
+      handshakeHash,
+      passkeyCredentialId,
+    });
+    const request: PairingRequestV1 = { code, label, presence };
+    let outcome: unknown;
+    try {
+      this.#sendCiphertext(
+        { kind: 'pairing', id: inviteId, hostId },
+        session.sendControl({ ...request }),
+      );
+      outcome = await this.#awaitControl(
+        { kind: 'pairing', id: inviteId, hostId },
+        session,
+        deadline,
+      );
+    } catch (err) {
+      return this.#unavailable(err);
+    }
+    if (!isPairingOutcomeV1(outcome)) {
+      return { ok: false, message: PAIRING_DENIAL_MESSAGES['host-error'] };
+    }
+    if (!outcome.ok) return { ok: false, message: PAIRING_DENIAL_MESSAGES[outcome.code] };
+
+    // The outcome is authenticated, which proves who sent it and nothing about
+    // what it says: an approval naming another account, credential, or key is
+    // not this ceremony's, and storing it would pin an authorization this phone
+    // never asked for.
+    const passkeyPublicKeyHash = await hashPasskeyPublicKey(
+      this.#requirePasskeyPublicKey(passkeyCredentialId),
+    );
+    if (
+      outcome.accountId !== SELFHOST_ACCOUNT_ID ||
+      outcome.passkeyCredentialId !== passkeyCredentialId ||
+      outcome.passkeyPublicKeyHash !== passkeyPublicKeyHash
+    ) {
+      return { ok: false, message: PAIRING_DENIAL_MESSAGES['host-error'] };
+    }
+    const existing = await this.#knownHosts.get(hostId);
+    if (existing && existing.hostStaticPublicKey !== outcome.hostStaticPublicKey) {
+      // Terminal, and the old record is untouched — see HostIdentityMismatchError.
+      throw new HostIdentityMismatchError();
+    }
+    const record: KnownHostV1 = {
+      hostId,
+      accountId: outcome.accountId,
+      label: outcome.hostLabel,
+      hostStaticPublicKey: outcome.hostStaticPublicKey,
+      clientStaticKeyPair: {
+        privateKey: clientStatic.privateKey as CryptoKey,
+        publicKeyRaw: toBase64Url(clientStatic.publicKey),
+      },
+      passkeyCredentialId: outcome.passkeyCredentialId,
+      passkeyPublicKeyHash: outcome.passkeyPublicKeyHash,
+      authorization: {
+        state: 'paired',
+        deliveryId: outcome.deliveryId,
+        approvedAt: this.#now(),
+      },
+    };
+    await this.#knownHosts.put(record);
+    return { ok: true, record };
   }
 
-  async #sendPair(hostId: string, request: PairingRequest): Promise<PairResult> {
-    const awaited = this.#expect('pair-result');
-    this.#send({ t: 'pair', hostId, request });
-    const frame = (await awaited) as Extract<ServerToClientFrame, { t: 'pair-result' }>;
-    return { approved: frame.approved, record: frame.record, error: frame.error };
-  }
+  // --- Connection ----------------------------------------------------------
 
-  /** Refresh the session's server-verified presence with one WebAuthn prompt. */
-  async #reauth(): Promise<void> {
-    const auth = { authorization: `Bearer ${this.#requireToken()}` };
-    const begin = await this.#api<SigninBeginResponse>(API_ROUTES.reauthBegin, {}, { headers: auth });
-    const assertion = await this.#webauthn.getAssertion(begin.challenge, begin.rpId);
-    await this.#api<ReauthFinishResponse>(API_ROUTES.reauthFinish, { assertion }, { headers: auth });
+  /**
+   * Connect to a paired Host: IK against the pinned static, one presence proof
+   * over this handshake's own transcript, and the Host's single outcome
+   * (`docs/specs/remote-security-model.md` → Connection).
+   */
+  async connect(hostId: string): Promise<ConnectResult> {
+    await this.#ensureSocket();
+    const record = await this.#knownHosts.get(hostId);
+    if (!record) {
+      return { ok: false, message: CONNECTION_DENIAL_MESSAGES['pairing-required'], pairingRequired: true };
+    }
+    if (record.authorization.state !== 'paired') {
+      return { ok: false, message: CONNECTION_DENIAL_MESSAGES['pairing-required'], pairingRequired: true };
+    }
+    const deadline = this.#now() + DEFAULT_CHALLENGE_TTL_MS;
+    const connectionId = randomBase64Url(E2E_ID_BYTE_LENGTH);
+    const route = { kind: 'connection', id: connectionId, hostId } as const;
+    const handshake = await createNoiseInitiator({
+      prologue: e2eConnectionPrologue(hostId, connectionId),
+      staticKeyPair: {
+        privateKey: record.clientStaticKeyPair.privateKey,
+        publicKey: fromBase64Url(record.clientStaticKeyPair.publicKeyRaw),
+      },
+      remoteStaticPublicKey: fromBase64Url(record.hostStaticPublicKey),
+    });
+    let session: NoiseTransportSession;
+    let hostChallenge: string;
+    try {
+      const response = await this.#exchange(route, await handshake.writeMessage(), deadline);
+      // Message 2's payload is the Host's fresh single-use challenge, which the
+      // presence binding must name.
+      hostChallenge = toBase64Url(await handshake.readMessage(fromBase64Url(response)));
+      session = new NoiseTransportSession(handshake.session);
+    } catch (err) {
+      return this.#connectionUnavailable(err);
+    }
+    const presence = await this.#provePresence({
+      kind: 'connection',
+      hostId,
+      connectionId,
+      hostChallenge,
+      handshakeHash: toBase64Url(session.handshakeHash),
+      passkeyCredentialId: record.passkeyCredentialId,
+    });
+    let outcome: unknown;
+    try {
+      this.#sendCiphertext(route, session.sendControl({ presence } satisfies ConnectionRequestV1));
+      outcome = await this.#awaitControl(route, session, deadline);
+    } catch (err) {
+      return this.#connectionUnavailable(err);
+    }
+    if (!isConnectionOutcomeV1(outcome)) {
+      return { ok: false, message: CONNECTION_DENIAL_MESSAGES['host-error'], pairingRequired: false };
+    }
+    if (outcome.ok) {
+      this.#established = { connectionId, session };
+      this.#connectedHostId = hostId;
+      return { ok: true, hostLabel: outcome.hostLabel };
+    }
+    if (outcome.code === 'pairing-required') await this.#dropAuthorization(record);
+    return {
+      ok: false,
+      message: CONNECTION_DENIAL_MESSAGES[outcome.code],
+      pairingRequired: outcome.code === 'pairing-required',
+    };
   }
 
   /**
-   * Connect to a paired Host: request a challenge, then produce ONE passkey
-   * assertion + one device-key signature over it (one biometric prompt), send
-   * `connect2`, and await the Host's final decision.
+   * An authenticated `pairing-required` removes local authorization without
+   * discarding the pin, and the delivery row goes with it — tombstone first,
+   * because the record about to be rewritten holds the only id that can name
+   * that row again.
    */
-  async connect(hostId: string): Promise<ConnectDecision> {
-    const device = await this.#getDeviceKey();
-    const challengeAwaited = this.#expect('challenge');
-    this.#send({ t: 'connect', hostId });
-    const challengeFrame = (await challengeAwaited) as Extract<
-      ServerToClientFrame,
-      { t: 'challenge' }
-    >;
-    const challenge = challengeFrame.challenge;
-
-    // Scope the assertion to credentials this device has a stored public key for.
-    // With several synced passkeys for one rpId, an empty allowCredentials lets
-    // the OS pick a credential whose public key we never stored — an unverifiable
-    // dead end below. An empty list here (first-time flows) preserves discovery.
-    const assertion = await this.#webauthn.getAssertion(
-      challenge,
-      this.#requireRpId(),
-      this.#storage.knownCredentialIds(),
-    );
-    const deviceSignature = await signDeviceChallenge(device.privateKey, {
-      hostId,
-      challenge,
-      devicePublicKey: device.devicePublicKey,
-    });
-    const publicKey = this.#storage.getPasskeyPublicKey(assertion.credentialId);
-    if (!publicKey) throw new Error(PASSKEY_UNAVAILABLE_MESSAGE);
-
-    const request: ConnectionRequest = {
-      accountId: SELFHOST_ACCOUNT_ID,
-      devicePublicKey: device.devicePublicKey,
-      challenge,
-      deviceSignature,
-      passkey: { publicKey, assertion },
-    };
-    const decisionAwaited = this.#expect('decision');
-    this.#send({ t: 'connect2', hostId, request });
-    const decisionFrame = (await decisionAwaited) as Extract<
-      ServerToClientFrame,
-      { t: 'decision' }
-    >;
-    const pairingStale =
-      !decisionFrame.allowed && hasRecoverablePairingFailure(decisionFrame.failures);
-    if (decisionFrame.allowed) {
-      this.#connectedHostId = hostId;
-    } else if (pairingStale) {
-      this.#storage.unmarkPaired(hostId);
+  async #dropAuthorization(record: KnownHostV1): Promise<void> {
+    if (record.authorization.state !== 'paired') return;
+    const { deliveryId } = record.authorization;
+    await this.#tombstone(record.hostId, deliveryId);
+    await this.#knownHosts.put({ ...record, authorization: { state: 'pairing-required' } });
+    // Best-effort: the tombstone is what makes this retryable, so a failure
+    // here costs a later drain rather than the row.
+    try {
+      await this.deletePushSubscription(deliveryId);
+      await this.#pendingDeletions.delete(record.hostId, deliveryId);
+    } catch {
+      // Left queued.
     }
-    return {
-      allowed: decisionFrame.allowed,
-      failures: decisionFrame.failures,
-      ...(pairingStale ? { pairingStale: true } : {}),
-    };
+    this.#disposeCeremony();
+  }
+
+  async #tombstone(hostId: string, deliveryId: string): Promise<void> {
+    await this.#pendingDeletions.put({ hostId, deliveryId, queuedAt: this.#now() });
   }
 
   // --- Remote-api v1 -------------------------------------------------------
@@ -766,12 +898,17 @@ export class PocketClient {
     return this.request(REMOTE_METHODS.surfaceDetach, { surfaceId });
   }
 
-  /** Correlated request over a `msg` frame; resolves with `result` or rejects on `ok:false`. */
+  /** Correlated request on the established session; resolves with `result`. */
   request<T = unknown>(method: string, params?: unknown, requestId: string = uuid()): Promise<T> {
     const promise = new Promise<T>((resolve, reject) => {
       this.#pending.set(requestId, { resolve: resolve as (r: unknown) => void, reject });
     });
-    this.#send({ t: 'msg', data: { requestId, method, params } });
+    try {
+      this.#sendApp({ requestId, method, params });
+    } catch (error) {
+      this.#pending.get(requestId)?.reject(error instanceof Error ? error : new Error(String(error)));
+      this.#pending.delete(requestId);
+    }
     return promise;
   }
 
@@ -813,43 +950,137 @@ export class PocketClient {
 
   // --- Internals -----------------------------------------------------------
 
-  async #getDeviceKey(): Promise<DeviceKeyPair> {
-    if (!this.#deviceKey) this.#deviceKey = await this.#deviceKeyFactory();
-    return this.#deviceKey;
+  async #ensureSocket(): Promise<void> {
+    if (!this.socketOpen) await this.openSocket();
   }
 
-  #passkeyForRequest(): { credentialId: string; publicKey: string } {
-    const credentialId = this.#credentialId;
-    if (!credentialId) throw new Error('sign in before pairing or connecting');
-    const publicKey = this.#storage.getPasskeyPublicKey(credentialId);
-    if (!publicKey) throw new Error(PASSKEY_UNAVAILABLE_MESSAGE);
-    return { credentialId, publicKey };
+  #auth(): { headers: Record<string, string> } {
+    return { headers: { authorization: `Bearer ${this.#requireToken()}` } };
   }
 
-  #send(frame: ClientFrame): void {
+  /**
+   * One WebAuthn assertion, bound to this ceremony and to nothing else
+   * (`docs/specs/remote-security-model.md` → Presence proofs).
+   *
+   * **One authenticator prompt per proof, never cached and never reused.** The
+   * challenge is derived from the binding, so an assertion produced here
+   * authenticates no other pairing or connection; the Server's `finish` proves
+   * nothing to the Host, which recomputes the challenge and verifies the same
+   * assertion itself.
+   */
+  async #provePresence(binding: PresenceBinding): Promise<PresenceProofV1> {
+    const auth = this.#auth();
+    const begin = await this.#api<ReauthBeginResponse>(
+      API_ROUTES.reauthBegin,
+      { binding },
+      auth,
+    );
+    const assertion = await this.#webauthn.getAssertion(
+      begin.challenge,
+      begin.rpId,
+      begin.allowCredentials,
+    );
+    await this.#api<ReauthFinishResponse>(
+      API_ROUTES.reauthFinish,
+      { serverNonce: begin.serverNonce, assertion },
+      auth,
+    );
+    return {
+      binding,
+      serverNonce: begin.serverNonce,
+      accountId: SELFHOST_ACCOUNT_ID,
+      passkeyCredentialId: binding.passkeyCredentialId,
+      passkeyPublicKey: this.#requirePasskeyPublicKey(binding.passkeyCredentialId),
+      assertion,
+    };
+  }
+
+  /** Send message 1 and await the Host's message 2 for the same ceremony. */
+  async #exchange(route: E2eRoute, message1: Uint8Array, deadline: number): Promise<string> {
+    const key = waiterKey(route.kind, route.id, 'response');
+    const awaited = this.#expect(key, deadline);
+    try {
+      this.#send({
+        t: 'e2e',
+        hostId: route.hostId,
+        kind: route.kind,
+        id: route.id,
+        step: 'init',
+        ct: toBase64Url(message1),
+      });
+    } catch (error) {
+      this.#reclaim(key, awaited, error);
+      throw error;
+    }
+    return await awaited;
+  }
+
+  /**
+   * The first control message a ceremony's session decrypts. Keepalives are
+   * accepted and skipped; anything else is the outcome, whatever it says.
+   */
+  async #awaitControl(
+    route: E2eRoute,
+    session: NoiseTransportSession,
+    deadline: number,
+  ): Promise<unknown> {
+    for (;;) {
+      const ct = await this.#expect(waiterKey(route.kind, route.id, 'transport'), deadline);
+      const receipt = session.receive(fromBase64Url(ct));
+      if (receipt.kind === 'keepalive') continue;
+      if (receipt.kind !== 'control') throw new Error('expected a control message');
+      return receipt.value;
+    }
+  }
+
+  #sendCiphertext(route: E2eRoute, ciphertext: Uint8Array): void {
+    this.#send({
+      t: 'e2e',
+      hostId: route.hostId,
+      kind: route.kind,
+      id: route.id,
+      step: 'transport',
+      ct: toBase64Url(ciphertext),
+    });
+  }
+
+  /** One protocol-v1 message on the established session, chunked as it needs. */
+  #sendApp(payload: unknown): void {
+    const established = this.#established;
+    if (!established) throw new Error('not connected to a host');
+    const hostId = this.#connectedHostId;
+    if (hostId === null) throw new Error('not connected to a host');
+    for (const ciphertext of established.session.sendApp(utf8Encode(JSON.stringify(payload)))) {
+      this.#sendCiphertext({ kind: 'connection', id: established.connectionId, hostId }, ciphertext);
+    }
+  }
+
+  #send(frame: E2eClientFrame): void {
     if (!this.#ws) throw new Error('relay socket is not open');
     this.#ws.send(JSON.stringify(frame));
   }
 
-  #expect(key: string, timeoutMs?: number): Promise<ServerToClientFrame> {
-    if (this.#waiters.has(key)) throw new Error(`already awaiting a '${key}' frame`);
+  /**
+   * Await one ciphertext for `key`, bounded by the ceremony's own deadline.
+   *
+   * A Host that never answers must not strand the key (and throw on the next
+   * ask) until the socket dies, and a timer expiring is reported as
+   * unavailability rather than as a denial — see {@link HOST_UNAVAILABLE_MESSAGE}.
+   */
+  #expect(key: string, deadline: number): Promise<string> {
+    if (this.#waiters.has(key)) throw new Error(`already awaiting '${key}'`);
     return new Promise((resolve, reject) => {
-      if (timeoutMs === undefined) {
-        this.#waiters.set(key, { resolve, reject });
-        return;
-      }
-      // A Host that predates the frame silently drops it, so an undeadlined
-      // waiter would strand this key (and throw on the next ask) until the
-      // socket died. The deadline reclaims the key; #settle's drop-unawaited
-      // guard absorbs an answer that arrives after it.
-      const timer = setTimeout(() => {
-        this.#waiters.delete(key);
-        reject(new Error(`timed out awaiting a '${key}' frame`));
-      }, timeoutMs);
+      const timer = setTimeout(
+        () => {
+          this.#waiters.delete(key);
+          reject(new HostUnavailableError());
+        },
+        Math.max(0, deadline - this.#now()),
+      );
       this.#waiters.set(key, {
-        resolve: (frame) => {
+        resolve: (ct) => {
           clearTimeout(timer);
-          resolve(frame);
+          resolve(ct);
         },
         reject: (error) => {
           clearTimeout(timer);
@@ -857,6 +1088,13 @@ export class PocketClient {
         },
       });
     });
+  }
+
+  /** Reclaim a waiter whose frame never left, so its deadline cannot fire unheard. */
+  #reclaim(key: string, awaited: Promise<string>, error: unknown): void {
+    this.#waiters.get(key)?.reject(error instanceof Error ? error : new Error(String(error)));
+    this.#waiters.delete(key);
+    void awaited.catch(() => undefined);
   }
 
   #onFrame(raw: unknown): void {
@@ -868,19 +1106,15 @@ export class PocketClient {
     }
     if (!frame || typeof (frame as { t?: unknown }).t !== 'string') return;
     switch (frame.t) {
-      case 'pair-result':
-      case 'challenge':
-      case 'decision':
-        this.#settle(frame.t, frame);
-        return;
-      case 'pair-status-result':
-        this.#settle(pairStatusKey(frame.hostId), frame);
-        return;
-      case 'msg':
-        this.#onMsg(frame.data);
+      case 'e2e':
+        // The shared guard bounds every routing value before any of them is
+        // used as a map key or decoded; this Client runs it rather than
+        // trusting the relay to have (`docs/specs/server.md` → Relay).
+        if (isE2eServerToClientFrame(frame)) this.#onE2e(frame);
         return;
       case 'host-gone':
         this.#connectedHostId = null;
+        this.#established = null;
         this.#onHostGone?.();
         this.#rejectAll(new Error('host disconnected'));
         return;
@@ -888,16 +1122,54 @@ export class PocketClient {
         this.#rejectAll(new Error(frame.error));
         return;
       default:
+        // Every legacy frame is ignored: this Client speaks one protocol.
         return;
     }
   }
 
-  /** Hand a frame to whoever is awaiting `key`; an unawaited answer is dropped. */
-  #settle(key: string, frame: ServerToClientFrame): void {
+  #onE2e(frame: E2eServerToClientFrame): void {
+    const established = this.#established;
+    if (
+      established &&
+      frame.kind === 'connection' &&
+      frame.id === established.connectionId &&
+      frame.step === 'transport'
+    ) {
+      this.#onEstablishedFrame(established, frame.ct);
+      return;
+    }
+    const key = waiterKey(frame.kind, frame.id, frame.step);
     const waiter = this.#waiters.get(key);
-    if (!waiter) return;
+    if (!waiter) return; // an answer nobody is awaiting
     this.#waiters.delete(key);
-    waiter.resolve(frame);
+    waiter.resolve(frame.ct);
+  }
+
+  /**
+   * One transport frame on an authorized session. **Any decrypt or framing
+   * failure ends it**: there is no resynchronization point in a stream cipher,
+   * so a poisoned session is host loss and the app must leave the wall.
+   */
+  #onEstablishedFrame(established: EstablishedSession, ct: string): void {
+    let receipt;
+    try {
+      receipt = established.session.receive(fromBase64Url(ct));
+    } catch {
+      this.#teardown('the end-to-end session failed', { notifyGone: true });
+      return;
+    }
+    // A keepalive is accepted and ignored; a control message on an established
+    // session is not part of protocol-v1 and says nothing this can act on.
+    if (receipt.kind !== 'app') return;
+    for (const message of receipt.messages) {
+      let payload: unknown;
+      try {
+        payload = JSON.parse(utf8Decode(message));
+      } catch {
+        continue;
+      }
+      this.#onMsg(payload);
+    }
   }
 
   #onMsg(data: unknown): void {
@@ -936,12 +1208,18 @@ export class PocketClient {
    */
   #teardown(reason: string, { notifyGone }: { notifyGone: boolean }): void {
     this.#ws = null; // never reuse a closed socket; openSocket() makes a fresh one
-    this.#connectedHostId = null;
+    this.#disposeCeremony();
     this.#rejectAll(new Error(reason));
     if (notifyGone) this.#onHostGone?.();
   }
 
-  /** Fail every awaited handshake frame and in-flight request (avoids hangs). */
+  /** Erase every session's cipher state; a new ceremony starts from a handshake. */
+  #disposeCeremony(): void {
+    this.#connectedHostId = null;
+    this.#established = null;
+  }
+
+  /** Fail every awaited ceremony frame and in-flight request (avoids hangs). */
   #rejectAll(error: Error): void {
     for (const waiter of this.#waiters.values()) waiter.reject(error);
     this.#waiters.clear();
@@ -949,17 +1227,34 @@ export class PocketClient {
     this.#pending.clear();
   }
 
+  /**
+   * A ceremony that failed before an outcome. A relay error, a dropped socket,
+   * and an expired timer are all "the computer did not answer" — never a
+   * denial, which only an authenticated outcome can be.
+   */
+  #unavailable(error: unknown): PairingResult {
+    this.#disposeCeremony();
+    if (error instanceof SessionExpiredError) throw error;
+    return { ok: false, message: HOST_UNAVAILABLE_MESSAGE };
+  }
+
+  #connectionUnavailable(error: unknown): ConnectResult {
+    this.#disposeCeremony();
+    if (error instanceof SessionExpiredError) throw error;
+    return { ok: false, message: HOST_UNAVAILABLE_MESSAGE, pairingRequired: false };
+  }
+
   async #api<T>(route: string, body?: unknown, init?: RequestInit): Promise<T> {
     const method = init?.method ?? 'POST';
     const response = await this.#fetch(`${this.#baseUrl}${route}`, {
       method,
       headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
-      ...(method === 'GET' ? {} : { body: JSON.stringify(body ?? {}) }),
+      ...(method === 'GET' || method === 'DELETE' ? {} : { body: JSON.stringify(body ?? {}) }),
     });
     const parsed = (await response.json().catch(() => ({}))) as T & { error?: string };
-    // Only the session gate's 401 means "sign in again" — a wrong setup
-    // password and a rejected device signature answer 401 too, and bouncing the
-    // user to sign-in for those would be a worse bug than the one this fixes.
+    // Only the session gate's 401 means "sign in again" — a refused setup token
+    // answers 401 too, and bouncing the user to sign-in for that would be a
+    // worse bug than the one this fixes.
     if (response.status === 401 && parsed.error === UNAUTHORIZED_ERROR) {
       // Drop the token here rather than at the call site: every later request
       // and every relay upgrade would fail the same way, and keeping it would
@@ -1002,39 +1297,41 @@ export class PocketClient {
     return this.#sessionToken;
   }
 
-  #requireRpId(): string {
-    if (!this.#rpId) throw new Error('rpId unknown — begin a sign-in or setup first');
-    return this.#rpId;
+  #requireCredentialId(): string {
+    const credentialId = this.#credentialId;
+    if (!credentialId) throw new Error('sign in before pairing or connecting');
+    return credentialId;
+  }
+
+  #requirePasskeyPublicKey(credentialId: string): string {
+    const publicKey = this.#storage.getPasskeyPublicKey(credentialId);
+    if (!publicKey) throw new Error(PASSKEY_UNAVAILABLE_MESSAGE);
+    return publicKey;
   }
 }
 
-export const PASSKEY_UNAVAILABLE_MESSAGE =
-  "This app no longer has the signed-in passkey's public key, so it cannot pair or connect. " +
-  'Sign in again to restore it.';
+/** Every routing id on the `e2e` envelope is base64url of 16 bytes. */
+const E2E_ID_BYTE_LENGTH = 16;
 
-const RECOVERABLE_PAIRING_FAILURES = new Set<ConnectionFailure>([
-  'passkey-not-paired',
-  'device-not-paired',
-  'pairing-mismatch',
-]);
-
-export function hasRecoverablePairingFailure(
-  failures: readonly ConnectionFailure[] | undefined,
-): boolean {
-  return failures?.some((failure) => RECOVERABLE_PAIRING_FAILURES.has(failure)) ?? false;
+/** Where one ceremony's frames are addressed; the envelope's routing triple. */
+interface E2eRoute {
+  readonly kind: E2eKind;
+  readonly id: string;
+  readonly hostId: string;
 }
 
-/** Waiter key for a pair-status answer; several hosts may be in flight at once. */
-function pairStatusKey(hostId: string): string {
-  return `pair-status:${hostId}`;
+/** A ceremony frame is awaited by its kind, its id, **and** its step. */
+function waiterKey(kind: string, id: string, step: string): string {
+  return `${kind}:${id}:${step}`;
 }
 
-/**
- * Deadline on the advisory pair-status ask. Generous for a tailnet round trip,
- * short enough that one unanswering Host cannot starve the serial Hosts-view
- * sweep for the whole visit.
- */
-const PAIR_STATUS_TIMEOUT_MS = 5_000;
+/** Internal: a deadline expired with no answer. Never reaches the UI as itself. */
+class HostUnavailableError extends Error {
+  constructor() {
+    super(HOST_UNAVAILABLE_MESSAGE);
+    this.name = 'HostUnavailableError';
+  }
+}
 
 function uuid(): string {
   return globalThis.crypto.randomUUID();
@@ -1054,18 +1351,13 @@ function uuid(): string {
  * So the mirror is the primary copy — writes land there first, reads consult it
  * before storage — and localStorage is a cache that may silently do nothing.
  * Setup and sign-in then complete normally for the life of the tab; only
- * surviving a reload is lost. The mirror also shadows storage on `unmarkPaired`,
- * so a removal that could not be persisted is still honored while this instance
- * lives.
+ * surviving a reload is lost.
  */
 export function localStoragePocketStorage(): PocketStorage {
   const PASSKEY_PREFIX = 'dormouse-pocket:passkey:';
-  const PAIRED_PREFIX = 'dormouse-pocket:paired:';
   const PUSH_ENDPOINT_KEY = 'dormouse-pocket:push-endpoint';
 
   const passkeys = new Map<string, string>();
-  /** `false` records an unpair, which must outrank whatever storage still says. */
-  const paired = new Map<string, boolean>();
   let pushEndpoint: string | undefined;
 
   const read = (key: string): string | null => {
@@ -1097,16 +1389,16 @@ export function localStoragePocketStorage(): PocketStorage {
       passkeys.set(credentialId, publicKey);
       write(PASSKEY_PREFIX + credentialId, publicKey);
     },
-    // No tombstone, unlike `unmarkPaired`: the only key ever forgotten was
-    // written by this same run, so storage holds it only if that write worked —
-    // in which case this removal does too.
+    // No tombstone: the only key ever forgotten was written by this same run,
+    // so storage holds it only if that write worked — in which case this
+    // removal does too.
     forgetPasskeyPublicKey: (credentialId) => {
       passkeys.delete(credentialId);
       drop(PASSKEY_PREFIX + credentialId);
     },
     knownCredentialIds: () => {
       // Union, not either-or: storage holds earlier visits, the mirror holds
-      // this one's writes, and `connect` scopes its assertion to the whole set.
+      // this one's writes.
       const ids = new Set(passkeys.keys());
       try {
         const store = globalThis.localStorage;
@@ -1119,19 +1411,33 @@ export function localStoragePocketStorage(): PocketStorage {
       }
       return [...ids];
     },
-    isPaired: (hostId) => paired.get(hostId) ?? read(PAIRED_PREFIX + hostId) === '1',
-    markPaired: (hostId) => {
-      paired.set(hostId, true);
-      write(PAIRED_PREFIX + hostId, '1');
-    },
-    unmarkPaired: (hostId) => {
-      paired.set(hostId, false);
-      drop(PAIRED_PREFIX + hostId);
-    },
     getRegisteredPushEndpoint: () => pushEndpoint ?? read(PUSH_ENDPOINT_KEY),
     setRegisteredPushEndpoint: (fingerprint) => {
       pushEndpoint = fingerprint;
       write(PUSH_ENDPOINT_KEY, fingerprint);
     },
   };
+}
+
+/**
+ * The legacy per-Host markers, removed once per page life.
+ *
+ * `dormouse-pocket:paired:*` was the local guess the pre-end-to-end Hosts view
+ * offered a button from; the `KnownHostV1` records replaced it, and a marker
+ * left behind is a claim about authorization that nothing checks. Best-effort,
+ * like every other touch of this storage.
+ */
+export function purgeLegacyPairedMarkers(): void {
+  const PAIRED_PREFIX = 'dormouse-pocket:paired:';
+  try {
+    const store = globalThis.localStorage;
+    const stale: string[] = [];
+    for (let i = 0; i < store.length; i++) {
+      const key = store.key(i);
+      if (key?.startsWith(PAIRED_PREFIX)) stale.push(key);
+    }
+    for (const key of stale) store.removeItem(key);
+  } catch {
+    // Blocked or absent storage holds no markers to remove.
+  }
 }

@@ -6,15 +6,20 @@
  * the old version fails outright once the first has upgraded.
  *
  * The records here are the end-to-end identities of
- * `docs/specs/remote-security-model.md`; nothing in the app reads or writes
- * them yet.
+ * `docs/specs/remote-security-model.md`.
  */
 
 export const POCKET_DB_NAME = 'dormouse-pocket';
 
-/** v1 was `device-key` alone; v2 adds the two E2E stores beside it. */
-export const POCKET_DB_VERSION = 2;
+/**
+ * v1 was `device-key` alone; v2 added the two E2E stores beside it; v3 deletes
+ * `device-key`, which nothing reads any more. A phone arriving from either
+ * earlier version lands in the same shape, and the deletion is what stops a
+ * superseded Client identity from outliving the protocol that used it.
+ */
+export const POCKET_DB_VERSION = 3;
 
+/** Deleted at v3; named only so the upgrade and its test can say what goes. */
 export const DEVICE_KEY_STORE = 'device-key';
 export const KNOWN_HOSTS_STORE = 'known-hosts';
 export const PENDING_DELETIONS_STORE = 'pending-deletions';
@@ -38,8 +43,7 @@ export type KnownHostAuthorization =
  * One Host this Client has paired with, keyed by `hostId`.
  *
  * The Client static is per Host and never shared between them, and its private
- * half is a nonextractable `CryptoKey` stored directly — never exported, the
- * same rule the device key has always followed.
+ * half is a nonextractable `CryptoKey` stored directly — never exported.
  */
 export interface KnownHostV1 {
   readonly hostId: string;
@@ -48,9 +52,13 @@ export interface KnownHostV1 {
   readonly label: string;
   /** The pinned Host Noise static, base64url. A change is a terminal error. */
   readonly hostStaticPublicKey: string;
+  /**
+   * This Client's static for this Host. Only the private half is a key object:
+   * a `NoiseKeyPair` wants the public half as raw bytes, so storing a second
+   * `CryptoKey` for it would be a structured clone nothing ever reads.
+   */
   readonly clientStaticKeyPair: {
     readonly privateKey: CryptoKey;
-    readonly publicKey: CryptoKey;
     /** The raw 32-byte public half, base64url — what the ACL records. */
     readonly publicKeyRaw: string;
   };
@@ -101,20 +109,22 @@ export function pendingDeletionKey(hostId: string, deliveryId: string): string {
 }
 
 /**
- * Open the database, creating whatever stores this version is missing.
+ * Open the database, creating whatever stores this version is missing and
+ * deleting the one it has retired.
  *
- * The upgrade is written as "create what is absent" rather than as a v1→v2
- * migration step: a browser arriving from v1 keeps its `device-key` record
- * untouched, and one arriving with no database at all lands in the same shape.
+ * The upgrade is written as "create what is absent, drop what is gone" rather
+ * than as a chain of per-version steps: a browser arriving from v1, from v2, or
+ * with no database at all lands in exactly the same shape.
  */
 export function openPocketDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(POCKET_DB_NAME, POCKET_DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
-      // Out-of-line key, as v1 created it — the record has no id field.
-      if (!db.objectStoreNames.contains(DEVICE_KEY_STORE)) {
-        db.createObjectStore(DEVICE_KEY_STORE);
+      // The device key is gone with the legacy protocol, and a key nothing can
+      // use is only a credential left lying about.
+      if (db.objectStoreNames.contains(DEVICE_KEY_STORE)) {
+        db.deleteObjectStore(DEVICE_KEY_STORE);
       }
       if (!db.objectStoreNames.contains(KNOWN_HOSTS_STORE)) {
         db.createObjectStore(KNOWN_HOSTS_STORE, { keyPath: 'hostId' });
@@ -124,19 +134,20 @@ export function openPocketDb(): Promise<IDBDatabase> {
         db.createObjectStore(PENDING_DELETIONS_STORE);
       }
     };
-    // A connection on the pre-v2 build has no `versionchange` handler, so it
-    // can hold the upgrade off; neither `success` nor `error` follows while it
-    // does. Naming the failure beats an unbounded wait — the caller can tell
-    // the user to close the other tab, which nothing can do from a hang.
+    // A connection on a build older than the one that added the
+    // `versionchange` handler below can hold the upgrade off; neither `success`
+    // nor `error` follows while it does. Naming the failure beats an unbounded
+    // wait — the caller can tell the user to close the other tab, which nothing
+    // can do from a hang.
     request.onblocked = () =>
       reject(new Error('another tab is holding the Pocket database at an older version'));
     request.onsuccess = () => {
       const db = request.result;
       // Another tab asking for a newer version is blocked for as long as this
       // connection is open, and the block has no timeout. Closing on the
-      // `versionchange` notice is what lets v3 land while this tab is up;
-      // every operation here already closes its own handle, so the only reader
-      // this can interrupt is one that never released it.
+      // `versionchange` notice is what lets the next version land while this
+      // tab is up; every operation here already closes its own handle, so the
+      // only reader this can interrupt is one that never released it.
       db.onversionchange = () => db.close();
       resolve(db);
     };
@@ -163,7 +174,7 @@ export function promisifyTransaction(tx: IDBTransaction): Promise<void> {
  * Ask the browser to keep this origin's storage, best-effort.
  *
  * **Never throws and never blocks a write.** The keys here are recoverable by
- * re-pairing (`docs/specs/remote-security-model.md` → Device Key Loss), so a
+ * re-pairing (`docs/specs/remote-security-model.md` → Client static loss), so a
  * browser that refuses, or has no `navigator.storage` at all — Safari answers
  * nothing here — gets the ordinary eviction-prone storage rather than an
  * error.
