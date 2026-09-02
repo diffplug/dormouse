@@ -250,8 +250,12 @@ export interface RemoteHostConsoleStatus {
 /**
  * The devices a push would reach, or `null` when no Host is running — which is
  * "nowhere to push", not "the server could not be asked" (`push-devices.ts`).
+ *
+ * Labels only. The ACL record's `deliveryId` is a bearer capability for that
+ * Client's push rows and never crosses into the webview realm, which has no
+ * route that takes one (`SECURITY.md` → "What crosses the boundary").
  */
-export type PushDevicesResult = { devices: Array<{ deliveryId: string; label: string }> } | null;
+export type PushDevicesResult = { devices: Array<{ label: string }> } | null;
 
 /**
  * What one push fan-out actually did: the result of the `pushTest` command, and

@@ -22,6 +22,7 @@ import {
   MAX_ESTABLISHED_E2E_SESSIONS,
   MAX_E2E_CIPHERTEXT_LENGTH,
   MAX_CLIENT_ID_LENGTH,
+  MAX_SERVER_TO_HOST_FRAME_LENGTH,
   NoiseTransportSession,
   fromBase64Url,
   utf8Encode,
@@ -340,6 +341,41 @@ describe('RemoteHost bounds', () => {
     expect(host.trackedClientCount).toBe(0);
     expect(host.pendingChallengeCount).toBe(0);
     expect(socket.sent).toEqual([]);
+  });
+
+  it('drops an oversized raw frame without parsing it', () => {
+    // Every guard above reads a value `JSON.parse` already produced, so the
+    // parse itself is what a hostile relay would spend — in the process that
+    // owns every PTY. The bound is measured on the raw string, so the spy on
+    // JSON.parse is the assertion: a 100 MiB frame is never handed to it.
+    // A maximal *legal* frame — one full ciphertext plus its routing fields —
+    // has to stay under the cap, or the bound would break the protocol.
+    const maximalLegal = JSON.stringify({
+      t: 'e2e',
+      clientId: 'x'.repeat(MAX_CLIENT_ID_LENGTH),
+      hostId: enrollment.hostId,
+      kind: 'connection',
+      id: testRoutingId(),
+      step: 'init',
+      ct: 'A'.repeat(MAX_E2E_CIPHERTEXT_LENGTH),
+    });
+    expect(maximalLegal.length).toBeLessThanOrEqual(MAX_SERVER_TO_HOST_FRAME_LENGTH);
+
+    const parse = vi.spyOn(JSON, 'parse');
+    try {
+      const pad = (length: number) => `{"t":"nonsense","pad":"${'a'.repeat(length)}"}`;
+      socket.receiveRaw(pad(MAX_SERVER_TO_HOST_FRAME_LENGTH));
+      socket.receiveRaw(new ArrayBuffer(8));
+      expect(parse).not.toHaveBeenCalled();
+
+      // At the cap it still parses: this bounds hostility, not use.
+      const atCap = pad(MAX_SERVER_TO_HOST_FRAME_LENGTH - '{"t":"nonsense","pad":""}'.length);
+      expect(atCap.length).toBe(MAX_SERVER_TO_HOST_FRAME_LENGTH);
+      socket.receiveRaw(atCap);
+      expect(parse).toHaveBeenCalledTimes(1);
+    } finally {
+      parse.mockRestore();
+    }
   });
 
   it('spends no crypto on an unknown id or a pre-authorization transport frame', async () => {

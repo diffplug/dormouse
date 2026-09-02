@@ -34,6 +34,7 @@ import {
   isE2eServerToHostFrame,
   isPairingRequestV1,
   MAX_CLIENT_ID_LENGTH,
+  MAX_SERVER_TO_HOST_FRAME_LENGTH,
   pairingInvitationPrologue,
   e2eConnectionPrologue,
   randomBase64Url,
@@ -855,9 +856,16 @@ export class RemoteHost {
   // --- Frame handling ------------------------------------------------------
 
   #onFrame(raw: unknown): void {
+    // Measured before the parse, not after: every guard below reads a value
+    // `JSON.parse` has already materialized, so without this a hostile relay
+    // buys an unbounded string parse in the process that owns every PTY. The
+    // socket's own `maxPayload` is the same number where the implementation
+    // takes one (`vscode-ext/src/remote-host.ts`); this is the bound that holds
+    // on every implementation.
+    if (typeof raw !== 'string' || raw.length > MAX_SERVER_TO_HOST_FRAME_LENGTH) return;
     let frame: ServerToHostFrame;
     try {
-      frame = JSON.parse(typeof raw === 'string' ? raw : '') as ServerToHostFrame;
+      frame = JSON.parse(raw) as ServerToHostFrame;
     } catch {
       return;
     }
