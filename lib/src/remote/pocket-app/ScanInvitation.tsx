@@ -35,7 +35,7 @@ export type StartScan = (
 /** What the viewfinder is doing. Every state that is not `live` is explained. */
 type CameraState = 'starting' | 'live' | 'denied' | 'unsupported';
 
-export const SCAN_REJECTED_MESSAGE = 'That is not a Dormouse pairing code for this server.';
+export const SCAN_REJECTED_MESSAGE = 'That is not a Dormouse setup code for this server.';
 
 const CAMERA_BLOCKED_MESSAGE =
   'Camera access is off for this site. Turn it on in your browser settings, or paste the code below.';
@@ -244,12 +244,12 @@ export function ScanInvitation({
         >
           Cancel
         </button>
-        <h1 className={PK.headerTitle}>Scan the computer&rsquo;s code</h1>
+        <h1 className={PK.headerTitle}>Scan the setup code</h1>
       </header>
       <div className={PK.body}>
         <p className={PK.lead}>
-          On the computer, open <strong>Settings → Remote control</strong> and show a pairing code.
-          Point this phone at it.
+          On the computer: <strong>Settings → Remote control → Set up a phone</strong>. Point this
+          phone at the code it shows.
         </p>
         {error ? <ErrorRow message={error} /> : null}
         {cameraProblem ? (

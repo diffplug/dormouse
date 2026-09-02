@@ -230,9 +230,9 @@ above the action rather than after it:
 
 <Canvas of={SetupOrSignin.FirstRunNeedsInstall} />
 
-**Scan a Host QR** opens a rear-camera scanner inside Pocket. It reads the code
+**Scan a setup code** opens a rear-camera scanner inside Pocket. It reads the code
 as *data* — nothing navigates, and the text goes straight to the one parser that
-decides whether it is a pairing code for this server — with a paste field beside
+decides whether it is a setup code for this server — with a paste field beside
 it, because a desktop browser and the localhost dev loop have no camera:
 
 <Canvas of={ScanInvitation.Scanning} />

@@ -962,7 +962,7 @@ into Pocket, and differs from a real Host only in auto-approving and logging.
 
 **3. Phone** (or any other browser profile): show a code on the laptop
 (**Settings → Remote control → Set up a phone**) and open the server origin
-on the phone. A browser that has never been here leads with **Scan a Host QR**;
+on the phone. A browser that has never been here leads with **Scan a setup code**;
 scan or paste the code, which creates the passkey and signs you in, then read
 the two digits off the phone and type them into the laptop's modal → one
 biometric prompt → pick a pane → type. **A Host must be enrolled first**: the

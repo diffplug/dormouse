@@ -15,7 +15,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateNoiseKeyPair, toBase64Url, type PairingInvitation } from 'server-lib-common';
 
-import App, { UNSUPPORTED_BROWSER_TITLE } from './App';
+import App, { CAMERA_BOOTSTRAP_MESSAGE, SCAN_LABEL, UNSUPPORTED_BROWSER_TITLE } from './App';
 import type { ConnectResult, PairingResult } from '../client/pocket-client';
 import {
   SETUP_CODE_DEAD_MESSAGE,
@@ -199,7 +199,7 @@ async function boot(props: Partial<Parameters<typeof App>[0]> = {}): Promise<voi
 
 /** Open the scanner and paste one code into it, as a user without a camera would. */
 async function pasteCode(url: string): Promise<void> {
-  await click(container, 'Scan a Host QR');
+  await click(container, SCAN_LABEL);
   const input = container.querySelector<HTMLInputElement>('#pocket-paste-code')!;
   act(() => setNativeFieldValue(input, url));
   act(() => {
@@ -223,7 +223,7 @@ describe('the capability gate', () => {
 
     expect(container.textContent).toContain(UNSUPPORTED_BROWSER_TITLE);
     expect(buttonNamed(container, 'Sign in with passkey')).toBeNull();
-    expect(buttonNamed(container, 'Scan a Host QR')).toBeNull();
+    expect(buttonNamed(container, SCAN_LABEL)).toBeNull();
     expect(fake.signin).not.toHaveBeenCalled();
     expect(fake.listHosts).not.toHaveBeenCalled();
   });
@@ -232,7 +232,7 @@ describe('the capability gate', () => {
     await boot();
 
     expect(container.textContent).not.toContain(UNSUPPORTED_BROWSER_TITLE);
-    expect(buttonNamed(container, 'Scan a Host QR')).not.toBeNull();
+    expect(buttonNamed(container, SCAN_LABEL)).not.toBeNull();
   });
 });
 
@@ -538,12 +538,12 @@ describe('leaving the scanner', () => {
   it('returns a signed-out phone to the auth screen', async () => {
     await boot();
 
-    await click(container, 'Scan a Host QR');
+    await click(container, SCAN_LABEL);
     expect(container.querySelector('#pocket-paste-code')).not.toBeNull();
 
     await click(container, 'Cancel');
 
-    expect(buttonNamed(container, 'Scan a Host QR')).not.toBeNull();
+    expect(buttonNamed(container, SCAN_LABEL)).not.toBeNull();
     expect(container.querySelector('#pocket-paste-code')).toBeNull();
   });
 
@@ -552,7 +552,7 @@ describe('leaving the scanner', () => {
     await boot();
     await click(container, 'Sign in with passkey');
 
-    await click(container, 'Scan a Host QR');
+    await click(container, SCAN_LABEL);
     await click(container, 'Cancel');
 
     expect(buttonNamed(container, 'Refresh')).not.toBeNull();
@@ -571,7 +571,7 @@ describe('leaving the scanner', () => {
     fake.listKnownHosts.mockResolvedValue([await knownHost('host-1')]);
     fake.listHosts.mockResolvedValue([{ hostId: 'host-1', label: '', online: true }]);
     await boot();
-    await click(container, 'Scan a Host QR');
+    await click(container, SCAN_LABEL);
     const input = container.querySelector<HTMLInputElement>('#pocket-paste-code')!;
     act(() => setNativeFieldValue(input, url));
     act(() => {
@@ -624,7 +624,7 @@ it('never opens a camera on a screen that is gone', async () => {
   };
   await boot({ startScan });
 
-  await click(container, 'Scan a Host QR');
+  await click(container, SCAN_LABEL);
   await click(container, 'Cancel');
 
   expect(stopped.length).toBeGreaterThan(0);
@@ -633,7 +633,7 @@ it('never opens a camera on a screen that is gone', async () => {
 it('leads with the camera-bootstrap copy when the fragment brought us here', async () => {
   await boot({ arrivedByCamera: true });
 
-  expect(container.textContent).toContain('scan this Host QR in Pocket');
+  expect(container.textContent).toContain(CAMERA_BOOTSTRAP_MESSAGE);
   // Nothing was spent: the run has no token, and no Server call was made.
   expect(fake.setup).not.toHaveBeenCalled();
   expect(fake.retireSetupToken).not.toHaveBeenCalled();

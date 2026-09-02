@@ -100,7 +100,7 @@ export const UNSUPPORTED_BROWSER_BODY =
   'Update it, or open Dormouse Pocket in a newer browser.';
 
 /** The copy a run that arrived from the phone's own camera leads with. */
-export const CAMERA_BOOTSTRAP_MESSAGE = 'Install or open Pocket, then scan this Host QR in Pocket';
+export const CAMERA_BOOTSTRAP_MESSAGE = 'Scan again from inside Dormouse Pocket';
 
 export default function App({
   arrivedByCamera = false,
@@ -754,7 +754,13 @@ export function ConnectedView({
 
 // --- SetupOrSignin ---------------------------------------------------------
 
-const SCAN_LABEL = 'Scan a Host QR';
+/**
+ * The one way in, named for the thing the laptop is actually showing — the
+ * setup code under **Settings → Remote control → Set up a phone**. Exported so
+ * the tests press the button rather than a string that has to be kept in step
+ * with this one.
+ */
+export const SCAN_LABEL = 'Scan a setup code';
 
 /**
  * The auth screen, in two layouts on one question: does this browser hold a
@@ -836,7 +842,7 @@ export function SetupOrSignin({
           <p className={clsx(PK.lead, 'mt-1')}>
             {signinLeads
               ? 'Sign in with your passkey to reach the computers this phone is paired with, or scan a code to pair a new one.'
-              : 'Show a pairing code on the computer, in Settings → Remote control, and scan it here.'}
+              : 'On the computer: Settings → Remote control → Set up a phone. Scan the code it shows.'}
           </p>
         </div>
         {/* The one thing a native-camera arrival is for: saying where the scan
@@ -845,8 +851,8 @@ export function SetupOrSignin({
           <div className={PK.notice}>
             <div className={PK.noticeTitle}>{CAMERA_BOOTSTRAP_MESSAGE}</div>
             <p className={PK.noticeBody}>
-              The code your camera opened was not used. Scanning from inside Pocket is what creates
-              the keys this phone will keep.
+              The code your camera opened was not used, so nothing has been set up yet. Scanning
+              from inside Pocket is what creates the keys this phone will keep.
             </p>
           </div>
         ) : null}
@@ -870,7 +876,7 @@ export function SetupOrSignin({
             {/* Not a disclosure: a synced passkey makes sign-in a real path out
                 of a browser that has never stored anything. */}
             <div className={clsx(PK.setup, PK.divided)}>
-              <p className={PK.lead}>Already made a passkey? It syncs — sign in with it instead.</p>
+              <p className={PK.lead}>Set this phone up before? Passkeys sync — sign in instead.</p>
               {signinButton('outline')}
             </div>
           </>

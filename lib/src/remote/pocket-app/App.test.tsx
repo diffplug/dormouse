@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CAMERA_BOOTSTRAP_MESSAGE,
   HostsView,
+  SCAN_LABEL,
   PairingCodeView,
   SetupOrSignin,
   pushNoticeState,
@@ -166,7 +167,7 @@ describe('SetupOrSignin: scanning versus signing in', () => {
     expect(container.textContent).not.toContain('Welcome back');
     expect(container.querySelector('input')).toBeNull();
 
-    act(() => buttonNamed('Scan a Host QR')!.click());
+    act(() => buttonNamed(SCAN_LABEL)!.click());
     expect(onScan).toHaveBeenCalledOnce();
   });
 
@@ -185,7 +186,7 @@ describe('SetupOrSignin: scanning versus signing in', () => {
 
     expect(container.textContent).toContain('Welcome back');
     // A signed-in phone still scans — to pair a computer it has not met.
-    act(() => buttonNamed('Scan a Host QR')!.click());
+    act(() => buttonNamed(SCAN_LABEL)!.click());
     expect(onScan).toHaveBeenCalledOnce();
   });
 
@@ -203,7 +204,7 @@ describe('SetupOrSignin: scanning versus signing in', () => {
   it('locks every action while a ceremony this screen started is running', () => {
     renderAuth({ busy: 'pair' });
 
-    expect(buttonNamed('Scan a Host QR')).toBeNull();
+    expect(buttonNamed(SCAN_LABEL)).toBeNull();
     expect(buttonNamed('…')!.disabled).toBe(true);
     expect(buttonNamed('Sign in with passkey')!.disabled).toBe(true);
   });
@@ -219,7 +220,7 @@ describe('SetupOrSignin after a native-camera arrival', () => {
     renderAuth({ arrivedByCamera: true });
 
     expect(container.textContent).toContain(CAMERA_BOOTSTRAP_MESSAGE);
-    expect(buttonNamed('Scan a Host QR')).not.toBeNull();
+    expect(buttonNamed(SCAN_LABEL)).not.toBeNull();
   });
 
   it('says it on a returning browser too, where sign-in still leads', () => {
@@ -243,7 +244,7 @@ describe('SetupOrSignin install guidance', () => {
     renderAuth({ hasPriorUse: false, needsInstall: true });
 
     const notice = installNotice();
-    const scan = buttonNamed('Scan a Host QR');
+    const scan = buttonNamed(SCAN_LABEL);
     expect(notice).not.toBeNull();
     // Strictly before, not merely "not after": a notice that *contained* the
     // action would also satisfy FOLLOWING while saying nothing about order.
@@ -261,7 +262,7 @@ describe('SetupOrSignin install guidance', () => {
     const onScan = vi.fn();
     renderAuth({ hasPriorUse: false, needsInstall: true, onScan });
 
-    const scan = buttonNamed('Scan a Host QR')!;
+    const scan = buttonNamed(SCAN_LABEL)!;
     expect(scan.disabled).toBe(false);
     act(() => scan.click());
     expect(onScan).toHaveBeenCalledOnce();
@@ -366,7 +367,7 @@ describe('HostsView actions', () => {
     renderHosts({ hosts: [], onScan });
 
     expect(container.textContent).toContain('No computers paired yet');
-    act(() => buttonNamed('Scan a Host QR')!.click());
+    act(() => buttonNamed(SCAN_LABEL)!.click());
     expect(onScan).toHaveBeenCalledOnce();
   });
 });

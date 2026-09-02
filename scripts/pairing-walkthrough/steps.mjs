@@ -27,7 +27,7 @@ const POCKET_VIEWPORT = { width: 390, height: 844 };
  * (`lib/src/remote/pocket-app/App.tsx`). Clicked rather than routed to: the
  * scanner is a phase of the app, not a URL.
  */
-const SCAN_LABEL = 'Scan a Host QR';
+const SCAN_LABEL = 'Scan a setup code';
 
 /**
  * The Host's pairing modal, by the id its own title carries.
