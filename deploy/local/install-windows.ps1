@@ -1562,10 +1562,13 @@ function Invoke-Verify {
   if (-not $serveText.Trim()) {
     Fail "tailscale serve reports no configuration"
   } else {
-    if ($serveText -match ([regex]::Escape("127.0.0.1:$PORT") + '([^0-9]|$)')) {
-      Pass "Serve proxies to 127.0.0.1:$PORT"
+    # Root-scoped, not merely bounded: `/api` on this port is not `/` on this
+    # port, and a green tick here is a claim about the origin serving Pocket at
+    # `/`. Same match as the unix `serve_proxies_root`.
+    if ($serveText -match ('(?m)^\|--\s+/\s+proxy.*' + [regex]::Escape("127.0.0.1:$PORT") + '([^0-9]|$)')) {
+      Pass "Serve proxies / to 127.0.0.1:$PORT"
     } else {
-      Fail "Serve does not proxy to 127.0.0.1:$PORT"
+      Fail "Serve does not proxy / to 127.0.0.1:$PORT"
       foreach ($l in $serveText.Split("`n")) { if ($l.Trim()) { Write-Host "      $($l.TrimEnd())" } }
     }
     if ($ORIGIN -and ($serveText -match [regex]::Escape($ORIGIN.Replace('https://', '')))) {

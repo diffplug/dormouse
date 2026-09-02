@@ -244,7 +244,7 @@ shape what the user should expect day to day:
   what catches a responder no port lookup can see at all.
 - Port 3100 is bound only to `127.0.0.1`, and the plaintext port is unreachable
   on the laptop's Tailscale IP.
-- `tailscale serve` proxies to `127.0.0.1:3100` at the same origin recorded in
+- `tailscale serve` proxies `/` to `127.0.0.1:3100` at the same origin recorded in
   `config/server.env`, and `tailscale funnel` is **off** — a Funnel would
   publish this same origin to the public internet, which the setup password's
   hardening was never sized for (`SECURITY.md` -> "Network posture"). A Funnel

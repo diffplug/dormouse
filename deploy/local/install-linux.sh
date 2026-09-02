@@ -977,6 +977,20 @@ has_off_loopback() {
   grep -qv '^127\.0\.0\.1:' <<<"$addrs"
 }
 
+# Does captured `serve status` output ($2) map the ROOT path to 127.0.0.1:$1?
+# Root-scoped and right-bounded for the two reasons the installer's own
+# `serve_state` carries: `/api` on this port is not `/` on this port, and
+# `127.0.0.1:31000` contains `127.0.0.1:3100`. Either one green-ticked a node
+# whose origin served someone else's app at `/`.
+#
+# This bets on `serve status`'s layout, which the installer's conflict gate
+# already bets on. The bet fails toward a red verify on a healthy node rather
+# than a green one on a broken node, which is the direction this command exists
+# to get right.
+serve_proxies_root() {
+  grep -qE '^\|-- / +proxy .*127\.0\.0\.1:'"$1"'([^0-9]|$)' <<<"$2"
+}
+
 cmd_status() {
   printf '\nDormouse selfhost server\n'
   printf '  install root : %s\n' "$ROOT"
@@ -1139,10 +1153,10 @@ cmd_verify() {
   if [ -z "$serve_out" ]; then
     fail "tailscale serve reports no configuration"
   else
-    if grep -qE "127\.0\.0\.1:$PORT([^0-9]|\$)" <<<"$serve_out"; then
-      pass "Serve proxies to 127.0.0.1:$PORT"
+    if serve_proxies_root "$PORT" "$serve_out"; then
+      pass "Serve proxies / to 127.0.0.1:$PORT"
     else
-      fail "Serve does not proxy to 127.0.0.1:$PORT"
+      fail "Serve does not proxy / to 127.0.0.1:$PORT"
       printf '%s\n' "$serve_out" | sed 's/^/      /'
     fi
     if [ -n "$ORIGIN" ] && grep -q "${ORIGIN#https://}" <<<"$serve_out"; then

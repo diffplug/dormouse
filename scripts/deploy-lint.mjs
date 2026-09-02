@@ -325,19 +325,34 @@ export const RULES = [
     // A gate, not a report, which is why it is its own rule: past the pipe
     // buffer the piped ladder took NEITHER branch, so `confirm` never ran and
     // the install repointed the operator's root Serve path without asking.
-    // Both halves of the decision, exactly once each, and both scoped to the
-    // root line and right-bounded — an unscoped port match said "already
-    // ours" for a config whose root was foreign, and for one on :31000.
-    rule: 'Network posture — the Serve conflict gate decides on captured output, so its confirm cannot be skipped',
+    //
+    // Every root-path Serve match, counted: the gate's two arms, plus
+    // `manage verify`'s `serve_proxies_root`, which asks the same question
+    // about the same output. All are scoped to the root line and
+    // right-bounded — an unscoped port match said "already ours" for a config
+    // whose root was foreign, and for one on :31000.
+    rule: 'Network posture — every root-path Serve match is scoped to / and bounded on the port',
     patterns: {
       macOS: /grep -qE '\^\\\|-- \/ \+proxy \.\*127\\\.0\\\.0\\\.1:'"\$1"'\(\[\^0-9\]\|\$\)' <<<"\$2"|grep -qE '\^\\\|-- \/ \+proxy' <<<"\$2"/,
       Linux: /grep -qE '\^\\\|-- \/ \+proxy \.\*127\\\.0\\\.0\\\.1:'"\$1"'\(\[\^0-9\]\|\$\)' <<<"\$2"|grep -qE '\^\\\|-- \/ \+proxy' <<<"\$2"/,
     },
     skip: {
       Windows:
-        'its ladder is `$SERVE_BEFORE -match …` over a string already captured from `Invoke-Tailscale`, so there is no pipeline to take SIGPIPE',
+        'its ladder and its verify check are both `-match` over a string already captured from `Invoke-Tailscale`, so there is no pipeline to take SIGPIPE; the rule below pins that they are root-scoped',
     },
-    exactMatches: { macOS: 2, Linux: 2 },
+    exactMatches: { macOS: 3, Linux: 3 },
+  },
+  {
+    // Windows takes the same match inline rather than through a helper, so it
+    // is pinned on what the check says instead. The `/` in the message is the
+    // control: it is the difference between a claim about the origin serving
+    // Pocket at the root and a claim about the port appearing somewhere.
+    rule: 'Network posture — manage verify names the root path in its Serve verdict',
+    patterns: {
+      macOS: /Serve does not proxy \/ to 127\.0\.0\.1:/,
+      Linux: /Serve does not proxy \/ to 127\.0\.0\.1:/,
+      Windows: /Serve does not proxy \/ to 127\.0\.0\.1:/,
+    },
   },
   {
     // The other half of "preserved byte-for-byte": a file that exists is not

@@ -24,8 +24,9 @@
  * under. Extraction takes the LAST definition of a name, so it keeps working
  * if a helper ever exists twice — once in the installer body and once inside
  * the `MANAGE_EOF` heredoc. Today each is defined once: `funnel_state` and
- * `has_off_loopback` in the heredoc (the `manage` copy), `env_missing_keys`,
- * `serve_state` and `serve_root_target` in the installer body.
+ * `has_off_loopback` and `serve_proxies_root` in the heredoc (the `manage`
+ * copy), `env_missing_keys`, `serve_state` and `serve_root_target` in the
+ * installer body.
  *
  * The cases labelled `witness` are not tests of shipped code: each runs an old
  * piped idiom over the same input and requires it to get the answer wrong. If
@@ -165,6 +166,21 @@ function cases(platform, env) {
       'clean',
     ],
     [
+      'serve_proxies_root: a foreign root with our port on another path is not a pass',
+      `if serve_proxies_root 3100 "$(printf '%s\\n%s\\n' "${SERVE_ROOT_FOREIGN}" "${SERVE_OUR_PORT_OTHER_PATH}")"; then echo pass; else echo fail; fi`,
+      'fail',
+    ],
+    [
+      'serve_proxies_root: a root on a port this one is a prefix of is not a pass',
+      `if serve_proxies_root 3100 "${SERVE_ROOT_PORT_PREFIX}"; then echo pass; else echo fail; fi`,
+      'fail',
+    ],
+    [
+      'serve_proxies_root: the mapping the installer writes, with the origin header above it',
+      `if serve_proxies_root 3100 "$(printf '%s\\n%s\\n' 'https://node.tailnet.ts.net (tailnet only)' "${SERVE_ROOT_OURS}")"; then echo pass; else echo fail; fi`,
+      'pass',
+    ],
+    [
       'env_missing_keys: the file the installer writes is complete',
       `printf '[%s]\\n' "$(env_missing_keys '${env.complete}')"`,
       '[]',
@@ -280,7 +296,14 @@ export function run() {
       const text = readRepoFile(file);
       let helpers;
       try {
-        helpers = ['funnel_state', 'has_off_loopback', 'env_missing_keys', 'serve_state', 'serve_root_target']
+        helpers = [
+          'funnel_state',
+          'has_off_loopback',
+          'env_missing_keys',
+          'serve_state',
+          'serve_root_target',
+          'serve_proxies_root',
+        ]
           .map((name) => extractFunction(text, name))
           .join('\n\n');
       } catch (err) {
