@@ -14,15 +14,26 @@ import {
   type ScreenActions,
   type ScreenRegistration,
 } from './agent-browser-screen';
-import { hostPathDisplay } from './browser-url';
+import { browserSurfaceUrl, hostPathDisplay } from './browser-url';
 
-// Sandbox the proxied frame so a tool's `if (top !== self) top.location = …`
-// framebust cannot navigate the Wall away — allow-top-navigation is omitted on
-// purpose (docs/specs/dor-browser.md → "Iframe Renderer"). Everything else a local
-// dev tool needs is granted; allow-same-origin is safe here because the frame's
-// origin (the loopback proxy) is never same-origin with the host webview.
-const PROXY_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads';
-const IFRAME_ALLOW = 'autoplay; clipboard-read; clipboard-write; fullscreen; geolocation; microphone; camera';
+// Sandbox every framed page, proxied or raw, so a tool's
+// `if (top !== self) top.location = …` framebust cannot navigate the Wall away —
+// allow-top-navigation is omitted on purpose (docs/specs/dor-browser.md →
+// "Iframe Renderer"). Everything else a local dev tool needs is granted;
+// allow-same-origin is safe because the frame's origin (the loopback proxy, or
+// the upstream itself on a host with no proxy) is never same-origin with the
+// host webview. **The raw fallback is not the trusted case** — it is the one
+// with no proxy in front of it at all, so it gets the same sandbox rather than
+// none.
+const IFRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads';
+// Permissions-Policy for the framed page. `dor iframe` takes any http(s) URL,
+// not only a loopback dev server, and a desktop webview often has no per-site
+// permission prompt (WKWebView with no media `WKUIDelegate`, WebView2
+// defaults) — so a grant here is a grant, not a request. Camera, microphone,
+// geolocation and `clipboard-read` are therefore **not** granted:
+// `clipboard-read` most pointedly, since a terminal's clipboard is where users
+// paste secrets. Writing to the clipboard needs a user gesture and cannot read.
+const IFRAME_ALLOW = 'autoplay; clipboard-write; fullscreen';
 
 type Resolution =
   | { kind: 'empty' }
@@ -261,8 +272,12 @@ export function IframePanel({ id, title, params }: PaneProps) {
       if (data?.__dormouse === 'open-window' && typeof data.url === 'string') {
         // Single-frame renderer: a new-tab/window request becomes a new pane.
         // Map a proxy-origin URL back to the upstream; pass externals through.
-        const mapped = upstreamUrlFromFrameLocation(data.url, liveUrl || sourceUrl, proxyOrigin) ?? data.url;
-        setPendingOpenUrl(mapped);
+        // The framed page chose this string, so the scheme is checked here and
+        // not left to the confirm prompt — which is consent, not a boundary.
+        const mapped = browserSurfaceUrl(
+          upstreamUrlFromFrameLocation(data.url, liveUrl || sourceUrl, proxyOrigin) ?? data.url,
+        );
+        if (mapped) setPendingOpenUrl(mapped);
         return;
       }
       if (data?.__dormouse === 'location') {
@@ -335,7 +350,8 @@ export function IframePanel({ id, title, params }: PaneProps) {
           src={src}
           title={title ?? liveUrl}
           allow={IFRAME_ALLOW}
-          {...(resolution.kind === 'proxied' ? { sandbox: PROXY_SANDBOX, 'data-dormouse-proxy': 'true' } : {})}
+          sandbox={IFRAME_SANDBOX}
+          {...(resolution.kind === 'proxied' ? { 'data-dormouse-proxy': 'true' } : {})}
           referrerPolicy="strict-origin-when-cross-origin"
         />
       ) : (

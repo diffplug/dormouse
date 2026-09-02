@@ -1,6 +1,6 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAgentBrowserHost } from './agent-browser-host';
 
@@ -77,14 +77,14 @@ describe('agent-browser host screenshot transport', () => {
   beforeEach(() => { spawnMock.mockReset(); });
 
   it('screenshotToFile returns the path + mime without reading the bytes', async () => {
-    const shotPath = join(tmpdir(), 'dormouse-ab-shot-shotfile.jpg');
-    rmSync(shotPath, { force: true }); // no capture ran, so no file should exist
     // Only the CLI spawn happens — no file is written by the mock.
     enqueueSpawnResults([{}]); // screenshot exits 0
 
     const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
     const result = await host.screenshotToFile('shotfile', { format: 'jpeg', quality: 85 }, '/usr/local/bin/agent-browser');
 
+    expect(result.ok).toBe(true);
+    const shotPath = result.ok ? result.path : '';
     expect(result).toEqual({ ok: true, path: shotPath, mime: 'image/jpeg' });
     // The capture never touched the filesystem: the path points at a file that
     // does not exist (the mock spawned nothing that would create it).
@@ -96,18 +96,69 @@ describe('agent-browser host screenshot transport', () => {
     ]);
   });
 
-  it('screenshot() still reads the file and returns the raw bytes', async () => {
-    const shotPath = join(tmpdir(), 'dormouse-ab-shot-shotbytes.jpg');
-    const payload = Uint8Array.from([0xff, 0xd8, 0xff, 0x01, 0x02, 0x03]);
-    writeFileSync(shotPath, payload); // stand in for agent-browser writing the frame
-    enqueueSpawnResults([{}]); // screenshot exits 0
-
+  // The frame is a picture of the user's authenticated browser, written by an
+  // external process under the ambient umask. A derivable path straight in
+  // os.tmpdir() let any other local account read every frame, or pre-create the
+  // name as a symlink and have agent-browser clobber the target.
+  it('captures into a private, unguessable directory rather than a derivable tmp path', async () => {
+    enqueueSpawnResults([{}, {}]);
     const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+
+    const first = await host.screenshotToFile('dormouse.1.default', { format: 'jpeg' }, '/usr/local/bin/agent-browser');
+    const second = await host.screenshotToFile('dormouse.1.default', { format: 'jpeg' }, '/usr/local/bin/agent-browser');
+    if (!first.ok || !second.ok) throw new Error('expected both captures to resolve a path');
+
+    // Nothing about the path is derivable from the session name.
+    expect(first.path).not.toContain('dormouse.1.default');
+    expect(first.path).not.toBe(join(tmpdir(), 'dormouse-ab-shot-dormouse.1.default.jpg'));
+    // Still reused per session, so one file per frame does not accumulate.
+    expect(second.path).toBe(first.path);
+
+    const dir = dirname(first.path);
+    expect(dir).not.toBe(tmpdir());
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+  });
+
+  it('screenshot() still reads the file and returns the raw bytes', async () => {
+    const payload = Uint8Array.from([0xff, 0xd8, 0xff, 0x01, 0x02, 0x03]);
+    // Stand in for agent-browser writing the frame: the host chooses the path,
+    // so learn it from a capture first, then write there.
+    enqueueSpawnResults([{}, {}]);
+    const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+    const located = await host.screenshotToFile('shotbytes', { format: 'jpeg', quality: 85 }, '/usr/local/bin/agent-browser');
+    if (!located.ok) throw new Error('expected a path');
+    writeFileSync(located.path, payload);
+
     const result = await host.screenshot('shotbytes', { format: 'jpeg', quality: 85 }, '/usr/local/bin/agent-browser');
 
     expect(result.ok).toBe(true);
     expect(result.mime).toBe('image/jpeg');
     expect(Array.from(result.bytes ?? [])).toEqual(Array.from(payload));
-    rmSync(shotPath, { force: true });
+    rmSync(located.path, { force: true });
+  });
+
+  // `binaryPath` crosses from the webview realm and off the persisted session
+  // blob, so an unchecked one is arbitrary local execution in the extension host
+  // or the Tauri sidecar. The gate is at the spawn, so it covers streamStatus /
+  // open / popOut too — the entry points the subcommand allowlist never saw.
+  it('refuses a caller-supplied binary path that is not an agent-browser', async () => {
+    enqueueSpawnResults([{}]);
+    const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+
+    await host.command('sess', ['tab', 'list'], '/usr/bin/curl');
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    // Fell through to the host's own candidate rather than spawning curl.
+    expect(spawnMock.mock.calls[0][0]).toBe('agent-browser');
+  });
+
+  it('accepts an absolute path to an agent-browser, including its Windows shims', async () => {
+    for (const candidate of ['/opt/homebrew/bin/agent-browser', 'C:\\tools\\agent-browser.cmd']) {
+      spawnMock.mockReset();
+      enqueueSpawnResults([{}]);
+      const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+      await host.command('sess', ['tab', 'list'], candidate);
+      expect(spawnMock.mock.calls[0][0]).toBe(candidate);
+    }
   });
 });

@@ -460,6 +460,26 @@ runs the bundled copy through the sidecar/Rust adapter.
 `agentBrowserCommand` implementation must enforce the shared allowlist; the CLI
 is not trusted to pre-filter arguments.
 
+**`binaryPath` names what the host spawns, so it is checked at the spawn.** It
+crosses from the webview realm and is persisted into the pane's params, so an
+unchecked one is arbitrary local execution in the extension host or the Tauri
+sidecar — on the next launch, with no user interaction. The subcommand allowlist
+does not cover it: `streamStatus`, `open` and `popOut` supply their own args and
+take a `binaryPath` of their own, so the gate is `runWithBinaryFallback`, which
+every entry point shares. Accepted: an **absolute** path whose file name is the
+agent-browser executable (with its Windows `.cmd`/`.bat`/`.exe` shims), the
+host's own `DORMOUSE_AGENT_BROWSER_BIN` by exact match, or the bare name
+resolved on `PATH`. A refused path is dropped and the host's own candidates run,
+so a stale or hostile value degrades to "resolve it yourself". The webview
+applies the same predicate before storing or sending one. Source of truth:
+`isAllowedAgentBrowserBinary` in `lib/src/lib/agent-browser-binary.ts`.
+
+**Screenshots are captured into a private per-process directory.** The frame is
+a picture of the user's authenticated browser, written by an external process
+under the ambient umask, so the path is an `0700` `mkdtemp` with an unguessable
+file name rather than a derivable name in the shared temp directory — the same
+discipline `standalone/sidecar/clipboard-ops.js` applies to clipboard images.
+
 **VS Code must reach the stream through a loopback relay** — the agent-browser
 stream server rejects `vscode-webview://` origins. The relay grants one
 single-use, short-TTL token bound to one stream port, and strips the Origin
@@ -543,6 +563,13 @@ posts only these messages to the parent:
   same-frame anchor click that the page did not cancel.
 - `open-window`: intercepted `target=_blank` anchor or `window.open` URL.
 
+**A URL from the frame is re-checked before it becomes a pane.** `open-window`
+carries a string the framed page chose, and the new-tab prompt is user consent,
+not a boundary; the same check gates `surface.iframe` over the control socket,
+which is a wire protocol rather than the CLI. Only `http:` and `https:` are
+accepted. Source of truth: `browserSurfaceUrl` in
+`lib/src/components/wall/browser-url.ts`.
+
 **Parent listeners must validate the message origin against live proxy grants.**
 Leader messages feed the same Wall command-mode exit path as in-document dual-tap
 handling. `IframePanel` maps proxy-origin `location` URLs back to upstream URLs
@@ -568,10 +595,17 @@ Source of truth: `IFRAME_SHIM` in
 - `IframePanel` applies `transform: translateZ(0)` to its immediate container to
   avoid Chromium out-of-process iframe pointer offsets from a far-away
   compositing/containing ancestor.
-- **The iframe `sandbox` omits `allow-top-navigation`** to block framebusting,
-  while allowing scripts, same-origin (within the proxy origin), forms, popups,
-  modals, and downloads. Device/clipboard permissions ride the separate `allow`
-  attribute.
+- **Every framed page is sandboxed, proxied or raw**, and the `sandbox` omits
+  `allow-top-navigation` to block framebusting while allowing scripts,
+  same-origin (within the frame's own origin), forms, popups, modals, and
+  downloads. The raw fallback is the case with *no* proxy in front of it, so it
+  is not the trusted one and gets the same attribute.
+- **The `allow` attribute grants no device or clipboard-read permission** —
+  `autoplay`, `clipboard-write` and `fullscreen` only. `dor iframe` takes any
+  http(s) URL, not just a loopback dev server, and a desktop webview often has
+  no per-site prompt (WKWebView with no media `WKUIDelegate`, WebView2
+  defaults), so a grant here is a grant rather than a request; `clipboard-read`
+  most pointedly, since a terminal's clipboard is where secrets get pasted.
 
 Source of truth: `IframePanel.tsx`, `lib/src/components/wall/use-window-focused.ts`,
 `lib/src/lib/terminal-lifecycle.ts` (`registerSurfaceFocusHandle`).

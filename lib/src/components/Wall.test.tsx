@@ -237,6 +237,32 @@ describe('Wall on the Lath engine', () => {
     expect(saved!.surfaceRefsNext).toBe(4);
   });
 
+  // The control socket is a wire protocol, not the CLI: `dor iframe` validates
+  // its argument, but anything holding the control token reaches this method
+  // directly — and on a host with no iframe proxy the value becomes a raw
+  // `<iframe src>`, where `javascript:` runs in the app's own origin.
+  it('refuses a surface.iframe url that is not http(s)', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+
+    for (const url of ['javascript:alert(1)', 'data:text/html,<script>1</script>', 'file:///etc/passwd', 'vscode-webview://x/']) {
+      let response: { ok: boolean; error?: string } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.iframe,
+            params: { url },
+            respond: (r: typeof response) => { response = r; },
+          },
+        }));
+      });
+      await flush();
+      expect(response).toEqual({ ok: false, error: 'url must be an http:// or https:// URL' });
+    }
+  });
+
   it('preserves the surface ref when an iframe replaces an untouched terminal', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
