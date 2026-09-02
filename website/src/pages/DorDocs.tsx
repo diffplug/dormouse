@@ -2,28 +2,20 @@
  * `/docs/dor` — exhaustive, lossless CLI reference generated from the help
  * snapshots that `dor/test/cli-help.test.mjs` already proves match real output.
  */
+import { type MetaArgs } from "react-router";
+import { siteMeta } from "../lib/site-meta";
 import cli from "../data/docs.cli.json";
-import DocsLayout, { type TocEntry } from "../components/DocsLayout";
-import MarkdownDocument, { type BlockNode } from "../components/MarkdownDocument";
-import DorCommandReference, { AnchoredHeading, type CommandSection } from "../components/DorCommandReference";
+import DocsLayout from "../components/DocsLayout";
+import MarkdownDocument, { AnchoredHeading, type BlockNode } from "../components/MarkdownDocument";
+import DorCommandReference, { type CommandSection } from "../components/DorCommandReference";
 
-export function meta() {
-  return [
-    { title: "dor CLI reference — Dormouse" },
-    {
-      name: "description",
-      content:
-        "Every dor command, its flags, arguments, and output, generated from the CLI's own tested help text.",
-    },
-  ];
+export function meta({ location }: MetaArgs) {
+  return siteMeta(location.pathname, {
+    title: "dor CLI reference — Dormouse",
+    description:
+      "Every dor command, its flags, arguments, and output, generated from the CLI's own tested help text.",
+  });
 }
-
-// Pure function of a static import; no reason to rebuild it per render.
-const TOC: TocEntry[] = [
-  ...cli.intro.map((s) => ({ id: s.id, text: s.title, children: [] })),
-  { id: cli.root.id, text: cli.root.title, children: [] },
-  ...cli.commands.map((c) => ({ id: c.id, text: c.title, children: [] })),
-];
 
 export default function DorDocs() {
   return (
@@ -31,11 +23,11 @@ export default function DorDocs() {
       activePath="/docs/dor"
       title="dor CLI reference"
       intro="dor is on the PATH of every terminal Dormouse launches. This page is generated from the CLI's own help output."
-      toc={TOC}
+      toc={cli.toc}
     >
       {cli.intro.map((section) => (
         <section key={section.id} className="mb-14">
-          <AnchoredHeading id={section.id}>{section.title}</AnchoredHeading>
+          <AnchoredHeading id={section.id} spacing="mb-4">{section.title}</AnchoredHeading>
           <MarkdownDocument blocks={section.blocks as BlockNode[]} />
         </section>
       ))}

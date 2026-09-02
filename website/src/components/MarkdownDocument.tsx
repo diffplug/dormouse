@@ -9,7 +9,7 @@
  * See docs/specs/website-docs.md -> Markdown rendering contract.
  */
 import { Fragment, type ReactNode } from "react";
-import { CODE_CLASS, LINK_CLASS } from "./docs-tokens";
+import { CODE_CLASS, LINK_CLASS, PRE_CLASS, TABLE_CLASS, TABLE_ROW_CLASS, TABLE_WRAP_CLASS } from "./docs-tokens";
 
 export type InlineNode =
   | { type: "text"; value: string }
@@ -34,6 +34,10 @@ export type BlockNode =
  * A scheme is the whole test because same-site links reach here root-relative:
  * the generator localizes the absolute URLs the canonical sources are required
  * to use (`localizeSiteLinks` in website/scripts/generate-docs.js).
+ *
+ * Spelled out rather than importing `hasScheme` from the parser that owns the
+ * policy: that module is Node-side build code, and pulling it in would ship the
+ * whole Markdown parser to the browser to share one regex.
  */
 function isExternal(href: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/i.test(href);
@@ -43,7 +47,7 @@ function Inline({ nodes }: { nodes: InlineNode[] }): ReactNode {
   return nodes.map((node, i) => {
     switch (node.type) {
       case "text":
-        return <span key={i}>{node.value}</span>;
+        return <Fragment key={i}>{node.value}</Fragment>;
       case "code":
         return <code key={i} className={CODE_CLASS}>{node.value}</code>;
       case "strong":
@@ -86,27 +90,62 @@ function Inline({ nodes }: { nodes: InlineNode[] }): ReactNode {
 }
 
 const HEADING_BASE = "font-display scroll-mt-24";
-/** Size and spacing per depth; the shared base is applied alongside. */
-const HEADING_SIZE: Record<number, string> = {
-  2: "text-2xl mt-12 mb-4",
-  3: "text-xl mt-8 mb-3",
-  4: "text-lg mt-6 mb-2",
-  5: "text-base mt-4 mb-2",
-  6: "text-base mt-4 mb-2",
+/** Size per depth; the shared base is applied alongside. */
+const HEADING_TEXT: Record<number, string> = {
+  2: "text-2xl",
+  3: "text-xl",
+  4: "text-lg",
+  5: "text-base",
+  6: "text-base",
+};
+/** Flow spacing per depth, for a heading rendered inline in a document. A
+ *  caller that supplies its own section spacing overrides it. */
+const HEADING_FLOW: Record<number, string> = {
+  2: "mt-12 mb-4",
+  3: "mt-8 mb-3",
+  4: "mt-6 mb-2",
+  5: "mt-4 mb-2",
+  6: "mt-4 mb-2",
 };
 
-export function Block({ node }: { node: BlockNode }): ReactNode {
+/**
+ * A heading that links to itself.
+ *
+ * Every `h2`–`h6` on every docs page comes through here, so the anchor
+ * affordance and the `scroll-mt` that keeps a jumped-to heading clear of the
+ * sticky header have one owner. `spacing` replaces the depth's flow margins
+ * for a caller whose surrounding section already spaces it.
+ */
+export function AnchoredHeading({
+  id,
+  depth = 2,
+  spacing,
+  children,
+}: {
+  id: string;
+  depth?: number;
+  spacing?: string;
+  children: ReactNode;
+}) {
+  const level = depth in HEADING_TEXT ? depth : 6;
+  const Tag = `h${level}` as "h2";
+  return (
+    <Tag id={id} className={`${HEADING_BASE} ${HEADING_TEXT[level]} ${spacing ?? HEADING_FLOW[level]}`}>
+      <a href={`#${id}`} className="no-underline hover:underline underline-offset-4">
+        {children}
+      </a>
+    </Tag>
+  );
+}
+
+function Block({ node }: { node: BlockNode }): ReactNode {
   switch (node.type) {
-    case "heading": {
-      const Tag = `h${Math.min(node.depth, 6)}` as "h2";
+    case "heading":
       return (
-        <Tag id={node.id} className={`${HEADING_BASE} ${HEADING_SIZE[node.depth] ?? HEADING_SIZE[6]}`}>
-          <a href={`#${node.id}`} className="no-underline hover:underline underline-offset-4">
-            <Inline nodes={node.children} />
-          </a>
-        </Tag>
+        <AnchoredHeading id={node.id} depth={node.depth}>
+          <Inline nodes={node.children} />
+        </AnchoredHeading>
       );
-    }
     case "paragraph":
       return (
         <p className={node.tight ? "leading-relaxed" : "text-lg leading-relaxed opacity-80 mb-4"}>
@@ -115,8 +154,8 @@ export function Block({ node }: { node: BlockNode }): ReactNode {
       );
     case "code":
       return (
-        <pre className="mb-4 overflow-x-auto rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04] p-4">
-          <code className="font-mono text-sm">{node.value}</code>
+        <pre className={`${PRE_CLASS} mb-4`}>
+          <code>{node.value}</code>
         </pre>
       );
     case "list": {
@@ -133,8 +172,8 @@ export function Block({ node }: { node: BlockNode }): ReactNode {
     }
     case "table":
       return (
-        <div className="mb-6 overflow-x-auto">
-          <table className="w-full border-collapse text-left">
+        <div className={`mb-6 ${TABLE_WRAP_CLASS}`}>
+          <table className={TABLE_CLASS}>
             <thead>
               <tr className="border-b border-[var(--color-text)]/25">
                 {node.header.map((cell, i) => (
@@ -146,7 +185,7 @@ export function Block({ node }: { node: BlockNode }): ReactNode {
             </thead>
             <tbody>
               {node.rows.map((row, r) => (
-                <tr key={r} className="border-b border-[var(--color-text)]/10">
+                <tr key={r} className={TABLE_ROW_CLASS}>
                   {row.map((cell, c) => (
                     <td key={c} className="py-2 pr-4 align-top opacity-80">
                       <Inline nodes={cell} />
@@ -189,13 +228,12 @@ export default function MarkdownDocument({
   blocks: BlockNode[];
   renderAfterHeading?: (heading: Extract<BlockNode, { type: "heading" }>) => ReactNode;
 }) {
-  if (!renderAfterHeading) return <Blocks nodes={blocks} />;
   return (
     <>
       {blocks.map((node, i) => (
         <Fragment key={i}>
           <Block node={node} />
-          {node.type === "heading" && renderAfterHeading(node)}
+          {node.type === "heading" && renderAfterHeading?.(node)}
         </Fragment>
       ))}
     </>

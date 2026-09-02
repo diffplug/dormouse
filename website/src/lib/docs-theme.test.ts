@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DOCS_THEME_ID, hasChosenDocsTheme, rememberDocsThemeChoice } from "./docs-theme";
+import { DOCS_THEME_ID, dismissThemePrompt, isThemePromptDismissed } from "./docs-theme";
 
 afterEach(() => {
   // Unstub first: the storage-failure case replaces localStorage entirely.
@@ -8,11 +8,13 @@ afterEach(() => {
   localStorage.clear();
 });
 
-describe("docs theme choice", () => {
-  it("starts unchosen and stays chosen once recorded", () => {
-    expect(hasChosenDocsTheme()).toBe(false);
-    rememberDocsThemeChoice();
-    expect(hasChosenDocsTheme()).toBe(true);
+describe("docs theme prompt", () => {
+  it("starts undismissed and stays dismissed once recorded", () => {
+    // Both the picker's onPick and the prompt's close button record it, so a
+    // reader who declined the offer is not asked again on the next page.
+    expect(isThemePromptDismissed()).toBe(false);
+    dismissThemePrompt();
+    expect(isThemePromptDismissed()).toBe(true);
   });
 
   it("does not read the theme store's own key", () => {
@@ -20,10 +22,10 @@ describe("docs theme choice", () => {
     // after any page load whether or not the reader chose anything. A prompt
     // keyed on it would never show twice (docs/specs/theme.md).
     localStorage.setItem("dormouse:active-theme", DOCS_THEME_ID);
-    expect(hasChosenDocsTheme()).toBe(false);
+    expect(isThemePromptDismissed()).toBe(false);
   });
 
-  it("reports unchosen rather than throwing when storage is unavailable", () => {
+  it("reports undismissed rather than throwing when storage is unavailable", () => {
     // Safari in private mode throws on access; the prompt returning every
     // visit is the acceptable failure, a page that will not render is not.
     vi.stubGlobal("localStorage", {
@@ -31,8 +33,8 @@ describe("docs theme choice", () => {
         throw new DOMException("denied");
       },
     });
-    expect(hasChosenDocsTheme()).toBe(false);
-    expect(() => rememberDocsThemeChoice()).not.toThrow();
+    expect(isThemePromptDismissed()).toBe(false);
+    expect(() => dismissThemePrompt()).not.toThrow();
   });
 
   it("defaults to a theme that actually ships", async () => {

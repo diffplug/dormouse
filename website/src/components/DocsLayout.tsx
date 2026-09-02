@@ -9,6 +9,7 @@ import { useRestoredTheme } from "dormouse-lib/lib/themes";
 import SiteHeader from "./SiteHeader";
 import DocsThemeControl from "./DocsThemeControl";
 import { ACCENT_HOVER_TEXT_CLASS } from "./docs-tokens";
+import { DOCS_PAGES } from "../lib/docs-pages";
 import { DOCS_THEME_ID } from "../lib/docs-theme";
 
 /** Repaints the site's own tokens from the picked theme; see index.css. */
@@ -87,9 +88,11 @@ export default function DocsLayout({
 
           <footer className="mt-16 border-t border-[var(--color-text)]/20 pt-8 text-sm opacity-60">
             <div className="flex flex-wrap gap-x-6 gap-y-2">
-              <a href="/docs/dor" className="hover:underline">CLI reference</a>
-              <a href="/docs/agent-skill" className="hover:underline">Agent skill</a>
-              <a href="/docs/self-host" className="hover:underline">Self-host</a>
+              {DOCS_PAGES.map((page) => (
+                <a key={page.path} href={page.path} className="hover:underline">
+                  {page.label}
+                </a>
+              ))}
               <a
                 href="https://github.com/diffplug/dormouse/issues"
                 className="hover:underline"

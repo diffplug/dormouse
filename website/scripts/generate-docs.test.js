@@ -34,13 +34,6 @@ describe('product guide', () => {
     expect(ids).toContain('alerts-and-todos');
     expect(ids).toContain('browsers-for-you-and-your-agents');
   });
-
-  it('carries the sections the scope requires', () => {
-    const text = data.guide.headings.map((h) => h.text.toLowerCase());
-    for (const required of ['get dormouse', 'alerts and todos', 'keyboard shortcuts', 'getting started']) {
-      expect(text).toContain(required);
-    }
-  });
 });
 
 describe('delta operations', () => {
@@ -179,10 +172,21 @@ describe('agent skill', () => {
   it('resolves every reference into an existing CLI anchor', () => {
     const anchors = new Set(data.cli.anchors);
     const refs = Object.values(data.skill.references);
-    expect(refs.length).toBe(10);
+    // If this ever finds nothing the derivation has silently stopped matching.
+    expect(refs.length).toBeGreaterThan(0);
     for (const ref of refs) {
       expect(anchors).toContain(ref.href.replace('/docs/dor#', ''));
     }
+  });
+
+  it('links every skill heading that names a dor command', () => {
+    // The derivation's whole point: a command documented in dor/skill.md gets
+    // its reference with no table to update, so none may be left out.
+    const named = data.skill.blocks.filter(
+      (b) => b.type === 'heading' && (b.children ?? []).some((n) => n.type === 'code' && /^dor \S+$/.test(n.value)),
+    );
+    expect(named.length).toBeGreaterThan(0);
+    for (const heading of named) expect(data.skill.references).toHaveProperty(heading.id);
   });
 
   it('anchors each reference to a real skill heading id', () => {

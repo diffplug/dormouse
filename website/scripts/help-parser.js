@@ -17,10 +17,9 @@ export class MalformedSnapshotError extends Error {
   }
 }
 
-/** Column-zero markers. Anything else at column zero is prose. */
-const SECTION_MARKERS = ['USAGE', 'COMMANDS', 'FLAGS', 'ARGUMENTS'];
-const LABEL_MARKERS = ['Examples:', 'Text output:', 'JSON output:'];
-
+/** Column-zero markers, and the node kind each opens. Anything else at column
+ *  zero is prose. This object is the whole inventory — a marker added here is
+ *  recognized, with no second list to keep in step. */
 const MARKER_KIND = {
   USAGE: 'usage',
   COMMANDS: 'commands',
@@ -32,9 +31,9 @@ const MARKER_KIND = {
 };
 
 function markerFor(line) {
-  if (SECTION_MARKERS.includes(line)) return line;
-  if (LABEL_MARKERS.includes(line.trim()) && !line.startsWith(' ')) return line.trim();
-  return null;
+  if (/^\s/.test(line)) return null;
+  const marker = line.trimEnd();
+  return marker in MARKER_KIND ? marker : null;
 }
 
 /**
@@ -166,7 +165,7 @@ export function definitionRows(node) {
     }
 
     // A real gap at the description column splits term from description.
-    if (column > 0 && /\s\s/.test(line.slice(0, column).slice(-2)) && line.length > column) {
+    if (column > 0 && /\s\s$/.test(line.slice(0, column)) && line.length > column) {
       rows.push({ term: line.slice(0, column).trim(), description: line.slice(column).trim() });
       continue;
     }

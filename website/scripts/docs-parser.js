@@ -31,6 +31,24 @@ const IMG_ALLOWED_ATTRS = new Set(['src', 'alt', 'width', 'height', 'title']);
 // Slugger — mirrors github-slugger so /docs anchors match GitHub's own.
 // ---------------------------------------------------------------------------
 
+/**
+ * Whether a URL carries a scheme (`https:`, `mailto:`, `vscode:`).
+ *
+ * The parser owns this because it owns the `<img>` URL policy, and four
+ * decisions turn on the same question: rejecting a raw `<img src>`, rejecting a
+ * guide image, deciding whether a link leaves the site, and deciding whether a
+ * link is local enough to resolve on disk. Spelled once so those four cannot
+ * disagree about what a scheme looks like.
+ */
+export function hasScheme(url) {
+  return /^[a-z][a-z0-9+.-]*:/i.test(url);
+}
+
+/** `//host/path` — no scheme, but not local either. */
+export function isProtocolRelative(url) {
+  return url.startsWith('//');
+}
+
 export function slugify(text) {
   return text
     .trim()
@@ -82,7 +100,7 @@ function parseImgTag(raw, line) {
   // GitHub renders it natively) or an absolute https URL. Anything else --
   // http, protocol-relative, data: -- is rejected here; the public-doc lint
   // additionally requires relative files to exist and bans third-party hosts.
-  if (/^[a-z][a-z0-9+.-]*:/i.test(attrs.src) && !/^https:\/\//i.test(attrs.src)) {
+  if (hasScheme(attrs.src) && !/^https:\/\//i.test(attrs.src)) {
     throw new UnsupportedMarkdownError(`<img> src must be relative or https: "${attrs.src}"`, line);
   }
   return { type: 'image', src: attrs.src, alt: attrs.alt ?? '', width: attrs.width, height: attrs.height };
@@ -433,10 +451,12 @@ function parseList(lines, start, slug) {
 /**
  * Visit every node in a parsed tree, blocks and inlines alike.
  *
- * The parser owns the node schema, so it owns the traversal too — a consumer
- * that mirrors the container keys drifts the moment a node type gains a child
- * list. (The first such mirror missed table body cells entirely, since a row
- * is an array of cell arrays rather than a node.)
+ * Every value is descended into, rather than a named list of container keys:
+ * such a list is a mirror of the node schema, and it drifts the moment a node
+ * type gains a child array. (The first such mirror missed table body cells
+ * entirely, since a row is an array of cell arrays rather than a node.) The
+ * guard below discards strings, numbers, and nulls, so `align: ['left', null]`
+ * and every `value`/`raw` string costs nothing.
  *
  * Accepts a node, an array, or an arbitrarily nested array of either.
  */
@@ -447,13 +467,8 @@ export function visit(tree, fn) {
   }
   if (!tree || typeof tree !== 'object') return;
   fn(tree);
-  for (const key of CONTAINER_KEYS) {
-    if (key in tree) visit(tree[key], fn);
-  }
+  for (const value of Object.values(tree)) visit(value, fn);
 }
-
-/** Every key on any node that can hold child nodes. */
-const CONTAINER_KEYS = ['children', 'items', 'header', 'rows', 'blocks'];
 
 export function inlineToText(nodes) {
   return nodes

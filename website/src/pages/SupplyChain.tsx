@@ -4,14 +4,21 @@ import cargoDeps from "../data/dependencies-cargo.json";
 import npmDeps from "../data/dependencies-npm.json";
 import runtimeDeps from "../data/dependencies-runtime.json";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
+import { SITE_LINK_CLASS } from "../components/site-tokens";
+import { type MetaArgs } from "react-router";
+import { siteMeta } from "../lib/site-meta";
 
-// Single source of truth for caramel links, so links in body copy render at
-// the same full brightness as links in the dependency tables. Body copy is
-// dimmed with a text-color alpha (text-[…]/70) rather than `opacity`, since
-// `opacity` would composite the link along with the surrounding text.
-const link = tv({
-  base: "text-[var(--color-caramel)] underline-offset-2 hover:underline",
-});
+export function meta({ location }: MetaArgs) {
+  return siteMeta(location.pathname, {
+    title: "Supply chain — Dormouse",
+    description:
+      "Every dependency Dormouse ships, with its version, license, and author, generated from the lockfiles.",
+  });
+}
+
+// Wrapped in `tv()` so the tables can compose it; the recipe itself is the
+// site-wide one, so links here render at the same brightness as everywhere.
+const link = tv({ base: SITE_LINK_CLASS });
 
 type PackageDependency = {
   name: string;

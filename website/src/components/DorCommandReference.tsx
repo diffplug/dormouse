@@ -8,7 +8,8 @@
  * See docs/specs/website-docs.md -> /docs/dor reference.
  */
 
-import { ACCENT_TEXT_CLASS, PRE_CLASS } from "./docs-tokens";
+import { AnchoredHeading } from "./MarkdownDocument";
+import { ACCENT_TEXT_CLASS, PRE_CLASS, TABLE_CLASS, TABLE_ROW_CLASS, TABLE_WRAP_CLASS } from "./docs-tokens";
 
 export type DefinitionGroup = { label: string; rows: { term: string; description: string }[] };
 export type LabelledBlock = { label: string; body: string };
@@ -24,21 +25,10 @@ export type CommandSection = {
   raw: string;
 };
 
-/** A linkable section heading, shared by the CLI page and its command sections. */
-export function AnchoredHeading({ id, children, className = "mb-4" }: { id: string; children: React.ReactNode; className?: string }) {
-  return (
-    <h2 id={id} className={`font-display text-2xl scroll-mt-24 ${className}`}>
-      <a href={`#${id}`} className="no-underline hover:underline underline-offset-4">
-        {children}
-      </a>
-    </h2>
-  );
-}
-
 export default function DorCommandReference({ section }: { section: CommandSection }) {
   return (
     <section className="mb-14">
-      <AnchoredHeading id={section.id} className="mb-1">{section.title}</AnchoredHeading>
+      <AnchoredHeading id={section.id} spacing="mb-1">{section.title}</AnchoredHeading>
       <p className="mb-4 font-mono text-sm opacity-60">{section.invocation}</p>
 
       {section.usage.length > 0 && (
@@ -56,11 +46,11 @@ export default function DorCommandReference({ section }: { section: CommandSecti
       {section.definitions.map((group, i) => (
         <div key={i} className="mb-6">
           <h3 className="mb-2 font-display text-sm uppercase tracking-wide opacity-50">{group.label}</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left">
+          <div className={TABLE_WRAP_CLASS}>
+            <table className={TABLE_CLASS}>
               <tbody>
                 {group.rows.map((row, r) => (
-                  <tr key={r} className="border-b border-[var(--color-text)]/10">
+                  <tr key={r} className={TABLE_ROW_CLASS}>
                     <td className={`py-2 pr-4 align-top font-mono text-sm whitespace-nowrap ${ACCENT_TEXT_CLASS}`}>
                       {row.term}
                     </td>

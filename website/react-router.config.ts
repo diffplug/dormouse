@@ -1,4 +1,5 @@
 import type { Config } from "@react-router/dev/config";
+import { DOCS_PAGES } from "./src/lib/docs-pages";
 
 export default {
   appDirectory: "src",
@@ -12,9 +13,7 @@ export default {
       "/playground/pocket",
       "/pocket",
       "/changelog",
-      "/docs/dor",
-      "/docs/agent-skill",
-      "/docs/self-host",
+      ...DOCS_PAGES.map((page) => page.path),
       "/supply-chain",
     ];
   },

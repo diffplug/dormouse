@@ -6,6 +6,7 @@
  * homepage keeps its own palette (docs/specs/website-docs.md -> Reference page
  * chrome).
  */
+import { loadJson, saveJson } from "dormouse-lib/lib/local-json-store";
 
 /**
  * Softer than the site's `#000`, still dark enough to arrive from a black
@@ -15,37 +16,26 @@
 export const DOCS_THEME_ID = "vscode.theme-defaults.dark-visual-studio";
 
 /**
- * Whether the reader has ever chosen a theme.
+ * Whether the reader is done with the theme prompt — they picked a theme, or
+ * they closed it. Either way they have seen the offer, and repeating it is a
+ * nuisance rather than a service.
  *
  * Deliberately not `dormouse:active-theme`: `restoreActiveTheme` persists the
  * id it resolved, so that key exists after the first page load whether or not
  * anyone chose anything, and a prompt keyed on it would never show twice
  * (docs/specs/theme.md -> Where the user picks a theme).
  */
-const CHOSE_KEY = "dormouse:docs-theme-chosen";
+const DISMISSED_KEY = "dormouse:docs-theme-prompt-dismissed";
 
-/** Storage throws in some privacy modes; a reader with no storage is prompted
- *  every visit rather than seeing the page fail to render. */
-function storage(): Storage | null {
-  try {
-    return typeof localStorage === "undefined" ? null : localStorage;
-  } catch {
-    return null;
-  }
+/**
+ * Storage is absent in prerender and throws outright in some privacy modes;
+ * `loadJson`/`saveJson` already collapse both to the fallback, so a reader with
+ * no storage is prompted every visit rather than seeing the page fail.
+ */
+export function isThemePromptDismissed(): boolean {
+  return loadJson(DISMISSED_KEY, false) === true;
 }
 
-export function hasChosenDocsTheme(): boolean {
-  try {
-    return storage()?.getItem(CHOSE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-export function rememberDocsThemeChoice(): void {
-  try {
-    storage()?.setItem(CHOSE_KEY, "1");
-  } catch {
-    // Nothing to recover: the prompt simply returns on the next visit.
-  }
+export function dismissThemePrompt(): void {
+  saveJson(DISMISSED_KEY, true);
 }

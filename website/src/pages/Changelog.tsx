@@ -1,7 +1,15 @@
 import type { ReactNode } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useParams, type MetaArgs } from "react-router";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 import changelog from "../data/changelog.json";
+import { siteMeta } from "../lib/site-meta";
+
+export function meta({ location }: MetaArgs) {
+  return siteMeta(location.pathname, {
+    title: "Changelog — Dormouse",
+    description: "Every Dormouse release, what changed in it, and when it shipped.",
+  });
+}
 
 interface ChangelogItem {
   text: string;

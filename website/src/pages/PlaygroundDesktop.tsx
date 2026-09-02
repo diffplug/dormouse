@@ -23,6 +23,7 @@ import {
   PANE_SPLASH,
   type DesktopPaneSpec,
 } from "../lib/playground-desktop-layout";
+import { SITE_LINK_CLASS } from "../components/site-tokens";
 
 type FakePtyAdapter = import("dormouse-lib/lib/platform/fake-adapter").FakePtyAdapter;
 type TerminalRegistry = typeof import("dormouse-lib/lib/terminal-registry");
@@ -74,7 +75,7 @@ function DesktopPlaygroundUnavailable() {
           This screen is too small to run the desktop playground, but it is perfect for trying the{" "}
           <Link
             to={POCKET_PLAYGROUND_PATH}
-            className="text-[var(--color-caramel)] underline-offset-2 hover:underline"
+            className={SITE_LINK_CLASS}
           >
             Pocket playground
           </Link>

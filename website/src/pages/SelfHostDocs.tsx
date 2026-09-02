@@ -7,20 +7,19 @@
  * delta withholds that contract and the assistant-directed sections; see
  * docs/specs/website-docs.md -> `/docs/self-host` runbook.
  */
+import { type MetaArgs } from "react-router";
+import { siteMeta } from "../lib/site-meta";
 import selfhost from "../data/docs.selfhost.json";
 import DocsLayout from "../components/DocsLayout";
-import { LINK_CLASS } from "../components/docs-tokens";
+import { CODE_CLASS, LINK_CLASS } from "../components/docs-tokens";
 import MarkdownDocument, { type BlockNode } from "../components/MarkdownDocument";
 
-export function meta() {
-  return [
-    { title: "Self-host — Dormouse" },
-    {
-      name: "description",
-      content:
-        "Run the Dormouse coordinating server on your own machine, reachable only from your tailnet. One installer, no database, no account.",
-    },
-  ];
+export function meta({ location }: MetaArgs) {
+  return siteMeta(location.pathname, {
+    title: "Self-host — Dormouse",
+    description:
+      "Run the Dormouse coordinating server on your own machine, reachable only from your tailnet. One installer, no database, no account.",
+  });
 }
 
 const REPO_URL = "https://github.com/diffplug/dormouse";
@@ -39,7 +38,7 @@ export default function SelfHostDocs() {
           the repository
         </a>
         , start Claude Code in it, and say{" "}
-        <code className="rounded bg-[var(--color-text)]/20 px-1.5 py-0.5 font-mono text-sm">
+        <code className={CODE_CLASS}>
           read @SELF_HOST.md and walk me through it
         </code>
         . It will run the checkpoints below with you, one at a time.

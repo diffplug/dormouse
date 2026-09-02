@@ -23,7 +23,7 @@
 import { readFile, readdir, writeFile, mkdir, copyFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createSlugger, parseMarkdown, visit } from './docs-parser.js';
+import { createSlugger, hasScheme, parseMarkdown, slugify, visit } from './docs-parser.js';
 import {
   parseSnapshot,
   parseHelp,
@@ -40,25 +40,48 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..', '..');
 const dataDir = join(__dirname, '..', 'src', 'data');
 /**
- * Guide media lives next to the guide; the site serves a copy at /images/.
+ * Guide media lives next to the guide; the site serves a copy under /guide/.
  *
- * It is `images/`, not `media/`, because `vscode-ext/media/` is the webview
- * bundle's output directory — Vite empties it on every extension build, which
- * would delete anything committed there.
+ * It is `vscode-ext/images/`, not `vscode-ext/media/`, because the latter is
+ * the webview bundle's output directory — Vite empties it on every extension
+ * build, which would delete anything committed there.
  *
- * Load-bearing beyond this repo: `vsce --baseImagesUrl https://dormouse.sh`
- * turns the guide's `images/hero.jpg` into `https://dormouse.sh/images/hero.jpg`
- * on the Marketplace and Open VSX, so the listing's images 404 if the site
- * stops serving these.
+ * The published copy gets `public/guide/` to itself, and `syncGuideMedia`
+ * deletes that directory wholesale on every build. Nothing else may write
+ * there; hand-authored site assets stay at `public/` root, where they are
+ * tracked by git rather than swept away.
+ *
+ * Load-bearing beyond this repo: `vsce --baseImagesUrl` is passed
+ * `SITE_IMAGE_BASE`, which turns the guide's `images/hero.jpg` into
+ * `https://dormouse.sh/guide/images/hero.jpg` on the Marketplace and Open VSX,
+ * so the listing's images 404 if the site stops serving these.
  */
 const mediaSrcDir = join(repoRoot, 'vscode-ext', 'images');
-const mediaOutDir = join(__dirname, '..', 'public', 'images');
-const MEDIA_URL_BASE = '/images/';
 const MEDIA_SRC_PREFIX = 'images/';
+const mediaOutDir = join(__dirname, '..', 'public', 'guide', MEDIA_SRC_PREFIX);
+const MEDIA_URL_BASE = `/guide/${MEDIA_SRC_PREFIX}`;
 /** This site's own origin, as the canonical sources are forced to spell it. */
-const SITE_ORIGIN = 'https://dormouse.sh';
+export const SITE_ORIGIN = 'https://dormouse.sh';
+/**
+ * What `vsce --baseImagesUrl` must be given, everywhere it is invoked.
+ *
+ * `vsce` resolves the guide's repo-relative `images/x` against this, so it is
+ * the site copy's parent, not the directory itself. Pinned by
+ * scripts/public-docs-lint.mjs -> checkImageBaseUrl.
+ */
+export const SITE_IMAGE_BASE = `${SITE_ORIGIN}/guide`;
 /** Where the unpublished half of SELF_HOST.md is still readable. */
 const SELF_HOST_CANONICAL_URL = 'https://github.com/diffplug/dormouse/blob/main/SELF_HOST.md';
+
+/** Every page's shell supplies its own title and breadcrumb, so no published
+ *  document keeps the `#` heading its file leads with. */
+const DROP_DOCUMENT_TITLE = {
+  id: 'drop-document-title',
+  reason: 'The docs page shell supplies its own title and breadcrumb.',
+  /** @param {{type: string, depth?: number}} block */
+  match: (block) => block.type === 'heading' && block.depth === 1,
+  operation: 'remove',
+};
 
 /**
  * The complete guide delta, per docs/specs/website-docs.md.
@@ -67,15 +90,7 @@ const SELF_HOST_CANONICAL_URL = 'https://github.com/diffplug/dormouse/blob/main/
  * entry names exactly one target and fails the build when that target is absent
  * or ambiguous — no regexes over prose, no line-number patches.
  */
-const DOCS_DELTA = [
-  {
-    id: 'drop-document-title',
-    reason: 'The docs page shell supplies its own title and breadcrumb.',
-    /** @param {{type: string, depth?: number}} block */
-    match: (block) => block.type === 'heading' && block.depth === 1,
-    operation: 'remove',
-  },
-];
+const DOCS_DELTA = [DROP_DOCUMENT_TITLE];
 
 /** Match the one heading whose text is exactly `text`. */
 const headingNamed = (text) => (block) => block.type === 'heading' && block.text === text;
@@ -90,12 +105,7 @@ const headingNamed = (text) => (block) => block.type === 'heading' && block.text
  * `@SELF_HOST.md` in a checkout needs all of it in one place.
  */
 const SELF_HOST_DELTA = [
-  {
-    id: 'drop-document-title',
-    reason: 'The docs page shell supplies its own title and breadcrumb.',
-    match: (block) => block.type === 'heading' && block.depth === 1,
-    operation: 'remove',
-  },
+  DROP_DOCUMENT_TITLE,
   {
     id: 'drop-repo-invocation',
     reason: 'The opening blockquote tells a reader to open the file in a checkout.',
@@ -122,31 +132,14 @@ const SELF_HOST_DELTA = [
   },
 ];
 
-/** Sections of dor/skill.md reused verbatim as the CLI page's introduction. */
-const CLI_INTRO_SECTIONS = [
-  { prefix: 'Targeting', id: 'targeting', title: 'Targeting' },
-  { prefix: 'Surface handles', id: 'surface-handles', title: 'Surface handles' },
-];
-
 /**
- * Contextual links rendered beside matching agent-skill headings.
+ * Sections of dor/skill.md reused verbatim as the CLI page's introduction.
  *
- * The prose half is derived from CLI_INTRO_SECTIONS so a renamed skill section
- * is edited in one table, not two. `command` entries match on a backticked
- * token inside the heading, because skill headings carry descriptive suffixes
- * ("`dor list` — find surfaces").
+ * Each entry is the prefix its heading starts with — skill headings carry
+ * descriptive suffixes ("Targeting: three ways to name a surface") — and is
+ * also the section's title and, slugged, its anchor on /docs/dor.
  */
-const SKILL_REFERENCES = [
-  ...CLI_INTRO_SECTIONS.map((section) => ({ prefix: section.prefix, anchor: section.id })),
-  { command: 'dor list', anchor: 'list' },
-  { command: 'dor split', anchor: 'split' },
-  { command: 'dor ensure', anchor: 'ensure' },
-  { command: 'dor send', anchor: 'send' },
-  { command: 'dor read', anchor: 'read' },
-  { command: 'dor kill', anchor: 'kill' },
-  { command: 'dor ab', anchor: 'agent-browser' },
-  { command: 'dor iframe', anchor: 'iframe' },
-];
+const CLI_INTRO_SECTIONS = ['Targeting', 'Surface handles'];
 
 /**
  * Apply one document's delta.
@@ -291,7 +284,7 @@ function resolveGuideMedia(blocks, available) {
   const used = new Set();
   visit(blocks, (node) => {
     if (node.type !== 'image' || !node.src) return;
-    if (/^[a-z][a-z0-9+.-]*:|^\//i.test(node.src)) {
+    if (hasScheme(node.src) || node.src.startsWith('/')) {
       throw new Error(`guide image "${node.src}" must be a repo-relative local file`);
     }
     const rel = node.src.replace(/^\.\//, '');
@@ -347,34 +340,55 @@ async function syncGuideMedia(files) {
   await Promise.all(files.map((f) => copyFile(join(mediaSrcDir, f), join(mediaOutDir, f))));
 }
 
-async function buildGuide() {
-  const markdown = await readFile(join(repoRoot, 'vscode-ext', 'README.md'), 'utf8');
+/**
+ * One published page from one canonical Markdown file.
+ *
+ * Both Markdown pages need the same steps in the same order, and the only
+ * difference is an option: `canonicalUrl` sends links into withheld sections
+ * off-site rather than leaving them dangling. Written once because two copies
+ * of this had already drifted on the order of the last three steps, which is
+ * how one page quietly loses a guarantee the other still has.
+ */
+async function buildDocument({ file, delta, label, fallbackTitle, canonicalUrl }) {
+  const markdown = await readFile(join(repoRoot, file), 'utf8');
 
   // One slugger for the whole document, so ids are unique across the page.
   const parsed = parseMarkdown(markdown, { slug: createSlugger() });
-  const title = parsed.blocks.find((b) => b.type === 'heading' && b.depth === 1)?.text ?? 'Documentation';
+  const title = parsed.blocks.find((b) => b.type === 'heading' && b.depth === 1)?.text ?? fallbackTitle;
 
-  const { blocks, applied } = applyDelta(parsed.blocks, DOCS_DELTA, '/docs');
+  const { blocks, applied, removedIds } = applyDelta(parsed.blocks, delta, label);
   // Derived from the post-delta tree, so the delta is expressed once: whatever
   // it removes disappears from the heading inventory and the TOC for free.
   const headings = headingsOf(blocks);
-  assertUniqueIds(headings.map((h) => h.id), '/docs');
-  assertAnchorsResolve(blocks, headings, '/docs');
+  assertUniqueIds(headings.map((h) => h.id), label);
 
-  const available = (await readdir(mediaSrcDir)).sort();
-  const media = resolveGuideMedia(blocks, available);
+  // Both rewrites run before the assertion: a link into a withheld section is
+  // not dangling once it has gained the origin that still serves it.
+  const withheldLinks = canonicalUrl ? resolveRemovedAnchors(blocks, removedIds, canonicalUrl) : [];
   const localizedLinks = localizeSiteLinks(blocks);
+  assertAnchorsResolve(blocks, headings, label);
 
   return {
-    source: 'vscode-ext/README.md',
+    source: file,
     title,
     blocks,
     headings,
     toc: buildToc(headings),
     delta: applied,
-    media: { available, ...media },
+    withheldLinks,
     localizedLinks,
   };
+}
+
+async function buildGuide() {
+  const page = await buildDocument({
+    file: 'vscode-ext/README.md',
+    delta: DOCS_DELTA,
+    label: '/docs',
+    fallbackTitle: 'Documentation',
+  });
+  const available = (await readdir(mediaSrcDir)).sort();
+  return { ...page, media: { available, ...resolveGuideMedia(page.blocks, available) } };
 }
 
 /**
@@ -385,31 +399,14 @@ async function buildGuide() {
  * `deploy/local/`. Publishing a copy would mean two files to keep true about
  * how a server is installed.
  */
-async function buildSelfHost() {
-  const markdown = await readFile(join(repoRoot, 'SELF_HOST.md'), 'utf8');
-
-  const parsed = parseMarkdown(markdown, { slug: createSlugger() });
-  const title = parsed.blocks.find((b) => b.type === 'heading' && b.depth === 1)?.text ?? 'Self-host';
-
-  const { blocks, applied, removedIds } = applyDelta(parsed.blocks, SELF_HOST_DELTA, '/docs/self-host');
-  const headings = headingsOf(blocks);
-  assertUniqueIds(headings.map((h) => h.id), '/docs/self-host');
-
-  const withheldLinks = resolveRemovedAnchors(blocks, removedIds, SELF_HOST_CANONICAL_URL);
-  const localizedLinks = localizeSiteLinks(blocks);
-  assertAnchorsResolve(blocks, headings, '/docs/self-host');
-
-  return {
-    source: 'SELF_HOST.md',
-    title,
-    blocks,
-    headings,
-    toc: buildToc(headings),
-    delta: applied,
-    withheldLinks,
-    localizedLinks,
-  };
-}
+const buildSelfHost = () =>
+  buildDocument({
+    file: 'SELF_HOST.md',
+    delta: SELF_HOST_DELTA,
+    label: '/docs/self-host',
+    fallbackTitle: 'Self-host',
+    canonicalUrl: SELF_HOST_CANONICAL_URL,
+  });
 
 /** Blocks belonging to a heading: everything up to the next heading of <= depth. */
 function sectionBlocks(blocks, heading) {
@@ -482,11 +479,12 @@ async function buildCli(skill) {
 
   // Intro sections lifted from the skill, not re-authored here.
   const skillHeadings = skill.blocks.filter((b) => b.type === 'heading');
-  const intro = CLI_INTRO_SECTIONS.map(({ prefix, id, title }) => {
+  const intro = CLI_INTRO_SECTIONS.map((prefix) => {
     const heading = findExactlyOneHeading(skillHeadings, (h) => h.text.startsWith(prefix), prefix);
-    return { id, title, blocks: sectionBlocks(skill.blocks, heading) };
+    return { id: slugify(prefix), title: prefix, blocks: sectionBlocks(skill.blocks, heading) };
   });
 
+  const rootSection = toSection(root);
   const commands = inventory.map((name) => toSection(snapshots.get(name)));
 
   // Every id addressable on /docs/dor, from all three of its sources: the
@@ -501,7 +499,12 @@ async function buildCli(skill) {
   ];
   assertUniqueIds(anchors, '/docs/dor');
 
-  return { source: 'dor/test/snapshots/help/', intro, root: toSection(root), commands, anchors };
+  // Emitted, not assembled in the page: every docs page reads `toc` off its own
+  // data file, so the table of contents has one owner for all three.
+  const entry = ({ id, title }) => ({ id, text: title, children: [] });
+  const toc = [...intro.map(entry), entry(rootSection), ...commands.map(entry)];
+
+  return { source: 'dor/test/snapshots/help/', intro, root: rootSection, commands, anchors, toc };
 }
 
 async function buildSkill() {
@@ -513,25 +516,45 @@ async function buildSkill() {
   return { source: 'dor/skill.md', blocks: parsed.blocks, headings: parsed.headings, localizedLinks };
 }
 
-/** Attach a CLI reference link to each mapped skill heading. */
+/**
+ * Attach a CLI reference link to each skill heading that has a counterpart.
+ *
+ * Derived, never listed. The prose sections come from CLI_INTRO_SECTIONS; a
+ * command section is any skill heading whose backticked tokens name a `dor`
+ * subcommand, so documenting a new command in dor/skill.md earns its link with
+ * no table to remember. A heading that names a subcommand with no section on
+ * /docs/dor fails the build rather than publishing silently unlinked — the one
+ * failure a hardcoded list could not see.
+ */
 function linkSkillHeadings(skill, cli) {
   const anchors = new Set(cli.anchors);
   const headings = skill.blocks.filter((b) => b.type === 'heading');
   const links = {};
 
-  for (const rule of SKILL_REFERENCES) {
-    if (!anchors.has(rule.anchor)) {
-      throw new Error(`skill reference target "#${rule.anchor}" does not exist in the CLI reference`);
+  for (const prefix of CLI_INTRO_SECTIONS) {
+    const anchor = slugify(prefix);
+    if (!anchors.has(anchor)) {
+      throw new Error(`skill reference target "#${anchor}" does not exist in the CLI reference`);
     }
-    const label = rule.command ?? rule.prefix;
-    const heading = findExactlyOneHeading(
-      headings,
-      rule.command
-        ? (h) => headingCodeTokens(h).includes(rule.command)
-        : (h) => h.text.startsWith(rule.prefix),
-      label,
-    );
-    links[heading.id] = { href: `/docs/dor#${rule.anchor}`, label };
+    const heading = findExactlyOneHeading(headings, (h) => h.text.startsWith(prefix), prefix);
+    links[heading.id] = { href: `/docs/dor#${anchor}`, label: prefix };
+  }
+
+  for (const heading of headings) {
+    // A heading may name a command more than one way ("`dor ab` /
+    // `dor agent-browser`"). It is labelled by the spelling it leads with and
+    // linked to the first that has a section.
+    const named = headingCodeTokens(heading)
+      .map((token) => /^dor (\S+)$/.exec(token)?.[1])
+      .filter((name) => name !== undefined);
+    if (named.length === 0) continue;
+    const anchor = named.find((name) => anchors.has(name));
+    if (anchor === undefined) {
+      throw new Error(
+        `skill heading "${heading.text}" names dor ${named.join('/')}, which has no section in the CLI reference`,
+      );
+    }
+    links[heading.id] = { href: `/docs/dor#${anchor}`, label: `dor ${named[0]}` };
   }
 
   return links;

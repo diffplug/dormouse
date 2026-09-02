@@ -20,6 +20,7 @@ import tinyIconUrl from "../assets/icon-tiny-dark.png";
 import phoneMockupUrl from "../assets/phone-mockup.webp";
 import standaloneLatest from "@standalone-latest";
 import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
+import { SITE_CODE_CLASS, SITE_LINK_CLASS } from "../components/site-tokens";
 
 /** Multiplier on scroll required to drive the hero animation.
  *  1 = baseline, 2 = half as sensitive, 0.5 = twice as sensitive. */
@@ -812,24 +813,24 @@ export default function Home() {
             <p className="mb-4 text-lg leading-relaxed opacity-70">
               Then you answer it. Tap the terminal and a radial menu opens under
               your thumb: drag down-right for{" "}
-              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">y</code>,
+              <code className={SITE_CODE_CLASS}>y</code>,
               up-right for{" "}
-              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">n</code>,
+              <code className={SITE_CODE_CLASS}>n</code>,
               or out to Esc, Ctrl+C, and a quit menu. One drag and the agent's
               moving again. No keyboard, no squinting.
             </p>
             <p className="mb-4 text-lg leading-relaxed opacity-70">
               The relay is one Node process. No database — state is JSON on
               disk, and push keys mint themselves on first boot. Put{" "}
-              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">tailscale serve</code>{" "}
+              <code className={SITE_CODE_CLASS}>tailscale serve</code>{" "}
               in front of it and you're done: no account, no cloud dependency,
               nothing anyone can shut off. Your laptop decides which phones get
               notified — the server isn't allowed to choose for it. The{" "}
-              <a href="/docs/self-host" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">self-host runbook</a>{" "}
+              <a href="/docs/self-host" className={SITE_LINK_CLASS}>self-host runbook</a>{" "}
               walks the whole install.
             </p>
             <p className="text-lg leading-relaxed opacity-70">
-              <a href="/playground/pocket" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">Dormouse Pocket</a>{" "}
+              <a href="/playground/pocket" className={SITE_LINK_CLASS}>Dormouse Pocket</a>{" "}
               is in development — try the phone interface in your browser, and
               sign up there to hear when it's ready.
             </p>
@@ -842,14 +843,14 @@ export default function Home() {
             <h2 className="font-display text-xl mb-6">Terminals that know their ports</h2>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
               Six panes running and something's serving{" "}
-              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">:3000</code>.
+              <code className={SITE_CODE_CLASS}>:3000</code>.
               Which one?
             </p>
             <p className="text-lg leading-relaxed opacity-70">
               Right-click a pane and Dormouse lists the ports that pane's
               process tree is actually listening on — hit a number to open one.
               No{" "}
-              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">lsof</code>,
+              <code className={SITE_CODE_CLASS}>lsof</code>,
               no scrolling back to find where Vite printed the URL.
             </p>
           </div>
@@ -920,7 +921,7 @@ export default function Home() {
               alt-tab and no second monitor.
             </p>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
-              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">dor ab open surface:2</code>{" "}
+              <code className={SITE_CODE_CLASS}>dor ab open surface:2</code>{" "}
               aims a browser at the port that terminal is serving — the one from
               the section above. Your agents run the same command, so when an
               agent wants to see what it just built, it opens a pane you're
@@ -929,13 +930,13 @@ export default function Home() {
             </p>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
               Dormouse drives the{" "}
-              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">agent-browser</code>{" "}
+              <code className={SITE_CODE_CLASS}>agent-browser</code>{" "}
               you already have installed — it doesn't ship a browser of its own.
             </p>
             <p className="text-base leading-relaxed opacity-60">
-              <a href="/docs/dor#agent-browser" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">CLI reference</a>
+              <a href="/docs/dor#agent-browser" className={SITE_LINK_CLASS}>CLI reference</a>
               {" · "}
-              <a href="/docs/agent-skill" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">Agent skill</a>
+              <a href="/docs/agent-skill" className={SITE_LINK_CLASS}>Agent skill</a>
             </p>
           </div>
         </section>
@@ -947,7 +948,7 @@ export default function Home() {
             <p className="text-lg leading-relaxed opacity-70 mb-4">
               Click and drag in a "mouse conformant" terminal doesn't select
               text; it fires escape code{" "}
-              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">{"\\e[<0;x;yM"}</code>{" "}
+              <code className={SITE_CODE_CLASS}>{"\\e[<0;x;yM"}</code>{" "}
               at whatever's running. Dormouse notices when a TUI has grabbed the
               mouse and hands you a one-click override, so you can just — select
               the thing.
@@ -956,7 +957,7 @@ export default function Home() {
               Then copy it the way you meant it. <strong className="font-semibold opacity-100">Raw</strong> keeps
               the hard wraps; <strong className="font-semibold opacity-100">Rewrapped</strong> joins them back
               into the line the program actually printed. Tap{" "}
-              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">e</code>{" "}
+              <code className={SITE_CODE_CLASS}>e</code>{" "}
               mid-drag to snap the selection out to the whole URL or file path.
             </p>
           </div>

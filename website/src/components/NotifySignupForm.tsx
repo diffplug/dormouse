@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { CircleNotchIcon } from "@phosphor-icons/react";
+import { SITE_LINK_CLASS } from "./site-tokens";
 
 const EMAIL_REGEX =
   /^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
@@ -79,7 +80,7 @@ export function NotifySignupForm() {
         This signs you up for my personal devlog{" "}
         <a
           href="https://nedshed.dev"
-          className="text-[var(--color-caramel)] underline-offset-2 hover:underline"
+          className={SITE_LINK_CLASS}
         >
           nedshed.dev
         </a>{" "}

@@ -3,6 +3,7 @@ import {
   route,
   type RouteConfig,
 } from "@react-router/dev/routes";
+import { DOCS_PAGES } from "./lib/docs-pages";
 
 export default [
   index("./pages/Home.tsx"),
@@ -12,8 +13,6 @@ export default [
   route("pocket", "./pages/Pocket.tsx"),
   route("changelog", "./pages/Changelog.tsx"),
   route("changelog/after/:version", "./pages/ChangelogAfter.tsx"),
-  route("docs/dor", "./pages/DorDocs.tsx"),
-  route("docs/agent-skill", "./pages/AgentSkillDocs.tsx"),
-  route("docs/self-host", "./pages/SelfHostDocs.tsx"),
+  ...DOCS_PAGES.map((page) => route(page.path.slice(1), page.module)),
   route("supply-chain", "./pages/SupplyChain.tsx"),
 ] satisfies RouteConfig;

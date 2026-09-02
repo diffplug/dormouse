@@ -6,21 +6,20 @@
  * in `dor/skill.md`: an older installed CLI must stay self-contained and
  * version-matched rather than pointing its instructions at the latest website.
  */
+import { type MetaArgs } from "react-router";
+import { siteMeta } from "../lib/site-meta";
 import { useState } from "react";
 import skill from "../data/docs.skill.json";
 import DocsLayout from "../components/DocsLayout";
 import { ACCENT_HOVER_BORDER_CLASS, ACCENT_HOVER_TEXT_CLASS, LINK_CLASS } from "../components/docs-tokens";
 import MarkdownDocument, { type BlockNode } from "../components/MarkdownDocument";
 
-export function meta() {
-  return [
-    { title: "Agent skill — Dormouse" },
-    {
-      name: "description",
-      content:
-        "The agent skill Dormouse bundles: how an agent drives panes, terminals, and browser surfaces with dor.",
-    },
-  ];
+export function meta({ location }: MetaArgs) {
+  return siteMeta(location.pathname, {
+    title: "Agent skill — Dormouse",
+    description:
+      "The agent skill Dormouse bundles: how an agent drives panes, terminals, and browser surfaces with dor.",
+  });
 }
 
 function CopyButton({ text, children }: { text: string; children: React.ReactNode }) {

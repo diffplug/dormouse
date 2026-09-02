@@ -44,8 +44,9 @@ GitHub.
 The guide is not served by this site. It was rendered at `/docs`; that page and
 every link to it were removed, and the guide is now read where it is published.
 The generator still parses it on every build, for two reasons that outlive the
-page: the media sync is what puts `vscode-ext/images/` on `dormouse.sh`, which
-the packaged listing depends on (see below), and the parsed guide is what a
+page: the pass validates the guide's media against the Marketplace rules and
+copies `vscode-ext/images/` to `website/public/guide/images/`, which the
+packaged listing resolves its images against, and the parsed guide is what a
 replacement page would render. Its data file is generated and unconsumed. The
 lint's guide checks still run, because they constrain the guide as a
 *Marketplace listing*, not as a website page.
@@ -115,8 +116,8 @@ verified:
 | --- | --- |
 | GitHub | Natively, relative to `vscode-ext/` |
 | Packaged extension pane | From `images/` inside the VSIX, retained by `!images/**` in `.vscodeignore` |
-| Marketplace / Open VSX | `vsce --baseImagesUrl https://dormouse.sh` rewrites both Markdown images **and** raw `<img src>` attributes at package time |
-| `dormouse.sh` | The generator copies `vscode-ext/images/` to `website/public/images/`, which is what `--baseImagesUrl` above resolves against |
+| Marketplace / Open VSX | `vsce --baseImagesUrl https://dormouse.sh/guide` rewrites both Markdown images **and** raw `<img src>` attributes at package time |
+| `dormouse.sh` | The generator copies `vscode-ext/images/` to `website/public/guide/images/`, which is what `--baseImagesUrl` above resolves against |
 
 Links back to this site take the same shape of treatment. The guide spells them
 absolutely (`https://dormouse.sh/docs/dor`) because the Marketplace, Open VSX,
@@ -135,12 +136,15 @@ bare scheme check. A new documentation source rendered through that component
 through `localizeSiteLinks` too, or its site links will open in a new tab
 pointed at production.
 
-`--baseImagesUrl` is passed explicitly in `vscode-ext/package.json` and in the
-release workflow rather than letting `vsce` infer a base, because inference
-uses the repository root and this extension lives in a subdirectory.
-- Critical documentation, install, issue, and media links are explicit absolute
-  URLs. The monorepo does not rely on `vsce` inferring a relative subdirectory
-  base for critical navigation.
+`--baseImagesUrl` is passed explicitly rather than letting `vsce` infer a base,
+because inference uses the repository root and this extension lives in a
+subdirectory. **Must** pass it on every `vsce` invocation that builds a VSIX;
+`checkImageBaseUrl` pins them to `SITE_IMAGE_BASE`, exempting a
+`--packagePath` republish whose URLs were already rewritten.
+
+**Never** write to `website/public/guide/` from anything but the generator,
+which deletes it wholesale each build. Hand-authored assets stay at `public/`
+root, where git tracks them.
 - The same content renders usefully in Open VSX and GitHub Markdown.
 
 The listing's discovery contract also includes `displayName`, `description`,
@@ -219,6 +223,20 @@ external-link attributes, mobile table access, and mobile-width media without
 horizontal overflow. No HTML string is ever injected —
 `dangerouslySetInnerHTML` is deliberately absent.
 
+## Per-page head tags
+
+`website/src/lib/site-meta.ts` builds every page's title, description,
+canonical, and social cards. The root route calls it with the homepage's copy;
+a page overrides by exporting `meta` and calling it with its own.
+
+**Never** hardcode one of those in `root.tsx`'s `<head>`. React Router renders
+only the deepest route's `meta`, and a `<head>` tag is emitted before
+`<Meta />` — so a page with its own `meta` shipped two `<title>` elements, and
+crawlers read the first. **Must** give every page a canonical on its own path;
+one origin-wide canonical asks search engines to treat every page as a
+duplicate of the homepage. Canonicals carry the trailing slash the host
+redirects to. `checkPageHeadTags` and `checkSiteOrigin` pin both.
+
 ## Reference page chrome
 
 All three published pages share `DocsLayout`: the site header, an `h1` and
@@ -242,10 +260,10 @@ reader who picks one would drop the page's links below WCAG AA. Caramel stays
 where it cannot be rethemed — the wordmark, the header, the homepage — and is
 the fallback before a theme applies.
 
-**A reader who has never chosen a theme is prompted until they do.** Keyed on
-the website's own `dormouse:docs-theme-chosen`, set from the picker's `onPick`:
-`dormouse:active-theme` cannot answer it, because restoring writes that key
-too.
+**A reader is prompted to pick a theme until they answer.** Picking one and
+closing the prompt both count — a reader who declined has seen the offer.
+Keyed on the website's own `dormouse:docs-theme-prompt-dismissed`, because
+`dormouse:active-theme` cannot answer it: restoring writes that key too.
 
 ## `/docs/dor` reference
 
@@ -330,24 +348,16 @@ checkout (`read @SELF_HOST.md and walk me through it`), and
 true about how a server is installed.
 
 The file is two documents in one, and `SELF_HOST_DELTA` publishes only the
-first:
+first: it withholds the `#` title, the opening blockquote, and the three
+sections addressed to the assistant or to a maintainer, each rule carrying its
+own `reason`. What survives is the runbook — prerequisites, what the installer
+does, the definition of done, the six checkpoints, official references,
+troubleshooting boundaries, and keeping the relay up while the laptop sleeps.
 
-| Withheld | Why |
-| --- | --- |
-| `# ` title | The page shell supplies its own |
-| Opening blockquote | Tells a reader to open the file in a checkout |
-| **Instructions to the assistant** | Addressed to the assistant, not a reader |
-| **Final handoff** | Tells the assistant what to report back |
-| **Installer contract (maintainers)** | The maintainer half, with its four subsections |
-
-What survives is the runbook: prerequisites, what the installer does, the
-definition of done, the six checkpoints, official references, troubleshooting
-boundaries, and keeping the relay up while the laptop sleeps.
-
-**Must** keep every withheld section present in `SELF_HOST.md`. A rule that
-matches nothing fails the build rather than silently publishing what it meant
-to hold back; `checkSelfHostWithholding` in the lint states the same list from
-the other direction, so a rename is caught as a rename.
+**Must** keep every withheld section present in `SELF_HOST.md`. `applyDelta`
+owns this: a rule matching nothing fails the build naming the rule, so a
+renamed section is a decision rather than a silent republication of what the
+delta meant to hold back.
 
 The page carries one authored paragraph the source does not: a pointer to
 running the runbook with an assistant. It belongs to the page because it is
@@ -384,11 +394,6 @@ The generated data contains the canonical product-guide blocks and heading
 inventory with the explicit fixed delta applied, ordered semantic CLI nodes
 plus exact raw help, and the skill blocks plus validated heading-to-reference
 links. The raw skill Markdown is deliberately not emitted.
-
-Generating the guide is not dead work even with no page consuming it: the same
-pass validates the guide's media against the Marketplace rules and copies
-`vscode-ext/images/` to `website/public/images/`, which the packaged listing
-resolves its images against.
 
 Website `predev`, `pretest`, and `prebuild` run the generator, mirroring
 `generate-changelog.js`. Browser code consumes generated data rather than
@@ -437,10 +442,14 @@ as shipped behavior.
 `scripts/public-docs-lint.mjs`, invoked by root `pnpm test` after the spec lint,
 verifies:
 
-- the canonical guide contains its required product sections;
+- the canonical guide carries every section listed in the `text` fence above,
+  read out of this spec rather than restated in the lint;
 - neither public README nor `SELF_HOST.md` contains `TODO:` placeholders;
 - every canonical Markdown source stays inside the parser's supported subset;
-- local Markdown links resolve and public links use canonical HTTPS URLs;
+- public links use canonical HTTPS URLs, and a local link resolves — read off
+  the parsed tree, so a link-shaped string in a code span is not a link.
+  `SELF_HOST.md` gets only the HTTPS half; spec-lint already resolves its
+  relative links and validates their fragments;
 - guide images are repo-relative files that exist under `vscode-ext/images/`,
   with no remote URLs and no SVG, and every file there is referenced;
 - VS Code commands named by the guide exist in `vscode-ext/package.json`, and
@@ -448,16 +457,21 @@ verifies:
 - guide heading ids are stable and unique;
 - every agent-skill reference target exists in `/docs/dor`;
 - generated command inventory matches the snapshot set exactly;
-- both READMEs link to `/docs/dor` and `/docs/agent-skill`, and the root
-  README also links to `/docs/self-host` — checked as exact URLs so a link to
-  the non-existent `/docs` cannot satisfy a prefix test. The guide carries no
+- both READMEs link to every reference page in `docs-pages.ts`, except that
+  the root README alone owns `/docs/self-host` — checked as exact URLs so a
+  link to the non-existent `/docs` cannot satisfy a prefix test. The guide carries no
   self-host obligation: it is a Marketplace listing for the editor extension,
   and running a relay server is not part of installing one;
 - the homepage links all three root-relatively, and every `/docs` href on it
   resolves to a published reference — both directions, because a rewritten
   section can strand a reference's only link or reintroduce a bare `/docs`;
-- every section `SELF_HOST_DELTA` withholds is still present to withhold;
-- public copy does not present staged WebRTC as shipped.
+- every `vsce` invocation that packages the extension passes the site image
+  base;
+- no per-page head tag is hardcoded in the root route, every route that
+  exports `meta` builds it with `siteMeta`, and the two spellings of the site
+  origin agree;
+- public copy does not present staged WebRTC as shipped, for as long as WebRTC
+  is still under `## Future` in [remote-api.md](remote-api.md).
 
 Each check is isolated, so one malformed source reports its own failure instead
 of aborting the run and hiding every other problem behind a stack trace.
@@ -474,13 +488,15 @@ spec.
 | `SELF_HOST.md` | The self-host runbook and Installer contract; the runbook half is published |
 | `vscode-ext/package.json` | Listing metadata and VS Code command inventory |
 | `README.md` | Repository and contributor entry point |
-| `vscode-ext/images/` | Guide media; the generator copies it to `website/public/images/`, which the Marketplace listing loads from |
+| `vscode-ext/images/` | Guide media; the generator copies it to `website/public/guide/images/`, which the Marketplace listing loads from |
 | `dor/skill.md` | The bundled agent skill, rendered exactly at `/docs/agent-skill` |
 | `dor/test/snapshots/help/` | Tested CLI help, the source for `/docs/dor` |
+| `website/src/lib/site-meta.ts` | Every page's title, description, canonical, and social cards |
+| `website/src/lib/docs-pages.ts` | Which reference pages exist; the routes, the prerender list, the docs footer, and the lint all read it |
 | `website/src/routes.ts`, `website/src/components/SiteHeader.tsx` | The published routes and the header that omits `/docs` |
 | `website/scripts/docs-parser.js` (+ `.test.js`) | Markdown subset parser, slugger, `<img>` allowlist |
 | `website/scripts/help-parser.js` (+ `.test.js`) | Narrow CLI-help parser with losslessness |
-| `website/scripts/generate-docs.js` | Codegen: the delta tables, `buildGuide` / `buildSelfHost`, `localizeSiteLinks`, `resolveRemovedAnchors`, `SKILL_REFERENCES` |
+| `website/scripts/generate-docs.js` | Codegen: the delta tables, `buildDocument`, `localizeSiteLinks`, `resolveRemovedAnchors`, `linkSkillHeadings` |
 | `website/src/components/MarkdownDocument.tsx` | Renders parsed Markdown blocks |
 | `website/src/components/DocsLayout.tsx` | Reference page chrome: header, TOC, footer, theme restore |
 | `website/src/components/DocsThemeControl.tsx` | The floating picker and its first-visit prompt |
@@ -515,15 +531,14 @@ Remaining work, in staged order:
 
 A hosted rendering of the general product guide was built, shipped at `/docs`,
 and then withdrawn — the guide reads well enough where it is already published,
-and the page did not earn its place in the site's navigation. What remains is
-deliberately not a stub: the generator still parses the guide, applies the
-delta, resolves its media, and localizes its links, and `docs.guide.json` is
-written on every build with no consumer.
+and the page did not earn its place in the site's navigation. The pipeline is
+whole, not a stub: `docs.guide.json` is written on every build with no
+consumer.
 
-Reviving it needs a page component, a route, a prerender entry, and a way in
-from the header or the homepage — not new pipeline work. Whoever does it should
-first answer the question that removed the page: what this rendering gives a
-reader that the Marketplace and GitHub renderings do not.
+Reviving it needs a page component and an entry in `docs-pages.ts` — not new
+pipeline work. Whoever does it should first answer the question that removed
+the page: what this rendering gives a reader that the Marketplace and GitHub
+renderings do not.
 
 Until then, `/docs` must stay a 404. A link to it from public copy is a bug,
 which is why the lint checks reference URLs exactly rather than by prefix.

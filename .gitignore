@@ -43,7 +43,7 @@ website/dist/
 website/node_modules/
 website/src/data/changelog.json
 website/src/data/docs.*.json
-website/public/images/
+website/public/guide/
 
 # OS
 .DS_Store
