@@ -342,9 +342,6 @@ function useSetupQr() {
 
   const mint = useCallback(() => {
     const mine = ++mintSeq.current;
-    // The last ceremony's report goes with the code it was about: its sentence
-    // ends in "get a new one and try again", and this is the user doing that.
-    setOutcome(undefined);
     // Carry the code being replaced through the round trip: the refresh lead
     // exists precisely so a camera mid-scan keeps something live to read.
     setState((current) => ({ phase: 'minting', prev: displayedQr(current) }));
@@ -365,6 +362,24 @@ function useSetupQr() {
       }
     })();
   }, []);
+
+  /**
+   * The user asking for a code — opening the panel, or **New code**.
+   *
+   * **Not the same entry point as the refresh timer's**, which is the whole
+   * reason this wrapper exists rather than a `setOutcome(undefined)` inside
+   * {@link mint}. Clearing the report is an acknowledgement, and only a person
+   * can make one: the panel re-mints on its own anywhere from 30 s to nearly
+   * the full TTL later, and a sentence erased by that timer is one nobody read
+   * — leaving the absolute paired count, which does not move for any failure,
+   * as the only thing that ever said anything.
+   */
+  const newCode = useCallback(() => {
+    // The report goes with the code it was about: its sentence ends in "get a
+    // new one and try again", and this is the user doing that.
+    setOutcome(undefined);
+    mint();
+  }, [mint]);
 
   const close = useCallback(() => {
     mintSeq.current++;
@@ -417,7 +432,7 @@ function useSetupQr() {
   return {
     state,
     report: outcomeSentence(outcome, displayedQr(state) !== undefined),
-    mint,
+    newCode,
     close,
   };
 }
@@ -771,7 +786,7 @@ function EnrolledView({
               disabled={busy}
               aria-expanded={setup.state !== null}
               className={modalActionButton({ tone: setup.state ? 'secondary' : 'primary' })}
-              onClick={() => (setup.state ? setup.close() : setup.mint())}
+              onClick={() => (setup.state ? setup.close() : setup.newCode())}
             >
               Set up a phone
             </button>
@@ -791,7 +806,7 @@ function EnrolledView({
         <SetupPhonePanel
           state={setup.state}
           report={reportInPanel ? setup.report : undefined}
-          onNewCode={setup.mint}
+          onNewCode={setup.newCode}
           onDone={setup.close}
         />
       ) : null}

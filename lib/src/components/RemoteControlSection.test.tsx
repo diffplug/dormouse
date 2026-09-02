@@ -781,6 +781,47 @@ describe('RemoteControlSection', () => {
     expect(container.querySelector('svg[role="img"]')).toBeTruthy();
   });
 
+  it('keeps the last report through the refresh the panel arms for itself', async () => {
+    // The mint the timer runs is not the user taking a new code. Clearing the
+    // report is an acknowledgement, and the panel replaces its own code
+    // anywhere from 30 s to nearly the whole TTL later — so a shared clear
+    // erased the sentence unread, leaving the absolute paired count, which does
+    // not move for any failure, as the only thing that had said anything.
+    vi.useFakeTimers();
+    try {
+      const link = mintingLink();
+      platform = { remoteHost: link };
+      await render();
+      await act(async () => buttonLabelled('Set up a phone')!.click());
+      expect(mintCount(link)).toBe(1);
+
+      // An older ceremony, answered after this panel had moved on — the
+      // placement that leaves the report beside a live code in the first place.
+      await act(async () => {
+        link.emit('invitation', {
+          name: 'invitation',
+          inviteId: 'a-code-this-panel-replaced',
+          state: 'consumed',
+          outcome: 'code-mismatch',
+        });
+      });
+      expect(outcomeRegion()?.textContent).toContain('The two digits did not match');
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(290_000);
+      });
+      expect(mintCount(link)).toBe(2);
+      expect(outcomeRegion()?.textContent).toContain('The two digits did not match');
+
+      // The same mint, asked for, still is an acknowledgement.
+      await act(async () => buttonLabelled('New code')!.click());
+      expect(mintCount(link)).toBe(3);
+      expect(outcomeRegion()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('clears the last report when the user closes the panel it was shown in', async () => {
     // Done is the user acknowledging it. Left set, the same sentence would move
     // to the section under a panel that is gone, with nothing but a fresh mint
