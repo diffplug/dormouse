@@ -241,7 +241,8 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
     headers,
   }, (upstreamRes) => {
     const contentType = String(upstreamRes.headers['content-type'] ?? '');
-    if (!/text\/html/i.test(contentType) || grant.embedderOrigins === null) {
+    const embedder = grant.embedderOrigins?.[0];
+    if (!/text\/html/i.test(contentType) || embedder === undefined) {
       passThrough(grant, upstreamRes, res);
       return;
     }
@@ -252,7 +253,7 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
     // because the embed is the user's own `dor iframe`, not a third party
     // framing them — but only for that one embedder, so a stranger who scans
     // the port and frames it is refused by their own browser.
-    streamHtml(grant, upstreamRes, res);
+    streamHtml(grant, embedder, upstreamRes, res);
   });
   upstreamReq.on('error', (err) => {
     // Once we've begun streaming the response we can't swap in an error page —
@@ -292,10 +293,15 @@ function passThrough(grant: Grant, upstreamRes: http.IncomingMessage, res: http.
 // latin1 is byte-preserving, so searching/rewriting ASCII tags and re-encoding
 // can't corrupt multibyte bytes in <head> (e.g. an em-dash in <title>). The
 // response is chunked (no content-length) since instrumentation changes length.
-function streamHtml(grant: Grant, upstreamRes: http.IncomingMessage, res: http.ServerResponse): void {
-  // Only reached with a chain: the caller sends an uninstrumented response
-  // through `passThrough` otherwise.
-  const embedderOrigin = (grant.embedderOrigins ?? [])[0] ?? '';
+function streamHtml(
+  grant: Grant,
+  // Taken as an argument rather than read off the grant so the type carries the
+  // invariant: there is no instrumented response without an embedder to address
+  // the shim to. A grant with no chain goes through `passThrough` instead.
+  embedderOrigin: string,
+  upstreamRes: http.IncomingMessage,
+  res: http.ServerResponse,
+): void {
   const outHeaders = sanitizeResponseHeaders(grant, upstreamRes.headers);
   outHeaders['content-type'] = 'text/html; charset=utf-8';
   delete outHeaders['content-length'];
