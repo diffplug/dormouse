@@ -893,8 +893,8 @@ model's guarantee list end to end.
 that records, drops, reorders, duplicates, modifies, and invents frames
 (`server/test/harness/malicious-relay.mjs`, wrapping the real `RelayHub` over an
 in-memory socket pair, so its routing is the shipped routing). Its last case
-strips the relay's own `ct`/`id`/shape guards, and the Host refuses every frame
-itself. Browser-dependent Host and Pocket UI remain dogfood coverage.
+swaps the hub for a guard-less router of its own — no `ct`, `id`, or shape check
+anywhere — and the Host refuses every frame itself. Browser-dependent Host and Pocket UI remain dogfood coverage.
 
 ## Running it
 

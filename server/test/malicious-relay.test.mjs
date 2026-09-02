@@ -28,87 +28,13 @@ import {
   utf8Encode,
 } from 'server-lib-common';
 
-import { enrollHost, freshApp, ownerSession, startServer, until } from './helpers.mjs';
-import { FakeClient } from './harness/fake-client.mjs';
-import { FakeHost } from './harness/fake-host.mjs';
-import { newE2eId } from './harness/e2e.mjs';
+import { until } from './helpers.mjs';
+import { e2eFixture, establish, flip, newE2eId, watch } from './harness/e2e.mjs';
 import { createMaliciousRelay } from './harness/malicious-relay.mjs';
 
-/** A live HTTP server, one Host and one Client, joined by a relay we control. */
-async function hostileFixture({ guards = true } = {}) {
-  const created = await freshApp();
-  const server = await startServer(created);
-  const { body: enrollment } = await enrollHost(created.app);
-  const hostStatic = await generateNoiseKeyPair();
-  const clientStatic = await generateNoiseKeyPair();
-  const relay = createMaliciousRelay({ hostId: enrollment.hostId, guards });
-  const host = new FakeHost({
-    serverUrl: server.wsUrl,
-    hostToken: enrollment.hostToken,
-    hostId: enrollment.hostId,
-    origin: created.origin,
-    rpId: created.rpId,
-    noiseStaticKeyPair: hostStatic,
-    socket: relay.hostSocket,
-  });
-  await host.ready;
-  const { sessionToken, authenticator } = await ownerSession(created.app);
-  const client = new FakeClient({
-    serverUrl: server.wsUrl,
-    sessionToken,
-    hostId: enrollment.hostId,
-    staticKeyPair: clientStatic,
-    hostStaticPublicKey: hostStatic.publicKey,
-    origin: created.origin,
-    rpId: created.rpId,
-    socket: relay.clientSocket,
-  });
-  await client.ready;
-  return {
-    server,
-    host,
-    client,
-    relay,
-    authenticator,
-    enrollment,
-    hostStatic,
-    clientStatic,
-    close: async () => {
-      relay.close();
-      await server.close();
-    },
-  };
-}
-
-/** Pair and connect through this fixture's relay, leaving an authorized session. */
-async function establish(fixture) {
-  const invitation = await fixture.host.mintInvitation();
-  const paired = await fixture.client.pair({
-    invitation,
-    authenticator: fixture.authenticator,
-  });
-  assert.equal(paired.ok, true, JSON.stringify(paired.outcome));
-  const connected = await fixture.client.connect({ authenticator: fixture.authenticator });
-  assert.equal(connected.ok, true, JSON.stringify(connected.outcome));
-  return connected;
-}
-
-/** Record the Host's e2e outcomes so a test can await one. */
-function watch(host) {
-  const receipts = [];
-  const errors = [];
-  const opens = [];
-  host.on('e2e-receive', (ev) => receipts.push(ev));
-  host.on('e2e-error', (ev) => errors.push(ev));
-  host.on('e2e-open', (ev) => opens.push(ev));
-  return { receipts, errors, opens };
-}
-
-/** Flip one byte of a base64url ciphertext. */
-function flip(ct) {
-  const bytes = fromBase64Url(ct);
-  bytes[bytes.length - 1] ^= 0x01;
-  return toBase64Url(bytes);
+/** The shared E2E fixture, with a relay this test controls in its middle. */
+function hostileFixture({ guards = true } = {}) {
+  return e2eFixture({ relayFor: (hostId) => createMaliciousRelay({ hostId, guards }) });
 }
 
 test('a recording relay learns no decision, label, api message, or terminal byte', async () => {
@@ -243,7 +169,9 @@ test('dropping every frame denies service and nothing more', async () => {
     relay.tamper = () => [];
     const invitation = await host.mintInvitation();
     await assert.rejects(
-      () => client.pair({ invitation, authenticator: fixture.authenticator }),
+      // A short deadline: what is under test is that nothing arrives at all,
+      // and the harness's two-second default would be two seconds of the suite.
+      () => client.pair({ invitation, authenticator: fixture.authenticator, timeout: 100 }),
       /no matching frame in time/,
     );
     // The Host never saw a scan, so the code on its screen is still live and

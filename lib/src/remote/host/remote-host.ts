@@ -55,7 +55,7 @@ import {
   type ServerToHostFrame,
 } from 'server-lib-common';
 import type { HostEnrollment } from './enrollment';
-import type { RemoteWebSocket } from '../ws';
+import { hostTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 import { loadHostAcl } from './acl';
 import type { PendingPairing } from './pairing-approval';
 
@@ -145,13 +145,7 @@ interface EstablishedSession {
   readonly api: RemoteApiSessionLike;
   /** The IK-authenticated Client static — what the session cap is keyed on. */
   readonly clientStaticPublicKey: string;
-  /**
-   * When this Host last **decrypted** a Client→Host transport message on this
-   * session, keepalive or application data alike. Nothing else moves it: Host
-   * output, a failed decrypt, a relay envelope, and a socket ping are all
-   * things a Client that has gone silent still produces
-   * (`docs/specs/remote-security-model.md` → Host bounds).
-   */
+  /** When this Host last **decrypted** a Client→Host transport message here. */
   lastClientActivityAt: number;
 }
 
@@ -204,11 +198,13 @@ export interface RemoteHostOptions {
   onInvitationChanged?: (inviteId: string, state: InvitationState) => void;
   now?: () => number;
   /**
-   * The reaper's one timer, as `(run, delayMs) => cancel`. Injectable so a test
-   * driving `now` off a fake clock can fire expiry deterministically instead of
-   * waiting out a five-minute TTL in real milliseconds.
+   * Every timer this Host arms — the reaper's and the reconnect backoff's — as
+   * `(run, delayMs) => cancel`. Injectable so a test driving `now` off a fake
+   * clock can fire expiry deterministically instead of waiting out a five-minute
+   * TTL in real milliseconds, and so `stop()` leaving nothing armed is a thing a
+   * test can observe.
    */
-  setTimer?: (run: () => void, delayMs: number) => () => void;
+  setTimer?: RemoteTimer;
   /** Auto-reconnect with backoff (default true; tests pass false). */
   reconnect?: boolean;
 }
@@ -229,7 +225,7 @@ export class RemoteHost {
   readonly #dismissApproval: (clientId: string) => void;
   readonly #onInvitationChanged: (inviteId: string, state: InvitationState) => void;
   readonly #now: () => number;
-  readonly #setTimer: (run: () => void, delayMs: number) => () => void;
+  readonly #setTimer: RemoteTimer;
   readonly #reconnect: boolean;
 
   /**
@@ -291,17 +287,11 @@ export class RemoteHost {
   #epoch = 0;
 
   /**
-   * The crypto token bucket, Host-global and driven by the injected clock.
-   *
-   * Every accepted `init` frame spends one: an eight-operation burst decaying
-   * to one per second. A frame refused here performs **no** WebCrypto
-   * operation and allocates no entry — like one refused by shape, size, or a
-   * pending cap — and is dropped, because an error frame would itself be a
-   * reply a flood can buy (`docs/specs/remote-security-model.md` → Host
-   * bounds).
+   * The crypto token bucket, Host-global and driven by the injected clock
+   * (`docs/specs/remote-security-model.md` → Host bounds).
    */
   #initTokens = E2E_INIT_BURST;
-  #initTokensAt: number | null = null;
+  #initTokensAt: number;
 
   /** Cancels the armed reaper timer, or null when none is armed. */
   #cancelReaper: (() => void) | null = null;
@@ -314,7 +304,8 @@ export class RemoteHost {
   /** Latched by a {@link WS_CLOSE_HOST_REPLACED} close; only `start()` clears it. */
   #displaced = false;
   #backoffMs = INITIAL_BACKOFF_MS;
-  #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Cancels the armed reconnect, or null when none is armed. */
+  #cancelReconnect: (() => void) | null = null;
 
   constructor(options: RemoteHostOptions) {
     this.#enrollment = options.enrollment;
@@ -327,6 +318,7 @@ export class RemoteHost {
       requireUserVerification: options.enrollment.requireUserVerification ?? false,
     };
     this.#now = options.now ?? (() => Date.now());
+    this.#initTokensAt = this.#now();
     this.#acl = loadHostAcl(options.enrollment.hostId, options.loadAcl);
     this.#challenges = new HostChallengeIssuer({ now: this.#now });
 
@@ -337,12 +329,7 @@ export class RemoteHost {
     this.#requestApproval = options.requestApproval;
     this.#dismissApproval = options.dismissApproval;
     this.#onInvitationChanged = options.onInvitationChanged ?? (() => {});
-    this.#setTimer =
-      options.setTimer ??
-      ((run, delayMs) => {
-        const timer = setTimeout(run, delayMs);
-        return () => clearTimeout(timer);
-      });
+    this.#setTimer = options.setTimer ?? hostTimer;
     this.#reconnect = options.reconnect ?? true;
   }
 
@@ -431,76 +418,78 @@ export class RemoteHost {
   // --- The reaper ----------------------------------------------------------
 
   /**
-   * **One reaper, over absolute timestamps.** Every deadline this Host owns —
-   * an invitation's expiry, a pending pairing's TTL, a pending connection's
-   * challenge TTL, an established session's idle limit — is swept here and
-   * nowhere else, so a rule added to a terminal outcome cannot be missing from
-   * the path that reclaims one nobody answered.
+   * Every deadline this Host owns, as `{ at, expire }` over absolute
+   * timestamps. One enumeration, so a fifth deadline is one edit and the
+   * arithmetic behind an instant is written once
+   * (`docs/specs/remote-security-model.md` → Host bounds).
    *
-   * Runs on every `init`, every local decision, every relay lifecycle event,
-   * and its own next-expiry timer; a Host whose relay socket never delivers
-   * another frame still reclaims everything it holds.
+   * A snapshot, because `expire` runs injected callbacks — `dismissApproval`,
+   * `api.dispose` — that may re-enter and mutate the maps being walked.
    *
    * **An expiry emits the applicable outcome only where a transport cipher
-   * exists to encrypt one on**, and only where someone is still owed one. A
-   * pending pairing has both, and is told `invitation-expired`; a pending
-   * connection's challenge is now dead, so no proof bound to it can prove
-   * presence any more and the answer is the same `presence-rejected` a late
-   * request would have earned. An idle established session goes silently — its
-   * peer's own deadline reported this Host unavailable long ago — as does a
-   * pending ceremony evicted at a cap, where answering would let a flood buy a
-   * reply each.
+   * exists to encrypt one on**, and only where someone is still owed one: a
+   * pending connection whose challenge is dead earns the `presence-rejected` a
+   * late request would have, while an idle session's peer stopped waiting long
+   * ago and hears nothing.
+   */
+  #deadlines(): Array<{ at: number; expire: () => void }> {
+    const out: Array<{ at: number; expire: () => void }> = [];
+    for (const [inviteId, held] of this.#invitations) {
+      out.push({ at: held.expiresAt, expire: () => this.#retireInvitation(inviteId, 'expired') });
+    }
+    for (const [clientId, state] of this.#clients) {
+      const { pairing, connection, established } = state;
+      if (pairing) {
+        out.push({
+          at: pairing.expiresAt,
+          expire: () => this.#finishPairing(clientId, 'invitation-expired'),
+        });
+      }
+      if (connection) {
+        out.push({
+          at: connection.expiresAt,
+          expire: () => this.#denyConnection(clientId, connection, 'presence-rejected'),
+        });
+      }
+      if (established) {
+        out.push({
+          at: established.lastClientActivityAt + ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
+          expire: () => this.#disposeEstablished(clientId),
+        });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * **One reaper.** Every deadline is swept here and nowhere else, so a rule
+   * added to a terminal outcome cannot be missing from the path that reclaims
+   * one nobody answered. Runs on every `init`, every local decision, every
+   * relay lifecycle event, and its own next-expiry timer, so a Host whose relay
+   * socket never delivers another frame still reclaims everything it holds.
    */
   #reap(): void {
     const now = this.#now();
-    for (const [inviteId, held] of this.#invitations) {
-      if (held.expiresAt <= now) this.#retireInvitation(inviteId, 'expired');
-    }
-    for (const [clientId, state] of [...this.#clients]) {
-      if (state.pairing && state.pairing.expiresAt <= now) {
-        this.#finishPairing(clientId, 'invitation-expired');
-      }
-      if (state.connection && state.connection.expiresAt <= now) {
-        this.#denyConnection(clientId, state.connection, 'presence-rejected');
-      }
-      const established = state.established;
-      if (established && established.lastClientActivityAt + ESTABLISHED_E2E_IDLE_TIMEOUT_MS <= now) {
-        this.#disposeEstablished(clientId);
-      }
+    for (const deadline of this.#deadlines()) {
+      if (deadline.at <= now) deadline.expire();
     }
     this.#armReaper();
   }
 
-  /** The soonest deadline this Host is holding, or null if it holds none. */
-  #nextDeadline(): number | null {
-    let soonest = Number.POSITIVE_INFINITY;
-    for (const held of this.#invitations.values()) soonest = Math.min(soonest, held.expiresAt);
-    for (const state of this.#clients.values()) {
-      if (state.pairing) soonest = Math.min(soonest, state.pairing.expiresAt);
-      if (state.connection) soonest = Math.min(soonest, state.connection.expiresAt);
-      if (state.established) {
-        soonest = Math.min(
-          soonest,
-          state.established.lastClientActivityAt + ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
-        );
-      }
-    }
-    return Number.isFinite(soonest) ? soonest : null;
-  }
-
   /**
-   * Arm the reaper for the soonest deadline, re-arming only when that instant
-   * changed. A deadline that moved *later* — a keepalive refreshing an idle
-   * session — needs no re-arm: the timer fires early, reaps nothing, and arms
+   * Arm the reaper for the soonest deadline it does not already cover. A
+   * deadline that moved *later* — a keepalive refreshing an idle session —
+   * needs no re-arm: the armed timer fires early, reaps nothing, and arms
    * itself again on the way out.
    */
   #armReaper(): void {
-    const deadline = this.#nextDeadline();
-    if (deadline === null) {
+    let deadline = Number.POSITIVE_INFINITY;
+    for (const held of this.#deadlines()) deadline = Math.min(deadline, held.at);
+    if (!Number.isFinite(deadline)) {
       this.#clearReaper();
       return;
     }
-    if (this.#reaperAt === deadline && this.#cancelReaper !== null) return;
+    if (this.#reaperAt !== null && deadline >= this.#reaperAt) return;
     this.#clearReaper();
     this.#reaperAt = deadline;
     this.#cancelReaper = this.#setTimer(() => {
@@ -524,9 +513,7 @@ export class RemoteHost {
    * rate; a rewinding clock costs refill, never correctness.
    */
   #spendInitToken(): boolean {
-    const now = this.#now();
-    this.#initTokensAt ??= now;
-    const elapsed = Math.max(0, now - this.#initTokensAt);
+    const elapsed = Math.max(0, this.#now() - this.#initTokensAt);
     const refill = Math.floor(elapsed / E2E_INIT_REFILL_INTERVAL_MS);
     if (refill > 0) {
       this.#initTokens = Math.min(E2E_INIT_BURST, this.#initTokens + refill);
@@ -608,8 +595,7 @@ export class RemoteHost {
     this.#status = 'stopped';
     this.#clearReconnectTimer();
     this.#dropTransientState();
-    // Nothing is left to reap, and a Host that has stopped must leave no timer
-    // behind to wake the process it runs in.
+    // A stopped Host leaves no timer behind to wake the process it runs in.
     this.#clearReaper();
     try {
       this.#ws?.close();
@@ -629,8 +615,6 @@ export class RemoteHost {
     ws.addEventListener('open', () => {
       this.#status = 'connected';
       this.#backoffMs = INITIAL_BACKOFF_MS;
-      // A relay lifecycle event is one of the reaper's triggers: a socket that
-      // was down for longer than a TTL comes back to state that is already due.
       this.#reap();
     });
     ws.addEventListener('message', (ev) => {
@@ -672,17 +656,15 @@ export class RemoteHost {
     this.#status = 'disconnected';
     const delay = this.#backoffMs;
     this.#backoffMs = Math.min(this.#backoffMs * 2, MAX_BACKOFF_MS);
-    this.#reconnectTimer = setTimeout(() => {
-      this.#reconnectTimer = null;
+    this.#cancelReconnect = this.#setTimer(() => {
+      this.#cancelReconnect = null;
       this.#connect();
     }, delay);
   }
 
   #clearReconnectTimer(): void {
-    if (this.#reconnectTimer) {
-      clearTimeout(this.#reconnectTimer);
-      this.#reconnectTimer = null;
-    }
+    this.#cancelReconnect?.();
+    this.#cancelReconnect = null;
   }
 
   /**
@@ -799,7 +781,11 @@ export class RemoteHost {
   }
 
   async #onE2e(frame: E2eServerToHostFrame, epoch: number): Promise<void> {
-    this.#reap();
+    // An `init` is the frame that allocates, so it is the one that reaps first.
+    // A transport frame checks its own pending record's deadline, and the armed
+    // timer covers everything else — sweeping the whole Host on every keystroke
+    // from every phone would put two O(sessions) walks on the terminal path.
+    if (frame.step === 'init') this.#reap();
     if (frame.kind === 'pairing') {
       if (frame.step === 'init') return await this.#onPairingInit(frame, epoch);
       return await this.#onPairingTransport(frame);
@@ -814,8 +800,8 @@ export class RemoteHost {
   async #onPairingInit(frame: E2eServerToHostFrame, epoch: number): Promise<void> {
     const held = this.#invitations.get(frame.id);
     if (!held || held.state !== 'live') return;
-    // The bucket is the last gate before any WebCrypto runs, so a flood that
-    // names live invitations costs a map lookup each and nothing more.
+    // The last gate before any WebCrypto runs, so a flood that names live
+    // invitations costs a map lookup each and nothing more.
     if (!this.#spendInitToken()) return;
     let handshakeHash: string;
     let clientStaticPublicKey: string;
@@ -992,8 +978,6 @@ export class RemoteHost {
       deliveryId,
     });
     this.#disposePairing(clientId);
-    // A ceremony completing is one of the reaper's triggers: this is often the
-    // only thing that happens for minutes on an otherwise idle Host.
     this.#reap();
   }
 
@@ -1196,21 +1180,18 @@ export class RemoteHost {
   /**
    * Success: answer, then hand the session's byte stream to protocol-v1.
    *
-   * **{@link MAX_ESTABLISHED_E2E_SESSIONS} is checked here and only here** —
-   * after the presence proof and the ACL conjunction have both succeeded. A cap
-   * applied to handshakes would let unauthenticated traffic decide who gets in;
-   * applied here, the only thing that can fill it is sixteen authorized phones.
-   *
-   * A Client static that already holds a session **replaces its own**, whatever
-   * relay-chosen `clientId` the new one arrived under — a phone whose socket
-   * dropped reconnects as a stranger, and would otherwise be locked out by its
-   * own zombie. Any other identity at the cap gets `host-busy` and **evicts
-   * nothing**: an authorized session must not be displaceable by whoever
-   * completes a handshake next.
+   * **{@link MAX_ESTABLISHED_E2E_SESSIONS} is checked here and only here**, and
+   * a Client static replaces its own session rather than counting against it
+   * (`docs/specs/remote-security-model.md` → Host bounds). This is the first
+   * point at which the presence proof and the ACL conjunction have both
+   * succeeded, so the only thing that can fill the cap is authorized phones.
    */
   #promoteConnection(clientId: string, pending: PendingConnectionSession): void {
-    const incumbent = this.#establishedHolderOf(pending.clientStaticPublicKey);
-    if (incumbent === null && this.#establishedSessionCountExcept(clientId) >= MAX_ESTABLISHED_E2E_SESSIONS) {
+    const { incumbent, others } = this.#establishedFor(
+      pending.clientStaticPublicKey,
+      clientId,
+    );
+    if (incumbent === null && others >= MAX_ESTABLISHED_E2E_SESSIONS) {
       this.#denyConnection(clientId, pending, 'host-busy');
       return;
     }
@@ -1254,21 +1235,24 @@ export class RemoteHost {
     this.#armReaper();
   }
 
-  /** Which client entry, if any, already holds an established session for `staticKey`. */
-  #establishedHolderOf(staticKey: string): string | null {
-    for (const [clientId, state] of this.#clients) {
-      if (state.established?.clientStaticPublicKey === staticKey) return clientId;
-    }
-    return null;
-  }
-
-  /** Established sessions other than `clientId`'s, which a promotion replaces. */
-  #establishedSessionCountExcept(clientId: string): number {
-    let count = 0;
+  /**
+   * One walk answering both questions a promotion asks: which client entry
+   * already holds a session for `staticKey`, and how many sessions other than
+   * `exceptClientId`'s exist. `others` is what the cap is compared against,
+   * because a promotion always replaces whatever its own entry held.
+   */
+  #establishedFor(
+    staticKey: string,
+    exceptClientId: string,
+  ): { incumbent: string | null; others: number } {
+    let incumbent: string | null = null;
+    let others = 0;
     for (const [id, state] of this.#clients) {
-      if (id !== clientId && state.established) count += 1;
+      if (!state.established) continue;
+      if (state.established.clientStaticPublicKey === staticKey) incumbent = id;
+      if (id !== exceptClientId) others += 1;
     }
-    return count;
+    return { incumbent, others };
   }
 
   #denyConnection(
@@ -1341,9 +1325,8 @@ export class RemoteHost {
       this.#disposeEstablished(clientId);
       return;
     }
-    // The one thing that refreshes the idle deadline: a Client→Host message
-    // this Host actually decrypted. A keepalive is exactly that and nothing
-    // more (`docs/specs/remote-security-model.md` → Host bounds).
+    // The one thing that refreshes the idle deadline, keepalive or application
+    // data alike (`docs/specs/remote-security-model.md` → Host bounds).
     established.lastClientActivityAt = this.#now();
     if (receipt.kind !== 'app') return;
     for (const message of receipt.messages) {
@@ -1374,9 +1357,8 @@ export class RemoteHost {
     } catch {
       // **Only a poisoned session is host loss.** An over-cap message is
       // refused before the first `encryptWithAd`, so no ciphertext exists and
-      // no counter moved — disposing there would turn a caller's size error
-      // into a re-handshake, which costs the user a fresh authenticator prompt,
-      // and would do it re-entrantly from inside `#onEstablishedFrame`'s loop.
+      // no counter moved; disposing there would turn a caller's size error into
+      // a re-handshake, re-entrantly from inside `#onEstablishedFrame`'s loop.
       if (!session.isPoisoned) {
         console.warn('[remote-host] discarding an application message the transport refused');
         return;
@@ -1439,8 +1421,6 @@ export class RemoteHost {
 
   #onClientGone(clientId: string): void {
     this.#disposeClient(clientId);
-    // A relay lifecycle event, and the one a hostile relay simply never sends —
-    // so it is a trigger, never the mechanism (`#reap` is that).
     this.#reap();
   }
 }

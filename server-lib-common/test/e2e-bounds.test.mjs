@@ -18,19 +18,23 @@ import {
   MAX_PENDING_PAIRINGS,
 } from '../dist/index.js';
 
-test('the idle timeout leaves room for missed keepalives', () => {
-  // A phone that loses one keepalive to a radio gap must not be reaped; one
-  // suspended in the background must be. Four intervals is that line.
+test('the idle timeout leaves room for four missed keepalives', () => {
   assert.equal(ESTABLISHED_E2E_IDLE_TIMEOUT_MS / E2E_KEEPALIVE_INTERVAL_MS, 4);
 });
 
 test('the crypto burst matches the number of handshakes that may be pending', () => {
-  // A burst larger than the pending caps buys nothing but WebCrypto work.
   assert.equal(E2E_INIT_BURST, MAX_PENDING_PAIRINGS);
-  assert.equal(E2E_INIT_REFILL_INTERVAL_MS, 1_000);
 });
 
-test('the established-session cap is a number a laptop can actually serve', () => {
-  assert.equal(MAX_ESTABLISHED_E2E_SESSIONS, 16);
+test('the established-session cap sits above the pending caps', () => {
   assert.ok(MAX_ESTABLISHED_E2E_SESSIONS > MAX_PENDING_PAIRINGS);
+});
+
+// The three numbers the spec names in prose, so a bound cannot move without the
+// text that documents it (`docs/specs/remote-security-model.md` -> Host bounds).
+test('the values the spec names are the values that ship', () => {
+  assert.equal(MAX_ESTABLISHED_E2E_SESSIONS, 16);
+  assert.equal(E2E_KEEPALIVE_INTERVAL_MS, 30_000);
+  assert.equal(ESTABLISHED_E2E_IDLE_TIMEOUT_MS, 120_000);
+  assert.equal(E2E_INIT_REFILL_INTERVAL_MS, 1_000);
 });

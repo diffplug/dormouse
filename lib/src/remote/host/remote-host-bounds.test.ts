@@ -42,6 +42,7 @@ import {
   flushUntil,
   openConnectionSession,
   openPairingSession,
+  pairThroughSocket,
   presenceProofFor,
   randomBase64Url,
   readOutcome,
@@ -176,9 +177,9 @@ describe('RemoteHost bounds', () => {
     crypto.restore();
   });
 
-  function makeHost(): RemoteHost {
+  function makeHost(enrollmentOverrides?: Partial<HostEnrollment>): RemoteHost {
     const created = new RemoteHost({
-      enrollment,
+      enrollment: { ...enrollment, ...enrollmentOverrides },
       reconnect: false,
       createWebSocket: () => (socket = new FakeSocket()),
       loadAcl: () => [] as HostAclRecord[],
@@ -203,12 +204,15 @@ describe('RemoteHost bounds', () => {
     return created;
   }
 
-  /** One authorized session, from a fresh Client static through both ceremonies. */
-  async function establish(
+  /** The connection ceremony through to its outcome, whatever that outcome is. */
+  async function connectClient(
     clientId: string,
-    clientStatic?: NoiseKeyPair,
-  ): Promise<{ session: NoiseTransportSession; clientStatic: NoiseKeyPair; connectionId: string }> {
-    const paired = clientStatic ?? (await pairClient(clientId));
+    clientStatic: NoiseKeyPair,
+  ): Promise<{
+    session: NoiseTransportSession;
+    connectionId: string;
+    outcome: Record<string, unknown>;
+  }> {
     // One token per `init`, and the bucket sustains one per second.
     clock.advance(1_000);
     const connectionId = testRoutingId();
@@ -217,7 +221,7 @@ describe('RemoteHost bounds', () => {
       hostId: enrollment.hostId,
       clientId,
       connectionId,
-      clientStatic: paired,
+      clientStatic,
       hostStaticPublicKey: enrollment.noiseStaticPublicKey!,
     });
     const binding: PresenceBinding = {
@@ -234,54 +238,51 @@ describe('RemoteHost bounds', () => {
       kind: 'connection',
       id: connectionId,
       step: 'transport',
-      ct: toBase64Url(session.sendControl({ presence: await presenceProofFor(authenticator, binding) })),
+      ct: toBase64Url(
+        session.sendControl({ presence: await presenceProofFor(authenticator, binding) }),
+      ),
     });
     const outcome = await readOutcome(socket, session, 'connection', connectionId);
+    return { session, connectionId, outcome };
+  }
+
+  /** One authorized session, from a fresh Client static through both ceremonies. */
+  async function establish(
+    clientId: string,
+    clientStatic?: NoiseKeyPair,
+  ): Promise<{ session: NoiseTransportSession; clientStatic: NoiseKeyPair; connectionId: string }> {
+    const paired = clientStatic ?? (await pairClient(clientId));
+    const { session, connectionId, outcome } = await connectClient(clientId, paired);
     expect(outcome).toEqual({ ok: true, hostLabel: 'Ned’s laptop' });
     return { session, clientStatic: paired, connectionId };
   }
 
   /** Pair one fresh Client static against this Host's one passkey. */
   async function pairClient(clientId: string): Promise<NoiseKeyPair> {
+    return (await pairAndReadOutcome(clientId)).clientStatic;
+  }
+
+  /** The pairing ceremony, approved locally, through to the outcome it answers. */
+  async function pairAndReadOutcome(
+    clientId: string,
+  ): Promise<{ clientStatic: NoiseKeyPair; outcome: Record<string, unknown> }> {
     clock.advance(1_000);
     const invitation = await host.mintInvitation(
       randomBase64Url(32),
       clock.now() + DEFAULT_PAIRING_TTL_MS,
     );
-    const clientStatic = await generateNoiseKeyPair();
-    const session = await openPairingSession({
+    const before = approvals.length;
+    const { session, clientStatic } = await pairThroughSocket({
       socket,
       hostId: enrollment.hostId,
       clientId,
       invitation,
-      clientStatic,
+      authenticator,
+      until: () => approvals.length > before,
     });
-    if (!session) throw new Error('the Host refused the pairing handshake');
-    const binding: PresenceBinding = {
-      kind: 'pairing',
-      hostId: enrollment.hostId,
-      handshakeHash: toBase64Url(session.handshakeHash),
-      passkeyCredentialId: authenticator.credentialId,
-    };
-    const before = approvals.length;
-    sendE2eFrame(socket, {
-      clientId,
-      hostId: enrollment.hostId,
-      kind: 'pairing',
-      id: invitation.inviteId,
-      step: 'transport',
-      ct: toBase64Url(
-        session.sendControl({
-          code: '42',
-          label: 'iPhone Safari',
-          presence: await presenceProofFor(authenticator, binding),
-        }),
-      ),
-    });
-    await settleUntil(() => approvals.length > before);
     approvals[approvals.length - 1]!.approve('42');
-    await readOutcome(socket, session, 'pairing', invitation.inviteId);
-    return clientStatic;
+    const outcome = await readOutcome(socket, session, 'pairing', invitation.inviteId);
+    return { clientStatic, outcome };
   }
 
   /** Deliver a raw frame straight to the Host socket — no relay, no guards. */
@@ -413,39 +414,8 @@ describe('RemoteHost bounds', () => {
     // A seventeenth identity: authorized, and still refused — a session an
     // authenticated Client holds must not be displaceable by the next one.
     const stranger = await pairClient('c-late');
-    clock.advance(1_000);
-    const connectionId = testRoutingId();
-    const { session, hostChallenge } = await openConnectionSession({
-      socket,
-      hostId: enrollment.hostId,
-      clientId: 'c-late',
-      connectionId,
-      clientStatic: stranger,
-      hostStaticPublicKey: enrollment.noiseStaticPublicKey!,
-    });
-    sendE2eFrame(socket, {
-      clientId: 'c-late',
-      hostId: enrollment.hostId,
-      kind: 'connection',
-      id: connectionId,
-      step: 'transport',
-      ct: toBase64Url(
-        session.sendControl({
-          presence: await presenceProofFor(authenticator, {
-            kind: 'connection',
-            hostId: enrollment.hostId,
-            connectionId,
-            hostChallenge,
-            handshakeHash: toBase64Url(session.handshakeHash),
-            passkeyCredentialId: authenticator.credentialId,
-          }),
-        }),
-      ),
-    });
-    expect(await readOutcome(socket, session, 'connection', connectionId)).toEqual({
-      ok: false,
-      code: 'host-busy',
-    });
+    const { outcome } = await connectClient('c-late', stranger);
+    expect(outcome).toEqual({ ok: false, code: 'host-busy' });
     expect(host.establishedSessionCount).toBe(MAX_ESTABLISHED_E2E_SESSIONS);
     expect(sessions.filter((s) => s.disposed)).toHaveLength(0);
   });
@@ -482,7 +452,7 @@ describe('RemoteHost bounds', () => {
 
   // --- Teardown ------------------------------------------------------------
 
-  it('costs one decrypt for a bad ciphertext, and destroys only that session', async () => {
+  it('spends nothing on a transport frame naming no session, and destroys none', async () => {
     await establish('c1');
     const other = await establish('c2');
     crypto.reset();
@@ -645,55 +615,10 @@ describe('RemoteHost bounds', () => {
     // The Client's outcome guards refuse any field over `CEREMONY_FIELD_LIMIT`.
     // An unbounded machine name would pair on the laptop and be thrown away by
     // the phone, leaving the two permanently disagreeing about being paired.
-    const created = new RemoteHost({
-      enrollment: { ...enrollment, label: 'L'.repeat(CEREMONY_FIELD_LIMIT + 100) },
-      reconnect: false,
-      createWebSocket: () => (socket = new FakeSocket()),
-      loadAcl: () => [] as HostAclRecord[],
-      saveAcl: () => {},
-      requestApproval: (pending) => approvals.push(pending),
-      dismissApproval: () => {},
-      now: clock.now,
-      setTimer: clock.setTimer,
-    });
-    created.start();
-    socket.open();
     host.stop();
-    host = created;
+    host = makeHost({ label: 'L'.repeat(CEREMONY_FIELD_LIMIT + 100) });
 
-    const invitation = await host.mintInvitation(
-      randomBase64Url(32),
-      clock.now() + DEFAULT_PAIRING_TTL_MS,
-    );
-    const session = await openPairingSession({
-      socket,
-      hostId: enrollment.hostId,
-      clientId: 'c1',
-      invitation,
-      clientStatic: await generateNoiseKeyPair(),
-    });
-    sendE2eFrame(socket, {
-      clientId: 'c1',
-      hostId: enrollment.hostId,
-      kind: 'pairing',
-      id: invitation.inviteId,
-      step: 'transport',
-      ct: toBase64Url(
-        session!.sendControl({
-          code: '42',
-          label: 'iPhone Safari',
-          presence: await presenceProofFor(authenticator, {
-            kind: 'pairing',
-            hostId: enrollment.hostId,
-            handshakeHash: toBase64Url(session!.handshakeHash),
-            passkeyCredentialId: authenticator.credentialId,
-          }),
-        }),
-      ),
-    });
-    await settleUntil(() => approvals.length > 0);
-    approvals[0]!.approve('42');
-    const outcome = await readOutcome(socket, session!, 'pairing', invitation.inviteId);
+    const { outcome } = await pairAndReadOutcome('c1');
 
     expect(isPairingOutcomeV1(outcome)).toBe(true);
     expect((outcome.hostLabel as string).length).toBeLessThanOrEqual(CEREMONY_FIELD_LIMIT);
@@ -702,9 +627,8 @@ describe('RemoteHost bounds', () => {
   it('treats an over-size application message as the caller’s error, not host loss', async () => {
     const first = await establish('c1');
 
-    // Refused before the first `encryptWithAd`, so no ciphertext exists and no
-    // counter moved: killing the session here would turn a caller's size error
-    // into a re-handshake, which costs the user a fresh authenticator prompt.
+    // Refused before the first `encryptWithAd`, so only a poisoned session is
+    // host loss (`RemoteHost.#sendApp`).
     sessions[0]!.send({ oversize: 'x'.repeat(2 * 1024 * 1024) });
     await settle();
     expect(sessions[0]!.disposed).toBe(false);

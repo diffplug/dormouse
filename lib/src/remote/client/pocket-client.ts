@@ -84,7 +84,7 @@ import {
   type KnownHostV1,
   type PendingDeletionStore,
 } from './pocket-db';
-import type { RemoteWebSocket } from '../ws';
+import { hostTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 
 /** The slice of a WebSocket the client uses; a browser `WebSocket` satisfies it. */
 export type PocketSocket = RemoteWebSocket;
@@ -142,8 +142,8 @@ export interface PocketClientDeps {
   readonly pendingDeletions: PendingDeletionStore;
   readonly storage?: PocketStorage;
   readonly now?: () => number;
-  /** The keepalive timer, as `(run, delayMs) => cancel`. */
-  readonly setTimer?: (run: () => void, delayMs: number) => () => void;
+  /** The keepalive timer; see {@link RemoteTimer}. */
+  readonly setTimer?: RemoteTimer;
   readonly visibility?: PocketVisibility;
 }
 
@@ -303,7 +303,7 @@ export class PocketClient {
   readonly #pendingDeletions: PendingDeletionStore;
   readonly #storage: PocketStorage;
   readonly #now: () => number;
-  readonly #setTimer: (run: () => void, delayMs: number) => () => void;
+  readonly #setTimer: RemoteTimer;
   readonly #visibility: PocketVisibility;
 
   #ws: PocketSocket | null = null;
@@ -340,12 +340,7 @@ export class PocketClient {
     this.#pendingDeletions = deps.pendingDeletions;
     this.#storage = deps.storage ?? localStoragePocketStorage();
     this.#now = deps.now ?? (() => Date.now());
-    this.#setTimer =
-      deps.setTimer ??
-      ((run, delayMs) => {
-        const timer = setTimeout(run, delayMs);
-        return () => clearTimeout(timer);
-      });
+    this.#setTimer = deps.setTimer ?? hostTimer;
     this.#visibility = deps.visibility ?? documentVisibility();
   }
 
@@ -1105,23 +1100,16 @@ export class PocketClient {
   }
 
   /**
-   * Keepalives run **only while the page is visible**. A backgrounded tab has
-   * its timers throttled or suspended outright, so a phone in a pocket cannot
-   * promise liveness it does not have — the Host reaps it, and coming back
-   * costs a fresh handshake and one WebAuthn prompt
-   * ([pocket-app.md](../../../docs/specs/pocket-app.md)). Returning to the
-   * foreground sends one immediately, because a tab hidden for less than the
-   * idle timeout still has a session worth keeping.
+   * Keepalives run **only while the page is visible**, and returning to the
+   * foreground sends one immediately — a tab hidden for less than the idle
+   * timeout still has a session worth keeping
+   * ([pocket-app.md](../../../docs/specs/pocket-app.md)).
    */
   #startKeepalives(): void {
     this.#stopKeepalives();
     this.#cancelVisibility = this.#visibility.subscribe(() => {
-      if (!this.#established) return;
-      if (!this.#visibility.isVisible()) {
-        this.#cancelKeepaliveTimer();
-        return;
-      }
-      this.sendKeepalive();
+      if (this.#established && this.#visibility.isVisible()) this.sendKeepalive();
+      // Re-arms while visible and cancels while hidden; one place decides.
       this.#armKeepalive();
     });
     this.#armKeepalive();
@@ -1462,15 +1450,7 @@ function uuid(): string {
  * this default runs is the app, which always has one.
  */
 function documentVisibility(): PocketVisibility {
-  const doc = (
-    globalThis as {
-      document?: {
-        visibilityState?: string;
-        addEventListener(type: string, handler: () => void): void;
-        removeEventListener(type: string, handler: () => void): void;
-      };
-    }
-  ).document;
+  const doc: Document | undefined = globalThis.document;
   return {
     isVisible: () => doc === undefined || doc.visibilityState === 'visible',
     subscribe(onChange) {

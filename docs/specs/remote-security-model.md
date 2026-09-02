@@ -346,17 +346,15 @@ defense in depth only, and Host correctness must survive a relay that omits
   replacement disposes its predecessor. Pending pairings expire on the pairing
   TTL (a human is typing); pending connections on the challenge TTL.
 - **The session cap is checked at promotion and nowhere else**, after the
-  presence proof and the ACL conjunction have both succeeded — a cap applied to
-  handshakes would let unauthenticated traffic decide who gets in. A Client
-  static already holding a session **replaces its own** atomically, whatever
-  relay-chosen `clientId` the replacement arrived under; any other identity at
-  the cap receives the fixed-size `host-busy` and **evicts nothing**. The
-  pending caps and the token bucket stay active at the cap.
+  presence proof and the ACL conjunction have both succeeded (rationale). A
+  Client static already holding a session **replaces its own** atomically,
+  whatever relay-chosen `clientId` the replacement arrived under; any other
+  identity at the cap receives the fixed-size `host-busy` and **evicts
+  nothing**. The pending caps and the token bucket stay active at the cap.
 - **A Host-global token bucket gates the WebCrypto an accepted `init` buys**:
   an eight-operation burst decaying to one per second, on the Host's own clock.
   A frame it refuses is dropped exactly like one refused by shape, size, or a
-  pending cap — and an outer error frame is never required, because a reply is
-  itself something a flood can buy.
+  pending cap, and answered with nothing at all (rationale).
 - **A message is processed only for its exact pending ID and expected step.**
   Unknown IDs are dropped without decryption, established frames only decrypt at
   their session's next nonce, and **the first invalid ciphertext destroys its
@@ -370,17 +368,23 @@ defense in depth only, and Host correctness must survive a relay that omits
   expiry, pairing TTL, challenge TTL, and
   `ESTABLISHED_E2E_IDLE_TIMEOUT_MS = 120_000`. It runs on every `init`, every
   local decision, every relay lifecycle event, and a timer armed for the
-  soonest deadline — re-armed on change, cleared on `stop()` — so a Host whose
-  relay never delivers another frame still reclaims what it holds. An expiry
-  emits an outcome only where a transport cipher exists and someone is owed
-  one: `invitation-expired` for a pending pairing, `presence-rejected` for a
-  pending connection whose challenge is now dead, nothing for an idle session
-  or a ceremony evicted at a cap.
+  soonest deadline — re-armed when that instant moves earlier, cleared on
+  `stop()` — so a Host whose relay never delivers another frame still reclaims
+  what it holds. **An expiry emits an outcome only where a transport cipher
+  exists and someone is owed one:**
+
+  | Expired | Answer |
+  | --- | --- |
+  | Pending pairing | `invitation-expired` |
+  | Pending connection (its challenge is now dead) | `presence-rejected` |
+  | Idle established session | nothing |
+  | Ceremony evicted at a cap | nothing (rationale) |
+
 - **The idle deadline moves only on a successfully decrypted Client→Host
-  transport message**, keepalive or application data. Host output, a failed
-  decrypt, a relay envelope, a socket ping, and any unauthenticated frame are
-  all things a Client that has gone silent still produces. A Client keepalives
-  every `E2E_KEEPALIVE_INTERVAL_MS = 30_000` while its page is visible
+  transport message**, keepalive or application data; **never** on Host output,
+  a failed decrypt, a relay envelope, a socket ping, or any unauthenticated
+  frame (rationale). A Client keepalives every
+  `E2E_KEEPALIVE_INTERVAL_MS = 30_000` while its page is visible
   ([pocket-app.md](./pocket-app.md)), so the timeout is four missed intervals.
 - **Every expiry or outcome disposes remote-control attachments without killing
   terminal sessions**, erases Noise state and keys, and removes the entry before

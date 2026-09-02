@@ -69,7 +69,20 @@ service.
 pending pairing drops something a person may be looking at, so it sends
 `superseded` and dismisses the modal. A connection `init` that never decrypted
 gets nothing at all: there is no session to encrypt a denial on, and answering
-would let a flood of `init` frames buy a reply each.
+would let a flood of `init` frames buy a reply each. The token bucket is
+answered with silence for the same reason.
+
+**Why the session cap is checked at promotion rather than at the handshake.** A
+cap applied earlier would let unauthenticated traffic decide who gets in: anyone
+who can reach the relay could fill it and lock out the phones that are actually
+paired. Applied after the presence proof and the ACL conjunction, the only thing
+that can fill it is authorized phones.
+
+**Why so little refreshes the idle deadline.** Host output, a relay envelope, a
+socket ping, and a frame that failed to decrypt are all things a Client that has
+gone silent still produces — a phone in a pocket, a relay replaying, a socket a
+proxy is keeping warm. Only a message this Host decrypted on the session's own
+cipher is evidence the paired phone is still there.
 
 ## Noise suite
 

@@ -220,9 +220,10 @@ export function chunkAppMessage(message: Uint8Array): Uint8Array[] {
 }
 
 /**
- * The capacity a drained reassembler keeps: one maximal stream body and its
- * length prefix. Ordinary traffic never reallocates, and a session that once
- * carried a 1 MiB message does not hold that megabyte for the rest of its life.
+ * The most a drained reassembler keeps rather than releasing: one maximal
+ * stream body and its length prefix. Ordinary traffic never reallocates, and a
+ * session that once carried a 1 MiB message does not hold that megabyte for the
+ * rest of its life.
  */
 const RETAINED_BUFFER_CAPACITY = MAX_STREAM_BODY_LENGTH + APP_LENGTH_PREFIX_SIZE;
 
@@ -245,13 +246,10 @@ const INITIAL_BUFFER_CAPACITY = 1024;
  * resynchronization point in a byte stream to recover to.
  *
  * **Bodies are compacted into one geometrically-grown buffer**, never queued
- * one array entry per body. `MAX_STREAM_BODY_LENGTH` is a maximum, not a
- * minimum: a peer may legally split one 1 MiB message into single-byte bodies,
- * so a per-body queue is bounded in bytes and unbounded in *entries* — a
- * megabyte declared and delivered a byte at a time cost 234 MB of live
- * `Uint8Array` headers (measured 2026-08). Copying into a doubling buffer keeps
- * memory proportional to the bytes actually queued and the work linear, where
- * re-concatenating on every arrival would be quadratic.
+ * one array entry per body: a per-body queue is bounded in bytes and unbounded
+ * in *entries*, and a megabyte declared and delivered a byte at a time cost
+ * 234 MB of live `Uint8Array` headers (measured 2026-08). Re-concatenating on
+ * every arrival instead would be quadratic.
  */
 export class StreamReassembler {
   #buffer = EMPTY;

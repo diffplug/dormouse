@@ -1,26 +1,21 @@
 /**
- * The bounds an end-to-end session lives inside, shared because both endpoints
- * have to agree on them: the Host reaps on the idle timeout and the Client
- * sends keepalives against the same clock, so two copies would be two opinions
- * about when a live session looks dead.
+ * The bounds an end-to-end session lives inside.
  *
- * Every one is **Host-enforced and independent of the relay**
- * (`docs/specs/remote-security-model.md` -> Host bounds); the Server's own
- * gates are defense in depth. The pending-ceremony caps live beside the work
- * they bound — `MAX_PENDING_PAIRINGS` in `pairing.ts`,
+ * Every one is Host-enforced and independent of the relay; what each means and
+ * why it is where it is belongs to `docs/specs/remote-security-model.md` ->
+ * Host bounds. They live together — rather than inside the Host — because two
+ * of them are the Client's business too: the Host reaps on the idle timeout and
+ * the Client keepalives against it, so two copies would be two opinions about
+ * when a live session looks dead. The pending-ceremony caps stay beside the
+ * work they bound: `MAX_PENDING_PAIRINGS` in `pairing.ts`,
  * `MAX_PENDING_CONNECTION_HANDSHAKES` in the Host itself.
+ *
+ * The relationships between these numbers are pinned by
+ * `server-lib-common/test/e2e-bounds.test.mjs`; what the Host does with them is
+ * `lib/src/remote/host/remote-host-bounds.test.ts`.
  */
 
-/**
- * How many authorized sessions one Host will hold at once.
- *
- * Checked only at promotion, after the presence proof and the ACL conjunction
- * have already succeeded: a cap applied earlier would let unauthenticated
- * traffic decide who gets in. A Client static that already holds a session
- * replaces its own; a different identity at the cap is answered `host-busy`
- * and evicts nobody, because an authorized phone must not be displaceable by a
- * stranger who merely completed a handshake.
- */
+/** How many authorized sessions one Host will hold at once. */
 export const MAX_ESTABLISHED_E2E_SESSIONS = 16;
 
 /**
@@ -36,9 +31,7 @@ export const E2E_KEEPALIVE_INTERVAL_MS = 30_000;
  *
  * Four keepalive intervals: a phone that misses one to a radio gap or a
  * garbage-collected timer is still inside the window, and one suspended in the
- * background is not. Nothing else refreshes it — not Host output, not a relay
- * envelope, not a socket ping — because only an authenticated Client frame is
- * evidence the paired phone is still there.
+ * background is not.
  */
 export const ESTABLISHED_E2E_IDLE_TIMEOUT_MS = 120_000;
 

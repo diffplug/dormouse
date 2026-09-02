@@ -23,6 +23,7 @@ import {
   TRANSPORT_KIND_KEEPALIVE,
   TRANSPORT_KIND_STREAM,
   chunkAppMessage,
+  concatBytes,
   createNoiseInitiator,
   createNoiseResponder,
   decodeTransportPlaintext,
@@ -247,12 +248,7 @@ test('400 random message/split patterns reassemble byte-exact', () => {
       messages.push(message);
       for (const body of chunkAppMessage(message)) parts.push(new Uint8Array(body));
     }
-    const stream = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
-    let at = 0;
-    for (const part of parts) {
-      stream.set(part, at);
-      at += part.length;
-    }
+    const stream = concatBytes(...parts);
 
     const reassembler = new StreamReassembler();
     const out = [];

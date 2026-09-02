@@ -247,7 +247,7 @@ export class FakeClient extends EventEmitter {
   // --- Pairing --------------------------------------------------------------
 
   /** IK against the scanned invitation's one-use key; no ACL exists yet. */
-  async openPairing(invitation, { staticKeyPair = this.staticKeyPair } = {}) {
+  async openPairing(invitation, { staticKeyPair = this.staticKeyPair, timeout } = {}) {
     const initiator = await createNoiseInitiator({
       prologue: pairingInvitationPrologue(invitation),
       staticKeyPair,
@@ -267,6 +267,7 @@ export class FakeClient extends EventEmitter {
     const response = await this.waitFor(
       (f) =>
         f.t === 'e2e' && f.kind === 'pairing' && f.id === invitation.inviteId && f.step === 'response',
+      timeout,
     );
     await initiator.readMessage(fromBase64Url(response.ct));
     this.noise = initiator.session;
@@ -290,8 +291,13 @@ export class FakeClient extends EventEmitter {
     label = this.label,
     code,
     binding,
+    /** How long to wait for each answer; a case about a *silent* relay lowers it. */
+    timeout,
   }) {
-    const { session, handshakeHash } = await this.openPairing(invitation, { staticKeyPair });
+    const { session, handshakeHash } = await this.openPairing(invitation, {
+      staticKeyPair,
+      timeout,
+    });
     const bound = binding ?? {
       kind: 'pairing',
       hostId: invitation.hostId,
@@ -301,7 +307,7 @@ export class FakeClient extends EventEmitter {
     const presence = await this.presenceProof({ binding: bound, accountId, authenticator });
     const displayed = code ?? samplePairingCode();
     this.sendControl({ code: displayed, label, presence });
-    const frame = await this.nextTransport({ kind: 'pairing', id: invitation.inviteId });
+    const frame = await this.nextTransport({ kind: 'pairing', id: invitation.inviteId, timeout });
     const receipt = session.receive(fromBase64Url(frame.ct));
     const outcome =
       receipt.kind === 'control' && isPairingOutcomeV1(receipt.value) ? receipt.value : null;
