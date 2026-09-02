@@ -13,6 +13,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { fromBase64Url, openPush, sealPush, utf8Decode, utf8Encode } from '../dist/index.js';
 import {
   CompromisedServer,
   FakeClock,
@@ -157,6 +158,50 @@ test('passkey synchronization does not automatically create trusted clients', as
   assert.equal(active.length, 2);
   assert.equal(new Set(active.map((r) => r.clientStaticPublicKey)).size, 2);
   assert.equal(new Set(active.map((r) => r.deliveryId)).size, 2);
+});
+
+// The guarantee that a compromised Server reveals no *notification text*. A
+// push runs outside both ceremonies — the phone is asleep and there is no live
+// session — so it is sealed on its own construction
+// (docs/specs/remote-security-model.md § Push sealing); the mechanics of that
+// seal are `push-seal.test.mjs`, and what this pins is the end-to-end claim.
+test('a push the Host seals is readable only by the Client it names', async () => {
+  const { server, host, authenticator, client } = await world();
+  await client.pair(host, { accountId: ACCOUNT, authenticator });
+  const other = await SimClient.create({ label: 'iPad Safari', origin: ORIGIN, server });
+  await other.pair(host, { accountId: ACCOUNT, authenticator });
+
+  const plaintext = utf8Encode(JSON.stringify({ title: 'build finished', tag: 'pty-1' }));
+  const record = host.acl
+    .activeRecords()
+    .find((r) => r.clientStaticPublicKey === client.staticPublicKeyFor(host));
+  const sealed = await sealPush({
+    hostStaticPrivateKey: host.staticKeyPair.privateKey,
+    clientStaticPublicKey: fromBase64Url(record.clientStaticPublicKey),
+    plaintext,
+  });
+
+  // Everything the Server holds about this pair — the hostId, the delivery
+  // capability, the account — is on the envelope's outside and opens nothing.
+  assert.equal(JSON.stringify({ hostId: host.hostId, ...sealed }).includes('build finished'), false);
+
+  // The other paired phone holds its own record on the same Host, and still
+  // cannot read this one: the seal binds the Client static, not the pairing.
+  assert.equal(
+    await openPush({
+      clientStaticPrivateKey: other.staticKeyPairFor(host).privateKey,
+      hostStaticPublicKey: host.staticKeyPair.publicKey,
+      sealed,
+    }),
+    null,
+  );
+
+  const opened = await openPush({
+    clientStaticPrivateKey: client.staticKeyPairFor(host).privateKey,
+    hostStaticPublicKey: host.staticKeyPair.publicKey,
+    sealed,
+  });
+  assert.equal(utf8Decode(opened), utf8Decode(plaintext));
 });
 
 test('every trusted client must be explicitly paired with every host', async () => {

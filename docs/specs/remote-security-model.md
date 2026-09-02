@@ -560,7 +560,7 @@ reviewer verifies against, and the one
 * Adding a new passkey does not grant Host access.
 * Compromising the Server does not let it create an authorized Client.
 * Compromising the Server reveals no pairing decision, Host label, remote-api
-  message, or terminal byte.
+  message, terminal byte, or notification text.
 * Passkey synchronization does not automatically create trusted Clients.
 * Every trusted Client must be explicitly paired with every Host.
 * Every connection requires fresh user presence, single-use and bound to that
