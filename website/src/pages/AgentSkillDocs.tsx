@@ -9,7 +9,7 @@
 import { useState } from "react";
 import skill from "../data/docs.skill.json";
 import DocsLayout from "../components/DocsLayout";
-import { LINK_CLASS } from "../components/docs-tokens";
+import { ACCENT_HOVER_BORDER_CLASS, ACCENT_HOVER_TEXT_CLASS, LINK_CLASS } from "../components/docs-tokens";
 import MarkdownDocument, { type BlockNode } from "../components/MarkdownDocument";
 
 export function meta() {
@@ -37,7 +37,7 @@ function CopyButton({ text, children }: { text: string; children: React.ReactNod
           () => undefined,
         );
       }}
-      className="rounded-md border border-[var(--color-text)]/20 px-3 py-1.5 font-mono text-sm hover:border-[var(--color-caramel)] hover:text-[var(--color-caramel)]"
+      className={`rounded-md border border-[var(--color-text)]/20 px-3 py-1.5 font-mono text-sm ${ACCENT_HOVER_BORDER_CLASS} ${ACCENT_HOVER_TEXT_CLASS}`}
     >
       {copied ? "copied" : children}
     </button>

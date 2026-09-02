@@ -224,11 +224,20 @@ playground navbar — carries no theme control.
   render-time `body.style` writes away. Pocket passes `restorePocketTheme` as the
   hook's `restore` argument so its browser-chrome sync rides the same lifecycle
   (`lib/src/remote/pocket-app/pocket-theme.ts`).
-- The two `/playground/pocket` marketing mounts keep the free-floating `compact`
-  picker: those pages render a mobile prototype with no baseboard, so there is no
-  Settings dialog to put it in. The dialog variant's collapsed trigger carries
-  the active theme's `ThemeSwatch` and label so it reads as the same control as
-  the row it stands in for; `compact` shows the swatch beside the word "Theme".
+- The two `/playground/pocket` marketing mounts and the three `/docs` reference
+  pages keep the free-floating `compact` picker: those pages have no baseboard,
+  so there is no Settings dialog to put it in. The dialog variant's collapsed
+  trigger carries the active theme's `ThemeSwatch` and label so it reads as the
+  same control as the row it stands in for; `compact` shows the swatch beside
+  the word "Theme".
+- **`compact` takes its menu offset from style, never a Tailwind class**
+  (`menuSide`, `'above'` for a trigger pinned to the viewport bottom): the
+  website renders against the lib's *prebuilt* stylesheet, so a utility the lib
+  has never emitted is absent there and the menu drops to its static position.
+- **`onPick` reports the choice, not the change.** `restoreActiveTheme` persists
+  the id it resolved, so `dormouse:active-theme` exists whether or not anyone
+  chose anything, and `subscribeToActiveTheme` is silent when the active theme
+  is re-picked. Only the picker can answer "has this person chosen yet".
 - **The host's fallback theme is module state, not a prop.**
   `setDefaultThemeId()` in `lib/src/lib/themes/apply.ts` (shaped like
   `shell-defaults.ts`) holds it and `restoreActiveTheme()` takes no argument, so

@@ -8,7 +8,7 @@
  * See docs/specs/website-docs.md -> /docs/dor reference.
  */
 
-import { PRE_CLASS } from "./docs-tokens";
+import { ACCENT_TEXT_CLASS, PRE_CLASS } from "./docs-tokens";
 
 export type DefinitionGroup = { label: string; rows: { term: string; description: string }[] };
 export type LabelledBlock = { label: string; body: string };
@@ -61,7 +61,7 @@ export default function DorCommandReference({ section }: { section: CommandSecti
               <tbody>
                 {group.rows.map((row, r) => (
                   <tr key={r} className="border-b border-[var(--color-text)]/10">
-                    <td className="py-2 pr-4 align-top font-mono text-sm whitespace-nowrap text-[var(--color-caramel)]">
+                    <td className={`py-2 pr-4 align-top font-mono text-sm whitespace-nowrap ${ACCENT_TEXT_CLASS}`}>
                       {row.term}
                     </td>
                     <td className="py-2 align-top opacity-80">{row.description}</td>

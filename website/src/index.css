@@ -37,6 +37,28 @@ html body {
   height: auto;
 }
 
+/* Reference pages follow the reader's picked theme instead of the site's
+   black; the rest of the site is unaffected because only DocsLayout adds the
+   class (docs/specs/website-docs.md -> Reference page chrome).
+
+   `applyTheme` writes --vscode-* onto body.style, so the remap has to live on
+   body too — html cannot read a custom property set on its child. That leaves
+   html painting the canvas its own black behind the page, which shows on
+   overscroll, so html gives the canvas up and lets body's background
+   propagate. */
+html:has(body.docs-themed) {
+  background: transparent;
+}
+
+body.docs-themed {
+  --color-bg: var(--vscode-editor-background);
+  --color-text: var(--vscode-editor-foreground);
+  --color-surface: var(--vscode-editorWidget-background);
+  background: var(--color-bg);
+  color: var(--color-text);
+  min-height: 100dvh;
+}
+
 html body.pocket-marketing-body {
   overflow: auto;
 }

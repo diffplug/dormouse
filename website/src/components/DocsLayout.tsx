@@ -4,8 +4,22 @@
  *
  * See docs/specs/website-docs.md -> reference page chrome.
  */
-import type { ReactNode } from "react";
-import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "./SiteHeader";
+import { useEffect, type ReactNode } from "react";
+import { useRestoredTheme } from "dormouse-lib/lib/themes";
+import SiteHeader from "./SiteHeader";
+import DocsThemeControl from "./DocsThemeControl";
+import { ACCENT_HOVER_TEXT_CLASS } from "./docs-tokens";
+import { DOCS_THEME_ID } from "../lib/docs-theme";
+
+/** Repaints the site's own tokens from the picked theme; see index.css. */
+const THEMED_BODY_CLASS = "docs-themed";
+
+/** The header is translucent over the page, so it takes the theme's own
+ *  widget background rather than the site's near-black. */
+const DOCS_HEADER_STYLE: React.CSSProperties = {
+  background: "color-mix(in srgb, var(--color-bg) 85%, transparent)",
+  backdropFilter: "blur(12px)",
+};
 
 export type TocEntry = { id: string; text: string; children: TocEntry[] };
 
@@ -17,7 +31,7 @@ function TocList({ entries, nested = false }: { entries: TocEntry[]; nested?: bo
         <li key={entry.id}>
           <a
             href={`#${entry.id}`}
-            className="block text-sm opacity-70 hover:opacity-100 hover:text-[var(--color-caramel)]"
+            className={`block text-sm opacity-70 hover:opacity-100 ${ACCENT_HOVER_TEXT_CLASS}`}
           >
             {entry.text}
           </a>
@@ -41,9 +55,17 @@ export default function DocsLayout({
   toc: TocEntry[];
   children: ReactNode;
 }) {
+  // These pages are long-form reading, so they follow the reader's theme
+  // rather than the site's black (docs/specs/website-docs.md).
+  useRestoredTheme(DOCS_THEME_ID);
+  useEffect(() => {
+    document.body.classList.add(THEMED_BODY_CLASS);
+    return () => document.body.classList.remove(THEMED_BODY_CLASS);
+  }, []);
+
   return (
     <>
-      <SiteHeader activePath={activePath} style={STATIC_PAGE_HEADER_STYLE} />
+      <SiteHeader activePath={activePath} style={DOCS_HEADER_STYLE} />
 
       <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)] pt-24 pb-16">
         <div className="mx-auto max-w-6xl px-4 md:px-6">
@@ -81,6 +103,8 @@ export default function DocsLayout({
           </footer>
         </div>
       </div>
+
+      <DocsThemeControl />
     </>
   );
 }

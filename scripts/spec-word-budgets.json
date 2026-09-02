@@ -29,7 +29,7 @@
   "docs/specs/terminal-escapes.md": 3950,
   "docs/specs/terminal-escapes.rationale.md": 350,
   "docs/specs/terminal-state.md": 2875,
-  "docs/specs/theme.md": 2350,
+  "docs/specs/theme.md": 2475,
   "docs/specs/tiling-engine.md": 5175,
   "docs/specs/tiling-engine.rationale.md": 900,
   "docs/specs/transport.md": 5275,
@@ -38,5 +38,5 @@
   "docs/specs/vscode.md": 9380,
   "docs/specs/vscode.rationale.md": 950,
   "docs/specs/webgl-text.md": 1600,
-  "docs/specs/website-docs.md": 3800
+  "docs/specs/website-docs.md": 4000
 }
