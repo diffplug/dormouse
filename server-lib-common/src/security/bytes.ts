@@ -48,6 +48,16 @@ export function isBoundedBase64Url(value: unknown, limit: number): value is stri
   );
 }
 
+/**
+ * Base64url of exactly `length` *characters* — canonical, unpadded, and one
+ * fixed size. Every fixed-width handle in this package (a routing id, a delivery
+ * id, an ACL key) is checked with this rather than with a bound, so a value of
+ * any other length is refused before it becomes a map key.
+ */
+export function isExactBase64Url(value: unknown, length: number): value is string {
+  return isBoundedBase64Url(value, length) && value.length === length;
+}
+
 /** Unpadded base64url characters for `byteLength` bytes. */
 export function base64UrlLength(byteLength: number): number {
   const remainder = byteLength % 3;

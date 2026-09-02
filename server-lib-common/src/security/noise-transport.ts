@@ -82,12 +82,9 @@ export function e2eConnectionPrologue(hostId: string, connectionId: string): Uin
  * The pairing prologue: the version, the kind, the `hostId`, and every
  * invitation field in the order the QR carries them.
  *
- * Reserved: the invitation grammar itself (invitation id, expiry, setup token,
- * invitation public key) lands with the pairing ceremony in
- * `docs/specs/remote-security-model.md` -> `## Future` -> **Scope:
- * e2e-client-host** stage 4, which replaces this positional array with the
- * parsed invitation. The binding rule — every field, length-prefixed, in
- * declared order — is already fixed here so stage 4 changes only the caller.
+ * Positional, and the order is `pairingInvitationFields`' to say
+ * (`security/pairing-invitation.ts`) — kept out of this layer so the encoding
+ * and the grammar it binds stay in one file each.
  */
 export function e2ePairingPrologue(
   hostId: string,

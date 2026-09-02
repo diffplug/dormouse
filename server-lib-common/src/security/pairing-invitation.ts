@@ -9,7 +9,7 @@
  * mis-pairing rather than a parse error.
  */
 
-import { base64UrlLength, fromBase64Url, isBoundedBase64Url } from './bytes.js';
+import { base64UrlLength, fromBase64Url, isExactBase64Url } from './bytes.js';
 import { NOISE_KEY_LENGTH } from './noise.js';
 import { e2ePairingPrologue } from './noise-transport.js';
 import { getWebCrypto, type WebCryptoLike } from './webcrypto.js';
@@ -32,11 +32,17 @@ const SECRET_LENGTH = base64UrlLength(32);
 /** Epoch seconds as exactly this many decimal digits, zero-padded. */
 const EXPIRY_DIGITS = 10;
 
+/** The one spelling of an expiry field, built from {@link EXPIRY_DIGITS}. */
+const EXPIRY_PATTERN = new RegExp(`^[0-9]{${EXPIRY_DIGITS}}$`);
+
 /** The largest epoch-seconds value a uint32 expiry may carry. */
 const MAX_UINT32 = 0xffff_ffff;
 
+/** How many dot-delimited fields the fragment carries. */
+const FRAGMENT_FIELD_COUNT = 6;
+
 /**
- * The positional fragment's exact length: six fields plus five separators.
+ * The positional fragment's exact length: every field plus its separators.
  * Fixed, because every field is fixed — a fragment of any other length is
  * rejected before a single field is read.
  */
@@ -45,7 +51,7 @@ export const PAIRING_FRAGMENT_LENGTH =
   ROUTING_ID_LENGTH * 2 +
   EXPIRY_DIGITS +
   SECRET_LENGTH * 2 +
-  5;
+  (FRAGMENT_FIELD_COUNT - 1);
 
 /**
  * The longest complete pairing URL a Host will mint.
@@ -85,11 +91,6 @@ function parseUrl(text: string) {
   } catch {
     return null;
   }
-}
-
-/** Base64url of exactly `length` characters, canonical and unpadded. */
-function isExact(value: unknown, length: number): value is string {
-  return isBoundedBase64Url(value, length) && value.length === length;
 }
 
 /** Epoch seconds as the fragment spells them: exactly ten digits, zero-padded. */
@@ -135,14 +136,11 @@ export function pairingInvitationPrologue(invitation: PairingInvitation): Uint8A
  * error at mint time rather than a thrown encoder at paint time.
  */
 export function formatPairingInvitationUrl(origin: string, invitation: PairingInvitation): string {
-  const fragment = [
-    PAIRING_INVITATION_VERSION,
-    invitation.hostId,
-    invitation.inviteId,
-    formatInvitationExpiry(invitation.expiry),
-    invitation.setupToken,
-    invitation.ephPubBase64Url,
-  ].join(FIELD_SEPARATOR);
+  // Through {@link pairingInvitationFields}, so the fragment and the prologue
+  // cannot disagree about order: the version leads, the `hostId` follows it, and
+  // the rest is exactly what the transcript binds.
+  const [version, ...rest] = pairingInvitationFields(invitation);
+  const fragment = [version, invitation.hostId, ...rest].join(FIELD_SEPARATOR);
   const url = `${origin}/${PAIRING_HASH_PREFIX}${fragment}`;
   if (url.length > PAIRING_QR_URL_MAX_LENGTH) {
     throw new Error(
@@ -189,7 +187,7 @@ export async function parsePairingInvitationUrl(
   const fragment = url.hash.slice(PAIRING_HASH_PREFIX.length);
   if (fragment.length !== PAIRING_FRAGMENT_LENGTH) return null;
   const fields = fragment.split(FIELD_SEPARATOR);
-  if (fields.length !== 6) return null;
+  if (fields.length !== FRAGMENT_FIELD_COUNT) return null;
   const [version, hostId, inviteId, expiryText, setupToken, ephPubBase64Url] = fields as [
     string,
     string,
@@ -199,9 +197,11 @@ export async function parsePairingInvitationUrl(
     string,
   ];
   if (version !== PAIRING_INVITATION_VERSION) return null;
-  if (!isExact(hostId, ROUTING_ID_LENGTH) || !isExact(inviteId, ROUTING_ID_LENGTH)) return null;
-  if (!isExact(setupToken, SECRET_LENGTH) || !isExact(ephPubBase64Url, SECRET_LENGTH)) return null;
-  if (!/^[0-9]{10}$/.test(expiryText)) return null;
+  if (!isExactBase64Url(hostId, ROUTING_ID_LENGTH) || !isExactBase64Url(inviteId, ROUTING_ID_LENGTH))
+    return null;
+  if (!isExactBase64Url(setupToken, SECRET_LENGTH) || !isExactBase64Url(ephPubBase64Url, SECRET_LENGTH))
+    return null;
+  if (!EXPIRY_PATTERN.test(expiryText)) return null;
   const expiry = Number(expiryText);
   if (expiry > MAX_UINT32) return null;
   // Advisory only — the Host's own memory stays authoritative — but a code that

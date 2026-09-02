@@ -9,6 +9,8 @@
  * `SubtleCrypto` objects satisfy them structurally.
  */
 
+import { toBase64Url } from './bytes.js';
+
 export interface CryptoKeyLike {
   readonly type: 'public' | 'private' | 'secret';
   readonly extractable: boolean;
@@ -68,4 +70,13 @@ export function getWebCrypto(): WebCryptoLike {
     );
   }
   return crypto;
+}
+
+/**
+ * `byteLength` fresh random bytes as base64url — the one way every unguessable
+ * handle in this system is minted, so no caller decides for itself whether to
+ * reach for the CSPRNG.
+ */
+export function randomBase64Url(byteLength: number, crypto: WebCryptoLike = getWebCrypto()): string {
+  return toBase64Url(crypto.getRandomValues(new Uint8Array(byteLength)));
 }

@@ -26,8 +26,11 @@ export interface HostStateStore {
   /**
    * Whether a write survives this process. Only the dev-harness store (no state
    * directory) says `false`. Required rather than optional so a store that
-   * forgot to answer is not silently read as durable — the dev loop's whole
-   * warning about a Host that vanishes at the next launch rests on it.
+   * forgot to answer is not silently read as durable.
+   *
+   * Nothing reads it today — its consumer went with the webview-persisted Host
+   * hand-off — and it is kept as the store contract's own statement of
+   * durability, which an implementor must make before anything can rely on it.
    */
   readonly persistent: boolean;
   loadEnrollment(): Promise<HostEnrollment | null>;

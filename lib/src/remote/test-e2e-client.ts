@@ -24,6 +24,7 @@ import {
   generateNoiseKeyPair,
   pairingInvitationPrologue,
   presenceChallenge,
+  randomBase64Url,
   toBase64Url,
   utf8Encode,
   type NoiseKeyPair,
@@ -36,10 +37,7 @@ import type { FakeSocket } from './test-fake-socket';
 
 const subtle = globalThis.crypto.subtle;
 
-/** Base64url of `bytes` random bytes — a routing id, a nonce, a token. */
-export function randomBase64Url(bytes: number): string {
-  return toBase64Url(globalThis.crypto.getRandomValues(new Uint8Array(bytes)));
-}
+export { randomBase64Url };
 
 /** A routing id as the relay mints one: base64url of 16 bytes. */
 export function testRoutingId(): string {
@@ -149,13 +147,9 @@ export async function presenceProofFor(
 
 /** Poll until `get` answers, so a Host that awaits WebCrypto can catch up. */
 export async function flushUntil<T>(get: () => T | undefined, timeoutMs = 2000): Promise<T> {
-  const start = Date.now();
-  for (;;) {
-    const value = get();
-    if (value !== undefined) return value;
-    if (Date.now() - start > timeoutMs) throw new Error('timed out waiting for a frame');
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
+  const value = await pollFor(get, timeoutMs);
+  if (value === undefined) throw new Error('timed out waiting for a frame');
+  return value;
 }
 
 /** Poll for at most `timeoutMs`, answering `undefined` if it never arrives. */

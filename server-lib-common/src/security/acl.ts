@@ -8,7 +8,7 @@
  * same active record.
  */
 
-import { base64UrlLength, isBoundedBase64Url } from './bytes.js';
+import { base64UrlLength, isExactBase64Url } from './bytes.js';
 import { NOISE_KEY_LENGTH } from './noise.js';
 
 /** Base64url of a raw 32-byte X25519 public key. */
@@ -50,26 +50,11 @@ export interface HostAclRecord {
   readonly revokedAt: number | null;
 }
 
-/** Base64url of exactly `byteLength` bytes, non-empty and canonical. */
-function isExactBase64Url(value: unknown, length: number): value is string {
-  return isBoundedBase64Url(value, length) && value.length === length;
-}
-
 /**
- * Structural validation of a `HostAclRecord` off disk.
- *
- * Every store reads its ACL back as `unknown[]`, so this is what keeps a
- * malformed row from reaching the authorization conjunction. **The two E2E
- * fields are checked for exact length, which is the whole of the Host-ACL
- * version**: a record written before the end-to-end cutover carries a
- * `devicePublicKey` and no Client static or delivery id, fails here, and is
- * dropped on read — the reset-and-re-pair the scope requires, with no migration
- * reader anywhere.
- *
- * This is not an authorization check. It cannot be — every field here is
- * attacker-choosable if something can write the store at all. The local
- * approval that minted the record is the authorization; this only ensures the
- * comparisons downstream are comparing strings to strings.
+ * Structural validation of a `HostAclRecord` off disk: hygiene, not
+ * authorization, and the exact-length checks on the two E2E fields are the
+ * whole of the Host-ACL version (`docs/specs/remote-security-model.md` → Host
+ * Authorization).
  */
 export function isHostAclRecord(record: unknown): record is HostAclRecord {
   if (!record || typeof record !== 'object') return false;

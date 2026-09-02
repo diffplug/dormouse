@@ -9,7 +9,6 @@ import assert from 'node:assert/strict';
 
 import {
   PAIRING_FINGERPRINT_LENGTH,
-  boundedPairingAccount,
   boundedPairingLabel,
   isPairStatusQuery,
   isPairingRequest,
@@ -61,14 +60,11 @@ test('isPairStatusQuery bounds both halves of the ACL lookup key', () => {
   assert.equal(isPairStatusQuery({ ...query, passkeyCredentialId: 'x'.repeat(1025) }), false);
 });
 
-test('boundedPairingLabel and boundedPairingAccount strip bidi and cap length', () => {
-  const hostile = `‮owner${'A'.repeat(500)}`;
-  for (const bounded of [boundedPairingLabel(hostile), boundedPairingAccount(hostile)]) {
-    assert.equal(bounded.includes('‮'), false);
-    assert.ok(Array.from(bounded).length <= 64);
-  }
+test('boundedPairingLabel strips bidi and caps length', () => {
+  const bounded = boundedPairingLabel(`‮owner${'A'.repeat(500)}`);
+  assert.equal(bounded.includes('‮'), false);
+  assert.ok(Array.from(bounded).length <= 64);
   assert.equal(boundedPairingLabel(undefined), '(unnamed)');
-  assert.equal(boundedPairingAccount(undefined), '(unknown)');
 });
 
 test('the fingerprint skips the constant prefix of a raw P-256 point', async () => {

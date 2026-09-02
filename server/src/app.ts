@@ -29,7 +29,7 @@ import {
   fromBase64Url,
   getWebCrypto,
   helloResponse,
-  isBoundedBase64Url,
+  isExactBase64Url,
   isOrigin,
   isPresenceBinding,
   presenceChallenge,
@@ -241,11 +241,10 @@ interface PendingPresenceNonce {
  * The server nonces `POST /api/reauth/begin` mints and `finish` consumes
  * (`docs/specs/remote-security-model.md` → Presence proofs).
  *
- * Not a {@link HostChallengeIssuer}: the entry has to carry the binding, so
- * `finish` recomputes the challenge from what `begin` actually signed off on
- * rather than from whatever the caller sends back. Bounded the same way —
- * expired entries are swept on every mint, and the map is capped — because the
- * route that fills it needs only a session token.
+ * Not a {@link HostChallengeIssuer} — whose single-use and TTL rules this
+ * otherwise shares — because the entry has to carry the *binding*, so `finish`
+ * recomputes the challenge from what `begin` signed off on rather than from
+ * whatever the caller sends back.
  */
 class PresenceNonceStore {
   readonly #pending = new Map<string, PendingPresenceNonce>();
@@ -805,12 +804,10 @@ export function createApp(config: AppConfig): CreatedApp {
   });
 
   // --- Web Push: subscriptions (client-facing) and delivery (host-facing) --
-  // See alert.md "Push notifications". Two audiences, two credentials: a
-  // Client registers, queries and deletes its own rows with a session token
-  // plus the `deliveryId` the Host minted for it; a Host reads and sends with
-  // its `hostToken`. The delivery id is 256 unguessable bits known only to the
-  // Host's ACL record and that Client, so possession IS the authorization —
-  // there is no challenge and no signature, and the Server never lists one.
+  // Two audiences, two credentials, and possession of the `deliveryId` is the
+  // whole Client-facing authorization: `server-lib-common/src/remote/wire.ts`
+  // -> "Web Push" states the contract, docs/specs/server.md -> Web Push the
+  // rules these routes implement.
 
   app.get(API_ROUTES.pushConfig, (c) => {
     // The VAPID public key is public by construction — it ships to every
@@ -1187,7 +1184,7 @@ function bearerToken(c: Context<AppEnv>): string | null {
  * be refused before it becomes a row key.
  */
 function isDeliveryId(value: unknown): value is string {
-  return isBoundedBase64Url(value, DELIVERY_ID_LENGTH) && value.length === DELIVERY_ID_LENGTH;
+  return isExactBase64Url(value, DELIVERY_ID_LENGTH);
 }
 
 /** True if `value` is a `PushSubscriptionPayload` with both encryption keys. */

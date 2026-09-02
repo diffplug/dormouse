@@ -249,10 +249,9 @@ function isStoredHost(row: unknown): row is StoredHost {
 export interface StoredPushSubscription {
   readonly hostId: string;
   /**
-   * The bearer capability the Host minted for this Client at pairing
-   * (`docs/specs/remote-security-model.md` → Push sealing). Possession of it is
-   * the whole authorization to register, query, and delete this row; the Server
-   * never lists one to a session.
+   * The bearer capability the Host minted for this Client at pairing;
+   * possession of it is the whole authorization for this row
+   * (`docs/specs/remote-security-model.md` → Host Authorization).
    */
   readonly deliveryId: string;
   readonly endpoint: string;

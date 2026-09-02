@@ -24,11 +24,9 @@ export const SETUP_TOKEN_TTL_MS = DEFAULT_PAIRING_TTL_MS;
 // `MAX_TOKENS_PER_HOST` bounds this map, which anything holding a `hostToken`
 // can otherwise grow for the process's lifetime by re-rendering its QR in a
 // loop. Per-host rather than global: a global cap makes one Host's minting loop
-// evict another Host's live token mid-scan. A Host's own oldest goes first —
-// same rule as `MAX_PENDING_TICKETS`
-// (`server-lib-common/src/security/pairing.ts`). It is defined in
-// `server-lib-common` because the Host caps its own map of paired nonces at the
-// same number.
+// evict another Host's live token mid-scan, and a Host's own oldest goes first.
+// It is defined in `server-lib-common` because the Host caps its own invitation
+// map at the same number.
 
 /** 256 bits, like every other unguessable handle in this system. */
 const SETUP_TOKEN_BYTE_LENGTH = 32;

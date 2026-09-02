@@ -253,8 +253,8 @@ newly-added passkey is not automatically trusted — the Client must still pair.
   device label in the first transport payload. After the proof verifies, the
   Host opens a modal with the label, an empty two-digit input, and the copy:
   *Only authorize if your phone is showing a two-digit code. If it shows an
-  error or no code, cancel this request.* **The service holds the expected code
-  and never displays, mirrors, or retransmits it**; the webview echoes the typed
+  error or no code, cancel this request.* **The Host holds the expected code and
+  never displays, mirrors, or retransmits it**; the webview echoes the typed
   digits with the immutable pairing ID, and the Host compares them without early
   exit. **Exactly one attempt** — a two-digit secret with retries is not a
   secret.

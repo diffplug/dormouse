@@ -103,21 +103,10 @@ export type PresenceProofResult =
 
 /**
  * The one presence verifier both ceremonies run — pairing and connection differ
- * only in the binding they pass as `expected`.
+ * only in the binding they pass as `expected`, which the caller must have built
+ * from its own state (`docs/specs/remote-security-model.md` → Presence proofs).
  *
- * **Never throws.** Its input is attacker-supplied plaintext from inside a
- * Noise session, and a rejection in the Node Host process must be an ordinary
- * denial rather than an unhandled async failure that can take the sidecar down.
- *
- * **Every binding field must equal `expected`, of the same kind.** The Host
- * built `expected` from its own state — its `hostId`, the final handshake hash,
- * and for a connection the challenge it just consumed and the connection id it
- * routed on — so this compare is what stops a proof for one ceremony
- * authenticating another.
- *
- * The assertion is verified against the *presented* key, and its hash returned
- * for the caller to check against the ACL. A compromised Server therefore
- * cannot substitute a passkey: the hash on the record is what the Host trusts.
+ * **Never throws**, so a caller may treat every rejection as an ordinary denial.
  */
 export async function verifyPresenceProof(
   proof: unknown,
@@ -232,14 +221,20 @@ export function isPairingRequestV1(value: unknown): value is PairingRequestV1 {
   return isPairingCode(request.code) && bounded(request.label) && isPresenceProofV1(request.presence);
 }
 
-/** Why a pairing ended without an ACL record. Fixed copy on the Client. */
-export type PairingDenialCode =
-  | 'user-denied'
-  | 'confirmation-mismatch'
-  | 'presence-rejected'
-  | 'invitation-expired'
-  | 'superseded'
-  | 'host-error';
+/**
+ * Why a pairing ended without an ACL record. Fixed copy on the Client, and the
+ * type is derived from the list the guard checks so the two cannot drift.
+ */
+const PAIRING_DENIALS = [
+  'user-denied',
+  'confirmation-mismatch',
+  'presence-rejected',
+  'invitation-expired',
+  'superseded',
+  'host-error',
+] as const;
+
+export type PairingDenialCode = (typeof PAIRING_DENIALS)[number];
 
 /** The single Host→Client control message that ends a pairing, either way. */
 export type PairingOutcomeV1 =
@@ -257,19 +252,10 @@ export type PairingOutcomeV1 =
     }
   | { readonly ok: false; readonly code: PairingDenialCode };
 
-const PAIRING_DENIALS: readonly string[] = [
-  'user-denied',
-  'confirmation-mismatch',
-  'presence-rejected',
-  'invitation-expired',
-  'superseded',
-  'host-error',
-];
-
 export function isPairingOutcomeV1(value: unknown): value is PairingOutcomeV1 {
   if (!value || typeof value !== 'object') return false;
   const outcome = value as Record<string, unknown>;
-  if (outcome.ok === false) return PAIRING_DENIALS.includes(outcome.code as string);
+  if (outcome.ok === false) return includesCode(PAIRING_DENIALS, outcome.code);
   if (outcome.ok !== true) return false;
   return (
     bounded(outcome.hostStaticPublicKey) &&
@@ -299,29 +285,29 @@ export function isConnectionRequestV1(value: unknown): value is ConnectionReques
  * half of the conjunction failed is logged owner-locally and never returned
  * (`docs/specs/remote-security-model.md` → Connection).
  */
-export type ConnectionDenialCode =
-  | 'pairing-required'
-  | 'presence-rejected'
-  | 'protocol-rejected'
-  | 'host-busy'
-  | 'host-error';
+const CONNECTION_DENIALS = [
+  'pairing-required',
+  'presence-rejected',
+  'protocol-rejected',
+  'host-busy',
+  'host-error',
+] as const;
+
+export type ConnectionDenialCode = (typeof CONNECTION_DENIALS)[number];
 
 /** The single Host→Client control message that ends a connection attempt. */
 export type ConnectionOutcomeV1 =
   | { readonly ok: true; readonly hostLabel: string }
   | { readonly ok: false; readonly code: ConnectionDenialCode };
 
-const CONNECTION_DENIALS: readonly string[] = [
-  'pairing-required',
-  'presence-rejected',
-  'protocol-rejected',
-  'host-busy',
-  'host-error',
-];
-
 export function isConnectionOutcomeV1(value: unknown): value is ConnectionOutcomeV1 {
   if (!value || typeof value !== 'object') return false;
   const outcome = value as Record<string, unknown>;
-  if (outcome.ok === false) return CONNECTION_DENIALS.includes(outcome.code as string);
+  if (outcome.ok === false) return includesCode(CONNECTION_DENIALS, outcome.code);
   return outcome.ok === true && bounded(outcome.hostLabel);
+}
+
+/** Membership in a denial list, without widening the list's literal type. */
+function includesCode(codes: readonly string[], value: unknown): boolean {
+  return typeof value === 'string' && codes.includes(value);
 }

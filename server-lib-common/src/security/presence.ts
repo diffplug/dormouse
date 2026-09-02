@@ -8,9 +8,6 @@
  * Server mints the challenge and the Host recomputes it — a second
  * implementation of these bytes would be a second opinion about what a valid
  * assertion is.
- *
- * Nothing calls this yet; the routes and the verifier land with the ceremony
- * cutover.
  */
 
 import {
@@ -26,9 +23,9 @@ import { getWebCrypto, type WebCryptoLike } from './webcrypto.js';
 export const PRESENCE_DOMAIN = 'dormouse/presence/v1';
 
 /**
- * The longest any single binding field may be. Same rule and roughly the same
- * headroom as `PAIRING_FIELD_LIMIT`: every real field is a routing id, a
- * 32-byte base64url value, or a credential id.
+ * The longest any single binding field may be. A type check alone bounds
+ * nothing — a megabyte string is a `string` — and every real field here is a
+ * routing id, a 32-byte base64url value, or a credential id.
  */
 export const PRESENCE_FIELD_LIMIT = 1024;
 

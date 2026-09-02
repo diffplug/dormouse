@@ -18,7 +18,7 @@
  */
 
 import { fromBase64Url, lengthPrefixedConcat, toBase64Url, utf8Encode } from './bytes.js';
-import { signDevicePayload, verifyDevicePayload } from './deviceKey.js';
+import { signDevicePayload } from './deviceKey.js';
 import { getWebCrypto, type CryptoKeyLike, type WebCryptoLike } from './webcrypto.js';
 
 
@@ -93,29 +93,6 @@ export function signPushSubscribe(
   crypto: WebCryptoLike = getWebCrypto(),
 ): Promise<string> {
   return signDevicePayload(privateKey, pushSubscribePayload(context), crypto);
-}
-
-/**
- * Server side: verify a push-subscribe signature. Returns false (never throws)
- * for malformed keys, malformed signatures, or any mismatch with the context.
- *
- * Building the payload is inside the guard because it decodes base64url from
- * the context, which throws on garbage — and this route is reachable by anyone
- * holding a session token, so a hostile body must produce a denial rather than
- * an unhandled rejection.
- */
-export async function verifyPushSubscribeSignature(
-  context: PushSubscribeContext,
-  signature: string,
-  crypto: WebCryptoLike = getWebCrypto(),
-): Promise<boolean> {
-  let payload: Uint8Array;
-  try {
-    payload = pushSubscribePayload(context);
-  } catch {
-    return false;
-  }
-  return verifyDevicePayload(context.devicePublicKey, payload, signature, crypto);
 }
 
 // ---------------------------------------------------------------------------

@@ -326,15 +326,15 @@ fails naming that — an error at mint time rather than a thrown QR encoder insi
 the app-wide ErrorBoundary. It bounds the longest origin a self-hoster may serve
 Pocket from: 103 characters.
 
-**One parser boundary, run before any field is used.**
-`parsePairingInvitationUrl(text, appOrigin, now?)` rejects strings over 256
-characters *before* URL parsing; requires HTTPS, no credentials, a root path, no
-query, the `#pair?` prefix, and an origin exactly equal to the running app's;
-then exactly six fields, the literal version, canonical alphabets at exact
-lengths, a uint32 expiry not in the past, and an `ephPub` X25519 imports. It
-answers the complete invitation or `null` — **never a partial parse** — and the
-import makes it asynchronous. Pinned by exact encode/parse vectors, including
-the 146-character fragment and the longest accepted origin.
+**One parser boundary.** `parsePairingInvitationUrl(text, appOrigin, now?)`
+answers the complete invitation or `null` — **never a partial parse**, and never
+an error a caller can distinguish. Two of its checks are this spec's rather than
+the parser's: the URL must be **HTTPS**, and its origin must **equal the running
+app's exactly** — a fragment is invisible to this server, so that compare is the
+only thing keeping a code from bootstrapping another deployment's Pocket. The
+check order is the function's own (cheap before expensive; the X25519 import
+last, which is what makes it asynchronous). Pinned by exact encode/parse
+vectors, including the 146-character fragment and the longest accepted origin.
 
 Source of truth: `server-lib-common/src/security/pairing-invitation.ts`, with
 `#setupQr` in `lib/src/host/remote/service.ts` as the emitter. What the
@@ -590,10 +590,9 @@ speaker today.
   violation destroys it and every later call throws — there is no
   resynchronization point in a stream cipher.
 - **Prologues are `lengthPrefixedConcat`** of `dormouse/e2e/v1`, the ceremony
-  kind, the `hostId`, and — for a connection — the connection id, so a
-  transcript is useless against another Host, id, or ceremony. Pairing's
-  invitation fields land with the ceremony
-  ([remote-security-model.md](./remote-security-model.md) `## Future`).
+  kind, the `hostId`, and — for a connection — the connection id, for a pairing
+  every field of its invitation in QR order ("Setup tokens and the pairing QR"
+  above), so a transcript is useless against another Host, id, or ceremony.
 
 Source of truth: `server-lib-common/src/security/noise-transport.ts`, pinned by
 `server-lib-common/test/noise-transport.test.mjs` and driven through the real

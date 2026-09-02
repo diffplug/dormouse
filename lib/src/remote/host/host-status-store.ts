@@ -85,8 +85,7 @@ function setState(next: RemoteHostStatusState): void {
  * one comparator per field, which is also the compile-time checklist that every
  * field has one.
  *
- * The same guard `sameRequest` uses in `activation.ts`, for the same reason: a
- * field added to the interface and forgotten here would be polled but never
+ * A field added to the interface and forgotten here would be polled but never
  * published, so the section would paint that field from whenever one of the
  * others last changed — stale for as long as the dialog stays open, and nothing
  * else would catch it. The mapped type makes the *omission* a compile error;

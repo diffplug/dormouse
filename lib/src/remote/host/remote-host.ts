@@ -23,13 +23,13 @@ import {
   formatInvitationExpiry,
   fromBase64Url,
   generateNoiseKeyPair,
-  getWebCrypto,
   importNoiseStaticPrivateKey,
   isConnectionRequestV1,
   isE2eServerToHostFrame,
   isPairingRequestV1,
   pairingInvitationPrologue,
   e2eConnectionPrologue,
+  randomBase64Url,
   toBase64Url,
   utf8Decode,
   utf8Encode,
@@ -74,8 +74,14 @@ export const MAX_PENDING_CONNECTION_HANDSHAKES = 8;
 /** What one invitation is doing, as the QR panel renders it. */
 export type InvitationState = 'live' | 'reserved' | 'consumed' | 'expired';
 
-/** 256 bits, like every other unguessable handle in this system. */
-const INVITE_ID_BYTE_LENGTH = 16;
+/**
+ * How many bytes name one thing this Host mints locally: the invitation id the
+ * QR carries, and the pairing id the modal echoes back. 16, the length every
+ * routing id on the `e2e` envelope is — the QR grammar pins the invitation id
+ * at exactly that (`server-lib-common/src/security/pairing-invitation.ts`), and
+ * a longer one would render a code no parser accepts.
+ */
+const LOCAL_ID_BYTE_LENGTH = 16;
 
 /** One invitation the Host is holding, with the key only it knows. */
 interface HeldInvitation {
@@ -307,9 +313,7 @@ export class RemoteHost {
     }
     const expiresAt = Math.min(now + DEFAULT_PAIRING_TTL_MS, serverExpiresAtMs);
     const keyPair = await generateNoiseKeyPair();
-    const inviteId = toBase64Url(
-      getWebCrypto().getRandomValues(new Uint8Array(INVITE_ID_BYTE_LENGTH)),
-    );
+    const inviteId = randomBase64Url(LOCAL_ID_BYTE_LENGTH);
     const invitation: PairingInvitation = {
       hostId: this.#enrollment.hostId,
       inviteId,
@@ -475,13 +479,12 @@ export class RemoteHost {
   }
 
   /**
-   * Connection-scoped state resets on a dropped socket (the ACL persists).
-   * Invitations go too: the key behind a code belongs to the socket the code
-   * was minted over.
+   * Connection-scoped state resets on a dropped socket; the ACL persists, and
+   * invitations go with the socket (`docs/specs/remote-security-model.md` →
+   * Host bounds).
    */
   #dropTransientState(): void {
     for (const clientId of [...this.#clients.keys()]) this.#disposeClient(clientId);
-    this.#clients.clear();
     for (const inviteId of [...this.#invitations.keys()]) {
       this.#retireInvitation(inviteId, 'consumed');
     }
@@ -512,6 +515,17 @@ export class RemoteHost {
     } catch {
       // socket mid-close
     }
+  }
+
+  /** One `e2e` envelope. Every Host→Client byte in this file goes through here. */
+  #sendE2e(
+    clientId: string,
+    kind: 'pairing' | 'connection',
+    id: string,
+    step: 'response' | 'transport',
+    ciphertext: Uint8Array,
+  ): void {
+    this.#send({ t: 'e2e', clientId, kind, id, step, ct: toBase64Url(ciphertext) });
   }
 
   // --- Frame handling ------------------------------------------------------
@@ -556,11 +570,7 @@ export class RemoteHost {
 
   // --- Pairing -------------------------------------------------------------
 
-  /**
-   * Noise message 1 against one invitation's key. A frame naming an invitation
-   * this Host does not hold live is **dropped without decryption** — an unknown
-   * id must cost a map lookup, not a handshake.
-   */
+  /** Noise message 1 against one invitation's key; an unknown id costs a map lookup. */
   async #onPairingInit(frame: E2eServerToHostFrame): Promise<void> {
     const held = this.#invitations.get(frame.id);
     if (!held || held.state !== 'live') return;
@@ -602,7 +612,7 @@ export class RemoteHost {
     const now = this.#now();
     this.#clientState(frame.clientId).pairing = {
       inviteId: held.invitation.inviteId,
-      pairingId: toBase64Url(getWebCrypto().getRandomValues(new Uint8Array(INVITE_ID_BYTE_LENGTH))),
+      pairingId: randomBase64Url(LOCAL_ID_BYTE_LENGTH),
       session,
       handshakeHash,
       clientStaticPublicKey,
@@ -610,24 +620,13 @@ export class RemoteHost {
       expiresAt: held.expiresAt,
       attempted: false,
     };
-    this.#send({
-      t: 'e2e',
-      clientId: frame.clientId,
-      kind: 'pairing',
-      id: frame.id,
-      step: 'response',
-      ct: toBase64Url(message2),
-    });
+    this.#sendE2e(frame.clientId, 'pairing', frame.id, 'response', message2);
   }
 
   /**
    * The first Client→Host transport payload of a pairing: a `PairingRequestV1`
-   * carrying the two digits, the device label, and the presence proof.
-   *
-   * Anything else is terminal. The invitation is single-use and the person at
-   * the Host is about to be interrupted, so a peer that cannot produce the one
-   * message this step expects spends the code rather than being allowed to
-   * retry against it.
+   * carrying the two digits, the device label, and the presence proof. Anything
+   * else is terminal (`docs/specs/remote-security-model.md` → Pairing).
    */
   async #onPairingTransport(frame: E2eServerToHostFrame): Promise<void> {
     const state = this.#clients.get(frame.clientId);
@@ -643,9 +642,8 @@ export class RemoteHost {
     try {
       receipt = pending.session.receive(fromBase64Url(frame.ct));
     } catch {
-      // The first invalid ciphertext destroys its session; there is no
-      // resynchronization point in a stream cipher, and nothing can be said
-      // over a poisoned one.
+      // The first invalid ciphertext destroys its session, and nothing can be
+      // said over a poisoned one.
       this.#disposePairing(frame.clientId, 'consumed');
       return;
     }
@@ -692,12 +690,10 @@ export class RemoteHost {
   }
 
   /**
-   * The local confirmation — the ONLY path that writes the ACL.
-   *
-   * **Exactly one attempt.** The secret is two digits, so a second guess would
-   * be worth 1% of the space; the compare is constant-time for the same reason
-   * an early exit anywhere else is a leak, and the attempt is spent before the
-   * comparison so a throw cannot leave a retry behind.
+   * The local confirmation — the ONLY path that writes the ACL, and **exactly
+   * one attempt** (`docs/specs/remote-security-model.md` → Pairing). The
+   * attempt is spent *before* the comparison, so no throw can leave a retry
+   * behind.
    */
   #approvePairing(clientId: string, pairingId: string, code: string): void {
     const pending = this.#clients.get(clientId)?.pairing;
@@ -712,9 +708,7 @@ export class RemoteHost {
       this.#finishPairing(clientId, 'confirmation-mismatch');
       return;
     }
-    const deliveryId = toBase64Url(
-      getWebCrypto().getRandomValues(new Uint8Array(DELIVERY_ID_BYTE_LENGTH)),
-    );
+    const deliveryId = randomBase64Url(DELIVERY_ID_BYTE_LENGTH);
     const record = this.#acl.approve({
       accountId: pending.approval.accountId,
       passkeyCredentialId: pending.approval.passkeyCredentialId,
@@ -760,9 +754,8 @@ export class RemoteHost {
   }
 
   /**
-   * Erase a pairing's handshake material and spend its invitation. Both, always:
-   * an invitation that survived its ceremony would let a second phone reserve
-   * the code the person has already answered for.
+   * Erase a pairing's handshake material and spend its invitation — both, on
+   * every terminal outcome (`docs/specs/remote-security-model.md` → Pairing).
    */
   #disposePairing(clientId: string, invitationState: 'consumed' | 'expired'): void {
     const state = this.#clients.get(clientId);
@@ -784,29 +777,20 @@ export class RemoteHost {
    * denying a pending request.
    */
   #evictOldestPairingIfFull(): void {
-    for (;;) {
-      let pendingCount = 0;
-      let oldestId: string | null = null;
-      let oldestAt = Number.POSITIVE_INFINITY;
-      for (const [id, state] of this.#clients) {
-        if (!state.pairing) continue;
-        pendingCount++;
-        if (state.pairing.requestedAt < oldestAt) {
-          oldestAt = state.pairing.requestedAt;
-          oldestId = id;
-        }
-      }
-      if (pendingCount < MAX_PENDING_PAIRINGS || oldestId === null) return;
-      this.#finishPairing(oldestId, 'superseded');
-    }
+    this.#evictOldestIfFull(
+      (state) => state.pairing?.requestedAt,
+      MAX_PENDING_PAIRINGS,
+      // Answered, because a person may be looking at the modal it removes.
+      (clientId) => this.#finishPairing(clientId, 'superseded'),
+    );
   }
 
   // --- Connection ----------------------------------------------------------
 
   /**
-   * Noise message 1 against this Host's long-term static. Message 2's payload
-   * is the fresh 32-byte challenge the presence proof must bind to, so
-   * completing the handshake proves both statics and authorizes nothing.
+   * Noise message 1 against this Host's long-term static; message 2's payload is
+   * the fresh challenge the proof must bind to
+   * (`docs/specs/remote-security-model.md` → Connection).
    */
   async #onConnectionInit(frame: E2eServerToHostFrame): Promise<void> {
     const staticKeyPair = await this.#loadNoiseStatic();
@@ -828,8 +812,7 @@ export class RemoteHost {
       clientStaticPublicKey = toBase64Url(remoteStatic);
       session = new NoiseTransportSession(handshake.session);
     } catch {
-      // Failures before `Split` yield only a generic outer error: there is no
-      // session to encrypt a denial on, so silence is the whole answer.
+      // Nothing to answer on: there is no session yet.
       return;
     }
     // At most one pending connection per relay client; a replacement disposes
@@ -845,14 +828,7 @@ export class RemoteHost {
       hostChallenge: challenge,
       expiresAt,
     };
-    this.#send({
-      t: 'e2e',
-      clientId: frame.clientId,
-      kind: 'connection',
-      id: frame.id,
-      step: 'response',
-      ct: toBase64Url(message2),
-    });
+    this.#sendE2e(frame.clientId, 'connection', frame.id, 'response', message2);
   }
 
   /**
@@ -895,33 +871,44 @@ export class RemoteHost {
     const proof = await verifyPresenceProof(request.presence, binding, this.#policy);
     if (this.#clients.get(frame.clientId)?.connection !== pending) return;
     if (!challengeValid || !proof.ok) {
-      console.warn(
-        `[remote-host] connection presence rejected: ${challengeValid ? (proof.ok ? '' : proof.reason) : 'challenge-invalid'}`,
-      );
+      const why = challengeValid && !proof.ok ? proof.reason : 'challenge-invalid';
+      console.warn(`[remote-host] connection presence rejected: ${why}`);
       this.#denyConnection(frame.clientId, pending, 'presence-rejected');
       return;
     }
-    const authorization = this.#acl.authorize({
-      passkeyCredentialId: binding.passkeyCredentialId,
-      clientStaticPublicKey: pending.clientStaticPublicKey,
-    });
-    // One record must hold all four identities. Which one failed is logged
-    // owner-locally and never returned: every miss is `pairing-required`.
-    const record = authorization.record;
-    const miss =
-      record === null
-        ? authorization.reasons.join(',')
-        : record.accountId !== request.presence.accountId
-          ? 'account-mismatch'
-          : record.passkeyPublicKeyHash !== proof.passkeyPublicKeyHash
-            ? 'passkey-key-mismatch'
-            : null;
+    const miss = this.#aclMiss(
+      binding.passkeyCredentialId,
+      pending.clientStaticPublicKey,
+      request.presence.accountId,
+      proof.passkeyPublicKeyHash,
+    );
     if (miss !== null) {
       console.warn(`[remote-host] connection refused: ${miss}`);
       this.#denyConnection(frame.clientId, pending, 'pairing-required');
       return;
     }
     this.#promoteConnection(frame.clientId, pending);
+  }
+
+  /**
+   * Why the ACL refuses this connection, or `null` if it authorizes it.
+   *
+   * **One record must hold all four identities.** The reason is for the
+   * owner-local log only — every miss answers `pairing-required`
+   * (`docs/specs/remote-security-model.md` → Connection).
+   */
+  #aclMiss(
+    passkeyCredentialId: string,
+    clientStaticPublicKey: string,
+    accountId: string,
+    passkeyPublicKeyHash: string,
+  ): string | null {
+    const authorization = this.#acl.authorize({ passkeyCredentialId, clientStaticPublicKey });
+    const record = authorization.record;
+    if (record === null) return authorization.reasons.join(',');
+    if (record.accountId !== accountId) return 'account-mismatch';
+    if (record.passkeyPublicKeyHash !== passkeyPublicKeyHash) return 'passkey-key-mismatch';
+    return null;
   }
 
   /** Success: answer, then hand the session's byte stream to protocol-v1. */
@@ -934,13 +921,17 @@ export class RemoteHost {
       hostLabel: this.#enrollment.label ?? '',
     } satisfies ConnectionOutcomeV1);
     if (!this.#createSession) return;
+    // Destructured, so the `send` closure retains only what an established
+    // session is — the id and the two cipher states — and not the pending
+    // record, whose handshake hash, Client static and challenge are spent.
+    const { connectionId, session } = pending;
     const api = this.#createSession({
       hostId: this.#enrollment.hostId,
       send: (payload) => {
-        this.#sendApp(clientId, pending, payload);
+        this.#sendApp(clientId, connectionId, session, payload);
       },
     });
-    state.established = { connectionId: pending.connectionId, session: pending.session, api };
+    state.established = { connectionId, session, api };
   }
 
   #denyConnection(
@@ -963,22 +954,42 @@ export class RemoteHost {
   }
 
   #evictOldestConnectionIfFull(): void {
+    this.#evictOldestIfFull(
+      (state) => state.connection?.expiresAt,
+      MAX_PENDING_CONNECTION_HANDSHAKES,
+      // No outcome: the evicted peer never authenticated, and answering it would
+      // let a flood of `init` frames buy a reply each.
+      (clientId) => this.#disposeConnection(clientId),
+    );
+  }
+
+  /**
+   * Keep one kind of pending work under `cap` by evicting its oldest.
+   *
+   * One scan per eviction, repeated until under the cap: the callers each add
+   * at most one entry, so this normally evicts once — the loop is what makes a
+   * cap true rather than nearly true.
+   */
+  #evictOldestIfFull(
+    age: (state: ClientState) => number | undefined,
+    cap: number,
+    evict: (clientId: string) => void,
+  ): void {
     for (;;) {
       let pendingCount = 0;
       let oldestId: string | null = null;
       let oldestAt = Number.POSITIVE_INFINITY;
       for (const [id, state] of this.#clients) {
-        if (!state.connection) continue;
+        const at = age(state);
+        if (at === undefined) continue;
         pendingCount++;
-        if (state.connection.expiresAt < oldestAt) {
-          oldestAt = state.connection.expiresAt;
+        if (at < oldestAt) {
+          oldestAt = at;
           oldestId = id;
         }
       }
-      if (pendingCount < MAX_PENDING_CONNECTION_HANDSHAKES || oldestId === null) return;
-      // No outcome: the evicted peer never authenticated, and answering it would
-      // let a flood of `init` frames buy a reply each.
-      this.#disposeConnection(oldestId);
+      if (pendingCount < cap || oldestId === null) return;
+      evict(oldestId);
     }
   }
 
@@ -1009,17 +1020,15 @@ export class RemoteHost {
     }
   }
 
-  #sendApp(clientId: string, pending: PendingConnectionSession, payload: unknown): void {
+  #sendApp(
+    clientId: string,
+    connectionId: string,
+    session: NoiseTransportSession,
+    payload: unknown,
+  ): void {
     try {
-      for (const ciphertext of pending.session.sendApp(utf8Encode(JSON.stringify(payload)))) {
-        this.#send({
-          t: 'e2e',
-          clientId,
-          kind: 'connection',
-          id: pending.connectionId,
-          step: 'transport',
-          ct: toBase64Url(ciphertext),
-        });
+      for (const ciphertext of session.sendApp(utf8Encode(JSON.stringify(payload)))) {
+        this.#sendE2e(clientId, 'connection', connectionId, 'transport', ciphertext);
       }
     } catch {
       this.#disposeEstablished(clientId);
@@ -1037,25 +1046,24 @@ export class RemoteHost {
   // --- Shared plumbing -----------------------------------------------------
 
   /**
-   * One control message on a ceremony session. Every outcome — approval and
-   * denial alike — is the same NUL-padded size, so the relay learns nothing
-   * from a length (`docs/specs/server.md` → E2E framing).
+   * One control message on a ceremony session; the transport pads every one to
+   * the same size (`docs/specs/server.md` → E2E framing).
    */
   #sendControl(
     clientId: string,
     kind: 'pairing' | 'connection',
     id: string,
     session: NoiseTransportSession,
-    value: Record<string, unknown> | PairingOutcomeV1 | ConnectionOutcomeV1,
+    value: PairingOutcomeV1 | ConnectionOutcomeV1,
   ): void {
     let ciphertext: Uint8Array;
     try {
-      ciphertext = session.sendControl(value as Record<string, unknown>);
+      ciphertext = session.sendControl({ ...value });
     } catch {
       // A poisoned session has nothing to say; the caller disposes it anyway.
       return;
     }
-    this.#send({ t: 'e2e', clientId, kind, id, step: 'transport', ct: toBase64Url(ciphertext) });
+    this.#sendE2e(clientId, kind, id, 'transport', ciphertext);
   }
 
   /** Forget a client that holds nothing, so a relay-chosen key cannot accumulate. */
@@ -1066,22 +1074,21 @@ export class RemoteHost {
     }
   }
 
+  /**
+   * Everything one client holds, torn down through the same three paths a
+   * terminal outcome uses — never re-implemented here, so a rule added to one
+   * of them cannot be missing from the socket-loss path.
+   */
   #disposeClient(clientId: string): void {
-    const state = this.#clients.get(clientId);
-    if (!state) return;
-    if (state.pairing) {
-      this.#retireInvitation(state.pairing.inviteId, 'consumed');
-      state.pairing = undefined;
-      this.#dismissApproval(clientId);
-    }
-    state.connection = undefined;
-    state.established?.api.dispose();
-    state.established = undefined;
+    if (!this.#clients.has(clientId)) return;
+    this.#disposePairing(clientId, 'consumed');
+    this.#disposeConnection(clientId);
+    this.#disposeEstablished(clientId);
+    this.#clients.delete(clientId);
   }
 
   #onClientGone(clientId: string): void {
     this.#disposeClient(clientId);
-    this.#clients.delete(clientId);
   }
 }
 

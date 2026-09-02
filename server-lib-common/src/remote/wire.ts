@@ -6,7 +6,12 @@
  */
 
 import type { HostAclRecord } from '../security/acl.js';
-import { base64UrlLength, isBoundedBase64Url, isBoundedString } from '../security/bytes.js';
+import {
+  base64UrlLength,
+  isBoundedBase64Url,
+  isBoundedString,
+  isExactBase64Url,
+} from '../security/bytes.js';
 import type { ConnectionFailure, ConnectionRequest } from '../security/connection.js';
 import { NOISE_MAX_MESSAGE_LENGTH } from '../security/noise.js';
 import type { PairStatusQuery, PairingRequest } from '../security/pairing.js';
@@ -408,7 +413,7 @@ export interface PushDevicesResponse {
  *
  * Reserved: the payload is still plaintext `title`/`body`/`tag`. Stage 6 of
  * **Scope: e2e-client-host** (`docs/specs/remote-security-model.md` →
- * `## Future` → Push sealing) replaces it with the sealed envelope; nothing
+ * `## Future`, "Sealed push") replaces it with the sealed envelope; nothing
  * else about this route changes then.
  */
 export interface PushSendRequest {
@@ -579,7 +584,7 @@ export function isE2eKind(value: unknown): value is E2eKind {
 
 /** Base64url of exactly 16 bytes. */
 export function isE2eId(value: unknown): value is string {
-  return isBoundedBase64Url(value, E2E_ID_LENGTH) && value.length === E2E_ID_LENGTH;
+  return isExactBase64Url(value, E2E_ID_LENGTH);
 }
 
 /** Base64url, bounded by {@link MAX_E2E_CIPHERTEXT_LENGTH}, non-empty. */
