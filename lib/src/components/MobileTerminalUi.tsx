@@ -282,10 +282,9 @@ function KeyboardModeSelector({
  * What each reserve says when the OS keyboard is not covering it.
  *
  * `type` is not a placeholder: the reserve is the stable-height area the OS
- * keyboard occupies, so this is what a phone shows once that keyboard has been
- * dismissed, and it is the label on the button that brings it back. Recent and
- * Draft genuinely are unbuilt, and say so rather than reading as broken
- * (`docs/specs/mobile-terminal-ui.md` → Future).
+ * keyboard occupies, so this is the only thing a phone ever sees here — once
+ * that keyboard has been dismissed (`docs/specs/mobile-terminal-ui.md` → Input
+ * mode selector).
  */
 const RESERVE_COPY = {
   recent: 'Not built yet — commands you have run will show up here.',

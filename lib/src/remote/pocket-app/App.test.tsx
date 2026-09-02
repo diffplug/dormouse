@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CAMERA_BOOTSTRAP_MESSAGE,
   HostsView,
+  PUSH_SERVER_DISABLED,
   SCAN_LABEL,
   PairingCodeView,
   SetupOrSignin,
@@ -449,7 +450,7 @@ describe('the one push card on the Hosts view', () => {
   it('reports a server with push disabled rather than the browser state', () => {
     renderHosts({ pushConfigStatus: 'disabled' });
 
-    expect(pushCard()!.textContent).toContain('server has push notifications turned off');
+    expect(pushCard()!.textContent).toContain(PUSH_SERVER_DISABLED);
     expect(buttonNamed('Enable push notifications')).toBeNull();
   });
 
@@ -467,7 +468,7 @@ describe('the one push card on the Hosts view', () => {
     renderHosts({ pushState: 'needs-install', pushConfigStatus: 'disabled' });
 
     expect(container.textContent).not.toContain('Add Dormouse to your Home Screen');
-    expect(pushCard()!.textContent).toContain('server has push notifications turned off');
+    expect(pushCard()!.textContent).toContain(PUSH_SERVER_DISABLED);
   });
 
   it('does not offer Enable until the VAPID key is cached', () => {
@@ -547,8 +548,7 @@ describe('pushNoticeState', () => {
     // not, so "Push notifications on." would be a lie.
     expect(noticeState({ configStatus: 'disabled', isPushSubscribed: () => true })).toEqual({
       kind: 'blocked',
-      reason:
-        'This server has push notifications turned off. Nothing on this phone can turn them on.',
+      reason: PUSH_SERVER_DISABLED,
     });
   });
 

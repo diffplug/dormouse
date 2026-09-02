@@ -825,8 +825,9 @@ to honor:
 - **Enrolled, "Set up a phone" opens an inline QR panel**, so a phone is set up
   by pointing a camera at the laptop rather than typing an origin and a 64-hex
   password. It mints on open and never before — a code is a credential with a
-  clock on it — re-mints shortly before `expiresAt` while the panel stays open.
-  Rules it exists to honor:
+  clock on it — re-mints shortly before `expiresAt` while the panel stays open,
+  and always offers New code and Done, the only exit from a dead code
+  (`RemoteControlSection.test.tsx`). Rules it exists to honor:
   - **The panel owns its busy and error**, not the section's shared pair: a mint
     also fires on a timer, and the view's one error slot belongs to what the
     user clicked.
@@ -836,8 +837,8 @@ to honor:
   - **The code being replaced stays on screen** until its replacement lands;
     only a first mint blanks.
   - **An invitation state change flips only the panel showing that `inviteId`**,
-    so a second window offering a different code stays live. Two flips matter,
-    and the panel stays subscribed past the QR to hear both: `reserved` (a phone
+    so a second window offering a different code stays live. **The panel stays
+    subscribed past the QR**, because two flips matter: `reserved` (a phone
     completed the handshake, so the code is spent whatever the laptop decides)
     and `consumed` (that decision is made, so the panel **must stop sending the
     user to a phone**).

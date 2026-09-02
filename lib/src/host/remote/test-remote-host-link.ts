@@ -18,7 +18,7 @@
 import { DEFAULT_PAIRING_TTL_MS, formatPairingInvitationUrl } from 'server-lib-common';
 
 import type { RemoteHostConsoleStatus, SetupQrResult } from './service-protocol';
-import type { InvitationState } from '../../remote/host/remote-host';
+import type { TerminalInvitationState } from '../../remote/host/remote-host';
 import type { RemoteHostLink } from '../../lib/platform/types';
 
 /** A machine that has never enrolled: the section shows its three-field form. */
@@ -108,7 +108,7 @@ export interface PrimedRemoteHost {
    * renders that terminal state. A story is one frame, so "the phone reserved
    * the code" has to be a starting condition rather than an event to wait for.
    */
-  setupInvitation?: Exclude<InvitationState, 'live'>;
+  setupInvitation?: TerminalInvitationState;
 }
 
 /**

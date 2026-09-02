@@ -24,6 +24,10 @@ import {
   type PocketSocket,
 } from '../client/pocket-client';
 import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webauthn';
+// Re-exported: this screen owns the button, the laptop's panel names it, and
+// the tests press it through the constant rather than a string of their own.
+import { SCAN_LABEL } from '../setup-copy';
+export { SCAN_LABEL };
 import { probeNoiseSupport, type PairingInvitation } from 'server-lib-common';
 import {
   indexedDbKnownHostStore,
@@ -686,6 +690,9 @@ export function UnsupportedBrowser(): React.ReactElement {
 
 // --- The two-digit waiting screen -------------------------------------------
 
+/** The accessible name of the digits; see {@link PairingCodeView}. */
+export const PAIRING_CODE_LABEL = 'Pairing code';
+
 /**
  * The digits the person has to type on the computer, and nothing else.
  *
@@ -695,9 +702,6 @@ export function UnsupportedBrowser(): React.ReactElement {
  * teach exactly the reflex the ceremony is built to punish
  * (`docs/specs/remote-security-model.md` → Pairing).
  */
-/** The accessible name of the digits; see {@link PairingCodeView}. */
-export const PAIRING_CODE_LABEL = 'Pairing code';
-
 export function PairingCodeView({
   code,
   onCancel,
@@ -718,7 +722,9 @@ export function PairingCodeView({
         <p className={PK.code} role="status" aria-label={PAIRING_CODE_LABEL} aria-live="polite">
           {code ?? '··'}
         </p>
-        <p className={clsx(PK.lead, 'text-center')}>Type these digits on the computer to approve.</p>
+        <p className={clsx(PK.lead, 'text-center')}>
+          Type these digits on the computer to approve.
+        </p>
         <button
           type="button"
           className={pkButton({ tone: 'outline', block: true })}
@@ -735,10 +741,9 @@ export function PairingCodeView({
 
 /**
  * What the list of paired machines is called, on its own header and on the back
- * button that returns to it. **"Computer", not "Host"** — every other sentence
- * Pocket shows says computer, and Host is a word from the specs
- * (`docs/specs/remote-security-model.md` → Terminology), not one to put in
- * front of someone who has just been told to go press a button on their laptop.
+ * button that returns to it, so the two cannot drift
+ * (`docs/specs/pocket-app.md` → The seam: the remote session is a platform
+ * adapter).
  */
 export const HOSTS_TITLE = 'Computers';
 
@@ -768,15 +773,6 @@ export function ConnectedView({
 }
 
 // --- SetupOrSignin ---------------------------------------------------------
-
-/**
- * The one way in, named for the thing the laptop is actually showing — the
- * setup code under **Settings → Remote control → Set up a phone**. Exported so
- * the tests press the button rather than a string that has to be kept in step
- * with this one.
- */
-export const SCAN_LABEL = 'Scan a setup code';
-
 
 /**
  * The auth screen, in two layouts on one question: does this browser hold a
@@ -988,6 +984,15 @@ const PUSH_BLOCKED: Record<Exclude<PushAvailability, 'ready' | 'needs-install'>,
   'no-worker': 'Push needs the server to be reached over https.',
 };
 
+/**
+ * The fourth blocked reason, and the only one with nothing behind it for the
+ * person holding the phone: it is the Server's config, so say so rather than
+ * leave them hunting through iOS settings for a switch that would not help.
+ * Not in {@link PUSH_BLOCKED}, which is keyed by browser availability.
+ */
+export const PUSH_SERVER_DISABLED =
+  'This server has push notifications turned off. Nothing on this phone can turn them on.';
+
 /** What the one push card says; `on` is the settled state and carries no action. */
 export type PushNoticeState =
   | { kind: 'offer' }
@@ -1027,15 +1032,7 @@ export function pushNoticeState({
   if (availability === null) return null;
   // Outranks every browser state, a settled `on` included: a Server that no
   // longer holds VAPID keys cannot deliver through the rows it still stores.
-  if (configStatus === 'disabled') {
-    // The one blocked reason with nothing behind it for the person holding the
-    // phone: it is the Server's config, so say so rather than leave them
-    // hunting through iOS settings for a switch that would not help.
-    return {
-      kind: 'blocked',
-      reason: 'This server has push notifications turned off. Nothing on this phone can turn them on.',
-    };
-  }
+  if (configStatus === 'disabled') return { kind: 'blocked', reason: PUSH_SERVER_DISABLED };
   if (pairedHostIds.every(isPushSubscribed)) return { kind: 'on' };
   // `InstallNotice` is the push card for this state, and it is on screen
   // exactly when this branch is reached — a second card saying "see above"

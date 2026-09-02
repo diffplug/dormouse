@@ -90,6 +90,13 @@ export const MAX_PENDING_CONNECTION_HANDSHAKES = 8;
 export type InvitationState = 'live' | 'reserved' | 'consumed' | 'expired' | 'dropped';
 
 /**
+ * The subset a *change* can carry. `live` is a resting state a query answers
+ * with, never one this Host announces an invitation moving to, and naming the
+ * difference once keeps every consumer from re-deriving it.
+ */
+export type TerminalInvitationState = Exclude<InvitationState, 'live'>;
+
+/**
  * How many bytes name one thing this Host mints locally: the invitation id the
  * QR carries, and the pairing id the modal echoes back. 16, the length every
  * routing id on the `e2e` envelope is — the QR grammar pins the invitation id

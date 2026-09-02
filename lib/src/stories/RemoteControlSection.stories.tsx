@@ -60,6 +60,15 @@ function settled(text: string | RegExp) {
   };
 }
 
+/** {@link settled} for the states behind the setup panel, which has to be opened. */
+function setupPanel(text: string | RegExp) {
+  return async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole('button', { name: 'Set up a phone' }));
+    await canvas.findByText(text);
+  };
+}
+
 /** A machine that has never enrolled: server, setup password, name. */
 export const Unenrolled: Story = {
   parameters: {
@@ -183,6 +192,8 @@ export const SetupPhoneQr: Story = {
     primedRemoteHost: { status: enrolledStatus(), setupQr: setupQrResult() },
     docs: { story: { height: '520px' } },
   },
+  // The one setup-panel story that settles on the QR's accessible name rather
+  // than on text, so it cannot use {@link setupPanel}.
   play: async (context) => {
     const canvas = within(context.canvasElement);
     await userEvent.click(await canvas.findByRole('button', { name: 'Set up a phone' }));
@@ -200,18 +211,13 @@ export const SetupPhoneRedeemed: Story = {
     primedRemoteHost: { status: enrolledStatus(), setupInvitation: 'reserved' },
     docs: { story: { height: '340px' } },
   },
-  play: async (context) => {
-    const canvas = within(context.canvasElement);
-    await userEvent.click(await canvas.findByRole('button', { name: 'Set up a phone' }));
-    await canvas.findByText(/This code is used up/);
-  },
+  play: setupPanel(/This code is used up/),
 };
 
 /**
  * The pairing request that code produced has been answered — approved on this
  * machine, or cancelled. The panel is behind the modal the whole time, so this
- * is the frame the user is left looking at, and the one sentence it must not
- * still be showing is the one above, sending them to a phone that has finished.
+ * is the frame the user is left looking at.
  */
 export const SetupPhoneFinished: Story = {
   parameters: {
@@ -221,11 +227,7 @@ export const SetupPhoneFinished: Story = {
     },
     docs: { story: { height: '340px' } },
   },
-  play: async (context) => {
-    const canvas = within(context.canvasElement);
-    await userEvent.click(await canvas.findByRole('button', { name: 'Set up a phone' }));
-    await canvas.findByText(/This setup code is finished/);
-  },
+  play: setupPanel(/This setup code is finished/),
 };
 
 /**
@@ -240,11 +242,7 @@ export const SetupPhoneRefused: Story = {
     },
     docs: { story: { height: '340px' } },
   },
-  play: async (context) => {
-    const canvas = within(context.canvasElement);
-    await userEvent.click(await canvas.findByRole('button', { name: 'Set up a phone' }));
-    await canvas.findByText('could not mint a setup code (503)');
-  },
+  play: setupPanel('could not mint a setup code (503)'),
 };
 
 /**

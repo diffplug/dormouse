@@ -93,6 +93,19 @@ async function settleQrChunk() {
   });
 }
 
+/**
+ * An enrolled machine with the panel open on a live code, handing back the link
+ * so a case can drive invitation events against it.
+ */
+async function openSetupPanel(): Promise<ReturnType<typeof makeLink>> {
+  const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : enrolled()));
+  platform = { remoteHost: link };
+  await render();
+  await act(async () => buttonLabelled('Set up a phone')!.click());
+  await settleQrChunk();
+  return link;
+}
+
 function text(): string {
   return container.textContent ?? '';
 }
@@ -529,12 +542,7 @@ describe('RemoteControlSection', () => {
   });
 
   it('stops offering the invitation the phone used, and only that one', async () => {
-    const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : enrolled()));
-    platform = { remoteHost: link };
-    await render();
-
-    await act(async () => buttonLabelled('Set up a phone')!.click());
-    await settleQrChunk();
+    const link = await openSetupPanel();
     expect(container.querySelector('svg[role="img"]')).toBeTruthy();
 
     // Another window's code was scanned. Every open panel hears the event, so
@@ -563,12 +571,7 @@ describe('RemoteControlSection', () => {
     // The Host discards every held invitation when its relay socket goes, so a
     // wifi blip must not tell the user to finish on a phone that never asked
     // (`docs/specs/remote-security-model.md` → Pairing).
-    const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : enrolled()));
-    platform = { remoteHost: link };
-    await render();
-
-    await act(async () => buttonLabelled('Set up a phone')!.click());
-    await settleQrChunk();
+    const link = await openSetupPanel();
     expect(container.querySelector('svg[role="img"]')).toBeTruthy();
 
     await act(async () => {
@@ -586,11 +589,7 @@ describe('RemoteControlSection', () => {
     // left looking at after approving — and `reserved`'s sentence ("it will ask
     // to pair") is a lie by then. The Host publishes `consumed` for every
     // terminal outcome, which is why the subscription outlives the QR.
-    const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : enrolled()));
-    platform = { remoteHost: link };
-    await render();
-    await act(async () => buttonLabelled('Set up a phone')!.click());
-    await settleQrChunk();
+    const link = await openSetupPanel();
 
     await act(async () => {
       link.emit('invitation', { name: 'invitation', inviteId: 'invite-1', state: 'reserved' });
@@ -615,11 +614,7 @@ describe('RemoteControlSection', () => {
     ['dropped', 'This code is no longer valid — nobody scanned it.', 'A phone scanned this code.'],
     ['expired', 'This code expired — nobody scanned it.', 'A phone scanned this code.'],
   ])('reads a %s invitation as the fact it is', async (state, expected, forbidden) => {
-    const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : enrolled()));
-    platform = { remoteHost: link };
-    await render();
-    await act(async () => buttonLabelled('Set up a phone')!.click());
-    await settleQrChunk();
+    const link = await openSetupPanel();
 
     await act(async () => {
       link.emit('invitation', { name: 'invitation', inviteId: 'invite-1', state });
