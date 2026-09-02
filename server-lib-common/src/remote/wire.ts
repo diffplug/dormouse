@@ -5,16 +5,13 @@
  * three sides cannot drift — the same pattern as HELLO_ROUTE.
  */
 
-import type { HostAclRecord } from '../security/acl.js';
 import {
   base64UrlLength,
   isBoundedBase64Url,
   isBoundedString,
   isExactBase64Url,
 } from '../security/bytes.js';
-import type { ConnectionFailure, ConnectionRequest } from '../security/connection.js';
 import { NOISE_MAX_MESSAGE_LENGTH } from '../security/noise.js';
-import type { PairStatusQuery, PairingRequest } from '../security/pairing.js';
 import type { PasskeyAssertion } from '../security/passkey.js';
 import type { PresenceBinding } from '../security/presence.js';
 
@@ -57,9 +54,9 @@ export function pushSubscriptionDeletePath(deliveryId: string): string {
 /**
  * The `error` a session-gated route answers 401 with when the session token is
  * unknown or expired. Shared because Pocket keys recovery on it: a 401 alone is
- * ambiguous (a wrong setup password and a rejected device signature also answer
- * 401), and only this one means "sign in again". Changing the string on one
- * side without the other would silently strand users on a dead session.
+ * ambiguous (a spent setup token answers 401 too), and only this one means
+ * "sign in again". Changing the string on one side without the other would
+ * silently strand users on a dead session.
  */
 export const UNAUTHORIZED_ERROR = 'unauthorized';
 
@@ -100,14 +97,15 @@ export const WS_CLOSE_HOST_REPLACED_REASON = 'replaced by a newer host connectio
 export const SELFHOST_ACCOUNT_ID = 'owner';
 
 /**
- * What gates the two setup routes: the setup password, or the single-use
- * `token` of a {@link SetupTokenResponse} an enrolled Host minted for its QR.
- * Exactly one must be present — both, or neither, is a 400 (why: `pickCredential`
- * in `server/src/app.ts`), the same rule as {@link HostEnrollRequest}.
+ * What gates the two setup routes: the single-use `token` of a
+ * {@link SetupTokenResponse} an enrolled Host minted for its QR, and nothing
+ * else. Registering a passkey therefore always begins at a code an enrolled
+ * Host displayed; the setup password enrolls Hosts and no longer registers
+ * anything ({@link HostEnrollRequest}).
  */
-export type SetupCredential =
-  | { password: string; setupToken?: never }
-  | { password?: never; setupToken: string };
+export interface SetupCredential {
+  setupToken: string;
+}
 
 export type SetupBeginRequest = SetupCredential;
 export interface SetupBeginResponse {
@@ -161,10 +159,11 @@ export interface SigninFinishResponse {
    * having performed the registration itself — which forced a second passkey
    * on every new browser profile, most visibly an iOS Home Screen install.
    *
-   * Handing it out costs nothing. It is a *public* key the Host is given in
-   * every `ConnectionRequest` anyway, and possessing it authorizes nothing: a
-   * connection still requires a fresh assertion, a device-key signature, and
-   * both halves on one active ACL record (docs/specs/remote-security-model.md).
+   * Handing it out costs nothing. It is a *public* key the Host is given inside
+   * every presence proof anyway, and possessing it authorizes nothing: a
+   * connection still requires a fresh assertion, the Client static the Noise
+   * handshake authenticated, and both halves on one active ACL record
+   * (docs/specs/remote-security-model.md).
    */
   passkeyPublicKey: string;
 }
@@ -210,11 +209,14 @@ export interface ReauthFinishResponse {
  * Enroll a Host. Exactly one credential must be present — the setup password,
  * or the one-time `token` of an installer's `EnrollmentOffer` (enroll-offer.ts)
  * for a Host on the server's own machine. Both, or neither, is a 400.
+ *
+ * **No label.** The name a machine presents is its own, kept beside the
+ * enrollment on the Host and told to a Client only inside an encrypted ceremony
+ * outcome (`docs/specs/remote-security-model.md` → Host identity).
  */
-export type HostEnrollRequest = { label: string } & (
+export type HostEnrollRequest =
   | { password: string; enrollToken?: never }
-  | { password?: never; enrollToken: string }
-);
+  | { password?: never; enrollToken: string };
 export interface HostEnrollResponse {
   hostId: string;
   /** Bearer credential for the `token` param of /ws/host. */
@@ -283,20 +285,8 @@ export const MAX_TOKENS_PER_HOST = 8;
  */
 const SETUP_TOKEN_MAX_LENGTH = 128;
 
-/**
- * The `#setup` hash a Host composes for its QR and Pocket parses at boot; one
- * owner so the emitter and the parser cannot drift. `docs/specs/server.md` ->
- * Setup tokens owns the grammar.
- */
-export const SETUP_HASH_PREFIX = '#setup?';
-export const SETUP_HASH_TOKEN_PARAM = 'token';
-export const SETUP_HASH_NONCE_PARAM = 'nonce';
-
-/**
- * Base64url, bounded, non-empty — the shape of every handle on this wire, and
- * of both halves of the QR hash above.
- */
-export function isSetupTokenHandle(value: unknown): value is string {
+/** Base64url, bounded, non-empty — the shape of a setup token on this wire. */
+function isSetupTokenHandle(value: unknown): value is string {
   return isBoundedBase64Url(value, SETUP_TOKEN_MAX_LENGTH);
 }
 
@@ -321,8 +311,13 @@ export function isSetupTokenResponse(value: unknown): value is SetupTokenRespons
   );
 }
 
+/**
+ * Discovery only: which Hosts this account has enrolled, and which are
+ * connected. **No label** — the Server holds none, and a Client renders the one
+ * its own pinned record carries (`docs/specs/pocket-app.md`).
+ */
 export interface HostsResponse {
-  hosts: Array<{ hostId: string; label: string; online: boolean }>;
+  hosts: Array<{ hostId: string; online: boolean }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -462,58 +457,27 @@ export interface PushSendResponse {
 // never sees or sends it.
 
 /**
- * Client → server. `msg` is only forwarded once the session is authorized.
- *
- * `pair-status` is the one frame that does **not** bind the client to the host
- * it names: it asks a question about the ACL, and asking must not tear down a
- * session the client currently holds elsewhere (see server.md "Relay").
+ * Client → server: the end-to-end envelope, and nothing else. Anything the
+ * relay cannot route is answered with an `error`.
  */
-export type ClientFrame =
-  | { t: 'pair'; hostId: string; request: PairingRequest }
-  | { t: 'pair-status'; hostId: string; query: PairStatusQuery }
-  | { t: 'connect'; hostId: string }
-  | { t: 'connect2'; hostId: string; request: ConnectionRequest }
-  | { t: 'msg'; data: unknown }
-  | E2eClientFrame;
+export type ClientFrame = E2eClientFrame;
 
 /** Server → client. */
 export type ServerToClientFrame =
-  | { t: 'pair-result'; approved: boolean; record?: HostAclRecord; error?: string }
-  | { t: 'pair-status-result'; hostId: string; paired: boolean }
-  | { t: 'challenge'; hostId: string; challenge: string; expiresAt: number }
-  | { t: 'decision'; allowed: boolean; failures?: readonly ConnectionFailure[] }
-  | { t: 'msg'; data: unknown }
   | { t: 'host-gone' }
   | { t: 'error'; error: string }
   | E2eServerToClientFrame;
 
 /** Server → host. Every frame addresses one Client by its server-assigned `clientId`. */
-export type ServerToHostFrame =
-  | { t: 'pair'; clientId: string; request: PairingRequest }
-  | { t: 'pair-status'; clientId: string; query: PairStatusQuery }
-  | { t: 'connect'; clientId: string }
-  | { t: 'connect2'; clientId: string; request: ConnectionRequest }
-  | { t: 'msg'; clientId: string; data: unknown }
-  | { t: 'client-gone'; clientId: string }
-  | E2eServerToHostFrame;
+export type ServerToHostFrame = { t: 'client-gone'; clientId: string } | E2eServerToHostFrame;
 
-/**
- * Host → server. `pair-status-result` carries no hostId — the relay knows which
- * Host the socket belongs to and stamps it on the way out, exactly as it does
- * for `challenge`.
- */
-export type HostFrame =
-  | { t: 'pair-result'; clientId: string; approved: boolean; record?: HostAclRecord; error?: string }
-  | { t: 'pair-status-result'; clientId: string; paired: boolean }
-  | { t: 'challenge'; clientId: string; challenge: string; expiresAt: number }
-  | { t: 'decision'; clientId: string; allowed: boolean; failures?: readonly ConnectionFailure[] }
-  | { t: 'msg'; clientId: string; data: unknown }
-  | E2eHostFrame;
+/** Host → server. */
+export type HostFrame = E2eHostFrame;
 
 // ---------------------------------------------------------------------------
 // The `e2e` relay envelope: one end-to-end Noise message per frame, in a
-// bounded routing envelope. Additive beside the legacy union above, with no
-// production speaker yet (server.md -> Relay).
+// bounded routing envelope — the whole of what the relay routes
+// (server.md -> Relay).
 
 /** Which ceremony a frame belongs to; a session is scoped to one kind and id. */
 export type E2eKind = 'pairing' | 'connection';
@@ -668,7 +632,7 @@ export function isE2eHostFrame(value: unknown): value is E2eHostFrame {
 
 // ---------------------------------------------------------------------------
 // Remote-api v1, terminal-only (see remote-api.md "v1 scope" and server.md).
-// These ride inside `msg` frames once a session is authorized.
+// These ride as application messages on an authorized Noise session.
 
 export interface RemoteRequest {
   requestId: string;
@@ -788,9 +752,8 @@ export const MAX_TERMINAL_DIMENSION = 2000;
  * `terminal.resize` carries a peer-supplied number straight to `term.resize`
  * in the webview that owns the pane, and xterm bounds only the minimum before
  * allocating `rows × cols` cells. Unbounded, one frame asking for a million by
- * a million wedges every terminal in that window — reachable by an authorized
- * Client, or by a compromised Server forging `msg` on an established session
- * (`SECURITY.md` -> Remote Control, Trust boundary).
+ * a million wedges every terminal in that window — reachable by any authorized
+ * Client (`SECURITY.md` -> Remote Control, Trust boundary).
  */
 export function clampTerminalDimension(value: number | undefined, fallback: number): number {
   if (value === undefined || !Number.isFinite(value)) return fallback;

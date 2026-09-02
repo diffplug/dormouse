@@ -11,7 +11,12 @@
  */
 
 import { isBoundedString } from './bytes.js';
-import { hashPasskeyPublicKey, verifyPasskeyAssertion, type PasskeyAssertion } from './passkey.js';
+import {
+  hashPasskeyPublicKey,
+  verifyPasskeyAssertion,
+  type ConnectionPolicy,
+  type PasskeyAssertion,
+} from './passkey.js';
 import { presenceChallenge, isPresenceBinding, type PresenceBinding } from './presence.js';
 import { getWebCrypto, type WebCryptoLike } from './webcrypto.js';
 
@@ -78,13 +83,6 @@ export function isPresenceProofV1(value: unknown): value is PresenceProofV1 {
   );
 }
 
-/** What the Host demands of an assertion; the mirrored `ConnectionPolicy` fields. */
-export interface PresencePolicy {
-  readonly origin: string | readonly string[];
-  readonly rpId: string;
-  readonly requireUserVerification?: boolean;
-}
-
 export type PresenceProofFailure =
   /** The proof was not a {@link PresenceProofV1} at all. */
   | 'malformed'
@@ -111,7 +109,7 @@ export type PresenceProofResult =
 export async function verifyPresenceProof(
   proof: unknown,
   expected: PresenceBinding,
-  policy: PresencePolicy,
+  policy: ConnectionPolicy,
   crypto: WebCryptoLike = getWebCrypto(),
 ): Promise<PresenceProofResult> {
   if (!isPresenceProofV1(proof)) return { ok: false, reason: 'malformed' };

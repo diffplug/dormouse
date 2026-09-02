@@ -21,7 +21,6 @@ export * from './security/ecdsa.js';
 export * from './security/noise.js';
 export * from './security/noise-transport.js';
 export * from './security/presence.js';
-export * from './security/deviceKey.js';
 export * from './security/challenge.js';
 export * from './security/passkey.js';
 export * from './security/acl.js';
@@ -29,8 +28,6 @@ export * from './security/push.js';
 export * from './security/pairing.js';
 export * from './security/pairing-invitation.js';
 export * from './security/e2e-ceremony.js';
-export * from './security/setup-proof.js';
-export * from './security/connection.js';
 
 /** Path of the greeting endpoint that `server` serves and `lib` can call. */
 export const HELLO_ROUTE = '/api/hello';
