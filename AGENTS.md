@@ -60,8 +60,6 @@ Use one implementation map per spec: either an exhaustive `Files` / `Code Map` s
 
 When updating code covered by a spec, update the spec to match. When the two specs overlap (e.g. pane header elements appear in both), layout.md documents placement and sizing while alert.md documents behavior and visual states.
 
-**Narrative docs are not specs.** `docs/stories/pairing.mdx` is a Storybook page that walks the self-hosted remote-control setup end to end, embedding the real screens from `lib/src/stories/`. It restates specs for narrative flow rather than owning anything, `scripts/spec-lint.mjs` does not check it, and the `## Future` fold does not apply. When a remote spec changes, check whether it needs the same edit — the specs win where they disagree.
-
 **Say it once.** An invariant and its rationale live in exactly one place — the owning spec when one covers it, otherwise a comment at the code it constrains. Everywhere else gets at most a one-line pointer. Write a comment only for a constraint the code cannot show, and keep prose proportional to the change: a one-line fix earns a sentence of spec plus pointers, not three restatements of the same explanation. A "must stay in sync" claim names the test that pins it (exemplars: `lib/src/lib/themes/consumed-keys.test.ts`, `lib/src/lib/mirrored-constants.test.ts`).
 
 **The rationale split.** A spec stays dense and normative; the evidence behind its rules moves to a paired `docs/specs/<foo>.rationale.md`. Opt-in per spec — thin specs keep rationale inline. What moves and what stays:
