@@ -41,10 +41,36 @@ selectors), `ab.mjs` (`agent-browser`), `chrome.mjs` (the Pocket browser),
 Every line about `agent-browser` and Chrome here was probed against
 `agent-browser` 0.31.1 and Chrome for Testing 150, not assumed.
 
+## Scenarios
+
+`--scenario <name>` picks which ending the run drives: `happy` (the default),
+`wrong-code`, `denied`, and `expired-code`. They share the first six steps —
+everything up to the scan is the same code on every path — so a scenario is only
+ever the last step or two, named for it in *Steps* below, and the differences are
+all in what the laptop and the phone say afterwards. What a green run of each
+proves is one sentence per scenario in `steps.mjs`, printed at startup and
+recorded in `summary.json` as `expect`.
+
+**Every artifact of a scenario other than `happy` is prefixed with the
+scenario's name** — screenshots, text captures, logs, proof files — so several
+scenarios can share one `--out` without overwriting each other's evidence.
+
+`wrong-code` and `denied` both check an *absence* — that nothing was paired —
+which the count cannot show the instant a decision lands, since the section
+re-reads its status on a 2 s poll. Each therefore waits a poll cycle out before
+believing the count.
+
+`expired-code` never scans anything, so it stops one step short of the others
+and its two codes go in through the paste field beside the viewfinder. Both are
+the Host's own live code re-issued through the shipped emitter — never by
+splicing the fragment, which is positional and carries no field names — so what
+the phone refuses is a code that Host could have minted.
+
 ## Steps
 
-`--until <step>` stops after the step it names; the default is the last one, so
-a bare run does all of it.
+`--until <step>` stops after the step it names, and must name a step of the
+chosen scenario; the default is that scenario's last, so a bare run does all of
+it.
 
 | # | Step | What happens |
 | --- | --- | --- |
@@ -56,11 +82,14 @@ a bare run does all of it.
 | 6 | `pocket` | Launches a second, isolated Chrome with the fake camera pointed at `qr.y4m`, attaches with `agent-browser connect <port>`, opens the **plain origin**, and gives the page a CDP virtual authenticator. → `05-pocket-first-run.png` |
 | 7 | `code` | Taps **Scan a setup code**; Pocket's own scanner decodes the fake camera, registers a passkey with the scanned token, signs in, and shows two digits. Reads them, and waits for the Host's modal to open. → `06-scanner.png`, `07-code-screen.png`, `08-host-pairing-modal.png`, `pairing-code.txt` |
 | 8 | `terminal` | Types the two digits into the Host's modal and authorizes; waits for Pocket to connect itself and land on the terminal; runs a command from the phone and reads the file it wrote; rings the Host and finds the bell on the phone; then leaves to the Hosts view and connects again. → `09-host-approved.png` … `14-pocket-reconnected.png`, `terminal-proof.txt`, `notify-proof.txt`, `reconnect-proof.txt` |
+| 8′ | `mismatch` | (`wrong-code`) Types the *next* two digits instead, and waits for the panel to report a mismatch; checks the paired count did not move and follows the phone back to its list. → `09-host-mismatch.png`, `10-pocket-mismatch.png` |
+| 8′ | `cancel` | (`denied`) Presses the modal's Cancel and waits for the panel to report it; same two checks. → `09-host-cancelled.png`, `10-pocket-cancelled.png` |
+| 7′ | `dead-code` | (`expired-code`) Replaces the camera's Y4M with a blank frame, opens the scanner, and pastes the Host's own code re-issued twice — once stamped with a 2023 expiry, once for another origin as well. Waits for the phone's own sentence each time, and checks the two differ. → `06-pocket-expired.png`, `07-pocket-foreign.png` |
 
 Everything a later step needs from an earlier one is on `ctx.state` —
 `hostBrowser`, `pocketBrowser`, `pocketAuth` (the live CDP session holding the
-authenticator), `invitationUrl`, `pairingCode`, and `signCount` — or in
-`summary.json`.
+authenticator), `serverHandle`, `invitationUrl`, `pairingCode`, and `signCount`
+— or in `summary.json`.
 
 Per-step milliseconds land in `summary.json`. With warm builds the whole run is
 about 15 s, of which the Host's boot is a third and step 8 is under 3 s; a cold
@@ -76,7 +105,8 @@ to tap something there would have found a bug.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--until <step>` | `terminal` | Stop after this step. |
+| `--scenario <name>` | `happy` | Which ending to drive — see *Scenarios*. |
+| `--until <step>` | the scenario's last | Stop after this step. |
 | `--out <dir>` | `$TMPDIR/pairing-walkthrough/<timestamp>` | Run directory. |
 | `--skip-build` | off | Reuse `lib/dist-pocket` and `server/dist` instead of rebuilding them. Ignored (with a warning) when either is missing. |
 | `--password <pw>` | `walkthrough-hunter2` | `DORMOUSE_SETUP_PASSWORD` for the run. |
@@ -117,6 +147,17 @@ summary.json          per-step status and timing, plus the run's facts
 visible text at that moment, with anything announced (`role="alert"`,
 `aria-live`) repeated under a rule. A pass that critiques the copy a user meets
 on this path cannot read a PNG; this is its raw material.
+
+### Warnings a green run leaves behind
+
+Three, every time. None is a symptom of anything, and a run that lacks them is
+not healthier than one that has them.
+
+| Where | What | Why |
+| --- | --- | --- |
+| `pocket-console.log` | `publicKey.pubKeyCredParams is missing at least one of the default algorithm identifiers: ES256 and RS256` | Deliberate: the verifier is ES256-only, so offering RS256 would mint keys that fail at the first assertion (`lib/src/remote/client/webauthn.ts`). |
+| `pocket-console.log`, twice | `Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute` | `@zxing/browser` reading camera frames; not ours to set, and one decode per run is not a performance question. |
+| `server.log`, `host.log` | `[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] … Command failed with signal "SIGTERM"` | The last line of a clean teardown. `pnpm` reports a SIGTERMed child as a failed script; the harness sent that signal on purpose. |
 
 `summary.json` also carries what only a run can know: the decoded pairing URL
 and how much of its TTL was left, the round trip from Enter to the file the

@@ -77,6 +77,24 @@ export async function toY4m(source, out) {
 }
 
 /**
+ * A camera-shaped Y4M with nothing in it, replacing whatever `out` held.
+ *
+ * For the scenarios about codes that arrive by hand: a viewfinder still pointed
+ * at the Host's live QR decodes it the moment the scanner mounts, which would
+ * start a real ceremony underneath the one being driven. White rather than
+ * black, so the screenshots show a viewfinder that is plainly looking at
+ * nothing rather than one that looks broken.
+ */
+export async function blankY4m(out) {
+  const w = even(CAMERA.width);
+  const h = even(CAMERA.height);
+  await exec(FFMPEG, [...QUIET,
+    '-f', 'lavfi', '-i', `color=c=white:s=${w}x${h}:r=${CAMERA.fps}:d=${CAMERA.seconds}`,
+    '-pix_fmt', 'yuv420p', out]);
+  return { ...CAMERA, width: w, height: h };
+}
+
+/**
  * An integer nearest-neighbour enlargement of `source`.
  *
  * A laptop draws the code at 168 CSS px and a headless browser captures at

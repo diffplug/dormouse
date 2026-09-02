@@ -916,6 +916,38 @@ describe('setup QR', () => {
     });
   });
 
+  it('carries how the ceremony ended to the webview, mistyped or not', async () => {
+    // The panel behind the modal has no other way to tell a success from a
+    // mistyped confirmation: both spend the code and dismiss the request
+    // (`docs/specs/server.md` → "Remote control, in the Settings dialog").
+    const socket = await running();
+    for (const [clientId, typed, expected] of [
+      ['c1', (code: string) => code, 'paired'],
+      ['c2', (code: string) => (code === '99' ? '98' : '99'), 'code-mismatch'],
+    ] as const) {
+      const { qr, invitation } = await mint();
+      const before = queueEvents().length;
+      const { code } = await pairThroughSocket({
+        socket,
+        hostId: QR_ENROLLMENT.hostId,
+        clientId,
+        invitation,
+        authenticator,
+        until: () => queueEvents().length > before,
+      });
+      const item = queueEvents().at(-1)!.queue.find((entry) => entry.clientId === clientId)!;
+      await command('approve', { clientId, pairingId: item.pairingId, code: typed(code) });
+      await settle();
+
+      expect(invitationEvents().at(-1)).toEqual({
+        name: 'invitation',
+        inviteId: qr.inviteId,
+        state: 'consumed',
+        outcome: expected,
+      });
+    }
+  });
+
   it('refuses to mint on a machine with no enrollment', async () => {
     createService();
     await service.start();

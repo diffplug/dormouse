@@ -2,8 +2,14 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import {
+  PAIRING_OUTCOME_COPY,
+  PAIRING_OUTCOME_LABEL,
+} from '../components/RemoteControlSection';
 import { enrollmentOfferPath } from '../host/remote/enroll-offer';
+import { SETUP_CODE_DEAD_MESSAGE } from '../remote/client/pocket-client';
 import { PAIRING_CODE_LABEL } from '../remote/pocket-app/App';
+import { SCAN_REJECTED_MESSAGE } from '../remote/pocket-app/ScanInvitation';
 import { SCAN_LABEL } from '../remote/setup-copy';
 import { ITERM2_COMPAT_VERSION } from './terminal-protocol';
 import { OPEN_PORT_TIMEOUT_MS } from './platform/types';
@@ -125,6 +131,31 @@ describe('the pairing walkthrough mirrors the copy it clicks', () => {
   it('finds the two digits by the live region’s shipped accessible name', () => {
     const selector = extract(source, file, /^const PAIRING_CODE_REGION = '([^']+)';$/m);
     expect(selector).toBe(`[role="status"][aria-label="${PAIRING_CODE_LABEL}"]`);
+  });
+
+  it('finds the pairing report by the live region’s shipped accessible name', () => {
+    const selector = extract(source, file, /^const PAIRING_OUTCOME_REGION = '([^']+)';$/m);
+    expect(selector).toBe(`[role="status"][aria-label="${PAIRING_OUTCOME_LABEL}"]`);
+  });
+
+  // The screens' structure says only that a ceremony ended or a code was
+  // refused; the scenarios turn on *which* one, so these prefixes are the
+  // harness's one match on copy. What has to hold is not the wording but that
+  // each prefix still picks out exactly one of the shipped sentences — a
+  // rewrite that let two of them share an opening would otherwise leave
+  // `--scenario wrong-code` passing on a run that paired a phone.
+  const REFUSALS = { dead: SETUP_CODE_DEAD_MESSAGE, rejected: SCAN_REJECTED_MESSAGE };
+  it.each([
+    ['OUTCOME_PAIRED', PAIRING_OUTCOME_COPY],
+    ['OUTCOME_CODE_MISMATCH', PAIRING_OUTCOME_COPY],
+    ['OUTCOME_CANCELLED', PAIRING_OUTCOME_COPY],
+    // `--scenario expired-code` turns on which refusal a pasted code earns.
+    ['REFUSED_EXPIRED', REFUSALS],
+    ['REFUSED_NOT_A_CODE', REFUSALS],
+  ] as const)('%s names exactly one shipped sentence', (name, sentences) => {
+    const prefix = extract(source, file, new RegExp(`^const ${name} = '([^']+)';$`, 'm'));
+    const matched = Object.values(sentences).filter((sentence) => sentence.startsWith(prefix));
+    expect(matched).toHaveLength(1);
   });
 });
 

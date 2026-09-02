@@ -97,6 +97,46 @@ export type InvitationState = 'live' | 'reserved' | 'consumed' | 'expired' | 'dr
 export type TerminalInvitationState = Exclude<InvitationState, 'live'>;
 
 /**
+ * How one pairing ceremony ended, for the person standing at this machine.
+ *
+ * **Not {@link InvitationState}, which is about a code.** An invitation is also
+ * retired by things that decided nothing — a lost relay socket, a TTL nobody
+ * reached — and only a ceremony a phone actually started has an outcome. So the
+ * two travel together and neither is derivable from the other: every outcome
+ * rides a `consumed`, and a `consumed` may carry none.
+ *
+ * A closed set this Host picks locally. `paired` is the only member that wrote
+ * an ACL record; the other five name why nothing was. The webview renders fixed
+ * copy per member and never wire text
+ * (`docs/specs/remote-security-model.md` → Pairing).
+ */
+export type PairingOutcome =
+  | 'paired'
+  | 'code-mismatch'
+  | 'cancelled'
+  | 'expired'
+  | 'superseded'
+  | 'host-error';
+
+/**
+ * What each denial reports locally. A `Record` so a new denial code is a type
+ * error here rather than a ceremony that ends in silence at the panel.
+ *
+ * `presence-rejected` reads as `host-error`: from this machine's side both are
+ * "it could not finish, and nothing was paired", and the phone — which is where
+ * the passkey that failed lives — gets its own sentence for it
+ * (`PAIRING_DENIAL_MESSAGES` in `lib/src/remote/client/pocket-client.ts`).
+ */
+const PAIRING_OUTCOME_FOR_DENIAL: Record<PairingDenialCode, PairingOutcome> = {
+  'user-denied': 'cancelled',
+  'confirmation-mismatch': 'code-mismatch',
+  'presence-rejected': 'host-error',
+  'invitation-expired': 'expired',
+  superseded: 'superseded',
+  'host-error': 'host-error',
+};
+
+/**
  * How many bytes name one thing this Host mints locally: the invitation id the
  * QR carries, and the pairing id the modal echoes back. 16, the length every
  * routing id on the `e2e` envelope is — the QR grammar pins the invitation id
@@ -203,8 +243,15 @@ export interface RemoteHostOptions {
    * One of this Host's invitations changed state, so whoever is displaying its
    * QR can stop offering a code that can no longer be used. Nothing here acts
    * on it — the Host's own map is the authority.
+   *
+   * `outcome` is present only where a pairing ceremony ended, and says how
+   * ({@link PairingOutcome}).
    */
-  onInvitationChanged?: (inviteId: string, state: InvitationState) => void;
+  onInvitationChanged?: (
+    inviteId: string,
+    state: InvitationState,
+    outcome?: PairingOutcome,
+  ) => void;
   now?: () => number;
   /**
    * Every timer this Host arms — the reaper's and the reconnect backoff's — as
@@ -232,7 +279,7 @@ export class RemoteHost {
   readonly #saveAcl: (hostId: string, records: readonly HostAclRecord[]) => void;
   readonly #requestApproval: (pending: PendingPairing) => void;
   readonly #dismissApproval: (clientId: string) => void;
-  readonly #onInvitationChanged: (inviteId: string, state: InvitationState) => void;
+  readonly #onInvitationChanged: NonNullable<RemoteHostOptions['onInvitationChanged']>;
   readonly #now: () => number;
   readonly #setTimer: RemoteTimer;
   readonly #reconnect: boolean;
@@ -489,12 +536,16 @@ export class RemoteHost {
    * pending connection whose challenge is dead earns the `presence-rejected` a
    * late request would have, while an idle session's peer stopped waiting long
    * ago and hears nothing.
+   *
+   * **Clients before invitations**, because a pairing shares its invitation's
+   * `expiresAt` and both fall in one sweep: the pairing's own deadline is the
+   * only one that knows the ceremony timed out, and retiring its invitation
+   * first would leave that outcome with nothing left to announce it on
+   * ({@link RemoteHost.#retireInvitation} answers for an id it no longer holds
+   * by doing nothing at all).
    */
   #deadlines(): Array<{ at: number; expire: () => void }> {
     const out: Array<{ at: number; expire: () => void }> = [];
-    for (const [inviteId, held] of this.#invitations) {
-      out.push({ at: held.expiresAt, expire: () => this.#retireInvitation(inviteId, 'expired') });
-    }
     for (const [clientId, state] of this.#clients) {
       const { pairing, connection, established } = state;
       if (pairing) {
@@ -522,6 +573,9 @@ export class RemoteHost {
           expire: () => this.#disposeEstablished(clientId),
         });
       }
+    }
+    for (const [inviteId, held] of this.#invitations) {
+      out.push({ at: held.expiresAt, expire: () => this.#retireInvitation(inviteId, 'expired') });
     }
     return out;
   }
@@ -599,10 +653,15 @@ export class RemoteHost {
    * completed message 1 against as one nobody touched
    * (`docs/specs/remote-security-model.md` → Pairing). With no `state` at all
    * the entry's own decides it, for a retirement that is not about a cause.
+   *
+   * `outcome` rides along for the ceremony that ended, so the panel learns the
+   * code is spent and *how* in one change rather than in two it would have to
+   * order for itself.
    */
   #retireInvitation(
     inviteId: string,
     state?: Exclude<InvitationState, 'live' | 'reserved'>,
+    outcome?: PairingOutcome,
   ): void {
     const held = this.#invitations.get(inviteId);
     if (!held) return;
@@ -610,6 +669,7 @@ export class RemoteHost {
     this.#onInvitationChanged(
       inviteId,
       held.state === 'reserved' ? 'consumed' : (state ?? 'dropped'),
+      outcome,
     );
   }
 
@@ -948,8 +1008,10 @@ export class RemoteHost {
       receipt = pending.session.receive(fromBase64Url(frame.ct));
     } catch {
       // The first invalid ciphertext destroys its session, and nothing can be
-      // said over a poisoned one.
-      this.#disposePairing(frame.clientId);
+      // said over a poisoned one. The person at this machine is still owed the
+      // fact that a ceremony ended without pairing anything, which is what
+      // `host-error` says here.
+      this.#disposePairing(frame.clientId, 'host-error');
       return;
     }
     if (receipt.kind === 'keepalive') return;
@@ -1044,7 +1106,7 @@ export class RemoteHost {
       passkeyPublicKeyHash: record.passkeyPublicKeyHash,
       deliveryId,
     });
-    this.#disposePairing(clientId);
+    this.#disposePairing(clientId, 'paired');
     this.#reap();
   }
 
@@ -1060,7 +1122,7 @@ export class RemoteHost {
     const pending = this.#clients.get(clientId)?.pairing;
     if (!pending) return;
     this.#sendPairingOutcome(clientId, pending, { ok: false, code });
-    this.#disposePairing(clientId);
+    this.#disposePairing(clientId, PAIRING_OUTCOME_FOR_DENIAL[code]);
   }
 
   #sendPairingOutcome(
@@ -1074,15 +1136,20 @@ export class RemoteHost {
   /**
    * Erase a pairing's handshake material and spend its invitation — both, on
    * every terminal outcome (`docs/specs/remote-security-model.md` → Pairing).
+   *
+   * **`outcome` is what a decision ended it**, and its absence is not a
+   * default: a teardown decides nothing ({@link PairingOutcome}), and reporting
+   * one there would put a sentence about a pairing under a panel whose machine
+   * is busy reconnecting.
    */
-  #disposePairing(clientId: string): void {
+  #disposePairing(clientId: string, outcome?: PairingOutcome): void {
     const state = this.#clients.get(clientId);
     const pending = state?.pairing;
     if (!state || !pending) return;
     state.pairing = undefined;
     // Always `consumed`: reaching here means a phone completed message 1
     // against this invitation, whatever ended the ceremony afterwards.
-    this.#retireInvitation(pending.inviteId, 'consumed');
+    this.#retireInvitation(pending.inviteId, 'consumed', outcome);
     this.#dismissApproval(clientId);
     this.#pruneClient(clientId);
   }

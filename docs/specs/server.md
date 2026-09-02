@@ -807,10 +807,8 @@ to honor:
   file that no longer names it: an installer rerun rewrites the offer, and that
   new origin is one nobody reviewed. `enrollOffer` takes `{ origin, label }` —
   the origin reviewed, never the one enrolled against, which stays the file's.
-- **The card outlives its offer.** The poll sees the file unlinked the moment an
-  enroll redeems it, so the card keeps rendering while that enroll is in flight
-  or holding an error: a refusal landing after the card went away is silence
-  over a spent token.
+- **The card outlives its offer**, so a refusal landing after the enroll unlinked
+  the file is not silence over a spent token.
 - **Only one enrollment may run.** One synchronous gate covers both forms and
   pre-render double clicks.
 - **The password is passed through, never held.** It goes straight to the
@@ -824,24 +822,28 @@ to honor:
   included.
 - **Enrolled, "Set up a phone" opens an inline QR panel**, so a phone is set up
   by pointing a camera at the laptop rather than typing an origin and a 64-hex
-  password. It mints on open and never before — a code is a credential with a
-  clock on it — re-mints shortly before `expiresAt` while the panel stays open,
-  and always offers New code and Done, the only exit from a dead code
-  (`RemoteControlSection.test.tsx`). Rules it exists to honor:
-  - **The panel owns its busy and error**, not the section's shared pair: a mint
-    also fires on a timer, and the view's one error slot belongs to what the
-    user clicked.
+  password. It mints on open and never before, re-mints shortly before
+  `expiresAt` while the panel stays open, and always offers New code and Done,
+  the only exit from a dead code (`RemoteControlSection.test.tsx`). Rules it
+  exists to honor:
+  - **The panel owns its busy and error**, not the section's shared pair, since
+    its mint also fires on a timer.
   - **Must clamp refresh delay to `[30 s, DEFAULT_PAIRING_TTL_MS - 20 s]`.** The
     floor stops a fast-clock mint loop; the TTL ceiling replaces a slow-clock
     code before its real Server expiry.
   - **The code being replaced stays on screen** until its replacement lands;
     only a first mint blanks.
   - **An invitation state change flips only the panel showing that `inviteId`**,
-    so a second window offering a different code stays live. **The panel stays
-    subscribed past the QR**, because two flips matter: `reserved` (a phone
-    completed the handshake, so the code is spent whatever the laptop decides)
-    and `consumed` (that decision is made, so the panel **must stop sending the
-    user to a phone**).
+    so a second window offering a different code stays live, and **the panel
+    stays subscribed past the QR**: `reserved` spends the code, `consumed` says
+    the request it produced has been answered.
+  - **The panel reports which decision ended the code**, in fixed copy per
+    outcome. Every one spends the invitation and dismisses the modal, so a
+    mismatch — one attempt, no retry — would otherwise read like a success, the
+    paired count being absolute. The outcome rides that `consumed` event; a
+    retirement nobody decided carries none. **One region reports it**: the
+    panel where it supersedes that sentence, the section otherwise. **Only a
+    user action clears it**, never the timed re-mint.
   - **The view is keyed by enrollment identity and the QR sits behind its own
     error boundary**: a server swap drops the stale code, and a failed chunk
     fetch or a refused encode costs a retry button rather than the app-wide
@@ -918,7 +920,9 @@ DORMOUSE_SETUP_PASSWORD=hunter2 pnpm dev:pocket-server
 ```
 
 Builds the Pocket app (`lib/dist-pocket`) and the server, then serves both on
-`:3000`. Other env vars per Configuration above; for a real phone set
+`:3000`. **`./data` survives between runs**, so a second one starts already
+enrolled with no setup path left to walk; remove it, or set
+`DORMOUSE_STATE_DIR`. Other env vars per Configuration above; for a real phone set
 `DORMOUSE_ORIGIN` to your TLS origin (e.g. via `tailscale serve`) — WebAuthn
 needs a secure context, and only `localhost` is exempt.
 
@@ -953,29 +957,28 @@ await window.dormouseRemoteHost.enroll('http://localhost:3000', 'hunter2', 'My L
 ```
 
 Enrollment then persists in the service's own store, and on later launches the
-Host connects by itself. (The same commands ride on that object, all promises
-since the hook forwards to the service. The dev loop has no installer offer.)
-For a headless
+Host connects by itself. (Every command rides on that object, all promises; the
+dev loop has no installer offer.) For a headless
 stand-in host instead:
 `DORMOUSE_SETUP_PASSWORD=hunter2 node server/scripts/fake-host.mjs http://localhost:3000`
 — it instantiates the test harness's `FakeHost`, prints a pairing URL to paste
 into Pocket, and differs from a real Host only in auto-approving and logging.
 
-**3. Phone** (or any other browser profile): show a code on the laptop
-(**Settings → Remote control → Set up a phone**) and open the server origin
-on the phone. A browser that has never been here leads with **Scan a setup code**;
+**3. Phone** (or any other browser profile): open the server origin there first,
+then show a code on the laptop
+(**Settings → Remote control → Set up a phone**).
+A browser that has never been here leads with **Scan a setup code**;
 scan or paste the code, which creates the passkey and signs you in, then read
-the two digits off the phone and type them into the laptop's modal → one
-biometric prompt → pick a pane → type. **A Host must be enrolled first**: the
+the two digits off the phone and type them into the laptop's modal. Approving is
+the last action: the phone answers its own biometric prompt and lands on the
+laptop's terminal, with no picker. **A Host must be enrolled first**: the
 code is the only credential `/api/setup/*` takes, so there is no way to register
 a passkey before step 2.
 
 A code the phone's *own camera* opens is origin bootstrap only — Pocket erases
 the fragment, spends nothing, and asks you to scan again from inside the app,
 because on iOS the camera opens Safari rather than the installed app
-([pocket-app.md](./pocket-app.md)). On the localhost dev loop the parser's
-loopback exemption is what lets a code minted at `http://localhost:3000` parse
-at all.
+([pocket-app.md](./pocket-app.md)).
 
 To test push, **add Pocket to the Home Screen before scanning** and do all of
 the above inside the installed app: iOS delivers Web Push only there, and the
@@ -987,8 +990,8 @@ and registers every paired Host at once. That tap is the user gesture iOS
 requires before it will prompt for permission; connecting alone does not
 subscribe.
 
-Limitations to know about: each browser storage partition has its own keys and
-therefore needs its own Host pairing, even when a synced passkey signs it in;
+Limitations to know about: each browser partition needs its own Host pairing,
+even when a synced passkey signs it in;
 clearing site data destroys them → re-pair, per the security model; a dropped
 WebSocket sends you back to the Hosts view — reconnect by tapping Connect
 again.

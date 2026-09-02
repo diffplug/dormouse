@@ -28,7 +28,7 @@ import {
   type PresenceBinding,
   type PresenceProofV1,
 } from 'server-lib-common';
-import { RemoteHost, type RemoteApiSessionLike } from './remote-host';
+import { RemoteHost, type RemoteApiSessionLike, type RemoteHostOptions } from './remote-host';
 import type { HostEnrollment } from './enrollment';
 import type { PendingPairing } from './pairing-approval';
 import { FakeSocket } from '../test-fake-socket';
@@ -64,7 +64,16 @@ describe('RemoteHost end-to-end ceremonies', () => {
   let savedRecords: HostAclRecord[] = [];
   let approvals: PendingPairing[] = [];
   let dismissed: string[] = [];
-  let invitationEvents: Array<{ inviteId: string; state: string }> = [];
+  let invitationEvents: Array<{ inviteId: string; state: string; outcome?: string }> = [];
+  // `outcome` is omitted rather than `undefined` where there is none, so the
+  // cases that are only about a state still compare against a two-field object.
+  const recordInvitation: NonNullable<RemoteHostOptions['onInvitationChanged']> = (
+    inviteId,
+    state,
+    outcome,
+  ) => {
+    invitationEvents.push(outcome ? { inviteId, state, outcome } : { inviteId, state });
+  };
   let sessions: Array<{ handled: unknown[]; disposed: boolean; send: (payload: unknown) => void }> =
     [];
   let clock = 1_700_000_000_000;
@@ -115,7 +124,7 @@ describe('RemoteHost end-to-end ceremonies', () => {
       },
       requestApproval: (pending) => approvals.push(pending),
       dismissApproval: (clientId) => dismissed.push(clientId),
-      onInvitationChanged: (inviteId, state) => invitationEvents.push({ inviteId, state }),
+      onInvitationChanged: recordInvitation,
       createSession: withSession
         ? ({ send }) => {
             const entry = { handled: [] as unknown[], disposed: false, send };
@@ -327,6 +336,78 @@ describe('RemoteHost end-to-end ceremonies', () => {
     });
     // Its invitation goes with it: the replaced ceremony can never resume.
     expect(host.invitationState(first.invitation.inviteId)).toBe('consumed');
+  });
+
+  /** The last thing said about one invitation, which is the change that retired it. */
+  function retirement(invitation: PairingInvitation) {
+    return invitationEvents.filter((event) => event.inviteId === invitation.inviteId).at(-1);
+  }
+
+  it('reports how each pairing ended, not only that it did', async () => {
+    // Every terminal outcome spends the code and dismisses the modal, so
+    // `consumed` on its own reads the same whether the pairing succeeded or the
+    // digits were mistyped — and the paired count, the only other signal, is
+    // absolute, so on a machine that already has a phone it does not move
+    // either (`docs/specs/server.md` → "Remote control, in the Settings dialog").
+    makeHost();
+    const authenticator = await newAuthenticator();
+    const ended = async (clientId: string) => {
+      const pairing = await requestPairing(clientId, authenticator);
+      return { ...pairing, pending: approvals.at(-1)! };
+    };
+
+    const approved = await ended('c1');
+    approved.pending.approve(approved.code);
+    await settle();
+    expect(retirement(approved.invitation)?.outcome).toBe('paired');
+
+    const mistyped = await ended('c2');
+    mistyped.pending.approve(mistyped.code === '00' ? '01' : '00');
+    await settle();
+    expect(retirement(mistyped.invitation)?.outcome).toBe('code-mismatch');
+
+    const cancelled = await ended('c3');
+    cancelled.pending.deny();
+    await settle();
+    expect(retirement(cancelled.invitation)?.outcome).toBe('cancelled');
+
+    // A replacement from the same phone, which the modal has already been
+    // showing the first request for.
+    const replaced = await ended('c4');
+    await requestPairing('c4', authenticator);
+    expect(retirement(replaced.invitation)?.outcome).toBe('superseded');
+
+    // A first control this Host cannot parse never reaches a modal, so all it
+    // can report locally is that the ceremony ended and paired nothing.
+    const malformed = await requestPairing('c5', authenticator, { code: 'not-two-digits' });
+    expect(retirement(malformed.invitation)?.outcome).toBe('host-error');
+
+    // Last, because it moves the clock past every other invitation's TTL.
+    const timedOut = await ended('c6');
+    clock += DEFAULT_PAIRING_TTL_MS + 1;
+    timedOut.pending.approve(timedOut.code);
+    await settle();
+    expect(retirement(timedOut.invitation)?.outcome).toBe('expired');
+
+    // Every one of them spent its code, and only the first paired anything.
+    expect(invitationEvents.filter((event) => event.outcome !== undefined)).toHaveLength(6);
+    for (const event of invitationEvents.filter((e) => e.outcome)) {
+      expect(event.state).toBe('consumed');
+    }
+    expect(savedRecords).toHaveLength(1);
+  });
+
+  it('reports no outcome for a ceremony nobody decided', async () => {
+    // A lost relay socket ends the ceremony without anyone answering it, so
+    // there is no decision to report — and the panel behind the modal is about
+    // to say the machine is reconnecting, which is the fact that matters.
+    makeHost();
+    const { invitation } = await requestPairing('c1', await newAuthenticator());
+    invitationEvents.length = 0;
+    socket.drop();
+    await settle();
+
+    expect(retirement(invitation)).toEqual({ inviteId: invitation.inviteId, state: 'consumed' });
   });
 
   it('refuses a proof bound to another handshake', async () => {
@@ -918,11 +999,13 @@ describe('RemoteHost end-to-end ceremonies', () => {
     expect(host.trackedClientCount).toBe(0);
   });
 
-  it('expiring a scanned invitation reports consumed, not expired', async () => {
-    // The pairing shares the invitation's `expiresAt`, and the reaper sweeps
-    // invitations before pairings — so a person still deciding at the modal when
-    // the TTL passes would have seen the panel behind it flip to "This code
-    // expired — nobody scanned it", about the code their phone had scanned.
+  it('expiring a scanned invitation reports consumed, and says the request timed out', async () => {
+    // The pairing shares the invitation's `expiresAt`, so one sweep covers
+    // both: the code is `consumed` because a phone did scan it — anything else
+    // would flip the panel to "nobody scanned it" about the code in their hand
+    // — and the pairing's own deadline is the only thing that knows why. It
+    // therefore runs first, and its outcome is what a person still deciding at
+    // the modal is left holding.
     makeHost();
     const { invitation } = await requestPairing('c1', await newAuthenticator());
     invitationEvents.length = 0;
@@ -931,7 +1014,9 @@ describe('RemoteHost end-to-end ceremonies', () => {
     sendE2e('c2', 'pairing', invitation.inviteId, 'init', toBase64Url(new Uint8Array(96)));
     await settle();
 
-    expect(invitationEvents).toEqual([{ inviteId: invitation.inviteId, state: 'consumed' }]);
+    expect(invitationEvents).toEqual([
+      { inviteId: invitation.inviteId, state: 'consumed', outcome: 'expired' },
+    ]);
   });
 
   it('evicting a scanned invitation at the cap reports consumed, not dropped', async () => {
@@ -1044,7 +1129,7 @@ describe('RemoteHost end-to-end ceremonies', () => {
       },
       requestApproval: (pending) => approvals.push(pending),
       dismissApproval: (clientId) => dismissed.push(clientId),
-      onInvitationChanged: (inviteId, state) => invitationEvents.push({ inviteId, state }),
+      onInvitationChanged: recordInvitation,
       now: () => clock,
     });
     created.start();

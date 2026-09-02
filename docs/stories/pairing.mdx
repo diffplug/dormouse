@@ -67,14 +67,19 @@ checkout into a self-contained release and installs it:
 ```sh
 ./deploy/local/install-macos.sh        # macOS
 .\deploy\local\install-windows.ps1     # Windows
+./deploy/local/install-linux.sh        # Linux
 ```
 
-It installs under your user profile, needs no administrator rights, and wires up
-a per-login service plus Tailscale Serve:
+The Linux one is the always-on shape: run it with `--linger` on a spare tailnet
+machine and the relay outlives your logout, which is what lets you reach a Host
+that is not the laptop you are sitting at.
+
+Each installs under your user profile, needs no administrator rights, and wires
+up a per-login service plus Tailscale Serve:
 
 ```text
 LaunchAgent (RunAtLoad + KeepAlive)
-  — or a Windows Scheduled Task at logon —
+  — a Windows Scheduled Task at logon, or a systemd user unit —
         |
         v
 Dormouse Node server on 127.0.0.1:3100
@@ -209,8 +214,10 @@ no longer work — the laptop knows that itself, because the key it was complete
 against is the laptop's own.
 
 The panel keeps listening past that, because it is the thing the pairing modal
-in §6 is covering: once the request has been answered, either way, it stops
-pointing at a phone that has already finished.
+in §6 is covering: once the request has been answered it stops pointing at a
+phone that has already finished, and — where a person answered it — says which
+way it went (§6). This is the frame a socket that dropped mid-ceremony leaves,
+where nobody decided anything:
 
 <Canvas of={RemoteControl.SetupPhoneFinished} />
 
@@ -275,7 +282,13 @@ are gated, not degraded.
 
 ---
 
-## 5. Pick a machine
+## 5. Coming back
+
+This screen is not on a first run's path. A phone that has just scanned goes
+scan → two digits → terminal, and never sees a list; it is where a phone lands
+on every session *after* the first, and where an interrupted one falls back to.
+Read it now for what a paired phone looks like from the outside, then carry on
+to §6 for what happens on the first run instead.
 
 <Canvas of={HostsView.MixedList} />
 
@@ -328,6 +341,13 @@ the laptop compares the digits itself, exactly once
 (`docs/specs/remote-security-model.md` → Pairing owns the rule and what it rules
 out). The modal is the whole security model in one screen, which is why it is a
 modal and not a settings row.
+
+Exactly once is unforgiving, so the panel behind the modal says which way it
+went. Mistype the digits and the code is spent — there is no second try, and
+the paired count above is absolute, so nothing else on that screen would have
+moved:
+
+<Canvas of={RemoteControl.PairingOutcomeCodeMismatch} />
 
 - **Local confirmation is the only path into the ACL.** Not signing in, not
   owning the account, not holding a synced passkey. Someone with your account
@@ -478,7 +498,11 @@ So nothing above reads as a promise:
   no relay frame carries a revocation. Deleting a *machine* takes effect within
   a minute — the server re-reads the file and drops that machine's socket — but
   withdrawing one *phone's* approval is the laptop's own list, and takes effect
-  when that laptop restarts.
+  when that laptop restarts. **Remove** on the phone is not that list: it
+  forgets the machine locally, and a phone that pairs again arrives with a new
+  per-Host key, which the laptop cannot match to the old record — so it appends
+  a second approval and goes on counting both. One phone, "2 paired phones",
+  and the first record still live.
 - **Approval is Approve/Deny only.** Choosing a standing grant at pairing time
   — observe-only versus interactive — is designed but not built. Every paired
   session today gets full input.

@@ -17,7 +17,7 @@ vi.mock('../lib/platform', () => ({
   getPlatform: () => platform,
 }));
 
-import { RemoteControlSection } from './RemoteControlSection';
+import { PAIRING_OUTCOME_LABEL, RemoteControlSection } from './RemoteControlSection';
 import type { RemoteHostConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
 import {
   enrolledStatus,
@@ -108,6 +108,16 @@ async function openSetupPanel(): Promise<ReturnType<typeof makeLink>> {
 
 function text(): string {
   return container.textContent ?? '';
+}
+
+/**
+ * The region that reports how a pairing ended, by the accessible name the
+ * walkthrough waits on too (`PAIRING_OUTCOME_LABEL`).
+ */
+function outcomeRegion(): HTMLElement | null {
+  return container.querySelector<HTMLElement>(
+    `[role="status"][aria-label="${PAIRING_OUTCOME_LABEL}"]`,
+  );
 }
 
 function buttonLabelled(label: string): HTMLButtonElement | undefined {
@@ -624,6 +634,237 @@ describe('RemoteControlSection', () => {
     expect(text()).not.toContain(forbidden);
     // And the way out is always one click away.
     expect(buttonLabelled('New code')).toBeTruthy();
+  });
+
+  // The panel is behind the modal for the whole ceremony, so the sentence it is
+  // left showing is the only report the person at this machine gets: the count
+  // above it is absolute, and does not move when a mistyped code pairs nothing.
+  it.each([
+    ['paired', 'This phone is paired with this machine.'],
+    ['code-mismatch', 'The two digits did not match, so nothing was paired.'],
+    ['cancelled', 'You cancelled this request, so nothing was paired.'],
+    ['expired', 'The request ran out of time, so nothing was paired.'],
+    ['superseded', 'Another pairing request replaced this one, so nothing was paired.'],
+    ['host-error', 'This machine could not finish pairing, so nothing was paired.'],
+  ])('says a %s ceremony ended that way, in an announced region', async (outcome, expected) => {
+    const link = await openSetupPanel();
+
+    await act(async () => {
+      link.emit('invitation', {
+        name: 'invitation',
+        inviteId: 'invite-1',
+        state: 'consumed',
+        outcome,
+      });
+    });
+
+    expect(outcomeRegion()?.textContent).toContain(expected);
+    // The code is gone and nothing on screen has replaced it, so every failure
+    // ends by saying so. A pairing spent nothing the user has to replace.
+    const spent = 'This setup code is spent';
+    expect(outcomeRegion()?.textContent?.includes(spent)).toBe(outcome !== 'paired');
+    // The sentence the Host used to leave behind for every one of these.
+    expect(text()).not.toContain('This setup code is finished.');
+    expect(buttonLabelled('New code')).toBeTruthy();
+  });
+
+  // The service is typed to send a member of the closed set, so these are a
+  // bridge sending something else — and reporting a ceremony ended while saying
+  // nothing about it would be worse than the old, vaguer sentence. `toString`
+  // is the case an `in` check answers "yes" to: it is on every object's
+  // prototype, and the copy table would hand back a function to render.
+  it.each(['sideways', 'toString', 'constructor'])(
+    'falls back to the state when the outcome is %s, which this build has no sentence for',
+    async (outcome) => {
+      const link = await openSetupPanel();
+
+      await act(async () => {
+        link.emit('invitation', {
+          name: 'invitation',
+          inviteId: 'invite-1',
+          state: 'consumed',
+          outcome,
+        });
+      });
+
+      expect(outcomeRegion()).toBeNull();
+      expect(text()).toContain('This setup code is finished.');
+    },
+  );
+
+  // The same hole one field over: `TERMINAL_PHASE` is looked up with a state off
+  // the same bridge, and a phase that is not one of the four used to leave the
+  // panel saying "Getting a code…" about a code that is gone.
+  it.each(['sideways', 'toString'])(
+    'treats %s as a terminal state rather than a code still coming',
+    async (state) => {
+      const link = await openSetupPanel();
+
+      await act(async () => {
+        link.emit('invitation', { name: 'invitation', inviteId: 'invite-1', state });
+      });
+
+      expect(text()).toContain('This setup code is finished.');
+      expect(text()).not.toContain('Getting a code');
+      // The one sentence that must never be shown for a code nobody touched.
+      expect(text()).not.toContain('A phone scanned this code');
+    },
+  );
+
+  // The nine outcome stories drive the panel through `makeStubRemoteHostLink`'s
+  // `setupOutcome`, and no test in this suite touches that path — Storybook's
+  // play functions do not run in `pnpm test`, so a change to the stub would
+  // break every one of them silently. These two are that path's unit test: one
+  // per placement, mirroring `PairingOutcomeWithPanelClosed` and its siblings.
+  it('drives the section report from the primed stub, panel shut', async () => {
+    platform = {
+      remoteHost: makeStubRemoteHostLink({
+        status: enrolledStatus(),
+        setupOutcome: 'code-mismatch',
+      }),
+    };
+    await render();
+    await settleQrChunk();
+
+    expect(outcomeRegion()?.textContent).toContain('The two digits did not match');
+    expect(outcomeRegion()?.textContent).toContain('This setup code is spent');
+  });
+
+  it('drives the panel report from the primed stub, panel open', async () => {
+    platform = {
+      remoteHost: makeStubRemoteHostLink({ status: enrolledStatus(), setupOutcome: 'paired' }),
+    };
+    await render();
+    await act(async () => buttonLabelled('Set up a phone')!.click());
+    await settleQrChunk();
+    await settleQrChunk();
+
+    expect(outcomeRegion()?.textContent).toContain('This phone is paired with this machine.');
+    expect(text()).not.toContain('This setup code is finished.');
+  });
+
+  it('reports the outcome under the section when the panel was never opened', async () => {
+    // The modal interrupts whatever is on screen, so the request can be
+    // answered from a Settings dialog that never opened this panel.
+    const link = makeLink(async () => enrolled({ pairedClients: 0 }));
+    platform = { remoteHost: link };
+    await render();
+
+    await act(async () => {
+      link.emit('invitation', {
+        name: 'invitation',
+        inviteId: 'someone-elses',
+        state: 'consumed',
+        outcome: 'code-mismatch',
+      });
+    });
+
+    expect(outcomeRegion()?.textContent).toContain('The two digits did not match');
+    expect(text()).toContain('No phone has paired with this machine yet.');
+  });
+
+  it('clears the last report when the user takes the new code it asked for', async () => {
+    const link = await openSetupPanel();
+    await act(async () => {
+      link.emit('invitation', {
+        name: 'invitation',
+        inviteId: 'invite-1',
+        state: 'consumed',
+        outcome: 'code-mismatch',
+      });
+    });
+    expect(outcomeRegion()).toBeTruthy();
+
+    await act(async () => buttonLabelled('New code')!.click());
+    await settleQrChunk();
+    expect(outcomeRegion()).toBeNull();
+    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
+  });
+
+  it('keeps the last report through the refresh the panel arms for itself', async () => {
+    // The mint the timer runs is not the user taking a new code. Clearing the
+    // report is an acknowledgement, and the panel replaces its own code
+    // anywhere from 30 s to nearly the whole TTL later — so a shared clear
+    // erased the sentence unread, leaving the absolute paired count, which does
+    // not move for any failure, as the only thing that had said anything.
+    vi.useFakeTimers();
+    try {
+      const link = mintingLink();
+      platform = { remoteHost: link };
+      await render();
+      await act(async () => buttonLabelled('Set up a phone')!.click());
+      expect(mintCount(link)).toBe(1);
+
+      // An older ceremony, answered after this panel had moved on — the
+      // placement that leaves the report beside a live code in the first place.
+      await act(async () => {
+        link.emit('invitation', {
+          name: 'invitation',
+          inviteId: 'a-code-this-panel-replaced',
+          state: 'consumed',
+          outcome: 'code-mismatch',
+        });
+      });
+      expect(outcomeRegion()?.textContent).toContain('The two digits did not match');
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(290_000);
+      });
+      expect(mintCount(link)).toBe(2);
+      expect(outcomeRegion()?.textContent).toContain('The two digits did not match');
+
+      // The same mint, asked for, still is an acknowledgement.
+      await act(async () => buttonLabelled('New code')!.click());
+      expect(mintCount(link)).toBe(3);
+      expect(outcomeRegion()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears the last report when the user closes the panel it was shown in', async () => {
+    // Done is the user acknowledging it. Left set, the same sentence would move
+    // to the section under a panel that is gone, with nothing but a fresh mint
+    // able to clear it.
+    const link = await openSetupPanel();
+    await act(async () => {
+      link.emit('invitation', {
+        name: 'invitation',
+        inviteId: 'invite-1',
+        state: 'consumed',
+        outcome: 'code-mismatch',
+      });
+    });
+    expect(outcomeRegion()).toBeTruthy();
+
+    await act(async () => buttonLabelled('Done')!.click());
+    expect(outcomeRegion()).toBeNull();
+    expect(text()).not.toContain('The two digits did not match');
+  });
+
+  it('reports an outcome that lands while the panel already shows a newer code', async () => {
+    // The subscription takes an outcome from whichever invitation carries one,
+    // because the modal can be answered after the panel has moved on — so the
+    // report goes to the section rather than nowhere.
+    const link = await openSetupPanel();
+
+    await act(async () => {
+      link.emit('invitation', {
+        name: 'invitation',
+        inviteId: 'a-code-this-panel-replaced',
+        state: 'consumed',
+        outcome: 'code-mismatch',
+      });
+    });
+
+    expect(outcomeRegion()?.textContent).toContain('The two digits did not match');
+    // Exactly one region: the panel is still drawing its own live code.
+    expect(
+      container.querySelectorAll(`[role="status"][aria-label="${PAIRING_OUTCOME_LABEL}"]`),
+    ).toHaveLength(1);
+    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
+    // And it does not tell them to go and get the code they are looking at.
+    expect(outcomeRegion()?.textContent).not.toContain('get a new one and try again');
   });
 
   it('drops the panel when the machine enrolls somewhere else under it', async () => {

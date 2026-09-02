@@ -245,9 +245,8 @@ newly-added passkey is not automatically trusted — the Client must still pair.
   teardown is refused rather than inserted**, so no code outlives the socket it
   was made for. **Each invitation accepts one request**,
   a message 1 that fails to decrypt leaves it live, and redemption at the Server
-  flips nothing. The QR panel renders that state and offers a new code;
-  **neither may read as a scan**, or it sends the user to a phone that
-  never asked.
+  flips nothing. The QR panel renders that state, and **neither may read as a
+  scan**.
 - **IK against the invitation key.** Client initiator, fresh per-Host static as
   `s`, invitation public key as `rs`. **Both handshake payloads are empty**, and
   `Split` yields the pairing channel; no ACL, delivery ID, or resumable state
@@ -261,9 +260,12 @@ newly-added passkey is not automatically trusted — the Client must still pair.
   never displays, mirrors, or retransmits it**; the webview echoes the typed
   digits with the immutable pairing ID, and the Host compares them without early
   exit. **Exactly one attempt** — a two-digit secret with retries is none.
-- **Every terminal outcome consumes the invitation and erases handshake
-  material**: a mismatch, denial, timeout on the pairing TTL, replacement by a
-  newer pairing from the same Client, malformed input, or a failed proof.
+- **Every terminal outcome consumes the invitation, erases handshake material,
+  and is reported at both ends in fixed local copy** — never text off the wire —
+  so a mismatch cannot read as a success ([server.md](./server.md) -> "Remote
+  control, in the Settings dialog"): a mismatch, denial, timeout on the pairing
+  TTL, replacement by a newer pairing from the same Client, malformed input, or
+  a failed proof.
 - **Confirmation writes one record, then answers.** On a match the Host durably
   writes one active `HostAclRecord` binding `hostId`, `accountId`,
   `passkeyCredentialId`, `passkeyPublicKeyHash`, **the Client static IK
@@ -280,9 +282,8 @@ newly-added passkey is not automatically trusted — the Client must still pair.
   (rationale).
 
 Before storing the record, Pocket verifies the passkey fields match its ceremony
-and compares the Host static to any existing pin for that `hostId` — **a
-mismatch is a terminal security error that keeps the old pin** — and it maps
-every denial to fixed copy rather than rendering Host- or relay-supplied text.
+and compares the Host static to any existing pin for that `hostId`: **a
+mismatch is a terminal security error that keeps the old pin**.
 
 Source of truth: `RemoteHost.mintInvitation` / `#onPairingInit` /
 `#onPairingTransport` / `#approvePairing` in

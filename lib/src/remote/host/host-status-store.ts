@@ -341,20 +341,33 @@ export async function mintSetupQr(): Promise<SetupQrResult> {
  * still offering *that* code can stop. Independent of the status subscription
  * above: the event changes no status field, so there is nothing to re-read.
  *
- * The listener gets the `inviteId` and the state; a panel showing a different
- * invitation ignores it (`service-protocol.ts` → `InvitationEvent`). An event
- * that names no invitation is dropped here rather than passed on as
- * `undefined` — the service is typed to send one, so the only source of a
- * malformed event is a bridge nobody should be trusting to pick a panel.
+ * The listener gets the `inviteId`, the state, and — where a pairing ceremony
+ * ended — how it ended; a panel showing a different invitation ignores the
+ * first two (`service-protocol.ts` → `InvitationEvent`). An event that names no
+ * invitation is dropped here rather than passed on as `undefined` — the service
+ * is typed to send one, so the only source of a malformed event is a bridge
+ * nobody should be trusting to pick a panel.
+ *
+ * **Membership is not checked here**, only that the field is a string: the
+ * closed set lives in the copy table the panel renders from, and importing it
+ * would be a *value* import of `remote-host.ts` from the main chunk — the whole
+ * stack this module exists to stay out of. A member this build does not know
+ * therefore lands as an outcome nothing has a sentence for, and the panel falls
+ * back to what it said before there were outcomes at all.
  */
 export function subscribeToInvitation(
-  listener: (inviteId: string, state: InvitationEvent['state']) => void,
+  listener: (
+    inviteId: string,
+    state: InvitationEvent['state'],
+    outcome?: InvitationEvent['outcome'],
+  ) => void,
 ): () => void {
   return (
     link()?.on('invitation', (data) => {
       const event = data as InvitationEvent | undefined;
       if (typeof event?.inviteId === 'string' && typeof event.state === 'string') {
-        listener(event.inviteId, event.state);
+        const outcome = typeof event.outcome === 'string' ? event.outcome : undefined;
+        listener(event.inviteId, event.state, outcome);
       }
     }) ?? (() => {})
   );

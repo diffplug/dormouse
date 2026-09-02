@@ -1,8 +1,12 @@
 /**
- * The ordered walkthrough (`scripts/pairing-walkthrough/README.md`).
+ * The walkthrough's steps, and the scenarios that order them
+ * (`scripts/pairing-walkthrough/README.md`).
  *
- * Each entry is one thing a person does, in the order they do it, and
- * `--until <name>` stops after the one it names.
+ * Each entry is one thing a person does, in the order they do it;
+ * `--until <name>` stops after the one it names, and `--scenario <name>` picks
+ * which ending the run drives. Every scenario shares one prelude, so the six
+ * steps up to the two digits are the same code on every path — a scenario is
+ * only ever the last step or two.
  */
 
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -12,7 +16,7 @@ import { pathToFileURL } from 'node:url';
 import { AgentBrowser } from './ab.mjs';
 import { addVirtualAuthenticator, attachPage, pageUrl, virtualCredentials } from './cdp.mjs';
 import { launchChrome, resolveChrome } from './chrome.mjs';
-import { crop, decodeQr, imageSize, toY4m, upscale } from './qr.mjs';
+import { blankY4m, crop, decodeQr, imageSize, toY4m, upscale } from './qr.mjs';
 import { delay, findFreePort, spawnLogged, waitFor, waitForLine } from './proc.mjs';
 
 /**
@@ -56,6 +60,51 @@ const PAIRING_CODE_REGION = '[role="status"][aria-label="Pairing code"]';
 const PAIRING_MODAL = '[role="dialog"][aria-labelledby="remote-pairing-title"]';
 
 /**
+ * The Settings panel's report of how a pairing ended, by the accessible name of
+ * the live region that holds it — the same kind of anchor as
+ * {@link PAIRING_CODE_REGION}, and for the same reason.
+ *
+ * Mirrors `PAIRING_OUTCOME_LABEL` in `lib/src/components/RemoteControlSection.tsx`;
+ * pinned by `lib/src/lib/mirrored-constants.test.ts`.
+ */
+const PAIRING_OUTCOME_REGION = '[role="status"][aria-label="Pairing outcome"]';
+
+/**
+ * Enough of each outcome's sentence to tell it from the other five.
+ *
+ * **The one place this harness matches on copy**, because the region's name says
+ * only that a ceremony ended and every scenario here turns on *which* one — and
+ * the alternative, a machine-readable attribute on the product, would exist for
+ * no other reader. `mirrored-constants.test.ts` pins each of these to exactly
+ * one shipped sentence, so a rewrite fails a unit test rather than a run.
+ */
+const OUTCOME_PAIRED = 'This phone is paired';
+const OUTCOME_CODE_MISMATCH = 'The two digits did not match';
+const OUTCOME_CANCELLED = 'You cancelled this request';
+
+/**
+ * Enough of each of the scanner's two refusals to tell them apart.
+ *
+ * The same exception, for the same reason: the screen's structure says a code
+ * was refused, and `expired-code` turns on *which* refusal it was. Pinned to
+ * exactly one shipped sentence each by `mirrored-constants.test.ts`.
+ */
+const REFUSED_EXPIRED = 'That setup code has expired';
+const REFUSED_NOT_A_CODE = 'That is not a Dormouse setup code';
+
+/**
+ * The expiry a re-issued code is stamped with: 2023-11-14, comfortably behind
+ * any clock this runs on and the same value the unit tests use.
+ */
+const DEAD_EXPIRY_SECONDS = 1_700_000_000;
+
+/**
+ * An origin no run of this harness serves Pocket from, for the code that is
+ * refused on the origin compare rather than on its expiry.
+ */
+const FOREIGN_ORIGIN = 'https://someone-elses-dormouse.example';
+
+/**
  * The setup QR, by the accessible name `QrCode` gives it
  * (`lib/src/components/RemoteControlSection.tsx`) — an accessibility contract
  * rather than copy, so it survives the copy pass the way `PAIRING_MODAL` does.
@@ -86,18 +135,53 @@ const RECONNECT_PROOF = 'reconnect-proof.txt';
 const NOTIFY_SEQUENCE = String.raw`printf '\033]777;notify;Walkthrough;the Host is ringing\033\\'`;
 
 /**
+ * The workspace's built `server-lib-common`, or `null` when it is not built.
+ *
+ * The one place this harness reads product code rather than driving it, and it
+ * reads the shipped module rather than a copy: the setup code's TTL, and the
+ * emitter/parser pair {@link reissueInvitation} re-stamps a live code with.
+ */
+function securityModule(repoRoot) {
+  const entry = join(repoRoot, 'server-lib-common', 'dist', 'index.js');
+  return import(pathToFileURL(entry).href).catch(() => null);
+}
+
+/**
  * How long a setup code stays redeemable, read out of the workspace rather than
  * copied here — a harness that mirrors the number would keep claiming the old
  * one after somebody changed it. `server/src/setup-token.ts` pins the Server's
  * TTL to this same constant, and `RemoteControlSection.tsx` mints a replacement
  * 20s before it, so the capture → scan gap has to stay comfortably under it.
+ *
+ * Informational, so an unbuilt workspace (`--skip-build` against a stale tree)
+ * records `null` rather than failing a run that works without it.
  */
 async function setupTokenTtlMs(repoRoot) {
-  const entry = join(repoRoot, 'server-lib-common', 'dist', 'index.js');
-  // Informational, so an unbuilt workspace (`--skip-build` against a stale
-  // tree) records `null` rather than failing a run that works without it.
-  const module = await import(pathToFileURL(entry).href).catch(() => null);
-  return module?.DEFAULT_PAIRING_TTL_MS ?? null;
+  return (await securityModule(repoRoot))?.DEFAULT_PAIRING_TTL_MS ?? null;
+}
+
+/**
+ * The Host's own live code, re-emitted with a field changed.
+ *
+ * **Through the shipped emitter and parser, never by editing the fragment.**
+ * It is positional and carries no field names, so a harness that spliced
+ * "field four" would go on splicing field four after somebody reordered the
+ * grammar — and would write a code the Host could never have minted, which is
+ * the one thing this scenario must not do. Parsed at the epoch, so a code that
+ * rotated out from under the run still re-issues.
+ */
+async function reissueInvitation(ctx, url, { expiry, origin } = {}) {
+  const security = await securityModule(ctx.repoRoot);
+  if (!security) {
+    throw new Error('server-lib-common is not built; run `pnpm --filter server-lib-common build`');
+  }
+  const liveOrigin = new URL(url).origin;
+  const invitation = await security.parsePairingInvitationUrl(url, liveOrigin, 0);
+  if (!invitation) throw new Error(`the Host's own setup code did not parse: ${url}`);
+  return security.formatPairingInvitationUrl(origin ?? liveOrigin, {
+    ...invitation,
+    expiry: expiry ?? invitation.expiry,
+  });
 }
 
 /** The Host webview is ready when its first terminal has an input to type into. */
@@ -115,8 +199,11 @@ function hostReadyExpr(vitePort) {
  * enroll form this walkthrough is here to drive.
  */
 async function stepServer(ctx) {
-  const { repoRoot, runDir, opts } = ctx;
-  const stateDir = join(runDir, 'server-state');
+  const { repoRoot, opts } = ctx;
+  // Prefixed like every other run-directory name: two scenarios sharing one
+  // `--out` and one state dir would leave the second already enrolled, which is
+  // exactly what an isolated `DORMOUSE_STATE_DIR` is here to prevent.
+  const stateDir = ctx.path('server-state');
   const built =
     existsSync(join(repoRoot, 'lib', 'dist-pocket', 'index.html')) &&
     existsSync(join(repoRoot, 'server', 'dist', 'index.js'));
@@ -130,7 +217,7 @@ async function stepServer(ctx) {
     skipBuild ? ['--filter', 'server', 'start'] : ['dev:pocket-server'],
     {
       cwd: repoRoot,
-      logPath: join(runDir, 'server.log'),
+      logPath: ctx.path('server.log'),
       prefix: 'server',
       env: {
         DORMOUSE_SETUP_PASSWORD: opts.password,
@@ -151,6 +238,9 @@ async function stepServer(ctx) {
     { what: `${ctx.serverOrigin} to answer`, timeoutMs: 60_000 },
   );
 
+  // Held for the scenarios that take the Server away mid-story; nothing on the
+  // happy path touches it.
+  ctx.state.serverHandle = handle;
   ctx.record({ serverStateDir: stateDir, serverBuilt: !skipBuild });
 }
 
@@ -163,10 +253,10 @@ async function stepServer(ctx) {
  * plain-HTTP localhost server and enrollment fails with a policy error.
  */
 async function stepHost(ctx) {
-  const { repoRoot, runDir, opts } = ctx;
+  const { repoRoot, opts } = ctx;
   const handle = spawnLogged('pnpm', ['dev:standalone:ab'], {
     cwd: repoRoot,
-    logPath: join(runDir, 'host.log'),
+    logPath: ctx.path('host.log'),
     prefix: 'host',
     env: {
       DORMOUSE_REMOTE_CONNECT_SRC: `${ctx.serverOrigin} ${ctx.serverOrigin.replace(/^http/, 'ws')}`,
@@ -283,7 +373,6 @@ async function stepQr(ctx) {
  */
 async function captureQr(ctx) {
   const ab = ctx.state.hostBrowser;
-  const { runDir } = ctx;
 
   // One round trip for "it is there" and "here is where": a second read could
   // land after a rotation and measure a different code than the one captured.
@@ -300,7 +389,7 @@ async function captureQr(ctx) {
   // rect it returned, so a stale frame would be a mis-crop rather than a wobble.
   await delay(400);
 
-  const full = join(runDir, 'qr-full.png');
+  const full = ctx.path('qr-full.png');
   await ctx.shot('qr-full.png');
 
   // Screenshot pixels per CSS pixel, measured rather than taken from
@@ -314,11 +403,11 @@ async function captureQr(ctx) {
     width: measured.width * scale,
     height: measured.height * scale,
   };
-  const cropped = join(runDir, 'qr.png');
+  const cropped = ctx.path('qr.png');
   const cropBox = await crop(full, cropped, rect, { padding: Math.round(12 * scale), size: shotSize });
-  ctx.artifacts.add('qr.png');
-  const y4m = await toY4m(cropped, join(runDir, 'qr.y4m'));
-  ctx.artifacts.add('qr.y4m');
+  ctx.keep('qr.png');
+  const y4m = await toY4m(cropped, ctx.path('qr.y4m'));
+  ctx.keep('qr.y4m');
 
   const { decoded, decodedFrom } = await proveDecodes(ctx, cropped, cropBox);
   const invitationUrl = measured.url;
@@ -355,9 +444,9 @@ async function proveDecodes(ctx, cropped, cropBox) {
   const decoded = await decodeQr(cropped, ctx.repoRoot, cropBox);
   if (decoded !== null) return { decoded, decodedFrom: 'qr.png' };
 
-  const large = join(ctx.runDir, 'qr-large.png');
+  const large = ctx.path('qr-large.png');
   const largeSize = await upscale(cropped, large);
-  ctx.artifacts.add('qr-large.png');
+  ctx.keep('qr-large.png');
   const enlarged = await decodeQr(large, ctx.repoRoot, largeSize);
   if (enlarged === null) throw new Error(`qr.png did not decode (crop ${JSON.stringify(cropBox)})`);
   return { decoded: enlarged, decodedFrom: 'qr-large.png' };
@@ -406,12 +495,12 @@ function readInvitationUrl(ab) {
  * on (`docs/specs/pocket-app.md`); this walkthrough is about the in-app scan.
  */
 async function stepPocket(ctx) {
-  const { repoRoot, runDir, opts } = ctx;
+  const { repoRoot, opts } = ctx;
 
   const chrome = resolveChrome();
   ctx.log(`pocket browser: ${chrome.path} (${chrome.from})`);
   const port = await findFreePort(opts.hostPort + 100);
-  const userDataDir = join(runDir, 'pocket-profile');
+  const userDataDir = ctx.path('pocket-profile');
   mkdirSync(userDataDir, { recursive: true });
   const launched = await launchChrome({
     binary: chrome.path,
@@ -419,10 +508,10 @@ async function stepPocket(ctx) {
     userDataDir,
     // Opened at `getUserMedia` time rather than at launch (probed), so this
     // may be — and on a rotated code is — rewritten after Chrome is up.
-    fakeVideoFile: join(runDir, 'qr.y4m'),
+    fakeVideoFile: ctx.path('qr.y4m'),
     width: POCKET_VIEWPORT.width,
     height: POCKET_VIEWPORT.height,
-    logPath: join(runDir, 'pocket-chrome.log'),
+    logPath: ctx.path('pocket-chrome.log'),
   });
 
   const ab = new AgentBrowser(`${opts.session}-pocket`, repoRoot);
@@ -501,15 +590,7 @@ async function stepCode(ctx) {
 
   await ensureCapturedCodeIsLive(ctx);
 
-  await pocket.run(['find', 'role', 'button', 'click', '--name', SCAN_LABEL, '--exact']);
-  // The scanner is on screen for as long as the decode takes, which behind a
-  // fake camera is under a second — so the wait polls fast and the screenshot
-  // goes in front of everything else this step does.
-  await pocket.waitUntil(scannerUpExpr(), {
-    what: 'the scanner to open',
-    timeoutMs: 30_000,
-    intervalMs: 50,
-  });
+  await openScanner(pocket);
   await ctx.shot('06-scanner.png', pocket);
 
   const code = await pocket.waitUntil(pairingCodeExpr(), {
@@ -583,6 +664,22 @@ function scannerUpExpr() {
 }
 
 /**
+ * Tap **Scan a setup code** and wait for the scanner.
+ *
+ * The scanner is on screen for as long as the decode takes, which behind a fake
+ * camera is under a second — so the wait polls fast, and whatever the caller
+ * does next goes in front of everything else.
+ */
+async function openScanner(pocket) {
+  await pocket.run(['find', 'role', 'button', 'click', '--name', SCAN_LABEL, '--exact']);
+  await pocket.waitUntil(scannerUpExpr(), {
+    what: 'the scanner to open',
+    timeoutMs: 30_000,
+    intervalMs: 50,
+  });
+}
+
+/**
  * The two digits off the waiting screen — the only place they exist, since the
  * Host holds the expected ones and never sends them. The digit test stays,
  * because {@link PAIRING_CODE_REGION} holds a placeholder until the sampled
@@ -612,6 +709,7 @@ function pairingModalExpr() {
 async function stepTerminal(ctx) {
   if (!ctx.state.pairingCode) throw new Error('the code step has to run first');
   await approveOnHost(ctx);
+  await ctx.shot('09-host-approved.png');
   await connectPocket(ctx);
   await runFromPocket(ctx);
   await ringFromHost(ctx);
@@ -619,16 +717,17 @@ async function stepTerminal(ctx) {
 }
 
 /**
- * Type the phone's digits into the modal and authorize.
+ * Type digits into the modal and authorize.
  *
  * **One attempt.** The Host holds the expected code, compares it itself, and
  * every terminal outcome spends the invitation
- * (`docs/specs/remote-security-model.md` → Pairing) — so a mistyped field is not
- * a retry, it is a failed run.
+ * (`docs/specs/remote-security-model.md` → Pairing) — so on the happy path a
+ * mistyped field is not a retry, it is a failed run. `code` is what to type, so
+ * the `wrong-code` scenario exercises exactly the same control with the wrong
+ * value rather than a path of its own.
  */
-async function approveOnHost(ctx) {
+async function approveOnHost(ctx, { code = ctx.state.pairingCode, reports = OUTCOME_PAIRED } = {}) {
   const ab = ctx.state.hostBrowser;
-  const code = ctx.state.pairingCode;
   await fillField(ctx, `${PAIRING_MODAL} input`, code);
   // The last button in the modal, and disabled until the field holds two
   // digits — so clicking it exercises that gate rather than working around it.
@@ -638,27 +737,255 @@ async function approveOnHost(ctx) {
      return modal ? [...modal.querySelectorAll('button')].at(-1) : null;`,
     "the pairing modal's confirm button",
   );
+  ctx.record({ decision: { code, confirm, ...(await settleDecision(ctx, reports)) } });
+}
 
+/** Cancel the request instead, which is the modal's first (and focused) button. */
+async function denyOnHost(ctx) {
+  const cancel = await clickElement(
+    ctx.state.hostBrowser,
+    `const modal = document.querySelector(${JSON.stringify(PAIRING_MODAL)});
+     return modal ? modal.querySelector('button') : null;`,
+    "the pairing modal's cancel button",
+  );
+  ctx.record({ decision: { cancel, ...(await settleDecision(ctx, OUTCOME_CANCELLED)) } });
+}
+
+/**
+ * Follow one answered request from the click to what the laptop is left saying.
+ *
+ * The modal closing only means the request was answered. **What it was answered
+ * *as* is the panel behind it**, which is the only place the two decisions
+ * differ: both spend the code, and the paired count is absolute, so a mismatch
+ * moves nothing (`docs/specs/server.md` → "Remote control, in the Settings
+ * dialog"). Waiting for that report is also what keeps the screenshot below
+ * from catching the panel one event early.
+ */
+async function settleDecision(ctx, reports) {
+  const ab = ctx.state.hostBrowser;
   // The clock the next step reads too: what a person waits through is the span
   // from authorizing to a terminal on the phone, and the phone is usually
   // already there by the time the laptop has finished settling.
-  const startedAt = (ctx.state.approvedAt = Date.now());
+  const startedAt = (ctx.state.decidedAt = Date.now());
   await waitFor(async () => (await ab.eval(pairingModalExpr())) === null, {
     what: 'the pairing modal to close',
     timeoutMs: 60_000,
     intervalMs: 200,
   });
-  // The modal closing only says the request was answered. What says it was
-  // *approved* is the ACL the Host wrote, which the enrolled view counts.
-  const section = await ab.waitUntil(
-    `const section = ${REMOTE_SECTION};
-     return section && /\\d+\\s+paired/.test(section.innerText) ? section.innerText : null;`,
-    { what: 'the Host to count a paired phone', timeoutMs: 60_000 },
-  );
-  ctx.record({
-    approval: { code, confirm, approvedInMs: Date.now() - startedAt, remoteControl: section.trim() },
+  const outcome = await ab.waitUntil(outcomeReportExpr(reports), {
+    what: `the panel to report the pairing as “${reports}…”`,
+    timeoutMs: 60_000,
   });
-  await ctx.shot('09-host-approved.png');
+  // On a pairing, the ACL the Host wrote is the second witness, and the enrolled
+  // view counts it a status poll later.
+  if (reports === OUTCOME_PAIRED) {
+    await ab.waitUntil(pairedCountExpr(), {
+      what: 'the Host to count a paired phone',
+      timeoutMs: 60_000,
+    });
+  }
+  return { decidedInMs: Date.now() - startedAt, outcome, remoteControl: await sectionText(ab) };
+}
+
+/** The panel's outcome report, once it starts with `prefix`; null until then. */
+function outcomeReportExpr(prefix) {
+  return `const region = document.querySelector(${JSON.stringify(PAIRING_OUTCOME_REGION)});
+    if (!region) return null;
+    const text = region.innerText.trim();
+    return text.startsWith(${JSON.stringify(prefix)}) ? text : null;`;
+}
+
+/** The section's own text, or null while the dialog is not showing it. */
+function sectionText(ab) {
+  return ab.eval(`const section = ${REMOTE_SECTION};
+    return section ? section.innerText.trim() : null;`);
+}
+
+/**
+ * The count the enrolled view renders, as a number — 0 being the wording that
+ * names no digits at all. The same regex the happy path waits on, so a copy
+ * change that broke this would fail there first and loudly.
+ */
+function pairedCountExpr() {
+  return `const section = ${REMOTE_SECTION};
+    if (!section) return null;
+    const match = /(\\d+)\\s+paired/.exec(section.innerText);
+    return match ? Number(match[1]) : null;`;
+}
+
+/** The same number as {@link pairedCountExpr}, read once — 0 while it names none. */
+async function pairedCount(ab) {
+  return (await ab.eval(pairedCountExpr())) ?? 0;
+}
+
+/**
+ * Answer the request the wrong way and prove that nothing was paired.
+ *
+ * The two ways to pair nothing — mistyping the digits and cancelling — differ
+ * only in `decide`, so they are one function: what makes each a scenario is the
+ * absence afterwards, and that check is identical and easy to get subtly wrong.
+ *
+ * The scenarios exist because both sides used to go quiet about it — the modal
+ * vanished, the count did not move, and the panel said the same sentence it says
+ * after a success.
+ */
+async function pairedNothing(ctx, { decide, hostShot, pocketShot, as, complaint, facts = {} }) {
+  const host = ctx.state.hostBrowser;
+  const before = await pairedCount(host);
+  // Records the decision itself under `decision`, as the happy path's does.
+  await decide(ctx);
+  await ctx.shot(hostShot);
+
+  // "Nothing was paired" is an absence, and the count is re-read on a 2 s poll
+  // (`docs/specs/server.md`), so it is given a cycle to move before being
+  // believed — a count read the instant the outcome lands would pass whether or
+  // not the Host wrote a record.
+  await delay(2_500);
+  const after = await pairedCount(host);
+  if (after !== before) {
+    throw new Error(`${complaint}: ${before} → ${after} paired phones`);
+  }
+  ctx.record({ [as]: { ...facts, pairedClients: after } });
+  await recordPocketRefusal(ctx, pocketShot);
+}
+
+/**
+ * Type the wrong two digits, which is the one mistake this ceremony does not
+ * forgive: the Host spends its single attempt on the compare, so there is no
+ * retry and nothing is paired.
+ */
+function stepWrongCode(ctx) {
+  const typed = nextCode(ctx.state.pairingCode);
+  return pairedNothing(ctx, {
+    decide: (c) => approveOnHost(c, { code: typed, reports: OUTCOME_CODE_MISMATCH }),
+    hostShot: '09-host-mismatch.png',
+    pocketShot: '10-pocket-mismatch.png',
+    as: 'mismatch',
+    complaint: 'a mistyped code paired something',
+    facts: { typed, expected: ctx.state.pairingCode },
+  });
+}
+
+/** Cancel the request on the laptop, which is the other way to pair nothing. */
+function stepDenied(ctx) {
+  return pairedNothing(ctx, {
+    decide: denyOnHost,
+    hostShot: '09-host-cancelled.png',
+    pocketShot: '10-pocket-cancelled.png',
+    as: 'denial',
+    complaint: 'a cancelled request paired something',
+  });
+}
+
+/** The two digits that are not the ones the phone is showing. */
+function nextCode(code) {
+  return String((Number(code) + 1) % 100).padStart(2, '0');
+}
+
+/**
+ * Two codes a phone can be handed that will never pair, told apart.
+ *
+ * Setup codes live five minutes, so an expired one is the likeliest thing this
+ * scanner ever meets — and `parsePairingInvitationUrl` refuses it with the same
+ * `null` it gives a QR off a cereal box (`docs/specs/pocket-app.md` → the
+ * scanner). The scenario exists because the phone used to say the same sentence
+ * to both, sending a user who needed a fresh code off to look for a different
+ * QR. Nothing is scanned and no ceremony starts: both codes go in by hand,
+ * through the paste field beside the viewfinder.
+ */
+async function stepDeadCode(ctx) {
+  const pocket = ctx.state.pocketBrowser;
+  if (!pocket) throw new Error('the pocket step has to run first');
+  const live = ctx.state.invitationUrl;
+  if (!live) throw new Error('the qr step has to run first');
+
+  // Before the scanner mounts, or the camera — still pointed at the Host's live
+  // QR — decodes it and starts a real pairing underneath this one.
+  await blankY4m(ctx.path('qr.y4m'));
+
+  await openScanner(pocket);
+
+  const expired = await reissueInvitation(ctx, live, { expiry: DEAD_EXPIRY_SECONDS });
+  await pasteIntoScanner(ctx, expired);
+  const dead = await recordPocketRefusal(ctx, '06-pocket-expired.png', {
+    announces: REFUSED_EXPIRED,
+    as: 'expiredCode',
+  });
+
+  // The same dead code, minted by somebody else's deployment. Expiry is not the
+  // first question about it: there is no fresh code to go and get on a computer
+  // this phone was never pointed at, so it gets the other sentence.
+  const foreign = await reissueInvitation(ctx, live, {
+    expiry: DEAD_EXPIRY_SECONDS,
+    origin: FOREIGN_ORIGIN,
+  });
+  await pasteIntoScanner(ctx, foreign);
+  const rejected = await recordPocketRefusal(ctx, '07-pocket-foreign.png', {
+    announces: REFUSED_NOT_A_CODE,
+    as: 'foreignCode',
+  });
+  if (dead.announced === rejected.announced) {
+    throw new Error(`both codes got the same sentence: ${JSON.stringify(dead.announced)}`);
+  }
+  ctx.record({ deadCode: { expired, foreign, expiry: DEAD_EXPIRY_SECONDS } });
+}
+
+/**
+ * Type a code into the scanner's own paste field and submit it.
+ *
+ * The button is `disabled` until the field holds something, which is the
+ * scanner's gate to decide — so clicking it through {@link clickElement}
+ * exercises that rather than working around it.
+ */
+async function pasteIntoScanner(ctx, url) {
+  const pocket = ctx.state.pocketBrowser;
+  await fillField(ctx, '#pocket-paste-code', url, pocket);
+  return clickElement(
+    pocket,
+    `const field = document.querySelector('#pocket-paste-code');
+     return field ? field.form.querySelector('button[type="submit"]') : null;`,
+    "the scanner's paste button",
+  );
+}
+
+/**
+ * Follow the phone to a refusal and record what it was told.
+ *
+ * **Structural, except for `announces`.** What is always checked is that no
+ * digits are on screen, that the phone announced *something*, and that it is on
+ * a screen with a title; the words are fixed copy the phone chooses from closed
+ * sets (`PAIRING_DENIAL_MESSAGES`, the scanner's two), and they land in the
+ * shot's `.txt` for the pass that reads them. A scenario that turns on *which*
+ * sentence passes `announces`, and then waits for that one — which is also what
+ * makes a second refusal on an unchanged screen distinguishable from the first.
+ */
+async function recordPocketRefusal(ctx, shot, { announces = null, as = 'pocketRefusal' } = {}) {
+  const pocket = ctx.state.pocketBrowser;
+  const refusal = await pocket.waitUntil(pocketRefusedExpr(announces), {
+    what: announces
+      ? `the phone to answer with “${announces}…”`
+      : 'the phone to leave the two-digit screen and say why',
+    timeoutMs: 120_000,
+    intervalMs: 250,
+  });
+  ctx.record({ [as]: refusal });
+  await ctx.shot(shot, pocket);
+  return refusal;
+}
+
+/**
+ * The phone after a refusal: no digits, an announced sentence, and the screen it
+ * is on (`lib/src/remote/pocket-app/App.tsx` → `HostsView` and the scanner both
+ * carry exactly one `h1`, in a header).
+ */
+function pocketRefusedExpr(prefix = null) {
+  return `if (document.querySelector(${JSON.stringify(PAIRING_CODE_REGION)})) return null;
+    const alert = document.querySelector('[role="alert"]');
+    const title = document.querySelector('header h1');
+    if (!alert || !alert.innerText.trim() || !title) return null;
+    const announced = alert.innerText.trim();
+    ${prefix === null ? '' : `if (!announced.startsWith(${JSON.stringify(prefix)})) return null;`}
+    return { announced, screen: title.innerText.trim() };`;
 }
 
 /**
@@ -677,7 +1004,7 @@ async function connectPocket(ctx) {
     timeoutMs: 120_000,
     intervalMs: 250,
   });
-  const connectedInMs = Date.now() - ctx.state.approvedAt;
+  const connectedInMs = Date.now() - ctx.state.decidedAt;
   const signCount = await assertAsserted(ctx, 'the connection');
   ctx.record({ connect: { connectedInMs, signCountAfterConnect: signCount } });
   await ctx.shot('10-pocket-connected.png', pocket);
@@ -781,7 +1108,7 @@ async function leaveAndReconnect(ctx) {
 async function proveCommand(ctx, name, { prefix = '' } = {}) {
   const pocket = ctx.state.pocketBrowser;
   const marker = `WALKTHROUGH-OK-${Date.now().toString(36)}`;
-  const proof = join(ctx.runDir, name);
+  const proof = ctx.path(name);
   const part = `${proof}.part`;
   // A re-used `--out` must not let an earlier run's file answer this one.
   for (const path of [proof, part]) rmSync(path, { force: true });
@@ -809,7 +1136,7 @@ async function proveCommand(ctx, name, { prefix = '' } = {}) {
   if (!text.includes(marker) || !text.includes('EXIT=0')) {
     throw new Error(`${name} is not that command's output: ${JSON.stringify(text)}`);
   }
-  ctx.artifacts.add(name);
+  ctx.keep(name);
   return { marker, command, roundTripMs, output: text.trim() };
 }
 
@@ -931,8 +1258,7 @@ function shellQuote(value) {
  * change, so a run in which it fires is a run where the honest path is broken:
  * it says so out loud rather than passing quietly.
  */
-async function fillField(ctx, selector, value) {
-  const ab = ctx.state.hostBrowser;
+async function fillField(ctx, selector, value, ab = ctx.state.hostBrowser) {
   await ab.run(['fill', selector, value]);
   const seen = await ab.eval(`const el = document.querySelector(${JSON.stringify(selector)});
     return el ? el.value : null;`);
@@ -948,7 +1274,14 @@ async function fillField(ctx, selector, value) {
     return el.value;`);
 }
 
-export const STEPS = [
+/**
+ * Everything before anything is scanned: a Server, a Host, an enrollment, a QR,
+ * and a phone. Named rather than counted from the end of {@link PRELUDE},
+ * because `expired-code` is exactly "this and no scan" — and a step appended to
+ * the prelude must not silently start a ceremony that scenario says it never
+ * starts.
+ */
+const SETUP = [
   { name: 'server', title: 'Start the coordinating server', run: stepServer },
   { name: 'host', title: 'Start the Host in the agent-browser harness', run: stepHost },
   { name: 'settings', title: 'Open Settings → Remote control', run: stepSettings },
@@ -959,14 +1292,59 @@ export const STEPS = [
     title: 'Open Pocket with a fake camera and a virtual authenticator',
     run: stepPocket,
   },
-  {
-    name: 'code',
-    title: 'Scan from inside Pocket and read the two-digit code',
-    run: stepCode,
-  },
-  {
-    name: 'terminal',
-    title: 'Approve on the Host and prove the terminal',
-    run: stepTerminal,
-  },
 ];
+
+/** The scan, and with it the two digits — every scenario that has a ceremony. */
+const SCAN = {
+  name: 'code',
+  title: 'Scan from inside Pocket and read the two-digit code',
+  run: stepCode,
+};
+
+/** Everything up to the two digits, which every ceremony does identically. */
+const PRELUDE = [...SETUP, SCAN];
+
+/**
+ * The endings, by `--scenario`. Each says in one sentence what a green run of it
+ * proves — recorded into `summary.json` as `expect`, so an artifact directory
+ * says what it was for without the README beside it.
+ *
+ * Every scenario but `happy` prefixes its own artifacts with its name
+ * (`run.mjs`), so they can share one `--out` without overwriting each other.
+ */
+export const SCENARIOS = {
+  happy: {
+    expect:
+      'a phone paired from a QR runs a command the laptop’s own shell answers, and hears it ring',
+    steps: [
+      ...PRELUDE,
+      { name: 'terminal', title: 'Approve on the Host and prove the terminal', run: stepTerminal },
+    ],
+  },
+  'wrong-code': {
+    expect:
+      'a mistyped confirmation pairs nothing, says so on the laptop, and sends the phone back with its own sentence',
+    steps: [
+      ...PRELUDE,
+      { name: 'mismatch', title: 'Type the wrong two digits', run: stepWrongCode },
+    ],
+  },
+  denied: {
+    expect: 'cancelling on the laptop pairs nothing and returns the phone to its list',
+    steps: [...PRELUDE, { name: 'cancel', title: 'Cancel the request', run: stepDenied }],
+  },
+  // The one scenario with no scan in it: nothing is ever decoded, so there is no
+  // ceremony and no two digits.
+  'expired-code': {
+    expect:
+      'a setup code that ran out of time is told apart from one that was never for this server, and neither starts a ceremony',
+    steps: [
+      ...SETUP,
+      {
+        name: 'dead-code',
+        title: 'Paste a code that expired, then one for another server',
+        run: stepDeadCode,
+      },
+    ],
+  },
+};

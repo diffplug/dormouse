@@ -17,8 +17,8 @@
 
 import { DEFAULT_PAIRING_TTL_MS, formatPairingInvitationUrl } from 'server-lib-common';
 
-import type { RemoteHostConsoleStatus, SetupQrResult } from './service-protocol';
-import type { TerminalInvitationState } from '../../remote/host/remote-host';
+import type { InvitationEvent, RemoteHostConsoleStatus, SetupQrResult } from './service-protocol';
+import type { PairingOutcome, TerminalInvitationState } from '../../remote/host/remote-host';
 import type { RemoteHostLink } from '../../lib/platform/types';
 
 /** A machine that has never enrolled: the section shows its three-field form. */
@@ -109,6 +109,13 @@ export interface PrimedRemoteHost {
    * the code" has to be a starting condition rather than an event to wait for.
    */
   setupInvitation?: TerminalInvitationState;
+  /**
+   * How the ceremony that code produced ended, on the same event. Implies
+   * `consumed` where {@link PrimedRemoteHost.setupInvitation} says nothing,
+   * because that is the only state the Host ever reports an outcome with
+   * (`service-protocol.ts` → `InvitationEvent`).
+   */
+  setupOutcome?: PairingOutcome;
 }
 
 /**
@@ -139,15 +146,22 @@ export function makeStubRemoteHostLink(primed: PrimedRemoteHost): RemoteHostLink
     respond: () => {},
     notify: () => {},
     on: (name, listener) => {
-      if (name === 'invitation' && primed.setupInvitation) {
+      if (name === 'invitation' && (primed.setupInvitation || primed.setupOutcome)) {
         // Naming the invitation the stub's own `setupQr` answered, because the
         // panel acts only on its own code (`service-protocol.ts`).
         const { inviteId } = primed.setupQr ?? setupQrResult();
-        const state = primed.setupInvitation;
+        // Spread like the service's own `#emitInvitation`, so no story or test
+        // drives the panel with a shape production cannot send.
+        const event: InvitationEvent = {
+          name: 'invitation',
+          inviteId,
+          state: primed.setupInvitation ?? 'consumed',
+          ...(primed.setupOutcome ? { outcome: primed.setupOutcome } : {}),
+        };
         // A microtask rather than inline: the panel subscribes during an effect,
         // and setting state before that effect has returned is a no-op React
         // warns about.
-        queueMicrotask(() => listener({ name: 'invitation', inviteId, state }));
+        queueMicrotask(() => listener(event));
       }
       return () => {};
     },

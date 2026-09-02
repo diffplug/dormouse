@@ -31,7 +31,12 @@ import {
   type AlertPushDeps,
 } from '../../remote/host/push-delivery';
 import { RemoteApiSession } from '../../remote/host/remote-api';
-import { RemoteHost, type InvitationState, type WebSocketLike } from '../../remote/host/remote-host';
+import {
+  RemoteHost,
+  type InvitationState,
+  type PairingOutcome,
+  type WebSocketLike,
+} from '../../remote/host/remote-host';
 import { originAllowedByConnectSrc } from './connect-src';
 import { readEnrollmentOffer } from './enroll-offer';
 import type { HostStateStore } from './host-state-store';
@@ -582,7 +587,8 @@ export class RemoteHostService {
       },
       requestApproval: (pending) => this.#enqueuePairing(pending),
       dismissApproval: (clientId) => this.#resolvePairing(clientId),
-      onInvitationChanged: (inviteId, state) => this.#emitInvitation(inviteId, state),
+      onInvitationChanged: (inviteId, state, outcome) =>
+        this.#emitInvitation(inviteId, state, outcome),
       now: this.#now,
     });
     this.#host.start();
@@ -667,12 +673,17 @@ export class RemoteHostService {
    * Announce that an invitation a Settings panel may be displaying changed
    * state, naming it so a panel showing a *different* code stays live.
    */
-  #emitInvitation(inviteId: string, state: InvitationState): void {
+  #emitInvitation(inviteId: string, state: InvitationState, outcome?: PairingOutcome): void {
     if (this.#disposed) return;
     this.#sendToUi(REMOTE_HOST_EVENT_EVENT, {
       name: 'invitation',
       inviteId,
       state,
+      // Spread rather than always set: this crosses a JSON bridge, and an
+      // explicit `outcome: undefined` is a key the VS Code side would drop and
+      // the Tauri side would keep, leaving the two hosts sending different
+      // events for the same retirement.
+      ...(outcome ? { outcome } : {}),
     } satisfies InvitationEvent);
   }
 
