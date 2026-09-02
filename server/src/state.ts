@@ -349,10 +349,24 @@ export class PushSubscriptionStore extends JsonFileStore {
    * Replace any existing subscription for this (host, delivery), or add one.
    *
    * A service-worker scope has one subscription shared by every Host, so when
-   * this delivery's address changes every row still carrying the *replaced*
-   * endpoint is stale — whichever delivery id it belongs to — and goes in the
-   * same mutation. Keyed on the endpoint rather than on the delivery id
-   * because the endpoint is the thing there is only one of per worker scope.
+   * this delivery's address changes every row still carrying an address it is
+   * moving off is stale — whichever delivery id that row belongs to — and goes
+   * in the same mutation. Two keys do that work, and both are needed:
+   *
+   * * **The addresses being replaced come from every row carrying this
+   *   `deliveryId`**, not only the one for this Host. A delivery id names one
+   *   Client's pairing, so any row holding it speaks for the same worker scope;
+   *   reading only `(hostId, deliveryId)` left a sibling Host's row sitting on
+   *   an address this Client had already moved off, which the possession query
+   *   then reported as registered.
+   * * **The rows dropped are matched on the endpoint**, which is what reaches
+   *   the siblings — they carry delivery ids this request never names.
+   *
+   * What it cannot do: a *brand-new* delivery id (a re-pair) has no row to read
+   * a previous address from, so rows for that scope's old endpoint survive
+   * until the push service 404/410s them. `docs/specs/server.md` -> State files
+   * states that limit; nothing in the request can close it, since the Server
+   * holds no cross-Host device identity linking the two ids.
    */
   upsert(
     record: Omit<StoredPushSubscription, 'subscribedAt'>,
@@ -360,15 +374,15 @@ export class PushSubscriptionStore extends JsonFileStore {
     return this.mutate(async () => {
       const all = await this.list();
       const stored: StoredPushSubscription = { ...record, subscribedAt: this.now() };
-      const previous = all.find(
-        (s) => s.hostId === record.hostId && s.deliveryId === record.deliveryId,
+      const replacedEndpoints = new Set(
+        all
+          .filter((s) => s.deliveryId === record.deliveryId && s.endpoint !== record.endpoint)
+          .map((s) => s.endpoint),
       );
-      const replacedEndpoint =
-        previous !== undefined && previous.endpoint !== record.endpoint ? previous.endpoint : null;
       const kept = all.filter(
         (s) =>
           !(s.hostId === record.hostId && s.deliveryId === record.deliveryId) &&
-          s.endpoint !== replacedEndpoint,
+          !replacedEndpoints.has(s.endpoint),
       );
       kept.push(stored);
       await this.writeAtomic(kept);

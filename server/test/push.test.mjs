@@ -121,7 +121,7 @@ function newDeliveryId() {
 async function pushApp(overrides = {}) {
   const sender = fakePushSender();
   const app = await freshApp({ vapidPublicKey: VAPID_PUBLIC, pushSender: sender, ...overrides });
-  const { body: host } = await enrollHost(app.app, { label: 'Laptop' });
+  const { body: host } = await enrollHost(app.app);
   const { sessionToken } = await ownerSession(app.app);
   return { ...app, sender, host, sessionToken };
 }
@@ -293,7 +293,7 @@ test('rotating the endpoint drops every row still carrying the replaced one', as
   // means every row still on the old endpoint — whichever Host, whichever
   // delivery id — points somewhere the browser no longer listens.
   const { app, stateDir, host, sessionToken } = await pushApp();
-  const { body: other } = await enrollHost(app, { label: 'Other laptop' });
+  const { body: other } = await enrollHost(app);
   const original = subscription('https://push.example.com/original');
   const forHost = newDeliveryId();
   const forOther = newDeliveryId();
@@ -323,9 +323,45 @@ test('rotating the endpoint drops every row still carrying the replaced one', as
   assert.equal(stored[0].endpoint, 'https://push.example.com/replacement');
 });
 
+test('a moved delivery drops its own stale rows under every Host that holds it', async () => {
+  // The addresses a subscribe replaces are read from every row carrying this
+  // delivery id, not only the row for this Host. A delivery id names one
+  // Client's pairing, so any row holding it speaks for the same worker scope —
+  // and reading only `(hostId, deliveryId)` left a sibling row sitting on an
+  // address the browser had already moved off, which the possession query then
+  // reported as registered.
+  const { app, stateDir, host, sessionToken } = await pushApp();
+  const { body: other } = await enrollHost(app);
+  const deliveryId = newDeliveryId();
+  const old = subscription('https://push.example.com/old');
+
+  assert.equal(
+    (await subscribe(app, { sessionToken, host: other, deliveryId, sub: old })).status,
+    200,
+  );
+  // A different Host, the same delivery, a new address: this Host has no row of
+  // its own to read the replaced endpoint from.
+  const moved = await subscribe(app, {
+    sessionToken,
+    host,
+    deliveryId,
+    sub: subscription('https://push.example.com/new'),
+  });
+  assert.deepEqual((await moved.json()).hostIds, [host.hostId]);
+
+  const stored = await storedRows(stateDir);
+  assert.deepEqual(
+    stored.map((row) => row.endpoint),
+    ['https://push.example.com/new'],
+  );
+  // And the query no longer reports the dead address as registered.
+  const answered = await (await query(app, sessionToken, [deliveryId])).json();
+  assert.deepEqual(answered.registered, [{ hostId: host.hostId, deliveryId }]);
+});
+
 test('subscribe answers every Host whose rows carry the presented endpoint', async () => {
   const { app, host, sessionToken } = await pushApp();
-  const { body: other } = await enrollHost(app, { label: 'Other laptop' });
+  const { body: other } = await enrollHost(app);
   const forHost = newDeliveryId();
   const forOther = newDeliveryId();
 
@@ -353,7 +389,7 @@ test('a retried subscribe whose first response was lost still reports the truth'
   // already deleted — but it can always answer what is registered now, which is
   // what lets the Client repair its view without remembering what it did.
   const { app, host, sessionToken } = await pushApp();
-  const { body: other } = await enrollHost(app, { label: 'Other laptop' });
+  const { body: other } = await enrollHost(app);
   const forHost = newDeliveryId();
   const forOther = newDeliveryId();
   await subscribe(app, { sessionToken, host, deliveryId: forHost });
@@ -372,7 +408,7 @@ test('a retried subscribe whose first response was lost still reports the truth'
 
 test('query reports the presented ids, and never one the caller did not name', async () => {
   const { app, host, sessionToken } = await pushApp();
-  const { body: other } = await enrollHost(app, { label: 'Other laptop' });
+  const { body: other } = await enrollHost(app);
   const mine = newDeliveryId();
   const someone = newDeliveryId();
   await subscribe(app, { sessionToken, host, deliveryId: mine });
@@ -427,7 +463,7 @@ test('query hides rows registered under an old VAPID key', async () => {
 
 test('deleting is idempotent and answers 204 whether or not a row existed', async () => {
   const { app, stateDir, host, sessionToken } = await pushApp();
-  const { body: other } = await enrollHost(app, { label: 'Other laptop' });
+  const { body: other } = await enrollHost(app);
   const deliveryId = newDeliveryId();
   await subscribe(app, { sessionToken, host, deliveryId });
   await subscribe(app, { sessionToken, host: other, deliveryId });
@@ -469,7 +505,7 @@ test('devices lists this host subscribers by delivery id, never a label', async 
 
 test('a host cannot see another host subscribers', async () => {
   const { app, host, sessionToken } = await pushApp();
-  const { body: other } = await enrollHost(app, { label: 'Other laptop' });
+  const { body: other } = await enrollHost(app);
   await subscribe(app, { sessionToken, host, deliveryId: newDeliveryId() });
 
   const res = await app.request(API_ROUTES.pushDevices, {
@@ -648,7 +684,7 @@ test('one wedged device does not hold up the rest of the fan-out', async () => {
 
 test('a host cannot push to another host subscribers', async () => {
   const { app, sender, host, sessionToken } = await pushApp();
-  const { body: other } = await enrollHost(app, { label: 'Other laptop' });
+  const { body: other } = await enrollHost(app);
   const deliveryId = newDeliveryId();
   await subscribe(app, { sessionToken, host, deliveryId });
 
