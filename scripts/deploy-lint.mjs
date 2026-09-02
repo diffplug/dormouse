@@ -326,12 +326,12 @@ export const RULES = [
     // buffer the piped ladder took NEITHER branch, so `confirm` never ran and
     // the install repointed the operator's root Serve path without asking.
     // Both halves of the decision, exactly once each, and both scoped to the
-    // root line — an unscoped port match said "already ours" for a config
-    // whose root was foreign.
+    // root line and right-bounded — an unscoped port match said "already
+    // ours" for a config whose root was foreign, and for one on :31000.
     rule: 'Network posture — the Serve conflict gate decides on captured output, so its confirm cannot be skipped',
     patterns: {
-      macOS: /grep -qE '\^\\\|-- \/ \+proxy \.\*127\\\.0\\\.0\\\.1:'"\$1" <<<"\$2"|grep -qE '\^\\\|-- \/ \+proxy' <<<"\$2"/,
-      Linux: /grep -qE '\^\\\|-- \/ \+proxy \.\*127\\\.0\\\.0\\\.1:'"\$1" <<<"\$2"|grep -qE '\^\\\|-- \/ \+proxy' <<<"\$2"/,
+      macOS: /grep -qE '\^\\\|-- \/ \+proxy \.\*127\\\.0\\\.0\\\.1:'"\$1"'\(\[\^0-9\]\|\$\)' <<<"\$2"|grep -qE '\^\\\|-- \/ \+proxy' <<<"\$2"/,
+      Linux: /grep -qE '\^\\\|-- \/ \+proxy \.\*127\\\.0\\\.0\\\.1:'"\$1"'\(\[\^0-9\]\|\$\)' <<<"\$2"|grep -qE '\^\\\|-- \/ \+proxy' <<<"\$2"/,
     },
     skip: {
       Windows:

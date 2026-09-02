@@ -74,6 +74,7 @@ const SERVE_ROOT_FOREIGN = '|-- / proxy http://127.0.0.1:9999';
 const SERVE_ROOT_OURS = '|-- / proxy http://127.0.0.1:3100';
 const SERVE_OTHER_PATH = '|-- /elsewhere proxy http://127.0.0.1:8888';
 const SERVE_OUR_PORT_OTHER_PATH = '|-- /api proxy http://127.0.0.1:3100';
+const SERVE_ROOT_PORT_PREFIX = '|-- / proxy http://127.0.0.1:31000';
 
 /**
  * `lsof` and `ss` print different shapes, and each platform's check reads its
@@ -217,6 +218,11 @@ function cases(platform, env) {
       'serve_state: our root mapping, with other paths around it',
       `serve_state 3100 "$(printf '%s\\n%s\\n' "${SERVE_ROOT_OURS}" "${SERVE_OTHER_PATH}")"`,
       'loopback',
+    ],
+    [
+      'serve_state: a root on a port this one is a prefix of is not ours',
+      `serve_state 3100 "${SERVE_ROOT_PORT_PREFIX}"`,
+      'conflict',
     ],
     [
       'serve_state: 1 MiB of serve status with no root mapping at all',

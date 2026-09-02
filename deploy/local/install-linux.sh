@@ -1139,7 +1139,7 @@ cmd_verify() {
   if [ -z "$serve_out" ]; then
     fail "tailscale serve reports no configuration"
   else
-    if grep -q "127.0.0.1:$PORT" <<<"$serve_out"; then
+    if grep -qE "127\.0\.0\.1:$PORT([^0-9]|\$)" <<<"$serve_out"; then
       pass "Serve proxies to 127.0.0.1:$PORT"
     else
       fail "Serve does not proxy to 127.0.0.1:$PORT"
@@ -1336,7 +1336,7 @@ cmd_uninstall() {
   # Turn off only the mapping this installer owns.
   local serve_out
   serve_out="$(ts serve status 2>/dev/null || true)"
-  if grep -q "127.0.0.1:$PORT" <<<"$serve_out"; then
+  if grep -qE "127\.0\.0\.1:$PORT([^0-9]|\$)" <<<"$serve_out"; then
     if ts serve --bg off 2>/dev/null; then
       printf 'turned off the Serve mapping to 127.0.0.1:%s\n' "$PORT"
     else
@@ -1667,7 +1667,7 @@ serve_state() {
   # `loopback` for a config whose ROOT was foreign and whose /api happened to
   # sit on this port: the confirm was skipped, the mutation was skipped, and
   # the install ended reporting the origin as ours while / served someone else.
-  if grep -qE '^\|-- / +proxy .*127\.0\.0\.1:'"$1" <<<"$2"; then
+  if grep -qE '^\|-- / +proxy .*127\.0\.0\.1:'"$1"'([^0-9]|$)' <<<"$2"; then
     printf 'loopback\n'
   elif grep -qE '^\|-- / +proxy' <<<"$2"; then
     printf 'conflict\n'
@@ -1728,7 +1728,7 @@ fi
 
 if [ "$TEST_MODE" != "1" ]; then
   SERVE_AFTER="$(ts serve status 2>&1 || true)"
-  grep -q "127.0.0.1:$LOOPBACK_PORT" <<<"$SERVE_AFTER" \
+  grep -qE "127\.0\.0\.1:$LOOPBACK_PORT([^0-9]|\$)" <<<"$SERVE_AFTER" \
     || { printf '%s\n' "$SERVE_AFTER" >&2; die "Serve does not report a proxy to 127.0.0.1:$LOOPBACK_PORT."; }
   grep -q "$TS_DNS" <<<"$SERVE_AFTER" \
     || { printf '%s\n' "$SERVE_AFTER" >&2; die "Serve does not report the expected HTTPS origin $ORIGIN."; }

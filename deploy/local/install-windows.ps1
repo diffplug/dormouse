@@ -1562,7 +1562,7 @@ function Invoke-Verify {
   if (-not $serveText.Trim()) {
     Fail "tailscale serve reports no configuration"
   } else {
-    if ($serveText -match [regex]::Escape("127.0.0.1:$PORT")) {
+    if ($serveText -match ([regex]::Escape("127.0.0.1:$PORT") + '([^0-9]|$)')) {
       Pass "Serve proxies to 127.0.0.1:$PORT"
     } else {
       Fail "Serve does not proxy to 127.0.0.1:$PORT"
@@ -1583,14 +1583,17 @@ function Invoke-Verify {
   # and a check that could not run has assumed. Every way the CLI can be
   # unavailable (off PATH, tailscaled down, `funnel status` unknown to an older
   # CLI) yields text that matches nothing, which is indistinguishable from a
-  # node with no Funnel until the exit status is consulted. So it is.
+  # node with no Funnel until the exit status is consulted. So it is -- after
+  # the match, not before it: evidence of `on` outranks a failed probe, since
+  # `serve status` naming a Funnel is an answer even when `funnel status` is
+  # what broke. Same precedence as `funnel_state` on the other two.
   $funnel = Invoke-Tailscale @('funnel', 'status')
   $funnelText = $funnel.StdOut + $funnel.StdErr
-  if ($funnel.ExitCode -ne 0) {
-    Fail "could not check tailscale funnel: ``tailscale funnel status`` exited $($funnel.ExitCode) -- verify cannot say this origin stays tailnet-only"
-    foreach ($l in $funnelText.Split("`n")) { if ($l.Trim()) { Write-Host "      $($l.TrimEnd())" } }
-  } elseif (($serveText + "`n" + $funnelText) -match '(?i)funnel on') {
+  if (($serveText + "`n" + $funnelText) -match '(?i)funnel on') {
     Fail "tailscale funnel is ON -- this origin is published to the public internet"
+    foreach ($l in $funnelText.Split("`n")) { if ($l.Trim()) { Write-Host "      $($l.TrimEnd())" } }
+  } elseif ($funnel.ExitCode -ne 0) {
+    Fail "could not check tailscale funnel: ``tailscale funnel status`` exited $($funnel.ExitCode) -- verify cannot say this origin stays tailnet-only"
     foreach ($l in $funnelText.Split("`n")) { if ($l.Trim()) { Write-Host "      $($l.TrimEnd())" } }
   } else {
     Pass "tailscale funnel is off (the origin stays tailnet-only)"
@@ -1856,7 +1859,7 @@ function Invoke-Uninstall {
 
   # Turn off only the mapping this installer owns.
   $serve = Invoke-Tailscale @('serve', 'status')
-  if (($serve.StdOut + $serve.StdErr) -match [regex]::Escape("127.0.0.1:$PORT")) {
+  if (($serve.StdOut + $serve.StdErr) -match ([regex]::Escape("127.0.0.1:$PORT") + '([^0-9]|$)')) {
     $off = Invoke-Tailscale @('serve', '--bg', 'off')
     if ($off.ExitCode -eq 0) { Write-Host "turned off the Serve mapping to 127.0.0.1:$PORT" }
     else { [Console]::Error.WriteLine('could not turn off the Serve mapping; check "tailscale serve status" and remove it by hand') }
@@ -2224,7 +2227,12 @@ rem directly.
   }
 
   $NEEDS_SERVE = $true
-  if ($SERVE_BEFORE -match [regex]::Escape("127.0.0.1:$LOOPBACK_PORT")) {
+  # Root-scoped and right-bounded, for the two reasons the unix `serve_state`
+  # carries: a bare port match said "already ours" for a config whose ROOT was
+  # foreign and whose other path sat on this port, and `127.0.0.1:31000`
+  # contains `127.0.0.1:3100`. Either one skips the confirm below and the
+  # mutation with it, leaving / foreign while the install reports success.
+  if ($SERVE_BEFORE -match ('(?m)^\|--\s+/\s+proxy.*' + [regex]::Escape("127.0.0.1:$LOOPBACK_PORT") + '([^0-9]|$)')) {
     Write-Ok "Serve already proxies to 127.0.0.1:$LOOPBACK_PORT"
     $NEEDS_SERVE = $false
   } elseif ($SERVE_BEFORE -match '(?m)^\|--\s+/\s+proxy') {
@@ -2252,7 +2260,7 @@ rem directly.
   if (-not $TEST_MODE) {
     $after = Invoke-Tailscale @('serve', 'status')
     $SERVE_AFTER = ($after.StdOut + $after.StdErr).TrimEnd()
-    if ($SERVE_AFTER -notmatch [regex]::Escape("127.0.0.1:$LOOPBACK_PORT")) {
+    if ($SERVE_AFTER -notmatch ([regex]::Escape("127.0.0.1:$LOOPBACK_PORT") + '([^0-9]|$)')) {
       Write-Host $SERVE_AFTER
       Die "Serve does not report a proxy to 127.0.0.1:$LOOPBACK_PORT."
     }
