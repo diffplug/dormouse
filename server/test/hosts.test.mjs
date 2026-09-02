@@ -11,6 +11,8 @@ import { join } from 'node:path';
 
 import { API_ROUTES, E2E_ID_LENGTH, WS_ROUTES, WS_TOKEN_PARAM, isE2eId } from 'server-lib-common';
 
+import { HOST_TOKEN_LENGTH, HostStore, MAX_ENROLLED_HOSTS } from '../dist/state.js';
+
 import {
   RP_ID,
   connectHost,
@@ -186,4 +188,81 @@ test('enrollment mirrors requireUserVerification to the Host, and omits it when 
   const off = await freshApp();
   const { body: uvOff } = await enrollHost(off.app);
   assert.equal('requireUserVerification' in uvOff, false);
+});
+
+// --- probing a host token costs the prober too -----------------------------
+// `requireHost` and the `/ws/host` gate both run unauthenticated over the most
+// expensive lookup on the server: a `readFile` + `JSON.parse` + two SHA-256 per
+// row. Answering instantly, and reading the file for a value no Host could have
+// been minted, made probing cheaper for the caller than for us.
+
+test('a rejected host token pays the credential-failure delay', async () => {
+  const delayMs = 60;
+  const { app } = await freshApp({ credentialFailureDelayMs: delayMs });
+  await enrollHost(app);
+
+  const started = Date.now();
+  const res = await app.request(API_ROUTES.pushDevices, {
+    headers: { Authorization: `Bearer ${'A'.repeat(HOST_TOKEN_LENGTH)}` },
+  });
+  const elapsed = Date.now() - started;
+
+  assert.equal(res.status, 401);
+  assert.ok(elapsed >= delayMs, `answered in ${elapsed}ms, under the ${delayMs}ms delay`);
+});
+
+test('the /ws/host upgrade pays the same delay on a bad token', async () => {
+  const delayMs = 60;
+  const { app } = await freshApp({ credentialFailureDelayMs: delayMs });
+  await enrollHost(app);
+
+  const started = Date.now();
+  const res = await app.request(
+    `${WS_ROUTES.host}?${WS_TOKEN_PARAM}=${'A'.repeat(HOST_TOKEN_LENGTH)}`,
+  );
+  const elapsed = Date.now() - started;
+
+  assert.equal(res.status, 401);
+  assert.ok(elapsed >= delayMs, `answered in ${elapsed}ms, under the ${delayMs}ms delay`);
+});
+
+test('a token of a shape no Host was ever minted never reaches hosts.json', async () => {
+  const { app, stateDir } = await freshApp({ credentialFailureDelayMs: 1 });
+  const { body: host } = await enrollHost(app);
+  assert.equal(host.hostToken.length, HOST_TOKEN_LENGTH);
+
+  const store = new HostStore(stateDir);
+  // Make the file unreadable-as-JSON: any lookup that actually reads it throws.
+  await writeFile(join(stateDir, 'hosts.json'), 'not json');
+  for (const bad of ['', 'short', `${host.hostToken}x`, `${'!'.repeat(HOST_TOKEN_LENGTH)}`]) {
+    assert.equal(await store.findByToken(bad), undefined, bad);
+  }
+  // The control: a well-shaped token does read the file, and so does throw.
+  await assert.rejects(store.findByToken('A'.repeat(HOST_TOKEN_LENGTH)));
+});
+
+test('enrollment is capped, and the refusal names the remedy', async () => {
+  // Credential-gated, so this is not a flood defense: it is the bound on a file
+  // that is otherwise append-only and is compared row by row on every
+  // host-gated request and every `/ws/host` upgrade.
+  const { app } = await freshApp({ credentialFailureDelayMs: 1 });
+  for (let i = 0; i < MAX_ENROLLED_HOSTS; i += 1) {
+    assert.equal((await enrollHost(app)).res.status, 200, `host ${i}`);
+  }
+
+  const { res, body } = await enrollHost(app);
+  assert.equal(res.status, 409);
+  assert.match(body.error, /hosts\.json/);
+});
+
+test('the enrollment cap is checked after the credential, never before', async () => {
+  // A caller that has proved nothing must not learn from the refusal whether
+  // the server is full.
+  const { app } = await freshApp({ credentialFailureDelayMs: 1 });
+  for (let i = 0; i < MAX_ENROLLED_HOSTS; i += 1) {
+    assert.equal((await enrollHost(app)).res.status, 200);
+  }
+
+  const res = await post(app, API_ROUTES.hostEnroll, { password: 'wrong' });
+  assert.equal(res.status, 401);
 });

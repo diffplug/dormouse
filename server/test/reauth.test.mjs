@@ -236,3 +236,48 @@ test('a request with no binding is refused, not answered with a random challenge
   const finished = await finish(app, sessionToken, {});
   assert.equal(finished.status, 400);
 });
+
+test('one session flooding `begin` cannot evict another session nonce', async () => {
+  // The nonce is minted BEFORE the biometric prompt, so it waits out seconds of
+  // human latency. A cap scoped globally made any other session's flood evict
+  // it inside that window and fail every ceremony while the flood ran.
+  const { app } = await freshApp();
+  const victim = await ownerSession(app);
+  const attacker = await ownerSession(app);
+  const victimProof = await proveFor(
+    app,
+    victim.sessionToken,
+    victim.authenticator,
+    pairingBinding(victim.authenticator),
+  );
+
+  // Far past any per-session cap, from one other session.
+  for (let i = 0; i < 200; i += 1) {
+    const res = await begin(app, attacker.sessionToken, {
+      binding: pairingBinding(attacker.authenticator),
+    });
+    assert.equal(res.status, 200);
+  }
+
+  const res = await finish(app, victim.sessionToken, {
+    serverNonce: victimProof.serverNonce,
+    assertion: victimProof.assertion,
+  });
+  assert.equal(res.status, 200, 'the victim nonce survived the flood');
+});
+
+test('a session evicts only its own oldest nonce past the per-session cap', async () => {
+  const { app } = await freshApp();
+  const { authenticator, sessionToken } = await ownerSession(app);
+  const first = await proveFor(app, sessionToken, authenticator, pairingBinding(authenticator));
+
+  for (let i = 0; i < 8; i += 1) {
+    assert.equal((await begin(app, sessionToken, { binding: pairingBinding(authenticator) })).status, 200);
+  }
+
+  const res = await finish(app, sessionToken, {
+    serverNonce: first.serverNonce,
+    assertion: first.assertion,
+  });
+  assert.equal(res.status, 400, 'a caller still bounds itself');
+});

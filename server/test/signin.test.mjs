@@ -11,6 +11,8 @@ import { Hono } from 'hono';
 import { API_ROUTES } from 'server-lib-common';
 import { SimAuthenticator } from '../../server-lib-common/test/harness/actors.mjs';
 
+import { MAX_PENDING_CHALLENGES } from '../dist/app.js';
+
 import {
   ORIGIN,
   RP_ID,
@@ -169,4 +171,32 @@ test('sign-in returns the asserted passkey public key', async () => {
   const { res } = await signin(app, authenticator);
   const body = await res.json();
   assert.equal(body.passkeyPublicKey, authenticator.publicKey);
+});
+
+test('the sign-in challenge store is capped, not merely swept', async () => {
+  // `POST /api/signin/begin` needs no auth and no body, so the expiry sweep
+  // alone lets the map plateau at request-rate x TTL rather than at a bound the
+  // process chose. Under the cap the oldest go first, and single use is
+  // untouched: the surviving challenge still redeems exactly once.
+  const { app } = await freshApp();
+  const authenticator = await newAuthenticator();
+  assert.equal((await register(app, authenticator)).status, 200);
+
+  const first = await (await post(app, API_ROUTES.signinBegin, {})).json();
+  for (let i = 0; i < MAX_PENDING_CHALLENGES; i += 1) {
+    assert.equal((await post(app, API_ROUTES.signinBegin, {})).status, 200);
+  }
+
+  // Evicted by the flood: a challenge the store no longer holds cannot redeem.
+  const stale = await authenticator.assert({
+    challenge: first.challenge,
+    origin: ORIGIN,
+    rpId: RP_ID,
+  });
+  const res = await post(app, API_ROUTES.signinFinish, { assertion: stale });
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).error, /unrecognized or expired challenge/);
+
+  // And an ordinary sign-in still works right after.
+  assert.equal((await signin(app, authenticator)).res.status, 200);
 });

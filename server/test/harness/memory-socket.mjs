@@ -70,3 +70,30 @@ export function memorySocketPair() {
   }, 0);
   return [a, b];
 }
+
+/**
+ * A one-sided `RelaySocket` that records rather than delivers: what the hub
+ * sent it, and how it was closed. For the cases that drive `RelayHub` directly
+ * — revocation, displacement, the socket sweeps — where a peer would only add
+ * timing to an assertion about a decision.
+ *
+ * `closed` is derived, so a case may assert either "it was closed" or the exact
+ * code the contract names.
+ */
+export function recordingSocket() {
+  return {
+    sent: [],
+    closeCode: null,
+    closeReason: null,
+    get closed() {
+      return this.closeCode !== null;
+    },
+    send(data) {
+      this.sent.push(JSON.parse(data));
+    },
+    close(code = 1000, reason = '') {
+      this.closeCode = code;
+      this.closeReason = reason;
+    },
+  };
+}

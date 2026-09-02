@@ -25,6 +25,16 @@ export interface HostChallengeIssuerOptions {
   /** Clock returning epoch milliseconds; injectable for tests. */
   readonly now?: () => number;
   readonly crypto?: WebCryptoLike;
+  /**
+   * Hard ceiling on outstanding challenges; the oldest go first once it is
+   * reached. Optional because the expiry sweep alone bounds an issuer whose
+   * `issue` is behind a credential — but where minting needs no auth at all
+   * (`POST /api/signin/begin`), the sweep only makes the map plateau at
+   * request-rate x TTL, which is not a bound the process chose. A caller that
+   * sets this accepts that a flood evicts live challenges: the abandoned
+   * ceremony retries, and single-use is unaffected.
+   */
+  readonly maxPending?: number;
 }
 
 export class HostChallengeIssuer {
@@ -32,15 +42,25 @@ export class HostChallengeIssuer {
   readonly #ttlMs: number;
   readonly #now: () => number;
   readonly #crypto: WebCryptoLike;
+  readonly #maxPending: number;
 
   constructor(options: HostChallengeIssuerOptions = {}) {
     this.#ttlMs = options.ttlMs ?? DEFAULT_CHALLENGE_TTL_MS;
     this.#now = options.now ?? (() => Date.now());
     this.#crypto = options.crypto ?? getWebCrypto();
+    this.#maxPending = options.maxPending ?? Number.POSITIVE_INFINITY;
   }
 
   issue(): IssuedChallenge {
     this.#sweepExpiredPrefix();
+    // Oldest first, and only once expiry has already reclaimed what it can:
+    // every challenge carries the same TTL, so insertion order is expiry order
+    // and the front of the map is the closest to dying anyway.
+    while (this.#pending.size >= this.#maxPending) {
+      const oldest = this.#pending.keys().next();
+      if (oldest.done) break;
+      this.#pending.delete(oldest.value);
+    }
     const bytes = this.#crypto.getRandomValues(new Uint8Array(CHALLENGE_BYTE_LENGTH));
     const challenge = toBase64Url(bytes);
     const issuedAt = this.#now();
