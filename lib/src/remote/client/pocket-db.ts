@@ -48,7 +48,11 @@ export type KnownHostAuthorization =
 export interface KnownHostV1 {
   readonly hostId: string;
   readonly accountId: string;
-  /** Local, chosen here; the Host's own label arrives inside encrypted outcomes. */
+  /**
+   * What to call this machine. The Host's own label, as it arrived inside the
+   * encrypted pairing outcome — never the Server's copy, which a Client is not
+   * told and which stops existing in stage 4c.
+   */
   readonly label: string;
   /** The pinned Host Noise static, base64url. A change is a terminal error. */
   readonly hostStaticPublicKey: string;
