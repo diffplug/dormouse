@@ -257,6 +257,14 @@ export class StreamReassembler {
   #start = 0;
   /** One past the last undrained byte. */
   #end = 0;
+  /**
+   * Latched by the first failure, because every failure here is terminal and
+   * this class is exported on its own: a caller that keeps pushing after one
+   * must keep getting the same {@link NoiseTransportError}, not grow past the
+   * bound and eventually throw a bare `RangeError` out of a typed-array write.
+   * Inside a session `#requireLive` gets there first.
+   */
+  #failed = false;
 
   /** Backing bytes held right now — what the memory bound's own test reads. */
   get capacity(): number {
@@ -270,8 +278,9 @@ export class StreamReassembler {
 
   /** Accept one stream body; returns the messages it completed, in order. */
   push(body: Uint8Array): Uint8Array[] {
+    if (this.#failed) throw new NoiseTransportError('reassembly already failed');
     if (body.length > MAX_STREAM_BODY_LENGTH) {
-      throw new NoiseTransportError('stream body exceeds one Noise message');
+      throw this.#fail('stream body exceeds one Noise message');
     }
     if (body.length > 0) this.#append(body);
     const messages: Uint8Array[] = [];
@@ -283,7 +292,7 @@ export class StreamReassembler {
       // message. A separate capacity check would never fire.
       const length = readUint32BE(this.#buffer, this.#start);
       if (length > MAX_APP_MESSAGE_LENGTH) {
-        throw new NoiseTransportError('application message exceeds the 1 MiB cap');
+        throw this.#fail('application message exceeds the 1 MiB cap');
       }
       if (this.queued < APP_LENGTH_PREFIX_SIZE + length) break;
       const from = this.#start + APP_LENGTH_PREFIX_SIZE;
@@ -321,6 +330,15 @@ export class StreamReassembler {
     }
     this.#buffer.set(body, this.#end);
     this.#end += body.length;
+  }
+
+  /** Latch the failure, release the buffer, and hand back what to throw. */
+  #fail(why: string): NoiseTransportError {
+    this.#failed = true;
+    this.#buffer = EMPTY;
+    this.#start = 0;
+    this.#end = 0;
+    return new NoiseTransportError(why);
   }
 
   /** Nothing is queued: rewind, and release a buffer one big message grew. */

@@ -359,16 +359,16 @@ describe('a phone that is already signed in', () => {
     expect(fake.pair).not.toHaveBeenCalled();
   });
 
-  it('registers when the Server refuses the sign-in this browser thought it could do', async () => {
+  it('registers when the Server has never heard of the credential this browser holds', async () => {
     // `setup` caches the passkey before `setupFinish`, so a first run whose
     // `finish` never reached the Server leaves a browser that reads as
     // returning while holding a credential the account never got. Every later
     // scan would sign in, fail, and leave clearing site data as the only way
-    // out — so a Server *refusal* outranks this browser's own record.
+    // out — so the Server's 404 outranks this browser's own record.
     const { url, invitation } = await invitationUrl();
     fake.hasPriorUse = true;
     fake.signin.mockReset().mockImplementationOnce(async () => {
-      throw new ServerRefusalError('unknown credential');
+      throw new ServerRefusalError('unknown credential', 404);
     });
     fake.signin.mockImplementation(async () => {
       fake.sessionToken = 'tok';
@@ -388,10 +388,28 @@ describe('a phone that is already signed in', () => {
 
   it('does not register when the sign-in failed for any other reason', async () => {
     // A dismissed authenticator prompt or a dead radio proves nothing about
-    // what the Server holds, so it must not spend the scanned token.
+    // what the Server holds, so it must not spend the scanned token. Nor does
+    // any *other* refusal: a signin challenge that expired while the user sat
+    // at the Face ID prompt answers 400, a rejected assertion 401, and a
+    // restarting self-hosted server 502 — registering on one of those would
+    // spend the single-use setup token and mint a redundant second passkey.
     const { url } = await invitationUrl();
     fake.hasPriorUse = true;
     fake.signin.mockReset().mockRejectedValue(new Error('The operation was aborted.'));
+    await boot();
+
+    await pasteCode(url);
+
+    expect(fake.setup).not.toHaveBeenCalled();
+    expect(fake.pair).not.toHaveBeenCalled();
+  });
+
+  it.each([400, 401, 502])('does not register on a %i refusal either', async (status) => {
+    const { url } = await invitationUrl();
+    fake.hasPriorUse = true;
+    fake.signin
+      .mockReset()
+      .mockRejectedValue(new ServerRefusalError('refused this attempt', status));
     await boot();
 
     await pasteCode(url);

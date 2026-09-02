@@ -183,6 +183,21 @@ test('a declared length over the 1 MiB cap is a hard failure', () => {
   assert.throws(() => new StreamReassembler().push(maxUint32), NoiseError);
 });
 
+test('a reassembler that failed stays failed, and holds nothing', () => {
+  // `StreamReassembler` is exported on its own, so it cannot rely on the
+  // session's poison to stop a caller pushing after a terminal error: every
+  // later push must be the same typed failure rather than unbounded growth and
+  // eventually a bare `RangeError` out of a typed-array write.
+  const reassembler = new StreamReassembler();
+  assert.throws(() => reassembler.push(lengthPrefix(MAX_APP_MESSAGE_LENGTH + 1)), NoiseError);
+  assert.equal(reassembler.queued, 0);
+  assert.equal(reassembler.capacity, 0);
+  for (let i = 0; i < 5; i++) {
+    assert.throws(() => reassembler.push(new Uint8Array(MAX_STREAM_BODY_LENGTH)), NoiseError);
+  }
+  assert.equal(reassembler.capacity, 0, 'a failed reassembler grows nothing');
+});
+
 test('a length prefix split across bodies is still read, and still capped', () => {
   const reassembler = new StreamReassembler();
   const prefix = lengthPrefix(MAX_APP_MESSAGE_LENGTH + 1);
@@ -219,6 +234,26 @@ test('an incomplete message split into one-byte bodies stays bounded in memory',
   assert.equal(reassembler.queued, APP_LENGTH_PREFIX_SIZE + 200_000);
   assert.ok(
     reassembler.capacity <= 2 * reassembler.queued + 1024,
+    `capacity ${reassembler.capacity} for ${reassembler.queued} queued bytes`,
+  );
+});
+
+test('alternating body sizes cannot outgrow the bound either', () => {
+  // The bound has to hold for the *pattern* a peer chooses, not just the two
+  // extremes: a maximal body followed by a single byte compacts on every other
+  // push, and a growth rule that reacted to the largest body rather than to
+  // what is actually held would double away from the message it is waiting on.
+  const reassembler = new StreamReassembler();
+  reassembler.push(lengthPrefix(MAX_APP_MESSAGE_LENGTH));
+  let pushed = 0;
+  for (let i = 0; i < 24; i++) {
+    const size = i % 2 === 0 ? MAX_STREAM_BODY_LENGTH : 1;
+    assert.deepEqual(reassembler.push(new Uint8Array(size)), [], 'nothing completes');
+    pushed += size;
+  }
+  assert.equal(reassembler.queued, APP_LENGTH_PREFIX_SIZE + pushed);
+  assert.ok(
+    reassembler.capacity <= 2 * reassembler.queued + MAX_STREAM_BODY_LENGTH,
     `capacity ${reassembler.capacity} for ${reassembler.queued} queued bytes`,
   );
 });

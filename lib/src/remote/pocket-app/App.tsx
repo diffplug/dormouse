@@ -374,15 +374,21 @@ export default function App({
             try {
               await client.signin();
             } catch (err) {
-              // **A Server that refuses the assertion outranks this browser's
-              // own record of prior use.** `setup` caches the passkey before
-              // `setupFinish`, so a first run whose `finish` never reached the
-              // Server leaves a browser that reads as returning while holding a
-              // credential the account never got. Without this, every later
-              // scan signs in, fails, and clearing site data is the only way
-              // out. A refusal is proof there is nothing to sign in against; a
-              // dismissed prompt or a dead radio is not, and propagates.
-              if (!(err instanceof ServerRefusalError)) throw err;
+              // **A Server that says it has never heard of this credential
+              // outranks this browser's own record of prior use.** `setup`
+              // caches the passkey before `setupFinish`, so a first run whose
+              // `finish` never reached the Server leaves a browser that reads
+              // as returning while holding a credential the account never got.
+              // Without this, every later scan signs in, fails, and clearing
+              // site data is the only way out.
+              //
+              // **Only the 404.** Every other refusal — a challenge that
+              // expired while the user sat at the Face ID prompt, a rejected
+              // assertion, a restarting server's 502 — refuses *this attempt*
+              // and proves nothing; registering on one would spend the
+              // single-use setup token and mint a redundant second passkey. A
+              // dismissed prompt or a dead radio propagates as before.
+              if (!(err instanceof ServerRefusalError) || err.status !== 404) throw err;
               mustRegister = true;
             }
           }

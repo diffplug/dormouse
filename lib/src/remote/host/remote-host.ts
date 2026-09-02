@@ -448,7 +448,14 @@ export class RemoteHost {
       if (connection) {
         out.push({
           at: connection.expiresAt,
-          expire: () => this.#denyConnection(clientId, connection, 'presence-rejected'),
+          // Re-read, because this is a snapshot and `#denyConnection` — unlike
+          // its three siblings here — takes the record rather than looking it
+          // up: answering on a cipher the entry no longer holds would tear down
+          // whatever replaced it.
+          expire: () => {
+            if (this.#clients.get(clientId)?.connection !== connection) return;
+            this.#denyConnection(clientId, connection, 'presence-rejected');
+          },
         });
       }
       if (established) {
@@ -1064,9 +1071,9 @@ export class RemoteHost {
       });
       const payload = await handshake.readMessage(fromBase64Url(frame.ct));
       if (payload.length !== 0) throw new NoiseError('connection message 1 carries a payload');
-      // Issued only once message 1 has decrypted. Nothing but its own TTL
-      // reclaims a challenge, so minting one per *attempted* `init` would let a
-      // relay grow the issuer with frames that never authenticated at all.
+      // Issued only once message 1 has decrypted: minting one per *attempted*
+      // `init` would let a relay grow the issuer with frames that never
+      // authenticated at all.
       ({ challenge, expiresAt } = this.#challenges.issue());
       message2 = await handshake.writeMessage(fromBase64Url(challenge));
       const remoteStatic = handshake.remoteStaticPublicKey;
@@ -1270,6 +1277,12 @@ export class RemoteHost {
   #disposeConnection(clientId: string): void {
     const state = this.#clients.get(clientId);
     if (!state?.connection) return;
+    // **A challenge dies with the record that named it**, on every path that
+    // drops one — a replacement `init`, a cap eviction, a denial, the reaper,
+    // `client-gone`. Without this the issuer's own lazy sweep is the only thing
+    // that reclaims an abandoned challenge, which is the second reclaim policy
+    // the reaper exists to remove. Already-consumed is a no-op.
+    this.#challenges.consume(state.connection.hostChallenge);
     state.connection = undefined;
     this.#pruneClient(clientId);
   }
@@ -1341,6 +1354,11 @@ export class RemoteHost {
         continue;
       }
       established.api.handle(payload);
+      // `handle` can send, and a send on a poisoned cipher disposes this
+      // session from inside this loop. Handing the rest of the receipt to an
+      // api that is already disposed would leave whatever it allocates with no
+      // owner left to tear it down.
+      if (this.#clients.get(clientId)?.established !== established) return;
     }
   }
 

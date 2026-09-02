@@ -486,8 +486,15 @@ costs a fresh Noise handshake and one WebAuthn prompt. That is the price of the
 Host being able to reclaim state a hostile relay would otherwise never let it
 reclaim.
 
-Source of truth: `PocketClient.sendKeepalive` and its injected timer and
-visibility seams in `lib/src/remote/client/pocket-client.ts`.
+**Pocket runs the same deadline against its own last send**, before a keepalive
+and before every request, and reports host loss when it passes. A reap sends
+nothing — there is no frame to send — and this Client's relay socket is to the
+*Server*, so it stays open: without this check a returning phone holds a session
+the Host has forgotten, every request hangs with no error, and a reload is the
+only way out.
+
+Source of truth: `PocketClient.sendKeepalive` / `#reapedByHost` and the injected
+timer, clock, and visibility seams in `lib/src/remote/client/pocket-client.ts`.
 
 ## An expired session drops to sign-in
 

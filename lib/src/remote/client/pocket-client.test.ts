@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_PAIRING_TTL_MS,
   E2E_KEEPALIVE_INTERVAL_MS,
+  ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   KEEPALIVE_BODY_SIZE,
   SELFHOST_ACCOUNT_ID,
   SETUP_TOKEN_INVALID_ERROR,
@@ -920,11 +921,12 @@ function fakeVisibility() {
 }
 
 describe('keepalives on an established session', () => {
-  /** A connected phone whose timer and visibility the test owns. */
-  async function connected() {
+  /** A connected phone whose timer, clock, and visibility the test owns. */
+  async function connected(now?: () => number) {
     const timers = fakeTimers();
     const visibility = fakeVisibility();
     const harness = await makeE2eHarness({
+      ...(now ? { now } : {}),
       deps: { setTimer: timers.setTimer, visibility: visibility.visibility },
     });
     await harness.pairAndApprove(await harness.mintInvitation());
@@ -977,6 +979,75 @@ describe('keepalives on an established session', () => {
     const before = harness.clientSocket().frames('e2e').length;
     harness.client.sendKeepalive();
     expect(harness.clientSocket().frames('e2e').length).toBe(before);
+  });
+
+  it('ends a session the Host has already reaped, rather than hanging on it', async () => {
+    // The Host disposes a session it has not decrypted a Client message on for
+    // `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` and sends nothing when it does; the
+    // relay socket is to the *Server*, so nothing closes. Keepalives pause
+    // while the page is hidden, so a phone in a pocket crosses that line on its
+    // own — and without this it comes back to a wall whose every request hangs
+    // forever with no error.
+    let now = Date.now();
+    const { harness, timers, visibility } = await connected(() => now);
+    const gone = vi.fn();
+    harness.client.setOnHostGone(gone);
+
+    visibility.set(false);
+    expect(timers.live).toHaveLength(0);
+    now += ESTABLISHED_E2E_IDLE_TIMEOUT_MS;
+
+    const before = harness.clientSocket().frames('e2e').length;
+    visibility.set(true);
+
+    // No keepalive into a session that no longer exists, and the app is told.
+    expect(sentSince(harness, before)).toHaveLength(0);
+    expect(gone).toHaveBeenCalledOnce();
+    expect(timers.live).toHaveLength(0);
+
+    // And a request on the dead session fails rather than hanging.
+    await expect(harness.client.write('s1', 'ls')).rejects.toThrow();
+  });
+
+  it('fails a request on a reaped session instead of waiting for an answer', async () => {
+    // The same deadline, reached without a visibility event: a tab a browser
+    // never marked hidden, or a request the user makes before the resume
+    // handler runs. `request` has no timeout of its own, so this check is the
+    // only thing between the user and a terminal that is frozen forever.
+    let now = Date.now();
+    const { harness } = await connected(() => now);
+    const gone = vi.fn();
+    harness.client.setOnHostGone(gone);
+
+    now += ESTABLISHED_E2E_IDLE_TIMEOUT_MS;
+    await expect(harness.client.write('s1', 'ls')).rejects.toThrow(/away too long/);
+    expect(gone).toHaveBeenCalledOnce();
+
+    // One millisecond earlier it is still a live session, and still sends.
+    const fresh = await connected(() => now);
+    const before = fresh.harness.clientSocket().frames('e2e').length;
+    now += ESTABLISHED_E2E_IDLE_TIMEOUT_MS - 1;
+    fresh.harness.client.sendKeepalive();
+    expect(sentSince(fresh.harness, before)).toHaveLength(1);
+  });
+
+  it('survives a socket that refuses the send, and keeps its interval', async () => {
+    // A socket closing under the timer is the ordinary case on a phone. A
+    // keepalive is the one thing that must not be what reports host loss: the
+    // Client's own teardown paths own that, and a throw here would escape into
+    // a bare timer callback with nobody to catch it.
+    const { harness, timers } = await connected();
+    const socket = harness.clientSocket();
+    const send = vi.spyOn(socket, 'send').mockImplementation(() => {
+      throw new Error('socket is closed');
+    });
+
+    expect(() => timers.fire()).not.toThrow();
+    expect(send).toHaveBeenCalledTimes(1);
+    // And the next interval is still armed, so a socket that comes back is
+    // keepalived again rather than silently reaped.
+    expect(timers.live).toHaveLength(1);
+    send.mockRestore();
   });
 });
 

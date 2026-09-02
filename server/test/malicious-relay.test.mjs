@@ -148,6 +148,10 @@ test('duplicating, reordering, or dropping a transport frame is terminal, not st
       if (mode === 'reorder') client.sendKeepalive();
       await until(() => seen.errors.length > errorsBefore);
       assert.equal(host.e2eEntry(relay.clientId).session.isPoisoned, true, mode);
+      // **Exactly the receiving side.** Poison follows the failed decrypt; the
+      // Client's own cipher states never saw the tampered bytes, so a relay
+      // cannot use one direction to take down the other.
+      assert.equal(client.session.isPoisoned, false, mode);
 
       // And it stays dead for traffic that would otherwise be valid: there is
       // no resynchronization point for the relay to steer the stream back to.

@@ -24,6 +24,7 @@ import {
   MAX_CLIENT_ID_LENGTH,
   NoiseTransportSession,
   fromBase64Url,
+  utf8Encode,
   generateNoiseKeyPair,
   isPairingOutcomeV1,
   mintNoiseStaticKeyPair,
@@ -76,6 +77,10 @@ function createTestClock(start: number) {
     /** How many timers are armed — what `stop()` has to leave at zero. */
     get armed(): number {
       return timers.size;
+    },
+    /** Move the clock backwards, as an NTP correction or a sleeping laptop does. */
+    rewind(ms: number): void {
+      now -= ms;
     },
     advance(ms: number): void {
       const target = now + ms;
@@ -148,6 +153,8 @@ describe('RemoteHost bounds', () => {
   let sessions: Array<{ handled: unknown[]; disposed: boolean; send: (payload: unknown) => void }> =
     [];
   let authenticator: TestAuthenticator;
+  /** What the injected remote-api does with a message; the real one may reply. */
+  let onHandle: ((data: unknown, send: (payload: unknown) => void) => void) | null = null;
 
   beforeAll(async () => {
     const material = await mintNoiseStaticKeyPair();
@@ -167,6 +174,7 @@ describe('RemoteHost bounds', () => {
   beforeEach(() => {
     approvals = [];
     sessions = [];
+    onHandle = null;
     clock = createTestClock(START);
     crypto = countCrypto();
     host = makeHost();
@@ -190,7 +198,10 @@ describe('RemoteHost bounds', () => {
         const entry = { handled: [] as unknown[], disposed: false, send };
         sessions.push(entry);
         return {
-          handle: (data) => entry.handled.push(data),
+          handle: (data) => {
+            entry.handled.push(data);
+            onHandle?.(data, send);
+          },
           dispose: () => {
             entry.disposed = true;
           },
@@ -370,7 +381,7 @@ describe('RemoteHost bounds', () => {
       clock.now() + DEFAULT_PAIRING_TTL_MS,
     );
     let sent = 0;
-    const flood = async (count: number): Promise<number> => {
+    const flood = async (count: number, inviteId = invitation.inviteId): Promise<number> => {
       crypto.reset();
       for (let i = 0; i < count; i += 1) {
         deliver({
@@ -378,7 +389,7 @@ describe('RemoteHost bounds', () => {
           clientId: `flood-${sent++}`,
           hostId: enrollment.hostId,
           kind: 'pairing',
-          id: invitation.inviteId,
+          id: inviteId,
           step: 'init',
           ct: toBase64Url(new Uint8Array(96)),
         });
@@ -400,6 +411,20 @@ describe('RemoteHost bounds', () => {
     // And it refills at one per second, not faster.
     clock.advance(3_000);
     expect(await flood(8)).toBe(unit * 3);
+
+    // An hour of quiet does not mint an hour of tokens: the burst is the cap.
+    // (A fresh invitation, because the reaper took the last one with it.)
+    clock.advance(60 * 60 * 1_000);
+    const later = await host.mintInvitation(
+      randomBase64Url(32),
+      clock.now() + DEFAULT_PAIRING_TTL_MS,
+    );
+    expect(await flood(E2E_INIT_BURST + 12, later.inviteId)).toBe(unit * E2E_INIT_BURST);
+
+    // And a clock that goes backwards costs refill, never correctness: it must
+    // not hand out a token it never earned.
+    clock.rewind(10 * 60 * 1_000);
+    expect(await flood(4, later.inviteId)).toBe(0);
   });
 
   // --- The established-session cap -----------------------------------------
@@ -448,6 +473,26 @@ describe('RemoteHost bounds', () => {
     await settle();
     expect(host.establishedSessionCount).toBe(2);
     expect(sessions[2]!.disposed).toBe(false);
+  });
+
+  it('holds one session per relay clientId, and the cap displaces nobody', async () => {
+    // Two authorized phones. A relay that stamps one phone's frames with the
+    // other's `clientId` takes down the session it reused — the entry holds
+    // one session and a promotion replaces it, whatever identity it belonged
+    // to. That is availability the relay already has; what must never happen
+    // is the *cap* displacing an authorized phone, which is a different rule.
+    await establish('c1');
+    await establish('c2');
+    const third = await pairClient('c3');
+    expect(host.establishedSessionCount).toBe(2);
+
+    // A third authorized identity arriving under c2's relay-chosen key.
+    const { outcome } = await connectClient('c2', third);
+    expect(outcome).toEqual({ ok: true, hostLabel: 'Ned’s laptop' });
+    expect(sessions[1]!.disposed).toBe(true, 'c2 held one session, and now holds this one');
+    expect(sessions[0]!.disposed).toBe(false, 'nobody else was touched');
+    expect(host.establishedSessionCount).toBe(2);
+    expect(host.trackedClientCount).toBe(2);
   });
 
   // --- Teardown ------------------------------------------------------------
@@ -564,6 +609,51 @@ describe('RemoteHost bounds', () => {
     });
     expect(host.trackedClientCount).toBe(0);
     expect(host.outstandingInvitationCount).toBe(0);
+    // Every deadline it held is gone, so nothing is left to wake the process.
+    expect(clock.armed).toBe(0);
+    // The abandoned challenge went with the record that named it, rather than
+    // waiting on the issuer's own sweep.
+    expect(host.pendingChallengeCount).toBe(0);
+  });
+
+  it('reaps every deadline a single clock jump passes, in one timer chain', async () => {
+    // One timer covers deadlines of three different kinds and three different
+    // instants: the first firing has to arm the next, or a laptop waking from
+    // sleep reclaims only whatever happened to be soonest.
+    await host.mintInvitation(randomBase64Url(32), clock.now() + DEFAULT_PAIRING_TTL_MS);
+    await establish('c1');
+    clock.advance(1_000);
+    await openConnectionSession({
+      socket,
+      hostId: enrollment.hostId,
+      clientId: 'k1',
+      connectionId: testRoutingId(),
+      clientStatic: await generateNoiseKeyPair(),
+      hostStaticPublicKey: enrollment.noiseStaticPublicKey!,
+    });
+    expect(host.outstandingInvitationCount).toBe(1);
+    expect(host.trackedClientCount).toBe(2);
+
+    // Past all three at once — the challenge TTL, the idle timeout, and the
+    // pairing TTL are 2, 2, and 5 minutes apart.
+    clock.advance(DEFAULT_PAIRING_TTL_MS + ESTABLISHED_E2E_IDLE_TIMEOUT_MS);
+    expect(host.outstandingInvitationCount).toBe(0);
+    expect(host.trackedClientCount).toBe(0);
+    expect(host.pendingChallengeCount).toBe(0);
+    expect(sessions.every((s) => s.disposed)).toBe(true);
+    expect(clock.armed).toBe(0);
+  });
+
+  it('expires a deadline that falls exactly on now', async () => {
+    await host.mintInvitation(randomBase64Url(32), clock.now() + DEFAULT_PAIRING_TTL_MS);
+    clock.advance(DEFAULT_PAIRING_TTL_MS - 1);
+    expect(host.outstandingInvitationCount).toBe(1);
+
+    // Not a millisecond past it: `<= now` has to mean expired everywhere, or a
+    // reaper that arms for an instant it will not reap spins on that instant.
+    clock.advance(1);
+    expect(host.outstandingInvitationCount).toBe(0);
+    expect(clock.armed).toBe(0);
   });
 
   it('reaps sixteen silent sessions on the idle timeout, without a restart', async () => {
@@ -609,6 +699,42 @@ describe('RemoteHost bounds', () => {
     expect(host.establishedSessionCount).toBe(1);
   });
 
+  it('nothing the relay can send by itself extends the idle deadline', async () => {
+    const live = await establish('c1');
+    // Everything a Client that has gone silent still produces, arriving right
+    // up to the deadline: a malformed envelope on the live session's own id, a
+    // well-formed one from a client that never authenticated, and a socket
+    // event. None of them is a decrypt on this session.
+    for (let i = 0; i < 3; i += 1) {
+      clock.advance(E2E_KEEPALIVE_INTERVAL_MS);
+      deliver({
+        t: 'e2e',
+        clientId: 'c1',
+        hostId: enrollment.hostId,
+        kind: 'connection',
+        id: live.connectionId,
+        step: 'transport',
+        ct: 'not base64url!',
+      });
+      deliver({
+        t: 'e2e',
+        clientId: 'stranger',
+        hostId: enrollment.hostId,
+        kind: 'connection',
+        id: testRoutingId(),
+        step: 'transport',
+        ct: toBase64Url(new Uint8Array(64)),
+      });
+      deliver({ t: 'client-gone', clientId: 'stranger' });
+      await settle();
+    }
+    expect(sessions[0]!.disposed).toBe(false);
+
+    clock.advance(ESTABLISHED_E2E_IDLE_TIMEOUT_MS);
+    expect(sessions[0]!.disposed).toBe(true);
+    expect(host.establishedSessionCount).toBe(0);
+  });
+
   // --- What the Host puts on the wire --------------------------------------
 
   it('bounds its own label, so an outcome the phone would discard is never sent', async () => {
@@ -643,6 +769,39 @@ describe('RemoteHost bounds', () => {
     );
     const receipt = first.session.receive(fromBase64Url(frame.ct as string));
     expect(receipt.kind).toBe('app');
+  });
+
+  it('stops dispatching a receipt whose session died in the middle of it', async () => {
+    const live = await establish('c1');
+    onHandle = (_data, send) => send({ reply: true });
+
+    // Two application messages in one stream body — which the shipped Client
+    // never packs, and an authenticated peer is free to — where answering the
+    // first finds a cipher that has died. The second must not reach an api the
+    // Host has already disposed.
+    vi.spyOn(NoiseTransportSession.prototype, 'receive').mockImplementationOnce(() => ({
+      kind: 'app',
+      messages: [utf8Encode('{"n":1}'), utf8Encode('{"n":2}')],
+    }));
+    vi.spyOn(NoiseTransportSession.prototype, 'sendApp').mockImplementationOnce(function (
+      this: NoiseTransportSession,
+    ): Uint8Array[] {
+      Object.defineProperty(this, 'isPoisoned', { value: true, configurable: true });
+      throw new Error('session is destroyed');
+    });
+
+    sendE2eFrame(socket, {
+      clientId: 'c1',
+      hostId: enrollment.hostId,
+      kind: 'connection',
+      id: live.connectionId,
+      step: 'transport',
+      ct: toBase64Url(new Uint8Array(64)),
+    });
+    await settleUntil(() => sessions[0]!.disposed);
+
+    expect(sessions[0]!.handled).toEqual([{ n: 1 }]);
+    expect(host.establishedSessionCount).toBe(0);
   });
 
   it('leaves no timer armed once the Host stops', async () => {

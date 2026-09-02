@@ -15,6 +15,7 @@ import {
   DEFAULT_PAIRING_TTL_MS,
   E2E_ID_BYTE_LENGTH,
   E2E_KEEPALIVE_INTERVAL_MS,
+  ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   MAX_PUSH_QUERY_DELIVERY_IDS,
   NoiseTransportSession,
   REMOTE_EVENTS,
@@ -162,11 +163,30 @@ export interface TerminalHandlers {
  * the Server can be assumed to hold nothing.
  */
 export class ServerRefusalError extends Error {
-  constructor(message: string) {
+  /**
+   * The HTTP status behind the refusal, `0` where none was read.
+   *
+   * Carried because "the Server answered" and "the Server answered *this*" are
+   * different facts, and a caller that acts on a refusal usually means one
+   * status: a 404 is proof the Server holds nothing, while a 400, a 401, or a
+   * 502 is a refusal of this attempt and proof of nothing at all.
+   */
+  readonly status: number;
+
+  constructor(message: string, status = 0) {
     super(message);
     this.name = 'ServerRefusalError';
+    this.status = status;
   }
 }
+
+/**
+ * Shown when the Host reaped this session while the page was backgrounded.
+ * Not a failure — the price of the Host being able to reclaim state a hostile
+ * relay would otherwise never let it reclaim (`docs/specs/pocket-app.md`).
+ */
+export const HOST_SESSION_REAPED_MESSAGE =
+  'This phone was away too long, so the computer let the session go. Connect again to resume.';
 
 /** Shown when the Server no longer accepts our session token. */
 export const SESSION_EXPIRED_MESSAGE = 'Your session expired. Sign in again to continue.';
@@ -184,7 +204,7 @@ export const SESSION_EXPIRED_MESSAGE = 'Your session expired. Sign in again to c
  */
 export class SessionExpiredError extends ServerRefusalError {
   constructor() {
-    super(SESSION_EXPIRED_MESSAGE);
+    super(SESSION_EXPIRED_MESSAGE, 401);
     this.name = 'SessionExpiredError';
   }
 }
@@ -203,7 +223,7 @@ export const SETUP_CODE_DEAD_MESSAGE =
  */
 export class SetupTokenInvalidError extends ServerRefusalError {
   constructor() {
-    super(SETUP_CODE_DEAD_MESSAGE);
+    super(SETUP_CODE_DEAD_MESSAGE, 401);
     this.name = 'SetupTokenInvalidError';
   }
 }
@@ -291,6 +311,12 @@ interface PendingRequest {
 interface EstablishedSession {
   readonly connectionId: string;
   readonly session: NoiseTransportSession;
+  /**
+   * When this Client last put a byte on this session — the mirror of the
+   * Host's `lastClientActivityAt`, because that is the clock the Host reaps on
+   * (`docs/specs/remote-security-model.md` → Host bounds).
+   */
+  lastSentAt: number;
 }
 
 export class PocketClient {
@@ -379,7 +405,10 @@ export class PocketClient {
     return this.#storage.getRegisteredPushEndpoint();
   }
 
-  /** Notified when the Host drops (a `host-gone` frame or a closed socket). */
+  /**
+   * Notified when the Host drops: a `host-gone` frame, a closed socket, or a
+   * session the Host's idle reaper took while this page was hidden.
+   */
   setOnHostGone(callback: (() => void) | null): void {
     this.#onHostGone = callback;
   }
@@ -829,7 +858,7 @@ export class PocketClient {
       return { ok: false, message: CONNECTION_DENIAL_MESSAGES['host-error'], pairingRequired: false };
     }
     if (outcome.ok) {
-      this.#established = { connectionId, session };
+      this.#established = { connectionId, session, lastSentAt: this.#now() };
       this.#connectedHostId = hostId;
       this.#startKeepalives();
       return { ok: true, hostLabel: outcome.hostLabel };
@@ -1087,16 +1116,44 @@ export class PocketClient {
     const established = this.#established;
     const hostId = this.#connectedHostId;
     if (!established || hostId === null) return;
+    if (this.#reapedByHost(established)) return;
     try {
       this.#sendE2e(
         { kind: 'connection', id: established.connectionId, hostId },
         'transport',
         established.session.sendKeepalive(),
       );
+      established.lastSentAt = this.#now();
     } catch {
       // A closed socket or a poisoned session; both have their own teardown,
       // and a keepalive must not be what reports host loss.
     }
+  }
+
+  /**
+   * **A session the Host has already reaped, ended here too.**
+   *
+   * The Host disposes an established session it has not decrypted a Client
+   * message on for `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` and sends nothing when it
+   * does — there is no frame to send, and the relay socket this Client holds is
+   * to the *Server*, so nothing closes. Keepalives pause while the page is
+   * hidden, so a phone in a pocket crosses that line on its own, and without
+   * this check it comes back to a wall whose every request hangs forever with
+   * no error and no way out but a reload
+   * ([pocket-app.md](../../../docs/specs/pocket-app.md)).
+   *
+   * The Host's deadline runs from the message it last decrypted, which is the
+   * one this Client last sent, so the same constant answers the question on
+   * both sides. Reports host loss and leaves the relay socket alone: what died
+   * is the end-to-end session, and reconnecting is a fresh handshake over the
+   * socket already open.
+   */
+  #reapedByHost(established: EstablishedSession): boolean {
+    if (this.#now() - established.lastSentAt < ESTABLISHED_E2E_IDLE_TIMEOUT_MS) return false;
+    this.#disposeCeremony();
+    this.#rejectAll(new Error(HOST_SESSION_REAPED_MESSAGE));
+    this.#onHostGone?.();
+    return true;
   }
 
   /**
@@ -1154,10 +1211,12 @@ export class PocketClient {
     if (!established) throw new Error('not connected to a host');
     const hostId = this.#connectedHostId;
     if (hostId === null) throw new Error('not connected to a host');
+    if (this.#reapedByHost(established)) throw new Error(HOST_SESSION_REAPED_MESSAGE);
     const route = { kind: 'connection', id: established.connectionId, hostId } as const;
     for (const ciphertext of established.session.sendApp(utf8Encode(JSON.stringify(payload)))) {
       this.#sendE2e(route, 'transport', ciphertext);
     }
+    established.lastSentAt = this.#now();
   }
 
   #send(frame: E2eClientFrame): void {
@@ -1219,8 +1278,8 @@ export class PocketClient {
         return;
       case 'host-gone':
         this.#disposeCeremony();
-        this.#onHostGone?.();
         this.#rejectAll(new Error('host disconnected'));
+        this.#onHostGone?.();
         return;
       case 'error':
         // Fixed copy, for the reason the denial tables are: the text is the
@@ -1373,7 +1432,10 @@ export class PocketClient {
     // A refusal, not a bare Error: an answer arrived, which is what `setup`
     // reads to decide whether the Server can be assumed to hold nothing.
     if (!response.ok) {
-      throw new ServerRefusalError(parsed.error ?? `request failed (${response.status})`);
+      throw new ServerRefusalError(
+        parsed.error ?? `request failed (${response.status})`,
+        response.status,
+      );
     }
     return parsed;
   }

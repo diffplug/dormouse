@@ -342,15 +342,17 @@ defense in depth only, and Host correctness must survive a relay that omits
   `MAX_ESTABLISHED_E2E_SESSIONS = 16`, `MAX_CLIENT_ID_LENGTH = 256`, and the
   eight-invitation cap (`MAX_TOKENS_PER_HOST`, shared with the Server's own
   bound on the setup tokens they ride with).
-- **At most one pending pairing and one pending connection per relay client**; a
-  replacement disposes its predecessor. Pending pairings expire on the pairing
+- **At most one pairing, one connection, and one established session per relay
+  client**; a replacement disposes its predecessor, whatever identity that
+  predecessor belonged to (rationale). Pending pairings expire on the pairing
   TTL (a human is typing); pending connections on the challenge TTL.
 - **The session cap is checked at promotion and nowhere else**, after the
   presence proof and the ACL conjunction have both succeeded (rationale). A
   Client static already holding a session **replaces its own** atomically,
   whatever relay-chosen `clientId` the replacement arrived under; any other
-  identity at the cap receives the fixed-size `host-busy` and **evicts
-  nothing**. The pending caps and the token bucket stay active at the cap.
+  identity at the cap receives the fixed-size `host-busy` and **evicts no other
+  entry** — reaching the cap is never what displaces an authorized phone. The
+  pending caps and the token bucket stay active at the cap.
 - **A Host-global token bucket gates the WebCrypto an accepted `init` buys**:
   an eight-operation burst decaying to one per second, on the Host's own clock.
   A frame it refuses is dropped exactly like one refused by shape, size, or a
@@ -384,8 +386,9 @@ defense in depth only, and Host correctness must survive a relay that omits
   transport message**, keepalive or application data; **never** on Host output,
   a failed decrypt, a relay envelope, a socket ping, or any unauthenticated
   frame (rationale). A Client keepalives every
-  `E2E_KEEPALIVE_INTERVAL_MS = 30_000` while its page is visible
-  ([pocket-app.md](./pocket-app.md)), so the timeout is four missed intervals.
+  `E2E_KEEPALIVE_INTERVAL_MS = 30_000` while its page is visible, and **runs the
+  same deadline against its own last send**, so a session the Host reaped ends
+  on both sides ([pocket-app.md](./pocket-app.md)).
 - **Every expiry or outcome disposes remote-control attachments without killing
   terminal sessions**, erases Noise state and keys, and removes the entry before
   accepting replacement work. `client-gone` disposes that client's state; losing
@@ -397,9 +400,9 @@ Source of truth: `lib/src/remote/host/remote-host.ts`, with the caps in
 `server-lib-common/src/security/pairing.ts`, and
 `server-lib-common/src/remote/wire.ts`. Pinned by
 `lib/src/remote/host/remote-host-bounds.test.ts`, which counts the WebCrypto a
-rejected frame buys and drives every deadline off an injected clock, and by
-`server/test/malicious-relay.test.mjs`, which runs the same floods through a
-relay holding no guards of its own.
+rejected frame buys and drives every deadline off an injected clock. The wire
+refusals those bounds sit behind are shown to survive a relay holding no guards
+of its own by `server/test/malicious-relay.test.mjs`.
 
 ## Noise suite
 

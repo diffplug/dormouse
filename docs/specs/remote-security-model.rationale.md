@@ -72,6 +72,13 @@ gets nothing at all: there is no session to encrypt a denial on, and answering
 would let a flood of `init` frames buy a reply each. The token bucket is
 answered with silence for the same reason.
 
+**Why one entry per relay `clientId`, even for an established session.** A
+relay that reuses a `clientId` therefore takes down the session it reuses — but
+that is availability the relay already holds, since it decides what is delivered
+at all, and the alternative (refusing the promotion) lets the same relay lock a
+phone *out* instead. Neither reaches authorization; the Client that lost its
+session recovers on its own idle deadline.
+
 **Why the session cap is checked at promotion rather than at the handshake.** A
 cap applied earlier would let unauthenticated traffic decide who gets in: anyone
 who can reach the relay could fill it and lock out the phones that are actually
