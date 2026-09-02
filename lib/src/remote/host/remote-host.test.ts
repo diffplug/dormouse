@@ -5,7 +5,7 @@
  * (`docs/specs/remote-security-model.md` → Pairing, Connection, Host bounds).
  */
 
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   DEFAULT_PAIRING_TTL_MS,
@@ -68,6 +68,7 @@ describe('RemoteHost end-to-end ceremonies', () => {
   let sessions: Array<{ handled: unknown[]; disposed: boolean; send: (payload: unknown) => void }> =
     [];
   let clock = 1_700_000_000_000;
+  let hosts: RemoteHost[] = [];
 
   beforeAll(async () => {
     const material = await mintNoiseStaticKeyPair();
@@ -90,6 +91,13 @@ describe('RemoteHost end-to-end ceremonies', () => {
     invitationEvents = [];
     sessions = [];
     clock = 1_700_000_000_000;
+    hosts = [];
+  });
+
+  // These cases run the reaper on real timers, so a Host left running holds a
+  // five-minute `setTimeout` for every invitation the case minted.
+  afterEach(() => {
+    for (const created of hosts) created.stop();
   });
 
   function makeHost(
@@ -125,6 +133,7 @@ describe('RemoteHost end-to-end ceremonies', () => {
     created.start();
     socket.open();
     host = created;
+    hosts.push(created);
     return created;
   }
 
@@ -995,6 +1004,7 @@ describe('RemoteHost end-to-end ceremonies', () => {
     created.start();
     socket.open();
     host = created;
+    hosts.push(created);
 
     const { invitation, session, code } = await requestPairing('c1', await newAuthenticator());
     approvals[0]!.approve(code);
