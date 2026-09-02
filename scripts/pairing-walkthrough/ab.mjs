@@ -71,12 +71,18 @@ export class AgentBrowser {
    * `about:blank` instead of navigating — the stray-`about:blank` race the
    * `debug-standalone-agent-browser` skill documents. Re-issuing is the fix, so
    * this issues and re-checks rather than trusting the first one.
+   *
+   * **Checks before it opens**, because `open` on a live page is a real
+   * navigation: when the Host harness has already put the app there, opening
+   * again would tear down the page's bridge connection and rebuild it for
+   * nothing.
    */
   async openUntil(url, ready, { attempts = 6, settleMs = 1500 } = {}) {
-    for (let attempt = 0; attempt < attempts; attempt++) {
+    for (let attempt = 0; attempt <= attempts; attempt++) {
+      if (await this.eval(ready).catch(() => false)) return;
+      if (attempt === attempts) break;
       await this.open(url).catch(() => {});
       await delay(settleMs);
-      if (await this.eval(ready).catch(() => false)) return;
     }
     throw new Error(`page at ${url} never became ready (session ${this.session})`);
   }
