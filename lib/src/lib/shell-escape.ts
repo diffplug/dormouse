@@ -1,10 +1,11 @@
 import { quotePowerShellArg, type ShellCommandKind } from 'dor/commands/shell-quote';
+import { POSIX_ESCAPABLE } from './posix-escape';
 
 // Matches macOS Terminal's drag-and-drop format: backslash-escape each shell
 // metacharacter instead of wrapping in quotes. TUIs like `claude` recognize
 // backslash-escaped tokens as filesystem paths where a single-quoted whole
 // path gets treated as opaque pasted text.
-const POSIX_UNSAFE = /([ \t!"#$&'()*;<>?[\\\]`{|}~])/g;
+const POSIX_UNSAFE = new RegExp(`(${POSIX_ESCAPABLE.source})`, 'g');
 const POSIX_NEEDS_QUOTES = /[\n\r]/;
 
 export function shellEscapePosix(input: string): string {

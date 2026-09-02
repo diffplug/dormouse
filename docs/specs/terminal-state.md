@@ -98,6 +98,8 @@ The parser accepts both BEL and ST terminators and handles split chunks. Support
 - `commandFinish` moves `currentCommand` to `lastCommand`, stores `finishedAt`/`exitCode`, snapshots the latest in-run OSC 0/2/9 title into `lastCommand.finalTerminalTitle` (titles older than `startedAt` or younger than `finishedAt` are excluded), clears `currentCommand`, and sets `{ kind: "finished", exitCode }`. With no `currentCommand` it only sets the activity — it never invents a `lastCommand`.
 - `title` updates `title` and the per-source entry in `titleCandidates`. Later OSC title events do not erase earlier user, shell, or notification candidates from other sources.
 
+Command-line tokenizing is dialect-free. `\` escapes exactly the set `shellEscapePosix` writes (`POSIX_ESCAPABLE` in `lib/src/lib/posix-escape.ts`, both halves pinned by `terminal-state.test.ts`), so POSIX escapes keep their meaning while a native Windows program path keeps the separators the basename step splits on. A leading `&` is PowerShell's call operator, never a POSIX background suffix, so it is dropped rather than read as a boundary. An unquoted Windows path containing spaces stays split — which token ends the program name is undecidable without the filesystem. **A launcher suffix is not part of a program's name**: `npm.cmd` and `C:\tools\claude.exe` are `npm` and `claude` for the header, the WATCHING key, and the bell tooltip alike, so PATHEXT's spellings of one program cannot become two rules. Accepted: `foo.bat` and `foo.exe` in one directory cannot be watched separately.
+
 ### Keystroke fallback
 
 For shells without OSC 133/633 integration, the command is read from what is on screen rather than reconstructed from keystrokes.
