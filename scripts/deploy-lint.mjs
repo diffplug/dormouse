@@ -321,7 +321,7 @@ export const RULES = [
     },
     skip: {
       Windows:
-        'its ladder, verify and uninstall checks are all `-match` over a string already captured from `Invoke-Tailscale`, so there is no pipeline to take SIGPIPE; the rule below pins the `/` in the verify message, and the root scoping itself has no signal on this platform at all',
+        'its ladder, verify and uninstall checks are all `-match` over a string already captured from `Invoke-Tailscale`, so there is no pipeline to take SIGPIPE; the root scoping and the port bound are pinned on this platform by the rule below, which counts all three inline `-match` sites',
     },
     exactMatches: { macOS: 3, Linux: 3 },
   },
@@ -331,16 +331,27 @@ export const RULES = [
     // call alone, and the shell test pins that its answer is right, never that
     // uninstall consults it. Reviewing this branch proved it: the uninstall
     // scoping was deletable on all three platforms with every gate green. This
-    // counts the consumers instead. Windows's install-time gate spells the same
-    // regex against $LOOPBACK_PORT, so it does not collide with these two.
+    // counts the consumers instead.
+    //
+    // Windows spells the match inline at all three sites rather than through a
+    // helper, so the pattern is variable-agnostic — $PORT in `cmd_verify` and
+    // `Invoke-Uninstall`, $LOOPBACK_PORT at the install-time gate — and runs
+    // through the `([^0-9]|$)` tail. Both halves are load-bearing and neither
+    // was covered at first: stopping the pattern before the tail left the
+    // right-bound deletable at the two $PORT sites, and counting only $PORT
+    // left the gate — the one arm where a wrong answer is a mutation, not a
+    // report — pinned by nothing at all. Each revert kept every gate green.
+    // `SERVE_AFTER` is excluded on purpose: it is bounded but not root-scoped,
+    // because it asserts our own `serve --bg` landed rather than auditing a
+    // foreign config.
     rule: 'Network posture — every root-path Serve decision consults the root-scoped match',
     patterns: {
       macOS: /if serve_proxies_root "\$PORT" "\$serve_out"; then/,
       Linux: /if serve_proxies_root "\$PORT" "\$serve_out"; then/,
       Windows:
-        /-match \('\(\?m\)\^\\\|--\\s\+\/\\s\+proxy\.\*' \+ \[regex\]::Escape\("127\.0\.0\.1:\$PORT"\)/,
+        /-match \('\(\?m\)\^\\\|--\\s\+\/\\s\+proxy\.\*' \+ \[regex\]::Escape\("127\.0\.0\.1:\$(?:LOOPBACK_)?PORT"\) \+ '\(\[\^0-9\]\|\$\)'\)/,
     },
-    exactMatches: { macOS: 2, Linux: 2, Windows: 2 },
+    exactMatches: { macOS: 2, Linux: 2, Windows: 3 },
   },
   {
     // Windows takes the same match inline rather than through a helper, so it
