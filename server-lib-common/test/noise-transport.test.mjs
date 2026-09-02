@@ -205,6 +205,79 @@ test('a message split into one-byte bodies reassembles, in linear time', () => {
   assert.deepEqual(out[0], message);
 });
 
+test('an incomplete message split into one-byte bodies stays bounded in memory', () => {
+  // The bound that matters is *memory*, not bytes queued: a per-body queue is
+  // bounded in bytes and unbounded in entries, so one declared 1 MiB message
+  // delivered a byte at a time grew the array without limit. Compaction keeps
+  // the backing store proportional to what is actually held.
+  const reassembler = new StreamReassembler();
+  reassembler.push(lengthPrefix(MAX_APP_MESSAGE_LENGTH));
+  for (let i = 0; i < 200_000; i++) {
+    assert.deepEqual(reassembler.push(Uint8Array.of(i & 0xff)), [], 'nothing completes');
+  }
+  assert.equal(reassembler.queued, APP_LENGTH_PREFIX_SIZE + 200_000);
+  assert.ok(
+    reassembler.capacity <= 2 * reassembler.queued + 1024,
+    `capacity ${reassembler.capacity} for ${reassembler.queued} queued bytes`,
+  );
+});
+
+test('a drained reassembler releases the buffer one big message grew', () => {
+  const reassembler = new StreamReassembler();
+  const message = new Uint8Array(600_000);
+  for (const body of chunkAppMessage(message)) reassembler.push(body);
+  assert.equal(reassembler.queued, 0);
+  assert.ok(
+    reassembler.capacity <= MAX_STREAM_BODY_LENGTH + APP_LENGTH_PREFIX_SIZE,
+    `a drained reassembler kept ${reassembler.capacity} bytes`,
+  );
+});
+
+test('400 random message/split patterns reassemble byte-exact', () => {
+  // Seeded, so a failure is reproducible: the interesting cases are boundaries
+  // between the length prefix, a body, and the buffer's own compaction, and
+  // only a spread of splittings visits them.
+  const random = seededRandom(0x5eed_1234);
+  for (let trial = 0; trial < 400; trial++) {
+    const messages = [];
+    const parts = [];
+    for (let i = 0; i <= random(5); i++) {
+      const message = new Uint8Array(random(3000));
+      for (let j = 0; j < message.length; j++) message[j] = random(256);
+      messages.push(message);
+      for (const body of chunkAppMessage(message)) parts.push(new Uint8Array(body));
+    }
+    const stream = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
+    let at = 0;
+    for (const part of parts) {
+      stream.set(part, at);
+      at += part.length;
+    }
+
+    const reassembler = new StreamReassembler();
+    const out = [];
+    for (let offset = 0; offset < stream.length; ) {
+      const size = Math.min(stream.length - offset, 1 + random(40));
+      out.push(...reassembler.push(stream.subarray(offset, offset + size)));
+      offset += size;
+    }
+    assert.deepEqual(out, messages, `trial ${trial}`);
+    assert.equal(reassembler.queued, 0, `trial ${trial} left bytes behind`);
+  }
+});
+
+/** A deterministic `0 <= n < bound` source (xorshift32), so a fuzz is replayable. */
+function seededRandom(seed) {
+  let state = seed >>> 0;
+  return (bound) => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    state >>>= 0;
+    return state % bound;
+  };
+}
+
 /** The 4-byte big-endian application-message length prefix for `value`. */
 function lengthPrefix(value) {
   const prefix = new Uint8Array(APP_LENGTH_PREFIX_SIZE);
