@@ -136,11 +136,12 @@ bare scheme check. A new documentation source rendered through that component
 through `localizeSiteLinks` too, or its site links will open in a new tab
 pointed at production.
 
-`--baseImagesUrl` is passed explicitly rather than letting `vsce` infer a base,
-because inference uses the repository root and this extension lives in a
-subdirectory. **Must** pass it on every `vsce` invocation that builds a VSIX;
-`checkImageBaseUrl` pins them to `SITE_IMAGE_BASE`, exempting a
-`--packagePath` republish whose URLs were already rewritten.
+`--baseImagesUrl` is passed explicitly rather than letting `vsce` or `ovsx`
+infer a base, because inference uses the repository root and this extension
+lives in a subdirectory. **Must pass** it on every `vsce` or `ovsx` invocation
+that builds a VSIX from source; `checkImageBaseUrl` pins them to
+`SITE_IMAGE_BASE`, exempting a `--packagePath` republish whose URLs were already
+rewritten.
 
 **Never** write to `website/public/guide/` from anything but the generator,
 which deletes it wholesale each build. Hand-authored assets stay at `public/`
@@ -264,6 +265,10 @@ the fallback before a theme applies.
 closing the prompt both count — a reader who declined has seen the offer.
 Keyed on the website's own `dormouse:docs-theme-prompt-dismissed`, because
 `dormouse:active-theme` cannot answer it: restoring writes that key too.
+
+**Must keep** prerendered and first-client prompt markup independent of
+`localStorage`, then reconcile after hydration. Until then the prompt stays
+hidden, so a returning reader never sees dismissed UI flash.
 
 ## `/docs/dor` reference
 
@@ -465,8 +470,8 @@ verifies:
 - the homepage links all three root-relatively, and every `/docs` href on it
   resolves to a published reference — both directions, because a rewritten
   section can strand a reference's only link or reintroduce a bare `/docs`;
-- every `vsce` invocation that packages the extension passes the site image
-  base;
+- every `vsce` or `ovsx` invocation that packages the extension from source
+  passes the site image base;
 - no per-page head tag is hardcoded in the root route, every route that
   exports `meta` builds it with `siteMeta`, and the two spellings of the site
   origin agree;

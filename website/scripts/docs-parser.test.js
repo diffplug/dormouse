@@ -37,9 +37,16 @@ describe('inline', () => {
     expect(inlineToText(parseInline('surface_id_value'))).toBe('surface_id_value');
   });
 
-  it('accepts an allowlisted https img', () => {
-    const [img] = parseInline('<img width="22" height="22" alt="bell" src="https://x.test/a.png" />');
-    expect(img).toMatchObject({ type: 'image', width: '22', height: '22', src: 'https://x.test/a.png' });
+  it('preserves every allowlisted attribute on an https img', () => {
+    const [img] = parseInline('<img width="22" height="22" alt="bell" title="Alert ringing" src="https://x.test/a.png" />');
+    expect(img).toMatchObject({
+      type: 'image',
+      width: '22',
+      height: '22',
+      alt: 'bell',
+      title: 'Alert ringing',
+      src: 'https://x.test/a.png',
+    });
   });
 
   it('rejects a disallowed img attribute', () => {

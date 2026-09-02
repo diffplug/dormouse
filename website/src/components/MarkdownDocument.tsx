@@ -92,6 +92,7 @@ function Inline({ nodes }: { nodes: InlineNode[] }): ReactNode {
 const HEADING_BASE = "font-display scroll-mt-24";
 /** Size per depth; the shared base is applied alongside. */
 const HEADING_TEXT: Record<number, string> = {
+  1: "text-3xl",
   2: "text-2xl",
   3: "text-xl",
   4: "text-lg",
@@ -101,6 +102,7 @@ const HEADING_TEXT: Record<number, string> = {
 /** Flow spacing per depth, for a heading rendered inline in a document. A
  *  caller that supplies its own section spacing overrides it. */
 const HEADING_FLOW: Record<number, string> = {
+  1: "mt-12 mb-4",
   2: "mt-12 mb-4",
   3: "mt-8 mb-3",
   4: "mt-6 mb-2",
@@ -111,7 +113,7 @@ const HEADING_FLOW: Record<number, string> = {
 /**
  * A heading that links to itself.
  *
- * Every `h2`–`h6` on every docs page comes through here, so the anchor
+ * Every `h1`–`h6` inside a Markdown document comes through here, so the anchor
  * affordance and the `scroll-mt` that keeps a jumped-to heading clear of the
  * sticky header have one owner. `spacing` replaces the depth's flow margins
  * for a caller whose surrounding section already spaces it.
@@ -128,7 +130,7 @@ export function AnchoredHeading({
   children: ReactNode;
 }) {
   const level = depth in HEADING_TEXT ? depth : 6;
-  const Tag = `h${level}` as "h2";
+  const Tag = `h${level}` as "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
   return (
     <Tag id={id} className={`${HEADING_BASE} ${HEADING_TEXT[level]} ${spacing ?? HEADING_FLOW[level]}`}>
       <a href={`#${id}`} className="no-underline hover:underline underline-offset-4">

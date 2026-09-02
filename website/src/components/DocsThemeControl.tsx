@@ -6,7 +6,7 @@
  * Settings dialog to put it in (docs/specs/theme.md -> Where the user picks a
  * theme). It opens upward, being pinned to the bottom of the viewport.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { XIcon } from "@phosphor-icons/react";
 import { ThemePicker } from "dormouse-lib/components/ThemePicker";
 import { dismissThemePrompt, isThemePromptDismissed } from "../lib/docs-theme";
@@ -24,9 +24,11 @@ const PANEL_STYLE: React.CSSProperties = {
 };
 
 export default function DocsThemeControl() {
-  // Read once, before the first paint: the prompt must not appear and then
-  // vanish for a reader who is already done with it.
-  const [dismissed, setDismissed] = useState(isThemePromptDismissed);
+  // Prerender and the first client render must agree without consulting
+  // browser-only storage. Unknown stays hidden; after hydration, only a reader
+  // who has not answered sees the prompt, so a dismissed prompt never flashes.
+  const [dismissed, setDismissed] = useState<boolean | null>(null);
+  useEffect(() => setDismissed(isThemePromptDismissed()), []);
 
   const dismiss = () => {
     dismissThemePrompt();
@@ -35,7 +37,7 @@ export default function DocsThemeControl() {
 
   return (
     <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2 print:hidden">
-      {dismissed ? null : (
+      {dismissed === false ? (
         <div
           role="status"
           className="relative max-w-[15rem] rounded-lg border py-2 pl-3 pr-8 text-sm leading-snug shadow-2xl"
@@ -58,7 +60,7 @@ export default function DocsThemeControl() {
             style={PANEL_STYLE}
           />
         </div>
-      )}
+      ) : null}
       <div className="rounded border px-1.5 py-1 shadow-2xl" style={PANEL_STYLE}>
         <ThemePicker variant="compact" menuSide="above" onPick={dismiss} />
       </div>

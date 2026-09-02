@@ -127,16 +127,16 @@ function checkImages() {
 }
 
 /**
- * Every `vsce` invocation that packages the extension must pass the site's
- * image base.
+ * Every `vsce` or `ovsx` invocation that packages the extension from source
+ * must pass the site's image base.
  *
  * docs/specs/website-docs.md -> "`--baseImagesUrl` is passed explicitly" — the
- * guide's images are repo-relative, `vsce` infers a base from the repository
- * root, and this extension lives in a subdirectory, so an invocation without
- * the flag ships a listing whose images 404. Only a human looking at the live
- * Marketplace page would find out, which is why it is pinned here. An
- * invocation with `--packagePath` republishes an already-packaged VSIX, whose
- * URLs were rewritten when it was built.
+ * guide's images are repo-relative, both packagers infer a base from the
+ * repository root, and this extension lives in a subdirectory, so an
+ * invocation without the flag ships a listing whose images 404. Only a human
+ * looking at the live Marketplace page would find out, which is why it is
+ * pinned here. An invocation with `--packagePath` republishes an
+ * already-packaged VSIX, whose URLs were rewritten when it was built.
  */
 function checkImageBaseUrl() {
   const claim = '`--baseImagesUrl` is passed explicitly';
@@ -147,14 +147,14 @@ function checkImageBaseUrl() {
   let found = 0;
   for (const rel of callers) {
     for (const line of readRepoFile(rel).split('\n')) {
-      if (!/\bvsce (package|publish)\b/.test(line) || line.includes('--packagePath')) continue;
+      if (!/\b(?:vsce (?:package|publish)|ovsx publish)\b/.test(line) || line.includes('--packagePath')) continue;
       found += 1;
       if (!line.includes(`--baseImagesUrl ${SITE_IMAGE_BASE}`)) {
         fail(`${rel}: packages the extension without --baseImagesUrl ${SITE_IMAGE_BASE} — ${line.trim()}`);
       }
     }
   }
-  if (found === 0) fail(`no \`vsce package|publish\` invocation found in ${callers.join(', ')}`);
+  if (found === 0) fail(`no source-packaging \`vsce\` or \`ovsx\` invocation found in ${callers.join(', ')}`);
 }
 
 /**

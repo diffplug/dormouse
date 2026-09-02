@@ -116,7 +116,7 @@
     "package": "vsce package --no-dependencies --baseImagesUrl https://dormouse.sh/guide --out dormouse.vsix",
     "dogfood": "node ../scripts/dogfood-vscode.mjs",
     "publish:marketplace": "vsce publish --no-dependencies --baseImagesUrl https://dormouse.sh/guide",
-    "publish:openvsx": "ovsx publish --no-dependencies"
+    "publish:openvsx": "ovsx publish --no-dependencies --baseImagesUrl https://dormouse.sh/guide"
   },
   "dependencies": {
     "node-pty": "1.2.0-beta.15",

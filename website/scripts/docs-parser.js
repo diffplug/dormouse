@@ -103,7 +103,14 @@ function parseImgTag(raw, line) {
   if (hasScheme(attrs.src) && !/^https:\/\//i.test(attrs.src)) {
     throw new UnsupportedMarkdownError(`<img> src must be relative or https: "${attrs.src}"`, line);
   }
-  return { type: 'image', src: attrs.src, alt: attrs.alt ?? '', width: attrs.width, height: attrs.height };
+  return {
+    type: 'image',
+    src: attrs.src,
+    alt: attrs.alt ?? '',
+    width: attrs.width,
+    height: attrs.height,
+    title: attrs.title,
+  };
 }
 
 /**
