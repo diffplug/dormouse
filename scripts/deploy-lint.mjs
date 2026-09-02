@@ -128,6 +128,32 @@ export const RULES = [
     },
   },
   {
+    // The same rule from the other side: a search of a definition that could
+    // not be read finds no password either. The unix pair read a file and fail
+    // when it is missing; Windows exports over CIM, which can hand back $null
+    // for reasons that have nothing to do with the task, and used to answer
+    // that with the reassuring line.
+    rule: 'Credentials at rest — manage verify fails when the service definition could not be read at all',
+    patterns: {
+      macOS: /fail "LaunchAgent plist missing or invalid/,
+      Linux: /fail "unit file missing/,
+      Windows: /the task definition could not be exported -- verify cannot say it carries no credential/,
+    },
+  },
+  {
+    // Windows-only, and the only thing enforcing owner-only on `hosts.json`
+    // there, so an enumeration that failed must not print the same Note as an
+    // account that was never created.
+    rule: 'Credentials at rest — manage verify fails when state\\ cannot be enumerated',
+    patterns: { Windows: /state\\ could not be enumerated/ },
+    skip: {
+      macOS:
+        'the per-file walk is Windows-only — `server/src/state.ts` writes 0o600 and it holds on unix, so the mode check on `state/` is the whole control (SECURITY.md, "Credentials at rest")',
+      Linux:
+        'the per-file walk is Windows-only, for the reason stated in the macOS skip; Linux checks mode and owner on `state/` itself',
+    },
+  },
+  {
     rule: 'Network posture — the installer refuses to rewrite a mismatched DORMOUSE_ORIGIN',
     patterns: {
       macOS: /refusing to silently rewrite the origin/,

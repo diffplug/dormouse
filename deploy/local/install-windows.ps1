@@ -1412,6 +1412,13 @@ function Invoke-Verify {
   # Both are consulted by two separate checks below. Export-ScheduledTask is a
   # CIM round trip into the Task Scheduler service -- the priciest call in this
   # whole path -- so it is made once here rather than once per check.
+  #
+  # It can also come back $null: CIM blocked by policy, the Task Scheduler
+  # service momentarily unavailable, or the task unregistered between Get-Task
+  # and here. Both consumers below treat that as its own outcome and fail,
+  # because a credential search through nothing found nothing. macOS and Linux
+  # reach the same place by failing outright when the plist or unit file is
+  # missing.
   $taskXml = Export-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue
   $wrapper = Join-Path $Root 'bin\run-server.ps1'
   $wrapperText = ''
@@ -1457,7 +1464,9 @@ function Invoke-Verify {
       Fail "bin\run-server.ps1 is missing or has no supervision loop"
     }
 
-    if ($taskXml -and ($taskXml -match 'DORMOUSE_SETUP_PASSWORD')) {
+    if (-not $taskXml) {
+      Fail "the task definition could not be exported -- verify cannot say it carries no credential"
+    } elseif ($taskXml -match 'DORMOUSE_SETUP_PASSWORD') {
       Fail "the task definition contains the setup password -- it must live only in config\server.env"
     } else {
       Pass "the task definition carries no credential"
@@ -1584,8 +1593,15 @@ function Invoke-Verify {
   # the ACE those files inherit from state\. So the files are checked here
   # rather than assumed from the directory -- this is the Windows half of the
   # "Credentials at rest" posture, and nothing else enforces it.
-  $stateFiles = @(Get-ChildItem -LiteralPath $StateDir -File -Force -ErrorAction SilentlyContinue)
-  if ($stateFiles.Count -eq 0) {
+  # An enumeration that failed and a directory with nothing in it both arrive
+  # here as zero files, and only one of them is healthy: reporting the Note for
+  # the other would retire the one check that holds this property on Windows.
+  # The error is kept, so they can be told apart.
+  $stateErr = $null
+  $stateFiles = @(Get-ChildItem -LiteralPath $StateDir -File -Force -ErrorAction SilentlyContinue -ErrorVariable stateErr)
+  if ($stateErr -and $stateErr.Count -gt 0) {
+    Fail "state\ could not be enumerated, so its files were not checked: $($stateErr[0].Exception.Message)"
+  } elseif ($stateFiles.Count -eq 0) {
     Note "no state files yet (no account created -- see SELF_HOST.md checkpoint 4)"
   } else {
     $leaky = @()
@@ -1640,8 +1656,9 @@ function Invoke-Verify {
   if ($src) {
     $refs = $false
     if ($wrapperText -match [regex]::Escape($src)) { $refs = $true }
-    if ($taskXml -and ($taskXml -match [regex]::Escape($src))) { $refs = $true }
+    if ($taskXml -match [regex]::Escape($src)) { $refs = $true }
     if ($refs) { Fail "the Scheduled Task or wrapper references the source checkout ($src)" }
+    elseif (-not $taskXml) { Fail "the task definition could not be exported -- only the wrapper was searched for the source checkout" }
     else { Pass "the installed service does not reference the source checkout" }
   }
 

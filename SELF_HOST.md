@@ -226,7 +226,8 @@ shape what the user should expect day to day:
 `manage verify` checks all of these locally and exits nonzero on any failure:
 
 - The service is registered and running, declares its run-at-load and
-  restart-on-exit behavior, and carries no credential. On macOS: the LaunchAgent
+  restart-on-exit behavior, and carries no credential — a definition `verify`
+  could not read at all fails, since a search through nothing finds nothing. On macOS: the LaunchAgent
   is loaded in `gui/$UID` and its plist lints, declares `RunAtLoad` and
   `KeepAlive`. On Windows: the Scheduled Task is `Running`, has an at-logon
   trigger, no execution time limit, restarts on failure, runs unelevated, is not
