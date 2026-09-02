@@ -618,8 +618,18 @@ The optional `PlatformAdapter.createIframeProxyUrl` method and
 
 Reachability is diagnosed lazily by served error pages after the iframe loads the
 proxy URL, and frame refusal is not diagnosed at all — any http upstream is
-framed with its frame-blocking headers stripped — so v1 mostly returns `ok` or
+framed with its frame-blocking headers replaced — so v1 mostly returns `ok` or
 `scheme`.
+
+**The webview passes its own ancestor chain with every request for a proxy
+URL.** `frame-ancestors` is checked against every ancestor, not just the parent,
+and VS Code nests the extension's document two frames deep inside the workbench,
+so the chain is `location.origin` plus `location.ancestorOrigins` — knowable only
+in the realm that has a `location`. It is validated host-side and used
+all-or-nothing: an unparseable or opaque (`"null"`) entry means no chain, because
+a partial one would block Dormouse's own frame. Source of truth:
+`embedderOrigins` in `lib/src/lib/embedder-origins.ts`, `normalizeEmbedderOrigins`
+in `lib/src/host/iframe-proxy-rewrite.ts`.
 
 VS Code routes this through webview request/response messages to
 `vscode-ext/src/iframe-proxy-host.ts`; standalone routes through
@@ -643,9 +653,27 @@ Security boundaries:
 - no user script is injected,
 - link-local/cloud-metadata ranges are blocked,
 - every other user-supplied `http://` target is trusted as the user's command
-  and framed with its response CSP and `X-Frame-Options` dropped (the embed is
-  the user's own, not third-party clickjacking). The cost is real: inside the
-  frame the upstream loses its own XSS policy for the duration of the embed.
+  and framed with its response CSP and `X-Frame-Options` **replaced** by
+  `frame-ancestors <the webview's own chain>` (the embed is the user's own, not
+  third-party clickjacking). The cost is real: inside the frame the upstream
+  loses its own XSS policy for the duration of the embed.
+
+**Must replace the upstream's framing controls, never merely drop them.** The
+port is not a secret and no request header separates our webview from an
+attacker page — an iframe navigation carries no `Origin`, and `Sec-Fetch-Site`
+reads `cross-site` for both — so dropping them for everyone hands a stranger two
+privileges the upstream refused it: framing a page that answered `DENY`, and
+reading that page's live URL and anchor hrefs back through the shim. Both are
+conditioned on a known embedder chain instead, and **the shim's `postMessage`
+targets that origin, never `'*'`**. With no chain the proxy strips nothing and
+injects nothing.
+
+**Must refresh a grant's idle timer for every caller except one that named
+itself foreign.** A live frame's navigations and sub-resource loads carry no
+`Origin` at all, so "own-origin only" would expire a grant the user is still
+looking at; what an `Origin: https://evil.example` must not buy is keeping a
+closed pane's grant, and its upstream binding, alive indefinitely. `isOwnOrigin`
+and `isForeignOrigin` are deliberately not each other's negation.
 
 **Must rewrite `Origin` only when it names the proxy itself.** Forward a foreign
 origin unchanged and keep an absent origin absent, on request and upgrade paths;
@@ -653,8 +681,10 @@ origin unchanged and keep an absent origin absent, on request and upgrade paths;
 for all loopback listeners lives in `lib/src/host/loopback-guard.ts` and is
 audited by `SECURITY.md` → "Loopback Listeners".
 
-**Never relax** the `Host` validation or conditional `Origin` gate without
-updating that `SECURITY.md` audit.
+**Never relax** the `Host` validation, the conditional `Origin` gate, or the
+`frame-ancestors` replacement without updating that `SECURITY.md` audit. Pinned
+by `lib/src/host/iframe-proxy.test.ts`, which covers the upgrade path as well as
+the request path.
 
 Source of truth: `lib/src/lib/platform/iframe-proxy-types.ts`,
 `lib/src/lib/platform/types.ts`,

@@ -72,6 +72,14 @@ export interface RemoteApiSessionLike {
 export type WebSocketLike = RemoteWebSocket;
 
 /**
+ * Re-exported beside {@link WebSocketLike} on purpose: a host that constructs a
+ * real socket must hand it this as `maxPayload`, and the hosts reach this file
+ * by relative path without `server-lib-common` on their own resolution path.
+ * Two numbers here would be two bounds that could drift.
+ */
+export { MAX_SERVER_TO_HOST_FRAME_LENGTH } from 'server-lib-common';
+
+/**
  * How many connection handshakes may be mid-flight across every client.
  *
  * Host-enforced and independent of the relay (`docs/specs/remote-security-model.md`

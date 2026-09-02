@@ -29,6 +29,7 @@ import {
   type RemoteHostCommand,
   type RemoteHostResult,
 } from "dormouse-lib/host/remote/service-protocol";
+import { embedderOrigins } from "dormouse-lib/lib/embedder-origins";
 import { AlertManager } from "dormouse-lib/lib/alert-manager";
 import type { AwaitHandle, AwaitOptions } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
@@ -306,7 +307,12 @@ export class TauriAdapter implements PlatformAdapter {
     // lib/src/host/iframe-proxy.ts). On failure, report unreachable so the panel
     // shows a hint rather than a never-loading frame.
     try {
-      return await rawInvoke<IframeProxyResult>("iframe_create_proxy_url", { target: targetUrl });
+      // The webview's ancestor chain decides who may frame the proxy and where
+      // its shim may post; only this realm can read it.
+      return await rawInvoke<IframeProxyResult>("iframe_create_proxy_url", {
+        target: targetUrl,
+        embedderOrigins: embedderOrigins(),
+      });
     } catch (err) {
       return { ok: false, reason: "unreachable", detail: errMessage(err) };
     }

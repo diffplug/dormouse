@@ -634,7 +634,12 @@ export function attachRouter(
         });
         break;
       case 'iframe:createProxyUrl':
-        createIframeProxyUrl(typeof msg.url === 'string' ? msg.url : '').then(
+        createIframeProxyUrl(
+          typeof msg.url === 'string' ? msg.url : '',
+          // Validated host-side (`normalizeEmbedderOrigins`); an unusable chain
+          // costs the shim, never a wider grant.
+          Array.isArray(msg.embedderOrigins) ? msg.embedderOrigins : [],
+        ).then(
           (result) => post({
             type: 'iframe:proxyUrl', requestId: msg.requestId, result,
           } satisfies ExtensionMessage),

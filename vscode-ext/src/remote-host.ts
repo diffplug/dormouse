@@ -25,8 +25,10 @@ import type {
   PeerSurfaceParams,
   PeerSurfaceResult,
 } from '../../lib/src/remote/host/peer-surfaces';
-import type { WebSocketLike } from '../../lib/src/remote/host/remote-host';
-import { MAX_SERVER_TO_HOST_FRAME_LENGTH } from 'server-lib-common';
+import {
+  MAX_SERVER_TO_HOST_FRAME_LENGTH,
+  type WebSocketLike,
+} from '../../lib/src/remote/host/remote-host';
 import type { ExtensionMessage } from './message-types';
 import {
   broadcastUiEvent,
