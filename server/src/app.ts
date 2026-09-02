@@ -35,6 +35,7 @@ import {
   WS_TOKEN_PARAM,
   fromBase64Url,
   getWebCrypto,
+  boundedPushText,
   helloResponse,
   isBoundedBase64Url,
   isExactBase64Url,
@@ -92,6 +93,7 @@ import type { SetupTokenEntry } from './setup-token.js';
 import {
   AccountStore,
   DuplicateCredentialError,
+  HostLimitReachedError,
   HostStore,
   PushSubscriptionStore,
 } from './state.js';
@@ -247,6 +249,14 @@ const WS_CLOSE_IDLE_REASON = 'no response to heartbeat';
  */
 export const MAX_RELAY_FRAME_BYTES =
   MAX_E2E_CIPHERTEXT_LENGTH + MAX_CLIENT_ID_LENGTH + 2 * E2E_ID_LENGTH + 1024;
+/**
+ * Longest passkey label `account.json` will hold, in code points. A device
+ * name, so this is generous — and it is a bound at all because the file is
+ * durable and is re-read and re-parsed on every sign-in and every re-auth,
+ * while the two sibling fields on the same route are already bounded.
+ */
+const MAX_PASSKEY_LABEL_LENGTH = 64;
+
 /** A small fixed delay on a rejected credential — the extent of POC brute-force hardening. */
 const CREDENTIAL_FAILURE_DELAY_MS = 250;
 
@@ -712,7 +722,13 @@ export function createApp(config: AppConfig): CreatedApp {
         await accounts.appendPasskey({
           credentialId: body.credentialId,
           publicKey: body.publicKey,
-          label: typeof body.label === 'string' ? body.label : '',
+          // Reduced rather than refused, so a long device name still
+          // registers, and bounded because `account.json` is durable and is
+          // re-read and re-parsed on every sign-in and every re-auth. The same
+          // `boundedPushText` the Host reduces a pairing label with, so a
+          // control or bidi character cannot reorder what an operator reads
+          // out of the file either.
+          label: boundedPushText(body.label, { limit: MAX_PASSKEY_LABEL_LENGTH, fallback: '' }),
         });
       } catch (err) {
         if (err instanceof DuplicateCredentialError) {
@@ -839,6 +855,13 @@ export function createApp(config: AppConfig): CreatedApp {
     } catch (err) {
       if (err instanceof EnrollmentCredentialRejected) {
         return credentialFailure(c, UNAUTHORIZED_ERROR);
+      }
+      if (err instanceof HostLimitReachedError) {
+        // Reached only past a valid credential, so it pays the same delay as
+        // every other refusal here, and it names the remedy: revocation is
+        // hand-editing `hosts.json` (docs/specs/server.md -> Guardrails).
+        await delay(credentialFailureDelayMs);
+        return c.json({ error: `${err.message}; remove one from hosts.json first` }, 409);
       }
       if (err instanceof EnrollmentOfferNotInvalidated) {
         // Reached only after a valid bootstrap credential, so answering fast

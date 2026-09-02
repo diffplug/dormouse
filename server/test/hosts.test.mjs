@@ -11,7 +11,7 @@ import { join } from 'node:path';
 
 import { API_ROUTES, E2E_ID_LENGTH, WS_ROUTES, WS_TOKEN_PARAM, isE2eId } from 'server-lib-common';
 
-import { HOST_TOKEN_LENGTH, HostStore } from '../dist/state.js';
+import { HOST_TOKEN_LENGTH, HostStore, MAX_ENROLLED_HOSTS } from '../dist/state.js';
 
 import {
   RP_ID,
@@ -239,4 +239,30 @@ test('a token of a shape no Host was ever minted never reaches hosts.json', asyn
   }
   // The control: a well-shaped token does read the file, and so does throw.
   await assert.rejects(store.findByToken('A'.repeat(HOST_TOKEN_LENGTH)));
+});
+
+test('enrollment is capped, and the refusal names the remedy', async () => {
+  // Credential-gated, so this is not a flood defense: it is the bound on a file
+  // that is otherwise append-only and is compared row by row on every
+  // host-gated request and every `/ws/host` upgrade.
+  const { app } = await freshApp({ credentialFailureDelayMs: 1 });
+  for (let i = 0; i < MAX_ENROLLED_HOSTS; i += 1) {
+    assert.equal((await enrollHost(app)).res.status, 200, `host ${i}`);
+  }
+
+  const { res, body } = await enrollHost(app);
+  assert.equal(res.status, 409);
+  assert.match(body.error, /hosts\.json/);
+});
+
+test('the enrollment cap is checked after the credential, never before', async () => {
+  // A caller that has proved nothing must not learn from the refusal whether
+  // the server is full.
+  const { app } = await freshApp({ credentialFailureDelayMs: 1 });
+  for (let i = 0; i < MAX_ENROLLED_HOSTS; i += 1) {
+    assert.equal((await enrollHost(app)).res.status, 200);
+  }
+
+  const res = await post(app, API_ROUTES.hostEnroll, { password: 'wrong' });
+  assert.equal(res.status, 401);
 });

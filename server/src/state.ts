@@ -186,6 +186,25 @@ export function isHostToken(value: unknown): value is string {
 }
 
 /**
+ * How many Hosts one account may have enrolled.
+ *
+ * Enrollment is credential-gated, so this is not a flood defense — it is the
+ * bound on a file that is otherwise append-only and is re-read, re-parsed and
+ * compared row by row on every host-gated request and every `/ws/host`
+ * upgrade. Far above the machines a person owns; revocation (deleting a row by
+ * hand) is what makes room.
+ */
+export const MAX_ENROLLED_HOSTS = 32;
+
+/** Thrown by {@link HostStore.enroll} when {@link MAX_ENROLLED_HOSTS} is reached. */
+export class HostLimitReachedError extends Error {
+  constructor() {
+    super(`this server already has ${MAX_ENROLLED_HOSTS} hosts enrolled`);
+    this.name = 'HostLimitReachedError';
+  }
+}
+
+/**
  * Persistent host enrollment (`hosts.json`). Mirrors {@link AccountStore}: an
  * append-only JSON array, atomic writes, and a mutex so concurrent enrollments
  * cannot lose a write. Revocation is deleting a line by hand (POC guardrail).
@@ -278,6 +297,10 @@ export class HostStore extends JsonFileStore {
     return this.mutate(async () => {
       await beforeEnroll(!(await this.exists()));
       const hosts = await this.list();
+      // After the credential gate, never before: a caller that has not proved
+      // anything must not learn from the refusal whether the server is full.
+      // Inside the mutex, so two concurrent enrollments cannot both pass it.
+      if (hosts.length >= MAX_ENROLLED_HOSTS) throw new HostLimitReachedError();
       const host: StoredHost = {
         hostId: toBase64Url(randomBytes(E2E_ID_BYTE_LENGTH)),
         hostToken: toBase64Url(randomBytes(HOST_TOKEN_BYTE_LENGTH)),
