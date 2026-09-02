@@ -31,6 +31,13 @@ type HostModule = typeof import('../src/remote-host');
 type LinkModule = typeof import('../src/peer-link');
 
 /**
+ * A well-formed `hostId`: base64url of 16 bytes. `isEnrollment` accepts only
+ * that shape, so a stored enrollment naming a shorter id reads as malformed
+ * and this window never starts a Host.
+ */
+const HOST_ID = 'S6kyjjqOS7mw3l8ye89U3g';
+
+/**
  * The installer's offer file is the one thing an idle `status` reads off the
  * real disk, and whether the machine running these tests happens to have a
  * Dormouse server installed must not decide whether they pass. Mocked at the
@@ -327,7 +334,7 @@ describe('host state store', () => {
     const target = new VsCodeHostStateStore(context);
     const enrollment = {
       serverUrl: 'https://relay.dormouse.sh',
-      hostId: 'host-1',
+      hostId: HOST_ID,
       hostToken: 'token',
       origin: 'https://relay.dormouse.sh',
       rpId: 'relay.dormouse.sh',
@@ -349,20 +356,20 @@ describe('host state store', () => {
     const { context, store } = fakeContext();
     const enrollment = {
       serverUrl: 'https://relay.dormouse.sh',
-      hostId: 'host-1',
+      hostId: HOST_ID,
       hostToken: 'token',
       origin: 'https://relay.dormouse.sh',
       rpId: 'relay.dormouse.sh',
     };
     store.secrets.set('dormouse.remote-host.enrollment', JSON.stringify(enrollment));
     store.global.set(
-      'dormouse.remote-host.acl.host-1',
-      JSON.stringify([aclRecord('host-1', 'client-1')]),
+      `dormouse.remote-host.acl.${HOST_ID}`,
+      JSON.stringify([aclRecord(HOST_ID, 'client-1')]),
     );
 
     const target = new VsCodeHostStateStore(context);
     expect(await target.loadEnrollment()).toEqual(enrollment);
-    expect(await target.loadAcl('host-1')).toEqual([aclRecord('host-1', 'client-1')]);
+    expect(await target.loadAcl(HOST_ID)).toEqual([aclRecord(HOST_ID, 'client-1')]);
   });
 
   it('forgets a failed keychain read instead of memoizing it', async () => {
@@ -374,7 +381,7 @@ describe('host state store', () => {
     const { context, store } = fakeContext();
     const enrollment = {
       serverUrl: 'https://relay.dormouse.sh',
-      hostId: 'host-1',
+      hostId: HOST_ID,
       hostToken: 'token',
       origin: 'https://relay.dormouse.sh',
       rpId: 'relay.dormouse.sh',
@@ -403,7 +410,7 @@ describe('host state store', () => {
     const target = new VsCodeHostStateStore(context, () => changes.push(1));
     const enrollment = {
       serverUrl: 'https://relay.dormouse.sh',
-      hostId: 'host-1',
+      hostId: HOST_ID,
       hostToken: 'token',
       origin: 'https://relay.dormouse.sh',
       rpId: 'relay.dormouse.sh',
@@ -618,7 +625,7 @@ describe('remote host service glue', () => {
       ENROLLMENT_KEY,
       JSON.stringify({
         serverUrl: 'https://relay.example.com',
-        hostId: 'host-1',
+        hostId: HOST_ID,
         hostToken: 'token',
         origin: 'https://relay.example.com',
         rpId: 'relay.example.com',
@@ -742,7 +749,7 @@ describe('remote host service glue', () => {
       ENROLLMENT_KEY,
       JSON.stringify({
         serverUrl: 'https://relay.example.com',
-        hostId: 'host-1',
+        hostId: HOST_ID,
         hostToken: 'token',
         origin: 'https://relay.example.com',
         rpId: 'relay.example.com',
