@@ -47,14 +47,13 @@ describe('commandArgv0', () => {
     expect(commandArgv0(raw)).toBeNull();
   });
 
-  it('mangles an unquoted native Windows path, and that is a known limitation', () => {
-    // The shared tokenizer reads `\` as a POSIX escape, so backslash separators
-    // are eaten before the basename split can see them — `summarizeCommandLine`
-    // has always had the same blind spot. Harmless in practice: the shells that
-    // report a command line (pwsh, Git Bash, WSL) send either a bare program
-    // name or a POSIX path, and the mangling is at least stable, so a rule keyed
-    // on it still matches itself.
-    expect(commandArgv0('C:\\tools\\claude.exe --print')).toBe('C:toolsclaude.exe');
+  // Native Windows paths reduce to the same bare name a rule is stored under;
+  // the tokenizer's dialect handling is pinned in `terminal-state.test.ts`.
+  it.each([
+    ['C:\\tools\\claude.exe --print', 'claude.exe'],
+    ['C:\\Users\\me\\.claude\\local\\claude', 'claude'],
+  ])('reduces the Windows path %j to %j', (raw, expected) => {
+    expect(commandArgv0(raw)).toBe(expected);
   });
 });
 

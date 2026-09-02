@@ -15,6 +15,7 @@ import {
   notificationDisplayTitle,
   reduceTerminalState,
   shortestUniqueCwdLabels,
+  commandArgv0,
   summarizeCommandLine,
   surfaceRunsCommand,
   terminalTitleFromNotification,
@@ -270,6 +271,35 @@ describe('command title summarizer', () => {
     expect(summarizeCommandLine('cat package.json | jq .name')).toBe('cat package.json | ...');
     expect(summarizeCommandLine('cd lib && pnpm test')).toBe('cd lib ...');
     expect(summarizeCommandLine('"my command" "quoted arg"')).toBe('my command quoted arg');
+  });
+});
+
+describe('command tokenizer dialects', () => {
+  // A backslash is a path separator unless it precedes something a shell really
+  // escapes, so both dialects reduce to the bare program name.
+  it.each([
+    // Windows: absolute paths, launchers, quoted and unquoted spaces, UNC.
+    ['C:\\tools\\dor.cmd tool storybook', 'dor.cmd', 'dor.cmd tool storybook'],
+    ['C:\\Users\\me\\.claude\\local\\claude', 'claude', 'claude'],
+    ['C:\\Program Files\\nodejs\\npm.cmd run dev', 'npm.cmd', 'npm.cmd run dev'],
+    ['"C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm.cmd', 'npm.cmd run dev'],
+    ['c:/tools/dor.cmd tool storybook', 'dor.cmd', 'dor.cmd tool storybook'],
+    ['\\\\build\\share\\tools\\claude.exe --print', 'claude.exe', 'claude.exe --print'],
+    ['FOO=1 C:\\tools\\claude.exe --print', 'claude.exe', 'claude.exe --print'],
+    // POSIX escapes keep their meaning.
+    ['/opt/my\\ tools/claude --print', 'claude', 'claude --print'],
+    ['find . -name \\*.ts', 'find', 'find . -name'],
+    ['echo a\\\\b', 'echo', 'echo a\\b'],
+  ])('reduces %j to %j / %j', (raw, argv0, summary) => {
+    expect(commandArgv0(raw)).toBe(argv0);
+    expect(summarizeCommandLine(raw)).toBe(summary);
+  });
+
+  it('only re-joins an unquoted Windows program path that lands on an executable', () => {
+    // Two real words, not one path with a space: the second token starts its own
+    // absolute path, so the split stands and argv0 stays the program.
+    expect(commandArgv0('C:\\bin\\tool C:\\data\\in.txt')).toBe('tool');
+    expect(commandArgv0('C:\\bin\\tool sub\\dir\\notes.txt')).toBe('tool');
   });
 });
 

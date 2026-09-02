@@ -782,6 +782,18 @@ function withRequiredHostPrefixes(
   return result;
 }
 
+// Characters a shell actually escapes with a backslash. Everything else after a
+// `\` is a literal, so a native Windows path survives tokenizing intact and the
+// argv0 basename split below still has separators to split on. The escape rule
+// stays load-bearing for the POSIX shells that report most command lines:
+// `foo\ bar` is one token and `\*.ts` passes a literal glob.
+const SHELL_ESCAPABLE = /[\s"'\\*?[\]{}()$`!|&;<>#]/;
+
+/**
+ * Split a command line into words, honoring quotes, POSIX backslash escapes
+ * (see `SHELL_ESCAPABLE`), and the pipeline/compound separators `| || && ; &`,
+ * which are emitted as their own tokens.
+ */
 function tokenizeCommand(input: string): string[] {
   const tokens: string[] = [];
   let current = '';
@@ -803,7 +815,12 @@ function tokenizeCommand(input: string): string[] {
       continue;
     }
     if (char === '\\' && quote !== "'") {
-      escaping = true;
+      const next = input[i + 1];
+      if (next !== undefined && SHELL_ESCAPABLE.test(next)) {
+        escaping = true;
+        continue;
+      }
+      current += char;
       continue;
     }
     if (quote) {
@@ -843,6 +860,29 @@ function tokenizeCommand(input: string): string[] {
   return tokens;
 }
 
+const WINDOWS_PATH_HEAD = /^[A-Za-z]:[\\/]/;
+const WINDOWS_EXECUTABLE_SUFFIX = /\.(?:exe|cmd|bat|com|ps1)$/i;
+
+/**
+ * cmd.exe resolves an unquoted program path containing spaces by probing
+ * successively longer prefixes, so `C:\Program Files\nodejs\npm.cmd run dev`
+ * is one program plus two arguments. Tokenizing cannot know that, so re-join the
+ * leading tokens — but only when the join lands on a Windows executable suffix,
+ * which keeps `C:\bin\tool C:\data\in.txt` (two real words) split.
+ */
+function joinWindowsProgramPath(tokens: string[]): string[] {
+  const head = tokens[0];
+  if (!head || !WINDOWS_PATH_HEAD.test(head) || WINDOWS_EXECUTABLE_SUFFIX.test(head)) return tokens;
+  let joined = head;
+  for (let i = 1; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (!token.includes('\\') || WINDOWS_PATH_HEAD.test(token)) break;
+    joined = `${joined} ${token}`;
+    if (WINDOWS_EXECUTABLE_SUFFIX.test(token)) return [joined, ...tokens.slice(i + 1)];
+  }
+  return tokens;
+}
+
 function takePrimaryCommandTokens(tokens: string[]): string[] {
   const firstBoundary = tokens.findIndex((token) => token === '|' || token === '&&' || token === '||' || token === ';' || token === '&');
   const command = (firstBoundary === -1 ? tokens : tokens.slice(0, firstBoundary)).filter(Boolean);
@@ -852,7 +892,7 @@ function takePrimaryCommandTokens(tokens: string[]): string[] {
     index += 1;
     while (isEnvAssignment(command[index])) index += 1;
   }
-  return command.slice(index);
+  return joinWindowsProgramPath(command.slice(index));
 }
 
 function isEnvAssignment(token: string | undefined): boolean {
