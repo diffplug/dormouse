@@ -9,6 +9,7 @@ icon.svg
 *.ts
 !dist/**
 !media/**
+!images/**
 !icon.png
 !README.md
 !CHANGELOG.md

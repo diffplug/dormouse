@@ -42,7 +42,7 @@ GitHub.
 The guide is not served by this site. It was rendered at `/docs`; that page and
 every link to it were removed, and the guide is now read where it is published.
 The generator still parses it on every build, for two reasons that outlive the
-page: the media sync is what puts `vscode-ext/media/` on `dormouse.sh`, which
+page: the media sync is what puts `vscode-ext/images/` on `dormouse.sh`, which
 the packaged listing depends on (see below), and the parsed guide is what a
 replacement page would render. Its data file is generated and unconsumed. The
 lint's guide checks still run, because they constrain the guide as a
@@ -94,9 +94,12 @@ stays within Marketplace-compatible Markdown:
 - README image URLs use HTTPS.
 - User-provided SVG images are not allowed; content uses raster media or an
   approved badge provider.
-- Media is **repo-relative local files under `vscode-ext/media/`**, referenced
-  the way GitHub expects (`media/hero.jpg`). The Markdown stays the source of
-  truth and ordinary GitHub authoring works: drop a file in and link it.
+- Media is **repo-relative local files under `vscode-ext/images/`**, referenced
+  the way GitHub expects (`images/hero.jpg`). The Markdown stays the source of
+  truth and ordinary GitHub authoring works: drop a file in and link it. It is
+  `images/` and never `media/`: `vscode-ext/media/` is the webview bundle's
+  Vite output directory, emptied on every extension build, so anything
+  committed there is deleted by the next `pnpm build:vscode`.
   Remote media is rejected outright. `github.com/user-attachments` URLs in
   particular 302 to a signature-expiring S3 object (so `HEAD` 403s where `GET`
   succeeds), cannot be cached downstream, leak every visitor's IP to a third
@@ -106,12 +109,12 @@ stays within Marketplace-compatible Markdown:
 Each renderer resolves those relative paths differently, and all four are
 verified:
 
-| Renderer | How `media/x.gif` resolves |
+| Renderer | How `images/x.gif` resolves |
 | --- | --- |
 | GitHub | Natively, relative to `vscode-ext/` |
-| Packaged extension pane | From `media/` inside the VSIX, retained by `!media/**` in `.vscodeignore` |
+| Packaged extension pane | From `images/` inside the VSIX, retained by `!images/**` in `.vscodeignore` |
 | Marketplace / Open VSX | `vsce --baseImagesUrl https://dormouse.sh` rewrites both Markdown images **and** raw `<img src>` attributes at package time |
-| `dormouse.sh` | The generator copies `vscode-ext/media/` to `website/public/media/`, which is what `--baseImagesUrl` above resolves against |
+| `dormouse.sh` | The generator copies `vscode-ext/images/` to `website/public/images/`, which is what `--baseImagesUrl` above resolves against |
 
 Links back to this site take the same shape of treatment. The guide spells them
 absolutely (`https://dormouse.sh/docs/dor`) because the Marketplace, Open VSX,
@@ -315,7 +318,7 @@ links. The raw skill Markdown is deliberately not emitted.
 
 Generating the guide is not dead work even with no page consuming it: the same
 pass validates the guide's media against the Marketplace rules and copies
-`vscode-ext/media/` to `website/public/media/`, which the packaged listing
+`vscode-ext/images/` to `website/public/images/`, which the packaged listing
 resolves its images against.
 
 Website `predev`, `pretest`, and `prebuild` run the generator, mirroring
@@ -369,7 +372,7 @@ verifies:
 - neither public README contains `TODO:` placeholders;
 - both canonical Markdown sources stay inside the parser's supported subset;
 - local Markdown links resolve and public links use canonical HTTPS URLs;
-- guide images are repo-relative files that exist under `vscode-ext/media/`,
+- guide images are repo-relative files that exist under `vscode-ext/images/`,
   with no remote URLs and no SVG, and every file there is referenced;
 - VS Code commands named by the guide exist in `vscode-ext/package.json`, and
   the listing metadata fields are present;
@@ -394,7 +397,7 @@ spec.
 | `vscode-ext/README.md` | The canonical product guide; published off-site, parsed here |
 | `vscode-ext/package.json` | Listing metadata and VS Code command inventory |
 | `README.md` | Repository and contributor entry point |
-| `vscode-ext/media/` | Guide media; the generator copies it to `website/public/media/`, which the Marketplace listing loads from |
+| `vscode-ext/images/` | Guide media; the generator copies it to `website/public/images/`, which the Marketplace listing loads from |
 | `dor/skill.md` | The bundled agent skill, rendered exactly at `/docs/agent-skill` |
 | `dor/test/snapshots/help/` | Tested CLI help, the source for `/docs/dor` |
 | `website/src/routes.ts`, `website/src/components/SiteHeader.tsx` | The published routes and the header that omits `/docs` |
@@ -417,7 +420,7 @@ Remaining work, in staged order:
 1. **VSIX packaging verification.** Package the extension and inspect its
    README and media inventory as part of release, so a listing cannot ship with
    a broken image or an unretained local asset. `vscode-ext/.vscodeignore`
-   already retains `README.md`, `icon.png`, and `media/`.
+   already retains `README.md`, `icon.png`, and `images/`.
 2. **Live listing verification.** After publication, inspect the rendered
    Marketplace and Open VSX pages, and preview the root README under GitHub
    Markdown. If packaged or live README inspection becomes a release step,

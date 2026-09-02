@@ -2,7 +2,7 @@
 
 A multitasking terminal for VS Code and the desktop — a real tiling layout, tmux keybindings, full mouse support, browser panes your agents can drive, and alerts that tell you when something needs you.
 
-![Dormouse running a tiling terminal layout](media/hero.jpg)
+![Dormouse running a tiling terminal layout](images/hero.jpg)
 
 [dormouse.sh/playground](https://dormouse.sh/playground) — try the real thing in your browser, nothing to install.
 
@@ -38,10 +38,10 @@ Dormouse can owe you attention in three independent ways. Two of them need no se
 
 Dormouse never guesses which commands deserve an alert. Watching is a rule you create on a command name, and turning it off anywhere removes it everywhere.
 
-- <img width="22" height="22" alt="Bell icon, alerts off" src="media/alert-disabled.gif" /> no watch rule for this pane's command
-- <img width="22" height="22" alt="Bell icon, command watched" src="media/alert-enabled.gif" /> this command is watched
-- <img width="22" height="22" alt="Bell icon, watched command running" src="media/alert-armed.gif" /> a watched command is running; it will alert when it goes quiet
-- <img width="22" height="22" alt="Bell icon, ringing for attention" src="media/alert-ringing.gif" /> finished, and it needs your attention
+- <img width="22" height="22" alt="Bell icon, alerts off" src="images/alert-disabled.gif" /> no watch rule for this pane's command
+- <img width="22" height="22" alt="Bell icon, command watched" src="images/alert-enabled.gif" /> this command is watched
+- <img width="22" height="22" alt="Bell icon, watched command running" src="images/alert-armed.gif" /> a watched command is running; it will alert when it goes quiet
+- <img width="22" height="22" alt="Bell icon, ringing for attention" src="images/alert-ringing.gif" /> finished, and it needs your attention
 
 Whichever way a pane rings, the ring becomes a **TODO** — a marker beside the pane's title that outlives the alert, so a ring you dismissed does not disappear without a trace. Clear it by clicking it or pressing `t` in command mode.
 

@@ -177,7 +177,7 @@ async function checkGenerated() {
   // different message, so only the generator owns them and the catch above
   // reports any failure.
   for (const file of data.guide.media.unused) {
-    fail(`vscode-ext/media/${file} is not referenced by the guide`);
+    fail(`vscode-ext/images/${file} is not referenced by the guide`);
   }
 }
 

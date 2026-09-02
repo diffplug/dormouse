@@ -10,7 +10,7 @@
  * The guide half of this pipeline has no page of its own right now (see
  * docs/specs/website-docs.md -> Canonical product guide). It is kept whole and
  * still runs on every build, because the guide's media sync is what puts
- * vscode-ext/media/ on dormouse.sh, where the packaged Marketplace listing
+ * vscode-ext/images/ on dormouse.sh, where the packaged Marketplace listing
  * loads its images from, and because the guide data is what a future page
  * would render.
  *
@@ -40,17 +40,21 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..', '..');
 const dataDir = join(__dirname, '..', 'src', 'data');
 /**
- * Guide media lives next to the guide; the site serves a copy at /media/.
+ * Guide media lives next to the guide; the site serves a copy at /images/.
+ *
+ * It is `images/`, not `media/`, because `vscode-ext/media/` is the webview
+ * bundle's output directory — Vite empties it on every extension build, which
+ * would delete anything committed there.
  *
  * Load-bearing beyond this repo: `vsce --baseImagesUrl https://dormouse.sh`
- * turns the guide's `media/hero.jpg` into `https://dormouse.sh/media/hero.jpg`
+ * turns the guide's `images/hero.jpg` into `https://dormouse.sh/images/hero.jpg`
  * on the Marketplace and Open VSX, so the listing's images 404 if the site
  * stops serving these.
  */
-const mediaSrcDir = join(repoRoot, 'vscode-ext', 'media');
-const mediaOutDir = join(__dirname, '..', 'public', 'media');
-const MEDIA_URL_BASE = '/media/';
-const MEDIA_SRC_PREFIX = 'media/';
+const mediaSrcDir = join(repoRoot, 'vscode-ext', 'images');
+const mediaOutDir = join(__dirname, '..', 'public', 'images');
+const MEDIA_URL_BASE = '/images/';
+const MEDIA_SRC_PREFIX = 'images/';
 /** This site's own origin, as the canonical sources are forced to spell it. */
 const SITE_ORIGIN = 'https://dormouse.sh';
 
@@ -161,7 +165,7 @@ function assertUniqueIds(ids, where) {
  * report which media files were actually used.
  *
  * The README is the source of truth and references images the way GitHub
- * expects — repo-relative — so dropping a file into vscode-ext/media/ and
+ * expects — repo-relative — so dropping a file into vscode-ext/images/ and
  * linking it just works on GitHub, in the packaged extension, and here.
  */
 function resolveGuideMedia(blocks, available) {
