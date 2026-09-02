@@ -320,7 +320,8 @@ export interface PushSubscriptionUpsertResult {
  * malformed rows handles orphans too, and the next mutation writes the pruned
  * set back. Deleting a Host by hand is the documented revocation mechanism, so
  * this is read fresh rather than cached — the same rule `HostStore.has`
- * follows.
+ * follows. An *absent* `hosts.json` cascades to nothing: it is a file in
+ * flight, not a revocation.
  */
 export class PushSubscriptionStore extends JsonFileStore {
   /** Which Hosts are still enrolled. Required, so no caller can skip the join. */
@@ -353,7 +354,13 @@ export class PushSubscriptionStore extends JsonFileStore {
     if (!Array.isArray(rows)) return [];
     const kept = rows.filter(isStoredPushSubscription);
     if (kept.length !== rows.length) warnOnceAboutDroppedRows();
-    const enrolled = new Set((await this.#hosts.list()).map((h) => h.hostId));
+    // An absent `hosts.json` is not an empty one — the same distinction the
+    // relay's revocation sweep makes, and it matters more here because
+    // `upsert` writes this answer back: joining against `[]` inside the rename
+    // window of a hand edit would make the truncation durable.
+    const hosts = await this.#hosts.listIfPresent();
+    if (hosts === null) return kept;
+    const enrolled = new Set(hosts.map((h) => h.hostId));
     return kept.filter((s) => enrolled.has(s.hostId));
   }
 

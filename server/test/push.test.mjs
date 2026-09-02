@@ -12,7 +12,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, stat, writeFile } from 'node:fs/promises';
+import { readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import {
@@ -37,6 +37,7 @@ import {
   defaultVapidSubject,
   generateVapidKeys,
 } from '../dist/push.js';
+import { HostStore, PushSubscriptionStore } from '../dist/state.js';
 import { enrollHost, fakePushSender, freshApp, ownerSession, post } from './helpers.mjs';
 
 const VAPID_PUBLIC = 'BJxKIjEEuJH0dLHTAcMFVYRnLsIBWcuMt5S1FCdDLbxCkmpUuLfHTFzWSFCPFTFsFvT8sVFTFxKIjEE';
@@ -840,6 +841,46 @@ test('a row whose Host is no longer enrolled is dropped on read', async () => {
     (await storedRows(stateDir)).map((row) => row.deliveryId),
     [survivorDelivery],
   );
+});
+
+test('a `hosts.json` absent for an instant revokes nobody, and truncates nothing', async () => {
+  // An editor saves by rename, so the file is briefly absent — the same
+  // absent-vs-empty distinction the relay's revocation sweep makes. Emptying
+  // the array is the revocation; losing the file for an instant is not.
+  const { app, stateDir, host, sessionToken } = await pushApp();
+  const deliveryId = newDeliveryId();
+  await subscribe(app, { sessionToken, host, deliveryId });
+
+  const path = join(stateDir, 'hosts.json');
+  const hosts = await readFile(path, 'utf8');
+  await rm(path);
+
+  assert.deepEqual(await (await query(app, sessionToken, [deliveryId])).json(), {
+    registered: [{ hostId: host.hostId, deliveryId }],
+  });
+
+  // And the read that matters most is the one `upsert` writes back: joining
+  // against an empty enrolled set would not hide the rows, it would delete
+  // them. The routes 404 a subscribe while the file is gone, so this is the
+  // store's own guarantee, held whatever a future caller reaches it through.
+  const store = new PushSubscriptionStore(stateDir, () => Date.now(), new HostStore(stateDir));
+  const second = newDeliveryId();
+  await store.upsert({
+    hostId: host.hostId,
+    deliveryId: second,
+    ...subscription('https://push.example.com/second'),
+    vapidPublicKey: VAPID_PUBLIC,
+  });
+  assert.deepEqual(
+    (await storedRows(stateDir)).map((row) => row.deliveryId).sort(),
+    [deliveryId, second].sort(),
+  );
+
+  // Restored with the row gone, the cascade still fires.
+  await writeFile(path, JSON.stringify(JSON.parse(hosts).filter(() => false)));
+  assert.deepEqual(await (await query(app, sessionToken, [deliveryId])).json(), {
+    registered: [],
+  });
 });
 
 // --- rows this Server cannot use --------------------------------------------

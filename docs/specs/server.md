@@ -192,7 +192,10 @@ field.
 
 **A row whose `hostId` has left `hosts.json` is dropped on read**, joined
 against the Host store rather than pruned at startup, so revoking a Host
-cascades without a restart; the next mutation writes the pruned set back. A row
+cascades without a restart; the next mutation writes the pruned set back. The
+join reads `listIfPresent`, so an **absent** `hosts.json` drops nothing —
+writing an empty enrolled set back would make a rename in flight a durable
+truncation. A row
 from before the end-to-end cutover carries a device key and no `deliveryId`, so
 **it is dropped on read** too — with **one** warning per process
 naming the file and saying to re-register. No versioned refusal, no archive
