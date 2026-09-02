@@ -109,7 +109,6 @@ async function main(live) {
     facts: {},
   };
   const state = live.state;
-  let shotSeq = 0;
 
   const ctx = {
     repoRoot,
@@ -123,7 +122,6 @@ async function main(live) {
     record: (facts) => Object.assign(summary.facts, facts),
     /** Screenshot the Host webview into the run directory. */
     shot: async (name) => {
-      shotSeq++;
       if (!state.hostBrowser) throw new Error('no browser to screenshot yet');
       await state.hostBrowser.screenshot(join(runDir, name));
       summary.artifacts.push(name);
