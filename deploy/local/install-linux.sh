@@ -1696,9 +1696,12 @@ serve_state() {
 
 # The first root-path proxy target in captured `serve status` output ($1), or
 # nothing. The first line is taken by parameter expansion rather than `| head
-# -1`, which exits after one line and leaves `sed` to die of SIGPIPE — 141 out
-# of a command substitution, which `set -e` turns into an install that stops
-# mid-run with nothing printed.
+# -1`, which exits after one line and leaves `sed` to die of SIGPIPE. That 141
+# was fatal in the pre-branch INLINE form, where the substitution's status was
+# the assignment's; inside this helper `printf` runs last and resets it, and
+# bash 3.2 has no `inherit_errexit`. So the expansion is hygiene here, not a
+# control — nothing downstream would notice a `head -1` returning the same
+# target, which is why no lint or test pins it.
 serve_root_target() {
   local targets
   targets="$(sed -n 's%^|-- / *proxy *%%p' <<<"$1")"

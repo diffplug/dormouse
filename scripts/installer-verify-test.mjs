@@ -228,8 +228,13 @@ function cases(platform, env) {
     ],
     [
       'serve_root_target: names the first root target, over 1 MiB of matches',
-      // Assignment-shaped, like the call site: a command substitution's status
-      // is the assignment's, so a 141 from inside stops the install there.
+      // Call-site shaped, but this pins the ANSWER, not an abort. A `| head -1`
+      // in here raises 141 and nothing propagates it: `printf` is the
+      // function's last command, so `$?` is 0 by the time it returns, and bash
+      // carries no `errexit` into `$( )` without `inherit_errexit`, which
+      // bash 3.2 does not have. The abort this shape once risked belonged to
+      // the pre-branch INLINE form, where the substitution's status was the
+      // assignment's — see the comment on `serve_root_target` itself.
       `serve="$(printf '%s\\n' "${SERVE_ROOT_FOREIGN}"; awk 'BEGIN{for(i=0;i<20000;i++) print "${SERVE_ROOT_FOREIGN}"}')"\n` +
         `if target="$(serve_root_target "$serve")"; then printf '[%s]\\n' "$target"; else echo aborted; fi`,
       '[http://127.0.0.1:9999]',

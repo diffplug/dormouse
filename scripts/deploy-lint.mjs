@@ -334,8 +334,8 @@ export const RULES = [
     // counts the consumers instead.
     //
     // Windows spells the match inline at all three sites rather than through a
-    // helper, so the pattern is variable-agnostic — $PORT in `cmd_verify` and
-    // `Invoke-Uninstall`, $LOOPBACK_PORT at the install-time gate — and runs
+    // helper, so the pattern is variable-agnostic — $PORT in `Invoke-Verify`
+    // and `Invoke-Uninstall`, $LOOPBACK_PORT at the install-time gate — and runs
     // through the `([^0-9]|$)` tail. Both halves are load-bearing and neither
     // was covered at first: stopping the pattern before the tail left the
     // right-bound deletable at the two $PORT sites, and counting only $PORT
