@@ -12,7 +12,8 @@ import {
 import { DEFAULT_PAIRING_TTL_MS } from 'server-lib-common';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
 import type { RemoteHostConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
-import type { InvitationState, RemoteHostStatus } from '../remote/host/remote-host';
+import type { RemoteHostStatus, TerminalInvitationState } from '../remote/host/remote-host';
+import { SCAN_LABEL } from '../remote/setup-copy';
 import {
   clearRemoteHostEnrollment,
   enrollOfferRemoteHost,
@@ -138,38 +139,77 @@ function useBusyAction() {
  * Everything the phone-setup panel can be showing, as one value.
  *
  * `null` is the closed panel. The rest are open: waiting on a mint, holding a
- * live code, spent, dropped, or refused. `minting` carries the code being
- * replaced when there is one, so an auto-refresh never blanks a QR a camera is
- * pointed at.
- *
- * **`spent`, `dropped`, and `expired` are three different facts and read
- * differently.** `spent` means a phone completed the handshake and the next
- * step is on that phone; `dropped` means this Host discarded the code
- * un-scanned — the relay socket went, or a newer mint evicted it; `expired`
- * means its TTL ran out before anyone scanned it. Only the first sends the user
- * to a phone (`docs/specs/remote-security-model.md` → Pairing).
+ * live code, in one of the four terminal phases, or refused. `minting` carries
+ * the code being replaced when there is one, so an auto-refresh never blanks a
+ * QR a camera is pointed at.
  */
 type SetupQrState =
   | null
   | { phase: 'minting'; prev?: SetupQrResult }
   | { phase: 'live'; qr: SetupQrResult }
-  | { phase: 'spent' }
-  | { phase: 'dropped' }
-  | { phase: 'expired' }
+  /** Carries its own id: the outcome is a second event about the same code. */
+  | { phase: 'scanned'; inviteId: string }
+  | { phase: Exclude<TerminalPhase, 'scanned'> }
   | { phase: 'failed'; message: string };
 
 /**
- * How each terminal invitation state reads in the panel. Exhaustive over
- * `InvitationState` minus `live`, so a state added to the Host cannot quietly
- * fall through to "Scanned" — which is the one sentence that must never be
- * shown for a code nobody touched.
+ * **Four different facts, and they read differently.** `scanned` means a phone
+ * completed the handshake and the next step is the pairing request about to
+ * interrupt this machine; `finished` means that request has been answered,
+ * either way; `dropped` means this Host discarded the code un-scanned — the
+ * relay socket went, or a newer mint evicted it; `expired` means its TTL ran
+ * out before anyone scanned it. **Only `scanned` sends the user to a phone**
+ * (`docs/specs/remote-security-model.md` → Pairing).
  */
-const TERMINAL_PHASE: Record<Exclude<InvitationState, 'live'>, 'spent' | 'dropped' | 'expired'> = {
-  reserved: 'spent',
-  consumed: 'spent',
+type TerminalPhase = 'scanned' | 'finished' | 'dropped' | 'expired';
+
+/**
+ * How each terminal invitation state reads in the panel. Exhaustive over the
+ * states the Host publishes, so a fifth one cannot quietly fall through to
+ * "scanned" — the one sentence that must never be shown for a code nobody
+ * touched.
+ */
+const TERMINAL_PHASE: Record<TerminalInvitationState, TerminalPhase> = {
+  reserved: 'scanned',
+  consumed: 'finished',
   dropped: 'dropped',
   expired: 'expired',
 };
+
+/**
+ * What each terminal phase says. A table rather than four JSX branches, so the
+ * exhaustiveness {@link TERMINAL_PHASE} promises holds on the render side too.
+ */
+const TERMINAL_COPY: Record<TerminalPhase, { headline: string; detail: string }> = {
+  scanned: {
+    headline:
+      'A phone scanned this code. It will ask to pair — that request interrupts you here with two digits to type.',
+    detail: 'This code is used up.',
+  },
+  // Approved or cancelled: the Host publishes one `consumed` for both, so this
+  // sentence has to be true of either. **It deliberately does not claim the
+  // pairing succeeded** — the count above it is absolute, not a delta, so on a
+  // machine with a phone already paired it reads the same either way.
+  finished: {
+    headline: 'This setup code is finished.',
+    detail: 'Pair another phone with a new code, or close this.',
+  },
+  dropped: {
+    headline: 'This code is no longer valid — nobody scanned it.',
+    detail: 'This machine lost its connection to the server, or replaced the code. Get a new one.',
+  },
+  expired: {
+    headline: 'This code expired — nobody scanned it.',
+    detail: 'Get a new one.',
+  },
+};
+
+/** The terminal copy for a state, or `undefined` while the panel is still live. */
+function terminalCopy(state: SetupQrState): { headline: string; detail: string } | undefined {
+  return state && state.phase in TERMINAL_COPY
+    ? TERMINAL_COPY[state.phase as TerminalPhase]
+    : undefined;
+}
 
 /**
  * The phone-setup panel's whole lifecycle: mint on open, replace the code before
@@ -237,19 +277,18 @@ function useSetupQr() {
 
   // The Host reports its own invitation states, which is the only way this
   // panel can know its code was used: the scan happens on the phone. Only for
-  // the invitation this panel is showing — a second window offering a different
-  // code stays live — and bumping the sequence makes it terminal, so a mint
-  // already in flight cannot paint a code over it.
-  const inviteId = displayedQr(state)?.inviteId;
+  // the invitation this panel is following — a second window offering a
+  // different code stays live — and bumping the sequence makes it terminal, so
+  // a mint already in flight cannot paint a code over it.
+  const inviteId = trackedInviteId(state);
   useEffect(() => {
     if (inviteId === undefined) return;
     return subscribeToInvitation((changed, invitationState) => {
-      // `reserved` is the flip that matters: a phone has completed the
-      // handshake against this code, so it is spent whatever the person at the
-      // laptop decides next. `live` is the only state that keeps the panel.
+      // `live` is the only state that keeps the code on screen.
       if (changed !== inviteId || invitationState === 'live') return;
       mintSeq.current++;
-      setState({ phase: TERMINAL_PHASE[invitationState] });
+      const phase = TERMINAL_PHASE[invitationState];
+      setState(phase === 'scanned' ? { phase, inviteId } : { phase });
     });
   }, [inviteId]);
 
@@ -261,6 +300,17 @@ function displayedQr(state: SetupQrState): SetupQrResult | undefined {
   if (state?.phase === 'live') return state.qr;
   if (state?.phase === 'minting') return state.prev;
   return undefined;
+}
+
+/**
+ * The invitation this panel is following: the one it is drawing, or — once a
+ * phone has completed a handshake against it — the one whose outcome it is
+ * still waiting on. The second half is why the subscription outlives the QR
+ * (`docs/specs/server.md` → Remote control, in the Settings dialog).
+ */
+function trackedInviteId(state: SetupQrState): string | undefined {
+  if (state?.phase === 'scanned') return state.inviteId;
+  return displayedQr(state)?.inviteId;
 }
 
 type EnrollmentAction = 'offer' | 'form';
@@ -344,7 +394,7 @@ export function RemoteControlSection() {
         <div className="mt-1.5 text-sm text-muted">Checking…</div>
       ) : state.kind === 'error' ? (
         <div className="mt-1.5 text-sm leading-relaxed text-muted">
-          Could not reach this machine’s Host service: {state.message}
+          Could not reach this machine’s remote-control service: {state.message}
         </div>
       ) : state.status.enrolled ? (
         // Keyed by which enrollment this is: a swap to another server — the
@@ -535,7 +585,7 @@ function EnrolledView({
       <div className="mt-0.5 text-muted">
         {pairedClients === 0
           ? 'No phone has paired with this machine yet.'
-          : `${pairedClients} paired ${pairedClients === 1 ? 'device' : 'devices'}.`}
+          : `${pairedClients} paired ${pairedClients === 1 ? 'phone' : 'phones'}.`}
       </div>
 
       {error ? <div className="mt-1.5 text-error">{error}</div> : null}
@@ -624,6 +674,7 @@ function SetupPhonePanel({
   onDone: () => void;
 }) {
   const shown = displayedQr(state);
+  const terminal = terminalCopy(state);
   const expiresAt = shown?.expiresAt ?? null;
   const [now, setNow] = useState(() => Date.now());
 
@@ -648,46 +699,27 @@ function SetupPhonePanel({
   return (
     <div className="mt-2 rounded border border-border p-2">
       <div className={FIELD_LABEL}>Set up a phone</div>
-      {state.phase === 'spent' ? (
+      {terminal ? (
         <>
-          <div className="mt-1 text-sm leading-relaxed text-foreground">
-            Scanned. Finish on the phone — it asks to pair, and that request interrupts you here
-            with a two-digit code to type.
-          </div>
-          <div className="mt-1 text-xs text-muted">This code is used up.</div>
-        </>
-      ) : state.phase === 'dropped' ? (
-        // Nobody scanned it: this machine let it go. Saying "scanned" here sends
-        // the user to a phone that never asked.
-        <>
-          <div className="mt-1 text-sm leading-relaxed text-foreground">
-            This code is no longer valid — nobody scanned it.
-          </div>
-          <div className="mt-1 text-xs text-muted">
-            This machine lost its connection to the server, or replaced the code. Get a new one.
-          </div>
-        </>
-      ) : state.phase === 'expired' ? (
-        // Nobody scanned this one either — it simply ran out, which happens
-        // whenever the refresh timer runs late: a backgrounded window, a laptop
-        // waking from sleep.
-        <>
-          <div className="mt-1 text-sm leading-relaxed text-foreground">
-            This code expired — nobody scanned it.
-          </div>
-          <div className="mt-1 text-xs text-muted">Get a new one.</div>
+          <div className="mt-1 text-sm leading-relaxed text-foreground">{terminal.headline}</div>
+          <div className="mt-1 text-xs text-muted">{terminal.detail}</div>
         </>
       ) : shown ? (
         <>
+          {/* Names the phone-side control — through the constant Pocket labels
+              it with — because pointing the phone's *own* camera at this is the
+              one route that sets nothing up: on iOS it opens Safari rather than
+              the installed app (`pocket-app.md`). */}
           <div className="mt-1 text-sm leading-relaxed text-muted">
-            Point the phone’s camera at this. Nothing to type — no address, no password.
+            In Dormouse Pocket on the phone, tap {SCAN_LABEL} and point it at this. Nothing to type
+            — no address, no password.
           </div>
           <div className="mt-2 flex justify-center">
             <ScannableCode url={shown.url} />
           </div>
           <div className="mt-1.5 text-center text-xs text-muted">
             {minutesUntil(shown.expiresAt, now) > 0
-              ? `Sets up one phone, within ${minutesUntil(shown.expiresAt, now)} min.`
+              ? `Good for one phone. Expires in ${minutesUntil(shown.expiresAt, now)} min.`
               : 'This code has expired — get a new one.'}
           </div>
         </>

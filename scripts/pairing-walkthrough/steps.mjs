@@ -23,11 +23,25 @@ import { delay, findFreePort, spawnLogged, waitFor, waitForLine } from './proc.m
 const POCKET_VIEWPORT = { width: 390, height: 844 };
 
 /**
- * Pocket's one way in, as its first-run screen labels it
- * (`lib/src/remote/pocket-app/App.tsx`). Clicked rather than routed to: the
- * scanner is a phase of the app, not a URL.
+ * Pocket's one way in, as its first-run screen labels it. Clicked rather than
+ * routed to: the scanner is a phase of the app, not a URL.
+ *
+ * Mirrors `SCAN_LABEL` in `lib/src/remote/setup-copy.ts`; pinned by
+ * `lib/src/lib/mirrored-constants.test.ts`, since a Node harness cannot import
+ * the lib's TypeScript.
  */
-const SCAN_LABEL = 'Scan a Host QR';
+const SCAN_LABEL = 'Scan a setup code';
+
+/**
+ * The phone's two-digit screen, by the accessible name of the live region that
+ * holds the digits — the same reason {@link PAIRING_MODAL} and {@link SETUP_QR}
+ * anchor where they do: the copy around it is under review and the name is a
+ * contract.
+ *
+ * Mirrors `PAIRING_CODE_LABEL` in `lib/src/remote/pocket-app/App.tsx`; pinned by
+ * `lib/src/lib/mirrored-constants.test.ts`.
+ */
+const PAIRING_CODE_REGION = '[role="status"][aria-label="Pairing code"]';
 
 /**
  * The Host's pairing modal, by the id its own title carries.
@@ -558,21 +572,27 @@ async function ensureCapturedCodeIsLive(ctx) {
   ctx.record({ qrRecaptured: true });
 }
 
-/** The scanner screen, matched on copy with no typographic quotes in it. */
+/**
+ * The scanner screen, by the id of the paste field only it renders — the same
+ * anchor the unit tests use (`App.scan.test.tsx`). Not by its lead copy, which
+ * this pass rewrote: a rewrite would have surfaced here as "the scanner never
+ * came up".
+ */
 function scannerUpExpr() {
-  return `return !!document.body && document.body.innerText.includes('Or paste the code');`;
+  return `return !!document.querySelector('#pocket-paste-code');`;
 }
 
 /**
  * The two digits off the waiting screen — the only place they exist, since the
- * Host holds the expected ones and never sends them.
+ * Host holds the expected ones and never sends them. The digit test stays,
+ * because {@link PAIRING_CODE_REGION} holds a placeholder until the sampled
+ * code lands.
  */
 function pairingCodeExpr() {
-  return `if (!document.body || !document.body.innerText.includes('Type this code on the computer')) return null;
-    const digits = [...document.querySelectorAll('p')]
-      .map((el) => el.textContent.trim())
-      .find((text) => /^\\d\\d$/.test(text));
-    return digits ?? null;`;
+  return `const region = document.querySelector('${PAIRING_CODE_REGION}');
+    if (!region) return null;
+    const digits = region.textContent.trim();
+    return /^\\d\\d$/.test(digits) ? digits : null;`;
 }
 
 /** The Host's pairing modal, as text, or null while it is not up. */
@@ -633,7 +653,7 @@ async function approveOnHost(ctx) {
   const section = await ab.waitUntil(
     `const section = ${REMOTE_SECTION};
      return section && /\\d+\\s+paired/.test(section.innerText) ? section.innerText : null;`,
-    { what: 'the Host to count a paired device', timeoutMs: 60_000 },
+    { what: 'the Host to count a paired phone', timeoutMs: 60_000 },
   );
   ctx.record({
     approval: { code, confirm, approvedInMs: Date.now() - startedAt, remoteControl: section.trim() },

@@ -15,9 +15,15 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateNoiseKeyPair, toBase64Url, type PairingInvitation } from 'server-lib-common';
 
-import App, { UNSUPPORTED_BROWSER_TITLE } from './App';
+import App, {
+  CAMERA_BOOTSTRAP_MESSAGE,
+  HOSTS_TITLE,
+  SCAN_LABEL,
+  UNSUPPORTED_BROWSER_TITLE,
+} from './App';
 import type { ConnectResult, PairingResult } from '../client/pocket-client';
 import {
+  PAIRING_DENIAL_MESSAGES,
   SETUP_CODE_DEAD_MESSAGE,
   ServerRefusalError,
   SetupTokenInvalidError,
@@ -28,6 +34,7 @@ import {
   buttonNamed,
   click,
   invitationUrl as sharedInvitationUrl,
+  pairingCode,
   rowFor,
   settle,
 } from './app-test-utils';
@@ -199,7 +206,7 @@ async function boot(props: Partial<Parameters<typeof App>[0]> = {}): Promise<voi
 
 /** Open the scanner and paste one code into it, as a user without a camera would. */
 async function pasteCode(url: string): Promise<void> {
-  await click(container, 'Scan a Host QR');
+  await click(container, SCAN_LABEL);
   const input = container.querySelector<HTMLInputElement>('#pocket-paste-code')!;
   act(() => setNativeFieldValue(input, url));
   act(() => {
@@ -223,7 +230,7 @@ describe('the capability gate', () => {
 
     expect(container.textContent).toContain(UNSUPPORTED_BROWSER_TITLE);
     expect(buttonNamed(container, 'Sign in with passkey')).toBeNull();
-    expect(buttonNamed(container, 'Scan a Host QR')).toBeNull();
+    expect(buttonNamed(container, SCAN_LABEL)).toBeNull();
     expect(fake.signin).not.toHaveBeenCalled();
     expect(fake.listHosts).not.toHaveBeenCalled();
   });
@@ -232,7 +239,7 @@ describe('the capability gate', () => {
     await boot();
 
     expect(container.textContent).not.toContain(UNSUPPORTED_BROWSER_TITLE);
-    expect(buttonNamed(container, 'Scan a Host QR')).not.toBeNull();
+    expect(buttonNamed(container, SCAN_LABEL)).not.toBeNull();
   });
 });
 
@@ -258,8 +265,10 @@ describe('a first run, from the scan to the terminal', () => {
     expect(fake.pair.mock.calls[0]![0].inviteId).toBe(invitation.inviteId);
 
     // The digits are on screen while the outcome is pending.
-    expect(container.textContent).toContain('07');
-    expect(container.textContent).toContain('Type this code on the computer');
+    // Matched on the live region's accessible name, not on the sentence beside
+    // it: the identity of this screen is an accessibility contract, and the copy
+    // around it is not (`PAIRING_CODE_LABEL`).
+    expect(pairingCode(container)).toBe('07');
 
     const record = await knownHost(invitation.hostId);
     releasePair({ ok: true, record });
@@ -267,17 +276,20 @@ describe('a first run, from the scan to the terminal', () => {
 
     expect(fake.connect).toHaveBeenCalledWith(invitation.hostId);
     // Approving on the laptop lands the phone in a terminal, not back on a list.
-    expect(buttonNamed(container, '‹ Hosts')).not.toBeNull();
+    expect(buttonNamed(container, `‹ ${HOSTS_TITLE}`)).not.toBeNull();
   });
 
   it('reports a pairing the laptop refused, and lands on the Hosts list', async () => {
     const { url } = await invitationUrl();
-    fake.pair.mockResolvedValue({ ok: false, message: 'The pairing was refused on the computer.' });
+    fake.pair.mockResolvedValue({
+      ok: false,
+      message: PAIRING_DENIAL_MESSAGES['user-denied'],
+    });
     await boot();
 
     await pasteCode(url);
 
-    expect(alertText(container)).toBe('The pairing was refused on the computer.');
+    expect(alertText(container)).toBe(PAIRING_DENIAL_MESSAGES['user-denied']);
     expect(fake.connect).not.toHaveBeenCalled();
     expect(buttonNamed(container, 'Refresh')).not.toBeNull();
   });
@@ -538,12 +550,12 @@ describe('leaving the scanner', () => {
   it('returns a signed-out phone to the auth screen', async () => {
     await boot();
 
-    await click(container, 'Scan a Host QR');
+    await click(container, SCAN_LABEL);
     expect(container.querySelector('#pocket-paste-code')).not.toBeNull();
 
     await click(container, 'Cancel');
 
-    expect(buttonNamed(container, 'Scan a Host QR')).not.toBeNull();
+    expect(buttonNamed(container, SCAN_LABEL)).not.toBeNull();
     expect(container.querySelector('#pocket-paste-code')).toBeNull();
   });
 
@@ -552,7 +564,7 @@ describe('leaving the scanner', () => {
     await boot();
     await click(container, 'Sign in with passkey');
 
-    await click(container, 'Scan a Host QR');
+    await click(container, SCAN_LABEL);
     await click(container, 'Cancel');
 
     expect(buttonNamed(container, 'Refresh')).not.toBeNull();
@@ -567,11 +579,11 @@ describe('leaving the scanner', () => {
     // pairing, so a scan that failed after sign-in has a session and no list.
     // Cancelling into an empty "No computers paired yet" would be a lie.
     const { url } = await invitationUrl();
-    fake.setup.mockRejectedValue(new Error('That pairing code has expired.'));
+    fake.setup.mockRejectedValue(new Error(SETUP_CODE_DEAD_MESSAGE));
     fake.listKnownHosts.mockResolvedValue([await knownHost('host-1')]);
     fake.listHosts.mockResolvedValue([{ hostId: 'host-1', label: '', online: true }]);
     await boot();
-    await click(container, 'Scan a Host QR');
+    await click(container, SCAN_LABEL);
     const input = container.querySelector<HTMLInputElement>('#pocket-paste-code')!;
     act(() => setNativeFieldValue(input, url));
     act(() => {
@@ -624,7 +636,7 @@ it('never opens a camera on a screen that is gone', async () => {
   };
   await boot({ startScan });
 
-  await click(container, 'Scan a Host QR');
+  await click(container, SCAN_LABEL);
   await click(container, 'Cancel');
 
   expect(stopped.length).toBeGreaterThan(0);
@@ -633,7 +645,7 @@ it('never opens a camera on a screen that is gone', async () => {
 it('leads with the camera-bootstrap copy when the fragment brought us here', async () => {
   await boot({ arrivedByCamera: true });
 
-  expect(container.textContent).toContain('scan this Host QR in Pocket');
+  expect(container.textContent).toContain(CAMERA_BOOTSTRAP_MESSAGE);
   // Nothing was spent: the run has no token, and no Server call was made.
   expect(fake.setup).not.toHaveBeenCalled();
   expect(fake.retireSetupToken).not.toHaveBeenCalled();

@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CAMERA_BOOTSTRAP_MESSAGE,
   HostsView,
+  PUSH_SERVER_DISABLED,
+  SCAN_LABEL,
   PairingCodeView,
   SetupOrSignin,
   pushNoticeState,
@@ -15,7 +17,12 @@ import {
   type PushConfigStatus,
 } from './App';
 import type { PushAvailability } from '../client/push-subscribe';
-import { HOSTS, buttonNamed as buttonNamedIn, rowFor as rowForIn } from './app-test-utils';
+import {
+  HOSTS,
+  buttonNamed as buttonNamedIn,
+  pairingCode as pairingCodeIn,
+  rowFor as rowForIn,
+} from './app-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -166,7 +173,7 @@ describe('SetupOrSignin: scanning versus signing in', () => {
     expect(container.textContent).not.toContain('Welcome back');
     expect(container.querySelector('input')).toBeNull();
 
-    act(() => buttonNamed('Scan a Host QR')!.click());
+    act(() => buttonNamed(SCAN_LABEL)!.click());
     expect(onScan).toHaveBeenCalledOnce();
   });
 
@@ -185,7 +192,7 @@ describe('SetupOrSignin: scanning versus signing in', () => {
 
     expect(container.textContent).toContain('Welcome back');
     // A signed-in phone still scans — to pair a computer it has not met.
-    act(() => buttonNamed('Scan a Host QR')!.click());
+    act(() => buttonNamed(SCAN_LABEL)!.click());
     expect(onScan).toHaveBeenCalledOnce();
   });
 
@@ -203,7 +210,7 @@ describe('SetupOrSignin: scanning versus signing in', () => {
   it('locks every action while a ceremony this screen started is running', () => {
     renderAuth({ busy: 'pair' });
 
-    expect(buttonNamed('Scan a Host QR')).toBeNull();
+    expect(buttonNamed(SCAN_LABEL)).toBeNull();
     expect(buttonNamed('…')!.disabled).toBe(true);
     expect(buttonNamed('Sign in with passkey')!.disabled).toBe(true);
   });
@@ -219,7 +226,7 @@ describe('SetupOrSignin after a native-camera arrival', () => {
     renderAuth({ arrivedByCamera: true });
 
     expect(container.textContent).toContain(CAMERA_BOOTSTRAP_MESSAGE);
-    expect(buttonNamed('Scan a Host QR')).not.toBeNull();
+    expect(buttonNamed(SCAN_LABEL)).not.toBeNull();
   });
 
   it('says it on a returning browser too, where sign-in still leads', () => {
@@ -243,12 +250,27 @@ describe('SetupOrSignin install guidance', () => {
     renderAuth({ hasPriorUse: false, needsInstall: true });
 
     const notice = installNotice();
-    const scan = buttonNamed('Scan a Host QR');
+    const scan = buttonNamed(SCAN_LABEL);
     expect(notice).not.toBeNull();
     // Strictly before, not merely "not after": a notice that *contained* the
     // action would also satisfy FOLLOWING while saying nothing about order.
     expect(notice!.compareDocumentPosition(scan!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(notice!.contains(scan!)).toBe(false);
+  });
+
+  it('warns before the camera notice too, the one arrival that shows both', () => {
+    // iOS Safari, opened by the phone's own camera: the camera notice sends the
+    // reader to the scan button, and scanning here before installing mints the
+    // passkey in the wrong partition — the trap the install notice exists for.
+    renderAuth({ hasPriorUse: false, needsInstall: true, arrivedByCamera: true });
+
+    const notice = installNotice()!;
+    const camera = [...container.querySelectorAll<HTMLElement>('div')].find(
+      (el) => el.textContent === CAMERA_BOOTSTRAP_MESSAGE,
+    )!;
+    expect(notice).not.toBeUndefined();
+    expect(camera).not.toBeUndefined();
+    expect(notice.compareDocumentPosition(camera) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('stays quiet on a return visit, which mints no passkey', () => {
@@ -261,7 +283,7 @@ describe('SetupOrSignin install guidance', () => {
     const onScan = vi.fn();
     renderAuth({ hasPriorUse: false, needsInstall: true, onScan });
 
-    const scan = buttonNamed('Scan a Host QR')!;
+    const scan = buttonNamed(SCAN_LABEL)!;
     expect(scan.disabled).toBe(false);
     act(() => scan.click());
     expect(onScan).toHaveBeenCalledOnce();
@@ -288,8 +310,10 @@ describe('the two-digit waiting screen', () => {
       );
     });
 
-    expect(container.textContent).toContain('07');
-    expect(container.textContent).toContain('Type this code on the computer');
+    // Matched on the live region's accessible name, not on the sentence beside
+    // it: the identity of this screen is an accessibility contract, and the copy
+    // around it is not (`PAIRING_CODE_LABEL`).
+    expect(pairingCodeIn(container)).toBe('07');
   });
 
   it('offers a way out while the outcome is still pending', () => {
@@ -366,7 +390,7 @@ describe('HostsView actions', () => {
     renderHosts({ hosts: [], onScan });
 
     expect(container.textContent).toContain('No computers paired yet');
-    act(() => buttonNamed('Scan a Host QR')!.click());
+    act(() => buttonNamed(SCAN_LABEL)!.click());
     expect(onScan).toHaveBeenCalledOnce();
   });
 });
@@ -441,7 +465,7 @@ describe('the one push card on the Hosts view', () => {
   it('reports a server with push disabled rather than the browser state', () => {
     renderHosts({ pushConfigStatus: 'disabled' });
 
-    expect(pushCard()!.textContent).toContain('server has push notifications disabled');
+    expect(pushCard()!.textContent).toContain(PUSH_SERVER_DISABLED);
     expect(buttonNamed('Enable push notifications')).toBeNull();
   });
 
@@ -459,7 +483,7 @@ describe('the one push card on the Hosts view', () => {
     renderHosts({ pushState: 'needs-install', pushConfigStatus: 'disabled' });
 
     expect(container.textContent).not.toContain('Add Dormouse to your Home Screen');
-    expect(pushCard()!.textContent).toContain('server has push notifications disabled');
+    expect(pushCard()!.textContent).toContain(PUSH_SERVER_DISABLED);
   });
 
   it('does not offer Enable until the VAPID key is cached', () => {
@@ -539,7 +563,7 @@ describe('pushNoticeState', () => {
     // not, so "Push notifications on." would be a lie.
     expect(noticeState({ configStatus: 'disabled', isPushSubscribed: () => true })).toEqual({
       kind: 'blocked',
-      reason: 'This server has push notifications disabled.',
+      reason: PUSH_SERVER_DISABLED,
     });
   });
 

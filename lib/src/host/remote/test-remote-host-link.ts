@@ -18,6 +18,7 @@
 import { DEFAULT_PAIRING_TTL_MS, formatPairingInvitationUrl } from 'server-lib-common';
 
 import type { RemoteHostConsoleStatus, SetupQrResult } from './service-protocol';
+import type { TerminalInvitationState } from '../../remote/host/remote-host';
 import type { RemoteHostLink } from '../../lib/platform/types';
 
 /** A machine that has never enrolled: the section shows its three-field form. */
@@ -58,7 +59,7 @@ export function enrolledStatus(
 }
 
 /**
- * A pairing code as `setupQr` answers one: the positional `#pair?` URL, the
+ * A setup code as `setupQr` answers one: the positional `#pair?` URL, the
  * invitation it belongs to, and its clock. Composed by the real formatter, so a
  * grammar change reaches the fixture too — and so a fixture that would not
  * scan fails here rather than in a story.
@@ -91,7 +92,7 @@ export function setupQrResult(over: Partial<SetupQrResult> = {}): SetupQrResult 
 export interface PrimedRemoteHost {
   /** What `status` answers. */
   status?: RemoteHostConsoleStatus;
-  /** Make `status` reject — "could not reach this machine's Host service". */
+  /** Make `status` reject — "could not reach this machine's remote-control service". */
   statusError?: string;
   /**
    * Make `enroll` *and* `enrollOffer` reject — the refused-origin case both
@@ -103,11 +104,11 @@ export interface PrimedRemoteHost {
   /** Make `setupQr` reject — the relay is down, or the server refused. */
   setupQrError?: string;
   /**
-   * Fire an `invitation` event as soon as something subscribes, so the panel
-   * renders its scanned state. A story is one frame, so "the phone reserved the
-   * code" has to be a starting condition rather than an event to wait for.
+   * Fire one `invitation` event as soon as something subscribes, so the panel
+   * renders that terminal state. A story is one frame, so "the phone reserved
+   * the code" has to be a starting condition rather than an event to wait for.
    */
-  setupRedeemed?: boolean;
+  setupInvitation?: TerminalInvitationState;
 }
 
 /**
@@ -138,14 +139,15 @@ export function makeStubRemoteHostLink(primed: PrimedRemoteHost): RemoteHostLink
     respond: () => {},
     notify: () => {},
     on: (name, listener) => {
-      if (name === 'invitation' && primed.setupRedeemed) {
+      if (name === 'invitation' && primed.setupInvitation) {
         // Naming the invitation the stub's own `setupQr` answered, because the
         // panel acts only on its own code (`service-protocol.ts`).
         const { inviteId } = primed.setupQr ?? setupQrResult();
+        const state = primed.setupInvitation;
         // A microtask rather than inline: the panel subscribes during an effect,
         // and setting state before that effect has returned is a no-op React
         // warns about.
-        queueMicrotask(() => listener({ name: 'invitation', inviteId, state: 'reserved' }));
+        queueMicrotask(() => listener({ name: 'invitation', inviteId, state }));
       }
       return () => {};
     },

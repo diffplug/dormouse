@@ -54,7 +54,7 @@ a bare run does all of it.
 | 4 | `enroll` | Types the server URL, the setup password and the machine name into the real form, submits, and waits for **Connected**. → `03-enroll-form.png`, `04-enrolled.png` |
 | 5 | `qr` | Clicks **Set up a phone**, waits for the code, screenshots, crops to the QR, makes a camera-shaped Y4M, and decodes the crop to prove it is legible. → `qr-full.png`, `qr.png`, `qr.y4m`, `invitation-url.txt` |
 | 6 | `pocket` | Launches a second, isolated Chrome with the fake camera pointed at `qr.y4m`, attaches with `agent-browser connect <port>`, opens the **plain origin**, and gives the page a CDP virtual authenticator. → `05-pocket-first-run.png` |
-| 7 | `code` | Taps **Scan a Host QR**; Pocket's own scanner decodes the fake camera, registers a passkey with the scanned token, signs in, and shows two digits. Reads them, and waits for the Host's modal to open. → `06-scanner.png`, `07-code-screen.png`, `08-host-pairing-modal.png`, `pairing-code.txt` |
+| 7 | `code` | Taps **Scan a setup code**; Pocket's own scanner decodes the fake camera, registers a passkey with the scanned token, signs in, and shows two digits. Reads them, and waits for the Host's modal to open. → `06-scanner.png`, `07-code-screen.png`, `08-host-pairing-modal.png`, `pairing-code.txt` |
 | 8 | `terminal` | Types the two digits into the Host's modal and authorizes; waits for Pocket to connect itself and land on the terminal; runs a command from the phone and reads the file it wrote; rings the Host and finds the bell on the phone; then leaves to the Hosts view and connects again. → `09-host-approved.png` … `14-pocket-reconnected.png`, `terminal-proof.txt`, `notify-proof.txt`, `reconnect-proof.txt` |
 
 Everything a later step needs from an earlier one is on `ctx.state` —
@@ -175,8 +175,8 @@ the Server derives from its own origin
 - **Push is off**, because a loopback origin has no routable VAPID subject
   ([`docs/specs/server.md`](../../docs/specs/server.md) → Configuration). So the
   Hosts view's card reads *Push notifications are off · This server has push
-  notifications disabled* (`13-pocket-hosts.txt`), the alarm settings say no
-  device has enabled alerts, and **the whole delivery-keyed push path — Enable,
+  notifications turned off* (`13-pocket-hosts.txt`), the alarm settings say no
+  paired phone has push on, and **the whole delivery-keyed push path — Enable,
   the sealed payload, the worker's notification — is untested here.** Only the
   in-session ring is.
 - **Nothing on this path is a phone.** The Client is a desktop Chrome at a

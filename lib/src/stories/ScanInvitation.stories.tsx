@@ -69,7 +69,7 @@ export const CameraUnsupported: Story = {
   args: { startScan: refused('NotFoundError') },
 };
 
-// A pasted string that is not a pairing code for this server. One fixed line —
+// A pasted string that is not a setup code for this server. One fixed line —
 // the parser answers a complete invitation or nothing, never a reason.
 export const PastedCodeRejected: Story = {
   play: async ({ canvasElement }) => {

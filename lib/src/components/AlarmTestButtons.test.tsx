@@ -92,7 +92,7 @@ describe('PushTestButton', () => {
     await act(async () => root.render(<PushTestButton />));
     await act(async () => button().click());
 
-    expect(text()).toContain('Sent to 2 devices');
+    expect(text()).toContain('Sent to 2 phones');
   });
 
   it('distinguishes "nowhere to send it" from a failure', async () => {
@@ -107,7 +107,7 @@ describe('PushTestButton', () => {
     await act(async () => root.render(<PushTestButton />));
     await act(async () => button().click());
 
-    expect(text()).toContain('No paired phone has enabled alerts yet');
+    expect(text()).toContain('No paired phone has push notifications turned on');
     // The ordinary answer on a freshly enrolled machine — not rendered as an error.
     expect(container.querySelector('[role="status"]')?.className).not.toContain('text-error');
   });
@@ -124,7 +124,22 @@ describe('PushTestButton', () => {
     await act(async () => root.render(<PushTestButton />));
     await act(async () => button().click());
 
-    expect(text()).toContain('No device accepted the push');
+    expect(text()).toContain('No phone accepted the push');
+  });
+
+  it('names what a partly-failed fan-out reached, like every other outcome', async () => {
+    platform = {
+      remoteHost: {
+        command: vi.fn(async () => ({ targeted: 3, delivered: 2, failed: 1 })),
+        on: () => () => {},
+        respond: () => {},
+        notify: () => {},
+      },
+    };
+    await act(async () => root.render(<PushTestButton />));
+    await act(async () => button().click());
+
+    expect(text()).toContain('Sent to 2 phones; 1 failed.');
   });
 
   it('surfaces the service error', async () => {

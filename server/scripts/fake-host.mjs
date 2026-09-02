@@ -66,7 +66,7 @@ async function main() {
     }
     const { token, expiresAt } = await minted.json();
     const invitation = await fakeHost.mintInvitation({ setupToken: token, expiresAt });
-    console.log(`\npairing code (paste into Pocket):\n  ${formatPairingInvitationUrl(host.origin, invitation)}\n`);
+    console.log(`\nsetup code (paste into Pocket):\n  ${formatPairingInvitationUrl(host.origin, invitation)}\n`);
   };
 
   fakeHost.on('open', () => console.log('host socket open — waiting for clients'));

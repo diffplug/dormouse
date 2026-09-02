@@ -260,19 +260,19 @@ The input mode selector controls what appears in the reserve area. It is always
 visible, has four items (`Sessions | Recent | Type | Draft`), and is
 self-labeling with both an icon and a short mode label.
 
-Source of truth: `KEYBOARD_MODES` and `RESERVE_PLACEHOLDER_COPY` in
+Source of truth: `KEYBOARD_MODES` and `RESERVE_COPY` in
 `lib/src/components/MobileTerminalUi.tsx` define input-mode button labels, icons,
-and placeholder copy.
+and reserve copy.
 
 | Mode | Reserve area content |
 | --- | --- |
 | Sessions | Mobile session rows with active, alert, and TODO state. Selecting a session makes it the single visible terminal. |
-| Recent | The Recent reserve placeholder copy, filling the reserve. |
-| Type | The Type reserve placeholder copy, as a button that focuses the hidden terminal input. Every typed key is echoed into the terminal as it happens. |
-| Draft | The Draft reserve placeholder copy, filling the reserve. |
+| Recent | The Recent reserve copy, filling the reserve. |
+| Type | The Type reserve copy, as a button that focuses the hidden terminal input — so it reads as the way to bring a dismissed keyboard back. Every typed key is echoed into the terminal as it happens. |
+| Draft | The Draft reserve copy, filling the reserve. |
 
-Default input mode is **Type**. Recent and Draft are placeholder-only today —
-the real features are staged (see [Future](#future)).
+Default input mode is **Type**. Recent and Draft are placeholder-only today and
+say so in the reserve — the real features are staged (see [Future](#future)).
 
 Tapping the **Type** selector **must** focus the hidden input synchronously
 during the tap/click handler — the user-gesture-linked call is what makes mobile

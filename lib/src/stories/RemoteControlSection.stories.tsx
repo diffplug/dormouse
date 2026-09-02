@@ -60,6 +60,15 @@ function settled(text: string | RegExp) {
   };
 }
 
+/** {@link settled} for the states behind the setup panel, which has to be opened. */
+function setupPanel(text: string | RegExp) {
+  return async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole('button', { name: 'Set up a phone' }));
+    await canvas.findByText(text);
+  };
+}
+
 /** A machine that has never enrolled: server, setup password, name. */
 export const Unenrolled: Story = {
   parameters: {
@@ -134,7 +143,7 @@ export const ConnectedNoDevices: Story = {
 /** After a successful pairing ceremony. */
 export const ConnectedOneDevice: Story = {
   parameters: { primedRemoteHost: { status: enrolledStatus({ pairedClients: 1 }) } },
-  play: settled('1 paired device.'),
+  play: settled('1 paired phone.'),
 };
 
 /** Plural, and a long tailnet origin exercising the URL line's `break-all`. */
@@ -147,7 +156,7 @@ export const ConnectedManyDevices: Story = {
       }),
     },
   },
-  play: settled('4 paired devices.'),
+  play: settled('4 paired phones.'),
 };
 
 /**
@@ -183,6 +192,8 @@ export const SetupPhoneQr: Story = {
     primedRemoteHost: { status: enrolledStatus(), setupQr: setupQrResult() },
     docs: { story: { height: '520px' } },
   },
+  // The one setup-panel story that settles on the QR's accessible name rather
+  // than on text, so it cannot use {@link setupPanel}.
   play: async (context) => {
     const canvas = within(context.canvasElement);
     await userEvent.click(await canvas.findByRole('button', { name: 'Set up a phone' }));
@@ -197,14 +208,26 @@ export const SetupPhoneQr: Story = {
  */
 export const SetupPhoneRedeemed: Story = {
   parameters: {
-    primedRemoteHost: { status: enrolledStatus(), setupRedeemed: true },
+    primedRemoteHost: { status: enrolledStatus(), setupInvitation: 'reserved' },
     docs: { story: { height: '340px' } },
   },
-  play: async (context) => {
-    const canvas = within(context.canvasElement);
-    await userEvent.click(await canvas.findByRole('button', { name: 'Set up a phone' }));
-    await canvas.findByText(/This code is used up/);
+  play: setupPanel(/This code is used up/),
+};
+
+/**
+ * The pairing request that code produced has been answered — approved on this
+ * machine, or cancelled. The panel is behind the modal the whole time, so this
+ * is the frame the user is left looking at.
+ */
+export const SetupPhoneFinished: Story = {
+  parameters: {
+    primedRemoteHost: {
+      status: enrolledStatus({ pairedClients: 1 }),
+      setupInvitation: 'consumed',
+    },
+    docs: { story: { height: '340px' } },
   },
+  play: setupPanel(/This setup code is finished/),
 };
 
 /**
@@ -219,11 +242,7 @@ export const SetupPhoneRefused: Story = {
     },
     docs: { story: { height: '340px' } },
   },
-  play: async (context) => {
-    const canvas = within(context.canvasElement);
-    await userEvent.click(await canvas.findByRole('button', { name: 'Set up a phone' }));
-    await canvas.findByText('could not mint a setup code (503)');
-  },
+  play: setupPanel('could not mint a setup code (503)'),
 };
 
 /**
@@ -231,6 +250,6 @@ export const SetupPhoneRefused: Story = {
  * none, which renders nothing at all rather than an error.
  */
 export const HostServiceError: Story = {
-  parameters: { primedRemoteHost: { statusError: 'The Host service did not answer.' } },
-  play: settled(/Could not reach this machine’s Host service/),
+  parameters: { primedRemoteHost: { statusError: 'It did not answer.' } },
+  play: settled(/Could not reach this machine’s remote-control service/),
 };

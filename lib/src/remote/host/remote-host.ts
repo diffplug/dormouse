@@ -90,6 +90,13 @@ export const MAX_PENDING_CONNECTION_HANDSHAKES = 8;
 export type InvitationState = 'live' | 'reserved' | 'consumed' | 'expired' | 'dropped';
 
 /**
+ * The subset a *change* can carry. `live` is a resting state a query answers
+ * with, never one this Host announces an invitation moving to, and naming the
+ * difference once keeps every consumer from re-deriving it.
+ */
+export type TerminalInvitationState = Exclude<InvitationState, 'live'>;
+
+/**
  * How many bytes name one thing this Host mints locally: the invitation id the
  * QR carries, and the pairing id the modal echoes back. 16, the length every
  * routing id on the `e2e` envelope is — the QR grammar pins the invitation id
@@ -585,11 +592,13 @@ export class RemoteHost {
   /**
    * Drop an invitation and its key, announcing the state it ended in.
    *
-   * **With no `state` the entry's own decides it**, so a retirement that is not
-   * about a cause cannot mislabel one: `reserved` means a phone completed
-   * message 1 and the code really is spent, while anything still `live` is one
-   * nobody ever scanned. A caller passes a state only when the cause *is* the
-   * fact.
+   * **A `reserved` entry always ends `consumed`, whatever retired it**, and a
+   * caller's `state` only labels one nobody scanned. `dropped` and `expired`
+   * both mean *un-scanned* — the QR panel renders them in those words — so the
+   * TTL sweep, which cannot tell the two apart, must not report a code a phone
+   * completed message 1 against as one nobody touched
+   * (`docs/specs/remote-security-model.md` → Pairing). With no `state` at all
+   * the entry's own decides it, for a retirement that is not about a cause.
    */
   #retireInvitation(
     inviteId: string,
@@ -600,7 +609,7 @@ export class RemoteHost {
     this.#invitations.delete(inviteId);
     this.#onInvitationChanged(
       inviteId,
-      state ?? (held.state === 'reserved' ? 'consumed' : 'dropped'),
+      held.state === 'reserved' ? 'consumed' : (state ?? 'dropped'),
     );
   }
 

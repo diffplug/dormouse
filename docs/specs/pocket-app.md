@@ -61,10 +61,10 @@ irreversible and a throw would leave every retry minting an orphan.
 fragment is erased with `history.replaceState` before the first render, parsed
 or not — an address bar, a history stack and a screenshot are no place for a
 live credential — nothing from it is retained, no call is made, and the token is
-not spent. All the run keeps is a flag that leads the auth screen with *Install
-or open Pocket, then scan this Host QR in Pocket*: on iOS the camera opens
-Safari, a different storage partition from the installed app, so the keys must
-be minted where they will live.
+not spent. All the run keeps is a flag that leads the auth screen with *Scan
+again from inside Dormouse Pocket*: on iOS the camera opens Safari, a different
+storage partition from the installed app, so the keys must be minted where they
+will live.
 
 **The scanner reads a code as data.** `ScanInvitation` lazy-loads
 `@zxing/browser` for a rear-camera scan (iOS has no `BarcodeDetector`), never
@@ -141,7 +141,8 @@ Three details the table above leaves implicit:
   the active pane (`attachableDirectoryEntries` in
   `lib/src/remote/pocket-app/wall-model.ts`).
 
-**The pinned record picks a row's one action.** The Hosts view lists the
+**The pinned record picks a row's one action.** The Hosts view — titled
+**Computers**, because that is the word the rest of Pocket uses — lists the
 `KnownHostV1` records — a Host with no record is not a row — labeled from the
 record and stamped with online state from `GET /api/hosts`, and offers Connect
 alone or **Pair again** alone, never a Connect that can only fail. Nothing asks
@@ -149,7 +150,7 @@ the Host: an authenticated `pairing-required` outcome is the only thing that
 moves a row, and it removes local authorization without discarding the pin, so
 an ACL reset or a revocation recovers through the ordinary ceremony. Each row
 also carries **Remove**, which tombstones the delivery id before deleting the
-record, and the list carries **Scan a Host QR**. Pairing continues into
+record, and the list carries **Scan a setup code**. Pairing continues into
 connecting, so laptop approval lands the phone in a terminal.
 
 ## Design system and theming

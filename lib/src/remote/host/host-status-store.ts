@@ -384,5 +384,8 @@ export async function sendTestPush(): Promise<PushSendSummary> {
 function describeError(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === 'string' && error) return error;
-  return 'The Host service did not answer.';
+  // Completes the section's own sentence — "Could not reach this machine's
+  // remote-control service: …" — so it does not name the service again, in the
+  // internal word at that (`RemoteControlSection.tsx`).
+  return 'It did not answer.';
 }

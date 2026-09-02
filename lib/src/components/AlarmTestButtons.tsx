@@ -108,16 +108,21 @@ export function PushTestButton() {
             .then((outcome) => {
               if (outcome.targeted === 0) {
                 // Not a failure: the Host is fine, nothing has opted in yet.
-                show('No paired phone has enabled alerts yet, so there was nowhere to send it.', 'ok');
-              } else if (outcome.delivered === 0) {
-                show(`No device accepted the push (${outcome.failed} failed).`, 'bad');
-              } else if (outcome.failed > 0) {
-                show(`Sent to ${outcome.delivered}; ${outcome.failed} failed.`, 'bad');
-              } else {
                 show(
-                  `Sent to ${outcome.delivered} ${outcome.delivered === 1 ? 'device' : 'devices'}.`,
+                  'No paired phone has push notifications turned on, so there was nowhere to send it.',
                   'ok',
                 );
+              } else if (outcome.delivered === 0) {
+                show(`No phone accepted the push (${outcome.failed} failed).`, 'bad');
+              } else {
+                // One noun across every outcome: the mixed case is the one a
+                // reader has to count, so it may not be the one with none.
+                const phones = `${outcome.delivered} ${outcome.delivered === 1 ? 'phone' : 'phones'}`;
+                if (outcome.failed > 0) {
+                  show(`Sent to ${phones}; ${outcome.failed} failed.`, 'bad');
+                } else {
+                  show(`Sent to ${phones}.`, 'ok');
+                }
               }
             })
             .catch((error: unknown) => {

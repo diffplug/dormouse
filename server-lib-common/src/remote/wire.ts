@@ -70,6 +70,17 @@ export const UNAUTHORIZED_ERROR = 'unauthorized';
  */
 export const SETUP_TOKEN_INVALID_ERROR = 'invalid setup token';
 
+/**
+ * The `error` `POST /api/host/enroll` answers 401 with when the *setup password*
+ * was wrong, as against {@link UNAUTHORIZED_ERROR} for a rejected enroll token.
+ * Shared for the same reason as its two siblings: the status alone is ambiguous
+ * and the two have different recoveries — retype the password, or stop pressing
+ * the installer's one-click offer and use the typed form. A Host that guessed
+ * from the credential it happened to send would name the wrong one for a 401
+ * raised by anything in front of the Server.
+ */
+export const BAD_PASSWORD_ERROR = 'invalid setup password';
+
 export const WS_ROUTES = {
   host: '/ws/host',
   client: '/ws/client',

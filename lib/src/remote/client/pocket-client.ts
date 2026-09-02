@@ -211,7 +211,7 @@ export class SessionExpiredError extends ServerRefusalError {
 
 /** Shown when the scanned code is expired, spent, or otherwise unknown. */
 export const SETUP_CODE_DEAD_MESSAGE =
-  'That pairing code has expired. Show a new one on the computer and scan it again.';
+  'That setup code has expired. Show a new one on the computer and scan it again.';
 
 /**
  * The Server refused the `setupToken` off a scanned code
@@ -260,7 +260,8 @@ export const PASSKEY_UNAVAILABLE_MESSAGE =
  * rendering one that arrived on the wire.
  */
 export const PAIRING_DENIAL_MESSAGES: Record<PairingDenialCode, string> = {
-  'user-denied': 'The pairing was refused on the computer.',
+  'user-denied':
+    'Pairing was cancelled on the computer. Show a new code there and scan it again to retry.',
   'confirmation-mismatch': 'The digits typed on the computer did not match. Show a new code and scan it again.',
   'presence-rejected': 'The computer could not verify your passkey. Sign in again, then scan a new code.',
   'invitation-expired': SETUP_CODE_DEAD_MESSAGE,
@@ -417,7 +418,7 @@ export class PocketClient {
 
   /**
    * First-time setup: passkey registration gated by the single-use `setupToken`
-   * off a scanned pairing code. Follow with {@link signin}.
+   * off a scanned setup code. Follow with {@link signin}.
    */
   async setup({ setupToken }: { setupToken: string }, label: string): Promise<SetupFinishResponse> {
     const begin = await this.#setupApi<SetupBeginResponse>(API_ROUTES.setupBegin, { setupToken });

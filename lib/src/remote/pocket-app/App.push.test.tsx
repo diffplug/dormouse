@@ -207,14 +207,14 @@ describe('the one Enable on the Hosts view', () => {
   it('keeps what a partly-failed loop already registered', async () => {
     fake.subscribeInBrowser.mockResolvedValue({ endpoint: 'https://push.example/abc' });
     fake.subscribeToPush.mockImplementation(async (hostId) => {
-      if (hostId === 'host-2') throw new Error('The host disconnected.');
+      if (hostId === 'host-2') throw new Error('The server refused the registration.');
       return { hostIds: [...registered.add(hostId)] };
     });
     await signIn();
 
     await click(container, ENABLE);
 
-    expect(alertText(container)).toBe('The host disconnected.');
+    expect(alertText(container)).toBe('The server refused the registration.');
     // The first Host is on, so the card stays up for the second alone.
     expect(rowText('First laptop')).toContain('Push on');
     expect(rowText('Second laptop')).not.toContain('Push on');

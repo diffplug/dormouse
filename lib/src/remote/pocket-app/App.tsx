@@ -24,6 +24,7 @@ import {
   type PocketSocket,
 } from '../client/pocket-client';
 import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webauthn';
+import { SCAN_LABEL } from '../setup-copy';
 import { probeNoiseSupport, type PairingInvitation } from 'server-lib-common';
 import {
   indexedDbKnownHostStore,
@@ -100,7 +101,7 @@ export const UNSUPPORTED_BROWSER_BODY =
   'Update it, or open Dormouse Pocket in a newer browser.';
 
 /** The copy a run that arrived from the phone's own camera leads with. */
-export const CAMERA_BOOTSTRAP_MESSAGE = 'Install or open Pocket, then scan this Host QR in Pocket';
+export const CAMERA_BOOTSTRAP_MESSAGE = 'Scan again from inside Dormouse Pocket';
 
 export default function App({
   arrivedByCamera = false,
@@ -332,7 +333,7 @@ export default function App({
   useEffect(() => {
     client.setOnHostGone(() => {
       teardownAdapter();
-      setError('The host disconnected.');
+      setError('The connection to the computer ended.');
       setPhase({ at: 'hosts' });
     });
     return () => client.setOnHostGone(null);
@@ -493,7 +494,7 @@ export default function App({
   const onEnablePush = () =>
     run(PUSH_OP, async () => {
       if (pushConfig.status !== 'ready') {
-        throw new Error('Check the server configuration before enabling push notifications.');
+        throw new Error('Could not read this server’s push settings. Try again.');
       }
       try {
         const subscription = await subscribeToPushInBrowser(pushConfig.key, () => {
@@ -686,6 +687,9 @@ export function UnsupportedBrowser(): React.ReactElement {
 
 // --- The two-digit waiting screen -------------------------------------------
 
+/** The accessible name of the digits; see {@link PairingCodeView}. */
+export const PAIRING_CODE_LABEL = 'Pairing code';
+
 /**
  * The digits the person has to type on the computer, and nothing else.
  *
@@ -709,10 +713,15 @@ export function PairingCodeView({
         <h1 className={PK.headerTitle}>Pairing</h1>
       </header>
       <div className={clsx(PK.body, PK.bodyCenter)}>
-        <p className={PK.code} aria-live="polite">
+        {/* Named and announced structurally, so what identifies this screen — to
+            a screen reader, to the tests, and to the walkthrough harness — is
+            not a sentence the next copy pass is free to rewrite. */}
+        <p className={PK.code} role="status" aria-label={PAIRING_CODE_LABEL} aria-live="polite">
           {code ?? '··'}
         </p>
-        <p className={clsx(PK.lead, 'text-center')}>Type this code on the computer</p>
+        <p className={clsx(PK.lead, 'text-center')}>
+          Type these digits on the computer to approve.
+        </p>
         <button
           type="button"
           className={pkButton({ tone: 'outline', block: true })}
@@ -726,6 +735,14 @@ export function PairingCodeView({
 }
 
 // --- ConnectedView ---------------------------------------------------------
+
+/**
+ * What the list of paired machines is called, on its own header and on the back
+ * button that returns to it, so the two cannot drift
+ * (`docs/specs/pocket-app.md` → The seam: the remote session is a platform
+ * adapter).
+ */
+export const HOSTS_TITLE = 'Computers';
 
 /** The connected Pocket shell: host navigation chrome over the remote wall. */
 export function ConnectedView({
@@ -741,7 +758,7 @@ export function ConnectedView({
     <div className={PK.app}>
       <header className={PK.header}>
         <button type="button" className={pkButton({ tone: 'ghost', size: 'sm' })} onClick={onLeave}>
-          ‹ Hosts
+          ‹ {HOSTS_TITLE}
         </button>
         <h1 className={PK.headerTitle}>{host.label || host.hostId}</h1>
       </header>
@@ -754,7 +771,9 @@ export function ConnectedView({
 
 // --- SetupOrSignin ---------------------------------------------------------
 
-const SCAN_LABEL = 'Scan a Host QR';
+// This screen owns the button the laptop's panel names, so the label lives in
+// the leaf both bundles import. Re-exported because the tests press it here.
+export { SCAN_LABEL };
 
 /**
  * The auth screen, in two layouts on one question: does this browser hold a
@@ -836,24 +855,28 @@ export function SetupOrSignin({
           <p className={clsx(PK.lead, 'mt-1')}>
             {signinLeads
               ? 'Sign in with your passkey to reach the computers this phone is paired with, or scan a code to pair a new one.'
-              : 'Show a pairing code on the computer, in Settings → Remote control, and scan it here.'}
+              : 'On the computer: Settings → Remote control → Set up a phone. Scan the code it shows.'}
           </p>
         </div>
+        {/* Above the actions, never below: the passkey this screen mints
+            belongs to whichever partition creates it, so guidance that arrives
+            after setup arrives after the trap. **Above the camera notice too**,
+            on the one arrival where both render — iOS Safari, reached from the
+            phone's own camera — because that notice sends the reader to the
+            scan button, and doing that before installing walks into the trap
+            this one is here to prevent. */}
+        {!signinLeads && needsInstall ? <InstallFirstNotice /> : null}
         {/* The one thing a native-camera arrival is for: saying where the scan
             has to happen. The code it carried is already gone and unspent. */}
         {arrivedByCamera ? (
           <div className={PK.notice}>
             <div className={PK.noticeTitle}>{CAMERA_BOOTSTRAP_MESSAGE}</div>
             <p className={PK.noticeBody}>
-              The code your camera opened was not used. Scanning from inside Pocket is what creates
-              the keys this phone will keep.
+              The code your camera opened was not used, so nothing has been set up yet. Scanning
+              from inside Pocket is what creates the keys this phone will keep.
             </p>
           </div>
         ) : null}
-        {/* Above the actions, never below: the passkey this screen mints
-            belongs to whichever partition creates it, so guidance that arrives
-            after setup arrives after the trap. */}
-        {!signinLeads && needsInstall ? <InstallFirstNotice /> : null}
         {error ? <ErrorRow message={error} /> : null}
 
         {signinLeads ? (
@@ -870,7 +893,7 @@ export function SetupOrSignin({
             {/* Not a disclosure: a synced passkey makes sign-in a real path out
                 of a browser that has never stored anything. */}
             <div className={clsx(PK.setup, PK.divided)}>
-              <p className={PK.lead}>Already made a passkey? It syncs — sign in with it instead.</p>
+              <p className={PK.lead}>Set this phone up before? Passkeys sync — sign in instead.</p>
               {signinButton('outline')}
             </div>
           </>
@@ -963,8 +986,17 @@ const PUSH_PITCH =
 const PUSH_BLOCKED: Record<Exclude<PushAvailability, 'ready' | 'needs-install'>, string> = {
   denied: 'Notifications are blocked for this site in your browser settings.',
   unsupported: 'This browser cannot receive push notifications.',
-  'no-worker': 'Background worker unavailable — the server must be served over https.',
+  'no-worker': 'Push needs the server to be reached over https.',
 };
+
+/**
+ * The fourth blocked reason, and the only one with nothing behind it for the
+ * person holding the phone: it is the Server's config, so say so rather than
+ * leave them hunting through iOS settings for a switch that would not help.
+ * Not in {@link PUSH_BLOCKED}, which is keyed by browser availability.
+ */
+export const PUSH_SERVER_DISABLED =
+  'This server has push notifications turned off. Nothing on this phone can turn them on.';
 
 /** What the one push card says; `on` is the settled state and carries no action. */
 export type PushNoticeState =
@@ -1005,9 +1037,7 @@ export function pushNoticeState({
   if (availability === null) return null;
   // Outranks every browser state, a settled `on` included: a Server that no
   // longer holds VAPID keys cannot deliver through the rows it still stores.
-  if (configStatus === 'disabled') {
-    return { kind: 'blocked', reason: 'This server has push notifications disabled.' };
-  }
+  if (configStatus === 'disabled') return { kind: 'blocked', reason: PUSH_SERVER_DISABLED };
   if (pairedHostIds.every(isPushSubscribed)) return { kind: 'on' };
   // `InstallNotice` is the push card for this state, and it is on screen
   // exactly when this branch is reached — a second card saying "see above"
@@ -1122,7 +1152,7 @@ export function HostsView({
   return (
     <div className={PK.app}>
       <header className={PK.header}>
-        <h1 className={PK.headerTitle}>Hosts</h1>
+        <h1 className={PK.headerTitle}>{HOSTS_TITLE}</h1>
         <button
           type="button"
           className={pkButton({ tone: 'ghost', size: 'sm' })}
@@ -1150,7 +1180,8 @@ export function HostsView({
         ) : null}
         {hosts.length === 0 ? (
           <div className={PK.empty}>
-            No computers paired yet. Show a pairing code on one and scan it.
+            No computers paired yet. On a computer, open Settings → Remote control → Set up a
+            phone, then scan the code.
           </div>
         ) : (
           hosts.map((host) => {

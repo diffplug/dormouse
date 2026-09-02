@@ -3,6 +3,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 // so Tailwind's utilities load for these stories. Storybook manages the theme
 // tokens (`--vscode-*`) itself.
 import { SetupOrSignin } from '../remote/pocket-app/App';
+import { SETUP_CODE_DEAD_MESSAGE } from '../remote/client/pocket-client';
 import { PASSKEY_ALREADY_REGISTERED_MESSAGE } from '../remote/client/webauthn';
 import { PhoneFrame } from './PhoneFrame';
 
@@ -79,9 +80,10 @@ export const Pairing: Story = {
   args: { busy: 'pair' },
 };
 
-// A failed scan or pairing keeps the screen and reports itself.
+// A failed scan or pairing keeps the screen and reports itself. The message is
+// the shipped one rather than a copy of it, so a reworded refusal shows up here.
 export const SetupErrorFocused: Story = {
-  args: { error: 'That pairing code has expired. Show a new one on the computer and scan it again.' },
+  args: { error: SETUP_CODE_DEAD_MESSAGE },
 };
 
 // The return visit: welcome copy, "Sign in with passkey", scanning below it for
