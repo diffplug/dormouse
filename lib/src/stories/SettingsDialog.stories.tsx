@@ -80,7 +80,7 @@ export const PushEnabled: Story = {
     primedAlertSettings: { pushEnabled: true },
     primedPushDevices: {
       status: 'ready',
-      devices: [{ deliveryId: 'delivery-1', label: 'iPhone Safari' }],
+      devices: [{ label: 'iPhone Safari' }],
     },
   },
 };
@@ -93,9 +93,9 @@ export const PushManyDevices: Story = {
     primedPushDevices: {
       status: 'ready',
       devices: [
-        { deliveryId: 'delivery-1', label: 'iPhone Safari' },
-        { deliveryId: 'delivery-2', label: 'iPad' },
-        { deliveryId: 'delivery-3', label: 'Pixel Chrome' },
+        { label: 'iPhone Safari' },
+        { label: 'iPad' },
+        { label: 'Pixel Chrome' },
       ],
     },
   },

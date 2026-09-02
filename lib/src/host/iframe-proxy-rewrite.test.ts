@@ -1,28 +1,33 @@
 import { describe, it, expect } from 'vitest';
 import {
+  frameAncestorsCsp,
   instrumentHtml,
   isBlockedAddress,
-  IFRAME_SHIM,
+  iframeShim,
+  normalizeEmbedderOrigins,
   errorPageHtml,
   unreachablePage,
   timedOutPage,
 } from './iframe-proxy-rewrite';
 
+const APP = 'vscode-webview://abc-123';
+const IFRAME_SHIM = iframeShim(APP);
+
 describe('instrumentHtml', () => {
   it('injects the shim before </head>', () => {
-    const out = instrumentHtml('<html><head><title>x</title></head><body>hi</body></html>');
+    const out = instrumentHtml('<html><head><title>x</title></head><body>hi</body></html>', APP);
     expect(out).toContain('__dormouse');
     expect(out).toMatch(/<\/script><\/head>/);
     expect(out).toContain('<title>x</title>');
   });
 
   it('falls back to after <body> when there is no head', () => {
-    const out = instrumentHtml('<body>hi</body>');
+    const out = instrumentHtml('<body>hi</body>', APP);
     expect(out).toMatch(/<body>\s*<script>/);
   });
 
   it('strips an in-document CSP meta', () => {
-    const out = instrumentHtml('<head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'"></head>');
+    const out = instrumentHtml('<head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'"></head>', APP);
     expect(out).not.toMatch(/http-equiv=["']?content-security-policy/i);
   });
 
@@ -53,6 +58,54 @@ describe('instrumentHtml', () => {
     // the click (preventDefault / fetch-instead-of-navigate), else it reports a
     // navigation that never happened.
     expect(IFRAME_SHIM).toContain('if(!e.defaultPrevented)post(\'location\'');
+  });
+});
+
+// The shim reads the framed page's live URL and its anchor hrefs and hands them
+// out — reads the same-origin policy would otherwise forbid. `'*'` handed them
+// to whoever had framed the proxy, which the port scan makes anybody.
+describe('the shim addresses the app, not the world', () => {
+  it('posts to the embedder origin and never to a wildcard', () => {
+    expect(IFRAME_SHIM).toContain(`var TARGET="${APP}"`);
+    expect(IFRAME_SHIM).toContain('P.postMessage(m,TARGET)');
+    expect(IFRAME_SHIM).not.toContain("postMessage(m,'*')");
+  });
+});
+
+describe('normalizeEmbedderOrigins', () => {
+  it('accepts the ancestor chains the shipped webviews actually have', () => {
+    expect(normalizeEmbedderOrigins(['vscode-webview://abc-123', 'vscode-file://vscode-app']))
+      .toEqual(['vscode-webview://abc-123', 'vscode-file://vscode-app']);
+    expect(normalizeEmbedderOrigins(['tauri://localhost'])).toEqual(['tauri://localhost']);
+    expect(normalizeEmbedderOrigins(['http://tauri.localhost'])).toEqual(['http://tauri.localhost']);
+    expect(normalizeEmbedderOrigins(['HTTP://Tauri.Localhost:1420'])).toEqual(['http://tauri.localhost:1420']);
+    expect(normalizeEmbedderOrigins(['tauri://localhost', 'tauri://localhost'])).toEqual(['tauri://localhost']);
+  });
+
+  it('refuses a chain it cannot use in full', () => {
+    // All-or-nothing: a chain missing one ancestor would block Dormouse's own
+    // frame, so an opaque or malformed entry means no chain at all.
+    for (const bad of [
+      undefined,
+      [],
+      ['null'],
+      ['tauri://localhost', 'null'],
+      ['tauri://localhost/path'],
+      ['tauri://localhost; script-src *'],
+      ['tauri://localhost *'],
+      ["tauri://localhost'"],
+      ['not-an-origin'],
+      [42],
+      'tauri://localhost',
+      Array.from({ length: 9 }, (_, i) => `http://h${i}.test`),
+    ]) {
+      expect(normalizeEmbedderOrigins(bad)).toBeNull();
+    }
+  });
+
+  it('renders every ancestor into the policy', () => {
+    expect(frameAncestorsCsp(['vscode-webview://abc-123', 'vscode-file://vscode-app']))
+      .toBe('frame-ancestors vscode-webview://abc-123 vscode-file://vscode-app');
   });
 });
 

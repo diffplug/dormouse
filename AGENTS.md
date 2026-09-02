@@ -66,6 +66,7 @@ When updating code covered by a spec, update the spec to match. When the two spe
 
 **The rationale split.** A spec stays dense and normative; the evidence behind its rules moves to a paired `docs/specs/<foo>.rationale.md`. Opt-in per spec — thin specs keep rationale inline. What moves and what stays:
 
+- **Maximize the rationale file, minimize the spec.** The default destination for a new sentence is `<foo>.rationale.md`; it earns a place in the spec only by the boundary test below. When a change grows a spec, the growth should be the rule — one bolded imperative — and the paragraph behind it should land in the rationale. A spec's word budget rising while its rationale's stays flat means the split went backwards.
 - Every prohibition and constraint keeps a one-line form in the spec. The boundary test: if deleting the sentence would let a competent editor reintroduce a bug or break compatibility, its one-line form stays in the spec; everything past that line is rationale.
 - Mechanism explanation stays inline when the invariant is illegible without it.
 - Forensic history — measurement narratives, dead-approach stories, grievances against replaced dependencies — moves to the rationale file, or is deleted outright once depreciated (git history keeps the record).

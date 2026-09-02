@@ -118,7 +118,7 @@ const invokeMap = {
   read_clipboard_file_paths: () => requestSidecar('clipboard:readFiles', {}, 'clipboard:files', (data) => data.paths ?? null),
   read_clipboard_image_as_file_path: () => requestSidecar('clipboard:readImage', {}, 'clipboard:image', (data) => data.path ?? null),
   read_clipboard_text: () => requestSidecar('clipboard:readText', {}, 'clipboard:text', (data) => data.text ?? null),
-  iframe_create_proxy_url: ({ target }) => requestSidecar('iframe:createProxyUrl', { target }, 'iframe:proxyUrl', (data) => data.result),
+  iframe_create_proxy_url: ({ target, embedderOrigins }) => requestSidecar('iframe:createProxyUrl', { target, embedderOrigins }, 'iframe:proxyUrl', (data) => data.result),
   agent_browser_command: ({ session, args, binaryPath }) => requestSidecar('agentBrowser:command', { session, args, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   agent_browser_edit: ({ session, op, binaryPath }) => requestSidecar('agentBrowser:edit', { session, op, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   agent_browser_screenshot: async ({ session, format, quality, binaryPath }) => {

@@ -69,7 +69,16 @@ export class FakeSocket implements RemoteWebSocket {
 
   /** Deliver one frame from the far end. */
   receive(frame: unknown): void {
-    this.#emit('message', { data: JSON.stringify(frame) });
+    this.receiveRaw(JSON.stringify(frame));
+  }
+
+  /**
+   * Deliver the exact bytes the far end sent, unserialized. `receive` can only
+   * express a frame that is already a well-formed object, so it never reaches
+   * the size and parse guards that run *before* the shape guards.
+   */
+  receiveRaw(data: unknown): void {
+    this.#emit('message', { data });
   }
 
   /** Every frame this socket was asked to send of one wire type. */

@@ -14,9 +14,13 @@
  */
 
 export interface PushDevice {
-  /** Base64url delivery capability — the Host ACL record's `deliveryId`. */
-  deliveryId: string;
-  /** Human name from the Host's ACL record, e.g. `iPhone Safari`. */
+  /**
+   * Human name from the Host's ACL record, e.g. `iPhone Safari` — and nothing
+   * else. The record's `deliveryId` is a bearer capability for that Client's
+   * push rows, so it stays on the Host side of the bridge; the dialog renders a
+   * label and never addresses a device (`SECURITY.md` → "What crosses the
+   * boundary").
+   */
   label: string;
 }
 

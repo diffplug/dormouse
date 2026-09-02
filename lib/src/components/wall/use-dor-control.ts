@@ -21,7 +21,8 @@ import {
   resolveTerminalSessionId,
 } from '../../lib/terminal-registry';
 import { surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
-import { hostPathDisplay } from './browser-url';
+import { isAllowedAgentBrowserBinary } from '../../lib/agent-browser-binary';
+import { browserSurfaceUrl, hostPathDisplay } from './browser-url';
 import { agentBrowserSessionFromParams, isAgentBrowserParams } from './browser-surface';
 // One-way import: connect-port no longer depends on this module (its eager-surface
 // and refresh seams are injected as plain functions).
@@ -928,9 +929,17 @@ export function useDorControl({
       }
 
       if (detail.method === SURFACE_CONTROL_METHODS.iframe) {
-        const url = stringParam(params.url);
-        if (!url) {
+        const raw = stringParam(params.url);
+        if (!raw) {
           detail.respond({ ok: false, error: 'url is required' });
+          return;
+        }
+        // The control socket is a wire protocol, not the CLI: `dor iframe`
+        // validates its argument, but anything holding the control token
+        // reaches this method directly (`browserSurfaceUrl`).
+        const url = browserSurfaceUrl(raw);
+        if (!url) {
+          detail.respond({ ok: false, error: 'url must be an http:// or https:// URL' });
           return;
         }
         const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
@@ -969,11 +978,26 @@ export function useDorControl({
           detail.respond({ ok: false, error: 'session is required' });
           return;
         }
+        // `binaryPath` names a program the host will spawn and is persisted into
+        // the pane's params, so it is checked before it is stored rather than
+        // only at the spawn (`lib/src/lib/agent-browser-binary.ts`).
+        //
+        // Dropped rather than fatal, like `allowedBinaryPath` in
+        // agent-browser-surface-controller.ts and `runWithBinaryFallback`: the
+        // host resolves its own candidate instead, and it can accept a path
+        // this realm cannot — `DORMOUSE_AGENT_BROWSER_BIN` matches by exact
+        // value, and only the host can read its own environment. Refusing the
+        // request here would mean no browser surface at all for an operator who
+        // set that variable to a differently-named wrapper.
+        const requestedBinaryPath = stringParam(params.binaryPath);
+        const binaryPath = isAllowedAgentBrowserBinary(requestedBinaryPath)
+          ? requestedBinaryPath
+          : undefined;
         const result = ensureAgentBrowserSurface({
           key: stringParam(params.key),
           session,
           wsPort: numberParam(params.wsPort),
-          binaryPath: stringParam(params.binaryPath),
+          binaryPath,
           reference: () => resolveVisibleSurface(stringParam(params.surface), detail.surfaceId),
           minimized: booleanParam(params.minimized),
         });

@@ -380,6 +380,7 @@ defense in depth only, and Host correctness must survive a relay that omits
 | `MAX_PENDING_PAIRINGS` | 8 | `server-lib-common/src/security/pairing.ts` |
 | `MAX_TOKENS_PER_HOST` | 8 | `server-lib-common/src/remote/wire.ts`, shared with the Server's setup-token cap (rationale) |
 | `MAX_CLIENT_ID_LENGTH` | 256 | `server-lib-common/src/remote/wire.ts` |
+| `MAX_SERVER_TO_HOST_FRAME_LENGTH` | one maximal `ct` + `MAX_CLIENT_ID_LENGTH` + 512 | same |
 | `MAX_PENDING_CONNECTION_HANDSHAKES` | 8 | `lib/src/remote/host/remote-host.ts` |
 | `MAX_ESTABLISHED_E2E_SESSIONS` | 16 | `server-lib-common/src/security/e2e-bounds.ts` |
 | `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` | 120 000 | same |
@@ -405,7 +406,13 @@ defense in depth only, and Host correctness must survive a relay that omits
 - **Rejected frames perform no WebCrypto operation and allocate no entry.** The
   wire guard bounds every routing value, `clientId` first, before the ciphertext
   scan — handshake messages at 65,535 bytes, application payloads at 1 MiB,
-  measured before JSON parsing or base64 decoding.
+  measured before base64 decoding.
+- **The raw frame is bounded before `JSON.parse`.** Every guard above reads a
+  value the parse already produced, so `MAX_SERVER_TO_HOST_FRAME_LENGTH` is
+  measured on the received string first; a non-string payload is dropped. Where
+  the socket implementation takes a `maxPayload` it is given the same number, so
+  an oversized frame is never buffered either. Pinned by
+  `lib/src/remote/host/remote-host-bounds.test.ts`.
 - **One reaper owns every deadline**, over absolute timestamps: invitation
   expiry, pairing TTL, challenge TTL, and the idle timeout. It runs on every
   `init`, every local decision, every relay lifecycle event, and a timer armed

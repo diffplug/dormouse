@@ -12,17 +12,66 @@
 /** Header bag shape both `http.IncomingHttpHeaders` and a plain map satisfy. */
 export type ProxyHeaders = Record<string, string | string[] | undefined>;
 
-// Hop-by-hop headers (RFC 7230 §6.1) plus framing headers we manage ourselves.
-// Never forwarded downstream.
-export const STRIP_RESPONSE_HEADERS = new Set([
+// Hop-by-hop headers (RFC 7230 §6.1). Never forwarded downstream.
+export const HOP_BY_HOP_RESPONSE_HEADERS = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
   'te', 'trailer', 'transfer-encoding', 'upgrade',
-  // Framing controls — stripped so the proxy origin (which the webview frames)
-  // never inherits a "do not embed" from the upstream. Applied to every http
-  // upstream, loopback or remote: the embed is the user's own `dor iframe`, so a
-  // site's X-Frame-Options / CSP frame-ancestors is overridden rather than obeyed.
+]);
+
+/**
+ * The upstream's framing controls.
+ *
+ * **Dropped only when the proxy replaces them with its own `frame-ancestors`.**
+ * Dropping them for everyone is what once made this listener a privilege: the
+ * loopback port is not a secret, and neither `Origin` (absent on a navigation)
+ * nor `Sec-Fetch-Site` (`cross-site` for our webview and for an attacker page
+ * alike) can tell the two embedders apart at request time. So the recognizer
+ * cannot be a request header — it is the *embedder* that has to be named, and
+ * `frame-ancestors` is the mechanism browsers already enforce for exactly that
+ * question. With it, a stranger's frame never loads; without a known embedder
+ * origin the upstream's own "do not embed" is forwarded untouched, which grants
+ * the caller nothing it could not get by reaching the upstream directly.
+ */
+export const FRAMING_RESPONSE_HEADERS = new Set([
   'x-frame-options', 'content-security-policy', 'content-security-policy-report-only',
 ]);
+
+// A serialized origin: scheme, host, optional port, nothing else. Deliberately
+// strict — the value ends up inside a CSP header we emit, so anything that
+// could carry a `;` or a space is refused rather than escaped. It covers the
+// origins the shipped webviews actually have (`vscode-webview://<uuid>`,
+// `vscode-file://vscode-app`, `tauri://localhost`, `http://tauri.localhost`).
+const SERIALIZED_ORIGIN_RE = /^[a-z][a-z0-9+.-]*:\/\/[a-z0-9.-]+(?::[0-9]{1,5})?$/;
+const MAX_EMBEDDER_ORIGINS = 8;
+
+/**
+ * The ancestor chain a proxied frame is allowed to sit in, or `null` when it
+ * cannot be established.
+ *
+ * `frame-ancestors` is checked against **every** ancestor, not just the parent,
+ * so the caller supplies its whole chain (`location.origin` plus
+ * `location.ancestorOrigins`) — VS Code nests the extension's document two
+ * frames deep inside the workbench. All-or-nothing on purpose: a chain missing
+ * one entry would block Dormouse's own frame, so an unparseable or opaque
+ * ancestor (`"null"`) means no chain at all, and the proxy then vouches for
+ * nobody rather than guessing.
+ */
+export function normalizeEmbedderOrigins(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_EMBEDDER_ORIGINS) return null;
+  const out: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string') return null;
+    const origin = entry.toLowerCase();
+    if (!SERIALIZED_ORIGIN_RE.test(origin)) return null;
+    if (!out.includes(origin)) out.push(origin);
+  }
+  return out;
+}
+
+/** The `Content-Security-Policy` the proxy serves in place of the upstream's. */
+export function frameAncestorsCsp(embedderOrigins: string[]): string {
+  return `frame-ancestors ${embedderOrigins.join(' ')}`;
+}
 
 // The fixed, Dormouse-owned shim — like agent-browser's EDIT_SCRIPTS, never
 // user-supplied, so it is not an eval vector. Injected inline into served HTML;
@@ -41,10 +90,16 @@ export const STRIP_RESPONSE_HEADERS = new Set([
 //     honest.
 //   - `open-window`: a `target=_blank` anchor or `window.open` the single-frame
 //     renderer can't honor; the parent offers it as a new pane instead.
-export const IFRAME_SHIM = `(function(){
+export function iframeShim(embedderOrigin: string): string {
+  return `(function(){
   var P=window.parent;
+  var TARGET=${JSON.stringify(embedderOrigin)};
   if(!P||P===window)return;
-  function post(t,d){try{var m={__dormouse:t};if(d)for(var k in d)m[k]=d[k];P.postMessage(m,'*');}catch(e){}}
+  // Addressed to the app's own origin, never '*': every message here is a
+  // cross-origin *read* of the framed page — its live URL, its anchor hrefs —
+  // that the same-origin policy would otherwise forbid, and postMessage only
+  // delivers when the target window's origin matches.
+  function post(t,d){try{var m={__dormouse:t};if(d)for(var k in d)m[k]=d[k];P.postMessage(m,TARGET);}catch(e){}}
   function postLocation(){post('location',{url:String(location.href)});}
   function anchorHref(e){
     var n=e&&e.target;
@@ -105,18 +160,23 @@ export const IFRAME_SHIM = `(function(){
   if(document.readyState==='loading')addEventListener('DOMContentLoaded',postLocation,{once:true});
   else setTimeout(postLocation,0);
 })();`;
+}
 
 // Drop any in-document CSP and inject the shim before </head> so it runs before
 // the tool's own scripts. Applies to every framed http upstream, loopback or
 // remote — the trade is stated in docs/specs/dor-browser.md → "Iframe Host
-// Capability And CSP". The response-header CSP is stripped separately via
-// STRIP_RESPONSE_HEADERS.
-export function instrumentHtml(body: string): string {
+// Capability And CSP". The response-header CSP is replaced separately via
+// FRAMING_RESPONSE_HEADERS.
+//
+// `embedderOrigin` is the document that frames us, and it is required: without
+// one there is nobody to address the shim's messages to, so the caller must not
+// instrument at all rather than fall back to `'*'`.
+export function instrumentHtml(body: string, embedderOrigin: string): string {
   const html = body.replace(
     /<meta[^>]+http-equiv=["']?content-security-policy["']?[^>]*>/gi,
     '',
   );
-  const shimTag = `<script>${IFRAME_SHIM}</script>`;
+  const shimTag = `<script>${iframeShim(embedderOrigin)}</script>`;
   if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, `${shimTag}</head>`);
   if (/<body[^>]*>/i.test(html)) return html.replace(/(<body[^>]*>)/i, `$1${shimTag}`);
   return shimTag + html;

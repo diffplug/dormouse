@@ -136,7 +136,12 @@ function handleLine(line) {
       case 'iframe:createProxyUrl':
         // Log to stderr — stdout is the JSON-lines protocol channel.
         respondAsync('iframe:proxyUrl', data.requestId, async () => ({
-          result: await createIframeProxyUrl(data.target, { log: (m) => console.error(m) }),
+          result: await createIframeProxyUrl(data.target, {
+            log: (m) => console.error(m),
+            // Validated inside the proxy (`normalizeEmbedderOrigins`); an
+            // unusable chain costs the shim, never a wider grant.
+            embedderOrigins: data.embedderOrigins,
+          }),
         }));
         break;
       case 'agentBrowser:command':

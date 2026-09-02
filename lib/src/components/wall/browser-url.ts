@@ -63,6 +63,30 @@ export function normalizeNavUrl(raw: string): string {
   return `${scheme}://${trimmed}`;
 }
 
+/**
+ * A URL a browser Surface may be pointed at, or `null` — `http:` and `https:`
+ * and nothing else.
+ *
+ * The CLI validates its own arguments (`normalizeConcreteOpenUrl` in
+ * `dor/src/commands/open-target.ts`), but the control socket is a wire protocol
+ * rather than the CLI: anything holding the control token reaches
+ * `surface.iframe` directly, and a proxied page's `open-window` message reaches
+ * the same sink through the confirm prompt. On a host with no iframe proxy the
+ * value becomes a raw `<iframe src>`, where a `javascript:` URL runs in the
+ * embedding document's origin — so the check belongs at the handler, not only
+ * at the callers that happen to have one today.
+ */
+export function browserSurfaceUrl(raw: string): string | null {
+  const normalized = normalizeNavUrl(raw);
+  if (!normalized) return null;
+  try {
+    const { protocol } = new URL(normalized);
+    return protocol === 'http:' || protocol === 'https:' ? normalized : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The host part of a schemeless authority, minus any `:port`. An IPv6 literal
  *  is bracketed and full of colons, so splitting on the first `:` would yield
  *  `[` — take everything through the closing bracket instead, which keeps the
