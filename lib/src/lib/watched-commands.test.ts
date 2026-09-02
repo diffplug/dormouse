@@ -59,6 +59,10 @@ describe('watched-commands store', () => {
     // `C:\tools\claude.exe`. A real key is a basename, so it holds no separator.
     applyWatchedCommandsFromHost(['C:toolsclaude.exe', 'claude', '/usr/bin/claude']);
     expect(getWatchedCommands()).toEqual(['claude']);
+    // Same gate on the write path — a drive-relative invocation is the one
+    // shape `commandArgv0` can still return with a `:` in it.
+    setCommandWatched('C:foo.exe', true);
+    expect(getWatchedCommands()).toEqual(['claude']);
   });
 
   it('adds, reports, and removes rules', () => {
