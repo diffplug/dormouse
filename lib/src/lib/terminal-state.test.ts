@@ -269,10 +269,12 @@ describe('command title summarizer', () => {
     expect(summarizeCommandLine('ssh prod-box')).toBe('ssh prod-box');
   });
 
+  // Matched on the stripped name, rendered as invoked — the header has to read
+  // the same name the WATCHING rule row and the bell tooltip show.
   it('matches its per-program cases through a Windows launcher suffix', () => {
-    expect(summarizeCommandLine('vim.exe notes.txt')).toBe('vim');
-    expect(summarizeCommandLine('cargo.exe watch -x test')).toBe('cargo watch -x test');
-    expect(summarizeCommandLine('C:\\tools\\nodejs\\npm.cmd')).toBe('npm');
+    expect(summarizeCommandLine('vim.exe notes.txt')).toBe('vim.exe');
+    expect(summarizeCommandLine('cargo.exe watch -x test')).toBe('cargo.exe watch -x test');
+    expect(summarizeCommandLine('C:\\tools\\nodejs\\npm.cmd')).toBe('npm.cmd');
   });
 
   it('keeps pipelines and compound commands recognizable', () => {
@@ -287,15 +289,15 @@ describe('command tokenizer dialects', () => {
   // escapes, so both dialects reduce to the bare program name.
   it.each([
     // Windows: absolute paths, launchers, a quoted path with spaces.
-    ['C:\\tools\\dor.cmd tool storybook', 'dor.cmd', 'dor tool storybook'],
+    ['C:\\tools\\dor.cmd tool storybook', 'dor.cmd', 'dor.cmd tool storybook'],
     ['C:\\Users\\me\\.claude\\local\\claude', 'claude', 'claude'],
-    ['"C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm.cmd', 'npm run dev'],
-    ['\\\\build\\share\\tools\\claude.exe --print', 'claude.exe', 'claude --print'],
-    ['FOO=1 "C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm.cmd', 'npm run dev'],
+    ['"C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm.cmd', 'npm.cmd run dev'],
+    ['\\\\build\\share\\tools\\claude.exe --print', 'claude.exe', 'claude.exe --print'],
+    ['FOO=1 "C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm.cmd', 'npm.cmd run dev'],
     // PowerShell's call operator, the only way that shell runs a quoted path.
     // Without the leading-`&` skip it reads as a boundary and argv0 is null.
-    ['& "C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm.cmd', 'npm run dev'],
-    ['& C:\\tools\\dor.cmd tool storybook', 'dor.cmd', 'dor tool storybook'],
+    ['& "C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm.cmd', 'npm.cmd run dev'],
+    ['& C:\\tools\\dor.cmd tool storybook', 'dor.cmd', 'dor.cmd tool storybook'],
     // POSIX escapes keep their meaning.
     ['/opt/my\\ tools/claude --print', 'claude', 'claude --print'],
     ['grep \\*.ts src', 'grep', 'grep *.ts src'],
@@ -316,14 +318,19 @@ describe('command tokenizer dialects', () => {
   // `POSIX_ESCAPABLE` is `shellEscapePosix`'s set; the tokenizer unescapes it.
   // The two halves must name the same characters or a path Dormouse escaped for
   // a drag-and-drop paste renders with stray backslashes in the pane header.
-  it.each(Array.from(` \t!"#$&'()*;<>?[]\`{|}~\\`))('round-trips %j out of shellEscapePosix', (char) => {
-    expect(POSIX_ESCAPABLE.test(char)).toBe(true);
-    expect(summarizeCommandLine(`cat ${shellEscapePosix(`a${char}b`)}`)).toBe(`cat a${char}b`);
+  const ESCAPABLE = ` \t!"#$&'()*;<>?[]\`{|}~\\`;
+
+  it('is exactly the set spelled out here, so a change to it lands in this file', () => {
+    // Both directions, so neither a new nor a dropped member slips through.
+    expect(Array.from(ESCAPABLE).filter((char) => !POSIX_ESCAPABLE.test(char))).toEqual([]);
+    const printable = Array.from({ length: 95 }, (_, i) => String.fromCharCode(32 + i));
+    expect(printable.filter((char) => POSIX_ESCAPABLE.test(char)).join('')).toBe(
+      Array.from(ESCAPABLE).filter((char) => char !== '\t').sort().join(''),
+    );
   });
 
-  it('holds no path character, which is what keeps Windows separators intact', () => {
-    const pathChars = Array.from('AZaz09_-.+=,@:^%');
-    expect(pathChars.filter((char) => POSIX_ESCAPABLE.test(char))).toEqual([]);
+  it.each(Array.from(ESCAPABLE))('round-trips %j out of shellEscapePosix', (char) => {
+    expect(summarizeCommandLine(`cat ${shellEscapePosix(`a${char}b`)}`)).toBe(`cat a${char}b`);
   });
 });
 

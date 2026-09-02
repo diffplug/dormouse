@@ -383,6 +383,11 @@ export function summarizeCommandLine(raw: string): string {
  * all yield `claude`; `foo | claude` yields `foo`. Returns null when the line
  * holds no runnable word.
  *
+ * A Windows launcher suffix is part of the key: `C:\tools\claude.exe` yields
+ * `claude.exe`, not `claude`. `foo.bat` and `foo.exe` can be two files in one
+ * directory, and the rule set is the one place conflating them cannot be undone
+ * from the UI — so a rule made on Windows keys on the spelling that was run.
+ *
  * This is the key WATCHING rules are stored under — see `docs/specs/alert.md`.
  */
 export function commandArgv0(raw: string): string | null {
@@ -796,7 +801,10 @@ function withRequiredHostPrefixes(
  * separators to split on. Two accepted costs of one dialect-free set: a Windows
  * segment that starts with a metacharacter (`C:\$Recycle.Bin`) still loses its
  * separator, and a POSIX escape of an ordinary character (`grep \-v`) keeps a
- * backslash bash would drop. Both are display-only — neither reaches argv[0].
+ * backslash bash would drop. The second is display-only; so is the first,
+ * unless the mangled segment is the last one (`C:\tools\$claude.exe` ->
+ * `tools$claude.exe`), where the separator the basename split needed is the
+ * one that was eaten.
  */
 function tokenizeCommand(input: string): string[] {
   const tokens: string[] = [];
@@ -890,23 +898,27 @@ function commandBasename(command: string): string {
   return command.replace(/^.*[\\/]/, '');
 }
 
-// `.cmd`/`.exe` is how the same program spells itself on Windows, so strip it
-// before matching or rendering: `npm.cmd run dev` is `npm run dev`, and the
-// per-program cases below (which are keyed on bare names) still fire there.
 const WINDOWS_EXECUTABLE_SUFFIX = /\.(?:exe|cmd|bat|com|ps1)$/i;
 
+// `.cmd`/`.exe` is how the same program spells itself on Windows, so the cases
+// below — all keyed on bare names — match against the stripped form, or none of
+// them fire on Windows now that argv[0] resolves to `npm.cmd`. They still
+// *render* the basename as it was invoked: one program reads as one name across
+// the pane header, the WATCHING rule row, and the bell tooltip, and only the
+// header goes through here.
 function commandTitleTokens(tokens: string[]): string[] {
   const command = tokens[0];
   if (!command) return [];
-  const basename = commandBasename(command).replace(WINDOWS_EXECUTABLE_SUFFIX, '');
+  const basename = commandBasename(command);
+  const matched = basename.replace(WINDOWS_EXECUTABLE_SUFFIX, '');
   const rest = tokens.slice(1);
 
-  if (basename === 'npm' && rest[0] === 'run') return [basename, ...rest.slice(0, 2)];
-  if (basename === 'pnpm' || basename === 'yarn' || basename === 'bun') return [basename, ...rest.slice(0, 2)];
-  if (basename === 'docker' && rest[0] === 'compose') return [basename, ...rest.slice(0, 2)];
-  if (basename === 'cargo' && rest[0] === 'watch') return [basename, ...rest.slice(0, 3)];
-  if (basename === 'ssh') return [basename, ...rest.slice(0, 1)];
-  if (basename === 'vim' || basename === 'nvim' || basename === 'vi' || basename === 'pytest') return [basename];
+  if (matched === 'npm' && rest[0] === 'run') return [basename, ...rest.slice(0, 2)];
+  if (matched === 'pnpm' || matched === 'yarn' || matched === 'bun') return [basename, ...rest.slice(0, 2)];
+  if (matched === 'docker' && rest[0] === 'compose') return [basename, ...rest.slice(0, 2)];
+  if (matched === 'cargo' && rest[0] === 'watch') return [basename, ...rest.slice(0, 3)];
+  if (matched === 'ssh') return [basename, ...rest.slice(0, 1)];
+  if (matched === 'vim' || matched === 'nvim' || matched === 'vi' || matched === 'pytest') return [basename];
   return [basename, ...rest.slice(0, 2)];
 }
 

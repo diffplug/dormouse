@@ -13,7 +13,8 @@
  * "command tokenizer dialects" pins both directions character by character.
  *
  * Its own module because `terminal-state.ts` is bundled into the VS Code
- * extension host and the Tauri sidecar, where the `dor/*` path `shell-escape.ts`
- * imports does not resolve — this file must stay dependency-free.
+ * extension host, which resolves the `dor/*` path `shell-escape.ts` imports only
+ * through a tsconfig mapping its vitest run does not read — so this file must
+ * stay dependency-free.
  */
 export const POSIX_ESCAPABLE = /[ \t!"#$&'()*;<>?[\\\]`{|}~]/;

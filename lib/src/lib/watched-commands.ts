@@ -64,7 +64,10 @@ export function isCommandWatched(name: string | null | undefined): boolean {
 
 export function setCommandWatched(name: string, on: boolean): void {
   const trimmed = name.trim();
-  if (!trimmed) return;
+  // Same gate `normalize` applies on the way in, so a key that would be dropped
+  // on the next reload is never stored: it would otherwise match for the rest of
+  // the session and then vanish with nothing on screen to explain it.
+  if (!trimmed || !isKeyableName(trimmed)) return;
   if (watched.includes(trimmed) === on) return;
   watched = on
     ? [...watched, trimmed].sort()
