@@ -2,23 +2,53 @@
  * The ordered walkthrough (`scripts/pairing-walkthrough/README.md`).
  *
  * Each entry is one thing a person does, in the order they do it, and
- * `--until <name>` stops after the one it names. Stages (b) and (c) of the
- * harness are the last three entries: they exist as named steps that throw,
- * so adding them is filling in a `run` rather than restructuring the runner.
+ * `--until <name>` stops after the one it names. Stage (c) of the harness is the
+ * last entry: it exists as a named step that throws, so adding it is filling in
+ * a `run` rather than restructuring the runner.
  */
 
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { AgentBrowser } from './ab.mjs';
+import { installVirtualAuthenticator, virtualCredentials } from './cdp.mjs';
+import { launchChrome, resolveChrome } from './chrome.mjs';
 import { crop, decodeQr, imageSize, toY4m, upscale } from './qr.mjs';
-import { delay, spawnLogged, waitFor, waitForLine } from './proc.mjs';
+import { delay, findFreePort, spawnLogged, waitFor, waitForLine } from './proc.mjs';
 
 /** The one step a stage that is not built yet gets. */
 function notImplemented(stage, what) {
   return () => {
     throw new Error(`not implemented — stage (${stage}): ${what}`);
   };
+}
+
+/**
+ * The Pocket browser's viewport: a phone, because every Pocket screen is laid
+ * out for one and a desktop-shaped window would put the copy pass's screenshots
+ * in a layout no user sees.
+ */
+const POCKET_VIEWPORT = { width: 390, height: 844 };
+
+/**
+ * Pocket's one way in, as its first-run screen labels it
+ * (`lib/src/remote/pocket-app/App.tsx`). Clicked rather than routed to: the
+ * scanner is a phase of the app, not a URL.
+ */
+const SCAN_LABEL = 'Scan a Host QR';
+
+/**
+ * How long a setup code stays redeemable, read out of the workspace rather than
+ * copied here — a harness that mirrors the number would keep claiming the old
+ * one after somebody changed it. `server/src/setup-token.ts` pins the Server's
+ * TTL to this same constant, and `RemoteControlSection.tsx` mints a replacement
+ * 20s before it, so the capture → scan gap has to stay comfortably under it.
+ */
+async function setupTokenTtlMs(repoRoot) {
+  const entry = join(repoRoot, 'server-lib-common', 'dist', 'index.js');
+  const { DEFAULT_PAIRING_TTL_MS } = await import(pathToFileURL(entry).href);
+  return DEFAULT_PAIRING_TTL_MS;
 }
 
 /** The Host webview is ready when its first terminal has an input to type into. */
@@ -191,15 +221,31 @@ async function stepEnroll(ctx) {
 /**
  * Open the phone-setup panel, capture its QR, and prove the capture decodes.
  *
- * The cropped PNG and the Y4M beside it are what stage (b) feeds to Chromium's
- * fake video device, so the decode here is not a nicety: an illegible crop
- * would show up as an unexplained scanner timeout three steps later.
+ * The cropped PNG and the Y4M beside it are what the `pocket` step feeds to
+ * Chromium's fake video device, so the decode here is not a nicety: an
+ * illegible crop would show up as an unexplained scanner timeout two steps
+ * later.
  */
 async function stepQr(ctx) {
   const ab = ctx.state.hostBrowser;
+  await ab.run(['find', 'role', 'button', 'click', '--name', 'Set up a phone', '--exact']);
+  ctx.record({ setupTokenTtlMs: await setupTokenTtlMs(ctx.repoRoot) });
+  await captureQr(ctx);
+}
+
+/**
+ * Screenshot the QR the panel is currently showing, crop it, make the camera's
+ * Y4M out of it, and prove the crop still decodes.
+ *
+ * Separate from the step because the `code` step re-runs it: the panel replaces
+ * its own code before the TTL runs out, and a Y4M holding the previous one
+ * would surface as an unexplained scanner timeout rather than as the rotation
+ * it is.
+ */
+async function captureQr(ctx) {
+  const ab = ctx.state.hostBrowser;
   const { runDir, repoRoot } = ctx;
 
-  await ab.run(['find', 'role', 'button', 'click', '--name', 'Set up a phone', '--exact']);
   await waitFor(
     () => ab.eval(`return !!document.querySelector('svg[aria-label="Setup code for this machine"]');`),
     { what: 'the setup QR to render', timeoutMs: 60_000 },
@@ -210,8 +256,7 @@ async function stepQr(ctx) {
   await delay(400);
 
   const full = join(runDir, 'qr-full.png');
-  await ab.screenshot(full);
-  ctx.artifacts.push('qr-full.png');
+  await ctx.shot('qr-full.png');
 
   const measured = await ab.eval(`const svg = document.querySelector('svg[aria-label="Setup code for this machine"]');
     if (!svg) return null;
@@ -254,7 +299,18 @@ async function stepQr(ctx) {
   ctx.artifacts.push('invitation-url.txt');
 
   ctx.record({
-    qr: { scale, cropBox, y4m, decoded, decodedFrom, fromDom: invitationUrl !== null },
+    qr: {
+      scale,
+      cropBox,
+      y4m,
+      decoded,
+      decodedFrom,
+      fromDom: invitationUrl !== null,
+      // Against `setupTokenTtlMs`: how much of the code's life was still ahead
+      // of it when the camera got its frame.
+      capturedAt: new Date().toISOString(),
+      captures: (ctx.state.qrCaptures = (ctx.state.qrCaptures ?? 0) + 1),
+    },
   });
 }
 
@@ -283,6 +339,188 @@ async function readInvitationUrl(ab) {
     return null;`);
 }
 
+/**
+ * Bring up the Pocket side: its own Chrome, its own profile, a fake camera
+ * pointed at the QR, and a virtual authenticator standing in for the phone's
+ * biometrics.
+ *
+ * **A browser of its own, not a second tab.** Pocket is a different device from
+ * the laptop in every way this walkthrough is about — its own passkeys, its own
+ * IndexedDB, its own service worker — and the flags it needs (the fake capture
+ * device and the file behind it) can only be given at launch, which
+ * `agent-browser` has no verb for. So the harness launches Chrome and attaches.
+ *
+ * **The plain origin, never the invitation URL.** Opening the `#pair?` fragment
+ * is the native-camera bootstrap path, which Pocket deliberately spends nothing
+ * on (`docs/specs/pocket-app.md`); this walkthrough is about the in-app scan.
+ */
+async function stepPocket(ctx) {
+  const { repoRoot, runDir, opts } = ctx;
+
+  const chrome = resolveChrome();
+  ctx.log(`pocket browser: ${chrome.path} (${chrome.from})`);
+  const port = await findFreePort(opts.hostPort + 100);
+  const userDataDir = join(runDir, 'pocket-profile');
+  mkdirSync(userDataDir, { recursive: true });
+  const launched = await launchChrome({
+    binary: chrome.path,
+    port,
+    userDataDir,
+    // Opened at `getUserMedia` time rather than at launch (probed), so this
+    // may be — and on a rotated code is — rewritten after Chrome is up.
+    fakeVideoFile: join(runDir, 'qr.y4m'),
+    width: POCKET_VIEWPORT.width,
+    height: POCKET_VIEWPORT.height,
+    logPath: join(runDir, 'pocket-chrome.log'),
+  });
+
+  const ab = new AgentBrowser(`${opts.session}-pocket`, repoRoot);
+  ctx.state.pocketBrowser = ab;
+  await ab.run(['connect', String(port)]);
+  // `connect` adopts the browser but not its window size, and every Pocket
+  // screen is laid out for a phone.
+  await ab.run(['set', 'viewport', String(POCKET_VIEWPORT.width), String(POCKET_VIEWPORT.height)]);
+  await ab.openUntil(
+    `${ctx.serverOrigin}/`,
+    `return !!document.body && document.body.innerText.includes(${JSON.stringify(SCAN_LABEL)});`,
+  );
+
+  // Before anything can call `navigator.credentials`: the authenticator belongs
+  // to this page target, and a WebAuthn call made without one hangs until its
+  // own timeout rather than failing.
+  ctx.state.pocketAuth = await installVirtualAuthenticator(
+    port,
+    new RegExp(`^${escapeRegExp(ctx.serverOrigin)}/`),
+  );
+
+  ctx.record({
+    pocket: {
+      chrome: chrome.path,
+      chromeFrom: chrome.from,
+      chromeVersion: launched.version.Browser,
+      debuggingPort: port,
+      userDataDir,
+      viewport: POCKET_VIEWPORT,
+      authenticatorId: ctx.state.pocketAuth.authenticatorId,
+    },
+  });
+  await ctx.shot('05-pocket-first-run.png', ab);
+}
+
+/**
+ * The real in-app path: scan, register, sign in, and read the two digits — then
+ * check that the Host was interrupted by the same ceremony.
+ *
+ * Nothing here drives the client directly. The scan is the fake camera being
+ * decoded by Pocket's own `@zxing` reader, and both passkey operations are the
+ * app's, answered by the virtual authenticator.
+ */
+async function stepCode(ctx) {
+  const pocket = ctx.state.pocketBrowser;
+  const host = ctx.state.hostBrowser;
+  if (!pocket) throw new Error('the pocket step has to run first');
+
+  await ensureCapturedCodeIsLive(ctx);
+
+  await pocket.run(['find', 'role', 'button', 'click', '--name', SCAN_LABEL, '--exact']);
+  // The scanner is on screen for as long as the decode takes, which behind a
+  // fake camera is under a second — so the wait polls fast and the screenshot
+  // goes in front of everything else this step does.
+  await waitFor(() => pocket.eval(scannerUpExpr()), {
+    what: 'the scanner to open',
+    timeoutMs: 30_000,
+    intervalMs: 50,
+  });
+  await ctx.shot('06-scanner.png', pocket);
+
+  const code = await waitFor(() => pocket.eval(pairingCodeExpr()), {
+    what: 'Pocket to register a passkey, sign in, and show a pairing code',
+    timeoutMs: 180_000,
+    intervalMs: 250,
+  });
+  writeFileSync(join(ctx.runDir, 'pairing-code.txt'), `${code}\n`);
+  ctx.artifacts.push('pairing-code.txt');
+  ctx.state.pairingCode = code;
+  await ctx.shot('07-code-screen.png', pocket);
+
+  // Two authenticator operations, asserted at the authenticator rather than
+  // inferred from the screen: `setup` creates the resident credential and
+  // `signin` asserts it, so one credential whose `signCount` has moved is the
+  // proof that both actually happened.
+  const credentials = await virtualCredentials(ctx.state.pocketAuth);
+  if (credentials.length !== 1 || credentials[0].signCount < 2) {
+    throw new Error(
+      `expected one resident credential asserted at least once, got ${JSON.stringify(credentials)}`,
+    );
+  }
+  ctx.record({ pairing: { code, credentials } });
+
+  // The Host's own interruption, which is the half of this ceremony the phone
+  // cannot see: the pairing request reaches the webview and opens the modal.
+  const modalText = await waitFor(() => host.eval(pairingModalExpr()), {
+    what: "the Host's pairing modal to open",
+    timeoutMs: 120_000,
+  });
+  ctx.record({ hostPairingModal: modalText });
+  await ctx.shot('08-host-pairing-modal.png', host);
+}
+
+/**
+ * Make sure the Y4M the camera is about to read still holds the code the Host
+ * is showing, re-capturing when it does not.
+ *
+ * The panel replaces its own code ahead of the TTL, and a run that is slow
+ * between the two steps can straddle that. Chrome opens the capture file at
+ * `getUserMedia` time, so rewriting it here — before the scanner mounts — is
+ * enough; without this the scan would simply never decode into anything the
+ * Server still honours, and the failure would read as a broken scanner.
+ */
+async function ensureCapturedCodeIsLive(ctx) {
+  const ab = ctx.state.hostBrowser;
+  const captured = readFileSync(join(ctx.runDir, 'invitation-url.txt'), 'utf8').trim();
+  const showing = await readInvitationUrl(ab);
+  if (showing === captured) return;
+  ctx.log(
+    showing === null
+      ? 'the setup panel is no longer showing a code; asking for a new one'
+      : 'the Host rotated its setup code since the capture; re-capturing',
+  );
+  if (showing === null) {
+    await ab.run(['find', 'role', 'button', 'click', '--name', 'New code', '--exact']);
+  }
+  await captureQr(ctx);
+  ctx.record({ qrRecaptured: true });
+}
+
+/** The scanner screen, matched on copy with no typographic quotes in it. */
+function scannerUpExpr() {
+  return `return !!document.body && document.body.innerText.includes('Or paste the code');`;
+}
+
+/**
+ * The two digits off the waiting screen — the only place they exist, since the
+ * Host holds the expected ones and never sends them.
+ */
+function pairingCodeExpr() {
+  return `if (!document.body || !document.body.innerText.includes('Type this code on the computer')) return null;
+    const digits = [...document.querySelectorAll('p')]
+      .map((el) => el.textContent.trim())
+      .find((text) => /^\\d\\d$/.test(text));
+    return digits ?? null;`;
+}
+
+/** The Host's pairing modal, as text, or null while it has not opened. */
+function pairingModalExpr() {
+  return `const modal = [...document.querySelectorAll('[role="dialog"]')]
+      .find((el) => el.innerText.includes('Pair a new device'));
+    return modal ? modal.innerText.trim() : null;`;
+}
+
+/** Escape `value` for use inside a regular expression. */
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /** `fill`, then read the value back — a controlled input can swallow a paste. */
 async function fillField(ab, selector, value) {
   await ab.run(['fill', selector, value]);
@@ -307,16 +545,19 @@ export const STEPS = [
   {
     name: 'pocket',
     title: 'Open Pocket with a fake camera and a virtual authenticator',
-    run: notImplemented('b', 'launch Chrome with --use-file-for-fake-video-capture=qr.y4m, attach with `agent-browser connect`, add a CDP virtual authenticator, and register the passkey'),
+    run: stepPocket,
   },
   {
     name: 'code',
-    title: 'Read the two-digit code and approve the pairing on the Host',
-    run: notImplemented('c', 'read the code off Pocket, type it into the Host pairing modal, and confirm'),
+    title: 'Scan from inside Pocket and read the two-digit code',
+    run: stepCode,
   },
   {
     name: 'terminal',
-    title: 'Prove the terminal',
-    run: notImplemented('c', 'run a command from Pocket and observe its output'),
+    title: 'Approve on the Host and prove the terminal',
+    run: notImplemented(
+      'c',
+      "type ctx.state.pairingCode into the Host's pairing modal, press Confirm and authorize, then run a command from Pocket and observe its output",
+    ),
   },
 ];

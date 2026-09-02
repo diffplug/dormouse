@@ -109,6 +109,8 @@ async function main(live) {
     facts: {},
   };
   const state = live.state;
+  // Cleanup identifies the Pocket Chrome by its profile path; see `cleanup`.
+  state.runDir = runDir;
 
   const ctx = {
     repoRoot,
@@ -120,11 +122,25 @@ async function main(live) {
     artifacts: summary.artifacts,
     log: (message) => console.log(`[walkthrough] ${message}`),
     record: (facts) => Object.assign(summary.facts, facts),
-    /** Screenshot the Host webview into the run directory. */
-    shot: async (name) => {
-      if (!state.hostBrowser) throw new Error('no browser to screenshot yet');
-      await state.hostBrowser.screenshot(join(runDir, name));
+    /**
+     * Screenshot a browser into the run directory — the Host's by default, the
+     * Pocket one when it is passed.
+     *
+     * **Every screenshot also writes `<name>.txt`.** A later pass critiques
+     * every string a user meets along this path, and a PNG is not something it
+     * can read; the text dump is its raw material, so it is taken here rather
+     * than left to each step to remember.
+     */
+    shot: async (name, browser = state.hostBrowser) => {
+      if (!browser) throw new Error('no browser to screenshot yet');
+      await browser.screenshot(join(runDir, name));
       summary.artifacts.push(name);
+      const textName = `${name.replace(/\.png$/, '')}.txt`;
+      const text = await browser
+        .visibleText()
+        .catch((err) => `(text capture failed: ${err.message})`);
+      writeFileSync(join(runDir, textName), `${text ?? ''}\n`);
+      summary.artifacts.push(textName);
       return name;
     },
   };
@@ -157,6 +173,8 @@ async function main(live) {
   }
 
   summary.finishedAt = new Date().toISOString();
+  // A re-captured QR rewrites the same files, so the list is a set of names.
+  summary.artifacts = [...new Set(summary.artifacts)];
   summary.reached = reached;
   summary.ok = failure === null;
   writeFileSync(join(runDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
@@ -176,16 +194,41 @@ async function main(live) {
  * — it would take down every other agent-browser session on the machine.
  */
 async function cleanup(state, opts) {
-  if (state.hostBrowser) {
-    await state.hostBrowser.close();
-    await state.hostBrowser.killDaemon().catch(() => {});
+  // Before anything is closed, and on the failure path too: the Host mirrors
+  // its webview's console into `host.log`, and this is the Pocket side's only
+  // equivalent — the one place a client-side throw shows up at all.
+  if (state.pocketBrowser && state.runDir) {
+    const dumps = await Promise.all(
+      [['console'], ['errors']].map((argv) =>
+        state.pocketBrowser.run(argv).catch((err) => `(${argv[0]} unavailable: ${err.message})`),
+      ),
+    );
+    writeFileSync(
+      join(state.runDir, 'pocket-console.log'),
+      `--- console ---\n${dumps[0]}\n\n--- errors ---\n${dumps[1]}\n`,
+    );
+  }
+  // The CDP socket next: it is the only thing holding the Pocket page's virtual
+  // authenticator, and closing it after Chrome is gone throws.
+  state.pocketAuth?.session.close();
+  for (const browser of [state.pocketBrowser, state.hostBrowser]) {
+    if (!browser) continue;
+    await browser.close();
+    await browser.killDaemon().catch(() => {});
   }
   for (const handle of spawnedHandles()) await killTree(handle);
   // The harness's own children can outlive a SIGTERM that arrived while pnpm
   // was still wiring up its tree.
   await delay(500);
-  const survivors = await exec('/bin/sh', ['-c',
-    `pgrep -fl 'dev-agent-browser.mjs|${opts?.session ?? 'pairing-walkthrough'}' || true`]).catch(() => ({ stdout: '' }));
+  // The Pocket Chrome answers to neither name — it is not an agent-browser
+  // session and not a harness child by the time it matters — so its profile
+  // path, which is inside the run directory, is what identifies it.
+  const marks = ['dev-agent-browser.mjs', opts?.session ?? 'pairing-walkthrough', state.runDir]
+    .filter(Boolean)
+    .join('|');
+  const survivors = await exec('/bin/sh', ['-c', `pgrep -fl '${marks}' || true`]).catch(() => ({
+    stdout: '',
+  }));
   if (survivors.stdout.trim()) {
     console.error(`[walkthrough] processes survived cleanup:\n${survivors.stdout.trim()}`);
   }

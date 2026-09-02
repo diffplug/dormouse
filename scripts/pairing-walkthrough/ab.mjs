@@ -3,12 +3,12 @@
  * (`scripts/pairing-walkthrough/README.md`).
  *
  * One instance is one `--session`, which is one isolated browser. The Host runs
- * in the session the `dev:standalone:ab` harness opened; stage (b)'s Pocket
- * browser is a second instance with its own session name, which is why this is
- * a class rather than a module of free functions.
+ * in the session the `dev:standalone:ab` harness opened; the Pocket browser is a
+ * second instance with its own session name, which is why this is a class rather
+ * than a module of free functions.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -65,6 +65,25 @@ export class AgentBrowser {
   }
 
   /**
+   * Everything the page is currently saying, for the copy pass that reads every
+   * string a user meets on this path.
+   *
+   * `innerText` rather than `textContent`, so it is what is *visible* and in
+   * reading order. Anything announced — an error row, a live region — is
+   * appended under a rule as well as left in place: a code screen's two digits
+   * and an alert's sentence read identically as plain text otherwise.
+   */
+  async visibleText() {
+    return this.eval(`const body = document.body ? document.body.innerText.trim() : '';
+      const announced = [...document.querySelectorAll('[role="alert"], [role="status"], [aria-live]')]
+        .map((el) => el.innerText.trim())
+        .filter(Boolean);
+      return announced.length === 0
+        ? body
+        : body + '\\n\\n--- announced ---\\n' + announced.join('\\n');`);
+  }
+
+  /**
    * Open `url` until it sticks.
    *
    * The first `open` against a daemon that has just been closed lands on
@@ -93,34 +112,44 @@ export class AgentBrowser {
   }
 
   /**
-   * Terminate the per-session daemon.
+   * Terminate the per-session daemon and forget the session.
    *
    * `close` stops Chrome but leaves the daemon alive holding its config, and
    * there is no CLI verb that stops one — so the pid file is the only handle.
    * Leaving it behind is what makes a later run inherit the wrong headed/headless
-   * mode and a stale profile.
+   * mode and a stale profile. The config goes too: session names carry the run's
+   * timestamp, so one left behind per run is litter in the user's home directory
+   * that nothing will ever read again.
    */
   async killDaemon() {
     const dir = process.env.AGENT_BROWSER_SOCKET_DIR || join(homedir(), '.agent-browser');
-    const pidFile = join(dir, `${this.session}.pid`);
-    if (!existsSync(pidFile)) return null;
-    const pid = Number(readFileSync(pidFile, 'utf8').trim());
-    if (!Number.isInteger(pid) || pid <= 0) return null;
-    for (const signal of ['SIGTERM', 'SIGKILL']) {
+    try {
+      return await stopDaemon(join(dir, `${this.session}.pid`));
+    } finally {
+      rmSync(join(dir, `${this.session}.config`), { force: true });
+    }
+  }
+}
+
+/** SIGTERM then SIGKILL the pid in `pidFile`, answering it (or null if absent). */
+async function stopDaemon(pidFile) {
+  if (!existsSync(pidFile)) return null;
+  const pid = Number(readFileSync(pidFile, 'utf8').trim());
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  for (const signal of ['SIGTERM', 'SIGKILL']) {
+    try {
+      process.kill(pid, signal);
+    } catch {
+      return pid;
+    }
+    for (let i = 0; i < 20; i++) {
+      await delay(100);
       try {
-        process.kill(pid, signal);
+        process.kill(pid, 0);
       } catch {
         return pid;
       }
-      for (let i = 0; i < 20; i++) {
-        await delay(100);
-        try {
-          process.kill(pid, 0);
-        } catch {
-          return pid;
-        }
-      }
     }
-    return pid;
   }
+  return pid;
 }
