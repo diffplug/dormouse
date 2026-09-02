@@ -38,9 +38,11 @@
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 
 import {
+  base64UrlLength,
   concatBytes,
   constantTimeEqual,
   fromBase64Url,
+  isExactBase64Url,
   toBase64Url,
   utf8Encode,
 } from './bytes.js';
@@ -220,6 +222,18 @@ export async function mintNoiseStaticKeyPair(
     throw new NoiseError('X25519 static key generation failed');
   }
   return { privateKeyPkcs8: toBase64Url(pkcs8), publicKey: toBase64Url(publicKey) };
+}
+
+/**
+ * Whether a value is base64url of a raw 32-byte X25519 public key.
+ *
+ * **Shape only, and required before a key is pinned.** A peer that names a
+ * static of any other length is one whose key nothing can import, so a store
+ * that keeps it holds a pin no later handshake can ever be built from — the
+ * failure surfaces at the *next* attempt, far from the outcome that caused it.
+ */
+export function isNoisePublicKey(value: unknown): value is string {
+  return isExactBase64Url(value, base64UrlLength(NOISE_KEY_LENGTH));
 }
 
 /**

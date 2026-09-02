@@ -30,6 +30,7 @@ import {
   hashPasskeyPublicKey,
   isConnectionOutcomeV1,
   isE2eServerToClientFrame,
+  isNoisePublicKey,
   isPairingOutcomeV1,
   pairingInvitationPrologue,
   pushEndpointFingerprint,
@@ -703,10 +704,15 @@ export class PocketClient {
     const passkeyPublicKeyHash = await hashPasskeyPublicKey(
       this.#requirePasskeyPublicKey(passkeyCredentialId),
     );
+    // The static's shape is checked here rather than trusted: the wire guard
+    // bounds it as a string, and a pin that is not an importable X25519 point
+    // is one no later connection can build a handshake from — a record that
+    // fails at the *next* attempt, with nothing left on screen to explain it.
     if (
       outcome.accountId !== SELFHOST_ACCOUNT_ID ||
       outcome.passkeyCredentialId !== passkeyCredentialId ||
-      outcome.passkeyPublicKeyHash !== passkeyPublicKeyHash
+      outcome.passkeyPublicKeyHash !== passkeyPublicKeyHash ||
+      !isNoisePublicKey(outcome.hostStaticPublicKey)
     ) {
       return { ok: false, message: PAIRING_DENIAL_MESSAGES['host-error'] };
     }
@@ -805,7 +811,17 @@ export class PocketClient {
       this.#connectedHostId = hostId;
       return { ok: true, hostLabel: outcome.hostLabel };
     }
-    if (outcome.code === 'pairing-required') await this.#dropAuthorization(record);
+    if (outcome.code === 'pairing-required') {
+      // Best-effort: the outcome is authenticated and the row has to move to
+      // *Pair again* whatever the local stores do. A tombstone write that
+      // throws leaves the record `paired`, which is the safe half — the next
+      // Connect earns the same authenticated denial and retries this.
+      try {
+        await this.#dropAuthorization(record);
+      } catch {
+        this.#disposeCeremony();
+      }
+    }
     return {
       ok: false,
       message: CONNECTION_DENIAL_MESSAGES[outcome.code],
@@ -1006,6 +1022,14 @@ export class PocketClient {
   /**
    * A ceremony's one control message, and the Host's single answer to it. Both
    * ceremonies are this shape, so the send and the await share a `try`.
+   *
+   * **The waiter is registered before the send**, as {@link #exchange} does it:
+   * an answer that arrives with no await in between — a relay that delivers
+   * synchronously — would otherwise reach {@link #onE2e} with nobody waiting,
+   * be dropped as an answer nobody asked for, and hang the ceremony to its
+   * deadline. Keepalives are accepted and skipped; the first control message is
+   * the outcome, whatever it says, and anything else is a peer this Client does
+   * not speak the same protocol as.
    */
   async #exchangeControl(
     route: E2eRoute,
@@ -1013,25 +1037,19 @@ export class PocketClient {
     request: Record<string, unknown>,
     deadline: number,
   ): Promise<unknown> {
-    this.#sendE2e(route, 'transport', session.sendControl(request));
-    return await this.#awaitControl(route, session, deadline);
-  }
-
-  /**
-   * The first control message a ceremony's session decrypts. Keepalives are
-   * accepted and skipped; anything else is the outcome, whatever it says.
-   */
-  async #awaitControl(
-    route: E2eRoute,
-    session: NoiseTransportSession,
-    deadline: number,
-  ): Promise<unknown> {
+    const key = waiterKey(route.kind, route.id, 'transport');
+    let awaited = this.#expect(key, deadline);
+    try {
+      this.#sendE2e(route, 'transport', session.sendControl(request));
+    } catch (error) {
+      this.#reclaim(key, awaited, error);
+      throw error;
+    }
     for (;;) {
-      const ct = await this.#expect(waiterKey(route.kind, route.id, 'transport'), deadline);
-      const receipt = session.receive(fromBase64Url(ct));
-      if (receipt.kind === 'keepalive') continue;
-      if (receipt.kind !== 'control') throw new Error('expected a control message');
-      return receipt.value;
+      const receipt = session.receive(fromBase64Url(await awaited));
+      if (receipt.kind === 'control') return receipt.value;
+      if (receipt.kind !== 'keepalive') throw new Error('expected a control message');
+      awaited = this.#expect(key, deadline);
     }
   }
 
@@ -1123,7 +1141,13 @@ export class PocketClient {
         this.#rejectAll(new Error('host disconnected'));
         return;
       case 'error':
-        this.#rejectAll(new Error(frame.error));
+        // Fixed copy, for the reason the denial tables are: the text is the
+        // relay's, unbounded and unshaped, and `#rejectAll` fails in-flight
+        // protocol-v1 requests whose message the app renders verbatim — so a
+        // hostile relay would be choosing the sentence the user reads. The
+        // relay's own words go to the console instead.
+        console.warn('[pocket] relay error frame', frame.error);
+        this.#rejectAll(new Error(HOST_UNAVAILABLE_MESSAGE));
         return;
       default:
         // Every legacy frame is ignored: this Client speaks one protocol.

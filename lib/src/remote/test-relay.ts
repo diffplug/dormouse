@@ -35,6 +35,8 @@ export interface TestRelay {
   openClientSocket(): FakeSocket;
   /** The Host went away: what a client bound to it is told. */
   hostGone(): void;
+  /** An `error` frame, as the relay answers a client it cannot route for. */
+  errorClient(message: string): void;
   /** Corrupt the `ct` of the next Host→Client frame, as a hostile relay would. */
   tamperNextHostFrame(): void;
   /** Stop routing, without closing either socket. */
@@ -116,6 +118,9 @@ export function createTestRelay(options: {
       if (!client) return;
       client.bound = null;
       client.socket.receive({ t: 'host-gone' });
+    },
+    errorClient(message) {
+      client?.socket.receive({ t: 'error', error: message });
     },
     tamperNextHostFrame() {
       tamper = true;

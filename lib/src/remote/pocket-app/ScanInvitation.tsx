@@ -101,13 +101,24 @@ export function ScanInvitation({
   /** The origin a code must name; `location.origin` in the app. */
   appOrigin: string;
   startScan?: StartScan;
-  onScanned: (invitation: PairingInvitation) => void;
+  /**
+   * Handed the parsed invitation. Awaited, so this screen knows when a ceremony
+   * that failed without leaving it is over and it may look again.
+   */
+  onScanned: (invitation: PairingInvitation) => void | Promise<void>;
   onCancel: () => void;
 }): React.ReactElement {
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsRef = useRef<ScanControls | null>(null);
-  /** Latched by the first accepted code, so a still-running decode is ignored. */
-  const settledRef = useRef(false);
+  /**
+   * Held while one accepted code is being handed over, so a decode still in
+   * flight cannot start a second ceremony. **Released again when the handover
+   * settles**: every failure between acceptance and the pairing screen — a
+   * refused setup token, a failed sign-in — leaves this screen up, and a latch
+   * that never opened would leave the camera *and* the paste field inert with
+   * an error on screen telling the user to scan again.
+   */
+  const acceptingRef = useRef(false);
   const [camera, setCamera] = useState<CameraState>('starting');
   const [pasted, setPasted] = useState('');
   const [rejected, setRejected] = useState(false);
@@ -124,21 +135,32 @@ export function ScanInvitation({
    */
   const accept = useCallback(
     async (text: string): Promise<void> => {
-      if (settledRef.current) return;
+      if (acceptingRef.current) return;
       const invitation = await parsePairingInvitationUrl(text, appOrigin);
       if (!invitation) {
         setRejected(true);
         return;
       }
-      if (settledRef.current) return;
-      settledRef.current = true;
+      if (acceptingRef.current) return;
+      acceptingRef.current = true;
       stopCamera();
-      onScanned(invitation);
+      try {
+        await onScanned(invitation);
+      } finally {
+        acceptingRef.current = false;
+      }
     },
     [appOrigin, onScanned, stopCamera],
   );
 
+  // **No camera while a ceremony this screen started is running.** It was
+  // stopped the moment the code was accepted, and one running behind a WebAuthn
+  // prompt and two round trips is the recording light nobody can account for
+  // (docs/specs/pocket-app.md). `busy` falling back to null is also what
+  // reopens it for a second attempt, so a ceremony that failed without leaving
+  // this screen gets the scanner back rather than only the paste field.
   useEffect(() => {
+    if (busy !== null) return;
     let live = true;
     const video = videoRef.current;
     if (!video) return;
@@ -154,6 +176,11 @@ export function ScanInvitation({
         setCamera('live');
       })
       .catch((err: unknown) => {
+        // Released here too, not only on the way out: the decoder can throw
+        // after `getUserMedia` already attached a stream, and there are no
+        // controls to stop in that case — so without this the screen explains
+        // that the camera is unavailable while its light is still on.
+        release(null, video);
         if (!live) return;
         // A refused permission is the one the user can fix; everything else —
         // no camera, no `getUserMedia`, an insecure context — reads the same
@@ -165,7 +192,7 @@ export function ScanInvitation({
       release(controlsRef.current, video);
       controlsRef.current = null;
     };
-  }, [accept, startScan]);
+  }, [accept, busy, startScan]);
 
   const cameraProblem =
     camera === 'denied'

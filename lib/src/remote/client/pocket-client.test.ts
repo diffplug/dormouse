@@ -344,6 +344,12 @@ async function makeE2eHarness(
     pendingDeletions?: MemoryPendingDeletions;
     authenticator?: TestAuthenticator;
     noiseStatic?: NoiseStaticKeyMaterial;
+    /**
+     * What the Host *announces* as its static, when that has to differ from the
+     * key it actually handshakes with. Nothing on the Host validates this
+     * string, so it is how a malformed pin reaches the Client at all.
+     */
+    announcedStatic?: string;
     loadAcl?: () => HostAclRecord[];
     now?: () => number;
     /** Make every delivery-row deletion fail, as an offline phone's would. */
@@ -367,7 +373,7 @@ async function makeE2eHarness(
     rpId: RP_ID,
     label: HOST_LABEL,
     noiseStaticPrivateKey: noiseStatic.privateKeyPkcs8,
-    noiseStaticPublicKey: noiseStatic.publicKey,
+    noiseStaticPublicKey: options.announcedStatic ?? noiseStatic.publicKey,
   };
   const hostSocket = new FakeSocket();
   const host = new RemoteHost({
@@ -609,6 +615,21 @@ describe('pairing, end to end', () => {
   });
 
   /**
+   * The pin has to be an importable X25519 point. A Host announcing anything
+   * else — the outcome's field is only bounded as a string on the wire — would
+   * otherwise be stored, and every later `connect` would throw building a
+   * handshake from it, long after the screen that could explain it is gone.
+   */
+  it('refuses a Host static that is not a 32-byte key, rather than pinning it', async () => {
+    const harness = await makeE2eHarness({ announcedStatic: 'not-a-key' });
+
+    const result = await harness.pairAndApprove(await harness.mintInvitation());
+
+    expect(result).toEqual({ ok: false, message: PAIRING_DENIAL_MESSAGES['host-error'] });
+    expect(harness.knownHosts.records.size).toBe(0);
+  });
+
+  /**
    * An outcome is believed only after it decrypts on this ceremony's own
    * session, so a relay that flips a byte cannot turn a pairing into anything —
    * and the failure is unavailability, never a denial.
@@ -722,6 +743,42 @@ describe('connecting, end to end', () => {
     expect([...paired.pendingDeletions.records.values()]).toEqual([]);
   });
 
+  /**
+   * The outcome is authenticated, so the row has to move to *Pair again*
+   * whatever the local stores do. A tombstone write that throws leaves the
+   * record `paired` — the safe half, since the next Connect earns the same
+   * denial and retries — but the caller must still get the ConnectResult
+   * rather than a raw IndexedDB error the UI would print at the user.
+   */
+  it('still reports pairing-required when the tombstone cannot be written', async () => {
+    const paired = await makeE2eHarness();
+    await paired.pairAndApprove(await paired.mintInvitation());
+    const reset = await makeE2eHarness({
+      hostId: paired.hostId,
+      knownHosts: paired.knownHosts,
+      pendingDeletions: paired.pendingDeletions,
+      authenticator: paired.authenticator,
+      noiseStatic: paired.noiseStatic,
+      loadAcl: () => [],
+    });
+    paired.pendingDeletions.put = () => Promise.reject(new Error('QuotaExceededError'));
+
+    const result = await reset.client.connect(reset.hostId);
+
+    expect(result).toEqual({
+      ok: false,
+      message: CONNECTION_DENIAL_MESSAGES['pairing-required'],
+      pairingRequired: true,
+    });
+    // Tombstone first: a write that failed must not have let the record forget
+    // the only id that can ever name that row.
+    expect(paired.knownHosts.records.get(paired.hostId)!.authorization).toEqual({
+      state: 'paired',
+      deliveryId: expect.any(String),
+      approvedAt: expect.any(Number),
+    });
+  });
+
   it('keeps the tombstone when the deletion cannot be delivered', async () => {
     const paired = await makeE2eHarness();
     await paired.pairAndApprove(await paired.mintInvitation());
@@ -769,6 +826,25 @@ describe('connecting, end to end', () => {
     await expect(harness.client.hello()).rejects.toThrow();
     await waitFor(() => hostGone === 1, 'the session to be torn down');
     expect(harness.client.connectedHostId).toBeNull();
+  });
+
+  /**
+   * An `error` frame's text is the relay's — unbounded, unshaped, and not run
+   * through any guard. `#rejectAll` fails in-flight protocol-v1 requests, whose
+   * message the app renders in its alert row, so believing that text would let
+   * a hostile relay pick the sentence the user reads. Same rule as the denial
+   * tables: fixed copy, never a remote party's.
+   */
+  it('answers a relay error with fixed copy, never the relay’s own words', async () => {
+    const harness = await makeE2eHarness();
+    await harness.pairAndApprove(await harness.mintInvitation());
+    await harness.client.connect(harness.hostId);
+
+    const pending = harness.client.hello();
+    harness.relay.errorClient('Your session was revoked — visit http://evil.example to restore it');
+
+    await expect(pending).rejects.toThrow(HOST_UNAVAILABLE_MESSAGE);
+    await expect(pending).rejects.not.toThrow(/evil\.example/);
   });
 
   it('leaves the phone connected to nothing when the Host drops', async () => {

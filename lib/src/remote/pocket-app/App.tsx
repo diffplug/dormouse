@@ -359,57 +359,75 @@ export default function App({
    * credential, and the only place it is allowed to exist is the argument list
    * of the pairing it starts.
    */
-  const onScanned = (invitation: PairingInvitation) =>
-    run('pair', async () => {
-      cancelledPairingRef.current = false;
-      const label = deviceLabel();
-      let spentOnSetup = false;
-      if (client.sessionToken === null) {
-        // A browser with no usable passkey registers one with the scanned
-        // token; anything else signs in with what it already holds.
-        if (hasPriorUseNow(client, passkeyAlreadyRegistered)) {
-          await client.signin();
-        } else {
-          try {
-            await client.setup({ setupToken: invitation.setupToken }, label);
-          } catch (err) {
-            // Registration can never succeed on this device, so the scan is
-            // over: sign-in leads, and is now known to work.
-            if (err instanceof PasskeyAlreadyRegisteredError) setPasskeyAlreadyRegistered(true);
-            throw err;
+  const onScanned = useCallback(
+    (invitation: PairingInvitation) =>
+      run('pair', async () => {
+        cancelledPairingRef.current = false;
+        const label = deviceLabel();
+        let spentOnSetup = false;
+        if (client.sessionToken === null) {
+          // A browser with no usable passkey registers one with the scanned
+          // token; anything else signs in with what it already holds.
+          if (hasPriorUseNow(client, passkeyAlreadyRegistered)) {
+            await client.signin();
+          } else {
+            try {
+              await client.setup({ setupToken: invitation.setupToken }, label);
+            } catch (err) {
+              // Registration can never succeed on this device, so the scan is
+              // over: sign-in leads, and is now known to work.
+              if (err instanceof PasskeyAlreadyRegisteredError) setPasskeyAlreadyRegistered(true);
+              throw err;
+            }
+            spentOnSetup = true;
+            await client.signin();
           }
-          spentOnSetup = true;
-          await client.signin();
         }
-      }
-      // A signed-in phone has no passkey to create, so it spends the code
-      // rather than leaving a photographed QR redeemable. A refusal aborts:
-      // the code is dead, and pairing with it would fail at the Host anyway.
-      if (!spentOnSetup) await client.retireSetupToken(invitation.setupToken);
-      await client.retirePendingDeletions();
+        // A signed-in phone has no passkey to create, so it spends the code
+        // rather than leaving a photographed QR redeemable. A refusal aborts:
+        // the code is dead, and pairing with it would fail at the Host anyway.
+        if (!spentOnSetup) await client.retireSetupToken(invitation.setupToken);
+        await client.retirePendingDeletions();
 
-      setPhase({ at: 'pairing', code: null });
-      // The digits land on the screen already showing them, and only while it
-      // is still up — a code arriving after Cancel has nowhere to go.
-      const result = await client.pair(invitation, label, (code) =>
-        setPhase((current) => (current.at === 'pairing' ? { at: 'pairing', code } : current)),
-      );
-      if (cancelledPairingRef.current) {
-        // The user stopped waiting; whatever the ceremony answered afterwards
-        // is not a failure to report at them.
-        await loadHosts();
-        return;
-      }
-      if (!result.ok) {
-        await loadHosts();
-        throw new Error(result.message);
-      }
-      // Approving on the laptop should land the phone in a terminal, not back
-      // on a list. Re-labelling busy is what keeps the screen showing progress.
-      setBusy('connect');
-      setHosts((prev) => withRecord(prev, result.record));
-      await connectTo(toHostView(result.record, true));
-    });
+        setPhase({ at: 'pairing', code: null });
+        // **Nothing may throw out of here while the pairing screen is up.** It
+        // shows two digits and a Cancel button and renders no error, so a throw
+        // left standing hides the one sentence the path exists to deliver —
+        // `HostIdentityMismatchError` above all, but equally a dismissed
+        // authenticator prompt or a connect the Host refused after approving the
+        // pair. `pair` and `connect` report denials as results and throw for the
+        // rest, so the whole span is covered rather than either call.
+        try {
+          // The digits land on the screen already showing them, and only while it
+          // is still up — a code arriving after Cancel has nowhere to go.
+          const result = await client.pair(invitation, label, (code) =>
+            setPhase((current) => (current.at === 'pairing' ? { at: 'pairing', code } : current)),
+          );
+          if (cancelledPairingRef.current) {
+            // The user stopped waiting; whatever the ceremony answered afterwards
+            // is not a failure to report at them.
+            await loadHosts();
+            return;
+          }
+          if (!result.ok) {
+            await loadHosts();
+            throw new Error(result.message);
+          }
+          // Approving on the laptop should land the phone in a terminal, not back
+          // on a list. Re-labelling busy keeps the screen showing progress.
+          setBusy('connect');
+          setHosts((prev) => withRecord(prev, result.record));
+          await connectTo(toHostView(result.record, true));
+        } catch (err) {
+          // Leave first, then re-read, so a failed re-read cannot strand them
+          // either. Both are no-ops once a successful connect has moved on.
+          setPhase((current) => (current.at === 'pairing' ? { at: 'hosts' } : current));
+          await loadHosts().catch(() => undefined);
+          throw err;
+        }
+      }),
+    [client, connectTo, loadHosts, passkeyAlreadyRegistered, run],
+  );
 
   const onCancelPairing = () => {
     cancelledPairingRef.current = true;
@@ -501,8 +519,16 @@ export default function App({
           startScan={startScan}
           onScanned={onScanned}
           onCancel={() => {
-            setError(null);
-            setPhase({ at: client.sessionToken === null ? 'auth' : 'hosts' });
+            // A scan that signed in but failed afterwards has a session and no
+            // list: `onScanned` only reads one on a path that reaches pairing.
+            // So the way back is the read, not a bare phase change — otherwise
+            // the Hosts view claims nothing is paired until Refresh.
+            if (client.sessionToken === null) {
+              setError(null);
+              setPhase({ at: 'auth' });
+              return;
+            }
+            void run('refresh', loadHosts);
           }}
         />
       );

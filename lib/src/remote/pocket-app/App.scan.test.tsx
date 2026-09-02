@@ -271,6 +271,53 @@ describe('a first run, from the scan to the terminal', () => {
     expect(fake.connect).not.toHaveBeenCalled();
     expect(buttonNamed(container, 'Refresh')).not.toBeNull();
   });
+
+  /**
+   * `pair` reports denials as a result but *throws* for a Host-static mismatch,
+   * a dismissed authenticator prompt, and a lost passkey cache. The two-digit
+   * waiting screen renders no error, so a throw that left the user there would
+   * hide the one sentence that path exists to deliver.
+   */
+  it('leaves the waiting screen for a throw, where the message can be read', async () => {
+    const { url } = await invitationUrl();
+    fake.pair.mockRejectedValue(
+      new Error('This computer is presenting a different identity than the one this phone paired with.'),
+    );
+    await boot();
+
+    await pasteCode(url);
+
+    expect(alertText(container)).toBe(
+      'This computer is presenting a different identity than the one this phone paired with.',
+    );
+    // The Hosts list, not the pairing screen: `Refresh` exists only there.
+    expect(buttonNamed(container, 'Refresh')).not.toBeNull();
+    expect(buttonNamed(container, 'Cancel')).toBeNull();
+  });
+
+  /**
+   * The connect that follows an approved pairing runs with the two-digit screen
+   * still up, so a Host that refuses it — busy, protocol-rejected — or a
+   * dismissed biometric inside `connect` has the same nowhere-to-show problem
+   * the pairing half had.
+   */
+  it('leaves the waiting screen when the connect after a pairing is refused', async () => {
+    const { url, invitation } = await invitationUrl();
+    fake.pair.mockResolvedValue({ ok: true, record: await knownHost(invitation.hostId) });
+    fake.connect.mockResolvedValue({
+      ok: false,
+      message: 'The computer is already handling as many phones as it can. Try again shortly.',
+      pairingRequired: false,
+    });
+    await boot();
+
+    await pasteCode(url);
+
+    expect(alertText(container)).toBe(
+      'The computer is already handling as many phones as it can. Try again shortly.',
+    );
+    expect(buttonNamed(container, 'Refresh')).not.toBeNull();
+  });
 });
 
 describe('a phone that is already signed in', () => {
@@ -424,6 +471,34 @@ describe('leaving the scanner', () => {
    * Cancelling the wait is not a failure to report at the user: the ceremony
    * they abandoned has nothing left to say to them.
    */
+  it('reads the list on the way back, since the scan may have signed in', async () => {
+    // `onScanned` signs in and only reads the Hosts list on a path that reaches
+    // pairing, so a scan that failed after sign-in has a session and no list.
+    // Cancelling into an empty "No computers paired yet" would be a lie.
+    const { url } = await invitationUrl();
+    fake.setup.mockRejectedValue(new Error('That pairing code has expired.'));
+    fake.listKnownHosts.mockResolvedValue([await knownHost('host-1')]);
+    fake.listHosts.mockResolvedValue([{ hostId: 'host-1', label: '', online: true }]);
+    await boot();
+    await click(container, 'Scan a Host QR');
+    const input = container.querySelector<HTMLInputElement>('#pocket-paste-code')!;
+    act(() => setNativeFieldValue(input, url));
+    act(() => {
+      container.querySelector('form')!.dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      );
+    });
+    await settle();
+    // Setup failed but sign-in did not run; give the phone a session anyway,
+    // as a scan that got past setup and failed later would have.
+    fake.sessionToken = 'tok';
+
+    await click(container, 'Cancel');
+
+    expect(container.textContent).toContain('First laptop');
+    expect(container.textContent).not.toContain('No computers paired yet');
+  });
+
   it('leaves no error behind when the waiting screen is cancelled', async () => {
     const { url } = await invitationUrl();
     let releasePair!: (result: PairingResult) => void;

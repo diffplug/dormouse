@@ -185,8 +185,10 @@ Two phone-specific exceptions to `DESIGN.md`'s Two-Step Rule, kept narrow: form
 inputs use 16px text (anything smaller triggers iOS zoom-on-focus, and 10–12px
 is illegible at thumb distance), and chrome type runs a step larger than desktop
 (13px body, 11–12px secondary) with taller touch targets (44px block actions,
-36px row actions). Source of truth: `lib/src/remote/pocket-app/App.tsx` (views +
-the `pkButton`/`PK` vocabulary), `lib/src/remote/pocket-app/pocket-theme.ts`
+36px row actions). Source of truth: `lib/src/remote/pocket-app/pocket-chrome.tsx`
+(the `pkButton`/`PK` vocabulary every screen draws from),
+`lib/src/remote/pocket-app/App.tsx` (views),
+`lib/src/remote/pocket-app/pocket-theme.ts`
 (theme boot + browser-chrome sync), `lib/pocket/index.html` (structural viewport
 rules + pre-boot color fallbacks).
 
@@ -487,9 +489,9 @@ Two details this depends on:
 
 - **The trigger is the session gate specifically**, matched on the shared
   `UNAUTHORIZED_ERROR` from `server-lib-common/src/remote/wire.ts` — a 401 alone
-  is ambiguous, since a wrong setup password and a rejected device signature
-  answer 401 too, and signing the user out for those would be worse than the bug
-  this fixes.
+  is ambiguous, since a refused setup token answers 401 too (as
+  `SetupTokenInvalidError`), and signing the user out for that would be worse
+  than the bug this fixes.
 - **A rejected relay upgrade carries no status.** The browser surfaces it as a
   bare `error` event, so `openSocket` asks an authenticated route what happened:
   a 401 there means expiry, anything else leaves it an ordinary socket failure.

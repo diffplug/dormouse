@@ -179,6 +179,44 @@ describe('reading a code', () => {
   });
 });
 
+/**
+ * Everything between accepting a code and the pairing screen can fail — a
+ * refused setup token, a sign-in that did not work — and every one of those
+ * leaves this screen up with an error telling the user to scan again.
+ */
+describe('after a ceremony that failed without leaving this screen', () => {
+  it('takes a second code, rather than latching on the first', async () => {
+    const { onScanned } = render();
+    await settle();
+
+    await paste((await invitationUrl()).url);
+    expect(onScanned).toHaveBeenCalledOnce();
+
+    await paste((await invitationUrl()).url);
+
+    expect(onScanned).toHaveBeenCalledTimes(2);
+  });
+
+  it('runs no camera while the ceremony is live, and reopens one after', async () => {
+    // A camera behind a WebAuthn prompt and two round trips is the recording
+    // light nobody can account for; `busy` is what says the ceremony is up.
+    const camera = fakeCamera();
+    render({ startScan: camera.startScan });
+    await settle();
+    expect(camera.started).toBe(1);
+
+    render({ startScan: camera.startScan, busy: 'pair' });
+    await settle();
+    expect(camera.started).toBe(1);
+    expect(camera.stops).toBeGreaterThan(0);
+
+    render({ startScan: camera.startScan });
+    await settle();
+
+    expect(camera.started).toBe(2);
+  });
+});
+
 describe('when the camera cannot be opened', () => {
   it('names a refused permission and leaves paste available', async () => {
     const { onScanned } = render({
@@ -225,6 +263,26 @@ describe('the camera is stopped on every way out', () => {
 
     expect(onCancel).toHaveBeenCalledOnce();
     expect(camera.stops).toBeGreaterThan(0);
+  });
+
+  it('stops the tracks a decoder attached before it threw', async () => {
+    // `getUserMedia` resolves and the stream is attached, then the decoder
+    // fails. There are no controls to stop, so nothing but this releases the
+    // stream — and the screen stays up saying the camera is unavailable while
+    // its light is on.
+    let stops = 0;
+    render({
+      startScan: (video) => {
+        (video as unknown as { srcObject: unknown }).srcObject = {
+          getTracks: () => [{ stop: () => stops++ }],
+        };
+        return Promise.reject(Object.assign(new Error('decoder'), { name: 'NotFoundError' }));
+      },
+    });
+    await settle();
+
+    expect(container.textContent).toContain('cannot open a camera here');
+    expect(stops).toBeGreaterThan(0);
   });
 
   it('stops a camera that finished starting after the screen was gone', async () => {
