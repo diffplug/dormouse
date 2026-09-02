@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { AgentBrowser } from './ab.mjs';
-import { addVirtualAuthenticator, attachPage, virtualCredentials } from './cdp.mjs';
+import { addVirtualAuthenticator, attachPage, pageUrl, virtualCredentials } from './cdp.mjs';
 import { launchChrome, resolveChrome } from './chrome.mjs';
 import { crop, decodeQr, imageSize, toY4m, upscale } from './qr.mjs';
 import { delay, findFreePort, spawnLogged, waitFor, waitForLine } from './proc.mjs';
@@ -385,11 +385,24 @@ async function stepPocket(ctx) {
 
   // Attached before the app is opened, so the page's log is recorded from its
   // first paint; the target survives the navigation that follows.
-  const session = await attachPage(port, /^(about:blank$|chrome:|http)/);
+  let session = await attachPage(port, () => true, 'the Pocket browser to have a page');
   await ab.openUntil(
     `${ctx.serverOrigin}/`,
     `return !!document.body && document.body.innerText.includes(${JSON.stringify(SCAN_LABEL)});`,
   );
+  // …unless `connect` adopted a *different* tab than the one attached to, in
+  // which case the authenticator would land on a page nothing is looking at and
+  // every `navigator.credentials` call would hang rather than fail. Cheap to
+  // check, and impossible to diagnose from the symptom.
+  if (!(await pageUrl(session)).startsWith(ctx.serverOrigin)) {
+    ctx.log('the attached page is not the one Pocket opened in; re-attaching');
+    session.close();
+    session = await attachPage(
+      port,
+      (target) => target.url.startsWith(ctx.serverOrigin),
+      'the page target showing Pocket',
+    );
+  }
 
   // Before anything can call `navigator.credentials`: the authenticator belongs
   // to this page target, and a WebAuthn call made without one hangs until its

@@ -91,17 +91,17 @@ function describeLogEvent({ method, params }) {
 }
 
 /**
- * Attach to the page target matching `urlPattern` and start recording its log.
+ * Attach to the first page target `matches` accepts and start recording its log.
  *
- * **Before the app is opened**, so the record covers the first paint: the
- * target survives a same-tab navigation, which is what the `open` that follows
- * is. `agent-browser console` is not a substitute — it answers empty for a
- * browser it merely connected to.
+ * **Attached before the app is opened**, so the record covers the first paint:
+ * the target survives a same-tab navigation, which is what the `open` that
+ * follows is. `agent-browser console` is not a substitute — it answers empty
+ * for a browser it merely connected to.
  */
-export async function attachPage(port, urlPattern) {
+export async function attachPage(port, matches, what = 'a page target') {
   const target = await waitFor(
-    async () => (await pageTargets(port)).find((t) => urlPattern.test(t.url)) ?? null,
-    { what: `a page target matching ${urlPattern}`, timeoutMs: 30_000, intervalMs: 250 },
+    async () => (await pageTargets(port)).find(matches) ?? null,
+    { what, timeoutMs: 30_000, intervalMs: 250 },
   );
   const ws = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => {
@@ -145,6 +145,15 @@ export async function addVirtualAuthenticator(session) {
     },
   });
   return authenticatorId;
+}
+
+/** Where `session`'s page currently is, asked of the page rather than of `/json/list`. */
+export async function pageUrl(session) {
+  const { result } = await session.send('Runtime.evaluate', {
+    expression: 'location.href',
+    returnByValue: true,
+  });
+  return result.value;
 }
 
 /**
