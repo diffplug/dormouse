@@ -80,7 +80,7 @@ export const PushEnabled: Story = {
     primedAlertSettings: { pushEnabled: true },
     primedPushDevices: {
       status: 'ready',
-      devices: [{ devicePublicKey: 'device-1', label: 'iPhone Safari' }],
+      devices: [{ deliveryId: 'delivery-1', label: 'iPhone Safari' }],
     },
   },
 };
@@ -93,9 +93,9 @@ export const PushManyDevices: Story = {
     primedPushDevices: {
       status: 'ready',
       devices: [
-        { devicePublicKey: 'device-1', label: 'iPhone Safari' },
-        { devicePublicKey: 'device-2', label: 'iPad' },
-        { devicePublicKey: 'device-3', label: 'Pixel Chrome' },
+        { deliveryId: 'delivery-1', label: 'iPhone Safari' },
+        { deliveryId: 'delivery-2', label: 'iPad' },
+        { deliveryId: 'delivery-3', label: 'Pixel Chrome' },
       ],
     },
   },

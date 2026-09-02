@@ -480,7 +480,8 @@ describe('enrollOffer', () => {
 
     expect(result.result).toEqual({ hostId: HOST_ID, serverUrl: OFFER.origin });
     expect(requests).toHaveLength(1);
-    expect(requestBody(0)).toEqual({ enrollToken: OFFER.token, label: 'Laptop' });
+    // The credential and nothing else: the label the operator typed stays local.
+    expect(requestBody(0)).toEqual({ enrollToken: OFFER.token });
     expect(requestBody(0)).not.toHaveProperty('password');
     // Same store-first persistence and same started Host as the typed form.
     expect(store.enrollment?.hostToken).toBe('tok');

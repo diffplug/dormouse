@@ -10,7 +10,7 @@ import { QrCode } from './QrCode';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-const URL_UNDER_TEST = 'https://ned-mac.tail9c2f1.ts.net/#setup?token=3PkQ8sV2mYb1hZr7Lw0c';
+const URL_UNDER_TEST = 'https://ned-mac.tail9c2f1.ts.net/#pair?1.3PkQ8sV2mYb1hZr7Lw0c';
 
 let container: HTMLDivElement;
 let root: Root;

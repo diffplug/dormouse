@@ -64,7 +64,7 @@ describe('remote-host enrollment', () => {
       expect.objectContaining({ method: 'POST', redirect: 'error' }),
     );
     const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
-    expect(body).toEqual({ password: 'hunter2', label: 'My Laptop' });
+    expect(body).toEqual({ password: 'hunter2' });
 
     expect(enrollment).toEqual({
       serverUrl: 'https://dormouse.example',
@@ -72,9 +72,8 @@ describe('remote-host enrollment', () => {
       hostToken: 'tok-xyz',
       origin: 'https://dormouse.example',
       rpId: 'dormouse.example',
-      // Kept from the caller's own argument: the Server never returns a label,
-      // and this one is what the machine calls itself inside an encrypted
-      // outcome.
+      // Kept from the caller's own argument: the request never carries one,
+      // and this is what the machine calls itself inside an encrypted outcome.
       label: 'My Laptop',
       // Minted locally, before the request and never in it (see below).
       noiseStaticPrivateKey: expect.any(String),
@@ -120,7 +119,7 @@ describe('remote-host enrollment', () => {
       string,
       unknown
     >;
-    expect(body).toEqual({ password: 'hunter2', label: 'My Laptop' });
+    expect(body).toEqual({ password: 'hunter2' });
   });
 
   it('refuses to enroll when the runtime cannot mint the static it needs', async () => {
@@ -170,7 +169,7 @@ describe('remote-host enrollment', () => {
     await performEnrollment('https://dormouse.example', { enrollToken: 'f'.repeat(64) }, 'My Laptop');
 
     const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
-    expect(body).toEqual({ enrollToken: 'f'.repeat(64), label: 'My Laptop' });
+    expect(body).toEqual({ enrollToken: 'f'.repeat(64) });
     expect(body).not.toHaveProperty('password');
   });
 
