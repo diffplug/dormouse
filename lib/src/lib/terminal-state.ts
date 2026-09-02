@@ -383,10 +383,12 @@ export function summarizeCommandLine(raw: string): string {
  * all yield `claude`; `foo | claude` yields `foo`. Returns null when the line
  * holds no runnable word.
  *
- * A Windows launcher suffix is part of the key: `C:\tools\claude.exe` yields
- * `claude.exe`, not `claude`. `foo.bat` and `foo.exe` can be two files in one
- * directory, and the rule set is the one place conflating them cannot be undone
- * from the UI — so a rule made on Windows keys on the spelling that was run.
+ * A Windows launcher suffix is not part of the name: `C:\tools\claude.exe`,
+ * `npm.cmd` and `build.ps1` yield `claude`, `npm` and `build`. `.exe` / `.cmd`
+ * is how one program spells itself when PATHEXT resolves it, so keeping the
+ * suffix would leave `npm` and `npm.cmd` as two rules for one program — the
+ * miss this whole path exists to close. Accepted: `foo.bat` and `foo.exe` in
+ * one directory cannot be watched separately.
  *
  * This is the key WATCHING rules are stored under — see `docs/specs/alert.md`.
  */
@@ -394,7 +396,7 @@ export function commandArgv0(raw: string): string | null {
   const commandTokens = takePrimaryCommandTokens(tokenizeCommand(raw.trim()));
   const command = commandTokens[0];
   if (!command) return null;
-  return commandBasename(command) || null;
+  return commandProgramName(command) || null;
 }
 
 export interface ResolvedCommandStart {
@@ -797,7 +799,7 @@ function withRequiredHostPrefixes(
  * A `\` escapes exactly the `POSIX_ESCAPABLE` set (`foo\ bar` is one token,
  * `\*.ts` passes a literal glob, and a path Dormouse escaped for paste reads
  * back as itself); before anything else it is a literal, so a native Windows
- * program path survives tokenizing intact and `commandBasename` still has
+ * program path survives tokenizing intact and `commandProgramName` still has
  * separators to split on. Two accepted costs of one dialect-free set: a Windows
  * segment that starts with a metacharacter (`C:\$Recycle.Bin`) still loses its
  * separator, and a POSIX escape of an ordinary character (`grep \-v`) keeps a
@@ -893,32 +895,34 @@ function isEnvAssignment(token: string | undefined): boolean {
   return !!token && /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
 }
 
-/** argv[0] reduced to a bare program name, in either path dialect. */
+/** A path reduced to its last segment, in either dialect. */
 function commandBasename(command: string): string {
   return command.replace(/^.*[\\/]/, '');
 }
 
 const WINDOWS_EXECUTABLE_SUFFIX = /\.(?:exe|cmd|bat|com|ps1)$/i;
 
-// `.cmd`/`.exe` is how the same program spells itself on Windows, so the cases
-// below — all keyed on bare names — match against the stripped form, or none of
-// them fire on Windows now that argv[0] resolves to `npm.cmd`. They still
-// *render* the basename as it was invoked: one program reads as one name across
-// the pane header, the WATCHING rule row, and the bell tooltip, and only the
-// header goes through here.
+/**
+ * argv[0] reduced to the one name a program answers to: no path, no launcher
+ * suffix. The single answer to "which program is this", so the header, the
+ * WATCHING rule row and the bell tooltip cannot disagree about it.
+ */
+function commandProgramName(command: string): string {
+  return commandBasename(command).replace(WINDOWS_EXECUTABLE_SUFFIX, '');
+}
+
 function commandTitleTokens(tokens: string[]): string[] {
   const command = tokens[0];
   if (!command) return [];
-  const basename = commandBasename(command);
-  const matched = basename.replace(WINDOWS_EXECUTABLE_SUFFIX, '');
+  const basename = commandProgramName(command);
   const rest = tokens.slice(1);
 
-  if (matched === 'npm' && rest[0] === 'run') return [basename, ...rest.slice(0, 2)];
-  if (matched === 'pnpm' || matched === 'yarn' || matched === 'bun') return [basename, ...rest.slice(0, 2)];
-  if (matched === 'docker' && rest[0] === 'compose') return [basename, ...rest.slice(0, 2)];
-  if (matched === 'cargo' && rest[0] === 'watch') return [basename, ...rest.slice(0, 3)];
-  if (matched === 'ssh') return [basename, ...rest.slice(0, 1)];
-  if (matched === 'vim' || matched === 'nvim' || matched === 'vi' || matched === 'pytest') return [basename];
+  if (basename === 'npm' && rest[0] === 'run') return [basename, ...rest.slice(0, 2)];
+  if (basename === 'pnpm' || basename === 'yarn' || basename === 'bun') return [basename, ...rest.slice(0, 2)];
+  if (basename === 'docker' && rest[0] === 'compose') return [basename, ...rest.slice(0, 2)];
+  if (basename === 'cargo' && rest[0] === 'watch') return [basename, ...rest.slice(0, 3)];
+  if (basename === 'ssh') return [basename, ...rest.slice(0, 1)];
+  if (basename === 'vim' || basename === 'nvim' || basename === 'vi' || basename === 'pytest') return [basename];
   return [basename, ...rest.slice(0, 2)];
 }
 
@@ -991,6 +995,8 @@ const GENERIC_PROCESS_TITLE_NAMES = new Set([
 function isGenericProcessTitle(title: string): boolean {
   const trimmed = title.trim();
   if (!trimmed) return false;
+  // Basename, not program name: the suffix is the evidence this test is looking
+  // for, so stripping it would leave every `.exe` title indistinguishable.
   const basename = commandBasename(trimmed);
   if (/\s/.test(basename)) return false; // carries arguments/description → meaningful
   if (WINDOWS_EXECUTABLE_SUFFIX.test(basename)) return true; // bare executable path

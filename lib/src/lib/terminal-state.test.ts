@@ -269,12 +269,13 @@ describe('command title summarizer', () => {
     expect(summarizeCommandLine('ssh prod-box')).toBe('ssh prod-box');
   });
 
-  // Matched on the stripped name, rendered as invoked — the header has to read
-  // the same name the WATCHING rule row and the bell tooltip show.
-  it('matches its per-program cases through a Windows launcher suffix', () => {
-    expect(summarizeCommandLine('vim.exe notes.txt')).toBe('vim.exe');
-    expect(summarizeCommandLine('cargo.exe watch -x test')).toBe('cargo.exe watch -x test');
-    expect(summarizeCommandLine('C:\\tools\\nodejs\\npm.cmd')).toBe('npm.cmd');
+  // One name per program: the launcher suffix is dropped everywhere, so the
+  // header reads the same name as the WATCHING rule row and the bell tooltip.
+  it('reads a Windows launcher as the program it launches', () => {
+    expect(summarizeCommandLine('vim.exe notes.txt')).toBe('vim');
+    expect(summarizeCommandLine('cargo.exe watch -x test')).toBe('cargo watch -x test');
+    expect(summarizeCommandLine('C:\\tools\\nodejs\\npm.cmd')).toBe('npm');
+    expect(summarizeCommandLine('C:\\tools\\nodejs\\npm.cmd run dev')).toBe('npm run dev');
   });
 
   it('keeps pipelines and compound commands recognizable', () => {
@@ -289,15 +290,15 @@ describe('command tokenizer dialects', () => {
   // escapes, so both dialects reduce to the bare program name.
   it.each([
     // Windows: absolute paths, launchers, a quoted path with spaces.
-    ['C:\\tools\\dor.cmd tool storybook', 'dor.cmd', 'dor.cmd tool storybook'],
+    ['C:\\tools\\dor.cmd tool storybook', 'dor', 'dor tool storybook'],
     ['C:\\Users\\me\\.claude\\local\\claude', 'claude', 'claude'],
-    ['"C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm.cmd', 'npm.cmd run dev'],
-    ['\\\\build\\share\\tools\\claude.exe --print', 'claude.exe', 'claude.exe --print'],
-    ['FOO=1 "C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm.cmd', 'npm.cmd run dev'],
+    ['"C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm', 'npm run dev'],
+    ['\\\\build\\share\\tools\\claude.exe --print', 'claude', 'claude --print'],
+    ['FOO=1 "C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm', 'npm run dev'],
     // PowerShell's call operator, the only way that shell runs a quoted path.
     // Without the leading-`&` skip it reads as a boundary and argv0 is null.
-    ['& "C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm.cmd', 'npm.cmd run dev'],
-    ['& C:\\tools\\dor.cmd tool storybook', 'dor.cmd', 'dor.cmd tool storybook'],
+    ['& "C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm', 'npm run dev'],
+    ['& C:\\tools\\dor.cmd tool storybook', 'dor', 'dor tool storybook'],
     // POSIX escapes keep their meaning.
     ['/opt/my\\ tools/claude --print', 'claude', 'claude --print'],
     ['grep \\*.ts src', 'grep', 'grep *.ts src'],
