@@ -738,7 +738,10 @@ is live rather than asserting either.
   `config/server.env` is generated once with a setup password from the
   platform's CSPRNG — 32 bytes, i.e. **64 hex characters**, and a guard refuses
   anything shorter, counting characters rather than bytes so a regression to
-  half the entropy cannot pass — and is preserved byte-for-byte thereafter.
+  half the entropy cannot pass — and is preserved byte-for-byte thereafter. A
+  preserved file missing installer-owned keys is a half-written one: the install
+  names them and stops, rather than rewriting a password or an origin it cannot
+  prove is stale.
   `manage verify` fails if the password ever appears in the service definition;
   it must live only in `server.env`. Windows applies the `server.env` DACL
   *before* writing the password (Linux: `chmod 0600` on the empty file first),

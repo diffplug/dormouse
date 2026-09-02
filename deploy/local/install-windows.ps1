@@ -863,6 +863,28 @@ try {
     Write-Ok "preserved the existing config/server.env"
   }
 
+  # A file that exists is not necessarily one an install finished writing. Killed
+  # between creating config\server.env and filling it, it leaves a truncated file
+  # that the branch above happily "preserves" -- and then the bind-host guard
+  # below tells the operator to *fix* a file whose repair is `del`, on every run,
+  # forever. The two cases are indistinguishable from here and their repairs are
+  # opposite, so this names what is missing and changes nothing: DORMOUSE_ORIGIN
+  # is durable WebAuthn identity, and the password may already have enrolled a
+  # Host.
+  $envMissing = @()
+  foreach ($key in @('DORMOUSE_SETUP_PASSWORD', 'DORMOUSE_ORIGIN', 'DORMOUSE_STATE_DIR', 'DORMOUSE_BIND_HOST', 'PORT')) {
+    if (-not (Get-EnvFileValue -Path $ENV_FILE -Key $key)) { $envMissing += $key }
+  }
+  if ($envMissing.Count -gt 0) {
+    Die @"
+config\server.env is missing installer-owned keys: $($envMissing -join ' ')
+An install interrupted between creating that file and writing it leaves exactly this. Nothing has been changed. The repair depends on which one it is:
+  - nothing enrolled yet (no $STATE_DIR\hosts.json): remove the file and re-run this installer
+      del "$ENV_FILE"
+  - otherwise: restore the missing key(s) by hand, and leave DORMOUSE_ORIGIN exactly as it is -- it is durable WebAuthn identity, and rewriting it invalidates the registered passkey and every enrolled Host.
+"@
+  }
+
   # The bind host is a security boundary whenever the TLS proxy is local: Serve
   # reaches the app over loopback, so an unbound socket would also publish the
   # plaintext port to the LAN and to the tailnet.

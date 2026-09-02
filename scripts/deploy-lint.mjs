@@ -322,6 +322,20 @@ export const RULES = [
     },
   },
   {
+    // The other half of "preserved byte-for-byte": a file that exists is not
+    // necessarily one an install finished writing, and the preserve branch
+    // cannot tell. Anchored on the message, since that is the whole control —
+    // it names the missing keys and sends the operator to `rm`, where the
+    // bind-host guard below it says "fix it" about a file with nothing in it.
+    // `scripts/installer-verify-test.mjs` drives the unix `env_missing_keys`.
+    rule: 'Credentials at rest — a half-written config/server.env is named, not preserved',
+    patterns: {
+      macOS: /config\/server\.env is missing installer-owned keys/,
+      Linux: /config\/server\.env is missing installer-owned keys/,
+      Windows: /config\\server\.env is missing installer-owned keys/,
+    },
+  },
+  {
     // `run/` is the whole claim — SECURITY.md's FAIL IF carries the why — so
     // the pattern pins the path segment and not the basename: a rename is not
     // this rule's business, and pinning it would redden the lint for the wrong

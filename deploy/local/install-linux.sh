@@ -652,6 +652,17 @@ random_hex32() {
   "$STAGE/runtime/node" -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))'
 }
 
+# Which installer-owned keys is the env file $1 missing (absent, or present
+# with an empty value)? Echoes them space-separated; empty output means the
+# file is one a run of this installer finished writing.
+env_missing_keys() {
+  local key missing=""
+  for key in DORMOUSE_SETUP_PASSWORD DORMOUSE_ORIGIN DORMOUSE_STATE_DIR DORMOUSE_BIND_HOST PORT; do
+    grep -q "^$key=." "$1" || missing="$missing $key"
+  done
+  printf '%s' "$missing"
+}
+
 if [ ! -f "$ENV_FILE" ]; then
   SETUP_PASSWORD="$(random_hex32)"
   # 32 random bytes is 64 hex characters. The guard counts characters, so it
@@ -685,6 +696,20 @@ else
   chmod 0600 "$ENV_FILE"
   ok "preserved the existing config/server.env"
 fi
+
+# A file that exists is not necessarily one an install finished writing. Killed
+# between creating config/server.env and filling it, it leaves a truncated file
+# that the branch above happily "preserves" — and then the bind-host guard below
+# tells the operator to *fix* a file whose repair is `rm`, on every run, forever.
+# The two cases are indistinguishable from here and their repairs are opposite,
+# so this names what is missing and changes nothing: DORMOUSE_ORIGIN is durable
+# WebAuthn identity, and the password may already have enrolled a Host.
+ENV_MISSING="$(env_missing_keys "$ENV_FILE")"
+[ -z "$ENV_MISSING" ] || die "config/server.env is missing installer-owned keys:$ENV_MISSING
+An install interrupted between creating that file and writing it leaves exactly this. Nothing has been changed. The repair depends on which one it is:
+  - nothing enrolled yet (no $STATE_DIR/hosts.json): remove the file and re-run this installer
+      rm '$ENV_FILE'
+  - otherwise: restore the missing key(s) by hand, and leave DORMOUSE_ORIGIN exactly as it is — it is durable WebAuthn identity, and rewriting it invalidates the registered passkey and every enrolled Host."
 
 # The bind host is a security boundary whenever the TLS proxy is local: Serve
 # reaches the app over loopback, so an unbound socket would also publish the

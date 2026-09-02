@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
- * Executable tests for the two `manage verify` checks whose verdict is a text
- * search over CLI output nobody bounds: is Tailscale Funnel on, and is the
- * loopback port bound anywhere but 127.0.0.1. Runs from the repo root via
- * `pnpm test`.
+ * Executable tests for the installer decisions whose answer cannot be read off
+ * the file: the two `manage verify` verdicts that search CLI output nobody
+ * bounds — is Tailscale Funnel on, is the loopback port bound anywhere but
+ * 127.0.0.1 — and the install's own reading of a `config/server.env` that may
+ * be half-written. Runs from the repo root via `pnpm test`.
  *
  * Why this exists: `deploy-lint.mjs` is textual, so it can say a control is
- * still present and nothing more. These two are the controls where "present"
+ * still present and nothing more. The first two are controls where "present"
  * was not the property that failed — both read the right string and reported
  * the wrong answer, because `printf … | grep -q` under `set -o pipefail`
  * returns 141 when `grep` exits early and the writer takes SIGPIPE, and 141
@@ -15,11 +16,11 @@
  * above the pipe buffer (64 KiB), so every hand-run of `manage verify` on a
  * small tailnet passes, and nothing here is provable by reading the file.
  *
- * How: the functions are extracted from the generated `manage` inside each
- * installer — the real text, not a copy — and driven under the same
- * `set -euo pipefail` that `manage` runs under. Extraction takes the LAST
- * definition of a name, because several helpers exist twice in these files,
- * once in the installer body and once inside the `MANAGE_EOF` heredoc.
+ * How: the functions are extracted from each installer — the real text, not a
+ * copy — and driven under the same `set -euo pipefail` those scripts run
+ * under. Extraction takes the LAST definition of a name, because several
+ * helpers exist twice in these files, once in the installer body and once
+ * inside the `MANAGE_EOF` heredoc.
  *
  * The last case in each platform's list is a witness rather than a test of
  * shipped code: it runs the old piped idiom over the same input and requires
@@ -32,6 +33,9 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { readRepoFile } from './lint-kit.mjs';
@@ -74,8 +78,48 @@ const listenerFixtures = {
   },
 };
 
+/**
+ * The env files `env_missing_keys` has to tell apart. `complete` is the shape
+ * the installer writes; the rest are what a run killed partway through the
+ * heredoc leaves behind, plus the operator edits that must not be mistaken for
+ * one.
+ */
+const ENV_COMPLETE = [
+  '# Dormouse selfhost server — installer-owned runtime configuration.',
+  '# Generated 2026-01-01T00:00:00Z. Preserved byte-for-byte across updates.',
+  'DORMOUSE_SETUP_PASSWORD=' + 'a'.repeat(64),
+  'DORMOUSE_ORIGIN=https://laptop.tail.ts.net',
+  'DORMOUSE_STATE_DIR=/home/me/.local/share/dormouse-server/state',
+  'DORMOUSE_BIND_HOST=127.0.0.1',
+  'PORT=3100',
+  'NODE_ENV=production',
+].join('\n');
+
+function writeEnvFixtures(dir) {
+  const head = ENV_COMPLETE.split('\n');
+  const files = {
+    complete: ENV_COMPLETE,
+    // Created and never filled: `: > "$ENV_FILE"` and then the install died.
+    empty: '',
+    // Died inside the heredoc, at three points.
+    headerOnly: head.slice(0, 2).join('\n'),
+    throughPassword: head.slice(0, 3).join('\n'),
+    throughBindHost: head.slice(0, 6).join('\n'),
+    // A key present with no value is as absent as a missing line.
+    emptyPassword: ENV_COMPLETE.replace(/^DORMOUSE_SETUP_PASSWORD=.*$/m, 'DORMOUSE_SETUP_PASSWORD='),
+    // An operator's own addition is not a defect.
+    extraKey: `${ENV_COMPLETE}\nDORMOUSE_LOG_LEVEL=debug`,
+  };
+  const paths = {};
+  for (const [name, body] of Object.entries(files)) {
+    paths[name] = join(dir, `${name}.env`);
+    writeFileSync(paths[name], body === '' ? '' : `${body}\n`);
+  }
+  return paths;
+}
+
 /** `[label, body, expected]`, where `body` echoes exactly one word. */
-function cases(platform) {
+function cases(platform, env) {
   const { loopback, offLoopback } = listenerFixtures[platform];
   return [
     [
@@ -108,6 +152,41 @@ function cases(platform) {
       'clean',
     ],
     [
+      'env_missing_keys: the file the installer writes is complete',
+      `printf '[%s]\\n' "$(env_missing_keys '${env.complete}')"`,
+      '[]',
+    ],
+    [
+      'env_missing_keys: created and never filled',
+      `printf '[%s]\\n' "$(env_missing_keys '${env.empty}')"`,
+      '[ DORMOUSE_SETUP_PASSWORD DORMOUSE_ORIGIN DORMOUSE_STATE_DIR DORMOUSE_BIND_HOST PORT]',
+    ],
+    [
+      'env_missing_keys: died after the comment header',
+      `printf '[%s]\\n' "$(env_missing_keys '${env.headerOnly}')"`,
+      '[ DORMOUSE_SETUP_PASSWORD DORMOUSE_ORIGIN DORMOUSE_STATE_DIR DORMOUSE_BIND_HOST PORT]',
+    ],
+    [
+      'env_missing_keys: died after the password line',
+      `printf '[%s]\\n' "$(env_missing_keys '${env.throughPassword}')"`,
+      '[ DORMOUSE_ORIGIN DORMOUSE_STATE_DIR DORMOUSE_BIND_HOST PORT]',
+    ],
+    [
+      'env_missing_keys: died one line from the end',
+      `printf '[%s]\\n' "$(env_missing_keys '${env.throughBindHost}')"`,
+      '[ PORT]',
+    ],
+    [
+      'env_missing_keys: a key with no value is as absent as a missing line',
+      `printf '[%s]\\n' "$(env_missing_keys '${env.emptyPassword}')"`,
+      '[ DORMOUSE_SETUP_PASSWORD]',
+    ],
+    [
+      "env_missing_keys: an operator's extra key is not a defect",
+      `printf '[%s]\\n' "$(env_missing_keys '${env.extraKey}')"`,
+      '[]',
+    ],
+    [
       'witness: the piped form reports a live Funnel as off (this is the bug)',
       `if printf '%s\\n%s' "${FUNNEL_ON}" ${pad('some tailscale prose')} | grep -qi 'funnel on'; then echo on; else echo off; fi`,
       'off',
@@ -130,31 +209,37 @@ export function run() {
     return { failures, checked };
   }
 
-  for (const { platform, file } of PLATFORMS) {
-    const text = readRepoFile(file);
-    let helpers;
-    try {
-      helpers = ['funnel_state', 'has_off_loopback']
-        .map((name) => extractFunction(text, name))
-        .join('\n\n');
-    } catch (err) {
-      failures.push(`${platform}: ${err.message} in ${file}`);
-      continue;
-    }
-    for (const [label, body, expected] of cases(platform)) {
-      checked += 1;
-      // The same options `manage` sets. `pipefail` is not incidental here: it
-      // is the setting that turns an early `grep -q` into a wrong answer.
-      const script = `set -euo pipefail\n${helpers}\n${body}\n`;
-      const res = spawnSync('bash', ['-c', script], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
-      const got = (res.stdout ?? '').trim();
-      if (res.status !== 0 || got !== expected) {
-        failures.push(
-          `${platform.padEnd(6)} ${label}\n    expected ${expected}, got ${got || '(nothing)'}` +
-            (res.status === 0 ? '' : ` (bash exited ${res.status}: ${(res.stderr ?? '').trim()})`),
-        );
+  const fixtureDir = mkdtempSync(join(tmpdir(), 'dormouse-installer-verify-'));
+  const env = writeEnvFixtures(fixtureDir);
+  try {
+    for (const { platform, file } of PLATFORMS) {
+      const text = readRepoFile(file);
+      let helpers;
+      try {
+        helpers = ['funnel_state', 'has_off_loopback', 'env_missing_keys']
+          .map((name) => extractFunction(text, name))
+          .join('\n\n');
+      } catch (err) {
+        failures.push(`${platform}: ${err.message} in ${file}`);
+        continue;
+      }
+      for (const [label, body, expected] of cases(platform, env)) {
+        checked += 1;
+        // The same options `manage` sets. `pipefail` is not incidental here: it
+        // is the setting that turns an early `grep -q` into a wrong answer.
+        const script = `set -euo pipefail\n${helpers}\n${body}\n`;
+        const res = spawnSync('bash', ['-c', script], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+        const got = (res.stdout ?? '').trim();
+        if (res.status !== 0 || got !== expected) {
+          failures.push(
+            `${platform.padEnd(6)} ${label}\n    expected ${expected}, got ${got || '(nothing)'}` +
+              (res.status === 0 ? '' : ` (bash exited ${res.status}: ${(res.stderr ?? '').trim()})`),
+          );
+        }
       }
     }
+  } finally {
+    rmSync(fixtureDir, { recursive: true, force: true });
   }
 
   return { failures, checked };
@@ -163,12 +248,15 @@ export function run() {
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { failures, checked } = run();
   if (failures.length > 0) {
-    console.error('installer-verify-test: a `manage verify` check answered wrongly\n');
+    console.error('installer-verify-test: an installer decision came out wrong\n');
     for (const f of failures) console.error(`  ${f}\n`);
     console.error(
-      'These verdicts must be taken over captured text, never a pipe into `grep -q`:\n' +
-        'under `set -o pipefail` the early exit SIGPIPEs the writer and 141 reads as\n' +
-        '"no match" (SECURITY.md -> "Network posture (self-hosted)").',
+      'The two verify verdicts must be taken over captured text, never a pipe into\n' +
+        '`grep -q`: under `set -o pipefail` the early exit SIGPIPEs the writer and 141\n' +
+        'reads as "no match" (SECURITY.md -> "Network posture (self-hosted)").\n' +
+        '`env_missing_keys` must name every installer-owned key a half-written\n' +
+        'config/server.env lacks, so the install says `rm` rather than "fix it"\n' +
+        '(SECURITY.md -> "Credentials at rest").',
     );
     process.exit(1);
   }
