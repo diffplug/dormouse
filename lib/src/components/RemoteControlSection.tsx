@@ -208,11 +208,26 @@ const TERMINAL_COPY: Record<TerminalPhase, { headline: string; detail: string }>
   },
 };
 
+/**
+ * A lookup into one of this panel's copy tables, answering only for a key the
+ * table actually holds.
+ *
+ * **Never the `in` operator.** Every one of these tables is keyed by a string
+ * the Host chose and a bridge relayed, and `in` walks the prototype chain — so
+ * `'toString'` would answer "yes, there is copy for that" and hand back
+ * `Object.prototype.toString` to render. The store checks that those fields are
+ * strings and deliberately *not* that they are members of the closed set
+ * (`host-status-store.ts`), so this is where a stranger stops.
+ * `hasOwnProperty.call` rather than `Object.hasOwn`, which is ES2022 and this
+ * build's lib is ES2020.
+ */
+function own<T>(table: Record<string, T>, key: string): T | undefined {
+  return Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
+}
+
 /** The terminal copy for a state, or `undefined` while the panel is still live. */
 function terminalCopy(state: SetupQrState): { headline: string; detail: string } | undefined {
-  return state && state.phase in TERMINAL_COPY
-    ? TERMINAL_COPY[state.phase as TerminalPhase]
-    : undefined;
+  return state ? own(TERMINAL_COPY, state.phase) : undefined;
 }
 
 /**
@@ -224,8 +239,16 @@ function terminalCopy(state: SetupQrState): { headline: string; detail: string }
  */
 export const PAIRING_OUTCOME_LABEL = 'Pairing outcome';
 
-/** The half of every failure sentence that is the same: the code is gone, get another. */
-const SPENT_GET_ANOTHER = ' This setup code is spent — get a new one and try again.';
+/**
+ * The half of every failure sentence that is the same: the code is gone, get
+ * another.
+ *
+ * **Only where nothing on screen already is another.** An outcome belongs to
+ * the code its ceremony used, and the panel may since have minted a newer one —
+ * telling the reader to get a fresh code directly above a fresh code is the one
+ * thing this sentence must not do.
+ */
+const SPENT_GET_ANOTHER = 'This setup code is spent — get a new one and try again.';
 
 /**
  * What each pairing outcome says to the person at this machine.
@@ -233,20 +256,29 @@ const SPENT_GET_ANOTHER = ' This setup code is spent — get a new one and try a
  * **Fixed copy chosen by code.** The outcome is a closed member this machine's
  * own Host decided, and the sentence for it is written here — nothing on this
  * screen is ever rendered from something that arrived on a wire
- * (`docs/specs/alert.md`). Exhaustive over {@link PairingOutcome} for the same
- * reason {@link TERMINAL_COPY} is over the phases: an outcome with no sentence
- * would report a ceremony ended and say nothing about how.
+ * (`docs/specs/remote-security-model.md` → Pairing). Exhaustive over
+ * {@link PairingOutcome} for the same reason {@link TERMINAL_COPY} is over the
+ * phases: an outcome with no sentence would report a ceremony ended and say
+ * nothing about how.
  *
  * Every failure names what did *not* happen — "nothing was paired" — because
  * the paired count above it moves for none of them ({@link PairingOutcome}).
+ * `paired` is the only member with nothing to add: it did not spend a code the
+ * user needs to replace, so it never takes {@link SPENT_GET_ANOTHER}.
+ *
+ * `expired` covers **both** ways a deadline ends a ceremony — the reaper firing
+ * with the modal unanswered, and a confirmation typed after it — so it says the
+ * request ran out of time rather than that nobody answered it
+ * (`RemoteHost.#approvePairing` checks the deadline after spending its one
+ * attempt).
  */
 export const PAIRING_OUTCOME_COPY: Record<PairingOutcome, string> = {
   paired: 'This phone is paired with this machine.',
-  'code-mismatch': `The two digits did not match, so nothing was paired.${SPENT_GET_ANOTHER}`,
-  cancelled: `You cancelled this request, so nothing was paired.${SPENT_GET_ANOTHER}`,
-  expired: `The request expired before it was answered, so nothing was paired.${SPENT_GET_ANOTHER}`,
-  superseded: `Another pairing request replaced this one, so nothing was paired.${SPENT_GET_ANOTHER}`,
-  'host-error': `This machine could not finish pairing, so nothing was paired.${SPENT_GET_ANOTHER}`,
+  'code-mismatch': 'The two digits did not match, so nothing was paired.',
+  cancelled: 'You cancelled this request, so nothing was paired.',
+  expired: 'The request ran out of time, so nothing was paired.',
+  superseded: 'Another pairing request replaced this one, so nothing was paired.',
+  'host-error': 'This machine could not finish pairing, so nothing was paired.',
 };
 
 /**
@@ -270,12 +302,18 @@ function PairingOutcomeReport({ sentence }: { sentence: string }) {
 
 /**
  * What to say about an outcome, or `undefined` for one this build has no
- * sentence for — which is the whole of the fallback to the state-only copy. The
- * same lookup-and-guard as {@link terminalCopy}, and for the same reason: the
- * key crosses a bridge that is typed but not enforced.
+ * sentence for — which is the whole of the fallback to the state-only copy.
+ *
+ * `replaced` says a scannable code is already on screen, which is what decides
+ * whether {@link SPENT_GET_ANOTHER} is still advice or a contradiction.
  */
-function outcomeSentence(outcome: PairingOutcome | undefined): string | undefined {
-  return outcome && outcome in PAIRING_OUTCOME_COPY ? PAIRING_OUTCOME_COPY[outcome] : undefined;
+function outcomeSentence(
+  outcome: PairingOutcome | undefined,
+  replaced: boolean,
+): string | undefined {
+  const sentence = outcome ? own(PAIRING_OUTCOME_COPY, outcome) : undefined;
+  if (sentence === undefined || outcome === 'paired' || replaced) return sentence;
+  return `${sentence} ${SPENT_GET_ANOTHER}`;
 }
 
 /**
@@ -330,6 +368,10 @@ function useSetupQr() {
 
   const close = useCallback(() => {
     mintSeq.current++;
+    // The report goes with the panel it was shown in: Done is the user
+    // acknowledging it, and a sentence they dismissed must not reappear under
+    // the section with nothing left that could clear it but minting again.
+    setOutcome(undefined);
     setState(null);
   }, []);
 
@@ -363,13 +405,21 @@ function useSetupQr() {
       if (reported) setOutcome(reported);
       // `live` is the only state that keeps the code on screen.
       if (changed !== inviteId || invitationState === 'live') return;
+      // A state this build has no phase for is still terminal — the code is
+      // gone — so it falls back to `finished`, which is the one sentence true of
+      // any retirement and does not send anyone to a phone.
+      const phase = own(TERMINAL_PHASE, invitationState) ?? 'finished';
       mintSeq.current++;
-      const phase = TERMINAL_PHASE[invitationState];
       setState(phase === 'scanned' ? { phase, inviteId } : { phase });
     });
   }, [inviteId]);
 
-  return { state, report: outcomeSentence(outcome), mint, close };
+  return {
+    state,
+    report: outcomeSentence(outcome, displayedQr(state) !== undefined),
+    mint,
+    close,
+  };
 }
 
 /** The code the panel is actually rendering, live or held through a refresh. */
@@ -654,6 +704,15 @@ function EnrolledView({
   // on a timer, and this view's one error slot belongs to what the user clicked.
   const setup = useSetupQr();
   const described = describeConnection(connection);
+  /**
+   * Where the one pairing report goes, decided here rather than half in each
+   * place that can draw it: **the panel owns it only where it has a sentence to
+   * supersede**, which is `finished`. Everywhere else — panel shut, or open on a
+   * newer code, a mint, or a failed one — the section does, because an outcome
+   * arrives from whichever invitation carries one and would otherwise be
+   * rendered to nobody.
+   */
+  const reportInPanel = setup.state?.phase === 'finished';
 
   return (
     <div className="mt-1.5 text-sm leading-relaxed">
@@ -665,11 +724,7 @@ function EnrolledView({
           : `${pairedClients} paired ${pairedClients === 1 ? 'phone' : 'phones'}.`}
       </div>
 
-      {/* One region per report, never two: with the panel open it belongs to
-          the panel, and this is the other half of that rule. */}
-      {setup.state === null && setup.report ? (
-        <PairingOutcomeReport sentence={setup.report} />
-      ) : null}
+      {setup.report && !reportInPanel ? <PairingOutcomeReport sentence={setup.report} /> : null}
 
       {error ? <div className="mt-1.5 text-error">{error}</div> : null}
 
@@ -735,7 +790,7 @@ function EnrolledView({
       {setup.state ? (
         <SetupPhonePanel
           state={setup.state}
-          report={setup.report}
+          report={reportInPanel ? setup.report : undefined}
           onNewCode={setup.mint}
           onDone={setup.close}
         />
@@ -765,10 +820,6 @@ function SetupPhonePanel({
 }) {
   const shown = displayedQr(state);
   const terminal = terminalCopy(state);
-  // The report supersedes `finished`'s deliberately-vague sentence and nothing
-  // else: `scanned` still has a phone waiting on it, and `dropped` / `expired`
-  // are about a code nobody used, so neither has an outcome to report.
-  const reported = state.phase === 'finished' ? report : undefined;
   const expiresAt = shown?.expiresAt ?? null;
   const [now, setNow] = useState(() => Date.now());
 
@@ -793,8 +844,10 @@ function SetupPhonePanel({
   return (
     <div className="mt-2 rounded border border-border p-2">
       <div className={FIELD_LABEL}>Set up a phone</div>
-      {reported ? (
-        <PairingOutcomeReport sentence={reported} />
+      {/* The report supersedes `finished`'s deliberately-vague sentence, which
+          is the only reason the panel ever draws one (`EnrolledView`). */}
+      {report ? (
+        <PairingOutcomeReport sentence={report} />
       ) : terminal ? (
         <>
           <div className="mt-1 text-sm leading-relaxed text-foreground">{terminal.headline}</div>

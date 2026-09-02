@@ -107,7 +107,8 @@ export type TerminalInvitationState = Exclude<InvitationState, 'live'>;
  *
  * A closed set this Host picks locally. `paired` is the only member that wrote
  * an ACL record; the other five name why nothing was. The webview renders fixed
- * copy per member and never wire text (`docs/specs/alert.md`).
+ * copy per member and never wire text
+ * (`docs/specs/remote-security-model.md` → Pairing).
  */
 export type PairingOutcome =
   | 'paired'

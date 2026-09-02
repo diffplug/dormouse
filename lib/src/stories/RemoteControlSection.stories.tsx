@@ -291,7 +291,7 @@ export const PairingOutcomeExpired: Story = {
     primedRemoteHost: { status: enrolledStatus(), setupOutcome: 'expired' },
     docs: { story: { height: '340px' } },
   },
-  play: setupPanel(/The request expired/),
+  play: setupPanel(/The request ran out of time/),
 };
 
 export const PairingOutcomeSuperseded: Story = {

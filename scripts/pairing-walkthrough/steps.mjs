@@ -199,8 +199,11 @@ function hostReadyExpr(vitePort) {
  * enroll form this walkthrough is here to drive.
  */
 async function stepServer(ctx) {
-  const { repoRoot, runDir, opts } = ctx;
-  const stateDir = join(runDir, 'server-state');
+  const { repoRoot, opts } = ctx;
+  // Prefixed like every other run-directory name: two scenarios sharing one
+  // `--out` and one state dir would leave the second already enrolled, which is
+  // exactly what an isolated `DORMOUSE_STATE_DIR` is here to prevent.
+  const stateDir = ctx.path('server-state');
   const built =
     existsSync(join(repoRoot, 'lib', 'dist-pocket', 'index.html')) &&
     existsSync(join(repoRoot, 'server', 'dist', 'index.js'));

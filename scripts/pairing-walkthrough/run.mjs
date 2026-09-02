@@ -240,7 +240,13 @@ async function main(live) {
   summary.artifacts = [...artifacts];
   summary.reached = reached;
   summary.ok = failure === null;
-  writeFileSync(join(runDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
+  // Named like everything else it describes: it is the file that says which
+  // scenario a directory holds, so it is the last one that may be overwritten by
+  // the next scenario run into the same `--out`.
+  writeFileSync(
+    join(runDir, artifactName(opts, 'summary.json')),
+    `${JSON.stringify(summary, null, 2)}\n`,
+  );
 
   if (failure) console.error(`[walkthrough] FAILED at ${summary.steps.at(-1)?.name}: ${failure.message}`);
   console.log(`[walkthrough] reached: ${reached ?? '(nothing)'}`);

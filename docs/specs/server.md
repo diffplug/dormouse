@@ -838,11 +838,12 @@ to honor:
     stays subscribed past the QR**: `reserved` spends the code, `consumed` says
     the request it produced has been answered.
   - **The panel reports which decision ended the code**, in fixed copy per
-    outcome. Every one of them spends the invitation and dismisses the modal, so
-    a mismatch — one attempt, no retry — would otherwise read exactly like a
-    success, the paired count being absolute. The outcome rides the same
-    `consumed` event; a retirement nobody decided carries none, and the section
-    reports one too, since the modal can be answered with the panel shut.
+    outcome. Every one spends the invitation and dismisses the modal, so a
+    mismatch — one attempt, no retry — would otherwise read like a success, the
+    paired count being absolute. The outcome rides the same `consumed` event and
+    a retirement nobody decided carries none. **One region reports it**: the
+    panel where it supersedes that sentence, the section otherwise. A new code
+    or Done clears it.
   - **The view is keyed by enrollment identity and the QR sits behind its own
     error boundary**: a server swap drops the stale code, and a failed chunk
     fetch or a refused encode costs a retry button rather than the app-wide
