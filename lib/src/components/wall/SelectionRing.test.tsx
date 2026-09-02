@@ -10,6 +10,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it } from 'vitest';
+import { isRingCorner, type RingPiece } from '../../lib/ring-geometry';
 import { SelectionRing } from './SelectionRing';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -44,8 +45,13 @@ it('renders the smear transform origin without a React DOM-property warning', as
   }
 
   expect(errors.filter((line) => /Invalid DOM property/.test(line))).toEqual([]);
-  const piece = container.querySelector<SVGPathElement>('[data-piece="top"]');
-  expect(piece?.style.transformOrigin).toBe('0 0');
+  // Every piece carries it, but a corner is where it does work: the overlay
+  // scales corners from their own corner and leaves the straight edges
+  // untransformed (`WorkspaceSelectionOverlay.tsx` → `writeSmear`).
+  const corners = [...container.querySelectorAll<SVGPathElement>('[data-piece]')]
+    .filter((el) => isRingCorner(el.dataset.piece as RingPiece));
+  expect(corners).toHaveLength(4);
+  expect(corners.map((el) => el.style.transformOrigin)).toEqual(['0 0', '0 0', '0 0', '0 0']);
 
   await act(async () => root.unmount());
   container.remove();
