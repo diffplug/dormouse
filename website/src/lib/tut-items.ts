@@ -3,6 +3,8 @@ import { cfg } from "dormouse-lib/cfg";
 const USER_ATTENTION_SECS = Math.round(cfg.alert.userAttention / 1000);
 
 // Item ids are the persistence key — keep them stable across releases.
+const THEME_ITEM_IDS = ["th-theme"] as const;
+
 const GESTURE_ITEM_IDS = [
   "gn-touch-mode",
   "gn-arrows",
@@ -40,6 +42,7 @@ const COPY_ITEM_IDS = [
 ] as const;
 
 export const ITEM_IDS = [
+  ...THEME_ITEM_IDS,
   ...GESTURE_ITEM_IDS,
   ...KEYBOARD_ITEM_IDS,
   ...ALERT_ITEM_IDS,
@@ -136,6 +139,20 @@ const POCKET_COPY_PASTE_SECTION: Section = {
 };
 
 export const DESKTOP_SECTIONS: readonly Section[] = [
+  {
+    // Deliberately first, and the section the desktop profile opens into: the
+    // very first thing the tutorial asks for is a mouse action, before any
+    // keyboard vocabulary has been introduced.
+    id: 'theme',
+    title: 'Make it yours',
+    items: [
+      {
+        id: 'th-theme',
+        title: 'Change the theme',
+        hint: 'Click the `sliders` icon at the bottom-right to open Settings, then pick a theme.',
+      },
+    ],
+  },
   {
     id: 'keyboard',
     title: 'Keyboard navigation',
@@ -245,6 +262,7 @@ export const DESKTOP_TUTORIAL_PROFILE: TutorialProfile = {
   id: "desktop",
   title: "Dormouse Playground Tutorial",
   sections: DESKTOP_SECTIONS,
+  initialSectionId: "theme",
 };
 
 export const POCKET_TUTORIAL_PROFILE: TutorialProfile = {

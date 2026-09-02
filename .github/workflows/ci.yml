@@ -19,16 +19,172 @@ jobs:
         with:
           node-version-file: package.json
 
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      # The disclosed dependency snapshots are a SECURITY.md `FAIL IF`
+      # (Dependency Supply Chain), but until this step existed the only thing
+      # that ever ran the generator was the nightly security audit — strictly
+      # after the fact, and only if it reached that check. Two prod-dependency
+      # bumps shipped undisclosed that way (`ws` via vscode-ext, `hono` via a
+      # Renovate lockfile-only bump). Running it here makes forgetting to
+      # regenerate a failed PR instead of a finding filed the next morning.
+      #
+      # The generator needs `node_modules` to match the lockfile — it resolves
+      # every dependency by walking real directories and throws rather than
+      # under-reporting — which is exactly what `--frozen-lockfile` above
+      # guarantees.
+      - name: Dependency disclosure is current
+        run: |
+          node website/scripts/generate-deps.js
+          if ! git diff --quiet -- website/src/data/; then
+            echo "::error::The disclosed dependency snapshots are stale. Run \`node website/scripts/generate-deps.js\` and commit the result."
+            git --no-pager diff -- website/src/data/
+            exit 1
+          fi
+
+      # zsh is not on the ubuntu runner image, and it is the default shell on
+      # macOS — our primary platform. Without it, `standalone/sidecar`'s
+      # shell-integration suite silently covered only bash, which is half of
+      # what stands behind an emit-side security fix (SECURITY.md's OSC 633
+      # rules; the emitters are the boundary, since the parser cannot defend
+      # against a terminator that arrives inside a directory name). The suite
+      # names the shells it covered on every run, so a future image change that
+      # drops one is visible rather than silent.
+      # `update` first: the runner image's apt lists are baked at image build, so
+      # once the archive rotates zsh's version the cached Packages entry 404s.
+      # `timeout` because a degraded Azure mirror dribbles bytes rather than
+      # failing — see the fuller treatment in Standalone Smoketest below, which
+      # also rotates mirrors. That much machinery is not worth it for one
+      # package; the retry here covers the common case without turning a
+      # `Build & Test` red for a reason unrelated to the diff.
+      # 13 minutes, not 6: the budget has to outlast the schedule it wraps, or
+      # Actions kills the step mid-attempt and the ::error:: below — the line
+      # that says what the failure costs — never prints. Worst case is
+      # 3 x (120 update + 120 install) + 2 x 15 sleep = 750s, and the last sleep
+      # is guarded to keep that `2 x` true: unguarded it is 3 x 15 = 765s, which
+      # halves the headroom for pure dead time before a step that is already
+      # failing.
+      - name: Install zsh (shell-integration tests)
+        timeout-minutes: 13
+        run: |
+          for i in 1 2 3; do
+            if sudo timeout 120 apt-get update -q \
+               && sudo timeout 120 apt-get install -y -q --no-install-recommends zsh; then
+              exit 0
+            fi
+            echo "::warning::apt attempt $i for zsh failed or timed out"
+            if [ "$i" -lt 3 ]; then sleep 15; fi
+          done
+          echo "::error::could not install zsh; the shell-integration suite would silently cover only bash"
+          exit 1
 
       - name: Test
         run: pnpm test
 
       - name: Build
         run: pnpm build
+
+      # The Linux installer is the only one CI can execute, and most of what it
+      # does is shared with its two siblings: the release build, the staging,
+      # the self-contained runtime copy, the candidate health probe on an
+      # ephemeral port, the `current` switch, the prune, and the generated
+      # `manage`. Test mode stops short of systemd and Serve, and the injected
+      # origin is what lets it run on a machine with no tailnet.
+      - name: Self-host installer (Linux, test mode)
+        env:
+          DORMOUSE_INSTALL_TEST: '1'
+          DORMOUSE_INSTALL_ORIGIN: https://ci.example.ts.net
+        run: |
+          set -euo pipefail
+          root="$(mktemp -d)/dormouse-server"
+          offer="$root/run/enroll-offer.json"
+          # Prints the token, because it must rotate on every run before the
+          # first Host enrollment — and this job is the only executable check.
+          #
+          # The shape check is the server's own `isEnrollmentOffer`, imported
+          # rather than restated: a CI copy of the token regex and the origin
+          # rule is free to drift from the validator the redemption path
+          # actually runs, and then agrees with itself while the server rejects
+          # what the installer writes. No build step is needed for it: the
+          # `Test` step above builds server-lib-common, as does the
+          # `pnpm --filter server build` inside every install below.
+          read_offer() {
+            node --input-type=module -e '
+              import { readFileSync, statSync } from "node:fs";
+              import { isEnrollmentOffer } from "./server-lib-common/dist/index.js";
+              const [path, wantOrigin] = process.argv.slice(1);
+              const mode = statSync(path).mode & 0o777;
+              if (mode !== 0o600) throw new Error(`${path} is mode ${mode.toString(8)}, expected 600`);
+              const offer = JSON.parse(readFileSync(path, "utf8"));
+              if (!isEnrollmentOffer(offer)) throw new Error(`not an enrollment offer: ${JSON.stringify(offer)}`);
+              // Beyond the structural guard, and nothing else checks it: the
+              // server hard-rejects a mintedAt it cannot parse, which the shape
+              // guard — a length bound — accepts.
+              if (Number.isNaN(Date.parse(offer.mintedAt))) throw new Error(`mintedAt is ${offer.mintedAt}`);
+              if (offer.origin !== wantOrigin) throw new Error(`origin is ${offer.origin}`);
+              process.stdout.write(offer.token);
+            ' "$offer" "$DORMOUSE_INSTALL_ORIGIN"
+          }
+          # Twice: the first is a first install, the second exercises the update
+          # path — previous pointer, prune, and preserving config/server.env.
+          DORMOUSE_INSTALL_ROOT="$root" ./deploy/local/install-linux.sh --yes
+          before="$(sha256sum "$root/config/server.env" | cut -d' ' -f1)"
+          first_token="$(read_offer)"
+          DORMOUSE_INSTALL_ROOT="$root" ./deploy/local/install-linux.sh --yes
+          after="$(sha256sum "$root/config/server.env" | cut -d' ' -f1)"
+          second_token="$(read_offer)"
+          [ "$before" = "$after" ] || { echo "::error::server.env was not preserved across an update"; exit 1; }
+          [ "$first_token" != "$second_token" ] || { echo "::error::the enrollment offer was not re-minted on the update"; exit 1; }
+          # hosts.json existence, not its current row count, is the durable
+          # "first Host happened" marker. Even an empty hand-edited file keeps
+          # a later installer run from reopening bootstrap.
+          printf '[]\n' > "$root/state/hosts.json"
+          chmod 0600 "$root/state/hosts.json"
+          DORMOUSE_INSTALL_ROOT="$root" ./deploy/local/install-linux.sh --yes
+          [ ! -e "$offer" ] || { echo "::error::the enrollment offer survived after hosts.json existed"; exit 1; }
+          [ -L "$root/previous" ] || { echo "::error::no previous release retained after an update"; exit 1; }
+          bash -n "$root/bin/manage"
+          bash -n "$root/bin/run-server"
+  webview-smoketest:
+    name: Webview Boot Smoketest
+    runs-on: ubuntu-latest
+    # Its own job, in parallel with Build & Test: this is the only check that
+    # needs a browser, and pinning that cost to one job keeps `pnpm test` free of
+    # it. It is also the only check that runs the shipped bundle rather than
+    # inspecting it — the VS Code webview's CSP is enforced by Chromium, so a
+    # policy that blocks the app is invisible to every string-level test we have
+    # (docs/specs/vscode.md -> "CSP policy").
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      # Frozen for the same supply-chain reason as every other job here.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `playwright-core` ships no browser, deliberately — a unit-test run should
+      # not drag one down. Fetch it here, where it is actually used.
+      - name: Install Chromium
+        run: pnpm --filter dormouse exec playwright-core install --with-deps chromium
+
+      # The smoketest loads what the build emits, so the build has to precede
+      # it. `build:frontend` alone — this job never touches the extension host
+      # bundle — and its `prebuild:frontend` hook builds the two workspace
+      # packages the webview bundle imports, which a clean checkout has no dist
+      # for.
+      - name: Build the webview frontend
+        run: pnpm --filter dormouse build:frontend
+
+      - name: Smoketest
+        run: pnpm --filter dormouse test:smoke
 
   standalone-smoketest:
     name: Standalone Smoketest
@@ -46,9 +202,9 @@ jobs:
         with:
           node-version-file: package.json
 
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
 
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
 
       - name: Install system dependencies
         # apt mirrors are flaky: a healthy run finishes in <1min, but a degraded
@@ -57,7 +213,15 @@ jobs:
         # attempt) and rotate the mirror host between attempts so a sustained
         # single-mirror problem is escaped. Azure first (fast, same datacenter),
         # archive.ubuntu.com as fallback. --no-install-recommends trims the download.
-        timeout-minutes: 10
+        #
+        # 16 minutes, not 10: the budget has to outlast the schedule it wraps, or
+        # Actions kills the step mid-attempt and the ::error:: below — the line
+        # that says the mirrors were rotated and still failed — never prints,
+        # leaving a bare timeout in exactly the sustained-outage case the mirror
+        # rotation exists for. Worst case is
+        # 3 x (120 update + 180 install) + 3 x 15 sleep = 945s (the loop
+        # sleeps after the third failed attempt too, before the ::error::).
+        timeout-minutes: 16
         run: |
           mirrors=(azure.archive.ubuntu.com archive.ubuntu.com)
           src_files=(/etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list)
@@ -87,6 +251,60 @@ jobs:
         run: npx tsc --noEmit
         working-directory: standalone
 
-      - name: Cargo check
-        run: cargo check
+      # `cargo test` rather than `cargo check`: the crate carries unit tests
+      # (path/session/sidecar resolution in lib.rs) that no job ran, so they
+      # compiled at most as `cargo check` and never executed. Building the test
+      # harness also links, which `check` does not.
+      - name: Cargo test
+        run: cargo test
+        working-directory: standalone/src-tauri
+
+  standalone-platform-check:
+    # The job above runs on Linux only, so it compiles none of the crate's
+    # `#[cfg(windows)]` / `#[cfg(target_os = "macos")]` code — two whole modules
+    # (clipboard_win.rs, pe_subsystem.rs), the platform arms throughout lib.rs
+    # and build.rs, and the unit tests gated with them. Without this job their
+    # first compile is the Windows / macOS leg of release.yml, which runs only on
+    # a `v*` tag: a typo in Windows-only Rust surfaces as a failed release rather
+    # than as a failed PR. Deliberately a separate job from the smoketest above,
+    # so that job keeps its registered check name.
+    name: Standalone Platform Check (${{ matrix.platform }})
+    strategy:
+      # Each platform's compile is independent; a Windows failure must not hide
+      # what macOS would have said.
+      fail-fast: false
+      matrix:
+        platform: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.platform }}
+
+    # A hung compile on a premium-billed runner must not ride the 6-hour job
+    # default. Cold-cache runs land at ~2min (macOS) and ~5min (Windows).
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Same pin-driven setup as the smoketest above: build.rs fails unless the
+      # Node.js on PATH matches package.json's devEngines.runtime.version.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+
+      # Windows and macOS runners bill at a multiple of Linux, so the dependency
+      # compile is cached rather than paid on every PR.
+      - name: Rust cache
+        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: standalone/src-tauri
+
+      # No pnpm install and no TypeScript check here. The TS check is
+      # platform-independent and the smoketest above already runs it; and the Rust
+      # build never reads node_modules — build.rs needs only `node` on PATH (it
+      # resolves the binary with `node -p process.execPath`) plus the root
+      # package.json version pin. This job exists for the Rust the smoketest
+      # cannot see.
+      - name: Cargo test
+        run: cargo test
         working-directory: standalone/src-tauri

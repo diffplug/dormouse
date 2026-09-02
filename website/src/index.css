@@ -52,15 +52,3 @@ html body.pocket-terminal-body {
 body.pocket-terminal-body #root {
   height: 100vh;
 }
-
-[data-theme-picker-current="true"] {
-  background-image: linear-gradient(currentColor, currentColor);
-  background-position: 0 100%;
-  background-repeat: no-repeat;
-  background-size: 0 2px;
-}
-
-[data-theme-picker-trigger="playground"]:hover [data-theme-picker-current="true"],
-[data-theme-picker-trigger="playground"]:focus-visible [data-theme-picker-current="true"] {
-  background-size: 100% 2px;
-}

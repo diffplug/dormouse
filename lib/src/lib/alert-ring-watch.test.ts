@@ -6,7 +6,7 @@ vi.mock('./platform', () => ({
 
 import { watchUnattendedRings } from './alert-ring-watch';
 import { clearPrimedActivity, primeActivity } from './session-activity-store';
-import type { SessionStatus } from './activity-monitor';
+import type { SessionStatus } from './alert-manager';
 
 const DELAY_MS = 10_000;
 

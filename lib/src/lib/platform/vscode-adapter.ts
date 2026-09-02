@@ -1,6 +1,9 @@
-import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo } from './types';
+import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo, RemoteHostLink } from './types';
 import { OPEN_PORT_TIMEOUT_MS } from './types';
+import { createRemoteHostLinkClient } from '../../host/remote/link-client';
+import type { AwaitHandle, AwaitOptions, AwaitOutcome } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
+import { readInjectedRecoveryCommands } from '../vscode-recovery-global';
 import { setDefaultShellOpts } from '../shell-defaults';
 import {
   collectTerminalSemanticEvents,
@@ -10,12 +13,34 @@ import {
   applyTerminalSemanticEventsByPtyId,
 } from '../terminal-state-store';
 import { getTerminalTheme, onTerminalThemeChange } from '../terminal-theme';
-import type { DorControlResult } from 'dor/protocol';
+import { isHostMessage, readHostMessageToken } from '../vscode-message-token';
+import { cancelDorControlRequest, dispatchDorControlRequest } from './dor-control-dispatch';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 
+/**
+ * What `awaitHostReply` settles with when its caller's own deadline fired and
+ * the listener was detached. A distinct sentinel rather than `null`, so a host
+ * reply whose extracted value is legitimately `null` stays distinguishable from
+ * "no reply came".
+ */
+const DETACHED = Symbol('detached');
+
+/** The outcome a VS Code await handle reports when it can never be answered. */
+const CANCELLED_AWAIT: AwaitOutcome = { kind: 'cancelled', waitedMs: 0 };
+
 export class VSCodeAdapter implements PlatformAdapter {
+  // VS Code owns the theme here: it provides --vscode-* itself and has its own
+  // theme UI, so Dormouse hides the Settings dialog's Theme row.
+  readonly hostOwnsTheme = true;
+  // Same for the shell: VS Code's native `dormouse.selectShell` QuickPick owns
+  // shell selection there, so the Settings dialog hides its Shell row.
+  readonly hostOwnsShells = true;
   private vscode: ReturnType<typeof acquireVsCodeApi>;
   private hostState: unknown = (globalThis as typeof globalThis & { __DORMOUSE_HOST_STATE__?: unknown }).__DORMOUSE_HOST_STATE__ ?? null;
+  // Captured once, at construction, from the global the extension host injects
+  // at webview boot — so a later same-document write can't move the goalposts.
+  // Every `message` listener below checks it before reading anything else.
+  private readonly hostMessageToken = readHostMessageToken();
   private dataHandlers = new Set<(detail: { id: string; data: string }) => void>();
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private listHandlers = new Set<(detail: { ptys: PtyInfo[] }) => void>();
@@ -24,6 +49,23 @@ export class VSCodeAdapter implements PlatformAdapter {
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   private watchedCommandHandlers = new Set<(names: string[]) => void>();
   private alertSettingsHandlers = new Set<(settings: AlertSettings) => void>();
+  // --- Remote host bridge (docs/specs/remote-api.md) ---
+  //
+  // The Host lives in the extension host, next to the PTYs, in whichever VS
+  // Code window won the bind-as-lease. This webview forwards its console
+  // commands, answers what only it knows (pane names, xterm sizes), and mirrors
+  // the pairing queue. Everything but the three postMessage shapes below is the
+  // shared client's (lib/src/host/remote/link-client.ts).
+  private readonly remoteHostClient = createRemoteHostLinkClient({
+    sendCommand: (payload) => this.vscode.postMessage({ type: 'remoteHost:command', payload }),
+    // An ask arrives as `peer:ask` and is answered on the same pair, which the
+    // extension host's fan-out settles by `requestId`.
+    answerAsk: (requestId, results) =>
+      this.vscode.postMessage({ type: 'peer:answer', requestId, results }),
+    notify: () => this.vscode.postMessage({ type: 'peer:notify' }),
+  });
+
+  readonly remoteHost: RemoteHostLink = this.remoteHostClient.link;
 
   constructor() {
     this.vscode = acquireVsCodeApi();
@@ -59,8 +101,11 @@ export class VSCodeAdapter implements PlatformAdapter {
     onTerminalThemeChange(() => this.pushThemeColors());
 
     window.addEventListener('message', (event: MessageEvent) => {
+      // Authenticate the sender before looking at `type` at all — see
+      // ../vscode-message-token.ts.
+      if (!isHostMessage(event.data, this.hostMessageToken)) return;
       const msg = event.data;
-      if (!msg || !msg.type) return;
+      if (!msg.type) return;
 
       if (msg.type === 'pty:data') {
         for (const handler of this.dataHandlers) {
@@ -100,6 +145,7 @@ export class VSCodeAdapter implements PlatformAdapter {
             todo: msg.todo,
             notification: msg.notification ?? null,
             attentionDismissedRing: msg.attentionDismissedRing,
+            awaited: msg.awaited,
           });
         }
       } else if (msg.type === 'alert:watchedCommands') {
@@ -125,23 +171,21 @@ export class VSCodeAdapter implements PlatformAdapter {
       } else if (msg.type === 'dormouse:openThemeDebugger') {
         window.dispatchEvent(new CustomEvent('dormouse:openThemeDebugger'));
       } else if (msg.type === 'dor:controlRequest') {
-        const respond = (response: DorControlResult) => {
+        dispatchDorControlRequest(msg, (response) => {
           this.vscode.postMessage({
             type: 'dor:controlResponse',
             requestId: msg.requestId,
             ...response,
           });
-        };
-
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
-          detail: {
-            requestId: msg.requestId,
-            surfaceId: msg.surfaceId,
-            method: msg.method,
-            params: msg.params ?? {},
-            respond,
-          },
-        }));
+        });
+      } else if (msg.type === 'dor:controlCancel') {
+        cancelDorControlRequest(msg.requestId);
+      } else if (msg.type === 'peer:ask') {
+        this.remoteHostClient.onAsk(msg.requestId, msg.op, msg.params);
+      } else if (msg.type === 'remoteHost:result') {
+        this.remoteHostClient.onResult(msg.payload);
+      } else if (msg.type === 'remoteHost:event') {
+        this.remoteHostClient.onEvent(msg.payload);
       }
     });
   }
@@ -155,22 +199,51 @@ export class VSCodeAdapter implements PlatformAdapter {
    */
   private requestResponse<T>(requestType: string, responseType: string, data: Record<string, unknown>, extract: (msg: any) => T, timeoutMs = 1000): Promise<T | null> {
     const requestId = `req-${++this.nextRequestId}`;
+    const reply = this.awaitHostReply(responseType, requestId, extract);
     return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        window.removeEventListener('message', handler);
-        resolve(null);
-      }, timeoutMs);
-      const handler = (event: MessageEvent) => {
-        const msg = event.data;
-        if (msg?.type === responseType && msg.requestId === requestId) {
-          clearTimeout(timeout);
-          window.removeEventListener('message', handler);
-          resolve(extract(msg));
-        }
-      };
-      window.addEventListener('message', handler);
+      const timeout = setTimeout(() => reply.detach(), timeoutMs);
+      void reply.promise.then((value) => {
+        clearTimeout(timeout);
+        resolve(value === DETACHED ? null : value);
+      });
       this.vscode.postMessage({ type: requestType, ...data, requestId });
     });
+  }
+
+  /**
+   * One-shot listener for the host reply correlated by `requestId`. `detach`
+   * stops listening and settles the promise with `DETACHED` (a caller's own
+   * deadline fired). It settles rather than simply going quiet because a
+   * promise that can never resolve keeps every `.then` closure registered on it
+   * alive for the life of the webview.
+   */
+  private awaitHostReply<T>(responseType: string, requestId: string, extract: (msg: any) => T): { promise: Promise<T | typeof DETACHED>; detach(): void } {
+    let handler: ((event: MessageEvent) => void) | null = null;
+    let settle: ((value: T | typeof DETACHED) => void) | null = null;
+    const detach = (): void => {
+      if (!handler) return;
+      window.removeEventListener('message', handler);
+      handler = null;
+      settle?.(DETACHED);
+    };
+    const promise = new Promise<T | typeof DETACHED>((resolve) => {
+      settle = resolve;
+      handler = (event: MessageEvent) => {
+        // Same guard as the main listener: a request/response reply carries
+        // host-supplied data (a proxy URL, scrollback, clipboard contents), and
+        // a forged one racing the real reply would win on first match.
+        if (!isHostMessage(event.data, this.hostMessageToken)) return;
+        const msg = event.data;
+        if (msg.type !== responseType || msg.requestId !== requestId) return;
+        // The real reply is the answer, so drop the `DETACHED` fallback before
+        // unhooking — otherwise `detach` would settle the promise first and win.
+        settle = null;
+        detach();
+        resolve(extract(msg));
+      };
+      window.addEventListener('message', handler);
+    });
+    return { promise, detach };
   }
 
   async init(): Promise<void> {
@@ -178,7 +251,9 @@ export class VSCodeAdapter implements PlatformAdapter {
   }
 
   shutdown(): void {
-    // No-op — the extension host handles cleanup
+    // The extension host handles PTY cleanup, but nothing there will answer a
+    // command this webview is still holding once it goes away.
+    this.remoteHostClient.dispose();
   }
 
   async getAvailableShells(): Promise<{ name: string; path: string; args?: string[] }[]> {
@@ -208,10 +283,6 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   getCwd(id: string): Promise<string | null> {
     return this.requestResponse('pty:getCwd', 'pty:cwd', { id }, (msg) => msg.cwd);
-  }
-
-  getScrollback(id: string): Promise<string | null> {
-    return this.requestResponse('pty:getScrollback', 'pty:scrollback', { id }, (msg) => msg.data);
   }
 
   async getOpenPorts(id: string): Promise<OpenPort[]> {
@@ -444,6 +515,26 @@ export class VSCodeAdapter implements PlatformAdapter {
     this.vscode.postMessage({ type: 'alert:clearTodo', id });
   }
 
+  /**
+   * The `AlertManager` lives in the extension host, so the wait parks there and
+   * only its outcome crosses back. Unlike `requestResponse` this has no local
+   * deadline — the ceiling is `timeoutMs`, enforced host-side — and `cancel()`
+   * asks rather than answers: the `cancelled` outcome arrives on the same
+   * result message as every other, so a claim is never released twice.
+   */
+  alertAwait(id: string, options: AwaitOptions): AwaitHandle {
+    const requestId = `req-${++this.nextRequestId}`;
+    const { promise } = this.awaitHostReply('alert:awaitResult', requestId, (msg) => msg.outcome as AwaitOutcome);
+    this.vscode.postMessage({ type: 'alert:await', requestId, id, until: options.until, timeoutMs: options.timeoutMs });
+    return {
+      // Nothing detaches this reply — the host answers exactly one
+      // `alert:awaitResult` per request, a cancel included — but the mapping
+      // keeps the handle's `AwaitOutcome` contract without a cast.
+      promise: promise.then((outcome) => (outcome === DETACHED ? CANCELLED_AWAIT : outcome)),
+      cancel: () => this.vscode.postMessage({ type: 'alert:awaitCancel', requestId }),
+    };
+  }
+
   onAlertState(handler: (detail: AlertStateDetail) => void): void {
     this.alertStateHandlers.add(handler);
   }
@@ -472,5 +563,17 @@ export class VSCodeAdapter implements PlatformAdapter {
     // first resolveWebviewView call. Fall back to hostState on the very
     // first load, before any setState has run.
     return this.vscode.getState() ?? this.hostState;
+  }
+
+  /**
+   * The recovery commands the extension host captured at its last teardown, from
+   * the boot payload. Host-owned and single-use: this is a separate global rather
+   * than a field on the persisted session precisely so the webview cannot write it
+   * back — a `getState`/`saveState` cycle has nothing to carry forward, so no
+   * later restore can replay a stale invocation
+   * (docs/specs/transport.md -> "Consuming it").
+   */
+  getRecoveryCommands(): Record<string, string> {
+    return readInjectedRecoveryCommands();
   }
 }

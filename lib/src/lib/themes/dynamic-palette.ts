@@ -68,6 +68,7 @@ export interface DynamicPaletteVars {
   '--color-alarm-vs-header-active'?: string;
   '--color-alarm-vs-header-inactive'?: string;
   '--color-alarm-vs-door'?: string;
+  '--color-alarm-vs-terminal'?: string;
 }
 
 export function computeDynamicPalette(
@@ -110,12 +111,14 @@ export function computeDynamicPalette(
   if (headerInactiveRgb) {
     result['--color-alarm-vs-header-inactive'] = pickAlarmColor(headerInactiveRgb);
   }
-  // Door bg is also computed by this same pass; on the first run after a theme
-  // change this reads the previous value, but the MutationObserver re-fires on
-  // our own body.style write and the next pass picks up the fresh door bg.
+  // Door bg is computed in this pass; the observer's next pass corrects its tint.
   const doorRgb = rgbOfVar('--color-door-bg');
   if (doorRgb) {
     result['--color-alarm-vs-door'] = pickAlarmColor(doorRgb);
+  }
+  const terminalRgb = rgbOfVar('--color-terminal-bg');
+  if (terminalRgb) {
+    result['--color-alarm-vs-terminal'] = pickAlarmColor(terminalRgb);
   }
 
   return result;

@@ -2,7 +2,7 @@ import { clsx } from 'clsx';
 import { tv, type VariantProps } from 'tailwind-variants';
 import { XIcon } from '@phosphor-icons/react';
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, RefObject } from 'react';
+import type { ButtonHTMLAttributes, ComponentProps, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, RefObject } from 'react';
 import { stepFocus } from './focus-step';
 
 // App-wide type scale, color strategy, and chrome conventions: see
@@ -68,15 +68,24 @@ export const HEADER_PALETTE_TRANSITION_CLASS =
 // tiny label legible. Shared so both pill sites stay in sync.
 export const TODO_PILL_TRACKING_CLASS = 'tracking-[0.08em]';
 
+// Spoken-alarm delivery is intentionally louder than resting chrome.
+// `--color-alarm-vs-terminal` is the dynamic black/white contrast pick for the
+// terminal body behind the overlay. The pulse itself is `alertSpeakingAnimationClass`
+// in `bell-icon-class.ts`, beside the other Chromatic-frozen alert animation.
+export const ALERT_SPEECH_TRACKING_CLASS = 'tracking-[0.12em]';
+
 // Chrome for small anchored popovers (title candidates, TODO preview, pane
 // context menu, rename warning). Text size and padding vary per popover and
 // stay at the call site; the surface recipe is shared so they can't drift.
 export const POPUP_SURFACE_CLASS = 'z-[1000] rounded border border-border bg-surface-raised font-mono text-foreground shadow-md';
 
+// `ComponentProps<'div'>` rather than `HTMLAttributes<HTMLDivElement>` so `ref`
+// is among the props (React 19 ref-as-prop): an anchored menu needs the row
+// itself measured, not a wrapper around it.
 export function PopupButtonRow({
   className,
   ...props
-}: HTMLAttributes<HTMLDivElement>) {
+}: ComponentProps<'div'>) {
   return (
     <div
       className={clsx(
@@ -91,16 +100,12 @@ export function PopupButtonRow({
 export const popupButton = tv({
   base: 'm-0 px-1.5 py-0.5',
   variants: {
-    tone: {
-      foreground: '',
-      muted: 'text-muted hover:text-foreground',
-    },
     flashed: {
       true: 'animate-copy-flash bg-header-active-bg/25 text-header-active-bg',
       false: 'hover:bg-foreground/10',
     },
   },
-  defaultVariants: { tone: 'foreground', flashed: false },
+  defaultVariants: { flashed: false },
 });
 
 export type PopupButtonVariants = VariantProps<typeof popupButton>;
@@ -139,6 +144,48 @@ export const modalOverlay = tv({
 });
 
 export type ModalOverlayVariants = VariantProps<typeof modalOverlay>;
+
+/**
+ * The inset a modal overlay reserves around its surface. Hoisted because
+ * `OVERLAY_MAX_HEIGHT.modal` below is derived from it — `py-6`, doubled — and
+ * Tailwind needs both as literals, so the pair can only be kept honest by
+ * living side by side.
+ */
+export const MODAL_OVERLAY_INSET = 'px-4 py-6';
+
+/**
+ * The custom properties viewport-bounded overlays read for their height caps.
+ *
+ * These exist so a bound can be *narrowed* by an ancestor: a story overrides one
+ * to snapshot the short-viewport layout deterministically, which no `dvh` value
+ * can (Chromatic controls snapshot width, never height). Unset everywhere in the
+ * app, so each entry below falls through to the real viewport.
+ *
+ * One property per kind, not one shared: inside the Settings dialog the popover
+ * is a DOM descendant of the modal surface, and custom properties inherit
+ * through `position: fixed` — so a single knob narrowed to constrain the
+ * dropdown would silently cap the dialog containing it too.
+ */
+export const OVERLAY_MAX_HEIGHT_VAR = {
+  modal: '--overlay-max-h-modal',
+  popover: '--overlay-max-h-popover',
+} as const;
+
+/**
+ * Height caps for things that float over the viewport. One spelling per kind of
+ * inset, rather than the six hand-rolled `vh`/`dvh` literals these replaced.
+ *
+ * `dvh` rather than `vh` so a mobile browser's collapsing chrome counts. Written
+ * as whole literals because Tailwind scans source statically and cannot see a
+ * value assembled from a constant — `design.test.ts` pins `popover` to
+ * `OVERLAY_VIEWPORT_MARGIN_PX` so the two cannot drift.
+ */
+export const OVERLAY_MAX_HEIGHT = {
+  /** A `ModalFrame` surface: the viewport minus `MODAL_OVERLAY_INSET` doubled. */
+  modal: 'max-h-[var(--overlay-max-h-modal,calc(100dvh-3rem))]',
+  /** An anchored popover, matching `clampOverlayPosition`'s viewport margin. */
+  popover: 'max-h-[var(--overlay-max-h-popover,calc(100dvh-24px))]',
+} as const;
 
 export const modalSurface = tv({
   base: 'rounded-lg border border-border bg-surface-raised font-mono text-foreground shadow-lg',
@@ -273,6 +320,34 @@ export const NumericInput = forwardRef<HTMLInputElement, NumericInputProps>(
         style={{ width: `calc(${chars}ch + 0.5rem)`, ...style }}
         className={clsx(
           'border-0 border-b border-border bg-transparent px-0.5 py-0.5 font-mono text-foreground outline-none focus:border-focus-ring',
+          className,
+        )}
+        {...props}
+      />
+    );
+  },
+);
+
+export type TextInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value'> & {
+  value: string;
+  onChange: (next: string) => void;
+};
+
+/**
+ * A full-width underlined text field — the string counterpart to
+ * {@link NumericInput}, sharing its underline so a dialog mixing the two reads
+ * as one form. Unlike NumericInput it filters nothing and sets no `type`, so a
+ * caller passes `type="password"` for a credential.
+ */
+export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
+  function TextInput({ value, onChange, className, ...props }, ref) {
+    return (
+      <input
+        ref={ref}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={clsx(
+          'w-full border-0 border-b border-border bg-transparent px-0.5 py-0.5 font-mono text-foreground outline-none placeholder:text-muted focus:border-focus-ring',
           className,
         )}
         {...props}
@@ -496,6 +571,17 @@ function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElem
     const handleKeyDown = (event: KeyboardEvent) => {
       const modal = modalRef.current;
       if (!modal) return;
+
+      if (event.key !== 'Escape' && event.key !== 'Tab') return;
+
+      // A native modal <dialog> (ThemeStoreDialog, ThemeDebuggerDialog) sits in
+      // the browser's top layer and owns the keyboard with its own Tab/Escape
+      // handling. This listener is on window in the capture phase, so without
+      // this bail it would preventDefault every Tab and cycle focus back into
+      // the modal underneath — leaving the dialog's own fields untabbable.
+      // Kept below the key filter: it is a full-document query, and this
+      // handler runs for every keystroke while any modal is mounted.
+      if (document.querySelector('dialog[open]')) return;
 
       if (event.key === 'Escape') {
         if (onEscape) {

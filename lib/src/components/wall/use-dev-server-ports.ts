@@ -35,7 +35,8 @@ import {
 } from './agent-browser-ports';
 import type { DooredItem } from './wall-types';
 import type { LathWallEngine } from './lath-wall-engine';
-import { isBrowserParams } from './browser-surface';
+import { surfaceKindFromParams } from './browser-surface';
+import { hasTerminal } from 'dor/commands/types';
 import { servesLoopback } from './port-url';
 
 // Wait this long after interest changes before scanning, so a tab's open +
@@ -49,12 +50,9 @@ const IDLE_TIMEOUT_MS = 2000;
 
 type ResolveOutcome = 'busy' | 'idle' | 'pending';
 
+// Port scans are terminal-gated (`docs/specs/glossary.md` → Panes and Surfaces).
 function isTerminalParams(params: unknown): boolean {
-  return !isBrowserParams(params);
-}
-
-function isTerminalDoor(door: DooredItem): boolean {
-  return (door.component ?? 'terminal') === 'terminal';
+  return hasTerminal(surfaceKindFromParams(params));
 }
 
 // requestIdleCallback isn't universal (absent in WKWebView / Tauri on macOS),
@@ -106,8 +104,8 @@ export function useDevServerPortCorrelation({
 
       const platform = getPlatform();
       if (!platform.getOpenPorts) {
-        // No port enumeration on this host (e.g. Tauri today): nothing will ever
-        // match, so settle to "no match" and stop (don't poll).
+        // No port enumeration on this host: nothing will ever match, so settle
+        // to "no match" and stop (don't poll).
         for (const port of unsettled) setDevServerResolution(port, null);
         return 'idle';
       }
@@ -123,10 +121,13 @@ export function useDevServerPortCorrelation({
           candidates.push(panel.id);
           titles.set(panel.id, panel.title ?? null);
         }
+        // A Door's component/title live in the store, which stays their authority
+        // while the Surface is minimized.
         for (const door of doors) {
-          if (!isTerminalDoor(door)) continue;
+          const meta = lath.getMeta(door.id);
+          if ((meta?.component ?? 'terminal') !== 'terminal') continue;
           if (!candidates.includes(door.id)) candidates.push(door.id);
-          titles.set(door.id, door.title ?? null);
+          titles.set(door.id, meta?.title ?? null);
         }
 
         // port → the pane ids that listen on it (loopback-reachable binds only).

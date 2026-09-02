@@ -296,11 +296,8 @@ export function translatedPoint(
   };
 }
 
-// As the user keeps dragging past a selection in the direction that opened the
-// submenu, slide the reference origin out to track that overshoot. Otherwise the
-// user would have to drag all the way back through the overshoot before a move in
-// any other direction could register. Only advances outward (a ratchet), so as soon
-// as the drag reverses the pulled-back distance counts toward the intended option.
+// Ratchet the submenu origin outward so reversing counts immediately rather
+// than first retracing the opening-direction overshoot.
 function advanceOptionOrigin(
   selectionDirection: MobileGestureDirection,
   optionOrigin: MobileGesturePoint,
@@ -310,10 +307,7 @@ function advanceOptionOrigin(
   const direction = MOBILE_GESTURE_DIRECTION_VECTORS[selectionDirection];
   const overshoot = (point.x - optionOrigin.x) * direction.x + (point.y - optionOrigin.y) * direction.y;
   if (overshoot <= 0) return { optionOrigin, displayOptionOrigin, advancing: false };
-  // Still ratchet the origin out to track the finger, but only call it "advancing"
-  // (which keeps the compass collapsed) while the outward push is brisk. Once the drag
-  // slows to a settle, advancing drops so the compass can expand without waiting for a
-  // deliberate move back in the chosen direction.
+  // Keep the compass collapsed only while the outward push remains brisk.
   return {
     advancing: overshoot > OPTION_EXPAND_RELEASE,
     optionOrigin: {

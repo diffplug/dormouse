@@ -110,7 +110,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
 
   // Sessions currently relaunched headed via pop-out, mapped to the binary path
   // that spawned them. A headed session is a real OS window, so the host must
-  // close it on shutdown or it orphans (spec → "Headed Pop-Out" lifecycle:
+  // close it on shutdown or it orphans (spec → "Pop-Out" lifecycle:
   // "Dormouse/editor quits → headed windows are cleaned up; no orphans").
   // Headless sessions are deliberately NOT tracked — they're left alive to
   // reattach across webview reloads (the wsPort/stream-recovery design).
@@ -403,7 +403,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   }
 
   // Pop-out is a relaunch, not a live toggle: Chrome's headed/headless choice is
-  // fixed at launch (spec → "Headed Pop-Out"). Close the headless session, then
+  // fixed at launch (spec → "Pop-Out"). Close the headless session, then
   // reopen it headed at the active URL. (v1 preserves the active tab URL only;
   // multi-tab + profile/cookie restore are tracked follow-ups. Window
   // positioning over opts.rect is deferred — neither host acts on it yet, so the

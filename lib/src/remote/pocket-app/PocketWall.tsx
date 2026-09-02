@@ -1,14 +1,4 @@
-/**
- * The Pocket wall experience: `MobileTerminalUi` + `MobileWall` driven by a
- * connected {@link RemotePtyAdapter}. Same composition the website playground
- * proves out with `FakePtyAdapter` (`PocketTerminalExperience`), minus the
- * tutorial/shell-registry machinery — the Host owns the shells here.
- *
- * Sessions come straight from the adapter's directory snapshot (id = surfaceId).
- * v1 allows one attachment per session, so every active-pane change funnels
- * through {@link RemotePtyAdapter.setActivePane}; the registry's own resize path
- * keeps the attached pane sized. Writes and paste target the active pane.
- */
+/** Pocket's shared mobile wall composition; see `docs/specs/pocket-app.md`. */
 
 import {
   useCallback,

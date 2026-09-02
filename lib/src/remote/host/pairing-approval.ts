@@ -1,22 +1,33 @@
 /**
  * The pairing-approval queue: an external store (same shape as
- * `external-link-confirmation.ts`) that bridges the {@link RemoteHost}'s frame
- * loop to the React approval modal. A `pair` frame enqueues a request; the modal
- * renders the head of the queue and calls `approve`/`deny`, which run the real
- * `PairingCeremony` on the Host (the only path that writes the ACL).
+ * `external-link-confirmation.ts`) that backs the React approval modal.
+ *
+ * The ceremony itself runs in the Host service, which is where the ACL is
+ * (`lib/src/host/remote/service.ts`). This is the webview's mirror of its
+ * queue: the service pushes a snapshot, `activation.ts` projects it here, and
+ * `approve`/`deny` send a command back keyed by both `clientId` and the
+ * immutable `pairingId` the modal displayed — so the closures that can
+ * actually write the ACL never leave that process, and a stale modal cannot
+ * answer a replacement request under the same client id.
+ *
+ * **The expected two-digit code is not here and cannot be.** The webview echoes
+ * the digits a person typed; the Host compares them. A mirrored code would make
+ * the confirmation a formality any webview-side attacker could satisfy
+ * (`docs/specs/remote-security-model.md` → Pairing).
  */
 
-import type { PairingRequest } from 'server-lib-common';
-
 export interface PendingPairing {
-  /** Server-assigned client socket id; the approve/deny reply is keyed by it. */
+  /** Server-assigned client socket id. */
   clientId: string;
-  request: PairingRequest;
+  /** Immutable ceremony id; approve/deny must name this exact request. */
+  pairingId: string;
+  /** The Client's own name for itself, already bounded and stripped. */
+  label: string;
   requestedAt: number;
-  /** Approve locally on the Host — writes the ACL and replies `pair-result`. */
-  approve: (label?: string) => void;
+  /** Confirm with the digits the phone is showing — the only path that writes the ACL. */
+  approve: (code: string) => void;
   /** Deny locally — the ACL is untouched. */
-  deny: (error?: string) => void;
+  deny: () => void;
 }
 
 let queue: readonly PendingPairing[] = [];
@@ -27,7 +38,7 @@ function emit(): void {
 }
 
 export function enqueuePairingApproval(pending: PendingPairing): void {
-  // Coalesce by clientId: a re-sent pair for the same client replaces the old.
+  // Coalesce by clientId: a re-sent pairing for the same client replaces the old.
   queue = [...queue.filter((p) => p.clientId !== pending.clientId), pending];
   emit();
 }

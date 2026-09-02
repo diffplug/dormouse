@@ -1,6 +1,7 @@
 import type {
   Command as StricliCommand,
   CommandContext,
+  StricliProcess,
 } from '@stricli/core';
 
 export type IdFormat = 'refs' | 'ids' | 'both';
@@ -8,6 +9,32 @@ export type SplitDirection = 'left' | 'right' | 'up' | 'down' | 'auto';
 export type ResolvedSplitDirection = 'left' | 'right' | 'up' | 'down';
 export type SurfaceKind = 'terminal' | 'browser';
 export type SurfaceRenderMode = 'iframe' | 'ab-screencast' | 'ab-popout';
+
+/** What each kind is backed by (`docs/specs/glossary.md` → Panes and Surfaces).
+ *  The single source of capability gating; kind switches elsewhere go through
+ *  the predicates below. `Record<SurfaceKind, ...>` on purpose: adding a kind
+ *  (the staged `tool`, which has both) must be a compile error here, not a
+ *  silent `false`. */
+const KIND_CAPABILITIES: Record<SurfaceKind, { terminal: boolean; browser: boolean }> = {
+  terminal: { terminal: true, browser: false },
+  browser: { terminal: false, browser: true },
+};
+
+/** Every kind, derived from the table so `--kind` parsing and its help
+ *  placeholder cannot drift from it. */
+export const SURFACE_KINDS = Object.keys(KIND_CAPABILITIES) as SurfaceKind[];
+
+/** Whether this kind has a terminal — PTY-backed: `read` / `send` / `await` /
+ *  port scans. */
+export function hasTerminal(kind: SurfaceKind): boolean {
+  return KIND_CAPABILITIES[kind].terminal;
+}
+
+/** Whether this kind has a browser renderer — nav / render-mode /
+ *  agent-browser operations. */
+export function hasBrowser(kind: SurfaceKind): boolean {
+  return KIND_CAPABILITIES[kind].browser;
+}
 
 /** Where a Surface renders. Minimized Surfaces (baseboard doors) are listed too;
  *  `hidden` is reserved for Surfaces in an inactive Workspace (a future). */
@@ -50,6 +77,9 @@ export interface Surface {
   ringing: boolean;
   /** User-flagged TODO. */
   todo: boolean;
+  /** At least one `dor await` is parked on this Surface. Never persisted — a
+   *  wait cannot outlive the process blocking on it. */
+  awaited: boolean;
   /** Listening ports opened by this terminal Surface. Present only when the
    *  request set `includePorts` (`dor list --ports`); never on browser Surfaces. */
   ports?: SurfacePort[];
@@ -138,6 +168,35 @@ export interface ReadSurfaceResponse {
   text: string;
 }
 
+/** How much evidence of completion a `dor await` caller will accept
+ *  (`docs/specs/alert.md` → Await). */
+export type AwaitUntil = 'quiet' | 'exit';
+
+/** Why a resolved await stopped waiting. */
+export type AwaitCause = 'quiet' | 'exit' | 'bell' | 'idle';
+
+/** How an await ended. `cancelled` never reaches a client: it only happens once
+ *  the client is already gone, and nothing it responds with could be delivered. */
+export type AwaitSurfaceOutcome = 'resolved' | 'timeout' | 'died';
+
+export interface AwaitSurfaceRequest {
+  surface: string;
+  until: AwaitUntil;
+  /** The caller's ceiling, enforced host-side so no hop can reap the wait early. */
+  timeoutMs: number;
+}
+
+export interface AwaitSurfaceResponse {
+  workspaceRef: string;
+  surfaceId: string;
+  surfaceRef: string;
+  outcome: AwaitSurfaceOutcome;
+  /** Present iff `outcome === 'resolved'`. */
+  cause?: AwaitCause;
+  /** The host's own measurement of the wait; the CLI never re-measures it. */
+  waitedMs: number;
+}
+
 export type KillSurfaceConfirmation =
   | { mode: 'if-read'; text: string }
   | { mode: 'dangerously' };
@@ -182,6 +241,21 @@ export interface ResolveOpenTargetResponse {
   port: number;
 }
 
+export interface ResolveAgentBrowserSessionRequest {
+  /** A Surface handle (surface:N, surface:<stable-id>, surface:self,
+   *  surface:focused, title:<title>) naming the browser Surface to drive. */
+  surface: string;
+}
+
+export interface ResolveAgentBrowserSessionResponse {
+  surfaceId: string;
+  surfaceRef: string;
+  /** The agent-browser session bound to that Surface — what `dor ab --surface`
+   *  forwards as `--session`. Includes GUI-minted sessions, which no `--key`
+   *  can name. */
+  session: string;
+}
+
 export interface AgentBrowserSurfaceRequest {
   /** Managed workspace-scoped key; absent when attaching via raw --session. */
   key?: string;
@@ -208,10 +282,14 @@ export interface ControlClient {
   ensureSurface(request: EnsureSurfaceRequest): Promise<EnsureSurfaceResponse>;
   sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse>;
   readSurface(request: ReadSurfaceRequest): Promise<ReadSurfaceResponse>;
+  awaitSurface(request: AwaitSurfaceRequest): Promise<AwaitSurfaceResponse>;
   killSurface(request: KillSurfaceRequest): Promise<KillSurfaceResponse>;
   iframeSurface(request: IframeSurfaceRequest): Promise<IframeSurfaceResponse>;
   agentBrowserSurface(request: AgentBrowserSurfaceRequest): Promise<AgentBrowserSurfaceResponse>;
   resolveOpenTarget(request: ResolveOpenTargetRequest): Promise<ResolveOpenTargetResponse>;
+  resolveAgentBrowserSession(
+    request: ResolveAgentBrowserSessionRequest,
+  ): Promise<ResolveAgentBrowserSessionResponse>;
 }
 
 export interface AgentBrowserExecResult {
@@ -242,6 +320,12 @@ export interface CliResult {
 }
 
 export interface DorCommandContext extends CommandContext {
+  /** Narrower than stricli's `CommandContext`, which exposes only the writable
+   *  streams. `cli.ts` always supplies a full `StricliProcess`, and a command
+   *  that needs an exit code other than `dor`'s usual 0/1 sets `exitCode` on it
+   *  directly (`dor await`); stricli assigns its own with `??=`, so the
+   *  command's wins. */
+  readonly process: StricliProcess;
   readonly options: CliOptions;
   /** Whether the raw argv carried the `--` argument-escape sequence. stricli
    *  consumes `--` and leaves no trace in the parsed positionals, so this is the

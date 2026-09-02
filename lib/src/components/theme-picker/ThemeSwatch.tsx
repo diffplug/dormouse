@@ -1,12 +1,11 @@
 import type { DormouseTheme } from '../../lib/themes';
 import { themePickerStyles as styles } from './styles';
 
-export function ThemeSwatch({ theme, size }: { theme: DormouseTheme; size: 'sm' | 'md' }) {
-  const swatchClass = size === 'sm' ? 'h-3.5 w-3.5' : 'h-4 w-4';
+export function ThemeSwatch({ theme }: { theme: DormouseTheme }) {
   return (
-    <span className={`relative flex shrink-0 items-center justify-center ${swatchClass}`}>
+    <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
       <span
-        className={`block rounded-full border ${swatchClass}`}
+        className="block h-3.5 w-3.5 rounded-full border"
         style={{ ...styles.border, backgroundColor: theme.swatch }}
       />
       <span

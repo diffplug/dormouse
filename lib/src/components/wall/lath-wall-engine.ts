@@ -1,13 +1,5 @@
-// The Wall-facing Lath engine handle (docs/specs/tiling-engine.md → "The wall store
-// and engine"). The store (`lath-wall-store.ts`) is the state machine + geometry +
-// enter hints; the engine layers presentation, vocabulary, and persistence
-// conveniences over it — the animator (entry/exit/tween + dying state), the
-// pane-list / meta projections, the dor-direction ↔ Edge maps, the leaf-meta
-// builders, and the hydration `seed` + `serializeLayout`. Every state op and
-// geometry query goes straight to `lath.store.*`; the engine no longer re-exports
-// them.
-//
-// The engine holds NO selection/focus/mode/activation state — those stay in the Wall.
+// Wall-facing presentation/vocabulary/persistence layer over lath-wall-store.
+// State and geometry stay on `store`; selection/focus/mode stay in Wall.
 
 import {
   type Edge,
@@ -37,7 +29,8 @@ import {
   isLathPersistedLayout,
   lathLayoutFromStore,
 } from '../../lib/lath/persistence';
-import type { DooredItem, VisiblePane } from './wall-types';
+import type { VisiblePane } from './wall-types';
+import type { PersistedDoor } from '../../lib/session-types';
 
 /** Wall-clock reader for the animator (the single definition — LathHost imports it
  *  rather than duplicating one). Kept out of the pure core, which always takes `now`
@@ -99,10 +92,8 @@ export function browserLeafMeta(title: string, params: Record<string, unknown>):
   return { component: 'browser', tabComponent: 'surface', title, params };
 }
 
-/** The engine-tracked meta for a Door's surface. Shared by the two reattach paths —
- *  click-reattach (`restore`) and drag-out (`insert`) — so they build the same shape.
- *  Component/tabComponent default to terminal for a door that carries neither. */
-export function leafMetaFromDoor(item: DooredItem): LeafMeta {
+/** Hydration-only Door-row projection; runtime metadata stays in the store. */
+export function leafMetaFromPersistedDoor(item: PersistedDoor): LeafMeta {
   return {
     component: item.component ?? 'terminal',
     tabComponent: item.tabComponent ?? 'terminal',
@@ -111,13 +102,21 @@ export function leafMetaFromDoor(item: DooredItem): LeafMeta {
   };
 }
 
+/** Whether minimizing this leaf should park it rather than remove it: true when the
+ *  Surface's state lives in its DOM. Browser Surfaces qualify (an iframe document, a
+ *  screencast canvas); terminals do not — the PTY holds their state and the registry
+ *  replays it (docs/specs/tiling-engine.md → "Parked leaves"). */
+export function shouldParkOnMinimize(meta: LeafMeta): boolean {
+  return meta.component === 'browser';
+}
+
 export type LathWallEngine = {
   /** The underlying headless store — the state machine + geometry every state op and
    *  query goes through directly (`lath.store.*`), and the reader LathHost + the
    *  persistence subscription subscribe to. */
   store: LathWallStore;
 
-  // --- animation (stage 3; docs/specs/tiling-engine.md → "Animation contract") ---
+  // --- animation (docs/specs/tiling-engine.md → "Animation") ---
   /** The headless motion core the HTML adapter drives from its rAF loop. Created
    *  with a 0 duration under reduced motion, so the same code path snaps instantly. */
   animator: LathAnimator;
@@ -138,9 +137,12 @@ export type LathWallEngine = {
   subscribeWake(cb: () => void): () => void;
 
   // --- reads / projections over the store ---
-  /** Visible leaves in tree pre-order, each with its meta title + params. */
+  /** Visible leaves in tree pre-order, each with its meta title + params. Parked
+   *  leaves are not visible and are not listed. */
   listPanes(): VisiblePane[];
-  /** The leaf's metadata, or undefined. */
+  /** The leaf's metadata, or undefined. Resolves Doored leaves (parked or not) too —
+   *  the store is the single authority for a minimized Surface's live title/params,
+   *  so this is what every Door reader calls. */
   getMeta(id: string): LeafMeta | undefined;
 
   // --- persistence ---
@@ -154,6 +156,10 @@ export type LathWallEngine = {
     lathBlob: unknown,
     initialPaneIds: string[] | undefined,
     generatePaneId: () => string,
+    /** Persisted Doors restored alongside the tree. Their meta is seeded into the
+     *  store in the same commit, because the store — not the Door record — is the
+     *  authority for a minimized Surface's title/params from then on. */
+    doors?: readonly PersistedDoor[],
   ): { paneIds: string[]; fresh: boolean };
 };
 
@@ -210,13 +216,19 @@ export function createLathWallEngine(
 
     serializeLayout: () => lathLayoutFromStore(snapshot()),
 
-    seed(lathBlob, initialPaneIds, generatePaneId) {
+    seed(lathBlob, initialPaneIds, generatePaneId, doors) {
+      // Doors ride into `leafMeta` beside the tree's leaves: a restored Door is a
+      // detached leaf, and detachment is a tree fact, not a metadata one.
+      const doorMeta = (doors ?? []).map(
+        (door) => [door.id, leafMetaFromPersistedDoor(door)] as const,
+      );
+
       // 1. A persisted Lath layout (must validate; empty trees fall through so the
       //    Wall always seeds ≥1 pane).
       if (isLathPersistedLayout(lathBlob)) {
         const tree = lathBlob.tree as LathTree;
         if (validate(tree).length === 0 && leaves(tree).length > 0) {
-          store.seed(tree, Object.entries(lathBlob.leafMeta));
+          store.seed(tree, [...Object.entries(lathBlob.leafMeta), ...doorMeta]);
           return { paneIds: store.leafIds(), fresh: false };
         }
       }
@@ -224,7 +236,7 @@ export function createLathWallEngine(
       // 2. Fresh tree from the restored session ids (or one generated id), splitting
       //    successive panes via the store's autoEdge (as `addTerminalPanel` does).
       const ids = initialPaneIds && initialPaneIds.length > 0 ? initialPaneIds : [generatePaneId()];
-      store.seed(leafTree(ids[0]), [[ids[0], terminalLeafMeta()]]);
+      store.seed(leafTree(ids[0]), [[ids[0], terminalLeafMeta()], ...doorMeta]);
       for (let i = 1; i < ids.length; i++) {
         store.addLeaf(ids[i], terminalLeafMeta(), null);
       }

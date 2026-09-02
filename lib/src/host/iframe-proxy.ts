@@ -28,12 +28,17 @@
  *     A server bound to exactly one upstream is inherently not an open forwarder.
  *   - No token in the URL. It would land in `location.pathname` and break
  *     client-side routers (a React-Router/Remix dev server reads the path,
- *     matches no route, and renders its own 404). The dedicated server +
- *     loopback bind is the boundary instead.
+ *     matches no route, and renders its own 404), and it would not survive onto
+ *     root-relative sub-resource requests at all. The dedicated server and the
+ *     loopback bind are mitigations, **not** the boundary — the port is
+ *     discoverable in seconds. The boundary is the `Host` check plus the
+ *     conditional `Origin` vouch below: this server admits anyone and vouches
+ *     for no one it did not serve. See `./loopback-guard.ts`.
  */
 import * as http from 'http';
 import * as net from 'net';
 import type { IframeProxyResult } from '../lib/platform/iframe-proxy-types';
+import { isLoopbackHost, isOwnOrigin } from './loopback-guard';
 import {
   STRIP_RESPONSE_HEADERS,
   errorPageHtml,
@@ -152,6 +157,13 @@ function listen(server: http.Server): Promise<number> {
 }
 
 function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.ServerResponse): void {
+  if (!isLoopbackHost(req.headers.host, grant.port)) {
+    // DNS rebinding: a hostile domain re-pointed at 127.0.0.1 reaches this
+    // grant with its own name in Host. Refuse before touching lastUsed, so a
+    // stranger cannot hold a grant open past its idle TTL either.
+    res.writeHead(421).end();
+    return;
+  }
   grant.lastUsed = Date.now();
   const path = req.url ?? '/';
 
@@ -160,7 +172,24 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
   // Present the request as coming from the upstream's own origin so origin-aware
   // dev servers (Vary: Origin, CSRF checks) treat it as same-origin, and drop
   // Accept-Encoding so HTML comes back identity (we rewrite it).
-  if (headers.origin) headers.origin = grant.upstream.origin;
+  //
+  // Only for a caller we actually served. This rewrite is the proxy vouching
+  // for the request upstream, and vouching for a stranger is what turns a
+  // transparent proxy into a CSRF amplifier: the port is discoverable, so any
+  // page could otherwise POST here and have its `Origin: https://evil.example`
+  // relabelled as the upstream's own — defeating exactly the origin check the
+  // rewrite exists to satisfy. Forward a foreign Origin untouched instead of
+  // blocking it: the upstream then sees the truth and applies its own policy,
+  // which leaves the proxy granting nothing the attacker did not already have
+  // by hitting the upstream's port directly.
+  //
+  // An absent Origin stays absent, as before — that is a top-level navigation
+  // or a same-origin GET, which is the ordinary iframe case.
+  if (isOwnOrigin(req.headers.origin, grant.port)) {
+    headers.origin = grant.upstream.origin;
+  }
+  // Referer needs no such test: it only substitutes our own proxy origin, so a
+  // foreign referer already passes through untouched.
   if (typeof headers.referer === 'string') headers.referer = headers.referer.split(grant.proxyOrigin).join(grant.upstream.origin);
   delete headers['accept-encoding'];
 
@@ -274,10 +303,20 @@ function sanitizeResponseHeaders(grant: Grant, headers: http.IncomingHttpHeaders
 // Mirrors the stream relay: once the upgrade head is rewritten (Host/Origin
 // pointed at the upstream) the proxy is a dumb byte pipe.
 function handleUpgrade(grant: Grant, req: http.IncomingMessage, socket: net.Socket, head: Buffer): void {
+  // The upgrade path is where the Origin rewrite costs the most, so it gets the
+  // same two tests as handleRequest. WebSockets are not subject to CORS, so a
+  // laundered Origin does not merely let a stranger write — it hands them a
+  // *readable* socket to a dev server or openvscode-server that would have
+  // refused their real origin.
+  if (!isLoopbackHost(req.headers.host, grant.port)) {
+    socket.destroy();
+    return;
+  }
   grant.lastUsed = Date.now();
   socket.on('error', () => {});
   const path = req.url ?? '/';
   const targetPort = Number(grant.upstream.port) || 80;
+  const vouch = isOwnOrigin(req.headers.origin, grant.port);
 
   const upstream = net.connect(targetPort, grant.upstream.hostname, () => {
     const headerLines: string[] = [];
@@ -285,7 +324,7 @@ function handleUpgrade(grant: Grant, req: http.IncomingMessage, socket: net.Sock
       const name = req.rawHeaders[i];
       const lower = name.toLowerCase();
       if (lower === 'host') headerLines.push(`Host: ${grant.upstream.host}`);
-      else if (lower === 'origin') headerLines.push(`Origin: ${grant.upstream.origin}`);
+      else if (lower === 'origin') headerLines.push(`Origin: ${vouch ? grant.upstream.origin : req.rawHeaders[i + 1]}`);
       else headerLines.push(`${name}: ${req.rawHeaders[i + 1]}`);
     }
     upstream.write(`GET ${path} HTTP/1.1\r\n${headerLines.join('\r\n')}\r\n\r\n`);

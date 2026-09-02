@@ -4,6 +4,18 @@
   "dependencyDashboard": true,
   "timezone": "America/Los_Angeles",
   "schedule": ["* * * * 1"],
+  "vulnerabilityAlerts": {
+    "description": [
+      "Security fixes must not wait for the Monday window. Everything else here is batched to one day a week, which is right for routine bumps and wrong for a known-vulnerable dependency, so this overrides the schedule only.",
+      "`minimumReleaseAge` is set here EXPLICITLY, and must stay that way. Renovate\u0027s own default for this block is `minimumReleaseAge: null`, force-applied before lookup — so omitting it does not inherit the cooldown from packageRules, it DROPS the cooldown entirely. Stating it is the only way to keep it.",
+      "Keeping it is the deliberate choice: the cooldown guards the opposite threat — a compromised release that gets yanked within a day — and a reviewer reading a Renovate diff cannot detect a supply-chain compromise the way the ecosystem\u0027s own yank process can. Nothing here auto-merges, and the Dependabot alert already makes the vulnerability visible the moment it is published, so what the cooldown costs is a day before the remediation PR appears, not a day before anyone knows.",
+      "See SECURITY.md, Dependency Supply Chain."
+    ],
+    "enabled": true,
+    "schedule": [],
+    "minimumReleaseAge": "1 day",
+    "labels": ["security", "dependencies"]
+  },
   "packageRules": [
     {
       "matchManagers": ["npm", "cargo"],
@@ -67,13 +79,9 @@
       "separateMajorMinor": false
     },
     {
-      "description": "xterm core and its first-party addons ship from one repo on one beta counter, and each addon peers on the exact core beta it was built against — an addon at beta.N requires ^6.1.0-beta.N, which no earlier core beta satisfies. The addons also compile against core internals, so a partial bump lands an unsatisfied peer range and mismatched internals; keep them in one PR. canopy's fork-base pins are excluded below",
+      "description": "xterm core and its first-party addons ship from one repo but carry INDEPENDENT beta counters (an addon is only published when its own content changes), and each addon peers on the exact core version published from the commit it was built from. So the latest of each is routinely a set spanning two commits — today's newest core has no matching addon publish at all — and since ^6.1.0-beta.N admits every later beta, npm and pnpm stay silent about the mismatch while the addons run against core internals they were not compiled for. This group only guarantees core and the addons arrive in one PR and are tested together; scripts/xterm-lint.mjs is what rejects an incoherent set, and `pnpm bump:xterm` writes the newest coherent one. Matched by scope so a newly added addon is grouped automatically; canopy's fork-base pins are excluded below",
       "matchManagers": ["npm"],
-      "matchPackageNames": [
-        "@xterm/xterm",
-        "@xterm/addon-fit",
-        "@xterm/addon-unicode-graphemes"
-      ],
+      "matchPackageNames": ["@xterm/**"],
       "groupName": "xterm",
       "groupSlug": "xterm",
       "separateMajorMinor": false
@@ -121,12 +129,6 @@
       "description": "Node version is governed by devEngines in package.json; don't let Renovate bump node in GitHub Actions workflows",
       "matchManagers": ["github-actions"],
       "matchPackageNames": ["node"],
-      "enabled": false
-    },
-    {
-      "description": "dockview-react is slated for removal; stay on ^5.1.0 and don't churn through major breaking changes (e.g. v6) on a dependency that's getting kicked out",
-      "matchManagers": ["npm"],
-      "matchPackageNames": ["dockview-react"],
       "enabled": false
     },
     {

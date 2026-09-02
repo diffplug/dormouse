@@ -1,15 +1,5 @@
-/**
- * Live agent-browser session viewer (see docs/specs/dor-browser.md).
- *
- * This component is a THIN VIEW. All the non-React lifecycle — the stream
- * connection + screenshot loop, viewport-sync state machine, pop-out/pop-in
- * orchestration + auto-revert, CDP observer, canonical-URL tracking, input
- * bridging, params persistence, and the screen/chrome registration — lives in a
- * surface-id-keyed controller registry (`agent-browser-surface-controller.ts`,
- * mirroring `terminal-lifecycle.ts`). The controller outlives panel unmount; the
- * view just mounts a canvas, feeds params/visibility, forwards DOM input, and
- * subscribes to one snapshot via `useSyncExternalStore`.
- */
+/** React view for the surface-scoped lifecycle in
+ * `agent-browser-surface-controller.ts`; see docs/specs/dor-browser.md. */
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { clsx } from 'clsx';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
@@ -38,7 +28,7 @@ import {
 
 type AgentBrowserPanelParams = AgentBrowserSurfaceParams;
 
-export function AgentBrowserPanel({ id, params: rawParams, renderMode: renderModeProp }: PaneProps & { renderMode?: RenderMode }) {
+export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: renderModeProp }: PaneProps & { renderMode?: RenderMode }) {
   // The engine-tracked `title` prop is unused here: the live title is derived
   // from the stream (controller → paneWrite.setTitle), never read back.
   const params = rawParams as AgentBrowserPanelParams | undefined;
@@ -124,9 +114,10 @@ export function AgentBrowserPanel({ id, params: rawParams, renderMode: renderMod
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controller, paneWrite, id]);
 
-  // Feed effective on-screen visibility (foreground window; a mounted leaf is always
-  // engine-visible) so the controller can park a hidden pane after the debounce.
-  const visible = useSurfaceVisibility();
+  // Feed effective on-screen visibility (foreground window, and not a parked leaf)
+  // so the controller can park a hidden pane after the debounce. A minimized
+  // screencast stays mounted and connected but stops pulling frames.
+  const visible = useSurfaceVisibility(parked);
   useEffect(() => {
     controller.setVisible(visible);
   }, [controller, visible]);

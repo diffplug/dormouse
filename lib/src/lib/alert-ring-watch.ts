@@ -1,20 +1,6 @@
 import { getActivity, getActivitySnapshot, subscribeToActivity } from './session-activity-store';
 
-/**
- * The shared "unattended ring, delayed, re-checked" machine behind every alarm
- * sink (`docs/specs/alert.md` -> Alarm settings).
- *
- * Spoken alarms and push notifications are the same state machine with a
- * different sink: watch the activity store, detect a fresh transition into
- * `ALERT_RINGING`, wait a configurable delay, re-check that it is *still*
- * ringing, then act. Only the sink and which settings field gates it differ, so
- * they share this rather than each carrying a copy of the freshness and
- * cancellation rules — those rules are subtle enough that two copies would
- * drift.
- *
- * Renderer-side by design: the ring already arrives here as an activity-store
- * transition, and the delay timer needs no host round-trip.
- */
+/** Shared renderer-side fresh-ring→delay→recheck machine for alarm sinks. */
 export interface UnattendedRingWatch {
   /**
    * Whether this sink is switched on. Read when a ring is scheduled *and*
@@ -33,11 +19,8 @@ export interface UnattendedRingWatch {
  * that cancels everything pending.
  */
 export function watchUnattendedRings(watch: UnattendedRingWatch): () => void {
-  // Last seen status per Session. A Session missing from this map has never been
-  // observed, so its first sighting can never count as a transition — that is
-  // what keeps a restore or reconnect that arrives already ringing silent
-  // (`docs/specs/alert.md` -> WATCHING Track). For push this is the difference
-  // between "works" and "buzzes your phone every time you open your laptop".
+  // Absence means never observed, so restore/reconnect cannot turn an existing
+  // ring into a fresh transition.
   const lastStatus = new Map<string, string>();
   const pending = new Map<string, ReturnType<typeof setTimeout>>();
 

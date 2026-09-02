@@ -103,6 +103,7 @@ function PocketWallStory({ connected = false }: { connected?: boolean }) {
             hostId: 'host-studio',
             label: 'Studio iMac with a deliberately long connected-host title',
             online: true,
+            needsPairing: false,
           }}
           adapter={adapterRef.current}
           onLeave={() => {}}

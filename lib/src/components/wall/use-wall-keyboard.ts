@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { handleDualTap } from './keyboard/handle-dual-tap';
+import { handleEditableClipboard } from './keyboard/handle-editable-clipboard';
 import { handleMouseSelectionKeys } from './keyboard/handle-mouse-selection-keys';
 import { handleKillConfirm } from './keyboard/handle-kill-confirm';
 import { handlePaneShortcuts } from './keyboard/handle-pane-shortcuts';
@@ -27,6 +28,9 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       const c = ctxRef.current;
 
       if (handleDualTap(e, c, dualTapState)) return;
+      // Before every mode/renaming gate below: a focused text field owns its
+      // clipboard chords no matter what the wall is doing.
+      if (handleEditableClipboard(e)) return;
       if (handleMouseSelectionKeys(e, c)) return;
       if (c.modeRef.current === 'passthrough') return;
       if (c.renamingRef.current) return;
@@ -38,9 +42,9 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
 
     // A focused cross-origin iframe owns the keyboard, so its keystrokes never
     // reach the capturing window listener above. The proxy shim posts our
-    // reserved leader chord back out (docs/specs/dor-browser.md → "The iframe
-    // shim message channel"); feed it into the same dispatch the in-document dual-tap
-    // would, after validating the message came from a live proxy origin.
+    // reserved leader chord back out (docs/specs/dor-browser.md → "Iframe
+    // Shim"); feed it into the same dispatch the in-document dual-tap would,
+    // after validating the message came from a live proxy origin.
     const onMessage = (e: MessageEvent) => {
       const data = e.data as { __dormouse?: unknown } | null;
       if (!data || data.__dormouse !== 'leader') return;

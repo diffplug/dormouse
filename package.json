@@ -2,7 +2,7 @@
   "name": "dormouse-root",
   "private": true,
   "license": "FSL-1.1-MIT",
-  "packageManager": "pnpm@11.17.0",
+  "packageManager": "pnpm@11.24.0",
   "devEngines": {
     "runtime": {
       "name": "node",
@@ -11,10 +11,14 @@
     }
   },
   "scripts": {
-    "build": "pnpm run build:vscode && pnpm --filter dormouse-website build",
-    "test": "node scripts/spec-lint.mjs && pnpm lint:public-docs && pnpm -r run test",
+    "build": "pnpm run build:vscode && pnpm --filter dormouse-lib build:pocket && pnpm --filter dormouse-website build",
+    "test": "node scripts/spec-lint.mjs && node scripts/public-docs-lint.mjs && node scripts/xterm-lint.mjs && node scripts/loopback-lint.mjs && node scripts/deploy-lint.mjs && node scripts/deploy-lint-selftest.mjs && node scripts/e2e-lint.mjs && node scripts/e2e-lint-selftest.mjs && node scripts/clamp-issue-body-selftest.mjs && pnpm -r run test",
     "lint:specs": "node scripts/spec-lint.mjs",
     "lint:public-docs": "node scripts/public-docs-lint.mjs",
+    "audit:prose": "node scripts/prose-audit.mjs",
+    "lint:loopback": "node scripts/loopback-lint.mjs",
+    "lint:xterm": "node scripts/xterm-lint.mjs",
+    "bump:xterm": "node scripts/xterm-bump.mjs",
     "dev:canopy": "pnpm --filter canopy storybook",
     "dev:lib": "pnpm --filter dormouse-lib dev",
     "dev:standalone": "node scripts/free-dev-port.mjs && pnpm --filter dormouse-standalone tauri dev",
@@ -28,7 +32,9 @@
     "dogfood:vscode": "pnpm run build:vscode && pnpm --filter dormouse dogfood",
     "dogfood:standalone": "bash standalone/scripts/dogfood.sh",
     "storybook": "pnpm --filter dormouse-lib storybook",
-    "bundle-themes": "node lib/scripts/bundle-themes.mjs"
+    "bundle-themes": "node lib/scripts/bundle-themes.mjs",
+    "lint:deploy": "node scripts/deploy-lint.mjs && node scripts/deploy-lint-selftest.mjs",
+    "lint:e2e": "node scripts/e2e-lint.mjs && node scripts/e2e-lint-selftest.mjs"
   },
   "devDependencies": {}
 }

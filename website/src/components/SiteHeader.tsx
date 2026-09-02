@@ -24,7 +24,7 @@ interface SiteHeaderProps {
   brandRef?: React.Ref<HTMLAnchorElement>;
   /** Whether brand is on a non-home page (visible + grey) vs home (hidden, animated in) */
   brandVisible?: boolean;
-  /** Optional header control, used by the playground theme picker. */
+  /** Optional header control, used by the Pocket playground's theme picker. */
   controls?: React.ReactNode;
   /** Use VSCode theme variables instead of the marketing site's palette. */
   themeAware?: boolean;

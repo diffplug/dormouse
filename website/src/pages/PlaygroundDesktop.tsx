@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 import { PlaceToPaste } from "../components/PlaceToPaste";
 import { POCKET_THEME_ID } from "../components/PocketTerminalExperience";
-import { ThemePicker } from "dormouse-lib/components/ThemePicker";
+import { useRestoredTheme } from "dormouse-lib/lib/themes";
 import { PlaygroundShellRegistry } from "../lib/playground-shells";
 import { TutorialState } from "../lib/tutorial-state";
 import { TutDetector } from "../lib/tut-detector";
@@ -89,6 +89,11 @@ function DesktopPlaygroundUnavailable() {
 }
 
 function PlaygroundDesktopExperience() {
+  // The navbar picker used to theme this page as a side effect of its own
+  // render-time restore. The picker now lives in the Settings dialog and only
+  // mounts when opened, so the page restores its own theme.
+  useRestoredTheme(POCKET_THEME_ID);
+
   const [WallModule, setWallModule] = useState<{
     Wall: React.ComponentType<any>;
   } | null>(null);
@@ -130,6 +135,7 @@ function PlaygroundDesktopExperience() {
       const platform = await import("dormouse-lib/lib/platform");
       const registry = await import("dormouse-lib/lib/terminal-registry");
       const mouseSelection = await import("dormouse-lib/lib/mouse-selection");
+      const themes = await import("dormouse-lib/lib/themes");
       const wall = await import("dormouse-lib/components/Wall");
       const scenarios = await import("dormouse-lib/lib/platform/fake-scenarios");
       const asciiSplash = await import("../lib/ascii-splash-runner");
@@ -150,11 +156,13 @@ function PlaygroundDesktopExperience() {
 
       const tutorialState = new TutorialState();
       stateRef.current = tutorialState;
-      const detector = new TutDetector(tutorialState, registry, mouseSelection);
+      const detector = new TutDetector({
+        state: tutorialState,
+        activityStore: registry,
+        mouseStore: mouseSelection,
+        themeStore: themes,
+      });
       detectorRef.current = detector;
-      // The detector now reads app state entirely through the WallEvent stream and
-      // the activity/mouse stores — no tiling api. `start()` seeds its prev-state
-      // maps and subscribes to those stores.
       detector.start();
 
       const shellRegistry = new PlaygroundShellRegistry(
@@ -296,16 +304,7 @@ function PlaygroundDesktopExperience() {
 
   return (
     <>
-      <SiteHeader
-        activePath="/playground"
-        themeAware
-        controls={
-          <ThemePicker
-            variant="playground-header"
-            defaultThemeId={POCKET_THEME_ID}
-          />
-        }
-      />
+      <SiteHeader activePath="/playground" themeAware />
 
       <main className="fixed top-16 right-0 bottom-0 left-0 flex min-h-0 md:top-20">
         {WallModule ? (

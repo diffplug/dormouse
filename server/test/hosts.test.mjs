@@ -1,15 +1,15 @@
 /**
- * Slice-2 host enrollment and presence (docs/specs/server.md, "Relay & host
- * enrollment"): the password-gated `POST /api/host/enroll`, the session-gated
+ * Host enrollment and presence (docs/specs/server.md, "HTTP API"): the password
+ * path of the credential-gated `POST /api/host/enroll`, the session-gated
  * `GET /api/hosts` presence flag, and WS token rejection on both relay routes.
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stat } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { API_ROUTES, WS_ROUTES, WS_TOKEN_PARAM } from 'server-lib-common';
+import { API_ROUTES, E2E_ID_LENGTH, WS_ROUTES, WS_TOKEN_PARAM, isE2eId } from 'server-lib-common';
 
 import {
   RP_ID,
@@ -33,9 +33,13 @@ async function listHosts(app, sessionToken) {
 
 test('enroll happy path returns host credentials and policy', async () => {
   const { app, origin } = await freshApp();
-  const { res, body } = await enrollHost(app, { label: 'MacBook' });
+  const { res, body } = await enrollHost(app);
   assert.equal(res.status, 200);
-  assert.equal(typeof body.hostId, 'string');
+  // Pinned at enrollment: `e2e` routes on `hostId`, and `isE2eId` accepts only
+  // base64url of 16 bytes — a Host of any other shape is one no Client could
+  // ever address (docs/specs/server.md -> Relay).
+  assert.equal(isE2eId(body.hostId), true);
+  assert.equal(body.hostId.length, E2E_ID_LENGTH);
   assert.equal(typeof body.hostToken, 'string');
   assert.notEqual(body.hostId, body.hostToken);
   assert.equal(body.origin, origin);
@@ -44,20 +48,27 @@ test('enroll happy path returns host credentials and policy', async () => {
 
 test('enroll rejects a wrong password', async () => {
   const { app } = await freshApp();
-  const res = await post(app, API_ROUTES.hostEnroll, { password: 'wrong', label: 'x' });
+  const res = await post(app, API_ROUTES.hostEnroll, { password: 'wrong' });
   assert.equal(res.status, 401);
 });
 
 test('a second enrollment appends and gets distinct credentials', async () => {
   const { app } = await freshApp();
+  // Registering the owner passkey enrolls a Host of its own — that is the only
+  // way a setup token exists — so the list is measured as a delta.
+  const { sessionToken } = await ownerSession(app);
+  const before = (await listHosts(app, sessionToken)).body.hosts.length;
   const { body: a } = await enrollHost(app);
   const { body: b } = await enrollHost(app);
   assert.notEqual(a.hostId, b.hostId);
   assert.notEqual(a.hostToken, b.hostToken);
 
-  const { sessionToken } = await ownerSession(app);
   const { body } = await listHosts(app, sessionToken);
-  assert.equal(body.hosts.length, 2);
+  assert.equal(body.hosts.length, before + 2);
+  assert.deepEqual(
+    body.hosts.filter((h) => h.hostId === a.hostId || h.hostId === b.hostId).length,
+    2,
+  );
 });
 
 test('hosts.json is owner-only, since it stores hostToken in plaintext', async (t) => {
@@ -66,6 +77,32 @@ test('hosts.json is owner-only, since it stores hostToken in plaintext', async (
   await enrollHost(app);
   const { mode } = await stat(join(stateDir, 'hosts.json'));
   assert.equal(mode & 0o777, 0o600);
+});
+
+test('a hand-edited hosts.json row of the wrong hostId shape is dropped', async () => {
+  // The documented revocation mechanism is editing this file, so a row of
+  // another length is an expected state — and it must read as un-enrolled
+  // rather than as a Host no `e2e` frame could ever be routed to.
+  const { app, stateDir } = await freshApp();
+  const { sessionToken } = await ownerSession(app);
+  const { body: host } = await enrollHost(app);
+  const path = join(stateDir, 'hosts.json');
+  const rows = JSON.parse(await readFile(path, 'utf8'));
+  const corrupted = rows.map((row) =>
+    row.hostId === host.hostId ? { ...row, hostId: 'too-short' } : row,
+  );
+  await writeFile(path, JSON.stringify(corrupted), 'utf8');
+
+  const listed = (await listHosts(app, sessionToken)).body.hosts;
+  assert.equal(listed.some((h) => h.hostId === host.hostId), false);
+  assert.equal(listed.some((h) => h.hostId === 'too-short'), false);
+  // And its bearer token no longer resolves, so the row is revoked rather than
+  // merely invisible.
+  const minted = await app.request(API_ROUTES.hostSetupToken, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${host.hostToken}` },
+  });
+  assert.equal(minted.status, 401);
 });
 
 test('GET /api/hosts requires a session', async () => {
@@ -80,21 +117,24 @@ test('GET /api/hosts online flag flips with the host socket', async () => {
   try {
     const { sessionToken } = await ownerSession(app);
 
-    const enrolled = await enrollHost(app, { label: 'Laptop' });
+    const enrolled = await enrollHost(app);
     const hostId = enrolled.body.hostId;
+    /** This Host's row; the owner's registration enrolled one of its own. */
+    const row = async () =>
+      (await listHosts(app, sessionToken)).body.hosts.find((h) => h.hostId === hostId);
 
-    let listed = (await listHosts(app, sessionToken)).body.hosts;
-    assert.deepEqual(listed, [{ hostId, label: 'Laptop', online: false }]);
+    // No label: the Server holds none, so this list is discovery only.
+    assert.deepEqual(await row(), { hostId, online: false });
 
     const socket = wsConnect(
       `${server.wsUrl}${WS_ROUTES.host}?${WS_TOKEN_PARAM}=${enrolled.body.hostToken}`,
     );
     await socket.ready;
-    await until(async () => (await listHosts(app, sessionToken)).body.hosts[0].online === true);
+    await until(async () => (await row()).online === true);
 
     socket.close();
     await socket.closed;
-    await until(async () => (await listHosts(app, sessionToken)).body.hosts[0].online === false);
+    await until(async () => (await row()).online === false);
   } finally {
     await server.close();
   }
@@ -132,4 +172,18 @@ test('a host socket opens with a real enrollment token', async () => {
   } finally {
     await server.close();
   }
+});
+
+test('enrollment mirrors requireUserVerification to the Host, and omits it when off', async () => {
+  // The flag has to travel: the Host is the final authority on an assertion,
+  // so a Server that demands UV while the Host does not leaves the weaker
+  // verifier deciding access. Absent means false, which is what an older Host
+  // reading a newer server — or either reading an older one — must see.
+  const on = await freshApp({ requireUserVerification: true });
+  const { body: uvOn } = await enrollHost(on.app);
+  assert.equal(uvOn.requireUserVerification, true);
+
+  const off = await freshApp();
+  const { body: uvOff } = await enrollHost(off.app);
+  assert.equal('requireUserVerification' in uvOff, false);
 });

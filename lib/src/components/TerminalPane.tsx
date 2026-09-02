@@ -39,15 +39,11 @@ export function TerminalPane({ id, isFocused = true }: TerminalPaneProps) {
     const container = containerRef.current;
     if (!container) return;
 
-    // Ensure the terminal exists in the registry
     getOrCreateTerminal(id);
-
-    // Attach the terminal's persistent element to this container
     mountElement(id, container);
 
-    // Resize observer — refit terminal when container changes size, throttled
-    // (see REFIT_THROTTLE_MS) so animated/dragged geometry doesn't reflow the
-    // buffer on every frame.
+    // Throttled (see REFIT_THROTTLE_MS) so animated/dragged geometry doesn't
+    // reflow the buffer on every frame.
     const throttledRefit = throttleTrailing(() => refitSession(id), REFIT_THROTTLE_MS);
     const observer = new ResizeObserver(throttledRefit);
     observer.observe(container);

@@ -1,6 +1,7 @@
-import type { AlertState } from '../alert-manager';
+import type { AlertState, AwaitHandle, AwaitOptions } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
+import type { ShellEntry } from '../shell-defaults';
 // Defined in its own dependency-free file so the Node proxy in lib/src/host can
 // share it without pulling this browser-typed module into a Node tsconfig.
 import type { IframeProxyResult } from './iframe-proxy-types';
@@ -9,6 +10,9 @@ export interface PtyInfo {
   id: string;
   alive: boolean;
   exitCode?: number;
+  /** Executable path of the shell this PTY launched. Carried on reconnect so
+   *  shell-sensitive input remains Session-specific after the webview reloads. */
+  shell?: string;
 }
 
 /**
@@ -32,7 +36,8 @@ export interface OpenPort {
  * `Get-NetTCPConnection`, `netstat`). Wider than the 1 s cwd query because
  * enumeration shells out on macOS/Windows; tight enough to fail visibly rather
  * than hang a pane header. Mirrored as `OPEN_PORT_TIMEOUT_MS` in
- * `standalone/sidecar/pty-core.js` and `standalone/src-tauri/src/lib.rs`.
+ * `standalone/sidecar/pty-core.js` and `standalone/src-tauri/src/lib.rs`;
+ * pinned by `mirrored-constants.test.ts`.
  */
 export const OPEN_PORT_TIMEOUT_MS = 3000;
 
@@ -112,13 +117,58 @@ export interface AgentBrowserPopResult {
   error?: string;
 }
 
+/**
+ * The webview end of a Node-resident remote Host
+ * (`lib/src/host/remote/service-protocol.ts`).
+ *
+ * The Host runs in the process that owns the PTYs — the Tauri sidecar, the VS
+ * Code extension host — so the webview is its UI plus its surface responder: it
+ * forwards console commands, answers what its own panes are called and how big
+ * they are, and mirrors the pairing queue. Nothing a webview answers can widen
+ * access (docs/specs/remote-security-model.md).
+ *
+ * `cmd` and `op` are deliberately opaque here. *What* the service can be asked
+ * belongs to the remote Host, not to the platform, so the operation map and its
+ * real types live in `lib/src/remote/host/peer-surfaces.ts`; this layer and the
+ * transports under it only carry the bytes.
+ */
+export interface RemoteHostLink {
+  /** Run a service command and resolve its result, or reject with its error. */
+  command(cmd: string, params?: unknown): Promise<unknown>;
+
+  /** Answer `op` on behalf of this webview's own surfaces; no results = not mine. */
+  respond(op: string, handler: (params: unknown) => unknown[]): void;
+
+  /**
+   * Announce that future answers may differ. Carries no subject: the directory
+   * is the only thing a peer can be asked to answer, so naming it would be a
+   * field every layer copies and nobody reads.
+   */
+  notify(): void;
+
+  /**
+   * Subscribe to one of the service's pushed events by name (`pairing-queue`),
+   * receiving the event object the service sent — its `name` included. Returns
+   * the unsubscribe.
+   */
+  on(name: string, listener: (data: unknown) => void): () => void;
+}
+
 export interface PlatformAdapter {
   // Lifecycle
   init(): Promise<void>;
   shutdown(): void;
 
+  /**
+   * Reach the remote Host service behind this host. Present exactly when a
+   * process behind the webview owns the PTYs and can run the Host (standalone's
+   * sidecar, VS Code's extension host). Adapters that omit it have no Host
+   * anywhere — the website — so the remote modules stay inert.
+   */
+  remoteHost?: RemoteHostLink;
+
   // Shell detection
-  getAvailableShells(): Promise<{ name: string; path: string; args?: string[] }[]>;
+  getAvailableShells(): Promise<ShellEntry[]>;
 
   // PTY operations
   spawnPty(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[] }): void;
@@ -126,9 +176,51 @@ export interface PlatformAdapter {
   resizePty(id: string, cols: number, rows: number): void;
   killPty(id: string): void;
 
+  /**
+   * Whether this host keeps a Session snapshot across a restart. `false` means
+   * `saveSession` does no work at all rather than building a record for a
+   * `saveState` that discards it — the gate belongs above the per-pane `getCwd`
+   * round trips, not below them.
+   *
+   * Absent reads as `true`. Standalone sets it `false`: quitting is a deliberate
+   * ending and a crash captured nothing, so every launch starts fresh
+   * (docs/specs/transport.md -> "The governing rule").
+   */
+  persistsSession?: boolean;
+
+  /**
+   * Whether the host owns the color theme, so Dormouse must not offer a theme
+   * picker of its own. Absent reads as `false`.
+   *
+   * `VSCodeAdapter` sets it `true`: VS Code supplies `--vscode-*` directly and
+   * its own theme UI is the only correct control there, so the Settings dialog
+   * hides its Theme row (docs/specs/theme.md).
+   */
+  hostOwnsTheme?: boolean;
+
+  /**
+   * Whether the host owns shell selection, so Dormouse must not offer a shell
+   * picker of its own. Absent reads as `false`.
+   *
+   * `VSCodeAdapter` sets it `true`: the native `dormouse.selectShell` QuickPick
+   * (with its own workspaceState persistence) is the only correct control
+   * there, so the Settings dialog hides its Shell row (docs/specs/vscode.md).
+   */
+  hostOwnsShells?: boolean;
+
+  /**
+   * Agent resume invocations the host captured when it last tore down, keyed by
+   * surface id — consumed once by a cold restore (`session-restore.ts`).
+   *
+   * Deliberately *not* part of the persisted session: it is host-owned and
+   * single-use, and a webview that could save it back would replay a stale
+   * invocation on a later restore. Absent on adapters whose host captures
+   * nothing (docs/specs/transport.md -> "Consuming it").
+   */
+  getRecoveryCommands?(): Record<string, string>;
+
   // PTY queries
   getCwd(id: string): Promise<string | null>;
-  getScrollback(id: string): Promise<string | null>;
   /** TCP listening ports opened by this terminal's process tree (shell + descendants). */
   getOpenPorts(id: string): Promise<OpenPort[]>;
 
@@ -163,11 +255,10 @@ export interface PlatformAdapter {
   // Captures a single device-resolution (HiDPI) frame via the user's
   // agent-browser `screenshot` command and returns the raw image bytes. The
   // stream's screencast is CSS-resolution only (a Chromium limitation —
-  // Page.startScreencast ignores deviceScaleFactor), so the panel displays
-  // these crisp screenshots instead, using stream frames only as change
-  // signals. Absent on hosts that can't run the binary — the panel then shows
-  // only the placeholder (frame bytes are discarded; there is no frame-drawing
-  // fallback).
+  // Page.startScreencast ignores deviceScaleFactor), so the panel settles on
+  // these crisp screenshots, painting stream frames provisionally for latency.
+  // Absent on hosts that can't run the binary — the panel then keeps every
+  // changed stream frame as its final, lower-resolution image.
   agentBrowserScreenshot?(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotResult>;
   // Reads the current stream port for an already-running session. This is a
   // purpose-built status channel, not part of agentBrowserCommand's allowlist,
@@ -244,6 +335,14 @@ export interface PlatformAdapter {
   alertToggleTodo(id: string): void;
   alertMarkTodo(id: string): void;
   alertClearTodo(id: string): void;
+  /**
+   * Park until the Session finishes what it is doing (`docs/specs/alert.md` ->
+   * Await), for `dor await`. The host owns the wake condition, the grace
+   * window, and the `timeoutMs` ceiling; the caller only reads the outcome and
+   * may `cancel()` while it is still pending. A completion the await consumes
+   * is delivered to it instead of ringing the human.
+   */
+  alertAwait(id: string, options: AwaitOptions): AwaitHandle;
   // Alert subscriptions have no `off` counterpart, unlike the PTY listeners
   // above: their handlers are stable module-level functions registered once for
   // the renderer's lifetime (`initAlertStateReceiver`), so adapters store them

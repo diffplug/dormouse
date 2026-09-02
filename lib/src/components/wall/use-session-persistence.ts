@@ -8,10 +8,10 @@ import {
   subscribeToTerminalPaneState,
   UNNAMED_PANEL_TITLE,
 } from '../../lib/terminal-registry';
-import { isBrowserParams } from './browser-surface';
+import { surfaceKindFromParams } from './browser-surface';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem, WallSelectionKind } from './wall-types';
-import type { PersistedSurfaceRefs } from '../../lib/session-types';
+import type { PersistedDoor, PersistedSurfaceRefs } from '../../lib/session-types';
 
 export function useSessionPersistence({
   lath,
@@ -25,10 +25,10 @@ export function useSessionPersistence({
    *  of the visible-pane projection (`lath.listPanes()`). Stable identity, so the
    *  effect never re-subscribes. */
   lath: LathWallEngine;
-  // The `doors` STATE value, not just `doorsRef`: doors can mutate with no Lath
-  // store commit (e.g. `dor ensure` refreshing a minimized door's params via
-  // setDoors), so the store subscription alone can't signal that the persisted
-  // blob changed.
+  // The `doors` STATE value, not just `doorsRef`. Every door mutation now pairs with
+  // a store commit (minimize `doorLeaf`, reattach `restoreLeaf`/`insertLeaf`, kill
+  // `forgetLeaf`, born-minimized `addDoor`), so this is a correctness net rather than
+  // the only signal — it keeps a future setDoors-only path from going unpersisted.
   doors: DooredItem[];
   doorsRef: RefObject<DooredItem[]>;
   selectedIdRef: RefObject<string | null>;
@@ -45,9 +45,22 @@ export function useSessionPersistence({
     const panes = lath.listPanes().map((p) => ({
       id: p.id,
       title: p.title ?? UNNAMED_PANEL_TITLE,
-      surfaceType: isBrowserParams(p.params) ? ('browser' as const) : ('terminal' as const),
+      surfaceType: surfaceKindFromParams(p.params),
     }));
-    const doors = doorsRef.current ?? [];
+    // The runtime Door is id + token; its metadata is materialized HERE, from the
+    // store that owned it all along, so a Surface persists where it navigated to
+    // rather than where it was minimized and a restart cold-loads it there.
+    const doors: PersistedDoor[] = (doorsRef.current ?? []).map((door) => {
+      const meta = lath.getMeta(door.id);
+      return {
+        id: door.id,
+        title: meta?.title?.trim() || UNNAMED_PANEL_TITLE,
+        component: meta?.component,
+        tabComponent: meta?.tabComponent,
+        params: meta?.params,
+        token: door.token,
+      };
+    });
     const surfaceRefs = surfaceRefsForSave?.();
     // The Lath tree is the sole persisted layout; doors ride through with their tokens.
     return saveSession(getPlatform(), panes, doors, lath.serializeLayout(), surfaceRefs?.refs, surfaceRefs?.next);
@@ -87,8 +100,8 @@ export function useSessionPersistence({
     }
   }, [doSave]);
 
-  // Doors mutate without any Lath store commit (setDoors from minimize/reattach or
-  // `dor ensure` param refresh), so mark dirty whenever the state array changes.
+  // Belt and braces: the store commit that accompanies every door mutation already
+  // schedules a save, so this only has to catch a setDoors that somehow stands alone.
   useEffect(() => {
     trackerRef.current.markDirty();
   }, [doors]);

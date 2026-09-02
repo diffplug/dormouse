@@ -1,3 +1,5 @@
+import { POSIX_ESCAPABLE } from './posix-escape';
+
 export type CwdSource = 'osc7' | 'osc9_9' | 'osc633' | 'osc1337' | 'process' | 'manual';
 export type PathKind = 'posix' | 'windows' | 'unknown';
 
@@ -381,13 +383,20 @@ export function summarizeCommandLine(raw: string): string {
  * all yield `claude`; `foo | claude` yields `foo`. Returns null when the line
  * holds no runnable word.
  *
+ * A Windows launcher suffix is not part of the name: `C:\tools\claude.exe`,
+ * `npm.cmd` and `build.ps1` yield `claude`, `npm` and `build`. `.exe` / `.cmd`
+ * is how one program spells itself when PATHEXT resolves it, so keeping the
+ * suffix would leave `npm` and `npm.cmd` as two rules for one program — the
+ * miss this whole path exists to close. Accepted: `foo.bat` and `foo.exe` in
+ * one directory cannot be watched separately.
+ *
  * This is the key WATCHING rules are stored under — see `docs/specs/alert.md`.
  */
 export function commandArgv0(raw: string): string | null {
   const commandTokens = takePrimaryCommandTokens(tokenizeCommand(raw.trim()));
   const command = commandTokens[0];
   if (!command) return null;
-  return command.split(/[\\/]/).pop() || null;
+  return commandProgramName(command) || null;
 }
 
 export interface ResolvedCommandStart {
@@ -782,6 +791,23 @@ function withRequiredHostPrefixes(
   return result;
 }
 
+/**
+ * Split a command line into words, honoring quotes, POSIX backslash escapes,
+ * and the pipeline/compound separators `| || && ; &`, which are emitted as
+ * their own tokens.
+ *
+ * A `\` escapes exactly the `POSIX_ESCAPABLE` set (`foo\ bar` is one token,
+ * `\*.ts` passes a literal glob, and a path Dormouse escaped for paste reads
+ * back as itself); before anything else it is a literal, so a native Windows
+ * program path survives tokenizing intact and `commandProgramName` still has
+ * separators to split on. Two accepted costs of one dialect-free set: a Windows
+ * segment that starts with a metacharacter (`C:\$Recycle.Bin`) still loses its
+ * separator, and a POSIX escape of an ordinary character (`grep \-v`) keeps a
+ * backslash bash would drop. Outside argv[0] both costs are display-only. Inside
+ * it, the retained POSIX backslash becomes a basename separator (`foo\-bar` ->
+ * `-bar`), while an eaten Windows separator leaves `C:\tools\$claude.exe`
+ * keyed as `tools$claude.exe`.
+ */
 function tokenizeCommand(input: string): string[] {
   const tokens: string[] = [];
   let current = '';
@@ -803,7 +829,12 @@ function tokenizeCommand(input: string): string[] {
       continue;
     }
     if (char === '\\' && quote !== "'") {
-      escaping = true;
+      const next = input[i + 1];
+      if (next !== undefined && POSIX_ESCAPABLE.test(next)) {
+        escaping = true;
+        continue;
+      }
+      current += char;
       continue;
     }
     if (quote) {
@@ -844,8 +875,13 @@ function tokenizeCommand(input: string): string[] {
 }
 
 function takePrimaryCommandTokens(tokens: string[]): string[] {
-  const firstBoundary = tokens.findIndex((token) => token === '|' || token === '&&' || token === '||' || token === ';' || token === '&');
-  const command = (firstBoundary === -1 ? tokens : tokens.slice(0, firstBoundary)).filter(Boolean);
+  // PowerShell's call operator. `& "C:\Program Files\nodejs\npm.cmd" run dev`
+  // is the only way that shell runs a quoted program path, and a leading `&` is
+  // never a POSIX background suffix, so drop it rather than read it as a
+  // boundary that leaves no command at all.
+  const words = tokens[0] === '&' ? tokens.slice(1) : tokens;
+  const firstBoundary = words.findIndex((token) => token === '|' || token === '&&' || token === '||' || token === ';' || token === '&');
+  const command = (firstBoundary === -1 ? words : words.slice(0, firstBoundary)).filter(Boolean);
   let index = 0;
   while (isEnvAssignment(command[index])) index += 1;
   if (command[index] === 'env') {
@@ -859,19 +895,37 @@ function isEnvAssignment(token: string | undefined): boolean {
   return !!token && /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
 }
 
+/** A path reduced to its last segment, in either dialect. */
+function commandBasename(command: string): string {
+  return command.replace(/^.*[\\/]/, '');
+}
+
+/** PATHEXT's spellings of one program. Exported for `watched-commands.ts`,
+ *  which drops a stored key ending in one: `commandArgv0` cannot produce one. */
+export const WINDOWS_EXECUTABLE_SUFFIX = /\.(?:exe|cmd|bat|com|ps1)$/i;
+
+/**
+ * argv[0] reduced to the one name a program answers to: no path, no launcher
+ * suffix. The single answer to "which program is this", so the header, the
+ * WATCHING rule row and the bell tooltip cannot disagree about it.
+ */
+function commandProgramName(command: string): string {
+  return commandBasename(command).replace(WINDOWS_EXECUTABLE_SUFFIX, '');
+}
+
 function commandTitleTokens(tokens: string[]): string[] {
   const command = tokens[0];
   if (!command) return [];
-  const basename = command.split(/[\\/]/).pop() ?? command;
+  const program = commandProgramName(command);
   const rest = tokens.slice(1);
 
-  if (basename === 'npm' && rest[0] === 'run') return [basename, ...rest.slice(0, 2)];
-  if (basename === 'pnpm' || basename === 'yarn' || basename === 'bun') return [basename, ...rest.slice(0, 2)];
-  if (basename === 'docker' && rest[0] === 'compose') return [basename, ...rest.slice(0, 2)];
-  if (basename === 'cargo' && rest[0] === 'watch') return [basename, ...rest.slice(0, 3)];
-  if (basename === 'ssh') return [basename, ...rest.slice(0, 1)];
-  if (basename === 'vim' || basename === 'nvim' || basename === 'vi' || basename === 'pytest') return [basename];
-  return [basename, ...rest.slice(0, 2)];
+  if (program === 'npm' && rest[0] === 'run') return [program, ...rest.slice(0, 2)];
+  if (program === 'pnpm' || program === 'yarn' || program === 'bun') return [program, ...rest.slice(0, 2)];
+  if (program === 'docker' && rest[0] === 'compose') return [program, ...rest.slice(0, 2)];
+  if (program === 'cargo' && rest[0] === 'watch') return [program, ...rest.slice(0, 3)];
+  if (program === 'ssh') return [program, ...rest.slice(0, 1)];
+  if (program === 'vim' || program === 'nvim' || program === 'vi' || program === 'pytest') return [program];
+  return [program, ...rest.slice(0, 2)];
 }
 
 function truncateCommandTitle(title: string): string {
@@ -879,8 +933,6 @@ function truncateCommandTitle(title: string): string {
   return `${Array.from(title).slice(0, COMMAND_TITLE_LIMIT - 3).join('').trimEnd()}...`;
 }
 
-// Returns the title text plus whether it carries the fail glyph, so callers can
-// color the glyph without inferring its presence by matching the string.
 function headerPrimary(pane: TerminalPaneState, options: HeaderOptions): { text: string; failed: boolean } {
   const userTitle = titleCandidateForSource(pane, 'user')?.title.trim();
   if (userTitle) return { text: userTitle, failed: false };
@@ -945,9 +997,11 @@ const GENERIC_PROCESS_TITLE_NAMES = new Set([
 function isGenericProcessTitle(title: string): boolean {
   const trimmed = title.trim();
   if (!trimmed) return false;
-  const basename = trimmed.split(/[\\/]/).pop() ?? trimmed;
+  // Basename, not program name: the suffix is the evidence this test is looking
+  // for, so stripping it would leave every `.exe` title indistinguishable.
+  const basename = commandBasename(trimmed);
   if (/\s/.test(basename)) return false; // carries arguments/description → meaningful
-  if (/\.(?:exe|com|bat|cmd|ps1)$/i.test(basename)) return true; // bare executable path
+  if (WINDOWS_EXECUTABLE_SUFFIX.test(basename)) return true; // bare executable path
   return GENERIC_PROCESS_TITLE_NAMES.has(basename.toLowerCase()); // bare shell/interpreter name
 }
 

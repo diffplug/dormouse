@@ -417,6 +417,19 @@ fn pty_request_init(state: tauri::State<'_, SidecarState>) {
     send_to_sidecar(&state, msg.to_string());
 }
 
+// One passthrough for the whole remote-host bridge: the webview and the sidecar
+// service share a contract (lib/src/host/remote/service-protocol.ts) that Rust
+// has no reason to know, so the payload rides through opaquely. Replies come
+// back on the sidecar's own stdout events, not from this invoke.
+#[tauri::command]
+fn remote_host_command(state: tauri::State<'_, SidecarState>, payload: JsonValue) {
+    let msg = serde_json::json!({
+        "event": "remoteHost:command",
+        "data": payload,
+    });
+    send_to_sidecar(&state, msg.to_string());
+}
+
 #[tauri::command]
 fn dor_control_response(state: tauri::State<'_, SidecarState>, response: DorControlResponse) {
     let msg = serde_json::json!({
@@ -437,7 +450,8 @@ fn pty_get_cwd(
         .and_then(|cwd| cwd.as_str().map(String::from)))
 }
 
-// Mirrors `OPEN_PORT_TIMEOUT_MS` in `lib/src/lib/platform/types.ts` — keep in sync.
+// Mirrors `OPEN_PORT_TIMEOUT_MS` in `lib/src/lib/platform/types.ts` — pinned by
+// `lib/src/lib/mirrored-constants.test.ts`.
 const OPEN_PORT_TIMEOUT_MS: u64 = 3000;
 
 #[tauri::command(async)]
@@ -761,8 +775,167 @@ fn read_session_from(dir: &Path, label: &str) -> Result<Option<String>, String> 
     }
 }
 
+/// Tighten a path to owner-only, best-effort.
+///
+/// Session snapshots are `PersistedWindow` blobs carrying terminal
+/// *transcripts* — scrollback, so whatever the user's shells printed:
+/// tokens echoed by a failing curl, a pasted connection string, the contents
+/// of a `.env` someone `cat`ed. Written under the umask they land `0644` in a
+/// `0755` directory, readable by every other account on the machine. The
+/// Host's own state file is already `0600` in a `0700` directory for a
+/// strictly *smaller* secret (`lib/src/host/remote/host-state-store.ts`), so
+/// this is closing an inconsistency, not inventing a rule.
+///
+/// Failures are reported rather than swallowed, and whether one is tolerable
+/// is the caller's decision: `write_session_to` ignores it — a filesystem
+/// without the permission model it wants must not fail a session save — while
+/// `remote_host_state_dir` logs it.
+///
+/// The `mode` is a unix mode and is ignored on Windows, which has no such
+/// concept — there the equivalent is a DACL protected from inheritance carrying
+/// exactly one entry, for the user this process runs as. That is the same shape
+/// `deploy/local/install-windows.ps1` applies to the server's `state\`, and it
+/// is needed for the same reason: a unix mode is a silent no-op on Windows, so
+/// without this the directory simply keeps whatever `%LOCALAPPDATA%` hands
+/// down, which is never owner-only. That inheritance always carries SYSTEM and
+/// Administrators (as a `0700` does not exclude root either), and in practice
+/// often stale entries from earlier installs — this machine's carried two
+/// unresolvable `S-1-5-21-…` principals from other Windows domains with
+/// read/write. Those particular entries are inert, since no account here can
+/// present a foreign install's SID, so what this closes is the parity gap with
+/// the unix mode rather than a demonstrated live hole.
+#[cfg(unix)]
+fn restrict_to_owner(path: &Path, mode: u32) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+        .map_err(|e| format!("set_permissions: {e}"))
+}
+
+/// Replace `path`'s DACL with a single full-control entry for the current
+/// user, and mark it protected so nothing is inherited from the parent.
+///
+/// Reports rather than swallowing. Whether a failure is tolerable depends on
+/// the caller, not on this function: `write_session_to` runs on the quit path
+/// and would rather keep a snapshot under the ACL Windows gave it than lose it,
+/// while `remote_host_state_dir` runs at sidecar start and is — per
+/// `SECURITY.md`, "Credentials at rest" — the *only* thing restricting
+/// `hostToken` on Windows, so a failure there is a silent downgrade of the one
+/// control and must reach the log.
+#[cfg(windows)]
+fn restrict_to_owner(path: &Path, _mode: u32) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PWSTR;
+    use windows::Win32::Foundation::{CloseHandle, LocalFree, ERROR_SUCCESS, HANDLE, HLOCAL};
+    use windows::Win32::Security::Authorization::{
+        SetEntriesInAclW, SetNamedSecurityInfoW, EXPLICIT_ACCESS_W, SET_ACCESS, SE_FILE_OBJECT,
+        TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
+    };
+    use windows::Win32::Security::{
+        GetTokenInformation, TokenUser, ACE_FLAGS, ACL, CONTAINER_INHERIT_ACE,
+        DACL_SECURITY_INFORMATION, NO_INHERITANCE, OBJECT_INHERIT_ACE,
+        PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER,
+    };
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    // FILE_ALL_ACCESS, not GENERIC_ALL. The generic rights map to different
+    // concrete masks for containers and for objects, so SetEntriesInAclW splits
+    // a single inheritable GENERIC_ALL entry into an effective ACE plus an
+    // inherit-only one -- two entries where the intent was one. A concrete mask
+    // needs no such split, which is what keeps the DACL to exactly one ACE.
+    const FILE_ALL_ACCESS: u32 = 0x001F_01FF;
+
+    unsafe {
+        let mut token = HANDLE::default();
+        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token)
+            .map_err(|e| format!("OpenProcessToken: {e}"))?;
+        // Size query first: TOKEN_USER is variable-length because the SID is.
+        let mut needed = 0u32;
+        let _ = GetTokenInformation(token, TokenUser, None, 0, &mut needed);
+        if needed == 0 {
+            let _ = CloseHandle(token);
+            return Err("GetTokenInformation reported a zero-length TOKEN_USER".into());
+        }
+        let mut buf = vec![0u8; needed as usize];
+        let got = GetTokenInformation(
+            token,
+            TokenUser,
+            Some(buf.as_mut_ptr().cast()),
+            needed,
+            &mut needed,
+        );
+        let _ = CloseHandle(token);
+        got.map_err(|e| format!("GetTokenInformation: {e}"))?;
+
+        // The SID points into `buf`, so `buf` must outlive every use below.
+        let user = &*(buf.as_ptr() as *const TOKEN_USER);
+        let sid = user.User.Sid;
+
+        // A directory carries the entry down to what the Node sidecar and the
+        // rest of the app write inside it; a file inherits nothing.
+        let inheritance = if path.is_dir() {
+            ACE_FLAGS(CONTAINER_INHERIT_ACE.0 | OBJECT_INHERIT_ACE.0)
+        } else {
+            NO_INHERITANCE
+        };
+
+        let access = EXPLICIT_ACCESS_W {
+            grfAccessPermissions: FILE_ALL_ACCESS,
+            grfAccessMode: SET_ACCESS,
+            grfInheritance: inheritance,
+            Trustee: TRUSTEE_W {
+                pMultipleTrustee: std::ptr::null_mut(),
+                MultipleTrusteeOperation: Default::default(),
+                TrusteeForm: TRUSTEE_IS_SID,
+                TrusteeType: TRUSTEE_IS_USER,
+                // With TRUSTEE_IS_SID this field carries the SID pointer, not a
+                // name. That is the documented Win32 convention, not a cast bug.
+                ptstrName: PWSTR(sid.0 as *mut u16),
+            },
+        };
+
+        let mut acl: *mut ACL = std::ptr::null_mut();
+        let rc = SetEntriesInAclW(Some(&mut [access]), None, &mut acl);
+        if rc != ERROR_SUCCESS {
+            return Err(format!("SetEntriesInAclW: {rc:?}"));
+        }
+
+        let mut wide: Vec<u16> = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        // PROTECTED_DACL_SECURITY_INFORMATION is the half that matters: without
+        // it the inherited entries survive alongside ours and nothing is
+        // actually revoked.
+        let rc = SetNamedSecurityInfoW(
+            PWSTR(wide.as_mut_ptr()),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            Some(acl),
+            None,
+        );
+        // Freed before the early return: the ACL is LocalAlloc'd by
+        // SetEntriesInAclW and belongs to us whether or not the apply worked.
+        let _ = LocalFree(Some(HLOCAL(acl.cast())));
+        if rc != ERROR_SUCCESS {
+            return Err(format!("SetNamedSecurityInfoW: {rc:?}"));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn restrict_to_owner(_path: &Path, _mode: u32) -> Result<(), String> {
+    Ok(())
+}
+
 fn write_session_to(dir: &Path, label: &str, state: &str) -> Result<(), String> {
     create_dir_all(dir).map_err(|e| format!("create sessions dir: {e}"))?;
+    // Deliberately ignored here: this is the quit path, and losing the snapshot
+    // is worse than keeping one under the ACL the OS gave it.
+    let _ = restrict_to_owner(dir, 0o700);
     let file_name = session_file_name(label);
     let path = dir.join(&file_name);
     let tmp = dir.join(format!("{file_name}.tmp"));
@@ -770,6 +943,9 @@ fn write_session_to(dir: &Path, label: &str, state: &str) -> Result<(), String> 
     // target so a crash mid-write can never truncate the previous good snapshot.
     {
         let mut f = File::create(&tmp).map_err(|e| format!("open temp: {e}"))?;
+        // Before any bytes land: the rename below preserves the temp file's
+        // mode, so tightening here is what makes the final snapshot 0600.
+        let _ = restrict_to_owner(&tmp, 0o600);
         f.write_all(state.as_bytes())
             .map_err(|e| format!("write temp: {e}"))?;
         f.sync_all().map_err(|e| format!("fsync temp: {e}"))?;
@@ -800,6 +976,36 @@ async fn load_session(window: tauri::Window) -> Result<Option<String>, String> {
 #[tauri::command]
 async fn save_session(window: tauri::Window, state: String) -> Result<(), String> {
     write_session_to(&sessions_dir(window.app_handle())?, window.label(), &state)
+}
+
+fn remove_session_from(dir: &Path, label: &str) -> Result<(), String> {
+    let file_name = session_file_name(label);
+    let paths = [dir.join(&file_name), dir.join(format!("{file_name}.tmp"))];
+    let mut first_error = None;
+    for path in paths {
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            // Already gone is the desired end state, not a failure.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) if first_error.is_none() => {
+                first_error = Some(format!("remove session artifact {}: {e}", path.display()));
+            }
+            Err(_) => {}
+        }
+    }
+    first_error.map_or(Ok(()), Err)
+}
+
+/// Delete this window's snapshot and any orphaned temp write outright.
+///
+/// Deleting rather than blanking matters: a pre-upgrade snapshot carries a
+/// transcript, and the point of clearing it is that those bytes stop being on
+/// disk (docs/specs/transport.md -> "Retiring the transcripts already on disk").
+/// Overwriting with an empty string would also leave every reader of the store
+/// obliged to treat `""` as a distinct third state alongside present and absent.
+#[tauri::command]
+async fn clear_session(window: tauri::Window) -> Result<(), String> {
+    remove_session_from(&sessions_dir(window.app_handle())?, window.label())
 }
 
 #[tauri::command]
@@ -1053,28 +1259,18 @@ fn ensure_console_subsystem_node(gui_node: &Path, app: &AppHandle) -> Result<Pat
     Ok(dest)
 }
 
-fn dor_control_socket_path() -> String {
-    let pid = std::process::id();
-    #[cfg(windows)]
-    {
-        format!(r"\\.\pipe\dormouse-{pid}-dor")
-    }
-    #[cfg(not(windows))]
-    {
-        env::temp_dir()
-            .join(format!("dormouse-{pid}-dor.sock"))
-            .to_string_lossy()
-            .into_owned()
-    }
-}
-
 fn dor_control_token() -> String {
-    // Must be unguessable: it is the sole authenticator for the private `dor`
-    // control socket. A PID+timestamp value is locally discoverable (`ps`) and
-    // bounded by the app's launch window, so draw 24 bytes from the OS CSPRNG and
-    // hex-encode them — matching the VS Code host's randomBytes(24).toString('hex')
-    // in pty-manager.ts. Aborting on CSPRNG failure is deliberate: never fall back
-    // to a weak token.
+    // Must be unguessable: it is the shared secret both ends of the private `dor`
+    // control channel prove knowledge of (never sent on the wire — see
+    // standalone/sidecar/dor-control-server.js). A PID+timestamp value is locally
+    // discoverable (`ps`) and bounded by the app's launch window, so draw 24 bytes
+    // from the OS CSPRNG and hex-encode them — matching the VS Code host's
+    // randomBytes(24).toString('hex') in pty-manager.ts. Aborting on CSPRNG failure
+    // is deliberate: never fall back to a weak token.
+    //
+    // The socket path is not set here: the sidecar picks it (hardened per-user
+    // directory on POSIX, unguessable pipe name on Windows) and exports
+    // DORMOUSE_CONTROL_SOCKET into spawned shells itself, only once it is bound.
     let mut bytes = [0u8; 24];
     getrandom::fill(&mut bytes).expect("OS CSPRNG unavailable for dor control token");
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -1103,14 +1299,54 @@ fn resolve_dor_cli_paths(sidecar_path: &Path, manifest_dir: &Path) -> DorCliPath
     dor_cli_paths_from_root(manifest_dir.join("..").join("..").join("dor"))
 }
 
+// Where the sidecar's remote Host persists its enrollment (a bearer credential)
+// and its ACL, as one 0600 file it writes itself
+// (lib/src/host/remote/host-state-store.ts). Created here so a first launch
+// hands the sidecar a directory that exists; if it can't be made, the sidecar is
+// told nothing and runs without persistence rather than not at all.
+fn remote_host_state_dir(app: &AppHandle) -> Option<String> {
+    let dir = match app.path().app_data_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            append_log(format!("[sidecar] app_data_dir unavailable: {e}"));
+            return None;
+        }
+    };
+    if let Err(e) = create_dir_all(&dir) {
+        append_log(format!("[sidecar] create state dir: {e}"));
+        return None;
+    }
+    // The Node sidecar writes the Host enrollment here, and that record carries
+    // `hostToken` — a bearer credential for `/ws/host`. `FileHostStateStore`
+    // asks for `0700`/`0600`, which Windows ignores entirely, so on Windows this
+    // is the only thing that restricts it: lock the directory here, before the
+    // sidecar is spawned, and everything it writes inside inherits the single
+    // owner-only entry — while an enrollment file a prior version already left
+    // there is tightened by propagation instead, which is the leg
+    // `restrict_to_owner_leaves_one_owner_only_ace` covers with `before.json`.
+    // On unix the store's own modes already do the job and this is a harmless
+    // re-assert of the same intent.
+    if let Err(e) = restrict_to_owner(&dir, 0o700) {
+        // Not fatal — a Host that cannot start is worse than one whose state
+        // directory kept the OS default — but never silent: on Windows this
+        // call is the only thing restricting `hostToken`, so its failure is a
+        // downgrade of the sole control and has to be visible.
+        append_log(format!(
+            "[sidecar] WARNING could not restrict state dir {}: {e}",
+            dir.display()
+        ));
+    }
+    Some(dir.to_string_lossy().into_owned())
+}
+
 fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sidecar_path = resolve_sidecar_path(app.path().resource_dir().ok(), manifest_dir);
     let node_path = resolve_node_binary_path()?;
     let dor_cli_paths = resolve_dor_cli_paths(&sidecar_path, manifest_dir);
     let dor_node_path = resolve_dor_node_path(&node_path, app);
-    let dor_control_socket = dor_control_socket_path();
     let dor_control_token = dor_control_token();
+    let state_dir = remote_host_state_dir(app);
     append_log(format!(
         "[sidecar] resolved script: {}",
         sidecar_path.display()
@@ -1125,7 +1361,10 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
         "[dor] CLI entrypoint: {}",
         dor_cli_paths.entrypoint.display()
     ));
-    append_log(format!("[dor] control socket: {dor_control_socket}"));
+    append_log(format!(
+        "[remote-host] state dir: {}",
+        state_dir.as_deref().unwrap_or("(none)")
+    ));
 
     let mut wrap = CommandWrap::with_new(&node_path, |c| {
         c.arg(&sidecar_path)
@@ -1133,8 +1372,8 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
             .env("DORMOUSE_NODE", &dor_node_path)
             .env("DORMOUSE_CLI_BIN", &dor_cli_paths.bin_dir)
             .env("DORMOUSE_CLI_JS", &dor_cli_paths.entrypoint)
-            .env("DORMOUSE_CONTROL_SOCKET", &dor_control_socket)
             .env("DORMOUSE_CONTROL_TOKEN", &dor_control_token)
+            .env("DORMOUSE_STATE_DIR", state_dir.as_deref().unwrap_or(""))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -1381,6 +1620,7 @@ pub fn run() {
             iframe_create_proxy_url,
             pty_request_init,
             dor_control_response,
+            remote_host_command,
             kill_sidecar_now,
             quit_ack,
             quit_progress,
@@ -1393,6 +1633,7 @@ pub fn run() {
             read_update_log,
             load_session,
             save_session,
+            clear_session,
             agent_browser_command,
             agent_browser_edit,
             agent_browser_screenshot,
@@ -1430,8 +1671,8 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        find_node_binary, read_session_from, resolve_dor_cli_paths, resolve_sidecar_path,
-        session_file_name, strip_windows_verbatim_prefix, write_session_to,
+        find_node_binary, read_session_from, remove_session_from, resolve_dor_cli_paths,
+        resolve_sidecar_path, session_file_name, strip_windows_verbatim_prefix, write_session_to,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -1456,6 +1697,166 @@ mod tests {
     impl Drop for TempDir {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// The Windows half of `restrict_to_owner`: after it runs, the DACL must be
+    /// protected from inheritance and grant exactly one principal — this user.
+    ///
+    /// Worth a test rather than prose because the failure is silent and
+    /// invisible: a unix `mode` is a no-op on Windows, so before this existed
+    /// the session snapshots simply kept whatever `%LOCALAPPDATA%` handed down
+    /// — never owner-only — and nothing about the app would look different.
+    #[test]
+    #[cfg(windows)]
+    fn restrict_to_owner_leaves_one_owner_only_ace() {
+        use windows::Win32::Foundation::{LocalFree, ERROR_SUCCESS, HLOCAL};
+        use windows::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
+        use windows::Win32::Security::{
+            EqualSid, GetAclInformation, GetSecurityDescriptorControl, AclSizeInformation, ACL,
+            ACL_SIZE_INFORMATION, DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+            SE_DACL_PROTECTED,
+        };
+        use windows::core::PCWSTR;
+        use std::os::windows::ffi::OsStrExt;
+
+        let dir = TempDir::new("acl");
+        let target = dir.path().join("sessions");
+        fs::create_dir_all(&target).expect("failed to create target dir");
+
+        // A file created BEFORE the lock, to prove the entry propagates down.
+        fs::write(target.join("before.json"), b"{}").expect("failed to write");
+
+        super::restrict_to_owner(&target, 0o700).expect("restrict_to_owner failed");
+
+        let wide: Vec<u16> = target
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        unsafe {
+            let mut dacl: *mut ACL = std::ptr::null_mut();
+            let mut sd = PSECURITY_DESCRIPTOR::default();
+            let rc = GetNamedSecurityInfoW(
+                PCWSTR(wide.as_ptr()),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                None,
+                None,
+                Some(&mut dacl),
+                None,
+                &mut sd,
+            );
+            assert_eq!(rc, ERROR_SUCCESS, "GetNamedSecurityInfoW failed");
+            assert!(!dacl.is_null(), "no DACL on the locked directory");
+
+            // Inheritance must be broken, or the parent's entries survive
+            // alongside ours and nothing has actually been revoked.
+            let mut control: u16 = 0;
+            let mut revision = 0u32;
+            GetSecurityDescriptorControl(sd, &mut control, &mut revision)
+                .expect("GetSecurityDescriptorControl failed");
+            assert!(
+                control & SE_DACL_PROTECTED.0 != 0,
+                "DACL is not protected from inheritance"
+            );
+
+            let mut info = ACL_SIZE_INFORMATION::default();
+            GetAclInformation(
+                dacl,
+                std::ptr::addr_of_mut!(info).cast(),
+                std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+                AclSizeInformation,
+            )
+            .expect("GetAclInformation failed");
+            assert_eq!(
+                info.AceCount, 1,
+                "expected exactly one ACE, found {}",
+                info.AceCount
+            );
+
+            // And that one entry must be *us*, not merely a single stranger.
+            let mut ace: *mut std::ffi::c_void = std::ptr::null_mut();
+            windows::Win32::Security::GetAce(dacl, 0, &mut ace).expect("GetAce failed");
+            // ACCESS_ALLOWED_ACE: 4-byte header, 4-byte mask, then the SID.
+            let sid_in_ace = PSID((ace as *mut u8).add(8).cast());
+
+            let mut token = windows::Win32::Foundation::HANDLE::default();
+            windows::Win32::System::Threading::OpenProcessToken(
+                windows::Win32::System::Threading::GetCurrentProcess(),
+                windows::Win32::Security::TOKEN_QUERY,
+                &mut token,
+            )
+            .expect("OpenProcessToken failed");
+            let mut needed = 0u32;
+            let _ = windows::Win32::Security::GetTokenInformation(
+                token,
+                windows::Win32::Security::TokenUser,
+                None,
+                0,
+                &mut needed,
+            );
+            let mut buf = vec![0u8; needed as usize];
+            windows::Win32::Security::GetTokenInformation(
+                token,
+                windows::Win32::Security::TokenUser,
+                Some(buf.as_mut_ptr().cast()),
+                needed,
+                &mut needed,
+            )
+            .expect("GetTokenInformation failed");
+            let _ = windows::Win32::Foundation::CloseHandle(token);
+            let me = (*(buf.as_ptr() as *const windows::Win32::Security::TOKEN_USER))
+                .User
+                .Sid;
+            assert!(
+                EqualSid(sid_in_ace, me).is_ok(),
+                "the single ACE is not the current user"
+            );
+
+            // And it reached what was already inside. This is not decoration:
+            // on an upgrade remote-host.json already exists under the inherited
+            // ACL holding a live hostToken, so propagation to existing children
+            // is the only thing that tightens that file.
+            let child: Vec<u16> = target
+                .join("before.json")
+                .as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
+            let mut child_dacl: *mut ACL = std::ptr::null_mut();
+            let mut child_sd = PSECURITY_DESCRIPTOR::default();
+            assert_eq!(
+                GetNamedSecurityInfoW(
+                    PCWSTR(child.as_ptr()),
+                    SE_FILE_OBJECT,
+                    DACL_SECURITY_INFORMATION,
+                    None,
+                    None,
+                    Some(&mut child_dacl),
+                    None,
+                    &mut child_sd,
+                ),
+                ERROR_SUCCESS,
+                "GetNamedSecurityInfoW failed on the pre-existing child"
+            );
+            let mut child_info = ACL_SIZE_INFORMATION::default();
+            GetAclInformation(
+                child_dacl,
+                std::ptr::addr_of_mut!(child_info).cast(),
+                std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+                AclSizeInformation,
+            )
+            .expect("GetAclInformation failed on the pre-existing child");
+            assert_eq!(
+                child_info.AceCount, 1,
+                "the pre-existing child kept {} ACEs -- the entry did not propagate",
+                child_info.AceCount
+            );
+
+            let _ = LocalFree(Some(HLOCAL(child_sd.0)));
+            let _ = LocalFree(Some(HLOCAL(sd.0)));
         }
     }
 
@@ -1678,6 +2079,46 @@ mod tests {
             read_session_from(dir.path(), "main").unwrap().as_deref(),
             Some(r#"{"v":2}"#),
         );
+    }
+
+    #[test]
+    fn clearing_a_session_removes_the_file_and_leaves_other_windows_alone() {
+        let dir = TempDir::new("sessions-clear");
+        write_session_to(dir.path(), "main", r#"{"v":1,"who":"main"}"#).unwrap();
+        write_session_to(dir.path(), "win-2", r#"{"v":1,"who":"win-2"}"#).unwrap();
+        fs::write(dir.path().join("main.json.tmp"), b"main transcript").unwrap();
+        fs::write(dir.path().join("win-2.json.tmp"), b"win-2 transcript").unwrap();
+
+        remove_session_from(dir.path(), "main").unwrap();
+
+        // Absent, not blank: a pre-upgrade snapshot carries a transcript, and the
+        // point of clearing is that those bytes leave the disk.
+        assert_eq!(read_session_from(dir.path(), "main").unwrap(), None);
+        assert!(!dir.path().join("main.json").exists());
+        assert!(!dir.path().join("main.json.tmp").exists());
+        assert_eq!(
+            read_session_from(dir.path(), "win-2").unwrap().as_deref(),
+            Some(r#"{"v":1,"who":"win-2"}"#),
+        );
+        assert!(dir.path().join("win-2.json.tmp").exists());
+    }
+
+    #[test]
+    fn clearing_an_orphaned_temp_session_removes_it() {
+        let dir = TempDir::new("sessions-clear-orphaned-temp");
+        let tmp = dir.path().join("main.json.tmp");
+        fs::write(&tmp, b"legacy transcript").unwrap();
+
+        remove_session_from(dir.path(), "main").unwrap();
+
+        assert!(!tmp.exists());
+    }
+
+    #[test]
+    fn clearing_an_absent_session_succeeds() {
+        // Already gone is the desired end state; a first launch must not error.
+        let dir = TempDir::new("sessions-clear-missing");
+        assert!(remove_session_from(dir.path(), "main").is_ok());
     }
 
     #[test]

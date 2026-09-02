@@ -58,9 +58,19 @@ export function normalizeNavUrl(raw: string): string {
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) return trimmed;
   if (/^(about|data|blob|mailto|tel|javascript|view-source|chrome):/i.test(trimmed)) return trimmed;
   const authority = trimmed.split(/[/?#]/, 1)[0];
-  const hostname = authority.split(':', 1)[0];
+  const hostname = authorityHostname(authority);
   const scheme = /:\d+$/.test(authority) || isLoopbackHostname(hostname) ? 'http' : 'https';
   return `${scheme}://${trimmed}`;
+}
+
+/** The host part of a schemeless authority, minus any `:port`. An IPv6 literal
+ *  is bracketed and full of colons, so splitting on the first `:` would yield
+ *  `[` — take everything through the closing bracket instead, which keeps the
+ *  form `isLoopbackHostname` recognizes. */
+function authorityHostname(authority: string): string {
+  if (!authority.startsWith('[')) return authority.split(':', 1)[0];
+  const close = authority.indexOf(']');
+  return close === -1 ? authority : authority.slice(0, close + 1);
 }
 
 /** True for hostnames that resolve to the local machine. `*.localhost` is

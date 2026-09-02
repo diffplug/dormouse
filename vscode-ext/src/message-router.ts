@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
-import { AlertManager } from '../../lib/src/lib/alert-manager';
+import { AlertManager, type AwaitHandle, type AwaitOutcome } from '../../lib/src/lib/alert-manager';
 import { WatchedCommandHost } from '../../lib/src/lib/watched-command-host';
 import { AlertSettingsHost } from '../../lib/src/lib/alert-settings-host';
 import {
@@ -21,7 +21,21 @@ import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
 import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
+import { ASK_BUDGET_MS } from '../../lib/src/host/remote/service-protocol';
+import { configurePeerLink, remoteNotifyPeerChange } from './peer-link';
+import { createProcessedPtyStreams } from './processed-pty-streams';
+import {
+  configureRemoteHost,
+  deliverCommandResult,
+  deliverUiEvent,
+  dropForwardedCommands,
+  greetPeerWindow,
+  handleForwardedCommand,
+  handleRemoteHostCommand,
+  notifyDirectoryChanged,
+} from './remote-host';
 import { log } from './log';
+import type { WebviewChannel } from './webview-messaging';
 
 const clipboardOps = require('../../lib/clipboard-ops.cjs') as {
   readClipboardFilePaths(): Promise<string[]>;
@@ -31,10 +45,112 @@ const clipboardOps = require('../../lib/clipboard-ops.cjs') as {
 // Global set of PTY IDs claimed by any router instance.
 // Prevents reconnecting routers from stealing PTYs owned by other webviews.
 const globalOwnedPtyIds = new Set<string>();
+
 interface ActiveRouter {
   flushSessionSave(timeoutMs?: number): Promise<void>;
   ownsPty(id: string): boolean;
   forwardDorControlRequest(request: DorControlRequest): void;
+  send(message: ExtensionMessage): void;
+  ask(requestId: string, op: string, params: unknown): void;
+}
+
+let nextBrokerRequestId = 0;
+
+interface PendingRequest {
+  /** Answers still outstanding, so a miss settles as fast as a hit. */
+  pending: Set<ActiveRouter>;
+  results: unknown[];
+  settle: () => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+const peerRequests = new Map<string, PendingRequest>();
+const processedPtyStreams = createProcessedPtyStreams(
+  onProcessedPtyData,
+  onProcessedPtyExit,
+  ptyManager.getPtyStatus,
+);
+
+// The link reaches other windows; it must never call back into a fan-out that
+// would reach them again, so it only ever gets the in-window broker.
+configurePeerLink({
+  brokerRequest,
+  invalidateDirectory: notifyDirectoryChanged,
+  streamPty: processedPtyStreams.streamPty,
+  writePty: (ptyId, data) => ptyManager.write(ptyId, data),
+  resizePty: (ptyId, cols, rows) => ptyManager.resize(ptyId, cols, rows),
+  // Peer PTYs use generated provider-local route handles. Keep those handles
+  // outside this window's real PTY namespace so local ids always fall through
+  // to the manager that owns them.
+  ownsPty: (ptyId) => ptyManager.hasPty(ptyId) || globalOwnedPtyIds.has(ptyId),
+  // The Host half: which of these fire depends on which side of the bind this
+  // window landed on, and the link is what knows that.
+  handleForwardedCommand,
+  dropForwardedCommands,
+  deliverCommandResult,
+  deliverUiEvent,
+  onClientAuthenticated: greetPeerWindow,
+});
+
+configureRemoteHost({
+  brokerRequest,
+  broadcastToWebviews,
+  streamPty: processedPtyStreams.streamPty,
+  writePty: (ptyId, data) => ptyManager.write(ptyId, data),
+  resizePty: (ptyId, cols, rows) => ptyManager.resize(ptyId, cols, rows),
+});
+
+/**
+ * Put one question to every webview in this window and settle with everything
+ * they answered.
+ *
+ * The remote Host runs in the extension host, but a window's terminals are
+ * spread across its webviews — each has its own xterm registry, so the Host can
+ * neither list nor attach to a pane without asking. See docs/specs/vscode.md →
+ * "Peer surfaces".
+ *
+ * `op` and `params` are opaque here on purpose: the operation map lives in
+ * `lib/src/remote/host/peer-surfaces.ts`, and one fan-out rule covers all of
+ * it — every webview answers with zero or more results, so a webview that owns
+ * nothing settles the request as fast as the one that does. The budget is the
+ * backstop for a webview with no live content, which must not hang the phone's
+ * picker; it is the *inner* one, deliberately shorter than the broker's
+ * cross-window `PEER_REPLY_BUDGET_MS`, which has to contain a whole run of this
+ * plus two socket hops. The asker is this window's own Host service, or the
+ * broker window's over the link, never a webview; that is why it is a plain
+ * promise rather than message plumbing.
+ */
+function brokerRequest(op: string, params: unknown): Promise<unknown[]> {
+  const peers = [...activeRouters];
+  if (peers.length === 0) return Promise.resolve([]);
+
+  const requestId = `broker-${++nextBrokerRequestId}`;
+  return new Promise((resolve) => {
+    const settle = () => {
+      const request = peerRequests.get(requestId);
+      if (!request) return;
+      peerRequests.delete(requestId);
+      clearTimeout(request.timer);
+      resolve(request.results);
+    };
+    peerRequests.set(requestId, {
+      pending: new Set(peers),
+      results: [],
+      settle,
+      timer: setTimeout(settle, ASK_BUDGET_MS),
+    });
+    for (const peer of peers) peer.ask(requestId, op, params);
+  });
+}
+
+/**
+ * Post one message to every live webview in this window.
+ *
+ * The Host's results ride this rather than a reply to one webview: the service
+ * answers an `rhId`, and only the adapter that minted it holds a pending
+ * command for it (`lib/src/lib/platform/vscode-adapter.ts`).
+ */
+function broadcastToWebviews(message: ExtensionMessage): void {
+  for (const router of activeRouters) router.send(message);
 }
 
 const activeRouters = new Set<ActiveRouter>();
@@ -60,12 +176,19 @@ const themeColorProvider: TerminalColorProvider = (target) => latestThemeColors?
 // the protocol parser once per chunk regardless of webview count.
 type ProcessedDataListener = (id: string, visibleData: string) => void;
 const processedDataListeners = new Set<ProcessedDataListener>();
+type ProcessedExitListener = (id: string, exitCode: number) => void;
+const processedExitListeners = new Set<ProcessedExitListener>();
 type SemanticEventsListener = (id: string, events: TerminalSemanticEvent[]) => void;
 const semanticEventsListeners = new Set<SemanticEventsListener>();
 
-function onProcessedPtyData(listener: ProcessedDataListener): () => void {
+export function onProcessedPtyData(listener: ProcessedDataListener): () => void {
   processedDataListeners.add(listener);
   return () => { processedDataListeners.delete(listener); };
+}
+
+export function onProcessedPtyExit(listener: ProcessedExitListener): () => void {
+  processedExitListeners.add(listener);
+  return () => { processedExitListeners.delete(listener); };
 }
 
 function onTerminalSemanticEvents(listener: SemanticEventsListener): () => void {
@@ -73,7 +196,6 @@ function onTerminalSemanticEvents(listener: SemanticEventsListener): () => void 
   return () => { semanticEventsListeners.delete(listener); };
 }
 
-// Log all alert state transitions (including timer-driven ones)
 alertManager.onStateChange((id, state) => {
   log.info(`[alert] ${id}: → ${state.status} (todo=${state.todo})`);
 });
@@ -106,6 +228,7 @@ ptyManager.addCallbacks({
     log.info(`[alert-feed] ${id}: PTY exited`);
     alertManager.onExit(id, exitCode);
     alertProtocolParsers.delete(id);
+    for (const listener of processedExitListeners) listener(id, exitCode);
   },
 });
 
@@ -129,6 +252,13 @@ ptyManager.onDorControlRequest((request) => {
   router.forwardDorControlRequest(request);
 });
 
+// Broadcast rather than route: only the webview actually holding this requestId
+// has anything to abort, and it recognizes its own id. Tracking which router got
+// which request would buy nothing a no-op lookup does not already give us.
+ptyManager.onDorControlCancel((cancel) => {
+  broadcastToWebviews({ type: 'dor:controlCancel', requestId: cancel.requestId });
+});
+
 function getAlertProtocolParser(id: string): TerminalProtocolParser {
   let parser = alertProtocolParsers.get(id);
   if (!parser) {
@@ -147,7 +277,7 @@ export async function flushAllSessions(timeoutMs = 1000): Promise<void> {
 }
 
 export function attachRouter(
-  webview: vscode.Webview,
+  channel: WebviewChannel,
   options?: {
     reconnect?: boolean;
     killOnDispose?: boolean;
@@ -163,22 +293,30 @@ export function attachRouter(
   const reconnect = options?.reconnect ?? false;
   const killOnDispose = options?.killOnDispose ?? false;
 
+  // The router's only send path — it stamps this webview's message token, which
+  // the webview requires (docs/specs/vscode.md → "Webview message
+  // authentication"). A raw `vscode.Webview` never reaches this scope.
+  const post = (message: ExtensionMessage): Thenable<boolean> => channel.post(message);
+
   // Track which PTY IDs were spawned (or reconnected) through this webview
   const ownedPtyIds = new Set<string>();
   const pendingFlushRequests = new Map<string, { resolve: () => void; timeout: ReturnType<typeof setTimeout> }>();
+  // `dor await`s this webview has parked in the shared alert manager, keyed by
+  // the requestId that will carry the outcome back.
+  const pendingAwaits = new Map<string, { handle: AwaitHandle; startedAt: number }>();
   let disposed = false;
 
   // Webview-facing subscriptions — only active when the webview has live content.
   // Subscribed on dormouse:init, unsubscribed when webview content is gone.
   let disconnectWebview: (() => void) | null = null;
   const removeWatchedCommandListener = watchedCommandHost.subscribe((names) => {
-    void webview.postMessage({
+    void post({
       type: 'alert:watchedCommands',
       names,
     } satisfies ExtensionMessage);
   });
   const removeAlertSettingsListener = alertSettingsHost.subscribe((settings) => {
-    void webview.postMessage({
+    void post({
       type: 'alert:settings',
       settings,
     } satisfies ExtensionMessage);
@@ -221,6 +359,28 @@ export function attachRouter(
     }
   }
 
+  // A webview that went away cannot deliver an outcome, and an await that
+  // delivers nothing must not hold a completion claim open.
+  //
+  // The result is posted from here rather than left to `handle.promise`: that
+  // callback runs a microtask later, by which time `disposed` suppresses it, and
+  // the contract is exactly one `alert:awaitResult` per request (a cancel
+  // included — `docs/specs/alert.md` -> Await). Deleting the entry first makes
+  // the later callback a no-op, so the answer is still sent exactly once.
+  function cancelAllPendingAwaits(): void {
+    for (const [requestId, { handle, startedAt }] of [...pendingAwaits]) {
+      pendingAwaits.delete(requestId);
+      handle.cancel();
+      const outcome: AwaitOutcome = { kind: 'cancelled', waitedMs: Date.now() - startedAt };
+      try {
+        void post({ type: 'alert:awaitResult', requestId, outcome } satisfies ExtensionMessage);
+      } catch {
+        // The usual reason to be here is the webview being torn down, which can
+        // make `postMessage` throw. Nothing left to tell — keep cancelling.
+      }
+    }
+  }
+
   function flushSessionSave(timeoutMs = 1000): Promise<void> {
     if (disposed || !disconnectWebview) return Promise.resolve();
 
@@ -236,7 +396,7 @@ export function attachRouter(
         timeout,
       });
 
-      void webview.postMessage({ type: 'dormouse:flushSessionSave', requestId } satisfies ExtensionMessage);
+      void post({ type: 'dormouse:flushSessionSave', requestId } satisfies ExtensionMessage);
     });
   }
 
@@ -245,7 +405,7 @@ export function attachRouter(
   }
 
   function forwardDorControlRequest(request: DorControlRequest): void {
-    void webview.postMessage({
+    void post({
       type: 'dor:controlRequest',
       requestId: request.requestId,
       surfaceId: request.surfaceId,
@@ -278,23 +438,20 @@ export function attachRouter(
   function connectWebview(): () => void {
     const removeProcessedListener = onProcessedPtyData((id, visibleData) => {
       if (!ownedPtyIds.has(id)) return;
-      webview.postMessage({ type: 'pty:data', id, data: visibleData } satisfies ExtensionMessage);
+      post({ type: 'pty:data', id, data: visibleData } satisfies ExtensionMessage);
     });
     const removeSemanticListener = onTerminalSemanticEvents((id, events) => {
       if (!ownedPtyIds.has(id)) return;
-      webview.postMessage({ type: 'terminal:semanticEvents', id, events } satisfies ExtensionMessage);
+      post({ type: 'terminal:semanticEvents', id, events } satisfies ExtensionMessage);
     });
-    const removePtyCallbacks = ptyManager.addCallbacks({
-      onData() {},
-      onExit(id: string, exitCode: number) {
-        if (!ownedPtyIds.has(id)) return;
-        webview.postMessage({ type: 'pty:exit', id, exitCode } satisfies ExtensionMessage);
-      },
+    const removeExitListener = onProcessedPtyExit((id, exitCode) => {
+      if (!ownedPtyIds.has(id)) return;
+      post({ type: 'pty:exit', id, exitCode } satisfies ExtensionMessage);
     });
 
     const removeAlertListener = alertManager.onStateChange((id, state) => {
       if (!ownedPtyIds.has(id)) return;
-      webview.postMessage({
+      post({
         type: 'alert:state',
         id,
         status: state.status,
@@ -302,6 +459,7 @@ export function attachRouter(
         todo: state.todo,
         notification: state.notification,
         attentionDismissedRing: state.attentionDismissedRing,
+        awaited: state.awaited,
       } satisfies ExtensionMessage);
       notifyUnion();
     });
@@ -309,13 +467,12 @@ export function attachRouter(
     return () => {
       removeProcessedListener();
       removeSemanticListener();
-      removePtyCallbacks();
+      removeExitListener();
       removeAlertListener();
     };
   }
 
-  // Route webview messages to the PTY manager
-  const messageDisposable = webview.onDidReceiveMessage((msg: WebviewMessage) => {
+  const messageDisposable = channel.onDidReceiveMessage((msg: WebviewMessage) => {
     switch (msg.type) {
       case 'pty:spawn': {
         claim(msg.id);
@@ -340,46 +497,39 @@ export function attachRouter(
         break;
       case 'pty:getCwd':
         ptyManager.getCwd(msg.id).then((cwd) => {
-          webview.postMessage({ type: 'pty:cwd', id: msg.id, cwd, requestId: msg.requestId } satisfies ExtensionMessage);
+          post({ type: 'pty:cwd', id: msg.id, cwd, requestId: msg.requestId } satisfies ExtensionMessage);
         });
         break;
       case 'pty:getOpenPorts':
         ptyManager.getOpenPorts(msg.id).then((ports) => {
-          webview.postMessage({ type: 'pty:openPorts', id: msg.id, ports, requestId: msg.requestId } satisfies ExtensionMessage);
+          post({ type: 'pty:openPorts', id: msg.id, ports, requestId: msg.requestId } satisfies ExtensionMessage);
         });
-        break;
-      case 'pty:getScrollback':
-        webview.postMessage({
-          type: 'pty:scrollback', id: msg.id,
-          data: ptyManager.getScrollback(msg.id),
-          requestId: msg.requestId,
-        } satisfies ExtensionMessage);
         break;
       case 'pty:getShells':
         ptyManager.getAvailableShells().then((shells) => {
-          webview.postMessage({
+          post({
             type: 'pty:shells', shells, requestId: msg.requestId,
           } satisfies ExtensionMessage);
         });
         break;
       case 'clipboard:readFiles':
         clipboardOps.readClipboardFilePaths()
-          .then((paths) => webview.postMessage({
+          .then((paths) => post({
             type: 'clipboard:files', paths: paths.length ? paths : null, requestId: msg.requestId,
           } satisfies ExtensionMessage))
           .catch((err) => {
             log.info(`[clipboard] readFiles failed: ${err?.message ?? err}`);
-            webview.postMessage({ type: 'clipboard:files', paths: null, requestId: msg.requestId } satisfies ExtensionMessage);
+            post({ type: 'clipboard:files', paths: null, requestId: msg.requestId } satisfies ExtensionMessage);
           });
         break;
       case 'clipboard:readImage':
         clipboardOps.readClipboardImageAsFilePath()
-          .then((path) => webview.postMessage({
+          .then((path) => post({
             type: 'clipboard:image', path, requestId: msg.requestId,
           } satisfies ExtensionMessage))
           .catch((err) => {
             log.info(`[clipboard] readImage failed: ${err?.message ?? err}`);
-            webview.postMessage({ type: 'clipboard:image', path: null, requestId: msg.requestId } satisfies ExtensionMessage);
+            post({ type: 'clipboard:image', path: null, requestId: msg.requestId } satisfies ExtensionMessage);
           });
         break;
       case 'dormouse:openExternal': {
@@ -404,7 +554,7 @@ export function attachRouter(
           Array.isArray(msg.args) ? msg.args : [],
           typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
         ).then((result) => {
-          webview.postMessage({
+          post({
             type: 'agentBrowser:commandResult', requestId: msg.requestId, ...result,
           } satisfies ExtensionMessage);
         });
@@ -415,7 +565,7 @@ export function attachRouter(
           msg.op,
           typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
         ).then((result) => {
-          webview.postMessage({
+          post({
             type: 'agentBrowser:editResult', requestId: msg.requestId, ...result,
           } satisfies ExtensionMessage);
         });
@@ -426,7 +576,7 @@ export function attachRouter(
           { format: msg.format, quality: msg.quality },
           typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
         ).then((result) => {
-          webview.postMessage({
+          post({
             type: 'agentBrowser:screenshotResult', requestId: msg.requestId, ...result,
           } satisfies ExtensionMessage);
         });
@@ -436,7 +586,7 @@ export function attachRouter(
           msg.session,
           typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
         ).then((result) => {
-          webview.postMessage({
+          post({
             type: 'agentBrowser:streamStatusResult', requestId: msg.requestId, ...result,
           } satisfies ExtensionMessage);
         });
@@ -444,15 +594,15 @@ export function attachRouter(
       case 'agentBrowser:getStreamUrl': {
         const streamPort = Number.isInteger(msg.port) && msg.port > 0 && msg.port <= 65535 ? msg.port : null;
         if (!streamPort) {
-          webview.postMessage({ type: 'agentBrowser:streamUrl', requestId: msg.requestId, url: null } satisfies ExtensionMessage);
+          post({ type: 'agentBrowser:streamUrl', requestId: msg.requestId, url: null } satisfies ExtensionMessage);
           break;
         }
         createStreamRelayUrl(streamPort).then(
-          (url) => webview.postMessage({
+          (url) => post({
             type: 'agentBrowser:streamUrl', requestId: msg.requestId,
             url,
           } satisfies ExtensionMessage),
-          () => webview.postMessage({ type: 'agentBrowser:streamUrl', requestId: msg.requestId, url: null } satisfies ExtensionMessage),
+          () => post({ type: 'agentBrowser:streamUrl', requestId: msg.requestId, url: null } satisfies ExtensionMessage),
         );
         break;
       }
@@ -462,7 +612,7 @@ export function attachRouter(
           { headed: msg.headed === true },
           typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
         ).then((result) => {
-          webview.postMessage({ type: 'agentBrowser:openResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
+          post({ type: 'agentBrowser:openResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
         });
         break;
       case 'agentBrowser:popOut':
@@ -471,7 +621,7 @@ export function attachRouter(
           { url: typeof msg.url === 'string' ? msg.url : undefined, rect: msg.rect },
           typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
         ).then((result) => {
-          webview.postMessage({ type: 'agentBrowser:popResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
+          post({ type: 'agentBrowser:popResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
         });
         break;
       case 'agentBrowser:popIn':
@@ -480,19 +630,49 @@ export function attachRouter(
           { url: typeof msg.url === 'string' ? msg.url : undefined },
           typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
         ).then((result) => {
-          webview.postMessage({ type: 'agentBrowser:popResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
+          post({ type: 'agentBrowser:popResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
         });
         break;
       case 'iframe:createProxyUrl':
         createIframeProxyUrl(typeof msg.url === 'string' ? msg.url : '').then(
-          (result) => webview.postMessage({
+          (result) => post({
             type: 'iframe:proxyUrl', requestId: msg.requestId, result,
           } satisfies ExtensionMessage),
-          (err) => webview.postMessage({
+          (err) => post({
             type: 'iframe:proxyUrl', requestId: msg.requestId,
             result: { ok: false, reason: 'unreachable', detail: err?.message ?? String(err) },
           } satisfies ExtensionMessage),
         );
+        break;
+      case 'peer:answer': {
+        // Every webview answers, so "nobody owns it" settles immediately
+        // instead of waiting out the budget — which is the common case when
+        // what was asked about actually lives in another window.
+        const request = peerRequests.get(msg.requestId);
+        if (!request) {
+          // Late: the budget already expired and the Host rendered a snapshot
+          // without whatever this webview owns. Nothing can re-open a settled
+          // request, so mark the directory stale instead — the next collect
+          // asks again and repairs it. Without this an idle machine never
+          // re-collects and the phone's picker stays wrong indefinitely.
+          notifyDirectoryChanged();
+          break;
+        }
+        // Deleted before the results are taken, so a duplicate answer from the
+        // same webview cannot contribute its panes twice.
+        if (!request.pending.delete(router)) break;
+        if (Array.isArray(msg.results)) request.results.push(...msg.results);
+        if (request.pending.size === 0) request.settle();
+        break;
+      }
+      case 'peer:notify':
+        // The directory is the only thing a webview is asked to answer, so the
+        // message carries nothing but the fact that its snapshot may differ.
+        notifyDirectoryChanged();
+        remoteNotifyPeerChange();
+        break;
+      case 'remoteHost:command':
+        handleRemoteHostCommand(msg.payload);
         break;
       case 'dormouse:themeColors':
         // Webview reports its resolved terminal theme; cache for OSC color replies.
@@ -508,7 +688,7 @@ export function attachRouter(
         // freshly-mounted webview know what to use.
         const selected = options?.getSelectedShell?.();
         if (selected) {
-          webview.postMessage({
+          post({
             type: 'dormouse:selectedShell',
             shell: selected.shell,
             args: selected.args,
@@ -517,14 +697,14 @@ export function attachRouter(
 
         if (!reconnect) {
           // Fresh instance — no existing PTYs to restore
-          webview.postMessage({ type: 'pty:list', ptys: [] } satisfies ExtensionMessage);
+          post({ type: 'pty:list', ptys: [] } satisfies ExtensionMessage);
           break;
         }
         // Snapshot IDs owned before claiming so we can choose the right data source below
         const previouslyOwned = new Set(ownedPtyIds);
 
         const ptys = ptyManager.getBufferedPtys();
-        const reconnectable = new Map<string, { alive: boolean; exitCode?: number }>();
+        const reconnectable = new Map<string, { alive: boolean; exitCode?: number; shell?: string }>();
 
         // Re-serve PTYs this router already owns (webview content was recreated,
         // e.g. WebviewView collapsed then re-expanded — resolveWebviewView is NOT
@@ -564,11 +744,10 @@ export function attachRouter(
         const list: ExtensionMessage = {
           type: 'pty:list',
           ptys: Array.from(reconnectable.entries()).map(([id, info]) => ({
-            id, alive: info.alive, exitCode: info.exitCode,
+            id, alive: info.alive, exitCode: info.exitCode, shell: info.shell,
           })),
         };
-        webview.postMessage(list);
-        // Send replay/scrollback data for each reconnectable PTY
+        post(list);
         for (const [id] of reconnectable) {
           // For already-owned PTYs the replay buffer was consumed on first connect,
           // so use scrollback (full history, never cleared).
@@ -578,14 +757,13 @@ export function attachRouter(
             : ptyManager.getReplayData(id);
           if (data) {
             const replay: ExtensionMessage = { type: 'pty:replay', id, data };
-            webview.postMessage(replay);
+            post(replay);
           }
         }
-        // Send current alert state for all reconnectable PTYs
         for (const [id] of reconnectable) {
           const alertState = alertManager.getState(id);
           log.info(`[alert-reconnect] ${id}: sending ${alertState.status} (todo=${alertState.todo})`);
-          webview.postMessage({
+          post({
             type: 'alert:state',
             id,
             status: alertState.status,
@@ -593,6 +771,7 @@ export function attachRouter(
             todo: alertState.todo,
             notification: alertState.notification,
             attentionDismissedRing: alertState.attentionDismissedRing,
+            awaited: alertState.awaited,
           } satisfies ExtensionMessage);
         }
         break;
@@ -651,6 +830,29 @@ export function attachRouter(
       case 'alert:clearTodo':
         alertManager.clearTodo(msg.id);
         break;
+      // The wait itself is parked host-side (`docs/specs/alert.md` → Await), so
+      // only the outcome crosses back. `timeoutMs` is revalidated by
+      // `awaitCompletion`, which rejects nonsense rather than installing it.
+      case 'alert:await': {
+        const handle = alertManager.awaitCompletion(msg.id, {
+          until: msg.until,
+          timeoutMs: msg.timeoutMs,
+        });
+        const requestId = msg.requestId;
+        pendingAwaits.set(requestId, { handle, startedAt: Date.now() });
+        void handle.promise.then((outcome) => {
+          // Gone from the map means `cancelAllPendingAwaits` already answered
+          // this request synchronously; anything else is the ordinary path.
+          if (!pendingAwaits.delete(requestId)) return;
+          void post({ type: 'alert:awaitResult', requestId, outcome } satisfies ExtensionMessage);
+        });
+        break;
+      }
+      case 'alert:awaitCancel':
+        // The cancelled outcome comes back through `alert:awaitResult` like any
+        // other, so there is nothing to answer here.
+        pendingAwaits.get(msg.requestId)?.handle.cancel();
+        break;
     }
   });
 
@@ -658,10 +860,28 @@ export function attachRouter(
     flushSessionSave,
     ownsPty,
     forwardDorControlRequest,
+    send(message: ExtensionMessage) {
+      if (disposed) return;
+      void post(message);
+    },
+    ask(requestId: string, op: string, params: unknown) {
+      if (disposed) return;
+      void post({ type: 'peer:ask', requestId, op, params } satisfies ExtensionMessage);
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
       activeRouters.delete(router);
+      // One fewer webview to ask means the directory's answer changed, even if
+      // no surface did.
+      notifyDirectoryChanged();
+      remoteNotifyPeerChange();
+      // A webview that goes away mid-fan-out must not hold the answer open.
+      for (const request of peerRequests.values()) {
+        if (!request.pending.delete(router)) continue;
+        if (request.pending.size === 0) request.settle();
+      }
+      cancelAllPendingAwaits();
       removeWatchedCommandListener();
       removeAlertSettingsListener();
       resolveAllFlushRequests();
@@ -680,5 +900,7 @@ export function attachRouter(
   };
 
   activeRouters.add(router);
+  notifyDirectoryChanged();
+  remoteNotifyPeerChange();
   return router;
 }

@@ -19,10 +19,12 @@ import type {
   SurfacePort,
   SurfaceView,
 } from './types.js';
+import { hasBrowser, hasTerminal, SURFACE_KINDS } from './types.js';
 import {
   callerWorkingDirectory,
   errorMessage,
   parseIdFormat,
+  parsePositiveInt,
   renderHandle,
   renderJson,
   requireControlClient,
@@ -43,7 +45,7 @@ interface ListFlags {
 
 const FULL_DESCRIPTION = `Lists every Surface in the current Workspace — terminals and browser Surfaces, including minimized ones (view "minimized").
 
-Text output prints one row per Surface: a * marks the focused Surface, then the handle, kind, render mode ("-" for terminals), view, location (cwd for terminals, URL for browser Surfaces), and title. Trailing tags: (you) for the calling terminal, [ringing], [todo], and listening ports with --ports.
+Text output prints one row per Surface: a * marks the focused Surface, then the handle, kind, render mode ("-" for terminals), view, location (cwd for terminals, URL for browser Surfaces), and title. Trailing tags: (you) for the calling terminal, [ringing], [todo], [awaited] while a dor await is parked on it, and listening ports with --ports.
 
 --ports adds each terminal's listening TCP ports. The host shells out per pane (lsof / PowerShell), so it is opt-in; remote sessions report none.
 
@@ -51,7 +53,7 @@ Text output prints one row per Surface: a * marks the focused Surface, then the 
 
 Filters are ANDed. --command is an exact match against the running command reported by shell integration. --cwd resolves to an absolute path like dor ensure --cwd, relative to the invoking shell's PWD when available.
 
-JSON output (--json) always includes both stable ids and refs, and adds top-level caller_surface_ref/caller_surface_id and focused_surface_ref/focused_surface_id — the calling and focused Surfaces, null when neither is in the list — plus workspace_ref, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
+JSON output (--json) always includes both stable ids and refs, and each row carries has_terminal (a PTY) and has_browser (a browser renderer) — gate on those, not on kind, so a Surface that has both still matches. It adds top-level caller_surface_ref/caller_surface_id and focused_surface_ref/focused_surface_id — the calling and focused Surfaces, null when neither is in the list — plus workspace_ref, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
 
 Text output:
   * surface:1  terminal  -              paned  ~/projects/site  pnpm dev  :5173`;
@@ -90,7 +92,7 @@ function buildListCommand(): Command['command'] {
       parse: parseSurfaceKind,
       brief: 'Surface kind to show.',
       optional: true,
-      placeholder: 'terminal|browser',
+      placeholder: SURFACE_KINDS.join('|'),
     },
     port: {
       kind: 'parsed',
@@ -150,9 +152,11 @@ async function runListCommand(
   }
 }
 
-// These are display predicates applied to the host's full surface projection.
+// Display predicates applied to the host's full surface projection. Cheap by
+// construction: `--port` is the only filter here that needs host data beyond the
+// projection, and it pays for it by opting into the port scan up in the caller.
 // (Caller-identity targeting — the `pane` field — is filtered host-side in
-// use-dor-control.ts; only `--port` opts into the expensive host port scan.)
+// use-dor-control.ts.)
 function applyListFilters(
   response: ListSurfacesResponse,
   flags: ListFlags,
@@ -206,6 +210,7 @@ function renderListText(
     if (callerId !== undefined && surface.id === callerId) tags.push('(you)');
     if (surface.ringing) tags.push('[ringing]');
     if (surface.todo) tags.push('[todo]');
+    if (surface.awaited) tags.push('[awaited]');
     if (includePorts && surface.ports && surface.ports.length > 0) {
       tags.push(surface.ports.map((port) => `:${port.port}`).join(' '));
     }
@@ -252,6 +257,10 @@ function renderSurfaceJson(
     id: surface.id,
     ref: surface.ref,
     kind: surface.kind,
+    // Derived at the JSON boundary: a kind *is* a capability set, so these are a
+    // pure function of kind and are not carried as wire state.
+    has_terminal: hasTerminal(surface.kind),
+    has_browser: hasBrowser(surface.kind),
     render_mode: surface.renderMode,
     view: surface.view,
     title: surface.title,
@@ -263,7 +272,8 @@ function renderSurfaceJson(
     url: surface.url,
     ringing: surface.ringing,
     todo: surface.todo,
-    ...(includePorts && surface.kind === 'terminal'
+    awaited: surface.awaited,
+    ...(includePorts && hasTerminal(surface.kind)
       ? { ports: (surface.ports ?? []).map(renderPortJson) }
       : {}),
   };
@@ -280,7 +290,8 @@ function renderPortJson(port: SurfacePort): Record<string, unknown> {
 }
 
 function parseSurfaceKind(value: string): SurfaceKind {
-  if (value === 'terminal' || value === 'browser') return value;
+  const kind = SURFACE_KINDS.find((candidate) => candidate === value);
+  if (kind) return kind;
   throw new SyntaxError(`invalid --kind '${value}'`);
 }
 
@@ -290,9 +301,5 @@ function parseSurfaceView(value: string): SurfaceView {
 }
 
 function parsePort(value: string): number {
-  const port = Number(value);
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-    throw new SyntaxError(`invalid --port '${value}'`);
-  }
-  return port;
+  return parsePositiveInt(value, '--port', 65535);
 }

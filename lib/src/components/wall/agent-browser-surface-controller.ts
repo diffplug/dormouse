@@ -1,24 +1,8 @@
 /**
- * Surface-scoped, module-level controller for an agent-browser pane (see
- * docs/specs/dor-browser.md → "Agent-Browser Connection"). Mirrors
- * `terminal-lifecycle.ts`: the live non-React machinery — stream connection,
- * screenshot loop, CDP observer, viewport-sync state machine, pop-out/pop-in
- * orchestration + auto-revert, canonical-URL tracking, input bridging, params
- * persistence, and the screen/chrome registration — lives OUTSIDE React in a
- * registry keyed by surface id. `AgentBrowserPanel` becomes a thin view that
- * mounts a canvas, feeds params/visibility, and subscribes to a snapshot.
- *
- * Lifetime (deliberately surface-scoped, not panel-scoped):
- *   - created on first panel mount (`acquire…`),
- *   - SURVIVES unmount (minimize, layout churn, React StrictMode) —
- *     minimize no longer synchronously disposes the connection; the
- *     detach-as-hidden park (1s debounce) tears it down, reaching the same
- *     zero-resource end state with less thrash,
- *   - disposed only by `dispose…` at kill / render-swap in Wall.tsx.
- *
- * Disposing releases CLIENT-side resources only; it never runs
- * `agent-browser close`. Tearing down the daemon/session is a policy decision
- * owned by `closeAgentBrowserSession` in Wall.tsx.
+ * Surface-scoped browser lifecycle; see docs/specs/dor-browser.md →
+ * "Agent-Browser Connection". The registry survives panel unmount and is
+ * disposed by Wall on kill/render swap. Disposal releases client resources
+ * only; Wall owns daemon teardown.
  */
 import { getPlatform } from '../../lib/platform';
 import { readTextFromClipboard } from '../../lib/clipboard';
@@ -128,7 +112,9 @@ export type KeyLike = {
   shiftKey: boolean;
 };
 
-/** Canonical persisted params for a browser surface, as the view reads them. */
+/** Canonical persisted params for a browser surface, as the view reads them.
+ *  Pop-out is deliberately absent: it is derived from `renderMode`, never stored
+ *  (docs/specs/dor-browser.md → "Canonical Params"). */
 export interface AgentBrowserSurfaceParams {
   surfaceType?: string;
   renderMode?: RenderMode;
@@ -138,7 +124,6 @@ export interface AgentBrowserSurfaceParams {
   binaryPath?: string;
   url?: string;
   syncEngaged?: boolean;
-  poppedOut?: boolean;
 }
 
 /** The live DOM bindings a mounted view lends the controller. `attachView`
@@ -1172,8 +1157,9 @@ export class AgentBrowserSurfaceController {
     // never force its viewport to the (now-stub) pane size. Sync resumes when it
     // pops back in — the streamPort-change reclaim re-issues against the fresh session.
     if (this.poppedOut) return;
-    // Hosts without agentBrowserCommand (Tauri today) can't drive the viewport;
-    // stay silent rather than warn on every resize. The surface just reads SCALED.
+    // Hosts without agentBrowserCommand (e.g. the web demo) can't drive the
+    // viewport; stay silent rather than warn on every resize — the surface just
+    // reads SCALED.
     if (!getPlatform().agentBrowserCommand) return;
     const el = this.sink?.viewport;
     if (!el) return;
@@ -1221,7 +1207,7 @@ export class AgentBrowserSurfaceController {
     return true;
   }
 
-  // Headed Pop-Out: relaunch this session's browser as a native OS window. The
+  // Pop-Out: relaunch this session's browser as a native OS window. The
   // pane becomes a stub; the stream stays connected to observe tabs/status and
   // to auto-revert when the window closes. The new Chrome process gets a fresh
   // stream port, which we write into params so the WS reconnects.

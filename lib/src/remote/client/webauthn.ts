@@ -11,6 +11,36 @@
 
 import { fromBase64Url, toBase64Url, utf8Encode, type PasskeyAssertion } from 'server-lib-common';
 
+/** Shown when this device already holds a passkey the Server has registered. */
+export const PASSKEY_ALREADY_REGISTERED_MESSAGE =
+  'This device already has a passkey for this server. Sign in with it instead.';
+
+/**
+ * The authenticator refused to create a credential because one named in
+ * `excludeCredentials` is already on it. Its own class, like
+ * `SetupTokenInvalidError`, because the UI must act rather than report: the
+ * exclusion list is what the *Server* holds, so this is proof that a sign-in
+ * from this very device will work — the one case where prior use is certain
+ * even when this browser stored nothing.
+ */
+export class PasskeyAlreadyRegisteredError extends Error {
+  constructor() {
+    super(PASSKEY_ALREADY_REGISTERED_MESSAGE);
+    this.name = 'PasskeyAlreadyRegisteredError';
+  }
+}
+
+/**
+ * Whether `navigator.credentials.create()` failed for that reason. Matched on
+ * `name`, not `instanceof DOMException`: the error crosses realms (an installed
+ * app's window, a polyfilled authenticator, a test fake) and the name is the
+ * only part guaranteed to survive the trip.
+ */
+export function isPasskeyAlreadyRegistered(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false;
+  return (err as { name?: unknown }).name === 'InvalidStateError';
+}
+
 /** The result of a passkey registration, ready for `POST /api/setup/finish`. */
 export interface PasskeyRegistration {
   /** `PublicKeyCredential.id` — already base64url. */
@@ -23,7 +53,17 @@ export interface PasskeyRegistration {
 
 /** The two authenticator operations the Pocket client needs; faked in tests. */
 export interface WebAuthnClient {
-  registerPasskey(challenge: string, rpId: string, accountId: string): Promise<PasskeyRegistration>;
+  /**
+   * Create a passkey for `accountId`. Pass `excludeCredentialIds` (base64url,
+   * from `SetupBeginResponse`) to stop the authenticator minting a duplicate of
+   * a credential the Server already holds.
+   */
+  registerPasskey(
+    challenge: string,
+    rpId: string,
+    accountId: string,
+    excludeCredentialIds?: readonly string[],
+  ): Promise<PasskeyRegistration>;
   /**
    * Get an assertion bound to `challenge`. Pass `allowCredentials` (base64url
    * credential ids) to scope selection to specific passkeys; leave it empty to
@@ -47,16 +87,28 @@ function toBufferSource(bytes: Uint8Array): ArrayBuffer {
 
 /**
  * Create a discoverable ES256 passkey. `attestation: 'none'` keeps the server
- * dependency-free (it trusts the browser-provided SPKI key). `residentKey`
+ * dependency-free (it trusts the browser-provided SPKI key).
+ *
+ * **ES256 alone in `pubKeyCredParams` is deliberate, and Chrome warns about
+ * it**: the verifier accepts nothing else
+ * (`server-lib-common/src/security/passkey.ts`), so offering RS256 would only
+ * mint keys that fail at the first assertion. Expected in every run's console
+ * (`scripts/pairing-walkthrough/README.md`). `residentKey`
  * is `'required'`: sign-in discovers credentials with an empty
  * `allowCredentials`, so a non-resident credential (which `'preferred'` can
  * silently produce) would register fine and then never be able to sign in —
  * better to fail here, where re-running setup is a one-tap recovery.
+ *
+ * `excludeCredentialIds` is the account's registered passkeys as the *Server*
+ * knows them, so the authenticator refuses a duplicate of one that can already
+ * sign in, while an orphan it holds — created, then refused at `finish` — is
+ * absent from the list and correctly replaced rather than blocking setup.
  */
 async function registerPasskey(
   challenge: string,
   rpId: string,
   accountId: string,
+  excludeCredentialIds: readonly string[] = [],
 ): Promise<PasskeyRegistration> {
   const credential = (await navigator.credentials.create({
     publicKey: {
@@ -68,6 +120,10 @@ async function registerPasskey(
         displayName: accountId,
       },
       pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+      excludeCredentials: excludeCredentialIds.map((id) => ({
+        type: 'public-key',
+        id: toBufferSource(fromBase64Url(id)),
+      })),
       authenticatorSelection: {
         residentKey: 'required',
         // WebAuthn L1 authenticators ignore `residentKey`; this is its spelling.

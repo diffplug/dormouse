@@ -1,0 +1,20 @@
+<!--
+  Give the docs page back its scrollbar.
+
+  `lib/src/index.css` sets `body { overflow: hidden }` because the app is a
+  fixed-viewport tiling UI that must never scroll, and `preview.ts` imports that
+  file to get Tailwind. CSS then propagates the body's overflow to the viewport
+  (the `html` element leaves its own at `visible`), so the whole preview iframe
+  became unscrollable — fine for a story, which is sized to the viewport, and
+  fatal for a docs page, which is 10,000px of prose the reader cannot reach.
+
+  Scoped to a *populated* docs container: Storybook keeps `#storybook-root` and
+  `#storybook-docs` in the DOM at all times and toggles `display` between them,
+  so `:has(#storybook-docs)` alone would match story pages too and hand every
+  snapshot an unwanted scrollbar.
+-->
+<style>
+  body:has(#storybook-docs:not(:empty)) {
+    overflow: auto;
+  }
+</style>

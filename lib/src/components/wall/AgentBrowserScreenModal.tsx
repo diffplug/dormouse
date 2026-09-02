@@ -1,7 +1,6 @@
 /**
- * Display modal for a web surface (docs/specs/dor-browser.md → "Render
- * indicator & the Display modal"; docs/specs/dor-browser.md → "Render-mode
- * transitions"). Opened from the header's far-left chip, it is the
+ * Display modal for a web surface (docs/specs/dor-browser.md → "Display Modal
+ * And Render Swaps"). Opened from the header's far-left chip, it is the
  * single place that owns *how* a surface renders:
  *
  *   - Render — swap the backend in place, preserving the target:
@@ -27,7 +26,14 @@ import {
   LockSimpleIcon,
   XIcon,
 } from '@phosphor-icons/react';
-import { ModalCloseButton, ModalFrame, NumericInput, modalActionButton } from '../design';
+import {
+  MODAL_OVERLAY_INSET,
+  modalActionButton,
+  ModalCloseButton,
+  ModalFrame,
+  NumericInput,
+  OVERLAY_MAX_HEIGHT,
+} from '../design';
 import type { RenderMode, ScreenController, ScreenSnapshot } from './agent-browser-screen';
 import { useAgentBrowserScreenSnapshot } from './agent-browser-screen';
 
@@ -75,7 +81,7 @@ export function AgentBrowserScreenModal({
   const [customH, setCustomH] = useState(String(initial?.viewport.h ?? 720));
   const [customDpi, setCustomDpi] = useState(String(initial?.viewport.dpr ?? 1));
 
-  // Render backend (Path 1 + Headed Pop-Out). The Render section only appears
+  // Render backend (Path 1 + Pop-Out). The Render section only appears
   // when the surface wires `setRenderMode` (the swap is wired); otherwise the
   // modal is the plain screencast viewport modal it has always been.
   const currentMode: RenderMode = snapshot?.renderMode ?? 'ab-screencast';
@@ -198,8 +204,8 @@ export function AgentBrowserScreenModal({
       layer="critical"
       backdrop="strong"
       elevation="modal"
-      overlayClassName="px-4 py-6"
-      className="max-h-[85vh] w-full max-w-[30rem] overflow-y-auto"
+      overlayClassName={MODAL_OVERLAY_INSET}
+      className={`${OVERLAY_MAX_HEIGHT.modal} w-full max-w-[30rem] overflow-y-auto`}
       initialFocusRef={cancelRef}
       onEscape={onClose}
     >

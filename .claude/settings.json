@@ -1,4 +1,5 @@
 {
+  "outputStyle": "dormouse-concise",
   "permissions": {
     "allow": [
       "Bash(agent-browser:*)",

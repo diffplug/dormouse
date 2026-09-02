@@ -1,81 +1,118 @@
 /**
- * Process entrypoint: translate environment variables (docs/specs/server.md,
- * "Configuration") into an {@link AppConfig} and bind a port. Kept separate from
- * `app.ts` so the app itself stays testable without touching env or the network.
+ * Process entrypoint: read the environment via {@link readConfig}, resolve the
+ * VAPID keypair (which touches disk, so it stays here rather than in the pure
+ * config mapping), and bind a port. Kept separate from `app.ts` so the app
+ * itself stays testable without touching env or the network.
  */
-
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { serve } from '@hono/node-server';
 
-import { createApp } from './app.js';
+import { createApp, HOST_REVOCATION_SWEEP_MS } from './app.js';
+import { ConfigError, readConfig } from './config.js';
 import {
-  DEFAULT_VAPID_SUBJECT,
   assertVapidKeyPair,
   assertVapidSubject,
   createWebPushSender,
   generateVapidKeys,
 } from './push.js';
+import { removeRuntimeFile, writeRuntimeFile } from './runtime-file.js';
 import { VapidStore } from './state.js';
 
-const port = Number(process.env.PORT ?? 3000);
-
-const setupPassword = process.env.DORMOUSE_SETUP_PASSWORD;
-if (!setupPassword) {
-  console.error(
-    'DORMOUSE_SETUP_PASSWORD is required — it gates account creation and host enrollment.',
-  );
-  process.exit(1);
+function loadConfig() {
+  try {
+    return readConfig();
+  } catch (err) {
+    if (err instanceof ConfigError) {
+      console.error(err.message);
+      process.exit(1);
+    }
+    throw err;
+  }
 }
 
-const origin = process.env.DORMOUSE_ORIGIN ?? `http://localhost:${port}`;
-const stateDir = process.env.DORMOUSE_STATE_DIR ?? './data';
+const { port, bindHost, vapidKeys, vapidSubject, runtimeFile, releaseId, ...appConfig } =
+  loadConfig();
+const { origin, stateDir } = appConfig;
 
-// Default to `lib/dist-pocket` resolved from this compiled file's location
-// (server/dist/index.js → repo root two levels up), so it works regardless of
-// the process's cwd. Override with DORMOUSE_POCKET_DIR.
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const pocketDir = process.env.DORMOUSE_POCKET_DIR ?? join(repoRoot, 'lib', 'dist-pocket');
-
-// VAPID keys sign the push JWT and identify this server to every push service.
-// Supply both through env to control them; supply neither and the server mints
-// a pair once and persists it (0o600), so a selfhost POC needs no key ceremony.
-// Supplying exactly one is a misconfiguration, not a default worth guessing at:
-// the pair must match or every subscription silently stops working.
-const envVapidPublic = process.env.DORMOUSE_VAPID_PUBLIC_KEY;
-const envVapidPrivate = process.env.DORMOUSE_VAPID_PRIVATE_KEY;
-if (!!envVapidPublic !== !!envVapidPrivate) {
-  console.error(
-    'DORMOUSE_VAPID_PUBLIC_KEY and DORMOUSE_VAPID_PRIVATE_KEY must be set together, or neither.',
-  );
-  process.exit(1);
-}
-const vapid =
-  envVapidPublic && envVapidPrivate
-    ? { publicKey: envVapidPublic, privateKey: envVapidPrivate }
-    : await new VapidStore(stateDir).loadOrCreate(generateVapidKeys);
-const vapidSubject = process.env.DORMOUSE_VAPID_SUBJECT ?? DEFAULT_VAPID_SUBJECT;
+// The one part of the VAPID story that is not a pure env read: with no keys
+// configured, mint a pair once and persist it (0o600).
+const vapid = vapidKeys ?? (await new VapidStore(stateDir).loadOrCreate(generateVapidKeys));
 try {
   assertVapidKeyPair(vapid);
-  assertVapidSubject(vapidSubject);
+  if (vapidSubject !== null) assertVapidSubject(vapidSubject);
 } catch (err) {
   console.error(`Invalid VAPID configuration: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 }
+if (vapidSubject === null) {
+  console.warn(
+    `push is disabled: no VAPID subject. DORMOUSE_ORIGIN (${origin}) cannot serve as one — ` +
+      'set DORMOUSE_VAPID_SUBJECT to a routable mailto: or https: contact to enable it.',
+  );
+}
 
-const { app, injectWebSocket } = createApp({
-  setupPassword,
-  origin,
-  stateDir,
-  pocketDir,
-  vapidPublicKey: vapid.publicKey,
-  pushSender: createWebPushSender(vapid, vapidSubject),
+const { app, injectWebSocket, sweepRevokedHosts } = createApp({
+  ...appConfig,
+  // Both together or neither: advertising a key the server has no subject to
+  // sign with would let a phone register against a push it can never receive.
+  ...(vapidSubject === null
+    ? {}
+    : {
+        vapidPublicKey: vapid.publicKey,
+        pushSender: createWebPushSender(vapid, vapidSubject),
+      }),
 });
 
-const server = serve({ fetch: app.fetch, port }, (info) => {
-  console.log(`server listening on http://localhost:${info.port} (origin ${origin})`);
-});
+// `hostname` is omitted rather than passed as undefined so @hono/node-server
+// keeps its listen-on-every-interface default (what a container wants).
+const server = serve(
+  { fetch: app.fetch, port, ...(bindHost ? { hostname: bindHost } : {}) },
+  (info) => {
+    console.log(
+      `server listening on http://${bindHost ?? 'localhost'}:${info.port} (origin ${origin})`,
+    );
+    // Only now, with the port actually taken: this file is what tells an
+    // installer which release is answering, and claiming it before the bind
+    // succeeded would be the very confusion it exists to remove. Never fatal —
+    // an unwritten identity degrades the installer to "unknown", which it
+    // handles, where a crash here would take down a working server.
+    if (runtimeFile !== null) {
+      void writeRuntimeFile(runtimeFile, {
+        pid: process.pid,
+        releaseId,
+        port: info.port,
+        origin,
+        startedAt: new Date().toISOString(),
+      }).catch((err: unknown) => {
+        console.warn(
+          `could not write ${runtimeFile}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+    }
+  },
+);
+
+// A clean exit takes the file with it. A crash deliberately leaves it: readers
+// check whether the recorded pid is alive, so a stale file reads as "nothing is
+// serving" rather than as a lie.
+if (runtimeFile !== null) {
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(signal, () => {
+      void removeRuntimeFile(runtimeFile).finally(() => process.exit(0));
+    });
+  }
+}
 
 // Bind the relay's WS upgrade handler onto the running server (@hono/node-ws).
 injectWebSocket(server);
+
+// Revocation is hand-editing `hosts.json`, and the `/ws/host` token is checked
+// only at the upgrade, so a connected Host has to be re-checked on a clock
+// (`docs/specs/server.md` -> Guardrails). `unref`'d: nothing here is work the
+// server owes anyone, so it must not be a reason the process stays alive.
+setInterval(() => {
+  void sweepRevokedHosts().catch(() => {
+    // A `hosts.json` caught mid-edit is an expected state (State files); the
+    // next sweep reads it again.
+  });
+}, HOST_REVOCATION_SWEEP_MS).unref();

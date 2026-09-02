@@ -8,6 +8,7 @@ import {
   type StricliProcess,
 } from '@stricli/core';
 import { agentBrowserCommand, runAgentBrowserCli } from './commands/agent-browser.js';
+import { awaitCommand } from './commands/await.js';
 import { ensureCommand } from './commands/ensure.js';
 import { iframeCommand } from './commands/iframe.js';
 import { killCommand } from './commands/kill.js';
@@ -17,7 +18,7 @@ import { sendCommand } from './commands/send.js';
 import { skillCommand } from './commands/skill.js';
 import { splitCommand } from './commands/split.js';
 import { versionCommand } from './commands/version.js';
-import { errorMessage, fail } from './commands/shared.js';
+import { errorLine, errorMessage, fail } from './commands/shared.js';
 import type {
   CliEnv,
   CliOptions,
@@ -32,6 +33,11 @@ export type {
   AgentBrowserExecResult,
   AgentBrowserSurfaceRequest,
   AgentBrowserSurfaceResponse,
+  AwaitCause,
+  AwaitSurfaceOutcome,
+  AwaitSurfaceRequest,
+  AwaitSurfaceResponse,
+  AwaitUntil,
   CliEnv,
   CliOptions,
   CliResult,
@@ -74,6 +80,7 @@ const COMMANDS = [
   skillCommand,
   sendCommand,
   readCommand,
+  awaitCommand,
   killCommand,
   iframeCommand,
   agentBrowserCommand,
@@ -87,6 +94,7 @@ const ROUTES = {
   skill: skillCommand.command,
   send: sendCommand.command,
   read: readCommand.command,
+  await: awaitCommand.command,
   kill: killCommand.command,
   iframe: iframeCommand.command,
   'agent-browser': agentBrowserCommand.command,
@@ -95,7 +103,7 @@ const ROUTES = {
 
 const DOR_TEXT: ApplicationText = {
   ...text_en,
-  commandErrorResult: (error, _ansiColor) => `Error: ${error.message}`,
+  commandErrorResult: (error, _ansiColor) => errorLine(error.message),
   exceptionWhileLoadingCommandContext: (error, _ansiColor) => `Error: ${errorMessage(error)}`,
   exceptionWhileLoadingCommandFunction: (error, _ansiColor) => `Error: ${errorMessage(error)}`,
   exceptionWhileParsingArguments: (error, _ansiColor) => `Error: ${errorMessage(error)}`,
@@ -405,5 +413,12 @@ function normalizeExitCode(exitCode: number | string | null | undefined): number
     : typeof exitCode === 'string'
       ? Number(exitCode)
       : 0;
-  return numeric === 0 || Number.isNaN(numeric) ? 0 : 1;
+  if (numeric === 0) return 0;
+  // Commands that need a verdict richer than pass/fail set `process.exitCode`
+  // themselves and return void — stricli assigns its own with `??=`, so theirs
+  // survives (`dor await`: 2 for a timeout, 3 for a dead surface). Pass such a
+  // code through, and collapse everything else to 1: stricli's own codes are all
+  // negative and all mean "usage or target error", as does any other shape that
+  // could not be a deliberate verdict (NaN, fractional, shell-reserved).
+  return Number.isInteger(numeric) && numeric > 0 && numeric < 126 ? numeric : 1;
 }

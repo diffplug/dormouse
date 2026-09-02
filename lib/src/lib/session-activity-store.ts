@@ -1,4 +1,4 @@
-import type { SessionStatus } from './activity-monitor';
+import type { SessionStatus } from './alert-manager';
 import type { AlertStateDetail } from './platform/types';
 import { applyAlertSettingsFromHost, publishAlertSettings } from './alert-settings';
 import type { PersistedAlertState, PersistedPane } from './session-types';
@@ -31,6 +31,7 @@ export const DEFAULT_ACTIVITY_STATE: ActivityState = {
   watchingEnabled: false,
   todo: false,
   notification: null,
+  awaited: false,
 };
 
 const activityListeners = new Set<() => void>();
@@ -86,6 +87,7 @@ function readLiveActivity(id: string): ActivityState | null {
     watchingEnabled: entry.watchingEnabled,
     todo: entry.todo,
     notification: entry.notification,
+    awaited: entry.awaited,
   };
 }
 
@@ -182,6 +184,7 @@ function handleAlertState(detail: AlertStateDetail): void {
     entry.todo = detail.todo;
     entry.notification = detail.notification;
     entry.attentionDismissedRing = detail.attentionDismissedRing;
+    entry.awaited = detail.awaited;
     primedActivityStates.delete(detail.id);
     notifyActivityListeners();
   } else {
@@ -190,6 +193,7 @@ function handleAlertState(detail: AlertStateDetail): void {
       watchingEnabled: detail.watchingEnabled,
       todo: detail.todo,
       notification: detail.notification,
+      awaited: detail.awaited,
     });
   }
 }

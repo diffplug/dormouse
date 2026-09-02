@@ -8,7 +8,11 @@
 export type ShellCommandKind = 'cmd' | 'posix' | 'powershell';
 
 const POSIX_SAFE_ARG = /^[A-Za-z0-9_@%+=:,./-]+$/;
-const WINDOWS_SAFE_ARG = /^[A-Za-z0-9_@+=:,./\\-]+$/;
+// No `,` or `@`, unlike the posix set: PowerShell's argument mode reads a comma
+// as the array operator (`cat a,b.txt` passes two arguments), while an initial
+// `@` starts splatting / array / hashtable syntax. cmd.exe also treats `,` as an
+// argument separator, so the shared set conservatively quotes both characters.
+const WINDOWS_SAFE_ARG = /^[A-Za-z0-9_+=:./\\-]+$/;
 
 export function shellCommandKind(shell: string | undefined, platformString: string): ShellCommandKind {
   const normalizedShell = (shell ?? '').replace(/\\/g, '/').split('/').pop()?.toLowerCase() ?? '';
@@ -45,7 +49,10 @@ function quotePowerShellCommand(args: readonly string[]): string {
   return `${commandPrefix}${[quotedCommand, ...rest.map(quotePowerShellArg)].join(' ')}`;
 }
 
-function quotePowerShellArg(arg: string): string {
+/** PowerShell single-quoted strings are literal — no `$(...)` subexpression and
+ *  no `$name` interpolation — so this is also what the webview's drop/paste
+ *  path uses to quote a file path for a PowerShell pane (`shellEscapePath`). */
+export function quotePowerShellArg(arg: string): string {
   if (arg === '') return "''";
   if (WINDOWS_SAFE_ARG.test(arg)) return arg;
   return `'${arg.replace(/'/g, "''")}'`;

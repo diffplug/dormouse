@@ -11,6 +11,21 @@ import { TutorialState } from "./tutorial-state";
 
 const FRAME_RESET = "\x1b[H\x1b[2J";
 
+// Both profiles open inside a section (`initialSectionId`), so menu-driven
+// tests pop out with Esc first. Menu rows are addressed by name rather than
+// ordinal, so inserting a section does not rewrite every test below.
+const ESC = "\x1b";
+const DOWN = "\x1b[B";
+const ENTER = "\r";
+const toMenu = ESC;
+const menuRow = (index: number) => toMenu + DOWN.repeat(index);
+type Sections = readonly { id: string }[];
+const sectionRow = (id: string, sections: Sections = SECTIONS) =>
+  menuRow(sections.findIndex((section) => section.id === id));
+/** The fixed rows the menu renders after the section list, in order. */
+const extraRow = (name: "star" | "flappy" | "reset", sections: Sections = SECTIONS) =>
+  menuRow(sections.length + { star: 0, flappy: 1, reset: 2 }[name]);
+
 function mountRunner(
   completedIds: ItemId[] = [],
   options: {
@@ -76,29 +91,38 @@ function mountRunner(
 }
 
 describe("TutRunner snapshots", () => {
-  it("renders the top-level menu", () => {
+  // The desktop profile opens inside its first section (`initialSectionId`), so
+  // every menu-driven test below pops out with a leading Esc first.
+  it("starts the desktop tutorial inside Make it yours", () => {
     const { lastFrame, dispose } = mountRunner();
+    expect(lastFrame()).toMatchSnapshot();
+    dispose();
+  });
+
+  it("renders the top-level menu", () => {
+    const { sendKeys, lastFrame, dispose } = mountRunner();
+    sendKeys(toMenu);
     expect(lastFrame()).toMatchSnapshot();
     dispose();
   });
 
   it("renders Keyboard navigation with all items incomplete", () => {
     const { sendKeys, lastFrame, dispose } = mountRunner();
-    sendKeys("\r");
+    sendKeys(sectionRow("keyboard") + ENTER);
     expect(lastFrame()).toMatchSnapshot();
     dispose();
   });
 
   it("renders the alert section with all items incomplete", () => {
     const { sendKeys, lastFrame, dispose } = mountRunner();
-    sendKeys("\x1b[B\r");
+    sendKeys(sectionRow("alert") + ENTER);
     expect(lastFrame()).toMatchSnapshot();
     dispose();
   });
 
   it("renders Copy paste with all items incomplete", () => {
     const { sendKeys, lastFrame, dispose } = mountRunner();
-    sendKeys("\x1b[B\x1b[B\r");
+    sendKeys(sectionRow("copy") + ENTER);
     expect(lastFrame()).toMatchSnapshot();
     dispose();
   });
@@ -119,7 +143,7 @@ describe("TutRunner snapshots", () => {
       profile: POCKET_TUTORIAL_PROFILE,
     });
 
-    sendKeys("\x1b");
+    sendKeys(toMenu);
 
     expect(lastFrame()).toContain("Dormouse Pocket Tutorial");
     expect(lastFrame()).toContain("Gesture navigation");
@@ -136,7 +160,7 @@ describe("TutRunner snapshots", () => {
       profile: POCKET_TUTORIAL_PROFILE,
     });
 
-    sendKeys("\x1b\x1b[B\r");
+    sendKeys(sectionRow("copy", POCKET_TUTORIAL_PROFILE.sections) + ENTER);
     expect(lastFrame()).toContain("Copy paste");
     expect(lastFrame()).toContain("0/3 complete");
     expect(lastFrame()).toContain('Tap "Select" to enable drag-to-copy');
@@ -152,16 +176,15 @@ describe("TutRunner snapshots", () => {
   });
 
   it("renders Keyboard navigation with all items complete", () => {
-    const allKeyboardIds = SECTIONS[0].items.map((i) => i.id);
+    const allKeyboardIds = SECTIONS.find((s) => s.id === "keyboard")!.items.map((i) => i.id);
     const { sendKeys, lastFrame, dispose } = mountRunner(allKeyboardIds);
-    sendKeys("\r");
+    sendKeys(sectionRow("keyboard") + ENTER);
     expect(lastFrame()).toMatchSnapshot();
     dispose();
   });
 
   it("backs out of a section with q before exiting from the menu", () => {
     const { sendKeys, lastFrame, exitCount, dispose } = mountRunner();
-    sendKeys("\r");
 
     sendKeys("q");
     expect(lastFrame()).toContain("Dormouse Playground Tutorial");
@@ -176,7 +199,7 @@ describe("TutRunner snapshots", () => {
     const onOpenGithub = vi.fn();
     const { state, sendKeys, lastFrame, dispose } = mountRunner([], { onOpenGithub });
 
-    sendKeys("\x1b[B\x1b[B\x1b[B\r");
+    sendKeys(extraRow("star") + ENTER);
 
     expect(onOpenGithub).toHaveBeenCalledTimes(1);
     expect(state.isStarPromptResolved()).toBe(true);
@@ -189,7 +212,7 @@ describe("TutRunner snapshots", () => {
     const { state, sendKeys, dispose } = mountRunner(["kb-mode"]);
     state.resolveStarPrompt();
 
-    sendKeys("\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\rreset\r");
+    sendKeys(extraRow("reset") + ENTER + "reset" + ENTER);
 
     expect(state.isComplete("kb-mode")).toBe(false);
     expect(state.isStarPromptResolved()).toBe(false);
@@ -202,7 +225,7 @@ describe("TutRunner snapshots", () => {
     });
     state.resolveStarPrompt();
 
-    sendKeys("\x1b\x1b[B\x1b[B\x1b[B\x1b[B\rreset\r");
+    sendKeys(extraRow("reset", POCKET_TUTORIAL_PROFILE.sections) + ENTER + "reset" + ENTER);
 
     expect(state.isComplete("gn-arrows")).toBe(false);
     expect(state.isStarPromptResolved()).toBe(false);
@@ -215,11 +238,11 @@ describe("TutRunner snapshots", () => {
   it("keeps Flappy Term locked until every tutorial task is complete", () => {
     const { sendKeys, lastFrame, dispose } = mountRunner();
 
-    sendKeys("\x1b[B\x1b[B\x1b[B\x1b[B\r");
+    sendKeys(extraRow("flappy") + ENTER);
 
     expect(lastFrame()).toContain("🐭 FlappyTerm 🐭");
     expect(lastFrame()).not.toContain("???");
-    expect(lastFrame()).toContain("[LOCKED 0/20]");
+    expect(lastFrame()).toContain("[LOCKED 0/21]");
     expect(lastFrame()).toContain("Dormouse Playground Tutorial");
     dispose();
   });
@@ -230,7 +253,7 @@ describe("TutRunner snapshots", () => {
     state.recordFlappyScore(7);
 
     // Navigate to (but don't enter) the Flappy Term row.
-    sendKeys("\x1b[B\x1b[B\x1b[B\x1b[B");
+    sendKeys(extraRow("flappy"));
     expect(lastFrame()).toContain("🐭 FlappyTerm 🐭");
     expect(lastFrame()).toContain("[High score: 7]");
     dispose();
@@ -240,7 +263,7 @@ describe("TutRunner snapshots", () => {
     const allItemIds = SECTIONS.flatMap((section) => section.items.map((i) => i.id));
     const { sendKeys, lastFrame, dispose } = mountRunner(allItemIds);
 
-    sendKeys("\x1b[B\x1b[B\x1b[B\x1b[B\r");
+    sendKeys(extraRow("flappy") + ENTER);
     const frame = lastFrame();
     expect(frame).toContain("Score: 0");
     expect(frame).toContain("Best:");
@@ -258,7 +281,7 @@ describe("TutRunner snapshots", () => {
     const { sendKeys, lastFrame, dispose } = mountRunner(allItemIds, { onOpenPocket });
 
     try {
-      sendKeys("\x1b[B\x1b[B\x1b[B\x1b[B\r ");
+      sendKeys(extraRow("flappy") + ENTER + " ");
       vi.advanceTimersByTime(3000);
 
       expect(lastFrame()).toContain("GAME OVER");
@@ -285,7 +308,7 @@ describe("TutRunner snapshots", () => {
     });
 
     try {
-      sendKeys("\x1b\x1b[B\x1b[B\x1b[B\r ");
+      sendKeys(extraRow("flappy", POCKET_TUTORIAL_PROFILE.sections) + ENTER + " ");
       vi.advanceTimersByTime(3000);
 
       expect(lastFrame()).toContain("GAME OVER");

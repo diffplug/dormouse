@@ -10,9 +10,10 @@ USAGE
   dor skill [--install] [--json]
   dor send <surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw]
   dor read <surface> [--json] [--lines count] [--scrollback]
+  dor await <surface> --until condition [--json] [--timeout seconds]
   dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json]
   dor iframe [--json] [--minimize] [--surface id|ref] <target>
-  dor agent-browser [--key name|--session name] [args...]
+  dor agent-browser [--key name|--session name|--surface handle] [args...]
   dor list [--command text] [--cwd path] [--id-format refs|ids|both] [--json] [--kind terminal|browser] [--port number] [--ports] [--view paned|zoomed|minimized]
   dor --help
 
@@ -29,6 +30,7 @@ COMMANDS
   skill          Print the Dormouse agent skill, or install its bootstrap stub.
   send           Send text or key input to a terminal surface.
   read           Read terminal text from a surface.
+  await          Wait until a terminal surface finishes.
   kill           Kill a surface.
   iframe         Open a target in an iframe surface.
   agent-browser  Drive a browser surface via your agent-browser install (alias: dor ab).

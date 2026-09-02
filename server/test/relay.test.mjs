@@ -1,17 +1,26 @@
 /**
- * Slice-2 relay routing (docs/specs/server.md, "Relay"): two real in-process
- * WebSockets echoing through the hub. Covers the handshake allowlist (`pair` /
- * `connect` / `connect2` up, `pair-result` / `challenge` / `decision` down), the
- * `msg` gate that only opens on an allowed Host decision, presence teardown
- * (`client-gone` / `host-gone`), and the malformed/unknown-frame paths.
+ * Relay routing at the socket level (docs/specs/server.md, "Relay"): two real
+ * in-process WebSockets echoing through the hub, with no ceremony behind them.
+ *
+ * The relay routes exactly one envelope, so these cases are about the routing
+ * rules rather than about what rides inside: `clientId` stamping and stripping,
+ * the refusals, presence teardown (`client-gone` / `host-gone`), and host
+ * replacement. The envelope driven by real Noise ceremonies — including its
+ * bounds, the binding, and relay opacity — is `e2e-relay.test.mjs`.
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { WS_ROUTES, WS_TOKEN_PARAM, hashPasskeyPublicKey } from 'server-lib-common';
+import {
+  WS_CLOSE_HOST_REPLACED,
+  WS_CLOSE_HOST_REPLACED_REASON,
+  WS_ROUTES,
+  WS_TOKEN_PARAM,
+} from 'server-lib-common';
 
 import { connectClient, connectHost, freshApp, startServer, wsConnect } from './helpers.mjs';
+import { e2eClientFrame, newE2eId } from './harness/e2e.mjs';
 
 /** A boot-a-real-server fixture; every test tears its server down in `finally`. */
 async function relay() {
@@ -20,133 +29,78 @@ async function relay() {
   return { app: created.app, server, close: () => server.close() };
 }
 
-test('pair round-trips client→host with a stamped clientId, pair-result routes back', async () => {
+test('an init round-trips client→host with a stamped clientId, and the answer routes back', async () => {
   const { app, server, close } = await relay();
   try {
     const { host, socket: hostWs } = await connectHost(app, server);
-    const { socket: clientWs, authenticator } = await connectClient(app, server);
+    const { socket: clientWs } = await connectClient(app, server);
 
-    // Slice 3 verifies pair frames server-side, so the request must reference
-    // the session's real (registered) passkey rather than a synthetic one.
-    const pairingRequest = {
-      accountId: 'owner',
-      passkeyCredentialId: authenticator.credentialId,
-      passkeyPublicKeyHash: await hashPasskeyPublicKey(authenticator.publicKey),
-      devicePublicKey: 'device-1',
-      requestedLabel: 'iPhone Safari',
-    };
-    clientWs.send({ t: 'pair', hostId: host.hostId, request: pairingRequest });
+    const sent = e2eClientFrame(host.hostId);
+    clientWs.send(sent);
     const forwarded = await hostWs.take();
-    assert.equal(forwarded.t, 'pair');
+    assert.equal(forwarded.t, 'e2e');
     assert.equal(typeof forwarded.clientId, 'string');
-    assert.deepEqual(forwarded.request, pairingRequest);
+    assert.equal(forwarded.id, sent.id);
+    assert.equal(forwarded.ct, sent.ct);
 
-    const record = { hostId: host.hostId, accountId: 'owner' };
-    hostWs.send({ t: 'pair-result', clientId: forwarded.clientId, approved: true, record });
-    const result = await clientWs.take();
-    assert.equal(result.t, 'pair-result');
-    assert.equal(result.approved, true);
-    assert.deepEqual(result.record, record);
-    assert.equal(result.clientId, undefined); // the clientId secret never leaks to the client
-  } finally {
-    await close();
-  }
-});
-
-test('connect round-trips and challenge routes back with the originating hostId', async () => {
-  const { app, server, close } = await relay();
-  try {
-    const { host, socket: hostWs } = await connectHost(app, server);
-    const { socket: clientWs } = await connectClient(app, server);
-
-    clientWs.send({ t: 'connect', hostId: host.hostId });
-    const connFrame = await hostWs.take();
-    assert.equal(connFrame.t, 'connect');
-    assert.equal(typeof connFrame.clientId, 'string');
-
-    hostWs.send({ t: 'challenge', clientId: connFrame.clientId, challenge: 'chal-abc', expiresAt: 999 });
-    const challenge = await clientWs.take();
-    assert.deepEqual(challenge, {
-      t: 'challenge',
-      hostId: host.hostId,
-      challenge: 'chal-abc',
-      expiresAt: 999,
+    hostWs.send({
+      t: 'e2e',
+      clientId: forwarded.clientId,
+      kind: 'pairing',
+      id: sent.id,
+      step: 'response',
+      ct: 'YmFy',
     });
+    const answer = await clientWs.take();
+    assert.equal(answer.t, 'e2e');
+    assert.equal(answer.hostId, host.hostId, 'the relay stamps the hostId from the socket');
+    assert.equal(answer.ct, 'YmFy');
+    assert.equal(answer.clientId, undefined); // the clientId secret never leaks to the client
   } finally {
     await close();
   }
 });
 
-test('msg is blocked until an allowed decision, then flows both ways', async () => {
-  const { app, server, close } = await relay();
-  try {
-    const { host, socket: hostWs } = await connectHost(app, server);
-    const { socket: clientWs } = await connectClient(app, server);
-
-    clientWs.send({ t: 'connect', hostId: host.hostId });
-    const connFrame = await hostWs.take();
-    const clientId = connFrame.clientId;
-
-    // Blocked before the decision.
-    clientWs.send({ t: 'msg', data: { attempted: true } });
-    assert.ok(await hostWs.quiet(), 'host must not receive msg before the decision');
-
-    // The Host's allowed decision establishes the session.
-    hostWs.send({ t: 'decision', clientId, allowed: true });
-    const decision = await clientWs.take();
-    assert.deepEqual(decision, { t: 'decision', allowed: true });
-
-    // Client → host.
-    clientWs.send({ t: 'msg', data: { up: 1 } });
-    const up = await hostWs.take();
-    assert.equal(up.t, 'msg');
-    assert.equal(up.clientId, clientId);
-    assert.deepEqual(up.data, { up: 1 });
-
-    // Host → client (clientId stripped).
-    hostWs.send({ t: 'msg', clientId, data: { down: 2 } });
-    const down = await clientWs.take();
-    assert.equal(down.t, 'msg');
-    assert.deepEqual(down.data, { down: 2 });
-    assert.equal(down.clientId, undefined);
-  } finally {
-    await close();
-  }
-});
-
-test('msg stays blocked for a second, un-established client', async () => {
-  const { app, server, close } = await relay();
-  try {
-    const { host, socket: hostWs } = await connectHost(app, server);
-    const { socket: clientWs } = await connectClient(app, server);
-    clientWs.send({ t: 'connect', hostId: host.hostId });
-    const first = await hostWs.take();
-    hostWs.send({ t: 'decision', clientId: first.clientId, allowed: true });
-    await clientWs.take();
-
-    // A second client connects but is never approved.
-    const { socket: client2Ws } = await connectClient(app, server);
-    client2Ws.send({ t: 'connect', hostId: host.hostId });
-    const second = await hostWs.take();
-
-    hostWs.send({ t: 'msg', clientId: second.clientId, data: { x: 1 } });
-    assert.ok(await client2Ws.quiet(), 'un-established client must not receive host msg');
-    client2Ws.send({ t: 'msg', data: { y: 1 } });
-    assert.ok(await hostWs.quiet(), 'un-established client msg must not reach the host');
-  } finally {
-    await close();
-  }
-});
-
-test('connect to an unknown/offline host returns an error and nothing else', async () => {
+test('an e2e frame naming an offline host returns an error and nothing else', async () => {
   const { app, server, close } = await relay();
   try {
     const { socket: clientWs } = await connectClient(app, server);
-    clientWs.send({ t: 'connect', hostId: 'no-such-host' });
+    clientWs.send(e2eClientFrame(newE2eId()));
     const err = await clientWs.take();
     assert.equal(err.t, 'error');
     assert.match(err.error, /offline/);
-    assert.ok(await clientWs.quiet(), 'no further frames for an offline connect');
+    assert.ok(await clientWs.quiet(), 'no further frames for an offline host');
+  } finally {
+    await close();
+  }
+});
+
+test('a transport outside a binding reaches no host, before and after one exists', async () => {
+  // The `init` is what binds; only it may create one. A `transport` that
+  // arrives with no binding — or naming a Host this socket has bound away
+  // from — has nowhere to go, and is dropped rather than answered, so nothing
+  // tells a prober which Hosts a session is talking to.
+  const { app, server, close } = await relay();
+  try {
+    const a = await connectHost(app, server);
+    const b = await connectHost(app, server);
+    const { socket: clientWs } = await connectClient(app, server);
+
+    // Never bound: the Host is online and the frame is well formed anyway.
+    clientWs.send(e2eClientFrame(a.host.hostId, { step: 'transport' }));
+    assert.ok(await a.socket.quiet(), 'an unbound transport reaches no host');
+    assert.ok(await clientWs.quiet(), 'and is dropped rather than answered');
+
+    // Bound to A, so a transport for B is outside the binding.
+    clientWs.send(e2eClientFrame(a.host.hostId));
+    assert.equal((await a.socket.take()).step, 'init');
+    clientWs.send(e2eClientFrame(b.host.hostId, { step: 'transport' }));
+    assert.ok(await b.socket.quiet(), 'a transport for the unbound host is dropped');
+    assert.ok(await clientWs.quiet());
+
+    // The binding it does hold still carries.
+    clientWs.send(e2eClientFrame(a.host.hostId, { step: 'transport' }));
+    assert.equal((await a.socket.take()).step, 'transport');
   } finally {
     await close();
   }
@@ -161,8 +115,15 @@ test('malformed JSON and unknown client frames get an error; host garbage is ign
     clientWs.ws.send('this is not json{');
     assert.equal((await clientWs.take()).t, 'error');
 
-    clientWs.send({ t: 'nonsense-type' });
-    assert.equal((await clientWs.take()).t, 'error');
+    // Every frame the legacy handshake used is now exactly as unknown as any
+    // other word: the relay routes the `e2e` envelope and nothing else.
+    for (const t of ['pair', 'pair-status', 'connect', 'connect2', 'msg', 'nonsense-type']) {
+      clientWs.send({ t, hostId: host.hostId, data: {}, request: {} });
+      const err = await clientWs.take();
+      assert.equal(err.t, 'error');
+      assert.equal(err.error, 'unknown frame type', t);
+    }
+    assert.ok(await hostWs.quiet(), 'the host saw none of them');
 
     // Garbage from the host is dropped without a reply or a crash — the relay
     // still routes a following valid frame.
@@ -170,8 +131,8 @@ test('malformed JSON and unknown client frames get an error; host garbage is ign
     hostWs.send({ t: 'unknown-host-frame', clientId: 'whatever' });
     assert.ok(await hostWs.quiet());
 
-    clientWs.send({ t: 'connect', hostId: host.hostId });
-    assert.equal((await hostWs.take()).t, 'connect');
+    clientWs.send(e2eClientFrame(host.hostId));
+    assert.equal((await hostWs.take()).t, 'e2e');
   } finally {
     await close();
   }
@@ -182,14 +143,31 @@ test('client disconnect delivers client-gone to its host', async () => {
   try {
     const { host, socket: hostWs } = await connectHost(app, server);
     const { socket: clientWs } = await connectClient(app, server);
-    clientWs.send({ t: 'connect', hostId: host.hostId });
-    const connFrame = await hostWs.take();
+    clientWs.send(e2eClientFrame(host.hostId));
+    const forwarded = await hostWs.take();
 
     clientWs.close();
     await clientWs.closed;
 
     const gone = await hostWs.take();
-    assert.deepEqual(gone, { t: 'client-gone', clientId: connFrame.clientId });
+    assert.deepEqual(gone, { t: 'client-gone', clientId: forwarded.clientId });
+  } finally {
+    await close();
+  }
+});
+
+test('binding to a second host tells the first the client is gone', async () => {
+  const { app, server, close } = await relay();
+  try {
+    const a = await connectHost(app, server);
+    const b = await connectHost(app, server);
+    const { socket: clientWs } = await connectClient(app, server);
+
+    clientWs.send(e2eClientFrame(a.host.hostId));
+    const first = await a.socket.take();
+    clientWs.send(e2eClientFrame(b.host.hostId));
+    assert.equal((await b.socket.take()).t, 'e2e');
+    assert.deepEqual(await a.socket.take(), { t: 'client-gone', clientId: first.clientId });
   } finally {
     await close();
   }
@@ -201,9 +179,9 @@ test('host disconnect delivers host-gone to all its clients', async () => {
     const { host, socket: hostWs } = await connectHost(app, server);
     const clientA = await connectClient(app, server);
     const clientB = await connectClient(app, server);
-    clientA.socket.send({ t: 'connect', hostId: host.hostId });
+    clientA.socket.send(e2eClientFrame(host.hostId));
     await hostWs.take();
-    clientB.socket.send({ t: 'connect', hostId: host.hostId });
+    clientB.socket.send(e2eClientFrame(host.hostId));
     await hostWs.take();
 
     hostWs.close();
@@ -216,27 +194,25 @@ test('host disconnect delivers host-gone to all its clients', async () => {
   }
 });
 
-test('a msg to a vanished client is dropped and the server keeps routing', async () => {
+test('a host frame for a vanished client is dropped and the server keeps routing', async () => {
   const { app, server, close } = await relay();
   try {
     const { host, socket: hostWs } = await connectHost(app, server);
     const { socket: clientWs } = await connectClient(app, server);
-    clientWs.send({ t: 'connect', hostId: host.hostId });
-    const connFrame = await hostWs.take();
-    hostWs.send({ t: 'decision', clientId: connFrame.clientId, allowed: true });
-    await clientWs.take();
+    clientWs.send(e2eClientFrame(host.hostId));
+    const forwarded = await hostWs.take();
 
     clientWs.close();
     await clientWs.closed;
     await hostWs.take(); // client-gone
 
     // The counterpart is gone; this must not throw or crash the process.
-    hostWs.send({ t: 'msg', clientId: connFrame.clientId, data: { orphan: true } });
+    hostWs.send({ ...forwarded, step: 'response', hostId: undefined });
 
     // Prove the relay is still alive: a fresh client still round-trips.
     const client2 = await connectClient(app, server);
-    client2.socket.send({ t: 'connect', hostId: host.hostId });
-    assert.equal((await hostWs.take()).t, 'connect');
+    client2.socket.send(e2eClientFrame(host.hostId));
+    assert.equal((await hostWs.take()).t, 'e2e');
   } finally {
     await close();
   }
@@ -245,20 +221,24 @@ test('a msg to a vanished client is dropped and the server keeps routing', async
 test('a new host socket replaces the old one for the same hostId', async () => {
   const { app, server, close } = await relay();
   try {
-    const first = await connectHost(app, server, { label: 'Laptop' });
+    const first = await connectHost(app, server);
     // Re-open /ws/host with the SAME token → same hostId, displaces the first.
     const second = wsConnect(
       `${server.wsUrl}${WS_ROUTES.host}?${WS_TOKEN_PARAM}=${first.host.hostToken}`,
     );
     await second.ready;
 
-    // The displaced socket is closed by the hub.
-    await first.socket.closed;
+    // The displaced socket is closed by the hub, carrying the code the evicted
+    // Host keys its stand-down on (lib/src/remote/host/remote-host.ts). Pinned
+    // here because a changed code would silently restore the reconnect fight.
+    const closeEvent = await first.socket.closed;
+    assert.equal(closeEvent.code, WS_CLOSE_HOST_REPLACED);
+    assert.equal(closeEvent.reason, WS_CLOSE_HOST_REPLACED_REASON);
 
-    // The new socket serves the same hostId: a client connect reaches it.
+    // The new socket serves the same hostId: a client's frame reaches it.
     const { socket: clientWs } = await connectClient(app, server);
-    clientWs.send({ t: 'connect', hostId: first.host.hostId });
-    assert.equal((await second.take()).t, 'connect');
+    clientWs.send(e2eClientFrame(first.host.hostId));
+    assert.equal((await second.take()).t, 'e2e');
     second.close();
   } finally {
     await close();

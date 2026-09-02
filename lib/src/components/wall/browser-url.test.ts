@@ -52,6 +52,19 @@ describe('normalizeNavUrl', () => {
     expect(normalizeNavUrl('app.localhost:3000')).toBe('http://app.localhost:3000');
   });
 
+  it('adds http:// for a bracketed IPv6 loopback literal, with or without a port', () => {
+    // `[::1]` is loopback whether or not a port pins it to http: splitting the
+    // authority on the first `:` would read the hostname as `[` and fall through
+    // to https, which just SSL-errors there.
+    expect(normalizeNavUrl('[::1]')).toBe('http://[::1]');
+    expect(normalizeNavUrl('[::1]/app?q=1')).toBe('http://[::1]/app?q=1');
+    expect(normalizeNavUrl('[::1]:5173')).toBe('http://[::1]:5173');
+  });
+
+  it('adds https:// for a bare non-loopback IPv6 literal', () => {
+    expect(normalizeNavUrl('[2001:db8::1]')).toBe('https://[2001:db8::1]');
+  });
+
   it('adds http:// for any host with an explicit port (matches the dor CLI)', () => {
     // The port is the dev/infra-server signal — LAN and Tailnet hosts speak http.
     expect(normalizeNavUrl('example.com:8080')).toBe('http://example.com:8080');

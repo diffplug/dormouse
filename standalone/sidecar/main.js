@@ -18,6 +18,10 @@ const { createIframeProxyUrl } = require('./iframe-proxy.cjs');
 // for the agent-browser host capabilities, run here exactly as the VS Code
 // extension host runs it. See docs/specs/dor-browser.md → "Agent-Browser Host Capabilities".
 const { createAgentBrowserHost } = require('./agent-browser-host.cjs');
+// Same pattern again: lib/src/host/remote/sidecar-entry.ts is the remote Host —
+// the relay socket, the enrollment, the ACL, and remote-api v1 — running next to
+// the PTYs it serves. See docs/specs/remote-api.md.
+const { createSidecarRemoteHost } = require('./remote-host.cjs');
 
 const agentBrowser = createAgentBrowserHost({
   writeClipboardText: (text) => clipboard.writeClipboardText(text),
@@ -29,12 +33,35 @@ function send(event, data) {
 }
 
 const mgr = create((event, data) => {
+  // Tap output and exits for the remote Host before they go to the webview. A
+  // remote listener must never be able to break the local pipe, so its failure
+  // is logged and the send happens either way.
+  try {
+    remoteHost.onPtyEvent(event, data);
+  } catch (err) {
+    console.error(`[sidecar] remote host ${event} tap failed:`, err && err.message || err);
+  }
   send(`pty:${event}`, data);
 }, nodePty);
 
+const remoteHost = createSidecarRemoteHost({
+  send,
+  stateDir: process.env.DORMOUSE_STATE_DIR,
+  mgr,
+});
+
+// The control token arrives from Rust in our own environment, and `pty-core`
+// merges `process.env` into every shell it spawns — so it has to come out of
+// there and go back only once the channel is actually listening. A lost bind
+// (a squatted Windows pipe name, an unsafe socket directory) is not fatal to
+// PTY work, but it must not leave Dormouse handing the token, and the surface
+// API it opens, to whoever won the path. See docs/specs/dor-cli.md.
+const dorControlToken = process.env.DORMOUSE_CONTROL_TOKEN;
+delete process.env.DORMOUSE_CONTROL_TOKEN;
+delete process.env.DORMOUSE_CONTROL_SOCKET;
+
 const dorControl = createDorControlServer({
-  socketPath: process.env.DORMOUSE_CONTROL_SOCKET,
-  token: process.env.DORMOUSE_CONTROL_TOKEN,
+  token: dorControlToken,
   send,
 });
 
@@ -49,7 +76,42 @@ async function respondAsync(event, requestId, run) {
 
 const rl = readline.createInterface({ input: process.stdin });
 
+// Hold commands until the control channel has settled, so the very first
+// `pty:spawn` cannot race the bind and produce a shell with no `dor` (or, worse,
+// with a token for a channel that never came up). `listen` calls back or errors
+// within a tick or two, and the 2s ceiling means a runtime that somehow does
+// neither costs a short delay rather than a sidecar that never spawns anything.
+let controlSettled = !dorControl;
+const queuedLines = [];
+
+if (dorControl) {
+  dorControl.ready.then(
+    () => {
+      process.env.DORMOUSE_CONTROL_SOCKET = dorControl.socketPath;
+      process.env.DORMOUSE_CONTROL_TOKEN = dorControlToken;
+    },
+    () => {
+      console.error('[dor-control] control channel is off; `dor` will not be available in new terminals');
+    },
+  );
+  Promise.race([
+    dorControl.ready.catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, 2000).unref?.()),
+  ]).then(() => {
+    controlSettled = true;
+    while (queuedLines.length > 0) handleLine(queuedLines.shift());
+  });
+}
+
 rl.on('line', (line) => {
+  if (!controlSettled) {
+    queuedLines.push(line);
+    return;
+  }
+  handleLine(line);
+});
+
+function handleLine(line) {
   try {
     const { event, data } = JSON.parse(line);
     switch (event) {
@@ -62,9 +124,15 @@ rl.on('line', (line) => {
       case 'pty:getOpenPorts': mgr.getOpenPorts(data.id, data.requestId); break;
       case 'pty:getScrollback': mgr.getScrollback(data.id, data.requestId); break;
       case 'pty:getShells':  mgr.getShells(data.requestId); break;
+      // Reserved: no standalone caller yet — recovery capture ships for VS Code
+      // only, which reaches the same `pty-core` through its own `pty-host.js`
+      // rather than this route (docs/specs/transport.md -> `## Future`, scope
+      // codex-recovery).
+      case 'pty:interrupt': mgr.interrupt(data.ids, data.requestId); break;
       case 'pty:gracefulKillAll': mgr.gracefulKillAll(data.timeout, data.requestId); break;
       case 'sidecar:shutdown': shutdown(); break;
       case 'dor:controlResponse': dorControl?.respond(data); break;
+      case 'remoteHost:command': remoteHost.handleCommand(data); break;
       case 'iframe:createProxyUrl':
         // Log to stderr — stdout is the JSON-lines protocol channel.
         respondAsync('iframe:proxyUrl', data.requestId, async () => ({
@@ -134,14 +202,14 @@ rl.on('line', (line) => {
   } catch (err) {
     console.error(`[sidecar] Failed to parse message:`, err.message);
   }
-});
+}
 
 let shuttingDown = false;
 async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
   // Close any headed pop-out windows so quitting never orphans a real Chrome
-  // window (spec → "Headed Pop-Out" lifecycle). Bounded so a hung agent-browser
+  // window (spec → "Pop-Out" lifecycle). Bounded so a hung agent-browser
   // can't wedge the exit; mirrors the VS Code host's deactivate().
   try {
     await Promise.race([
@@ -150,6 +218,7 @@ async function shutdown() {
     ]);
   } catch {}
   dorControl?.close();
+  remoteHost.dispose();
   mgr.killAll();
   process.exit(0);
 }

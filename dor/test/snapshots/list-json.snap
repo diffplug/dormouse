@@ -6,6 +6,8 @@ stdout:
       "id": "11111111-1111-4111-8111-111111111111",
       "ref": "surface:1",
       "kind": "terminal",
+      "has_terminal": true,
+      "has_browser": false,
       "render_mode": null,
       "view": "paned",
       "title": "pnpm dev",
@@ -15,12 +17,15 @@ stdout:
       "command": "pnpm dev",
       "url": null,
       "ringing": false,
-      "todo": false
+      "todo": false,
+      "awaited": false
     },
     {
       "id": "22222222-2222-4222-8222-222222222222",
       "ref": "surface:2",
       "kind": "terminal",
+      "has_terminal": true,
+      "has_browser": false,
       "render_mode": null,
       "view": "paned",
       "title": "repo \"watch\"",
@@ -31,12 +36,15 @@ stdout:
       "command": null,
       "url": null,
       "ringing": false,
-      "todo": true
+      "todo": true,
+      "awaited": true
     },
     {
       "id": "33333333-3333-4333-8333-333333333333",
       "ref": "surface:3",
       "kind": "browser",
+      "has_terminal": false,
+      "has_browser": true,
       "render_mode": "ab-screencast",
       "view": "paned",
       "title": "Dormouse",
@@ -46,12 +54,15 @@ stdout:
       "command": null,
       "url": "http://localhost:5173/",
       "ringing": false,
-      "todo": false
+      "todo": false,
+      "awaited": false
     },
     {
       "id": "44444444-4444-4444-8444-444444444444",
       "ref": "surface:4",
       "kind": "terminal",
+      "has_terminal": true,
+      "has_browser": false,
       "render_mode": null,
       "view": "minimized",
       "title": "<idle> server.js",
@@ -61,7 +72,8 @@ stdout:
       "command": null,
       "url": null,
       "ringing": true,
-      "todo": false
+      "todo": false,
+      "awaited": false
     }
   ],
   "caller_surface_ref": "surface:2",

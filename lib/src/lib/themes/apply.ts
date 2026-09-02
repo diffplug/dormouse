@@ -5,6 +5,15 @@ import { flattenSelectionAlpha } from './flatten-alpha';
 
 let appliedThemeSnapshot: AppliedThemeSnapshot | null = null;
 
+const activeThemeListeners = new Set<() => void>();
+
+/** Notify only when the applied theme id changes. Consumers needing initial
+ * state must seed it separately; see docs/specs/theme.md. */
+export function subscribeToActiveTheme(listener: () => void): () => void {
+  activeThemeListeners.add(listener);
+  return () => activeThemeListeners.delete(listener);
+}
+
 export interface AppliedThemeSnapshot {
   theme: DormouseTheme;
   providedVars: Record<string, string>;
@@ -34,6 +43,9 @@ export function applyTheme(theme: DormouseTheme): void {
   if (typeof document === 'undefined') return;
   if (theme === appliedThemeSnapshot?.theme && hasVisibleTheme(appliedThemeSnapshot)) return;
 
+  // Hydration may reapply a fresh object for the same installed theme; compare ids.
+  const previousThemeId = appliedThemeSnapshot?.theme.id ?? null;
+
   if (appliedThemeSnapshot && theme !== appliedThemeSnapshot.theme) {
     for (const name of Object.keys(appliedThemeSnapshot.resolvedVars)) {
       document.body.style.removeProperty(name);
@@ -44,11 +56,7 @@ export function applyTheme(theme: DormouseTheme): void {
   // them here so theme.css can read --vscode-* directly without fallbacks.
   const providedVars = { ...HOST_TYPOGRAPHY_VARS, ...theme.vars };
   const vars = completeThemeVars(providedVars, theme.type);
-  // Theme authors give list.*SelectionBackground alpha because VSCode renders
-  // it as an overlay on the sidebar. Dormouse uses it as a solid AppBar /
-  // tab fill, so flatten the alpha over sideBar.background here — otherwise
-  // whatever sits behind the surface bleeds through (Selenized Dark's bright
-  // cyan AppBar, for instance).
+  // Dormouse uses VSCode's overlay selection colors as solid fills.
   flattenSelectionAlpha(vars);
   appliedThemeSnapshot = { theme, providedVars, resolvedVars: vars };
   for (const [name, value] of Object.entries(vars)) {
@@ -63,19 +71,28 @@ export function applyTheme(theme: DormouseTheme): void {
     document.body.classList.remove('vscode-light');
   }
 
-  // Match the resolved polarity so native controls (form inputs, scrollbars,
-  // autofill) render in the theme's light/dark UA chrome rather than following
-  // the OS preference. Owned here so every non-VSCode host (standalone, website,
-  // Pocket) inherits it from one place instead of guessing in each HTML shell.
+  // Keep native-control polarity with the resolved theme, not the OS preference.
   document.body.style.colorScheme = theme.type === 'light' ? 'light' : 'dark';
+
+  if (previousThemeId !== theme.id) {
+    for (const listener of activeThemeListeners) listener();
+  }
 }
 
-/** Apply the persisted active theme. When nothing is persisted yet, fall
- *  back to `defaultThemeId` if it resolves to a known theme, otherwise to the
- *  first bundled theme. Idempotent and safe to call before render so the
- *  first paint already has --vscode-* set on body. Returns the theme that was
- *  applied, or null when no themes are available (e.g. SSR). */
-export function restoreActiveTheme(defaultThemeId?: string): DormouseTheme | null {
+let defaultThemeId: string | null = null;
+
+/** Set the module-wide fallback used by every restore path. */
+export function setDefaultThemeId(id: string | null): void {
+  defaultThemeId = id;
+}
+
+/** Apply the persisted active theme. When nothing is persisted yet — or the
+ *  persisted theme no longer resolves — fall back to `setDefaultThemeId`'s
+ *  value if it names a known theme, otherwise to the first bundled theme.
+ *  Idempotent and safe to call before render so the first paint already has
+ *  --vscode-* set on body. Returns the theme that was applied, or null when no
+ *  themes are available (e.g. SSR). */
+export function restoreActiveTheme(): DormouseTheme | null {
   const all = getAllThemes();
   const find = (id: string | null | undefined) => (id ? all.find((t) => t.id === id) : undefined);
   const theme = find(getStoredActiveThemeId()) ?? find(defaultThemeId) ?? all[0];

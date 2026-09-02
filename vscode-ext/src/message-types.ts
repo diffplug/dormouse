@@ -1,10 +1,17 @@
-import type { ActivityNotification, SessionStatus, TodoState } from '../../lib/src/lib/alert-manager';
+import type {
+  ActivityNotification,
+  AwaitOutcome,
+  AwaitUntil,
+  SessionStatus,
+  TodoState,
+} from '../../lib/src/lib/alert-manager';
 import type { AlertSettings } from '../../lib/src/lib/alert-settings';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { TerminalColors } from '../../lib/src/lib/terminal-protocol';
-import type { DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
+import type { DorControlCancelPayload, DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
 import type { AgentBrowserStreamStatusResult, IframeProxyResult, OpenPort } from '../../lib/src/lib/platform/types';
 import type { VSCodeWorkbenchCommand } from '../../lib/src/lib/vscode-keybindings';
+import type { RemoteHostCommand, RemoteHostResult } from '../../lib/src/host/remote/service-protocol';
 
 // Messages from webview → extension host
 export type WebviewMessage =
@@ -14,7 +21,6 @@ export type WebviewMessage =
   | { type: 'pty:kill'; id: string }
   | { type: 'pty:getCwd'; id: string; requestId?: string }
   | { type: 'pty:getOpenPorts'; id: string; requestId?: string }
-  | { type: 'pty:getScrollback'; id: string; requestId?: string }
   | { type: 'pty:getShells'; requestId?: string }
   | { type: 'clipboard:readFiles'; requestId: string }
   | { type: 'clipboard:readImage'; requestId: string }
@@ -29,6 +35,15 @@ export type WebviewMessage =
   | { type: 'agentBrowser:popOut'; session: string; url?: string; rect?: { x: number; y: number; width: number; height: number }; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:popIn'; session: string; url?: string; binaryPath?: string; requestId: string }
   | { type: 'iframe:createProxyUrl'; url: string; requestId: string }
+  // Peer surfaces: the remote Host runs in the extension host, but the terminals
+  // live in whichever webview opened them. See docs/specs/vscode.md → "Peer
+  // surfaces". `op` is opaque to the router: the operation map lives in
+  // `lib/src/remote/host/peer-surfaces.ts`, so a new peer operation adds no
+  // message type here.
+  | { type: 'peer:answer'; requestId: string; results: unknown[] }
+  | { type: 'peer:notify' }
+  // One command for the Host service (`lib/src/host/remote/service-protocol.ts`).
+  | { type: 'remoteHost:command'; payload: RemoteHostCommand }
   | { type: 'dormouse:init' }
   | ({ type: 'dormouse:themeColors' } & TerminalColors)
   | { type: 'dormouse:saveState'; state: unknown }
@@ -46,12 +61,17 @@ export type WebviewMessage =
   | { type: 'alert:clearAttention'; id?: string }
   | { type: 'alert:toggleTodo'; id: string }
   | { type: 'alert:markTodo'; id: string }
-  | { type: 'alert:clearTodo'; id: string };
+  | { type: 'alert:clearTodo'; id: string }
+  // `dor await`: the AlertManager lives here, so the wait is parked in the
+  // extension host and only its outcome crosses back (docs/specs/alert.md → Await).
+  | { type: 'alert:await'; requestId: string; id: string; until: AwaitUntil; timeoutMs: number }
+  | { type: 'alert:awaitCancel'; requestId: string };
 
 export interface PtyInfo {
   id: string;
   alive: boolean;
   exitCode?: number;
+  shell?: string;
 }
 
 // Messages from extension host → webview
@@ -63,7 +83,6 @@ export type ExtensionMessage =
   | { type: 'pty:replay'; id: string; data: string }
   | { type: 'pty:cwd'; id: string; cwd: string | null; requestId?: string }
   | { type: 'pty:openPorts'; id: string; ports: OpenPort[]; requestId?: string }
-  | { type: 'pty:scrollback'; id: string; data: string | null; requestId?: string }
   | { type: 'pty:shells'; shells: Array<{ name: string; path: string; args: string[] }>; requestId?: string }
   | { type: 'clipboard:files'; paths: string[] | null; requestId: string }
   | { type: 'clipboard:image'; path: string | null; requestId: string }
@@ -75,6 +94,11 @@ export type ExtensionMessage =
   | { type: 'agentBrowser:openResult'; requestId: string; ok: boolean; session?: string; wsPort?: number; binaryPath?: string; error?: string }
   | { type: 'agentBrowser:popResult'; requestId: string; ok: boolean; wsPort?: number; error?: string }
   | { type: 'iframe:proxyUrl'; requestId: string; result: IframeProxyResult }
+  | { type: 'peer:ask'; requestId: string; op: string; params: unknown }
+  // Broadcast to every webview: `rhId` carries a per-adapter tag, so only the
+  // one that asked finds a pending command to settle.
+  | { type: 'remoteHost:result'; payload: RemoteHostResult }
+  | { type: 'remoteHost:event'; payload: unknown }
   | {
       type: 'dormouse:newTerminal';
       shell?: string;
@@ -87,6 +111,7 @@ export type ExtensionMessage =
   | { type: 'dormouse:openThemeDebugger' }
   | { type: 'dormouse:flushSessionSave'; requestId: string }
   | ({ type: 'dor:controlRequest' } & DorControlRequestPayload)
+  | ({ type: 'dor:controlCancel' } & DorControlCancelPayload)
   // Alert state updates
   | {
     type: 'alert:state';
@@ -96,6 +121,8 @@ export type ExtensionMessage =
     todo: TodoState;
     notification: ActivityNotification | null;
     attentionDismissedRing: boolean;
+    awaited: boolean;
   }
+  | { type: 'alert:awaitResult'; requestId: string; outcome: AwaitOutcome }
   | { type: 'alert:watchedCommands'; names: string[] }
   | { type: 'alert:settings'; settings: AlertSettings };

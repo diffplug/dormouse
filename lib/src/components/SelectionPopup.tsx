@@ -86,8 +86,8 @@ export function SelectionPopup({ terminalId }: Props) {
     const onMouseDown = (ev: MouseEvent) => {
       // Click anywhere outside the popup → dismiss. The overlay itself and
       // the terminal body both qualify. A new mousedown inside the terminal
-      // will also begin a new drag (handled in terminal-registry), which
-      // also replaces the selection.
+      // will also begin a new drag (terminal-mouse-router), which replaces
+      // the selection anyway.
       const target = ev.target as HTMLElement | null;
       if (!target?.closest(`[data-selection-popup-for="${terminalId}"]`)) {
         setSelection(terminalId, null);

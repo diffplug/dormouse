@@ -14,8 +14,23 @@ import type {
   OpenPort,
   PlatformAdapter,
   PtyInfo,
+  RemoteHostLink,
 } from "dormouse-lib/lib/platform/types";
+import {
+  answerAskCommand,
+  createRemoteHostLinkClient,
+  notifyCommand,
+} from "dormouse-lib/host/remote/link-client";
+import {
+  REMOTE_HOST_ASK_EVENT,
+  REMOTE_HOST_EVENT_EVENT,
+  REMOTE_HOST_RESULT_EVENT,
+  type RemoteHostAsk,
+  type RemoteHostCommand,
+  type RemoteHostResult,
+} from "dormouse-lib/host/remote/service-protocol";
 import { AlertManager } from "dormouse-lib/lib/alert-manager";
+import type { AwaitHandle, AwaitOptions } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { loadSessionState, saveSessionState } from "dormouse-lib/lib/window-persistence";
@@ -31,7 +46,11 @@ import { themeColorProvider } from "dormouse-lib/lib/terminal-theme";
 import {
   applyTerminalSemanticEventsByPtyId,
 } from "dormouse-lib/lib/terminal-state-store";
-import type { DorControlRequestPayload, DorControlResult } from "dor/protocol";
+import type { DorControlCancelPayload, DorControlRequestPayload } from "dor/protocol";
+import {
+  cancelDorControlRequest,
+  dispatchDorControlRequest,
+} from "dormouse-lib/lib/platform/dor-control-dispatch";
 
 function invoke(cmd: string, args?: Record<string, unknown>): void {
   rawInvoke(cmd, args).catch((err) =>
@@ -72,9 +91,23 @@ export class TauriAdapter implements PlatformAdapter {
   private flushHandlers = new Set<(detail: { requestId: string }) => void>();
   private pendingFlushRequests = new Map<string, () => void>();
   private nextFlushRequestId = 0;
+  // --- Remote host bridge (docs/specs/remote-api.md) ---
+  //
+  // The Host lives in the sidecar, next to the PTYs. This webview forwards its
+  // console commands, answers what only it knows (pane names, xterm sizes), and
+  // mirrors the pairing queue. Only the transport is this adapter's: one Rust
+  // invoke carries everything, so an answer and a notify ride it as ordinary
+  // commands, and correlation is `rhId` — never `requestId`, which Rust
+  // swallows on any sidecar line that carries it.
+  private readonly remoteHostClient = createRemoteHostLinkClient({
+    sendCommand: (command) => this.sendRemoteHostCommand(command),
+    answerAsk: (askId, results) => this.sendRemoteHostCommand(answerAskCommand(askId, results)),
+    notify: () => this.sendRemoteHostCommand(notifyCommand()),
+  });
+
+  readonly remoteHost: RemoteHostLink = this.remoteHostClient.link;
 
   constructor() {
-    // Wire alert manager state changes to handlers
     this.alertManager.onStateChange((id, state) => {
       for (const handler of this.alertStateHandlers) {
         handler({ id, ...state });
@@ -83,10 +116,11 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   async init(): Promise<void> {
-    // Set up event listeners for PTY events from the Rust backend
-    // (The Rust backend manages the Node.js sidecar lifecycle via std::process::Command)
-    this.unlistenFns.push(
-      await listen<{ id: string; data: string }>("pty:data", (event) => {
+    // Registered together rather than one await after another: every `listen`
+    // is an independent round trip to Rust, and serializing them puts the whole
+    // set in front of the first paint.
+    this.unlistenFns.push(...(await Promise.all([
+      listen<{ id: string; data: string }>("pty:data", (event) => {
         const { id, data } = event.payload;
         const parsed = this.getProtocolParser(id).process(data);
         applyTerminalProtocolEvents(this.alertManager, id, parsed.events);
@@ -103,28 +137,22 @@ export class TauriAdapter implements PlatformAdapter {
           handler({ id, data: parsed.visibleData });
         }
       }),
-    );
 
-    this.unlistenFns.push(
-      await listen<{ id: string; exitCode: number }>("pty:exit", (event) => {
+      listen<{ id: string; exitCode: number }>("pty:exit", (event) => {
         this.alertManager.onExit(event.payload.id, event.payload.exitCode);
         this.protocolParsers.delete(event.payload.id);
         for (const handler of this.exitHandlers) {
           handler(event.payload);
         }
       }),
-    );
 
-    this.unlistenFns.push(
-      await listen<{ ptys: PtyInfo[] }>("pty:list", (event) => {
+      listen<{ ptys: PtyInfo[] }>("pty:list", (event) => {
         for (const handler of this.listHandlers) {
           handler(event.payload);
         }
       }),
-    );
 
-    this.unlistenFns.push(
-      await listen<{ id: string; data: string }>("pty:replay", (event) => {
+      listen<{ id: string; data: string }>("pty:replay", (event) => {
         // Replay arrives as raw buffered output. Run it through the protocol
         // parser so semantic OSCs (CWD, prompt, title) repopulate pane state
         // and are stripped before xterm sees them, mirroring live pty:data.
@@ -135,21 +163,30 @@ export class TauriAdapter implements PlatformAdapter {
           handler({ id, data: parsed.visibleData });
         }
       }),
-    );
 
-    // Inert while dragDropEnabled=false in tauri.conf.json. See diffplug/dormouse#38 and tauri-apps/tauri#14373.
-    this.unlistenFns.push(
-      await listen<{ paths: string[] }>("dormouse://files-dropped", (event) => {
+      // Inert while dragDropEnabled=false in tauri.conf.json. See diffplug/dormouse#38 and tauri-apps/tauri#14373.
+      listen<{ paths: string[] }>("dormouse://files-dropped", (event) => {
         const paths = event.payload.paths ?? [];
         if (paths.length === 0) return;
         for (const handler of this.filesDroppedHandlers) handler(paths);
       }),
-    );
 
-    this.unlistenFns.push(
-      await listen<DorControlRequestPayload>("dor:controlRequest", (event) => {
+      listen<RemoteHostResult>(REMOTE_HOST_RESULT_EVENT, (event) => {
+        this.remoteHostClient.onResult(event.payload);
+      }),
+
+      listen<RemoteHostAsk>(REMOTE_HOST_ASK_EVENT, (event) => {
+        const ask = event.payload;
+        this.remoteHostClient.onAsk(ask.rhId, ask.op, ask.params);
+      }),
+
+      listen<{ name?: string }>(REMOTE_HOST_EVENT_EVENT, (event) => {
+        this.remoteHostClient.onEvent(event.payload);
+      }),
+
+      listen<DorControlRequestPayload>("dor:controlRequest", (event) => {
         const payload = event.payload;
-        const respond = (response: DorControlResult) => {
+        dispatchDorControlRequest(payload, (response) => {
           rawInvoke("dor_control_response", {
             response: {
               requestId: payload.requestId,
@@ -158,19 +195,17 @@ export class TauriAdapter implements PlatformAdapter {
           }).catch((err) =>
             console.error("[tauri-adapter] dor_control_response failed:", err),
           );
-        };
-
-        window.dispatchEvent(new CustomEvent("dormouse:control-request", {
-          detail: {
-            requestId: payload.requestId,
-            surfaceId: payload.surfaceId,
-            method: payload.method,
-            params: payload.params ?? {},
-            respond,
-          },
-        }));
+        });
       }),
-    );
+
+      // The sidecar's control server gave up on a request (the `dor` client hung
+      // up, or its own deadline fired). Rust forwards it verbatim: `dor-*`
+      // request ids never collide with its own `req-*` invoke ids, so the
+      // pending-invoke lookup misses and the event reaches us.
+      listen<DorControlCancelPayload>("dor:controlCancel", (event) => {
+        cancelDorControlRequest(event.payload.requestId);
+      }),
+    ])));
 
     await this.hydrateSessionStore();
   }
@@ -187,6 +222,7 @@ export class TauriAdapter implements PlatformAdapter {
       console.error("[tauri-adapter] load_session failed:", err);
     }
     this.sessionStore.hydrate(seed);
+    await this.clearLegacySessionState();
   }
 
   shutdown(): void {
@@ -196,6 +232,8 @@ export class TauriAdapter implements PlatformAdapter {
       unlisten();
     }
     this.unlistenFns = [];
+    // Nothing will answer what is outstanding once the sidecar is gone.
+    this.remoteHostClient.dispose();
     invoke("kill_sidecar_now");
   }
 
@@ -226,12 +264,6 @@ export class TauriAdapter implements PlatformAdapter {
   async getCwd(id: string): Promise<string | null> {
     try {
       return await rawInvoke<string | null>("pty_get_cwd", { id });
-    } catch { return null; }
-  }
-
-  async getScrollback(id: string): Promise<string | null> {
-    try {
-      return await rawInvoke<string | null>("pty_get_scrollback", { id });
     } catch { return null; }
   }
 
@@ -448,6 +480,12 @@ export class TauriAdapter implements PlatformAdapter {
     );
   }
 
+  private sendRemoteHostCommand(command: RemoteHostCommand): void {
+    rawInvoke("remote_host_command", { payload: command }).catch((err) =>
+      console.error("[tauri-adapter] remote_host_command failed:", err),
+    );
+  }
+
   // --- Alert management (local AlertManager) ---
 
   alertRemove(id: string): void {
@@ -462,9 +500,7 @@ export class TauriAdapter implements PlatformAdapter {
     this.alertManager.setCommandWatched(name, watched);
   }
 
-  alertPublishSettings(settings: AlertSettings): void {
-    this.alertManager.setInactivityTimeoutMs(settings.inactivityTimeoutMs);
-  }
+  alertPublishSettings(settings: AlertSettings): void { this.alertManager.applySettings(settings); }
 
   alertDismiss(id: string): void {
     this.alertManager.dismissAlert(id);
@@ -494,6 +530,10 @@ export class TauriAdapter implements PlatformAdapter {
     this.alertManager.clearTodo(id);
   }
 
+  alertAwait(id: string, options: AwaitOptions): AwaitHandle {
+    return this.alertManager.awaitCompletion(id, options);
+  }
+
   onAlertState(handler: (detail: AlertStateDetail) => void): void {
     this.alertStateHandlers.add(handler);
   }
@@ -508,11 +548,27 @@ export class TauriAdapter implements PlatformAdapter {
 
   private static STATE_KEY = 'dormouse.session';
 
-  // Persisted blob is a PersistedWindow when the workspaces flag is on, a bare
-  // PersistedSession when off (docs/specs/transport.md). The window-persistence
-  // helpers own the translation + JSON plumbing; the backing store is the
-  // Rust-backed cache (hydrated in init()), not WebKit localStorage.
+  // Standalone persists no Session state: quitting the app is a deliberate
+  // ending, and a crash captured nothing, so every launch starts fresh
+  // (docs/specs/transport.md -> "The governing rule").
+  //
+  // This is a gate at the adapter boundary, not a removal of the store. The
+  // plumbing below it — TauriSessionStore, the Rust temp-then-rename file store,
+  // the quit flush/drain ordering — is intact and still needed by the
+  // workspaces-rollout scope (docs/specs/layout.md -> `## Future`). Bringing
+  // VS Code-style restoration to standalone later is flipping this flag plus
+  // adding capture to the existing quit teardown, which already has the right
+  // shape (flush -> kill -> flush -> drain).
+  private static PERSIST_SESSION = false;
+
+  /**
+   * Read by `saveSession`, which skips the whole record build — not just the
+   * write — when a host persists nothing (`PlatformAdapter.persistsSession`).
+   */
+  readonly persistsSession = TauriAdapter.PERSIST_SESSION;
+
   saveState(state: unknown): void {
+    if (!TauriAdapter.PERSIST_SESSION) return;
     try {
       saveSessionState(this.sessionStore, TauriAdapter.STATE_KEY, state);
     } catch {
@@ -521,10 +577,37 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   getState(): unknown {
+    if (!TauriAdapter.PERSIST_SESSION) return null;
     try {
       return loadSessionState(this.sessionStore, TauriAdapter.STATE_KEY);
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Delete any pre-upgrade snapshot or orphaned temp write. Those carry
+   * transcripts, so ignoring the slot is not enough — the bytes have to leave the
+   * disk (docs/specs/transport.md -> "Retiring the transcripts already on disk").
+   * Called from init() after the store hydrates.
+   *
+   * Deletes the file through the Rust store that owns it rather than blanking the
+   * slot: a sentinel would leave the bytes in place until some later write, and
+   * would oblige every reader to treat `''` as a third state alongside present
+   * and absent.
+   */
+  private async clearLegacySessionState(): Promise<void> {
+    const hadReadableSnapshot = this.sessionStore.getItem(TauriAdapter.STATE_KEY) !== null;
+    try {
+      // Always ask Rust to clear: load_session cannot see a .json.tmp left by a
+      // crash before rename, but that file still contains the legacy transcript.
+      await rawInvoke<void>("clear_session");
+      this.sessionStore.hydrate(null);
+      if (hadReadableSnapshot) {
+        console.info('[tauri-adapter] Cleared legacy persisted session (transcripts are no longer stored)');
+      }
+    } catch (err) {
+      console.error('[tauri-adapter] Failed to clear legacy session state:', err);
     }
   }
 

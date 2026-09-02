@@ -30,6 +30,13 @@ export function makeClock(startMs = 1_700_000_000_000) {
   };
 }
 
+/**
+ * The rejected-credential delay every app here runs with. Short enough that a
+ * suite full of 401s does not spend its wall time asleep; the real
+ * `CREDENTIAL_FAILURE_DELAY_MS` is pinned by one test that injects its own.
+ */
+export const TEST_CREDENTIAL_FAILURE_DELAY_MS = 5;
+
 export async function freshApp({
   password = PASSWORD,
   origin = ORIGIN,
@@ -37,6 +44,11 @@ export async function freshApp({
   requireUserVerification,
   vapidPublicKey,
   pushSender,
+  // Forwarded, or a wedged-push-service case waits out the real 15-second
+  // deadline it is meant to be proving.
+  pushSendDeadlineMs,
+  enrollTokenFile,
+  credentialFailureDelayMs = TEST_CREDENTIAL_FAILURE_DELAY_MS,
 } = {}) {
   const stateDir = await mkdtemp(join(tmpdir(), 'dormouse-server-'));
   const created = createApp({
@@ -47,25 +59,33 @@ export async function freshApp({
     requireUserVerification,
     vapidPublicKey,
     pushSender,
+    pushSendDeadlineMs,
+    enrollTokenFile,
+    credentialFailureDelayMs,
   });
   return { ...created, stateDir, origin, rpId: new URL(origin).hostname };
 }
 
 /**
  * A {@link PushSender} that records instead of sending. `expire` / `fail` name
- * endpoints that should report those outcomes, so the pruning and counting
- * paths are testable without a real push service.
+ * endpoints that should report those outcomes, and `hang` names one that never
+ * settles, so the pruning, counting, and deadline paths are all testable
+ * without a real push service.
  */
 export function fakePushSender() {
   const sent = [];
   const expired = new Set();
   const failing = new Set();
+  const hanging = new Set();
   return {
     sent,
     expire: (endpoint) => expired.add(endpoint),
     fail: (endpoint) => failing.add(endpoint),
+    /** Models a push service that accepts the connection and then goes quiet. */
+    hang: (endpoint) => hanging.add(endpoint),
     async send(target, payload) {
       sent.push({ endpoint: target.endpoint, keys: target.keys, payload });
+      if (hanging.has(target.endpoint)) return new Promise(() => {});
       if (expired.has(target.endpoint)) return 'expired';
       if (failing.has(target.endpoint)) return 'failed';
       return 'delivered';
@@ -100,17 +120,35 @@ export function padBase64Url(text) {
   return rem === 0 ? text : `${text}${'='.repeat(4 - rem)}`;
 }
 
-/** begin → finish registration for `authenticator`; returns the finish Response. */
-export async function register(
-  app,
-  authenticator,
-  { password = PASSWORD, origin = ORIGIN, label = 'Test Passkey' } = {},
-) {
-  const begin = await post(app, API_ROUTES.setupBegin, { password });
+/**
+ * Enroll a throwaway Host and mint one setup token from it — the only credential
+ * `/api/setup/*` takes, so every registration in this suite starts at a code an
+ * enrolled Host displayed. Pass `host` to mint another from one already enrolled.
+ */
+export async function mintSetupToken(app, host) {
+  const minter = host ?? (await enrollHost(app)).body;
+  const res = await app.request(API_ROUTES.hostSetupToken, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${minter.hostToken}` },
+  });
+  const { token } = await res.json();
+  return { token, host: minter };
+}
+
+/**
+ * begin → finish registration for `authenticator`; returns the finish Response.
+ * `credential` is `{ setupToken }`, freshly minted through a Host unless the
+ * caller supplies one it wants to control (spent, revoked minter, reused).
+ */
+export async function register(app, authenticator, options = {}) {
+  const { origin = ORIGIN, label = 'Test Passkey' } = options;
+  const credential = options.credential ?? { setupToken: (await mintSetupToken(app)).token };
+  const begin = await post(app, API_ROUTES.setupBegin, credential);
+  if (begin.status !== 200) return begin;
   const { challenge } = await begin.json();
   const clientDataJSON = registrationClientData({ challenge, origin });
   return post(app, API_ROUTES.setupFinish, {
-    password,
+    ...credential,
     credentialId: authenticator.credentialId,
     publicKey: authenticator.publicKey,
     clientDataJSON,
@@ -230,8 +268,8 @@ export function wsConnect(url) {
 }
 
 /** POST /api/host/enroll with the setup password; returns the JSON body. */
-export async function enrollHost(app, { label = 'Laptop', password = PASSWORD } = {}) {
-  const res = await post(app, API_ROUTES.hostEnroll, { password, label });
+export async function enrollHost(app) {
+  const res = await post(app, API_ROUTES.hostEnroll, { password: PASSWORD });
   return { res, body: await res.json() };
 }
 
@@ -245,8 +283,8 @@ export async function ownerSession(app) {
 }
 
 /** Enroll a host and open its `/ws/host` socket (awaiting the upgrade). */
-export async function connectHost(app, server, opts) {
-  const { body } = await enrollHost(app, opts);
+export async function connectHost(app, server) {
+  const { body } = await enrollHost(app);
   const socket = wsConnect(`${server.wsUrl}${WS_ROUTES.host}?${WS_TOKEN_PARAM}=${body.hostToken}`);
   await socket.ready;
   return { host: body, socket };

@@ -47,18 +47,42 @@ describe('commandArgv0', () => {
     expect(commandArgv0(raw)).toBeNull();
   });
 
-  it('mangles an unquoted native Windows path, and that is a known limitation', () => {
-    // The shared tokenizer reads `\` as a POSIX escape, so backslash separators
-    // are eaten before the basename split can see them — `summarizeCommandLine`
-    // has always had the same blind spot. Harmless in practice: the shells that
-    // report a command line (pwsh, Git Bash, WSL) send either a bare program
-    // name or a POSIX path, and the mangling is at least stable, so a rule keyed
-    // on it still matches itself.
-    expect(commandArgv0('C:\\tools\\claude.exe --print')).toBe('C:toolsclaude.exe');
+  it('reduces a native Windows path to the bare name a rule is stored under', () => {
+    // The tokenizer's dialect handling is pinned in `terminal-state.test.ts`.
+    expect(commandArgv0('C:\\Users\\me\\.claude\\local\\claude')).toBe('claude');
   });
 });
 
 describe('watched-commands store', () => {
+  it('drops a key no command line can ever produce', () => {
+    // Written by the pre-fix tokenizer, which ate the backslashes in
+    // `C:\tools\claude.exe`. A real key is a basename, so it holds no separator.
+    // A colon outside a leading drive prefix is legal in a POSIX basename.
+    applyWatchedCommandsFromHost([
+      'C:toolsclaude.exe',
+      'claude',
+      'foo:bar',
+      '/usr/bin/claude',
+    ]);
+    expect(getWatchedCommands()).toEqual(['claude', 'foo:bar']);
+    // Same gate on the write path — a drive-relative invocation is the one
+    // shape `commandArgv0` can still return with a `:` in it.
+    setCommandWatched('C:foo.exe', true);
+    expect(getWatchedCommands()).toEqual(['claude', 'foo:bar']);
+    // A launcher suffix is the other tell: a relative invocation had no
+    // separator to eat (`tools\\dor.cmd` -> `toolsdor.cmd`), and a bare
+    // `npm.cmd` stored cleanly — but `commandProgramName` strips the suffix, so
+    // neither can match again.
+    applyWatchedCommandsFromHost([
+      'npm.cmd',
+      'toolsdor.cmd',
+      '.build.ps1',
+      'claude',
+      'foo:bar',
+    ]);
+    expect(getWatchedCommands()).toEqual(['claude', 'foo:bar']);
+  });
+
   it('adds, reports, and removes rules', () => {
     expect(getWatchedCommands()).toEqual([]);
     expect(isCommandWatched('claude')).toBe(false);

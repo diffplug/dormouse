@@ -1,19 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { CaretDownIcon, MinusIcon, CornersOutIcon, CornersInIcon, XIcon, PlusIcon, CheckIcon } from '@phosphor-icons/react';
-import { ThemePicker } from '../../lib/src/components/ThemePicker';
+import { useState, useEffect } from 'react';
+import { MinusIcon, CornersOutIcon, CornersInIcon, XIcon, PlusIcon } from '@phosphor-icons/react';
 import { PopupButtonRow, chromeButton } from '../../lib/src/components/design';
-import { setDefaultShellOpts } from '../../lib/src/lib/shell-defaults';
-import { IS_MAC } from '../../lib/src/lib/platform';
+import { getPlatform, IS_MAC } from '../../lib/src/lib/platform';
 
-export interface ShellEntry {
-  name: string;
-  path: string;
-  args?: string[];
-}
-
-interface AppBarProps {
-  shells: ShellEntry[];
-}
+const WORKSPACES_ISSUE_URL = 'https://github.com/diffplug/dormouse/issues/406';
 
 type AppWindow = {
   isFocused(): Promise<boolean>;
@@ -145,112 +135,9 @@ function WinControls() {
   );
 }
 
-// ── Shell dropdown ─────────────────────────────────────────────────────────
-
-function ShellDropdown({ shells }: { shells: ShellEntry[] }) {
-  const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState<ShellEntry | undefined>(shells[0]);
-  const ref = useRef<HTMLDivElement>(null);
-
-  // Publish the selection so splits (and other spawn paths) can reuse it.
-  useEffect(() => {
-    setDefaultShellOpts(selected ? { shell: selected.path, args: selected.args } : null);
-  }, [selected]);
-
-  const spawn = useCallback((
-    shell: ShellEntry,
-    options: { replaceUntouched?: boolean; announce?: boolean } = {},
-  ) => {
-    window.dispatchEvent(new CustomEvent('dormouse:new-terminal', {
-      detail: {
-        shell: shell.path,
-        args: shell.args,
-        name: shell.name,
-        ...options,
-      },
-    }));
-  }, []);
-
-  // Close on click outside
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
-
-  // Close on Escape
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [open]);
-
-  return (
-    <div ref={ref} className="relative flex items-center">
-      {/* Primary action: [+] spawns a new terminal with the selected shell */}
-      <Tip label={`New ${selected?.name ?? 'terminal'}`}>
-        <button
-          className={chromeButton({ kind: 'icon' })}
-          onClick={() => selected && spawn(selected)}
-          aria-label={`New ${selected?.name ?? 'terminal'}`}
-        >
-          <PlusIcon size={12} weight="bold" />
-        </button>
-      </Tip>
-      {/* Selector: shows current shell name + caret; click to choose a different shell */}
-      <Tip label="Choose shell">
-        <button
-          className={chromeButton({ kind: 'labeled' })}
-          onClick={() => setOpen(!open)}
-          aria-expanded={open}
-          aria-haspopup="menu"
-        >
-          <span className="font-mono text-[11px]">{selected?.name ?? 'shell'}</span>
-          <CaretDownIcon size={10} weight="bold" />
-        </button>
-      </Tip>
-      {open && (
-        <PopupButtonRow
-          role="menu"
-          className="absolute left-0 top-full z-50 mt-1 w-max flex-col py-1"
-        >
-          {shells.map((shell) => {
-            const isSelected = shell.name === selected?.name;
-            return (
-              <button
-                key={shell.name}
-                role="menuitemradio"
-                aria-checked={isSelected}
-                className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface-raised"
-                onClick={() => {
-                  setOpen(false);
-                  if (isSelected) return;
-                  setSelected(shell);
-                  spawn(shell, { replaceUntouched: true, announce: true });
-                }}
-              >
-                <span className="flex w-3.5 shrink-0 items-center justify-center">
-                  {isSelected && <CheckIcon size={12} weight="bold" />}
-                </span>
-                {shell.name}
-              </button>
-            );
-          })}
-        </PopupButtonRow>
-      )}
-    </div>
-  );
-}
-
 // ── AppBar ─────────────────────────────────────────────────────────────────
 
-export function AppBar({ shells }: AppBarProps) {
+export function AppBar() {
   const windowFocused = useAppWindowFocused();
 
   return (
@@ -267,23 +154,30 @@ export function AppBar({ shells }: AppBarProps) {
       {/* On macOS, native traffic lights are shown by titleBarStyle "Overlay" —
           we just leave padding on the left (pl-[78px]) to avoid overlapping them. */}
 
-      {/* Shell dropdown sits on the left on every platform (after the traffic
-          lights on macOS, or at the start of the bar on Windows/Linux). */}
+      {/* Placeholder for the workspace strip (workspaces-rollout scope,
+          docs/specs/layout.md `## Future`), occupying the spot the strip will
+          take: after the traffic lights on macOS, at the start of the bar on
+          Windows/Linux. Until then it opens the tracking issue externally. */}
       <div className="pl-2">
-        <ShellDropdown shells={shells} />
+        <Tip label="Workspaces are coming — opens the tracking issue">
+          <button
+            className={chromeButton({ kind: 'labeled' })}
+            onClick={() => getPlatform().openExternal?.(WORKSPACES_ISSUE_URL)}
+          >
+            <PlusIcon size={12} weight="bold" aria-hidden="true" />
+            <span>New workspace</span>
+          </button>
+        </Tip>
       </div>
 
       {/* Draggable spacer */}
       <div data-tauri-drag-region className="flex-1 self-stretch" />
 
-      {/* Theme picker is right-aligned on every platform; Windows/Linux
-          additionally show the native-style window controls after it. */}
-      <div className="ml-auto flex items-stretch self-stretch">
-        <div className="flex items-center pr-2">
-          <ThemePicker variant="standalone-appbar" />
-        </div>
-        {!IS_MAC && <WinControls />}
-      </div>
+      {/* Theme and shell selection live in the Settings dialog at the
+          bottom-right of the window (docs/specs/theme.md,
+          docs/specs/standalone.md), so the titlebar carries only the
+          native-style window controls on Windows/Linux. */}
+      {!IS_MAC && <WinControls />}
     </div>
   );
 }

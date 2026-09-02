@@ -1,11 +1,5 @@
-// The pane / Door drag gesture controller (docs/specs/tiling-engine.md →
-// "Hierarchical drag and drop"). Pure imperative pointer machinery with no React
-// dependency beyond ref types: LathHost builds exactly one controller per mount and
-// drives it from a header press (internal pane drag) or the Wall's `externalDrag`
-// mirror (a Door drag entering from the baseboard). Both paths share the threshold
-// gate, the per-frame hit-test against the LIVE store tree, wheel depth cycling,
-// Escape cancel, and the drop-preview publication; the controller owns the window
-// listeners for the whole gesture, so nothing re-subscribes on a Wall re-render.
+// One imperative pane/Door gesture owner per LathHost mount; both paths share the
+// threshold, live-tree hit test, depth cycling, cancel, and preview machinery.
 
 import type { MutableRefObject, RefObject } from 'react';
 import { type Rect, rectKey } from '../../lib/lath/model';

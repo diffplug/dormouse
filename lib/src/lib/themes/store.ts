@@ -1,4 +1,5 @@
 import type { DormouseTheme } from './types';
+import { getStorage } from '../local-json-store';
 // JSON import types are inferred too narrowly — cast at the boundary.
 import _bundledThemes from './bundled.json';
 const bundledThemes = _bundledThemes as unknown as DormouseTheme[];
@@ -6,21 +7,23 @@ const bundledThemes = _bundledThemes as unknown as DormouseTheme[];
 const INSTALLED_KEY = 'dormouse:installed-themes';
 const ACTIVE_KEY = 'dormouse:active-theme';
 
-function getStorage(): Storage | null {
-  const storage = globalThis.localStorage;
-  if (
-    typeof storage?.getItem !== 'function' ||
-    typeof storage?.setItem !== 'function' ||
-    typeof storage?.removeItem !== 'function'
-  ) {
-    return null;
-  }
-  return storage;
-}
-
 export function getBundledThemes(): DormouseTheme[] {
   return bundledThemes;
 }
+
+/**
+ * Parsed installed themes, keyed by the exact JSON they came from.
+ *
+ * Bundled themes are a module array, so repeated `getBundledThemes()` calls
+ * hand back the same objects; installed ones were re-parsed on every call and
+ * so never had stable identity. `applyTheme` compares the incoming theme with
+ * the applied one to skip redundant work, and that comparison silently never
+ * held for an installed theme — every restore cleared and rewrote ~44 CSS
+ * variables. Keying on the raw string keeps the semantics exact: reinstalling
+ * an extension rewrites the JSON, so the objects are new and the re-apply
+ * happens as it should.
+ */
+let installedCache: { raw: string; themes: DormouseTheme[] } | null = null;
 
 export function getInstalledThemes(): DormouseTheme[] {
   const storage = getStorage();
@@ -28,12 +31,23 @@ export function getInstalledThemes(): DormouseTheme[] {
   try {
     const raw = storage.getItem(INSTALLED_KEY);
     if (!raw) return [];
+    // A fresh array over cached elements: identity matters per theme, and no
+    // caller should be able to reach in and mutate the cache.
+    if (installedCache?.raw === raw) return [...installedCache.themes];
     // Guard against valid-but-wrong-shaped JSON (corrupted or externally
-    // tampered storage): a non-array value would otherwise be returned cast
-    // as DormouseTheme[], and the later `.filter`/spread callers would throw
-    // an uncaught TypeError that breaks theme listing and installation.
+    // tampered storage): a non-array value, or an array with malformed
+    // elements, would otherwise be returned cast as DormouseTheme[], and the
+    // later `.filter`/`.find`/spread callers that dereference `.id` would
+    // throw an uncaught TypeError that breaks theme listing and installation.
+    // Drop only the malformed entries so well-formed themes still load.
     const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as DormouseTheme[]) : [];
+    if (!Array.isArray(parsed)) return [];
+    const themes = parsed.filter(
+      (t): t is DormouseTheme =>
+        typeof t === 'object' && t !== null && typeof (t as { id?: unknown }).id === 'string',
+    );
+    installedCache = { raw, themes };
+    return [...themes];
   } catch {
     return [];
   }
@@ -79,5 +93,8 @@ export function getStoredActiveThemeId(): string | undefined {
 export function setActiveThemeId(id: string): void {
   const storage = getStorage();
   if (!storage) return;
+  // `restoreActiveTheme` re-persists the id it just read, which is the common
+  // case now that the picker remounts on every Settings-dialog open.
+  if (storage.getItem(ACTIVE_KEY) === id) return;
   storage.setItem(ACTIVE_KEY, id);
 }

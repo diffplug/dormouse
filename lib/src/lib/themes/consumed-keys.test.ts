@@ -31,3 +31,45 @@ describe('CONSUMED_VSCODE_KEYS / bundle-themes.mjs parity', () => {
     expect(extra).toEqual([]);
   });
 });
+
+// Every var()-bound token declared at document level (@theme or :root) must be
+// mirrored onto body with the same value, or it resolves to nothing outside
+// VS Code — rationale in docs/specs/theme.md. Values are compared, not just
+// presence, so repointing one level's binding without the other fails too.
+describe('theme.css var() bindings are mirrored onto body', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const themeCss = readFileSync(resolve(here, '../../theme.css'), 'utf8');
+
+  function declarations(block: string): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const m of block.matchAll(/^\s*(--[\w-]+)\s*:\s*([^;]+);/gm)) out.set(m[1], m[2].trim());
+    return out;
+  }
+
+  // Global patterns + matchAll, not match(): a second @theme or :root block
+  // would otherwise be read past in silence. Tailwind v4's @theme takes
+  // combinable modifiers (inline, static, reference, default), so the header
+  // is matched with a wildcard rather than an enumeration. `[^{}\n]*` keeps it
+  // bounded to the header line: it can't run past one block's `{` into the
+  // next, and it can't match the prose `@theme` mentions in theme.css's file
+  // comment, since neither of those lines contains a `{`.
+  function blockBodies(pattern: RegExp): string[] {
+    const bodies = [...themeCss.matchAll(pattern)].map((m) => m[1]);
+    if (bodies.length === 0) throw new Error(`Could not locate ${pattern} in theme.css`);
+    return bodies;
+  }
+
+  const documentLevel = new Map(
+    [/@theme\b[^{}\n]*\{([\s\S]*?)\n\}/g, /\n:root \{([\s\S]*?)\n\}/g]
+      .flatMap((pattern) => blockBodies(pattern))
+      .flatMap((block) => [...declarations(block)]),
+  );
+  const bodyLevel = declarations(blockBodies(/\nbody \{([\s\S]*?)\n\}/g).join('\n'));
+
+  it('every document-level token bound to a var() chain is mirrored onto body', () => {
+    const missing = [...documentLevel]
+      .filter(([name, value]) => value.includes('var(') && bodyLevel.get(name) !== value)
+      .map(([name]) => name);
+    expect(missing).toEqual([]);
+  });
+});

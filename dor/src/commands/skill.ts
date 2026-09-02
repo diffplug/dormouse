@@ -12,13 +12,8 @@ interface SkillFlags {
   readonly json?: boolean;
 }
 
-// The stub stays near fact-free — the real, always-current instructions live in
-// `dor skill` — but a purely-pointer stub proved too soft: agents skipped it and
-// fell back to native subprocesses and browser tools. So it carries exactly two
-// load-bearing directives (use `dor ensure`, use `dor ab`), stated loudly, because
-// those two behaviors must be redirected *before* an agent would think to run
-// `dor skill`. Both are foundational command names, the least likely `dor` facts
-// to ever drift.
+// Keep only the two pre-skill directives (`dor ensure`, `dor ab`); rationale and
+// distribution contract live in docs/specs/dor-cli.md → "Agent Skill".
 const BOOTSTRAP_STUB = `<!-- dor-skill:begin — managed by \`dor skill --install\`; edits inside are overwritten -->
 ## Running inside Dormouse
 

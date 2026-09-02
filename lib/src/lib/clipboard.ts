@@ -1,52 +1,55 @@
+import { shellCommandKind } from 'dor/commands/shell-quote';
 import { getMouseSelectionState } from './mouse-selection';
 import { rewrap } from './rewrap';
 import { extractSelectionText } from './selection-text';
-import { getPlatform } from './platform';
+import { getPlatform, PLATFORM_STRING } from './platform';
 import { shellEscapePath } from './shell-escape';
-import { getTerminalInstance, markSessionTouched } from './terminal-registry';
+import { getDefaultShellOpts, getTerminalInstance, getTerminalShellKind, markSessionTouched } from './terminal-registry';
 
-async function writeText(text: string): Promise<void> {
+/** Write plain text to the system clipboard, swallowing the failures a webview
+ *  raises when the document lacks focus or the Permissions API said no — the
+ *  user sees nothing was copied and retries. */
+export async function writeTextToClipboard(text: string): Promise<void> {
   if (!text) return;
   try {
     if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);
     }
   } catch {
-    // Clipboard write can fail when the document lacks focus or the
-    // Permissions API denied access. Silently ignore — the user will
-    // notice the paste didn't work and can retry.
+    // Best effort by contract above.
   }
 }
 
-/**
- * Copy the terminal's current selection to the clipboard as-is.
- * No-op if no selection exists.
- */
+/** Copy the current selection as-is; no-op without one. */
 export async function copyRaw(terminalId: string): Promise<void> {
   const terminal = getTerminalInstance(terminalId);
   const sel = getMouseSelectionState(terminalId).selection;
   if (!terminal || !sel) return;
-  await writeText(extractSelectionText(terminal, sel));
+  await writeTextToClipboard(extractSelectionText(terminal, sel));
 }
 
-/**
- * Copy the terminal's current selection with rewrap transformations applied.
- * Block selections are not rewrapped (they're intentionally rectangular slabs).
- * No-op if no selection exists.
- */
+/** Copy with rewrap, except for rectangular block selections. */
 export async function copyRewrapped(terminalId: string): Promise<void> {
   const terminal = getTerminalInstance(terminalId);
   const sel = getMouseSelectionState(terminalId).selection;
   if (!terminal || !sel) return;
   const raw = extractSelectionText(terminal, sel);
   const out = sel.shape === 'block' ? raw : rewrap(raw);
-  await writeText(out);
+  await writeTextToClipboard(out);
+}
+
+/** Replace ESC with visible U+241B so clipboard text cannot close a bracketed
+ * paste early. Never apply this to unbracketed input; see spec §8.5. */
+function defangPasteEscapes(text: string): string {
+  return text.replace(/\x1b/g, '\u241b');
 }
 
 function writePasteToPty(terminalId: string, text: string): void {
   if (!text) return;
   const bracketed = getMouseSelectionState(terminalId).bracketedPaste;
-  const payload = bracketed ? `\x1b[200~${text}\x1b[201~` : text;
+  const payload = bracketed ? `\x1b[200~${defangPasteEscapes(text)}\x1b[201~` : text;
+  // Paste and file-drop input bypass xterm's onData handler, so the touch has to
+  // be marked here rather than by the keystroke path.
   markSessionTouched(terminalId);
   getPlatform().writePty(terminalId, payload);
 }
@@ -58,14 +61,17 @@ function writePasteToPty(terminalId: string, text: string): void {
  */
 export function pasteFilePaths(terminalId: string, paths: string[]): void {
   if (paths.length === 0) return;
-  const text = paths.map(shellEscapePath).join(' ') + ' ';
+  // A Session keeps the shell family it launched with even after the user picks
+  // a different app-global default for future terminals. The fallback only
+  // serves adapters/tests that have no registered Session entry.
+  const shellKind = getTerminalShellKind(terminalId)
+    ?? shellCommandKind(getDefaultShellOpts()?.shell, PLATFORM_STRING);
+  const text = paths.map((path) => shellEscapePath(path, shellKind)).join(' ') + ' ';
   writePasteToPty(terminalId, text);
 }
 
 export async function readTextFromClipboard(): Promise<string> {
-  // Prefer the platform's native text read when available — navigator.clipboard.readText()
-  // on macOS WKWebView pops a "Paste from <App>" confirmation menu at the cursor every
-  // time it's invoked from JS, which defeats the point of a paste shortcut.
+  // Prefer native reads; macOS WKWebView prompts on every navigator read.
   const platform = getPlatform();
   if (platform.readClipboardText) {
     try {
@@ -82,15 +88,8 @@ export async function readTextFromClipboard(): Promise<string> {
   }
 }
 
-/**
- * Read the clipboard and write its contents to the PTY, honoring the inside
- * program's bracketed-paste mode when enabled (spec §8.5). Prefers file
- * references over plain text (a Finder Cmd+V types the path, not "Document.pdf"
- * as a name string), with raw images saved to a temp file as a last resort.
- *
- * File-path and text reads run in parallel since they're independent IPC
- * roundtrips; the image read is sequential because it allocates a temp file.
- */
+/** Paste file references, then text, then an image temp path; spec §8.6 owns
+ * priority and concurrency. */
 export async function doPaste(terminalId: string): Promise<void> {
   const platform = getPlatform();
 

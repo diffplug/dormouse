@@ -40,6 +40,7 @@ export class HostChallengeIssuer {
   }
 
   issue(): IssuedChallenge {
+    this.#sweepExpiredPrefix();
     const bytes = this.#crypto.getRandomValues(new Uint8Array(CHALLENGE_BYTE_LENGTH));
     const challenge = toBase64Url(bytes);
     const issuedAt = this.#now();
@@ -60,17 +61,30 @@ export class HostChallengeIssuer {
     return this.#now() < expiresAt;
   }
 
-  /** Drop expired challenges; returns how many were removed. */
-  pruneExpired(): number {
+  /**
+   * Drop expired challenges from the FRONT of `#pending`, stopping at the first
+   * one still live. Every challenge a given issuer mints carries the same
+   * `ttlMs`, so insertion order is expiry order and the expired ones are always
+   * a prefix — which makes this amortized O(1) per `issue` rather than a scan.
+   *
+   * `issue` has to do this because nothing else reclaims: `consume` removes only
+   * challenges someone actually redeemed, and every flow here routinely abandons
+   * one. `POST /api/signin/begin` (`server/src/app.ts`) is the sharp case — it
+   * mints before the caller is authenticated at all, so without a sweep an
+   * unauthenticated client can grow `#pending` for the process's lifetime just
+   * by asking.
+   *
+   * A rewinding injected clock only makes this reclaim less, never wrong: it
+   * deletes solely entries already past `expiresAt` and stops at the first live
+   * one, so a head that looks live under the rewound clock costs retention, not
+   * correctness.
+   */
+  #sweepExpiredPrefix(): void {
     const now = this.#now();
-    let pruned = 0;
     for (const [challenge, expiresAt] of this.#pending) {
-      if (now >= expiresAt) {
-        this.#pending.delete(challenge);
-        pruned++;
-      }
+      if (now < expiresAt) return;
+      this.#pending.delete(challenge);
     }
-    return pruned;
   }
 
   get pendingCount(): number {

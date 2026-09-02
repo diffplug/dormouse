@@ -11,8 +11,23 @@ import type {
   OpenPort,
   PlatformAdapter,
   PtyInfo,
+  RemoteHostLink,
 } from "dormouse-lib/lib/platform/types";
+import {
+  answerAskCommand,
+  createRemoteHostLinkClient,
+  notifyCommand,
+} from "dormouse-lib/host/remote/link-client";
+import {
+  REMOTE_HOST_ASK_EVENT,
+  REMOTE_HOST_EVENT_EVENT,
+  REMOTE_HOST_RESULT_EVENT,
+  type RemoteHostAsk,
+  type RemoteHostCommand,
+  type RemoteHostResult,
+} from "dormouse-lib/host/remote/service-protocol";
 import { AlertManager } from "dormouse-lib/lib/alert-manager";
+import type { AwaitHandle, AwaitOptions } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { loadSessionState, saveSessionState } from "dormouse-lib/lib/window-persistence";
@@ -24,7 +39,11 @@ import {
 } from "dormouse-lib/lib/terminal-protocol";
 import { themeColorProvider } from "dormouse-lib/lib/terminal-theme";
 import { applyTerminalSemanticEventsByPtyId } from "dormouse-lib/lib/terminal-state-store";
-import type { DorControlRequestPayload, DorControlResult } from "dor/protocol";
+import type { DorControlCancelPayload, DorControlRequestPayload } from "dor/protocol";
+import {
+  cancelDorControlRequest,
+  dispatchDorControlRequest,
+} from "dormouse-lib/lib/platform/dor-control-dispatch";
 import { BrowserSidecarHost } from "./browser-sidecar-host";
 
 const errMessage = (err: unknown): string => err instanceof Error ? err.message : String(err);
@@ -41,11 +60,19 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private listHandlers = new Set<(detail: { ptys: PtyInfo[] }) => void>();
   private replayHandlers = new Set<(detail: { id: string; data: string }) => void>();
-  private filesDroppedHandlers = new Set<(paths: string[]) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   private protocolParsers = new Map<string, TerminalProtocolParser>();
   private alertManager = new AlertManager();
   private unlistenHost: (() => void) | null = null;
+  // Remote-host bridge, identical in shape to TauriAdapter's — the dev harness
+  // forwards the same `remoteHost:*` messages over its own transport.
+  private readonly remoteHostClient = createRemoteHostLinkClient({
+    sendCommand: (command) => this.sendRemoteHostCommand(command),
+    answerAsk: (askId, results) => this.sendRemoteHostCommand(answerAskCommand(askId, results)),
+    notify: () => this.sendRemoteHostCommand(notifyCommand()),
+  });
+
+  readonly remoteHost: RemoteHostLink = this.remoteHostClient.link;
 
   constructor(private readonly host: BrowserSidecarHost) {
     this.alertManager.onStateChange((id, state) => {
@@ -67,6 +94,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   }
 
   async init(): Promise<void> {
+    this.clearPersistedState();
     await this.host.init();
     this.unlistenHost = this.host.onEvent(({ event, data }) => this.handleHostEvent(event, data));
     this.installConsoleForwarder();
@@ -77,8 +105,13 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.protocolParsers.clear();
     this.unlistenHost?.();
     this.unlistenHost = null;
+    this.remoteHostClient.dispose();
     this.host.send("kill_sidecar_now");
     this.host.close();
+  }
+
+  private sendRemoteHostCommand(command: RemoteHostCommand): void {
+    this.host.send("remote_host_command", { payload: command });
   }
 
   async getAvailableShells(): Promise<{ name: string; path: string; args?: string[] }[]> {
@@ -109,10 +142,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   async getCwd(id: string): Promise<string | null> {
     try { return await this.host.invoke("pty_get_cwd", { id }); } catch { return null; }
-  }
-
-  async getScrollback(id: string): Promise<string | null> {
-    try { return await this.host.invoke("pty_get_scrollback", { id }); } catch { return null; }
   }
 
   async getOpenPorts(id: string): Promise<OpenPort[]> {
@@ -187,10 +216,11 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     if (normalized) window.open(normalized, "_blank", "noopener,noreferrer");
   }
 
-  onFilesDropped(handler: (paths: string[]) => void): () => void {
-    this.filesDroppedHandlers.add(handler);
-    return () => { this.filesDroppedHandlers.delete(handler); };
-  }
+  // No `onFilesDropped`: the optional member is a capability probe for adapters
+  // with a native (non-DOM) drag-drop source (PlatformAdapter in
+  // dormouse-lib/lib/platform/types). This harness runs in a plain browser tab,
+  // where a drop yields `File` objects and no host paths, so there is nothing to
+  // report. Implementing it would claim the capability and never fire.
 
   onPtyData(handler: (detail: { id: string; data: string }) => void): void { this.dataHandlers.add(handler); }
   offPtyData(handler: (detail: { id: string; data: string }) => void): void { this.dataHandlers.delete(handler); }
@@ -208,7 +238,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   alertRemove(id: string): void { this.alertManager.remove(id); }
   alertSetWatchedCommands(names: string[]): void { this.alertManager.setWatchedCommands(names); }
   alertSetCommandWatched(name: string, watched: boolean): void { this.alertManager.setCommandWatched(name, watched); }
-  alertPublishSettings(settings: AlertSettings): void { this.alertManager.setInactivityTimeoutMs(settings.inactivityTimeoutMs); }
+  alertPublishSettings(settings: AlertSettings): void { this.alertManager.applySettings(settings); }
   alertDismiss(id: string): void { this.alertManager.dismissAlert(id); }
   alertAttend(id: string): void { this.alertManager.attend(id); }
   alertResize(id: string): void { this.alertManager.onResize(id); }
@@ -216,6 +246,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   alertToggleTodo(id: string): void { this.alertManager.toggleTodo(id); }
   alertMarkTodo(id: string): void { this.alertManager.markTodo(id); }
   alertClearTodo(id: string): void { this.alertManager.clearTodo(id); }
+  alertAwait(id: string, options: AwaitOptions): AwaitHandle { return this.alertManager.awaitCompletion(id, options); }
   onAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.add(handler); }
   // See TauriAdapter: single webview, so nothing is broadcast back.
   onWatchedCommands(_handler: (names: string[]) => void): void {}
@@ -223,20 +254,36 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   private static STATE_KEY = 'dormouse.browser-sidecar.session';
 
+  // Mirrors TauriAdapter's gate (docs/specs/standalone.md -> "Standalone persists
+  // no Session state"); flip both flags together.
+  private static PERSIST_SESSION = false;
+
+  readonly persistsSession = BrowserSidecarAdapter.PERSIST_SESSION;
+
   // See TauriAdapter: PersistedWindow when the workspaces flag is on, bare
   // PersistedSession when off; the helpers own the translation + JSON/storage
   // plumbing (docs/specs/transport.md).
   saveState(state: unknown): void {
+    if (!BrowserSidecarAdapter.PERSIST_SESSION) return;
     try { saveSessionState(localStorage, BrowserSidecarAdapter.STATE_KEY, state); }
     catch { console.error('[browser-sidecar] Failed to save session state'); }
   }
 
   getState(): unknown {
+    if (!BrowserSidecarAdapter.PERSIST_SESSION) return null;
     try {
       return loadSessionState(localStorage, BrowserSidecarAdapter.STATE_KEY);
     } catch {
       return null;
     }
+  }
+
+  // Delete (not just ignore) pre-gate blobs: they carry transcripts and localStorage
+  // outlives the harness's per-run temp state dir.
+  private clearPersistedState(): void {
+    if (BrowserSidecarAdapter.PERSIST_SESSION) return;
+    try { localStorage.removeItem(BrowserSidecarAdapter.STATE_KEY); }
+    catch { /* private-mode storage: nothing to clear */ }
   }
 
   private handleHostEvent(event: string, data: unknown): void {
@@ -263,20 +310,22 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       const parsed = this.getProtocolParser(id).process(text);
       applyTerminalSemanticEventsByPtyId(id, collectTerminalSemanticEvents(parsed.events));
       for (const handler of this.replayHandlers) handler({ id, data: parsed.visibleData });
+    } else if (event === REMOTE_HOST_RESULT_EVENT) {
+      this.remoteHostClient.onResult(data as RemoteHostResult);
+    } else if (event === REMOTE_HOST_ASK_EVENT) {
+      const ask = data as RemoteHostAsk;
+      this.remoteHostClient.onAsk(ask.rhId, ask.op, ask.params);
+    } else if (event === REMOTE_HOST_EVENT_EVENT) {
+      this.remoteHostClient.onEvent(data);
     } else if (event === "dor:controlRequest") {
       const payload = data as DorControlRequestPayload;
-      const respond = (response: DorControlResult) => {
+      dispatchDorControlRequest(payload, (response) => {
         this.host.send("dor_control_response", { response: { requestId: payload.requestId, ...response } });
-      };
-      window.dispatchEvent(new CustomEvent("dormouse:control-request", {
-        detail: {
-          requestId: payload.requestId,
-          surfaceId: payload.surfaceId,
-          method: payload.method,
-          params: payload.params ?? {},
-          respond,
-        },
-      }));
+      });
+    } else if (event === "dor:controlCancel") {
+      // The sidecar's control server gave up on the request: the `dor` client
+      // hung up, or its own deadline fired.
+      cancelDorControlRequest((data as DorControlCancelPayload).requestId);
     }
   }
 

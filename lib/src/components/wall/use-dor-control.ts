@@ -9,6 +9,8 @@ import type {
   ParseResult,
   SurfacePort as DorSurfacePort,
 } from 'dor/commands/types';
+import { hasBrowser, hasTerminal } from 'dor/commands/types';
+import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
 import type { OpenPort } from '../../lib/platform/types';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 import {
@@ -16,10 +18,11 @@ import {
   getTerminalInstance,
   getTerminalPaneState,
   isPaneOscDriven,
+  resolveTerminalSessionId,
 } from '../../lib/terminal-registry';
 import { surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { hostPathDisplay } from './browser-url';
-import { isAgentBrowserParams } from './browser-surface';
+import { agentBrowserSessionFromParams, isAgentBrowserParams } from './browser-surface';
 // One-way import: connect-port no longer depends on this module (its eager-surface
 // and refresh seams are injected as plain functions).
 import { connectPortToDefaultBrowser } from './connect-port';
@@ -39,6 +42,8 @@ type DorControlParams = {
   key?: unknown;
   lines?: unknown;
   minimized?: unknown;
+  timeoutMs?: unknown;
+  until?: unknown;
   restart?: unknown;
   binaryPath?: unknown;
   includePorts?: unknown;
@@ -53,11 +58,18 @@ type DorControlParams = {
 };
 
 // The webview view of a control request: the shared wire payload, but with
-// semantically-typed params and a `respond` callback the transport layer wires
-// back to the request's `requestId`.
+// semantically-typed params, a `respond` callback the transport layer wires back
+// to the request's `requestId`, and a `signal` that fires when the request is
+// cancelled — the `dor` client hung up, or the control server's deadline passed.
+// A handler that parks (a long `dor await`) must listen to it and release
+// whatever it armed; nothing it responds with afterwards can reach the client.
+// Both are supplied by `lib/src/lib/platform/dor-control-dispatch.ts`.
 type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
   params?: DorControlParams;
   respond: (response: DorControlResult) => void;
+  /** Absent on the in-process dispatch path (and in tests), which has no
+   *  client to hang up — every consumer must treat it as optional. */
+  signal?: AbortSignal;
 };
 
 /** Outcome of {@link EnsureAgentBrowserSurface}: the fields the caller maps onto
@@ -168,7 +180,7 @@ function toSurfacePort(port: OpenPort): DorSurfacePort {
 async function attachSurfacePorts(surfaces: DorSurface[]): Promise<DorSurface[]> {
   const platform = getPlatform();
   return Promise.all(surfaces.map(async (surface) => {
-    if (surface.kind !== 'terminal') return surface;
+    if (!hasTerminal(surface.kind)) return surface;
     try {
       const ports = await platform.getOpenPorts(surface.id);
       return { ...surface, ports: ports.map(toSurfacePort) };
@@ -334,7 +346,6 @@ export function useDorControl({
   lath,
   nav,
   doorsRef,
-  setDoors,
   buildDorSurfaces,
   buildDorSurfaceList,
   surfaceRefForId,
@@ -350,7 +361,6 @@ export function useDorControl({
   /** The navigation/query seam; the handler only needs `hasPane`. */
   nav: WallNav;
   doorsRef: MutableRefObject<DooredItem[]>;
-  setDoors: (doors: DooredItem[]) => void;
   /** The visible panes + active surface projection, shared with wallActions. */
   buildDorSurfaces: () => DorSurface[];
   /** Like `buildDorSurfaces` but also includes minimized (doored) Surfaces —
@@ -392,8 +402,9 @@ export function useDorControl({
     callerSurfaceId: string | undefined,
   ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaceList(), target, callerSurfaceId), [buildDorSurfaceList]);
 
-  // The shared prelude of the direct-operation handlers (send / read / kill): a
-  // target surface is required and must resolve against the listed surfaces.
+  // The shared prelude of every handler that acts on an existing surface
+  // (send / read / await / kill / resolve*): a target surface is required and
+  // must resolve against the listed surfaces — minimized ones included.
   // Responds with the failure and returns null so the caller just bails.
   const requireListedSurface = useCallback((
     surfaceParam: unknown,
@@ -412,17 +423,35 @@ export function useDorControl({
     return target.value;
   }, [resolveListedSurface]);
 
-  // requireListedSurface plus the terminal-only guard shared by the handlers that
-  // read/write/scan a shell (send / read / resolveOpen). Responds and returns null
-  // on a browser-surface target so the caller just bails.
+  // requireListedSurface plus the capability gate shared by the handlers that
+  // read/write/scan a shell (send / read / await / resolveOpen): these are
+  // terminal-gated operations (docs/specs/glossary.md → Panes and Surfaces).
+  // Responds and returns null on a target with no terminal so the caller just
+  // bails.
   const requireTerminalSurface = useCallback((
     surfaceParam: unknown,
     detail: DorControlRequest,
   ): DorSurface | null => {
     const target = requireListedSurface(surfaceParam, detail);
     if (!target) return null;
-    if (target.kind !== 'terminal') {
-      detail.respond({ ok: false, error: `surface '${target.ref}' is not a terminal` });
+    if (!hasTerminal(target.kind)) {
+      detail.respond({ ok: false, error: `surface '${target.ref}' has no terminal (kind: ${target.kind})` });
+      return null;
+    }
+    return target;
+  }, [requireListedSurface]);
+
+  // The browser half of the same gate, for `dor ab --surface` (browser-gated;
+  // docs/specs/glossary.md → Panes and Surfaces). Minimized targets pass: a
+  // parked ab surface keeps its daemon session alive.
+  const requireBrowserSurface = useCallback((
+    surfaceParam: unknown,
+    detail: DorControlRequest,
+  ): DorSurface | null => {
+    const target = requireListedSurface(surfaceParam, detail);
+    if (!target) return null;
+    if (!hasBrowser(target.kind)) {
+      detail.respond({ ok: false, error: `surface '${target.ref}' has no browser (kind: ${target.kind})` });
       return null;
     }
     return target;
@@ -444,34 +473,24 @@ export function useDorControl({
   const findSurfaceByParams = useCallback((isMatch: (params: unknown) => boolean): { id: string; minimized: boolean } | null => {
     const panel = lath.listPanes().find((candidate) => isMatch(candidate.params));
     if (panel) return { id: panel.id, minimized: false };
-    const door = doorsRef.current.find((candidate) => isMatch(candidate.params));
+    const door = doorsRef.current.find((candidate) => isMatch(lath.getMeta(candidate.id)?.params));
     if (door) return { id: door.id, minimized: true };
     return null;
   }, [lath]);
 
   /** The agent-browser session ↔ surface registry: the surface bound to
    *  `session`, or null if none exists. */
-  const findAgentBrowserSurface = useCallback((session: string) => findSurfaceByParams((params) =>
-    isAgentBrowserParams(params) && (params as { session?: unknown }).session === session,
+  const findAgentBrowserSurface = useCallback((session: string) => findSurfaceByParams(
+    (params) => agentBrowserSessionFromParams(params) === session,
   ), [findSurfaceByParams]);
 
-  // Fold a params patch onto a surface whether it's a visible pane (engine
-  // metadata) or a minimized door (the doorsRef map) — the reuse/refresh
-  // mechanics shared by `ensureAgentBrowserSurface`'s reuse arm and the
-  // connect-port refresh seam. A no-op on an empty patch.
+  // Fold a params patch onto a surface, pane or door alike — the store holds both,
+  // so there is one write path. Shared by `ensureAgentBrowserSurface`'s reuse arm and
+  // the connect-port refresh seam. A no-op on an empty patch.
   const updateSurfaceParams = useCallback((id: string, patch: Record<string, unknown>) => {
     if (Object.keys(patch).length === 0) return;
-    const door = doorsRef.current.find((candidate) => candidate.id === id);
-    if (door) {
-      const nextDoors = doorsRef.current.map((d) => d.id === id
-        ? { ...d, params: { ...d.params, ...patch } }
-        : d);
-      doorsRef.current = nextDoors;
-      setDoors(nextDoors);
-    } else {
-      lath.store.updateParams(id, patch);
-    }
-  }, [doorsRef, lath, setDoors]);
+    lath.store.updateParams(id, patch);
+  }, [lath]);
 
   const ensureAgentBrowserSurface = useCallback<EnsureAgentBrowserSurface>(({
     key,
@@ -559,7 +578,7 @@ export function useDorControl({
       const booting = findSurfaceByParams((params) =>
         isAgentBrowserParams(params)
         && (params as { key?: unknown }).key === 'default'
-        && (params as { session?: unknown }).session === undefined);
+        && agentBrowserSessionFromParams(params) === null);
       if (booting) return reveal(booting.id);
       // (c) Create it now: NO `session` (keeps the controller's stale-port
       // recovery inert until the daemon is up), but carry the target `url` so
@@ -826,6 +845,61 @@ export function useDorControl({
         return;
       }
 
+      // `dor await` — park until the Session finishes what it is doing
+      // (`docs/specs/alert.md` → Await). Everything that makes this a *wait* —
+      // the wake condition, the grace window, the `timeoutMs` ceiling, and the
+      // absorption of the completion it consumes — lives in the host's
+      // `AlertManager`; this branch only validates, parks, and reports.
+      if (detail.method === SURFACE_CONTROL_METHODS.await) {
+        const target = requireTerminalSurface(params.surface, detail);
+        if (!target) return;
+        const until = params.until;
+        if (until !== 'quiet' && until !== 'exit') {
+          detail.respond({ ok: false, error: `invalid await condition '${String(until)}'` });
+          return;
+        }
+        // The host re-checks this, but a bad ceiling there settles `cancelled`
+        // silently (no response ever reaches the caller); rejecting here turns
+        // that into a visible error.
+        const timeoutMs = numberParam(params.timeoutMs);
+        if (timeoutMs === undefined || timeoutMs <= 0 || timeoutMs > MAX_AWAIT_TIMEOUT_MS) {
+          detail.respond({ ok: false, error: `timeoutMs must be a positive number no greater than ${MAX_AWAIT_TIMEOUT_MS}` });
+          return;
+        }
+
+        const handle = getPlatform().alertAwait(resolveTerminalSessionId(target.id), { until, timeoutMs });
+        // The client hung up (Ctrl-C) or the control server's deadline passed:
+        // release the wait so it stops absorbing completions nobody can receive.
+        // Guarded because in-process callers may dispatch a request without one.
+        detail.signal?.addEventListener('abort', () => handle.cancel());
+
+        const outcome = await handle.promise;
+        // `cancelled` has no wire outcome of its own — it means the host tore
+        // the wait down (manager disposed, webview released). Answering with an
+        // error rather than returning silently is what forgets the request:
+        // `respond` is the only thing that clears `dor-control-dispatch`'s
+        // in-flight entry, and a client that is somehow still listening gets an
+        // answer instead of blocking to its own deadline.
+        if (outcome.kind === 'cancelled') {
+          detail.respond({ ok: false, error: `await on '${target.ref}' was cancelled by the host` });
+          return;
+        }
+        detail.respond({
+          ok: true,
+          result: {
+            workspaceRef: 'workspace:1',
+            surfaceId: target.id,
+            surfaceRef: target.ref,
+            outcome: outcome.kind,
+            ...(outcome.kind === 'resolved' ? { cause: outcome.cause } : {}),
+            // The host measured the wait; re-measuring here would only add the
+            // transport hop and disagree with what it absorbed.
+            waitedMs: outcome.waitedMs,
+          },
+        });
+        return;
+      }
+
       if (detail.method === SURFACE_CONTROL_METHODS.kill) {
         const confirmation = killConfirmationParam(params.confirmation);
         if (!confirmation) {
@@ -923,8 +997,8 @@ export function useDorControl({
       if (detail.method === SURFACE_CONTROL_METHODS.resolveOpen) {
         // Resolve a terminal Surface handle to the dev-server URL it owns, for
         // `dor ab open <surface>` / `dor iframe <surface>`. Same port scan as
-        // `dor list --ports`; minimized doors are valid targets. Only terminals
-        // own ports, so a browser-surface target is rejected by the guard.
+        // `dor list --ports`; minimized doors are valid targets. Ports ride the
+        // terminal, so a target without one is rejected by the guard.
         const target = requireTerminalSurface(params.surface, detail);
         if (!target) return;
         let ports: OpenPort[];
@@ -960,12 +1034,43 @@ export function useDorControl({
         return;
       }
 
+      if (detail.method === SURFACE_CONTROL_METHODS.resolveAgentBrowser) {
+        // Resolve a browser Surface handle to the agent-browser session bound to
+        // it, for `dor ab --surface <handle> <verb...>`. Past the browser gate,
+        // web verbs stay renderMode-gated: an `iframe` renderer is a browser
+        // with nothing to drive (docs/specs/glossary.md → Panes and Surfaces).
+        const target = requireBrowserSurface(params.surface, detail);
+        if (!target) return;
+        if (target.renderMode === 'iframe') {
+          detail.respond({
+            ok: false,
+            error: `surface '${target.ref}' is not agent-browser rendered (render_mode: ${target.renderMode})`,
+          });
+          return;
+        }
+        // The session is the one row field the projection deliberately withholds
+        // (it is an identifier, not a capability), so read it from the params —
+        // live metadata for panes and parked doors alike.
+        const session = agentBrowserSessionFromParams(lath.getMeta(target.id)?.params);
+        if (!session) {
+          // An eagerly-created connect pane whose daemon boot has not yet named
+          // it (docs/specs/dor-browser.md → Pane Context Menu Connect).
+          detail.respond({ ok: false, error: `surface '${target.ref}' has no agent-browser session yet` });
+          return;
+        }
+        detail.respond({
+          ok: true,
+          result: { surfaceId: target.id, surfaceRef: target.ref, session },
+        });
+        return;
+      }
+
       detail.respond({ ok: false, error: `unsupported Dormouse control method '${detail.method}'` });
     };
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
+  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
 
   return { connectPort };
 }

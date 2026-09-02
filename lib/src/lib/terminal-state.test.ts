@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { POSIX_ESCAPABLE } from './posix-escape';
+import { shellEscapePosix } from './shell-escape';
 import {
+  commandArgv0,
   createTerminalPaneState,
   cwdDisplay,
   cwdFromManualPath,
@@ -266,10 +269,73 @@ describe('command title summarizer', () => {
     expect(summarizeCommandLine('ssh prod-box')).toBe('ssh prod-box');
   });
 
+  // One name per program: the launcher suffix is dropped everywhere, so the
+  // header reads the same name as the WATCHING rule row and the bell tooltip.
+  it('reads a Windows launcher as the program it launches', () => {
+    expect(summarizeCommandLine('vim.exe notes.txt')).toBe('vim');
+    expect(summarizeCommandLine('cargo.exe watch -x test')).toBe('cargo watch -x test');
+    expect(summarizeCommandLine('C:\\tools\\nodejs\\npm.cmd')).toBe('npm');
+    expect(summarizeCommandLine('C:\\tools\\nodejs\\npm.cmd run dev')).toBe('npm run dev');
+  });
+
   it('keeps pipelines and compound commands recognizable', () => {
     expect(summarizeCommandLine('cat package.json | jq .name')).toBe('cat package.json | ...');
     expect(summarizeCommandLine('cd lib && pnpm test')).toBe('cd lib ...');
     expect(summarizeCommandLine('"my command" "quoted arg"')).toBe('my command quoted arg');
+  });
+});
+
+describe('command tokenizer dialects', () => {
+  // A backslash is a path separator unless it precedes something a shell really
+  // escapes, so both dialects reduce to the bare program name.
+  it.each([
+    // Windows: absolute paths, launchers, a quoted path with spaces.
+    ['C:\\tools\\dor.cmd tool storybook', 'dor', 'dor tool storybook'],
+    ['C:\\Users\\me\\.claude\\local\\claude', 'claude', 'claude'],
+    ['"C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm', 'npm run dev'],
+    ['\\\\build\\share\\tools\\claude.exe --print', 'claude', 'claude --print'],
+    ['FOO=1 "C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm', 'npm run dev'],
+    // PowerShell's call operator, the only way that shell runs a quoted path.
+    // Without the leading-`&` skip it reads as a boundary and argv0 is null.
+    ['& "C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm', 'npm run dev'],
+    ['& C:\\tools\\dor.cmd tool storybook', 'dor', 'dor tool storybook'],
+    // POSIX escapes keep their meaning.
+    ['/opt/my\\ tools/claude --print', 'claude', 'claude --print'],
+    ['grep \\*.ts src', 'grep', 'grep *.ts src'],
+    ['echo a\\\\b', 'echo', 'echo a\\b'],
+  ])('reduces %j to %j / %j', (raw, argv0, summary) => {
+    expect(commandArgv0(raw)).toBe(argv0);
+    expect(summarizeCommandLine(raw)).toBe(summary);
+  });
+
+  // An unquoted Windows path with spaces is undecidable without probing the
+  // filesystem — `A\B C\D.cmd` is equally `A\B` plus an argument — so the
+  // tokenizer splits it and argv0 misses rather than naming the wrong program.
+  it('leaves an unquoted Windows path with spaces split', () => {
+    expect(commandArgv0('C:\\Program Files\\nodejs\\npm.cmd run dev')).toBe('Program');
+    expect(commandArgv0('"C:\\Program Files\\Git\\bin\\bash" scripts\\bootstrap.cmd')).toBe('bash');
+  });
+
+  it('pins the ordinary POSIX argv[0] escape cost of dialect-free tokenizing', () => {
+    expect(commandArgv0('foo\\-bar')).toBe('-bar');
+  });
+
+  // `POSIX_ESCAPABLE` is `shellEscapePosix`'s set; the tokenizer unescapes it.
+  // The two halves must name the same characters or a path Dormouse escaped for
+  // a drag-and-drop paste renders with stray backslashes in the pane header.
+  const ESCAPABLE = ` \t!"#$&'()*;<>?[]\`{|}~\\`;
+
+  it('is exactly the set spelled out here, so a change to it lands in this file', () => {
+    // Both directions, so neither a new nor a dropped member slips through.
+    expect(Array.from(ESCAPABLE).filter((char) => !POSIX_ESCAPABLE.test(char))).toEqual([]);
+    const printable = Array.from({ length: 95 }, (_, i) => String.fromCharCode(32 + i));
+    expect(printable.filter((char) => POSIX_ESCAPABLE.test(char)).join('')).toBe(
+      Array.from(ESCAPABLE).filter((char) => char !== '\t').sort().join(''),
+    );
+  });
+
+  it.each(Array.from(ESCAPABLE))('round-trips %j out of shellEscapePosix', (char) => {
+    expect(summarizeCommandLine(`cat ${shellEscapePosix(`a${char}b`)}`)).toBe(`cat a${char}b`);
   });
 });
 

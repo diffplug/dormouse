@@ -43,6 +43,7 @@ const fixtureSurfaces = [
     url: null,
     ringing: false,
     todo: false,
+    awaited: false,
   },
   {
     id: '22222222-2222-4222-8222-222222222222',
@@ -59,6 +60,7 @@ const fixtureSurfaces = [
     url: null,
     ringing: false,
     todo: true,
+    awaited: true,
   },
   {
     id: '33333333-3333-4333-8333-333333333333',
@@ -74,6 +76,7 @@ const fixtureSurfaces = [
     url: 'http://localhost:5173/',
     ringing: false,
     todo: false,
+    awaited: false,
   },
   {
     id: '44444444-4444-4444-8444-444444444444',
@@ -89,6 +92,7 @@ const fixtureSurfaces = [
     url: null,
     ringing: true,
     todo: false,
+    awaited: false,
   },
 ];
 
@@ -208,6 +212,21 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         minimized: false,
       };
     },
+    // Mirrors the host's session↔surface registry: surface:3 is bound to a
+    // GUI-minted session, surface:1 is a terminal and fails the host's gate.
+    // Which gate rejected is the host's business (asserted in Wall.test.tsx);
+    // the CLI has one catch and prints whatever comes back.
+    async resolveAgentBrowserSession(request) {
+      this.requests.push({ method: 'resolveAgentBrowserSession', request });
+      if (request.surface === 'surface:1') {
+        throw new Error("surface 'surface:1' has no browser (kind: terminal)");
+      }
+      return {
+        surfaceId: '33333333-3333-4333-8333-333333333333',
+        surfaceRef: 'surface:3',
+        session: 'dormouse.1.gui-a1b2c3',
+      };
+    },
     async resolveOpenTarget(request) {
       this.requests.push({ method: 'resolveOpenTarget', request });
       // Mirror the host: surface:1 owns port 5173; surface:2 owns nothing.
@@ -219,6 +238,25 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         surfaceRef: 'surface:1',
         port: 5173,
         url: 'http://localhost:5173/',
+      };
+    },
+  };
+}
+
+// `dor await` only ever calls awaitSurface, so a canned outcome is the whole fake.
+// The host owns waitedMs, so the CLI's duration rendering is entirely a function
+// of what the fake hands back.
+function awaitClient(outcome) {
+  return {
+    requests: [],
+    async awaitSurface(request) {
+      this.requests.push({ method: 'awaitSurface', request });
+      return {
+        workspaceRef: 'workspace:1',
+        surfaceId: '33333333-3333-4333-8333-333333333333',
+        surfaceRef: request.surface,
+        waitedMs: 0,
+        ...outcome,
       };
     },
   };
@@ -286,7 +324,9 @@ test('split json output', async () => {
 });
 
 test('shell command quoting supports shell families', () => {
+  assert.equal(shellCommandKind(undefined, 'Windows'), 'cmd');
   assert.equal(shellCommandKind('/bin/zsh', 'darwin'), 'posix');
+  assert.equal(shellCommandKind('C:\\Program Files\\Git\\bin\\bash.exe', 'win32'), 'posix');
   assert.equal(shellCommandKind('C:\\Windows\\System32\\cmd.exe', 'win32'), 'cmd');
   assert.equal(shellCommandKind('C:\\Program Files\\PowerShell\\7\\pwsh.exe', 'win32'), 'powershell');
   assert.equal(
@@ -298,8 +338,19 @@ test('shell command quoting supports shell families', () => {
     "& 'C:\\Program Files\\nodejs\\node.exe' -e 'Write-Output $args[0]' 'hello world' 'it''s'",
   );
   assert.equal(
+    buildShellCommandForKind('powershell', ['Write-Output', '@args']),
+    "Write-Output '@args'",
+  );
+  assert.equal(
     buildShellCommandForKind('cmd', ['C:\\Program Files\\nodejs\\node.exe', '-e', 'console.log(process.argv[1])', 'hello world', 'a&b']),
     '"C:\\Program Files\\nodejs\\node.exe" -e "console.log^(process.argv[1]^)" "hello world" "a^&b"',
+  );
+  // `,` and `@` were dropped from the shared WINDOWS_SAFE_ARG for PowerShell's
+  // array operator and splatting; cmd.exe reads `,` as an argument separator and
+  // a leading `@` as echo suppression, so quoting them here is wanted too.
+  assert.equal(
+    buildShellCommandForKind('cmd', ['type', 'a,b.txt', '@echo.txt']),
+    'type "a,b.txt" "@echo.txt"',
   );
 });
 
@@ -678,6 +729,119 @@ test('read invalid lines output', async () => {
   await snapshot('read-invalid-lines', await runCli(['read', 'surface:1', '--lines', '0'], { client: fixtureClient() }));
 });
 
+test('await prints the bare cause on stdout and the narrative on stderr', async () => {
+  const result = await runCli(['await', 'surface:1', '--until', 'quiet'], {
+    client: awaitClient({ outcome: 'resolved', cause: 'quiet', waitedMs: 615_000 }),
+  });
+  // The whole point of the split: `CAUSE=$(dor await ...)` captures `quiet`, and
+  // nothing else, however chatty stderr gets.
+  assert.equal(result.stdout, 'quiet\n');
+  assert.equal(result.stderr, 'quiet: output stopped after 10m 15s\n');
+  assert.equal(result.exitCode, 0);
+  await snapshot('await-text', result);
+});
+
+test('await json output', async () => {
+  await snapshot('await-json', await runCli(['await', 'surface:3', '--until', 'quiet', '--json'], {
+    client: awaitClient({ outcome: 'resolved', cause: 'quiet', waitedMs: 615_000 }),
+  }));
+});
+
+test('await narrates every cause', async () => {
+  const cases = [
+    ['exit', { outcome: 'resolved', cause: 'exit', waitedMs: 182_000 }, 'exit: command exited after 3m 02s\n'],
+    ['quiet', { outcome: 'resolved', cause: 'bell', waitedMs: 45_000 }, 'bell: surface rang after 45s\n'],
+    ['quiet', { outcome: 'resolved', cause: 'idle', waitedMs: 2_000 }, 'idle: no output within 2s, nothing was running\n'],
+    ['exit', { outcome: 'resolved', cause: 'idle', waitedMs: 2_000 }, 'idle: no command started within 2s\n'],
+  ];
+  for (const [until, outcome, stderr] of cases) {
+    const result = await runCli(['await', 'surface:1', '--until', until], { client: awaitClient(outcome) });
+    assert.equal(result.stdout, `${outcome.cause}\n`);
+    assert.equal(result.stderr, stderr);
+    assert.equal(result.exitCode, 0);
+  }
+});
+
+test('await formats durations', async () => {
+  const cases = [[0, '0s'], [59_999, '59s'], [60_000, '1m 00s'], [615_000, '10m 15s']];
+  for (const [waitedMs, rendered] of cases) {
+    const result = await runCli(['await', 'surface:1', '--until', 'quiet'], {
+      client: awaitClient({ outcome: 'resolved', cause: 'quiet', waitedMs }),
+    });
+    assert.equal(result.stderr, `quiet: output stopped after ${rendered}\n`);
+  }
+});
+
+test('await times out with exit 2 and an empty stdout', async () => {
+  const timedOut = await runCli(['await', 'surface:5', '--until', 'quiet'], {
+    client: awaitClient({ outcome: 'timeout', waitedMs: 600_000 }),
+  });
+  assert.equal(timedOut.exitCode, 2);
+  assert.equal(timedOut.stdout, '');
+  await snapshot('await-timeout', timedOut);
+
+  // --until exit names the condition it gave up on, and the reported seconds are
+  // the --timeout value as given rather than the measured wait.
+  await snapshot('await-timeout-exit', await runCli(['await', 'surface:5', '--until', 'exit', '--timeout', '30'], {
+    client: awaitClient({ outcome: 'timeout', waitedMs: 30_000 }),
+  }));
+
+  // --json changes nothing about a failure: still stderr, still exit 2.
+  await snapshot('await-timeout-json', await runCli(['await', 'surface:5', '--until', 'quiet', '--json'], {
+    client: awaitClient({ outcome: 'timeout', waitedMs: 600_000 }),
+  }));
+});
+
+test('await reports a dead surface with exit 3', async () => {
+  const died = await runCli(['await', 'surface:5', '--until', 'exit'], {
+    client: awaitClient({ outcome: 'died', waitedMs: 200_000 }),
+  });
+  assert.equal(died.exitCode, 3);
+  assert.equal(died.stdout, '');
+  await snapshot('await-died', died);
+});
+
+test('await sends the request to the host', async () => {
+  const client = awaitClient({ outcome: 'resolved', cause: 'quiet', waitedMs: 0 });
+  await runCli(['await', 'surface:2', '--until', 'exit'], { client });
+  assert.deepEqual(client.requests, [{
+    method: 'awaitSurface',
+    request: { surface: 'surface:2', until: 'exit', timeoutMs: 600_000 },
+  }]);
+
+  const custom = awaitClient({ outcome: 'resolved', cause: 'quiet', waitedMs: 0 });
+  await runCli(['await', 'surface:2', '--until', 'quiet', '--timeout', '30'], { client: custom });
+  assert.equal(custom.requests[0].request.timeoutMs, 30_000);
+});
+
+test('await requires a valid --until', async () => {
+  await snapshot('await-missing-until', await runCli(['await', 'surface:1'], { client: awaitClient({}) }));
+  await snapshot('await-invalid-until', await runCli(['await', 'surface:1', '--until', 'soon'], { client: awaitClient({}) }));
+});
+
+test('await rejects a non-positive --timeout', async () => {
+  await snapshot('await-invalid-timeout', await runCli(['await', 'surface:1', '--until', 'quiet', '--timeout', '0'], {
+    client: awaitClient({}),
+  }));
+});
+
+test('await accepts at most a 24-hour --timeout', async () => {
+  const acceptedClient = awaitClient({ outcome: 'resolved', cause: 'quiet', waitedMs: 0 });
+  const accepted = await runCli(['await', 'surface:1', '--until', 'quiet', '--timeout', '86400'], {
+    client: acceptedClient,
+  });
+  assert.equal(accepted.exitCode, 0);
+  assert.equal(acceptedClient.requests[0].request.timeoutMs, 86_400_000);
+
+  const rejectedClient = awaitClient({});
+  const rejected = await runCli(['await', 'surface:1', '--until', 'quiet', '--timeout', '86401'], {
+    client: rejectedClient,
+  });
+  assert.equal(rejected.exitCode, 1);
+  assert.match(rejected.stderr, /invalid --timeout '86401'/);
+  assert.deepEqual(rejectedClient.requests, []);
+});
+
 test('kill text output', async () => {
   await snapshot(
     'kill-text',
@@ -706,6 +870,16 @@ test('kill sends confirmation to the host', async () => {
 
 test('kill missing confirmation output', async () => {
   await snapshot('kill-missing-confirmation', await runCli(['kill', 'surface:2'], { client: fixtureClient() }));
+});
+
+test('kill conflicting confirmation output', async () => {
+  await snapshot(
+    'kill-conflicting-confirmation',
+    await runCli(
+      ['kill', 'surface:2', '--confirm-dangerously', '--confirm-if-read', 'done'],
+      { client: fixtureClient() },
+    ),
+  );
 });
 
 test('kill short confirm-if-read output', async () => {
@@ -926,11 +1100,95 @@ test('agent-browser forwards child exit code and skips surface on failure', asyn
   assert.deepEqual(client.requests, []);
 });
 
+test('agent-browser --surface drives the session the host says the surface is bound to', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['ab', '--surface', 'surface:3', 'click', '@e3'], { client, execAgentBrowser: ab.exec });
+  // The handle is resolved first, then everything else is forwarded verbatim
+  // against the resolved session — a GUI-minted name no `--key` can produce.
+  assert.deepEqual(client.requests[0], {
+    method: 'resolveAgentBrowserSession',
+    request: { surface: 'surface:3' },
+  });
+  assert.deepEqual(ab.calls, [
+    ['agent-browser', '--session', 'dormouse.1.gui-a1b2c3', 'click', '@e3'],
+    ['agent-browser', '--session', 'dormouse.1.gui-a1b2c3', 'stream', 'status', '--json'],
+  ]);
+  // No `key`: a surface-addressed session is not necessarily a managed one.
+  assert.deepEqual(client.requests[1], {
+    method: 'agentBrowserSurface',
+    request: { key: undefined, session: 'dormouse.1.gui-a1b2c3', wsPort: 61141 },
+  });
+});
+
+test('agent-browser --surface accepts --surface=handle and resolves an open target too', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['ab', '--surface=surface:3', 'open', ':5173'], { client, execAgentBrowser: ab.exec });
+  assert.deepEqual(ab.calls[0], [
+    'agent-browser', '--session', 'dormouse.1.gui-a1b2c3', 'open', 'http://localhost:5173/',
+  ]);
+});
+
+test('agent-browser --surface prints the host gate error and never forwards', async () => {
+  const ab = fakeAgentBrowser();
+  const result = await runCli(['ab', '--surface', 'surface:1', 'reload'], {
+    client: fixtureClient(),
+    execAgentBrowser: ab.exec,
+  });
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, "Error: surface 'surface:1' has no browser (kind: terminal)\n");
+  // An unresolved handle must never reach agent-browser as a session.
+  assert.deepEqual(ab.calls, []);
+});
+
+test('agent-browser --surface needs a control endpoint', async () => {
+  const ab = fakeAgentBrowser();
+  const result = await runCli(['ab', '--surface', 'surface:3', 'reload'], { execAgentBrowser: ab.exec });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /control endpoint is not available/);
+  assert.deepEqual(ab.calls, []);
+});
+
+test('agent-browser rejects a valueless identity flag, whichever one it is', async () => {
+  // The three flags share one parse loop; a trailing flag has no value and a
+  // following flag is never one, so neither may be swallowed as the value.
+  for (const args of [['ab', 'reload', '--key'], ['ab', 'reload', '--session'], ['ab', 'reload', '--surface']]) {
+    const ab = fakeAgentBrowser();
+    const result = await runCli(args, { client: fixtureClient(), execAgentBrowser: ab.exec });
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stderr, `Error: ${args[2]} requires a value\n`);
+    assert.deepEqual(ab.calls, []);
+  }
+  const ab = fakeAgentBrowser();
+  const result = await runCli(['ab', '--surface', '--json', 'reload'], { client: fixtureClient(), execAgentBrowser: ab.exec });
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stderr, 'Error: --surface requires a value\n');
+  assert.deepEqual(ab.calls, []);
+});
+
 test('agent-browser key/session conflict output', async () => {
   const ab = fakeAgentBrowser();
   await snapshot(
     'agent-browser-key-session-conflict',
     await runCli(['ab', '--key', 'a', '--session', 'b', 'open', 'x'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
+  );
+});
+
+test('agent-browser key/surface conflict reports in flag order, not argv order', async () => {
+  const ab = fakeAgentBrowser();
+  await snapshot(
+    'agent-browser-key-surface-conflict',
+    await runCli(['ab', '--surface', 'surface:3', '--key', 'a', 'reload'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
+  );
+});
+
+test('agent-browser three-way identity conflict output', async () => {
+  const ab = fakeAgentBrowser();
+  await snapshot(
+    'agent-browser-identity-conflict',
+    await runCli(['ab', '--key', 'a', '--session', 'b', '--surface', 'surface:3', 'reload'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
   );
 });
 
@@ -995,6 +1253,19 @@ test('list text output', async () => {
   const result = await runCli(['list'], { client, env: listEnv });
   assert.deepEqual(client.requests, [{ includePorts: false }]);
   await snapshot('list-text', result);
+});
+
+test('list tags an awaited surface after its todo', async () => {
+  const text = await runCli(['list'], { client: fixtureClient(), env: listEnv });
+  const row = text.stdout.split('\n').find((line) => line.includes('surface:2'));
+  assert.match(row, /\[todo\]\s+\[awaited\]$/);
+
+  const json = await runCli(['list', '--json'], { client: fixtureClient(), env: listEnv });
+  const surfaces = JSON.parse(json.stdout).surfaces;
+  assert.deepEqual(
+    surfaces.map((surface) => [surface.ref, surface.awaited]),
+    [['surface:1', false], ['surface:2', true], ['surface:3', false], ['surface:4', false]],
+  );
 });
 
 test('list json output', async () => {

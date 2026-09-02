@@ -34,16 +34,46 @@ if [[ -z ${DORMOUSE_SHELL_INTEGRATION} ]]; then
 
   autoload -Uz add-zsh-hook
 
-  # Escape a value for OSC 633 transport. The parser splits the E command field
-  # on the first raw ';' then decodes \\ and \xNN, so backslash and semicolon
-  # must be escaped; newlines/CR are escaped to keep the sequence single-line.
+  # The three byte sequences that end an OSC string, and therefore the three no
+  # field of ours may contain raw: BEL, ESC (which begins ST, "ESC \\"), and the
+  # C1 ST U+009C. The last is held as its UTF-8 bytes because that is how it
+  # reaches us from a filename, and because [[:cntrl:]] does not cover it under
+  # LC_ALL=C — verified, not assumed.
+  __dormouse_633_c1st=$'\302\234'
+
+  # Escape a value for the E command field, leaving the result in
+  # __dormouse_633_out. Backslash and semicolon are escaped because the parser
+  # splits on the first raw ';' then decodes \\ and \xNN; newlines/CR keep the
+  # sequence single-line; BEL/ESC/C1-ST are the OSC terminators. Escaping costs
+  # nothing here because the parser decodes \xNN back.
+  # Why terminators must not survive: docs/specs/terminal-escapes.md -> OSC 633.
+  #
+  # Out-param rather than a return value: the call site would otherwise need
+  # $(...), which forks a subshell on every command in the user's shell.
   __dormouse_633_escape() {
     local value=$1
     value=${value//\\/\\\\}
     value=${value//;/\\x3b}
     value=${value//$'\n'/\\x0a}
     value=${value//$'\r'/\\x0d}
-    builtin print -rn -- "$value"
+    value=${value//$'\a'/\\x07}
+    value=${value//$'\e'/\\x1b}
+    value=${value//"$__dormouse_633_c1st"/\\x9c}
+    __dormouse_633_out=$value
+  }
+
+  # Reduce a value for the `Cwd=` field into __dormouse_633_out. Unlike E, the
+  # parser reads Cwd= verbatim — no \xNN decoding, so a Windows path's
+  # backslashes arrive intact — which rules out escaping, so the terminators are
+  # removed instead. A path component may hold any byte but '/' and NUL, so a
+  # directory name can carry one; see docs/specs/terminal-escapes.md -> OSC 633.
+  #
+  # The C1 ST goes first and explicitly: under LC_ALL=C it is two ordinary bytes
+  # that [[:cntrl:]] does not match.
+  __dormouse_633_safe_cwd() {
+    local value=$1
+    value=${value//"$__dormouse_633_c1st"/}
+    __dormouse_633_out=${value//[[:cntrl:]]/}
   }
 
   # First precmd has no preceding command, so it must not emit a D (finished).
@@ -52,7 +82,8 @@ if [[ -z ${DORMOUSE_SHELL_INTEGRATION} ]]; then
   # preexec: the user submitted a command line. Report it (E) and mark the start
   # of command output (C).
   __dormouse_633_preexec() {
-    builtin printf '\e]633;E;%s\a' "$(__dormouse_633_escape "$1")"
+    __dormouse_633_escape "$1"
+    builtin printf '\e]633;E;%s\a' "$__dormouse_633_out"
     builtin printf '\e]633;C\a'
   }
 
@@ -66,7 +97,8 @@ if [[ -z ${DORMOUSE_SHELL_INTEGRATION} ]]; then
       builtin printf '\e]633;D;%s\a' "$exit_code"
     fi
     __dormouse_633_first_prompt=
-    builtin printf '\e]633;P;Cwd=%s\a' "$PWD"
+    __dormouse_633_safe_cwd "$PWD"
+    builtin printf '\e]633;P;Cwd=%s\a' "$__dormouse_633_out"
     builtin printf '\e]633;A\a'
   }
 

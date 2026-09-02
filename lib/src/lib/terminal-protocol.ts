@@ -59,9 +59,9 @@ const OSC99_PENDING_BODY_LIMIT = 16_384;
 const OSC99_SUPPORT_PAYLOAD = 'o=always:p=title,body';
 const OSC99_RESPONSE_ID_RE = /^[^\s:;\x00-\x1f\x7f-\x9f]+$/;
 const TERMINAL_BELL_NOTIFICATION: ActivityNotification = { source: 'BEL', title: 'Terminal bell', body: null };
-// Mirrors ITERM2_COMPAT_VERSION in standalone/sidecar/pty-core.js — keep in
-// sync (terminal-escapes.md: one compatibility version across env and device
-// responses).
+// Mirrors ITERM2_COMPAT_VERSION in standalone/sidecar/pty-core.js — pinned by
+// mirrored-constants.test.ts (terminal-escapes.md: one compatibility version
+// across env and device responses).
 export const ITERM2_COMPAT_VERSION = '3.5.0';
 export const ITERM2_DEVICE_ATTRIBUTES_RESPONSE = `\x1bP>|iTerm2 ${ITERM2_COMPAT_VERSION}\x1b\\`;
 
@@ -69,15 +69,7 @@ export class TerminalProtocolParser {
   private pending = '';
   private osc99Pending = new Map<string, Osc99PendingNotification>();
 
-  /**
-   * @param colorProvider Resolves the active terminal theme color for OSC
-   *   10/11/12 background/foreground/cursor *queries*. Frontend adapters pass a
-   *   provider backed by the live xterm theme, so TUIs (e.g. Codex) can detect
-   *   the real terminal background. The VS Code extension-host parser passes a
-   *   provider fed by webview-pushed colors (`dormouse:themeColors`); until the
-   *   first push the provider returns null and the query falls through to
-   *   xterm.js.
-   */
+  /** Resolves OSC 10/11/12 queries; null lets xterm.js handle the sequence. */
   constructor(private readonly colorProvider?: TerminalColorProvider) {}
 
   process(data: string): TerminalProtocolParseResult {
@@ -143,14 +135,7 @@ export class TerminalProtocolParser {
   }
 
   private parseColorQuery(content: string): TerminalProtocolEvent[] | null {
-    // OSC 10/11/12 ; ? — foreground / background / cursor color *query*. Codex
-    // (and other TUIs) query the terminal background to blend adaptive UI — its
-    // composer "pill" — against it; with no answer it assumes dark and paints a
-    // near-black fill that is unreadable on a light theme. xterm.js does not
-    // reliably answer these in our pipeline (especially on Windows ConPTY), so
-    // we answer from the active theme ourselves, like the iTerm2 CSI > q reply.
-    // Only the report ('?') form is intercepted; color *set* requests and the
-    // no-provider/unparseable cases fall through (null) to xterm.js unchanged.
+    // Intercept only the `?` report form; sets and unresolved colors pass through.
     const match = /^(10|11|12);\?$/.exec(content);
     if (!match || !this.colorProvider) return null;
     const code = match[1];

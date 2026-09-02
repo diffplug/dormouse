@@ -1,15 +1,5 @@
-/**
- * Per-terminal mouse and selection state.
- *
- * Owns the data that the mouse-and-clipboard feature needs:
- * - Which mouse-reporting regime the inside program requested.
- * - Whether bracketed paste is on.
- * - Whether the user has activated an override (temporary / permanent).
- * - The current text selection and the current smart-extension hint.
- *
- * Exposes a `useSyncExternalStore`-compatible subscription API. Pure state,
- * no DOM dependencies — safe to unit-test.
- */
+/** DOM-free per-terminal mouse/selection store with a
+ * `useSyncExternalStore`-compatible subscription API. */
 
 export type MouseTrackingMode = 'none' | 'x10' | 'vt200' | 'drag' | 'any';
 export type OverrideState = 'off' | 'temporary' | 'permanent';
@@ -108,8 +98,7 @@ export function setMouseReporting(id: string, mode: MouseTrackingMode): void {
   const s = ensure(id);
   if (s.mouseReporting === mode) return;
   s.mouseReporting = mode;
-  // Per spec §1.1 / §2: when the inside program stops requesting mouse reporting,
-  // any active override is no longer meaningful. End it.
+  // Spec §2 (auto-clear on reporting off): with nothing left to override, end it.
   if (mode === 'none' && s.override !== 'off') {
     s.override = 'off';
   }

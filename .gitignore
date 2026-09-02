@@ -31,6 +31,7 @@ standalone/dist/
 standalone/sidecar/dor-cli/
 standalone/sidecar/iframe-proxy.cjs
 standalone/sidecar/agent-browser-host.cjs
+standalone/sidecar/remote-host.cjs
 standalone/sidecar/node_modules/
 standalone/node_modules/
 
@@ -69,3 +70,11 @@ chromatic-diagnostics.json
 .claude/worktrees/
 .claude/commands/*
 !.claude/commands/release-notes.md
+
+# Local security-audit fragments (scripts/security-audit-local.sh)
+audit-*.md
+audit-status.txt
+
+# deploy-lint-selftest / e2e-lint-selftest backups, if a signal interrupts one mid-run
+*.selftest.bak
+*.e2e-selftest.bak

@@ -22,6 +22,7 @@ colors:
   error: "var(--vscode-terminal-ansiRed)"
   success: "var(--vscode-terminal-ansiGreen)"
   alarm: "var(--vscode-terminal-ansiYellow)"
+  alarm-vs-terminal: "var(--color-alarm-vs-terminal)"
   window-close-hover: "#b92a1b"
 typography:
   body:
@@ -136,13 +137,15 @@ This system has no "primary" accent in the brand sense. The closest analogue is 
 - **Terminal Background / Foreground** (`var(--vscode-terminal-background)` / `var(--vscode-terminal-foreground)`): the terminal content surface and xterm default text. Orthogonal to the chrome.
 - **Error** (`var(--vscode-terminal-ansiRed)`): destructive actions and kill-confirm letter flash.
 - **Success** (`var(--vscode-terminal-ansiGreen)`): TODO check, theme-store install confirm.
-- **Alarm** (`var(--vscode-terminal-ansiYellow)` baseline; runtime-overridden): bell-ringing alert tint. `computeDynamicPalette()` replaces each `--color-alarm-vs-*` token with plain white or black by the OKLab lightness of the bg the bell sits on (active header, inactive header, or door), so the ringing bell stays maximally legible on any surface.
+- **Alarm** (`var(--vscode-terminal-ansiYellow)` baseline; runtime-overridden): alert tint. `computeDynamicPalette()` replaces each `--color-alarm-vs-*` token with plain white or black by the OKLab lightness of its background (active header, inactive header, Door, or terminal body), so ringing bells and the whole-Pane spoken-alarm treatment stay maximally legible on any surface.
 
-### Fixed Exception
-- **Window Close Hover** (`#b92a1b`): the only literal color in the whole system. Native OS close-button hover on Windows/Linux chrome buttons; matches the platform convention across themes.
+### Fixed Exceptions
+Every literal color the Host-Theme-Only Rule below permits, in full. Each is here because the surface it paints is not read as part of the theme; a literal anywhere else is a bug.
+- **Window Close Hover** (`#b92a1b`): native OS close-button hover on Windows/Linux chrome buttons; matches the platform convention across themes.
+- **Setup QR** (`#ffffff` ground, `#000000` modules, in `lib/src/components/QrCode.tsx`): a phone camera reads this control, not a person. Scanners expect dark-on-light and many refuse an inverted code, and no theme token promises either the polarity or the contrast ratio in both light and dark.
 
 ### Named Rules
-**The Host-Theme-Only Rule.** Never write a hex value or `oklch()` literal into `theme.css` or a component. Never use `var(..., fallback)` chains. Every color must resolve through `--vscode-*` or one of the body-published runtime picks (`--color-door-*`, `--color-focus-ring`, `--color-alarm-vs-*`). The one allowed exception is `#b92a1b` for native window-close hover.
+**The Host-Theme-Only Rule.** Never write a hex value or `oklch()` literal into `theme.css` or a component. Never use `var(..., fallback)` chains. Every color must resolve through `--vscode-*` or one of the body-published runtime picks (`--color-door-*`, `--color-focus-ring`, `--color-alarm-vs-*`). The only exceptions are the ones rostered under Fixed Exceptions above, and adding one means adding it there.
 
 **The Bg-Only Chrome Rule.** Pane headers, doors, and the baseboard convey hierarchy through background shifts only. Do not add borders or shadows to "make the hierarchy work." If a high-contrast theme makes a header look flat against the app bg, that is the user's theme speaking; do not override.
 
@@ -196,6 +199,7 @@ Doors are the pane-header indicators on the baseboard. The most signature compon
 - **Dimensions:** `h-6` (24px), `min-w-[68px]`, `max-w-[220px]`, horizontal padding `px-2.5` (10px), `gap-2` between title and badges.
 - **Type:** `text-sm font-medium font-mono`.
 - **Content:** truncated title; optional TODO pill (`text-xs font-semibold tracking-[0.08em]`, success-tinted when flourishing); optional bell icon (`size={11}`, `weight="fill"`), `text-alarm-vs-door` when ringing.
+- **Spoken alarm:** `SPEAKING` inverts and pulses the whole Door and takes the badge slot for its speaker-plus-label — it lasts one utterance. `SPOKEN` persists until the ring is attended, so it keeps a static 2px inset and adds its speaker icon *beside* the TODO pill and bell instead of evicting them. Both carry a speaker icon (shape, not color) and name the state in the accessible name.
 - **Hover/Focus:** no decorative hover. The whole door is a button; the focus state is conveyed by the parent pane's selection ring, not by a per-door treatment.
 
 ### Buttons
@@ -207,10 +211,15 @@ The icon-and-tooltip button used inside pane headers (kill, alert toggle, todo, 
 - **Hover:** `hover:bg-current/10` — a 10%-opacity wash of the current text color. Theme-agnostic, works light or dark.
 - **Tooltip:** rendered through a portal as a `PopupButtonRow` 8px below the button, with `text-sm` primary line and an optional muted detail line. Keybindings inside the tooltip auto-render as `[bracketed]` shortcuts.
 
+#### Popup Button (`popupButton`)
+The flat segments inside a `PopupButtonRow` — the row owns the border, background, shadow, and `text-sm`, so a segment contributes only padding and state. Every segment currently inherits the row's foreground; these rows offer rather than ask, so none of them carries an emphasized action.
+- **Hover:** `hover:bg-foreground/10`, a wash over the row's surface.
+- **Flash:** `flashed` swaps in `animate-copy-flash` with `bg-header-active-bg/25` for copy-confirm moments.
+
 #### Chrome Button (window controls)
 The Windows/Linux native-style window control row in the standalone app bar.
 - **Variants:** `icon` (h-5 min-w-5, hover bg-current/10), `labeled` (h-5 min-w-5 px-1.5 text-xs), `window` (w-11, hover bg-current/10), `windowClose` (w-11, hover bg `#b92a1b` text-white).
-- **The exception:** `windowClose` is the only place a literal hex color is permitted, because the platform convention is a hard red regardless of theme.
+- **The exception:** `windowClose` is one of the two rostered literal hex colors (Fixed Exceptions), because the platform convention is a hard red regardless of theme.
 
 ### Cards / Containers
 
@@ -219,9 +228,12 @@ The system uses **raised surfaces**, not "cards." There are no nested cards. The
 - **Dialog** (`KillConfirm`, `TodoAlertDialog`): `bg-surface-raised`, `border border-border`, `rounded-lg` (8px), `shadow-lg`, generous padding (`px-6 py-4` for kill-confirm).
 - **Modal** (`ThemePicker` dropdown, `ThemeDebugger`, `ThemeStoreDialog`): `bg-surface-raised`, `border`, `rounded`, `shadow-2xl`, fixed-position with viewport-clamped sizing.
 
+**The Viewport-Bound Rule.** Anything floating over the viewport takes its height cap from `OVERLAY_MAX_HEIGHT` in `design.tsx` — `.modal` for a `ModalFrame` surface (the viewport minus `MODAL_OVERLAY_INSET` doubled), `.popover` for an anchored overlay (matching `clampOverlayPosition`'s margin). Don't hand-write a `vh`/`dvh` literal at the call site: the six that predated this token had drifted to five different budgets, and one silently shadowed its own overlay's padding. Each entry reads its own custom property first (`--overlay-max-h-modal` / `--overlay-max-h-popover`), so a story — or a host with less room than the window — can narrow one bound without touching the component. They are deliberately separate: a popover inside a modal is a DOM descendant of it, and custom properties inherit, so one shared knob would cap the dialog too. A deliberately *smaller* budget than the viewport (a context menu at `max-h-[70vh]`) is a different decision and stays at the call site.
+
 ### Inputs
 - Used by `ThemePicker`. Style: `bg-input-bg`, `border border-input-border`, `rounded`, `font-mono`, `text-sm`.
 - **Focus:** native browser focus outline; this is acceptable because the entire input lives inside a raised surface that already has `shadow-2xl` and a border.
+- **Form fields inside a dialog** use the underlined pair in `design.tsx` instead, so a form mixing them reads as one: `NumericInput` for a number (filtered at the keystroke, sized in `ch`) and `TextInput` for a string (full width, `type` passed through — `type="password"` for a credential). The app has no checkbox anywhere: a boolean is an `OnOffSwitch`.
 
 ### Navigation
 
@@ -265,7 +277,7 @@ When selection moves between panes/doors, the focus ring **glides** to the new t
 - **Do** use the spring-overshoot curve `cubic-bezier(0.34, 1.56, 0.64, 1)` only for state-resolution moments (TODO check, kill confirm, copy flash), and keep durations short (220–500ms).
 
 ### Don't:
-- **Don't** write a hex color anywhere except `#b92a1b` for the windowClose hover. No exceptions. No `oklch()` literals either; even those bypass the host theme.
+- **Don't** write a hex color outside the Fixed Exceptions roster above — and adding one is an edit to that roster, not a local judgement call. No `oklch()` literals either; even those bypass the host theme.
 - **Don't** add `var(--vscode-*, #fallback)` fallback chains in `theme.css`. The runtime host plus the resolver are responsible for providing the variable; a fallback hides a real bug.
 - **Don't** add borders or shadows to pane headers or doors to "make the hierarchy work." The hierarchy is `header-active-bg` vs. `header-inactive-bg`. If a high-contrast theme makes that look flat, accept it.
 - **Don't** introduce a `text-muted` color inside an active or inactive pane header. Header-internal text inherits the header foreground; muting inside it breaks the focus signal.
@@ -273,5 +285,6 @@ When selection moves between panes/doors, the focus ring **glides** to the new t
 - **Don't** use hacker-aesthetic green-on-black, terminal-cliché Matrix tints, or any color that signals "this is a programmer tool." The user's theme decides what color this tool is.
 - **Don't** animate layout properties (`width`, `height`, `top`, `left`, `padding`) **with a CSS transition**. Pane transitions use `clip-path` and `opacity` deliberately so layout measurements stay valid mid-animation. The one carve-out is a JS tween that writes true per-frame values on a `pointer-events: none` overlay (the Lath animator; the focus ring's `rect-tween`): it moves through real intermediate geometry every frame rather than letting the browser interpolate an opaque box, so measurements stay valid — a CSS `transition: top/left/width/height` does not qualify and stays banned.
 - **Don't** add an emoji, mascot, or illustration to chrome. PRODUCT.md is explicit: "Overly playful (too many animations, emojis, mascots)."
+- **Don't** gate app chrome on `window.alert` / `confirm` / `prompt`. Native dialogs are not dependable in the desktop webview: the theme uninstall was gated on `confirm` and silently did nothing there, because the call returned without ever showing a dialog. Whether a given webview suppresses the panel or never implements it, a control gated on one cannot be trusted to run. Use `ModalFrame`, or make the action a single click when it is cheap and reversible. The marketing website is exempt — it only ever runs in a real browser, where `ShareUrlButton`'s `prompt` is a reasonable last-resort clipboard fallback.
 - **Don't** wrap things in containers. Most surfaces don't need one; the host's sidebar already is the container.
 - **Don't** introduce a new pass-through `--mt-*` token or a one-off color for tabs, badges, accents, or button hovers. If a new rendered surface truly needs a token that isn't in the hierarchy above, update `theme.css` and `design.tsx` together, document the addition in `docs/specs/theme.md`, and update `CONSUMED_VSCODE_KEYS` in `bundle-themes.mjs`.

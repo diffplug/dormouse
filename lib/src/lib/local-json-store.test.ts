@@ -1,14 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { loadJson, saveJson } from './local-json-store';
+import { loadJson, removeJson, saveJson } from './local-json-store';
+
+/** A Map-backed `Storage` surface. */
+function memoryStore() {
+  const map = new Map<string, string>();
+  return {
+    map,
+    getItem: (k: string) => (map.has(k) ? map.get(k)! : null),
+    setItem: (k: string, v: string) => void map.set(k, v),
+    removeItem: (k: string) => void map.delete(k),
+  };
+}
 
 function stubLocalStorage(): Map<string, string> {
-  const store = new Map<string, string>();
-  vi.stubGlobal('localStorage', {
-    getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
-    setItem: (k: string, v: string) => store.set(k, v),
-    removeItem: (k: string) => store.delete(k),
-  });
-  return store;
+  const backend = memoryStore();
+  vi.stubGlobal('localStorage', backend);
+  return backend.map;
 }
 
 interface Widget {
@@ -82,6 +89,20 @@ describe('local-json-store', () => {
         removeItem: () => {},
       });
       expect(() => saveJson('k', { id: 'w1' })).not.toThrow();
+    });
+  });
+  describe('removeJson', () => {
+    it('deletes the stored value', () => {
+      const store = stubLocalStorage();
+      saveJson('k', { id: 'w1' });
+      removeJson('k');
+      expect(store.has('k')).toBe(false);
+      expect(loadJson<Widget, null>('k', null, isWidget)).toBeNull();
+    });
+
+    it('does not throw when localStorage is absent', () => {
+      vi.stubGlobal('localStorage', undefined);
+      expect(() => removeJson('k')).not.toThrow();
     });
   });
 });

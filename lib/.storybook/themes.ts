@@ -1,9 +1,11 @@
 /** VSCode theme color maps for Storybook theme switcher.
- * Derived from bundled themes and completed with the same resolver used by
- * applyTheme(), so isolated stories receive VSCode registry defaults too.
+ * Derived from bundled themes and put through the same resolver + selection
+ * alpha flattening as applyTheme(), so isolated stories see the materialized
+ * --vscode-* set the app sees (docs/specs/theme.md).
  */
 import _bundled from '../src/lib/themes/bundled.json';
 import type { DormouseTheme } from '../src/lib/themes/types';
+import { flattenSelectionAlpha } from '../src/lib/themes/flatten-alpha';
 import { completeThemeVars } from '../src/lib/themes/vscode-color-resolver';
 
 const bundled = _bundled as unknown as DormouseTheme[];
@@ -20,8 +22,10 @@ export const VSCODE_THEMES: Record<string, Record<string, string>> = {};
 export const VSCODE_THEME_TYPES: Record<string, DormouseTheme['type']> = {};
 for (const theme of bundled) {
   VSCODE_THEME_TYPES[theme.label] = theme.type;
-  VSCODE_THEMES[theme.label] = completeThemeVars(
+  const vars = completeThemeVars(
     { ...STORYBOOK_HOST_TYPOGRAPHY_VARS, ...theme.vars },
     theme.type,
   );
+  flattenSelectionAlpha(vars);
+  VSCODE_THEMES[theme.label] = vars;
 }

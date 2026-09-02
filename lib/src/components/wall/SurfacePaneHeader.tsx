@@ -22,6 +22,7 @@ import {
   useAgentBrowserScreenSnapshot,
   type ScreenSnapshot,
 } from './agent-browser-screen';
+import { InlineEditInput } from './InlineEditInput';
 import type { PaneProps } from './pane-props';
 import { loopbackPort, normalizeNavUrl, pathDisplay } from './browser-url';
 import { triggerDevServerRescan, useDevServerMatch } from './agent-browser-ports';
@@ -56,9 +57,9 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
   const actions = useContext(WallActionsContext);
   const isActiveHeader = mode === 'passthrough' && selectedId === id && windowFocused;
 
-  // Presence of a screen controller for this pane is exactly what marks it an
-  // agent-browser surface — terminals/iframes never register one, so the whole
-  // browser chrome (nav + URL + connection) is strictly scoped to it.
+  // Presence of a screen controller for this pane is exactly what marks it a
+  // browser surface — both renderers register one, terminals never do, so the
+  // whole browser chrome (nav + URL + connection) is strictly scoped to it.
   const screen = useAgentBrowserScreenController(id);
   const screenSnapshot = useAgentBrowserScreenSnapshot(screen);
   const chrome = useAgentBrowserChromeSnapshot(screen);
@@ -94,6 +95,7 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
     if (url) screen?.chromeActions.navigate(url);
     setEditingUrl(false);
   };
+  const closeUrlEditor = () => setEditingUrl(false);
 
   return (
     <div
@@ -153,20 +155,13 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
             /* Inline URL editor (like renaming a terminal tab): pre-filled with
                the full URL + all selected, Enter navigates, Escape/blur cancels
                (browser-omnibox style). Fills the URL+chip+spacer span. */
-            <input
+            <InlineEditInput
               data-url-input-for={id}
               className="min-w-0 flex-1 border-none bg-transparent p-0 font-medium text-inherit outline-none"
-              defaultValue={chrome.url}
-              autoFocus
-              ref={(el) => el?.select()}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') submitUrl((e.target as HTMLInputElement).value);
-                else if (e.key === 'Escape') setEditingUrl(false);
-                e.stopPropagation();
-              }}
-              onBlur={() => setEditingUrl(false)}
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => e.stopPropagation()}
+              initialValue={chrome.url}
+              blurAction="cancel"
+              onSubmit={submitUrl}
+              onCancel={closeUrlEditor}
             />
           ) : (
             <>

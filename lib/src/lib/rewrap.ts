@@ -7,8 +7,8 @@
  *     (frames, table borders), keeping the text they surround.
  *
  * The rules are deliberately simple first-cut heuristics — see the
- * mouse-and-clipboard spec §9.1 (Out of Scope) for the follow-up to refine
- * them based on dogfooding.
+ * mouse-and-clipboard spec §9.1 (Future) for the follow-up to refine them
+ * based on dogfooding.
  */
 
 // U+2500..U+257F is Box Drawing; U+2580..U+259F is Block Elements. We treat
@@ -25,11 +25,9 @@ function isFrameOnlyLine(line: string): boolean {
 }
 
 function stripLeadingAndTrailingFrame(line: string): string {
-  // Strip leading run of box chars (with optional surrounding spaces).
-  let out = line.replace(/^[\u2500-\u259F]+\s?/, '');
-  // Strip trailing run of box chars.
-  out = out.replace(/\s?[\u2500-\u259F]+$/, '');
-  return out;
+  return line
+    .replace(/^[\u2500-\u259F]+\s?/, '')
+    .replace(/\s?[\u2500-\u259F]+$/, '');
 }
 
 /**

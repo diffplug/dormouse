@@ -149,9 +149,9 @@ export function attachTerminalMouseRouter({
       const dx = ev.clientX - pendingDrag.clientX;
       const dy = ev.clientY - pendingDrag.clientY;
       if (dx * dx + dy * dy < DRAG_THRESHOLD_PX_SQ) return;
-      // Block mode (shape) is latched for the whole drag: Alt held at press on
-      // desktop, or a double-tap on touch (which has no Alt to read mid-drag). A
-      // tap can no longer chain into the next press once a drag has begun.
+      // Touch has no Alt to read mid-drag, so its double-tap block mode latches
+      // for the whole drag; desktop Alt stays live (see onAltChange). A tap can
+      // no longer chain into the next press once a drag has begun.
       dragBlock = pendingDrag.block;
       lastTouchTap = null;
       beginDrag(id, {

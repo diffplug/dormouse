@@ -17,7 +17,6 @@ the Marketplace, Open VSX, and GitHub rather than through this site; the
 machinery that once rendered it at `/docs` is retained and still runs (see
 [Canonical product guide](#canonical-product-guide)). Nothing public may link
 to a bare `/docs`.
-Source of truth: `website/src/routes.ts`, `website/src/components/SiteHeader.tsx`.
 
 | Surface | Purpose | Canonical content |
 | --- | --- | --- |
@@ -127,8 +126,9 @@ link. Only exact-origin matches are rewritten; every other host is untouched.
 Reserved: because the generator guarantees it, same-site hrefs reach
 `MarkdownDocument` root-relative, and the renderer's external-link test is a
 bare scheme check. A new documentation source rendered through that component
-must run through `localizeSiteLinks` too, or its site links will open in a new
-tab pointed at production.
+— the revived guide page under **Scope: guide-page-return** included — must run
+through `localizeSiteLinks` too, or its site links will open in a new tab
+pointed at production.
 
 `--baseImagesUrl` is passed explicitly in `vscode-ext/package.json` and in the
 release workflow rather than letting `vsce` infer a base, because inference
@@ -168,9 +168,6 @@ whose punctuation sits between two spaces yields a double hyphen exactly as on
 GitHub. That is what keeps `/docs` anchors identical to the same heading's
 anchor on GitHub.
 
-Source of truth: `website/scripts/docs-parser.js`,
-`website/scripts/docs-parser.test.js`.
-
 ## Markdown rendering contract
 
 The website build reads each Markdown source and retains its headings,
@@ -206,18 +203,12 @@ external-link attributes, mobile table access, and mobile-width media without
 horizontal overflow. No HTML string is ever injected —
 `dangerouslySetInnerHTML` is deliberately absent.
 
-Source of truth: `website/scripts/generate-docs.js` (`DOCS_DELTA`,
-`buildGuide`, `localizeSiteLinks`),
-`website/src/components/MarkdownDocument.tsx`.
-
 ## Reference page chrome
 
 Both published pages share `DocsLayout`: the site header, an `h1` and intro, a
 sticky on-page table of contents, and a footer linking the CLI reference, the
 agent skill, the issue tracker, and the supply chain. There is no breadcrumb —
 with no `/docs` above them, the two pages are siblings, not children.
-
-Source of truth: `website/src/components/DocsLayout.tsx`.
 
 ## `/docs/dor` reference
 
@@ -256,11 +247,6 @@ Generation fails on a malformed snapshot envelope, duplicate command id, missing
 or extra snapshot, or root inventory mismatch. Semantic parsing may fall back to
 prose but never silently discards source text.
 
-Source of truth: `website/scripts/help-parser.js`,
-`website/scripts/help-parser.test.js`,
-`website/src/components/DorCommandReference.tsx`,
-`website/src/pages/DorDocs.tsx`.
-
 ## `/docs/agent-skill` guide
 
 The agent page renders `dor/skill.md` exactly. Page chrome adds a table of
@@ -296,9 +282,6 @@ website reference.
 
 Generation fails when a mapped skill heading is missing or ambiguous, or when
 its target anchor does not exist in the generated CLI reference.
-
-Source of truth: `SKILL_REFERENCES` in `website/scripts/generate-docs.js`,
-`website/src/pages/AgentSkillDocs.tsx`.
 
 ## Generated documentation boundary
 
@@ -414,9 +397,10 @@ spec.
 | `vscode-ext/media/` | Guide media; the generator copies it to `website/public/media/`, which the Marketplace listing loads from |
 | `dor/skill.md` | The bundled agent skill, rendered exactly at `/docs/agent-skill` |
 | `dor/test/snapshots/help/` | Tested CLI help, the source for `/docs/dor` |
-| `website/scripts/docs-parser.js` | Markdown subset parser, slugger, `<img>` allowlist |
-| `website/scripts/help-parser.js` | Narrow CLI-help parser with losslessness |
-| `website/scripts/generate-docs.js` | Codegen, `DOCS_DELTA`, `SKILL_REFERENCES` |
+| `website/src/routes.ts`, `website/src/components/SiteHeader.tsx` | The published routes and the header that omits `/docs` |
+| `website/scripts/docs-parser.js` (+ `.test.js`) | Markdown subset parser, slugger, `<img>` allowlist |
+| `website/scripts/help-parser.js` (+ `.test.js`) | Narrow CLI-help parser with losslessness |
+| `website/scripts/generate-docs.js` | Codegen: `DOCS_DELTA`, `buildGuide`, `localizeSiteLinks`, `SKILL_REFERENCES` |
 | `website/src/components/MarkdownDocument.tsx` | Renders parsed Markdown blocks |
 | `website/src/components/DocsLayout.tsx` | Reference page chrome: header, TOC, footer |
 | `website/src/components/DorCommandReference.tsx` | One CLI command section |

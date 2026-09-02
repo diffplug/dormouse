@@ -1,20 +1,4 @@
-/**
- * Pure glue between a remote `directory.snapshot` and the mobile wall UI. Kept
- * free of React and the terminal registry so it is unit-testable in isolation
- * (`wall-model.test.ts`).
- *
- * Two shapes come out of one directory snapshot:
- *   - {@link directoryWallSessions} — the `{id,title}` list `MobileWall` renders
- *     (which pane is live + its header title).
- *   - {@link directorySessionItems} — the badge-carrying items the session list
- *     in `MobileTerminalUi` shows. On the remote side, badge state is
- *     Host-authoritative and rides the directory (not local terminal parsing),
- *     so this replaces `useMobileWallSessionItems` rather than layering on it.
- *
- * The Host may keep exited panes in the directory with `alive:false`. Those are
- * historical entries, not attach targets, so the Pocket wall filters them out
- * before rendering selectable sessions or defaulting the active pane.
- */
+/** Pure directory-snapshot → mobile-wall projection; see `docs/specs/pocket-app.md`. */
 
 import type { DirectoryEntry } from 'server-lib-common';
 import type { MobileWallSession } from '../../components/MobileWall';

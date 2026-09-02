@@ -38,15 +38,9 @@ export function stripMouseReportsFromInput(data: string): string {
   return data.replace(MOUSE_REPORT_TOKENS, '');
 }
 
-// Reset tail written after a *dead* session's scrollback is replayed. Persisted
-// scrollback can end mid-TUI with private modes still latched — mouse tracking,
-// SGR/urxvt mouse encoding, alt-screen, hidden cursor, application cursor keys —
-// and replaying it verbatim re-applies those DECSETs with no process alive to
-// ever DECRST them. This tail returns the terminal to a sane baseline for the
-// freshly spawned shell. Callers decide when it applies (dead restore/resume
-// only, never a live resume); see docs/specs/terminal-escapes.md
-// §Replay-time mode-reset tail. The mouse-encoding DECRSTs (?1005/?1006/?1015)
-// aren't surfaced by `terminal.modes` but xterm's parser consumes them.
+// Baseline for a dead replay only; a live process still owns its modes. The
+// mouse-encoding resets are parser-only (`terminal.modes` does not expose them).
+// See docs/specs/terminal-escapes.md §Replay-time mode-reset tail.
 export const REPLAY_MODE_RESET =
   `${ESC}?1049l${ESC}?47l${ESC}?1047l` + // exit alt-screen (current + legacy variants)
   `${ESC}?9l${ESC}?1000l${ESC}?1002l${ESC}?1003l` + // disable mouse tracking

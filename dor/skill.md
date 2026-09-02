@@ -33,7 +33,9 @@ three ways:
 2. **Address by identity key.** Surfaces with a natural identity skip handle
    bookkeeping: `dor ensure -- <command>` uses its exact command + cwd as an
    implicit key (match-or-create in one idempotent call), and browser
-   surfaces are addressed by an explicit key (`dor ab --key <name>`).
+   surfaces are addressed by an explicit key (`dor ab --key <name>`). A browser
+   you did not create has no key you know — hold its ref and use `dor ab
+   --surface <ref>`.
 3. **Rediscover.** When you hold nothing — a fresh session, or a process the
    user started by hand — `dor list` (filtered) turns a description
    (`--command`, `--cwd`, `--port`) into a handle.
@@ -159,12 +161,22 @@ dor ab open http://localhost:5173         # key "default"
 dor ab --key server open http://localhost:3000
 dor ab click @e3                          # further args are agent-browser's own
 dor ab --key server reload
+dor ab --surface surface:4 click @e3      # drive the browser a ref names
 ```
 
 `--key <name>` is a workspace-scoped browser identity: one key = one session =
 one surface, reused across commands. Use distinct keys when you need
-independent browsers at once. `dor ab` has no `--json` of its own; any JSON
-flags belong to `agent-browser`.
+independent browsers at once.
+
+`--surface <handle>` drives whatever browser a handle names, so a ref from
+`dor list` works here exactly as it does for `read` / `send` / `kill`. Prefer
+it whenever you hold a ref rather than a key — it is the only way to reach a
+browser the *user* opened from the GUI, which has no key. It fails on a
+terminal (no browser), and on an `iframe`-rendered surface (nothing to drive —
+open it with `dor ab` instead). The three identity flags are mutually
+exclusive.
+
+`dor ab` has no `--json` of its own; any JSON flags belong to `agent-browser`.
 
 ### `dor iframe` — high-fidelity URL pane for the user
 
@@ -189,10 +201,15 @@ dor ab open http://localhost:<port>
 **Launch and drive a sub-agent** (another CLI agent in a sibling pane):
 
 ```sh
-dor split -- codex                  # prints "created surface:N"
+dor split -- codex                          # prints "created surface:N"
 dor send surface:N --text "/review" --key enter
-dor read surface:N                  # poll its screen for progress/results
+dor await surface:N --until quiet && dor read surface:N
 ```
+
+Block on the peer instead of polling. `--until quiet` wakes when it settles,
+exits, or rings — use it for agents that never exit; `--until exit` waits only
+for the command to exit, for builds and test runs that fall silent mid-run.
+Awaiting absorbs the bell, so the human is not summoned for news you received.
 
 **Client/server browser testing.** Two keys, two independent browsers:
 

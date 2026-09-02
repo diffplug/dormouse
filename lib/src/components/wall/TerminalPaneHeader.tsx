@@ -19,6 +19,7 @@ import { bellIconClass } from '../bell-icon-class';
 import { useTodoPillContent } from '../TodoPillBody';
 import type { PaneProps } from './pane-props';
 import { IllegalRenameWarning, type RenameRejection } from './IllegalRenameWarning';
+import { InlineEditInput } from './InlineEditInput';
 import { PaneHeaderContextMenu } from './PaneHeaderContextMenu';
 import {
   DEFAULT_MOUSE_SELECTION_STATE,
@@ -206,22 +207,13 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
     >
       <div className="flex flex-1 min-w-0 items-center gap-1.5 overflow-hidden">
         {isRenaming ? (
-          <input
+          <InlineEditInput
             data-renaming-input-for={id}
             className="bg-transparent outline-none border-none text-inherit font-medium font-mono w-full min-w-0 p-0 m-0"
-            defaultValue={displayTitleBase}
-            autoFocus
-            ref={(el) => el?.select()}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                submitRename((e.target as HTMLInputElement).value, e.currentTarget);
-              }
-              if (e.key === 'Escape') actions.onCancelRename();
-              e.stopPropagation();
-            }}
-            onBlur={(e) => submitRename(e.target.value, e.currentTarget)}
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
+            initialValue={displayTitleBase}
+            blurAction="submit"
+            onSubmit={submitRename}
+            onCancel={actions.onCancelRename}
           />
         ) : (
           <span
