@@ -67,14 +67,19 @@ checkout into a self-contained release and installs it:
 ```sh
 ./deploy/local/install-macos.sh        # macOS
 .\deploy\local\install-windows.ps1     # Windows
+./deploy/local/install-linux.sh        # Linux
 ```
 
-It installs under your user profile, needs no administrator rights, and wires up
-a per-login service plus Tailscale Serve:
+The Linux one is the always-on shape: run it with `--linger` on a spare tailnet
+machine and the relay outlives your logout, which is what lets you reach a Host
+that is not the laptop you are sitting at.
+
+Each installs under your user profile, needs no administrator rights, and wires
+up a per-login service plus Tailscale Serve:
 
 ```text
 LaunchAgent (RunAtLoad + KeepAlive)
-  — or a Windows Scheduled Task at logon —
+  — a Windows Scheduled Task at logon, or a systemd user unit —
         |
         v
 Dormouse Node server on 127.0.0.1:3100
@@ -277,7 +282,13 @@ are gated, not degraded.
 
 ---
 
-## 5. Pick a machine
+## 5. Coming back
+
+This screen is not on a first run's path. A phone that has just scanned goes
+scan → two digits → terminal, and never sees a list; it is where a phone lands
+on every session *after* the first, and where an interrupted one falls back to.
+Read it now for what a paired phone looks like from the outside, then carry on
+to §6 for what happens on the first run instead.
 
 <Canvas of={HostsView.MixedList} />
 
@@ -487,7 +498,11 @@ So nothing above reads as a promise:
   no relay frame carries a revocation. Deleting a *machine* takes effect within
   a minute — the server re-reads the file and drops that machine's socket — but
   withdrawing one *phone's* approval is the laptop's own list, and takes effect
-  when that laptop restarts.
+  when that laptop restarts. **Remove** on the phone is not that list: it
+  forgets the machine locally, and a phone that pairs again arrives with a new
+  per-Host key, which the laptop cannot match to the old record — so it appends
+  a second approval and goes on counting both. One phone, "2 paired phones",
+  and the first record still live.
 - **Approval is Approve/Deny only.** Choosing a standing grant at pairing time
   — observe-only versus interactive — is designed but not built. Every paired
   session today gets full input.
