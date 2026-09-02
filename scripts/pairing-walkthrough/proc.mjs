@@ -189,7 +189,16 @@ export function exec(command, args, { cwd, env, input, binary = false, timeoutMs
       if (code === 0) resolve({ stdout, stderr });
       else reject(new Error(`${command} ${args.join(' ')} exited ${code}\n${stderr || stdout}`));
     });
-    if (input !== undefined) child.stdin.end(input);
+    if (input !== undefined) {
+      // A child that closes its read end while still running — `agent-browser`
+      // refusing a verb before it reads `--stdin`, which every `ab.eval` goes
+      // through — EPIPEs this write. Unhandled, an `error` on a stream nothing
+      // listens to rethrows, and `run.mjs`'s `uncaughtException` tears the whole
+      // run down instead of letting the step that owns it fail with its own
+      // message. The `once('error')` above covers the child, not its stdin.
+      child.stdin.on('error', () => {});
+      child.stdin.end(input);
+    }
   });
 }
 
