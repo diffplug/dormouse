@@ -1,20 +1,23 @@
 #!/usr/bin/env node
 /**
  * Executable tests for the installer decisions whose answer cannot be read off
- * the file: the two `manage verify` verdicts that search CLI output nobody
- * bounds — is Tailscale Funnel on, is the loopback port bound anywhere but
- * 127.0.0.1 — and the install's own reading of a `config/server.env` that may
- * be half-written. Runs from the repo root via `pnpm test`.
+ * the file: the searches over CLI output nobody bounds — is Tailscale Funnel
+ * on, is the loopback port bound anywhere but 127.0.0.1, does an existing
+ * Serve config already claim the root path — and the install's own reading of
+ * a `config/server.env` that may be half-written. Runs from the repo root via
+ * `pnpm test`.
  *
  * Why this exists: `deploy-lint.mjs` is textual, so it can say a control is
- * still present and nothing more. The first two are controls where "present"
- * was not the property that failed — both read the right string and reported
- * the wrong answer, because `printf … | grep -q` under `set -o pipefail`
- * returns 141 when `grep` exits early and the writer takes SIGPIPE, and 141
- * reads exactly like "no match". The direction is the bad one: a Funnel that
- * is ON, and a socket bound off-loopback, both report clean. It only shows
- * above the pipe buffer (64 KiB), so every hand-run of `manage verify` on a
- * small tailnet passes, and nothing here is provable by reading the file.
+ * still present and nothing more. These are controls where "present" was not
+ * the property that failed — each read the right string and reported the wrong
+ * answer, because `printf … | grep -q` under `set -o pipefail` returns 141
+ * when `grep` exits early and the writer takes SIGPIPE, and 141 reads exactly
+ * like "no match". The direction is the bad one: a Funnel that is ON and a
+ * socket bound off-loopback both report clean, and the Serve ladder — the one
+ * that mutates rather than reports — took neither branch, so the `confirm`
+ * guarding an operator's existing root mapping never ran. It only shows above
+ * the pipe buffer (64 KiB), so every hand-run on a small tailnet passes, and
+ * nothing here is provable by reading the file.
  *
  * How: the functions are extracted from each installer — the real text, not a
  * copy — and driven under the same `set -euo pipefail` those scripts run
@@ -22,14 +25,15 @@
  * helpers exist twice in these files, once in the installer body and once
  * inside the `MANAGE_EOF` heredoc.
  *
- * The last case in each platform's list is a witness rather than a test of
- * shipped code: it runs the old piped idiom over the same input and requires
- * it to get the answer wrong. If that one ever fails, the bug stopped being
- * reachable on this platform — delete the witness, keep the fix.
+ * The cases labelled `witness` are not tests of shipped code: each runs an old
+ * piped idiom over the same input and requires it to get the answer wrong. If
+ * one ever fails, the bug stopped being reachable on this platform — delete
+ * the witness, keep the fix.
  *
  * Windows is not covered: PowerShell has no pipeline that can take SIGPIPE
- * here, `Invoke-Verify` matches against strings it has already captured, and
- * nothing in CI can run PowerShell anyway (see `deploy-lint.mjs`).
+ * here — `Invoke-Verify` and the Serve ladder both match against strings they
+ * have already captured — and nothing in CI can run PowerShell anyway (see
+ * `deploy-lint.mjs`).
  */
 
 import { spawnSync } from 'node:child_process';
@@ -62,6 +66,11 @@ const pad = (line) =>
   `"$(awk 'BEGIN{for(i=0;i<20000;i++) print "${line}"}')"`;
 
 const FUNNEL_ON = 'Funnel on for laptop.tail.ts.net (tcp 443)';
+
+/** The `tailscale serve status` line shapes the conflict gate reads. */
+const SERVE_ROOT_FOREIGN = '|-- / proxy http://127.0.0.1:9999';
+const SERVE_ROOT_OURS = '|-- / proxy http://127.0.0.1:3100';
+const SERVE_OTHER_PATH = '|-- /elsewhere proxy http://127.0.0.1:8888';
 
 /**
  * `lsof` and `ss` print different shapes, and each platform's check reads its
@@ -187,9 +196,45 @@ function cases(platform, env) {
       '[]',
     ],
     [
+      'serve_state: our own mapping, ahead of 1 MiB of serve status',
+      `serve_state 3100 "$(printf '%s\\n' "${SERVE_ROOT_OURS}"; awk 'BEGIN{for(i=0;i<20000;i++) print "${SERVE_OTHER_PATH}"}')"`,
+      'loopback',
+    ],
+    [
+      "serve_state: a foreign root mapping, ahead of 1 MiB — the gate the confirm hangs off",
+      `serve_state 3100 "$(printf '%s\\n' "${SERVE_ROOT_FOREIGN}"; awk 'BEGIN{for(i=0;i<20000;i++) print "${SERVE_OTHER_PATH}"}')"`,
+      'conflict',
+    ],
+    [
+      'serve_state: 1 MiB of serve status with no root mapping at all',
+      `serve_state 3100 ${pad(SERVE_OTHER_PATH)}`,
+      'none',
+    ],
+    [
+      'serve_root_target: names the first root target, over 1 MiB of matches',
+      // Assignment-shaped, like the call site: a command substitution's status
+      // is the assignment's, so a 141 from inside stops the install there.
+      `serve="$(printf '%s\\n' "${SERVE_ROOT_FOREIGN}"; awk 'BEGIN{for(i=0;i<20000;i++) print "${SERVE_ROOT_FOREIGN}"}')"\n` +
+        `if target="$(serve_root_target "$serve")"; then printf '[%s]\\n' "$target"; else echo aborted; fi`,
+      '[http://127.0.0.1:9999]',
+    ],
+    [
       'witness: the piped form reports a live Funnel as off (this is the bug)',
       `if printf '%s\\n%s' "${FUNNEL_ON}" ${pad('some tailscale prose')} | grep -qi 'funnel on'; then echo on; else echo off; fi`,
       'off',
+    ],
+    [
+      'witness: `sed … | head -1` over the same output aborts the install under set -e',
+      `big="$(awk 'BEGIN{for(i=0;i<20000;i++) print "${SERVE_ROOT_FOREIGN}"}')"\n` +
+        `if t="$(printf '%s' "$big" | sed -n 's%^|-- / *proxy *%%p' | head -1)"; then echo "survived:[$t]"; else echo aborted; fi`,
+      'aborted',
+    ],
+    [
+      'witness: the piped conflict gate takes neither branch, so `confirm` never runs',
+      `serve="$(printf '%s\\n' "${SERVE_ROOT_FOREIGN}"; awk 'BEGIN{for(i=0;i<20000;i++) print "${SERVE_OTHER_PATH}"}')"\n` +
+        `if printf '%s' "$serve" | grep -q "127.0.0.1:3100"; then echo loopback; ` +
+        `elif printf '%s' "$serve" | grep -qE '^\\|-- / +proxy'; then echo conflict; else echo none; fi`,
+      'none',
     ],
   ];
 }
@@ -216,7 +261,7 @@ export function run() {
       const text = readRepoFile(file);
       let helpers;
       try {
-        helpers = ['funnel_state', 'has_off_loopback', 'env_missing_keys']
+        helpers = ['funnel_state', 'has_off_loopback', 'env_missing_keys', 'serve_state', 'serve_root_target']
           .map((name) => extractFunction(text, name))
           .join('\n\n');
       } catch (err) {

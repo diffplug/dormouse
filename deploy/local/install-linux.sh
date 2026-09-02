@@ -1139,13 +1139,13 @@ cmd_verify() {
   if [ -z "$serve_out" ]; then
     fail "tailscale serve reports no configuration"
   else
-    if printf '%s' "$serve_out" | grep -q "127.0.0.1:$PORT"; then
+    if grep -q "127.0.0.1:$PORT" <<<"$serve_out"; then
       pass "Serve proxies to 127.0.0.1:$PORT"
     else
       fail "Serve does not proxy to 127.0.0.1:$PORT"
       printf '%s\n' "$serve_out" | sed 's/^/      /'
     fi
-    if [ -n "$ORIGIN" ] && printf '%s' "$serve_out" | grep -q "${ORIGIN#https://}"; then
+    if [ -n "$ORIGIN" ] && grep -q "${ORIGIN#https://}" <<<"$serve_out"; then
       pass "Serve origin matches DORMOUSE_ORIGIN ($ORIGIN)"
     else
       fail "Serve origin does not match DORMOUSE_ORIGIN ($ORIGIN)"
@@ -1334,7 +1334,9 @@ cmd_uninstall() {
   rm -f "$UNIT_FILE"
   systemctl --user daemon-reload 2>/dev/null || true
   # Turn off only the mapping this installer owns.
-  if ts serve status 2>/dev/null | grep -q "127.0.0.1:$PORT"; then
+  local serve_out
+  serve_out="$(ts serve status 2>/dev/null || true)"
+  if grep -q "127.0.0.1:$PORT" <<<"$serve_out"; then
     if ts serve --bg off 2>/dev/null; then
       printf 'turned off the Serve mapping to 127.0.0.1:%s\n' "$PORT"
     else
@@ -1649,6 +1651,37 @@ fi
 
 step "Configuring Tailscale Serve"
 
+# What does an existing Serve configuration say about the root path? Echoes
+# `loopback` (already proxying to the port $1), `conflict` (root mapped
+# somewhere else), or `none`. $2 is captured `tailscale serve status` output.
+#
+# Captured, and searched with a here-string, because the pipe form decided a
+# gate rather than a report: `printf … | grep -q` exits at the first match, the
+# writer takes SIGPIPE, and under `set -o pipefail` the 141 reads as "no
+# match". Past the pipe buffer, `serve status` carrying a foreign root mapping
+# took NEITHER branch — so the `confirm` below never ran and the install
+# repointed the operator's root path silently.
+serve_state() {
+  if grep -q "127.0.0.1:$1" <<<"$2"; then
+    printf 'loopback\n'
+  elif grep -qE '^\|-- / +proxy' <<<"$2"; then
+    printf 'conflict\n'
+  else
+    printf 'none\n'
+  fi
+}
+
+# The first root-path proxy target in captured `serve status` output ($1), or
+# nothing. The first line is taken by parameter expansion rather than `| head
+# -1`, which exits after one line and leaves `sed` to die of SIGPIPE — 141 out
+# of a command substitution, which `set -e` turns into an install that stops
+# mid-run with nothing printed.
+serve_root_target() {
+  local targets
+  targets="$(sed -n 's%^|-- / *proxy *%%p' <<<"$1")"
+  printf '%s' "${targets%%$'\n'*}"
+}
+
 SERVE_BEFORE="$(ts serve status 2>&1 || true)"
 if [ -n "$SERVE_BEFORE" ]; then
   detail "existing Serve configuration:"
@@ -1656,16 +1689,19 @@ if [ -n "$SERVE_BEFORE" ]; then
 fi
 
 NEEDS_SERVE=1
-if printf '%s' "$SERVE_BEFORE" | grep -q "127.0.0.1:$LOOPBACK_PORT"; then
-  ok "Serve already proxies to 127.0.0.1:$LOOPBACK_PORT"
-  NEEDS_SERVE=0
-elif printf '%s' "$SERVE_BEFORE" | grep -qE '^\|-- / +proxy'; then
-  EXISTING_TARGET="$(printf '%s' "$SERVE_BEFORE" | sed -n 's%^|-- / *proxy *%%p' | head -1)"
-  warn "the root HTTPS path is already mapped to something else: ${EXISTING_TARGET:-<unknown>}"
-  warn "Dormouse needs / on this node to serve the Pocket app at the passkey origin."
-  confirm "Repoint / to 127.0.0.1:$LOOPBACK_PORT?" \
-    || die "left the Serve config alone. Resolve the hostname/path conflict, then re-run."
-fi
+case "$(serve_state "$LOOPBACK_PORT" "$SERVE_BEFORE")" in
+  loopback)
+    ok "Serve already proxies to 127.0.0.1:$LOOPBACK_PORT"
+    NEEDS_SERVE=0
+    ;;
+  conflict)
+    EXISTING_TARGET="$(serve_root_target "$SERVE_BEFORE")"
+    warn "the root HTTPS path is already mapped to something else: ${EXISTING_TARGET:-<unknown>}"
+    warn "Dormouse needs / on this node to serve the Pocket app at the passkey origin."
+    confirm "Repoint / to 127.0.0.1:$LOOPBACK_PORT?" \
+      || die "left the Serve config alone. Resolve the hostname/path conflict, then re-run."
+    ;;
+esac
 
 if [ "$TEST_MODE" = "1" ]; then
   warn "test mode: skipping the Serve mutation"
@@ -1687,9 +1723,9 @@ fi
 
 if [ "$TEST_MODE" != "1" ]; then
   SERVE_AFTER="$(ts serve status 2>&1 || true)"
-  printf '%s' "$SERVE_AFTER" | grep -q "127.0.0.1:$LOOPBACK_PORT" \
+  grep -q "127.0.0.1:$LOOPBACK_PORT" <<<"$SERVE_AFTER" \
     || { printf '%s\n' "$SERVE_AFTER" >&2; die "Serve does not report a proxy to 127.0.0.1:$LOOPBACK_PORT."; }
-  printf '%s' "$SERVE_AFTER" | grep -q "$TS_DNS" \
+  grep -q "$TS_DNS" <<<"$SERVE_AFTER" \
     || { printf '%s\n' "$SERVE_AFTER" >&2; die "Serve does not report the expected HTTPS origin $ORIGIN."; }
   ok "Serve reports $ORIGIN -> 127.0.0.1:$LOOPBACK_PORT"
 fi

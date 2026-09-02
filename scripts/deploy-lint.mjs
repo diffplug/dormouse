@@ -23,11 +23,11 @@
  *     variable, passes here. The security audit still owns that.
  *   - It says nothing about the *generated* `manage` scripts beyond the fact
  *     that the installer writes the checks into them. Whether `manage verify`
- *     passes on a real install is what `manage verify` is for. Two of those
- *     checks are executed rather than read: `scripts/installer-verify-test.mjs`
- *     extracts `funnel_state` and `has_off_loopback` from the installed
- *     `manage` and drives them, because both once matched the right string and
- *     returned the wrong answer.
+ *     passes on a real install is what `manage verify` is for. The decisions
+ *     that turn on searching unbounded CLI output are executed rather than
+ *     read: `scripts/installer-verify-test.mjs` extracts those functions from
+ *     these files and drives them, because each once matched the right string
+ *     and returned the wrong answer.
  *   - Windows is checked at the same depth as the other two, which is worth
  *     stating plainly: nothing in CI can execute PowerShell here, so for that
  *     file this lint is the *only* automated signal that a control survives.
@@ -320,6 +320,22 @@ export const RULES = [
       Linux: /: > "\$ENV_FILE"\n\s*chmod 0600 "\$ENV_FILE"/,
       Windows: /\[IO\.File\]::WriteAllText\(\$ENV_FILE, ''\)\n\s*Protect-Path -Path \$ENV_FILE\b/,
     },
+  },
+  {
+    // A gate, not a report, which is why it is its own rule: past the pipe
+    // buffer the piped ladder took NEITHER branch, so `confirm` never ran and
+    // the install repointed the operator's root Serve path without asking.
+    // Both halves of the decision, exactly once each.
+    rule: 'Network posture — the Serve conflict gate decides on captured output, so its confirm cannot be skipped',
+    patterns: {
+      macOS: /grep -q "127\.0\.0\.1:\$1" <<<"\$2"|grep -qE '\^\\\|-- \/ \+proxy' <<<"\$2"/,
+      Linux: /grep -q "127\.0\.0\.1:\$1" <<<"\$2"|grep -qE '\^\\\|-- \/ \+proxy' <<<"\$2"/,
+    },
+    skip: {
+      Windows:
+        'its ladder is `$SERVE_BEFORE -match …` over a string already captured from `Invoke-Tailscale`, so there is no pipeline to take SIGPIPE',
+    },
+    exactMatches: { macOS: 2, Linux: 2 },
   },
   {
     // The other half of "preserved byte-for-byte": a file that exists is not
