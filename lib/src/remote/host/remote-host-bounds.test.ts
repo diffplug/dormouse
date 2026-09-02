@@ -50,6 +50,7 @@ import {
   sendE2eFrame,
   settle,
   settleUntil,
+  settleUntilQuiet,
   testRoutingId,
   type TestAuthenticator,
 } from '../test-e2e-client';
@@ -394,8 +395,9 @@ describe('RemoteHost bounds', () => {
           ct: toBase64Url(new Uint8Array(96)),
         });
       }
-      await settle();
-      return crypto.total();
+      // Quiescence, not a fixed settle: the Host answers a refused init with
+      // nothing, so the count itself is the only signal the burst is done.
+      return await settleUntilQuiet(() => crypto.total());
     };
 
     // What one refused init costs is the unit everything else is measured in.
