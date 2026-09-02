@@ -499,9 +499,17 @@ export class SimClient {
     return pair;
   }
 
+  /**
+   * This Client's keypair for one Host, or undefined if unscanned. The private
+   * half is what opens a push sealed to this Client.
+   */
+  staticKeyPairFor(host) {
+    return this.#statics.get(hostIdOf(host));
+  }
+
   /** This Client's static for one Host, base64url, or undefined if unscanned. */
   staticPublicKeyFor(host) {
-    const pair = this.#statics.get(hostIdOf(host));
+    const pair = this.staticKeyPairFor(host);
     return pair ? toBase64Url(pair.publicKey) : undefined;
   }
 

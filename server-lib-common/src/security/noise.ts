@@ -709,36 +709,44 @@ export class NoiseHandshake {
     return this.#ephemeral;
   }
 
-  /**
-   * X25519. A rejected key, a rejected agreement, and an all-zero shared
-   * secret are one indistinguishable terminal failure.
-   */
-  async #dh(privateKey: CryptoKeyLike, publicKey: Uint8Array): Promise<Uint8Array> {
-    requireKey(publicKey, 'X25519 public key');
-    let shared: Uint8Array;
-    try {
-      const imported = await this.#crypto.subtle.importKey(
-        'raw',
-        publicKey,
-        X25519_ALGORITHM,
-        true,
-        [],
-      );
-      shared = new Uint8Array(
-        await this.#crypto.subtle.deriveBits(
-          { name: 'X25519', public: imported },
-          privateKey,
-          NOISE_KEY_LENGTH * 8,
-        ),
-      );
-    } catch {
-      throw new NoiseError('X25519 agreement failed');
-    }
-    if (shared.length !== NOISE_KEY_LENGTH || constantTimeEqual(shared, ZERO_KEY)) {
-      throw new NoiseError('X25519 agreement failed');
-    }
-    return shared;
+  #dh(privateKey: CryptoKeyLike, publicKey: Uint8Array): Promise<Uint8Array> {
+    return x25519Agree(this.#crypto, privateKey, publicKey);
   }
+}
+
+/**
+ * X25519 to a raw shared secret. A rejected key, a rejected agreement, and an
+ * all-zero result are one indistinguishable terminal failure — a peer that
+ * presented a low-order point is one whose "shared" secret every other peer can
+ * compute too.
+ *
+ * Exported because the sealed push runs the same agreement under a different
+ * key schedule (`push-seal.ts`); one implementation is what keeps the two from
+ * disagreeing about which points are usable.
+ */
+export async function x25519Agree(
+  crypto: WebCryptoLike,
+  privateKey: CryptoKeyLike,
+  publicKey: Uint8Array,
+): Promise<Uint8Array> {
+  requireKey(publicKey, 'X25519 public key');
+  let shared: Uint8Array;
+  try {
+    const imported = await crypto.subtle.importKey('raw', publicKey, X25519_ALGORITHM, false, []);
+    shared = new Uint8Array(
+      await crypto.subtle.deriveBits(
+        { name: 'X25519', public: imported },
+        privateKey,
+        NOISE_KEY_LENGTH * 8,
+      ),
+    );
+  } catch {
+    throw new NoiseError('X25519 agreement failed');
+  }
+  if (shared.length !== NOISE_KEY_LENGTH || constantTimeEqual(shared, ZERO_KEY)) {
+    throw new NoiseError('X25519 agreement failed');
+  }
+  return shared;
 }
 
 function requireKey(key: Uint8Array, what: string): void {

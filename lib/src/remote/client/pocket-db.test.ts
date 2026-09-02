@@ -156,6 +156,33 @@ describe('the pocket database', () => {
     }
   });
 
+  it('closes the connection a blocked open eventually wins', async () => {
+    // `blocked` is not terminal: the other tab can still go away, and the open
+    // then *succeeds* — handing back a connection the rejected caller has no
+    // reference to and can never close. Observed on `IDBDatabase.close`,
+    // because a connection nobody holds is exactly a connection nothing else
+    // can see.
+    const stale = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(POCKET_DB_NAME, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore(DEVICE_KEY_STORE);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await expect(openPocketDb()).rejects.toThrow(/older version/);
+
+    const closes = vi.spyOn(IDBDatabase.prototype, 'close');
+    try {
+      // The blocker leaves; the abandoned open completes behind it.
+      stale.close();
+      closes.mockClear();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+
+      expect(closes).toHaveBeenCalledTimes(1);
+    } finally {
+      closes.mockRestore();
+    }
+  });
+
   it('creates every store on a browser that has no database yet', async () => {
     const db = await openPocketDb();
     try {

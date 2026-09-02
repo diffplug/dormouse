@@ -9,7 +9,7 @@
     "dev:pocket": "vite --config vite.pocket.config.ts",
     "prebuild": "pnpm --filter dor-lib-common build && pnpm --filter server-lib-common build",
     "build": "tsc -b && vite build",
-    "build:pocket": "vite build --config vite.pocket.config.ts",
+    "build:pocket": "vite build --config vite.pocket.config.ts && vite build --config vite.sw.config.ts && node scripts/assert-pocket-worker.mjs",
     "preview": "vite preview",
     "pretest": "pnpm --filter dor-lib-common build && pnpm --filter server-lib-common build",
     "test": "pnpm typecheck && vitest run",

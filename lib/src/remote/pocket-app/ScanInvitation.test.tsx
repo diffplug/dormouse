@@ -10,7 +10,7 @@
  * `parsePairingInvitationUrl` is the shipped one, so a code accepted here is a
  * code a Host could have minted.
  */
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fromBase64Url, toBase64Url, type PairingInvitation } from 'server-lib-common';
@@ -309,6 +309,98 @@ describe('the camera is stopped on every way out', () => {
 
     expect(stops).toBeGreaterThan(0);
   });
+});
+
+/** StrictMode's double-invoked effect is the `chainRef` case, on the mount path. */
+it('opens one camera under StrictMode, and leaves it running', async () => {
+  const attached: Array<{ stopped: boolean }> = [];
+  let starts = 0;
+  const startScan = async (video: HTMLVideoElement) => {
+    starts++;
+    const track = { stopped: false, stop() { this.stopped = true; } };
+    attached.push(track);
+    (video as unknown as { srcObject: unknown }).srcObject = {
+      getTracks: () => [track],
+    };
+    // One microtask of latency, which is what lets two starts overlap at all.
+    await Promise.resolve();
+    return { stop: () => track.stop() } satisfies ScanControls;
+  };
+
+  act(() => {
+    root.render(
+      <StrictMode>
+        <ScanInvitation
+          busy={null}
+          error={null}
+          appOrigin={ORIGIN}
+          startScan={startScan}
+          onScanned={vi.fn()}
+          onCancel={vi.fn()}
+        />
+      </StrictMode>,
+    );
+  });
+  await settle();
+
+  expect(starts).toBe(1);
+  // The surviving start's stream is still live, and it is the one on screen.
+  expect(attached.filter((t) => !t.stopped)).toHaveLength(1);
+  expect(container.querySelector('video')?.srcObject).not.toBeNull();
+});
+
+it('starts again after a run that threw on its way out', async () => {
+  // The chain tail must never be a rejected promise: the next run awaits it
+  // *before* its own try, so one throw would be inherited by every start after
+  // it and this screen would never open a camera again. The reachable throw is
+  // the release inside the catch — a track whose `stop()` raises.
+  let starts = 0;
+  let reads = 0;
+  const startScan = async (video: HTMLVideoElement) => {
+    starts++;
+    (video as unknown as { srcObject: unknown }).srcObject = {
+      // Only the release *inside the catch* throws; the effect cleanup's own
+      // release runs after it and must still find a stream it can put down.
+      getTracks: () => {
+        if (++reads === 1) throw new Error('the stream went away mid-teardown');
+        return [];
+      },
+    };
+    throw new DOMException('no camera', 'NotFoundError');
+  };
+
+  render({ startScan });
+  await settle();
+  expect(starts).toBe(1);
+
+  // A second mount, which is what a `busy` cycle or a remount performs.
+  render({ startScan });
+  await settle();
+
+  expect(starts).toBe(2);
+});
+
+it('drops a stale rejection when a real code is accepted, so one row shows at a time', async () => {
+  const camera = fakeCamera();
+  render({ startScan: camera.startScan });
+  await settle();
+
+  act(() => camera.read('https://example.com/some-other-qr'));
+  await settle();
+  expect(container.querySelectorAll('[role="alert"]')).toHaveLength(1);
+
+  // The ceremony this code starts fails without leaving the screen, so its
+  // error lands here — beneath the rejection, if that one never cleared.
+  render({
+    startScan: camera.startScan,
+    error: 'That code is no longer valid.',
+  });
+  const { url } = await invitationUrl();
+  act(() => camera.read(url));
+  await settle();
+
+  const alerts = [...container.querySelectorAll('[role="alert"]')].map((n) => n.textContent);
+  expect(alerts).toEqual(['That code is no longer valid.']);
 });
 
 it('refuses a value the parser cannot even look at', async () => {

@@ -8,6 +8,8 @@ import { randomBytes } from 'node:crypto';
 import {
   WS_CLOSE_HOST_REPLACED,
   WS_CLOSE_HOST_REPLACED_REASON,
+  WS_CLOSE_HOST_REVOKED,
+  WS_CLOSE_HOST_REVOKED_REASON,
   isE2eClientFrame,
   isE2eHostFrame,
   toBase64Url,
@@ -50,6 +52,24 @@ export class RelayHub {
   /** True while a socket for `hostId` is connected — drives `GET /api/hosts` presence. */
   isHostOnline(hostId: string): boolean {
     return this.#hosts.has(hostId);
+  }
+
+  /** Every `hostId` with a live socket right now. */
+  onlineHostIds(): string[] {
+    return [...this.#hosts.keys()];
+  }
+
+  /**
+   * Evict a revoked Host: close its socket and drop its clients, exactly as a
+   * disconnect would. `createApp`'s sweep is the one caller
+   * (`docs/specs/server.md` -> Guardrails).
+   */
+  closeHost(hostId: string): boolean {
+    const conn = this.#hosts.get(hostId);
+    if (!conn) return false;
+    this.unregisterHost(conn);
+    safeClose(conn.socket, WS_CLOSE_HOST_REVOKED, WS_CLOSE_HOST_REVOKED_REASON);
+    return true;
   }
 
   // --- Host lifecycle -------------------------------------------------------

@@ -52,6 +52,9 @@ const fake = vi.hoisted(() => ({
   >(),
   connect: vi.fn<(hostId: string) => Promise<ConnectResult>>(),
   forgetHost: vi.fn<(hostId: string) => Promise<void>>(),
+  clientClose: vi.fn<() => void>(),
+  adapterInit: vi.fn<() => Promise<void>>(),
+  adapterDispose: vi.fn<() => void>(),
 }));
 
 // The one shared module that is doubled, and only for its probe: the gate has
@@ -82,7 +85,7 @@ vi.mock('../client/pocket-client', async (importOriginal) => ({
     hasPriorUse = () => fake.hasPriorUse;
     registeredPushEndpoint = () => null;
     setOnHostGone = () => undefined;
-    close = () => undefined;
+    close = () => fake.clientClose();
     openSocket = async () => undefined;
     setup = (credential: { setupToken: string }, label: string) => fake.setup(credential, label);
     signin = () => fake.signin();
@@ -105,8 +108,8 @@ vi.mock('../client/pocket-client', async (importOriginal) => ({
 
 vi.mock('../client/remote-adapter', () => ({
   RemotePtyAdapter: class {
-    init = async () => undefined;
-    dispose = async () => undefined;
+    init = () => fake.adapterInit();
+    dispose = async () => fake.adapterDispose();
   },
 }));
 
@@ -169,6 +172,9 @@ beforeEach(() => {
   fake.pair.mockReset();
   fake.connect.mockReset().mockResolvedValue({ ok: true, hostLabel: 'First laptop' });
   fake.forgetHost.mockReset().mockResolvedValue(undefined);
+  fake.clientClose.mockReset();
+  fake.adapterInit.mockReset().mockResolvedValue(undefined);
+  fake.adapterDispose.mockReset();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -503,6 +509,28 @@ describe('the Hosts list', () => {
     await click(container, 'Sign in with passkey');
 
     expect(fake.retirePendingDeletions).toHaveBeenCalled();
+  });
+
+  /**
+   * The Host authorized the connection, so a session exists — and then the
+   * adapter's first `directory.watch` failed and the user is back on a list
+   * with no way to end anything. A session left up here is one the phone goes
+   * on keepaliving while holding one of the Host's slots.
+   */
+  it('ends the session when the adapter cannot stand up on it', async () => {
+    fake.hasPriorUse = true;
+    fake.listKnownHosts.mockResolvedValue([await knownHost('host-1')]);
+    fake.listHosts.mockResolvedValue([{ hostId: 'host-1', label: '', online: true }]);
+    fake.adapterInit.mockRejectedValue(new Error('the directory did not answer'));
+    await boot();
+    await click(container, 'Sign in with passkey');
+
+    await click(container, 'Connect');
+
+    expect(alertText(container)).toContain('the directory did not answer');
+    expect(buttonNamed(container, 'Connect')).not.toBeNull();
+    expect(fake.adapterDispose).toHaveBeenCalled();
+    expect(fake.clientClose).toHaveBeenCalled();
   });
 });
 

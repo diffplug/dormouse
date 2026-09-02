@@ -85,19 +85,25 @@ Surface. Remote-only vocabulary:
 
 ## Transport
 
-**WebSocket relay only** (`docs/specs/server.md` → "Relay"): the Client holds one
-WebSocket to the Server for the whole session; the Host multiplexes every session
-over its single relay socket, keyed by the relay-assigned `clientId` (the Client
-never sees or sends it). Control messages and terminal data both ride it as JSON
-— terminal data is small and ordering matters. Media channels arrive with browser
-surfaces (future). The API and the security model are identical in the Server's
-selfhost and (future) SaaS modes; only how accounts come to exist differs.
+**One Noise session, carried by the WebSocket relay** (`docs/specs/server.md` →
+"Relay"): the Client holds one WebSocket to the Server for the whole session,
+and the Host multiplexes every session over its single relay socket, keyed by
+the relay-assigned `clientId` (the Client never sees or sends it). The relay
+carries `t: 'e2e'` envelopes whose `ct` it never decodes; **every message below
+is JSON inside that ciphertext**, framed as one length-prefixed application
+message on the session's byte stream (`docs/specs/server.md` → "E2E framing").
+Terminal data rides the same stream — it is small and ordering matters. Media
+channels arrive with browser surfaces (future). The API and the security model
+are identical in the Server's selfhost and (future) SaaS modes; only how
+accounts come to exist differs.
 
-A `RemoteApiSession` is created lazily on the first message after an allowed
-connection outcome, and disposed both when the Client disconnects and on any
-fresh authorization attempt — so a re-authorizing client can never inherit the
-previous session's attachment. Source of truth: `RemoteHost` in
-`lib/src/remote/host/remote-host.ts`.
+**A `RemoteApiSession` exists only for an authorized session.** It is created at
+promotion — the first point at which the presence proof and the ACL conjunction
+have both passed ([remote-security-model.md](./remote-security-model.md) →
+Connection) — and disposed when the Client disconnects, when the Host reaps the
+session, and by any promotion that replaces it, so a re-authorizing Client can
+never inherit the previous session's attachment. Source of truth:
+`RemoteHost.#promoteConnection` in `lib/src/remote/host/remote-host.ts`.
 
 ### Envelope
 
@@ -487,17 +493,12 @@ created on the Host while the lease is held open tethered to the leaseholder.
 One lease at a time; the Host user can always reclaim it locally. Phones never
 need it.
 
-### 8. Noise transport, then WebRTC
+### 8. WebRTC rendezvous
 
-The **e2e-client-host** scope ([remote-security-model.md](./remote-security-model.md)
-`## Future`) carries protocol-v1 unchanged inside Noise transport messages: each
-request, response, event, and terminal-data frame becomes one length-prefixed
-application message in an encrypted byte stream, reassembled up to 1 MiB, and
-the relay sees ciphertext only. Nothing here changes shape. WebRTC rendezvous
-for latency comes after and replaces only the relay transport of those same
-Noise messages, after authorization — the Server signals but is never trusted
-with authorization, and the presence protocol is inherited unless separately
-reviewed.
+Latency. WebRTC replaces only the relay *transport* of the same Noise transport
+messages ([Transport](#transport)), and only after authorization: the Server
+signals but is never trusted with authorization, and the presence protocol is
+inherited unless separately reviewed. Nothing in protocol-v1 changes shape.
 
 ### 9. Audio
 

@@ -23,7 +23,15 @@ primitive lives in `server-lib-common`; the terminal UI lives in
   displayed. The setup password enrolls Hosts and registers nothing.
 * Terminal surfaces only — exactly remote-api.md's **protocol-v1** (browser
   remoting is staged in that spec's `## Future`).
-* Revocation is editing a JSON file by hand; no management UI.
+* Revocation is editing a JSON file by hand; no management UI. **A `/ws/host`
+  token is re-checked against `hosts.json` after the upgrade too**, on a bounded
+  sweep (`HOST_REVOCATION_SWEEP_MS`, one minute), because the upgrade check runs
+  once and a Host can stay connected indefinitely — so deleting its row would
+  otherwise leave the revoked socket relaying. The sweep closes it with
+  `WS_CLOSE_HOST_REVOKED` (4001) and its Clients get `host-gone`, the same
+  teardown a disconnect performs; the Host may reconnect, and the upgrade then
+  answers 401. Revoking a *Client* is still the Host's own ACL and still needs a
+  Host restart ([remote-security-model.md](./remote-security-model.md)).
 * A dropped WebSocket is handled by reloading the page / reconnecting the
   host. No resume protocol.
 * Everything transient (challenges, sessions, presence nonces, relay state) is
@@ -182,8 +190,14 @@ phone can parse. Reading it as un-enrolled instead is what the person editing
 the file was reaching for, and on the Host it fails the exchange naming the
 field.
 
-**A subscription row from before the end-to-end cutover carries a device key and
-no `deliveryId`, so it is dropped on read** — with **one** warning per process
+**A row whose `hostId` has left `hosts.json` is dropped on read**, joined
+against the Host store rather than pruned at startup, so revoking a Host
+cascades without a restart; the next mutation writes the pruned set back. The
+join reads `listIfPresent`, so an **absent** `hosts.json` drops nothing —
+writing an empty enrolled set back would make a rename in flight a durable
+truncation. A row
+from before the end-to-end cutover carries a device key and no `deliveryId`, so
+**it is dropped on read** too — with **one** warning per process
 naming the file and saying to re-register. No versioned refusal, no archive
 step: the Client that owns the row re-registers on its next Enable, and a
 warning per row would bury that in a log.
@@ -288,7 +302,7 @@ This table is the whole route surface. Paths and request/response shapes live in
 | `POST /api/push/subscriptions/query` | session token | Reports which of the **presented** `deliveryIds` are registered, and for which Host. Parameterized by a capability the caller must already hold, which is proof of possession rather than the enumeration primitive a device-key parameter was |
 | `DELETE /api/push/subscriptions/:deliveryId` | session token | Idempotent: **always 204**, so the route reveals nothing about whether a row existed |
 | `GET /api/push/devices`          | host token     | The `deliveryId`s subscribed to **this** Host under the current VAPID key |
-| `POST /api/push/send`            | host token     | Fans a notification out to the named deliveries; `deliveryIds` is required |
+| `POST /api/push/send`            | host token     | Fans out one sealed envelope per named delivery; `recipients` is required, and the Server reads no notification text |
 | `GET /ws/host`                   | host token     | The Host's relay socket                            |
 | `GET /ws/client`                 | session token  | A Client's relay socket                            |
 | `GET /*`                         | —              | The built Pocket app, registered last so every route above wins. Cache policy and SPA fallback: [pocket-app.md](./pocket-app.md) |
@@ -405,7 +419,7 @@ dependency. Source of truth: `server/src/push.ts` plus the routes in
   it; a Host reads and sends with its `hostToken`. The send route takes the
   `hostId` from the token and never from the body, so naming a delivery
   explicitly cannot escape the calling Host's own scope.
-- **The Server never selects recipients.** `deliveryIds` is required and
+- **The Server never selects recipients.** `recipients` is required and
   non-empty; an absent or empty list is a 400, not a fan-out. The Host holds the
   ACL and is the only party that may decide who a push reaches.
 - **Possession of the delivery id is the whole authorization.** It is 256
@@ -437,14 +451,14 @@ dependency. Source of truth: `server/src/push.ts` plus the routes in
   `SECURITY.md` -> "Remote Control". Source of truth:
   `server/src/push-endpoint.ts`, wired into registration in `server/src/app.ts`
   and delivery in `server/src/push.ts`.
-- **Payload text is re-sanitized at this boundary** even though the Host already
-  did it, because it originates in a renderer and is ultimately Pane-derived
-  ([alert.md](./alert.md) -> Text And Security). Both sides call the same
-  `boundedPushText`, so the two layers cannot enforce different rules. Reserved:
-  the payload is the one thing on this wire the Server still reads in plaintext.
-  Stage 6 of **Scope: e2e-client-host**
-  ([remote-security-model.md](./remote-security-model.md) `## Future`) replaces
-  it with a sealed envelope, and nothing else about this route changes then.
+- **The payload is sealed, and the Server reads none of it.** A send carries
+  `recipients: [{ deliveryId, sealed }]` — one envelope per Client, because the
+  seal is to that Client's own static — and the Server validates only shape and
+  bounds, then forwards exactly `JSON.stringify({ hostId, ...sealed })` with the
+  `hostId` from the caller's own token, which is how the worker picks the record
+  to decrypt against. Notification text is bounded on the Host before sealing
+  and re-sanitized in the worker at the sink
+  ([remote-security-model.md](./remote-security-model.md) -> Push sealing).
 - **Delivery outcomes prune.** 404/410 means the subscription is permanently
   gone and its row is deleted; anything else is transient and left alone, but
   never silent: the refusal is logged (origin only — the endpoint is a bearer
@@ -491,9 +505,11 @@ with `hostId` stamped from the socket), shapes in
 `client-gone`; anything else it receives is ignored.
 
 - **An `init` binds** the Client socket to the named Host, replacing whatever
-  binding it held; the previous Host gets `client-gone`.
+  binding it held; the previous live Host gets `client-gone` first, so its
+  pairing UI, remote-api sessions, and watchers are disposed immediately.
 - **A `transport` frame is forwarded only within that binding**, in either
-  direction. One outside it is dropped.
+  direction. One outside it is dropped — including a late reply from a Host the
+  Client has since left.
 - **Never parsed, never remembered, never authorized.** The relay does not
   decode `ct`, keeps no Noise state, holds no policy of its own, and has no
   notion of "authorized" — no gate, no challenge memory, nothing verified before
@@ -518,13 +534,6 @@ contract rather than a log line: the evicted Host keys its stand-down on it
 *replacement* time and not only on disconnect is load-bearing — the displaced
 socket's own close event is a no-op here, and the new Host process has a fresh
 ACL and no memory of them.
-
-The relay keeps one current Host binding per Client socket. Host-originated
-frames are routed only when the frame comes from that current Host; late replies
-from a previous Host are ignored. When a Client socket binds to a different
-Host, the relay sends `client-gone` to the previous live Host before replacing
-the binding, so Host-side pairing UI, remote-api sessions, and watchers are
-disposed immediately.
 
 Source of truth: `server/src/relay.ts` (`registerHost`), and `isE2eClientFrame` /
 `isE2eHostFrame` in `server-lib-common/src/remote/wire.ts`, written for a Host to
@@ -1018,33 +1027,15 @@ nothing typed on the phone (Setup tokens, Host side,
 One settled decision constrains what is left: **the stock allowlist stays
 `*.dormouse.sh`-only** ("Where a Host may reach a relay server") —
 self-hosting keeps requiring a source build, deliberately, so nothing may depend
-on widening it. The remaining phone-side items — in-app scanning and the end of
-the setup-password path — are absorbed by the **e2e-client-host** scope
-([remote-security-model.md](./remote-security-model.md) `## Future`), which also
-rules out the one-minute resume token that used to be staged here: every new
-session requires fresh WebAuthn presence, by design.
+on widening it. The phone-side items are done: scanning happens in Pocket
+([pocket-app.md](./pocket-app.md)) and nothing on the phone takes the setup
+password. Nor is a resume token staged — every new session requires fresh
+WebAuthn presence, by design
+([remote-security-model.md](./remote-security-model.md) -> Presence proofs).
 
 Unstaged but adjacent: origin migration (re-binding the passkey and
 enrollments after a Tailscale node rename), and the revocation UI staged in
 [remote-security-model.md](./remote-security-model.md) `## Future`.
-
-**Owned here for the e2e-client-host scope** — what remains of the syntax,
-routes, and state the trust model in
-[remote-security-model.md](./remote-security-model.md) `## Future` requires. The
-QR grammar and its parser, the relay envelope, the reauth and retire routes, the
-delivery-keyed push routes, the Host side, and the deletion of every legacy path
-all landed in that scope's stages 4 and 5 (above), the malicious-relay harness
-with them.
-
-- **Sealed push** (stage 6). `POST /api/push/send` carries only the sealed
-  envelope; the Server also deletes a delivery row when its push provider
-  answers 404/410 — which it does already — and Pocket stays the normal
-  lifecycle initiator, with provider deletion as cleanup for clients that can no
-  longer submit tombstones.
-- **Operator recovery** (`SELF_HOST.md`): a Host whose enrollment predates the
-  scope shows the enrollment form again; re-run the installer only if the offer
-  is wanted — it mints one solely while `state/hosts.json` is absent, so remove
-  that file first or enroll with the setup password.
 
 **Scope: saas-multitenant** — the server-side hurdles between today's
 single-owner selfhost server and a multi-tenant SaaS on `*.dormouse.sh`,

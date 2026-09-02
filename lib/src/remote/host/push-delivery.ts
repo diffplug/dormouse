@@ -17,11 +17,16 @@
 
 import {
   API_ROUTES,
+  MAX_PUSH_QUERY_DELIVERY_IDS,
   PUSH_SEND_DEADLINE_MS,
   boundedPushText,
+  utf8Encode,
   type HostAclRecord,
   type PushDevicesResponse,
+  type PushSendRequest,
   type PushSendResponse,
+  type SealedPushRecipient,
+  type SealedPushV1,
 } from 'server-lib-common';
 import type { PushSendSummary } from '../../host/remote/service-protocol';
 import type { PushDevice } from '../../lib/push-devices';
@@ -37,6 +42,14 @@ const PUSH_TITLE_LIMIT = 100;
 
 /** Shown as the notification body; the Pane name carries the information. */
 const PUSH_BODY = 'Needs attention';
+
+/**
+ * Longest collapse tag we seal. A tag is an internal id and is never displayed,
+ * so this is a size bound on the plaintext rather than a sanitization rule —
+ * but it runs through the same `boundedPushText`, so the worker re-applying
+ * that rule at the sink cannot change what the Host sent.
+ */
+const PUSH_TAG_LIMIT = 64;
 
 /**
  * The Settings dialog's test push. The title says plainly that nothing is
@@ -63,9 +76,8 @@ const PUSH_SEND_MARGIN_MS = 5_000;
 
 /**
  * Apply this sink's bounds to a Pane label. The rule itself is
- * `boundedPushText` in `server-lib-common`, shared with the Server so the
- * sanitization has one implementation rather than a strong copy here and a
- * weaker one there; this wrapper only names the sink's limit and fallback.
+ * `boundedPushText` in `server-lib-common`, shared with the worker that
+ * re-bounds at the render sink; this wrapper only names the limit and fallback.
  */
 export function toPushText(label: string): string {
   return boundedPushText(label, { limit: PUSH_TITLE_LIMIT, fallback: 'terminal' });
@@ -76,6 +88,15 @@ export interface AlertPushDeps {
   readonly enrollment: Pick<HostEnrollment, 'serverUrl' | 'hostToken'>;
   /** The Host's active ACL records — the authority on who may be reached. */
   readonly activeRecords: () => readonly HostAclRecord[];
+  /**
+   * Seal one plaintext to one paired Client's static, or `null` when this Host
+   * has no usable Noise static. A capability, never the key
+   * (`docs/specs/remote-security-model.md` -> Push sealing).
+   */
+  readonly seal: (
+    clientStaticPublicKey: string,
+    plaintext: Uint8Array,
+  ) => Promise<SealedPushV1 | null>;
   /** Injectable for tests. */
   readonly fetch?: typeof globalThis.fetch;
 }
@@ -108,25 +129,55 @@ export async function loadPushDevices(deps: AlertPushDeps): Promise<PushDevice[]
  * The label is passed in rather than derived: it comes from the pane stores,
  * which live in the webview, so a Host in another process is told what the
  * Session is called and never guesses.
+ *
+ * **One ciphertext per recipient**, sealed to that ACL record's own Client
+ * static (`docs/specs/remote-security-model.md` -> Push sealing).
  */
 export async function sendPush(
   deps: AlertPushDeps,
   sessionId: string,
   title: string,
 ): Promise<PushSendSummary> {
-  // Read straight from the ACL, which is local and in-memory, rather than
-  // asking the Server which devices are subscribed: the Server intersects the
-  // names it is given with its own subscriptions anyway, so the target set is
-  // identical and this costs one round trip instead of two on the one path
-  // whose whole value is timeliness.
+  // Read at send time, so a revocation during the ring delay takes effect
+  // (`docs/specs/alert.md` -> Push notifications owns the recipient rule).
+  const all = deps.activeRecords();
+  if (all.length === 0) return { targeted: 0, delivered: 0, failed: 0 };
+  // The send route refuses more than this, and it refuses the *whole* POST — so
+  // an unclamped fan-out past the bound would reach nobody rather than most.
   //
-  // Naming targets at all is the security-relevant part. Nothing propagates a
-  // revocation today (`docs/specs/remote-security-model.md` -> Future), so a
-  // revoked Client keeps its subscription row; letting the Server choose
-  // recipients would keep pushing Pane labels to a de-authorized phone. Read at
-  // send time, so a revocation during the delay takes effect.
-  const deliveryIds = deps.activeRecords().map((record) => record.deliveryId);
-  if (deliveryIds.length === 0) return { targeted: 0, delivered: 0, failed: 0 };
+  // **The newest end, not the oldest.** `activeRecords()` is in approval order,
+  // and re-pairing a phone that lost its IndexedDB mints a fresh Client static,
+  // which supersedes nothing — so the old record stays active forever, ahead of
+  // its own replacement. Clamping from the front would push to dead records and
+  // drop the phones actually in use.
+  const records = all.slice(-MAX_PUSH_QUERY_DELIVERY_IDS);
+  if (records.length !== all.length) {
+    console.warn(
+      `remote-host: ${all.length} devices are paired; pushing to the ${MAX_PUSH_QUERY_DELIVERY_IDS} most recent`,
+    );
+  }
+
+  // Bounded here, before it is sealed, because this is the last layer that can
+  // read it: what the worker re-sanitizes at the sink is whatever this
+  // produced.
+  const plaintext = utf8Encode(
+    JSON.stringify({
+      title: toPushText(title),
+      body: PUSH_BODY,
+      tag: boundedPushText(sessionId, { limit: PUSH_TAG_LIMIT, fallback: 'dormouse' }),
+    }),
+  );
+  const recipients: SealedPushRecipient[] = [];
+  for (const record of records) {
+    const sealed = await deps.seal(record.clientStaticPublicKey, plaintext);
+    if (sealed) recipients.push({ deliveryId: record.deliveryId, sealed });
+  }
+  if (recipients.length === 0) {
+    // A Host with records but no usable static reaches nobody, and silently
+    // would be indistinguishable from having no phones paired.
+    console.warn('remote-host: no push could be sealed for any paired device');
+    return { targeted: 0, delivered: 0, failed: 0 };
+  }
 
   const response = await hostFetch(
     // The one call that outlives the shared budget: the Server holds a send open
@@ -135,15 +186,7 @@ export async function sendPush(
     // from the Server's own bound plus a margin for the round trip.
     { ...deps, timeoutMs: PUSH_SEND_DEADLINE_MS + PUSH_SEND_MARGIN_MS },
     API_ROUTES.pushSend,
-    {
-      deliveryIds,
-      title: toPushText(title),
-      body: PUSH_BODY,
-      // Per-Session collapse key: a Pane that rings, is cleared, and rings again
-      // replaces its own notification rather than stacking copies. Internal ids
-      // only — a tag is never displayed.
-      tag: sessionId,
-    },
+    { recipients } satisfies PushSendRequest,
   );
   // `hostFetch` threw on a non-2xx; this is the quieter failure class — the
   // Server accepted the send but a push service refused delivery, which it
@@ -153,5 +196,5 @@ export async function sendPush(
   if (result.failed > 0 || result.delivered === 0) {
     console.warn('remote-host: push was not delivered to every device', result);
   }
-  return { targeted: deliveryIds.length, delivered: result.delivered, failed: result.failed };
+  return { targeted: recipients.length, delivered: result.delivered, failed: result.failed };
 }

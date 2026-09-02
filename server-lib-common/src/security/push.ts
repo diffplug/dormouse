@@ -40,11 +40,11 @@ export async function pushEndpointFingerprint(
 /**
  * Reduce untrusted text to something safe to put in an OS notification.
  *
- * Shared by the Host (which builds the payload from a Pane label) and the
- * Server (which revalidates before handing it to a push service), so the rule
- * has one implementation across both runtimes rather than a strong copy and a
- * weak one. `lib/pocket/public/sw.js` mirrors it a third time at the render
- * sink; that file is copied verbatim into the build and can import nothing.
+ * Shared by the Host (which builds the payload from a Pane label, before
+ * sealing it) and the Pocket service worker (which re-bounds at the render
+ * sink), so the rule has one implementation across both runtimes rather than a
+ * strong copy and a weak one. The Server is not one of them: it forwards
+ * ciphertext (`docs/specs/remote-security-model.md` -> Push sealing).
  *
  * The label is ultimately terminal-supplied — `OSC 0`/`2`/`9` titles reach the
  * Pane label (`docs/specs/alert.md` -> Text And Security) — so beyond bounding

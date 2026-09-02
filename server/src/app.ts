@@ -37,7 +37,7 @@ import {
   presenceChallenge,
   toBase64Url,
   utf8Decode,
-  boundedPushText,
+  isSealedPushV1,
   verifyPasskeyAssertion,
 } from 'server-lib-common';
 import type {
@@ -59,6 +59,8 @@ import type {
   ReauthBeginResponse,
   ReauthFinishRequest,
   ReauthFinishResponse,
+  SealedPushPayload,
+  SealedPushRecipient,
   SetupBeginRequest,
   SetupBeginResponse,
   SetupFinishRequest,
@@ -179,6 +181,16 @@ const REAUTH_NONCE_TTL_MS = 2 * 60 * 1000;
  * use: a phone holds one nonce at a time, per ceremony.
  */
 const MAX_PENDING_REAUTH_NONCES = 64;
+/**
+ * How often {@link CreatedApp.sweepRevokedHosts} should be run. `index.ts` owns
+ * the timer — `createApp` starts no background work of its own.
+ *
+ * A minute is chosen against what revocation is: a person editing a file after
+ * losing a machine, for whom the difference between instant and a minute is
+ * nothing, while the alternative — re-reading the store on every relayed frame
+ * — puts a disk read on the path every keystroke takes.
+ */
+export const HOST_REVOCATION_SWEEP_MS = 60_000;
 /** A small fixed delay on a rejected credential — the extent of POC brute-force hardening. */
 const CREDENTIAL_FAILURE_DELAY_MS = 250;
 /** The one answer to a wrong setup password, wherever it is supplied. */
@@ -291,6 +303,14 @@ export interface CreatedApp {
    * — the WebSocket routes are inert until the upgrade handler is injected.
    */
   readonly injectWebSocket: NodeWebSocket['injectWebSocket'];
+  /**
+   * Close the relay socket of every connected Host whose `hosts.json` row is
+   * gone, and report how many. `index.ts` runs it every
+   * {@link HOST_REVOCATION_SWEEP_MS}; exposed rather than scheduled here so
+   * `createApp` starts no background work, and so a test drives the decision
+   * instead of a timer.
+   */
+  readonly sweepRevokedHosts: () => Promise<number>;
 }
 
 export function createApp(config: AppConfig): CreatedApp {
@@ -306,7 +326,9 @@ export function createApp(config: AppConfig): CreatedApp {
   const rpId = new URL(origin).hostname;
   const accounts = new AccountStore(config.stateDir, now);
   const hostStore = new HostStore(config.stateDir, now);
-  const pushStore = new PushSubscriptionStore(config.stateDir, now);
+  // Joined against the Host store so a row outliving its `hosts.json` line is
+  // dropped on read (docs/specs/server.md -> State files).
+  const pushStore = new PushSubscriptionStore(config.stateDir, now, hostStore);
   const sessions = new SessionStore(now);
   const hub = new RelayHub();
   // Separate issuers per flow: a setup challenge cannot be redeemed at sign-in.
@@ -890,50 +912,60 @@ export function createApp(config: AppConfig): CreatedApp {
     const sender = config.pushSender;
     if (!sender) return c.json({ error: 'push is not configured' }, 503);
     const body = await readJson<PushSendRequest>(c);
-    if (!body || typeof body.title !== 'string' || typeof body.body !== 'string') {
-      return c.json({ error: 'malformed request' }, 400);
-    }
-    // Targets are required. The Host holds the ACL and is the only party that
-    // may decide who a push reaches; a Server that fanned out on its own would
-    // keep notifying a Client the Host had revoked, since nothing propagates a
-    // revocation today (docs/specs/remote-security-model.md).
-    const names: unknown = body.deliveryIds;
-    if (!Array.isArray(names) || names.length === 0 || names.some((n) => !isDeliveryId(n))) {
-      return c.json({ error: 'deliveryIds must be a non-empty array of delivery ids' }, 400);
+    // Recipients are required, one sealed envelope each. The Host holds the ACL
+    // and is the only party that may decide who a push reaches; a Server that
+    // fanned out on its own would keep notifying a Client the Host had revoked,
+    // since nothing propagates a revocation today
+    // (docs/specs/remote-security-model.md).
+    const recipients: unknown = body?.recipients;
+    if (
+      !Array.isArray(recipients) ||
+      recipients.length === 0 ||
+      recipients.length > MAX_PUSH_QUERY_DELIVERY_IDS ||
+      !recipients.every(isSealedPushRecipient)
+    ) {
+      return c.json(
+        {
+          error:
+            `recipients must be 1..${MAX_PUSH_QUERY_DELIVERY_IDS} ` +
+            '{ deliveryId, sealed } pairs',
+        },
+        400,
+      );
     }
 
     // The Host is identified by its token, never by the body: a Host can only
-    // ever reach subscriptions registered against itself.
-    const subscriptions = await currentPushSubscriptionsForHost(c.get('host').hostId);
-    const targets = subscriptions.filter((s) => names.includes(s.deliveryId));
-
-    // Title and body originate in a renderer and are ultimately Pane-derived,
-    // so they are re-bounded here rather than trusted — the same
-    // revalidate-at-the-boundary rule the alarm settings follow, through the
-    // same shared function the Host used (`boundedPushText`).
-    const payload = JSON.stringify({
-      title: boundedPushText(body.title, { limit: PUSH_TEXT_LIMIT, fallback: 'Dormouse' }),
-      body: boundedPushText(body.body, {
-        limit: PUSH_TEXT_LIMIT,
-        fallback: 'A terminal needs attention.',
-      }),
-      ...(typeof body.tag === 'string' && body.tag
-        ? // Code-point slice for the same reason as `boundedPushText`: a cut
-          // mid-surrogate would ship a lone half.
-          { tag: Array.from(body.tag).slice(0, PUSH_TEXT_LIMIT).join('') }
-        : {}),
+    // ever reach subscriptions registered against itself. The same `hostId`
+    // rides in the payload, because it is how the worker picks the pinned
+    // record to decrypt against — taken from the token for the same reason.
+    const { hostId } = c.get('host');
+    const subscriptions = await currentPushSubscriptionsForHost(hostId);
+    const byDelivery = new Map(subscriptions.map((s) => [s.deliveryId, s]));
+    const targets = recipients.flatMap((recipient) => {
+      const subscription = byDelivery.get(recipient.deliveryId);
+      return subscription ? [{ subscription, sealed: recipient.sealed }] : [];
     });
 
     // Every send starts at once, so one deadline per send also bounds the whole
     // route regardless of how many devices a Host has.
     const deadlineMs = config.pushSendDeadlineMs ?? PUSH_SEND_DEADLINE_MS;
     const results = await Promise.all(
-      targets.map(async (s) => ({
-        endpoint: s.endpoint,
+      targets.map(async ({ subscription, sealed }) => ({
+        endpoint: subscription.endpoint,
         result: await sendWithinDeadline(
           sender,
-          { endpoint: s.endpoint, keys: s.keys },
-          payload,
+          { endpoint: subscription.endpoint, keys: subscription.keys },
+          // Field by field, never a spread of `sealed`: `isSealedPushV1` bounds
+          // the three fields it knows and ignores the rest, so `{ hostId,
+          // ...sealed }` would let a Host both override the token's `hostId`
+          // and smuggle readable text past a Server that must forward neither
+          // (SECURITY.md -> "What crosses the boundary").
+          JSON.stringify({
+            hostId,
+            v: sealed.v,
+            salt: sealed.salt,
+            ct: sealed.ct,
+          } satisfies SealedPushPayload),
           deadlineMs,
         ),
       })),
@@ -947,7 +979,7 @@ export function createApp(config: AppConfig): CreatedApp {
     const res: PushSendResponse = {
       delivered: results.filter((r) => r.result === 'delivered').length,
       expired: expired.length,
-      unknown: names.filter((n) => !targets.some((t) => t.deliveryId === n)).length,
+      unknown: recipients.length - targets.length,
       failed: results.filter((r) => r.result === 'failed').length,
     };
     return c.json(res);
@@ -1035,11 +1067,34 @@ export function createApp(config: AppConfig): CreatedApp {
     }),
   );
 
+  /** `docs/specs/server.md` -> Guardrails owns the rule this enforces. */
+  async function sweepRevokedHosts(): Promise<number> {
+    const online = hub.onlineHostIds();
+    if (online.length === 0) return 0;
+    // One read for the whole sweep: `has()` reads the file per call, and a Host
+    // deleted mid-sweep is caught by the next one.
+    //
+    // **Nothing is closed on an answer this sweep did not actually read.**
+    // Unparseable JSON throws out of here and the interval swallows it;
+    // `listIfPresent` is what covers the other half, an absent file — both are
+    // ordinary states for a file whose editing *is* the revocation mechanism,
+    // and reading either as "nobody is enrolled" would drop every session.
+    const rows = await hostStore.listIfPresent();
+    if (rows === null) return 0;
+    const enrolled = new Set(rows.map((h) => h.hostId));
+    let closed = 0;
+    for (const hostId of online) {
+      if (enrolled.has(hostId)) continue;
+      if (hub.closeHost(hostId)) closed += 1;
+    }
+    return closed;
+  }
+
   // --- Static Pocket app: GET /* fallback, registered LAST so every API and
   //     /ws route above wins. Missing build → a stub with the build command.
   registerPocketServing(app, config.pocketDir);
 
-  return { app, sessions, requireSession, hub, injectWebSocket };
+  return { app, sessions, requireSession, hub, injectWebSocket, sweepRevokedHosts };
 }
 
 /** Message shown at `GET /` when the Pocket app has not been built yet. */
@@ -1131,9 +1186,6 @@ async function readJson<T>(c: { req: { json(): Promise<unknown> } }): Promise<T 
   }
 }
 
-/** Longest push title/body we will forward; see the send route for why. */
-const PUSH_TEXT_LIMIT = 200;
-
 /** Read an `Authorization: Bearer <token>` header, or null if absent/malformed. */
 function bearerToken(c: Context<AppEnv>): string | null {
   const match = /^Bearer (.+)$/.exec(c.req.header('Authorization') ?? '');
@@ -1147,6 +1199,17 @@ function bearerToken(c: Context<AppEnv>): string | null {
  */
 function isDeliveryId(value: unknown): value is string {
   return isExactBase64Url(value, DELIVERY_ID_LENGTH);
+}
+
+/**
+ * One `{ deliveryId, sealed }` pair on a send. Shape and bounds are the whole
+ * of what the Server can check — it holds no key — and the envelope's bound is
+ * its only defense against forwarding megabytes at a phone.
+ */
+function isSealedPushRecipient(value: unknown): value is SealedPushRecipient {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as SealedPushRecipient;
+  return isDeliveryId(v.deliveryId) && isSealedPushV1(v.sealed);
 }
 
 /** True if `value` is a `PushSubscriptionPayload` with both encryption keys. */

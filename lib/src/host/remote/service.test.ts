@@ -965,9 +965,13 @@ describe('setup QR', () => {
 });
 
 describe('push', () => {
-  const sendBody = (): Record<string, unknown> | null => {
-    const request = requests.filter((r) => r.url.endsWith('/api/push/send')).at(-1);
-    return request ? (JSON.parse(String(request.init?.body)) as Record<string, unknown>) : null;
+  const rawSendBody = (): string | null =>
+    (requests.filter((r) => r.url.endsWith('/api/push/send')).at(-1)?.init?.body as string) ?? null;
+  const sendRecipients = (): Array<{ deliveryId: string }> => {
+    const body = rawSendBody();
+    return body
+      ? (JSON.parse(body) as { recipients: Array<{ deliveryId: string }> }).recipients
+      : [];
   };
 
   it('addresses the Host’s own ACL, not anything the webview sent', async () => {
@@ -979,19 +983,25 @@ describe('push', () => {
 
     await command('push', { sessionId: 'pty-1', title: 'pnpm dev' });
 
-    expect(sendBody()).toMatchObject({
-      deliveryIds: [aclRecord('device-1').deliveryId, aclRecord('device-2').deliveryId],
-      title: 'pnpm dev',
-      tag: 'pty-1',
-    });
+    // One sealed envelope per active record, in ACL order.
+    expect(sendRecipients().map((r) => r.deliveryId)).toEqual([
+      aclRecord('device-1').deliveryId,
+      aclRecord('device-2').deliveryId,
+    ]);
   });
 
-  it('bounds the title the webview supplied', async () => {
+  it('seals what the webview named rather than posting it', async () => {
+    // The Server forwards this body and can read none of it
+    // (docs/specs/remote-security-model.md -> Push sealing). That the label is
+    // bounded *before* it is sealed is `lib/src/remote/host/alert-push.test.ts`,
+    // which holds the key to open one.
     createService({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('device-1')] } });
     await service.start();
 
-    await command('push', { sessionId: 'pty-1', title: 'build finished' });
-    expect(sendBody()).toMatchObject({ title: 'build finished' });
+    await command('push', { sessionId: 'pty-1', title: 'build\u0000finished\u001b' });
+    const body = rawSendBody()!;
+    expect(body).not.toContain('finished');
+    expect(body).not.toContain('pty-1');
   });
 
   it('is a silent no-op with no Host running', async () => {
@@ -1081,12 +1091,14 @@ describe('pushTest', () => {
 
     const send = requests.find((request) => request.url.endsWith('/api/push/send'));
     expect(send).toBeTruthy();
-    const body = JSON.parse(String(send!.init?.body)) as Record<string, unknown>;
-    // Recipients come from the ACL, exactly as a real ring does.
-    expect(body.deliveryIds).toEqual([aclRecord('device-1').deliveryId]);
-    // A fixed collapse key, so repeated presses replace rather than stack.
-    expect(body.tag).toBe('dormouse-push-test');
-    expect(String(body.title)).toContain('test');
+    const raw = String(send!.init?.body);
+    const body = JSON.parse(raw) as { recipients: Array<{ deliveryId: string }> };
+    // Recipients come from the ACL, exactly as a real ring does — and the test
+    // push is sealed like any other, so neither its fixed collapse key nor its
+    // title is readable on the wire.
+    expect(body.recipients.map((r) => r.deliveryId)).toEqual([aclRecord('device-1').deliveryId]);
+    expect(raw).not.toContain('dormouse-push-test');
+    expect(raw).not.toContain('Dormouse test');
   });
 
   it('surfaces a refused send instead of swallowing it', async () => {

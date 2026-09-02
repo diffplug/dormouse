@@ -37,6 +37,7 @@ import {
   pairingInvitationPrologue,
   e2eConnectionPrologue,
   randomBase64Url,
+  sealPush,
   toBase64Url,
   utf8Decode,
   utf8Encode,
@@ -52,6 +53,7 @@ import {
   type PairingInvitation,
   type PairingOutcomeV1,
   type PresenceBinding,
+  type SealedPushV1,
   type ServerToHostFrame,
 } from 'server-lib-common';
 import type { HostEnrollment } from './enrollment';
@@ -345,6 +347,34 @@ export class RemoteHost {
     return this.#acl.activeRecords();
   }
 
+  /**
+   * Seal one push plaintext to one paired Client, or `null` when this Host has
+   * no usable Noise static. The private key never leaves this class, which is
+   * why the delivery path asks rather than borrowing it
+   * (`docs/specs/remote-security-model.md` -> Push sealing).
+   *
+   * Answers `null` rather than throwing on a corrupt `clientStaticPublicKey`,
+   * because the caller's job is to notify the phones it can and warn about the
+   * rest.
+   */
+  async sealPushForClient(
+    clientStaticPublicKey: string,
+    plaintext: Uint8Array,
+  ): Promise<SealedPushV1 | null> {
+    const noiseStatic = await this.#loadNoiseStatic();
+    if (!noiseStatic) return null;
+    try {
+      return await sealPush({
+        hostStaticPrivateKey: noiseStatic.privateKey,
+        clientStaticPublicKey: fromBase64Url(clientStaticPublicKey),
+        plaintext,
+      });
+    } catch (error) {
+      console.warn('[remote-host] could not seal a push for a paired client', error);
+      return null;
+    }
+  }
+
   // --- Invitations ---------------------------------------------------------
 
   /**
@@ -359,8 +389,30 @@ export class RemoteHost {
    * Prunes on insert, since nothing else sweeps this map, and evicts its own
    * oldest at the cap: the code longest on screen is the one whose scanner has
    * most likely given up.
+   *
+   * **Everything that decides what this Host holds runs after the keygen, on
+   * one synchronous stretch.** `generateNoiseKeyPair` is the only await here,
+   * and two mints overlapping across it would each evict against the same
+   * pre-await size and then both insert — leaving `MAX_TOKENS_PER_HOST + 1`
+   * live invitations, which is the cap the Server's own setup-token bound is
+   * shared with. A teardown in that same window is the other half, and it is
+   * guarded by the epoch {@link RemoteHost.#enqueue} uses rather than by
+   * `#stopped`: invitations go with the socket, so a close — not only a
+   * `stop()` — retires them, and inserting afterwards would re-arm the reaper
+   * and return a QR the panel paints `live` over a relay socket that is gone.
    */
   async mintInvitation(setupToken: string, serverExpiresAtMs: number): Promise<PairingInvitation> {
+    const epoch = this.#epoch;
+    const keyPair = await generateNoiseKeyPair();
+    // Worded for every teardown the epoch covers, not only `stop()`: a dropped
+    // socket reaches here too, and on that one the panel is about to read
+    // connected again. Prefixed like `#setupQr`'s other refusals, since this
+    // string is what the person tapping *Show a code* is shown.
+    if (this.#epoch !== epoch) {
+      throw new Error(
+        'could not mint a setup code: this machine’s connection to the server dropped. Try again.',
+      );
+    }
     this.#reap();
     const now = this.#now();
     while (this.#invitations.size >= MAX_TOKENS_PER_HOST) {
@@ -371,7 +423,6 @@ export class RemoteHost {
       this.#retireInvitation(oldest.value[0]);
     }
     const expiresAt = Math.min(now + DEFAULT_PAIRING_TTL_MS, serverExpiresAtMs);
-    const keyPair = await generateNoiseKeyPair();
     const inviteId = randomBase64Url(LOCAL_ID_BYTE_LENGTH);
     const invitation: PairingInvitation = {
       hostId: this.#enrollment.hostId,

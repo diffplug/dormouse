@@ -14,6 +14,7 @@ import {
 import { NOISE_MAX_MESSAGE_LENGTH } from '../security/noise.js';
 import type { PasskeyAssertion } from '../security/passkey.js';
 import type { PresenceBinding } from '../security/presence.js';
+import type { SealedPushV1 } from '../security/push-seal.js';
 
 // ---------------------------------------------------------------------------
 // HTTP API (see server.md "HTTP API")
@@ -92,6 +93,19 @@ export const WS_CLOSE_HOST_REPLACED = 4000;
 
 /** Human-readable reason paired with {@link WS_CLOSE_HOST_REPLACED}. */
 export const WS_CLOSE_HOST_REPLACED_REASON = 'replaced by a newer host connection';
+
+/**
+ * The Host's `hosts.json` row is gone, so its bearer token names nothing.
+ *
+ * A distinct code from {@link WS_CLOSE_HOST_REPLACED} because the two mean
+ * opposite things to a reconnect: a replaced Host must stand down, while a
+ * revoked one may retry as often as it likes — the upgrade will simply 401,
+ * which is the whole of what revocation is.
+ */
+export const WS_CLOSE_HOST_REVOKED = 4001;
+
+/** Human-readable reason paired with {@link WS_CLOSE_HOST_REVOKED}. */
+export const WS_CLOSE_HOST_REVOKED_REASON = 'this host is no longer enrolled';
 
 /** The selfhost mode has exactly one account. */
 export const SELFHOST_ACCOUNT_ID = 'owner';
@@ -388,9 +402,11 @@ export interface PushSubscriptionsQueryResponse {
 }
 
 /**
- * The most delivery ids one query may name. A browser holds one per paired
- * Host, so this is far above any real use and is what keeps the route from
- * being a bulk oracle.
+ * The most delivery ids one request may name — a query's `deliveryIds`, and a
+ * send's `recipients`. A browser holds one per paired Host and a Host has one
+ * ACL record per paired Client, so this is far above any real use on either
+ * route: what it buys the query is not being a bulk oracle, and what it buys
+ * the send is a bound on the sealed envelopes one POST can carry.
  */
 export const MAX_PUSH_QUERY_DELIVERY_IDS = 64;
 
@@ -404,25 +420,39 @@ export interface PushDevicesResponse {
 }
 
 /**
- * Host-token auth. `deliveryIds` is required and non-empty: the Host holds the
+ * One recipient of a send: who to reach, and the envelope only they can open.
+ *
+ * Per recipient rather than one payload for the list, because the seal is to
+ * that Client's own static — there is no group key and deliberately none
+ * (`docs/specs/remote-security-model.md` -> Push sealing).
+ */
+export interface SealedPushRecipient {
+  deliveryId: string;
+  sealed: SealedPushV1;
+}
+
+/**
+ * Host-token auth. `recipients` is required and non-empty: the Host holds the
  * ACL and is the only party that may decide who a push reaches, so the Server
  * never selects recipients itself.
  *
- * Reserved: the payload is still plaintext `title`/`body`/`tag`. Stage 6 of
- * **Scope: e2e-client-host** (`docs/specs/remote-security-model.md` →
- * `## Future`, "Sealed push") replaces it with the sealed envelope; nothing
- * else about this route changes then.
+ * **The Server reads no notification text.** Title, body, and the per-Session
+ * collapse tag are bounded on the Host, sealed, and re-sanitized in the service
+ * worker at the render sink; what crosses this route is ciphertext plus a
+ * delivery address ([alert.md](../../../docs/specs/alert.md) -> Push
+ * notifications).
  */
 export interface PushSendRequest {
-  deliveryIds: string[];
-  title: string;
-  body: string;
-  /**
-   * Collapse key. The alarm path tags per Session so a Pane that rings, is
-   * cleared, and rings again replaces its own notification instead of stacking
-   * copies on the lock screen.
-   */
-  tag?: string;
+  recipients: SealedPushRecipient[];
+}
+
+/**
+ * What the Server forwards to the push service, verbatim: the sealed envelope
+ * plus the `hostId` from the sending Host's own token, which is how the worker
+ * picks the pinned record to decrypt against.
+ */
+export interface SealedPushPayload extends SealedPushV1 {
+  hostId: string;
 }
 /**
  * Wall-clock bound the send route holds one delivery attempt under, so a hung
@@ -543,7 +573,7 @@ export interface E2eHostFrame {
   ct: string;
 }
 
-/** Server → client: the Host's frame with `hostId` stamped, as for `challenge`. */
+/** Server → client: the Host's frame with `hostId` stamped from its socket. */
 export interface E2eServerToClientFrame extends Omit<E2eHostFrame, 'clientId'> {
   hostId: string;
 }

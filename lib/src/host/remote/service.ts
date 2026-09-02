@@ -692,6 +692,8 @@ export class RemoteHostService {
     return {
       enrollment,
       activeRecords: () => host.activeRecords,
+      seal: (clientStaticPublicKey, plaintext) =>
+        host.sealPushForClient(clientStaticPublicKey, plaintext),
       fetch: this.#fetch,
     };
   }

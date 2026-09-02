@@ -6,7 +6,7 @@ A mouse-friendly multitasking terminal built with pnpm, react, typescript, vite,
 
 ```
 pnpm install     # install deps
-pnpm build       # build lib, vscode extension, and website
+pnpm build       # build lib, vscode extension, Pocket, and website
 ```
 
 ## Architecture
@@ -94,7 +94,9 @@ The mechanically checkable parts of these conventions are enforced by `scripts/s
 
 Advisory spec/comment reviews follow `docs/prose-audit.md` (`pnpm audit:prose`).
 
-Three sibling lints run alongside it in `pnpm test`, each enforcing one invariant a spec states in prose: `scripts/xterm-lint.mjs` (`pnpm lint:xterm`) for the `@xterm/*` version lockstep in `docs/specs/webgl-text.md`; `scripts/loopback-lint.mjs` (`pnpm lint:loopback`) for the rule in `SECURITY.md` -> "Loopback Listeners" that a loopback bind is not an access control — a new listener must reference a guard module or be allowlisted with a reason; and `scripts/deploy-lint.mjs` (`pnpm lint:deploy`) for the installer controls in `SECURITY.md` -> "Credentials at rest" and "Network posture (self-hosted)", which bind all three of `deploy/local/install-{macos,windows,linux}` and were previously enforced by nothing. Its companion `scripts/deploy-lint-selftest.mjs` proves each rule is load-bearing by deleting the control — and, for exact-count rules, adding a copy — and requiring the lint to fail.
+Four sibling lints run alongside it in `pnpm test`, each enforcing one invariant a spec states in prose: `scripts/xterm-lint.mjs` (`pnpm lint:xterm`) for the `@xterm/*` version lockstep in `docs/specs/webgl-text.md`; `scripts/loopback-lint.mjs` (`pnpm lint:loopback`) for the rule in `SECURITY.md` -> "Loopback Listeners" that a loopback bind is not an access control — a new listener must reference a guard module or be allowlisted with a reason; `scripts/deploy-lint.mjs` (`pnpm lint:deploy`) for the installer controls in `SECURITY.md` -> "Credentials at rest" and "Network posture (self-hosted)", which bind all three of `deploy/local/install-{macos,windows,linux}` and were previously enforced by nothing; and `scripts/e2e-lint.mjs` (`pnpm lint:e2e`) for the structural half of `SECURITY.md` -> "Remote Control" — one Noise suite with no selector, no JavaScript curve, no legacy relay discriminant, no Server-side protocol-v1 type, no checked-in service worker, and no optional field on a ciphertext or transcript. Each rule names the `SECURITY.md` line it enforces and fails if that line is gone.
+
+The last two carry a load-bearing self-test, and the two are inverses because the lints are: `scripts/deploy-lint-selftest.mjs` deletes each installer control — and, for exact-count rules, adds a copy — while `scripts/e2e-lint-selftest.mjs` re-introduces each forbidden thing. Either way the requirement is the same: the lint must go red. **A rule added to one of these lints without its self-test case is not enforced** — it is a claim that something is checked. They share their plumbing, and only that, through `scripts/lint-kit.mjs`.
 
 `pnpm test` also runs `scripts/clamp-issue-body-selftest.mjs` — not a lint but the test for `scripts/clamp-issue-body.mjs`, the helper the audit workflows use to keep an issue body postable. It lives at the repo root because its callers do.
 

@@ -53,16 +53,27 @@ abstract class JsonFileStore {
     this.now = now;
   }
 
-  /** Read and parse the file, or `fallback` if it does not exist yet. */
-  protected async read<T>(fallback: T): Promise<T> {
+  /**
+   * Read and parse the file, or `null` if it is not there.
+   *
+   * Separate from {@link read} because one caller needs the distinction that
+   * one erases: a file that is absent for an instant — a rename in flight —
+   * is not the same fact as a file that lists nobody.
+   */
+  protected async readIfPresent<T>(): Promise<T | null> {
     let raw: string;
     try {
       raw = await readFile(this.#path, 'utf8');
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return fallback;
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
       throw err;
     }
     return JSON.parse(raw) as T;
+  }
+
+  /** Read and parse the file, or `fallback` if it does not exist yet. */
+  protected async read<T>(fallback: T): Promise<T> {
+    return (await this.readIfPresent<T>()) ?? fallback;
   }
 
   /**
@@ -178,7 +189,22 @@ export class HostStore extends JsonFileStore {
    * reaching for anyway.
    */
   async list(): Promise<StoredHost[]> {
-    const rows = await this.read<unknown[]>([]);
+    return (await this.listIfPresent()) ?? [];
+  }
+
+  /**
+   * The enrolled set, or `null` when `hosts.json` is not there at all.
+   *
+   * **An absent file is not an empty one.** The relay's revocation sweep closes
+   * the socket of every Host the answer omits, and a file is briefly absent
+   * whenever it is replaced by rename rather than truncated in place — which is
+   * how an editor saves. Reading that instant as "nobody is enrolled" would
+   * drop every live session over it. Revoking is emptying the *array*, which
+   * still answers an enrolled set of zero and still closes everything.
+   */
+  async listIfPresent(): Promise<StoredHost[] | null> {
+    const rows = await this.readIfPresent<unknown[]>();
+    if (rows === null) return null;
     return Array.isArray(rows) ? rows.filter(isStoredHost) : [];
   }
 
@@ -289,15 +315,21 @@ export interface PushSubscriptionUpsertResult {
  * No secret of ours lives here, but the endpoint plus its keys IS a bearer
  * capability to notify that phone, so the inherited `0o600` still matters.
  *
- * **Removing a `hosts.json` row cascades lazily.** {@link listForHost} answers
- * nothing for a Host that is no longer enrolled and every read path filters,
- * so an orphaned row is unreachable the moment its Host is revoked; provider
- * 404/410 pruning ({@link removeEndpoints}) and the Client's own deletion are
- * what eventually take it off disk.
+ * **Removing a `hosts.json` row cascades.** {@link list} drops every row whose
+ * Host is no longer enrolled, so the read boundary that already handles
+ * malformed rows handles orphans too, and the next mutation writes the pruned
+ * set back. Deleting a Host by hand is the documented revocation mechanism, so
+ * this is read fresh rather than cached — the same rule `HostStore.has`
+ * follows. An *absent* `hosts.json` cascades to nothing: it is a file in
+ * flight, not a revocation.
  */
 export class PushSubscriptionStore extends JsonFileStore {
-  constructor(stateDir: string, now: () => number = () => Date.now()) {
+  /** Which Hosts are still enrolled. Required, so no caller can skip the join. */
+  readonly #hosts: HostStore;
+
+  constructor(stateDir: string, now: () => number, hosts: HostStore) {
     super(stateDir, 'push-subscriptions.json', now);
+    this.#hosts = hosts;
   }
 
   /**
@@ -311,13 +343,25 @@ export class PushSubscriptionStore extends JsonFileStore {
    * caller downstream. A dropped row reads as a missing registration, which
    * Pocket repairs by re-offering Enable, instead of as a live one that
    * cannot be delivered to.
+   *
+   * A row naming a Host that is no longer in `hosts.json` is dropped the same
+   * way — silently, because a deleted Host is a deliberate revocation rather
+   * than an edit to complain about, and the Client repairs it by re-registering
+   * against a Host that exists.
    */
   async list(): Promise<StoredPushSubscription[]> {
     const rows = await this.read<unknown>([]);
     if (!Array.isArray(rows)) return [];
     const kept = rows.filter(isStoredPushSubscription);
     if (kept.length !== rows.length) warnOnceAboutDroppedRows();
-    return kept;
+    // An absent `hosts.json` is not an empty one — the same distinction the
+    // relay's revocation sweep makes, and it matters more here because
+    // `upsert` writes this answer back: joining against `[]` inside the rename
+    // window of a hand edit would make the truncation durable.
+    const hosts = await this.#hosts.listIfPresent();
+    if (hosts === null) return kept;
+    const enrolled = new Set(hosts.map((h) => h.hostId));
+    return kept.filter((s) => enrolled.has(s.hostId));
   }
 
   async listForHost(hostId: string): Promise<StoredPushSubscription[]> {
