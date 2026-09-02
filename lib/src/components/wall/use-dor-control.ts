@@ -981,11 +981,18 @@ export function useDorControl({
         // `binaryPath` names a program the host will spawn and is persisted into
         // the pane's params, so it is checked before it is stored rather than
         // only at the spawn (`lib/src/lib/agent-browser-binary.ts`).
-        const binaryPath = stringParam(params.binaryPath);
-        if (binaryPath !== undefined && !isAllowedAgentBrowserBinary(binaryPath)) {
-          detail.respond({ ok: false, error: 'binaryPath must be an absolute path to an agent-browser executable' });
-          return;
-        }
+        //
+        // Dropped rather than fatal, like `allowedBinaryPath` in
+        // agent-browser-surface-controller.ts and `runWithBinaryFallback`: the
+        // host resolves its own candidate instead, and it can accept a path
+        // this realm cannot — `DORMOUSE_AGENT_BROWSER_BIN` matches by exact
+        // value, and only the host can read its own environment. Refusing the
+        // request here would mean no browser surface at all for an operator who
+        // set that variable to a differently-named wrapper.
+        const requestedBinaryPath = stringParam(params.binaryPath);
+        const binaryPath = isAllowedAgentBrowserBinary(requestedBinaryPath)
+          ? requestedBinaryPath
+          : undefined;
         const result = ensureAgentBrowserSurface({
           key: stringParam(params.key),
           session,

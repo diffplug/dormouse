@@ -237,6 +237,34 @@ describe('Wall on the Lath engine', () => {
     expect(saved!.surfaceRefsNext).toBe(4);
   });
 
+  // The gate on `binaryPath` drops rather than refuses, like every other one in
+  // this class: the host resolves its own candidate, and it can accept a path
+  // this realm cannot (`DORMOUSE_AGENT_BROWSER_BIN` matches by exact value, and
+  // only the host reads its own environment).
+  it('drops a binaryPath that is not an agent-browser without failing the request', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+
+    let response: { ok: boolean; error?: string; result?: { surfaceId: string } } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.agentBrowser,
+          params: { session: 'dormouse.1.gate', binaryPath: '/usr/bin/curl' },
+          respond: (r: typeof response) => { response = r; },
+        },
+      }));
+    });
+    await flush();
+
+    // The surface opens; the path simply does not travel with it.
+    expect(response?.ok).toBe(true);
+    expect(response?.error).toBeUndefined();
+    expect(response?.result?.surfaceId).toBeTruthy();
+  });
+
   // The control socket is a wire protocol, not the CLI: `dor iframe` validates
   // its argument, but anything holding the control token reaches this method
   // directly — and on a host with no iframe proxy the value becomes a raw

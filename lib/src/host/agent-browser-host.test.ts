@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, promises as fsp, rmSync, statSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -141,6 +141,53 @@ describe('agent-browser host screenshot transport', () => {
   // blob, so an unchecked one is arbitrary local execution in the extension host
   // or the Tauri sidecar. The gate is at the spawn, so it covers streamStatus /
   // open / popOut too — the entry points the subcommand allowlist never saw.
+  it('drops the capture directory on shutdown', async () => {
+    enqueueSpawnResults([{}]);
+    const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+    const shot = await host.screenshotToFile('shutdown-sess', { format: 'jpeg' }, '/usr/local/bin/agent-browser');
+    if (!shot.ok) throw new Error('expected a path');
+    writeFileSync(shot.path, Uint8Array.from([1, 2, 3])); // stand in for the capture
+    const dir = dirname(shot.path);
+
+    await host.closePoppedOut();
+
+    // A frame of the user's authenticated browser must not outlive the process
+    // that took it, waiting on whenever the OS gets round to reaping tmp.
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it('removes the frame once its bytes have been read', async () => {
+    enqueueSpawnResults([{}, {}]);
+    const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+    const located = await host.screenshotToFile('read-sess', { format: 'jpeg' }, '/usr/local/bin/agent-browser');
+    if (!located.ok) throw new Error('expected a path');
+    writeFileSync(located.path, Uint8Array.from([0xff, 0xd8]));
+
+    await host.screenshot('read-sess', { format: 'jpeg' }, '/usr/local/bin/agent-browser');
+
+    // `screenshot()` owns the file's whole life — the bytes went to the webview.
+    expect(existsSync(located.path)).toBe(false);
+    await host.closePoppedOut();
+  });
+
+  it('answers a capture-directory failure as a result, and retries the next time', async () => {
+    // `??=` on the mkdtemp promise would memoize a rejection, so one transient
+    // EACCES/ENOSPC on tmpdir would disable screenshots for the whole process.
+    const mkdtemp = vi.spyOn(fsp, 'mkdtemp').mockRejectedValueOnce(new Error('ENOSPC: no space left on device'));
+    const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+
+    const failed = await host.screenshotToFile('retry-sess', { format: 'jpeg' }, '/usr/local/bin/agent-browser');
+    expect(failed.ok).toBe(false);
+    expect(failed.ok === false && failed.error).toContain('ENOSPC');
+    expect(spawnMock).not.toHaveBeenCalled(); // never spawned without a path
+
+    mkdtemp.mockRestore();
+    enqueueSpawnResults([{}]);
+    const recovered = await host.screenshotToFile('retry-sess', { format: 'jpeg' }, '/usr/local/bin/agent-browser');
+    expect(recovered.ok).toBe(true);
+    await host.closePoppedOut();
+  });
+
   it('refuses a caller-supplied binary path that is not an agent-browser', async () => {
     enqueueSpawnResults([{}]);
     const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });

@@ -474,11 +474,16 @@ so a stale or hostile value degrades to "resolve it yourself". The webview
 applies the same predicate before storing or sending one. Source of truth:
 `isAllowedAgentBrowserBinary` in `lib/src/lib/agent-browser-binary.ts`.
 
-**Screenshots are captured into a private per-process directory.** The frame is
-a picture of the user's authenticated browser, written by an external process
-under the ambient umask, so the path is an `0700` `mkdtemp` with an unguessable
-file name rather than a derivable name in the shared temp directory — the same
-discipline `standalone/sidecar/clipboard-ops.js` applies to clipboard images.
+**Screenshots are captured into a private per-process directory, and it is
+removed.** The frame is a picture of the user's authenticated browser, written by
+an external process under the ambient umask, so the path is an `0700` `mkdtemp`
+with an unguessable file name rather than a derivable name in the shared temp
+directory — the same discipline `standalone/sidecar/clipboard-ops.js` applies to
+clipboard images, cleanup included. The byte-returning capture unlinks its file
+once the bytes are in memory; `closePoppedOut` drops the whole directory on
+shutdown, with a `process.once('exit')` backstop for a host that never reaches
+it. A tmpdir that cannot be created is answered as `{ ok: false }` and retried
+on the next capture, never memoized.
 
 **VS Code must reach the stream through a loopback relay** — the agent-browser
 stream server rejects `vscode-webview://` origins. The relay grants one
