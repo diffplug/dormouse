@@ -15,15 +15,9 @@
  * whatever code the request displayed; otherwise call
  * `confirmPairing(clientId, code)` / `denyPairing(clientId)`.
  *
- * Events, for logs and assertions: `open`, `close`, `frame`, `e2e-open`,
- * `e2e-receive`, `e2e-error`, `pairing-request`, `paired`, `denied`,
- * `decision`, `msg`, `client-gone`, plus the legacy `pair` / `pair-status` /
- * `connect`.
- *
- * STAGE-4 TRANSITIONAL: the `pair` / `pair-status` / `connect` / `connect2` /
- * `msg` handling and the `LegacyAcl` below exist only because the Server still
- * routes those frames for a Pocket that has not switched; both go in 4c, with
- * the relay frames themselves.
+ * Events, for logs and assertions: `open`, `close`, `frame`, `invitation`,
+ * `e2e-open`, `e2e-receive`, `e2e-error`, `pairing-request`, `paired`,
+ * `denied`, `decision`, `msg`, `client-gone`.
  */
 
 import { EventEmitter } from 'node:events';
@@ -47,17 +41,13 @@ import {
   formatInvitationExpiry,
   fromBase64Url,
   generateNoiseKeyPair,
-  hashPasskeyPublicKey,
   isConnectionRequestV1,
   isE2eServerToHostFrame,
-  isPairStatusQuery,
   isPairingRequestV1,
   pairingInvitationPrologue,
   toBase64Url,
   utf8Decode,
   utf8Encode,
-  verifyDeviceChallengeSignature,
-  verifyPasskeyAssertion,
   verifyPresenceProof,
 } from 'server-lib-common';
 
@@ -98,13 +88,6 @@ export class FakeHost extends EventEmitter {
     /** clientId → `{ pairing?, connection?, established? }`, so teardown is one delete. */
     this.clients = new Map();
 
-    // --- legacy relay path ---------------------------------------------------
-    this.legacyAcl = new LegacyAcl(hostId);
-    /** clientId → the legacy `pair` request awaiting approve/deny. */
-    this.pending = new Map();
-    /** clientIds whose legacy connection the Host allowed — the `msg` gate. */
-    this.established = new Set();
-
     /**
      * A tiny synthetic terminal directory so the remote adapter is testable
      * without a real Host: two in-memory "echo shells" addressable by surfaceId.
@@ -142,62 +125,12 @@ export class FakeHost extends EventEmitter {
       await this.#onE2e(frame);
       return;
     }
+    if (frame.t !== 'client-gone') return;
     if (typeof frame.clientId !== 'string') return;
-    const { clientId } = frame;
-    switch (frame.t) {
-      case 'pair': {
-        this.emit('pair', { clientId, request: frame.request });
-        this.pending.set(clientId, frame.request);
-        if (this.autoApprove) this.approve(clientId);
-        return;
-      }
-      case 'pair-status': {
-        // Advisory display truth, answered straight from the ACL: no ticket, no
-        // challenge, and nothing here may influence the `connect2` decision.
-        const paired =
-          isPairStatusQuery(frame.query) && this.legacyAcl.findActive(frame.query) !== undefined;
-        this.emit('pair-status', { clientId, query: frame.query, paired });
-        this.#send({ t: 'pair-status-result', clientId, paired });
-        return;
-      }
-      case 'connect': {
-        const { challenge, expiresAt } = this.challenges.issue();
-        this.emit('connect', { clientId, challenge });
-        this.#send({ t: 'challenge', clientId, challenge, expiresAt });
-        return;
-      }
-      case 'connect2': {
-        const decision = await this.#authorizeLegacyConnection(frame.request);
-        if (decision.allowed) this.established.add(clientId);
-        this.emit('decision', { clientId, allowed: decision.allowed, failures: decision.failures });
-        // `failures` is optional on the wire; omit it on an allowed decision.
-        this.#send({
-          t: 'decision',
-          clientId,
-          allowed: decision.allowed,
-          ...(decision.allowed ? {} : { failures: decision.failures }),
-        });
-        return;
-      }
-      case 'msg': {
-        if (!this.established.has(clientId)) return; // gate: never before an allowed decision
-        this.#handleRemoteApi(clientId, frame.data, (payload) =>
-          this.#send({ t: 'msg', clientId, data: payload }),
-        );
-        return;
-      }
-      case 'client-gone': {
-        this.established.delete(clientId);
-        this.pending.delete(clientId);
-        this.directorySubs.delete(clientId);
-        this.attachments.delete(clientId);
-        this.#disposeClient(clientId);
-        this.emit('client-gone', { clientId });
-        return;
-      }
-      default:
-        return;
-    }
+    this.directorySubs.delete(frame.clientId);
+    this.attachments.delete(frame.clientId);
+    this.#disposeClient(frame.clientId);
+    this.emit('client-gone', { clientId: frame.clientId });
   }
 
   // --- Invitations ----------------------------------------------------------
@@ -724,8 +657,8 @@ export class FakeHost extends EventEmitter {
    * streams a size banner; `terminal.write` echoes bytes back (treating `\r` as a
    * newline and re-drawing a prompt); `terminal.resize` notes the new size. Input
    * and resize only apply to the currently attached surface. Unknown methods echo
-   * ok:false. `send` is how a response leaves — a `msg` frame on the legacy path,
-   * an encrypted application message on an established e2e session.
+   * ok:false. `send` is how a response leaves: an encrypted application message
+   * on the established e2e session.
    */
   #handleRemoteApi(clientId, data, send) {
     const request = data;
@@ -836,138 +769,8 @@ export class FakeHost extends EventEmitter {
     return this.surfaces.find((surface) => surface.surfaceId === surfaceId);
   }
 
-  // --- Legacy relay path ----------------------------------------------------
-
-  /** Local approval on the legacy `pair` path: the only thing that writes {@link legacyAcl}. */
-  approve(clientId, { approvedBy = 'host-user', label } = {}) {
-    const request = this.pending.get(clientId);
-    if (!request) return undefined;
-    this.pending.delete(clientId);
-    const record = this.legacyAcl.approve({
-      accountId: request.accountId,
-      passkeyCredentialId: request.passkeyCredentialId,
-      passkeyPublicKeyHash: request.passkeyPublicKeyHash,
-      devicePublicKey: request.devicePublicKey,
-      approvedBy,
-      label: label ?? boundedPairingLabel(request.requestedLabel),
-    });
-    this.emit('paired', { clientId, record });
-    this.#send({ t: 'pair-result', clientId, approved: true, record });
-    return record;
-  }
-
-  /** Local denial on the legacy `pair` path: the ACL is untouched. */
-  deny(clientId, { error = 'pairing denied by host' } = {}) {
-    if (!this.pending.delete(clientId)) return;
-    this.emit('denied', { clientId });
-    this.#send({ t: 'pair-result', clientId, approved: false, error });
-  }
-
-  /**
-   * The legacy Host decision, evaluating every layer rather than
-   * short-circuiting so the Client learns each failure at once.
-   */
-  async #authorizeLegacyConnection(request) {
-    const challengeValid = this.challenges.consume(request?.challenge);
-    const credentialId = request?.passkey?.assertion?.credentialId;
-    // The relay's own gate refuses a malformed request before forwarding, but
-    // the security model does not trust the relay: a shape the verifiers below
-    // would throw on is a denial, not an unhandled rejection.
-    if (typeof credentialId !== 'string' || typeof request.passkey.publicKey !== 'string') {
-      return { allowed: false, failures: ['passkey-assertion-invalid'] };
-    }
-    const auth = this.legacyAcl.authorize({
-      passkeyCredentialId: credentialId,
-      devicePublicKey: request.devicePublicKey,
-    });
-    const [passkey, signatureValid, presentedKeyHash] = await Promise.all([
-      verifyPasskeyAssertion(request.passkey.assertion, request.passkey.publicKey, {
-        ...this.policy,
-        challenge: request.challenge,
-      }),
-      verifyDeviceChallengeSignature(
-        {
-          hostId: this.hostId,
-          challenge: request.challenge,
-          devicePublicKey: request.devicePublicKey,
-        },
-        request.deviceSignature,
-      ),
-      auth.record ? hashPasskeyPublicKey(request.passkey.publicKey).catch(() => null) : null,
-    ]);
-
-    const failures = [];
-    if (!challengeValid) failures.push('challenge-invalid');
-    if (!passkey.ok) failures.push('passkey-assertion-invalid');
-    if (auth.record === null) {
-      failures.push(...auth.reasons);
-    } else {
-      if (presentedKeyHash !== auth.record.passkeyPublicKeyHash) failures.push('passkey-key-mismatch');
-      if (auth.record.accountId !== request.accountId) failures.push('account-mismatch');
-    }
-    if (!signatureValid) failures.push('device-signature-invalid');
-    return { allowed: failures.length === 0, failures };
-  }
-
   close() {
     closeSocket(this);
   }
 }
 
-/**
- * The pre-cutover ACL: a record is the conjunction of a passkey credential and
- * a *device* key rather than a Client Noise static.
- *
- * STAGE-4 TRANSITIONAL: deleted in 4c with the legacy relay frames. It lives
- * here rather than in `server-lib-common` because nothing outside this harness
- * still writes one — the shared `HostAcl` keys on `clientStaticPublicKey`.
- */
-class LegacyAcl {
-  #records = [];
-
-  constructor(hostId) {
-    this.hostId = hostId;
-  }
-
-  approve(client) {
-    const existing = this.#findActive(client.passkeyCredentialId, client.devicePublicKey);
-    if (existing) existing.revokedAt = Date.now();
-    const record = { ...client, hostId: this.hostId, approvedAt: Date.now(), revokedAt: null };
-    this.#records.push(record);
-    return { ...record };
-  }
-
-  activeRecords() {
-    return this.#records.filter((r) => r.revokedAt === null).map((r) => ({ ...r }));
-  }
-
-  findActive({ passkeyCredentialId, devicePublicKey }) {
-    const found = this.#findActive(passkeyCredentialId, devicePublicKey);
-    return found ? { ...found } : undefined;
-  }
-
-  authorize({ passkeyCredentialId, devicePublicKey }) {
-    const found = this.#findActive(passkeyCredentialId, devicePublicKey);
-    if (found) return { record: { ...found }, reasons: [] };
-    const passkeyPaired = this.#records.some(
-      (r) => r.revokedAt === null && r.passkeyCredentialId === passkeyCredentialId,
-    );
-    const devicePaired = this.#records.some(
-      (r) => r.revokedAt === null && r.devicePublicKey === devicePublicKey,
-    );
-    const reasons = [];
-    if (!passkeyPaired) reasons.push('passkey-not-paired');
-    if (!devicePaired) reasons.push('device-not-paired');
-    if (passkeyPaired && devicePaired) reasons.push('pairing-mismatch');
-    return { record: null, reasons };
-  }
-
-  #findActive(passkeyCredentialId, devicePublicKey) {
-    return this.#records.find(
-      (r) =>
-        r.revokedAt === null &&
-        r.passkeyCredentialId === passkeyCredentialId &&
-        r.devicePublicKey === devicePublicKey,
-    );
-  }
-}

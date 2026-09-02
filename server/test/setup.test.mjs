@@ -1,7 +1,11 @@
 /**
- * Slice-1 setup/registration coverage (docs/specs/server.md, "Accounts &
- * passkeys"): the password gate, the clientDataJSON sanity checks, single-use
+ * Setup/registration coverage (docs/specs/server.md, "HTTP API"): the setup
+ * token is the only gate, the clientDataJSON sanity checks, single-use
  * challenges, and the account.json that lands on disk.
+ *
+ * Every registration here mints its token through a real enrolled Host
+ * (`mintSetupToken`), which is the only way a passkey is registered at all —
+ * the setup password enrolls Hosts and registers nothing.
  */
 
 import { test } from 'node:test';
@@ -15,6 +19,7 @@ import {
   RP_ID,
   freshApp,
   enrollHost,
+  mintSetupToken,
   newAuthenticator,
   padBase64Url,
   post,
@@ -22,6 +27,14 @@ import {
   register,
   registrationClientData,
 } from './helpers.mjs';
+
+/** A live setup token plus the challenge `begin` answers it with. */
+async function beginWithToken(app) {
+  const { token } = await mintSetupToken(app);
+  const begin = await post(app, API_ROUTES.setupBegin, { setupToken: token });
+  const { challenge } = await begin.json();
+  return { token, challenge };
+}
 
 test('register happy path writes account.json', async () => {
   const { app, stateDir } = await freshApp();
@@ -44,7 +57,7 @@ test('register happy path writes account.json', async () => {
   assert.equal(typeof passkey.createdAt, 'number');
 });
 
-test('a second passkey can be added by re-presenting the password', async () => {
+test('a second passkey needs a second setup token', async () => {
   const { app, stateDir } = await freshApp();
   assert.equal((await register(app, await newAuthenticator())).status, 200);
   assert.equal((await register(app, await newAuthenticator())).status, 200);
@@ -58,7 +71,8 @@ test('setup/begin names the credentials the account already holds', async () => 
   // can already sign in. Nothing new is disclosed — the gate above ran first.
   const { app } = await freshApp();
 
-  const empty = await post(app, API_ROUTES.setupBegin, { password: PASSWORD });
+  const { token: firstToken } = await mintSetupToken(app);
+  const empty = await post(app, API_ROUTES.setupBegin, { setupToken: firstToken });
   assert.deepEqual((await empty.json()).existingCredentialIds, []);
 
   const first = await newAuthenticator();
@@ -66,27 +80,38 @@ test('setup/begin names the credentials the account already holds', async () => 
   const second = await newAuthenticator();
   assert.equal((await register(app, second)).status, 200);
 
-  const listed = await post(app, API_ROUTES.setupBegin, { password: PASSWORD });
+  const { token } = await mintSetupToken(app);
+  const listed = await post(app, API_ROUTES.setupBegin, { setupToken: token });
   assert.deepEqual((await listed.json()).existingCredentialIds, [
     first.credentialId,
     second.credentialId,
   ]);
 });
 
-test('setup/begin rejects a wrong password', async () => {
+test('the setup password no longer registers anything', async () => {
+  // The whole of what 4c deleted: a caller holding the password can enroll a
+  // Host, and reaches `/api/setup/*` no further than an unauthenticated one.
   const { app } = await freshApp();
-  const res = await post(app, API_ROUTES.setupBegin, { password: 'wrong' });
+  for (const body of [{ password: PASSWORD }, {}]) {
+    const res = await post(app, API_ROUTES.setupBegin, body);
+    assert.equal(res.status, 401);
+    assert.equal((await res.json()).error, 'invalid setup token');
+  }
+});
+
+test('setup/begin rejects an unknown setup token', async () => {
+  const { app } = await freshApp();
+  const res = await post(app, API_ROUTES.setupBegin, { setupToken: 'nope' });
   assert.equal(res.status, 401);
 });
 
-test('setup/finish rejects a wrong password', async () => {
+test('setup/finish rejects an unknown setup token', async () => {
   const { app } = await freshApp();
   const authenticator = await newAuthenticator();
-  // Get a valid challenge with the correct password, then finish with a wrong one.
-  const begin = await post(app, API_ROUTES.setupBegin, { password: PASSWORD });
-  const { challenge } = await begin.json();
+  // Get a valid challenge with a real token, then finish with a bogus one.
+  const { challenge } = await beginWithToken(app);
   const res = await post(app, API_ROUTES.setupFinish, {
-    password: 'wrong',
+    setupToken: 'nope',
     credentialId: authenticator.credentialId,
     publicKey: authenticator.publicKey,
     clientDataJSON: registrationClientData({ challenge }),
@@ -99,12 +124,11 @@ test('setup/finish rejects a replayed challenge', async () => {
   const { app } = await freshApp();
   const first = await newAuthenticator();
 
-  const begin = await post(app, API_ROUTES.setupBegin, { password: PASSWORD });
-  const { challenge } = await begin.json();
+  const { token, challenge } = await beginWithToken(app);
   const clientDataJSON = registrationClientData({ challenge });
 
   const ok = await post(app, API_ROUTES.setupFinish, {
-    password: PASSWORD,
+    setupToken: token,
     credentialId: first.credentialId,
     publicKey: first.publicKey,
     clientDataJSON,
@@ -112,10 +136,12 @@ test('setup/finish rejects a replayed challenge', async () => {
   });
   assert.equal(ok.status, 200);
 
-  // Reuse the (now consumed) challenge with a different credential.
+  // Reuse the (now consumed) challenge with a different credential and a fresh
+  // token, so it is the challenge and not the credential that refuses it.
   const second = await newAuthenticator();
+  const { token: nextToken } = await mintSetupToken(app);
   const replay = await post(app, API_ROUTES.setupFinish, {
-    password: PASSWORD,
+    setupToken: nextToken,
     credentialId: second.credentialId,
     publicKey: second.publicKey,
     clientDataJSON,
@@ -128,11 +154,10 @@ test('setup/finish rejects a replayed challenge', async () => {
 test('setup/finish accepts a padded base64url clientData challenge', async () => {
   const { app } = await freshApp();
   const authenticator = await newAuthenticator();
-  const begin = await post(app, API_ROUTES.setupBegin, { password: PASSWORD });
-  const { challenge } = await begin.json();
+  const { token, challenge } = await beginWithToken(app);
 
   const res = await post(app, API_ROUTES.setupFinish, {
-    password: PASSWORD,
+    setupToken: token,
     credentialId: authenticator.credentialId,
     publicKey: authenticator.publicKey,
     clientDataJSON: registrationClientData({ challenge: padBase64Url(challenge) }),
@@ -144,11 +169,10 @@ test('setup/finish accepts a padded base64url clientData challenge', async () =>
 test('setup/finish rejects a mismatched origin in clientDataJSON', async () => {
   const { app } = await freshApp();
   const authenticator = await newAuthenticator();
-  const begin = await post(app, API_ROUTES.setupBegin, { password: PASSWORD });
-  const { challenge } = await begin.json();
+  const { token, challenge } = await beginWithToken(app);
 
   const res = await post(app, API_ROUTES.setupFinish, {
-    password: PASSWORD,
+    setupToken: token,
     credentialId: authenticator.credentialId,
     publicKey: authenticator.publicKey,
     clientDataJSON: registrationClientData({ challenge, origin: 'http://evil.example' }),
@@ -161,11 +185,10 @@ test('setup/finish rejects a mismatched origin in clientDataJSON', async () => {
 test('setup/finish rejects the wrong clientData type', async () => {
   const { app } = await freshApp();
   const authenticator = await newAuthenticator();
-  const begin = await post(app, API_ROUTES.setupBegin, { password: PASSWORD });
-  const { challenge } = await begin.json();
+  const { token, challenge } = await beginWithToken(app);
 
   const res = await post(app, API_ROUTES.setupFinish, {
-    password: PASSWORD,
+    setupToken: token,
     credentialId: authenticator.credentialId,
     publicKey: authenticator.publicKey,
     clientDataJSON: registrationClientData({ challenge, type: 'webauthn.get' }),
@@ -186,11 +209,10 @@ test('setup/finish rejects a duplicate credentialId', async () => {
 test('setup/finish rejects an unimportable public key', async () => {
   const { app } = await freshApp();
   const authenticator = await newAuthenticator();
-  const begin = await post(app, API_ROUTES.setupBegin, { password: PASSWORD });
-  const { challenge } = await begin.json();
+  const { token, challenge } = await beginWithToken(app);
 
   const res = await post(app, API_ROUTES.setupFinish, {
-    password: PASSWORD,
+    setupToken: token,
     credentialId: authenticator.credentialId,
     publicKey: 'bm90LWEta2V5', // "not-a-key", valid base64url but not SPKI
     clientDataJSON: registrationClientData({ challenge }),
@@ -202,7 +224,8 @@ test('setup/finish rejects an unimportable public key', async () => {
 
 test('origin/rpId derive from config', async () => {
   const { app } = await freshApp();
-  const begin = await post(app, API_ROUTES.setupBegin, { password: PASSWORD });
+  const { token } = await mintSetupToken(app);
+  const begin = await post(app, API_ROUTES.setupBegin, { setupToken: token });
   const body = await begin.json();
   assert.equal(body.rpId, RP_ID);
   assert.equal(body.accountId, 'owner');
@@ -216,12 +239,13 @@ test('origin/rpId derive from config', async () => {
 test('the configured origin drives setup and Host policy', async () => {
   const { app } = await freshApp({ origin: 'https://example.com' });
   const authenticator = await newAuthenticator();
-  const begin = await post(app, API_ROUTES.setupBegin, { password: PASSWORD });
+  const { token } = await mintSetupToken(app);
+  const begin = await post(app, API_ROUTES.setupBegin, { setupToken: token });
   const { challenge, rpId } = await begin.json();
   assert.equal(rpId, 'example.com');
 
   const finish = await post(app, API_ROUTES.setupFinish, {
-    password: PASSWORD,
+    setupToken: token,
     credentialId: authenticator.credentialId,
     publicKey: authenticator.publicKey,
     clientDataJSON: registrationClientData({ challenge, origin: 'https://example.com' }),

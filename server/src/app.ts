@@ -69,7 +69,6 @@ import type {
 } from 'server-lib-common';
 
 import { invalidateEnrollOffer, redeemEnrollToken } from './enroll-token.js';
-import { Handshake } from './handshake.js';
 import { RelayHub } from './relay.js';
 import type { ClientConn, HostConn } from './relay.js';
 import { secretEquals } from './secrets.js';
@@ -88,7 +87,10 @@ import { isPublicHttpsPushEndpoint } from './push-endpoint.js';
 
 /** Runtime configuration; see `index.ts` for how env maps onto this. */
 export interface AppConfig {
-  /** Gates account creation and passkey enrollment. */
+  /**
+   * Gates Host enrollment (`POST /api/host/enroll`). It no longer registers a
+   * passkey: `/api/setup/*` takes a Host-minted setup token only.
+   */
   readonly setupPassword: string;
   /**
    * External origin, e.g. `https://dormouse.tailnet.ts.net`; source of `rpId`.
@@ -98,11 +100,11 @@ export interface AppConfig {
    */
   readonly origin: string;
   /**
-   * Demand the authenticator's user-verification flag (biometric/PIN) on the
-   * relay's connection-handshake assertions, mirroring the Host's
-   * `ConnectionPolicy.requireUserVerification` so Server and Host cannot disagree
-   * on what a valid assertion is. Omitted/false keeps the current presence-only
-   * behavior; a deployment opts in explicitly (env → config in `index.ts`).
+   * Demand the authenticator's user-verification flag (biometric/PIN) on every
+   * assertion this Server verifies, and mirror it to each Host as its
+   * `ConnectionPolicy.requireUserVerification` so the two cannot disagree on
+   * what a valid assertion is. Omitted/false keeps the presence-only behavior;
+   * a deployment opts in explicitly (env → config in `index.ts`).
    */
   readonly requireUserVerification?: boolean;
   /** Directory holding the JSON state files (docs/specs/server.md, "State files"). */
@@ -153,13 +155,6 @@ export interface AppConfig {
 export interface Session {
   readonly accountId: string;
   readonly expiresAt: number;
-  /**
-   * Epoch ms of the last passkey assertion the Server verified for this
-   * session — set at sign-in, refreshed by `/api/reauth/finish` and by a
-   * verified `connect2` handshake. Pairing requires it to be within
-   * `PAIRING_PRESENCE_WINDOW_MS` (handshake.ts `checkPair`).
-   */
-  lastVerifiedPresence: number;
 }
 
 type AppEnv = { Variables: { session: Session; host: StoredHost } };
@@ -187,8 +182,8 @@ const CREDENTIAL_FAILURE_DELAY_MS = 250;
 /** The one answer to a wrong setup password, wherever it is supplied. */
 const BAD_PASSWORD_ERROR = 'invalid setup password';
 
-/** The credential fields `pickCredential` reads, whichever route supplied them. */
-type CredentialBody = { password?: unknown; setupToken?: unknown; enrollToken?: unknown };
+/** The credential fields `pickCredential` reads. */
+type CredentialBody = { password?: unknown; enrollToken?: unknown };
 
 /** Internal control flow out of HostStore's serialized pre-enrollment gate. */
 class EnrollmentCredentialRejected extends Error {}
@@ -210,11 +205,7 @@ export class SessionStore {
   /** Mint a fresh session token (32 random bytes, base64url) for an account. */
   mint(accountId: string): { token: string; session: Session } {
     const token = toBase64Url(randomBytes(32));
-    const session: Session = {
-      accountId,
-      expiresAt: this.#now() + SESSION_TTL_MS,
-      lastVerifiedPresence: this.#now(),
-    };
+    const session: Session = { accountId, expiresAt: this.#now() + SESSION_TTL_MS };
     this.#sessions.set(token, session);
     return { token, session };
   }
@@ -315,14 +306,7 @@ export function createApp(config: AppConfig): CreatedApp {
   const hostStore = new HostStore(config.stateDir, now);
   const pushStore = new PushSubscriptionStore(config.stateDir, now);
   const sessions = new SessionStore(now);
-  // Server-side handshake policy layered on the transport-dumb hub.
-  const handshake = new Handshake(accounts, {
-    origin,
-    rpId,
-    requireUserVerification: config.requireUserVerification,
-    now,
-  });
-  const hub = new RelayHub(handshake);
+  const hub = new RelayHub();
   // Separate issuers per flow: a setup challenge cannot be redeemed at sign-in.
   const setupChallenges = new HostChallengeIssuer({ now });
   const signinChallenges = new HostChallengeIssuer({ now });
@@ -347,31 +331,28 @@ export function createApp(config: AppConfig): CreatedApp {
   }
 
   /**
-   * The one credential ladder behind every password-or-token route: exactly one
-   * of `password` or `tokenField`, counted by presence rather than by type.
+   * The credential ladder behind `/api/host/enroll`: exactly one of `password`
+   * or `enrollToken`, counted by presence rather than by type.
    *
    * Both-or-neither is a 400 rather than a try-each fallback because trying
    * them in turn would let a *spent* token fall through to the password and
    * still succeed, leaving which credential authorized the request ambiguous on
    * both sides. A lone credential of the wrong type is that branch's own delayed
-   * 401 — carrying `tokenError`, since each flow's rejected token drives its own
-   * recovery on the Client — never the 400 for shape.
+   * 401 — never the 400 for shape.
    *
-   * Answers `{ token }` with the caller's still-unverified token — the flows
-   * redeem differently, so each route verifies its own — or `{ token: null }`
-   * once the password has been checked here, or a ready `Response` to return
-   * as-is.
+   * Answers `{ token }` with the caller's still-unverified token — the route
+   * redeems it under the Host-store mutex — or `{ token: null }` once the
+   * password has been checked here, or a ready `Response` to return as-is.
    */
   async function pickCredential(
     body: CredentialBody | null,
     c: Context<AppEnv>,
-    tokenField: 'setupToken' | 'enrollToken',
     tokenError: string,
   ): Promise<{ token: string | null } | Response> {
     const password: unknown = body?.password;
-    const token: unknown = body?.[tokenField];
+    const token: unknown = body?.enrollToken;
     if ((password !== undefined) === (token !== undefined)) {
-      return c.json({ error: `supply exactly one of password or ${tokenField}` }, 400);
+      return c.json({ error: 'supply exactly one of password or enrollToken' }, 400);
     }
     if (token !== undefined) {
       if (typeof token !== 'string') return credentialFailure(c, tokenError);
@@ -388,27 +369,25 @@ export function createApp(config: AppConfig): CreatedApp {
   }
 
   /**
-   * Read a JSON body and enforce the setup credential (`pickCredential`), then
-   * resolve a setup token. `gate` is what separates the two routes: `begin`
-   * peeks, while `finish` CONSUMES up front — that delete is what makes a token
-   * single-use under concurrency, so its caller must restore the entry on every
-   * failure after this point (see the route).
+   * Read a JSON body and resolve its setup token — the one credential these
+   * routes take. `gate` is what separates them: `begin` peeks, while `finish`
+   * CONSUMES up front — that delete is what makes a token single-use under
+   * concurrency, so its caller must restore the entry on every failure after
+   * this point (see the route).
    *
    * Either gate also re-checks that the minting Host is still enrolled, since a
    * revoked Host's outstanding tokens must die with it rather than stay
-   * redeemable for the rest of their TTL. Mistyped, unknown, expired, spent and
-   * revoked-minter are one delayed 401: none of them may tell a caller which one
-   * it hit.
+   * redeemable for the rest of their TTL. Absent, mistyped, unknown, expired,
+   * spent and revoked-minter are one delayed 401: none of them may tell a caller
+   * which one it hit.
    */
-  async function readSetupGated<T extends { password?: unknown; setupToken?: unknown }>(
+  async function readSetupGated<T extends { setupToken?: unknown }>(
     c: Context<AppEnv>,
     gate: 'peek' | 'consume',
   ): Promise<{ body: T; spent: SpentSetupToken | null } | Response> {
     const body = await readJson<T>(c);
-    const picked = await pickCredential(body, c, 'setupToken', SETUP_TOKEN_INVALID_ERROR);
-    if (picked instanceof Response) return picked;
-    const token = picked.token;
-    if (token === null) return { body: body as T, spent: null };
+    const token: unknown = body?.setupToken;
+    if (typeof token !== 'string') return credentialFailure(c, SETUP_TOKEN_INVALID_ERROR);
     const entry = gate === 'consume' ? setupTokens.consume(token) : setupTokens.peek(token);
     if (!entry) return credentialFailure(c, SETUP_TOKEN_INVALID_ERROR);
     // Nothing is restored here: a revoked minter's token is dead, not unlucky.
@@ -433,10 +412,11 @@ export function createApp(config: AppConfig): CreatedApp {
   // Shared greeting, kept from the skeleton so `lib` and `server` stay agreed.
   app.get(HELLO_ROUTE, (c) => c.json(helloResponse()));
 
-  // --- Setup: credential-gated passkey registration ------------------------
-  // The credential is the setup password or a Host's single-use setup token
-  // (`pickCredential`); `begin` is what mints the WebAuthn registration
-  // challenge, so both routes gate identically and neither is the softer path.
+  // --- Setup: token-gated passkey registration -----------------------------
+  // The credential is a Host's single-use setup token and nothing else: the
+  // only way to register a passkey is off a QR an enrolled Host displayed.
+  // `begin` is what mints the WebAuthn registration challenge, so both routes
+  // gate identically and neither is the softer path.
 
   app.post(API_ROUTES.setupBegin, async (c) => {
     const gated = await readSetupGated<SetupBeginRequest>(c, 'peek');
@@ -519,10 +499,11 @@ export function createApp(config: AppConfig): CreatedApp {
   });
 
   /**
-   * Shared by sign-in and re-auth: pull the challenge out of the assertion's
-   * own clientDataJSON and consume it (single-use, BEFORE verifying — a
-   * captured assertion can never be replayed even if verification succeeds),
-   * then verify against the STORED passkey for the asserted credential.
+   * Sign-in's verifier: pull the challenge out of the assertion's own
+   * clientDataJSON and consume it (single-use, BEFORE verifying — a captured
+   * assertion can never be replayed even if verification succeeds), then verify
+   * against the STORED passkey for the asserted credential. Re-auth verifies
+   * the same way but against a challenge it *derives*, so it cannot share this.
    */
   const verifyFreshAssertion = async (
     assertion: SigninFinishRequest['assertion'] | undefined,
@@ -551,8 +532,8 @@ export function createApp(config: AppConfig): CreatedApp {
       challenge,
       origin,
       rpId,
-      // Same server-wide UV policy the connect handshake enforces, so sign-in
-      // is not a softer path than a remote connect when UV is required.
+      // Same server-wide UV policy re-auth enforces, so sign-in is not a
+      // softer path than a presence proof when UV is required.
       requireUserVerification: config.requireUserVerification,
     });
     if (!result.ok) {
@@ -586,13 +567,12 @@ export function createApp(config: AppConfig): CreatedApp {
     // Keeps the shared `UNAUTHORIZED_ERROR`: only a Host sends an enroll token,
     // so no Client recovery keys on it. The shape ladder runs out here, ahead of
     // the gate below, which holds only the redemption that has to be serialized.
-    const picked = await pickCredential(body, c, 'enrollToken', UNAUTHORIZED_ERROR);
+    const picked = await pickCredential(body, c, UNAUTHORIZED_ERROR);
     if (picked instanceof Response) return picked;
     const enrollToken = picked.token;
-    const label = typeof body?.label === 'string' ? body.label : '';
     let host: StoredHost;
     try {
-      host = await hostStore.enroll(label, async (firstEnrollment) => {
+      host = await hostStore.enroll(async (firstEnrollment) => {
         if (enrollToken !== null) {
           if (!firstEnrollment) {
             // The offer is already dead by durable Server state. Best-effort
@@ -671,15 +651,6 @@ export function createApp(config: AppConfig): CreatedApp {
   app.post(API_ROUTES.reauthBegin, requireSession, async (c) => {
     const body = await readJson<Partial<ReauthBeginRequest>>(c);
     const binding: unknown = body?.binding;
-    if (binding === undefined) {
-      // STAGE-4 TRANSITIONAL: delete in 4c. The binding arm below is the real
-      // one; this answers the legacy Pocket, which asks for a random sign-in
-      // challenge and refreshes `lastVerifiedPresence` at `finish` so the
-      // legacy `pair` gate passes.
-      const { challenge } = signinChallenges.issue();
-      const legacy: SigninBeginResponse = { challenge, rpId };
-      return c.json(legacy);
-    }
     if (!isPresenceBinding(binding)) {
       return c.json({ error: 'malformed presence binding' }, 400);
     }
@@ -713,21 +684,14 @@ export function createApp(config: AppConfig): CreatedApp {
 
   app.post(API_ROUTES.reauthFinish, requireSession, async (c) => {
     const body = await readJson<Partial<ReauthFinishRequest>>(c);
-    if (body?.serverNonce === undefined) {
-      // STAGE-4 TRANSITIONAL: delete in 4c. The nonce arm below is the real
-      // one; this is the legacy Pocket's `{ assertion }`-only re-assert, and
-      // the only path that still touches `lastVerifiedPresence`.
-      const verdict = await verifyFreshAssertion(body?.assertion);
-      if (!verdict.ok) return c.json({ error: verdict.error }, verdict.status);
-      const session = c.get('session');
-      session.lastVerifiedPresence = now();
-      return c.json({ presenceVerifiedAt: session.lastVerifiedPresence });
-    }
+    const serverNonce = body?.serverNonce;
     // Consumed FIRST, whatever the rest of this decides: single use is what
     // stops one WebAuthn prompt proving presence for a second ceremony.
-    const pending = presenceNonces.consume(body.serverNonce);
-    if (!pending) return c.json({ error: 'unrecognized or expired nonce' }, 400);
-    const assertion = body.assertion;
+    const pending = presenceNonces.consume(serverNonce);
+    if (!pending || serverNonce === undefined) {
+      return c.json({ error: 'unrecognized or expired nonce' }, 400);
+    }
+    const assertion = body?.assertion;
     if (!assertion || typeof assertion.credentialId !== 'string') {
       return c.json({ error: 'malformed assertion' }, 400);
     }
@@ -740,7 +704,7 @@ export function createApp(config: AppConfig): CreatedApp {
     if (!stored) return c.json({ error: 'unknown credential' }, 404);
     // Recomputed from the binding this server stored, never from anything the
     // caller sent back with the assertion.
-    const challenge = await presenceChallenge(pending.binding, body.serverNonce);
+    const challenge = await presenceChallenge(pending.binding, serverNonce);
     const result = await verifyPasskeyAssertion(assertion, stored.publicKey, {
       challenge,
       origin,
@@ -759,11 +723,7 @@ export function createApp(config: AppConfig): CreatedApp {
   app.get(API_ROUTES.hosts, requireSession, async (c) => {
     const hosts = await hostStore.list();
     const res: HostsResponse = {
-      hosts: hosts.map((h) => ({
-        hostId: h.hostId,
-        label: h.label,
-        online: hub.isHostOnline(h.hostId),
-      })),
+      hosts: hosts.map((h) => ({ hostId: h.hostId, online: hub.isHostOnline(h.hostId) })),
     };
     return c.json(res);
   });
@@ -1046,31 +1006,20 @@ export function createApp(config: AppConfig): CreatedApp {
       return next();
     },
     upgradeWebSocket((c) => {
-      // Re-resolve the Session OBJECT (not just validity — the middleware
-      // already gated that) so the relay can hand the gate a live reference
-      // whose presence stamp reauth/connect2 can refresh.
+      // Re-checked here, not just in the middleware: a session can expire
+      // between that check and the upgrade.
       const token = c.req.query(WS_TOKEN_PARAM);
-      const session = token ? sessions.validate(token) : null;
       let conn: ClientConn | undefined;
-      // `onClientFrame` is async (pair/connect2 verification), so serialize
-      // frames from this socket through a promise chain — a client's frames
-      // must be processed in the order they arrived, not raced by the gate.
-      let chain: Promise<void> = Promise.resolve();
       return {
         onOpen: (_evt, ws) => {
-          if (!session) {
-            // Expired between the middleware check and the upgrade.
+          if (!token || !sessions.validate(token)) {
             ws.close(1008, 'unauthorized');
             return;
           }
-          conn = hub.registerClient(ws, session);
+          conn = hub.registerClient(ws);
         },
         onMessage: (evt) => {
-          if (conn && typeof evt.data === 'string') {
-            const c = conn;
-            const data = evt.data;
-            chain = chain.then(() => hub.onClientFrame(c, data)).catch(() => undefined);
-          }
+          if (conn && typeof evt.data === 'string') hub.onClientFrame(conn, evt.data);
         },
         onClose: () => {
           if (conn) hub.unregisterClient(conn);

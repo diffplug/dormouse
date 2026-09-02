@@ -83,7 +83,7 @@ async function e2eFixture() {
       return replacement;
     },
     async secondHost() {
-      const { body } = await enrollHost(created.app, { label: 'Second' });
+      const { body } = await enrollHost(created.app);
       const second = new FakeHost({
         serverUrl: server.wsUrl,
         hostToken: body.hostToken,
@@ -177,11 +177,13 @@ test('an established session round-trips every transport kind through the relay'
     assert.equal(frame.hostId, fixture.enrollment.hostId, 'the relay stamps hostId');
     assert.deepEqual(client.receiveFrame(frame).messages, [reply]);
 
-    // An e2e session is not a legacy one: the `msg` pipe stays shut.
+    // The envelope is the whole surface: an established session opens no other
+    // pipe, and every other frame type is simply unknown.
     const hostFramesBefore = host.frames.length;
     client.sendFrame({ t: 'msg', data: { forbidden: true } });
-    assert.equal(await client.quiet(), true);
-    assert.equal(host.frames.length, hostFramesBefore, 'e2e establishes no msg session');
+    const refusal = await client.waitFor((f) => f.t === 'error');
+    assert.equal(refusal.error, 'unknown frame type');
+    assert.equal(host.frames.length, hostFramesBefore, 'nothing else reaches the Host');
   } finally {
     await fixture.close();
   }

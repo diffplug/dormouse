@@ -4,7 +4,7 @@ import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 
-import { SELFHOST_ACCOUNT_ID, toBase64Url } from 'server-lib-common';
+import { E2E_ID_BYTE_LENGTH, SELFHOST_ACCOUNT_ID, isE2eId, toBase64Url } from 'server-lib-common';
 import type { PushSubscriptionPayload } from 'server-lib-common';
 
 import { secretEquals } from './secrets.js';
@@ -141,11 +141,16 @@ export class AccountStore extends JsonFileStore {
   }
 }
 
-/** An enrolled Host as stored in `hosts.json`. `hostToken` is the WS bearer secret. */
+/**
+ * An enrolled Host as stored in `hosts.json`. `hostToken` is the WS bearer
+ * secret. **No label**: the name a Host presents is its own, and a Client only
+ * ever learns it inside an encrypted ceremony outcome
+ * (`docs/specs/remote-security-model.md` → Host identity). A row written before
+ * that cutover carries one; it is simply ignored.
+ */
 export interface StoredHost {
   readonly hostId: string;
   readonly hostToken: string;
-  readonly label: string;
   readonly enrolledAt: number;
 }
 
@@ -206,25 +211,23 @@ export class HostStore extends JsonFileStore {
 
   /**
    * Enroll a new host: run `beforeEnroll` with whether this is the first Host
-   * ever persisted, mint a random `hostId` (16 bytes) and `hostToken` (32
-   * bytes), append them, and return the record. The callback and write share
-   * the mutex, so two credential paths cannot both authorize themselves as the
-   * first enrollment.
+   * ever persisted, mint a random `hostId` ({@link HOST_ID_BYTE_LENGTH} bytes)
+   * and `hostToken` (32 bytes), append them, and return the record. The
+   * callback and write share the mutex, so two credential paths cannot both
+   * authorize themselves as the first enrollment.
    *
    * File existence, not the current row count, is the durable boundary: hand-
    * editing every row away revokes those Hosts but does not reopen bootstrap.
    */
   enroll(
-    label: string,
     beforeEnroll: (firstEnrollment: boolean) => void | Promise<void> = () => {},
   ): Promise<StoredHost> {
     return this.mutate(async () => {
       await beforeEnroll(!(await this.exists()));
       const hosts = await this.list();
       const host: StoredHost = {
-        hostId: toBase64Url(randomBytes(16)),
+        hostId: toBase64Url(randomBytes(HOST_ID_BYTE_LENGTH)),
         hostToken: toBase64Url(randomBytes(32)),
-        label,
         enrolledAt: this.now(),
       };
       hosts.push(host);
@@ -234,13 +237,24 @@ export class HostStore extends JsonFileStore {
   }
 }
 
+/**
+ * A `hostId` is base64url of exactly this many bytes, minted here and enforced
+ * on read.
+ *
+ * **The shape is load-bearing, not cosmetic.** Every `e2e` envelope carries the
+ * `hostId` as a routing id, and `isE2eId` accepts only this length — so a
+ * hand-edited row of another length would enroll a Host the relay can reach and
+ * no Client can ever address. Dropping it here makes that row an un-enrolled
+ * Host, which is what the person editing the file was reaching for anyway.
+ */
+const HOST_ID_BYTE_LENGTH = E2E_ID_BYTE_LENGTH;
+
 function isStoredHost(row: unknown): row is StoredHost {
   if (!row || typeof row !== 'object') return false;
   const candidate = row as Record<string, unknown>;
   return (
-    typeof candidate.hostId === 'string' &&
+    isE2eId(candidate.hostId) &&
     typeof candidate.hostToken === 'string' &&
-    typeof candidate.label === 'string' &&
     typeof candidate.enrolledAt === 'number'
   );
 }

@@ -240,23 +240,19 @@ test('revoking the minting Host kills its outstanding tokens at both gates', asy
   assert.deepEqual(await finished.json(), REFUSED);
 });
 
-test('exactly one credential: both or neither is a 400, on both setup routes', async () => {
+test('the token is the only credential: a password or nothing is the same 401', async () => {
   const { app, token } = await appWithToken();
   const authenticator = await newAuthenticator();
 
-  for (const credential of [{ password: PASSWORD, setupToken: token }, {}]) {
-    assert.equal((await begin(app, credential)).status, 400);
+  for (const credential of [{ password: PASSWORD }, {}]) {
+    const began = await begin(app, credential);
+    assert.equal(began.status, 401);
+    assert.deepEqual(await began.json(), REFUSED);
     const res = await finish(app, authenticator, credential, { challenge: 'x' });
-    assert.equal(res.status, 400);
+    assert.equal(res.status, 401);
+    assert.deepEqual(await res.json(), REFUSED);
   }
   // Neither attempt may have spent the token.
-  assert.equal((await registerWithToken(app, token)).status, 200);
-});
-
-test('the setup password still registers a passkey with tokens outstanding', async () => {
-  const { app, token } = await appWithToken();
-  assert.equal((await register(app, await newAuthenticator())).status, 200);
-  // The password path is not the token path: the QR is untouched by it.
   assert.equal((await registerWithToken(app, token)).status, 200);
 });
 

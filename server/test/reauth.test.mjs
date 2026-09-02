@@ -24,7 +24,6 @@ import {
   newAuthenticator,
   ownerSession,
   register,
-  signin,
 } from './helpers.mjs';
 
 /** A well-formed base64url 32-byte value; the routing fields are opaque here. */
@@ -226,25 +225,16 @@ test('both routes require a session', async () => {
   assert.equal((await finish(app, undefined, { serverNonce: random32() })).status, 401);
 });
 
-// STAGE-4 TRANSITIONAL: the legacy Pocket's arm, deleted in 4c together with
-// the `pair` frame whose presence gate it feeds.
-test('the bodyless legacy arm still refreshes the session presence stamp', async () => {
-  const clock = makeClock();
-  const { app, sessions } = await freshApp({ now: clock.now });
-  const authenticator = await newAuthenticator();
-  await register(app, authenticator);
-  const { res } = await signin(app, authenticator);
-  const { sessionToken } = await res.json();
+test('a request with no binding is refused, not answered with a random challenge', async () => {
+  // The one arm 4c deleted. A bodyless `begin` used to mint a sign-in-shaped
+  // challenge; it must now fail closed, answering no `serverNonce` a proof
+  // could be built around.
+  const { app } = await freshApp();
+  const { sessionToken } = await ownerSession(app);
+  const res = await begin(app, sessionToken, {});
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).serverNonce, undefined);
 
-  clock.advance(60_000);
-  const began = await begin(app, sessionToken, {});
-  assert.equal(began.status, 200);
-  const { challenge, serverNonce } = await began.json();
-  assert.equal(serverNonce, undefined, 'the legacy arm answers the old shape');
-
-  const assertion = await authenticator.assert({ challenge, origin: ORIGIN, rpId: RP_ID });
-  const finished = await finish(app, sessionToken, { assertion });
-  assert.equal(finished.status, 200);
-  assert.deepEqual(await finished.json(), { presenceVerifiedAt: clock.now() });
-  assert.equal(sessions.validate(sessionToken).lastVerifiedPresence, clock.now());
+  const finished = await finish(app, sessionToken, {});
+  assert.equal(finished.status, 400);
 });
