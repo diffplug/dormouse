@@ -36,7 +36,7 @@ everything stage (a) implements.
 | 3 | `settings` | Clicks the baseboard's Settings button and scrolls to Remote control. → `02-settings-open.png` |
 | 4 | `enroll` | Types the server URL, the setup password and the machine name into the real form, submits, and waits for **Connected**. → `03-enroll-form.png`, `04-enrolled.png` |
 | 5 | `qr` | Clicks **Set up a phone**, waits for the code, screenshots, crops to the QR, makes a camera-shaped Y4M, and decodes the crop to prove it is legible. → `qr-full.png`, `qr.png`, `qr.y4m`, `invitation-url.txt` |
-| 6 | `pocket` | *Stage (b), not implemented.* Launch Chrome with `--use-fake-device-for-media-stream --use-file-for-fake-video-capture=qr.y4m`, attach with `agent-browser connect <port>`, add a CDP virtual WebAuthn authenticator, and register the passkey. |
+| 6 | `pocket` | *Stage (b), not implemented.* Launch Chrome with `--use-fake-device-for-media-stream --use-file-for-fake-video-capture=qr.y4m`, attach with `agent-browser connect <port>`, add a CDP virtual WebAuthn authenticator, and register the passkey. All three were probed against `agent-browser` 0.31.1 and work — see *Stage (b) notes* below. |
 | 7 | `code` | *Stage (c), not implemented.* Read the two-digit code off Pocket and type it into the Host's pairing modal. |
 | 8 | `terminal` | *Stage (c), not implemented.* Run a command from Pocket and observe its output. |
 
@@ -100,6 +100,27 @@ into `sidecar/remote-host.cjs` at stage time from `DORMOUSE_REMOTE_CONNECT_SRC`,
 and Pocket must be same-origin with its own API
 ([`docs/specs/pocket-app.md`](../../docs/specs/pocket-app.md) → Deployment). The
 Host harness's two ports are searched for from `:15540` and passed in.
+
+## Stage (b) notes
+
+Everything stage (b) needs was probed against `agent-browser` 0.31.1 and Chrome
+for Testing 150 before this stage landed, so none of it is speculative:
+
+- **`agent-browser connect <port>` attaches to a Chrome you launched yourself**,
+  which is how the Pocket browser gets the flags no `agent-browser` verb exposes.
+  `agent-browser --session <s> get cdp-url` then answers the *browser-level*
+  `ws://127.0.0.1:<port>/devtools/browser/<id>` endpoint.
+- **The `qr.y4m` this stage writes decodes back out of `getUserMedia`.** A page
+  behind `--use-fake-device-for-media-stream --use-fake-ui-for-media-stream
+  --use-file-for-fake-video-capture=qr.y4m` gets a 640×480 stream whose first
+  frame decodes to exactly the string in `invitation-url.txt`.
+- **There is no raw-CDP verb on the CLI**, so the virtual authenticator needs a
+  WebSocket of its own: take the page's `webSocketDebuggerUrl` from
+  `http://127.0.0.1:<port>/json/list` and send `WebAuthn.enable` then
+  `WebAuthn.addVirtualAuthenticator` over Node's built-in `WebSocket`. Chrome
+  accepts that second client while `agent-browser` is still attached. The
+  authenticator belongs to the *page target*, so it has to be re-added if the
+  flow ever moves to a new tab.
 
 ## Known limitations
 
