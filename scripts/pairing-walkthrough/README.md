@@ -41,10 +41,35 @@ selectors), `ab.mjs` (`agent-browser`), `chrome.mjs` (the Pocket browser),
 Every line about `agent-browser` and Chrome here was probed against
 `agent-browser` 0.31.1 and Chrome for Testing 150, not assumed.
 
+## Scenarios
+
+`--scenario <name>` picks which ending the run drives. They share the first
+seven steps — everything up to the two digits is the same code on every path —
+so a scenario is only ever the last step, and the differences are all in what
+the laptop and the phone say afterwards.
+
+| Scenario | Ends with | What a green run proves | Artifacts |
+| --- | --- | --- | --- |
+| `happy` (default) | `terminal` | A phone paired from a QR runs a command the laptop's own shell answers, and hears it ring. | unprefixed, as below |
+| `wrong-code` | `mismatch` | The two digits are mistyped: nothing pairs, the laptop's panel says the digits did not match, and the phone lands back on its list with its own sentence. | `wrong-code-*` |
+| `denied` | `cancel` | Cancel on the laptop: nothing pairs, the panel says the request was cancelled, the phone goes back to its list. | `denied-*` |
+
+Each scenario's sentence is in `summary.json` as `expect`, beside the artifacts
+that back it. **Every artifact of a scenario other than `happy` is prefixed with
+the scenario's name** — screenshots, text captures, logs, proof files — so
+several scenarios can share one `--out` without overwriting each other's
+evidence.
+
+The two refusal scenarios both check an *absence* — that nothing was paired —
+which the count cannot show the instant a decision lands, since the section
+re-reads its status on a 2 s poll. Each therefore waits a poll cycle out before
+believing the count.
+
 ## Steps
 
-`--until <step>` stops after the step it names; the default is the last one, so
-a bare run does all of it.
+`--until <step>` stops after the step it names, and must name a step of the
+chosen scenario; the default is that scenario's last, so a bare run does all of
+it.
 
 | # | Step | What happens |
 | --- | --- | --- |
@@ -56,11 +81,13 @@ a bare run does all of it.
 | 6 | `pocket` | Launches a second, isolated Chrome with the fake camera pointed at `qr.y4m`, attaches with `agent-browser connect <port>`, opens the **plain origin**, and gives the page a CDP virtual authenticator. → `05-pocket-first-run.png` |
 | 7 | `code` | Taps **Scan a setup code**; Pocket's own scanner decodes the fake camera, registers a passkey with the scanned token, signs in, and shows two digits. Reads them, and waits for the Host's modal to open. → `06-scanner.png`, `07-code-screen.png`, `08-host-pairing-modal.png`, `pairing-code.txt` |
 | 8 | `terminal` | Types the two digits into the Host's modal and authorizes; waits for Pocket to connect itself and land on the terminal; runs a command from the phone and reads the file it wrote; rings the Host and finds the bell on the phone; then leaves to the Hosts view and connects again. → `09-host-approved.png` … `14-pocket-reconnected.png`, `terminal-proof.txt`, `notify-proof.txt`, `reconnect-proof.txt` |
+| 8′ | `mismatch` | (`wrong-code`) Types the *next* two digits instead, and waits for the panel to report a mismatch; checks the paired count did not move and follows the phone back to its list. → `09-host-mismatch.png`, `10-pocket-mismatch.png` |
+| 8′ | `cancel` | (`denied`) Presses the modal's Cancel and waits for the panel to report it; same two checks. → `09-host-cancelled.png`, `10-pocket-cancelled.png` |
 
 Everything a later step needs from an earlier one is on `ctx.state` —
 `hostBrowser`, `pocketBrowser`, `pocketAuth` (the live CDP session holding the
-authenticator), `invitationUrl`, `pairingCode`, and `signCount` — or in
-`summary.json`.
+authenticator), `serverHandle`, `invitationUrl`, `pairingCode`, and `signCount`
+— or in `summary.json`.
 
 Per-step milliseconds land in `summary.json`. With warm builds the whole run is
 about 15 s, of which the Host's boot is a third and step 8 is under 3 s; a cold
@@ -76,7 +103,8 @@ to tap something there would have found a bug.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--until <step>` | `terminal` | Stop after this step. |
+| `--scenario <name>` | `happy` | Which ending to drive — see *Scenarios*. |
+| `--until <step>` | the scenario's last | Stop after this step. |
 | `--out <dir>` | `$TMPDIR/pairing-walkthrough/<timestamp>` | Run directory. |
 | `--skip-build` | off | Reuse `lib/dist-pocket` and `server/dist` instead of rebuilding them. Ignored (with a warning) when either is missing. |
 | `--password <pw>` | `walkthrough-hunter2` | `DORMOUSE_SETUP_PASSWORD` for the run. |

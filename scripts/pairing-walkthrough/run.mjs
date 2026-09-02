@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { STEPS } from './steps.mjs';
+import { SCENARIOS } from './steps.mjs';
 import { delay, exec, findFreePort, isPortFree, killTree, spawnedHandles } from './proc.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -25,10 +25,14 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
  */
 const SERVER_PORT = 3000;
 
+/** The scenario a bare run drives, and the one `--until` is checked against. */
+const DEFAULT_SCENARIO = 'happy';
+
 /** The defaults `parseArgs` starts from, and the ones `usage` prints. */
 function defaults() {
   return {
-    until: STEPS.at(-1).name,
+    scenario: DEFAULT_SCENARIO,
+    until: SCENARIOS[DEFAULT_SCENARIO].steps.at(-1).name,
     out: '$TMPDIR/pairing-walkthrough/<timestamp>',
     skipBuild: false,
     password: 'walkthrough-hunter2',
@@ -38,7 +42,9 @@ function defaults() {
 }
 
 function parseArgs(argv) {
-  const opts = { ...defaults(), out: null };
+  // `until` is resolved after the loop, not before: which steps exist depends on
+  // `--scenario`, and the two flags may arrive in either order.
+  const opts = { ...defaults(), out: null, until: null };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const value = () => {
@@ -47,6 +53,7 @@ function parseArgs(argv) {
       return next;
     };
     switch (arg) {
+      case '--scenario': opts.scenario = value(); break;
       case '--until': opts.until = value(); break;
       case '--out': opts.out = value(); break;
       case '--skip-build': opts.skipBuild = true; break;
@@ -57,19 +64,30 @@ function parseArgs(argv) {
       default: throw new Error(`unknown flag ${arg}`);
     }
   }
-  if (!STEPS.some((step) => step.name === opts.until)) {
-    throw new Error(`--until must be one of: ${STEPS.map((s) => s.name).join(', ')}`);
+  const scenario = SCENARIOS[opts.scenario];
+  if (!scenario) {
+    throw new Error(`--scenario must be one of: ${Object.keys(SCENARIOS).join(', ')}`);
+  }
+  opts.until ??= scenario.steps.at(-1).name;
+  if (!scenario.steps.some((step) => step.name === opts.until)) {
+    throw new Error(
+      `--until must name a step of --scenario ${opts.scenario}: ` +
+        scenario.steps.map((s) => s.name).join(', '),
+    );
   }
   return opts;
 }
 
 function usage() {
   const d = defaults();
+  const steps = SCENARIOS[DEFAULT_SCENARIO].steps.map((s) => s.name).join(', ');
   return [
     'Usage: node scripts/pairing-walkthrough/run.mjs [options]',
     '',
-    `  --until <step>     stop after this step (default: ${d.until})`,
-    `                     steps: ${STEPS.map((s) => s.name).join(', ')}`,
+    `  --scenario <name>  which ending to drive (default: ${d.scenario})`,
+    `                     scenarios: ${Object.keys(SCENARIOS).join(', ')}`,
+    '  --until <step>     stop after this step (default: the scenario\'s last)',
+    `                     ${DEFAULT_SCENARIO}: ${steps}`,
     `  --out <dir>        run directory (default: ${d.out})`,
     '  --skip-build       reuse lib/dist-pocket and server/dist instead of rebuilding',
     `  --password <pw>    DORMOUSE_SETUP_PASSWORD for the run (default: ${d.password})`,
@@ -108,11 +126,17 @@ async function main(live) {
   opts.hostPort = await findFreePort(opts.vitePort + 1);
   opts.session = `pairing-walkthrough-${stamp}`;
 
+  const scenario = SCENARIOS[opts.scenario];
+
   /** Every file the run left behind, by name. A re-captured QR rewrites its own. */
   const artifacts = new Set();
   const summary = {
     startedAt: new Date().toISOString(),
     runDir,
+    scenario: opts.scenario,
+    // What a green run of this scenario proves, beside the artifacts it proves
+    // it with — so a directory found later says what it was for.
+    expect: scenario.expect,
     options: { ...opts },
     steps: [],
     artifacts: [],
@@ -121,6 +145,16 @@ async function main(live) {
   const state = live.state;
   // Cleanup identifies the Pocket Chrome by its profile path; see `cleanup`.
   state.runDir = runDir;
+  /**
+   * Every artifact a scenario other than the default writes is named after it,
+   * so several scenarios can share one `--out` and none overwrites another's
+   * evidence — including the ones with the same name on every path (`server.log`,
+   * `qr.png`, the proof files).
+   */
+  const artifactName = (name) =>
+    opts.scenario === DEFAULT_SCENARIO ? name : `${opts.scenario}-${name}`;
+  // `cleanup` writes one artifact of its own, and runs where `ctx` does not.
+  state.artifactName = artifactName;
 
   const ctx = {
     repoRoot,
@@ -133,10 +167,11 @@ async function main(live) {
     artifacts,
     log: (message) => console.log(`[walkthrough] ${message}`),
     record: (facts) => Object.assign(summary.facts, facts),
+    artifactName,
     /** Write `text` into the run directory and register it as an artifact. */
     write: (name, text) => {
-      writeFileSync(join(runDir, name), `${text}\n`);
-      artifacts.add(name);
+      writeFileSync(join(runDir, artifactName(name)), `${text}\n`);
+      artifacts.add(artifactName(name));
     },
     /**
      * Screenshot a browser into the run directory — the Host's by default, the
@@ -149,8 +184,8 @@ async function main(live) {
      */
     shot: async (name, browser = state.hostBrowser) => {
       if (!browser) throw new Error('no browser to screenshot yet');
-      await browser.screenshot(join(runDir, name));
-      artifacts.add(name);
+      await browser.screenshot(join(runDir, artifactName(name)));
+      artifacts.add(artifactName(name));
       const text = await browser
         .visibleText()
         .catch((err) => `(text capture failed: ${err.message})`);
@@ -159,19 +194,20 @@ async function main(live) {
   };
   // Written by the children rather than by a step, so registered here.
   for (const log of ['server.log', 'host.log', 'pocket-chrome.log', 'pocket-console.log']) {
-    artifacts.add(log);
+    artifacts.add(artifactName(log));
   }
 
   ctx.record({ serverOrigin: ctx.serverOrigin });
   console.log(`[walkthrough] run directory: ${runDir}`);
+  console.log(`[walkthrough] scenario ${opts.scenario}: ${scenario.expect}`);
   console.log(`[walkthrough] server ${ctx.serverOrigin} · vite ${ctx.viteOrigin} · bridge :${opts.hostPort}`);
   console.log(`[walkthrough] agent-browser session: ${opts.session}`);
 
-  const lastIndex = STEPS.findIndex((step) => step.name === opts.until);
+  const lastIndex = scenario.steps.findIndex((step) => step.name === opts.until);
   let reached = null;
   let failure = null;
 
-  for (const step of STEPS.slice(0, lastIndex + 1)) {
+  for (const step of scenario.steps.slice(0, lastIndex + 1)) {
     const startedAt = Date.now();
     console.log(`[walkthrough] → ${step.name}: ${step.title}`);
     try {
@@ -214,7 +250,8 @@ async function cleanup(state, opts) {
   // side's only equivalent — the one place a client-side throw shows up at all.
   if (state.pocketAuth && state.runDir) {
     const { messages } = state.pocketAuth.session;
-    writeFileSync(join(state.runDir, 'pocket-console.log'), `${messages.join('\n')}\n`);
+    const name = state.artifactName?.('pocket-console.log') ?? 'pocket-console.log';
+    writeFileSync(join(state.runDir, name), `${messages.join('\n')}\n`);
   }
   // The CDP socket next: it is the only thing holding the Pocket page's virtual
   // authenticator, and closing it after Chrome is gone throws.

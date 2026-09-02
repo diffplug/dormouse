@@ -2,6 +2,10 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import {
+  PAIRING_OUTCOME_COPY,
+  PAIRING_OUTCOME_LABEL,
+} from '../components/RemoteControlSection';
 import { enrollmentOfferPath } from '../host/remote/enroll-offer';
 import { PAIRING_CODE_LABEL } from '../remote/pocket-app/App';
 import { SCAN_LABEL } from '../remote/setup-copy';
@@ -126,6 +130,27 @@ describe('the pairing walkthrough mirrors the copy it clicks', () => {
     const selector = extract(source, file, /^const PAIRING_CODE_REGION = '([^']+)';$/m);
     expect(selector).toBe(`[role="status"][aria-label="${PAIRING_CODE_LABEL}"]`);
   });
+
+  it('finds the pairing report by the live region’s shipped accessible name', () => {
+    const selector = extract(source, file, /^const PAIRING_OUTCOME_REGION = '([^']+)';$/m);
+    expect(selector).toBe(`[role="status"][aria-label="${PAIRING_OUTCOME_LABEL}"]`);
+  });
+
+  // The region's name says a ceremony ended; the scenarios turn on *which* one,
+  // so this is the harness's one match on copy. What has to hold is not the
+  // wording but that each prefix still picks out exactly one outcome — a
+  // rewrite that made two of them share an opening would otherwise leave
+  // `--scenario wrong-code` passing on a run that paired a phone.
+  it.each(['OUTCOME_PAIRED', 'OUTCOME_CODE_MISMATCH', 'OUTCOME_CANCELLED'])(
+    '%s names exactly one shipped outcome sentence',
+    (name) => {
+      const prefix = extract(source, file, new RegExp(`^const ${name} = '([^']+)';$`, 'm'));
+      const matched = Object.entries(PAIRING_OUTCOME_COPY).filter(([, sentence]) =>
+        sentence.startsWith(prefix),
+      );
+      expect(matched.map(([outcome]) => outcome)).toHaveLength(1);
+    },
+  );
 });
 
 // docs/specs/standalone.md -> "Rust <-> sidecar bridge"
