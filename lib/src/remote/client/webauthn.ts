@@ -87,7 +87,13 @@ function toBufferSource(bytes: Uint8Array): ArrayBuffer {
 
 /**
  * Create a discoverable ES256 passkey. `attestation: 'none'` keeps the server
- * dependency-free (it trusts the browser-provided SPKI key). `residentKey`
+ * dependency-free (it trusts the browser-provided SPKI key).
+ *
+ * **ES256 alone in `pubKeyCredParams` is deliberate, and Chrome warns about
+ * it**: the verifier accepts nothing else
+ * (`server-lib-common/src/security/passkey.ts`), so offering RS256 would only
+ * mint keys that fail at the first assertion. Expected in every run's console
+ * (`scripts/pairing-walkthrough/README.md`). `residentKey`
  * is `'required'`: sign-in discovers credentials with an empty
  * `allowCredentials`, so a non-resident credential (which `'preferred'` can
  * silently produce) would register fine and then never be able to sign in —

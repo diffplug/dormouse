@@ -78,7 +78,7 @@ So to reproduce a user flow faithfully: `keyboard inserttext` the `dor …` line
 
 ### Command/mouse subcommands are limited
 
-- `agent-browser keyboard` accepts only `type` and `inserttext` (there is **no** `keyboard press`).
+- `agent-browser keyboard` accepts only `type` and `inserttext` — key combos go through the **top-level** `agent-browser press <key>` (Enter, Control+a, …), which also acts on the focused element.
 - `agent-browser mouse` accepts only `move`, `down`, `up`, `wheel` (there is **no** `mouse click`).
 
 ### Typing into xterm

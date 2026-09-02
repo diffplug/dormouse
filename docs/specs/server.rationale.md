@@ -37,9 +37,9 @@
 
 **A loopback VAPID subject: measured, not guessed.** Apple answers `403 {"reason":"BadJwtToken"}` for one — verified against `web.push.apple.com` (2026-08) for both `mailto:admin@localhost` and `https://localhost:3000`, while `mailto:admin@example.com` and an ordinary https origin were accepted. So the rule is loopback specifically, not reachability of the contact. `web-push` only warns about the https form, at send time, and says nothing at all about `mailto:` at `localhost`. This mattered in practice: the previous default (`mailto:admin@localhost`) let a Server boot clean, answer 200 on send, and deliver nothing to any iPhone — the one platform the feature targets.
 
-## Pairing (phone ↔ laptop, first time)
+## Relay
 
-**Why the Host cannot lean on the server's shape guard.** A Host that trusted `isPairingRequest` on the relay's side would be taking a relayed object on faith in the one place where that is least acceptable: the approval UI a human reads, and the ACL record that approval writes.
+**Why the Host cannot lean on the server's shape guard.** A Host that trusted the relay's own `isE2eClientFrame` would be taking a relay-supplied object on faith where that is least acceptable: the routing values it uses as map keys, and the ciphertext it is about to spend WebCrypto on. The relay's copy keeps a bad frame off the wire; the Host's exists because the model does not trust it.
 
 ## Host side (`lib` + the two Node hosts)
 

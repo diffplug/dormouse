@@ -49,7 +49,7 @@ interface Attachment {
 
 export interface RemoteApiSessionOptions {
   hostId: string;
-  /** Sends a remote-api response/event; the caller wraps it in a `msg` frame. */
+  /** Sends a remote-api response/event; the caller encrypts it onto the session. */
   send: (payload: RemoteResponse | RemoteEventMsg) => void;
   /** Everything below the protocol: where surfaces live, and how PTYs are driven. */
   provider: HostSurfaceProvider;

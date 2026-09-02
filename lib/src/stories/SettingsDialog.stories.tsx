@@ -80,12 +80,12 @@ export const PushEnabled: Story = {
     primedAlertSettings: { pushEnabled: true },
     primedPushDevices: {
       status: 'ready',
-      devices: [{ devicePublicKey: 'device-1', label: 'iPhone Safari' }],
+      devices: [{ deliveryId: 'delivery-1', label: 'iPhone Safari' }],
     },
   },
 };
 
-/** Fan-out: several devices have enabled alerts, so all of them are named. */
+/** Fan-out: several phones have turned push on, so all of them are named. */
 export const PushManyDevices: Story = {
   parameters: {
     primedWatchedCommands: ['claude'],
@@ -93,9 +93,9 @@ export const PushManyDevices: Story = {
     primedPushDevices: {
       status: 'ready',
       devices: [
-        { devicePublicKey: 'device-1', label: 'iPhone Safari' },
-        { devicePublicKey: 'device-2', label: 'iPad' },
-        { devicePublicKey: 'device-3', label: 'Pixel Chrome' },
+        { deliveryId: 'delivery-1', label: 'iPhone Safari' },
+        { deliveryId: 'delivery-2', label: 'iPad' },
+        { deliveryId: 'delivery-3', label: 'Pixel Chrome' },
       ],
     },
   },
@@ -308,6 +308,6 @@ export const WithRemoteControl: Story = {
     primedAlertSettings: { pushEnabled: true },
   },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByText('1 paired device.');
+    await within(canvasElement).findByText('1 paired phone.');
   },
 };

@@ -15,14 +15,10 @@
  * records for `wall-test-utils.ts`). Callers that want spies wrap these.
  */
 
-import {
-  DEFAULT_PAIRING_TTL_MS,
-  SETUP_HASH_NONCE_PARAM,
-  SETUP_HASH_PREFIX,
-  SETUP_HASH_TOKEN_PARAM,
-} from 'server-lib-common';
+import { DEFAULT_PAIRING_TTL_MS, formatPairingInvitationUrl } from 'server-lib-common';
 
-import type { RemoteHostConsoleStatus, SetupQrResult } from './service-protocol';
+import type { InvitationEvent, RemoteHostConsoleStatus, SetupQrResult } from './service-protocol';
+import type { PairingOutcome, TerminalInvitationState } from '../../remote/host/remote-host';
 import type { RemoteHostLink } from '../../lib/platform/types';
 
 /** A machine that has never enrolled: the section shows its three-field form. */
@@ -63,9 +59,10 @@ export function enrolledStatus(
 }
 
 /**
- * A setup code as `setupQr` answers one: a `#setup?token=…&nonce=…` URL, the
- * mint it came from, and its clock. Composed from the same `wire.ts` constants
- * the real emitter uses, so a grammar change reaches the fixture too.
+ * A setup code as `setupQr` answers one: the positional `#pair?` URL, the
+ * invitation it belongs to, and its clock. Composed by the real formatter, so a
+ * grammar change reaches the fixture too — and so a fixture that would not
+ * scan fails here rather than in a story.
  *
  * The expiry is relative to *now* rather than a fixed epoch, because the panel
  * renders the minutes left — a frozen timestamp would render "expired" in every
@@ -73,14 +70,20 @@ export function enrolledStatus(
  * (`server/src/setup-token.ts`), so the copy reads as it does in the app.
  */
 export function setupQrResult(over: Partial<SetupQrResult> = {}): SetupQrResult {
-  const hash = new URLSearchParams({
-    [SETUP_HASH_TOKEN_PARAM]: '3PkQ8sV2mYb1hZr7Lw0cJdN6xTgAeUiOpqRsFuHv9Kz',
-    [SETUP_HASH_NONCE_PARAM]: 'Hs4mZbC1uKq7VnP0LxDgTfE8yRjWaOiUcQtBv3MdN2s',
-  });
+  const expiresAt = Date.now() + DEFAULT_PAIRING_TTL_MS;
+  const inviteId = 'Hs4mZbC1uKq7VnP0LxDgTf';
+  const ephPubBase64Url = '3PkQ8sV2mYb1hZr7Lw0cJdN6xTgAeUiOpqRsFuHv9Kz';
   return {
-    url: `https://ned-mac.tail9c2f1.ts.net/${SETUP_HASH_PREFIX}${hash}`,
-    mintId: 'mint-story',
-    expiresAt: Date.now() + DEFAULT_PAIRING_TTL_MS,
+    url: formatPairingInvitationUrl('https://ned-mac.tail9c2f1.ts.net', {
+      hostId: 'Zq7WmT1cX4bK0nLpRvYeAg',
+      inviteId,
+      expiry: Math.floor(expiresAt / 1000),
+      setupToken: 'B2xNc7QvKm0TdLa9YsEuPfHi4RgWjZo1UbXn6Vt3ARk',
+      ephPub: new Uint8Array(32),
+      ephPubBase64Url,
+    }),
+    inviteId,
+    expiresAt,
     ...over,
   };
 }
@@ -89,7 +92,7 @@ export function setupQrResult(over: Partial<SetupQrResult> = {}): SetupQrResult 
 export interface PrimedRemoteHost {
   /** What `status` answers. */
   status?: RemoteHostConsoleStatus;
-  /** Make `status` reject — "could not reach this machine's Host service". */
+  /** Make `status` reject — "could not reach this machine's remote-control service". */
   statusError?: string;
   /**
    * Make `enroll` *and* `enrollOffer` reject — the refused-origin case both
@@ -101,11 +104,18 @@ export interface PrimedRemoteHost {
   /** Make `setupQr` reject — the relay is down, or the server refused. */
   setupQrError?: string;
   /**
-   * Fire `setupTokenRedeemed` as soon as something subscribes, so the panel
-   * renders its scanned state. A story is one frame, so "the phone redeemed the
-   * code" has to be a starting condition rather than an event to wait for.
+   * Fire one `invitation` event as soon as something subscribes, so the panel
+   * renders that terminal state. A story is one frame, so "the phone reserved
+   * the code" has to be a starting condition rather than an event to wait for.
    */
-  setupRedeemed?: boolean;
+  setupInvitation?: TerminalInvitationState;
+  /**
+   * How the ceremony that code produced ended, on the same event. Implies
+   * `consumed` where {@link PrimedRemoteHost.setupInvitation} says nothing,
+   * because that is the only state the Host ever reports an outcome with
+   * (`service-protocol.ts` → `InvitationEvent`).
+   */
+  setupOutcome?: PairingOutcome;
 }
 
 /**
@@ -136,14 +146,22 @@ export function makeStubRemoteHostLink(primed: PrimedRemoteHost): RemoteHostLink
     respond: () => {},
     notify: () => {},
     on: (name, listener) => {
-      if (name === 'setupTokenRedeemed' && primed.setupRedeemed) {
-        // Naming the mint the stub's own `setupQr` answered, because the panel
-        // acts only on its own code (`service-protocol.ts`).
-        const { mintId } = primed.setupQr ?? setupQrResult();
+      if (name === 'invitation' && (primed.setupInvitation || primed.setupOutcome)) {
+        // Naming the invitation the stub's own `setupQr` answered, because the
+        // panel acts only on its own code (`service-protocol.ts`).
+        const { inviteId } = primed.setupQr ?? setupQrResult();
+        // Spread like the service's own `#emitInvitation`, so no story or test
+        // drives the panel with a shape production cannot send.
+        const event: InvitationEvent = {
+          name: 'invitation',
+          inviteId,
+          state: primed.setupInvitation ?? 'consumed',
+          ...(primed.setupOutcome ? { outcome: primed.setupOutcome } : {}),
+        };
         // A microtask rather than inline: the panel subscribes during an effect,
         // and setting state before that effect has returned is a no-op React
         // warns about.
-        queueMicrotask(() => listener({ name: 'setupTokenRedeemed', mintId }));
+        queueMicrotask(() => listener(event));
       }
       return () => {};
     },

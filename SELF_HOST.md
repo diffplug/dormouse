@@ -198,7 +198,7 @@ Task `\Dormouse Server`, or
 Before first Host enrollment, `run/enroll-offer.json` holds origin and a token that
 `POST /api/host/enroll` accepts in place of the setup password. A Dormouse Host
 on this machine reads the same file and offers one-click enrollment from it
-(checkpoint 4, step 3). It expires after 24 hours; either credential path's
+(checkpoint 4, step 2). It expires after 24 hours; either credential path's
 first Host enrollment removes it, and later installer runs do not recreate it.
 
 No installer will **ever**: run `git pull`, fetch, or switch branches; install a
@@ -269,7 +269,8 @@ These cannot be proven from the laptop, and are the checkpoints below:
 - The service manager restarts the server after a real kill.
 - State survives a reinstall from a newer checkout, and rollback returns the
   previous release.
-- Pocket passkey setup and Host enrollment complete against this origin.
+- Pocket passkey setup and Host enrollment complete against this origin, and one
+  command typed from the phone comes back with the laptop's own output.
 - The install root is backed up somewhere off this laptop.
 
 ## Checkpoint 1: preflight
@@ -414,20 +415,15 @@ same sequence is documented against the dev loop in `docs/specs/server.md`
 `localhost:3000`, and the password comes from the installer rather than the
 command line.
 
-1. **The setup password.** Have the user run `manage show-password` in their own
+**The Host comes first**: a passkey is registered only off a code an enrolled
+Host displays (`docs/specs/server.md` → Setup tokens and the pairing QR).
+
+1. **The setup password.** Only needed if the offer card in step 2 is gone or
+   the Host is elsewhere. Have the user run `manage show-password` in their own
    terminal when they are ready. It warns before printing. Do not ask for the
    value, and do not print it into the conversation.
 
-2. **The passkey.** On the phone, open `https://<laptop>.<tailnet>.ts.net` in
-   Safari. A browser that has never been here leads with the setup fields:
-   password + label create the passkey and sign them in, no disclosure to open.
-   The passkey is bound to this exact origin. If they want push
-   notifications, add Pocket to the Home Screen *before* signing in and do all
-   of this inside the installed app — iOS delivers Web Push only there, and the
-   install is a separate storage partition that would otherwise need its own
-   pairing (`docs/specs/pocket-app.md` → Installable web app).
-
-3. **The Host.** On this same machine, launch the standalone or VS Code build
+2. **The Host.** On this same machine, launch the standalone or VS Code build
    made with `DORMOUSE_REMOTE_CONNECT_SRC` (see Prerequisites) and open
    **Settings → Remote control** — the sliders icon at the far right of the
    baseboard. Until its 24-hour limit or another Host enrollment, the offer
@@ -447,10 +443,27 @@ command line.
    refusal verbatim. That is the expected symptom of a stock build, not a server
    problem.
 
-4. **A real session.** On the phone: Hosts → **Pair** → approve the modal that
-   appears on the laptop → **Connect** (one biometric prompt) → pick a pane and
-   type. Only now have HTTPS proxying, the WebSocket upgrade, and the security
-   flow been exercised together.
+3. **The phone, and only then the code.** On the phone, open
+   `https://<laptop>.<tailnet>.ts.net` in Safari and confirm it leads with
+   **Scan a setup code**. For push, add Pocket to the Home Screen and do the
+   rest inside the installed app: iOS delivers Web Push only there, and the
+   install is a separate partition needing its own pairing
+   (`docs/specs/pocket-app.md` → Installable web app, which also covers the
+   phone's own camera).
+
+   **A setup code is live for five minutes**, so a phone's first load of Pocket
+   — bundle, service worker, Home Screen install — must not happen inside that
+   window. With the phone waiting on that screen, press **Set up a phone** in
+   **Settings → Remote control**. Scanning (or pasting) the code creates the
+   passkey and signs them in — no password is typed on the phone — bound to
+   this exact origin.
+
+4. **A real session.** The scan runs straight into pairing: read the two digits
+   off the phone, type them into the modal on the laptop, and **approve — the
+   last thing anyone does**. The phone answers its own biometric prompt and
+   lands on the machine's terminal: no picker, nothing to tap. (**Connect**, on
+   the Hosts row, belongs to later sessions.) Only now have HTTPS proxying, the
+   WebSocket upgrade, and the security flow been exercised together.
 
 5. **State.** Confirm `account.json`, `hosts.json`, and `vapid.json` now exist
    in `state/` (plus `push-subscriptions.json` if push was enabled). Record
@@ -619,9 +632,8 @@ Do not print the setup password or any credential in the handoff.
 
 ## Keeping the relay up while the laptop sleeps
 
-A per-login agent is down whenever its machine is. That is usually fine, because
-there is then no local Host to control either — but it stops being fine the
-moment the user controls a Host that is *not* this laptop.
+A per-login agent is down whenever its machine is — fine until the user controls
+a Host that is *not* this laptop.
 
 That case needs no new machinery. The relay does not have to run on the laptop:
 the phone reaches the origin, and the Host dials *out* to it. So run the Linux
@@ -632,9 +644,8 @@ a small VM — and that node's own MagicDNS name becomes the origin:
 ./deploy/local/install-linux.sh --linger
 ```
 
-Lingering is what makes it survive logout and come back at boot; without it the
-service is still per-login and nothing has changed. `manage verify` reports
-which of the two modes is live.
+Lingering is what makes it survive logout and come back at boot — see
+Prerequisites. `manage verify` reports which of the two modes is live.
 
 Two things follow, and both are the same ones any origin change brings:
 

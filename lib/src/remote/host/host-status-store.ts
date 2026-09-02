@@ -17,10 +17,10 @@
  */
 
 import type {
+  InvitationEvent,
   PushSendSummary,
   RemoteHostConsoleStatus,
   SetupQrResult,
-  SetupTokenRedeemedEvent,
 } from '../../host/remote/service-protocol';
 import { getPlatform } from '../../lib/platform';
 import type { RemoteHostLink } from '../../lib/platform/types';
@@ -85,8 +85,7 @@ function setState(next: RemoteHostStatusState): void {
  * one comparator per field, which is also the compile-time checklist that every
  * field has one.
  *
- * The same guard `sameRequest` uses in `activation.ts`, for the same reason: a
- * field added to the interface and forgotten here would be polled but never
+ * A field added to the interface and forgotten here would be polled but never
  * published, so the section would paint that field from whenever one of the
  * others last changed — stale for as long as the dialog stays open, and nothing
  * else would catch it. The mapped type makes the *omission* a compile error;
@@ -338,23 +337,38 @@ export async function mintSetupQr(): Promise<SetupQrResult> {
 }
 
 /**
- * Be told when a setup code this machine minted is spent, so the panel still
- * offering *that* code can stop. Independent of the status subscription above:
- * the event changes no status field, so there is nothing to re-read.
+ * Be told when an invitation this machine minted changes state, so the panel
+ * still offering *that* code can stop. Independent of the status subscription
+ * above: the event changes no status field, so there is nothing to re-read.
  *
- * The listener gets the `mintId`; a panel showing a different mint ignores it
- * (`service-protocol.ts` → `SetupTokenRedeemedEvent`). An event that names no
- * mint is dropped here rather than passed on as `undefined` — the service is
- * typed to send one, so the only source of a malformed event is a bridge nobody
- * should be trusting to pick a panel.
+ * The listener gets the `inviteId`, the state, and — where a pairing ceremony
+ * ended — how it ended; a panel showing a different invitation ignores the
+ * first two (`service-protocol.ts` → `InvitationEvent`). An event that names no
+ * invitation is dropped here rather than passed on as `undefined` — the service
+ * is typed to send one, so the only source of a malformed event is a bridge
+ * nobody should be trusting to pick a panel.
+ *
+ * **Membership is not checked here**, only that the field is a string: the
+ * closed set lives in the copy table the panel renders from, and importing it
+ * would be a *value* import of `remote-host.ts` from the main chunk — the whole
+ * stack this module exists to stay out of. A member this build does not know
+ * therefore lands as an outcome nothing has a sentence for, and the panel falls
+ * back to what it said before there were outcomes at all.
  */
-export function subscribeToSetupTokenRedeemed(
-  listener: (mintId: string) => void,
+export function subscribeToInvitation(
+  listener: (
+    inviteId: string,
+    state: InvitationEvent['state'],
+    outcome?: InvitationEvent['outcome'],
+  ) => void,
 ): () => void {
   return (
-    link()?.on('setupTokenRedeemed', (data) => {
-      const mintId = (data as SetupTokenRedeemedEvent | undefined)?.mintId;
-      if (typeof mintId === 'string') listener(mintId);
+    link()?.on('invitation', (data) => {
+      const event = data as InvitationEvent | undefined;
+      if (typeof event?.inviteId === 'string' && typeof event.state === 'string') {
+        const outcome = typeof event.outcome === 'string' ? event.outcome : undefined;
+        listener(event.inviteId, event.state, outcome);
+      }
     }) ?? (() => {})
   );
 }
@@ -383,5 +397,8 @@ export async function sendTestPush(): Promise<PushSendSummary> {
 function describeError(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === 'string' && error) return error;
-  return 'The Host service did not answer.';
+  // Completes the section's own sentence — "Could not reach this machine's
+  // remote-control service: …" — so it does not name the service again, in the
+  // internal word at that (`RemoteControlSection.tsx`).
+  return 'It did not answer.';
 }

@@ -85,7 +85,7 @@ export function readConfig(env: Env = process.env): ServerConfig {
   const setupPassword = env.DORMOUSE_SETUP_PASSWORD;
   if (!setupPassword) {
     throw new ConfigError(
-      'DORMOUSE_SETUP_PASSWORD is required — it gates account creation and host enrollment.',
+      'DORMOUSE_SETUP_PASSWORD is required — it gates host enrollment.',
     );
   }
 

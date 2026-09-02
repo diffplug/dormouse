@@ -240,6 +240,9 @@ const missingAuthor = {
   "@tauri-apps/plugin-shell": "Tauri Apps Contributors",
   "@tauri-apps/plugin-updater": "Tauri Apps Contributors",
   "@xterm/xterm": "Christopher Jeffrey, SourceLair Private Company, xterm.js authors",
+  // Both ship an `authors` array rather than npm's singular `author` field.
+  "@zxing/browser": "David Werth, Luiz Barni",
+  "@zxing/library": "Adrian Toșcă, David Werth, Luiz Barni",
   "atomically": "Fabio Spampinato",
   "inherits": "Isaac Z. Schlueter",
   "minimalistic-assert": "Calvin Metcalf",

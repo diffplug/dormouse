@@ -12,7 +12,12 @@ import {
 import { DEFAULT_PAIRING_TTL_MS } from 'server-lib-common';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
 import type { RemoteHostConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
-import type { RemoteHostStatus } from '../remote/host/remote-host';
+import type {
+  PairingOutcome,
+  RemoteHostStatus,
+  TerminalInvitationState,
+} from '../remote/host/remote-host';
+import { SCAN_LABEL } from '../remote/setup-copy';
 import {
   clearRemoteHostEnrollment,
   enrollOfferRemoteHost,
@@ -22,7 +27,7 @@ import {
   reconnectRemoteHost,
   refreshRemoteHostStatus,
   subscribeToRemoteHostStatus,
-  subscribeToSetupTokenRedeemed,
+  subscribeToInvitation,
 } from '../remote/host/host-status-store';
 
 /**
@@ -138,15 +143,178 @@ function useBusyAction() {
  * Everything the phone-setup panel can be showing, as one value.
  *
  * `null` is the closed panel. The rest are open: waiting on a mint, holding a
- * live code, spent, or refused. `minting` carries the code being replaced when
- * there is one, so an auto-refresh never blanks a QR a camera is pointed at.
+ * live code, in one of the four terminal phases, or refused. `minting` carries
+ * the code being replaced when there is one, so an auto-refresh never blanks a
+ * QR a camera is pointed at.
  */
 type SetupQrState =
   | null
   | { phase: 'minting'; prev?: SetupQrResult }
   | { phase: 'live'; qr: SetupQrResult }
-  | { phase: 'spent' }
+  /** Carries its own id: the outcome is a second event about the same code. */
+  | { phase: 'scanned'; inviteId: string }
+  | { phase: Exclude<TerminalPhase, 'scanned'> }
   | { phase: 'failed'; message: string };
+
+/**
+ * **Four different facts, and they read differently.** `scanned` means a phone
+ * completed the handshake and the next step is the pairing request about to
+ * interrupt this machine; `finished` means that request has been answered,
+ * either way; `dropped` means this Host discarded the code un-scanned — the
+ * relay socket went, or a newer mint evicted it; `expired` means its TTL ran
+ * out before anyone scanned it. **Only `scanned` sends the user to a phone**
+ * (`docs/specs/remote-security-model.md` → Pairing).
+ */
+type TerminalPhase = 'scanned' | 'finished' | 'dropped' | 'expired';
+
+/**
+ * How each terminal invitation state reads in the panel. Exhaustive over the
+ * states the Host publishes, so a fifth one cannot quietly fall through to
+ * "scanned" — the one sentence that must never be shown for a code nobody
+ * touched.
+ */
+const TERMINAL_PHASE: Record<TerminalInvitationState, TerminalPhase> = {
+  reserved: 'scanned',
+  consumed: 'finished',
+  dropped: 'dropped',
+  expired: 'expired',
+};
+
+/**
+ * What each terminal phase says. A table rather than four JSX branches, so the
+ * exhaustiveness {@link TERMINAL_PHASE} promises holds on the render side too.
+ */
+const TERMINAL_COPY: Record<TerminalPhase, { headline: string; detail: string }> = {
+  scanned: {
+    headline:
+      'A phone scanned this code. It will ask to pair — that request interrupts you here with two digits to type.',
+    detail: 'This code is used up.',
+  },
+  // The frame left when a code was spent and nobody decided anything — a lost
+  // socket, a teardown. **It deliberately does not claim the pairing
+  // succeeded**: a ceremony a person answered carries an outcome and gets
+  // {@link PAIRING_OUTCOME_COPY}'s sentence instead.
+  finished: {
+    headline: 'This setup code is finished.',
+    detail: 'Pair another phone with a new code, or close this.',
+  },
+  dropped: {
+    headline: 'This code is no longer valid — nobody scanned it.',
+    detail: 'This machine lost its connection to the server, or replaced the code. Get a new one.',
+  },
+  expired: {
+    headline: 'This code expired — nobody scanned it.',
+    detail: 'Get a new one.',
+  },
+};
+
+/**
+ * A lookup into one of this panel's copy tables, answering only for a key the
+ * table actually holds.
+ *
+ * **Never the `in` operator.** Every one of these tables is keyed by a string
+ * the Host chose and a bridge relayed, and `in` walks the prototype chain — so
+ * `'toString'` would answer "yes, there is copy for that" and hand back
+ * `Object.prototype.toString` to render. The store checks that those fields are
+ * strings and deliberately *not* that they are members of the closed set
+ * (`host-status-store.ts`), so this is where a stranger stops.
+ * `hasOwnProperty.call` rather than `Object.hasOwn`, which is ES2022 and this
+ * build's lib is ES2020.
+ */
+function own<T>(table: Record<string, T>, key: string): T | undefined {
+  return Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
+}
+
+/** The terminal copy for a state, or `undefined` while the panel is still live. */
+function terminalCopy(state: SetupQrState): { headline: string; detail: string } | undefined {
+  return state ? own(TERMINAL_COPY, state.phase) : undefined;
+}
+
+/**
+ * The accessible name of the region that reports how a pairing ended.
+ *
+ * A contract, not copy: it is what the pairing walkthrough waits on
+ * (`scripts/pairing-walkthrough/steps.mjs`), the same way Pocket's two-digit
+ * region is. Pinned by `lib/src/lib/mirrored-constants.test.ts`.
+ */
+export const PAIRING_OUTCOME_LABEL = 'Pairing outcome';
+
+/**
+ * The half of every failure sentence that is the same: the code is gone, get
+ * another.
+ *
+ * **Only where nothing on screen already is another.** An outcome belongs to
+ * the code its ceremony used, and the panel may since have minted a newer one —
+ * telling the reader to get a fresh code directly above a fresh code is the one
+ * thing this sentence must not do.
+ */
+const SPENT_GET_ANOTHER = 'This setup code is spent — get a new one and try again.';
+
+/**
+ * What each pairing outcome says to the person at this machine.
+ *
+ * **Fixed copy chosen by code.** The outcome is a closed member this machine's
+ * own Host decided, and the sentence for it is written here — nothing on this
+ * screen is ever rendered from something that arrived on a wire
+ * (`docs/specs/remote-security-model.md` → Pairing). Exhaustive over
+ * {@link PairingOutcome} for the same reason {@link TERMINAL_COPY} is over the
+ * phases: an outcome with no sentence would report a ceremony ended and say
+ * nothing about how.
+ *
+ * Every failure names what did *not* happen — "nothing was paired" — because
+ * the paired count above it moves for none of them ({@link PairingOutcome}).
+ * `paired` is the only member with nothing to add: it did not spend a code the
+ * user needs to replace, so it never takes {@link SPENT_GET_ANOTHER}.
+ *
+ * `expired` covers **both** ways a deadline ends a ceremony — the reaper firing
+ * with the modal unanswered, and a confirmation typed after it — so it says the
+ * request ran out of time rather than that nobody answered it
+ * (`RemoteHost.#approvePairing` checks the deadline after spending its one
+ * attempt).
+ */
+export const PAIRING_OUTCOME_COPY: Record<PairingOutcome, string> = {
+  paired: 'This phone is paired with this machine.',
+  'code-mismatch': 'The two digits did not match, so nothing was paired.',
+  cancelled: 'You cancelled this request, so nothing was paired.',
+  expired: 'The request ran out of time, so nothing was paired.',
+  superseded: 'Another pairing request replaced this one, so nothing was paired.',
+  'host-error': 'This machine could not finish pairing, so nothing was paired.',
+};
+
+/**
+ * How a finished ceremony went, announced.
+ *
+ * `role="status"` rather than `alert`: the person is looking at this dialog —
+ * they just answered a modal on top of it — so it is a result, not an
+ * interruption.
+ */
+function PairingOutcomeReport({ sentence }: { sentence: string }) {
+  return (
+    <div
+      role="status"
+      aria-label={PAIRING_OUTCOME_LABEL}
+      className="mt-1 text-sm leading-relaxed text-foreground"
+    >
+      {sentence}
+    </div>
+  );
+}
+
+/**
+ * What to say about an outcome, or `undefined` for one this build has no
+ * sentence for — which is the whole of the fallback to the state-only copy.
+ *
+ * `replaced` says a scannable code is already on screen, which is what decides
+ * whether {@link SPENT_GET_ANOTHER} is still advice or a contradiction.
+ */
+function outcomeSentence(
+  outcome: PairingOutcome | undefined,
+  replaced: boolean,
+): string | undefined {
+  const sentence = outcome ? own(PAIRING_OUTCOME_COPY, outcome) : undefined;
+  if (sentence === undefined || outcome === 'paired' || replaced) return sentence;
+  return `${sentence} ${SPENT_GET_ANOTHER}`;
+}
 
 /**
  * The phone-setup panel's whole lifecycle: mint on open, replace the code before
@@ -161,6 +329,8 @@ type SetupQrState =
  */
 function useSetupQr() {
   const [state, setState] = useState<SetupQrState>(null);
+  /** How the last ceremony this machine answered ended; see the subscription below. */
+  const [outcome, setOutcome] = useState<PairingOutcome | undefined>(undefined);
   /**
    * Bumped synchronously by every mint and by closing. Two jobs, both about a
    * code that exists on the Server whether or not anyone can see it: it disarms
@@ -193,8 +363,30 @@ function useSetupQr() {
     })();
   }, []);
 
+  /**
+   * The user asking for a code — opening the panel, or **New code**.
+   *
+   * **Not the same entry point as the refresh timer's**, which is the whole
+   * reason this wrapper exists rather than a `setOutcome(undefined)` inside
+   * {@link mint}. Clearing the report is an acknowledgement, and only a person
+   * can make one: the panel re-mints on its own anywhere from 30 s to nearly
+   * the full TTL later, and a sentence erased by that timer is one nobody read
+   * — leaving the absolute paired count, which does not move for any failure,
+   * as the only thing that ever said anything.
+   */
+  const newCode = useCallback(() => {
+    // The report goes with the code it was about: its sentence ends in "get a
+    // new one and try again", and this is the user doing that.
+    setOutcome(undefined);
+    mint();
+  }, [mint]);
+
   const close = useCallback(() => {
     mintSeq.current++;
+    // The report goes with the panel it was shown in: Done is the user
+    // acknowledging it, and a sentence they dismissed must not reappear under
+    // the section with nothing left that could clear it but minting again.
+    setOutcome(undefined);
     setState(null);
   }, []);
 
@@ -212,23 +404,37 @@ function useSetupQr() {
     return () => clearTimeout(timer);
   }, [state, mint]);
 
-  // The Server announces a spent token to the Host that minted it
-  // (`docs/specs/server.md` → Relay), which is the only way this panel can know
-  // its code was used: the redemption happens on the phone. Only for the mint
-  // this panel is showing — a second window offering a different code stays
-  // live — and bumping the sequence makes it terminal, so a mint already in
-  // flight cannot paint a code over it.
-  const mintId = displayedQr(state)?.mintId;
+  // The Host reports its own invitation states, which is the only way this
+  // panel can know its code was used: the scan happens on the phone. The
+  // *phase* is only for the invitation this panel is following — a second
+  // window offering a different code stays live — and bumping the sequence
+  // makes it terminal, so a mint already in flight cannot paint a code over it.
+  //
+  // **The outcome is not filtered that way**, and the subscription is not
+  // conditional on there being one to filter by: the modal interrupts whatever
+  // is on screen, so the person can answer it with this panel closed or already
+  // showing a newer code, and the report is theirs either way.
+  const inviteId = trackedInviteId(state);
   useEffect(() => {
-    if (mintId === undefined) return;
-    return subscribeToSetupTokenRedeemed((redeemed) => {
-      if (redeemed !== mintId) return;
+    return subscribeToInvitation((changed, invitationState, reported) => {
+      if (reported) setOutcome(reported);
+      // `live` is the only state that keeps the code on screen.
+      if (changed !== inviteId || invitationState === 'live') return;
+      // A state this build has no phase for is still terminal — the code is
+      // gone — so it falls back to `finished`, which is the one sentence true of
+      // any retirement and does not send anyone to a phone.
+      const phase = own(TERMINAL_PHASE, invitationState) ?? 'finished';
       mintSeq.current++;
-      setState({ phase: 'spent' });
+      setState(phase === 'scanned' ? { phase, inviteId } : { phase });
     });
-  }, [mintId]);
+  }, [inviteId]);
 
-  return { state, mint, close };
+  return {
+    state,
+    report: outcomeSentence(outcome, displayedQr(state) !== undefined),
+    newCode,
+    close,
+  };
 }
 
 /** The code the panel is actually rendering, live or held through a refresh. */
@@ -236,6 +442,17 @@ function displayedQr(state: SetupQrState): SetupQrResult | undefined {
   if (state?.phase === 'live') return state.qr;
   if (state?.phase === 'minting') return state.prev;
   return undefined;
+}
+
+/**
+ * The invitation this panel is following: the one it is drawing, or — once a
+ * phone has completed a handshake against it — the one whose outcome it is
+ * still waiting on. The second half is why the subscription outlives the QR
+ * (`docs/specs/server.md` → Remote control, in the Settings dialog).
+ */
+function trackedInviteId(state: SetupQrState): string | undefined {
+  if (state?.phase === 'scanned') return state.inviteId;
+  return displayedQr(state)?.inviteId;
 }
 
 type EnrollmentAction = 'offer' | 'form';
@@ -319,7 +536,7 @@ export function RemoteControlSection() {
         <div className="mt-1.5 text-sm text-muted">Checking…</div>
       ) : state.kind === 'error' ? (
         <div className="mt-1.5 text-sm leading-relaxed text-muted">
-          Could not reach this machine’s Host service: {state.message}
+          Could not reach this machine’s remote-control service: {state.message}
         </div>
       ) : state.status.enrolled ? (
         // Keyed by which enrollment this is: a swap to another server — the
@@ -502,6 +719,15 @@ function EnrolledView({
   // on a timer, and this view's one error slot belongs to what the user clicked.
   const setup = useSetupQr();
   const described = describeConnection(connection);
+  /**
+   * Where the one pairing report goes, decided here rather than half in each
+   * place that can draw it: **the panel owns it only where it has a sentence to
+   * supersede**, which is `finished`. Everywhere else — panel shut, or open on a
+   * newer code, a mint, or a failed one — the section does, because an outcome
+   * arrives from whichever invitation carries one and would otherwise be
+   * rendered to nobody.
+   */
+  const reportInPanel = setup.state?.phase === 'finished';
 
   return (
     <div className="mt-1.5 text-sm leading-relaxed">
@@ -510,8 +736,10 @@ function EnrolledView({
       <div className="mt-0.5 text-muted">
         {pairedClients === 0
           ? 'No phone has paired with this machine yet.'
-          : `${pairedClients} paired ${pairedClients === 1 ? 'device' : 'devices'}.`}
+          : `${pairedClients} paired ${pairedClients === 1 ? 'phone' : 'phones'}.`}
       </div>
+
+      {setup.report && !reportInPanel ? <PairingOutcomeReport sentence={setup.report} /> : null}
 
       {error ? <div className="mt-1.5 text-error">{error}</div> : null}
 
@@ -558,7 +786,7 @@ function EnrolledView({
               disabled={busy}
               aria-expanded={setup.state !== null}
               className={modalActionButton({ tone: setup.state ? 'secondary' : 'primary' })}
-              onClick={() => (setup.state ? setup.close() : setup.mint())}
+              onClick={() => (setup.state ? setup.close() : setup.newCode())}
             >
               Set up a phone
             </button>
@@ -575,7 +803,12 @@ function EnrolledView({
       </div>
 
       {setup.state ? (
-        <SetupPhonePanel state={setup.state} onNewCode={setup.mint} onDone={setup.close} />
+        <SetupPhonePanel
+          state={setup.state}
+          report={reportInPanel ? setup.report : undefined}
+          onNewCode={setup.newCode}
+          onDone={setup.close}
+        />
       ) : null}
     </div>
   );
@@ -591,14 +824,17 @@ function EnrolledView({
  */
 function SetupPhonePanel({
   state,
+  report,
   onNewCode,
   onDone,
 }: {
   state: NonNullable<SetupQrState>;
+  report: string | undefined;
   onNewCode: () => void;
   onDone: () => void;
 }) {
   const shown = displayedQr(state);
+  const terminal = terminalCopy(state);
   const expiresAt = shown?.expiresAt ?? null;
   const [now, setNow] = useState(() => Date.now());
 
@@ -623,25 +859,31 @@ function SetupPhonePanel({
   return (
     <div className="mt-2 rounded border border-border p-2">
       <div className={FIELD_LABEL}>Set up a phone</div>
-      {state.phase === 'spent' ? (
+      {/* The report supersedes `finished`'s deliberately-vague sentence, which
+          is the only reason the panel ever draws one (`EnrolledView`). */}
+      {report ? (
+        <PairingOutcomeReport sentence={report} />
+      ) : terminal ? (
         <>
-          <div className="mt-1 text-sm leading-relaxed text-foreground">
-            Scanned. Finish on the phone — it registers a passkey, then asks to pair, and that
-            request interrupts you here.
-          </div>
-          <div className="mt-1 text-xs text-muted">This code is used up.</div>
+          <div className="mt-1 text-sm leading-relaxed text-foreground">{terminal.headline}</div>
+          <div className="mt-1 text-xs text-muted">{terminal.detail}</div>
         </>
       ) : shown ? (
         <>
+          {/* Names the phone-side control — through the constant Pocket labels
+              it with — because pointing the phone's *own* camera at this is the
+              one route that sets nothing up: on iOS it opens Safari rather than
+              the installed app (`pocket-app.md`). */}
           <div className="mt-1 text-sm leading-relaxed text-muted">
-            Point the phone’s camera at this. Nothing to type — no address, no password.
+            In Dormouse Pocket on the phone, tap {SCAN_LABEL} and point it at this. Nothing to type
+            — no address, no password.
           </div>
           <div className="mt-2 flex justify-center">
             <ScannableCode url={shown.url} />
           </div>
           <div className="mt-1.5 text-center text-xs text-muted">
             {minutesUntil(shown.expiresAt, now) > 0
-              ? `Sets up one phone, within ${minutesUntil(shown.expiresAt, now)} min.`
+              ? `Good for one phone. Expires in ${minutesUntil(shown.expiresAt, now)} min.`
               : 'This code has expired — get a new one.'}
           </div>
         </>

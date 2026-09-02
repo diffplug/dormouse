@@ -1,33 +1,32 @@
 import type { Meta, StoryObj } from '@storybook/react';
-// Importing from App.tsx runs its `index.css` side-effect import, so Tailwind's
-// utilities load for these stories. Storybook manages the theme tokens
-// (`--vscode-*`) itself.
-import { HostsView, type HostPairState, type HostView } from '../remote/pocket-app/App';
+// Importing from App.tsx runs `pocket-chrome`'s `index.css` side-effect import,
+// so Tailwind's utilities load for these stories. Storybook manages the theme
+// tokens (`--vscode-*`) itself.
+import { HostsView, type HostView } from '../remote/pocket-app/App';
 import { PhoneFrame } from './PhoneFrame';
 
-// A paired online host (Connect alone), an unpaired online host (Pair alone),
-// and an offline host (dimmed row, its one action disabled) — the full row
-// matrix in one frame.
+// A paired online host (Connect), a host whose authorization the laptop revoked
+// (Pair again), and an offline host (dimmed row, its Connect disabled) — the
+// full row matrix in one frame. Every row is a record this phone holds; a Host
+// it has never paired with is not listed at all.
 const MIXED_HOSTS: HostView[] = [
-  { hostId: 'host-studio', label: 'Studio iMac', online: true },
-  { hostId: 'host-laptop', label: 'MacBook Pro', online: true },
-  { hostId: 'host-nas', label: 'Basement NAS', online: false },
+  { hostId: 'host-studio', label: 'Studio iMac', online: true, needsPairing: false },
+  { hostId: 'host-laptop', label: 'MacBook Pro', online: true, needsPairing: true },
+  { hostId: 'host-nas', label: 'Basement NAS', online: false, needsPairing: false },
 ];
-
-const PAIRED = new Set(['host-studio']);
-const pairState = (hostId: string): HostPairState =>
-  PAIRED.has(hostId) ? 'paired' : 'unpaired';
 
 const STRESS_HOSTS: HostView[] = [
   {
     hostId: 'host-paired-offline',
     label: 'Offline production workstation with an unusually long display name',
     online: false,
+    needsPairing: false,
   },
   {
     hostId: 'host-without-a-label-and-a-deliberately-long-identifier',
     label: '',
     online: true,
+    needsPairing: false,
   },
 ];
 const meta: Meta<typeof HostsView> = {
@@ -38,13 +37,13 @@ const meta: Meta<typeof HostsView> = {
     hosts: MIXED_HOSTS,
     busy: null,
     error: null,
-    pairState,
     pushState: 'ready',
     pushConfigStatus: 'ready',
     isPushSubscribed: () => false,
     onRefresh: () => {},
-    onPair: () => {},
+    onScan: () => {},
     onConnect: () => {},
+    onForget: () => {},
     onEnablePush: () => {},
     onRetryPushConfig: () => {},
   },
@@ -63,12 +62,12 @@ const meta: Meta<typeof HostsView> = {
 export default meta;
 type Story = StoryObj<typeof HostsView>;
 
-// No hosts enrolled yet → the empty-state message.
+// Nothing paired yet → the empty state, with the scan action below it.
 export const Empty: Story = {
   args: { hosts: [] },
 };
 
-// Paired+online (Connect only), unpaired+online (Pair only), offline (dimmed).
+// Paired+online (Connect), pairing-required (Pair again), offline (dimmed).
 export const MixedList: Story = {};
 
 // Canonical Pocket default theme, pinned so Chromatic captures the dark rows.
@@ -78,25 +77,24 @@ export const MixedListKimbieDark: Story = {
 
 // Small-phone stress case: paired+offline, host-id fallback, and long labels.
 export const NarrowLongLabels: Story = {
-  args: {
-    hosts: STRESS_HOSTS,
-    pairState: (hostId) => (hostId === 'host-paired-offline' ? 'paired' : 'unpaired'),
-  },
+  args: { hosts: STRESS_HOSTS },
   parameters: {
     pocketFrame: { width: 320, height: 568 },
   },
 };
 
-// A connect the Host denied for an ACL miss. The row keeps its single action
-// and renames it, rather than re-offering the Connect that just failed.
+// A connect the Host denied for an ACL miss. The record kept its pin and lost
+// its authorization, so the row offers Pair again rather than re-offering the
+// Connect that just failed — and stays tappable while the Host is offline,
+// because pairing starts at the scanner rather than at the relay.
 export const PairAgainAfterDenial: Story = {
   args: {
-    pairState: (hostId: string) => (hostId === 'host-studio' ? 'stale' : 'unpaired'),
-    error: 'Connection denied: device-not-paired',
+    hosts: MIXED_HOSTS.map((host) => ({ ...host, needsPairing: true })),
+    error: 'This computer no longer recognizes this phone. Scan a new code to pair again.',
   },
 };
 
-// Pairing in flight → the unpaired online host's Pair button shows "…".
+// Pairing in flight → every action is locked and the Pair again row shows "…".
 export const Pairing: Story = {
   args: { busy: 'pair' },
 };
@@ -111,15 +109,21 @@ export const Refreshing: Story = {
   args: { busy: 'refresh' },
 };
 
-// Host dropped → the red error text above the list.
+// Removing a record → the row's Remove shows "…" while the tombstone is written.
+export const Forgetting: Story = {
+  args: { busy: 'forget' },
+};
+
+// Host dropped → the red error text above the list, in the words `setOnHostGone`
+// puts there (`App.tsx`).
 export const Error: Story = {
-  args: { error: 'The host disconnected.' },
+  args: { error: 'The connection to the computer ended.' },
 };
 
 // Every paired Host holds a row → the card collapses to one settled line and
-// the paired row carries the marker, while the unpaired rows below it stay
-// bare — they have nothing to register. Driven by the per-Host registrations,
-// not by browser availability: a scope-wide PushSubscription says nothing about
+// the paired row carries the marker, while a row still needing a pairing stays
+// bare — it has nothing to register. Driven by the per-Host registrations, not
+// by browser availability: a scope-wide PushSubscription says nothing about
 // which Hosts hold a server row.
 export const PushSubscribed: Story = {
   args: { isPushSubscribed: () => true },
@@ -129,7 +133,7 @@ export const PushSubscribed: Story = {
 // row markers say which of the two is already covered.
 export const PushSubscribedNewHostPaired: Story = {
   args: {
-    pairState: () => 'paired' as HostPairState,
+    hosts: MIXED_HOSTS.map((host) => ({ ...host, needsPairing: false })),
     isPushSubscribed: (hostId: string) => hostId === 'host-studio',
   },
 };
@@ -157,7 +161,7 @@ export const PushNoWorker: Story = {
 
 // Nothing paired yet → no card at all: pairing is the step that comes first.
 export const PushNothingPaired: Story = {
-  args: { pairState: () => 'unpaired' as HostPairState },
+  args: { hosts: MIXED_HOSTS.map((host) => ({ ...host, needsPairing: true })) },
 };
 
 /**

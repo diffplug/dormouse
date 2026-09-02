@@ -3,6 +3,8 @@ import { Meta, Canvas } from '@storybook/addon-docs/blocks';
 import * as RemoteControl from '../../lib/src/stories/RemoteControlSection.stories';
 import * as Pairing from '../../lib/src/stories/RemotePairingModal.stories';
 import * as SetupOrSignin from '../../lib/src/stories/SetupOrSignin.stories';
+import * as ScanInvitation from '../../lib/src/stories/ScanInvitation.stories';
+import * as PairingCode from '../../lib/src/stories/PairingCodeView.stories';
 import * as HostsView from '../../lib/src/stories/HostsView.stories';
 import * as PocketWall from '../../lib/src/stories/PocketWall.stories';
 
@@ -28,28 +30,31 @@ by default, and its state — a painted terminal — only exists after it runs.
 
 ---
 
-## 0. Three parties, four layers
+## 0. Three parties, five layers
 
 | Term | Who that is here |
 | --- | --- |
-| **Client** (Dormouse Pocket) | the phone. Holds a passkey and a device key, and signs Host challenges. |
+| **Client** (Dormouse Pocket) | the phone. Holds a passkey and one X25519 key per paired Host. |
 | **Host** (Dormouse Terminal) | the laptop being controlled. Holds the ACL. **Final authority for access decisions.** |
-| **Server** | the coordinating service: accounts, passkey registration, challenges, and relay. *Not* the authority for Host access. |
+| **Server** | the coordinating service: accounts, passkey registration, challenges, and relay. *Not* the authority for Host access, and it reads none of what it relays. |
 
-Access is deliberately split across four layers, and a connection needs all of
+Access is deliberately split across five layers, and a connection needs all of
 them to agree:
 
 | Layer | Responsibility |
 | --- | --- |
-| Passkey | Fresh user presence |
-| Device Key | Long-lived client identity |
+| Noise channel | Confidentiality, and both endpoints' long-term keys |
+| Passkey | Fresh user presence, *inside* that channel |
+| Client static | Long-lived client identity, one X25519 key per Host |
 | Host ACL | Authorization |
 | Host | Final access decision |
 
-The consequence that shapes every screen after this one: **adding a passkey to
-your account does not grant a new phone access to any machine.** Passkeys sync;
-authorization does not. Each browser must be approved on each laptop, in person,
-once.
+Two consequences shape every screen after this one. **Adding a passkey to your
+account does not grant a new phone access to any machine** — passkeys sync,
+authorization does not, so each browser must be approved on each laptop, in
+person, once. And **the server is a ciphertext pipe**: it never learns a pairing
+decision, a machine's name, a keystroke, or a notification's text, so nothing
+below asks you to trust it with any of them.
 
 ---
 
@@ -62,14 +67,19 @@ checkout into a self-contained release and installs it:
 ```sh
 ./deploy/local/install-macos.sh        # macOS
 .\deploy\local\install-windows.ps1     # Windows
+./deploy/local/install-linux.sh        # Linux
 ```
 
-It installs under your user profile, needs no administrator rights, and wires up
-a per-login service plus Tailscale Serve:
+The Linux one is the always-on shape: run it with `--linger` on a spare tailnet
+machine and the relay outlives your logout, which is what lets you reach a Host
+that is not the laptop you are sitting at.
+
+Each installs under your user profile, needs no administrator rights, and wires
+up a per-login service plus Tailscale Serve:
 
 ```text
 LaunchAgent (RunAtLoad + KeepAlive)
-  — or a Windows Scheduled Task at logon —
+  — a Windows Scheduled Task at logon, or a systemd user unit —
         |
         v
 Dormouse Node server on 127.0.0.1:3100
@@ -100,12 +110,12 @@ Two things to carry forward:
   desktop-only dev loop, `DORMOUSE_SETUP_PASSWORD=hunter2 pnpm dev:pocket-server`
   on `localhost:3000` is the shortcut.
 
-The setup password gates exactly two things: creating the one account, and
-enrolling a Host from somewhere else. It never leaves your machine except to
-those two endpoints — and on a happy path you never read it out at all: a Host
-on *this* laptop enrolls from the one-time offer the installer leaves it
-(section 3), and the phone sets itself up from a scanned code (section 4).
-`show-password` is the fallback both of those have.
+The setup password gates exactly one thing: enrolling a Host from somewhere
+else. It never leaves your machine except to that endpoint — and on a happy path
+you never read it out at all: a Host on *this* laptop enrolls from the one-time
+offer the installer leaves it (section 3), and the phone sets itself up from a
+scanned code (section 4), which is the *only* way any browser can register a
+passkey. `show-password` is the enrollment fallback.
 
 ---
 
@@ -189,171 +199,178 @@ An enrolled machine can mint one, on request:
 
 <Canvas of={RemoteControl.SetupPhoneQr} />
 
-That code is the origin you would otherwise type into mobile Safari, carrying
-two secrets: a **setup token** the server issues and will redeem in place of the
-setup password, and a **nonce** that is the *laptop's own* and never goes near
-the server — it travels laptop screen → phone camera and no further, which is
-what makes it worth something in §6. (`docs/specs/server.md` → Setup tokens owns
-the grammar.)
+That code is the origin you would otherwise type into mobile Safari, carrying a
+**setup token** the server issues and will redeem in place of the setup
+password, plus an **invitation**: an id and a one-use public key that are the
+*laptop's own* and never go near the server. The invitation's private half stays
+in the laptop's Host process, so a phone that completes a handshake against it
+has provably read this screen — which is what makes it worth something in §6.
+(`docs/specs/server.md` → Setup tokens and the pairing QR owns the grammar.)
 
 Neither lives long: five minutes, one use. The code is shown on request rather
-than left standing on screen, and once a phone redeems it the panel says so
-rather than going on offering a code that can no longer work — the server tells
-the Host that minted it, since the redemption happened on the phone.
+than left standing on screen, and the panel says so the moment a phone completes
+a handshake against the invitation rather than going on offering a code that can
+no longer work — the laptop knows that itself, because the key it was completed
+against is the laptop's own.
+
+The panel keeps listening past that, because it is the thing the pairing modal
+in §6 is covering: once the request has been answered it stops pointing at a
+phone that has already finished, and — where a person answered it — says which
+way it went (§6). This is the frame a socket that dropped mid-ceremony leaves,
+where nobody decided anything:
+
+<Canvas of={RemoteControl.SetupPhoneFinished} />
 
 ---
 
-## 4. Make a passkey on the phone
+## 4. Scan it with the phone
 
-Point the phone's camera at that code. It opens the same origin on the phone,
-and Pocket has read both secrets before it paints anything: the hash is taken
-out of the URL in the same act, so neither is left in the address bar, the
-history stack, or a screenshot.
-
-<Canvas of={SetupOrSignin.FromScannedCode} />
-
-**On iOS, install to the Home Screen before you do any of this** — the installed
-app is a separate storage partition from the Safari tab, so anything set up in
-the tab has to be set up again from scratch, and the code does not follow you
-across (the installed app launches at its own start URL, with no hash on it).
-
-There is no password field, because the code is the credential; all that is left
-is a label for the passkey. Setup also leads on a phone that *has* been here
-before — pointing a camera at a laptop is not an ambiguous request:
-
-<Canvas of={SetupOrSignin.FromScannedCodeReturning} />
-
-Sign in stays on the screen throughout. A passkey syncs, so a second phone may
-already hold one, and taking that path keeps the scanned nonce for §6 either
-way.
-
-If the code is expired or already spent, Pocket says so and drops it rather than
-stranding you on a dead code — putting the setup password on the screen in its
-place, unfolded, with whatever label you had already typed still in the field:
-
-<Canvas of={SetupOrSignin.SetupAfterDeadCode} />
-
-That password path is also the original one, for a phone nowhere near the
-laptop's screen: the setup password from `manage show-password`, plus the label.
+Open the server origin on the phone. A browser that has never been here has
+exactly one thing it can do, and the screen leads with it:
 
 <Canvas of={SetupOrSignin.FirstRun} />
 
-Either way, that one setup action creates the account's first passkey and signs
-in with it. Two things you cannot see happen at the same time:
-
-- A **device key** is minted — a non-extractable ECDSA P-256 keypair kept in
-  IndexedDB. This browser can sign with it and can never export it. It is this
-  browser's permanent identity, and it is what the laptop is about to
-  authorize.
-- The session's **presence stamp** is set. Pairing requires a passkey assertion
-  from the last 30 seconds, so signing in is what makes the next step possible.
-
-With no code and nothing stored, sign in is the quieter second option, because
-passkeys sync — a phone that has never been here may already hold one. If such a
-phone tries setup anyway, its authenticator refuses to duplicate a passkey the
-server already registered, and Pocket puts sign-in back in front. A phone
-that *has* been here, and did not arrive by camera, gets the other screen
-instead: sign-in first, with setup folded back behind a disclosure.
-
-<Canvas of={SetupOrSignin.Welcome} />
-
-In an iOS Safari tab, Pocket puts that install advice on the screen itself,
-above the fields, while it is still free to take:
+**On iOS, install to the Home Screen before you do any of this** — the installed
+app is a separate storage partition from the Safari tab, so anything set up in
+the tab has to be set up again from scratch. Pocket says so on this screen,
+above the action rather than after it:
 
 <Canvas of={SetupOrSignin.FirstRunNeedsInstall} />
 
-The installed app is a separate storage partition from the tab, so it gets its
-own device key and needs its own pairing approval. Setting up in the tab means
-doing all of it twice, and iOS delivers Web Push only to an installed app.
-Nothing stops you — it is advice, not a gate — but there is no reason to take
-it in the wrong window.
+**Scan a setup code** opens a rear-camera scanner inside Pocket. It reads the code
+as *data* — nothing navigates, and the text goes straight to the one parser that
+decides whether it is a setup code for this server — with a paste field beside
+it, because a desktop browser and the localhost dev loop have no camera:
+
+<Canvas of={ScanInvitation.Scanning} />
+
+Pointing the phone's *own camera* at the laptop instead is a different thing,
+and Pocket treats it as one. Following that link reaches the right origin and
+nothing else: the fragment is erased before the first render, nothing from it is
+kept, and the code is not spent. On iOS the camera opens Safari, which is not
+where the installed app's keys live, so the only useful thing left to say is
+where to scan:
+
+<Canvas of={SetupOrSignin.ArrivedByCamera} />
+
+There is no setup password anywhere in this flow, and no typed credential: the
+code on the laptop's screen *is* the credential. A phone that already holds a
+passkey signs in instead and scans only to add a machine:
+
+<Canvas of={SetupOrSignin.Welcome} />
+
+Either way, that one action creates the account's first passkey (or signs in
+with a synced one) and moves straight into pairing. Three things happen that you
+cannot see:
+
+- A **per-Host key** is minted — a non-extractable X25519 keypair, held in
+  memory until the laptop approves and only then written to IndexedDB. This
+  browser can agree with it and can never export it. It is this browser's
+  identity *for this laptop*; a different laptop gets a different key.
+- **The code is spent either way.** A phone with no passkey redeems it to
+  register one; a phone that already has one retires it at
+  `POST /api/setup/retire`, so a photograph of the laptop's screen cannot
+  register a passkey afterwards. A refusal stops the run — a dead code is one
+  the laptop would refuse too.
+- The session token that lets the phone open a relay socket is issued. Presence
+  itself is proved again inside the pairing channel, over a challenge derived
+  from that handshake, so signing in buys routing rather than authorization.
+
+A browser that cannot do X25519 at all never gets here: Pocket probes for it
+before any of the above and shows a fixed upgrade requirement instead. Runtimes
+are gated, not degraded.
 
 ---
 
-## 5. Pick a machine
+## 5. Coming back
+
+This screen is not on a first run's path. A phone that has just scanned goes
+scan → two digits → terminal, and never sees a list; it is where a phone lands
+on every session *after* the first, and where an interrupted one falls back to.
+Read it now for what a paired phone looks like from the outside, then carry on
+to §6 for what happens on the first run instead.
 
 <Canvas of={HostsView.MixedList} />
 
-One row per enrolled Host. A row is offline when no Dormouse instance currently
-holds that server's relay slot. The card above them is push, which §7 comes back
-to.
+One row per machine **this phone holds a key for** — a Host enrolled on the
+server but never paired with this browser is not a row at all. The label comes
+from the record, which learned it inside an encrypted pairing outcome; only the
+online dot comes from the server. The card above them is push, which §7 comes
+back to.
 
-Each row offers exactly one action, and which one is not a guess. Pocket asks
-every online Host whether its ACL already holds a record for this browser, so
-**Pair** appears where pairing is the actual next step and **Connect** only
-where it can succeed. The phone does keep a local note of what it has paired,
-but that note is the fallback for a Host that cannot be asked — the laptop is
-the one that knows, and its answer wins. Asking is advisory and nothing more:
-it moves a button, never a decision.
+Each row offers exactly one action, and nothing is asked to decide which.
+**Connect** is offered where this browser holds an authorized record, and
+**Pair again** where an authenticated denial took that authorization away —
+which is the only thing that can move a row, and which keeps the pinned Host key
+while dropping the authorization. **Remove** forgets the machine locally, and
+queues the deletion of its push mapping first, because the id in the record is
+the only handle that can name that row again.
 
 ---
 
 ## 6. The pairing ceremony
 
-Tapping **Pair** sends the phone's identity up to the server and across to the
-laptop:
+Pairing runs end to end between the phone and the laptop, through a server that
+routes ciphertext and reads none of it:
 
 ```text
 phone                        server                        host (laptop)
-  |-- signin (passkey) -------->|                              |
-  |   generate device key       |                              |
-  |-- pair + setupProof ------->|-- pair --------------------->|  approval modal
-  |                             |                              |  user clicks Approve
-  |<-- pair-result -------------|<-- pair-result --------------|  ACL record saved
+  |-- e2e init (Noise msg 1) -->|-- e2e init {clientId} ------>|  against the key
+  |<-- e2e response ------------|<-- e2e response ------------ |  the QR carried
+  |-- reauth begin/finish ----->|  challenge bound to this     |
+  |                             |  handshake, and no other     |
+  |-- e2e transport ----------->|-- e2e transport ------------>|  proof verified,
+  |    {code, label, proof}     |                              |  modal opens
+  |<-- outcome (encrypted) -----|<-- outcome -----------------|  ACL record saved
 ```
 
-The server checks what it can: that the credential is a registered passkey of
-the account, that its public-key hash matches the stored key, and that the
-session's last verified assertion is within 30 seconds. A malformed or stale
-request is answered there and **never reaches the approval modal** — so what a
-person is asked to look at is always a real, fresh request. (A stale one costs
-the phone one extra biometric prompt and a retry, not a restart.)
+The handshake runs against the one-use key printed in the QR, which never left
+the laptop, so a phone that completes it has provably read *this* screen. The
+server sees two routing ids and a handshake hash.
 
-Then the laptop interrupts. A phone set up from the code on *this* screen says
-so in the request, and the dialog asks for one confirm:
+Then the phone shows two digits, and the laptop asks for them. The phone paints
+them the moment they exist, before it knows how any of this ends:
 
-<Canvas of={Pairing.Verified} />
-
-What it is confirming is a MAC, not a claim: the request carries a proof keyed
-on the nonce the server never saw, and the laptop recomputes it against every
-nonce it still holds (`docs/specs/remote-security-model.md` → Pairing Ceremony
-owns the construction and what it rules out). Displaying the code was the
-local-presence act; the modal names what proved the device rather than asking
-you to vouch for it. Approving spends the nonce, and one scan sets up one phone.
-
-Without a proof — a phone set up by typing the password, a second browser on the
-same phone, a code already spent — the dialog is the other one, and eight
-characters of key are the control:
+<Canvas of={PairingCode.Waiting} />
 
 <Canvas of={Pairing.Default} />
 
-Either modal is the whole security model in one screen, which is why it is a
+The direction is the whole trick. A relayed or injected request has no screen
+to read from, so authorizing requires holding the device that is asking — and
+the laptop compares the digits itself, exactly once
+(`docs/specs/remote-security-model.md` → Pairing owns the rule and what it rules
+out). The modal is the whole security model in one screen, which is why it is a
 modal and not a settings row.
 
-- **Local approval is the only path into the ACL.** Not signing in, not owning
-  the account, not holding a synced passkey. Someone with your account and your
-  passkey still gets no further than this dialog on a machine they are not
-  standing at.
-- **It has to not read as a formality.** Hence *"Approve only if you are the
-  one asking"* rather than a bare Are-you-sure, and hence Deny holding initial
-  focus.
-- **The three rows are the identity being authorized.** Device is the label the
-  phone suggested, Account is who signed in, and Key is the first 8 characters
-  of that browser's device public key — the part that distinguishes two
-  Clients on the same physical phone. Unproved, that is the row to compare
-  against the one Pocket shows on its own Hosts screen (§5); a proof is what
-  replaces that comparison rather than dressing it up.
+Exactly once is unforgiving, so the panel behind the modal says which way it
+went. Mistype the digits and the code is spent — there is no second try, and
+the paired count above is absolute, so nothing else on that screen would have
+moved:
+
+<Canvas of={RemoteControl.PairingOutcomeCodeMismatch} />
+
+- **Local confirmation is the only path into the ACL.** Not signing in, not
+  owning the account, not holding a synced passkey. Someone with your account
+  and your passkey still gets no further than this dialog on a machine they are
+  not standing at.
+- **It has to not read as a formality.** Hence *"Only authorize if your phone is
+  showing a two-digit code. If it shows an error or no code, cancel this
+  request."* — the copy names the failure mode, because a request that shows no
+  code is exactly what an injected one looks like.
+- **The label is the only thing the phone chose**, and it is bounded and
+  stripped before it is drawn. Everything else about the Client — its key, its
+  passkey — was already proved by the handshake and the assertion, so there is
+  nothing left for a human to squint at.
 - **"Adds it to this machine only"** is doing real work. The ACL is per-Host
   and local; your other laptops are unaffected and will each ask separately.
 
-Approving writes one `HostAclRecord` binding *that passkey credential* to *that
-device key* — a pair, not either one alone. The approval is bound to the
-ceremony's immutable `pairingId`, so a request that changed underneath a
-displayed modal is rejected rather than silently approving a device nobody was
-shown.
+Confirming writes one `HostAclRecord` binding *that passkey credential* to *that
+Client key* — a pair, not either one alone — and is bound to the ceremony's
+immutable `pairingId`, so a request that changed underneath a displayed modal is
+rejected rather than silently authorizing a device nobody was shown.
 
-Two cases the copy has to survive: a phone that suggested no label, and an
-account and label long enough to wrap.
+Two cases the copy has to survive: a phone that suggested no label, and one long
+enough to wrap.
 
 <Canvas of={Pairing.UnnamedDevice} />
 
@@ -367,26 +384,25 @@ Pairing is once. Connecting is every session, and it re-proves everything:
 
 ```text
 phone                        server                        host
-  |-- connect {hostId} -------->|-- connect {clientId} ------->|
-  |<-- challenge ---------------|<-- challenge (HostChallengeIssuer)
-  |   ONE biometric prompt:     |                              |
-  |   WebAuthn get({challenge}) |                              |
-  |   + device-key signature    |                              |
-  |-- ConnectionRequest ------->|  server verifies the         |
-  |                             |  assertion itself, then      |
-  |                             |-- ConnectionRequest -------->|  authorizeConnection()
-  |<-- decision ----------------|<-- decision -----------------|  (final authority)
-  |============ opaque remote-api relay from here ============>|
+  |-- e2e init (Noise msg 1) -->|-- e2e init {clientId} ------>|  against the key
+  |<-- e2e response ------------|<-- msg 2 = 32-byte challenge |  the phone pinned
+  |   ONE biometric prompt,     |                              |
+  |   over a challenge derived  |                              |
+  |   from this handshake       |                              |
+  |-- e2e transport (proof) --->|-- e2e transport ------------>|  challenge consumed,
+  |<-- outcome (encrypted) -----|<-- outcome -----------------|  proof + ACL checked
+  |====== protocol-v1 inside the same Noise session ==========>|
 ```
 
-A connection succeeds only if all five hold: the passkey proves fresh presence,
-the Server recognizes the account, the Host recognizes the passkey credential,
-the Host recognizes the device key, and the Client signs a fresh Host challenge
-with that device key. The Host decides last and decides alone, regardless of
-what the Server claims to have already checked.
+A connection succeeds only if the handshake completes against the Host key this
+phone pinned at pairing, the passkey proves fresh presence over a challenge
+derived from *this* handshake, and one ACL record holds all four of the account,
+the passkey credential, that key's hash, and the Client key the handshake
+authenticated. The Host decides alone, and its denial says only
+`pairing-required` — which half missed is its own business.
 
-One host challenge feeds both signatures, so the whole thing costs the user a
-single Face ID prompt.
+One handshake feeds the whole thing, so it costs the user a single Face ID
+prompt.
 
 A successful pairing continues straight into all of this, so the approval you
 just gave on the laptop lands the phone in a terminal rather than back on the
@@ -413,6 +429,14 @@ The offer appears only where push can work — an installed app on a server with
 push configured (§1). A phone in a Safari tab is told to add Dormouse to the Home
 Screen instead, which is also where a server with push disabled says so.
 
+A notification is the one message the two ends exchange with no live session
+between them, so it gets the same treatment as everything else: the laptop seals
+each one to that phone's own key, and the server forwards a sealed envelope it
+holds no key for. The service worker on the phone is what opens it — and if
+anything about that fails, it shows a content-free "something needs attention"
+rather than nothing, because a worker that shows nothing gets the browser's own
+"site updated in the background" notice instead.
+
 ---
 
 ## 8. Living with it
@@ -429,7 +453,7 @@ once. Its answers are kept deliberately distinct, because they call for
 different responses: on a machine that has enrolled (§3) but has no phone with
 push notifications enabled yet, "nowhere to send it" is the ordinary answer, not
 a failure —
-while a fan-out that no device accepted is one worth chasing. The notification
+while a fan-out that no phone accepted is one worth chasing. The notification
 itself is titled to say that nothing actually needs attention, so a test that
 lands hours late, or on another paired phone, cannot masquerade as a real
 alarm. (The spoken alarm has a sibling **Play test sound**; both live in
@@ -448,19 +472,19 @@ phone until each pairs again.
 
 <Canvas of={RemoteControl.ConfirmingDisconnect} />
 
-Three limits worth knowing before they surprise you:
+Four limits worth knowing before they surprise you:
 
-- **Clearing site data destroys the device key.** That is a re-pair, by design:
-  the identity the laptop authorized is gone — and the storage partition the
-  key lives in is per-browser, as §4 warns.
-- **A scanned code is good for one setup, and its nonce for one approval.** So
-  a re-pair later compares fingerprints (§6) unless you show the phone a fresh
-  code, and the code a reload loses is simply gone — five minutes was its whole
-  life anyway.
-- **A code can never reach an installed iOS Pocket at all.** The camera opens
-  Safari, which is the other storage partition (§4), and the Home Screen app
-  launches at its own start URL with no hash on it. So "show a fresh code" is
-  not a recovery there: the setup password is the one that works.
+- **Clearing site data destroys the per-Host keys.** That is a re-pair, by
+  design: the identity the laptop authorized is gone — and the storage partition
+  those keys live in is per-browser, as §4 warns.
+- **A scanned code is good for one pairing.** The laptop reserves its invitation
+  the moment a phone completes the handshake against it, so a re-pair later
+  needs a fresh code; the one a reload loses is simply gone — five minutes was
+  its whole life anyway.
+- **A code opened by the phone's camera never reaches an installed iOS Pocket.**
+  The camera opens Safari, which is the other storage partition (§4), and the
+  Home Screen app launches at its own start URL with no hash on it. The recovery
+  is to open the installed app and scan the same code from inside it.
 - **A dropped WebSocket returns the phone to the Hosts view.** Tap Connect
   again; there is no resume protocol.
 
@@ -471,8 +495,14 @@ Three limits worth knowing before they surprise you:
 So nothing above reads as a promise:
 
 - **Revocation is editing a JSON file by hand.** There is no management UI and
-  no relay frame carries a revocation; a removed record takes effect at the
-  Host's next authorization check.
+  no relay frame carries a revocation. Deleting a *machine* takes effect within
+  a minute — the server re-reads the file and drops that machine's socket — but
+  withdrawing one *phone's* approval is the laptop's own list, and takes effect
+  when that laptop restarts. **Remove** on the phone is not that list: it
+  forgets the machine locally, and a phone that pairs again arrives with a new
+  per-Host key, which the laptop cannot match to the old record — so it appends
+  a second approval and goes on counting both. One phone, "2 paired phones",
+  and the first record still live.
 - **Approval is Approve/Deny only.** Choosing a standing grant at pairing time
   — observe-only versus interactive — is designed but not built. Every paired
   session today gets full input.

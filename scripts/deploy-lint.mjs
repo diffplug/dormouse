@@ -33,12 +33,9 @@
  * omitted — an unexplained gap is how the owner-check divergence happened.
  */
 
-import { readFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+import { readRepoFile } from './lint-kit.mjs';
 
 /** The three shipped installers, by the platform name the specs use. */
 export const INSTALLERS = [
@@ -372,17 +369,6 @@ export const RULES = [
   },
 ];
 
-/**
- * Line endings, normalized to `\n`. Several patterns span two adjacent lines,
- * and a `core.autocrlf=true` checkout puts a `\r` in front of every newline —
- * which no pattern here spells, so on such a checkout every span rule would
- * report a missing control that is in fact present. Shared with the self-test,
- * which matches and edits the same text.
- */
-export function normalizeEol(text) {
-  return text.replace(/\r\n/g, '\n');
-}
-
 export function check() {
   const failures = [];
   let checked = 0;
@@ -398,7 +384,7 @@ export function check() {
     checked += 1;
     let text;
     try {
-      text = normalizeEol(readFileSync(join(repoRoot, file), 'utf8'));
+      text = readRepoFile(file);
     } catch {
       failures.push(`${rule}\n    ${file}: missing`);
       continue;

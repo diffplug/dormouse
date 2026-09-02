@@ -21,8 +21,11 @@
  * a webview answer can never widen it.
  */
 
-import type { MirroredPairingRequest } from '../../remote/host/pairing-approval';
-import type { RemoteHostStatus } from '../../remote/host/remote-host';
+import type {
+  InvitationState,
+  PairingOutcome,
+  RemoteHostStatus,
+} from '../../remote/host/remote-host';
 
 /** Transport event names for what the service sends back. */
 export const REMOTE_HOST_RESULT_EVENT = 'remoteHost:result';
@@ -65,21 +68,23 @@ export interface RemoteHostAsk {
   params: unknown;
 }
 
-/** One pairing awaiting local approval, as the webview mirrors it. */
+/**
+ * One pairing awaiting local confirmation, as the webview mirrors it.
+ *
+ * **The expected two-digit code is deliberately absent.** The webview echoes
+ * what a person typed and the Host compares it; a mirrored code would make the
+ * confirmation something anything in this realm could satisfy
+ * (`docs/specs/remote-security-model.md` → Pairing). Nothing else about the
+ * Client crosses either: the presence proof already verified, so the only thing
+ * left for the human to decide is whether the phone in their hand is the one
+ * asking.
+ */
 export interface PairingQueueItem {
   clientId: string;
-  /** Immutable ceremony ticket id, echoed by approve/deny. */
+  /** Immutable ceremony id, echoed by approve/deny. */
   pairingId: string;
-  /** The request minus its `setupProof`; the webview gets {@link PairingQueueItem.verified} instead. */
-  request: MirroredPairingRequest;
-  /**
-   * The Client proved it was set up by scanning **this** machine's setup QR: its
-   * `setupProof` matched a nonce this Host minted, computed over the very device
-   * key it is asking to have authorized. Drives the modal's one-confirm copy
-   * (`docs/specs/remote-security-model.md` → Pairing Ceremony); `false` is the
-   * ordinary fingerprint-compare pairing, never an error.
-   */
-  verified: boolean;
+  /** The Client's own name for itself, already bounded and stripped by the Host. */
+  label: string;
   requestedAt: number;
 }
 
@@ -104,21 +109,28 @@ export interface HostStatusEvent {
 }
 
 /**
- * service → webview, unsolicited: a setup token this Host minted was just spent
- * on the Server, so the QR showing it is stale and a phone is mid-setup
- * (`ServerToHostFrame` `setup-token-redeemed`). The panel that displayed the
- * code is the only thing that can act on it, and what it does is stop offering a
- * code that can no longer be redeemed.
+ * service → webview, unsolicited: one of this Host's invitations changed state,
+ * so the panel displaying its QR can stop offering a code that can no longer be
+ * used. The Host's own map is the authority — this is display truth.
+ *
+ * Named by `inviteId` ({@link SetupQrResult.inviteId}), so a panel acts only on
+ * its own and two open windows do not both go stale over one scan. Never the
+ * setup token or the invitation key: correlating must not put a credential on a
+ * wire that carries none.
  */
-export interface SetupTokenRedeemedEvent {
-  name: 'setupTokenRedeemed';
+export interface InvitationEvent {
+  name: 'invitation';
+  inviteId: string;
+  state: InvitationState;
   /**
-   * Which mint was spent ({@link SetupQrResult.mintId}). A panel acts only on
-   * its own and ignores any other, so two open windows do not both go used-up
-   * over one scan. Not the token: correlating must not put the credential on a
-   * wire that carries none.
+   * How the ceremony this code produced ended, where one did — the only way the
+   * Settings panel can tell a mistyped confirmation from a success
+   * (`PairingOutcome`). **On this event rather than beside it**, because the two
+   * are one transition: carrying them together is what keeps the panel from
+   * painting the state-only sentence and then correcting itself. Absent means
+   * nobody decided anything.
    */
-  mintId: string;
+  outcome?: PairingOutcome;
 }
 
 // --- Command parameter shapes ---
@@ -147,7 +159,8 @@ export interface EnrollOfferParams {
 export interface ApproveParams {
   clientId: string;
   pairingId: string;
-  label?: string;
+  /** The two digits the person read off the phone; the Host compares them. */
+  code: string;
 }
 
 export interface DenyParams {
@@ -159,24 +172,6 @@ export interface DenyParams {
 export interface PushParams {
   sessionId: string;
   title: string;
-}
-
-/** One-shot hand-off of a webview-persisted Host (see `activation.ts`). */
-export interface AdoptParams {
-  enrollment: unknown;
-  aclRecords: unknown[];
-}
-
-/**
- * Whether the service now holds this Host somewhere that survives a restart —
- * because it just wrote the enrollment, or because it already had one of its
- * own. The webview drops its localStorage copy only on `true`: behind an
- * in-memory store (the dev harness with no state directory) that copy is the
- * only one that outlives the process, and clearing it would lose the Host at
- * the next launch.
- */
-export interface AdoptResult {
-  persisted: boolean;
 }
 
 /** Answers an outstanding {@link RemoteHostAsk}; `rhId` is the ask's, not a new one. */
@@ -193,30 +188,31 @@ export interface EnrollResult {
 }
 
 /**
- * What `setupQr` answers: the URL to render as a QR, which mint it came from,
- * and when it stops redeeming.
+ * What `setupQr` answers: the URL to render as a QR, which invitation it
+ * belongs to, and when it stops working.
  *
- * **Both of the QR's secrets ride into the webview inside `url`, on purpose.**
- * That is the whole point of the command — the code is displayed to a person
- * standing at this machine, and displaying it *is* the local-presence act
- * (`docs/specs/remote-security-model.md` → Pairing Ceremony). They are the only
+ * **The QR's secrets ride into the webview inside `url`, on purpose.** That is
+ * the whole point of the command — the code is displayed to a person standing
+ * at this machine, and displaying it *is* the local-presence act
+ * (`docs/specs/remote-security-model.md` → Pairing). They are the only
  * credentials in this contract that cross that seam: `hostToken` still never
  * does (`SECURITY.md` → the no-`hostToken`-in-a-webview FAIL IF), and neither
- * does the installer offer's token ({@link RemoteHostConsoleStatus.offer}).
+ * does the installer offer's token ({@link RemoteHostConsoleStatus.offer}), nor
+ * the invitation's *private* key, which never leaves the Host.
  */
 export interface SetupQrResult {
   /**
-   * `<enrollment origin>/#setup?token=…&nonce=…`, composed by the service: the
-   * Server's setup token, and the Host's own setup nonce, which the Server never
-   * sees.
+   * The pairing URL, composed by the service from the origin this Host enrolled
+   * against — `server-lib-common`'s `formatPairingInvitationUrl` owns its
+   * grammar (`docs/specs/server.md` → QR grammar).
    */
   url: string;
   /**
-   * Names this mint, so {@link SetupTokenRedeemedEvent} can say which code was
-   * scanned without naming either secret.
+   * Names this invitation, so {@link InvitationEvent} can say which code was
+   * used without naming any of its secrets.
    */
-  mintId: string;
-  /** Epoch ms after which the token no longer redeems. */
+  inviteId: string;
+  /** Epoch ms after which neither the token nor the invitation works. */
   expiresAt: number;
 }
 
@@ -255,7 +251,7 @@ export interface RemoteHostConsoleStatus {
  * The devices a push would reach, or `null` when no Host is running — which is
  * "nowhere to push", not "the server could not be asked" (`push-devices.ts`).
  */
-export type PushDevicesResult = { devices: Array<{ devicePublicKey: string; label: string }> } | null;
+export type PushDevicesResult = { devices: Array<{ deliveryId: string; label: string }> } | null;
 
 /**
  * What one push fan-out actually did: the result of the `pushTest` command, and

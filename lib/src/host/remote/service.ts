@@ -8,16 +8,14 @@ import { hostname } from 'node:os';
 import {
   API_ROUTES,
   MAX_PENDING_PAIRINGS,
-  SETUP_HASH_NONCE_PARAM,
-  SETUP_HASH_PREFIX,
-  SETUP_HASH_TOKEN_PARAM,
+  deriveNoiseStaticPublicKey,
+  formatPairingInvitationUrl,
   isSetupTokenResponse,
+  mintNoiseStaticKeyPair,
   normalizeOrigin,
   type EnrollmentOffer,
 } from 'server-lib-common';
-import { filterAclRecords } from '../../remote/host/acl';
 import {
-  isEnrollment,
   performEnrollment,
   type HostEnrollCredential,
   type HostEnrollment,
@@ -33,7 +31,12 @@ import {
   type AlertPushDeps,
 } from '../../remote/host/push-delivery';
 import { RemoteApiSession } from '../../remote/host/remote-api';
-import { RemoteHost, type WebSocketLike } from '../../remote/host/remote-host';
+import {
+  RemoteHost,
+  type InvitationState,
+  type PairingOutcome,
+  type WebSocketLike,
+} from '../../remote/host/remote-host';
 import { originAllowedByConnectSrc } from './connect-src';
 import { readEnrollmentOffer } from './enroll-offer';
 import type { HostStateStore } from './host-state-store';
@@ -42,14 +45,13 @@ import {
   REMOTE_HOST_EVENT_EVENT,
   REMOTE_HOST_RESULT_EVENT,
   isRemoteHostCommand,
-  type AdoptParams,
-  type AdoptResult,
   type ApproveParams,
   type DenyParams,
   type EnrollOfferParams,
   type EnrollParams,
   type EnrollResult,
   type HostStatusEvent,
+  type InvitationEvent,
   type PairingQueueEvent,
   type PairingQueueItem,
   type PushDevicesResult,
@@ -57,7 +59,6 @@ import {
   type PushSendSummary,
   type RemoteHostConsoleStatus,
   type SetupQrResult,
-  type SetupTokenRedeemedEvent,
 } from './service-protocol';
 
 export interface RemoteHostServiceOptions {
@@ -133,9 +134,8 @@ export class RemoteHostService {
    * Everything that starts or stops the Host runs one at a time on this chain.
    *
    * Each of those reads `#host`, awaits a store round trip, and then acts on
-   * what it read — so overlapping them (an activation `start` and a webview's
-   * `adopt`, a reconnect during an enroll) lets two of them both see no Host and
-   * both build one. The second `RemoteHost` would hold a relay socket nothing
+   * what it read — so overlapping them (an activation `start` and a reconnect
+   * during an enroll) lets two of them both see no Host and both build one. The second `RemoteHost` would hold a relay socket nothing
    * has a reference to and could not be stopped, and the two would displace each
    * other on the server forever.
    */
@@ -234,8 +234,6 @@ export class RemoteHostService {
         return this.#pushDevices();
       case 'pairingQueue':
         return this.#queueSnapshot();
-      case 'adopt':
-        return this.#serialize(() => this.#adopt(params as AdoptParams));
       default:
         throw new Error(`unknown remote-host command: ${cmd}`);
     }
@@ -350,7 +348,7 @@ export class RemoteHostService {
    *
    * Only the restart takes the lifecycle lease. The status snapshot after it is
    * a plain read — one that may touch the disk for the offer file — and holding
-   * the lease across it would queue every enroll/adopt/clear behind that read.
+   * the lease across it would queue every enroll/clear behind that read.
    */
   async #reconnect(): Promise<RemoteHostConsoleStatus> {
     await this.#serialize(async () => {
@@ -378,10 +376,10 @@ export class RemoteHostService {
   }
 
   /**
-   * Compose this machine's setup QR: the Server's single-use setup token, minted
-   * over the Host's own authenticated channel because this service is the half
-   * that holds the bearer, plus the `RemoteHost`'s own setup nonce, which never
-   * goes near the Server.
+   * Compose this machine's pairing QR: the Server's single-use setup token,
+   * minted over the Host's own authenticated channel because this service is
+   * the half that holds the bearer, plus an invitation the `RemoteHost` mints
+   * locally — an id and a one-use X25519 responder key the Server never sees.
    *
    * The URL is composed here, from the origin this Host enrolled against, for
    * the reason `SetupTokenResponse` carries the token alone: a URL minted
@@ -415,28 +413,30 @@ export class RemoteHostService {
         'could not mint a setup code: this machine reconnected to a different server.',
       );
     }
-    // The second secret, and the one that makes `verified` unforgeable by the
-    // Server: it exists only on this screen and on the phone that photographs it
-    // (`docs/specs/remote-security-model.md` → Pairing Ceremony). It dates
-    // itself off the Host's clock; `body.expiresAt` below is the Server's, and
-    // is returned only for the QR's own countdown.
-    const nonce = host.mintSetupNonce();
+    // The invitation, and the half that makes the ceremony unforgeable by the
+    // Server: its private key exists only in this Host's memory, and a phone
+    // completing IK against the public half has proved it is talking to the
+    // machine whose screen it photographed.
+    const invitation = await host.mintInvitation(body.token, body.expiresAt);
     // `enrollment.origin` is the phone-facing WebAuthn origin — where Pocket is
     // served and where the passkey will be registered — not necessarily the
-    // `serverUrl` this Host posts to.
-    const hash = new URLSearchParams({
-      [SETUP_HASH_TOKEN_PARAM]: body.token,
-      [SETUP_HASH_NONCE_PARAM]: nonce,
-    });
+    // `serverUrl` this Host posts to. The formatter refuses a URL too long to
+    // scan before any encoder sees it.
     return {
-      url: `${enrollment.origin}/${SETUP_HASH_PREFIX}${hash}`,
-      mintId: body.mintId,
-      expiresAt: body.expiresAt,
+      url: formatPairingInvitationUrl(enrollment.origin, invitation),
+      inviteId: invitation.inviteId,
+      // The invitation's own expiry, which is never later than the token's.
+      expiresAt: invitation.expiry * 1000,
     };
   }
 
   #approve(params: ApproveParams): Record<string, never> {
-    this.#pendingPairing(params.clientId, params.pairingId).approve(params.label);
+    // The code the person typed, straight through. The service never held the
+    // expected one — the Host compares, once (`service-protocol.ts` →
+    // `PairingQueueItem`).
+    this.#pendingPairing(params.clientId, params.pairingId).approve(
+      typeof params.code === 'string' ? params.code : '',
+    );
     return {};
   }
 
@@ -492,41 +492,6 @@ export class RemoteHostService {
     return { devices: await loadPushDevices(deps) };
   }
 
-  async #adopt(params: AdoptParams): Promise<AdoptResult> {
-    const existing = await this.#store.loadEnrollment();
-    // A store that keeps nothing across restarts (the dev harness) can run the
-    // Host for this session but must not be treated as having taken custody of
-    // it: the webview's copy is then the only one that survives.
-    const durable = this.#store.persistent;
-    let persisted = existing ? durable : false;
-
-    if (!existing && isEnrollment(params.enrollment)) {
-      const enrollment = params.enrollment;
-      // The same gate as `#enroll`, for the same reason: a Host handed over from
-      // an older build's localStorage may name a relay this build is not allowed
-      // to reach, and adopting it would connect there anyway.
-      if (!this.#allowed(enrollment.serverUrl)) {
-        throw new Error(
-          `${enrollment.serverUrl} is outside this build's allowed remote sources (${this.#connectSrc}). ` +
-            'A self-host build bakes its own via DORMOUSE_REMOTE_CONNECT_SRC.',
-        );
-      }
-      // Records first, enrollment last. A failed ACL write then fails the whole
-      // adopt while the store still holds no enrollment, so the next launch
-      // re-adopts from the webview's copy and retries cleanly — the other order
-      // leaves a Host running with every paired device silently dropped.
-      const records = filterAclRecords(enrollment.hostId, params.aclRecords ?? []);
-      if (records.length > 0) await this.#store.saveAcl(enrollment.hostId, records);
-      await this.#store.saveEnrollment(enrollment);
-      persisted = durable;
-    }
-    // Either way there may now be a Host to run: an adoption just supplied one,
-    // and a rejected adoption means the store already had one this service may
-    // not have started yet (a webview that reloads before `start()` lands).
-    if (!this.#host) await this.#start();
-    return { persisted };
-  }
-
   // --- Host lifecycle ---
 
   #allowed(serverUrl: string): boolean {
@@ -534,8 +499,63 @@ export class RemoteHostService {
     return origin !== null && originAllowedByConnectSrc(origin, this.#connectSrc);
   }
 
-  async #startHost(enrollment: HostEnrollment): Promise<void> {
+  /**
+   * The Noise static gate. **A Host without a usable one does not start**, and
+   * so reads as un-enrolled with the Settings dialog offering enrollment again —
+   * that is the entire Host-state version
+   * (`docs/specs/remote-security-model.md` → Identities and storage).
+   *
+   * Two cases, and they end differently on purpose:
+   *
+   * - **Absent** is an enrollment from before the field existed. Minting is
+   *   never retried once it has failed, so a gate without this backfill would
+   *   un-enroll a machine over one transient failure. The mint is persisted
+   *   before the Host starts, so it survives the next launch.
+   * - **Present but not corresponding** is a corrupt or hand-edited state file.
+   *   Starting anyway would present a Host identity every paired Client reads as
+   *   *changed*, which looks like a different machine rather than the local
+   *   damage it is — so it stays down, loudly, naming the store.
+   */
+  async #enrolledWithNoiseStatic(enrollment: HostEnrollment): Promise<HostEnrollment | null> {
+    const { noiseStaticPrivateKey, noiseStaticPublicKey } = enrollment;
+    if (noiseStaticPrivateKey !== undefined && noiseStaticPublicKey !== undefined) {
+      try {
+        if ((await deriveNoiseStaticPublicKey(noiseStaticPrivateKey)) === noiseStaticPublicKey) {
+          return enrollment;
+        }
+      } catch {
+        // Falls through to the same refusal: a private half that will not import
+        // is as unusable as one that names a different public point.
+      }
+      console.warn(
+        `[remote-host] the stored Noise static for ${enrollment.hostId} does not match its public half; ` +
+          'this machine\'s remote-control state is corrupt. Enroll again to replace it.',
+      );
+      return null;
+    }
+    let material;
+    try {
+      material = await mintNoiseStaticKeyPair();
+    } catch (error) {
+      console.warn('[remote-host] could not mint this machine\'s Noise static key', error);
+      return null;
+    }
+    const backfilled: HostEnrollment = {
+      ...enrollment,
+      noiseStaticPrivateKey: material.privateKeyPkcs8,
+      noiseStaticPublicKey: material.publicKey,
+    };
+    // Persisted first, for the reason enrollment persists first: a Host running
+    // on an identity no restart can recover is one every paired Client would
+    // have to pair with again after a reboot.
+    await this.#store.saveEnrollment(backfilled);
+    return backfilled;
+  }
+
+  async #startHost(incoming: HostEnrollment): Promise<void> {
     if (this.#disposed) return;
+    const enrollment = await this.#enrolledWithNoiseStatic(incoming);
+    if (!enrollment || this.#disposed) return;
     // Never two. Callers are serialized (see `#serialize`), but a Host left in
     // `#host` here would be dropped without its socket being closed, so the
     // replacement is explicit rather than implied by the assignment below.
@@ -567,7 +587,8 @@ export class RemoteHostService {
       },
       requestApproval: (pending) => this.#enqueuePairing(pending),
       dismissApproval: (clientId) => this.#resolvePairing(clientId),
-      onSetupTokenRedeemed: (mintId) => this.#emitSetupTokenRedeemed(mintId),
+      onInvitationChanged: (inviteId, state, outcome) =>
+        this.#emitInvitation(inviteId, state, outcome),
       now: this.#now,
     });
     this.#host.start();
@@ -600,9 +621,9 @@ export class RemoteHostService {
 
   #stopHost(): void {
     this.#host?.stop();
-    // Setup nonces go with it: they live on the `RemoteHost` precisely so a
-    // code the old server's QR carried cannot verify a pairing against the new
-    // one.
+    // Invitations go with it: their one-use keys live on the `RemoteHost`
+    // precisely so a code the old server's QR carried cannot complete a
+    // handshake against the new one.
     this.#host = null;
     // `stop()` dismisses every in-flight pairing, which empties the queue and
     // pushes the empty snapshot; clear defensively in case there was no Host.
@@ -636,27 +657,34 @@ export class RemoteHostService {
   }
 
   #queueSnapshot(): PairingQueueItem[] {
-    return [...this.#pairings.values()].map(
-      ({ clientId, pairingId, request, verified, requestedAt }) => ({
-        clientId,
-        pairingId,
-        request,
-        verified,
-        requestedAt,
-      }),
-    );
+    // Field by field, never a spread: the pending pairing the Host handed us
+    // carries the approve/deny closures, and a spread would try to serialize
+    // them across the bridge. Naming the four is what keeps this projection the
+    // whole of what a webview learns.
+    return [...this.#pairings.values()].map(({ clientId, pairingId, label, requestedAt }) => ({
+      clientId,
+      pairingId,
+      label,
+      requestedAt,
+    }));
   }
 
   /**
-   * Announce that the code a Settings panel may be displaying is now spent,
-   * naming the mint so a panel showing a *different* code stays live.
+   * Announce that an invitation a Settings panel may be displaying changed
+   * state, naming it so a panel showing a *different* code stays live.
    */
-  #emitSetupTokenRedeemed(mintId: string): void {
+  #emitInvitation(inviteId: string, state: InvitationState, outcome?: PairingOutcome): void {
     if (this.#disposed) return;
     this.#sendToUi(REMOTE_HOST_EVENT_EVENT, {
-      name: 'setupTokenRedeemed',
-      mintId,
-    } satisfies SetupTokenRedeemedEvent);
+      name: 'invitation',
+      inviteId,
+      state,
+      // Spread rather than always set: this crosses a JSON bridge, and an
+      // explicit `outcome: undefined` is a key the VS Code side would drop and
+      // the Tauri side would keep, leaving the two hosts sending different
+      // events for the same retirement.
+      ...(outcome ? { outcome } : {}),
+    } satisfies InvitationEvent);
   }
 
   #emitQueue(): void {
@@ -675,6 +703,8 @@ export class RemoteHostService {
     return {
       enrollment,
       activeRecords: () => host.activeRecords,
+      seal: (clientStaticPublicKey, plaintext) =>
+        host.sealPushForClient(clientStaticPublicKey, plaintext),
       fetch: this.#fetch,
     };
   }

@@ -14,6 +14,13 @@
     "homepage": "https://github.com/honojs/middleware"
   },
   {
+    "name": "@noble/ciphers",
+    "version": "2.4.0",
+    "license": "MIT",
+    "author": "Paul Miller (https://paulmillr.com)",
+    "homepage": "https://paulmillr.com/noble/"
+  },
+  {
     "name": "@phosphor-icons/react",
     "version": "2.1.10",
     "license": "MIT",
@@ -75,6 +82,27 @@
     "license": "MIT",
     "author": "Christopher Jeffrey, SourceLair Private Company, xterm.js authors",
     "homepage": "https://github.com/xtermjs/xterm.js"
+  },
+  {
+    "name": "@zxing/browser",
+    "version": "0.2.1",
+    "license": "MIT",
+    "author": "David Werth, Luiz Barni",
+    "homepage": "https://github.com/zxing-js/browser"
+  },
+  {
+    "name": "@zxing/library",
+    "version": "0.23.0",
+    "license": "Apache-2.0",
+    "author": "Adrian Toșcă, David Werth, Luiz Barni",
+    "homepage": "https://zxing-js.github.io/library/"
+  },
+  {
+    "name": "@zxing/text-encoding",
+    "version": "0.9.0",
+    "license": "(Unlicense OR Apache-2.0)",
+    "author": "Joshua Bell <inexorabletash@gmail.com>",
+    "homepage": "https://github.com/inexorabletash/text-encoding"
   },
   {
     "name": "agent-base",
@@ -306,6 +334,13 @@
     "license": "MIT",
     "author": "Junior Garcia <jrgarciadev@gmail.com>",
     "homepage": "https://github.com/heroui-inc/tailwind-variants"
+  },
+  {
+    "name": "ts-custom-error",
+    "version": "3.3.1",
+    "license": "MIT",
+    "author": "Adrien Gibrat <adrien.gibrat@gmail.com>",
+    "homepage": "github:adriengibrat/ts-custom-error"
   },
   {
     "name": "uqr",
