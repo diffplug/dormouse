@@ -24,10 +24,7 @@ import {
   type PocketSocket,
 } from '../client/pocket-client';
 import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webauthn';
-// Re-exported: this screen owns the button, the laptop's panel names it, and
-// the tests press it through the constant rather than a string of their own.
 import { SCAN_LABEL } from '../setup-copy';
-export { SCAN_LABEL };
 import { probeNoiseSupport, type PairingInvitation } from 'server-lib-common';
 import {
   indexedDbKnownHostStore,
@@ -773,6 +770,10 @@ export function ConnectedView({
 }
 
 // --- SetupOrSignin ---------------------------------------------------------
+
+// This screen owns the button the laptop's panel names, so the label lives in
+// the leaf both bundles import. Re-exported because the tests press it here.
+export { SCAN_LABEL };
 
 /**
  * The auth screen, in two layouts on one question: does this browser hold a
