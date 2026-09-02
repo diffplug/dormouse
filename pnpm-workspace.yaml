@@ -20,4 +20,16 @@ peerDependencyRules:
   allowedVersions:
     "react-helmet-async>react": ^19.0.0
     "react-helmet-async>react-dom": ^19.0.0
+    # `server` runs @hono/node-server 2.x; no @hono/node-ws release supports it
+    # (1.3.1 is latest and declares `^1.19.11`), so this is a deliberate widening
+    # rather than a missing upgrade. It is safe because the peer is nominal:
+    # @hono/node-ws imports `hono/ws`, `ws` and `node:http` only, never
+    # @hono/node-server. What it actually needs is `env.incoming` to be a
+    # `node:http` IncomingMessage — and it supplies that env itself when
+    # `injectWebSocket` re-dispatches the upgrade request — plus a
+    # `node:http`/`node:http2` server that emits `upgrade`. node-server 2.x still
+    # types `HttpBindings.incoming` as `IncomingMessage`. Drop this the moment a
+    # node-ws release widens the range; `server/test/*.test.mjs` covers the relay
+    # sockets that would break first.
+    "@hono/node-ws>@hono/node-server": ^2.0.0
 minimumReleaseAge: 1440

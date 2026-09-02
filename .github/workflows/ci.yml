@@ -243,8 +243,9 @@ jobs:
           echo "::error::apt failed after 3 attempts across mirrors"
           exit 1
 
+      # Frozen for the same supply-chain reason as every other job here.
       - name: Install npm dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
         working-directory: standalone
 
       - name: TypeScript check
