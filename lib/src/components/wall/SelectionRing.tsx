@@ -68,7 +68,12 @@ export function SelectionRing({
               // Corners are stroked at unit width and scaled; straight edges
               // overwrite this with their own width. Both are imperative.
               strokeWidth={1}
-              transform-origin="0 0"
+              // The CSS property, not the SVG presentation attribute: React
+              // knows that attribute only as `transformOrigin`, which
+              // `@types/react` does not declare, and the hyphenated spelling
+              // reaches the DOM only while logging `Invalid DOM property` on
+              // every render. Same effect on the corners' `scale(...)`.
+              style={{ transformOrigin: '0 0' }}
             />
           ))}
         </g>
