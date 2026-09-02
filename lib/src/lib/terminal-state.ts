@@ -916,16 +916,16 @@ function commandProgramName(command: string): string {
 function commandTitleTokens(tokens: string[]): string[] {
   const command = tokens[0];
   if (!command) return [];
-  const basename = commandProgramName(command);
+  const program = commandProgramName(command);
   const rest = tokens.slice(1);
 
-  if (basename === 'npm' && rest[0] === 'run') return [basename, ...rest.slice(0, 2)];
-  if (basename === 'pnpm' || basename === 'yarn' || basename === 'bun') return [basename, ...rest.slice(0, 2)];
-  if (basename === 'docker' && rest[0] === 'compose') return [basename, ...rest.slice(0, 2)];
-  if (basename === 'cargo' && rest[0] === 'watch') return [basename, ...rest.slice(0, 3)];
-  if (basename === 'ssh') return [basename, ...rest.slice(0, 1)];
-  if (basename === 'vim' || basename === 'nvim' || basename === 'vi' || basename === 'pytest') return [basename];
-  return [basename, ...rest.slice(0, 2)];
+  if (program === 'npm' && rest[0] === 'run') return [program, ...rest.slice(0, 2)];
+  if (program === 'pnpm' || program === 'yarn' || program === 'bun') return [program, ...rest.slice(0, 2)];
+  if (program === 'docker' && rest[0] === 'compose') return [program, ...rest.slice(0, 2)];
+  if (program === 'cargo' && rest[0] === 'watch') return [program, ...rest.slice(0, 3)];
+  if (program === 'ssh') return [program, ...rest.slice(0, 1)];
+  if (program === 'vim' || program === 'nvim' || program === 'vi' || program === 'pytest') return [program];
+  return [program, ...rest.slice(0, 2)];
 }
 
 function truncateCommandTitle(title: string): string {
