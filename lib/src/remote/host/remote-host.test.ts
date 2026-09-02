@@ -25,7 +25,11 @@ import {
   type PresenceBinding,
   type PresenceProofV1,
 } from 'server-lib-common';
-import { createNoiseInitiator, pairingInvitationPrologue } from 'server-lib-common';
+import {
+  createNoiseInitiator,
+  e2eConnectionPrologue,
+  pairingInvitationPrologue,
+} from 'server-lib-common';
 import { RemoteHost, type RemoteApiSessionLike } from './remote-host';
 import type { HostEnrollment } from './enrollment';
 import type { PendingPairing } from './pairing-approval';
@@ -789,19 +793,7 @@ describe('RemoteHost end-to-end ceremonies', () => {
     // entry for a peer the relay has already forgotten — one nothing removes.
     makeHost();
     const invitation = await mintInvitation();
-    const clientStatic = await generateNoiseKeyPair();
-    const handshake = await createNoiseInitiator({
-      prologue: pairingInvitationPrologue(invitation),
-      staticKeyPair: clientStatic,
-      remoteStaticPublicKey: invitation.ephPub,
-    });
-    sendE2e(
-      'c1',
-      'pairing',
-      invitation.inviteId,
-      'init',
-      toBase64Url(await handshake.writeMessage()),
-    );
+    await sendPairingInit('c1', invitation);
     // No await between the two: the init's WebCrypto is still in flight.
     socket.receive({ t: 'client-gone', clientId: 'c1' });
     await settle();
@@ -812,6 +804,52 @@ describe('RemoteHost end-to-end ceremonies', () => {
     // against it — but it must not be left `reserved` on a client that is gone.
     expect(host.invitationState(invitation.inviteId)).toBe('consumed');
     expect(host.outstandingInvitationCount).toBe(0);
+  });
+
+  /** Send pairing message 1 without awaiting the Host's answer. */
+  async function sendPairingInit(clientId: string, invitation: PairingInvitation): Promise<void> {
+    const handshake = await createNoiseInitiator({
+      prologue: pairingInvitationPrologue(invitation),
+      staticKeyPair: await generateNoiseKeyPair(),
+      remoteStaticPublicKey: invitation.ephPub,
+    });
+    sendE2e(clientId, 'pairing', invitation.inviteId, 'init', toBase64Url(await handshake.writeMessage()));
+  }
+
+  // Teardown is not a frame: `stop()` and the socket's own `close` run it
+  // synchronously, so it lands mid-await where the chain cannot order it. A
+  // handshake finishing afterwards must not re-reserve the invitation it just
+  // retired, and must not allocate an entry no later close will ever clear.
+  it.each([
+    ['stop()', () => host.stop()],
+    ['a dropped socket', () => socket.drop()],
+  ])('a handshake finishing after %s allocates nothing', async (_name, teardown) => {
+    makeHost();
+    const invitation = await mintInvitation();
+    await sendPairingInit('c1', invitation);
+    teardown();
+    await settle();
+
+    expect(host.trackedClientCount).toBe(0);
+    expect(host.outstandingInvitationCount).toBe(0);
+    expect(invitationEvents.at(-1)).not.toMatchObject({ state: 'reserved' });
+    expect(host.invitationState(invitation.inviteId)).toBe('consumed');
+  });
+
+  it('a connection handshake finishing after stop() allocates nothing', async () => {
+    makeHost();
+    const { clientStatic } = await pairedClient();
+    const connectionId = testRoutingId();
+    const handshake = await createNoiseInitiator({
+      prologue: e2eConnectionPrologue(enrollment.hostId, connectionId),
+      staticKeyPair: clientStatic,
+      remoteStaticPublicKey: fromBase64Url(enrollment.noiseStaticPublicKey!),
+    });
+    sendE2e('c2', 'connection', connectionId, 'init', toBase64Url(await handshake.writeMessage()));
+    host.stop();
+    await settle();
+
+    expect(host.trackedClientCount).toBe(0);
   });
 
   it('evicting a scanned invitation at the cap reports consumed, not dropped', async () => {

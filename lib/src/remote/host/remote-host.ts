@@ -252,6 +252,22 @@ export class RemoteHost {
    */
   #chain: Promise<void> = Promise.resolve();
 
+  /**
+   * Bumped by every teardown ({@link RemoteHost.#dropTransientState}).
+   *
+   * The chain orders frames against each other, but teardown is **not** a
+   * frame: `stop()` and the socket's own `close` run it synchronously, so it
+   * can land before a queued step begins or in the middle of one's awaits. It
+   * stays synchronous deliberately — the service clears its mirrored pairing
+   * queue the instant `stop()` returns, and a deferred teardown would write to
+   * that queue afterwards, possibly past a replacement Host — so
+   * {@link RemoteHost.#enqueue} stamps each step with the epoch it was queued
+   * under instead. Without it a handshake finishing after teardown reserves an
+   * invitation that was just retired and allocates a client entry nothing will
+   * ever remove: after `stop()` there is no later close to clean it up.
+   */
+  #epoch = 0;
+
   #ws: WebSocketLike | null = null;
   #status: RemoteHostStatus = 'idle';
   #stopped = false;
@@ -506,6 +522,8 @@ export class RemoteHost {
    * Host bounds).
    */
   #dropTransientState(): void {
+    // First, so a ceremony step already awaiting sees it the moment it resumes.
+    this.#epoch += 1;
     for (const clientId of [...this.#clients.keys()]) this.#disposeClient(clientId);
     for (const [inviteId, held] of [...this.#invitations]) {
       // `reserved` means a phone completed message 1 against it, so it really is
@@ -582,37 +600,45 @@ export class RemoteHost {
     // to have (`docs/specs/server.md` → Relay).
     if (!isE2eServerToHostFrame(frame)) return;
     const e2e = frame;
-    this.#enqueue(() => this.#onE2e(e2e));
+    this.#enqueue((epoch) => this.#onE2e(e2e, epoch));
   }
 
   /**
    * Run `step` after everything already queued for this socket, in arrival
-   * order. Every frame that touches the client map goes through here, so a
-   * teardown can never land in the middle of a ceremony step's awaits.
+   * order. Every frame that touches the client map goes through here.
+   *
+   * The {@link RemoteHost.#epoch} is captured **here**, not when the step runs:
+   * a step is queued on the microtask queue, so a `stop()` on the very next
+   * line tears down before it has begun. A step whose epoch is already stale
+   * never runs at all; one that goes stale mid-flight is handed its epoch so it
+   * can refuse to mutate afterwards.
    */
-  #enqueue(step: () => void | Promise<void>): void {
-    this.#chain = this.#chain.then(step).catch((error: unknown) => {
+  #enqueue(step: (epoch: number) => void | Promise<void>): void {
+    const epoch = this.#epoch;
+    this.#chain = this.#chain
+      .then(() => (this.#epoch === epoch ? step(epoch) : undefined))
+      .catch((error: unknown) => {
       // A ceremony step must never reject into the chain: this Host runs in
       // Node, where an unhandled rejection can take the sidecar or the extension
       // host down rather than merely logging in a webview.
-      console.warn('[remote-host] frame handling failed', error);
-    });
+        console.warn('[remote-host] frame handling failed', error);
+      });
   }
 
-  async #onE2e(frame: E2eServerToHostFrame): Promise<void> {
+  async #onE2e(frame: E2eServerToHostFrame, epoch: number): Promise<void> {
     this.#reapInvitations(this.#now());
     if (frame.kind === 'pairing') {
-      if (frame.step === 'init') return await this.#onPairingInit(frame);
+      if (frame.step === 'init') return await this.#onPairingInit(frame, epoch);
       return await this.#onPairingTransport(frame);
     }
-    if (frame.step === 'init') return await this.#onConnectionInit(frame);
+    if (frame.step === 'init') return await this.#onConnectionInit(frame, epoch);
     return await this.#onConnectionTransport(frame);
   }
 
   // --- Pairing -------------------------------------------------------------
 
   /** Noise message 1 against one invitation's key; an unknown id costs a map lookup. */
-  async #onPairingInit(frame: E2eServerToHostFrame): Promise<void> {
+  async #onPairingInit(frame: E2eServerToHostFrame, epoch: number): Promise<void> {
     const held = this.#invitations.get(frame.id);
     if (!held || held.state !== 'live') return;
     let handshakeHash: string;
@@ -642,6 +668,10 @@ export class RemoteHost {
     // Nothing above allocated a client entry: a handshake that fails must cost
     // a WebCrypto call and no map slot under a relay-chosen key.
     //
+    // A teardown that ran while it did retired `held` and dropped every client,
+    // so `held` is a detached object and anything allocated below would outlive
+    // the socket that asked for it — with no later close to clean it up.
+    if (this.#epoch !== epoch) return;
     // A replacement from the same client supersedes its predecessor, which is
     // told so over its own session before the material is erased.
     if (this.#clients.get(frame.clientId)?.pairing) {
@@ -846,7 +876,7 @@ export class RemoteHost {
    * the fresh challenge the proof must bind to
    * (`docs/specs/remote-security-model.md` → Connection).
    */
-  async #onConnectionInit(frame: E2eServerToHostFrame): Promise<void> {
+  async #onConnectionInit(frame: E2eServerToHostFrame, epoch: number): Promise<void> {
     const staticKeyPair = await this.#loadNoiseStatic();
     if (!staticKeyPair) return;
     let session: NoiseTransportSession;
@@ -874,6 +904,9 @@ export class RemoteHost {
       // Nothing to answer on: there is no session yet.
       return;
     }
+    // A teardown during the handshake drops the entry this would create, and
+    // the challenge it minted expires on its own TTL (see `#onPairingInit`).
+    if (this.#epoch !== epoch) return;
     // At most one pending connection per relay client; a replacement disposes
     // its predecessor without answering it. As above, no entry was allocated
     // before the handshake proved itself.
