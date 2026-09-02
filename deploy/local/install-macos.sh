@@ -694,6 +694,24 @@ wait_for_health() {
   return 1
 }
 
+# Is Tailscale Funnel on for this node? Echoes `on`, `off`, or `unknown`.
+# $1 = the exit status of `tailscale funnel status`, $2 = `serve status` output,
+# $3 = `funnel status` output.
+#
+# `unknown` is a first-class answer, and the reason this is a function: a check
+# that could not run must not report the reassuring one. Every way the CLI can
+# be unavailable — off PATH, tailscaled down, `funnel status` unknown to an
+# older CLI — yields no output, and no output greps clean. Only the exit status
+# separates that from a node with no Funnel, so it is what decides.
+funnel_state() {
+  [ "$1" = "0" ] || { printf 'unknown\n'; return 0; }
+  if printf '%s\n%s' "$2" "$3" | grep -qi 'funnel on'; then
+    printf 'on\n'
+  else
+    printf 'off\n'
+  fi
+}
+
 cmd_status() {
   printf '\nDormouse selfhost server\n'
   printf '  install root : %s\n' "$ROOT"
@@ -840,15 +858,26 @@ cmd_verify() {
   # exact origin to the public internet. The whole security analysis of the
   # selfhost server assumes a tailnet-only origin — most of all the setup
   # password, whose hardening is a constant-time compare and a 250ms delay
-  # (SECURITY.md, "The setup password"). So this is checked, never assumed.
-  local funnel_out
-  funnel_out="$(ts funnel status 2>/dev/null || true)"
-  if printf '%s\n%s' "$serve_out" "$funnel_out" | grep -qi 'funnel on'; then
-    fail "tailscale funnel is ON — this origin is published to the public internet"
-    printf '%s\n' "$funnel_out" | sed 's/^/      /'
-  else
-    pass "tailscale funnel is off (the origin stays tailnet-only)"
-  fi
+  # (SECURITY.md, "The setup password"). So this is checked, never assumed —
+  # and "assumed" is what `2>/dev/null || true` hid: it threw away the one
+  # signal that separates a node with no Funnel from a CLI that never ran, so
+  # an unavailable Tailscale printed the reassuring line. The status is kept,
+  # and `funnel_state` answers `unknown` rather than `off`.
+  local funnel_out funnel_rc
+  funnel_out="$(ts funnel status 2>&1)" && funnel_rc=0 || funnel_rc=$?
+  case "$(funnel_state "$funnel_rc" "$serve_out" "$funnel_out")" in
+    on)
+      fail "tailscale funnel is ON — this origin is published to the public internet"
+      printf '%s\n' "$funnel_out" | sed 's/^/      /'
+      ;;
+    unknown)
+      fail "could not check tailscale funnel: \`tailscale funnel status\` exited $funnel_rc — verify cannot say this origin stays tailnet-only"
+      if [ -n "$funnel_out" ]; then printf '%s\n' "$funnel_out" | sed 's/^/      /'; fi
+      ;;
+    *)
+      pass "tailscale funnel is off (the origin stays tailnet-only)"
+      ;;
+  esac
 
   local cfg_mode state_mode run_mode env_mode offer_mode
   cfg_mode="$(stat -f '%Lp' "$ROOT/config" 2>/dev/null || echo '???')"

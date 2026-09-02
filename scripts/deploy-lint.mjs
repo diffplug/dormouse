@@ -142,11 +142,28 @@ export const RULES = [
     },
   },
   {
+    // Anchored on the match itself, not the phrase: a bare /funnel on/i is
+    // also satisfied by any comment that names the state being matched for —
+    // this file's own rule about prose satisfying rules, found by the
+    // self-test the first time such a comment was written.
     rule: 'Network posture — manage verify fails on an active Tailscale Funnel',
     patterns: {
-      macOS: /funnel on/i,
-      Linux: /funnel on/i,
-      Windows: /funnel on/i,
+      macOS: /grep -qi 'funnel on'/,
+      Linux: /grep -qi 'funnel on'/,
+      Windows: /-match '\(\?i\)funnel on'/,
+    },
+  },
+  {
+    // The other half of that rule, and the half the pattern above cannot see:
+    // the string it matches is equally present in a check that never ran. An
+    // unavailable Tailscale CLI prints nothing, nothing matches `funnel on`,
+    // and the reassuring line is what the operator gets. Anchored on the
+    // failure message, which only the unknown verdict says.
+    rule: 'Network posture — manage verify fails when the Funnel check could not run',
+    patterns: {
+      macOS: /could not check tailscale funnel/,
+      Linux: /could not check tailscale funnel/,
+      Windows: /could not check tailscale funnel/,
     },
   },
   {

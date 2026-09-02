@@ -1548,10 +1548,17 @@ function Invoke-Verify {
   # exact origin to the public internet. The whole security analysis of the
   # selfhost server assumes a tailnet-only origin -- most of all the setup
   # password, whose hardening is a constant-time compare and a 250ms delay
-  # (SECURITY.md, "The setup password"). So this is checked, never assumed.
+  # (SECURITY.md, "The setup password"). So this is checked, never assumed --
+  # and a check that could not run has assumed. Every way the CLI can be
+  # unavailable (off PATH, tailscaled down, `funnel status` unknown to an older
+  # CLI) yields text that matches nothing, which is indistinguishable from a
+  # node with no Funnel until the exit status is consulted. So it is.
   $funnel = Invoke-Tailscale @('funnel', 'status')
   $funnelText = $funnel.StdOut + $funnel.StdErr
-  if (($serveText + $funnelText) -match '(?i)funnel on') {
+  if ($funnel.ExitCode -ne 0) {
+    Fail "could not check tailscale funnel: ``tailscale funnel status`` exited $($funnel.ExitCode) -- verify cannot say this origin stays tailnet-only"
+    foreach ($l in $funnelText.Split("`n")) { if ($l.Trim()) { Write-Host "      $($l.TrimEnd())" } }
+  } elseif (($serveText + "`n" + $funnelText) -match '(?i)funnel on') {
     Fail "tailscale funnel is ON -- this origin is published to the public internet"
     foreach ($l in $funnelText.Split("`n")) { if ($l.Trim()) { Write-Host "      $($l.TrimEnd())" } }
   } else {

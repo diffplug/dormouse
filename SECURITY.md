@@ -100,6 +100,7 @@ Tailscale here is network-layer defense-in-depth *under* the passkey/ACL model, 
 - FAIL IF any installer stops refusing to rewrite a `DORMOUSE_ORIGIN` that no longer matches the node's DNS name.
 - FAIL IF any installer stops refusing to run with elevated privileges — `id -u` on macOS and Linux, the `Administrator` role check on Windows. The install belongs to one user account and its whole credential posture is that account owning the files; an elevated run would write them owned by another principal and register the service for it.
 - FAIL IF `manage verify` does not fail on Funnel being on for this node. It matches `funnel on` across `tailscale serve status` and `tailscale funnel status`; that is node-scoped, not scoped to the served origin, and is deliberately the blunter test — any Funnel on the node that fronts this server is a thing to look at, and parsing a mapping out of CLI prose would fail open the day the wording changes.
+- FAIL IF that check reports `off` when it could not run. A Tailscale CLI that is absent, unauthenticated, or too old for `funnel status` produces output that matches nothing, which is indistinguishable from a node with no Funnel until the exit status is consulted — so a nonzero status is its own verdict and fails verify, rather than being discarded with `2>/dev/null || true`. A check that could not run has not passed.
 
 ### What crosses the boundary
 

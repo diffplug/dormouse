@@ -246,7 +246,10 @@ shape what the user should expect day to day:
 - `tailscale serve` proxies to `127.0.0.1:3100` at the same origin recorded in
   `config/server.env`, and `tailscale funnel` is **off** — a Funnel would
   publish this same origin to the public internet, which the setup password's
-  hardening was never sized for (`SECURITY.md` -> "Network posture").
+  hardening was never sized for (`SECURITY.md` -> "Network posture"). A Funnel
+  check that could not run fails too: an unavailable Tailscale CLI prints
+  nothing, and nothing matches, so only its exit status tells "off" from
+  "unknown".
 - `config/`, `state/`, `run/` and `config/server.env` are readable only by the
   installing user: modes `0700`/`0600` on macOS and Linux, a DACL with exactly
   that one user on Windows. The Windows check also covers each file in `state/`
