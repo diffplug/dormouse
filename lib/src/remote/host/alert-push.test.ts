@@ -1,10 +1,20 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../lib/platform', () => ({
   getPlatform: () => ({ alertPublishSettings: vi.fn() }),
 }));
 
-import type { HostAclRecord } from 'server-lib-common';
+import {
+  fromBase64Url,
+  generateNoiseKeyPair,
+  openPush,
+  sealPush,
+  toBase64Url,
+  utf8Decode,
+  type HostAclRecord,
+  type NoiseKeyPair,
+  type SealedPushV1,
+} from 'server-lib-common';
 import { commitPushDevices, invalidatePushDeviceRefreshes, watchPushRings } from './alert-push';
 // Delivery — the Server calls, the recipient rule, the title bounds — runs in
 // the Host's process, so it lives beside neither webview nor sidecar.
@@ -32,15 +42,29 @@ const TABLET = id32('delivery-tablet');
 /** Still subscribed on the Server, no longer on this Host's ACL. */
 const REVOKED = id32('delivery-revoked');
 
+/**
+ * Real X25519 statics, minted once: a push is sealed to the record's own Client
+ * key, so a fixture key that cannot be imported would fail the seal rather than
+ * the rule under test.
+ */
+let hostStatic: NoiseKeyPair;
+const clientStatics = new Map<string, NoiseKeyPair>();
+
+beforeAll(async () => {
+  hostStatic = await generateNoiseKeyPair();
+  for (const deliveryId of [PHONE, TABLET, REVOKED]) {
+    clientStatics.set(deliveryId, await generateNoiseKeyPair());
+  }
+});
+
 function aclRecord(deliveryId: string, label: string): HostAclRecord {
   return {
     hostId: 'host-1',
     accountId: 'owner',
     passkeyCredentialId: 'cred',
     passkeyPublicKeyHash: 'hash',
-    // The browser half of the record's identity; irrelevant to push, which
-    // addresses the opaque delivery capability instead.
-    clientStaticPublicKey: id32(`static-${deliveryId}`),
+    // The half a push is sealed to, so each recipient gets its own ciphertext.
+    clientStaticPublicKey: toBase64Url(clientStatics.get(deliveryId)!.publicKey),
     deliveryId,
     approvedAt: 1,
     approvedBy: 'host-user',
@@ -48,6 +72,27 @@ function aclRecord(deliveryId: string, label: string): HostAclRecord {
     revokedAt: null,
   };
 }
+
+/**
+ * A stand-in for the Host's seal: shape-correct, distinct per recipient, and
+ * free of WebCrypto, so the ring-delay cases below stay deterministic under
+ * fake timers. The real construction is driven with real keys in `sealed push`.
+ */
+function fakeSeal(): AlertPushDeps['seal'] {
+  let n = 0;
+  return async (clientStaticPublicKey) => {
+    n += 1;
+    return { v: 1, salt: id32(`salt${n}`), ct: `${clientStaticPublicKey}${n}` };
+  };
+}
+
+/** The seal exactly as `RemoteHost.sealPushForClient` performs it. */
+const realSeal: AlertPushDeps['seal'] = (clientStaticPublicKey, plaintext) =>
+  sealPush({
+    hostStaticPrivateKey: hostStatic.privateKey,
+    clientStaticPublicKey: fromBase64Url(clientStaticPublicKey),
+    plaintext,
+  });
 
 /** Requests the sink made, in order. */
 let requests: Array<{ url: string; init?: RequestInit }>;
@@ -74,8 +119,14 @@ function fakeFetch(): typeof globalThis.fetch {
   }) as unknown as typeof globalThis.fetch;
 }
 
-function deps() {
-  return { enrollment: ENROLLMENT, activeRecords: () => records, fetch: fakeFetch() };
+function deps(overrides: Partial<AlertPushDeps> = {}): AlertPushDeps {
+  return {
+    enrollment: ENROLLMENT,
+    activeRecords: () => records,
+    seal: fakeSeal(),
+    fetch: fakeFetch(),
+    ...overrides,
+  };
 }
 
 /**
@@ -104,9 +155,16 @@ function ring(id: string): void {
 }
 
 /** The body of the last `push/send` request, parsed. */
-function lastSend(): Record<string, unknown> | null {
+function lastSend(): { recipients: Array<{ deliveryId: string; sealed: SealedPushV1 }> } | null {
   const send = requests.filter((r) => r.url.endsWith('/api/push/send')).at(-1);
-  return send ? (JSON.parse(String(send.init?.body)) as Record<string, unknown>) : null;
+  return send
+    ? (JSON.parse(String(send.init?.body)) as ReturnType<typeof lastSend> & object)
+    : null;
+}
+
+/** Who the last send addressed, in order. */
+function lastRecipients(): string[] {
+  return lastSend()?.recipients.map((r) => r.deliveryId) ?? [];
 }
 
 beforeEach(() => {
@@ -189,11 +247,12 @@ describe('alarm push', () => {
     expect(lastSend()).toBeNull();
 
     await vi.advanceTimersByTimeAsync(1);
-    expect(lastSend()).toMatchObject({
-      title: 'terminal',
-      tag: 'pty-1',
-      deliveryIds: [PHONE],
-    });
+    expect(lastRecipients()).toEqual([PHONE]);
+    // The label and the collapse tag are sealed, so nothing readable rides on
+    // the request the Server sees.
+    const body = String(requests.at(-1)!.init?.body);
+    expect(body).not.toContain('terminal');
+    expect(body).not.toContain('pty-1');
   });
 
   it('sends nothing while pushEnabled is off', async () => {
@@ -228,7 +287,7 @@ describe('alarm push', () => {
     ring('pty-1');
 
     await vi.advanceTimersByTimeAsync(PUSH_DELAY_MS);
-    expect(lastSend()).toMatchObject({ deliveryIds: [PHONE] });
+    expect(lastRecipients()).toEqual([PHONE]);
   });
 
   it('costs one request per alarm, not a lookup then a send', async () => {
@@ -256,14 +315,14 @@ describe('alarm push', () => {
     // The send route answers 200 with counts even when every delivery failed —
     // a rotated VAPID key or a wedged push service must not be silent.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    stop = startPush({
-      enrollment: ENROLLMENT,
-      activeRecords: () => records,
-      fetch: (async () => ({
-        ok: true,
-        json: async () => ({ delivered: 0, expired: 0, unknown: 0, failed: 1 }),
-      })) as unknown as typeof globalThis.fetch,
-    });
+    stop = startPush(
+      deps({
+        fetch: (async () => ({
+          ok: true,
+          json: async () => ({ delivered: 0, expired: 0, unknown: 0, failed: 1 }),
+        })) as unknown as typeof globalThis.fetch,
+      }),
+    );
     ring('pty-1');
 
     await vi.advanceTimersByTimeAsync(PUSH_DELAY_MS);
@@ -275,11 +334,11 @@ describe('alarm push', () => {
     // A 401 from a revoked host token would otherwise resolve normally and
     // leave push permanently broken with nothing in the console.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    stop = startPush({
-      enrollment: ENROLLMENT,
-      activeRecords: () => records,
-      fetch: (async () => ({ ok: false, status: 401 })) as unknown as typeof globalThis.fetch,
-    });
+    stop = startPush(
+      deps({
+        fetch: (async () => ({ ok: false, status: 401 })) as unknown as typeof globalThis.fetch,
+      }),
+    );
     ring('pty-1');
 
     await vi.advanceTimersByTimeAsync(PUSH_DELAY_MS);
@@ -307,18 +366,87 @@ describe('alarm push', () => {
   });
 
   it('survives a server that cannot be reached', async () => {
-    const failing = {
-      enrollment: ENROLLMENT,
-      activeRecords: () => records,
+    const failing = deps({
       fetch: (async () => {
         throw new Error('network down');
       }) as unknown as typeof globalThis.fetch,
-    };
+    });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     stop = startPush(failing);
     ring('pty-1');
 
     await expect(vi.advanceTimersByTimeAsync(60_000)).resolves.not.toThrow();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
+
+/**
+ * The seal itself, against real statics: the Server forwards these and reads
+ * nothing (`docs/specs/remote-security-model.md` -> Push sealing). Driven
+ * through `sendPush` rather than `sealPush` directly, so what is under test is
+ * the payload the Host actually posts.
+ */
+describe('sealed push', () => {
+  it('seals one distinct ciphertext per recipient, and posts no plaintext', async () => {
+    records = [aclRecord(PHONE, 'iPhone Safari'), aclRecord(TABLET, 'iPad')];
+    await sendPush(deps({ seal: realSeal }), 'pty-1', 'build finished');
+
+    const recipients = lastSend()!.recipients;
+    expect(recipients.map((r) => r.deliveryId)).toEqual([PHONE, TABLET]);
+    // Same plaintext, two Client statics, two salts: nothing about the pair of
+    // envelopes tells the Server they carry the same notification.
+    expect(recipients[0]!.sealed.ct).not.toEqual(recipients[1]!.sealed.ct);
+    expect(recipients[0]!.sealed.salt).not.toEqual(recipients[1]!.sealed.salt);
+
+    const body = String(requests.at(-1)!.init?.body);
+    for (const secret of ['build finished', 'Needs attention', 'pty-1']) {
+      expect(body).not.toContain(secret);
+    }
+  });
+
+  it('opens with the recipient own key and with no other', async () => {
+    records = [aclRecord(PHONE, 'iPhone Safari'), aclRecord(TABLET, 'iPad')];
+    await sendPush(deps({ seal: realSeal }), 'pty-1', 'build finished');
+    const [phone, tablet] = lastSend()!.recipients;
+
+    const opened = await openPush({
+      clientStaticPrivateKey: clientStatics.get(PHONE)!.privateKey,
+      hostStaticPublicKey: hostStatic.publicKey,
+      sealed: phone!.sealed,
+    });
+    expect(JSON.parse(utf8Decode(opened!))).toEqual({
+      title: 'build finished',
+      body: 'Needs attention',
+      tag: 'pty-1',
+    });
+
+    // The other paired phone holds a delivery id it could present, and still
+    // cannot read this envelope: the ACL record's static is what the seal binds.
+    expect(
+      await openPush({
+        clientStaticPrivateKey: clientStatics.get(TABLET)!.privateKey,
+        hostStaticPublicKey: hostStatic.publicKey,
+        sealed: phone!.sealed,
+      }),
+    ).toBeNull();
+    expect(
+      await openPush({
+        clientStaticPrivateKey: clientStatics.get(PHONE)!.privateKey,
+        hostStaticPublicKey: hostStatic.publicKey,
+        sealed: tablet!.sealed,
+      }),
+    ).toBeNull();
+  });
+
+  it('reaches nobody, loudly, when this Host has no usable static', async () => {
+    // `sealPushForClient` answers null when the enrollment carries no importable
+    // static; a send that silently reported success would read as "delivered".
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const summary = await sendPush(deps({ seal: async () => null }), 'pty-1', 'build');
+
+    expect(summary).toEqual({ targeted: 0, delivered: 0, failed: 0 });
+    expect(lastSend()).toBeNull();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
@@ -343,11 +471,11 @@ describe('push device list', () => {
 
   it('reports error rather than an empty list when the server is unreachable', async () => {
     // "We could not ask" and "nothing is subscribed" must not look the same.
-    await refreshPushDevices({
-      enrollment: ENROLLMENT,
-      activeRecords: () => records,
-      fetch: (async () => ({ ok: false, status: 500 })) as unknown as typeof globalThis.fetch,
-    });
+    await refreshPushDevices(
+      deps({
+        fetch: (async () => ({ ok: false, status: 500 })) as unknown as typeof globalThis.fetch,
+      }),
+    );
     expect(getPushDevices()).toEqual({ status: 'error', devices: [] });
   });
 
@@ -356,14 +484,14 @@ describe('push device list', () => {
     // `no-host`. A request already on the wire resolves afterwards and would
     // otherwise repopulate the dialog with phones there is nothing to push to.
     let land: (response: Response) => void = () => {};
-    const inFlight = refreshPushDevices({
-      enrollment: ENROLLMENT,
-      activeRecords: () => records,
-      fetch: (() =>
-        new Promise((resolve) => {
-          land = resolve;
-        })) as unknown as typeof globalThis.fetch,
-    });
+    const inFlight = refreshPushDevices(
+      deps({
+        fetch: (() =>
+          new Promise((resolve) => {
+            land = resolve;
+          })) as unknown as typeof globalThis.fetch,
+      }),
+    );
 
     invalidatePushDeviceRefreshes();
     resetPushDevices();
@@ -380,22 +508,22 @@ describe('push device list', () => {
   it('keeps a newer refresh when an older request resolves last', async () => {
     records = [aclRecord(PHONE, 'iPhone Safari'), aclRecord(TABLET, 'iPad')];
     let resolveOlder: (response: Response) => void = () => {};
-    const older = refreshPushDevices({
-      enrollment: ENROLLMENT,
-      activeRecords: () => records,
-      fetch: (() =>
-        new Promise((resolve) => {
-          resolveOlder = resolve;
+    const older = refreshPushDevices(
+      deps({
+        fetch: (() =>
+          new Promise((resolve) => {
+            resolveOlder = resolve;
+          })) as unknown as typeof globalThis.fetch,
+      }),
+    );
+    const newer = refreshPushDevices(
+      deps({
+        fetch: (async () => ({
+          ok: true,
+          json: async () => ({ devices: [{ deliveryId: TABLET, subscribedAt: 2 }] }),
         })) as unknown as typeof globalThis.fetch,
-    });
-    const newer = refreshPushDevices({
-      enrollment: ENROLLMENT,
-      activeRecords: () => records,
-      fetch: (async () => ({
-        ok: true,
-        json: async () => ({ devices: [{ deliveryId: TABLET, subscribedAt: 2 }] }),
-      })) as unknown as typeof globalThis.fetch,
-    });
+      }),
+    );
 
     await newer;
     expect(getPushDevices().devices).toEqual([{ deliveryId: TABLET, label: 'iPad' }]);

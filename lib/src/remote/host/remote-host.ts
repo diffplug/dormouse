@@ -37,6 +37,7 @@ import {
   pairingInvitationPrologue,
   e2eConnectionPrologue,
   randomBase64Url,
+  sealPush,
   toBase64Url,
   utf8Decode,
   utf8Encode,
@@ -52,6 +53,7 @@ import {
   type PairingInvitation,
   type PairingOutcomeV1,
   type PresenceBinding,
+  type SealedPushV1,
   type ServerToHostFrame,
 } from 'server-lib-common';
 import type { HostEnrollment } from './enrollment';
@@ -343,6 +345,38 @@ export class RemoteHost {
 
   get activeRecords(): HostAclRecord[] {
     return this.#acl.activeRecords();
+  }
+
+  /**
+   * Seal one push plaintext to one paired Client, or `null` when this Host has
+   * no usable Noise static.
+   *
+   * **The private key never leaves.** It is a nonextractable `CryptoKey` held
+   * here, so the delivery path asks this to seal rather than borrowing the key
+   * — the same reason the handshake runs inside this class
+   * (`docs/specs/remote-security-model.md` -> Push sealing).
+   *
+   * `clientStaticPublicKey` is the ACL record's own base64url key, already
+   * length-checked on read, so a malformed one is a corrupt store rather than
+   * attacker input; it still answers `null` rather than throwing, because the
+   * caller's job is to notify the phones it can and warn about the rest.
+   */
+  async sealPushForClient(
+    clientStaticPublicKey: string,
+    plaintext: Uint8Array,
+  ): Promise<SealedPushV1 | null> {
+    const noiseStatic = await this.#loadNoiseStatic();
+    if (!noiseStatic) return null;
+    try {
+      return await sealPush({
+        hostStaticPrivateKey: noiseStatic.privateKey,
+        clientStaticPublicKey: fromBase64Url(clientStaticPublicKey),
+        plaintext,
+      });
+    } catch (error) {
+      console.warn('[remote-host] could not seal a push for a paired client', error);
+      return null;
+    }
   }
 
   // --- Invitations ---------------------------------------------------------
