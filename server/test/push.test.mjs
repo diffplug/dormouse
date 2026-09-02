@@ -623,6 +623,25 @@ test('the forwarded payload is the sealed envelope and nothing else', async () =
   assert.equal(utf8Decode(opened), utf8Decode(plaintext));
 });
 
+test('an extra field on the envelope reaches no phone, not even the hostId', async () => {
+  // `isSealedPushV1` bounds the three fields it knows and ignores the rest, so
+  // the route must copy those three rather than spread — a spread would let a
+  // Host override the token's `hostId` and smuggle readable text through a
+  // Server that holds no key and must forward neither (SECURITY.md -> "What
+  // crosses the boundary").
+  const { app, sender, host, sessionToken } = await pushApp();
+  const deliveryId = newDeliveryId();
+  await subscribe(app, { sessionToken, host, deliveryId });
+
+  const sealed = { ...fakeSealed(), hostId: 'AAAAAAAAAAAAAAAAAAAAAA', title: 'build finished' };
+  await sendAs(app, host.hostToken, { recipients: [{ deliveryId, sealed }] });
+
+  const forwarded = JSON.parse(sender.sent[0].payload);
+  assert.deepEqual(Object.keys(forwarded).sort(), ['ct', 'hostId', 'salt', 'v']);
+  assert.equal(forwarded.hostId, host.hostId);
+  assert.equal(sender.sent[0].payload.includes('build finished'), false);
+});
+
 test('send without recipients is rejected — the Host must choose them', async () => {
   // The Host holds the ACL; a Server that picked recipients itself would keep
   // notifying a Client the Host had revoked.

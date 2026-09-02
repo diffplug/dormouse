@@ -223,7 +223,9 @@ at the stable, unhashed `dist-pocket/sw.js`, after the app build and with
 `service-worker.test.ts`. `lib/scripts/assert-pocket-worker.mjs` runs last in
 `build:pocket` and fails the build on a missing worker, a sibling chunk, a
 top-level `import`/`export`, or a dynamic-import loader — a module-syntax worker
-installs on nothing, and push is the one feature no desktop exercises.
+installs on nothing, and push is the one feature no desktop exercises. **Root
+`pnpm build` runs `build:pocket`**, so CI checks a real bundler output rather
+than only the assertion's own fixtures (`assert-pocket-worker.test.ts`).
 `dev:pocket` bundles the same config in memory per `/sw.js` request, so the dev
 server serves what production would emit.
 

@@ -348,20 +348,23 @@ store-and-forward — so it gets its own construction.
   a shared counter, and a phone may receive one push, none, or three, days apart
   and out of order. The ChaChaPoly binding is the pinned `@noble/ciphers` the
   suite already uses ([Noise suite](#noise-suite)).
+- **Confidentiality, not freshness.** Nothing binds a push to a moment and the
+  sink keeps no replay memory, so a Server that kept an envelope can re-deliver
+  it; accepted residual ([Residual metadata](#residual-metadata)).
 - **The Host seals once per recipient**, to that ACL record's own Client static,
   from the nonextractable `CryptoKey` it holds — the delivery path is handed a
   seal capability, never the key. There is no group key.
-- **The Server forwards `{ hostId, v, salt, ct }` verbatim**, `hostId` taken
-  from the sending Host's token, validates only shape and bounds, and keeps no
-  plaintext ([server.md](./server.md) -> Web Push). **The ciphertext bound** is
-  what keeps the envelope inside Web Push's ~4 KB ceiling and a Host token from
-  asking the Server to forward an unbounded blob.
+- **The Server forwards exactly `{ hostId, v, salt, ct }`**, `hostId` taken from
+  the sending Host's token, and validates only shape and bounds
+  ([server.md](./server.md) -> Web Push). **Copied field by field, never spread**
+  — the guard bounds those three and ignores any others, so a spread would let a
+  Host override the token's `hostId` and smuggle readable text through. **The
+  ciphertext bound** keeps the envelope inside Web Push's ~4 KB ceiling.
 - **The worker decrypts at the sink**, against the pinned record for that
   `hostId`, and re-bounds what it recovers. **Any failure shows the generic
-  content-free notification** — no payload, an unknown Host, a
-  `pairing-required` record, a decrypt failure, malformed plaintext — because
-  `userVisibleOnly` makes showing nothing a browser-substituted notice
-  ([pocket-app.md](./pocket-app.md) -> Installable web app).
+  content-free notification**, because `userVisibleOnly` makes showing nothing a
+  browser-substituted notice ([pocket-app.md](./pocket-app.md) -> Installable
+  web app owns the branch list).
 
 Source of truth: `sealPush` / `openPush` / `isSealedPushV1` in
 `server-lib-common/src/security/push-seal.ts`, proven by

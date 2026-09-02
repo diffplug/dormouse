@@ -937,7 +937,17 @@ export function createApp(config: AppConfig): CreatedApp {
         result: await sendWithinDeadline(
           sender,
           { endpoint: subscription.endpoint, keys: subscription.keys },
-          JSON.stringify({ hostId, ...sealed } satisfies SealedPushPayload),
+          // Field by field, never a spread of `sealed`: `isSealedPushV1` bounds
+          // the three fields it knows and ignores the rest, so `{ hostId,
+          // ...sealed }` would let a Host both override the token's `hostId`
+          // and smuggle readable text past a Server that must forward neither
+          // (SECURITY.md -> "What crosses the boundary").
+          JSON.stringify({
+            hostId,
+            v: sealed.v,
+            salt: sealed.salt,
+            ct: sealed.ct,
+          } satisfies SealedPushPayload),
           deadlineMs,
         ),
       })),

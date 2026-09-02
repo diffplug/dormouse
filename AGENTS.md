@@ -6,7 +6,7 @@ A mouse-friendly multitasking terminal built with pnpm, react, typescript, vite,
 
 ```
 pnpm install     # install deps
-pnpm build       # build lib, vscode extension, and website
+pnpm build       # build lib, vscode extension, Pocket, and website
 ```
 
 ## Architecture

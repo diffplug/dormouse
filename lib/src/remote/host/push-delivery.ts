@@ -17,6 +17,7 @@
 
 import {
   API_ROUTES,
+  MAX_PUSH_QUERY_DELIVERY_IDS,
   PUSH_SEND_DEADLINE_MS,
   boundedPushText,
   utf8Encode,
@@ -139,8 +140,22 @@ export async function sendPush(
 ): Promise<PushSendSummary> {
   // Read at send time, so a revocation during the ring delay takes effect
   // (`docs/specs/alert.md` -> Push notifications owns the recipient rule).
-  const records = deps.activeRecords();
-  if (records.length === 0) return { targeted: 0, delivered: 0, failed: 0 };
+  const all = deps.activeRecords();
+  if (all.length === 0) return { targeted: 0, delivered: 0, failed: 0 };
+  // The send route refuses more than this, and it refuses the *whole* POST — so
+  // an unclamped fan-out past the bound would reach nobody rather than most.
+  //
+  // **The newest end, not the oldest.** `activeRecords()` is in approval order,
+  // and re-pairing a phone that lost its IndexedDB mints a fresh Client static,
+  // which supersedes nothing — so the old record stays active forever, ahead of
+  // its own replacement. Clamping from the front would push to dead records and
+  // drop the phones actually in use.
+  const records = all.slice(-MAX_PUSH_QUERY_DELIVERY_IDS);
+  if (records.length !== all.length) {
+    console.warn(
+      `remote-host: ${all.length} devices are paired; pushing to the ${MAX_PUSH_QUERY_DELIVERY_IDS} most recent`,
+    );
+  }
 
   // Bounded here, before it is sealed, because this is the last layer that can
   // read it: what the worker re-sanitizes at the sink is whatever this

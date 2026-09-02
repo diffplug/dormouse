@@ -5,6 +5,7 @@ vi.mock('../../lib/platform', () => ({
 }));
 
 import {
+  MAX_PUSH_QUERY_DELIVERY_IDS,
   fromBase64Url,
   generateNoiseKeyPair,
   openPush,
@@ -435,6 +436,47 @@ describe('sealed push', () => {
         sealed: tablet!.sealed,
       }),
     ).toBeNull();
+  });
+
+  it('clamps the fan-out to the newest devices the send route accepts', async () => {
+    // The Server refuses the whole POST past this bound, so an unclamped Host
+    // would reach nobody rather than most — and the end it keeps matters:
+    // `activeRecords()` is in approval order and a re-paired phone mints a new
+    // record without superseding the old one, so the front of the list is where
+    // dead records accumulate.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const ids = Array.from({ length: MAX_PUSH_QUERY_DELIVERY_IDS + 3 }, (_, i) =>
+      id32(`delivery-${i}`),
+    );
+    // Real statics, since `aclRecord` seals against whatever this map holds.
+    for (const deliveryId of ids) clientStatics.set(deliveryId, await generateNoiseKeyPair());
+    records = ids.map((deliveryId, i) => aclRecord(deliveryId, `phone ${i}`));
+
+    await sendPush(deps({ seal: realSeal }), 'pty-1', 'build finished');
+
+    const reached = lastRecipients();
+    expect(reached).toHaveLength(MAX_PUSH_QUERY_DELIVERY_IDS);
+    expect(reached).toEqual(ids.slice(-MAX_PUSH_QUERY_DELIVERY_IDS));
+    // The three oldest are the ones dropped, never the most recently paired.
+    expect(reached).not.toContain(ids[0]);
+    expect(reached).toContain(ids.at(-1));
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('keeps sealing for the rest when one recipient cannot be sealed for', async () => {
+    // A corrupt record must cost that phone its notification, not every phone
+    // its notification.
+    records = [aclRecord(PHONE, 'iPhone Safari'), aclRecord(TABLET, 'iPad')];
+    const seal: AlertPushDeps['seal'] = (clientStaticPublicKey, plaintext) =>
+      clientStaticPublicKey === records[0]!.clientStaticPublicKey
+        ? Promise.resolve(null)
+        : realSeal(clientStaticPublicKey, plaintext);
+
+    const summary = await sendPush(deps({ seal }), 'pty-1', 'build finished');
+
+    expect(lastRecipients()).toEqual([TABLET]);
+    expect(summary.targeted).toBe(1);
   });
 
   it('reaches nobody, loudly, when this Host has no usable static', async () => {
