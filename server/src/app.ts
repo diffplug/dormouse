@@ -16,6 +16,7 @@ import type { NodeWebSocket } from '@hono/node-ws';
 import { serveStatic } from '@hono/node-server/serve-static';
 import {
   API_ROUTES,
+  CEREMONY_FIELD_LIMIT,
   DELIVERY_ID_LENGTH,
   HELLO_ROUTE,
   HostChallengeIssuer,
@@ -29,6 +30,7 @@ import {
   fromBase64Url,
   getWebCrypto,
   helloResponse,
+  isBoundedBase64Url,
   isExactBase64Url,
   isOrigin,
   isPresenceBinding,
@@ -464,6 +466,14 @@ export function createApp(config: AppConfig): CreatedApp {
       // Reject any key we could not verify assertions against later.
       if (!(await importableSpkiP256(body.publicKey))) {
         return c.json({ error: 'unimportable public key' }, 400);
+      }
+      // And any credential id we could not hand back. It is stored verbatim and
+      // returned to every later `setup/begin` as an `existingCredentialIds`
+      // entry, which the Client base64url-decodes — so one malformed id from a
+      // holder of one live setup token wedges passkey registration for the
+      // account until `account.json` is hand-edited.
+      if (!isBoundedBase64Url(body.credentialId, CEREMONY_FIELD_LIMIT)) {
+        return c.json({ error: 'malformed credentialId' }, 400);
       }
 
       try {

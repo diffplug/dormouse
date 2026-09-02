@@ -13,6 +13,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  CEREMONY_FIELD_LIMIT,
   DEFAULT_CHALLENGE_TTL_MS,
   DEFAULT_PAIRING_TTL_MS,
   E2E_INIT_BURST,
@@ -22,7 +23,9 @@ import {
   MAX_E2E_CIPHERTEXT_LENGTH,
   MAX_CLIENT_ID_LENGTH,
   NoiseTransportSession,
+  fromBase64Url,
   generateNoiseKeyPair,
+  isPairingOutcomeV1,
   mintNoiseStaticKeyPair,
   toBase64Url,
   type HostAclRecord,
@@ -35,6 +38,8 @@ import type { PendingPairing } from './pairing-approval';
 import { FakeSocket } from '../test-fake-socket';
 import {
   createTestAuthenticator,
+  e2eFramesFor,
+  flushUntil,
   openConnectionSession,
   openPairingSession,
   presenceProofFor,
@@ -632,6 +637,88 @@ describe('RemoteHost bounds', () => {
     }
     expect(sessions[1]!.disposed).toBe(false);
     expect(host.establishedSessionCount).toBe(1);
+  });
+
+  // --- What the Host puts on the wire --------------------------------------
+
+  it('bounds its own label, so an outcome the phone would discard is never sent', async () => {
+    // The Client's outcome guards refuse any field over `CEREMONY_FIELD_LIMIT`.
+    // An unbounded machine name would pair on the laptop and be thrown away by
+    // the phone, leaving the two permanently disagreeing about being paired.
+    const created = new RemoteHost({
+      enrollment: { ...enrollment, label: 'L'.repeat(CEREMONY_FIELD_LIMIT + 100) },
+      reconnect: false,
+      createWebSocket: () => (socket = new FakeSocket()),
+      loadAcl: () => [] as HostAclRecord[],
+      saveAcl: () => {},
+      requestApproval: (pending) => approvals.push(pending),
+      dismissApproval: () => {},
+      now: clock.now,
+      setTimer: clock.setTimer,
+    });
+    created.start();
+    socket.open();
+    host.stop();
+    host = created;
+
+    const invitation = await host.mintInvitation(
+      randomBase64Url(32),
+      clock.now() + DEFAULT_PAIRING_TTL_MS,
+    );
+    const session = await openPairingSession({
+      socket,
+      hostId: enrollment.hostId,
+      clientId: 'c1',
+      invitation,
+      clientStatic: await generateNoiseKeyPair(),
+    });
+    sendE2eFrame(socket, {
+      clientId: 'c1',
+      hostId: enrollment.hostId,
+      kind: 'pairing',
+      id: invitation.inviteId,
+      step: 'transport',
+      ct: toBase64Url(
+        session!.sendControl({
+          code: '42',
+          label: 'iPhone Safari',
+          presence: await presenceProofFor(authenticator, {
+            kind: 'pairing',
+            hostId: enrollment.hostId,
+            handshakeHash: toBase64Url(session!.handshakeHash),
+            passkeyCredentialId: authenticator.credentialId,
+          }),
+        }),
+      ),
+    });
+    await settleUntil(() => approvals.length > 0);
+    approvals[0]!.approve('42');
+    const outcome = await readOutcome(socket, session!, 'pairing', invitation.inviteId);
+
+    expect(isPairingOutcomeV1(outcome)).toBe(true);
+    expect((outcome.hostLabel as string).length).toBeLessThanOrEqual(CEREMONY_FIELD_LIMIT);
+  });
+
+  it('treats an over-size application message as the caller’s error, not host loss', async () => {
+    const first = await establish('c1');
+
+    // Refused before the first `encryptWithAd`, so no ciphertext exists and no
+    // counter moved: killing the session here would turn a caller's size error
+    // into a re-handshake, which costs the user a fresh authenticator prompt.
+    sessions[0]!.send({ oversize: 'x'.repeat(2 * 1024 * 1024) });
+    await settle();
+    expect(sessions[0]!.disposed).toBe(false);
+    expect(host.establishedSessionCount).toBe(1);
+
+    // And the stream is exactly as synchronized as it was.
+    sessions[0]!.send({ ok: true });
+    const frame = await flushUntil(() =>
+      e2eFramesFor(socket, 'connection', first.connectionId)
+        .filter((f) => f.step === 'transport')
+        .at(-1),
+    );
+    const receipt = first.session.receive(fromBase64Url(frame.ct as string));
+    expect(receipt.kind).toBe('app');
   });
 
   it('leaves no timer armed once the Host stops', async () => {

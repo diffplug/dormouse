@@ -21,6 +21,7 @@ import {
   WS_CLOSE_HOST_REPLACED,
   WS_ROUTES,
   WS_TOKEN_PARAM,
+  boundedHostLabel,
   boundedPairingLabel,
   constantTimeEqual,
   createNoiseResponder,
@@ -984,7 +985,7 @@ export class RemoteHost {
     this.#sendPairingOutcome(clientId, pending, {
       ok: true,
       hostStaticPublicKey,
-      hostLabel: this.#enrollment.label ?? '',
+      hostLabel: boundedHostLabel(this.#enrollment.label),
       accountId: record.accountId,
       passkeyCredentialId: record.passkeyCredentialId,
       passkeyPublicKeyHash: record.passkeyPublicKeyHash,
@@ -1225,7 +1226,7 @@ export class RemoteHost {
     state.established = undefined;
     this.#sendControl(clientId, 'connection', pending.connectionId, pending.session, {
       ok: true,
-      hostLabel: this.#enrollment.label ?? '',
+      hostLabel: boundedHostLabel(this.#enrollment.label),
     } satisfies ConnectionOutcomeV1);
     if (!this.#createSession) {
       // No remote-api behind this Host: the outcome is the whole answer, and
@@ -1371,6 +1372,15 @@ export class RemoteHost {
         this.#sendE2e(clientId, 'connection', connectionId, 'transport', ciphertext);
       }
     } catch {
+      // **Only a poisoned session is host loss.** An over-cap message is
+      // refused before the first `encryptWithAd`, so no ciphertext exists and
+      // no counter moved — disposing there would turn a caller's size error
+      // into a re-handshake, which costs the user a fresh authenticator prompt,
+      // and would do it re-entrantly from inside `#onEstablishedFrame`'s loop.
+      if (!session.isPoisoned) {
+        console.warn('[remote-host] discarding an application message the transport refused');
+        return;
+      }
       this.#disposeEstablished(clientId);
     }
   }

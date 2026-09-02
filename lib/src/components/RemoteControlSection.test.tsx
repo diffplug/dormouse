@@ -581,6 +581,32 @@ describe('RemoteControlSection', () => {
     expect(buttonLabelled('New code')).toBeTruthy();
   });
 
+  // Four states reach this panel and only two of them mean a phone is waiting.
+  // `expired` in particular — the refresh timer runs late whenever the window
+  // is backgrounded or the laptop wakes from sleep — must not read as a scan
+  // (`docs/specs/remote-security-model.md` → Pairing).
+  it.each([
+    ['reserved', 'This code is used up.', 'nobody scanned it'],
+    ['consumed', 'This code is used up.', 'nobody scanned it'],
+    ['dropped', 'This code is no longer valid — nobody scanned it.', 'Scanned.'],
+    ['expired', 'This code expired — nobody scanned it.', 'Scanned.'],
+  ])('reads a %s invitation as the fact it is', async (state, expected, forbidden) => {
+    const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : enrolled()));
+    platform = { remoteHost: link };
+    await render();
+    await act(async () => buttonLabelled('Set up a phone')!.click());
+    await settleQrChunk();
+
+    await act(async () => {
+      link.emit('invitation', { name: 'invitation', inviteId: 'invite-1', state });
+    });
+    expect(container.querySelector('svg[role="img"]')).toBeNull();
+    expect(text()).toContain(expected);
+    expect(text()).not.toContain(forbidden);
+    // And the way out is always one click away.
+    expect(buttonLabelled('New code')).toBeTruthy();
+  });
+
   it('drops the panel when the machine enrolls somewhere else under it', async () => {
     // A code belongs to the server that minted it. The console hook can swap
     // enrollments with this dialog open, and a QR left on screen would point a

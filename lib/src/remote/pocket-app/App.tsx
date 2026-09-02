@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import {
   PocketClient,
+  ServerRefusalError,
   SessionExpiredError,
   type ConnectResult,
   type PocketSocket,
@@ -368,9 +369,24 @@ export default function App({
         if (client.sessionToken === null) {
           // A browser with no usable passkey registers one with the scanned
           // token; anything else signs in with what it already holds.
-          if (hasPriorUseNow(client, passkeyAlreadyRegistered)) {
-            await client.signin();
-          } else {
+          let mustRegister = !hasPriorUseNow(client, passkeyAlreadyRegistered);
+          if (!mustRegister) {
+            try {
+              await client.signin();
+            } catch (err) {
+              // **A Server that refuses the assertion outranks this browser's
+              // own record of prior use.** `setup` caches the passkey before
+              // `setupFinish`, so a first run whose `finish` never reached the
+              // Server leaves a browser that reads as returning while holding a
+              // credential the account never got. Without this, every later
+              // scan signs in, fails, and clearing site data is the only way
+              // out. A refusal is proof there is nothing to sign in against; a
+              // dismissed prompt or a dead radio is not, and propagates.
+              if (!(err instanceof ServerRefusalError)) throw err;
+              mustRegister = true;
+            }
+          }
+          if (mustRegister) {
             try {
               await client.setup({ setupToken: invitation.setupToken }, label);
             } catch (err) {

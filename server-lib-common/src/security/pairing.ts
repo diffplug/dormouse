@@ -45,3 +45,16 @@ const PAIRING_LABEL_LIMIT = 64;
 export function boundedPairingLabel(value: unknown): string {
   return boundedPushText(value, { limit: PAIRING_LABEL_LIMIT, fallback: '(unnamed)' });
 }
+
+/**
+ * The Host's *own* label, reduced before it goes on the wire.
+ *
+ * Not attacker-chosen — it is the machine's name — but the Client's outcome
+ * guards refuse any field over `CEREMONY_FIELD_LIMIT`, so an unbounded one
+ * would pair on the laptop and be discarded by the phone, leaving the two
+ * permanently disagreeing about whether they are paired. Empty is a legal
+ * answer, unlike a device label nobody would recognize unnamed.
+ */
+export function boundedHostLabel(value: unknown): string {
+  return boundedPushText(value, { limit: PAIRING_LABEL_LIMIT, fallback: '' });
+}

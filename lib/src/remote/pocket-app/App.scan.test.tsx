@@ -17,7 +17,11 @@ import { generateNoiseKeyPair, toBase64Url, type PairingInvitation } from 'serve
 
 import App, { UNSUPPORTED_BROWSER_TITLE } from './App';
 import type { ConnectResult, PairingResult } from '../client/pocket-client';
-import { SETUP_CODE_DEAD_MESSAGE, SetupTokenInvalidError } from '../client/pocket-client';
+import {
+  SETUP_CODE_DEAD_MESSAGE,
+  ServerRefusalError,
+  SetupTokenInvalidError,
+} from '../client/pocket-client';
 import type { KnownHostV1 } from '../client/pocket-db';
 import {
   alertText,
@@ -352,6 +356,47 @@ describe('a phone that is already signed in', () => {
     await pasteCode(url);
 
     expect(alertText(container)).toBe(SETUP_CODE_DEAD_MESSAGE);
+    expect(fake.pair).not.toHaveBeenCalled();
+  });
+
+  it('registers when the Server refuses the sign-in this browser thought it could do', async () => {
+    // `setup` caches the passkey before `setupFinish`, so a first run whose
+    // `finish` never reached the Server leaves a browser that reads as
+    // returning while holding a credential the account never got. Every later
+    // scan would sign in, fail, and leave clearing site data as the only way
+    // out — so a Server *refusal* outranks this browser's own record.
+    const { url, invitation } = await invitationUrl();
+    fake.hasPriorUse = true;
+    fake.signin.mockReset().mockImplementationOnce(async () => {
+      throw new ServerRefusalError('unknown credential');
+    });
+    fake.signin.mockImplementation(async () => {
+      fake.sessionToken = 'tok';
+      return {};
+    });
+    fake.pair.mockResolvedValue({ ok: true, record: await knownHost(invitation.hostId) });
+    await boot();
+
+    await pasteCode(url);
+
+    expect(fake.setup).toHaveBeenCalledWith({ setupToken: invitation.setupToken }, DEVICE_LABEL);
+    // The token made the passkey, so there is nothing left to retire, and the
+    // scan carries on into the pairing it was for.
+    expect(fake.retireSetupToken).not.toHaveBeenCalled();
+    expect(fake.pair).toHaveBeenCalledOnce();
+  });
+
+  it('does not register when the sign-in failed for any other reason', async () => {
+    // A dismissed authenticator prompt or a dead radio proves nothing about
+    // what the Server holds, so it must not spend the scanned token.
+    const { url } = await invitationUrl();
+    fake.hasPriorUse = true;
+    fake.signin.mockReset().mockRejectedValue(new Error('The operation was aborted.'));
+    await boot();
+
+    await pasteCode(url);
+
+    expect(fake.setup).not.toHaveBeenCalled();
     expect(fake.pair).not.toHaveBeenCalled();
   });
 

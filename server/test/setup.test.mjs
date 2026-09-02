@@ -222,6 +222,29 @@ test('setup/finish rejects an unimportable public key', async () => {
   assert.match((await res.json()).error, /public key/);
 });
 
+test('setup/finish rejects a credentialId it could not hand back', async () => {
+  // It is stored verbatim and returned to every later `setup/begin` as an
+  // `existingCredentialIds` entry, which the Client base64url-decodes — so one
+  // malformed id from a holder of one live setup token would wedge passkey
+  // registration for the account until `account.json` is hand-edited.
+  const { app } = await freshApp();
+  const authenticator = await newAuthenticator();
+  const { token, challenge } = await beginWithToken(app);
+
+  const res = await post(app, API_ROUTES.setupFinish, {
+    setupToken: token,
+    credentialId: '!!!not base64url!!!',
+    publicKey: authenticator.publicKey,
+    clientDataJSON: registrationClientData({ challenge }),
+    label: 'x',
+  });
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).error, /credentialId/);
+
+  // And the account is still registrable — nothing was stored.
+  assert.equal((await register(app, authenticator)).status, 200);
+});
+
 test('origin/rpId derive from config', async () => {
   const { app } = await freshApp();
   const { token } = await mintSetupToken(app);
