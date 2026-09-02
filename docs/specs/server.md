@@ -807,10 +807,8 @@ to honor:
   file that no longer names it: an installer rerun rewrites the offer, and that
   new origin is one nobody reviewed. `enrollOffer` takes `{ origin, label }` —
   the origin reviewed, never the one enrolled against, which stays the file's.
-- **The card outlives its offer.** The poll sees the file unlinked the moment an
-  enroll redeems it, so the card keeps rendering while that enroll is in flight
-  or holding an error: a refusal landing after the card went away is silence
-  over a spent token.
+- **The card outlives its offer**, so a refusal landing after the enroll unlinked
+  the file is not silence over a spent token.
 - **Only one enrollment may run.** One synchronous gate covers both forms and
   pre-render double clicks.
 - **The password is passed through, never held.** It goes straight to the
@@ -824,24 +822,27 @@ to honor:
   included.
 - **Enrolled, "Set up a phone" opens an inline QR panel**, so a phone is set up
   by pointing a camera at the laptop rather than typing an origin and a 64-hex
-  password. It mints on open and never before — a code is a credential with a
-  clock on it — re-mints shortly before `expiresAt` while the panel stays open,
-  and always offers New code and Done, the only exit from a dead code
-  (`RemoteControlSection.test.tsx`). Rules it exists to honor:
-  - **The panel owns its busy and error**, not the section's shared pair: a mint
-    also fires on a timer, and the view's one error slot belongs to what the
-    user clicked.
+  password. It mints on open and never before, re-mints shortly before
+  `expiresAt` while the panel stays open, and always offers New code and Done,
+  the only exit from a dead code (`RemoteControlSection.test.tsx`). Rules it
+  exists to honor:
+  - **The panel owns its busy and error**, not the section's shared pair, since
+    its mint also fires on a timer.
   - **Must clamp refresh delay to `[30 s, DEFAULT_PAIRING_TTL_MS - 20 s]`.** The
     floor stops a fast-clock mint loop; the TTL ceiling replaces a slow-clock
     code before its real Server expiry.
   - **The code being replaced stays on screen** until its replacement lands;
     only a first mint blanks.
   - **An invitation state change flips only the panel showing that `inviteId`**,
-    so a second window offering a different code stays live. **The panel stays
-    subscribed past the QR**, because two flips matter: `reserved` (a phone
-    completed the handshake, so the code is spent whatever the laptop decides)
-    and `consumed` (that decision is made, so the panel **must stop sending the
-    user to a phone**).
+    so a second window offering a different code stays live, and **the panel
+    stays subscribed past the QR**: `reserved` spends the code, `consumed` says
+    the request it produced has been answered.
+  - **The panel reports which decision ended the code**, in fixed copy per
+    outcome. Every one of them spends the invitation and dismisses the modal, so
+    a mismatch — one attempt, no retry — would otherwise read exactly like a
+    success, the paired count being absolute. The outcome rides the same
+    `consumed` event; a retirement nobody decided carries none, and the section
+    reports one too, since the modal can be answered with the panel shut.
   - **The view is keyed by enrollment identity and the QR sits behind its own
     error boundary**: a server swap drops the stale code, and a failed chunk
     fetch or a refused encode costs a retry button rather than the app-wide

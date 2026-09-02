@@ -21,7 +21,11 @@
  * a webview answer can never widen it.
  */
 
-import type { InvitationState, RemoteHostStatus } from '../../remote/host/remote-host';
+import type {
+  InvitationState,
+  PairingOutcome,
+  RemoteHostStatus,
+} from '../../remote/host/remote-host';
 
 /** Transport event names for what the service sends back. */
 export const REMOTE_HOST_RESULT_EVENT = 'remoteHost:result';
@@ -118,6 +122,19 @@ export interface InvitationEvent {
   name: 'invitation';
   inviteId: string;
   state: InvitationState;
+  /**
+   * How the ceremony this code produced ended, where one did — the only way the
+   * Settings panel can tell a mistyped confirmation from a success, since both
+   * spend the code and dismiss the modal.
+   *
+   * **On this event rather than beside it.** The state and the outcome are one
+   * transition (`PairingOutcome`), so carrying them together is what keeps the
+   * panel from painting the state-only sentence and then correcting itself; and
+   * `inviteId` already names which panel is concerned, so a sibling event would
+   * need the same correlation for nothing. Absent means nobody decided
+   * anything: an un-scanned code that expired, or a teardown.
+   */
+  outcome?: PairingOutcome;
 }
 
 // --- Command parameter shapes ---

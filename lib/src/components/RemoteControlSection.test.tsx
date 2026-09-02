@@ -17,7 +17,7 @@ vi.mock('../lib/platform', () => ({
   getPlatform: () => platform,
 }));
 
-import { RemoteControlSection } from './RemoteControlSection';
+import { PAIRING_OUTCOME_LABEL, RemoteControlSection } from './RemoteControlSection';
 import type { RemoteHostConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
 import {
   enrolledStatus,
@@ -108,6 +108,16 @@ async function openSetupPanel(): Promise<ReturnType<typeof makeLink>> {
 
 function text(): string {
   return container.textContent ?? '';
+}
+
+/**
+ * The region that reports how a pairing ended, by the accessible name the
+ * walkthrough waits on too (`PAIRING_OUTCOME_LABEL`).
+ */
+function outcomeRegion(): HTMLElement | null {
+  return container.querySelector<HTMLElement>(
+    `[role="status"][aria-label="${PAIRING_OUTCOME_LABEL}"]`,
+  );
 }
 
 function buttonLabelled(label: string): HTMLButtonElement | undefined {
@@ -624,6 +634,91 @@ describe('RemoteControlSection', () => {
     expect(text()).not.toContain(forbidden);
     // And the way out is always one click away.
     expect(buttonLabelled('New code')).toBeTruthy();
+  });
+
+  // The panel is behind the modal for the whole ceremony, so the sentence it is
+  // left showing is the only report the person at this machine gets: the count
+  // above it is absolute, and does not move when a mistyped code pairs nothing.
+  it.each([
+    ['paired', 'This phone is paired with this machine.'],
+    ['code-mismatch', 'The two digits did not match, so nothing was paired.'],
+    ['cancelled', 'You cancelled this request, so nothing was paired.'],
+    ['expired', 'The request expired before it was answered, so nothing was paired.'],
+    ['superseded', 'Another pairing request replaced this one, so nothing was paired.'],
+    ['host-error', 'This machine could not finish pairing, so nothing was paired.'],
+  ])('says a %s ceremony ended that way, in an announced region', async (outcome, expected) => {
+    const link = await openSetupPanel();
+
+    await act(async () => {
+      link.emit('invitation', {
+        name: 'invitation',
+        inviteId: 'invite-1',
+        state: 'consumed',
+        outcome,
+      });
+    });
+
+    expect(outcomeRegion()?.textContent).toContain(expected);
+    // The sentence the Host used to leave behind for every one of these.
+    expect(text()).not.toContain('This setup code is finished.');
+    expect(buttonLabelled('New code')).toBeTruthy();
+  });
+
+  it('falls back to the state when the outcome is one this build has no sentence for', async () => {
+    // The service is typed to send a member of the closed set, so this is a
+    // bridge sending something else — and reporting a ceremony ended while
+    // saying nothing about it would be worse than the old, vaguer sentence.
+    const link = await openSetupPanel();
+
+    await act(async () => {
+      link.emit('invitation', {
+        name: 'invitation',
+        inviteId: 'invite-1',
+        state: 'consumed',
+        outcome: 'sideways',
+      });
+    });
+
+    expect(outcomeRegion()).toBeNull();
+    expect(text()).toContain('This setup code is finished.');
+  });
+
+  it('reports the outcome under the section when the panel was never opened', async () => {
+    // The modal interrupts whatever is on screen, so the request can be
+    // answered from a Settings dialog that never opened this panel.
+    const link = makeLink(async () => enrolled({ pairedClients: 0 }));
+    platform = { remoteHost: link };
+    await render();
+
+    await act(async () => {
+      link.emit('invitation', {
+        name: 'invitation',
+        inviteId: 'someone-elses',
+        state: 'consumed',
+        outcome: 'code-mismatch',
+      });
+    });
+
+    expect(outcomeRegion()?.textContent).toContain('The two digits did not match');
+    expect(text()).toContain('No phone has paired with this machine yet.');
+  });
+
+  it('clears the last report when the user takes the new code it asked for', async () => {
+    const link = await openSetupPanel();
+    await act(async () => {
+      link.emit('invitation', {
+        name: 'invitation',
+        inviteId: 'invite-1',
+        state: 'consumed',
+        outcome: 'code-mismatch',
+      });
+    });
+    expect(outcomeRegion()).toBeTruthy();
+
+    await act(async () => buttonLabelled('New code')!.click());
+    await settleQrChunk();
+    expect(outcomeRegion()).toBeNull();
+    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
   });
 
   it('drops the panel when the machine enrolls somewhere else under it', async () => {
