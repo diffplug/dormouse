@@ -3,6 +3,8 @@ import { Meta, Canvas } from '@storybook/addon-docs/blocks';
 import * as RemoteControl from '../../lib/src/stories/RemoteControlSection.stories';
 import * as Pairing from '../../lib/src/stories/RemotePairingModal.stories';
 import * as SetupOrSignin from '../../lib/src/stories/SetupOrSignin.stories';
+import * as ScanInvitation from '../../lib/src/stories/ScanInvitation.stories';
+import * as PairingCode from '../../lib/src/stories/PairingCodeView.stories';
 import * as HostsView from '../../lib/src/stories/HostsView.stories';
 import * as PocketWall from '../../lib/src/stories/PocketWall.stories';
 
@@ -104,8 +106,8 @@ The setup password gates exactly two things: creating the one account, and
 enrolling a Host from somewhere else. It never leaves your machine except to
 those two endpoints — and on a happy path you never read it out at all: a Host
 on *this* laptop enrolls from the one-time offer the installer leaves it
-(section 3), and the phone sets itself up from a scanned code (section 4).
-`show-password` is the fallback both of those have.
+(section 3), and the phone sets itself up from a scanned code (section 4), which
+is the *only* way the phone can. `show-password` is the enrollment fallback.
 
 ---
 
@@ -198,77 +200,69 @@ has provably read this screen — which is what makes it worth something in §6.
 (`docs/specs/server.md` → Setup tokens and the pairing QR owns the grammar.)
 
 Neither lives long: five minutes, one use. The code is shown on request rather
-than left standing on screen, and once a phone redeems it the panel says so
-rather than going on offering a code that can no longer work — the server tells
-the Host that minted it, since the redemption happened on the phone.
+than left standing on screen, and the panel says so the moment a phone completes
+a handshake against the invitation rather than going on offering a code that can
+no longer work — the laptop knows that itself, because the key it was completed
+against is the laptop's own.
 
 ---
 
-## 4. Make a passkey on the phone
+## 4. Scan it with the phone
 
-Point the phone's camera at that code. It opens the same origin on the phone,
-and Pocket has read both secrets before it paints anything: the hash is taken
-out of the URL in the same act, so neither is left in the address bar, the
-history stack, or a screenshot.
-
-<Canvas of={SetupOrSignin.FromScannedCode} />
-
-**On iOS, install to the Home Screen before you do any of this** — the installed
-app is a separate storage partition from the Safari tab, so anything set up in
-the tab has to be set up again from scratch, and the code does not follow you
-across (the installed app launches at its own start URL, with no hash on it).
-
-There is no password field, because the code is the credential; all that is left
-is a label for the passkey. Setup also leads on a phone that *has* been here
-before — pointing a camera at a laptop is not an ambiguous request:
-
-<Canvas of={SetupOrSignin.FromScannedCodeReturning} />
-
-Sign in stays on the screen throughout. A passkey syncs, so a second phone may
-already hold one, and taking that path keeps the scanned invitation for §6
-either way.
-
-If the code is expired or already spent, Pocket says so and drops it rather than
-stranding you on a dead code — putting the setup password on the screen in its
-place, unfolded, with whatever label you had already typed still in the field:
-
-<Canvas of={SetupOrSignin.SetupAfterDeadCode} />
-
-That password path is also the original one, for a phone nowhere near the
-laptop's screen: the setup password from `manage show-password`, plus the label.
+Open the server origin on the phone. A browser that has never been here has
+exactly one thing it can do, and the screen leads with it:
 
 <Canvas of={SetupOrSignin.FirstRun} />
 
-Either way, that one setup action creates the account's first passkey and signs
-in with it. Two things you cannot see happen at the same time:
+**On iOS, install to the Home Screen before you do any of this** — the installed
+app is a separate storage partition from the Safari tab, so anything set up in
+the tab has to be set up again from scratch. Pocket says so on this screen,
+above the action rather than after it:
 
-- A **per-Host key** is minted — a non-extractable X25519 keypair kept in
-  IndexedDB. This browser can agree with it and can never export it. It is this
-  browser's identity *for this laptop*, and it is what the laptop is about to
-  authorize; a different laptop gets a different key.
+<Canvas of={SetupOrSignin.FirstRunNeedsInstall} />
+
+**Scan a Host QR** opens a rear-camera scanner inside Pocket. It reads the code
+as *data* — nothing navigates, and the text goes straight to the one parser that
+decides whether it is a pairing code for this server — with a paste field beside
+it, because a desktop browser and the localhost dev loop have no camera:
+
+<Canvas of={ScanInvitation.Scanning} />
+
+Pointing the phone's *own camera* at the laptop instead is a different thing,
+and Pocket treats it as one. Following that link reaches the right origin and
+nothing else: the fragment is erased before the first render, nothing from it is
+kept, and the code is not spent. On iOS the camera opens Safari, which is not
+where the installed app's keys live, so the only useful thing left to say is
+where to scan:
+
+<Canvas of={SetupOrSignin.ArrivedByCamera} />
+
+There is no setup password anywhere in this flow, and no typed credential: the
+code on the laptop's screen *is* the credential. A phone that already holds a
+passkey signs in instead and scans only to add a machine:
+
+<Canvas of={SetupOrSignin.Welcome} />
+
+Either way, that one action creates the account's first passkey (or signs in
+with a synced one) and moves straight into pairing. Three things happen that you
+cannot see:
+
+- A **per-Host key** is minted — a non-extractable X25519 keypair, held in
+  memory until the laptop approves and only then written to IndexedDB. This
+  browser can agree with it and can never export it. It is this browser's
+  identity *for this laptop*; a different laptop gets a different key.
+- **The code is spent either way.** A phone with no passkey redeems it to
+  register one; a phone that already has one retires it at
+  `POST /api/setup/retire`, so a photograph of the laptop's screen cannot
+  register a passkey afterwards. A refusal stops the run — a dead code is one
+  the laptop would refuse too.
 - The session token that lets the phone open a relay socket is issued. Presence
   itself is proved again inside the pairing channel, over a challenge derived
   from that handshake, so signing in buys routing rather than authorization.
 
-With no code and nothing stored, sign in is the quieter second option, because
-passkeys sync — a phone that has never been here may already hold one. If such a
-phone tries setup anyway, its authenticator refuses to duplicate a passkey the
-server already registered, and Pocket puts sign-in back in front. A phone
-that *has* been here, and did not arrive by camera, gets the other screen
-instead: sign-in first, with setup folded back behind a disclosure.
-
-<Canvas of={SetupOrSignin.Welcome} />
-
-In an iOS Safari tab, Pocket puts that install advice on the screen itself,
-above the fields, while it is still free to take:
-
-<Canvas of={SetupOrSignin.FirstRunNeedsInstall} />
-
-The installed app is a separate storage partition from the tab, so it gets its
-own keys and needs its own pairing. Setting up in the tab means
-doing all of it twice, and iOS delivers Web Push only to an installed app.
-Nothing stops you — it is advice, not a gate — but there is no reason to take
-it in the wrong window.
+A browser that cannot do X25519 at all never gets here: Pocket probes for it
+before any of the above and shows a fixed upgrade requirement instead. Runtimes
+are gated, not degraded.
 
 ---
 
@@ -276,17 +270,19 @@ it in the wrong window.
 
 <Canvas of={HostsView.MixedList} />
 
-One row per enrolled Host. A row is offline when no Dormouse instance currently
-holds that server's relay slot. The card above them is push, which §7 comes back
-to.
+One row per machine **this phone holds a key for** — a Host enrolled on the
+server but never paired with this browser is not a row at all. The label comes
+from the record, which learned it inside an encrypted pairing outcome; only the
+online dot comes from the server. The card above them is push, which §7 comes
+back to.
 
-Each row offers exactly one action, and which one is not a guess. Pocket asks
-every online Host whether its ACL already holds a record for this browser, so
-**Pair** appears where pairing is the actual next step and **Connect** only
-where it can succeed. The phone does keep a local note of what it has paired,
-but that note is the fallback for a Host that cannot be asked — the laptop is
-the one that knows, and its answer wins. Asking is advisory and nothing more:
-it moves a button, never a decision.
+Each row offers exactly one action, and nothing is asked to decide which.
+**Connect** is offered where this browser holds an authorized record, and
+**Pair again** where an authenticated denial took that authorization away —
+which is the only thing that can move a row, and which keeps the pinned Host key
+while dropping the authorization. **Remove** forgets the machine locally, and
+queues the deletion of its push mapping first, because the id in the record is
+the only handle that can name that row again.
 
 ---
 
@@ -310,7 +306,10 @@ The handshake runs against the one-use key printed in the QR, which never left
 the laptop, so a phone that completes it has provably read *this* screen. The
 server sees two routing ids and a handshake hash.
 
-Then the laptop interrupts, and the phone shows two digits you have to type:
+Then the phone shows two digits, and the laptop asks for them. The phone paints
+them the moment they exist, before it knows how any of this ends:
+
+<Canvas of={PairingCode.Waiting} />
 
 <Canvas of={Pairing.Default} />
 
@@ -445,10 +444,10 @@ Three limits worth knowing before they surprise you:
   the moment a phone completes the handshake against it, so a re-pair later
   needs a fresh code; the one a reload loses is simply gone — five minutes was
   its whole life anyway.
-- **A code can never reach an installed iOS Pocket at all.** The camera opens
-  Safari, which is the other storage partition (§4), and the Home Screen app
-  launches at its own start URL with no hash on it. So "show a fresh code" is
-  not a recovery there: the setup password is the one that works.
+- **A code opened by the phone's camera never reaches an installed iOS Pocket.**
+  The camera opens Safari, which is the other storage partition (§4), and the
+  Home Screen app launches at its own start URL with no hash on it. The recovery
+  is to open the installed app and scan the same code from inside it.
 - **A dropped WebSocket returns the phone to the Hosts view.** Tap Connect
   again; there is no resume protocol.
 
@@ -458,11 +457,11 @@ Three limits worth knowing before they surprise you:
 
 So nothing above reads as a promise:
 
-- **The phone half is mid-cutover.** The laptop speaks only the end-to-end
-  ceremonies described above; Pocket switches to them in stage 4b of
+- **The server still carries the legacy path.** Nothing speaks it — the laptop
+  never did, and the phone no longer does — but the relay still routes those
+  frames and the Server still serves the routes behind them until stage 4c of
   **Scope: e2e-client-host** (`docs/specs/remote-security-model.md` →
-  `## Future`), and the phone screens shown here are the ones it still renders
-  until then.
+  `## Future`) deletes them.
 - **Revocation is editing a JSON file by hand.** There is no management UI and
   no relay frame carries a revocation; a removed record takes effect after the
   Host is restarted.

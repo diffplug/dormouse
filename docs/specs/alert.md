@@ -375,6 +375,4 @@ forwards ciphertext. Recipients are already named by opaque `deliveryId`. The de
 Host still reads its active ACL at send time and the Server still refuses a
 send that names nobody — while the render sink moves from a verbatim-copied
 worker to a built one that decrypts and re-sanitizes
-([pocket-app.md](./pocket-app.md) `## Future`). Pocket retires obsolete
-delivery mappings through a durable tombstone queue and an idempotent
-authenticated deletion route ([server.md](./server.md) `## Future`).
+([pocket-app.md](./pocket-app.md) `## Future`).

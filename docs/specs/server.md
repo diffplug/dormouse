@@ -342,11 +342,10 @@ vectors, including the 146-character fragment and the longest accepted origin.
 Source of truth: `server-lib-common/src/security/pairing-invitation.ts`, with
 `#setupQr` in `lib/src/host/remote/service.ts` as the emitter. What the
 invitation half proves is
-[remote-security-model.md](./remote-security-model.md) -> Pairing. Reserved: the
-`#setup?` grammar (`SETUP_HASH_*` in `server-lib-common/src/remote/wire.ts`) is
-still parsed by Pocket at boot until stage 4b of **Scope: e2e-client-host**
-([remote-security-model.md](./remote-security-model.md) `## Future`), and no
-Host emits one.
+[remote-security-model.md](./remote-security-model.md) -> Pairing. The `#setup?`
+grammar (`SETUP_HASH_*` in `server-lib-common/src/remote/wire.ts`) now has no
+emitter and no reader; it is deleted in stage 4c
+([remote-security-model.md](./remote-security-model.md) `## Future`).
 
 Token rules, unchanged by the grammar:
 
@@ -505,8 +504,8 @@ remote-api sessions, and watchers are disposed immediately.
 **STAGE-4 TRANSITIONAL.** The legacy handshake frames — `pair`, `pair-status`,
 `connect`, `connect2`, `msg` up, `pair-result`, `pair-status-result`,
 `challenge`, `decision`, `msg` down — and the `Handshake` gate behind them are
-still routed, because the shipped Pocket client has not switched yet. No Host
-answers them. They and `Handshake` are deleted in stage 4c of **Scope:
+still routed, and now **nobody speaks them**: no Host answers them and Pocket no
+longer sends them. They and `Handshake` are deleted in stage 4c of **Scope:
 e2e-client-host** ([remote-security-model.md](./remote-security-model.md)
 `## Future`), which also pins the `hostId` shape at enrollment: `e2e` requires
 base64url of 16 bytes where `isStoredHost` accepts any string, so a hand-edited
@@ -928,18 +927,22 @@ stand-in host instead:
 — it instantiates the test harness's `FakeHost` and differs only in
 auto-approving pairing and logging.
 
-**3. Phone** (or any other browser profile): open the server origin → a browser
-that has never been here leads with the setup fields, and password + label
-create the passkey and sign you in → Hosts → **Pair** → approve in the modal on
-the laptop → one biometric prompt → pick a pane → type.
+**3. Phone** (or any other browser profile): show a code on the laptop
+(**Settings → Remote control → Show a pairing code**) and open the server origin
+on the phone. A browser that has never been here leads with **Scan a Host QR**;
+scan or paste the code, which creates the passkey and signs you in, then read
+the two digits off the phone and type them into the laptop's modal → one
+biometric prompt → pick a pane → type. There is no setup password on the phone:
+the code is the credential.
 
-Reserved: this loop is mid-cutover. The Host speaks only the end-to-end
-ceremonies, and Pocket switches to them in stage 4b of **Scope:
-e2e-client-host** ([remote-security-model.md](./remote-security-model.md)
-`## Future`); until it does, the phone side of this walkthrough does not
-complete.
+A code the phone's *own camera* opens is origin bootstrap only — Pocket erases
+the fragment, spends nothing, and asks you to scan again from inside the app,
+because on iOS the camera opens Safari rather than the installed app
+([pocket-app.md](./pocket-app.md)). On the localhost dev loop the parser's
+loopback exemption is what lets a code minted at `http://localhost:3000` parse
+at all.
 
-To test push, **add Pocket to the Home Screen before signing in** and do all of
+To test push, **add Pocket to the Home Screen before scanning** and do all of
 the above inside the installed app: iOS delivers Web Push only there, and the
 install is a separate storage partition needing its own pairing, so setting up
 in the tab first means doing it twice ([pocket-app.md](./pocket-app.md) ->

@@ -475,11 +475,14 @@ async function makeE2eHarness(
     fetch,
     mintInvitation: () => host.mintInvitation(secret(), Date.now() + DEFAULT_PAIRING_TTL_MS),
     async pairAndApprove(invitation, { code } = {}) {
+      // Counted from here: a harness that pairs twice must confirm the *new*
+      // request rather than re-answering the one still in the log.
+      const before = approvals.length;
       let shown: string | null = null;
       const pairing = client.pair(invitation, 'iPhone Safari', (value) => {
         shown = value;
       });
-      await waitFor(() => approvals.length > 0, 'the Host to surface an approval');
+      await waitFor(() => approvals.length > before, 'the Host to surface an approval');
       const pending = approvals[approvals.length - 1]!;
       pending.approve(code ? code(shown!) : shown!);
       return await pairing;
@@ -617,6 +620,24 @@ describe('pairing, end to end', () => {
 
     expect(await pairing).toEqual({ ok: false, message: HOST_UNAVAILABLE_MESSAGE });
     expect(harness.knownHosts.records.size).toBe(0);
+  });
+
+  it('queues the old delivery id when a re-pair mints a new one', async () => {
+    // The Host has forgotten this Client and pairs it again, so the row the
+    // previous id names is unreachable the moment the record is rewritten.
+    const first = await makeE2eHarness();
+    await first.pairAndApprove(await first.mintInvitation());
+    const before = (first.knownHosts.records.get(first.hostId)!.authorization as {
+      deliveryId: string;
+    }).deliveryId;
+
+    await first.pairAndApprove(await first.mintInvitation());
+
+    const after = (first.knownHosts.records.get(first.hostId)!.authorization as {
+      deliveryId: string;
+    }).deliveryId;
+    expect(after).not.toBe(before);
+    expect([...first.pendingDeletions.records.values()].map((t) => t.deliveryId)).toContain(before);
   });
 
   it('reports a Host that never answers as unavailable, not as a refusal', async () => {

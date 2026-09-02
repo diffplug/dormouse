@@ -212,9 +212,16 @@ connection share one verifier.
   Node process that owns every PTY, so a rejection is an ordinary denial.
 - **Every proof is fresh and single-use.** A dropped transport, a consumed
   challenge, a failed handshake, or a later attempt requires a new handshake,
-  Host challenge, Server nonce, and authenticator operation. A pairing costs one
-  WebAuthn prompt after sign-in, which is the price of the Host verifying
-  freshness itself rather than trusting a Server-attested window.
+  Host challenge, Server nonce, and authenticator operation. **A self-hosted
+  first run costs three authenticator prompts** — create the passkey, sign in,
+  prove presence for the pairing — and every pairing or connection after it
+  costs exactly one. That is the price of the Host verifying freshness itself
+  rather than trusting a Server-attested window.
+
+- **The Server session is authentication-plane only.** The bearer token stays
+  memory-only with its absolute 12-hour life, is never reusable proof of
+  presence for a Host, and has no app-session signing key beside it: TLS covers
+  transit, so a second key would answer no threat in scope.
 
 Source of truth: `presenceChallenge` / `isPresenceBinding` in
 `server-lib-common/src/security/presence.ts`, `verifyPresenceProof` in
@@ -312,7 +319,10 @@ Source of truth: `RemoteHost.mintInvitation` / `#onPairingInit` /
 
 Pocket accepts an outcome only after decrypting it on the cipher state for the
 expected handshake hash, and a timer expiring without one reports unavailable
-rather than denial.
+rather than denial. **The proof asserts with the record's own paired
+credential** — the sole `allowCredentials` entry for that Host, not whichever
+passkey signed this session in — and an authenticated `pairing-required` removes
+the record's local authorization while keeping its pin.
 
 Source of truth: `RemoteHost.#onConnectionInit` / `#onConnectionTransport` /
 `#promoteConnection` in `lib/src/remote/host/remote-host.ts`, and
@@ -442,9 +452,11 @@ in `lib/src/remote/host/enrollment.ts`, and
 
 **X25519 is probed, not assumed.** `probeNoiseSupport` runs one `generateKey`
 and one `deriveBits`. **Every rejection — a missing WebCrypto included — is
-`false`, never a throw**, because its callers are boot-path gates: a runtime
-that answers `false` shows a fixed upgrade requirement and performs no remote
-operation. Pocket's gate lands with its own cutover ([Future](#future)).
+`false`, never a throw**, because its callers are boot-path gates. **Runtimes
+are gated, not degraded**: a Host whose halves do not correspond stays down, and
+Pocket runs the same probe before sign-in, setup, pairing, or connection and
+shows a fixed upgrade requirement on `false`, performing no remote operation
+([pocket-app.md](./pocket-app.md)).
 
 ## Client static loss
 
@@ -520,18 +532,16 @@ machinery. Stages 1–3 landed — the suite and its vectors
 ([Noise suite](#noise-suite)), the identities ([Host identity](#host-identity)),
 and the relay-integrated harness ([server.md](./server.md) -> Relay). The
 numbering is preserved because other specs cite these stages by number.
-4. **Atomic pairing, connection, and push re-keying cutover** — **part a
-   landed**: the shared protocol, the Host's two ceremonies, and the Server's
-   routes and state ([Pairing](#pairing), [Connection](#connection),
-   [Host bounds](#host-bounds)). What remains: **(b)** Pocket switches to the
-   new protocol — native-camera bootstrap, the in-app scanner plus paste, the
-   per-Host static, Host-static pinning, and the capability gate
-   ([pocket-app.md](./pocket-app.md) `## Future`); **(c)** deletion of every
-   legacy path on all three sides — `pair`, `pair-status`, `connect`,
-   `connect2`, `msg`, the `device-key` store, the `:paired:` markers, setup
-   proofs, `verified`, the fingerprint compare, Server-issued decisions, the
-   setup-password arm of `/api/setup/*`, Host labels on the Server, and every
-   related type, fixture, and UI state.
+4. **Atomic pairing, connection, and push re-keying cutover** — **parts a and b
+   landed**: the shared protocol, the Host's two ceremonies, the Server's routes
+   and state, and Pocket's whole phone side ([Pairing](#pairing),
+   [Connection](#connection), [Host bounds](#host-bounds),
+   [pocket-app.md](./pocket-app.md)). What remains: **(c)** deletion of every
+   legacy path still standing on the Server and in the shared package —
+   `pair`, `pair-status`, `connect`, `connect2`, `msg`, the `Handshake` gate,
+   setup proofs, `verified`, the fingerprint compare, Server-issued decisions,
+   the setup-password arm of `/api/setup/*`, the `#setup?` hash grammar, Host
+   labels on the Server, and every related type, fixture, and UI state.
 5. **Bounds and flood harness.** The remaining [Host bounds](#host-bounds): the
    crypto token bucket (eight-operation burst, one per second sustained, on
    accepted `init` frames); `MAX_ESTABLISHED_E2E_SESSIONS = 16` checked at
@@ -551,8 +561,8 @@ numbering is preserved because other specs cite these stages by number.
    envelope carries `hostId`, the salt, and the ciphertext; the Server forwards
    it to the named `deliveryId`s and reads nothing, and the worker decrypts at
    the sink against the pinned record, showing a generic content-free
-   notification on any failure. Plus the worker's build and Pocket's durable
-   deletion queue ([pocket-app.md](./pocket-app.md) `## Future`).
+   notification on any failure. Plus the worker's build
+   ([pocket-app.md](./pocket-app.md) `## Future`).
 7. **Documentation and enforcement.** Deletion of superseded prose, the
    `SECURITY.md` `FAIL IF` rewrite for stages 5–6, the E2E structural lint with
    its load-bearing selftest, and the nightly application-security prompt
@@ -564,30 +574,13 @@ audit. An independent cryptographic review of the Noise integration, the
 WebAuthn channel binding, key storage, and the push construction is required
 before paid SaaS may claim this model.
 
-### Runtime gating
+### Device verification
 
-**Runtimes are gated, not degraded.** Pocket runs the built probe before
-sign-in, setup, pairing, or connection; failure shows a fixed upgrade
-requirement and performs no remote operation. The Host half is built
-([Host identity](#host-identity)); Pocket's lands with stage 4b. Two items must
-be verified on a real iOS device before that: an X25519 `CryptoKey` survives a
-structured clone into IndexedDB, and `getUserMedia` works inside a Home Screen
-web app.
-
-### Client-side records
-
-- **`KnownHostV1`.** The record and its store exist
-  ([pocket-app.md](./pocket-app.md) -> What Pocket stores); what remains is its
-  use. The paired `passkeyCredentialId` is the sole `allowCredentials` entry for
-  that Host, and an authenticated `pairing-required` outcome removes local
-  authorization without discarding the pin.
-- **`PendingDeliveryDeletionV1`.** The store exists; a tombstone is written
-  *before* a `KnownHostV1` forgets a delivery ID, and cleared only by a
-  successful deletion ([alert.md](./alert.md) `## Future`).
-- **The Server session is authentication-plane only.** The bearer token stays
-  memory-only with its existing absolute 12-hour life and is never reusable
-  proof of presence for a Host, and there is no app-session signing key: TLS
-  covers transit, so a second key would answer no threat in scope.
+Two properties of the shipped Pocket client cannot be observed anywhere but a
+real iOS device, and both are load-bearing: an X25519 `CryptoKey` surviving a
+structured clone into IndexedDB (a Client static that does not is one the phone
+loses on every reload), and `getUserMedia` working inside a Home Screen web app
+(without it the install has only the paste field).
 
 ### Revocation propagation
 

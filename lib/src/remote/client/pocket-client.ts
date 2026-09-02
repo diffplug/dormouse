@@ -728,6 +728,14 @@ export class PocketClient {
       // Terminal, and the old record is untouched — see HostIdentityMismatchError.
       throw new HostIdentityMismatchError();
     }
+    // A re-pair mints a fresh delivery id, so the one this record is about to
+    // forget has to be queued before the write that forgets it.
+    if (
+      existing?.authorization.state === 'paired' &&
+      existing.authorization.deliveryId !== outcome.deliveryId
+    ) {
+      await this.#tombstone(hostId, existing.authorization.deliveryId);
+    }
     const record: KnownHostV1 = {
       hostId,
       accountId: outcome.accountId,

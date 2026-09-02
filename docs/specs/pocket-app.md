@@ -41,55 +41,80 @@ is absent — the interface is designed for capability degradation (`getCwd` →
 null, shells/clipboard empty, alerts inert, `alertAwait` settling `cancelled`
 rather than handing back a promise that never resolves).
 
-**The auth screen leads with the half this browser can use.** Prior use is
-stored passkey material (`PocketClient.hasPriorUse`), re-derived every render so
-a half-finished setup retries into whichever half can still work. Without it,
-setup — setup password plus passkey label — is unfolded and sign-in secondary,
-since a synced passkey can reach a browser that stored nothing. With it, sign-in
-leads and setup folds behind the disclosure. **The local record must not lag the
-registration, nor outlive a refusal**: `setup` caches the public key between
-`registerPasskey` and `finish`, so a lost `finish` answer leaves a browser that
-can sign in rather than one minting a second passkey — while a `finish` the
-Server *answered* by rejecting clears it, that answer being proof there is
-nothing to sign in against. Blocked site data costs persistence, not the visit:
-`localStoragePocketStorage` mirrors writes in memory and reads the mirror first,
-since that write lands after the credential is already irreversible and a throw
-would leave every retry minting an orphan.
+**Scanning is the only way in.** There is no setup password, no typed
+credential, and no QR-less path: the code on the computer's screen is both the
+account setup and the pairing. A first run leads with the scanner; a browser
+holding a passkey leads with sign-in and keeps the scan beside it, since a
+signed-in phone still scans to pair a *new* computer. Prior use is stored
+passkey material (`PocketClient.hasPriorUse`), re-derived every render so a
+half-finished run retries into whichever half can still work. **The local record
+must not lag the registration, nor outlive a refusal**: `setup` caches the
+public key between `registerPasskey` and `finish`, so a lost `finish` answer
+leaves a browser that can sign in rather than one minting a second passkey —
+while a `finish` the Server *answered* by rejecting clears it, that answer being
+proof there is nothing to sign in against. Blocked site data costs persistence,
+not the visit: `localStoragePocketStorage` mirrors writes in memory and reads
+the mirror first, since that write lands after the credential is already
+irreversible and a throw would leave every retry minting an orphan.
 
-**A scanned code outranks that question.** Opened from a Host's QR
-([server.md](./server.md) owns the grammar), the screen leads with setup
-whatever this browser holds — pointing a camera at the laptop *is* the ask — and
-the token replaces the password field rather than joining it. **The hash is read
-before the first render and erased in the same act**, parsed or not — an address
-bar, a history stack and a screenshot are no place for a live credential — and a
-malformed one is ignored rather than reported.
+**A QR the native camera opened is origin bootstrap only.** The `#pair?`
+fragment is erased with `history.replaceState` before the first render, parsed
+or not — an address bar, a history stack and a screenshot are no place for a
+live credential — nothing from it is retained, no call is made, and the token is
+not spent. All the run keeps is a flag that leads the auth screen with *Install
+or open Pocket, then scan this Host QR in Pocket*: on iOS the camera opens
+Safari, a different storage partition from the installed app, so the keys must
+be minted where they will live.
 
-* **Sign-in stays offered** — a synced passkey may be the better path.
-* **The token is dropped on every way out of setup** — redeemed, refused, or
-  left behind by a sign-in — since its only job is the first passkey; one that
-  outlived it would lead a later session expiry into a *second* registration.
-* **A passkey the authenticator already holds outranks even the scan.**
+**The scanner reads a code as data.** `ScanInvitation` lazy-loads
+`@zxing/browser` for a rear-camera scan (iOS has no `BarcodeDetector`), never
+navigates, and hands the text to `parsePairingInvitationUrl`
+([server.md](./server.md) owns the grammar); a paste field feeds the same
+parser, since a pasted invitation is no weaker than a scanned one and a desktop
+browser or the dev loop has no camera. A `null` parse is one fixed line, because
+that parser answers a complete invitation or nothing and never a reason. **The
+camera tracks stop on every way out** — accepted, cancelled, errored, unmounted,
+and on a start that finished after the screen was gone. A refused permission is
+named and leaves paste working; every other camera failure reads the same from
+here. The invitation moves into memory-only ceremony state, which clears on
+every terminal outcome.
+
+**After the parse.** A browser with no usable passkey registers one with the
+scanned token (`setup({ setupToken })`) and signs in; one that already holds a
+passkey signs in if it must, then spends the code at `POST /api/setup/retire` so
+a photographed QR cannot register a passkey afterwards — and a refusal aborts,
+since a dead code is one the Host would refuse too. Then the per-Host static is
+minted, Noise IK runs against the invitation key, and **the two digits go on
+screen before the outcome is known and stay until it lands**: the laptop's modal
+tells the user to cancel if the phone shows no code
+([remote-security-model.md](./remote-security-model.md) → Pairing). Cancelling
+closes the relay socket — the only way out of a wait that has no other end — and
+reports nothing, because the ceremony the user abandoned has nothing left to say
+to them.
+
+* **Sign-in stays offered on a first run** — a synced passkey may be the better
+  path.
+* **A passkey the authenticator already holds outranks an empty store.**
   `excludeCredentials` refusing (`PasskeyAlreadyRegisteredError`) proves this
-  device can sign in, so the code is dropped and sign-in leads instead of a
-  setup whose every retry fails the same way.
-* **A refused token is reported, and setup stays unfolded.**
+  device can sign in, so sign-in leads instead of a registration whose every
+  retry fails the same way.
+* **A refused token is reported, never folded away.**
   `SETUP_TOKEN_INVALID_ERROR` — expired, spent, or minted by a since-revoked
-  Host — becomes `SetupTokenInvalidError`: its message goes in the alert row and
-  the setup password stays on screen, whatever this browser holds. Folding it
-  behind a returning browser's disclosure would hide the field the refusal just
-  named and remount the typed label away.
-* **The nonce lives for the run, never on disk**, riding every `pair` in it:
-  only the Host that verified against it spends it, so dropping it on another
-  Host's approval would end the ceremony silently, where a spent proof merely
-  misses ([remote-security-model.md](./remote-security-model.md) owns what it
-  proves).
+  Host — becomes `SetupTokenInvalidError`, and its message is the whole
+  recovery: show a new code on the computer.
 * **An installed iOS Pocket can never receive a scanned hash** — Camera opens
   Safari, a different partition, and the install launches at its own start URL.
-  "Show a fresh code" is no recovery there; the setup password is.
+  Scanning from inside the installed app is what the bootstrap copy asks for.
 
-Source of truth: `setup-link.ts` and `SetupOrSignin` in
-`lib/src/remote/pocket-app/App.tsx`, and `PocketClient.pair` in
-`lib/src/remote/client/pocket-client.ts`.
+**Runtimes are gated, not degraded.** `probeNoiseSupport` runs before sign-in,
+setup, pairing, or connection; `false` renders a fixed upgrade requirement and
+performs no remote operation
+([remote-security-model.md](./remote-security-model.md) → Host identity).
+
+Source of truth: `lib/src/remote/pocket-app/pair-link.ts`,
+`lib/src/remote/pocket-app/ScanInvitation.tsx`, `SetupOrSignin` /
+`PairingCodeView` / the gate in `lib/src/remote/pocket-app/App.tsx`, and
+`PocketClient.pair` in `lib/src/remote/client/pocket-client.ts`.
 
 **Pocket hides `MobileWall`'s local Kill affordance** (`showKillButton={false}`)
 — remote panes are Host-owned, and v1 grants no phone-side kill/layout
@@ -116,15 +141,16 @@ Three details the table above leaves implicit:
   the active pane (`attachableDirectoryEntries` in
   `lib/src/remote/pocket-app/wall-model.ts`).
 
-**The Host's ACL picks a row's one action; the local marker is the fallback.**
-The Hosts view asks each online Host whether it holds a record for this Client
-(`pair-status` — [server.md](./server.md)) and offers Pair alone or Connect
-alone, never a Connect that can only fail; offline rows keep the marker. A
-denial reporting an ACL miss (`passkey-not-paired`, `device-not-paired`,
-`pairing-mismatch`) drops it and relabels the action **Pair again**, so an ACL
-reset, revocation, or device-key loss recovers through the ordinary ceremony.
-Pairing continues into connecting, so laptop approval lands the phone in a
-terminal.
+**The pinned record picks a row's one action.** The Hosts view lists the
+`KnownHostV1` records — a Host with no record is not a row — labeled from the
+record and stamped with online state from `GET /api/hosts`, and offers Connect
+alone or **Pair again** alone, never a Connect that can only fail. Nothing asks
+the Host: an authenticated `pairing-required` outcome is the only thing that
+moves a row, and it removes local authorization without discarding the pin, so
+an ACL reset or a revocation recovers through the ordinary ceremony. Each row
+also carries **Remove**, which tombstones the delivery id before deleting the
+record, and the list carries **Scan a Host QR**. Pairing continues into
+connecting, so laptop approval lands the phone in a terminal.
 
 ## Design system and theming
 
@@ -212,7 +238,7 @@ source, never dropped into the output by hand.
 
 **The installed app is a separate storage partition from the browser tab.** On
 iOS, cookies, `localStorage`, and IndexedDB are not shared between Safari and a
-Home Screen web app, so the install generates its own device key and is a
+Home Screen web app, so the install mints its own per-Host statics and is a
 *different Client* than the same phone's Safari tab.
 
 **The install needs its own pairing approval on each Host** — the one
@@ -222,29 +248,28 @@ there must not inherit access
 ([remote-security-model.md](./remote-security-model.md)).
 
 Signing in *is* enough to ask. `SigninFinishResponse` returns the asserted
-passkey's public key, which a Client needs to build pair and connect requests,
-so a profile that never registered can still pair instead of minting a redundant
+passkey's public key, which a Client needs to build a presence proof, so a
+profile that never registered can still pair instead of minting a redundant
 second passkey. Holding that public key authorizes nothing
-([remote-security-model.md](./remote-security-model.md) -> Device Keys).
+([remote-security-model.md](./remote-security-model.md) -> Client statics).
 If the cached copy disappears mid-session, Pocket directs the user to sign in
 again, and the verified response restores it on any profile. Source of truth:
 `PASSKEY_UNAVAILABLE_MESSAGE` and `PocketClient.signin` in
 `lib/src/remote/client/pocket-client.ts`.
 
-So the order is: install to the Home Screen **first**, then sign in, approve the
-pairing on the machine, and enable push from within it — **and Pocket says so
-wherever setup can happen**, above the first-run fields and inside the return
-visit's disclosure. That precedes the passkey it warns about, though not the
-device key, which `App` mints at boot. A scanned code does not survive the
-install either: the installed app launches at `start_url`, which carries no
-hash.
+So the order is: install to the Home Screen **first**, then scan, approve the
+pairing on the machine, and enable push from within it — **and Pocket says so on
+the screen that leads with the scan**, above the action rather than after it.
+Everything partition-bound is minted from there: the passkey, and a per-Host
+static for each machine. A scanned code does not survive the install either: the
+installed app launches at `start_url`, which carries no hash.
 
 Because one phone can hold two Client identities, Pocket names the mode in the
 label it suggests at pairing — `Dormouse Pocket (Home Screen)` versus
 `Dormouse Pocket (browser)` — so the laptop's approval modal, and the Alarm
 settings dialog afterwards, can tell two entries for one phone apart. They
-cannot be merged: separate device keys are separate delivery targets. Source of
-truth: `deviceLabel` in `lib/src/remote/pocket-app/App.tsx`.
+cannot be merged: separate Client statics are separate delivery targets. Source
+of truth: `deviceLabel` in `lib/src/remote/pocket-app/App.tsx`.
 
 ### Detecting install state, and what cannot be detected
 
@@ -259,7 +284,7 @@ order, and every unavailable result is named in the UI:
 
 | Result | Condition | UI consequence |
 |---|---|---|
-| `needs-install` | `navigator.standalone` exists but the app is not installed; checked before capability probes because iOS tabs omit those APIs. `needsHomeScreenInstall` exports that predicate alone, so the auth gate awaits no push machinery. | Explain Home Screen install wherever setup can happen, and again on the Hosts view; with no prompt API it stays advice — setup in a tab must still work. |
+| `needs-install` | `navigator.standalone` exists but the app is not installed; checked before capability probes because iOS tabs omit those APIs. `needsHomeScreenInstall` exports that predicate alone, so the auth gate awaits no push machinery. | Explain Home Screen install above the scan action, and again on the Hosts view; with no prompt API it stays advice — scanning in a tab must still work. |
 | `unsupported` | Service workers, `Notification`, or `PushManager` are unavailable after the install gate. | Explain that this browser cannot receive push. |
 | `no-worker` | The tracked registration failed or resolved empty, commonly on an insecure origin. | Explain the worker failure. |
 | `denied` | Notification permission is denied. | Direct the user to browser settings. |
@@ -287,7 +312,7 @@ actions in `lib/src/remote/pocket-app/App.tsx`.
 
 Browser availability and Host registration are separate states: a
 `PushSubscription` belongs to the service-worker scope, while the Server stores
-one row per `(hostId, devicePublicKey)`.
+one row per `(hostId, deliveryId)`.
 
 **Push is asked for once per device, on one card, on the Hosts view.** The
 permission prompt and the subscription it mints are scope-wide, so the per-Host
@@ -310,14 +335,13 @@ exactly then. Source of truth: `pushNoticeState` and `PushNotice` in
 Which Hosts those are is read from the Server on entering the Hosts list — the
 connect neither refetches nor drops it — never locally, so a reload does not
 re-offer an action already taken and a row pruned after a 410 stops claiming
-push is on.
-`GET /api/push/subscriptions` returns the **account's** registrations, filtered
-to this device by `PocketClient`. **Never parameterize
-that read by `devicePublicKey`** — an enumeration primitive over an input the
-caller need not own, where the account's own rows are already its to read (the
-scoping `GET /api/hosts` uses). `POST /api/push/subscribe` answers with the same
-thing — every Host this device is registered with after the mutation — so both
-are complete answers, never deltas: nothing to merge, only which is newer.
+push is on. **The readback is by capability, never by identity**:
+`POST /api/push/subscriptions/query` presents this browser's own delivery ids
+and reports only on those, so there is no read over an input the caller need not
+already hold ([server.md](./server.md) → Web Push).
+`POST /api/push/subscribe` answers with the same thing — every Host this device
+is registered with after the mutation — so both are complete answers, never
+deltas: nothing to merge, only which is newer.
 One run token drops any read a newer load, or a completed registration, already
 overtook. A read in flight or failed never settles at empty on its own behalf:
 the card re-offers its idempotent Enable rather than preserving a stale
@@ -337,8 +361,8 @@ The endpoint check is the non-obvious one: a push service may rotate an address
 on its own with the VAPID key unchanged, so the subscription stays valid and
 correctly keyed while every stored row points somewhere unreachable. Pocket
 records a SHA-256 digest of the address each time the Server accepts a
-registration (`dormouse-pocket:push-endpoint`, beside the `:passkey:` and
-`:paired:` keys) and compares it on open — a digest, because the endpoint is a
+registration (`dormouse-pocket:push-endpoint`, beside the `:passkey:` cache)
+and compares it on open — a digest, because the endpoint is a
 bearer capability and equality is the only question. One key per device, not per
 Host: one scope holds one subscription, so if it moves, every Host row for that
 device is stale at once. **Absent reads as no opinion, not as a mismatch**, so a
@@ -350,8 +374,8 @@ is not forced to re-register. Source of truth: `hasCurrentPushSubscription` in
 `server/src/app.ts`.
 
 Repair waits for the next app open rather than a `pushsubscriptionchange`
-handler in `sw.js`: a worker can open the device key (a non-extractable
-`CryptoKey` in IndexedDB) but not obtain a session token, which lives only in
+handler in `sw.js`: a worker can open a pinned record but not obtain a session
+token, which lives only in
 `PocketClient` memory behind a fresh WebAuthn assertion — and
 `navigator.credentials` does not exist in a worker. Unattended re-registration
 would need a long-lived credential
@@ -377,24 +401,42 @@ one is minted, so a `subscribe()` that throws cannot take the fact with it
 `server/src/state.ts`, and `onEnablePush` in
 `lib/src/remote/pocket-app/App.tsx`.
 
+**Obsolete delivery mappings are retired, durably.** A `pairing-required`
+transition, a re-pair that mints a new id, and an explicit **Remove** each write
+the old `{ hostId, deliveryId }` to `PendingDeliveryDeletionV1` *before* the
+record forgets it — that id is the only handle that can ever name the row again
+— then call the idempotent deletion route. Tombstones retry after sign-in, on
+every entry to the Hosts list, and before registering a replacement, and clear
+only on a Server answer. **This deletes the delivery row alone** — never the
+scope's shared `PushSubscription`, and never another Host's row. Source of
+truth: `PocketClient.retirePendingDeletions` / `forgetHost` in
+`lib/src/remote/client/pocket-client.ts`.
+
 ## What Pocket stores
 
 **One module owns the IndexedDB name, its version, its upgrade, and every open**,
 so no two stores can disagree about the version and no caller can leak a
-connection past the next upgrade. `dormouse-pocket` is at **v2**: `device-key`
-(the shipped Client identity, one record), `known-hosts` (`KnownHostV1`, keyed
-by `hostId`), and `pending-deletions` (`PendingDeliveryDeletionV1`, keyed
-`hostId:deliveryId`). A phone arriving from v1 keeps its device key untouched.
-`navigator.storage.persist()` is requested once before the first write to either
-new store, and **never throws** — a browser that has no storage manager or
-refuses gets ordinary eviction-prone storage, which device-key loss already
-survives ([remote-security-model.md](./remote-security-model.md) → Device Key
-Loss).
+connection past the next upgrade. `dormouse-pocket` is at **v3**: `known-hosts`
+(`KnownHostV1`, keyed by `hostId`) and `pending-deletions`
+(`PendingDeliveryDeletionV1`, keyed `hostId:deliveryId`). The upgrade is "create
+what is absent, drop what is gone", so a phone arriving from v1 or v2 lands in
+the same shape and its `device-key` store goes with the protocol that used it —
+a key nothing can use is only a credential left lying about.
+`navigator.storage.persist()` is requested once before the first write, and
+**never throws**: a browser with no storage manager, or one that refuses, gets
+ordinary eviction-prone storage, which re-pairing already survives
+([remote-security-model.md](./remote-security-model.md) → Client static loss).
 
-**Nothing reads the two new stores yet** — they hold the end-to-end identities
-of the **e2e-client-host** scope. Source of truth:
-`lib/src/remote/client/pocket-db.ts`, which
-`lib/src/remote/client/device-key.ts` opens through.
+**A `KnownHostV1` is this Client's whole authorization state** — the pinned Host
+static, the per-Host X25519 private half as a nonextractable `CryptoKey` beside
+its raw public point, the paired passkey identifiers, and either
+`{ paired, deliveryId }` or `pairing-required`. Only the private half is a key
+object: a `NoiseKeyPair` wants the public half as raw bytes, so a second stored
+`CryptoKey` would be a structured clone nothing ever reads. `localStorage` holds
+only the `:passkey:` cache and the `:push-endpoint` digest — the `:paired:`
+markers those records replaced are swept once at boot. Source of truth:
+`lib/src/remote/client/pocket-db.ts` and `purgeLegacyPairedMarkers` in
+`lib/src/remote/client/pocket-client.ts`.
 
 ## Serving the built bundle
 
@@ -452,23 +494,6 @@ Two details this depends on:
   bare `error` event, so `openSocket` asks an authenticated route what happened:
   a 401 there means expiry, anything else leaves it an ordinary socket failure.
 
-## The device fingerprint on the Hosts screen
-
-The Hosts screen renders this browser's own device-key fingerprint under the
-header, from a one-shot effect over `getOrCreateDeviceKey()`. It is not a status
-line: the pairing ceremony verifies no assertion
-(`docs/specs/remote-security-model.md` -> Pairing), so the human at the
-laptop's approval modal is the control — and the fingerprint that modal shows,
-of the key that is *asking*, is uncheckable unless the phone shows it too. Both
-ends call the same `pairingFingerprint` helper from `server-lib-common`: an
-8-character slice of the base64url public point, past the two near-constant
-leading characters.
-
-It renders whenever the key loads, paired or not, so it reads as a property of
-this browser rather than a step in a flow; a key that fails to load leaves it
-absent, since the pair and connect paths already report that failure. Source of
-truth: `HostsView` in `lib/src/remote/pocket-app/App.tsx`.
-
 ## Deployment: same-origin, always
 
 **The Pocket app is always served same-origin with its API.** WebAuthn binds
@@ -510,68 +535,17 @@ code.
    entry) once its dropdown is phone-friendly.
 4. **Onboarding friction** — Pocket carries the phone-side items of the
    **selfhost-onboarding** scope ([server.md](./server.md) `## Future`).
-5. **End-to-end pairing and connection** — the phone side of the
-   **e2e-client-host** scope ([remote-security-model.md](./remote-security-model.md)
-   `## Future`), landing in its stage 4 unless noted:
-   - **A QR opened by the native camera is origin bootstrap only.** The
-     fragment is removed with `history.replaceState` before first render,
-     nothing from it is retained in storage or state, no setup or pairing call
-     is made, the token is not spent, and the screen says *Install or open
-     Pocket, then scan this Host QR in Pocket*. On iOS the install is a
-     separate partition, so the keys must be minted where they will live.
-   - **In-app scanning, or paste.** A rear-camera scanner lazy-loads
-     `@zxing/browser` (iOS has no `BarcodeDetector`), reads the code as data
-     without navigating, and hands the text to `parsePairingInvitationUrl`
-     ([server.md](./server.md) `## Future`); a paste field feeds the same
-     parser, since a pasted invitation is not weaker than a scanned one and a
-     desktop browser or the dev loop has no camera. No typed setup password,
-     fingerprint, or QR-less path exists. On success the camera tracks stop
-     and the invitation moves into memory-only ceremony state; on cancel,
-     error, or unmount it is discarded. Ceremony state clears on every
-     terminal outcome.
-   - **Two scans on a self-hosted first run, one when the origin is known.**
-     Native camera to reach the origin, then the in-app scan in the browser or
-     installed context that will own the keys. A phone that already has the
-     Pocket origin open — including a future fixed SaaS origin — needs only the
-     in-app scan. The Host keeps a displayed invitation usable until a pairing
-     request reserves it, an outcome consumes it, or its TTL expires; if
-     installation outlasts the TTL the laptop shows a fresh code.
-   - **After the parse.** A browser with no usable passkey registers one with
-     the scanned token (`setup({ setupToken })`) and signs in; a signed-in
-     browser calls `POST /api/setup/retire` instead, and a refusal aborts with
-     *scan a new code*. Then the per-Host static is minted, Noise IK runs
-     against the invitation key, the presence proof is obtained through the
-     `pairing` reauth binding, and the two-digit waiting screen shows the code
-     the laptop must be told. The setup-password field, `hasPriorUse`'s
-     setup-versus-sign-in fold, and the auth-screen QR copy go with it; sign-in
-     stays the returning-browser action.
-   - **Hosts view.** Rows are the `KnownHostV1` records, labeled locally, with
-     online state from `GET /api/hosts`, one action each — Connect, or *Pair
-     again* on `pairing-required` — plus a *Scan a Host QR* action. The
-     device-fingerprint line, `pair-status`, and the `:paired:` markers are
-     deleted; the `:passkey:` cache and `:push-endpoint` digest stay.
-   - **Storage.** IndexedDB v3 deletes `device-key` (stage 4; v2 landed —
-     "What Pocket stores"). The capability probe runs before any remote
-     operation and shows a fixed upgrade requirement on failure.
-   - **The worker is built, not copied** (stage 6). `sw.js` moves to a
-     TypeScript source under the Pocket app that imports the shared E2E,
-     IndexedDB, and sanitization code, bundled by a second Vite config as one
-     classic IIFE with `inlineDynamicImports`, no runtime `import`/`export`, no
-     secondary chunk, and the stable unhashed output name `dist-pocket/sw.js`,
-     run after the app build with `emptyOutDir: false`. Registration stays
-     `register('/sw.js', { scope: '/' })` with no `type: 'module'`. The worker
-     decrypts with the pinned record for the envelope's `hostId`,
-     re-validates and sanitizes, and shows a generic notification on any
-     failure. Production assertions in the Pocket build script require exactly
-     one `dist-pocket/sw.js`, classic registration, and no top-level imports,
-     exports, dynamic-import loaders, or auxiliary chunks.
-   - **Obsolete delivery mappings are retired, durably** (stage 6). A
-     `pairing-required` transition, a successful re-pair, and explicit local
-     removal of a Host each write the old `{ hostId, deliveryId }` to
-     `PendingDeliveryDeletionV1` before the record forgets it, then call the
-     idempotent deletion route; tombstones retry after sign-in, at app start,
-     and before registering a replacement, and clear only on success. This
-     deletes the delivery row only — never the scope's shared
-     `PushSubscription` or another Host's row. Push readback uses the
-     possession query with this browser's own delivery IDs; the card's
-     predicate and the endpoint-rotation repair are otherwise unchanged.
+5. **The Pocket worker is built, not copied** — the phone side of stage 6 of
+   the **e2e-client-host** scope
+   ([remote-security-model.md](./remote-security-model.md) `## Future`).
+   `sw.js` moves to a TypeScript source under the Pocket app that imports the
+   shared E2E, IndexedDB, and sanitization code, bundled by a second Vite
+   config as one classic IIFE with `inlineDynamicImports`, no runtime
+   `import`/`export`, no secondary chunk, and the stable unhashed output name
+   `dist-pocket/sw.js`, run after the app build with `emptyOutDir: false`.
+   Registration stays `register('/sw.js', { scope: '/' })` with no
+   `type: 'module'`. The worker decrypts with the pinned record for the
+   envelope's `hostId`, re-validates and sanitizes, and shows a generic
+   notification on any failure. Production assertions in the Pocket build
+   script require exactly one `dist-pocket/sw.js`, classic registration, and no
+   top-level imports, exports, dynamic-import loaders, or auxiliary chunks.
