@@ -39,6 +39,14 @@ primitive lives in `server-lib-common`; the terminal UI lives in
   prune** — `HostChallengeIssuer.issue` drops expired entries on every call, and
   the presence-nonce and setup-token stores do the same — because the requests
   that mint them are cheap to send and need little or no auth (rationale).
+* **A cap that one caller can spend on another's behalf is not a cap.** Every
+  bounded transient store here is keyed by whoever grew it: setup tokens per
+  minting Host (`MAX_TOKENS_PER_HOST`), presence nonces per session
+  (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`, with `MAX_REAUTH_NONCE_SESSIONS`
+  least-recently-used buckets bounding the total). A presence nonce is minted
+  *before* its WebAuthn prompt, so it waits out human latency; under a global
+  cap any other session's flood evicted it mid-prompt and failed every pairing
+  and connection ceremony for as long as the flood ran.
 
 ## Configuration
 

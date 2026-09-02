@@ -174,14 +174,28 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
  */
 const REAUTH_NONCE_TTL_MS = 2 * 60 * 1000;
 /**
- * How many unredeemed presence nonces the process will hold.
+ * How many unredeemed presence nonces ONE SESSION will hold.
  *
  * `POST /api/reauth/begin` needs only a session token, so without a cap one
  * signed-in caller can grow this map for the process's lifetime by asking —
  * exactly the reason `HostChallengeIssuer.issue` sweeps. Far above any real
  * use: a phone holds one nonce at a time, per ceremony.
+ *
+ * **Per session, never global.** A nonce is minted *before* its WebAuthn
+ * prompt, so it waits out seconds of human latency; a global cap made a flood
+ * from any other session evict a legitimate phone's nonce inside that window,
+ * failing every pairing and connection ceremony for as long as the flood ran.
+ * A caller can now only ever evict its own.
  */
-const MAX_PENDING_REAUTH_NONCES = 64;
+const MAX_PENDING_REAUTH_NONCES_PER_SESSION = 8;
+/**
+ * How many sessions may hold nonces at once. The second half of the bound:
+ * per-session caps alone leave the total riding on the session count, so the
+ * store holds at most this many buckets — least-recently-used dropped whole —
+ * which puts the ceiling at 32 x 8. Reaching it takes 32 distinct sign-ins,
+ * each a WebAuthn assertion, rather than 65 bare POSTs.
+ */
+const MAX_REAUTH_NONCE_SESSIONS = 32;
 /**
  * How often {@link CreatedApp.sweepRevokedHosts} should be run. `index.ts` owns
  * the timer — `createApp` starts no background work of its own.
@@ -251,40 +265,88 @@ interface PendingPresenceNonce {
  * whatever the caller sends back.
  */
 class PresenceNonceStore {
-  readonly #pending = new Map<string, PendingPresenceNonce>();
+  /**
+   * One bucket per session, keyed by the {@link Session} object `SessionStore`
+   * minted — a stable identity per session token that no request body can name.
+   * Map iteration is insertion order, so re-inserting a bucket on every write
+   * makes the front of this map the least recently used one.
+   */
+  readonly #bySession = new Map<Session, Map<string, PendingPresenceNonce>>();
+  /** Every live nonce, so `consume` stays one lookup rather than a bucket scan. */
+  readonly #owner = new Map<string, Session>();
   readonly #now: () => number;
 
   constructor(now: () => number) {
     this.#now = now;
   }
 
-  /** Hold `binding` against `serverNonce` for {@link REAUTH_NONCE_TTL_MS}. */
-  remember(serverNonce: string, binding: PresenceBinding): void {
+  /**
+   * Hold `binding` against `serverNonce` for {@link REAUTH_NONCE_TTL_MS}, in
+   * `session`'s own bucket. Eviction never leaves that bucket, so one caller
+   * cannot cost another its live nonce.
+   */
+  remember(session: Session, serverNonce: string, binding: PresenceBinding): void {
     const now = this.#now();
-    for (const [nonce, entry] of this.#pending) {
-      if (now >= entry.expiresAt) this.#pending.delete(nonce);
-    }
-    // Oldest first: Map iterates in insertion order and every entry carries the
-    // same TTL, so the front of the map is the closest to expiring anyway.
-    while (this.#pending.size >= MAX_PENDING_REAUTH_NONCES) {
-      const oldest = this.#pending.keys().next();
+    this.#sweepExpired(now);
+    const bucket = this.#bySession.get(session) ?? new Map<string, PendingPresenceNonce>();
+    // Re-inserted on every write, so this bucket becomes the most recently used.
+    this.#bySession.delete(session);
+    // Oldest first, within this session only: every entry carries the same TTL,
+    // so a bucket's insertion order is its expiry order.
+    while (bucket.size >= MAX_PENDING_REAUTH_NONCES_PER_SESSION) {
+      const oldest = bucket.keys().next();
       if (oldest.done) break;
-      this.#pending.delete(oldest.value);
+      bucket.delete(oldest.value);
+      this.#owner.delete(oldest.value);
     }
-    this.#pending.set(serverNonce, { binding, expiresAt: now + REAUTH_NONCE_TTL_MS });
+    bucket.set(serverNonce, { binding, expiresAt: now + REAUTH_NONCE_TTL_MS });
+    this.#bySession.set(session, bucket);
+    this.#owner.set(serverNonce, session);
+    // Whole buckets, least recently used first: a session at the ceiling is one
+    // that has not asked for a nonce in longer than any other.
+    while (this.#bySession.size > MAX_REAUTH_NONCE_SESSIONS) {
+      const stalest = this.#bySession.keys().next();
+      if (stalest.done) break;
+      this.#forget(stalest.value);
+    }
   }
 
   /**
    * Spend `serverNonce`, or `null` when it is unknown or expired. Removed
    * either way, so it can never become valid again — single use is what stops
    * one WebAuthn prompt from proving presence for two ceremonies.
+   *
+   * Not scoped to the consuming session: a nonce is 256 unguessable bits and
+   * the ceremony it belongs to is the *account's*, so which of that account's
+   * sessions redeems it is not a distinction this store may invent.
    */
   consume(serverNonce: unknown): PendingPresenceNonce | null {
     if (typeof serverNonce !== 'string') return null;
-    const entry = this.#pending.get(serverNonce);
+    const session = this.#owner.get(serverNonce);
+    if (session === undefined) return null;
+    const bucket = this.#bySession.get(session);
+    const entry = bucket?.get(serverNonce);
+    this.#owner.delete(serverNonce);
+    bucket?.delete(serverNonce);
+    if (bucket?.size === 0) this.#bySession.delete(session);
     if (entry === undefined) return null;
-    this.#pending.delete(serverNonce);
     return this.#now() < entry.expiresAt ? entry : null;
+  }
+
+  #sweepExpired(now: number): void {
+    for (const [session, bucket] of this.#bySession) {
+      for (const [nonce, entry] of bucket) {
+        if (now < entry.expiresAt) continue;
+        bucket.delete(nonce);
+        this.#owner.delete(nonce);
+      }
+      if (bucket.size === 0) this.#bySession.delete(session);
+    }
+  }
+
+  #forget(session: Session): void {
+    for (const nonce of this.#bySession.get(session)?.keys() ?? []) this.#owner.delete(nonce);
+    this.#bySession.delete(session);
   }
 }
 
@@ -700,7 +762,8 @@ export function createApp(config: AppConfig): CreatedApp {
       // remembered, so a broken binding costs a 400 rather than a map entry.
       return c.json({ error: 'malformed presence binding' }, 400);
     }
-    presenceNonces.remember(serverNonce, binding);
+    // The caller's own session owns the entry, so a flood can only evict its own.
+    presenceNonces.remember(c.get('session'), serverNonce, binding);
     const res: ReauthBeginResponse = {
       challenge,
       rpId,
