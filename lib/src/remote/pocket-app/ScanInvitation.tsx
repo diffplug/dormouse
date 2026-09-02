@@ -11,8 +11,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clsx } from 'clsx';
-import { parsePairingInvitationUrl, type PairingInvitation } from 'server-lib-common';
+import {
+  pairingInvitationExpired,
+  parsePairingInvitationUrl,
+  type PairingInvitation,
+} from 'server-lib-common';
 
+import { SETUP_CODE_DEAD_MESSAGE } from '../client/pocket-client';
 import { ErrorRow, PK, pkButton } from './pocket-chrome';
 
 /** A running camera scan; stopping it also stops the media tracks. */
@@ -36,6 +41,22 @@ export type StartScan = (
 type CameraState = 'starting' | 'live' | 'denied' | 'unsupported';
 
 export const SCAN_REJECTED_MESSAGE = 'That is not a Dormouse setup code for this server.';
+
+/**
+ * The two sentences a refused code can get, chosen here and never on the wire.
+ *
+ * A code this server *would* have taken had it been scanned sooner is the one
+ * failure with a different fix — show a fresh code, rather than point the phone
+ * at something else — and it is by far the likeliest, the codes living five
+ * minutes. Everything else, a foreign-origin invitation included, is not a
+ * setup code for this server: expired or not, there is no fresh code on this
+ * computer to go and get.
+ */
+async function rejectionFor(text: string, appOrigin: string): Promise<string> {
+  return (await pairingInvitationExpired(text, appOrigin))
+    ? SETUP_CODE_DEAD_MESSAGE
+    : SCAN_REJECTED_MESSAGE;
+}
 
 const CAMERA_BLOCKED_MESSAGE =
   'Camera access is off for this site. Turn it on in your browser settings, or paste the code below.';
@@ -138,7 +159,8 @@ export function ScanInvitation({
   const chainRef = useRef<Promise<void>>(Promise.resolve());
   const [camera, setCamera] = useState<CameraState>('starting');
   const [pasted, setPasted] = useState('');
-  const [rejected, setRejected] = useState(false);
+  /** The sentence a refused code earned, or null while none has been. */
+  const [rejected, setRejected] = useState<string | null>(null);
 
   const stopCamera = useCallback(() => {
     release(controlsRef.current, videoRef.current);
@@ -155,7 +177,7 @@ export function ScanInvitation({
       if (acceptingRef.current) return;
       const invitation = await parsePairingInvitationUrl(text, appOrigin);
       if (!invitation) {
-        setRejected(true);
+        setRejected(await rejectionFor(text, appOrigin));
         return;
       }
       if (acceptingRef.current) return;
@@ -163,7 +185,7 @@ export function ScanInvitation({
       // A code that parsed clears the rejection this screen may still be
       // showing: the two rows stack otherwise, and a ceremony that fails after
       // this point leaves its own error beneath a stale "that is not a code".
-      setRejected(false);
+      setRejected(null);
       stopCamera();
       try {
         await onScanned(invitation);
@@ -262,7 +284,7 @@ export function ScanInvitation({
           {/* Muted and inline, or iOS refuses to play the preview at all. */}
           <video ref={videoRef} className={PK.viewfinderVideo} muted playsInline />
         </div>
-        {rejected ? <ErrorRow message={SCAN_REJECTED_MESSAGE} /> : null}
+        {rejected ? <ErrorRow message={rejected} /> : null}
         <form
           className={PK.setup}
           onSubmit={(e) => {

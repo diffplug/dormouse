@@ -71,9 +71,12 @@ will live.
 navigates, and hands the text to `parsePairingInvitationUrl`
 ([server.md](./server.md) owns the grammar); a paste field feeds the same
 parser, since a pasted invitation is no weaker than a scanned one and a desktop
-browser or the dev loop has no camera. A `null` parse is one fixed line, because
-that parser answers a complete invitation or nothing and never a reason. **The
-camera tracks stop on every way out** — accepted, cancelled, errored, unmounted,
+browser or the dev loop has no camera. **A `null` parse is one of two fixed
+lines**: a code that would have parsed before it expired says so, everything
+else — a foreign-origin invitation included — is not a setup code for this
+server. `pairingInvitationExpired` answers by re-running the same parser at the
+epoch, so the grammar has no second copy. **The camera tracks stop on every way
+out** — accepted, cancelled, errored, unmounted,
 and on a start that finished after the screen was gone. A refused permission is
 named and leaves paste working; every other camera failure reads the same from
 here. The invitation moves into memory-only ceremony state, which clears on
@@ -279,8 +282,7 @@ So the order is: install to the Home Screen **first**, then scan, approve the
 pairing on the machine, and enable push from within it — **and Pocket says so on
 the screen that leads with the scan**, above the action rather than after it.
 Everything partition-bound is minted from there: the passkey, and a per-Host
-static for each machine. A scanned code does not survive the install either: the
-installed app launches at `start_url`, which carries no hash.
+static for each machine.
 
 Because one phone can hold two Client identities, Pocket names the mode in the
 label it suggests at pairing — `Dormouse Pocket (Home Screen)` versus

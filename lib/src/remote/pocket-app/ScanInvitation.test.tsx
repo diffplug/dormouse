@@ -17,6 +17,7 @@ import { fromBase64Url, toBase64Url, type PairingInvitation } from 'server-lib-c
 
 import { SCAN_REJECTED_MESSAGE, ScanInvitation, type ScanControls } from './ScanInvitation';
 import { buttonNamed, invitationUrl as sharedInvitationUrl, settle } from './app-test-utils';
+import { SETUP_CODE_DEAD_MESSAGE } from '../client/pocket-client';
 import { setNativeFieldValue } from '../../lib/dom';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -39,6 +40,9 @@ afterEach(() => {
 
 /** A live invitation URL for the origin this screen is checking against. */
 const invitationUrl = () => sharedInvitationUrl(ORIGIN);
+
+/** The same URL a second after its five minutes ran out. */
+const deadInvitationUrl = () => sharedInvitationUrl(ORIGIN, Math.floor(Date.now() / 1000) - 1);
 
 /** A camera whose decodes the test drives, and whose teardown it can observe. */
 function fakeCamera() {
@@ -144,6 +148,49 @@ describe('reading a code', () => {
 
     expect(onScanned).not.toHaveBeenCalled();
     expect(container.querySelector('[role="alert"]')?.textContent).toBe(SCAN_REJECTED_MESSAGE);
+  });
+
+  it('says a code that only ran out of time has run out of time', async () => {
+    // The parser refuses it exactly as it refuses junk, but the fix is not the
+    // same one: this user needs a fresh code on the computer, not a different
+    // thing to point the phone at.
+    const { onScanned } = render();
+    await settle();
+
+    await paste((await deadInvitationUrl()).url);
+
+    expect(onScanned).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(SETUP_CODE_DEAD_MESSAGE);
+  });
+
+  it('calls a dead code for another server not a code for this one', async () => {
+    // Expiry is not the first question: there is no fresh code to go and get on
+    // a computer this phone was never pointed at.
+    const { onScanned } = render();
+    await settle();
+    const { url } = await deadInvitationUrl();
+
+    await paste(url.replace(ORIGIN, 'https://someone.else'));
+
+    expect(onScanned).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(SCAN_REJECTED_MESSAGE);
+  });
+
+  it('keeps looking after a camera read of a code that had expired', async () => {
+    const camera = fakeCamera();
+    const { onScanned } = render({ startScan: camera.startScan });
+    await settle();
+
+    const dead = await deadInvitationUrl();
+    act(() => camera.read(dead.url));
+    await settle();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(SETUP_CODE_DEAD_MESSAGE);
+
+    const { url } = await invitationUrl();
+    act(() => camera.read(url));
+    await settle();
+
+    expect(onScanned).toHaveBeenCalledOnce();
   });
 
   it('keeps looking after a camera read that was not a pairing code', async () => {

@@ -242,3 +242,32 @@ export async function parsePairingInvitationUrl(
   }
   return { hostId, inviteId, expiry, setupToken, ephPub, ephPubBase64Url };
 }
+
+/**
+ * Whether a code {@link parsePairingInvitationUrl} refused is one this app
+ * *would* have taken, had it been scanned before its expiry.
+ *
+ * The parser answers a complete invitation or nothing and never a reason, which
+ * is what keeps "never a partial parse" true — so an expired code and a QR off
+ * a cereal box are one answer there. They are not one answer to a *user*: the
+ * first is fixed by showing a fresh code, the second by scanning something
+ * else. This is the whole of the difference, for a caller that already has a
+ * `null` and wants to say which.
+ *
+ * **Never `true` for anything the parser refuses on any other rule.** Answered
+ * by running that same parser at the epoch, so the structural rules and the
+ * origin compare are literally the shipped ones and cannot drift from a second
+ * copy — a foreign-origin code is not a setup code for this server whether or
+ * not its expiry has passed. It reads nothing the user is not already holding.
+ */
+export async function pairingInvitationExpired(
+  text: unknown,
+  appOrigin: string,
+  now: number = Date.now(),
+  crypto: WebCryptoLike = getWebCrypto(),
+): Promise<boolean> {
+  // No invitation can already be expired at the epoch, so this parse applies
+  // every rule *but* the expiry one.
+  const invitation = await parsePairingInvitationUrl(text, appOrigin, 0, crypto);
+  return invitation !== null && invitation.expiry * 1000 < now;
+}

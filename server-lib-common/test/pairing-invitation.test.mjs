@@ -20,6 +20,7 @@ import {
   formatInvitationExpiry,
   formatPairingInvitationUrl,
   fromBase64Url,
+  pairingInvitationExpired,
   pairingInvitationFields,
   pairingInvitationPrologue,
   parsePairingInvitationUrl,
@@ -281,6 +282,71 @@ test('the expiry is ten decimal digits inside a uint32, and not already past', a
   // already dead should fail here rather than after a handshake.
   assert.equal(await parsePairingInvitationUrl(EXPECTED_URL, ORIGIN, EXPIRY * 1000 + 1), null);
   assert.ok(await parsePairingInvitationUrl(EXPECTED_URL, ORIGIN, EXPIRY * 1000));
+});
+
+// --- Telling a dead code apart from a wrong one ----------------------------
+
+/** Epoch ms one millisecond past {@link EXPIRY}: the code is dead. */
+const PAST = EXPIRY * 1000 + 1;
+
+test('an expired code is the one refusal a caller can tell apart', async () => {
+  // Three answers, not two. The parser refuses all three the same way — that is
+  // "never a partial parse" — but only the first is fixed by showing a fresh
+  // code on the computer, so a phone that says so is telling the truth.
+  assert.equal(await pairingInvitationExpired(EXPECTED_URL, ORIGIN, PAST), true);
+  assert.equal(await pairingInvitationExpired(`${ORIGIN}/#pair?nonsense`, ORIGIN, PAST), false);
+  // A real code for a different deployment, long dead: still not a setup code
+  // for *this* server, which is what the user needs to hear.
+  const foreign = EXPECTED_URL.replace(ORIGIN, 'https://pocket.evil');
+  assert.equal(await pairingInvitationExpired(foreign, ORIGIN, PAST), false);
+  // The live side of the boundary is the parser's own: expiry second inclusive.
+  assert.equal(await pairingInvitationExpired(EXPECTED_URL, ORIGIN, EXPIRY * 1000), false);
+  assert.equal(await pairingInvitationExpired(EXPECTED_URL, ORIGIN, NOW), false);
+});
+
+test('nothing the parser refuses on another rule is ever called expired', async () => {
+  // The predicate must widen nothing the parser accepts, so every case here is
+  // built with an expiry already past: an implementation that read the field
+  // without re-applying the rest of the grammar would call all of them dead.
+  const refused = [
+    ['not a string', 42],
+    ['a megabyte of camera text', 'x'.repeat(1_000_000)],
+    ['not a URL at all', `pocket.example/${PAIRING_HASH_PREFIX}${FIELDS.join('.')}`],
+    ['plain http off loopback', `http://pocket.example/${PAIRING_HASH_PREFIX}${FIELDS.join('.')}`],
+    ['credentials in the authority', `https://evil@pocket.example/${PAIRING_HASH_PREFIX}${FIELDS.join('.')}`],
+    ['a non-root path', `${ORIGIN}/app/${PAIRING_HASH_PREFIX}${FIELDS.join('.')}`],
+    ['a query string', `${ORIGIN}/?next=x${PAIRING_HASH_PREFIX}${FIELDS.join('.')}`],
+    ['a different origin', `https://pocket.evil/${PAIRING_HASH_PREFIX}${FIELDS.join('.')}`],
+    ['a different port', `https://pocket.example:8443/${PAIRING_HASH_PREFIX}${FIELDS.join('.')}`],
+    ['no hash at all', `${ORIGIN}/`],
+    ['the wrong hash prefix', `${ORIGIN}/#setup?${FIELDS.join('.')}`],
+    ['a short fragment', `${ORIGIN}/${PAIRING_HASH_PREFIX}${FIELDS.slice(0, 5).join('.')}`],
+    ['a long fragment', `${EXPECTED_URL}.x`],
+    ['a version that is not 1', urlWithField(0, '2')],
+    ['a padded hostId', urlWithField(1, `${HOST_ID.slice(0, 21)}=`)],
+    ['a base64 inviteId', urlWithField(2, `${INVITE_ID.slice(0, 21)}+`)],
+    ['a non-numeric expiry', urlWithField(3, '+123456789')],
+    ['an expiry over uint32', urlWithField(3, '9999999999')],
+    ['a setup token with a slash', urlWithField(4, `${SETUP_TOKEN.slice(0, 42)}/`)],
+    ['a key with trailing bits', urlWithField(5, `${EPH_PUB.slice(0, 42)}a`)],
+  ];
+  for (const [why, text] of refused) {
+    assert.equal(await parsePairingInvitationUrl(text, ORIGIN, NOW), null, `${why}: parses`);
+    assert.equal(await pairingInvitationExpired(text, ORIGIN, PAST), false, why);
+  }
+
+  // Including the expensive last rule: a key the suite refuses to import is a
+  // code no handshake could use, however recently it was minted.
+  const refusing = {
+    getRandomValues: (array) => globalThis.crypto.getRandomValues(array),
+    subtle: {
+      ...globalThis.crypto.subtle,
+      importKey: async () => {
+        throw new Error('unsupported point');
+      },
+    },
+  };
+  assert.equal(await pairingInvitationExpired(EXPECTED_URL, ORIGIN, PAST, refusing), false);
 });
 
 test('the invitation key must decode canonically and import as X25519', async () => {

@@ -18,15 +18,19 @@ import {
 import { PAIRING_CODE_LABEL, type HostView } from './App';
 import { testRoutingId } from '../test-e2e-client';
 
-/** A live invitation URL, composed by the emitter a Host actually uses. */
+/**
+ * A live invitation URL, composed by the emitter a Host actually uses.
+ * `expiry` (epoch **seconds**) is for the suites that need a dead one.
+ */
 export async function invitationUrl(
   origin: string,
+  expiry: number = Math.floor(Date.now() / 1000) + 300,
 ): Promise<{ url: string; invitation: PairingInvitation }> {
   const keyPair = await generateNoiseKeyPair();
   const invitation: PairingInvitation = {
     hostId: testRoutingId(),
     inviteId: testRoutingId(),
-    expiry: Math.floor(Date.now() / 1000) + 300,
+    expiry,
     setupToken: randomBase64Url(32),
     ephPub: keyPair.publicKey,
     ephPubBase64Url: toBase64Url(keyPair.publicKey),
