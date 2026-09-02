@@ -138,37 +138,25 @@ describe('the pairing walkthrough mirrors the copy it clicks', () => {
     expect(selector).toBe(`[role="status"][aria-label="${PAIRING_OUTCOME_LABEL}"]`);
   });
 
-  // The region's name says a ceremony ended; the scenarios turn on *which* one,
-  // so this is the harness's one match on copy. What has to hold is not the
-  // wording but that each prefix still picks out exactly one outcome — a
-  // rewrite that made two of them share an opening would otherwise leave
+  // The screens' structure says only that a ceremony ended or a code was
+  // refused; the scenarios turn on *which* one, so these prefixes are the
+  // harness's one match on copy. What has to hold is not the wording but that
+  // each prefix still picks out exactly one of the shipped sentences — a
+  // rewrite that let two of them share an opening would otherwise leave
   // `--scenario wrong-code` passing on a run that paired a phone.
-  it.each(['OUTCOME_PAIRED', 'OUTCOME_CODE_MISMATCH', 'OUTCOME_CANCELLED'])(
-    '%s names exactly one shipped outcome sentence',
-    (name) => {
-      const prefix = extract(source, file, new RegExp(`^const ${name} = '([^']+)';$`, 'm'));
-      const matched = Object.entries(PAIRING_OUTCOME_COPY).filter(([, sentence]) =>
-        sentence.startsWith(prefix),
-      );
-      expect(matched.map(([outcome]) => outcome)).toHaveLength(1);
-    },
-  );
-
-  // The same, for the scanner's two refusals: `--scenario expired-code` turns
-  // on which one a pasted code earns, and a rewrite that let them share an
-  // opening would leave it green on a run that told the user the wrong thing.
-  const REFUSALS = {
-    REFUSED_EXPIRED: SETUP_CODE_DEAD_MESSAGE,
-    REFUSED_NOT_A_CODE: SCAN_REJECTED_MESSAGE,
-  } as const;
-  it.each(Object.keys(REFUSALS) as (keyof typeof REFUSALS)[])(
-    '%s names exactly one shipped refusal sentence',
-    (name) => {
-      const prefix = extract(source, file, new RegExp(`^const ${name} = '([^']+)';$`, 'm'));
-      const matched = Object.values(REFUSALS).filter((sentence) => sentence.startsWith(prefix));
-      expect(matched).toEqual([REFUSALS[name]]);
-    },
-  );
+  const REFUSALS = { dead: SETUP_CODE_DEAD_MESSAGE, rejected: SCAN_REJECTED_MESSAGE };
+  it.each([
+    ['OUTCOME_PAIRED', PAIRING_OUTCOME_COPY],
+    ['OUTCOME_CODE_MISMATCH', PAIRING_OUTCOME_COPY],
+    ['OUTCOME_CANCELLED', PAIRING_OUTCOME_COPY],
+    // `--scenario expired-code` turns on which refusal a pasted code earns.
+    ['REFUSED_EXPIRED', REFUSALS],
+    ['REFUSED_NOT_A_CODE', REFUSALS],
+  ] as const)('%s names exactly one shipped sentence', (name, sentences) => {
+    const prefix = extract(source, file, new RegExp(`^const ${name} = '([^']+)';$`, 'm'));
+    const matched = Object.values(sentences).filter((sentence) => sentence.startsWith(prefix));
+    expect(matched).toHaveLength(1);
+  });
 });
 
 // docs/specs/standalone.md -> "Rust <-> sidecar bridge"

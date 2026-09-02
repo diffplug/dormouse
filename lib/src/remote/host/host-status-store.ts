@@ -366,7 +366,8 @@ export function subscribeToInvitation(
     link()?.on('invitation', (data) => {
       const event = data as InvitationEvent | undefined;
       if (typeof event?.inviteId === 'string' && typeof event.state === 'string') {
-        listener(event.inviteId, event.state, typeof event.outcome === 'string' ? event.outcome : undefined);
+        const outcome = typeof event.outcome === 'string' ? event.outcome : undefined;
+        listener(event.inviteId, event.state, outcome);
       }
     }) ?? (() => {})
   );

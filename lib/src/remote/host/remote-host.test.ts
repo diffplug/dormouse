@@ -28,7 +28,7 @@ import {
   type PresenceBinding,
   type PresenceProofV1,
 } from 'server-lib-common';
-import { RemoteHost, type RemoteApiSessionLike } from './remote-host';
+import { RemoteHost, type RemoteApiSessionLike, type RemoteHostOptions } from './remote-host';
 import type { HostEnrollment } from './enrollment';
 import type { PendingPairing } from './pairing-approval';
 import { FakeSocket } from '../test-fake-socket';
@@ -64,9 +64,16 @@ describe('RemoteHost end-to-end ceremonies', () => {
   let savedRecords: HostAclRecord[] = [];
   let approvals: PendingPairing[] = [];
   let dismissed: string[] = [];
+  let invitationEvents: Array<{ inviteId: string; state: string; outcome?: string }> = [];
   // `outcome` is omitted rather than `undefined` where there is none, so the
   // cases that are only about a state still compare against a two-field object.
-  let invitationEvents: Array<{ inviteId: string; state: string; outcome?: string }> = [];
+  const recordInvitation: NonNullable<RemoteHostOptions['onInvitationChanged']> = (
+    inviteId,
+    state,
+    outcome,
+  ) => {
+    invitationEvents.push(outcome ? { inviteId, state, outcome } : { inviteId, state });
+  };
   let sessions: Array<{ handled: unknown[]; disposed: boolean; send: (payload: unknown) => void }> =
     [];
   let clock = 1_700_000_000_000;
@@ -117,8 +124,7 @@ describe('RemoteHost end-to-end ceremonies', () => {
       },
       requestApproval: (pending) => approvals.push(pending),
       dismissApproval: (clientId) => dismissed.push(clientId),
-      onInvitationChanged: (inviteId, state, outcome) =>
-        invitationEvents.push(outcome ? { inviteId, state, outcome } : { inviteId, state }),
+      onInvitationChanged: recordInvitation,
       createSession: withSession
         ? ({ send }) => {
             const entry = { handled: [] as unknown[], disposed: false, send };
@@ -1123,8 +1129,7 @@ describe('RemoteHost end-to-end ceremonies', () => {
       },
       requestApproval: (pending) => approvals.push(pending),
       dismissApproval: (clientId) => dismissed.push(clientId),
-      onInvitationChanged: (inviteId, state, outcome) =>
-        invitationEvents.push(outcome ? { inviteId, state, outcome } : { inviteId, state }),
+      onInvitationChanged: recordInvitation,
       now: () => clock,
     });
     created.start();

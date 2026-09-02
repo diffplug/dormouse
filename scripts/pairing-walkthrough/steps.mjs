@@ -214,7 +214,7 @@ async function stepServer(ctx) {
     skipBuild ? ['--filter', 'server', 'start'] : ['dev:pocket-server'],
     {
       cwd: repoRoot,
-      logPath: join(runDir, ctx.artifactName('server.log')),
+      logPath: ctx.path('server.log'),
       prefix: 'server',
       env: {
         DORMOUSE_SETUP_PASSWORD: opts.password,
@@ -250,10 +250,10 @@ async function stepServer(ctx) {
  * plain-HTTP localhost server and enrollment fails with a policy error.
  */
 async function stepHost(ctx) {
-  const { repoRoot, runDir, opts } = ctx;
+  const { repoRoot, opts } = ctx;
   const handle = spawnLogged('pnpm', ['dev:standalone:ab'], {
     cwd: repoRoot,
-    logPath: join(runDir, ctx.artifactName('host.log')),
+    logPath: ctx.path('host.log'),
     prefix: 'host',
     env: {
       DORMOUSE_REMOTE_CONNECT_SRC: `${ctx.serverOrigin} ${ctx.serverOrigin.replace(/^http/, 'ws')}`,
@@ -370,7 +370,6 @@ async function stepQr(ctx) {
  */
 async function captureQr(ctx) {
   const ab = ctx.state.hostBrowser;
-  const { runDir } = ctx;
 
   // One round trip for "it is there" and "here is where": a second read could
   // land after a rotation and measure a different code than the one captured.
@@ -387,7 +386,7 @@ async function captureQr(ctx) {
   // rect it returned, so a stale frame would be a mis-crop rather than a wobble.
   await delay(400);
 
-  const full = join(runDir, ctx.artifactName('qr-full.png'));
+  const full = ctx.path('qr-full.png');
   await ctx.shot('qr-full.png');
 
   // Screenshot pixels per CSS pixel, measured rather than taken from
@@ -401,11 +400,11 @@ async function captureQr(ctx) {
     width: measured.width * scale,
     height: measured.height * scale,
   };
-  const cropped = join(runDir, ctx.artifactName('qr.png'));
+  const cropped = ctx.path('qr.png');
   const cropBox = await crop(full, cropped, rect, { padding: Math.round(12 * scale), size: shotSize });
-  ctx.artifacts.add(ctx.artifactName('qr.png'));
-  const y4m = await toY4m(cropped, join(runDir, ctx.artifactName('qr.y4m')));
-  ctx.artifacts.add(ctx.artifactName('qr.y4m'));
+  ctx.keep('qr.png');
+  const y4m = await toY4m(cropped, ctx.path('qr.y4m'));
+  ctx.keep('qr.y4m');
 
   const { decoded, decodedFrom } = await proveDecodes(ctx, cropped, cropBox);
   const invitationUrl = measured.url;
@@ -442,9 +441,9 @@ async function proveDecodes(ctx, cropped, cropBox) {
   const decoded = await decodeQr(cropped, ctx.repoRoot, cropBox);
   if (decoded !== null) return { decoded, decodedFrom: 'qr.png' };
 
-  const large = join(ctx.runDir, ctx.artifactName('qr-large.png'));
+  const large = ctx.path('qr-large.png');
   const largeSize = await upscale(cropped, large);
-  ctx.artifacts.add(ctx.artifactName('qr-large.png'));
+  ctx.keep('qr-large.png');
   const enlarged = await decodeQr(large, ctx.repoRoot, largeSize);
   if (enlarged === null) throw new Error(`qr.png did not decode (crop ${JSON.stringify(cropBox)})`);
   return { decoded: enlarged, decodedFrom: 'qr-large.png' };
@@ -493,12 +492,12 @@ function readInvitationUrl(ab) {
  * on (`docs/specs/pocket-app.md`); this walkthrough is about the in-app scan.
  */
 async function stepPocket(ctx) {
-  const { repoRoot, runDir, opts } = ctx;
+  const { repoRoot, opts } = ctx;
 
   const chrome = resolveChrome();
   ctx.log(`pocket browser: ${chrome.path} (${chrome.from})`);
   const port = await findFreePort(opts.hostPort + 100);
-  const userDataDir = join(runDir, ctx.artifactName('pocket-profile'));
+  const userDataDir = ctx.path('pocket-profile');
   mkdirSync(userDataDir, { recursive: true });
   const launched = await launchChrome({
     binary: chrome.path,
@@ -506,10 +505,10 @@ async function stepPocket(ctx) {
     userDataDir,
     // Opened at `getUserMedia` time rather than at launch (probed), so this
     // may be — and on a rotated code is — rewritten after Chrome is up.
-    fakeVideoFile: join(runDir, ctx.artifactName('qr.y4m')),
+    fakeVideoFile: ctx.path('qr.y4m'),
     width: POCKET_VIEWPORT.width,
     height: POCKET_VIEWPORT.height,
-    logPath: join(runDir, ctx.artifactName('pocket-chrome.log')),
+    logPath: ctx.path('pocket-chrome.log'),
   });
 
   const ab = new AgentBrowser(`${opts.session}-pocket`, repoRoot);
@@ -588,15 +587,7 @@ async function stepCode(ctx) {
 
   await ensureCapturedCodeIsLive(ctx);
 
-  await pocket.run(['find', 'role', 'button', 'click', '--name', SCAN_LABEL, '--exact']);
-  // The scanner is on screen for as long as the decode takes, which behind a
-  // fake camera is under a second — so the wait polls fast and the screenshot
-  // goes in front of everything else this step does.
-  await pocket.waitUntil(scannerUpExpr(), {
-    what: 'the scanner to open',
-    timeoutMs: 30_000,
-    intervalMs: 50,
-  });
+  await openScanner(pocket);
   await ctx.shot('06-scanner.png', pocket);
 
   const code = await pocket.waitUntil(pairingCodeExpr(), {
@@ -667,6 +658,22 @@ async function ensureCapturedCodeIsLive(ctx) {
  */
 function scannerUpExpr() {
   return `return !!document.querySelector('#pocket-paste-code');`;
+}
+
+/**
+ * Tap **Scan a setup code** and wait for the scanner.
+ *
+ * The scanner is on screen for as long as the decode takes, which behind a fake
+ * camera is under a second — so the wait polls fast, and whatever the caller
+ * does next goes in front of everything else.
+ */
+async function openScanner(pocket) {
+  await pocket.run(['find', 'role', 'button', 'click', '--name', SCAN_LABEL, '--exact']);
+  await pocket.waitUntil(scannerUpExpr(), {
+    what: 'the scanner to open',
+    timeoutMs: 30_000,
+    intervalMs: 50,
+  });
 }
 
 /**
@@ -803,27 +810,28 @@ function pairedCountExpr() {
     return match ? Number(match[1]) : null;`;
 }
 
+/** The same number as {@link pairedCountExpr}, read once — 0 while it names none. */
 async function pairedCount(ab) {
-  const section = await sectionText(ab);
-  const match = /(\d+)\s+paired/.exec(section ?? '');
-  return match ? Number(match[1]) : 0;
+  return (await ab.eval(pairedCountExpr())) ?? 0;
 }
 
 /**
- * Type the wrong two digits, which is the one mistake this ceremony does not
- * forgive: the Host spends its single attempt on the compare, so there is no
- * retry and nothing is paired.
+ * Answer the request the wrong way and prove that nothing was paired.
  *
- * The scenario exists because both sides used to go quiet about it — the modal
+ * The two ways to pair nothing — mistyping the digits and cancelling — differ
+ * only in `decide`, so they are one function: what makes each a scenario is the
+ * absence afterwards, and that check is identical and easy to get subtly wrong.
+ *
+ * The scenarios exist because both sides used to go quiet about it — the modal
  * vanished, the count did not move, and the panel said the same sentence it says
  * after a success.
  */
-async function stepWrongCode(ctx) {
+async function pairedNothing(ctx, { decide, hostShot, pocketShot, as, complaint, facts = {} }) {
   const host = ctx.state.hostBrowser;
   const before = await pairedCount(host);
-  const typed = nextCode(ctx.state.pairingCode);
-  await approveOnHost(ctx, { code: typed, reports: OUTCOME_CODE_MISMATCH });
-  await ctx.shot('09-host-mismatch.png');
+  // Records the decision itself under `decision`, as the happy path's does.
+  await decide(ctx);
+  await ctx.shot(hostShot);
 
   // "Nothing was paired" is an absence, and the count is re-read on a 2 s poll
   // (`docs/specs/server.md`), so it is given a cycle to move before being
@@ -832,24 +840,38 @@ async function stepWrongCode(ctx) {
   await delay(2_500);
   const after = await pairedCount(host);
   if (after !== before) {
-    throw new Error(`a mistyped code paired something: ${before} → ${after} paired phones`);
+    throw new Error(`${complaint}: ${before} → ${after} paired phones`);
   }
-  ctx.record({ mismatch: { typed, expected: ctx.state.pairingCode, pairedClients: after } });
-  await recordPocketRefusal(ctx, '10-pocket-mismatch.png');
+  ctx.record({ [as]: { ...facts, pairedClients: after } });
+  await recordPocketRefusal(ctx, pocketShot);
+}
+
+/**
+ * Type the wrong two digits, which is the one mistake this ceremony does not
+ * forgive: the Host spends its single attempt on the compare, so there is no
+ * retry and nothing is paired.
+ */
+function stepWrongCode(ctx) {
+  const typed = nextCode(ctx.state.pairingCode);
+  return pairedNothing(ctx, {
+    decide: (c) => approveOnHost(c, { code: typed, reports: OUTCOME_CODE_MISMATCH }),
+    hostShot: '09-host-mismatch.png',
+    pocketShot: '10-pocket-mismatch.png',
+    as: 'mismatch',
+    complaint: 'a mistyped code paired something',
+    facts: { typed, expected: ctx.state.pairingCode },
+  });
 }
 
 /** Cancel the request on the laptop, which is the other way to pair nothing. */
-async function stepDenied(ctx) {
-  const host = ctx.state.hostBrowser;
-  const before = await pairedCount(host);
-  await denyOnHost(ctx);
-  await ctx.shot('09-host-cancelled.png');
-
-  await delay(2_500);
-  const after = await pairedCount(host);
-  if (after !== before) throw new Error(`a cancelled request paired something (${after})`);
-  ctx.record({ denial: { pairedClients: after } });
-  await recordPocketRefusal(ctx, '10-pocket-cancelled.png');
+function stepDenied(ctx) {
+  return pairedNothing(ctx, {
+    decide: denyOnHost,
+    hostShot: '09-host-cancelled.png',
+    pocketShot: '10-pocket-cancelled.png',
+    as: 'denial',
+    complaint: 'a cancelled request paired something',
+  });
 }
 
 /** The two digits that are not the ones the phone is showing. */
@@ -876,14 +898,9 @@ async function stepDeadCode(ctx) {
 
   // Before the scanner mounts, or the camera — still pointed at the Host's live
   // QR — decodes it and starts a real pairing underneath this one.
-  await blankY4m(join(ctx.runDir, ctx.artifactName('qr.y4m')));
+  await blankY4m(ctx.path('qr.y4m'));
 
-  await pocket.run(['find', 'role', 'button', 'click', '--name', SCAN_LABEL, '--exact']);
-  await pocket.waitUntil(scannerUpExpr(), {
-    what: 'the scanner to open',
-    timeoutMs: 30_000,
-    intervalMs: 50,
-  });
+  await openScanner(pocket);
 
   const expired = await reissueInvitation(ctx, live, { expiry: DEAD_EXPIRY_SECONDS });
   await pasteIntoScanner(ctx, expired);
@@ -1088,7 +1105,7 @@ async function leaveAndReconnect(ctx) {
 async function proveCommand(ctx, name, { prefix = '' } = {}) {
   const pocket = ctx.state.pocketBrowser;
   const marker = `WALKTHROUGH-OK-${Date.now().toString(36)}`;
-  const proof = join(ctx.runDir, ctx.artifactName(name));
+  const proof = ctx.path(name);
   const part = `${proof}.part`;
   // A re-used `--out` must not let an earlier run's file answer this one.
   for (const path of [proof, part]) rmSync(path, { force: true });
@@ -1116,7 +1133,7 @@ async function proveCommand(ctx, name, { prefix = '' } = {}) {
   if (!text.includes(marker) || !text.includes('EXIT=0')) {
     throw new Error(`${name} is not that command's output: ${JSON.stringify(text)}`);
   }
-  ctx.artifacts.add(ctx.artifactName(name));
+  ctx.keep(name);
   return { marker, command, roundTripMs, output: text.trim() };
 }
 
@@ -1255,10 +1272,13 @@ async function fillField(ctx, selector, value, ab = ctx.state.hostBrowser) {
 }
 
 /**
- * Everything up to the two digits, which every scenario does identically: a
- * Server, a Host, an enrollment, a QR, a phone, and a scan.
+ * Everything before anything is scanned: a Server, a Host, an enrollment, a QR,
+ * and a phone. Named rather than counted from the end of {@link PRELUDE},
+ * because `expired-code` is exactly "this and no scan" — and a step appended to
+ * the prelude must not silently start a ceremony that scenario says it never
+ * starts.
  */
-const PRELUDE = [
+const SETUP = [
   { name: 'server', title: 'Start the coordinating server', run: stepServer },
   { name: 'host', title: 'Start the Host in the agent-browser harness', run: stepHost },
   { name: 'settings', title: 'Open Settings → Remote control', run: stepSettings },
@@ -1269,12 +1289,17 @@ const PRELUDE = [
     title: 'Open Pocket with a fake camera and a virtual authenticator',
     run: stepPocket,
   },
-  {
-    name: 'code',
-    title: 'Scan from inside Pocket and read the two-digit code',
-    run: stepCode,
-  },
 ];
+
+/** The scan, and with it the two digits — every scenario that has a ceremony. */
+const SCAN = {
+  name: 'code',
+  title: 'Scan from inside Pocket and read the two-digit code',
+  run: stepCode,
+};
+
+/** Everything up to the two digits, which every ceremony does identically. */
+const PRELUDE = [...SETUP, SCAN];
 
 /**
  * The endings, by `--scenario`. Each says in one sentence what a green run of it
@@ -1305,13 +1330,13 @@ export const SCENARIOS = {
     expect: 'cancelling on the laptop pairs nothing and returns the phone to its list',
     steps: [...PRELUDE, { name: 'cancel', title: 'Cancel the request', run: stepDenied }],
   },
-  // The one scenario that stops short of the prelude's last step: nothing is
-  // ever scanned, so there is no ceremony and no two digits.
+  // The one scenario with no scan in it: nothing is ever decoded, so there is no
+  // ceremony and no two digits.
   'expired-code': {
     expect:
       'a setup code that ran out of time is told apart from one that was never for this server, and neither starts a ceremony',
     steps: [
-      ...PRELUDE.slice(0, -1),
+      ...SETUP,
       {
         name: 'dead-code',
         title: 'Paste a code that expired, then one for another server',

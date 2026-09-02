@@ -28,11 +28,27 @@ const SERVER_PORT = 3000;
 /** The scenario a bare run drives, and the one `--until` is checked against. */
 const DEFAULT_SCENARIO = 'happy';
 
-/** The defaults `parseArgs` starts from, and the ones `usage` prints. */
+/**
+ * Every artifact a scenario other than the default writes is named after it, so
+ * several scenarios can share one `--out` and none overwrites another's
+ * evidence — including the ones with the same name on every path (`server.log`,
+ * `qr.png`, the proof files).
+ *
+ * A function of `opts` rather than a closure, because `cleanup` writes one
+ * artifact of its own and runs where `ctx` does not.
+ */
+function artifactName(opts, name) {
+  return opts.scenario === DEFAULT_SCENARIO ? name : `${opts.scenario}-${name}`;
+}
+
+/**
+ * The defaults `parseArgs` starts from, and the ones `usage` prints. `until` is
+ * not among them: which steps exist depends on `--scenario`, so it is resolved
+ * after the whole argv has been read.
+ */
 function defaults() {
   return {
     scenario: DEFAULT_SCENARIO,
-    until: SCENARIOS[DEFAULT_SCENARIO].steps.at(-1).name,
     out: '$TMPDIR/pairing-walkthrough/<timestamp>',
     skipBuild: false,
     password: 'walkthrough-hunter2',
@@ -42,8 +58,6 @@ function defaults() {
 }
 
 function parseArgs(argv) {
-  // `until` is resolved after the loop, not before: which steps exist depends on
-  // `--scenario`, and the two flags may arrive in either order.
   const opts = { ...defaults(), out: null, until: null };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -145,16 +159,6 @@ async function main(live) {
   const state = live.state;
   // Cleanup identifies the Pocket Chrome by its profile path; see `cleanup`.
   state.runDir = runDir;
-  /**
-   * Every artifact a scenario other than the default writes is named after it,
-   * so several scenarios can share one `--out` and none overwrites another's
-   * evidence — including the ones with the same name on every path (`server.log`,
-   * `qr.png`, the proof files).
-   */
-  const artifactName = (name) =>
-    opts.scenario === DEFAULT_SCENARIO ? name : `${opts.scenario}-${name}`;
-  // `cleanup` writes one artifact of its own, and runs where `ctx` does not.
-  state.artifactName = artifactName;
 
   const ctx = {
     repoRoot,
@@ -164,14 +168,20 @@ async function main(live) {
     serverPort: SERVER_PORT,
     serverOrigin: `http://localhost:${SERVER_PORT}`,
     viteOrigin: `http://localhost:${opts.vitePort}`,
-    artifacts,
     log: (message) => console.log(`[walkthrough] ${message}`),
     record: (facts) => Object.assign(summary.facts, facts),
-    artifactName,
+    /**
+     * Where a run-directory file goes, scenario prefix and all — **the only way
+     * a step is allowed to name one**, so no path can escape the rule and be
+     * overwritten by another scenario sharing this `--out`.
+     */
+    path: (name) => join(runDir, artifactName(opts, name)),
+    /** Register a file as evidence this run left behind. */
+    keep: (name) => artifacts.add(artifactName(opts, name)),
     /** Write `text` into the run directory and register it as an artifact. */
     write: (name, text) => {
-      writeFileSync(join(runDir, artifactName(name)), `${text}\n`);
-      artifacts.add(artifactName(name));
+      writeFileSync(ctx.path(name), `${text}\n`);
+      ctx.keep(name);
     },
     /**
      * Screenshot a browser into the run directory — the Host's by default, the
@@ -184,8 +194,8 @@ async function main(live) {
      */
     shot: async (name, browser = state.hostBrowser) => {
       if (!browser) throw new Error('no browser to screenshot yet');
-      await browser.screenshot(join(runDir, artifactName(name)));
-      artifacts.add(artifactName(name));
+      await browser.screenshot(ctx.path(name));
+      ctx.keep(name);
       const text = await browser
         .visibleText()
         .catch((err) => `(text capture failed: ${err.message})`);
@@ -194,7 +204,7 @@ async function main(live) {
   };
   // Written by the children rather than by a step, so registered here.
   for (const log of ['server.log', 'host.log', 'pocket-chrome.log', 'pocket-console.log']) {
-    artifacts.add(artifactName(log));
+    ctx.keep(log);
   }
 
   ctx.record({ serverOrigin: ctx.serverOrigin });
@@ -250,8 +260,10 @@ async function cleanup(state, opts) {
   // side's only equivalent — the one place a client-side throw shows up at all.
   if (state.pocketAuth && state.runDir) {
     const { messages } = state.pocketAuth.session;
-    const name = state.artifactName?.('pocket-console.log') ?? 'pocket-console.log';
-    writeFileSync(join(state.runDir, name), `${messages.join('\n')}\n`);
+    writeFileSync(
+      join(state.runDir, artifactName(opts, 'pocket-console.log')),
+      `${messages.join('\n')}\n`,
+    );
   }
   // The CDP socket next: it is the only thing holding the Pocket page's virtual
   // authenticator, and closing it after Chrome is gone throws.

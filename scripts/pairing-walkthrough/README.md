@@ -43,23 +43,17 @@ Every line about `agent-browser` and Chrome here was probed against
 
 ## Scenarios
 
-`--scenario <name>` picks which ending the run drives. They share the first six
-steps — everything up to the scan is the same code on every path — so a scenario
-is only ever the last step or two, and the differences are all in what the laptop
-and the phone say afterwards.
+`--scenario <name>` picks which ending the run drives: `happy` (the default),
+`wrong-code`, `denied`, and `expired-code`. They share the first six steps —
+everything up to the scan is the same code on every path — so a scenario is only
+ever the last step or two, named for it in *Steps* below, and the differences are
+all in what the laptop and the phone say afterwards. What a green run of each
+proves is one sentence per scenario in `steps.mjs`, printed at startup and
+recorded in `summary.json` as `expect`.
 
-| Scenario | Ends with | What a green run proves | Artifacts |
-| --- | --- | --- | --- |
-| `happy` (default) | `terminal` | A phone paired from a QR runs a command the laptop's own shell answers, and hears it ring. | unprefixed, as below |
-| `wrong-code` | `mismatch` | The two digits are mistyped: nothing pairs, the laptop's panel says the digits did not match, and the phone lands back on its list with its own sentence. | `wrong-code-*` |
-| `denied` | `cancel` | Cancel on the laptop: nothing pairs, the panel says the request was cancelled, the phone goes back to its list. | `denied-*` |
-| `expired-code` | `dead-code` | A code that ran out of time is told apart from one that was never for this server: the phone says the first has expired and the second is not a setup code, and neither starts a ceremony. | `expired-code-*` |
-
-Each scenario's sentence is in `summary.json` as `expect`, beside the artifacts
-that back it. **Every artifact of a scenario other than `happy` is prefixed with
-the scenario's name** — screenshots, text captures, logs, proof files — so
-several scenarios can share one `--out` without overwriting each other's
-evidence.
+**Every artifact of a scenario other than `happy` is prefixed with the
+scenario's name** — screenshots, text captures, logs, proof files — so several
+scenarios can share one `--out` without overwriting each other's evidence.
 
 `wrong-code` and `denied` both check an *absence* — that nothing was paired —
 which the count cannot show the instant a decision lands, since the section

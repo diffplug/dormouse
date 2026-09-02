@@ -17,7 +17,7 @@
 
 import { DEFAULT_PAIRING_TTL_MS, formatPairingInvitationUrl } from 'server-lib-common';
 
-import type { RemoteHostConsoleStatus, SetupQrResult } from './service-protocol';
+import type { InvitationEvent, RemoteHostConsoleStatus, SetupQrResult } from './service-protocol';
 import type { PairingOutcome, TerminalInvitationState } from '../../remote/host/remote-host';
 import type { RemoteHostLink } from '../../lib/platform/types';
 
@@ -150,12 +150,18 @@ export function makeStubRemoteHostLink(primed: PrimedRemoteHost): RemoteHostLink
         // Naming the invitation the stub's own `setupQr` answered, because the
         // panel acts only on its own code (`service-protocol.ts`).
         const { inviteId } = primed.setupQr ?? setupQrResult();
-        const state = primed.setupInvitation ?? 'consumed';
-        const outcome = primed.setupOutcome;
+        // Spread like the service's own `#emitInvitation`, so no story or test
+        // drives the panel with a shape production cannot send.
+        const event: InvitationEvent = {
+          name: 'invitation',
+          inviteId,
+          state: primed.setupInvitation ?? 'consumed',
+          ...(primed.setupOutcome ? { outcome: primed.setupOutcome } : {}),
+        };
         // A microtask rather than inline: the panel subscribes during an effect,
         // and setting state before that effect has returned is a no-op React
         // warns about.
-        queueMicrotask(() => listener({ name: 'invitation', inviteId, state, outcome }));
+        queueMicrotask(() => listener(event));
       }
       return () => {};
     },

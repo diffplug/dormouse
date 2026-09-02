@@ -243,9 +243,8 @@ export interface RemoteHostOptions {
    * QR can stop offering a code that can no longer be used. Nothing here acts
    * on it — the Host's own map is the authority.
    *
-   * `outcome` is present only where a pairing ceremony ended, and says how: it
-   * is what lets the panel report a mistyped code, which otherwise looks
-   * exactly like a success from here ({@link PairingOutcome}).
+   * `outcome` is present only where a pairing ceremony ended, and says how
+   * ({@link PairingOutcome}).
    */
   onInvitationChanged?: (
     inviteId: string,
@@ -1138,10 +1137,9 @@ export class RemoteHost {
    * every terminal outcome (`docs/specs/remote-security-model.md` → Pairing).
    *
    * **`outcome` is what a decision ended it**, and its absence is not a
-   * default: a teardown — a lost relay socket, `stop()`, a client the relay
-   * says is gone — ends the ceremony without anyone deciding anything, and
-   * reporting one there would put a sentence about a pairing under a panel
-   * whose machine is busy reconnecting.
+   * default: a teardown decides nothing ({@link PairingOutcome}), and reporting
+   * one there would put a sentence about a pairing under a panel whose machine
+   * is busy reconnecting.
    */
   #disposePairing(clientId: string, outcome?: PairingOutcome): void {
     const state = this.#clients.get(clientId);

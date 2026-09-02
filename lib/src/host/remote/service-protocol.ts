@@ -124,15 +124,11 @@ export interface InvitationEvent {
   state: InvitationState;
   /**
    * How the ceremony this code produced ended, where one did — the only way the
-   * Settings panel can tell a mistyped confirmation from a success, since both
-   * spend the code and dismiss the modal.
-   *
-   * **On this event rather than beside it.** The state and the outcome are one
-   * transition (`PairingOutcome`), so carrying them together is what keeps the
-   * panel from painting the state-only sentence and then correcting itself; and
-   * `inviteId` already names which panel is concerned, so a sibling event would
-   * need the same correlation for nothing. Absent means nobody decided
-   * anything: an un-scanned code that expired, or a teardown.
+   * Settings panel can tell a mistyped confirmation from a success
+   * (`PairingOutcome`). **On this event rather than beside it**, because the two
+   * are one transition: carrying them together is what keeps the panel from
+   * painting the state-only sentence and then correcting itself. Absent means
+   * nobody decided anything.
    */
   outcome?: PairingOutcome;
 }
