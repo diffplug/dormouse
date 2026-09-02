@@ -58,7 +58,6 @@ export function RemotePairingModal({
           type="text"
           inputMode="numeric"
           autoComplete="off"
-          autoFocus
           aria-label="Two-digit code from the phone"
           value={code}
           // Digits only, and never more than two: the field is the whole secret,
