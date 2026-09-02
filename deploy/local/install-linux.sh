@@ -1361,7 +1361,7 @@ cmd_uninstall() {
       printf 'could not turn off the Serve mapping; check "tailscale serve status" and remove it by hand\n' >&2
     fi
   else
-    printf 'left the Serve config alone (it does not point at 127.0.0.1:%s)\n' "$PORT"
+    printf 'left the Serve config alone (it does not map / to 127.0.0.1:%s)\n' "$PORT"
   fi
   # bin/run-server, not bin: this script lives there too, and "purge" — the
   # command the message above points at — is unreachable once it is deleted.

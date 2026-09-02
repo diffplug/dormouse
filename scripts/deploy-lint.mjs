@@ -327,8 +327,9 @@ export const RULES = [
     // the install repointed the operator's root Serve path without asking.
     //
     // Every root-path Serve match, counted: the gate's two arms, plus
-    // `manage verify`'s `serve_proxies_root`, which asks the same question
-    // about the same output. All are scoped to the root line and
+    // `serve_proxies_root`, which asks the same question about the same output
+    // for `manage verify` and for uninstall — the rule below counts those two
+    // consumers, since this one cannot. All are scoped to the root line and
     // right-bounded — an unscoped port match said "already ours" for a config
     // whose root was foreign, and for one on :31000.
     rule: 'Network posture — every root-path Serve match is scoped to / and bounded on the port',
@@ -341,6 +342,23 @@ export const RULES = [
         'its ladder, verify and uninstall checks are all `-match` over a string already captured from `Invoke-Tailscale`, so there is no pipeline to take SIGPIPE; the rule below pins the `/` in the verify message, and the root scoping itself has no signal on this platform at all',
     },
     exactMatches: { macOS: 3, Linux: 3 },
+  },
+  {
+    // The rule above counts the helper's own text, so it stays green when a
+    // CALLER stops asking — `serve_proxies_root` survives on `manage verify`'s
+    // call alone, and the shell test pins that its answer is right, never that
+    // uninstall consults it. Reviewing this branch proved it: the uninstall
+    // scoping was deletable on all three platforms with every gate green. This
+    // counts the consumers instead. Windows's install-time gate spells the same
+    // regex against $LOOPBACK_PORT, so it does not collide with these two.
+    rule: 'Network posture — every root-path Serve decision consults the root-scoped match',
+    patterns: {
+      macOS: /if serve_proxies_root "\$PORT" "\$serve_out"; then/,
+      Linux: /if serve_proxies_root "\$PORT" "\$serve_out"; then/,
+      Windows:
+        /-match \('\(\?m\)\^\\\|--\\s\+\/\\s\+proxy\.\*' \+ \[regex\]::Escape\("127\.0\.0\.1:\$PORT"\)/,
+    },
+    exactMatches: { macOS: 2, Linux: 2, Windows: 2 },
   },
   {
     // Windows takes the same match inline rather than through a helper, so it

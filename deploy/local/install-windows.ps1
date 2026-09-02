@@ -1870,7 +1870,7 @@ function Invoke-Uninstall {
     if ($off.ExitCode -eq 0) { Write-Host "turned off the Serve mapping to 127.0.0.1:$PORT" }
     else { [Console]::Error.WriteLine('could not turn off the Serve mapping; check "tailscale serve status" and remove it by hand') }
   } else {
-    Write-Host "left the Serve config alone (it does not point at 127.0.0.1:$PORT)"
+    Write-Host "left the Serve config alone (it does not map / to 127.0.0.1:$PORT)"
   }
 
   foreach ($p in @((Join-Path $Root 'releases'), (Join-Path $Root 'run'))) {
