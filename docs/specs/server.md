@@ -991,8 +991,9 @@ clearing site data destroys them → re-pair, per the security model; a dropped
 WebSocket sends you back to the Hosts view — reconnect by tapping Connect
 again.
 
-`scripts/pairing-walkthrough/` drives steps 1–3 through the pairing code in real
-browsers, leaving screenshots and logs in a run directory. Not in CI.
+`scripts/pairing-walkthrough/` drives all three steps in real browsers, ending at
+a command typed from Pocket, leaving screenshots and logs in a run directory. Not
+in CI.
 
 ## Installing it
 

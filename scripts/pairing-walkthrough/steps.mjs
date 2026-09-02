@@ -2,12 +2,10 @@
  * The ordered walkthrough (`scripts/pairing-walkthrough/README.md`).
  *
  * Each entry is one thing a person does, in the order they do it, and
- * `--until <name>` stops after the one it names. Stage (c) of the harness is the
- * last entry: it exists as a named step that throws, so adding it is filling in
- * a `run` rather than restructuring the runner.
+ * `--until <name>` stops after the one it names.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -16,13 +14,6 @@ import { addVirtualAuthenticator, attachPage, pageUrl, virtualCredentials } from
 import { launchChrome, resolveChrome } from './chrome.mjs';
 import { crop, decodeQr, imageSize, toY4m, upscale } from './qr.mjs';
 import { delay, findFreePort, spawnLogged, waitFor, waitForLine } from './proc.mjs';
-
-/** The one step a stage that is not built yet gets. */
-function notImplemented(stage, what) {
-  return () => {
-    throw new Error(`not implemented — stage (${stage}): ${what}`);
-  };
-}
 
 /**
  * The Pocket browser's viewport: a phone, because every Pocket screen is laid
@@ -37,6 +28,37 @@ const POCKET_VIEWPORT = { width: 390, height: 844 };
  * scanner is a phase of the app, not a URL.
  */
 const SCAN_LABEL = 'Scan a Host QR';
+
+/**
+ * The Host's pairing modal, by the id its own title carries.
+ *
+ * **Not by its copy, and not by "the dialog with a numeric field".** Every
+ * string on it is normative and under review
+ * (`docs/specs/remote-security-model.md` → Pairing), and the Settings dialog
+ * standing behind it holds numeric inputs of its own — so the one anchor that is
+ * neither is `ModalFrame`'s `aria-labelledby`
+ * (`lib/src/remote/host/RemotePairingModal.tsx`).
+ */
+const PAIRING_MODAL = '[role="dialog"][aria-labelledby="remote-pairing-title"]';
+
+/**
+ * What a person types to prove the terminal is real, and where its answer lands.
+ *
+ * **A file, not the screen.** Both terminals render through WebGL, so neither
+ * side has `.xterm-rows` to scrape; the laptop's own shell writing a file this
+ * process can stat is the only end-to-end evidence that the keystrokes reached a
+ * PTY and its exit status came back.
+ */
+const TERMINAL_PROOF = 'terminal-proof.txt';
+const NOTIFY_PROOF = 'notify-proof.txt';
+const RECONNECT_PROOF = 'reconnect-proof.txt';
+
+/**
+ * A terminal notification, as WezTerm's OSC 777 spells it
+ * (`docs/specs/terminal-escapes.md`). Typed at the laptop's shell from the
+ * phone, so what rings is the Host's own alert manager.
+ */
+const NOTIFY_SEQUENCE = String.raw`printf '\033]777;notify;Walkthrough;the Host is ringing\033\\'`;
 
 /**
  * How long a setup code stays redeemable, read out of the workspace rather than
@@ -469,6 +491,9 @@ async function stepCode(ctx) {
       `expected one resident credential asserted at least once, got ${JSON.stringify(credentials)}`,
     );
   }
+  // Where the count stood before the connection's own proof, which the next
+  // step measures against: every connect costs one more assertion.
+  ctx.state.signCount = credentials[0].signCount;
   ctx.record({ pairing: { code, credentials } });
 
   // The Host's own interruption, which is the half of this ceremony the phone
@@ -525,11 +550,334 @@ function pairingCodeExpr() {
     return digits ?? null;`;
 }
 
-/** The Host's pairing modal, as text, or null while it has not opened. */
+/** The Host's pairing modal, as text, or null while it is not up. */
 function pairingModalExpr() {
-  return `const modal = [...document.querySelectorAll('[role="dialog"]')]
-      .find((el) => el.innerText.includes('Pair a new device'));
+  return `const modal = document.querySelector(${JSON.stringify(PAIRING_MODAL)});
     return modal ? modal.innerText.trim() : null;`;
+}
+
+/**
+ * Approve on the laptop, and follow the phone the rest of the way.
+ *
+ * The half of the ceremony every earlier step was setting up. Each claim is
+ * checked on the side that cannot fake it: the file the laptop's own shell
+ * wrote, the authenticator's `signCount`, and the Host's alert arriving in the
+ * phone's session list.
+ */
+async function stepTerminal(ctx) {
+  if (!ctx.state.pairingCode) throw new Error('the code step has to run first');
+  await approveOnHost(ctx);
+  await connectPocket(ctx);
+  await runFromPocket(ctx);
+  await ringFromHost(ctx);
+  await leaveAndReconnect(ctx);
+}
+
+/**
+ * Type the phone's digits into the modal and authorize.
+ *
+ * **One attempt.** The Host holds the expected code, compares it itself, and
+ * every terminal outcome spends the invitation
+ * (`docs/specs/remote-security-model.md` → Pairing) — so a mistyped field is not
+ * a retry, it is a failed run.
+ */
+async function approveOnHost(ctx) {
+  const ab = ctx.state.hostBrowser;
+  const code = ctx.state.pairingCode;
+  await fillField(ab, `${PAIRING_MODAL} input`, code);
+  // The last button in the modal, and disabled until the field holds two
+  // digits — so clicking it exercises that gate rather than working around it.
+  const confirm = await clickElement(
+    ab,
+    `const modal = document.querySelector(${JSON.stringify(PAIRING_MODAL)});
+     return modal ? [...modal.querySelectorAll('button')].at(-1) : null;`,
+    "the pairing modal's confirm button",
+  );
+
+  // The clock the next step reads too: what a person waits through is the span
+  // from authorizing to a terminal on the phone, and the phone is usually
+  // already there by the time the laptop has finished settling.
+  const startedAt = (ctx.state.approvedAt = Date.now());
+  await waitFor(async () => (await ab.eval(pairingModalExpr())) === null, {
+    what: 'the pairing modal to close',
+    timeoutMs: 60_000,
+    intervalMs: 200,
+  });
+  // The modal closing only says the request was answered. What says it was
+  // *approved* is the ACL the Host wrote, which the enrolled view counts.
+  const section = await waitFor(
+    async () => {
+      const text = await remoteControlText(ab);
+      return /\d+\s+paired/.test(text ?? '') ? text : null;
+    },
+    { what: 'the Host to count a paired device', timeoutMs: 60_000 },
+  );
+  ctx.record({
+    approval: { code, confirm, approvedInMs: Date.now() - startedAt, remoteControl: section.trim() },
+  });
+  await ctx.shot('09-host-approved.png');
+}
+
+/**
+ * Follow the phone from the code screen into the terminal.
+ *
+ * **Nothing is tapped here.** Approving on the laptop ends the ceremony, and
+ * Pocket connects itself and lands on the wall — "approving on the laptop should
+ * land the phone in a terminal, not back on a list"
+ * (`lib/src/remote/pocket-app/App.tsx`). A run that has to tap something to get
+ * there has found a bug.
+ */
+async function connectPocket(ctx) {
+  const pocket = ctx.state.pocketBrowser;
+  await waitFor(() => pocket.eval(wallReadyExpr()), {
+    what: 'Pocket to connect and land on the terminal',
+    timeoutMs: 120_000,
+    intervalMs: 250,
+  });
+  const connectedInMs = Date.now() - ctx.state.approvedAt;
+  const signCount = await assertAsserted(ctx, 'the connection');
+  ctx.record({ connect: { connectedInMs, signCountAfterConnect: signCount } });
+  await ctx.shot('10-pocket-connected.png', pocket);
+}
+
+/** Run a command from the phone and read its output on the laptop. */
+async function runFromPocket(ctx) {
+  const proof = await proveCommand(ctx, TERMINAL_PROOF, {});
+  // A second, weaker witness on the phone's own side, and the only one there is:
+  // both terminals render through WebGL, so the pane title — which the Host
+  // derives from the command line and ships in the directory snapshot — is the
+  // one place Pocket displays anything the laptop's shell produced.
+  const echoedInPaneTitle = ((await ctx.state.pocketBrowser.visibleText()) ?? '').includes(
+    proof.marker,
+  );
+  ctx.record({ terminal: { ...proof, echoedInPaneTitle } });
+  await ctx.shot('11-pocket-terminal.png', ctx.state.pocketBrowser);
+}
+
+/**
+ * A notification on the laptop, seen on the phone.
+ *
+ * The escape is typed from Pocket only because that is where the caret already
+ * is; what turns it into a ring is the Host's own alert manager, and the phone
+ * learns of it the one way it can — `ringing`/`hasTODO` on the directory
+ * snapshot (`docs/specs/alert.md`,
+ * `lib/src/remote/host/directory-collect.ts`). Push is off on a loopback
+ * origin, so this is the in-session path and the whole of it.
+ */
+async function ringFromHost(ctx) {
+  const pocket = ctx.state.pocketBrowser;
+  // The notification rides in front of a file write, so its delivery is settled
+  // before anything is asserted about the screen — a ring that never arrives is
+  // then a ring that never arrived, not a keystroke that went missing.
+  const startedAt = Date.now();
+  const sent = await proveCommand(ctx, NOTIFY_PROOF, { prefix: `${NOTIFY_SEQUENCE}; ` });
+  await pocket.run(['click', 'button[aria-label="Sessions input mode"]']);
+  const row = await waitFor(
+    async () => (await pocket.eval(sessionRowsExpr()))?.find((entry) => entry.todo) ?? null,
+    { what: "the Host's notification to reach the phone's session list", timeoutMs: 60_000 },
+  );
+  ctx.record({
+    notification: {
+      sequence: NOTIFY_SEQUENCE,
+      deliveredInMs: sent.roundTripMs,
+      // Enter to a bell on the phone, the tap that opens the session list
+      // included — the ring is normally there before the list is looked at.
+      visibleInMs: Date.now() - startedAt,
+      row,
+    },
+  });
+  await ctx.shot('12-pocket-alert.png', pocket);
+}
+
+/**
+ * Leave the wall and come back the way a phone comes back from a dropped socket
+ * (`docs/specs/server.md` → "Running it"): the Hosts view, then Connect.
+ *
+ * Also the only screenshot of the Hosts view with a row on it — every earlier
+ * step passes straight through it.
+ */
+async function leaveAndReconnect(ctx) {
+  const pocket = ctx.state.pocketBrowser;
+  await clickElement(pocket, `return document.querySelector('header button');`, "Pocket's back button");
+  const row = await waitFor(() => pocket.eval(hostRowExpr()), {
+    what: 'the Hosts view to list the paired computer',
+    timeoutMs: 60_000,
+  });
+  await ctx.shot('13-pocket-hosts.png', pocket);
+
+  const action = await clickElement(pocket, hostRowActionExpr(), "the Hosts row's own action");
+  await waitFor(() => pocket.eval(wallReadyExpr()), {
+    what: 'Pocket to reconnect',
+    timeoutMs: 120_000,
+    intervalMs: 250,
+  });
+  // A reconnect is a whole fresh ceremony — new handshake, new Host challenge,
+  // new assertion — so the count has to move again.
+  const signCount = await assertAsserted(ctx, 'the reconnect');
+  await ctx.shot('14-pocket-reconnected.png', pocket);
+  // The attachment is new too, so the input path is proved again rather than
+  // assumed to have survived: a wall that paints and cannot be typed into is
+  // exactly what a broken re-attach looks like.
+  const proof = await proveCommand(ctx, RECONNECT_PROOF, {});
+  ctx.record({ reconnect: { row, action, signCountAfterReconnect: signCount, ...proof } });
+}
+
+/**
+ * Type one command into Pocket's terminal and wait for the file it writes.
+ *
+ * The Enter is re-sent while the wait runs: it is the one input in this harness
+ * that can be dropped, and a spare one lands on an empty prompt and costs
+ * nothing.
+ */
+async function proveCommand(ctx, name, { prefix = '' }) {
+  const pocket = ctx.state.pocketBrowser;
+  const marker = `WALKTHROUGH-OK-${Date.now().toString(36)}`;
+  const proof = join(ctx.runDir, name);
+  const part = `${proof}.part`;
+  // A re-used `--out` must not let an earlier run's file answer this one.
+  for (const path of [proof, part]) rmSync(path, { force: true });
+  const command =
+    `${prefix}{ echo ${marker}; date; } > ${shellQuote(part)} 2>&1; ` +
+    `echo EXIT=$? >> ${shellQuote(part)}; mv ${shellQuote(part)} ${shellQuote(proof)}`;
+
+  await focusPocketInput(pocket);
+  const startedAt = Date.now();
+  await pocket.keyboard('inserttext', command);
+  await pocket.press('Enter');
+  let lastEnter = Date.now();
+  const text = await waitFor(
+    async () => {
+      if (existsSync(proof)) return readFileSync(proof, 'utf8');
+      if (Date.now() - lastEnter > 5_000) {
+        await pocket.press('Enter');
+        lastEnter = Date.now();
+      }
+      return null;
+    },
+    { what: `${name} to be written on the laptop`, timeoutMs: 90_000, intervalMs: 200 },
+  );
+  const roundTripMs = Date.now() - startedAt;
+  if (!text.includes(marker) || !text.includes('EXIT=0')) {
+    throw new Error(`${name} is not that command's output: ${JSON.stringify(text)}`);
+  }
+  ctx.artifacts.push(name);
+  return { marker, command, roundTripMs, output: text.trim() };
+}
+
+/**
+ * Put the caret in Pocket's hidden terminal input.
+ *
+ * Through the Type reserve's own button, because that is the only surface
+ * allowed to open a keyboard: a touch on the pane is consumed by the touch mode,
+ * and every input the terminal itself creates is deliberately made unfocusable
+ * (`docs/specs/mobile-terminal-ui.md` → Keyboard focus).
+ */
+async function focusPocketInput(pocket) {
+  await pocket.run(['click', 'button[aria-label="Type input mode"]']);
+  await pocket.run(['click', 'button[aria-label="Focus terminal input"]']);
+  // xterm's own helper textarea answers to the same label, and typing into it
+  // would prove nothing about the composition this step is here to exercise.
+  const focused = await pocket.eval(`const el = document.activeElement;
+    return !!el && el.tagName === 'TEXTAREA' && el.closest('.xterm') === null;`);
+  if (!focused) throw new Error("Pocket's terminal input did not take focus");
+}
+
+/**
+ * The authenticator's count, and the proof that one more assertion happened
+ * since the last time this asked.
+ *
+ * Every connection carries a presence proof of its own
+ * (`docs/specs/remote-security-model.md` → Connection), so this is what
+ * separates "the screen changed" from "the phone proved presence again".
+ */
+async function assertAsserted(ctx, what) {
+  const [credential] = await virtualCredentials(ctx.state.pocketAuth);
+  if (!credential) throw new Error(`the authenticator holds no credential after ${what}`);
+  if (!(credential.signCount > ctx.state.signCount)) {
+    throw new Error(`${what} made no passkey assertion (signCount stayed at ${credential.signCount})`);
+  }
+  ctx.state.signCount = credential.signCount;
+  return credential.signCount;
+}
+
+/**
+ * Click what an expression finds, with the page's own `click()`.
+ *
+ * **Structural, never by name.** Every string on these screens is about to be
+ * rewritten by the copy pass, and a harness that matched on copy would have to
+ * be rewritten with it. Answers the element's text, which is what the summary
+ * records — and is how a renamed control shows up as a diff rather than a break.
+ */
+async function clickElement(ab, js, what) {
+  const label = await ab.eval(`const el = (() => {${js}})();
+    if (!el) throw new Error('not found: ' + ${JSON.stringify(what)});
+    if (el.disabled) throw new Error('disabled: ' + ${JSON.stringify(what)});
+    const text = el.innerText.trim();
+    el.click();
+    return text;`);
+  if (typeof label !== 'string') throw new Error(`could not click ${what}: ${JSON.stringify(label)}`);
+  return label;
+}
+
+/** The enrolled Remote control section, as text, or null. */
+function remoteControlText(ab) {
+  return ab.eval(`const section = [...document.querySelectorAll('[role="dialog"] section')]
+      .find((el) => el.innerText.startsWith('Remote control'));
+    return section ? section.innerText : null;`);
+}
+
+/**
+ * The connected wall, ready to be typed into. The Type reserve's focus button is
+ * both the proof that `MobileTerminalUi` mounted and the affordance the next
+ * step uses.
+ */
+function wallReadyExpr() {
+  return `return !!document.querySelector('button[aria-label="Focus terminal input"]')
+    && !!document.querySelector('.xterm');`;
+}
+
+/**
+ * The session list as the reserve renders it, found by position rather than by
+ * class: it is the block directly under the input-mode selector, and each row is
+ * one button carrying the pane's title, its TODO pill, and — when the Host says
+ * the pane is ringing — a second icon, the bell
+ * (`lib/src/components/MobileTerminalUi.tsx`).
+ */
+function sessionRowsExpr() {
+  return `const modes = document.querySelector('section[aria-label="Input mode"]');
+    const reserve = modes && modes.nextElementSibling;
+    if (!reserve) return null;
+    return [...reserve.querySelectorAll('button')].map((row) => ({
+      text: row.innerText.trim(),
+      todo: [...row.querySelectorAll('span')].some((el) => el.textContent.trim() === 'TODO'),
+      ringing: row.querySelectorAll('svg').length > 1,
+    }));`;
+}
+
+/**
+ * The one Hosts row, anchored on the Remove button's label — the only string on
+ * that screen that is an accessibility contract rather than copy — and read
+ * outwards from it: the row's action is Remove's previous sibling, and the row
+ * is its grandparent (`lib/src/remote/pocket-app/App.tsx` → `HostsView`).
+ */
+function hostRowActionExpr() {
+  return `const remove = document.querySelector('button[aria-label^="Remove "]');
+    return remove ? remove.previousElementSibling : null;`;
+}
+
+function hostRowExpr() {
+  return `const remove = document.querySelector('button[aria-label^="Remove "]');
+    if (!remove) return null;
+    const action = remove.previousElementSibling;
+    return {
+      text: remove.parentElement.parentElement.innerText.trim(),
+      action: action ? action.innerText.trim() : null,
+    };`;
+}
+
+/** One shell word, safe for any path a `--out` can name. */
+function shellQuote(value) {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
 /** `fill`, then read the value back — a controlled input can swallow a paste. */
@@ -566,9 +914,6 @@ export const STEPS = [
   {
     name: 'terminal',
     title: 'Approve on the Host and prove the terminal',
-    run: notImplemented(
-      'c',
-      "type ctx.state.pairingCode into the Host's pairing modal, press Confirm and authorize, then run a command from Pocket and observe its output",
-    ),
+    run: stepTerminal,
   },
 ];

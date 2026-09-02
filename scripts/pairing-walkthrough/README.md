@@ -4,12 +4,20 @@ Drives the self-host setup → pairing story against the **real** Server and the
 **real** Host, in real browsers, and leaves every screenshot, log and captured
 image behind in one run directory.
 
+The whole loop, in one command: a Server, a Host enrolling through its own form,
+a QR on the laptop's screen read by a phone's camera, a passkey, two digits typed
+back on the laptop — and then a command typed on the phone whose output the
+laptop's filesystem is holding half a second later. Every claim it makes is
+checked on the side that cannot fake it: the file the laptop's shell wrote, the
+authenticator's own `signCount`, the Host's alert arriving in the phone's session
+list.
+
 It is a development tool, not a test. **It is deliberately not wired into
 `pnpm test` or any CI workflow**: it wants Chrome, `ffmpeg`, an exclusive
 `:3000`, and several minutes.
 
 ```sh
-node scripts/pairing-walkthrough/run.mjs --until code
+node scripts/pairing-walkthrough/run.mjs
 ```
 
 ## Prerequisites
@@ -26,8 +34,8 @@ node scripts/pairing-walkthrough/run.mjs --until code
 
 ## Steps
 
-`--until <step>` stops after the step it names; the default is `qr`. Stages (a)
-and (b) reach `code`; `terminal` is stage (c) and still throws.
+`--until <step>` stops after the step it names; the default is the last one, so
+a bare run does all of it.
 
 | # | Step | What happens |
 | --- | --- | --- |
@@ -38,24 +46,34 @@ and (b) reach `code`; `terminal` is stage (c) and still throws.
 | 5 | `qr` | Clicks **Set up a phone**, waits for the code, screenshots, crops to the QR, makes a camera-shaped Y4M, and decodes the crop to prove it is legible. → `qr-full.png`, `qr.png`, `qr.y4m`, `invitation-url.txt` |
 | 6 | `pocket` | Launches a second, isolated Chrome with the fake camera pointed at `qr.y4m`, attaches with `agent-browser connect <port>`, opens the **plain origin**, and gives the page a CDP virtual authenticator. → `05-pocket-first-run.png` |
 | 7 | `code` | Taps **Scan a Host QR**; Pocket's own scanner decodes the fake camera, registers a passkey with the scanned token, signs in, and shows two digits. Reads them, and waits for the Host's modal to open. → `06-scanner.png`, `07-code-screen.png`, `08-host-pairing-modal.png`, `pairing-code.txt` |
-| 8 | `terminal` | *Stage (c), not implemented.* Type the code into the Host modal, confirm, and run a command from Pocket. |
+| 8 | `terminal` | Types the two digits into the Host's modal and authorizes; waits for Pocket to connect itself and land on the terminal; runs a command from the phone and reads the file it wrote; rings the Host and finds the bell on the phone; then leaves to the Hosts view and connects again. → `09-host-approved.png` … `14-pocket-reconnected.png`, `terminal-proof.txt`, `notify-proof.txt`, `reconnect-proof.txt` |
 
-Step 8 exists as a named step whose `run` throws, so adding the stage is filling
-one in rather than restructuring the runner. Everything a later step needs from
-an earlier one is on `ctx.state` — `server`, `host`, `hostBrowser`,
-`pocketBrowser`, `pocketAuth` (the live CDP session holding the authenticator),
-and `pairingCode` — or in `summary.json`.
+Everything a later step needs from an earlier one is on `ctx.state` — `server`,
+`host`, `hostBrowser`, `pocketBrowser`, `pocketAuth` (the live CDP session
+holding the authenticator), `pairingCode`, and `signCount` — or in
+`summary.json`.
+
+Per-step milliseconds land in `summary.json`. With warm builds the whole run is
+about 15 s, of which the Host's boot is a third and step 8 is under 3 s; a cold
+`lib/dist-pocket` adds however long that build takes.
+
+Nothing in step 8 is driven around the product. The digits go into the modal's
+own field, the confirm button is clicked while `disabled` is still the modal's to
+decide, and **Pocket is never told to connect**: approving on the laptop is what
+ends the ceremony, and the phone lands on the terminal by itself
+(`lib/src/remote/pocket-app/App.tsx`). A run that had to tap something there
+would have found a bug.
 
 ## Options
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--until <step>` | `qr` | Stop after this step. |
+| `--until <step>` | `terminal` | Stop after this step. |
 | `--out <dir>` | `$TMPDIR/pairing-walkthrough/<timestamp>` | Run directory. |
 | `--skip-build` | off | Reuse `lib/dist-pocket` and `server/dist` instead of rebuilding them. Ignored (with a warning) when either is missing. |
 | `--password <pw>` | `walkthrough-hunter2` | `DORMOUSE_SETUP_PASSWORD` for the run. |
 | `--machine-name <n>` | `Walkthrough Mac` | The name the Host enrolls under. |
-| `--keep` | off | Leave everything running after the last step; Ctrl-C stops it. Useful while writing the next stage. |
+| `--keep` | off | Leave everything running after the last step; Ctrl-C stops it. Useful for poking at a paired pair by hand. |
 
 `--skip-build` skips the Pocket build, so **a change under
 `lib/src/remote/pocket-app/` or `lib/src/remote/client/` will not be in the run**
@@ -81,6 +99,9 @@ pocket-chrome.log     the Pocket browser's own stdout/stderr
 pocket-console.log    everything the Pocket page logged, recorded over CDP
 pocket-profile/       the Pocket browser's profile — passkeys, IndexedDB, worker
 pairing-code.txt      the two digits Pocket showed
+terminal-proof.txt    what the laptop's shell wrote for a command typed on the phone
+notify-proof.txt      the same, for the command that also rang the Host
+reconnect-proof.txt   the same again, after leaving the wall and connecting back
 summary.json          per-step status and timing, plus the run's facts
 ```
 
@@ -166,10 +187,50 @@ Testing 150 rather than assumed:
   authenticator belongs to the *page target*, so it has to be re-added if the
   flow ever moves to a new tab, and the socket stays open for the whole run —
   Chrome drops the authenticator when the client that added it goes away.
-- **Both passkey operations are asserted at the authenticator**, not inferred
+- **Every passkey operation is asserted at the authenticator**, not inferred
   from the screen: `WebAuthn.getCredentials` shows one resident credential whose
-  `signCount` has moved. A first run through `code` leaves it at 3 — register,
-  sign in, and the pairing presence proof.
+  `signCount` has moved. A full run leaves it at **5** — register, sign in, the
+  pairing presence proof, and one more for each of the two connections, since a
+  connection carries a fresh proof of its own
+  ([`docs/specs/remote-security-model.md`](../../docs/specs/remote-security-model.md)
+  → Connection). Each step checks the count moved rather than checking its
+  value, so an extra prompt somewhere earlier does not read as a pass.
+
+## Proving the terminal
+
+**A file, not the screen.** Both terminals render through WebGL, so neither side
+has `.xterm-rows` to scrape — the DOM-scraping recipes silently return nothing
+(memory note: `ab-harness-webgl-read-via-files`). So the command typed on the
+phone redirects itself into the run directory and moves the file into place when
+it is complete, and the harness polls for it: the laptop's own shell writing
+`WALKTHROUGH-OK-<id>` and `EXIT=0` is what proves the keystrokes reached a real
+PTY and its status came back. `summary.json` keeps the command, its output, and
+the Enter → file round trip (`terminal.roundTripMs`, ~220 ms on this machine).
+
+- **Typed the only way a phone can type.** The Type reserve's own focus button,
+  then `keyboard inserttext` into the hidden textarea and `press Enter` — a touch
+  on the pane is consumed by the touch mode, and every input the terminal creates
+  is deliberately unfocusable
+  ([`docs/specs/mobile-terminal-ui.md`](../../docs/specs/mobile-terminal-ui.md) →
+  Keyboard focus).
+- **The Enter is re-sent while the wait runs.** It is the one input here that can
+  be dropped, and a spare one lands on an empty prompt.
+- **The pane title is the phone-side witness.** The Host derives it from the
+  command line and ships it in the directory snapshot, so it is the only place
+  Pocket displays something the laptop's shell produced. Recorded as
+  `terminal.echoedInPaneTitle`, and weaker than the file — the title truncates.
+- **The notification round trip is the same trick.** An OSC 777 rides in front of
+  the file write, so its delivery is settled before anything is asserted about
+  the screen; then the phone's session list is opened and polled for the row's
+  TODO pill and bell, which come from the Host's own alert manager by way of
+  `ringing`/`hasTODO` on the directory snapshot. Push is off here, so this is the
+  in-session path and the whole of it.
+
+Every control in this step is found **structurally** — the pairing modal by its
+`aria-labelledby`, the confirm button as the modal's last, the Hosts row by the
+`Remove <label>` accessibility label — because the copy pass that follows is
+going to rewrite the strings. The one thing the harness reads *as* copy is the
+"N paired" line in the Host's enrolled view.
 
 ## The invitation's TTL
 
@@ -183,8 +244,6 @@ capture's own timestamp beside it in `summary.json`.
 
 ## Known limitations
 
-- **Stage (c) is not implemented.** `--until terminal` throws with the work it
-  would do, after everything before it has run and been written down.
 - **`06-scanner.png` shows an empty viewfinder.** The shot is taken the instant
   the scanner mounts, and behind a fake camera the decode lands under a second
   later — so there is no moment at which the screen is both still the scanner
@@ -201,7 +260,19 @@ capture's own timestamp beside it in `summary.json`.
   enlargement (`qr-large.png`) — closer to what a phone camera sees than the raw
   crop is, but worth knowing when a decode gets marginal.
 - **Push is off**, because a loopback origin has no routable VAPID subject
-  ([`docs/specs/server.md`](../../docs/specs/server.md) → Configuration). Nothing
-  in stages (a)–(c) needs it, and the Pocket screens that offer it are past the
-  point this harness reaches.
+  ([`docs/specs/server.md`](../../docs/specs/server.md) → Configuration). So the
+  Hosts view's card reads *Push notifications are off · This server has push
+  notifications disabled* (`13-pocket-hosts.txt`), the alarm settings say no
+  device has enabled alerts, and **the whole delivery-keyed push path — Enable,
+  the sealed payload, the worker's notification — is untested here.** Only the
+  in-session ring is.
+- **Nothing on this path is a phone.** The Client is a desktop Chrome at a
+  phone-shaped viewport with a virtual authenticator: no real biometrics, no iOS,
+  no Home Screen install, and therefore neither the partition warning nor the
+  two-scan native-camera story. `needsHomeScreenInstall` is false here, so
+  `InstallFirstNotice` and `InstallNotice` never render — they are Storybook
+  coverage only.
+- **The Host is attended throughout**, since its webview is the focused page.
+  Alert behavior that depends on the user having walked away (the inactivity
+  timeout, spoken alerts, deferral until quiet) is therefore not exercised.
 - **One run at a time.** `:3000` and the agent-browser daemon are both global.

@@ -21,7 +21,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 function parseArgs(argv) {
   const opts = {
-    until: 'qr',
+    until: STEPS.at(-1).name,
     out: null,
     skipBuild: false,
     password: 'walkthrough-hunter2',
@@ -57,7 +57,7 @@ function usage() {
   return [
     'Usage: node scripts/pairing-walkthrough/run.mjs [options]',
     '',
-    '  --until <step>     stop after this step (default: qr)',
+    '  --until <step>     stop after this step (default: the last one)',
     `                     steps: ${STEPS.map((s) => s.name).join(', ')}`,
     '  --out <dir>        run directory (default: $TMPDIR/pairing-walkthrough/<timestamp>)',
     '  --skip-build       reuse lib/dist-pocket and server/dist instead of rebuilding',

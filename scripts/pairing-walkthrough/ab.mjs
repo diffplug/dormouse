@@ -59,6 +59,25 @@ export class AgentBrowser {
     return this.run(['open', url]);
   }
 
+  /**
+   * `keyboard <sub> <text>` — whatever has focus receives it. `inserttext` is
+   * atomic where `type` reorders characters under load, so a typed command line
+   * can be trusted without reading it back.
+   */
+  async keyboard(sub, text) {
+    return this.run(['keyboard', sub, text]);
+  }
+
+  /**
+   * `press <key>` — a real key event on the focused element.
+   *
+   * A *top-level* verb: `keyboard` takes only `type` and `inserttext`, which is
+   * why driving a submit used to mean dispatching a synthetic `KeyboardEvent`.
+   */
+  async press(key) {
+    return this.run(['press', key]);
+  }
+
   async screenshot(path) {
     await this.run(['screenshot', path]);
     return path;
