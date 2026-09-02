@@ -8,9 +8,10 @@
 The coordinating Server from the remote security model, in its selfhost mode,
 cut down to the smallest thing that completes this loop:
 
-> Run the server with a setup password. Visit it, present the password, create
-> a passkey. Pair your phone with your laptop's Dormouse Terminal. Pick up a
-> running terminal session from the laptop on the phone.
+> Run the server with a setup password. Enroll your laptop's Dormouse Terminal
+> with it. Point your phone's camera at the code that Host shows: it creates a
+> passkey, signs in, and pairs. Pick up a running terminal session from the
+> laptop on the phone.
 
 One Node process (Hono). No database. **Terminal-only.** Every security
 primitive lives in `server-lib-common`; the terminal UI lives in
@@ -18,7 +19,8 @@ primitive lives in `server-lib-common`; the terminal UI lives in
 
 ## Guardrails
 
-* One account (`accountId: "owner"`), created once with the setup password.
+* One account (`accountId: "owner"`), created once off a code an enrolled Host
+  displayed. The setup password enrolls Hosts and registers nothing.
 * Terminal surfaces only — exactly remote-api.md's **protocol-v1** (browser
   remoting is staged in that spec's `## Future`).
 * Revocation is editing a JSON file by hand; no management UI.
@@ -36,7 +38,7 @@ This table is the whole of what `server/src/` reads from the environment.
 
 | Env var                   | Meaning                                                    |
 | ------------------------- | ---------------------------------------------------------- |
-| `DORMOUSE_SETUP_PASSWORD` | Required. Gates account creation and host enrollment.      |
+| `DORMOUSE_SETUP_PASSWORD` | Required. Gates host enrollment. It registers no passkey: `/api/setup/*` takes a Host-minted setup token only. |
 | `DORMOUSE_ORIGIN`         | External origin, e.g. `https://dormouse.tailnet.ts.net`. Source of the WebAuthn `rpId`/`origin` and the Host's `ConnectionPolicy`. Defaults to `http://localhost:<port>` for dev. |
 | `DORMOUSE_STATE_DIR`      | Where the JSON state files live. Default `./data`.         |
 | `DORMOUSE_POCKET_DIR`     | The built Pocket app to serve at `/*`. Defaults to `lib/dist-pocket` resolved from the compiled server's own location rather than from the cwd, so a service manager's working directory cannot change what is served. Absent or missing its `index.html`, `GET /` is a plaintext stub naming the build command. |
@@ -149,7 +151,7 @@ files is the *documented* revocation mechanism, so the editor should not need
 the source open:
 
 - `account.json` — `{ accountId, passkeys: [{ credentialId, publicKey /* SPKI b64u */, label, createdAt }] }`
-- `hosts.json` — `[{ hostId, hostToken, label, enrolledAt }]`
+- `hosts.json` — `[{ hostId, hostToken, enrolledAt }]`; **no label** — the Server keeps no name for a Host
 - `push-subscriptions.json` — `[{ hostId, deliveryId, endpoint, keys, vapidPublicKey, subscribedAt }]`
 - `vapid.json` — `{ publicKey, privateKey, createdAt }`; exists only when no keypair is configured by env
 
@@ -171,6 +173,13 @@ route (rationale); a malformed subscription reads as a missing registration,
 which Pocket repairs by re-offering Enable, rather than as a live one nothing
 can be delivered to.
 
+**`hostId` is pinned at enrollment: base64url of 16 bytes**, minted and
+validated as `isE2eId`. Every `e2e` envelope routes on it and the shared guard
+accepts no other length, so a hand-edited row of another shape would otherwise
+be a Host the relay admits and no Client can address. Dropping it on read makes
+that row an un-enrolled Host instead, which is what the person editing the file
+was reaching for.
+
 **A subscription row from before the end-to-end cutover carries a device key and
 no `deliveryId`, so it is dropped on read** — with **one** warning per process
 naming the file and saying to re-register. No versioned refusal, no archive
@@ -187,11 +196,21 @@ rotation:
   own subscribers. Each row records the public VAPID key it was registered
   under, so a rotation reads as stale rather than as still working, and holds no
   label — the Server never learns one.
-* **An upsert whose endpoint differs deletes every row still carrying the
-  replaced endpoint.** One service-worker scope has only one subscription, so
-  the old address is dead for every Host that phone had registered — matching on
-  the endpoint rather than on the delivery id is what reaches the siblings,
-  which have delivery ids this request never names.
+* **An upsert whose endpoint differs deletes every row still carrying an
+  address this delivery is moving off.** One service-worker scope has only one
+  subscription, so the old address is dead for every Host that phone had
+  registered. Two keys, and both are load-bearing: the replaced addresses are
+  read from **every row carrying this `deliveryId`**, whichever Host it belongs
+  to, since a delivery id names one Client's pairing and so speaks for one
+  worker scope; the rows *dropped* are matched on the **endpoint**, which is
+  what reaches siblings whose delivery ids this request never names.
+* **A brand-new `deliveryId` cannot know its scope's previous address.** After a
+  re-pair the Server holds nothing linking the new id to the old, so rows for
+  that scope's earlier endpoint survive until the push service 404/410s them.
+  Rows already carrying the *presented* endpoint are the same scope and stay,
+  which is what makes a second Host's registration additive. Closing the gap
+  would need cross-Host device identity on the Server, which the model
+  deliberately does not have.
 * **The response reports the state that mutation left behind** — every Host the
   presented endpoint is still registered with — rather than the fact that a
   deletion happened, so a committed POST whose response was lost is repaired by
@@ -252,14 +271,14 @@ This table is the whole route surface. Paths and request/response shapes live in
 | Route                            | Auth           | Does                                              |
 | -------------------------------- | -------------- | ------------------------------------------------- |
 | `GET /api/hello`                 | —              | The shared greeting. Carries no release identity: it is unauthenticated, CORS-`*` and reachable through `tailscale serve` — see the runtime file under "Installing it" |
-| `POST /api/setup/begin`          | setup password or setup token | Issues a registration challenge. Exactly one credential — both, or neither, is a 400 — gated exactly as `finish` is, so neither is softer. Re-presenting the **password** adds another passkey; a setup token buys one registration. Answers with the account's credential ids, so a retry's `excludeCredentials` cannot duplicate a passkey that already signs in — an orphan the Server never registered is absent, and is still replaced |
-| `POST /api/setup/finish`         | setup password or setup token | Registers the passkey in `account.json`. A setup token is spent at the gate and put back if the registration then fails |
+| `POST /api/setup/begin`          | setup token    | Issues a registration challenge, gated exactly as `finish` is, so neither is softer. A setup token buys one registration; an absent, mistyped, or spent one is the same delayed 401. Answers with the account's credential ids, so a retry's `excludeCredentials` cannot duplicate a passkey that already signs in — an orphan the Server never registered is absent, and is still replaced |
+| `POST /api/setup/finish`         | setup token    | Registers the passkey in `account.json`. The token is spent at the gate and put back if the registration then fails |
 | `POST /api/setup/retire`         | session token  | Spends a live setup token without registering anything, so a phone that scanned a QR it will not register with cannot leave a photographed code redeemable. 204, or 401 `SETUP_TOKEN_INVALID_ERROR` after the same fixed delay |
 | `POST /api/signin/begin`         | —              | Issues a sign-in challenge                          |
 | `POST /api/signin/finish`        | —              | Verifies the assertion and issues a 12-hour in-memory session token |
-| `POST /api/reauth/begin`         | session token  | Takes a required, kind-tagged `PresenceBinding`, mints a single-use 2-minute `serverNonce`, and answers `presenceChallenge(binding, nonce)` with the RP ID, the nonce, and the bound credential as the sole `allowCredentials` entry. 404 for a credential this account has not registered. A bodyless request still takes the legacy sign-in-challenge arm until 4c ([remote-security-model.md](./remote-security-model.md) -> Presence proofs) |
+| `POST /api/reauth/begin`         | session token  | Takes a required, kind-tagged `PresenceBinding`, mints a single-use 2-minute `serverNonce`, and answers `presenceChallenge(binding, nonce)` with the RP ID, the nonce, and the bound credential as the sole `allowCredentials` entry. 404 for a credential this account has not registered; 400 for a missing or malformed binding |
 | `POST /api/reauth/finish`        | session token  | Consumes the nonce, recomputes the challenge, and verifies the assertion against the **stored** key for exactly that credential. **Extends nothing** — not the session, not the relay socket |
-| `POST /api/host/enroll`          | setup password or one-time enroll token | Enrolls a Host, appends `hosts.json`, and mirrors the user-verification policy. Exactly one credential — both, or neither, is a 400 |
+| `POST /api/host/enroll`          | setup password or one-time enroll token | Enrolls a Host, appends `hosts.json`, and mirrors the user-verification policy. Exactly one credential — both, or neither, is a 400. **Takes no label**: the name a machine presents is its own, and a Client learns it only inside an encrypted outcome |
 | `POST /api/host/setup-token`     | host token     | Mints the single-use, short-TTL token behind this Host's QR (below) |
 | `GET /api/hosts`                 | session token  | Enrolled hosts + whether each is currently connected |
 | `GET /api/push/config`           | —              | Returns the public VAPID key, or `null` when push is unconfigured |
@@ -287,7 +306,7 @@ rejected before `injectWebSocket` ever sees it — answers an unknown or expired
 token with 401 and the shared `UNAUTHORIZED_ERROR` from
 `server-lib-common/src/remote/wire.ts`. That exact string is load-bearing:
 Pocket keys its "sign in again" recovery on it, and a bare 401 is ambiguous,
-since a wrong setup password and a rejected device signature answer 401 as well
+since a spent setup token answers 401 as well
 ([pocket-app.md](./pocket-app.md) -> An expired session drops to sign-in). A
 rejected enroll token answers that same body and delay whatever the cause,
 which stays safe because only a Host sends one. A rejected **setup** token does
@@ -300,8 +319,8 @@ not: Pocket sends those itself, so it answers the distinct
 
 An enrolled Host mints a setup token over its own authenticated channel; the
 response carries the token alone, since the Host knows the origin it enrolled
-against and composes the QR itself. Scanning replaces typing that origin and the
-setup password.
+against and composes the QR itself. Scanning is the *only* way a passkey is
+registered: `/api/setup/*` takes no other credential.
 
 **The QR grammar is this spec's.** Exactly
 `<enrolledOrigin>/#pair?<v>.<hostId>.<inviteId>.<expiry>.<setupToken>.<ephPub>`,
@@ -343,16 +362,15 @@ vectors, including the 146-character fragment and the longest accepted origin.
 Source of truth: `server-lib-common/src/security/pairing-invitation.ts`, with
 `#setupQr` in `lib/src/host/remote/service.ts` as the emitter. What the
 invitation half proves is
-[remote-security-model.md](./remote-security-model.md) -> Pairing. The `#setup?`
-grammar (`SETUP_HASH_*` in `server-lib-common/src/remote/wire.ts`) now has no
-emitter and no reader; it is deleted in stage 4c
-([remote-security-model.md](./remote-security-model.md) `## Future`).
+[remote-security-model.md](./remote-security-model.md) -> Pairing.
 
 Token rules, unchanged by the grammar:
 
-* **Exactly one credential, counted by presence rather than by type**, here and
-  at `/api/host/enroll`: trying the two in turn would let a spent token fall
-  through to the password.
+* **The setup token is the only credential.** `/api/host/enroll` still counts
+  exactly one of password or enroll token, by presence rather than by type —
+  trying the two in turn would let a spent token fall through to the password —
+  but the setup routes have nothing to count: a request without a live token is
+  the same delayed 401 as one with a dead one.
 * **`begin` peeks; `finish` consumes before it reads the body.** That delete is
   the single-use gate, so of two overlapping finishes only one registers. Every
   failure past it restores the token on its original expiry without exceeding
@@ -502,20 +520,16 @@ Client socket binds to a different Host, the relay sends `client-gone` to the
 previous live Host before replacing the binding, so Host-side pairing UI,
 remote-api sessions, and watchers are disposed immediately.
 
-**STAGE-4 TRANSITIONAL.** The legacy handshake frames — `pair`, `pair-status`,
-`connect`, `connect2`, `msg` up, `pair-result`, `pair-status-result`,
-`challenge`, `decision`, `msg` down — and the `Handshake` gate behind them are
-still routed, and now **nobody speaks them**: no Host answers them and Pocket no
-longer sends them. They and `Handshake` are deleted in stage 4c of **Scope:
-e2e-client-host** ([remote-security-model.md](./remote-security-model.md)
-`## Future`), which also pins the `hostId` shape at enrollment: `e2e` requires
-base64url of 16 bytes where `isStoredHost` accepts any string, so a hand-edited
-`state/hosts.json` row of another length becomes an unreachable Host rather than
-a refused one.
+**The envelope is the whole client surface.** Any other frame type — including
+every frame the pre-cutover handshake used — is answered with an `error` and
+reaches no Host; a Host-originated frame that is not one is dropped. The relay
+holds no policy of its own: there is no gate, no challenge memory, and nothing
+it verifies before forwarding, because only the Host can tell whether a ceremony
+succeeded.
 
-Source of truth: `server/src/relay.ts` (`registerHost`), `server/src/handshake.ts`,
-and `isE2eClientFrame` / `isE2eHostFrame` in
-`server-lib-common/src/remote/wire.ts`, written for a Host to reuse verbatim.
+Source of truth: `server/src/relay.ts` (`registerHost`), and `isE2eClientFrame` /
+`isE2eHostFrame` in `server-lib-common/src/remote/wire.ts`, written for a Host to
+reuse verbatim.
 
 ### Pairing (phone ↔ laptop, first time)
 
@@ -644,8 +658,8 @@ memo invalidation — live in that host's spec.
   [remote-security-model.md](./remote-security-model.md)) through its
   `HostStateStore`, then opens and
   maintains `GET /ws/host`. The `label` the operator typed is persisted with it
-  and stays local — the Server keeps its own copy of the name only until stage
-  4c, and a Client learns it solely inside an encrypted outcome
+  and **never leaves the machine** — the request body carries the credential and
+  nothing else, and a Client learns the name solely inside an encrypted outcome
   ([remote-security-model.md](./remote-security-model.md) -> Host identity).
   `hostToken` is a bearer credential and never enters a webview realm. Refused outright for a server outside this build's allowlist
   (above), before the password leaves the machine. **A 200 that is not an
@@ -656,7 +670,8 @@ memo invalidation — live in that host's spec.
   (rationale). The request carries a 10 s `AbortSignal.timeout`, under the
   webview's own 15 s command budget so the console sees the real error
   (rationale). `enrollOffer` is the same flow with the offer's one-time token in
-  place of the password. **A `status` snapshot is built after its last await**:
+  place of the password; neither request carries the label. **A `status` snapshot
+  is built after its last await**:
   it reads the offer file, and an enroll finishing under that read would answer
   `enrolled: false` after the `{ enrolled: true }` event, disarming the
   edge-triggered webview gate. The un-enrolled snapshot is one exported builder,
@@ -866,7 +881,8 @@ its one self-authored response is the plaintext missing-build stub at `GET /`.
 
 `pnpm --filter server test` drives setup → pairing → connect through real HTTP
 and WebSocket boundaries: the `FakeHost` in `server/test/harness/fake-host.mjs`
-mirrors the shipped Host's ceremony semantics with the same shared primitives,
+speaks only the `e2e` envelope and `client-gone`, mirroring the shipped Host's
+ceremony semantics over the same shared primitives,
 the `FakeClient` in `server/test/harness/fake-client.mjs` runs both ceremonies
 as a real Noise initiator with `SimAuthenticator` producing presence proofs
 through the real `/api/reauth/*` routes, and process-level tests spawn the real
@@ -925,16 +941,17 @@ since the hook forwards to the service. The dev loop has no installer offer.)
 For a headless
 stand-in host instead:
 `DORMOUSE_SETUP_PASSWORD=hunter2 node server/scripts/fake-host.mjs http://localhost:3000`
-— it instantiates the test harness's `FakeHost` and differs only in
-auto-approving pairing and logging.
+— it instantiates the test harness's `FakeHost`, prints a pairing URL to paste
+into Pocket, and differs from a real Host only in auto-approving and logging.
 
 **3. Phone** (or any other browser profile): show a code on the laptop
 (**Settings → Remote control → Show a pairing code**) and open the server origin
 on the phone. A browser that has never been here leads with **Scan a Host QR**;
 scan or paste the code, which creates the passkey and signs you in, then read
 the two digits off the phone and type them into the laptop's modal → one
-biometric prompt → pick a pane → type. There is no setup password on the phone:
-the code is the credential.
+biometric prompt → pick a pane → type. **A Host must be enrolled first**: the
+code is the only credential `/api/setup/*` takes, so there is no way to register
+a passkey before step 2.
 
 A code the phone's *own camera* opens is origin bootstrap only — Pocket erases
 the fragment, spends nothing, and asks you to scan again from inside the app,
@@ -991,8 +1008,8 @@ a `*.ts.net` origin means `DORMOUSE_REMOTE_CONNECT_SRC` at build time (see
 **Scope: selfhost-onboarding** — collapse self-host first-run friction. The
 first run is now *run installer → click Enroll → scan QR → approve*, with
 nothing typed on the phone (Setup tokens, Host side,
-[pocket-app.md](./pocket-app.md)); the setup password remains for the QR-less
-path. One settled decision constrains what is left: **the stock allowlist stays
+[pocket-app.md](./pocket-app.md)); the setup password now enrolls Hosts only.
+One settled decision constrains what is left: **the stock allowlist stays
 `*.dormouse.sh`-only** ("Where a Host may reach a relay server") —
 self-hosting keeps requiring a source build, deliberately, so nothing may depend
 on widening it. The remaining phone-side items — in-app scanning and the end of
@@ -1009,22 +1026,9 @@ enrollments after a Tailscale node rename), and the revocation UI staged in
 routes, and state the trust model in
 [remote-security-model.md](./remote-security-model.md) `## Future` requires. The
 QR grammar and its parser, the relay envelope, the reauth and retire routes, the
-delivery-keyed push routes, and the Host side all landed in that scope's stage
-4a (above).
+delivery-keyed push routes, the Host side, and the deletion of every legacy path
+all landed in that scope's stage 4 (above).
 
-- **Deletions, in stage 4c.** The wire union becomes bounded routing envelopes
-  only: `e2e` plus `client-gone`, `host-gone`, and `error`. `pair`,
-  `pair-status`, `connect`, `connect2`, `msg`, `pair-result`, `challenge` and
-  `decision` go, and with them `Handshake`, `checkPair`, `checkConnect2`, the
-  relayed challenge memory, and the `#setup?` grammar with `SETUP_HASH_*`.
-  `/api/setup/begin` and `/finish` accept a setup token only — the
-  setup-password arm is deleted so re-presenting the password can no longer
-  register a passkey; `/api/host/enroll` keeps both credentials but takes no
-  `label`, and `hosts.json` rows and `GET /api/hosts` lose it with them.
-  **Enrollment must pin the `hostId` shape then**: `e2e` requires base64url of
-  16 bytes where `isStoredHost` accepts any string, so a hand-edited
-  `state/hosts.json` row of another length becomes an unreachable Host rather
-  than a refused one.
 - **Sealed push** (stage 6). `POST /api/push/send` carries only the sealed
   envelope; the Server also deletes a delivery row when its push provider
   answers 404/410 — which it does already — and Pocket stays the normal
@@ -1032,8 +1036,7 @@ delivery-keyed push routes, and the Host side all landed in that scope's stage
   longer submit tombstones.
 - **Testing.** What remains is stage 5's flood and malicious-relay cases
   (record, drop, reorder, modify, inject — asserting nothing decrypts or forges
-  a decision, remote API traffic, terminal bytes, labels, or notifications), and
-  every legacy wire input failing closed once the frames are gone.
+  a decision, remote API traffic, terminal bytes, labels, or notifications).
 - **Operator recovery** (`SELF_HOST.md`): a Host whose enrollment predates the
   scope shows the enrollment form again; re-run the installer only if the offer
   is wanted — it mints one solely while `state/hosts.json` is absent, so remove

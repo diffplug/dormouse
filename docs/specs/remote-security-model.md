@@ -195,9 +195,9 @@ connection share one verifier.
   verified binding.
 - **`POST /api/reauth/begin` takes a required, kind-tagged binding**, mints a
   one-use Server nonce, and answers the derived challenge under the RP ID, the
-  nonce, and the named credential as the sole `allowCredentials` entry. Until 4c
-  both routes keep a `STAGE-4 TRANSITIONAL` legacy arm, selected by an absent
-  field; it fails closed, answering no `serverNonce`.
+  nonce, and the named credential as the sole `allowCredentials` entry. A
+  request with no binding, or no nonce to `finish`, is a 400: there is no arm
+  that answers a challenge nothing is bound to.
   `finish` consumes the nonce, recomputes the challenge, verifies the assertion
   against the stored key for that exact credential, and **extends nothing** —
   not the session's life, not the relay socket.
@@ -528,20 +528,14 @@ authorization by doing so).
 Staged order. Every stage lands as a green commit with its specs promoted above
 the fold, then a `/simplify` pass and a code review; no stage introduces a
 runtime selector, a dual ACL shape, temporary key distribution, or fallback
-machinery. Stages 1–3 landed — the suite and its vectors
+machinery. Stages 1–4 landed — the suite and its vectors
 ([Noise suite](#noise-suite)), the identities ([Host identity](#host-identity)),
-and the relay-integrated harness ([server.md](./server.md) -> Relay). The
-numbering is preserved because other specs cite these stages by number.
-4. **Atomic pairing, connection, and push re-keying cutover** — **parts a and b
-   landed**: the shared protocol, the Host's two ceremonies, the Server's routes
-   and state, and Pocket's whole phone side ([Pairing](#pairing),
-   [Connection](#connection), [Host bounds](#host-bounds),
-   [pocket-app.md](./pocket-app.md)). What remains: **(c)** deletion of every
-   legacy path still standing on the Server and in the shared package —
-   `pair`, `pair-status`, `connect`, `connect2`, `msg`, the `Handshake` gate,
-   setup proofs, `verified`, the fingerprint compare, Server-issued decisions,
-   the setup-password arm of `/api/setup/*`, the `#setup?` hash grammar, Host
-   labels on the Server, and every related type, fixture, and UI state.
+the relay-integrated harness ([server.md](./server.md) -> Relay), and the
+cutover itself: the shared protocol, the Host's two ceremonies, the Server's
+routes and state, Pocket's whole phone side, and the deletion of every legacy
+path from the Server and the shared package ([Pairing](#pairing),
+[Connection](#connection), [pocket-app.md](./pocket-app.md)). The numbering is
+preserved because other specs cite these stages by number.
 5. **Bounds and flood harness.** The remaining [Host bounds](#host-bounds): the
    crypto token bucket (eight-operation burst, one per second sustained, on
    accepted `init` frames); `MAX_ESTABLISHED_E2E_SESSIONS = 16` checked at

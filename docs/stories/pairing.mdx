@@ -102,12 +102,12 @@ Two things to carry forward:
   desktop-only dev loop, `DORMOUSE_SETUP_PASSWORD=hunter2 pnpm dev:pocket-server`
   on `localhost:3000` is the shortcut.
 
-The setup password gates exactly two things: creating the one account, and
-enrolling a Host from somewhere else. It never leaves your machine except to
-those two endpoints — and on a happy path you never read it out at all: a Host
-on *this* laptop enrolls from the one-time offer the installer leaves it
-(section 3), and the phone sets itself up from a scanned code (section 4), which
-is the *only* way the phone can. `show-password` is the enrollment fallback.
+The setup password gates exactly one thing: enrolling a Host from somewhere
+else. It never leaves your machine except to that endpoint — and on a happy path
+you never read it out at all: a Host on *this* laptop enrolls from the one-time
+offer the installer leaves it (section 3), and the phone sets itself up from a
+scanned code (section 4), which is the *only* way any browser can register a
+passkey. `show-password` is the enrollment fallback.
 
 ---
 
@@ -457,11 +457,6 @@ Three limits worth knowing before they surprise you:
 
 So nothing above reads as a promise:
 
-- **The server still carries the legacy path.** Nothing speaks it — the laptop
-  never did, and the phone no longer does — but the relay still routes those
-  frames and the Server still serves the routes behind them until stage 4c of
-  **Scope: e2e-client-host** (`docs/specs/remote-security-model.md` →
-  `## Future`) deletes them.
 - **Revocation is editing a JSON file by hand.** There is no management UI and
   no relay frame carries a revocation; a removed record takes effect after the
   Host is restarted.
