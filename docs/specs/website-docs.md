@@ -3,12 +3,13 @@
 > See `docs/specs/glossary.md` for canonical Surface / Session / Pane
 > vocabulary used by the public product guide and browser workflow.
 
-Dormouse publishes two specialized references on the marketing site, both
-generated from sources that live next to the code they describe.
+Dormouse publishes three specialized references on the marketing site, each
+generated from a source that lives next to the code it describes.
 
 ```text
 /docs/dor           dor CLI reference
 /docs/agent-skill   exact bundled agent skill
+/docs/self-host     the SELF_HOST.md runbook, minus its withheld halves
 ```
 
 `/docs` is deliberately not a page, and the site header carries no **Docs**
@@ -20,10 +21,11 @@ to a bare `/docs`.
 
 | Surface | Purpose | Canonical content |
 | --- | --- | --- |
-| Homepage | Product marketing, visual proof, playground and download conversion | `website/src/pages/Home.tsx` |
+| Homepage | Product marketing, visual proof, conversion, and the way in to all three references | `website/src/pages/Home.tsx` |
 | Marketplace and Open VSX | Extension discovery, evaluation, and basic onboarding | `vscode-ext/README.md` plus public metadata in `vscode-ext/package.json` |
 | `/docs/dor` | Complete CLI reference | Help snapshots in `dor/test/snapshots/help/`, verified against the built CLI |
 | `/docs/agent-skill` | Agent-facing operating guide | Exact `dor/skill.md` |
+| `/docs/self-host` | Running the coordinating server yourself | The runbook half of `SELF_HOST.md` |
 | GitHub root | Repository overview and contributor entry point | Root `README.md` |
 
 The guide reaches readers through the Marketplace, Open VSX, and GitHub rows of
@@ -189,17 +191,28 @@ delta is structural:
 7. Mark same-site and external navigation appropriately.
 
 Operations 1–4 live in the generator; 5–7 live in the page components.
-Operations 1–3 apply to the guide, which has no page today; operation 4 runs
-over the guide and over `dor/skill.md`, the latter before `/docs/dor` lifts its
-introduction out of those same blocks, so both published pages inherit one
-rewrite.
+Operations 1–3 apply to the guide, which has no page today, and to the
+self-host runbook; operation 4 runs over the guide, the runbook, and
+`dor/skill.md`, the last before `/docs/dor` lifts its introduction out of those
+same blocks, so every published page inherits one rewrite.
 
-The website does not use regular expressions to turn VS Code prose into generic
-prose. Channel-specific differences are explicit entries in one fixed delta
-table (`DOCS_DELTA`). Each entry names exactly one source target and fails the
-build when its target matches zero blocks or more than one. Fuzzy text and
-line-number patches are forbidden. The table currently holds a single
-operation: dropping the document title.
+**Never** use a regular expression to turn a canonical source's prose into
+site prose. Channel-specific differences are explicit entries in one fixed
+delta table per document — `DOCS_DELTA` for the guide, `SELF_HOST_DELTA` for
+the runbook. Each entry names exactly one source target and fails the build
+when its target matches zero blocks or more than one. Fuzzy text and
+line-number patches are forbidden.
+
+Two operations exist. `remove` drops the matched block. `remove-section`
+requires a heading and drops it with every block up to the next heading of the
+same or shallower depth, so a removed `##` takes its `###` subsections with it.
+
+**Must** leave no `#anchor` link pointing at a heading the delta removed.
+`resolveRemovedAnchors` rewrites such a link to the canonical file on GitHub —
+the material still exists, it is just not published here — and
+`assertAnchorsResolve` then fails the build on any that remain. Both run on
+every page built from a delta, so the guarantee does not depend on remembering
+to ask for it.
 
 The renderer preserves selectable code, authored image alt text, safe
 external-link attributes, mobile table access, and mobile-width media without
@@ -208,10 +221,11 @@ horizontal overflow. No HTML string is ever injected —
 
 ## Reference page chrome
 
-Both published pages share `DocsLayout`: the site header, an `h1` and intro, a
-sticky on-page table of contents, and a footer linking the CLI reference, the
-agent skill, the issue tracker, and the supply chain. There is no breadcrumb —
-with no `/docs` above them, the two pages are siblings, not children.
+All three published pages share `DocsLayout`: the site header, an `h1` and
+intro, a sticky on-page table of contents, and a footer linking the CLI
+reference, the agent skill, the self-host runbook, the issue tracker, and the
+supply chain. There is no breadcrumb — with no `/docs` above them, the pages
+are siblings, not children.
 
 ## `/docs/dor` reference
 
@@ -286,6 +300,39 @@ website reference.
 Generation fails when a mapped skill heading is missing or ambiguous, or when
 its target anchor does not exist in the generated CLI reference.
 
+## `/docs/self-host` runbook
+
+`SELF_HOST.md` stays canonical in the repository and is published from there.
+It has two consumers that outrank the website: an assistant reads it in a
+checkout (`read @SELF_HOST.md and walk me through it`), and
+`scripts/deploy-lint.mjs` audits its Installer contract against
+`deploy/local/`. A second copy under `website/` would be a second file to keep
+true about how a server is installed.
+
+The file is two documents in one, and `SELF_HOST_DELTA` publishes only the
+first:
+
+| Withheld | Why |
+| --- | --- |
+| `# ` title | The page shell supplies its own |
+| Opening blockquote | Tells a reader to open the file in a checkout |
+| **Instructions to the assistant** | Addressed to the assistant, not a reader |
+| **Final handoff** | Tells the assistant what to report back |
+| **Installer contract (maintainers)** | The maintainer half, with its four subsections |
+
+What survives is the runbook: prerequisites, what the installer does, the
+definition of done, the six checkpoints, official references, troubleshooting
+boundaries, and keeping the relay up while the laptop sleeps.
+
+**Must** keep every withheld section present in `SELF_HOST.md`. A rule that
+matches nothing fails the build rather than silently publishing what it meant
+to hold back; `checkSelfHostWithholding` in the lint states the same list from
+the other direction, so a rename is caught as a rename.
+
+The page carries one authored paragraph the source does not: a pointer to
+running the runbook with an assistant. It belongs to the page because it is
+advice about reading this document here.
+
 ## Generated documentation boundary
 
 One build-time generator reads the canonical inputs and writes a gitignored
@@ -296,6 +343,7 @@ website/scripts/generate-docs.js
 website/scripts/docs-parser.js
 website/scripts/help-parser.js
 website/src/data/docs.guide.json    generated, no page consumes it today
+website/src/data/docs.selfhost.json
 website/src/data/docs.cli.json
 website/src/data/docs.skill.json
 ```
@@ -307,6 +355,7 @@ Inputs:
 
 ```text
 vscode-ext/README.md
+SELF_HOST.md
 dor/test/snapshots/help/*.md
 dor/skill.md
 ```
@@ -369,8 +418,8 @@ as shipped behavior.
 verifies:
 
 - the canonical guide contains its required product sections;
-- neither public README contains `TODO:` placeholders;
-- both canonical Markdown sources stay inside the parser's supported subset;
+- neither public README nor `SELF_HOST.md` contains `TODO:` placeholders;
+- every canonical Markdown source stays inside the parser's supported subset;
 - local Markdown links resolve and public links use canonical HTTPS URLs;
 - guide images are repo-relative files that exist under `vscode-ext/images/`,
   with no remote URLs and no SVG, and every file there is referenced;
@@ -379,8 +428,15 @@ verifies:
 - guide heading ids are stable and unique;
 - every agent-skill reference target exists in `/docs/dor`;
 - generated command inventory matches the snapshot set exactly;
-- both READMEs link to `/docs/dor` and `/docs/agent-skill`, checked as exact
-  URLs so a link to the non-existent `/docs` cannot satisfy a prefix test;
+- both READMEs link to `/docs/dor` and `/docs/agent-skill`, and the root
+  README also links to `/docs/self-host` — checked as exact URLs so a link to
+  the non-existent `/docs` cannot satisfy a prefix test. The guide carries no
+  self-host obligation: it is a Marketplace listing for the editor extension,
+  and running a relay server is not part of installing one;
+- the homepage links all three root-relatively, and every `/docs` href on it
+  resolves to a published reference — both directions, because a rewritten
+  section can strand a reference's only link or reintroduce a bare `/docs`;
+- every section `SELF_HOST_DELTA` withholds is still present to withhold;
 - public copy does not present staged WebRTC as shipped.
 
 Each check is isolated, so one malformed source reports its own failure instead
@@ -395,6 +451,7 @@ spec.
 | File | Role |
 | --- | --- |
 | `vscode-ext/README.md` | The canonical product guide; published off-site, parsed here |
+| `SELF_HOST.md` | The self-host runbook and Installer contract; the runbook half is published |
 | `vscode-ext/package.json` | Listing metadata and VS Code command inventory |
 | `README.md` | Repository and contributor entry point |
 | `vscode-ext/images/` | Guide media; the generator copies it to `website/public/images/`, which the Marketplace listing loads from |
@@ -403,12 +460,13 @@ spec.
 | `website/src/routes.ts`, `website/src/components/SiteHeader.tsx` | The published routes and the header that omits `/docs` |
 | `website/scripts/docs-parser.js` (+ `.test.js`) | Markdown subset parser, slugger, `<img>` allowlist |
 | `website/scripts/help-parser.js` (+ `.test.js`) | Narrow CLI-help parser with losslessness |
-| `website/scripts/generate-docs.js` | Codegen: `DOCS_DELTA`, `buildGuide`, `localizeSiteLinks`, `SKILL_REFERENCES` |
+| `website/scripts/generate-docs.js` | Codegen: the delta tables, `buildGuide` / `buildSelfHost`, `localizeSiteLinks`, `resolveRemovedAnchors`, `SKILL_REFERENCES` |
 | `website/src/components/MarkdownDocument.tsx` | Renders parsed Markdown blocks |
 | `website/src/components/DocsLayout.tsx` | Reference page chrome: header, TOC, footer |
 | `website/src/components/DorCommandReference.tsx` | One CLI command section |
 | `website/src/pages/DorDocs.tsx` | `/docs/dor` |
 | `website/src/pages/AgentSkillDocs.tsx` | `/docs/agent-skill` |
+| `website/src/pages/SelfHostDocs.tsx` | `/docs/self-host` |
 | `scripts/public-docs-lint.mjs` | Public-doc validation |
 
 ## Future

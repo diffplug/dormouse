@@ -24,6 +24,21 @@ const fail = (msg) => failures.push(msg);
 const GUIDE = 'vscode-ext/README.md';
 const ROOT_README = 'README.md';
 const SKILL = 'dor/skill.md';
+const SELF_HOST = 'SELF_HOST.md';
+
+/**
+ * Sections of SELF_HOST.md the delta withholds from `/docs/self-host`.
+ *
+ * The generator already fails when a delta rule matches nothing, so this is
+ * the other direction: it names, in one place a reader of the lint can see,
+ * what is deliberately unpublished. A section renamed here without renaming
+ * the matching delta rule fails the generator, not this check.
+ */
+const WITHHELD_SELF_HOST_SECTIONS = [
+  'Instructions to the assistant',
+  'Final handoff',
+  'Installer contract (maintainers)',
+];
 
 /** Sections the canonical guide must carry. */
 const REQUIRED_GUIDE_SECTIONS = [
@@ -46,11 +61,12 @@ const src = {
   [GUIDE]: await read(GUIDE),
   [ROOT_README]: await read(ROOT_README),
   [SKILL]: await read(SKILL),
+  [SELF_HOST]: await read(SELF_HOST),
 };
 
 /** Parsed form, or null when the source is outside the supported subset. */
 const parsed = {};
-for (const rel of [GUIDE, SKILL]) {
+for (const rel of [GUIDE, SKILL, SELF_HOST]) {
   try {
     parsed[rel] = parseMarkdown(src[rel]);
   } catch (error) {
@@ -64,7 +80,7 @@ for (const rel of [GUIDE, SKILL]) {
 }
 
 async function checkNoPlaceholders() {
-  for (const rel of [GUIDE, ROOT_README]) {
+  for (const rel of [GUIDE, ROOT_README, SELF_HOST]) {
     if (/\bTODO:/.test(src[rel])) fail(`${rel}: contains a TODO: placeholder`);
   }
 }
@@ -106,7 +122,7 @@ async function checkImages() {
 
 /** Local Markdown links must resolve; public links must be absolute https. */
 async function checkLinks() {
-  for (const rel of [GUIDE, ROOT_README]) {
+  for (const rel of [GUIDE, ROOT_README, SELF_HOST]) {
     // Skip fenced code blocks: a link-looking string inside a sample is not a
     // link, and reporting it as broken would be a false failure.
     const text = src[rel]
@@ -153,10 +169,56 @@ async function checkVsCodeCommands() {
  */
 const REFERENCE_URLS = ['https://dormouse.sh/docs/dor', 'https://dormouse.sh/docs/agent-skill'];
 
+/**
+ * The self-host page is the root README's obligation alone.
+ *
+ * The product guide is a Marketplace listing for the editor extension, and
+ * running a relay server is not part of installing one.
+ */
+const ROOT_ONLY_REFERENCE_URLS = ['https://dormouse.sh/docs/self-host'];
+
+/**
+ * The homepage spells the same references root-relatively, being on-site.
+ *
+ * It is the page most able to strand them: a section can be rewritten or cut
+ * and take its only link to a reference with it.
+ */
+const HOMEPAGE = 'website/src/pages/Home.tsx';
+const HOMEPAGE_REFERENCE_PATHS = ['/docs/dor', '/docs/agent-skill', '/docs/self-host'];
+
 async function checkRoutesToReferences() {
   for (const rel of [GUIDE, ROOT_README]) {
     for (const url of REFERENCE_URLS) {
       if (!src[rel].includes(url)) fail(`${rel}: does not link to ${url}`);
+    }
+  }
+  for (const url of ROOT_ONLY_REFERENCE_URLS) {
+    if (!src[ROOT_README].includes(url)) fail(`${ROOT_README}: does not link to ${url}`);
+  }
+
+  const home = await read(HOMEPAGE);
+  const hrefs = [...home.matchAll(/href="(\/docs[^"]*)"/g)].map(([, href]) => href);
+  for (const path of HOMEPAGE_REFERENCE_PATHS) {
+    // Prefix, not equality: /docs/dor#agent-browser satisfies /docs/dor.
+    if (!hrefs.some((href) => href === path || href.startsWith(`${path}#`))) {
+      fail(`${HOMEPAGE}: does not link to ${path}`);
+    }
+  }
+  // `/docs` is not a page (docs/specs/website-docs.md), so a link to it 404s.
+  for (const href of hrefs) {
+    if (!HOMEPAGE_REFERENCE_PATHS.some((path) => href === path || href.startsWith(`${path}#`))) {
+      fail(`${HOMEPAGE}: links to ${href}, which is not a published reference`);
+    }
+  }
+}
+
+/** The unpublished half of SELF_HOST.md must still be there to withhold. */
+async function checkSelfHostWithholding() {
+  if (!parsed[SELF_HOST]) return;
+  const present = parsed[SELF_HOST].headings.map((h) => h.text);
+  for (const section of WITHHELD_SELF_HOST_SECTIONS) {
+    if (!present.includes(section)) {
+      fail(`${SELF_HOST}: withheld section "${section}" is gone; check the delta in generate-docs.js`);
     }
   }
 }
@@ -198,6 +260,7 @@ const checks = [
   checkLinks,
   checkVsCodeCommands,
   checkRoutesToReferences,
+  checkSelfHostWithholding,
   checkGenerated,
   checkNoStagedClaims,
 ];

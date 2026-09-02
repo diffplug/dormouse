@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { generateDocs } from './generate-docs.js';
-import { visit } from './docs-parser.js';
+import { applyDelta, generateDocs } from './generate-docs.js';
+import { createSlugger, parseMarkdown, visit } from './docs-parser.js';
 
 const data = await generateDocs();
 
@@ -15,6 +15,7 @@ function generatedHrefs() {
       if (node.type === 'link' && node.href) hrefs.push(node.href);
     });
   collect(data.guide.blocks);
+  collect(data.selfhost.blocks);
   collect(data.skill.blocks);
   for (const section of data.cli.intro) collect(section.blocks);
   return hrefs;
@@ -39,6 +40,92 @@ describe('product guide', () => {
     for (const required of ['get dormouse', 'alerts and todos', 'keyboard shortcuts', 'getting started']) {
       expect(text).toContain(required);
     }
+  });
+});
+
+describe('delta operations', () => {
+  const doc = () =>
+    parseMarkdown(
+      ['# Title', '', '## Keep', '', 'kept', '', '## Drop', '', 'gone', '', '### Nested', '', 'also gone', '', '## After', '', 'kept too'].join('\n'),
+      { slug: createSlugger() },
+    ).blocks;
+
+  const dropRule = { id: 'drop', reason: 'test', operation: 'remove-section', match: (b) => b.type === 'heading' && b.text === 'Drop' };
+
+  it('removes a section and its subsections, and stops at the next same-depth heading', () => {
+    const { blocks, applied, removedIds } = applyDelta(doc(), [dropRule], 'test');
+    const headings = blocks.filter((b) => b.type === 'heading').map((h) => h.text);
+    expect(headings).toEqual(['Title', 'Keep', 'After']);
+    expect(removedIds).toEqual(['drop', 'nested']);
+    expect(applied[0].blocks).toBe(4);
+  });
+
+  it('fails when a rule matches nothing, rather than publishing what it withholds', () => {
+    const gone = { ...dropRule, match: (b) => b.type === 'heading' && b.text === 'Renamed' };
+    expect(() => applyDelta(doc(), [gone], 'test')).toThrow(/matched nothing/);
+  });
+
+  it('fails when a rule is ambiguous', () => {
+    const both = { ...dropRule, match: (b) => b.type === 'heading' && b.depth === 2 };
+    expect(() => applyDelta(doc(), [both], 'test')).toThrow(/matched 3 blocks/);
+  });
+
+  it('refuses remove-section on a block that is not a heading', () => {
+    const wrong = { ...dropRule, match: (b) => b.type === 'paragraph' && b.children?.[0]?.value === 'kept' };
+    expect(() => applyDelta(doc(), [wrong], 'test')).toThrow(/remove-section but matched a paragraph/);
+  });
+});
+
+describe('self-host runbook', () => {
+  it('withholds the assistant and maintainer halves, and nothing else', () => {
+    expect(data.selfhost.delta.map((r) => r.id)).toEqual([
+      'drop-document-title',
+      'drop-repo-invocation',
+      'drop-assistant-instructions',
+      'drop-final-handoff',
+      'drop-installer-contract',
+    ]);
+    const text = data.selfhost.headings.map((h) => h.text);
+    for (const withheld of ['Instructions to the assistant', 'Final handoff', 'Installer contract (maintainers)']) {
+      expect(text).not.toContain(withheld);
+    }
+  });
+
+  it('takes a removed section subheadings and all', () => {
+    // The Installer contract's four ### subsections must go with their ##.
+    const ids = data.selfhost.headings.map((h) => h.id);
+    for (const id of ['mechanism-map', 'invariants', 'mechanical-traps', 'operator-surface-and-test-hooks']) {
+      expect(ids, `#${id} outlived its parent section`).not.toContain(id);
+    }
+    expect(data.selfhost.headings.every((h) => h.depth === 2)).toBe(true);
+  });
+
+  it('keeps every checkpoint the runbook walks through', () => {
+    const ids = data.selfhost.headings.map((h) => h.id);
+    expect(ids.filter((id) => id.startsWith('checkpoint-'))).toHaveLength(6);
+    expect(ids).toContain('prerequisites');
+    expect(ids).toContain('what-the-installer-does');
+  });
+
+  it('sends links orphaned by the delta to the canonical file', () => {
+    // Without this the surviving prose points at an anchor that is no longer
+    // on the page, and the link silently scrolls nowhere.
+    expect(data.selfhost.withheldLinks.length).toBeGreaterThan(0);
+    for (const { from, to } of data.selfhost.withheldLinks) {
+      expect(from.startsWith('#')).toBe(true);
+      expect(to).toBe(`https://github.com/diffplug/dormouse/blob/main/SELF_HOST.md${from}`);
+    }
+  });
+
+  it('leaves no in-document link pointing at a missing heading', () => {
+    const ids = new Set(data.selfhost.headings.map((h) => h.id));
+    const dangling = [];
+    visit(data.selfhost.blocks, (node) => {
+      if (node.type === 'link' && node.href?.startsWith('#') && !ids.has(node.href.slice(1))) {
+        dangling.push(node.href);
+      }
+    });
+    expect(dangling).toEqual([]);
   });
 });
 

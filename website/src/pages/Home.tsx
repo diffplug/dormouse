@@ -824,7 +824,9 @@ export default function Home() {
               <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">tailscale serve</code>{" "}
               in front of it and you're done: no account, no cloud dependency,
               nothing anyone can shut off. Your laptop decides which phones get
-              notified — the server isn't allowed to choose for it.
+              notified — the server isn't allowed to choose for it. The{" "}
+              <a href="/docs/self-host" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">self-host runbook</a>{" "}
+              walks the whole install.
             </p>
             <p className="text-lg leading-relaxed opacity-70">
               <a href="/playground/pocket" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">Dormouse Pocket</a>{" "}
@@ -1058,6 +1060,9 @@ export default function Home() {
 
         <footer className="border-t border-[var(--color-text)]/20 py-10">
           <div className="mx-auto max-w-5xl px-4 md:px-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-base text-center opacity-50">
+            <a href="/docs/dor" className="underline hover:opacity-100">CLI reference</a>
+            <a href="/docs/agent-skill" className="underline hover:opacity-100">Agent skill</a>
+            <a href="/docs/self-host" className="underline hover:opacity-100">Self-host</a>
             <a href="/supply-chain" className="underline hover:opacity-100">Supply Chain</a>
             <a href="https://github.com/diffplug/dormouse/issues" className="underline hover:opacity-100">Report an issue</a>
             <p>

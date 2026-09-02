@@ -26,7 +26,7 @@ The three hold the same invariants through different native mechanisms; where a
 checkpoint below differs, each form is given. **Work out which one applies
 before the first command and stay on that column** — mixing them is the main way
 this runbook goes wrong. The [Installer contract](#installer-contract-maintainers)
-at the end of this file carries the full mechanism-by-mechanism table.
+carries the full mechanism-by-mechanism table.
 
 This runbook is about running the installer and finishing the parts it cannot do
 on its own — the passkey, the Host build, the backup. Nobody following it should
@@ -544,7 +544,7 @@ Do not print the setup password or any credential in the handoff.
 
 - Dormouse server runtime and state contract: `docs/specs/server.md`. What the
   installer guarantees is the
-  [Installer contract](#installer-contract-maintainers) in this file.
+  [Installer contract](#installer-contract-maintainers).
 - Dormouse trust model: `docs/specs/remote-security-model.md`
 - Host installations: `docs/specs/standalone.md`, `docs/specs/vscode.md`
 - [Install Tailscale on macOS](https://tailscale.com/docs/install/mac)

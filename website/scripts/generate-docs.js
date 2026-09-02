@@ -57,6 +57,8 @@ const MEDIA_URL_BASE = '/images/';
 const MEDIA_SRC_PREFIX = 'images/';
 /** This site's own origin, as the canonical sources are forced to spell it. */
 const SITE_ORIGIN = 'https://dormouse.sh';
+/** Where the unpublished half of SELF_HOST.md is still readable. */
+const SELF_HOST_CANONICAL_URL = 'https://github.com/diffplug/dormouse/blob/main/SELF_HOST.md';
 
 /**
  * The complete guide delta, per docs/specs/website-docs.md.
@@ -72,6 +74,51 @@ const DOCS_DELTA = [
     /** @param {{type: string, depth?: number}} block */
     match: (block) => block.type === 'heading' && block.depth === 1,
     operation: 'remove',
+  },
+];
+
+/** Match the one heading whose text is exactly `text`. */
+const headingNamed = (text) => (block) => block.type === 'heading' && block.text === text;
+
+/**
+ * The complete self-host delta, per docs/specs/website-docs.md.
+ *
+ * SELF_HOST.md is two documents in one file: a runbook a reader can follow,
+ * and material addressed to the assistant running it or to a maintainer of
+ * `deploy/local/`. Only the runbook is published; the rest is removed here
+ * rather than split out of the file, because the assistant reading
+ * `@SELF_HOST.md` in a checkout needs all of it in one place.
+ */
+const SELF_HOST_DELTA = [
+  {
+    id: 'drop-document-title',
+    reason: 'The docs page shell supplies its own title and breadcrumb.',
+    match: (block) => block.type === 'heading' && block.depth === 1,
+    operation: 'remove',
+  },
+  {
+    id: 'drop-repo-invocation',
+    reason: 'The opening blockquote tells a reader to open the file in a checkout.',
+    match: (block) => block.type === 'blockquote',
+    operation: 'remove',
+  },
+  {
+    id: 'drop-assistant-instructions',
+    reason: 'Addressed to the assistant running the runbook, not to a reader.',
+    match: headingNamed('Instructions to the assistant'),
+    operation: 'remove-section',
+  },
+  {
+    id: 'drop-final-handoff',
+    reason: 'Tells the assistant what to report back; meaningless on a page.',
+    match: headingNamed('Final handoff'),
+    operation: 'remove-section',
+  },
+  {
+    id: 'drop-installer-contract',
+    reason: 'The maintainer half of the file, audited by scripts/deploy-lint.mjs.',
+    match: headingNamed('Installer contract (maintainers)'),
+    operation: 'remove-section',
   },
 ];
 
@@ -101,27 +148,99 @@ const SKILL_REFERENCES = [
   { command: 'dor iframe', anchor: 'iframe' },
 ];
 
-function applyDelta(blocks) {
+/**
+ * Apply one document's delta.
+ *
+ * `remove` drops the single matched block. `remove-section` drops a matched
+ * heading and everything under it — every following block up to the next
+ * heading of the same or shallower depth — so removing `## X` takes its `###`
+ * subsections with it.
+ *
+ * Every rule must match exactly one block, and a rule that matches nothing
+ * fails the build: a section renamed in the canonical source must be a
+ * decision, not a silent republication of what the delta meant to withhold.
+ *
+ * Returns the ids the delta removed, so the caller can find links left
+ * pointing at them.
+ */
+export function applyDelta(blocks, rules, label) {
   const applied = [];
+  const removedIds = [];
   let result = blocks;
 
-  for (const rule of DOCS_DELTA) {
+  for (const rule of rules) {
     const matches = result.filter(rule.match);
     if (matches.length === 0) {
-      throw new Error(`docs delta "${rule.id}" matched nothing; its target is gone`);
+      throw new Error(`${label} delta "${rule.id}" matched nothing; its target is gone`);
     }
     if (matches.length > 1) {
-      throw new Error(`docs delta "${rule.id}" matched ${matches.length} blocks; target is ambiguous`);
-    }
-    if (rule.operation !== 'remove') {
-      throw new Error(`docs delta "${rule.id}" has unknown operation "${rule.operation}"`);
+      throw new Error(`${label} delta "${rule.id}" matched ${matches.length} blocks; target is ambiguous`);
     }
     const [target] = matches;
-    result = result.filter((b) => b !== target);
-    applied.push({ id: rule.id, reason: rule.reason, operation: rule.operation, target: target.text ?? null });
+
+    let dropped;
+    if (rule.operation === 'remove') {
+      dropped = [target];
+    } else if (rule.operation === 'remove-section') {
+      if (target.type !== 'heading') {
+        throw new Error(`${label} delta "${rule.id}" is remove-section but matched a ${target.type}`);
+      }
+      dropped = [target, ...sectionBlocks(result, target)];
+    } else {
+      throw new Error(`${label} delta "${rule.id}" has unknown operation "${rule.operation}"`);
+    }
+
+    const gone = new Set(dropped);
+    result = result.filter((b) => !gone.has(b));
+    for (const block of dropped) {
+      visit([block], (node) => {
+        if (node.type === 'heading') removedIds.push(node.id);
+      });
+    }
+    applied.push({
+      id: rule.id,
+      reason: rule.reason,
+      operation: rule.operation,
+      target: target.text ?? null,
+      blocks: dropped.length,
+    });
   }
 
-  return { blocks: result, applied };
+  return { blocks: result, applied, removedIds };
+}
+
+/**
+ * Send in-document links that the delta orphaned to the canonical file.
+ *
+ * A `#anchor` into a removed section would otherwise scroll nowhere. The
+ * surviving prose still has a reason to point there — the material exists, it
+ * just isn't published here — so the link keeps its text and gains the origin
+ * that still serves it.
+ */
+function resolveRemovedAnchors(blocks, removedIds, canonicalUrl) {
+  const removed = new Set(removedIds);
+  const rewritten = [];
+  visit(blocks, (node) => {
+    if (node.type !== 'link' || !node.href?.startsWith('#')) return;
+    const id = node.href.slice(1);
+    if (!removed.has(id)) return;
+    node.href = `${canonicalUrl}#${id}`;
+    rewritten.push({ from: `#${id}`, to: node.href });
+  });
+  return rewritten;
+}
+
+/** No `#anchor` link may point at an id the page does not contain. */
+function assertAnchorsResolve(blocks, headings, where) {
+  const ids = new Set(headings.map((h) => h.id));
+  const dangling = [];
+  visit(blocks, (node) => {
+    if (node.type !== 'link' || !node.href?.startsWith('#')) return;
+    if (!ids.has(node.href.slice(1))) dangling.push(node.href);
+  });
+  if (dangling.length > 0) {
+    throw new Error(`dangling anchor link(s) on ${where}: ${[...new Set(dangling)].join(', ')}`);
+  }
 }
 
 /** Headings that survive the delta, in document order. */
@@ -235,11 +354,12 @@ async function buildGuide() {
   const parsed = parseMarkdown(markdown, { slug: createSlugger() });
   const title = parsed.blocks.find((b) => b.type === 'heading' && b.depth === 1)?.text ?? 'Documentation';
 
-  const { blocks, applied } = applyDelta(parsed.blocks);
+  const { blocks, applied } = applyDelta(parsed.blocks, DOCS_DELTA, '/docs');
   // Derived from the post-delta tree, so the delta is expressed once: whatever
   // it removes disappears from the heading inventory and the TOC for free.
   const headings = headingsOf(blocks);
   assertUniqueIds(headings.map((h) => h.id), '/docs');
+  assertAnchorsResolve(blocks, headings, '/docs');
 
   const available = (await readdir(mediaSrcDir)).sort();
   const media = resolveGuideMedia(blocks, available);
@@ -253,6 +373,40 @@ async function buildGuide() {
     toc: buildToc(headings),
     delta: applied,
     media: { available, ...media },
+    localizedLinks,
+  };
+}
+
+/**
+ * `/docs/self-host` from SELF_HOST.md, minus the halves the delta withholds.
+ *
+ * The file stays canonical: an assistant reads it in a checkout, and
+ * `scripts/deploy-lint.mjs` audits its Installer contract against
+ * `deploy/local/`. Publishing a copy would mean two files to keep true about
+ * how a server is installed.
+ */
+async function buildSelfHost() {
+  const markdown = await readFile(join(repoRoot, 'SELF_HOST.md'), 'utf8');
+
+  const parsed = parseMarkdown(markdown, { slug: createSlugger() });
+  const title = parsed.blocks.find((b) => b.type === 'heading' && b.depth === 1)?.text ?? 'Self-host';
+
+  const { blocks, applied, removedIds } = applyDelta(parsed.blocks, SELF_HOST_DELTA, '/docs/self-host');
+  const headings = headingsOf(blocks);
+  assertUniqueIds(headings.map((h) => h.id), '/docs/self-host');
+
+  const withheldLinks = resolveRemovedAnchors(blocks, removedIds, SELF_HOST_CANONICAL_URL);
+  const localizedLinks = localizeSiteLinks(blocks);
+  assertAnchorsResolve(blocks, headings, '/docs/self-host');
+
+  return {
+    source: 'SELF_HOST.md',
+    title,
+    blocks,
+    headings,
+    toc: buildToc(headings),
+    delta: applied,
+    withheldLinks,
     localizedLinks,
   };
 }
@@ -385,12 +539,14 @@ function linkSkillHeadings(skill, cli) {
 
 export async function generateDocs() {
   const guide = await buildGuide();
+  const selfhost = await buildSelfHost();
   const skill = await buildSkill();
   const cli = await buildCli(skill);
   const references = linkSkillHeadings(skill, cli);
 
   return {
     guide,
+    selfhost,
     cli,
     skill: {
       source: skill.source,
@@ -414,13 +570,14 @@ async function main() {
     ),
     syncGuideMedia(data.guide.media.available),
   ]);
-  const { guide, cli, skill } = data;
+  const { guide, selfhost, cli, skill } = data;
   console.log(
     `Wrote docs data: guide ${guide.headings.length} headings, ` +
+      `self-host ${selfhost.headings.length} headings (${selfhost.delta.length} delta rules), ` +
       `cli ${cli.commands.length} commands + ${cli.intro.length} intro sections, ` +
       `skill ${Object.keys(skill.references).length} reference links, ` +
       `${guide.media.available.length} media file(s), ` +
-      `${guide.localizedLinks.length + skill.localizedLinks.length} link(s) localized`,
+      `${guide.localizedLinks.length + selfhost.localizedLinks.length + skill.localizedLinks.length} link(s) localized`,
   );
 }
 

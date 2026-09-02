@@ -14,6 +14,7 @@ export default {
       "/changelog",
       "/docs/dor",
       "/docs/agent-skill",
+      "/docs/self-host",
       "/supply-chain",
     ];
   },

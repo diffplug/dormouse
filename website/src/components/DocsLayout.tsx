@@ -67,6 +67,7 @@ export default function DocsLayout({
             <div className="flex flex-wrap gap-x-6 gap-y-2">
               <a href="/docs/dor" className="hover:underline">CLI reference</a>
               <a href="/docs/agent-skill" className="hover:underline">Agent skill</a>
+              <a href="/docs/self-host" className="hover:underline">Self-host</a>
               <a
                 href="https://github.com/diffplug/dormouse/issues"
                 className="hover:underline"

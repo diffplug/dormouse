@@ -14,5 +14,6 @@ export default [
   route("changelog/after/:version", "./pages/ChangelogAfter.tsx"),
   route("docs/dor", "./pages/DorDocs.tsx"),
   route("docs/agent-skill", "./pages/AgentSkillDocs.tsx"),
+  route("docs/self-host", "./pages/SelfHostDocs.tsx"),
   route("supply-chain", "./pages/SupplyChain.tsx"),
 ] satisfies RouteConfig;
