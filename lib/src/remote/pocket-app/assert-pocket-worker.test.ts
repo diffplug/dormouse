@@ -101,13 +101,20 @@ describe('assertPocketShell', () => {
     expect(() => checkShell(dir)).toThrow(/inline script/);
   });
 
-  it('fails on an off-origin script or stylesheet', () => {
-    expect(() => checkShell(shell('<script src="https://cdn.example.com/x.js"></script>'))).toThrow(
-      /root-relative/,
-    );
-    expect(() =>
-      checkShell(shell('<link rel="stylesheet" href="https://fonts.example.com/x.css">')),
-    ).toThrow(/off-origin/);
+  it('fails on an off-origin script or stylesheet, in either spelling', () => {
+    // A `base` pointing at a CDN is the one input that makes this guard fire,
+    // and the protocol-relative form is the half that also starts with `/`.
+    for (const src of ['https://cdn.example.com/x.js', '//cdn.example.com/x.js']) {
+      expect(() => checkShell(shell(`<script src="${src}"></script>`)), src).toThrow(
+        /not same-origin/,
+      );
+    }
+    for (const href of ['https://fonts.example.com/x.css', '//fonts.example.com/x.css']) {
+      expect(
+        () => checkShell(shell(`<link rel="stylesheet" href="${href}">`)),
+        href,
+      ).toThrow(/off-origin/);
+    }
   });
 
   it('fails when the shell is missing', () => {
