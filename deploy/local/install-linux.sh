@@ -1697,11 +1697,12 @@ serve_state() {
 # The first root-path proxy target in captured `serve status` output ($1), or
 # nothing. The first line is taken by parameter expansion rather than `| head
 # -1`, which exits after one line and leaves `sed` to die of SIGPIPE. That 141
-# was fatal in the pre-branch INLINE form, where the substitution's status was
-# the assignment's; inside this helper `printf` runs last and resets it, and
-# bash 3.2 has no `inherit_errexit`. So the expansion is hygiene here, not a
-# control — nothing downstream would notice a `head -1` returning the same
-# target, which is why no lint or test pins it.
+# is absorbed here by two facts, neither of them "this is a helper": `printf`
+# runs last, so $? is 0 by return, and the single call site below is a `$( )`,
+# which bash enters without `errexit` absent `inherit_errexit` (bash 3.2 has
+# none). Lose either — end on the failing assignment, or call this outside a
+# substitution — and the 141 aborts the install again, so the expansion stays.
+# It is hygiene rather than a pinned control, which is why nothing lints it.
 serve_root_target() {
   local targets
   targets="$(sed -n 's%^|-- / *proxy *%%p' <<<"$1")"
