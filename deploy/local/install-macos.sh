@@ -703,13 +703,36 @@ wait_for_health() {
 # be unavailable — off PATH, tailscaled down, `funnel status` unknown to an
 # older CLI — yields no output, and no output greps clean. Only the exit status
 # separates that from a node with no Funnel, so it is what decides.
+#
+# The search runs over text captured beforehand, never `printf … | grep -q`:
+# `grep -q` exits at the first match, the writer takes SIGPIPE, and under
+# `set -o pipefail` the pipeline's 141 reads exactly like "no match" — so a
+# Funnel that is ON reported as off as soon as the CLI's combined output
+# outgrew the 64 KiB pipe buffer. A here-string has no writer to signal.
+# Evidence of `on` outranks a failed probe: `serve status` naming a Funnel is
+# an answer even when `funnel status` could not run.
+#
+# Source of truth for the behavior: `scripts/installer-verify-test.mjs` drives
+# this function, extracted from this file, over inputs larger than that buffer.
 funnel_state() {
-  [ "$1" = "0" ] || { printf 'unknown\n'; return 0; }
-  if printf '%s\n%s' "$2" "$3" | grep -qi 'funnel on'; then
+  if grep -qi 'funnel on' <<<"$2"$'\n'"$3"; then
     printf 'on\n'
-  else
-    printf 'off\n'
+    return 0
   fi
+  [ "$1" = "0" ] || { printf 'unknown\n'; return 0; }
+  printf 'off\n'
+}
+
+# Is anything in a captured listener list bound somewhere other than
+# 127.0.0.1:$1? $1 = the port, $2 = the `lsof` lines. Exit 0 when at least one
+# line is off-loopback.
+#
+# Captured, for the reason `funnel_state` states: `printf … | grep -qv` exits
+# at the first non-matching line, and the writer's SIGPIPE becomes the
+# pipeline's status under `set -o pipefail` — reporting "bound only to
+# 127.0.0.1" for a list that opens with an off-loopback bind.
+has_off_loopback() {
+  grep -qv "127\.0\.0\.1:$1" <<<"$2"
 }
 
 cmd_status() {
@@ -798,7 +821,7 @@ cmd_verify() {
   listeners="$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | tail -n +2 || true)"
   if [ -z "$listeners" ]; then
     fail "nothing is listening on port $PORT"
-  elif printf '%s\n' "$listeners" | grep -qv '127\.0\.0\.1:'"$PORT"; then
+  elif has_off_loopback "$PORT" "$listeners"; then
     fail "port $PORT is bound off-loopback — fix DORMOUSE_BIND_HOST=127.0.0.1"
     printf '%s\n' "$listeners" | sed 's/^/      /'
   else

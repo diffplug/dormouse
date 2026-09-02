@@ -23,7 +23,11 @@
  *     variable, passes here. The security audit still owns that.
  *   - It says nothing about the *generated* `manage` scripts beyond the fact
  *     that the installer writes the checks into them. Whether `manage verify`
- *     passes on a real install is what `manage verify` is for.
+ *     passes on a real install is what `manage verify` is for. Two of those
+ *     checks are executed rather than read: `scripts/installer-verify-test.mjs`
+ *     extracts `funnel_state` and `has_off_loopback` from the installed
+ *     `manage` and drives them, because both once matched the right string and
+ *     returned the wrong answer.
  *   - Windows is checked at the same depth as the other two, which is worth
  *     stating plainly: nothing in CI can execute PowerShell here, so for that
  *     file this lint is the *only* automated signal that a control survives.
@@ -165,6 +169,24 @@ export const RULES = [
       Linux: /could not check tailscale funnel/,
       Windows: /could not check tailscale funnel/,
     },
+  },
+  {
+    // The two verify checks whose verdict is a text search over CLI output
+    // nobody bounds. `scripts/installer-verify-test.mjs` executes both and is
+    // the real enforcement; this is the floor under it, because that test
+    // skips itself where there is no `bash`. An alternation with an exact
+    // count of 2, so editing either half is a miss — the idiom the count
+    // forbids is `printf … | grep -q`, whose SIGPIPE reads as "no match".
+    rule: 'Network posture — the Funnel and off-loopback verdicts search captured text, never a pipe into grep -q',
+    patterns: {
+      macOS: /grep -qi 'funnel on' <<<|grep -qv "127\\\.0\\\.0\\\.1:\$1" <<</,
+      Linux: /grep -qi 'funnel on' <<<|grep -qv '\^127\\\.0\\\.0\\\.1:' <<</,
+    },
+    skip: {
+      Windows:
+        'PowerShell has no pipeline that can take SIGPIPE here — `Invoke-Verify` matches `(?i)funnel on` and the listener addresses against values it has already captured',
+    },
+    exactMatches: { macOS: 2, Linux: 2 },
   },
   {
     // Anchored on the three paths that matter. A bare `chmod 0700` also matches
