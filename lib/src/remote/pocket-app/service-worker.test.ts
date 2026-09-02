@@ -17,11 +17,9 @@ afterEach(() => {
 
 describe('registerPushServiceWorker', () => {
   /**
-   * The worker is bundled as one classic IIFE, so this call must stay classic
-   * too: `type: 'module'` would ask the browser for module semantics the built
-   * file does not have, and the failure is invisible from a desktop, where push
-   * is never exercised. `lib/scripts/assert-pocket-worker.mjs` holds the other
-   * end of the same contract.
+   * The worker is bundled as one classic IIFE, so this call must stay classic:
+   * `type: 'module'` would ask for module semantics the built file does not
+   * have. `lib/scripts/assert-pocket-worker.mjs` holds the other end.
    */
   it('registers /sw.js at the root scope, classic', async () => {
     const registration = { scope: '/' };

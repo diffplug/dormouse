@@ -23,7 +23,7 @@ import {
   openPush,
   pushSubscriptionDeletePath,
   sealPush,
-  toBase64Url,
+  randomBase64Url,
   utf8Decode,
   utf8Encode,
 } from 'server-lib-common';
@@ -125,7 +125,7 @@ function subscription(endpoint = 'https://push.example.com/sub/abc') {
 
 /** A delivery id in the shape a Host mints: base64url of 32 random bytes. */
 function newDeliveryId() {
-  return toBase64Url(globalThis.crypto.getRandomValues(new Uint8Array(32)));
+  return randomBase64Url(32);
 }
 
 /** A fresh app with push configured, plus an enrolled host and a signed-in owner. */
@@ -175,8 +175,7 @@ function sendAs(app, hostToken, body) {
  * every case that is about routing rather than about the seal uses this.
  */
 function fakeSealed() {
-  const random = (n) => toBase64Url(globalThis.crypto.getRandomValues(new Uint8Array(n)));
-  return { v: 1, salt: random(32), ct: random(96) };
+  return { v: 1, salt: randomBase64Url(32), ct: randomBase64Url(96) };
 }
 
 /** A send body naming these deliveries, one distinct envelope each. */

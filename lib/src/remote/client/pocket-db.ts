@@ -178,13 +178,8 @@ export function promisifyTransaction(tx: IDBTransaction): Promise<void> {
  * re-pairing (`docs/specs/remote-security-model.md` → Client static loss), so a
  * browser that refuses, or has no `navigator.storage` at all — Safari answers
  * nothing here — gets the ordinary eviction-prone storage rather than an
- * error.
- *
- * **Feature-detected rather than window-detected**, because this module is also
- * imported by the service worker (`lib/src/remote/pocket-app/sw.ts`), where
- * `StorageManager.persist` does not exist. The worker only reads, so it never
- * reaches this — and if it did, it would get `false` rather than a throw inside
- * a push handler.
+ * error. Feature-detected rather than window-detected, because the service
+ * worker imports this module too and has no `StorageManager.persist`.
  */
 export async function persistStorage(): Promise<boolean> {
   try {

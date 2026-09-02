@@ -349,17 +349,13 @@ export class RemoteHost {
 
   /**
    * Seal one push plaintext to one paired Client, or `null` when this Host has
-   * no usable Noise static.
-   *
-   * **The private key never leaves.** It is a nonextractable `CryptoKey` held
-   * here, so the delivery path asks this to seal rather than borrowing the key
-   * — the same reason the handshake runs inside this class
+   * no usable Noise static. The private key never leaves this class, which is
+   * why the delivery path asks rather than borrowing it
    * (`docs/specs/remote-security-model.md` -> Push sealing).
    *
-   * `clientStaticPublicKey` is the ACL record's own base64url key, already
-   * length-checked on read, so a malformed one is a corrupt store rather than
-   * attacker input; it still answers `null` rather than throwing, because the
-   * caller's job is to notify the phones it can and warn about the rest.
+   * Answers `null` rather than throwing on a corrupt `clientStaticPublicKey`,
+   * because the caller's job is to notify the phones it can and warn about the
+   * rest.
    */
   async sealPushForClient(
     clientStaticPublicKey: string,

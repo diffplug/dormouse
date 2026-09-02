@@ -692,8 +692,6 @@ export class RemoteHostService {
     return {
       enrollment,
       activeRecords: () => host.activeRecords,
-      // The Host seals; its static never leaves the `RemoteHost` that imported
-      // it (`docs/specs/remote-security-model.md` -> Push sealing).
       seal: (clientStaticPublicKey, plaintext) =>
         host.sealPushForClient(clientStaticPublicKey, plaintext),
       fetch: this.#fetch,

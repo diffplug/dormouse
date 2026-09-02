@@ -59,6 +59,7 @@ import type {
   ReauthBeginResponse,
   ReauthFinishRequest,
   ReauthFinishResponse,
+  SealedPushPayload,
   SealedPushRecipient,
   SetupBeginRequest,
   SetupBeginResponse,
@@ -924,23 +925,19 @@ export function createApp(config: AppConfig): CreatedApp {
     const byDelivery = new Map(subscriptions.map((s) => [s.deliveryId, s]));
     const targets = recipients.flatMap((recipient) => {
       const subscription = byDelivery.get(recipient.deliveryId);
-      // Sealed to that Client's own static, so there is no shared payload and
-      // nothing here to re-sanitize: the Server cannot read what it forwards
-      // (docs/specs/remote-security-model.md -> Push sealing). Serialized
-      // verbatim — the worker's guard rejects anything else.
-      return subscription ? [{ subscription, payload: JSON.stringify({ hostId, ...recipient.sealed }) }] : [];
+      return subscription ? [{ subscription, sealed: recipient.sealed }] : [];
     });
 
     // Every send starts at once, so one deadline per send also bounds the whole
     // route regardless of how many devices a Host has.
     const deadlineMs = config.pushSendDeadlineMs ?? PUSH_SEND_DEADLINE_MS;
     const results = await Promise.all(
-      targets.map(async ({ subscription, payload }) => ({
+      targets.map(async ({ subscription, sealed }) => ({
         endpoint: subscription.endpoint,
         result: await sendWithinDeadline(
           sender,
           { endpoint: subscription.endpoint, keys: subscription.keys },
-          payload,
+          JSON.stringify({ hostId, ...sealed } satisfies SealedPushPayload),
           deadlineMs,
         ),
       })),
@@ -1154,13 +1151,9 @@ function isDeliveryId(value: unknown): value is string {
 }
 
 /**
- * One `{ deliveryId, sealed }` pair on a send.
- *
- * Both halves are bounded before anything is read from disk: `readJson` caps
- * nothing, and the envelope is forwarded verbatim, so its size is the Server's
- * only defense against a Host token being used to push megabytes at a phone.
- * The Server cannot check that the seal is *correct* — that is the point — so
- * shape and bounds are the whole of what it validates.
+ * One `{ deliveryId, sealed }` pair on a send. Shape and bounds are the whole
+ * of what the Server can check — it holds no key — and the envelope's bound is
+ * its only defense against forwarding megabytes at a phone.
  */
 function isSealedPushRecipient(value: unknown): value is SealedPushRecipient {
   if (!value || typeof value !== 'object') return false;

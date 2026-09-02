@@ -2,25 +2,15 @@
  * Pocket's service worker: a push transport, and deliberately nothing more
  * (`docs/specs/pocket-app.md` -> Installable web app).
  *
- * It registers no `fetch` handler and caches nothing. Pocket is useless without
- * a live relay connection, so an offline cache would buy no working screens
- * while actively fighting the server's SPA-shell handling: `registerPocketServing`
- * re-reads `index.html` per request precisely because a rebuild swaps in new
- * content-hashed assets, and a cached shell would keep pointing at deleted ones.
+ * **This is where a push is finally readable** — the Host seals to this
+ * Client's own static and the Server forwards ciphertext
+ * (`docs/specs/remote-security-model.md` -> Push sealing) — which is why the
+ * worker is bundled rather than hand-copied, and imports the same `openPush`
+ * and `boundedPushText` the rest of the system runs.
  *
- * **This is where a push is finally readable.** The Host seals every
- * notification to this Client's own static and the Server forwards ciphertext
- * (`docs/specs/remote-security-model.md` -> Push sealing), so the worker holds
- * the only key that opens one — which is why it is a bundled TypeScript module
- * rather than a hand-copied file, and why it imports the same `openPush` and
- * `boundedPushText` the rest of the system runs. It is built by
- * `lib/vite.sw.config.ts` into one classic IIFE at the stable, unhashed
- * `dist-pocket/sw.js`; `lib/scripts/assert-pocket-worker.mjs` is what holds that
- * shape.
- *
- * The event wiring at the bottom is a thin shell over the functions above it,
- * so the decision table can be driven directly by
- * `lib/src/remote/pocket-app/sw.test.ts`.
+ * The pure functions here take their scope and store as arguments, so
+ * `sw.test.ts` drives the decision table directly and `sw-entry.ts` is the only
+ * file that names the real globals.
  */
 
 import {
@@ -32,7 +22,7 @@ import {
   utf8Decode,
 } from 'server-lib-common';
 
-import { indexedDbKnownHostStore, type KnownHostStore } from '../client/pocket-db';
+import type { KnownHostStore } from '../client/pocket-db';
 
 /**
  * Longest title/body this sink will render. The Host caps the same fields
@@ -44,14 +34,10 @@ import { indexedDbKnownHostStore, type KnownHostStore } from '../client/pocket-d
 const PUSH_TEXT_LIMIT = 200;
 
 /**
- * What a push we cannot read still has to show.
- *
- * Subscribing with `userVisibleOnly: true` promises the browser that every
- * delivery becomes a visible notification; a browser that catches us showing
- * none substitutes its own "this site was updated in the background" notice and
- * counts it against the subscription's budget. So every failure — no payload,
- * an unknown Host, a record that lost its authorization, a decrypt failure,
- * malformed plaintext — lands here rather than returning early.
+ * What a push we cannot read still has to show. Every failure lands here rather
+ * than returning early, because `userVisibleOnly: true` makes showing nothing a
+ * browser-substituted notice charged against the subscription
+ * (`docs/specs/pocket-app.md` -> Installable web app).
  */
 export const GENERIC_PUSH_NOTIFICATION: PocketNotification = {
   title: 'Dormouse',
@@ -62,11 +48,7 @@ export const GENERIC_PUSH_NOTIFICATION: PocketNotification = {
 export interface PocketNotification {
   readonly title: string;
   readonly body: string;
-  /**
-   * Collapse key. The Host tags per Session so a Pane that rings, is cleared,
-   * and rings again replaces its own notification instead of stacking copies on
-   * the lock screen (`docs/specs/alert.md` -> Push notifications).
-   */
+  /** Per-Session collapse key (`docs/specs/alert.md` -> Push notifications). */
   readonly tag?: string;
 }
 
@@ -74,8 +56,7 @@ export interface PocketNotification {
  * Turn one delivered payload into the notification to show.
  *
  * **Never throws and never answers nothing**: its input is whatever a push
- * service handed the browser, and `userVisibleOnly` makes "show nothing" a
- * penalty rather than an option.
+ * service handed the browser.
  */
 export async function notificationForPush(
   payload: unknown,
@@ -95,7 +76,7 @@ async function openNotification(
 ): Promise<PocketNotification | null> {
   if (!payload || typeof payload !== 'object') return null;
   const envelope = payload as { hostId?: unknown };
-  // Bounded before it becomes a database key, and before any crypto runs.
+  // Bounded before it becomes a database key.
   if (!isE2eId(envelope.hostId) || !isSealedPushV1(payload)) return null;
 
   const record = await store.get(envelope.hostId);
@@ -134,21 +115,14 @@ async function openNotification(
 function notificationOptions(notification: PocketNotification): NotificationOptionsLike {
   return {
     body: notification.body,
-    // The tag is what makes a re-ring replace rather than stack; `renotify` is
-    // left at its default so replacing does not buzz the phone again.
+    // `renotify` is left at its default, so replacing does not buzz again.
     tag: notification.tag,
     icon: '/icon-192.png',
     badge: '/icon-192.png',
   };
 }
 
-/**
- * Wire this worker's four handlers onto `scope`.
- *
- * Takes its scope and store as arguments so the same code a phone runs is the
- * code the tests drive; the module-level call at the bottom is the only place
- * the real globals are named.
- */
+/** Wire this worker's four handlers onto `scope`. */
 export function installPocketWorker(scope: WorkerScope, store: KnownHostStore): void {
   scope.addEventListener('install', () => {
     // Nothing to precache, so there is no reason to wait for the old worker.
@@ -196,8 +170,8 @@ export function installPocketWorker(scope: WorkerScope, store: KnownHostStore): 
 // ---------------------------------------------------------------------------
 // The slice of `ServiceWorkerGlobalScope` this worker uses. Declared rather
 // than imported: `lib.webworker.d.ts` cannot be loaded beside `lib.dom.d.ts`,
-// which the rest of `lib/src` needs, and a fake scope in a test satisfies these
-// structurally.
+// which the rest of `lib/src` needs — and this module is in the same program as
+// the DOM app, since it shares `pocket-db.ts` with it.
 
 interface ExtendableEventLike {
   waitUntil(promise: Promise<unknown>): void;
@@ -241,9 +215,3 @@ export interface WorkerScope {
   };
 }
 
-// A real worker global has both of these and a test importing this module has
-// neither, so importing the pure functions above installs no listeners.
-const globalScope = globalThis as unknown as Partial<WorkerScope>;
-if (typeof globalScope.skipWaiting === 'function' && globalScope.registration) {
-  installPocketWorker(globalScope as WorkerScope, indexedDbKnownHostStore());
-}

@@ -13,7 +13,7 @@ import {
   utf8Decode,
   type HostAclRecord,
   type NoiseKeyPair,
-  type SealedPushV1,
+  type PushSendRequest,
 } from 'server-lib-common';
 import { commitPushDevices, invalidatePushDeviceRefreshes, watchPushRings } from './alert-push';
 // Delivery — the Server calls, the recipient rule, the title bounds — runs in
@@ -86,7 +86,7 @@ function fakeSeal(): AlertPushDeps['seal'] {
   };
 }
 
-/** The seal exactly as `RemoteHost.sealPushForClient` performs it. */
+/** The real construction, standing in for `RemoteHost.sealPushForClient`. */
 const realSeal: AlertPushDeps['seal'] = (clientStaticPublicKey, plaintext) =>
   sealPush({
     hostStaticPrivateKey: hostStatic.privateKey,
@@ -155,11 +155,9 @@ function ring(id: string): void {
 }
 
 /** The body of the last `push/send` request, parsed. */
-function lastSend(): { recipients: Array<{ deliveryId: string; sealed: SealedPushV1 }> } | null {
+function lastSend(): PushSendRequest | null {
   const send = requests.filter((r) => r.url.endsWith('/api/push/send')).at(-1);
-  return send
-    ? (JSON.parse(String(send.init?.body)) as ReturnType<typeof lastSend> & object)
-    : null;
+  return send ? (JSON.parse(String(send.init?.body)) as PushSendRequest) : null;
 }
 
 /** Who the last send addressed, in order. */

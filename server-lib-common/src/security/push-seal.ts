@@ -1,37 +1,15 @@
 /**
- * Sealed Web Push payloads (`docs/specs/remote-security-model.md` -> Push
- * sealing).
- *
- * A push is the one message the two endpoints exchange with no live Noise
- * session between them: the Host is awake, the phone is asleep, and the Server
- * is a store-and-forward relay that must learn nothing. So this is a
- * standalone, domain-separated seal from the two long-term statics the pair
- * already pinned at pairing — the Host's Noise static and that Client's
- * per-Host static — and **never a Noise `CipherState`**.
- *
- * Why it cannot be one: a `CipherState` is a counter plus a key from a
- * `Split`, and both sides advance it in lockstep. A push has no such shared
- * position — the phone may receive one, none, or three, in any order, days
- * apart — so reusing a transport state would either desynchronize the session
- * or reuse a nonce. This module therefore derives a **fresh key per message**
- * from a random salt and spends the all-zero nonce exactly once under it.
- *
- * The construction, in full:
- *
- *   ss  = X25519(hostStatic, clientStatic)          // WebCrypto deriveBits
- *   key = HKDF-SHA-256(ikm = ss, salt, info = domain, 32)  // WebCrypto HKDF
- *   ct  = ChaCha20-Poly1305(key, nonce = 0^12).encrypt(pt) // @noble/ciphers
+ * Sealed Web Push payloads. The construction and its rules live in
+ * `docs/specs/remote-security-model.md` -> Push sealing; this file is the
+ * implementation of them.
  *
  * **The HKDF here is WebCrypto's, not Noise's.** `noise.ts` implements the
  * spec's own HMAC construction because interoperability demands it; nothing
  * interoperates with this envelope, so the standard primitive is the right one
- * — and using it keeps the two key schedules visibly separate. `info` is the
- * one domain string below, so a key derived here can never collide with one
- * derived for any other purpose from the same static pair.
- *
- * ChaCha20-Poly1305 comes from the same exactly-pinned `@noble/ciphers`
- * binding the Noise suite uses (`noise.ts` carries the pin and its audit note),
- * so a version bump moves both together.
+ * — and using it keeps the two key schedules visibly separate. The X25519
+ * agreement underneath is shared with the handshake (`x25519Agree`), so both
+ * reject the same degenerate points. ChaCha20-Poly1305 comes from the same
+ * exactly-pinned `@noble/ciphers` binding, so a version bump moves both.
  */
 
 import {
@@ -42,7 +20,7 @@ import {
   toBase64Url,
   utf8Encode,
 } from './bytes.js';
-import { NOISE_KEY_LENGTH, NOISE_TAG_LENGTH } from './noise.js';
+import { NOISE_KEY_LENGTH, NOISE_TAG_LENGTH, x25519Agree } from './noise.js';
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { type CryptoKeyLike, type WebCryptoLike, getWebCrypto } from './webcrypto.js';
 
@@ -79,6 +57,12 @@ export const MAX_SEALED_PUSH_LENGTH = base64UrlLength(
 /** Shortest possible `ct`: an empty plaintext is still a Poly1305 tag. */
 const MIN_SEALED_PUSH_LENGTH = base64UrlLength(NOISE_TAG_LENGTH);
 
+/** The one `salt` length on the wire, in base64url characters. */
+const SEALED_PUSH_SALT_CHARS = base64UrlLength(PUSH_SEAL_SALT_LENGTH);
+
+/** The HKDF `info`, encoded once. */
+const PUSH_SEAL_INFO = utf8Encode(PUSH_SEAL_DOMAIN);
+
 /** The 96-bit nonce, spent exactly once because the key is minted per message. */
 const ZERO_NONCE = new Uint8Array(12);
 
@@ -105,7 +89,7 @@ export function isSealedPushV1(value: unknown): value is SealedPushV1 {
   const candidate = value as Record<string, unknown>;
   return (
     candidate.v === 1 &&
-    isExactBase64Url(candidate.salt, base64UrlLength(PUSH_SEAL_SALT_LENGTH)) &&
+    isExactBase64Url(candidate.salt, SEALED_PUSH_SALT_CHARS) &&
     isBoundedBase64Url(candidate.ct, MAX_SEALED_PUSH_LENGTH) &&
     (candidate.ct as string).length >= MIN_SEALED_PUSH_LENGTH
   );
@@ -172,13 +156,9 @@ export async function openPush(
 }
 
 /**
- * The per-message key both sides derive: X25519 to the shared secret, then
- * WebCrypto HKDF under this module's own domain.
- *
- * An all-zero shared secret is a hard failure rather than a key, exactly as it
- * is in the handshake (`docs/specs/remote-security-model.md` -> Noise suite):
- * a peer that presented a low-order point is one whose "shared" secret every
- * other peer can compute too.
+ * The per-message key both sides derive: X25519 to the shared secret — the same
+ * `x25519Agree` the handshake runs, so a low-order point is one indistinguishable
+ * failure in both — then WebCrypto HKDF under this module's own domain.
  */
 async function sealKey(
   crypto: WebCryptoLike,
@@ -186,20 +166,11 @@ async function sealKey(
   peerPublicKey: Uint8Array,
   salt: Uint8Array,
 ): Promise<Uint8Array> {
-  if (peerPublicKey.length !== NOISE_KEY_LENGTH) {
-    throw new Error('X25519 public key must be 32 bytes');
-  }
-  const peer = await crypto.subtle.importKey('raw', peerPublicKey, { name: 'X25519' }, false, []);
-  const shared = new Uint8Array(
-    await crypto.subtle.deriveBits({ name: 'X25519', public: peer }, privateKey, NOISE_KEY_LENGTH * 8),
-  );
-  if (shared.length !== NOISE_KEY_LENGTH || shared.every((byte) => byte === 0)) {
-    throw new Error('X25519 agreement produced no usable shared secret');
-  }
+  const shared = await x25519Agree(crypto, privateKey, peerPublicKey);
   const ikm = await crypto.subtle.importKey('raw', shared, { name: 'HKDF' }, false, ['deriveBits']);
   return new Uint8Array(
     await crypto.subtle.deriveBits(
-      { name: 'HKDF', hash: 'SHA-256', salt, info: utf8Encode(PUSH_SEAL_DOMAIN) },
+      { name: 'HKDF', hash: 'SHA-256', salt, info: PUSH_SEAL_INFO },
       ikm,
       NOISE_KEY_LENGTH * 8,
     ),

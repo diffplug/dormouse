@@ -75,9 +75,8 @@ const PUSH_SEND_MARGIN_MS = 5_000;
 
 /**
  * Apply this sink's bounds to a Pane label. The rule itself is
- * `boundedPushText` in `server-lib-common`, shared with the Server so the
- * sanitization has one implementation rather than a strong copy here and a
- * weaker one there; this wrapper only names the sink's limit and fallback.
+ * `boundedPushText` in `server-lib-common`, shared with the worker that
+ * re-bounds at the render sink; this wrapper only names the limit and fallback.
  */
 export function toPushText(label: string): string {
   return boundedPushText(label, { limit: PUSH_TITLE_LIMIT, fallback: 'terminal' });
@@ -90,10 +89,7 @@ export interface AlertPushDeps {
   readonly activeRecords: () => readonly HostAclRecord[];
   /**
    * Seal one plaintext to one paired Client's static, or `null` when this Host
-   * has no usable Noise static.
-   *
-   * A capability rather than the key itself: the Host's static is a
-   * nonextractable `CryptoKey` inside `RemoteHost` and never leaves it
+   * has no usable Noise static. A capability, never the key
    * (`docs/specs/remote-security-model.md` -> Push sealing).
    */
   readonly seal: (
@@ -133,41 +129,26 @@ export async function loadPushDevices(deps: AlertPushDeps): Promise<PushDevice[]
  * which live in the webview, so a Host in another process is told what the
  * Session is called and never guesses.
  *
- * **One ciphertext per recipient.** Each ACL record carries that Client's own
- * static, and the seal is to it, so there is no shared payload and no group key
- * — and the Server, which forwards these, learns nothing
- * (`docs/specs/remote-security-model.md` -> Push sealing).
+ * **One ciphertext per recipient**, sealed to that ACL record's own Client
+ * static (`docs/specs/remote-security-model.md` -> Push sealing).
  */
 export async function sendPush(
   deps: AlertPushDeps,
   sessionId: string,
   title: string,
 ): Promise<PushSendSummary> {
-  // Read straight from the ACL, which is local and in-memory, rather than
-  // asking the Server which devices are subscribed: the Server intersects the
-  // names it is given with its own subscriptions anyway, so the target set is
-  // identical and this costs one round trip instead of two on the one path
-  // whose whole value is timeliness.
-  //
-  // Naming targets at all is the security-relevant part. Nothing propagates a
-  // revocation today (`docs/specs/remote-security-model.md` -> Future), so a
-  // revoked Client keeps its subscription row; letting the Server choose
-  // recipients would keep pushing Pane labels to a de-authorized phone. Read at
-  // send time, so a revocation during the delay takes effect.
+  // Read at send time, so a revocation during the ring delay takes effect
+  // (`docs/specs/alert.md` -> Push notifications owns the recipient rule).
   const records = deps.activeRecords();
   if (records.length === 0) return { targeted: 0, delivered: 0, failed: 0 };
 
   // Bounded here, before it is sealed, because this is the last layer that can
-  // read it: the Server forwards ciphertext, so what the worker re-sanitizes at
-  // the sink is whatever this produced (`docs/specs/alert.md` -> Push
-  // notifications).
+  // read it: what the worker re-sanitizes at the sink is whatever this
+  // produced.
   const plaintext = utf8Encode(
     JSON.stringify({
       title: toPushText(title),
       body: PUSH_BODY,
-      // Per-Session collapse key: a Pane that rings, is cleared, and rings again
-      // replaces its own notification rather than stacking copies. Internal ids
-      // only — a tag is never displayed.
       tag: boundedPushText(sessionId, { limit: PUSH_TAG_LIMIT, fallback: 'dormouse' }),
     }),
   );

@@ -297,14 +297,10 @@ export interface PushSubscriptionUpsertResult {
  * follows.
  */
 export class PushSubscriptionStore extends JsonFileStore {
-  /** Which Hosts are still enrolled, or `null` when nothing supplies the join. */
-  readonly #hosts: HostStore | null;
+  /** Which Hosts are still enrolled. Required, so no caller can skip the join. */
+  readonly #hosts: HostStore;
 
-  constructor(
-    stateDir: string,
-    now: () => number = () => Date.now(),
-    hosts: HostStore | null = null,
-  ) {
+  constructor(stateDir: string, now: () => number, hosts: HostStore) {
     super(stateDir, 'push-subscriptions.json', now);
     this.#hosts = hosts;
   }
@@ -331,7 +327,6 @@ export class PushSubscriptionStore extends JsonFileStore {
     if (!Array.isArray(rows)) return [];
     const kept = rows.filter(isStoredPushSubscription);
     if (kept.length !== rows.length) warnOnceAboutDroppedRows();
-    if (!this.#hosts) return kept;
     const enrolled = new Set((await this.#hosts.list()).map((h) => h.hostId));
     return kept.filter((s) => enrolled.has(s.hostId));
   }

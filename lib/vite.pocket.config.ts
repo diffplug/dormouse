@@ -6,7 +6,7 @@ import tailwindcss from "@tailwindcss/vite";
 import swConfig from "./vite.sw.config";
 
 /**
- * Serve `/sw.js` from source while `dev:pocket` is running.
+ * Serve the worker from source while `dev:pocket` is running.
  *
  * The worker is bundled, not copied (docs/specs/pocket-app.md -> Installable
  * web app), so `publicDir` no longer has a file to hand out — and a dev server
@@ -16,36 +16,39 @@ import swConfig from "./vite.sw.config";
  * emit rather than a dev-only stand-in.
  */
 function serveWorkerFromSource(): Plugin {
+  // The one name `registerPushServiceWorker` asks for, read off the build that
+  // owns it rather than spelled a second time.
+  const fileName = (swConfig.build as { lib: { fileName: () => string } }).lib.fileName;
+  const workerPath = `/${fileName()}`;
   return {
     name: "dormouse-pocket-sw-dev",
     apply: "serve",
     configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        if (req.url?.split("?")[0] !== "/sw.js") return next();
-        void build({
-          ...swConfig,
-          configFile: false,
-          logLevel: "warn",
-          build: { ...swConfig.build, write: false },
-        })
-          .then((result) => {
-            // Narrowed locally: the bundler's own output types resolve through
-            // `vite`'s dependency, which this package does not declare.
-            type Emitted = { output: Array<{ type: string; code?: string }> };
-            const [bundle] = (Array.isArray(result) ? result : [result]) as Emitted[];
-            const chunk = bundle?.output.find((entry) => entry.type === "chunk");
-            if (!chunk?.code) throw new Error("the worker build emitted no chunk");
-            res.setHeader("content-type", "text/javascript");
-            // Registration re-fetches on every load; a cached dev worker would
-            // outlive the edit that motivated the reload.
-            res.setHeader("cache-control", "no-store");
-            res.end(chunk.code);
-          })
-          .catch((error: unknown) => {
-            server.config.logger.error(`failed to build /sw.js: ${String(error)}`);
-            res.statusCode = 500;
-            res.end("// the Pocket worker failed to build; see the dev server log\n");
+      server.middlewares.use(async (req, res, next) => {
+        if (req.url?.split("?")[0] !== workerPath) return next();
+        try {
+          const result = await build({
+            ...swConfig,
+            configFile: false,
+            logLevel: "warn",
+            build: { ...swConfig.build, write: false },
           });
+          // Narrowed locally: the bundler's own output types resolve through
+          // `vite`'s dependency, which this package does not declare.
+          type Emitted = { output: Array<{ type: string; code?: string }> };
+          const [bundle] = (Array.isArray(result) ? result : [result]) as Emitted[];
+          const chunk = bundle?.output.find((entry) => entry.type === "chunk");
+          if (!chunk?.code) throw new Error("the worker build emitted no chunk");
+          res.setHeader("content-type", "text/javascript");
+          // Registration re-fetches on every load; a cached dev worker would
+          // outlive the edit that motivated the reload.
+          res.setHeader("cache-control", "no-store");
+          res.end(chunk.code);
+        } catch (error: unknown) {
+          server.config.logger.error(`failed to build ${workerPath}: ${String(error)}`);
+          res.statusCode = 500;
+          res.end("// the Pocket worker failed to build; see the dev server log\n");
+        }
       });
     },
   };
