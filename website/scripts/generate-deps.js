@@ -228,7 +228,20 @@ if (vscodeBuiltInThemes.length > 0) {
     homepage: "https://github.com/microsoft/vscode/tree/main/extensions",
   });
 }
-deps.push(...themeExtensions.filter((dep) => !isVscodeBuiltInTheme(dep)));
+// `extensionId` is the join key that pins these records to the themes actually
+// compiled in (lib/src/lib/themes/bundled-extensions.test.ts); the disclosure
+// table shows the same five columns as every other row, so project it away.
+deps.push(
+  ...themeExtensions
+    .filter((dep) => !isVscodeBuiltInTheme(dep))
+    .map(({ name, version, license, author, homepage }) => ({
+      name,
+      version,
+      license,
+      author,
+      homepage,
+    })),
+);
 
 // Manual overrides for dependencies missing license or author in their metadata
 const missingLicense = {

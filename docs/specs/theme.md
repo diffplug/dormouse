@@ -191,6 +191,12 @@ imported so they stay out of the initial bundle. The build script cannot import
 TS, so it restates the consumed-key list; the two are pinned together by
 `lib/src/lib/themes/consumed-keys.test.ts`.
 
+**Never** ship a theme in `bundled.json` with no matching
+`bundled-extensions.json` record, or keep a record no theme uses — that file is
+the provenance the supply-chain page publishes ([SECURITY.md](../../SECURITY.md)).
+Records carry the `extensionId` that joins them to the `<extensionId>.<slug>`
+theme ids; `lib/src/lib/themes/bundled-extensions.test.ts` pins both directions.
+
 `subscribeToActiveTheme()` in `lib/src/lib/themes/apply.ts` notifies when a
 *different* theme is applied — compared by id, not object identity, since
 installed themes are re-parsed from storage and so are a fresh object on every

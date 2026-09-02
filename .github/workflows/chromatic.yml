@@ -35,9 +35,10 @@ jobs:
 
       - name: Install dependencies
         # Frozen, like every other workflow: a bare `pnpm install` resolves
-        # afresh, which bypasses both the lockfile and the `minimumReleaseAge`
-        # cooldown that SECURITY.md's supply-chain section rests on — in a job
-        # that holds CHROMATIC_PROJECT_TOKEN.
+        # afresh, so the lockfile stops pinning what actually runs — in a job
+        # that holds CHROMATIC_PROJECT_TOKEN. Not `minimumReleaseAge`, which is
+        # applied during resolution and so binds a fresh resolve too; the
+        # lockfile pin is the whole of what freezing buys.
         run: pnpm install --frozen-lockfile
         working-directory: lib
 
