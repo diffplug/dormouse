@@ -60,8 +60,14 @@ export function spawnLogged(command, args, { cwd, env, logPath, prefix }) {
   child.stderr.on('data', consume);
 
   let exit = null;
-  child.on('exit', (code, signal) => {
-    exit = { code, signal };
+  child.on('exit', (code, signal) => { exit = { code, signal }; });
+  // **The log ends on `close`, never on `exit`.** The tree a leader started
+  // holds the same stdout pipe, so chunks keep arriving after the leader is
+  // gone — and `consume` writing them to an ended stream drops them without
+  // even raising `error`, losing exactly the tail that says why it died.
+  // `exit` still has to be set where it is: `waitForLine` and `launchChrome`
+  // both want the early-death signal, which `close` is too late for.
+  child.on('close', (code, signal) => {
     log.end(`\n[${prefix}] exited code=${code} signal=${signal}\n`);
   });
 
