@@ -199,8 +199,8 @@ Testing 150 rather than assumed:
 ## Proving the terminal
 
 **A file, not the screen.** Both terminals render through WebGL, so neither side
-has `.xterm-rows` to scrape — the DOM-scraping recipes silently return nothing
-(memory note: `ab-harness-webgl-read-via-files`). So the command typed on the
+has `.xterm-rows` to scrape, and a driver that tries silently reads an empty
+terminal rather than failing. So the command typed on the
 phone redirects itself into the run directory and moves the file into place when
 it is complete, and the harness polls for it: the laptop's own shell writing
 `WALKTHROUGH-OK-<id>` and `EXIT=0` is what proves the keystrokes reached a real
