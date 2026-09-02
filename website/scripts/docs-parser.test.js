@@ -5,6 +5,7 @@ import {
   createSlugger,
   slugify,
   inlineToText,
+  IMG_ALLOWED_ATTRS,
   UnsupportedMarkdownError,
 } from './docs-parser.js';
 
@@ -38,15 +39,21 @@ describe('inline', () => {
   });
 
   it('preserves every allowlisted attribute on an https img', () => {
-    const [img] = parseInline('<img width="22" height="22" alt="bell" title="Alert ringing" src="https://x.test/a.png" />');
-    expect(img).toMatchObject({
-      type: 'image',
+    // Keyed off the allowlist itself: allowing an attribute the parser then
+    // drops on the way out fails here, where a fixed list of today's five
+    // would keep passing. A new entry must gain a sample below.
+    const sample = {
+      src: 'https://x.test/a.png',
+      alt: 'bell',
       width: '22',
       height: '22',
-      alt: 'bell',
       title: 'Alert ringing',
-      src: 'https://x.test/a.png',
-    });
+    };
+    expect(Object.keys(sample).sort()).toEqual([...IMG_ALLOWED_ATTRS].sort());
+
+    const attrs = Object.entries(sample).map(([name, value]) => `${name}="${value}"`).join(' ');
+    const [img] = parseInline(`<img ${attrs} />`);
+    expect(img).toMatchObject({ type: 'image', ...sample });
   });
 
   it('rejects a disallowed img attribute', () => {

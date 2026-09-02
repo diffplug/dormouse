@@ -25,7 +25,7 @@ export class UnsupportedMarkdownError extends Error {
 }
 
 /** Attributes an `<img>` may carry. Everything else is rejected. */
-const IMG_ALLOWED_ATTRS = new Set(['src', 'alt', 'width', 'height', 'title']);
+export const IMG_ALLOWED_ATTRS = new Set(['src', 'alt', 'width', 'height', 'title']);
 
 // ---------------------------------------------------------------------------
 // Slugger — mirrors github-slugger so /docs anchors match GitHub's own.

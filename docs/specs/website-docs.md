@@ -268,7 +268,8 @@ Keyed on the website's own `dormouse:docs-theme-prompt-dismissed`, because
 
 **Must keep** prerendered and first-client prompt markup independent of
 `localStorage`, then reconcile after hydration. Until then the prompt stays
-hidden, so a returning reader never sees dismissed UI flash.
+hidden, so a returning reader never sees dismissed UI flash. Pinned by
+`website/src/components/DocsThemeControl.test.tsx`.
 
 ## `/docs/dor` reference
 
