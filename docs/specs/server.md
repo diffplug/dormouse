@@ -991,9 +991,8 @@ clearing site data destroys them → re-pair, per the security model; a dropped
 WebSocket sends you back to the Hosts view — reconnect by tapping Connect
 again.
 
-`scripts/pairing-walkthrough/` drives steps 1–2 and the QR capture unattended in
-real browsers, into a run directory of screenshots, logs and the code it read.
-Development only — no CI workflow runs it.
+`scripts/pairing-walkthrough/` drives steps 1–2 and the QR capture in real
+browsers, leaving screenshots and logs in a run directory. Not in CI.
 
 ## Installing it
 
