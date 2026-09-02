@@ -23,9 +23,12 @@ function record(log, frame) {
  * Attach a frame socket to `target` (an `EventEmitter`), setting `ws`,
  * `ready`, `closed`, `frames`, and `sent` on it and emitting `open`, `close`,
  * and `frame`. Returns the socket.
+ *
+ * `socket` replaces the real `WebSocket` — how the malicious-relay harness puts
+ * a peer it controls between the two halves without changing either of them.
  */
-export function attachFrameSocket(target, url) {
-  const ws = new WebSocket(url);
+export function attachFrameSocket(target, url, socket) {
+  const ws = socket ?? new WebSocket(url);
   target.ws = ws;
   /** Every frame the relay delivered, and every frame this peer sent. */
   target.frames = [];

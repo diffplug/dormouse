@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fromBase64Url, mintNoiseStaticKeyPair, toBase64Url } from 'server-lib-common';
-import { clearEnrollment, getEnrollment, isEnrollment, performEnrollment } from './enrollment';
-import { ENROLLMENT_KEY } from './store';
+import { isEnrollment, performEnrollment } from './enrollment';
+
+// A real `hostId`: base64url of 16 bytes, the one shape `isEnrollment`
+// accepts, because it is also the routing id every `e2e` envelope carries.
+const HOST_ID = 'S6kyjjqOS7mw3l8ye89U3g';
 
 // Only the minter is faked, and only where a test asks for it; everything else
 // in the package stays real so the guards under test are the shipped ones.
@@ -15,7 +18,7 @@ function enrollResponder(): ReturnType<typeof vi.fn> {
   return vi.fn(async () =>
     new Response(
       JSON.stringify({
-        hostId: 'host-abc',
+        hostId: HOST_ID,
         hostToken: 'tok-xyz',
         origin: 'https://dormouse.example',
         rpId: 'dormouse.example',
@@ -43,7 +46,7 @@ describe('remote-host enrollment', () => {
     const fetchMock = vi.fn(async () =>
       new Response(
         JSON.stringify({
-          hostId: 'host-abc',
+          hostId: HOST_ID,
           hostToken: 'tok-xyz',
           origin: 'https://dormouse.example',
           rpId: 'dormouse.example',
@@ -65,15 +68,18 @@ describe('remote-host enrollment', () => {
       expect.objectContaining({ method: 'POST', redirect: 'error' }),
     );
     const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
-    expect(body).toEqual({ password: 'hunter2', label: 'My Laptop' });
+    expect(body).toEqual({ password: 'hunter2' });
 
     expect(enrollment).toEqual({
       serverUrl: 'https://dormouse.example',
-      hostId: 'host-abc',
+      hostId: HOST_ID,
       hostToken: 'tok-xyz',
       origin: 'https://dormouse.example',
       rpId: 'dormouse.example',
-      // Minted locally, after the answer above (see the Noise-static test).
+      // Kept from the caller's own argument: the request never carries one,
+      // and this is what the machine calls itself inside an encrypted outcome.
+      label: 'My Laptop',
+      // Minted locally, before the request and never in it (see below).
       noiseStaticPrivateKey: expect.any(String),
       noiseStaticPublicKey: expect.any(String),
     });
@@ -90,7 +96,7 @@ describe('remote-host enrollment', () => {
     const fetchMock = vi.fn(async () =>
       new Response(
         JSON.stringify({
-          hostId: 'host-abc',
+          hostId: HOST_ID,
           hostToken: 'tok-xyz',
           origin: 'https://dormouse.example',
           rpId: 'dormouse.example',
@@ -117,28 +123,34 @@ describe('remote-host enrollment', () => {
       string,
       unknown
     >;
-    expect(body).toEqual({ password: 'hunter2', label: 'My Laptop' });
+    expect(body).toEqual({ password: 'hunter2' });
   });
 
-  it('still enrolls when the runtime mints a static this build cannot persist', async () => {
-    // Minting is best-effort: a PKCS#8 outside what `isEnrollment` accepts must
-    // cost the Host its E2E identity, not its enrollment.
-    stubLocalStorage();
+  it('refuses to enroll when the runtime cannot mint the static it needs', async () => {
+    // The probe gate's Host half. The end-to-end protocol is mandatory and the
+    // static is this Host's identity in it, so enrolling without one would
+    // persist a `hostToken` for a machine that can never answer a pairing or a
+    // connection — a Host that looks connected and does nothing.
+    const store = stubLocalStorage();
+    vi.stubGlobal('fetch', enrollResponder());
+
+    // A runtime with no X25519 at all.
+    vi.mocked(mintNoiseStaticKeyPair).mockRejectedValueOnce(new Error('unsupported curve'));
+    await expect(
+      performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'My Laptop'),
+    ).rejects.toThrow(/cannot generate the X25519 key/);
+
+    // And one whose PKCS#8 falls outside what `isEnrollment` accepts: caught
+    // here, naming the key, rather than at the next read naming nothing.
     vi.mocked(mintNoiseStaticKeyPair).mockResolvedValueOnce({
       privateKeyPkcs8: toBase64Url(new Uint8Array(256)),
       publicKey: toBase64Url(new Uint8Array(32)),
     });
-    vi.stubGlobal('fetch', enrollResponder());
+    await expect(
+      performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'My Laptop'),
+    ).rejects.toThrow(/not a shape this build persists/);
 
-    const enrollment = await performEnrollment(
-      'https://dormouse.example',
-      { password: 'hunter2' },
-      'My Laptop',
-    );
-
-    expect(enrollment.hostId).toBe('host-abc');
-    expect(enrollment.noiseStaticPrivateKey).toBeUndefined();
-    expect(enrollment.noiseStaticPublicKey).toBeUndefined();
+    expect(store.size).toBe(0);
   });
 
   it('sends the installer’s one-time token in place of the password', async () => {
@@ -148,7 +160,7 @@ describe('remote-host enrollment', () => {
     const fetchMock = vi.fn(async () =>
       new Response(
         JSON.stringify({
-          hostId: 'host-abc',
+          hostId: HOST_ID,
           hostToken: 'tok-xyz',
           origin: 'https://dormouse.example',
           rpId: 'dormouse.example',
@@ -161,8 +173,23 @@ describe('remote-host enrollment', () => {
     await performEnrollment('https://dormouse.example', { enrollToken: 'f'.repeat(64) }, 'My Laptop');
 
     const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
-    expect(body).toEqual({ enrollToken: 'f'.repeat(64), label: 'My Laptop' });
+    expect(body).toEqual({ enrollToken: 'f'.repeat(64) });
     expect(body).not.toHaveProperty('password');
+  });
+
+  it('mints the Noise static before the exchange, so a failure costs nothing', async () => {
+    stubLocalStorage();
+    const fetchMock = enrollResponder();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.mocked(mintNoiseStaticKeyPair).mockRejectedValueOnce(new Error('no X25519 here'));
+
+    await expect(
+      performEnrollment('https://dormouse.example', { enrollToken: 'one-time' }, 'My Laptop'),
+    ).rejects.toThrow(/cannot generate the X25519 key/);
+    // A successful POST appends a `hosts.json` row and spends the installer's
+    // single-use token, neither of which this side can undo — so a runtime that
+    // cannot mint must fail while the Server still has nothing to forget.
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('gives up on a relay that accepts the connection and never answers', async () => {
@@ -184,6 +211,10 @@ describe('remote-host enrollment', () => {
     );
 
     const pending = performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x');
+    // Awaited rather than asserted synchronously: the X25519 mint runs before
+    // the exchange (see "mints the Noise static before the exchange"), so the
+    // request is one WebCrypto round trip away rather than in this tick.
+    await vi.waitFor(() => expect(seen).toBeDefined());
     // Below the webview's own 15 s command budget, so the console that asked
     // sees the real error rather than a bare timeout.
     expect(timeout).toHaveBeenCalledWith(10_000);
@@ -211,7 +242,7 @@ describe('remote-host enrollment', () => {
       'fetch',
       vi.fn(async () =>
         new Response(
-          JSON.stringify({ hostId: 'host-abc', hostToken: 'tok-xyz' }), // no origin/rpId
+          JSON.stringify({ hostId: HOST_ID, hostToken: 'tok-xyz' }), // no origin/rpId
           { status: 200, headers: { 'content-type': 'application/json' } },
         ),
       ),
@@ -242,6 +273,43 @@ describe('remote-host enrollment', () => {
     );
   });
 
+  it('refuses a hostId of any shape but the routing id', async () => {
+    // The response body is untrusted like any other, and this field is not just
+    // stored: it routes every `e2e` envelope and is the second field of every QR
+    // fragment, both of which accept exactly 16 bytes as base64url. Accepted
+    // here, a wrong-length id would leave this Host minting codes no phone can
+    // parse, with nothing anywhere to explain it. The Server pins the same shape
+    // at the mint (`server/src/state.ts`).
+    for (const hostId of ['host-abc', '', `${HOST_ID}A`, HOST_ID.slice(0, 21), `${HOST_ID}==`]) {
+      expect(
+        isEnrollment({ serverUrl: 's', hostId, hostToken: 't', origin: 'o', rpId: 'r' }),
+      ).toBe(false);
+    }
+    expect(
+      isEnrollment({ serverUrl: 's', hostId: HOST_ID, hostToken: 't', origin: 'o', rpId: 'r' }),
+    ).toBe(true);
+
+    // And the exchange fails naming the field rather than persisting one.
+    stubLocalStorage();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            hostId: 'host-abc',
+            hostToken: 'tok-xyz',
+            origin: 'https://dormouse.example',
+            rpId: 'dormouse.example',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      ),
+    );
+    await expect(
+      performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x'),
+    ).rejects.toThrow(/missing or invalid: hostId/);
+  });
+
   it('refuses a 200 that is not JSON at all', async () => {
     // A captive portal or a proxy error page served with a 200.
     stubLocalStorage();
@@ -262,7 +330,7 @@ describe('remote-host enrollment', () => {
     // it has none.
     const base = {
       serverUrl: 's',
-      hostId: 'h',
+      hostId: HOST_ID,
       hostToken: 't',
       origin: 'o',
       rpId: 'r',
@@ -292,29 +360,4 @@ describe('remote-host enrollment', () => {
     expect(isEnrollment({ ...base, noiseStaticPublicKey, noiseStaticPrivateKey: 42 })).toBe(false);
   });
 
-  it('clears and rejects malformed persisted enrollment', () => {
-    // What a webview that enrolled before the service existed still holds, and
-    // hands over once (`activation.ts` → adoption).
-    const store = stubLocalStorage();
-    expect(getEnrollment()).toBeNull();
-
-    store.set(ENROLLMENT_KEY, JSON.stringify({ serverUrl: 'x' })); // missing fields
-    expect(getEnrollment()).toBeNull();
-
-    store.set(
-      ENROLLMENT_KEY,
-      JSON.stringify({
-        serverUrl: 's',
-        hostId: 'h',
-        hostToken: 't',
-        origin: 'o',
-        rpId: 'r',
-      }),
-    );
-    expect(getEnrollment()).not.toBeNull();
-
-    clearEnrollment();
-    expect(store.has(ENROLLMENT_KEY)).toBe(false);
-    expect(getEnrollment()).toBeNull();
-  });
 });

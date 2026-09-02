@@ -4,7 +4,7 @@ import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 
-import { SELFHOST_ACCOUNT_ID, toBase64Url } from 'server-lib-common';
+import { E2E_ID_BYTE_LENGTH, SELFHOST_ACCOUNT_ID, isE2eId, toBase64Url } from 'server-lib-common';
 import type { PushSubscriptionPayload } from 'server-lib-common';
 
 import { secretEquals } from './secrets.js';
@@ -141,11 +141,16 @@ export class AccountStore extends JsonFileStore {
   }
 }
 
-/** An enrolled Host as stored in `hosts.json`. `hostToken` is the WS bearer secret. */
+/**
+ * An enrolled Host as stored in `hosts.json`. `hostToken` is the WS bearer
+ * secret. **No label**: the name a Host presents is its own, and a Client only
+ * ever learns it inside an encrypted ceremony outcome
+ * (`docs/specs/remote-security-model.md` → Host identity). A row written before
+ * that cutover carries one; it is simply ignored.
+ */
 export interface StoredHost {
   readonly hostId: string;
   readonly hostToken: string;
-  readonly label: string;
   readonly enrolledAt: number;
 }
 
@@ -206,25 +211,23 @@ export class HostStore extends JsonFileStore {
 
   /**
    * Enroll a new host: run `beforeEnroll` with whether this is the first Host
-   * ever persisted, mint a random `hostId` (16 bytes) and `hostToken` (32
-   * bytes), append them, and return the record. The callback and write share
-   * the mutex, so two credential paths cannot both authorize themselves as the
-   * first enrollment.
+   * ever persisted, mint a random `hostId` ({@link E2E_ID_BYTE_LENGTH} bytes)
+   * and `hostToken` (32 bytes), append them, and return the record. The
+   * callback and write share the mutex, so two credential paths cannot both
+   * authorize themselves as the first enrollment.
    *
    * File existence, not the current row count, is the durable boundary: hand-
    * editing every row away revokes those Hosts but does not reopen bootstrap.
    */
   enroll(
-    label: string,
     beforeEnroll: (firstEnrollment: boolean) => void | Promise<void> = () => {},
   ): Promise<StoredHost> {
     return this.mutate(async () => {
       await beforeEnroll(!(await this.exists()));
       const hosts = await this.list();
       const host: StoredHost = {
-        hostId: toBase64Url(randomBytes(16)),
+        hostId: toBase64Url(randomBytes(E2E_ID_BYTE_LENGTH)),
         hostToken: toBase64Url(randomBytes(32)),
-        label,
         enrolledAt: this.now(),
       };
       hosts.push(host);
@@ -234,13 +237,14 @@ export class HostStore extends JsonFileStore {
   }
 }
 
+// Minted and read at the one shape `isE2eId` accepts, since a `hostId` is the
+// routing id every `e2e` envelope carries (docs/specs/server.md -> State files).
 function isStoredHost(row: unknown): row is StoredHost {
   if (!row || typeof row !== 'object') return false;
   const candidate = row as Record<string, unknown>;
   return (
-    typeof candidate.hostId === 'string' &&
+    isE2eId(candidate.hostId) &&
     typeof candidate.hostToken === 'string' &&
-    typeof candidate.label === 'string' &&
     typeof candidate.enrolledAt === 'number'
   );
 }
@@ -248,7 +252,12 @@ function isStoredHost(row: unknown): row is StoredHost {
 /** A Web Push subscription as stored in `push-subscriptions.json`. */
 export interface StoredPushSubscription {
   readonly hostId: string;
-  readonly devicePublicKey: string;
+  /**
+   * The bearer capability the Host minted for this Client at pairing;
+   * possession of it is the whole authorization for this row
+   * (`docs/specs/remote-security-model.md` → Host Authorization).
+   */
+  readonly deliveryId: string;
   readonly endpoint: string;
   readonly keys: PushSubscriptionPayload['keys'];
   /** Public VAPID key this endpoint was minted and registered under. */
@@ -259,26 +268,32 @@ export interface StoredPushSubscription {
 export interface PushSubscriptionUpsertResult {
   readonly subscription: StoredPushSubscription;
   /**
-   * Every Host this device is registered with after the mutation, including the
-   * one just written. Computed inside the mutex, so it is the whole truth for
-   * the device at the instant it was committed rather than a delta the caller
-   * has to reconstruct.
+   * Every Host whose surviving rows carry the presented endpoint under the same
+   * VAPID key — the state the mutation left behind, not the delta. Computed
+   * inside the mutex, so it is the whole truth at the instant it was committed,
+   * which is what makes a lost response repairable by an idempotent retry.
    */
-  readonly deviceHostIds: readonly string[];
+  readonly endpointHostIds: readonly string[];
 }
 
 /**
  * Push subscriptions (`push-subscriptions.json`), keyed on the PAIR
- * (`hostId`, `devicePublicKey`) — one Client subscribes once per Host it is
- * paired with, and a Host can only ever see or reach its own subscribers.
+ * (`hostId`, `deliveryId`) — one Client subscribes once per Host it is paired
+ * with, and a Host can only ever see or reach its own subscribers.
  *
  * Unlike its append-only siblings this store deletes: a push service reports a
  * dead subscription with 404/410, and re-subscribing after a browser rotates
  * the endpoint must replace the stale row rather than accumulate one per
- * rotation. Both paths run under the inherited mutex.
+ * rotation. Every path runs under the inherited mutex.
  *
  * No secret of ours lives here, but the endpoint plus its keys IS a bearer
  * capability to notify that phone, so the inherited `0o600` still matters.
+ *
+ * **Removing a `hosts.json` row cascades lazily.** {@link listForHost} answers
+ * nothing for a Host that is no longer enrolled and every read path filters,
+ * so an orphaned row is unreachable the moment its Host is revoked; provider
+ * 404/410 pruning ({@link removeEndpoints}) and the Client's own deletion are
+ * what eventually take it off disk.
  */
 export class PushSubscriptionStore extends JsonFileStore {
   constructor(stateDir: string, now: () => number = () => Date.now()) {
@@ -288,17 +303,21 @@ export class PushSubscriptionStore extends JsonFileStore {
   /**
    * The rows this Server can act on.
    *
-   * Malformed rows are dropped here rather than defended against at each
-   * consumer: this file is hand-editable by design — revoking a device is
-   * deleting its rows — so a half-finished edit is a real case, and one guard
-   * at the read boundary is what lets {@link StoredPushSubscription} be true
-   * for every caller downstream. A mangled row therefore reads as a missing
-   * registration, which re-offers Enable and repairs itself, instead of as a
-   * live one that cannot be delivered to.
+   * Malformed rows — and rows written before the end-to-end cutover, which
+   * carry a `devicePublicKey` and no `deliveryId` — are dropped here rather
+   * than defended against at each consumer: this file is hand-editable by
+   * design, so a half-finished edit is a real case, and one guard at the read
+   * boundary is what lets {@link StoredPushSubscription} be true for every
+   * caller downstream. A dropped row reads as a missing registration, which
+   * Pocket repairs by re-offering Enable, instead of as a live one that
+   * cannot be delivered to.
    */
   async list(): Promise<StoredPushSubscription[]> {
     const rows = await this.read<unknown>([]);
-    return Array.isArray(rows) ? rows.filter(isStoredPushSubscription) : [];
+    if (!Array.isArray(rows)) return [];
+    const kept = rows.filter(isStoredPushSubscription);
+    if (kept.length !== rows.length) warnOnceAboutDroppedRows();
+    return kept;
   }
 
   async listForHost(hostId: string): Promise<StoredPushSubscription[]> {
@@ -307,12 +326,29 @@ export class PushSubscriptionStore extends JsonFileStore {
   }
 
   /**
-   * Replace any existing subscription for this (host, device), or add one.
+   * The rows for delivery ids the caller PRESENTED. Never a listing: the caller
+   * must already hold each id it asks about, so this is proof of possession
+   * rather than an enumeration primitive.
+   */
+  async listForDeliveryIds(deliveryIds: readonly string[]): Promise<StoredPushSubscription[]> {
+    const named = new Set(deliveryIds);
+    return (await this.list()).filter((s) => named.has(s.deliveryId));
+  }
+
+  /**
+   * Replace any existing subscription for this (host, delivery), or add one.
    *
-   * A service-worker scope has one subscription shared by every Host. If its
-   * endpoint, encryption keys, or VAPID key changes, every row for this device
-   * points at the old delivery address. Drop those sibling rows atomically so
-   * readback cannot claim they are still active.
+   * A service-worker scope has one subscription shared by every Host, so an
+   * address this delivery is moving off is dead under every Host at once and
+   * goes in the same mutation. Two keys, because they reach different rows:
+   *
+   * * **Read the replaced addresses from every row carrying this
+   *   `deliveryId`**, not only this Host's — one delivery id speaks for one
+   *   worker scope.
+   * * **Drop rows matched on the endpoint**, which is what reaches siblings
+   *   holding delivery ids this request never names.
+   *
+   * `docs/specs/server.md` -> State files owns the rule and the gap it leaves.
    */
   upsert(
     record: Omit<StoredPushSubscription, 'subscribedAt'>,
@@ -320,31 +356,56 @@ export class PushSubscriptionStore extends JsonFileStore {
     return this.mutate(async () => {
       const all = await this.list();
       const stored: StoredPushSubscription = { ...record, subscribedAt: this.now() };
-      const deviceRegistrationsReset = all.some(
-        (s) => s.devicePublicKey === record.devicePublicKey && !samePushAddress(s, record),
+      const replacedEndpoints = new Set(
+        all
+          .filter((s) => s.deliveryId === record.deliveryId && s.endpoint !== record.endpoint)
+          .map((s) => s.endpoint),
       );
-      const kept = all.filter((s) =>
-        deviceRegistrationsReset
-          ? s.devicePublicKey !== record.devicePublicKey
-          : !(s.hostId === record.hostId && s.devicePublicKey === record.devicePublicKey),
+      const kept = all.filter(
+        (s) =>
+          !(s.hostId === record.hostId && s.deliveryId === record.deliveryId) &&
+          !replacedEndpoints.has(s.endpoint),
       );
       kept.push(stored);
       await this.writeAtomic(kept);
-      // Every surviving row for this device necessarily shares `stored`'s
-      // address, and `samePushAddress` compares the VAPID key too — so a row
-      // minted under a rotated key is never among these, and the caller needs
-      // no further filtering to know they are all deliverable.
-      const deviceHostIds = kept
-        .filter((s) => s.devicePublicKey === record.devicePublicKey)
-        .map((s) => s.hostId);
-      return { subscription: stored, deviceHostIds };
+      const endpointHostIds = [
+        ...new Set(
+          kept
+            .filter(
+              (s) => s.endpoint === record.endpoint && s.vapidPublicKey === record.vapidPublicKey,
+            )
+            .map((s) => s.hostId),
+        ),
+      ];
+      return { subscription: stored, endpointHostIds };
+    });
+  }
+
+  /**
+   * Forget every row carrying `deliveryId`, across Hosts. The Client holding
+   * the capability is the normal lifecycle initiator; the route answers 204
+   * whatever this returns, so the count is for tests and logs only.
+   *
+   * **Not scoped to an account**, and correct only because selfhost has exactly
+   * one (`SELFHOST_ACCOUNT_ID`, which `SECURITY.md` pins). A delivery id is
+   * unguessable, so possession is the authorization — but multi-tenant would
+   * still have to key the delete on the calling account, since a leaked id
+   * would otherwise reach across tenants (`docs/specs/server.md` `## Future`).
+   */
+  removeDelivery(deliveryId: string): Promise<number> {
+    return this.mutate(async () => {
+      const all = await this.list();
+      const kept = all.filter((s) => s.deliveryId !== deliveryId);
+      if (kept.length === all.length) return 0;
+      await this.writeAtomic(kept);
+      return all.length - kept.length;
     });
   }
 
   /**
    * Drop subscriptions the push service reported as gone. Matched on endpoint
-   * rather than device so a stale row cannot outlive its endpoint even if the
-   * same device has since re-subscribed with a new one.
+   * rather than delivery so a stale row cannot outlive its endpoint even if the
+   * same phone has since re-subscribed with a new one.
    *
    * Takes the whole set because a fan-out can expire several at once, and one
    * rewrite is both cheaper and less code than a serialized call per endpoint.
@@ -361,33 +422,41 @@ export class PushSubscriptionStore extends JsonFileStore {
   }
 }
 
-function samePushAddress(
-  left: Omit<StoredPushSubscription, 'subscribedAt'>,
-  right: Omit<StoredPushSubscription, 'subscribedAt'>,
-): boolean {
-  return (
-    left.endpoint === right.endpoint &&
-    left.keys.p256dh === right.keys.p256dh &&
-    left.keys.auth === right.keys.auth &&
-    left.vapidPublicKey === right.vapidPublicKey
-  );
-}
-
 /**
  * Whether an on-disk row is a subscription this Server can use. Guards
  * {@link PushSubscriptionStore.list}, which is the only way rows enter the
  * process — so every field the type declares is present past that point.
+ *
+ * **`deliveryId` is the whole file version.** A row written before the
+ * end-to-end cutover carries `devicePublicKey` instead and fails here, which is
+ * the reset-and-re-register the scope requires; there is no migration reader.
  */
 function isStoredPushSubscription(row: unknown): row is StoredPushSubscription {
   const s = row as Partial<StoredPushSubscription> | null;
   return (
     typeof s?.hostId === 'string' &&
-    typeof s.devicePublicKey === 'string' &&
+    typeof s.deliveryId === 'string' &&
     typeof s.endpoint === 'string' &&
     typeof s.keys?.p256dh === 'string' &&
     typeof s.keys.auth === 'string' &&
     typeof s.vapidPublicKey === 'string' &&
     typeof s.subscribedAt === 'number'
+  );
+}
+
+/**
+ * Once per process, whatever dropped and however often it is read: the file is
+ * read on every push route, and an operator needs the instruction once, not on
+ * a loop under a phone that retries.
+ */
+let warnedAboutDroppedRows = false;
+
+function warnOnceAboutDroppedRows(): void {
+  if (warnedAboutDroppedRows) return;
+  warnedAboutDroppedRows = true;
+  console.warn(
+    'push-subscriptions.json: dropped rows this server cannot use (pre-end-to-end or ' +
+      'hand-edited). Re-register push on each phone to replace them.',
   );
 }
 

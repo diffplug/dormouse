@@ -47,6 +47,15 @@ export interface PasskeyAssertionExpectations {
   readonly requireUserVerification?: boolean;
 }
 
+/**
+ * The standing half of {@link PasskeyAssertionExpectations} — everything but
+ * the per-ceremony challenge. This is what a Host records at enrollment and
+ * what both verifiers demand of an assertion, so a Server that demands user
+ * verification while the Host does not cannot leave the weaker verifier
+ * deciding access (`docs/specs/remote-security-model.md`).
+ */
+export type ConnectionPolicy = Omit<PasskeyAssertionExpectations, 'challenge'>;
+
 export type PasskeyAssertionFailure =
   | 'client-data-malformed'
   | 'client-data-type'

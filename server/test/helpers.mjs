@@ -44,6 +44,9 @@ export async function freshApp({
   requireUserVerification,
   vapidPublicKey,
   pushSender,
+  // Forwarded, or a wedged-push-service case waits out the real 15-second
+  // deadline it is meant to be proving.
+  pushSendDeadlineMs,
   enrollTokenFile,
   credentialFailureDelayMs = TEST_CREDENTIAL_FAILURE_DELAY_MS,
 } = {}) {
@@ -56,6 +59,7 @@ export async function freshApp({
     requireUserVerification,
     vapidPublicKey,
     pushSender,
+    pushSendDeadlineMs,
     enrollTokenFile,
     credentialFailureDelayMs,
   });
@@ -117,15 +121,28 @@ export function padBase64Url(text) {
 }
 
 /**
- * begin → finish registration for `authenticator`; returns the finish Response.
- * `credential` is whatever gates the two setup routes — the setup password by
- * default, or `{ setupToken }` for the QR path.
+ * Enroll a throwaway Host and mint one setup token from it — the only credential
+ * `/api/setup/*` takes, so every registration in this suite starts at a code an
+ * enrolled Host displayed. Pass `host` to mint another from one already enrolled.
  */
-export async function register(
-  app,
-  authenticator,
-  { credential = { password: PASSWORD }, origin = ORIGIN, label = 'Test Passkey' } = {},
-) {
+export async function mintSetupToken(app, host) {
+  const minter = host ?? (await enrollHost(app)).body;
+  const res = await app.request(API_ROUTES.hostSetupToken, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${minter.hostToken}` },
+  });
+  const { token } = await res.json();
+  return { token, host: minter };
+}
+
+/**
+ * begin → finish registration for `authenticator`; returns the finish Response.
+ * `credential` is `{ setupToken }`, freshly minted through a Host unless the
+ * caller supplies one it wants to control (spent, revoked minter, reused).
+ */
+export async function register(app, authenticator, options = {}) {
+  const { origin = ORIGIN, label = 'Test Passkey' } = options;
+  const credential = options.credential ?? { setupToken: (await mintSetupToken(app)).token };
   const begin = await post(app, API_ROUTES.setupBegin, credential);
   if (begin.status !== 200) return begin;
   const { challenge } = await begin.json();
@@ -251,8 +268,8 @@ export function wsConnect(url) {
 }
 
 /** POST /api/host/enroll with the setup password; returns the JSON body. */
-export async function enrollHost(app, { label = 'Laptop', password = PASSWORD } = {}) {
-  const res = await post(app, API_ROUTES.hostEnroll, { password, label });
+export async function enrollHost(app) {
+  const res = await post(app, API_ROUTES.hostEnroll, { password: PASSWORD });
   return { res, body: await res.json() };
 }
 
@@ -266,8 +283,8 @@ export async function ownerSession(app) {
 }
 
 /** Enroll a host and open its `/ws/host` socket (awaiting the upgrade). */
-export async function connectHost(app, server, opts) {
-  const { body } = await enrollHost(app, opts);
+export async function connectHost(app, server) {
+  const { body } = await enrollHost(app);
   const socket = wsConnect(`${server.wsUrl}${WS_ROUTES.host}?${WS_TOKEN_PARAM}=${body.hostToken}`);
   await socket.ready;
   return { host: body, socket };

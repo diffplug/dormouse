@@ -9,6 +9,8 @@
  * `SubtleCrypto` objects satisfy them structurally.
  */
 
+import { toBase64Url } from './bytes.js';
+
 export interface CryptoKeyLike {
   readonly type: 'public' | 'private' | 'secret';
   readonly extractable: boolean;
@@ -21,6 +23,18 @@ export interface CryptoKeyPairLike {
   readonly privateKey: CryptoKeyLike;
 }
 
+/**
+ * The one JWK field this package reads (the X25519 public point).
+ *
+ * Spelled as named optional properties rather than `Record<string, unknown>`:
+ * the DOM's `JsonWebKey` has no index signature, so an index-signature shape
+ * is not comparable to it and every DOM-lib consumer of this package fails to
+ * compile on the `globalThis` cast in {@link getWebCrypto}.
+ */
+export interface JsonWebKeyLike {
+  readonly x?: string;
+}
+
 /** The subset of `SubtleCrypto` used by this package (asymmetric keys only). */
 export interface SubtleCryptoLike {
   generateKey(
@@ -28,6 +42,8 @@ export interface SubtleCryptoLike {
     extractable: boolean,
     keyUsages: readonly string[],
   ): Promise<CryptoKeyPairLike>;
+  /** `jwk` answers an object; every other format answers bytes. */
+  exportKey(format: 'jwk', key: CryptoKeyLike): Promise<JsonWebKeyLike>;
   exportKey(format: string, key: CryptoKeyLike): Promise<ArrayBuffer>;
   importKey(
     format: string,
@@ -66,4 +82,13 @@ export function getWebCrypto(): WebCryptoLike {
     );
   }
   return crypto;
+}
+
+/**
+ * `byteLength` fresh random bytes as base64url — the one way every unguessable
+ * handle in this system is minted, so no caller decides for itself whether to
+ * reach for the CSPRNG.
+ */
+export function randomBase64Url(byteLength: number, crypto: WebCryptoLike = getWebCrypto()): string {
+  return toBase64Url(crypto.getRandomValues(new Uint8Array(byteLength)));
 }

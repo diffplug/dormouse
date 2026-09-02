@@ -82,12 +82,9 @@ export function e2eConnectionPrologue(hostId: string, connectionId: string): Uin
  * The pairing prologue: the version, the kind, the `hostId`, and every
  * invitation field in the order the QR carries them.
  *
- * Reserved: the invitation grammar itself (invitation id, expiry, setup token,
- * invitation public key) lands with the pairing ceremony in
- * `docs/specs/remote-security-model.md` -> `## Future` -> **Scope:
- * e2e-client-host** stage 4, which replaces this positional array with the
- * parsed invitation. The binding rule — every field, length-prefixed, in
- * declared order — is already fixed here so stage 4 changes only the caller.
+ * Positional, and the order is `pairingInvitationFields`' to say
+ * (`security/pairing-invitation.ts`) — kept out of this layer so the encoding
+ * and the grammar it binds stay in one file each.
  */
 export function e2ePairingPrologue(
   hostId: string,
@@ -223,92 +220,132 @@ export function chunkAppMessage(message: Uint8Array): Uint8Array[] {
 }
 
 /**
+ * The most a drained reassembler keeps rather than releasing: one maximal
+ * stream body and its length prefix. Ordinary traffic never reallocates, and a
+ * session that once carried a 1 MiB message does not hold that megabyte for the
+ * rest of its life.
+ */
+const RETAINED_BUFFER_CAPACITY = MAX_STREAM_BODY_LENGTH + APP_LENGTH_PREFIX_SIZE;
+
+/**
+ * The most a reassembler can ever hold: it stops accepting at one maximal
+ * message plus its prefix, and the body that carries it past that point is
+ * itself capped. Growth is clamped here so no arithmetic can outrun the bound.
+ */
+const MAX_BUFFER_CAPACITY =
+  APP_LENGTH_PREFIX_SIZE + MAX_APP_MESSAGE_LENGTH + MAX_STREAM_BODY_LENGTH;
+
+/** The first capacity a growing buffer takes, before doubling. */
+const INITIAL_BUFFER_CAPACITY = 1024;
+
+/**
  * Reassemble stream bodies, in order, into complete application messages.
  *
  * Every failure is terminal for the session that owns it: a declared length
- * over the cap, or a buffer that would grow past one maximal message, means the
- * peer is not speaking this framing, and there is no resynchronization point in
- * a byte stream to recover to.
+ * over the cap means the peer is not speaking this framing, and there is no
+ * resynchronization point in a byte stream to recover to.
  *
- * Bodies are queued and copied once, when a message completes, rather than
- * concatenated on arrival. `MAX_STREAM_BODY_LENGTH` is a maximum, not a
- * minimum: a peer may legally split one 1 MiB message into single-byte bodies,
- * and re-concatenating a growing buffer on each of those is quadratic —
- * seconds of blocking memcpy on the process that also owns the terminal UI.
+ * **Bodies are compacted into one geometrically-grown buffer**, never queued
+ * one array entry per body: a per-body queue is bounded in bytes and unbounded
+ * in *entries*, and a megabyte declared and delivered a byte at a time cost
+ * 234 MB of live `Uint8Array` headers (measured 2026-08). Re-concatenating on
+ * every arrival instead would be quadratic.
  */
 export class StreamReassembler {
+  #buffer = EMPTY;
+  /** First undrained byte of {@link #buffer}. */
+  #start = 0;
+  /** One past the last undrained byte. */
+  #end = 0;
   /**
-   * Bodies received and not yet drained. Consumed via {@link #head} rather than
-   * `shift()`, which memmoves the whole array and would restore the quadratic
-   * term this design exists to remove.
+   * Latched by the first failure, because every failure here is terminal and
+   * this class is exported on its own: a caller that keeps pushing after one
+   * must keep getting the same {@link NoiseTransportError}, not grow past the
+   * bound and eventually throw a bare `RangeError` out of a typed-array write.
+   * Inside a session `#requireLive` gets there first.
    */
-  #queue: Uint8Array[] = [];
-  #head = 0;
-  /** Total undrained bytes across the live tail of {@link #queue}. */
-  #queued = 0;
+  #failed = false;
+
+  /** Backing bytes held right now — what the memory bound's own test reads. */
+  get capacity(): number {
+    return this.#buffer.length;
+  }
+
+  /** Undrained bytes, always under one maximal message plus one body. */
+  get queued(): number {
+    return this.#end - this.#start;
+  }
 
   /** Accept one stream body; returns the messages it completed, in order. */
   push(body: Uint8Array): Uint8Array[] {
+    if (this.#failed) throw new NoiseTransportError('reassembly already failed');
     if (body.length > MAX_STREAM_BODY_LENGTH) {
-      throw new NoiseTransportError('stream body exceeds one Noise message');
+      throw this.#fail('stream body exceeds one Noise message');
     }
-    if (body.length > 0) {
-      // Copied for the same reason `decodeTransportPlaintext` copies, and
-      // because a queued body outlives the call that delivered it.
-      this.#queue.push(new Uint8Array(body));
-      this.#queued += body.length;
-    }
+    if (body.length > 0) this.#append(body);
     const messages: Uint8Array[] = [];
     for (;;) {
-      if (this.#queued < APP_LENGTH_PREFIX_SIZE) break;
-      // The declared length is what bounds the queue: this loop only ever
+      if (this.queued < APP_LENGTH_PREFIX_SIZE) break;
+      // The declared length is what bounds the buffer: this loop only ever
       // stops holding fewer than `APP_LENGTH_PREFIX_SIZE + length` bytes, so
-      // rejecting an over-cap length here is what keeps the queue under one
-      // maximal message. A separate queue check would never fire.
-      const length = readUint32BE(this.#take(APP_LENGTH_PREFIX_SIZE, false));
+      // rejecting an over-cap length here is what keeps it under one maximal
+      // message. A separate capacity check would never fire.
+      const length = readUint32BE(this.#buffer, this.#start);
       if (length > MAX_APP_MESSAGE_LENGTH) {
-        throw new NoiseTransportError('application message exceeds the 1 MiB cap');
+        throw this.#fail('application message exceeds the 1 MiB cap');
       }
-      if (this.#queued < APP_LENGTH_PREFIX_SIZE + length) break;
-      this.#take(APP_LENGTH_PREFIX_SIZE, true);
-      messages.push(this.#take(length, true));
+      if (this.queued < APP_LENGTH_PREFIX_SIZE + length) break;
+      const from = this.#start + APP_LENGTH_PREFIX_SIZE;
+      // Copied out: the caller keeps this past the next push, which reuses the
+      // bytes behind it.
+      messages.push(this.#buffer.slice(from, from + length));
+      this.#start = from + length;
     }
+    if (this.#start === this.#end) this.#drain();
     return messages;
   }
 
   /**
-   * The next `count` queued bytes, copied out. `consume` also removes them —
-   * the caller peeks a length prefix before it knows whether the message it
-   * announces has arrived.
+   * Copy one body in, moving the live window to the front or doubling the
+   * buffer when it no longer fits behind it.
    */
-  #take(count: number, consume: boolean): Uint8Array {
-    const out = new Uint8Array(count);
-    let filled = 0;
-    let index = this.#head;
-    while (filled < count) {
-      const chunk = this.#queue[index]!;
-      const size = Math.min(chunk.length, count - filled);
-      out.set(chunk.subarray(0, size), filled);
-      filled += size;
-      if (!consume) {
-        index++;
-        continue;
-      }
-      if (size < chunk.length) {
-        this.#queue[index] = chunk.subarray(size);
+  #append(body: Uint8Array): void {
+    if (this.#end + body.length > this.#buffer.length) {
+      const live = this.queued;
+      const needed = live + body.length;
+      if (needed <= this.#buffer.length) {
+        this.#buffer.copyWithin(0, this.#start, this.#end);
       } else {
-        this.#queue[index] = EMPTY; // release the body's buffer
-        index++;
+        const grown = new Uint8Array(
+          Math.min(
+            MAX_BUFFER_CAPACITY,
+            Math.max(needed, this.#buffer.length * 2, INITIAL_BUFFER_CAPACITY),
+          ),
+        );
+        grown.set(this.#buffer.subarray(this.#start, this.#end));
+        this.#buffer = grown;
       }
+      this.#start = 0;
+      this.#end = live;
     }
-    if (!consume) return out;
-    this.#head = index;
-    this.#queued -= count;
-    if (this.#head === this.#queue.length) {
-      this.#queue = [];
-      this.#head = 0;
-    }
-    return out;
+    this.#buffer.set(body, this.#end);
+    this.#end += body.length;
+  }
+
+  /** Latch the failure, release the buffer, and hand back what to throw. */
+  #fail(why: string): NoiseTransportError {
+    this.#failed = true;
+    this.#buffer = EMPTY;
+    this.#start = 0;
+    this.#end = 0;
+    return new NoiseTransportError(why);
+  }
+
+  /** Nothing is queued: rewind, and release a buffer one big message grew. */
+  #drain(): void {
+    this.#start = 0;
+    this.#end = 0;
+    if (this.#buffer.length > RETAINED_BUFFER_CAPACITY) this.#buffer = EMPTY;
   }
 }
 

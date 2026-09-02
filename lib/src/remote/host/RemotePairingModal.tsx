@@ -1,42 +1,32 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { ModalFrame, ModalReviewBlock, modalActionButton } from '../../components/design';
-import { pairingFingerprint } from 'server-lib-common';
-import type { MirroredPairingRequest } from './pairing-approval';
+import { PAIRING_CODE_LENGTH } from 'server-lib-common';
 
 /**
- * The Host's local pairing-approval modal (server.md → "Pairing approval
- * modal"; same pattern as KillConfirm). Approving here is the only path that
- * writes the ACL, so the dialog shows exactly who is asking: the requested
- * label, the account, and a short fingerprint of the requesting browser's
- * device key.
+ * The Host's local pairing confirmation (server.md → "Pairing approval modal";
+ * same pattern as KillConfirm). Confirming here is the only path that writes
+ * the ACL.
  *
- * Two variants, and the difference is what the human is being asked to do.
- * Unverified, the fingerprint is the control: the ceremony verifies no
- * assertion, so a person comparing eight characters against the phone is what
- * stands between the ACL and a substituted request. Verified, that comparison
- * has already happened by other means — the phone returned a proof under the
- * nonce on this machine's own screen, computed over this very device key — so
- * the dialog says so and asks for one confirm
- * (`docs/specs/remote-security-model.md` → Pairing Ceremony).
+ * **The direction of the code is the control.** The phone displays two digits
+ * and the person types them on the laptop, so authorizing requires holding the
+ * device that is asking — a relayed or injected request has no screen to read
+ * from, and the copy below tells the user exactly that. The Host holds the
+ * expected digits and compares them itself; this component never sees them, and
+ * gets **one** attempt (`docs/specs/remote-security-model.md` → Pairing).
  */
 export function RemotePairingModal({
-  request,
-  verified = false,
+  label,
   onApprove,
   onDeny,
 }: {
-  request: MirroredPairingRequest;
-  /**
-   * The Client's setup proof matched a nonce this machine minted and displayed;
-   * see the module note. The proof itself is not here and cannot be — the type
-   * of `request` is what says so.
-   */
-  verified?: boolean;
-  onApprove: () => void;
+  /** The Client's own name for itself, already bounded by the Host. */
+  label: string;
+  onApprove: (code: string) => void;
   onDeny: () => void;
 }) {
   const denyButtonRef = useRef<HTMLButtonElement>(null);
-  const fingerprint = pairingFingerprint(request.devicePublicKey);
+  const [code, setCode] = useState('');
+  const complete = code.length === PAIRING_CODE_LENGTH;
 
   return (
     <ModalFrame
@@ -49,37 +39,43 @@ export function RemotePairingModal({
       <h2 id="remote-pairing-title" className="mb-1 text-base font-bold text-foreground">
         Pair a new device
       </h2>
-      {verified ? (
-        /* Displaying the code on this screen was the local-presence act, and
-           only a phone that scanned it can be holding the token — so the ask is
-           "you just did this", not "check this stranger". */
-        <p className="mb-3 text-sm leading-relaxed text-muted">
-          This device scanned the setup code shown on this machine, so it is the phone you just set
-          up. Approve it to let it reach this machine’s terminals.
-        </p>
-      ) : (
-        /* Signing in is not enough to reach this machine — approving here is.
-           Saying so is the whole point of the prompt: every browser is a
-           separate device even on hardware already paired, so this must not read
-           as a formality (`docs/specs/remote-security-model.md`). */
-        <p className="mb-3 text-sm leading-relaxed text-muted">
-          This device signed in to your account and is asking to reach this
-          machine's terminals. Approve only if you are the one asking.
-        </p>
-      )}
+      {/* The exact copy the spec fixes. It has to name the failure mode — a
+          request that shows no code — because that is the only signal a user
+          gets when something other than the phone in their hand is asking. */}
+      <p className="mb-3 text-sm leading-relaxed text-muted">
+        Only authorize if your phone is showing a two-digit code. If it shows an error or no code,
+        cancel this request.
+      </p>
 
       <ModalReviewBlock density="default" className="mb-4 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
         <span className="text-muted">Device</span>
-        <span className="break-words text-foreground">{request.requestedLabel || '(unnamed)'}</span>
-        <span className="text-muted">Account</span>
-        <span className="break-words text-foreground">{request.accountId}</span>
-        <span className="text-muted">Key</span>
-        <span className="text-foreground">{fingerprint}…</span>
+        <span className="break-words text-foreground">{label || '(unnamed)'}</span>
       </ModalReviewBlock>
 
+      <label className="mb-4 flex items-center gap-3 text-sm text-muted">
+        <span>Code from the phone</span>
+        <input
+          type="text"
+          inputMode="numeric"
+          autoComplete="off"
+          aria-label="Two-digit code from the phone"
+          value={code}
+          // Digits only, and never more than two: the field is the whole secret,
+          // so anything it accepts that the Host cannot match is a dead attempt
+          // the user does not get back.
+          onChange={(event) =>
+            setCode(event.target.value.replace(/\D/g, '').slice(0, PAIRING_CODE_LENGTH))
+          }
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && complete) onApprove(code);
+          }}
+          className="w-16 rounded border border-border bg-surface px-2 py-1 text-center font-mono text-base tracking-widest text-foreground"
+        />
+      </label>
+
       <p className="mb-4 text-sm leading-relaxed text-muted">
-        Approving adds it to this machine only. Your other machines are
-        unaffected, and each asks separately.
+        Approving adds it to this machine only. Your other machines are unaffected, and each asks
+        separately.
       </p>
 
       <div className="flex justify-end gap-2">
@@ -89,14 +85,15 @@ export function RemotePairingModal({
           onClick={onDeny}
           className={modalActionButton({ tone: 'secondary' })}
         >
-          Deny
+          Cancel
         </button>
         <button
           type="button"
-          onClick={onApprove}
+          disabled={!complete}
+          onClick={() => onApprove(code)}
           className={modalActionButton({ tone: 'primary' })}
         >
-          Approve
+          Confirm and authorize
         </button>
       </div>
     </ModalFrame>

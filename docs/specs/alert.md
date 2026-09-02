@@ -369,13 +369,10 @@ Alert-specific robustness requirements: multiple Sessions ring independently; mi
 ## Future
 
 **Push contents are sealed end to end** in the **e2e-client-host** scope
-([remote-security-model.md](./remote-security-model.md) `## Future`, Push
-sealing): the Host encrypts title, body, and tag to the paired Client's static
-key, names recipients by opaque `deliveryId` instead of device key, and the
-Server forwards ciphertext. The delivery-half rules above are unchanged — the
+([remote-security-model.md](./remote-security-model.md) `## Future`): the Host
+encrypts title, body, and tag to the paired Client's static key and the Server
+forwards ciphertext. Recipients are already named by opaque `deliveryId`. The delivery-half rules above are unchanged — the
 Host still reads its active ACL at send time and the Server still refuses a
 send that names nobody — while the render sink moves from a verbatim-copied
 worker to a built one that decrypts and re-sanitizes
-([pocket-app.md](./pocket-app.md) `## Future`). Pocket retires obsolete
-delivery mappings through a durable tombstone queue and an idempotent
-authenticated deletion route ([server.md](./server.md) `## Future`).
+([pocket-app.md](./pocket-app.md) `## Future`).

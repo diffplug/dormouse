@@ -1,165 +1,112 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 /**
- * Holds one `authorizeConnection` call open per queued gate, in call order, so a
- * test can make an *older* evaluation finish last. Everything else about the
- * module is the real thing — the decision itself is never faked.
+ * The Host's two end-to-end ceremonies, driven by a **real** Noise IK initiator
+ * over the fake relay socket: no ceremony step is stubbed, so a test that
+ * passes here would pass against a real phone
+ * (`docs/specs/remote-security-model.md` → Pairing, Connection, Host bounds).
  */
-const authProbe = vi.hoisted(() => ({ gates: [] as Array<Promise<void> | undefined>, calls: 0 }));
-const proofProbe = vi.hoisted(() => ({
-  gates: [] as Array<Promise<void> | undefined>,
-  calls: 0,
-  completed: 0,
-}));
-vi.mock('server-lib-common', async (importOriginal) => {
-  const real = await importOriginal<typeof import('server-lib-common')>();
-  return {
-    ...real,
-    authorizeConnection: async (context: never, request: never) => {
-      const gate = authProbe.gates[authProbe.calls++];
-      const decision = await real.authorizeConnection(context, request);
-      await gate;
-      return decision;
-    },
-    computeSetupProof: async (nonce: string, devicePublicKey: string) => {
-      const pause = proofProbe.gates[proofProbe.calls++];
-      const proof = await real.computeSetupProof(nonce, devicePublicKey);
-      if (pause) await pause;
-      proofProbe.completed += 1;
-      return proof;
-    },
-  };
-});
+
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   DEFAULT_PAIRING_TTL_MS,
-  WS_CLOSE_HOST_REPLACED,
-  concatBytes,
-  ecdsaRawToDer,
-  generateDeviceKeyPair,
-  hashPasskeyPublicKey,
-  signDeviceChallenge,
-  toBase64Url,
-  utf8Encode,
-  computeSetupProof,
-  type ConnectionRequest,
-  type HostAclRecord,
-  type PairingRequest,
-  MAX_PENDING_PAIRINGS,
+  DEFAULT_CHALLENGE_TTL_MS,
   MAX_TOKENS_PER_HOST,
+  NoiseTransportSession,
+  WS_CLOSE_HOST_REPLACED,
+  createNoiseInitiator,
+  e2eConnectionPrologue,
+  fromBase64Url,
+  generateNoiseKeyPair,
+  mintNoiseStaticKeyPair,
+  pairingInvitationPrologue,
+  toBase64Url,
+  utf8Decode,
+  utf8Encode,
+  type HostAclRecord,
+  type NoiseKeyPair,
+  type PairingInvitation,
+  type PresenceBinding,
+  type PresenceProofV1,
 } from 'server-lib-common';
-import { RemoteHost, type RemoteHostOptions } from './remote-host';
+import { RemoteHost, type RemoteApiSessionLike } from './remote-host';
 import type { HostEnrollment } from './enrollment';
 import type { PendingPairing } from './pairing-approval';
 import { FakeSocket } from '../test-fake-socket';
+import {
+  createTestAuthenticator,
+  e2eFramesFor,
+  flushUntil,
+  openConnectionSession,
+  openPairingSession,
+  presenceProofFor,
+  randomBase64Url,
+  readOutcome,
+  sendE2eFrame,
+  settle,
+  settleUntil,
+  testRoutingId,
+  type TestAuthenticator,
+} from '../test-e2e-client';
 
-const ENROLLMENT: HostEnrollment = {
-  serverUrl: 'https://host.example',
-  hostId: 'host-1',
-  hostToken: 'tok',
-  origin: 'https://host.example',
-  rpId: 'host.example',
-};
+const ORIGIN = 'https://host.example';
+const RP_ID = 'host.example';
+const HOST_LABEL = 'Ned’s laptop';
+const ACCOUNT = 'owner';
 
-// --- Minimal faithful WebAuthn authenticator (mirrors test/harness/actors.mjs) ---
+/** One passkey for this Host's RP, from the shared driver. */
+const newAuthenticator = (): Promise<TestAuthenticator> =>
+  createTestAuthenticator({ rpId: RP_ID, origin: ORIGIN });
 
-const subtle = globalThis.crypto.subtle;
-
-async function sha256(bytes: Uint8Array): Promise<Uint8Array> {
-  return new Uint8Array(await subtle.digest('SHA-256', bytes));
-}
-
-async function createAuthenticator(rpId: string) {
-  const keyPair = await subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, [
-    'sign',
-    'verify',
-  ]);
-  const spki = new Uint8Array(await subtle.exportKey('spki', keyPair.publicKey));
-  const publicKey = toBase64Url(spki);
-  const credentialId = toBase64Url(globalThis.crypto.getRandomValues(new Uint8Array(16)));
-  let signCount = 0;
-
-  async function assert(challenge: string, origin: string) {
-    const clientDataJSON = utf8Encode(
-      JSON.stringify({ type: 'webauthn.get', challenge, origin, crossOrigin: false }),
-    );
-    const rpIdHash = await sha256(utf8Encode(rpId));
-    signCount += 1;
-    const flags = 0x01 | 0x04; // user present + user verified
-    const authenticatorData = concatBytes(
-      rpIdHash,
-      Uint8Array.of(flags, (signCount >>> 24) & 0xff, (signCount >>> 16) & 0xff, (signCount >>> 8) & 0xff, signCount & 0xff),
-    );
-    const rawSignature = new Uint8Array(
-      await subtle.sign(
-        { name: 'ECDSA', hash: 'SHA-256' },
-        keyPair.privateKey,
-        concatBytes(authenticatorData, await sha256(clientDataJSON)),
-      ),
-    );
-    return {
-      credentialId,
-      clientDataJSON: toBase64Url(clientDataJSON),
-      authenticatorData: toBase64Url(authenticatorData),
-      signature: toBase64Url(ecdsaRawToDer(rawSignature)),
-    };
-  }
-
-  return { publicKey, credentialId, assert };
-}
-
-async function flushUntil<T>(get: () => T | undefined, timeoutMs = 2000): Promise<T> {
-  const start = Date.now();
-  for (;;) {
-    const value = get();
-    if (value !== undefined) return value;
-    if (Date.now() - start > timeoutMs) throw new Error('timed out waiting for frame');
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-}
-
-/** Drive connect → connect2 and return the decision frame. */
-async function runConnect(
-  socket: FakeSocket,
-  clientId: string,
-  build: (challenge: string) => Promise<ConnectionRequest>,
-): Promise<Record<string, unknown>> {
-  socket.sent.length = 0;
-  socket.receive({ t: 'connect', clientId });
-  const challengeFrame = socket.frames('challenge')[0]!;
-  const request = await build(challengeFrame.challenge as string);
-  socket.receive({ t: 'connect2', clientId, request });
-  return flushUntil(() => socket.frames('decision')[0]);
-}
-
-/** A promise a test releases by hand. */
-function gate(): { promise: Promise<void>; release: () => void } {
-  let release!: () => void;
-  const promise = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  return { promise, release };
-}
-
-/** Let every already-queued microtask run. */
-async function settle(): Promise<void> {
-  for (let i = 0; i < 8; i += 1) await Promise.resolve();
-}
-
-describe('RemoteHost frame handling', () => {
+describe('RemoteHost end-to-end ceremonies', () => {
+  let enrollment: HostEnrollment;
   let socket: FakeSocket;
+  let host: RemoteHost;
   let savedRecords: HostAclRecord[] = [];
   let approvals: PendingPairing[] = [];
+  let dismissed: string[] = [];
+  let invitationEvents: Array<{ inviteId: string; state: string }> = [];
+  let sessions: Array<{ handled: unknown[]; disposed: boolean; send: (payload: unknown) => void }> =
+    [];
+  let clock = 1_700_000_000_000;
+  let hosts: RemoteHost[] = [];
+
+  beforeAll(async () => {
+    const material = await mintNoiseStaticKeyPair();
+    enrollment = {
+      serverUrl: ORIGIN,
+      hostId: testRoutingId(),
+      hostToken: 'tok',
+      origin: ORIGIN,
+      rpId: RP_ID,
+      label: HOST_LABEL,
+      noiseStaticPrivateKey: material.privateKeyPkcs8,
+      noiseStaticPublicKey: material.publicKey,
+    };
+  });
+
+  beforeEach(() => {
+    savedRecords = [];
+    approvals = [];
+    dismissed = [];
+    invitationEvents = [];
+    sessions = [];
+    clock = 1_700_000_000_000;
+    hosts = [];
+  });
+
+  // These cases run the reaper on real timers, so a Host left running holds a
+  // five-minute `setTimeout` for every invitation the case minted.
+  afterEach(() => {
+    for (const created of hosts) created.stop();
+  });
 
   function makeHost(
     loadAcl: () => HostAclRecord[] = () => [],
-    now: () => number = () => Date.now(),
-    hooks: Pick<RemoteHostOptions, 'onSetupTokenRedeemed'> = {},
-  ) {
-    savedRecords = [];
-    approvals = [];
-    const host = new RemoteHost({
-      enrollment: ENROLLMENT,
+    options: { withSession?: boolean } = {},
+  ): RemoteHost {
+    const withSession = options.withSession ?? true;
+    const created = new RemoteHost({
+      enrollment,
       reconnect: false,
       createWebSocket: () => (socket = new FakeSocket()),
       loadAcl,
@@ -167,910 +114,928 @@ describe('RemoteHost frame handling', () => {
         savedRecords = [...records];
       },
       requestApproval: (pending) => approvals.push(pending),
-      dismissApproval: () => {},
-      ...hooks,
-      now,
+      dismissApproval: (clientId) => dismissed.push(clientId),
+      onInvitationChanged: (inviteId, state) => invitationEvents.push({ inviteId, state }),
+      createSession: withSession
+        ? ({ send }) => {
+            const entry = { handled: [] as unknown[], disposed: false, send };
+            sessions.push(entry);
+            return {
+              handle: (data) => entry.handled.push(data),
+              dispose: () => {
+                entry.disposed = true;
+              },
+            } satisfies RemoteApiSessionLike;
+          }
+        : undefined,
+      now: () => clock,
     });
-    host.start();
+    created.start();
     socket.open();
-    return host;
+    host = created;
+    hosts.push(created);
+    return created;
   }
 
-  beforeEach(() => {
-    socket = new FakeSocket();
-    authProbe.gates.length = 0;
-    authProbe.calls = 0;
-    proofProbe.gates.length = 0;
-    proofProbe.calls = 0;
-    proofProbe.completed = 0;
-  });
+  /** The Host's outgoing `e2e` frames for one ceremony, in order. */
+  function e2eFrames(kind: string, id: string): Array<Record<string, unknown>> {
+    return e2eFramesFor(socket, kind, id);
+  }
 
-  it('pair → local approval → pair-result with the ACL record, and persists', () => {
-    makeHost();
-    const request: PairingRequest = {
-      accountId: 'owner',
-      passkeyCredentialId: 'cred-1',
-      passkeyPublicKeyHash: 'hash-1',
-      devicePublicKey: 'device-1',
-      requestedLabel: 'iPhone Safari',
+  function sendE2e(
+    clientId: string,
+    kind: 'pairing' | 'connection',
+    id: string,
+    step: 'init' | 'transport',
+    ct: string,
+  ): void {
+    sendE2eFrame(socket, { clientId, hostId: enrollment.hostId, kind, id, step, ct });
+  }
+
+  // --- Pairing -------------------------------------------------------------
+
+  async function mintInvitation(): Promise<PairingInvitation> {
+    return await host.mintInvitation(randomBase64Url(32), clock + DEFAULT_PAIRING_TTL_MS);
+  }
+
+  /** Run the pairing IK handshake and return the Client's transport session. */
+  function openPairing(
+    clientId: string,
+    invitation: PairingInvitation,
+    clientStatic: NoiseKeyPair,
+  ): Promise<NoiseTransportSession | null> {
+    return openPairingSession({
+      socket,
+      hostId: enrollment.hostId,
+      clientId,
+      invitation,
+      clientStatic,
+    });
+  }
+
+  /** The full pairing up to the modal: handshake, request, surfaced approval. */
+  async function requestPairing(
+    clientId: string,
+    authenticator: TestAuthenticator,
+    options: { code?: string; label?: string; invitation?: PairingInvitation } = {},
+  ) {
+    const invitation = options.invitation ?? (await mintInvitation());
+    const clientStatic = await generateNoiseKeyPair();
+    const session = await openPairing(clientId, invitation, clientStatic);
+    if (!session) throw new Error('the Host refused the pairing handshake');
+    const code = options.code ?? '42';
+    const binding: PresenceBinding = {
+      kind: 'pairing',
+      hostId: enrollment.hostId,
+      handshakeHash: toBase64Url(session.handshakeHash),
+      passkeyCredentialId: authenticator.credentialId,
     };
-    socket.receive({ t: 'pair', clientId: 'c1', request });
+    const presence = await presenceProofFor(authenticator, binding);
+    const approvalsBefore = approvals.length;
+    const framesBefore = e2eFrames('pairing', invitation.inviteId).length;
+    sendE2e(
+      clientId,
+      'pairing',
+      invitation.inviteId,
+      'transport',
+      toBase64Url(session.sendControl({ code, label: options.label ?? 'iPhone Safari', presence })),
+    );
+    // Either a modal opened or the Host answered; both mean it is done thinking.
+    await settleUntil(
+      () =>
+        approvals.length > approvalsBefore ||
+        e2eFrames('pairing', invitation.inviteId).length > framesBefore,
+    );
+    return { invitation, clientStatic, session, code, presence, binding };
+  }
 
-    // No ACL write until the local user approves.
-    expect(socket.frames('pair-result')).toHaveLength(0);
+  /** Decrypt the outcome the Host sent last on this ceremony. */
+  function outcome(
+    session: NoiseTransportSession,
+    kind: string,
+    id: string,
+  ): Promise<Record<string, unknown>> {
+    return readOutcome(socket, session, kind, id);
+  }
+
+  it('pairs: handshake, presence proof, typed code, one ACL record', async () => {
+    makeHost();
+    const authenticator = await newAuthenticator();
+    const { invitation, clientStatic, session, code } = await requestPairing('c1', authenticator);
+
+    // Reserved the moment a valid message 1 decrypted, so the QR panel can stop
+    // offering a code a phone is already using.
+    expect(host.invitationState(invitation.inviteId)).toBe('reserved');
+    expect(invitationEvents).toContainEqual({ inviteId: invitation.inviteId, state: 'reserved' });
+
+    // The modal gets the label and nothing else: no code, no key, no proof.
     expect(approvals).toHaveLength(1);
+    const pending = approvals[0]!;
+    expect(pending.label).toBe('iPhone Safari');
+    expect(Object.keys(pending).sort()).toEqual([
+      'approve',
+      'clientId',
+      'deny',
+      'label',
+      'pairingId',
+      'requestedAt',
+    ]);
 
-    approvals[0]!.approve();
+    pending.approve(code);
+    const answer = await outcome(session, 'pairing', invitation.inviteId);
+    expect(answer).toMatchObject({
+      ok: true,
+      hostStaticPublicKey: enrollment.noiseStaticPublicKey,
+      hostLabel: HOST_LABEL,
+      accountId: ACCOUNT,
+      passkeyCredentialId: authenticator.credentialId,
+    });
+    expect(typeof answer.deliveryId).toBe('string');
 
-    const result = socket.frames('pair-result')[0]!;
-    expect(result).toMatchObject({ clientId: 'c1', approved: true });
-    expect((result.record as HostAclRecord).devicePublicKey).toBe('device-1');
-    expect((result.record as HostAclRecord).label).toBe('iPhone Safari');
-    // The approval wrote and persisted the ACL.
+    // One record, binding the passkey to the Client static IK authenticated —
+    // never to anything the payload merely claimed.
     expect(savedRecords).toHaveLength(1);
-    expect(savedRecords[0]!.passkeyCredentialId).toBe('cred-1');
+    expect(savedRecords[0]).toMatchObject({
+      hostId: enrollment.hostId,
+      accountId: ACCOUNT,
+      passkeyCredentialId: authenticator.credentialId,
+      clientStaticPublicKey: toBase64Url(clientStatic.publicKey),
+      deliveryId: answer.deliveryId,
+      label: 'iPhone Safari',
+      revokedAt: null,
+    });
+    // The invitation is spent by the outcome, whichever way it went.
+    expect(host.invitationState(invitation.inviteId)).toBe('consumed');
+    expect(dismissed).toEqual(['c1']);
   });
 
-  it.each([
-    ['a missing request', undefined],
-    ['a non-object request', 'not-an-object'],
-    ['a request missing devicePublicKey', { accountId: 'owner', passkeyCredentialId: 'c', passkeyPublicKeyHash: 'h', requestedLabel: 'x' }],
-    ['a request with a non-string label', { accountId: 'owner', passkeyCredentialId: 'c', passkeyPublicKeyHash: 'h', devicePublicKey: 'd', requestedLabel: { evil: true } }],
-  ])('malformed pair frame (%s) is denied and never reaches the approval UI', (_label, request) => {
+  it('gives the confirmation exactly one attempt', async () => {
     makeHost();
-    // The relay is not trusted, so the Host runs the same shape guard the
-    // Server does. Unguarded, these reach the modal, where rendering them
-    // throws inside the app-wide ErrorBoundary and takes every terminal down.
-    socket.receive({ t: 'pair', clientId: 'c1', request });
+    const authenticator = await newAuthenticator();
+    const { invitation, session, code } = await requestPairing('c1', authenticator);
 
-    expect(approvals).toHaveLength(0);
-    expect(socket.frames('pair-result')[0]).toMatchObject({
-      clientId: 'c1',
-      approved: false,
-      error: 'malformed-request',
+    approvals[0]!.approve(code === '00' ? '01' : '00');
+    expect(await outcome(session, 'pairing', invitation.inviteId)).toEqual({
+      ok: false,
+      code: 'confirmation-mismatch',
+    });
+    expect(savedRecords).toHaveLength(0);
+
+    // The right code afterwards buys nothing: a two-digit secret with retries
+    // is not a secret.
+    const sentBefore = socket.sent.length;
+    approvals[0]!.approve(code);
+    await settle();
+    expect(socket.sent.length).toBe(sentBefore);
+    expect(savedRecords).toHaveLength(0);
+  });
+
+  it('denies locally without touching the ACL', async () => {
+    makeHost();
+    const authenticator = await newAuthenticator();
+    const { invitation, session } = await requestPairing('c1', authenticator);
+    approvals[0]!.deny();
+    expect(await outcome(session, 'pairing', invitation.inviteId)).toEqual({
+      ok: false,
+      code: 'user-denied',
+    });
+    expect(savedRecords).toHaveLength(0);
+    expect(host.invitationState(invitation.inviteId)).toBe('consumed');
+  });
+
+  it('expires a pairing on the pairing TTL, even mid-deliberation', async () => {
+    makeHost();
+    const authenticator = await newAuthenticator();
+    const { invitation, session, code } = await requestPairing('c1', authenticator);
+    clock += DEFAULT_PAIRING_TTL_MS + 1;
+    approvals[0]!.approve(code);
+    expect(await outcome(session, 'pairing', invitation.inviteId)).toEqual({
+      ok: false,
+      code: 'invitation-expired',
     });
     expect(savedRecords).toHaveLength(0);
   });
 
-  /** The QR-less pairing every setup-proof test varies from. */
-  const PAIRING: PairingRequest = {
-    accountId: 'owner',
-    passkeyCredentialId: 'cred-1',
-    passkeyPublicKeyHash: 'hash-1',
-    devicePublicKey: 'device-1',
-    requestedLabel: 'iPhone Safari',
-  };
+  it('supersedes a pending pairing when the same client starts another', async () => {
+    makeHost();
+    const authenticator = await newAuthenticator();
+    const first = await requestPairing('c1', authenticator);
+    await requestPairing('c1', authenticator);
+    expect(await outcome(first.session, 'pairing', first.invitation.inviteId)).toEqual({
+      ok: false,
+      code: 'superseded',
+    });
+    // Its invitation goes with it: the replaced ceremony can never resume.
+    expect(host.invitationState(first.invitation.inviteId)).toBe('consumed');
+  });
 
-  /**
-   * Send a `pair` and wait for it to land. Verifying a setup proof is a
-   * WebCrypto HMAC, so an approval carrying one arrives a turn of the event loop
-   * after `receive` rather than inside it.
-   */
-  async function pair(clientId: string, request: unknown): Promise<PendingPairing> {
-    const before = approvals.length;
-    socket.receive({ t: 'pair', clientId, request });
-    for (let i = 0; i < 50 && approvals.length === before; i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 1));
-    }
-    return approvals.at(-1)!;
+  it('refuses a proof bound to another handshake', async () => {
+    makeHost();
+    const authenticator = await newAuthenticator();
+    const invitation = await mintInvitation();
+    const session = await openPairing('c1', invitation, await generateNoiseKeyPair());
+    const binding: PresenceBinding = {
+      kind: 'pairing',
+      hostId: enrollment.hostId,
+      // Not this transcript's hash: exactly what a proof lifted from another
+      // ceremony, or minted by a Server that never saw one, looks like.
+      handshakeHash: randomBase64Url(32),
+      passkeyCredentialId: authenticator.credentialId,
+    };
+    sendE2e(
+      'c1',
+      'pairing',
+      invitation.inviteId,
+      'transport',
+      toBase64Url(
+        session!.sendControl({
+          code: '42',
+          label: 'iPhone Safari',
+          presence: await presenceProofFor(authenticator, binding),
+        }),
+      ),
+    );
+    await settle();
+    expect(approvals).toHaveLength(0);
+    expect(await outcome(session!, 'pairing', invitation.inviteId)).toEqual({
+      ok: false,
+      code: 'presence-rejected',
+    });
+    expect(host.invitationState(invitation.inviteId)).toBe('consumed');
+  });
+
+  it('treats an unparseable first control as a hard failure', async () => {
+    makeHost();
+    const invitation = await mintInvitation();
+    const session = await openPairing('c1', invitation, await generateNoiseKeyPair());
+    sendE2e(
+      'c1',
+      'pairing',
+      invitation.inviteId,
+      'transport',
+      toBase64Url(session!.sendControl({ code: 'not-two-digits' })),
+    );
+    await settle();
+    expect(await outcome(session!, 'pairing', invitation.inviteId)).toEqual({
+      ok: false,
+      code: 'host-error',
+    });
+    expect(host.invitationState(invitation.inviteId)).toBe('consumed');
+  });
+
+  it('accepts one handshake per invitation and drops the second undecrypted', async () => {
+    makeHost();
+    const invitation = await mintInvitation();
+    expect(await openPairing('c1', invitation, await generateNoiseKeyPair())).not.toBeNull();
+    // A second scanner of the same photographed code gets nothing at all: an id
+    // that is not `live` is refused before any handshake runs.
+    expect(await openPairing('c2', invitation, await generateNoiseKeyPair())).toBeNull();
+    expect(host.trackedClientCount).toBe(1);
+  });
+
+  it('leaves an invitation live when its handshake fails, and allocates nothing', async () => {
+    makeHost();
+    const invitation = await mintInvitation();
+    sendE2e('hostile', 'pairing', invitation.inviteId, 'init', toBase64Url(new Uint8Array(96)));
+    await settle();
+    expect(host.invitationState(invitation.inviteId)).toBe('live');
+    // No entry under a relay-chosen key for a peer that proved nothing.
+    expect(host.trackedClientCount).toBe(0);
+    expect(await openPairing('c1', invitation, await generateNoiseKeyPair())).not.toBeNull();
+  });
+
+  it('caps outstanding invitations at the Server’s own bound, oldest first', async () => {
+    makeHost();
+    const first = await mintInvitation();
+    for (let i = 1; i < MAX_TOKENS_PER_HOST; i += 1) await mintInvitation();
+    expect(host.outstandingInvitationCount).toBe(MAX_TOKENS_PER_HOST);
+    await mintInvitation();
+    expect(host.outstandingInvitationCount).toBe(MAX_TOKENS_PER_HOST);
+    expect(host.invitationState(first.inviteId)).toBe('consumed');
+    // Evicted un-scanned, so the panel showing it is told to get a new code
+    // rather than to finish on a phone that never asked.
+    expect(invitationEvents).toContainEqual({ inviteId: first.inviteId, state: 'dropped' });
+  });
+
+  it('reports an invitation expired once its TTL passes', async () => {
+    makeHost();
+    const invitation = await mintInvitation();
+    clock += DEFAULT_PAIRING_TTL_MS + 1;
+    expect(host.invitationState(invitation.inviteId)).toBe('expired');
+    // And the entry is reaped — with its key — on the next frame that arrives.
+    sendE2e('c1', 'pairing', invitation.inviteId, 'init', toBase64Url(new Uint8Array(96)));
+    await settle();
+    expect(host.invitationState(invitation.inviteId)).toBe('consumed');
+    expect(invitationEvents).toContainEqual({ inviteId: invitation.inviteId, state: 'expired' });
+  });
+
+  // --- Connection ----------------------------------------------------------
+
+  /** Pair a client, then hand back what a connection needs. */
+  async function pairedClient(clientId = 'c1') {
+    const authenticator = await newAuthenticator();
+    const { invitation, clientStatic, session, code } = await requestPairing(clientId, authenticator);
+    approvals[approvals.length - 1]!.approve(code);
+    const answer = await outcome(session, 'pairing', invitation.inviteId);
+    return { authenticator, clientStatic, record: savedRecords[0]!, deliveryId: answer.deliveryId };
   }
 
-  it('verifies a proof over its own nonce, and does not spend it on arrival', async () => {
-    const host = makeHost();
-    const nonce = host.mintSetupNonce();
-    const setupProof = await computeSetupProof(nonce, PAIRING.devicePublicKey);
-
-    const first = await pair('c1', { ...PAIRING, setupProof });
-    expect(first.verified).toBe(true);
-    // The proof never travels on: `verified` is what the modal and the mirrored
-    // queue get. Cast because `MirroredPairingRequest` has no such field — this
-    // is the runtime half of that claim.
-    expect((first.request as PairingRequest).setupProof).toBeUndefined();
-
-    // Verification is non-consuming. The relay may re-deliver the same phone's
-    // frame, and a replay carrying the same device key is asking for exactly
-    // what the user is about to approve — so it must not silently downgrade.
-    expect((await pair('c2', { ...PAIRING, setupProof })).verified).toBe(true);
-    expect(socket.frames('pair-result')).toEqual([]);
-  });
-
-  it('never verifies a proof bound to a different device key', async () => {
-    // The security property the whole scheme exists for. A hostile Server sees
-    // the relayed pairing request and can substitute its own `devicePublicKey`,
-    // but the proof it can copy was computed over the phone's key — and it has
-    // never seen the nonce, so it cannot compute one over its own.
-    const host = makeHost();
-    const nonce = host.mintSetupNonce();
-    const phonesProof = await computeSetupProof(nonce, 'phone-key');
-
-    const substituted = await pair('c1', {
-      ...PAIRING,
-      devicePublicKey: 'server-key',
-      setupProof: phonesProof,
+  /** Run the connection IK handshake; returns the session and the Host challenge. */
+  function openConnection(clientId: string, clientStatic: NoiseKeyPair, connectionId: string) {
+    return openConnectionSession({
+      socket,
+      hostId: enrollment.hostId,
+      clientId,
+      connectionId,
+      clientStatic,
+      hostStaticPublicKey: enrollment.noiseStaticPublicKey!,
     });
-    expect(substituted.verified).toBe(false);
-    // The real phone's own request still verifies, so this is a rejection of
-    // the substitution rather than of the ceremony.
-    expect(
-      (await pair('c2', { ...PAIRING, devicePublicKey: 'phone-key', setupProof: phonesProof }))
-        .verified,
-    ).toBe(true);
-  });
+  }
 
-  it('spends the nonce when a verified pairing is approved, and downgrades the rest', async () => {
-    const host = makeHost();
-    const nonce = host.mintSetupNonce();
-    const setupProof = await computeSetupProof(nonce, PAIRING.devicePublicKey);
+  function connectionBinding(
+    connectionId: string,
+    hostChallenge: string,
+    session: NoiseTransportSession,
+    passkeyCredentialId: string,
+  ): PresenceBinding {
+    return {
+      kind: 'connection',
+      hostId: enrollment.hostId,
+      connectionId,
+      hostChallenge,
+      handshakeHash: toBase64Url(session.handshakeHash),
+      passkeyCredentialId,
+    };
+  }
 
-    const winner = await pair('c1', { ...PAIRING, setupProof });
-    const other = await pair('c2', { ...PAIRING, setupProof });
-    expect([winner.verified, other.verified]).toEqual([true, true]);
-
-    // One scan sets up one phone: approving is what the nonce authorized, so
-    // that is where it is spent.
-    winner.approve();
-    // Everything still standing on it is re-surfaced unverified, so the modal
-    // goes back to asking for the fingerprint compare rather than keeping copy
-    // that is no longer true.
-    const downgraded = approvals.at(-1)!;
-    expect(downgraded.clientId).toBe('c2');
-    expect(downgraded.verified).toBe(false);
-    expect(downgraded.pairingId).toBe(other.pairingId);
-    // And a later request holding the same proof is an ordinary pairing.
-    expect((await pair('c3', { ...PAIRING, setupProof })).verified).toBe(false);
-  });
-
-  it('does not verify against a nonce spent while its MAC is in flight', async () => {
-    const host = makeHost();
-    const nonce = host.mintSetupNonce();
-    const setupProof = await computeSetupProof(nonce, PAIRING.devicePublicKey);
-    const winner = await pair('c1', { ...PAIRING, setupProof });
-
-    // `receive` reaches the first WebCrypto await before returning. Approval
-    // spends the nonce while this second request is still verifying it.
-    const before = approvals.length;
-    socket.receive({ t: 'pair', clientId: 'c2', request: { ...PAIRING, setupProof } });
-    winner.approve();
-
-    const late = await flushUntil(() => approvals.slice(before).find((p) => p.clientId === 'c2'));
-    expect(late.verified).toBe(false);
-  });
-
-  it('drops a proof result after client-gone disposes its lifecycle', async () => {
-    const host = makeHost();
-    const nonce = host.mintSetupNonce();
-    const setupProof = await computeSetupProof(nonce, PAIRING.devicePublicKey);
-    const blocked = gate();
-    proofProbe.gates[1] = blocked.promise;
-
-    socket.receive({ t: 'pair', clientId: 'c1', request: { ...PAIRING, setupProof } });
-    socket.receive({ t: 'client-gone', clientId: 'c1' });
-    blocked.release();
-    await flushUntil(() => (proofProbe.completed >= 2 ? true : undefined));
+  it('connects: IK against the pinned static, presence, then protocol-v1 inside', async () => {
+    makeHost();
+    const { authenticator, clientStatic } = await pairedClient();
+    const connectionId = testRoutingId();
+    const { session, hostChallenge } = await openConnection('c1', clientStatic, connectionId);
+    const binding = connectionBinding(connectionId, hostChallenge, session, authenticator.credentialId);
+    sendE2e(
+      'c1',
+      'connection',
+      connectionId,
+      'transport',
+      toBase64Url(session.sendControl({ presence: await presenceProofFor(authenticator, binding) })),
+    );
     await settle();
+    expect(await outcome(session, 'connection', connectionId)).toEqual({
+      ok: true,
+      hostLabel: HOST_LABEL,
+    });
 
-    expect(approvals).toEqual([]);
+    // Promotion hands the session's byte stream to protocol-v1, both ways.
+    for (const ciphertext of session.sendApp(
+      utf8Encode(JSON.stringify({ requestId: 'r1', method: 'hello' })),
+    )) {
+      sendE2e('c1', 'connection', connectionId, 'transport', toBase64Url(ciphertext));
+    }
+    await settle();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]!.handled).toEqual([{ requestId: 'r1', method: 'hello' }]);
+
+    sessions[0]!.send({ requestId: 'r1', ok: true });
+    const back = await flushUntil(() => {
+      const frames = e2eFrames('connection', connectionId).filter((f) => f.step === 'transport');
+      return frames[frames.length - 1];
+    });
+    const receipt = session.receive(fromBase64Url(back.ct as string));
+    expect(receipt.kind).toBe('app');
+    if (receipt.kind !== 'app') throw new Error('unreachable');
+    expect(JSON.parse(utf8Decode(receipt.messages[0]!))).toEqual({ requestId: 'r1', ok: true });
+  });
+
+  /** Ask for a connection and return the decrypted outcome. */
+  async function attemptConnection(
+    clientId: string,
+    clientStatic: NoiseKeyPair,
+    authenticator: TestAuthenticator,
+    tamper: {
+      binding?: (binding: PresenceBinding) => PresenceBinding;
+      accountId?: string;
+      control?: Record<string, unknown>;
+      presence?: PresenceProofV1;
+    } = {},
+  ): Promise<Record<string, unknown>> {
+    const connectionId = testRoutingId();
+    const { session, hostChallenge } = await openConnection(clientId, clientStatic, connectionId);
+    const honest = connectionBinding(
+      connectionId,
+      hostChallenge,
+      session,
+      authenticator.credentialId,
+    );
+    const binding = tamper.binding ? tamper.binding(honest) : honest;
+    const control =
+      tamper.control ??
+      ({
+        presence:
+          tamper.presence ??
+          (await presenceProofFor(authenticator, binding, { accountId: tamper.accountId })),
+      } as Record<string, unknown>);
+    sendE2e(
+      clientId,
+      'connection',
+      connectionId,
+      'transport',
+      toBase64Url(session.sendControl(control)),
+    );
+    await settle();
+    return await outcome(session, 'connection', connectionId);
+  }
+
+  it('answers pairing-required for every ACL miss, and says no more than that', async () => {
+    const { authenticator, clientStatic } = await (async () => {
+      makeHost();
+      return await pairedClient();
+    })();
+    const paired = savedRecords[0]!;
+
+    // A Client static nobody approved.
+    expect(
+      await attemptConnection('c2', await generateNoiseKeyPair(), authenticator),
+    ).toEqual({ ok: false, code: 'pairing-required' });
+
+    // A passkey nobody approved, from the approved browser.
+    const strangerPasskey = await newAuthenticator();
+    expect(await attemptConnection('c1', clientStatic, strangerPasskey)).toEqual({
+      ok: false,
+      code: 'pairing-required',
+    });
+
+    // Halves that are each paired, but never together: the conjunction is the
+    // record, not the two identities.
+    const other = await newAuthenticator();
+    const otherStatic = await generateNoiseKeyPair();
+    const invitation = await mintInvitation();
+    const session = await openPairing('c3', invitation, otherStatic);
+    const pairBinding: PresenceBinding = {
+      kind: 'pairing',
+      hostId: enrollment.hostId,
+      handshakeHash: toBase64Url(session!.handshakeHash),
+      passkeyCredentialId: other.credentialId,
+    };
+    sendE2e(
+      'c3',
+      'pairing',
+      invitation.inviteId,
+      'transport',
+      toBase64Url(
+        session!.sendControl({
+          code: '11',
+          label: 'iPad',
+          presence: await presenceProofFor(other, pairBinding),
+        }),
+      ),
+    );
+    await settle();
+    approvals[approvals.length - 1]!.approve('11');
+    expect(savedRecords).toHaveLength(2);
+    expect(await attemptConnection('c1', clientStatic, other)).toEqual({
+      ok: false,
+      code: 'pairing-required',
+    });
+    // The mismatch changed nothing about the record that does authorize.
+    expect(savedRecords[0]).toEqual(paired);
+  });
+
+  it('refuses a proof that names the wrong ceremony values', async () => {
+    makeHost();
+    const { authenticator, clientStatic } = await pairedClient();
+    const denial = { ok: false, code: 'presence-rejected' };
+
+    // Each of the three values the connection binding pins, one at a time.
+    expect(
+      await attemptConnection('c1', clientStatic, authenticator, {
+        binding: (b) => ({ ...b, handshakeHash: randomBase64Url(32) }),
+      }),
+    ).toEqual(denial);
+    expect(
+      await attemptConnection('c1', clientStatic, authenticator, {
+        binding: (b) => ({ ...b, hostChallenge: randomBase64Url(32) }),
+      }),
+    ).toEqual(denial);
+    expect(
+      await attemptConnection('c1', clientStatic, authenticator, {
+        binding: (b) => ({ ...b, connectionId: testRoutingId() }),
+      }),
+    ).toEqual(denial);
+  });
+
+  it('refuses a proof whose assertion was signed over a different binding', async () => {
+    makeHost();
+    const { authenticator, clientStatic } = await pairedClient();
+    const connectionId = testRoutingId();
+    const { session, hostChallenge } = await openConnection('c1', clientStatic, connectionId);
+    const binding = connectionBinding(connectionId, hostChallenge, session, authenticator.credentialId);
+    // The Server substituting a challenge it minted for another ceremony: the
+    // binding is this connection's, the signature is not.
+    const presence = await presenceProofFor(authenticator, binding, {
+      assertionBinding: { ...binding, connectionId: testRoutingId() },
+    });
+    sendE2e(
+      'c1',
+      'connection',
+      connectionId,
+      'transport',
+      toBase64Url(session.sendControl({ presence })),
+    );
+    await settle();
+    expect(await outcome(session, 'connection', connectionId)).toEqual({
+      ok: false,
+      code: 'presence-rejected',
+    });
+  });
+
+  it('refuses a replayed proof, because the Host challenge is single-use', async () => {
+    makeHost();
+    const { authenticator, clientStatic } = await pairedClient();
+    const connectionId = testRoutingId();
+    const { session, hostChallenge } = await openConnection('c1', clientStatic, connectionId);
+    const binding = connectionBinding(connectionId, hostChallenge, session, authenticator.credentialId);
+    const presence = await presenceProofFor(authenticator, binding);
+    sendE2e('c1', 'connection', connectionId, 'transport', toBase64Url(session.sendControl({ presence })));
+    await settle();
+    expect(await outcome(session, 'connection', connectionId)).toEqual({ ok: true, hostLabel: HOST_LABEL });
+
+    // The same proof against a fresh handshake: the challenge it names was
+    // burned by the attempt above, so nothing about it is fresh any more.
+    expect(await attemptConnection('c2', clientStatic, authenticator, { presence })).toEqual({
+      ok: false,
+      code: 'presence-rejected',
+    });
+  });
+
+  it('refuses an expired Host challenge', async () => {
+    makeHost();
+    const { authenticator, clientStatic } = await pairedClient();
+    const connectionId = testRoutingId();
+    const { session, hostChallenge } = await openConnection('c1', clientStatic, connectionId);
+    clock += DEFAULT_CHALLENGE_TTL_MS + 1;
+    const binding = connectionBinding(connectionId, hostChallenge, session, authenticator.credentialId);
+    sendE2e(
+      'c1',
+      'connection',
+      connectionId,
+      'transport',
+      toBase64Url(session.sendControl({ presence: await presenceProofFor(authenticator, binding) })),
+    );
+    await settle();
+    expect(await outcome(session, 'connection', connectionId)).toEqual({
+      ok: false,
+      code: 'presence-rejected',
+    });
+  });
+
+  it('refuses an ACL record approved for another account', async () => {
+    makeHost();
+    const { authenticator, clientStatic } = await pairedClient();
+    expect(
+      await attemptConnection('c1', clientStatic, authenticator, { accountId: 'someone-else' }),
+    ).toEqual({ ok: false, code: 'pairing-required' });
+  });
+
+  it('answers protocol-rejected for a control message it cannot read', async () => {
+    makeHost();
+    const { authenticator, clientStatic } = await pairedClient();
+    expect(
+      await attemptConnection('c1', clientStatic, authenticator, { control: { hello: 'there' } }),
+    ).toEqual({ ok: false, code: 'protocol-rejected' });
+  });
+
+  it('destroys a session on the first invalid ciphertext', async () => {
+    makeHost();
+    const { authenticator, clientStatic } = await pairedClient();
+    const connectionId = testRoutingId();
+    const { session, hostChallenge } = await openConnection('c1', clientStatic, connectionId);
+    const framesBefore = e2eFrames('connection', connectionId).length;
+    sendE2e('c1', 'connection', connectionId, 'transport', toBase64Url(new Uint8Array(64)));
+    await settle();
+    // No outcome — there is nothing to say on a poisoned session — and the
+    // pending state is gone, so an honest frame after it reaches nothing.
+    expect(e2eFrames('connection', connectionId).length).toBe(framesBefore);
+    const binding = connectionBinding(connectionId, hostChallenge, session, authenticator.credentialId);
+    sendE2e(
+      'c1',
+      'connection',
+      connectionId,
+      'transport',
+      toBase64Url(session.sendControl({ presence: await presenceProofFor(authenticator, binding) })),
+    );
+    await settle();
+    expect(e2eFrames('connection', connectionId).length).toBe(framesBefore);
     expect(host.trackedClientCount).toBe(0);
   });
 
-  it('drops an older proof result after a newer pair for the same client', async () => {
-    const host = makeHost();
-    const nonce = host.mintSetupNonce();
-    const setupProof = await computeSetupProof(nonce, PAIRING.devicePublicKey);
-    const blocked = gate();
-    proofProbe.gates[1] = blocked.promise;
-
-    socket.receive({ t: 'pair', clientId: 'c1', request: { ...PAIRING, setupProof } });
-    socket.receive({
-      t: 'pair',
-      clientId: 'c1',
-      request: { ...PAIRING, devicePublicKey: 'replacement-key' },
-    });
-    expect(approvals).toHaveLength(1);
-    expect(approvals[0]!.request.devicePublicKey).toBe('replacement-key');
-
-    blocked.release();
-    await flushUntil(() => (proofProbe.completed >= 2 ? true : undefined));
+  it('accepts keepalives on an established session and ignores them', async () => {
+    makeHost();
+    const { authenticator, clientStatic } = await pairedClient();
+    const connectionId = testRoutingId();
+    const { session, hostChallenge } = await openConnection('c1', clientStatic, connectionId);
+    const binding = connectionBinding(connectionId, hostChallenge, session, authenticator.credentialId);
+    sendE2e(
+      'c1',
+      'connection',
+      connectionId,
+      'transport',
+      toBase64Url(session.sendControl({ presence: await presenceProofFor(authenticator, binding) })),
+    );
     await settle();
-    expect(approvals).toHaveLength(1);
+    await outcome(session, 'connection', connectionId);
+    const framesBefore = socket.sent.length;
+    sendE2e('c1', 'connection', connectionId, 'transport', toBase64Url(session.sendKeepalive()));
+    await settle();
+    expect(socket.sent.length).toBe(framesBefore);
+    expect(sessions[0]!.handled).toEqual([]);
+    expect(sessions[0]!.disposed).toBe(false);
   });
 
-  it('never verifies an expired nonce, and drops it on the next mint', async () => {
-    let clock = Date.now();
-    const host = makeHost(
-      () => [],
-      () => clock,
+  // --- Lifecycle -----------------------------------------------------------
+
+  it('disposes a client’s ceremonies and session on client-gone', async () => {
+    makeHost();
+    const { authenticator, clientStatic } = await pairedClient();
+    const connectionId = testRoutingId();
+    const { session, hostChallenge } = await openConnection('c1', clientStatic, connectionId);
+    const binding = connectionBinding(connectionId, hostChallenge, session, authenticator.credentialId);
+    sendE2e(
+      'c1',
+      'connection',
+      connectionId,
+      'transport',
+      toBase64Url(session.sendControl({ presence: await presenceProofFor(authenticator, binding) })),
     );
-    const stale = host.mintSetupNonce();
+    await settle();
+    socket.receive({ t: 'client-gone', clientId: 'c1' });
+    await settle();
+    expect(sessions[0]!.disposed).toBe(true);
+    expect(host.trackedClientCount).toBe(0);
+  });
+
+  it('drops every ceremony and invitation when the relay socket closes', async () => {
+    makeHost();
+    await requestPairing('c1', await newAuthenticator());
+    const spare = await mintInvitation();
+    socket.drop();
+    await settle();
+    expect(host.trackedClientCount).toBe(0);
+    expect(host.outstandingInvitationCount).toBe(0);
+    // The code on a second window's screen dies with the socket it was minted
+    // over: its one-use key lived only in the Host that just lost the relay.
+    expect(host.invitationState(spare.inviteId)).toBe('consumed');
+    expect(dismissed).toContain('c1');
+    // But nobody scanned it, so the panel must not be told it was: `dropped`
+    // and `consumed` are different facts, and only the reserved one is spent.
+    expect(invitationEvents).toContainEqual({ inviteId: spare.inviteId, state: 'dropped' });
+    expect(invitationEvents.filter((e) => e.state === 'dropped')).toHaveLength(1);
+  });
+
+  it('client-gone during a handshake disposes what the handshake then creates', async () => {
+    // `client-gone` is queued on the same chain as every `e2e` step. Run inline
+    // it would land *between* the responder's awaits, find nothing to dispose,
+    // and leave the resumed init holding a reserved invitation and a client
+    // entry for a peer the relay has already forgotten — one nothing removes.
+    makeHost();
+    const invitation = await mintInvitation();
+    await sendPairingInit('c1', invitation);
+    // No await between the two: the init's WebCrypto is still in flight.
+    socket.receive({ t: 'client-gone', clientId: 'c1' });
+    // Named, not counted: the step this waits on is a dozen WebCrypto awaits,
+    // which no fixed number of turns can be trusted to cover.
+    await settleUntil(() => host.invitationState(invitation.inviteId) === 'consumed');
+
+    expect(host.trackedClientCount).toBe(0);
+    expect(approvals).toEqual([]);
+    // The invitation is spent either way — a phone did complete message 1
+    // against it — but it must not be left `reserved` on a client that is gone.
+    expect(host.invitationState(invitation.inviteId)).toBe('consumed');
+    expect(host.outstandingInvitationCount).toBe(0);
+  });
+
+  it('a mint that retires the invitation mid-handshake allocates nothing', async () => {
+    // `mintInvitation` is the panel's, not the relay's: it runs off the frame
+    // chain and reaps synchronously, so it can retire the very entry a
+    // suspended `#onPairingInit` is holding. Resuming onto that detached object
+    // would announce `reserved` for an id already reported gone, and leave a
+    // client entry naming an invitation no dispose can retire.
+    makeHost();
+    const invitation = await mintInvitation();
+    await sendPairingInit('c1', invitation);
+    // No await between the two: the init's WebCrypto is still in flight when
+    // the clock moves past the TTL and the next mint reaps it.
     clock += DEFAULT_PAIRING_TTL_MS + 1;
-    // Minting a second code prunes the first, whether or not anyone asks about
-    // it — nothing else sweeps that map.
-    const fresh = host.mintSetupNonce();
-
-    expect(
-      (await pair('c1', { ...PAIRING, setupProof: await computeSetupProof(stale, 'device-1') }))
-        .verified,
-    ).toBe(false);
-    expect(
-      (await pair('c2', { ...PAIRING, setupProof: await computeSetupProof(fresh, 'device-1') }))
-        .verified,
-    ).toBe(true);
-  });
-
-  it('dates the nonce by its own clock, not the Server’s', async () => {
-    // The nonce is minted, held and verified entirely Host-side, so its expiry
-    // must come from the clock that compares against it. Dated off the Server's
-    // `expiresAt` instead, a Host running fast mints nonces born expired —
-    // every scanned phone silently drops to the fingerprint compare, with
-    // nothing anywhere reporting why.
-    const skewed = Date.now() + 6 * 60 * 60 * 1000;
-    const host = makeHost(
-      () => [],
-      () => skewed,
+    await mintInvitation();
+    await settleUntil(() =>
+      invitationEvents.some((e) => e.inviteId === invitation.inviteId && e.state === 'expired'),
     );
-    const nonce = host.mintSetupNonce();
 
-    const verified = await pair('c1', {
-      ...PAIRING,
-      setupProof: await computeSetupProof(nonce, PAIRING.devicePublicKey),
+    expect(invitationEvents).toContainEqual({
+      inviteId: invitation.inviteId,
+      state: 'expired',
     });
-    expect(verified.verified).toBe(true);
+    // Nothing after the terminal event: the resumed handshake stood down.
+    expect(invitationEvents.filter((e) => e.inviteId === invitation.inviteId)).toHaveLength(1);
+    expect(host.trackedClientCount).toBe(0);
+    expect(approvals).toEqual([]);
   });
 
-  it('pairs unverified with no proof, and with one nothing minted', async () => {
-    const host = makeHost();
-    expect((await pair('c1', PAIRING)).verified).toBe(false);
-    // Nothing minted, so nothing to compute against — and no MAC is computed.
-    expect((await pair('c2', { ...PAIRING, setupProof: 'forged' })).verified).toBe(false);
-    host.mintSetupNonce();
-    expect((await pair('c3', { ...PAIRING, setupProof: 'forged' })).verified).toBe(false);
+  /** Send pairing message 1 without awaiting the Host's answer. */
+  async function sendPairingInit(clientId: string, invitation: PairingInvitation): Promise<void> {
+    const handshake = await createNoiseInitiator({
+      prologue: pairingInvitationPrologue(invitation),
+      staticKeyPair: await generateNoiseKeyPair(),
+      remoteStaticPublicKey: invitation.ephPub,
+    });
+    sendE2e(clientId, 'pairing', invitation.inviteId, 'init', toBase64Url(await handshake.writeMessage()));
+  }
 
-    // All three still reach the modal: an unverifiable proof costs the
-    // fingerprint compare, not the pairing.
-    expect(approvals).toHaveLength(3);
-    expect(socket.frames('pair-result')).toEqual([]);
-  });
-
-  it('bounds proofs in flight, since a verification is not on the queue yet', async () => {
-    // Verification is async, so the pending-pairing cap cannot see a request
-    // that has not landed. Unbounded, a relay flooding proof-carrying frames
-    // while a QR is up buys concurrent MAC computations in the process that
-    // owns every PTY.
-    const host = makeHost();
-    const nonce = host.mintSetupNonce();
-    const setupProof = await computeSetupProof(nonce, PAIRING.devicePublicKey);
-
-    const flood = 200;
-    for (let i = 0; i < flood; i += 1) {
-      socket.receive({ t: 'pair', clientId: `f${i}`, request: { ...PAIRING, setupProof } });
-    }
-    for (let i = 0; i < 50 && approvals.length < flood; i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 1));
-    }
-    // Every frame still pairs; past the cap it simply skips verification, which
-    // is the safe degradation — the fingerprint compare.
-    expect(approvals).toHaveLength(flood);
-    expect(approvals.filter((pending) => pending.verified).length).toBeLessThanOrEqual(
-      MAX_PENDING_PAIRINGS,
-    );
-    // And the modal queue itself is still capped.
-    expect(host.trackedClientCount).toBeLessThanOrEqual(MAX_PENDING_PAIRINGS);
-  });
-
-  it('caps the nonces it holds at the Server’s own bound', () => {
-    // The two sides of one credential: a Host that kept nonces the Server had
-    // already evicted would mark a pairing verified against a token that can no
-    // longer be redeemed.
-    const host = makeHost();
-    const nonces = Array.from({ length: MAX_TOKENS_PER_HOST + 2 }, () => host.mintSetupNonce());
-    expect(new Set(nonces).size).toBe(nonces.length);
-    expect(host.outstandingSetupNonceCount).toBe(MAX_TOKENS_PER_HOST);
-  });
-
-  it('builds the mirrored request from the fields it knows, and no others', async () => {
-    // `isPairingRequest` allows extras, so a spread would forward whatever else
-    // the relay attached into the mirrored queue and the persisted ACL record.
+  // Teardown is not a frame: `stop()` and the socket's own `close` run it
+  // synchronously, so it lands mid-await where the chain cannot order it. A
+  // handshake finishing afterwards must not re-reserve the invitation it just
+  // retired, and must not allocate an entry no later close will ever clear.
+  it.each([
+    ['stop()', () => host.stop()],
+    ['a dropped socket', () => socket.drop()],
+  ])('a handshake finishing after %s allocates nothing', async (_name, teardown) => {
     makeHost();
-    const pending = await pair('c1', { ...PAIRING, injected: 'from-the-relay' });
+    const invitation = await mintInvitation();
+    await sendPairingInit('c1', invitation);
+    teardown();
+    await settle();
 
-    expect(Object.keys(pending.request).sort()).toEqual([
-      'accountId',
-      'devicePublicKey',
-      'passkeyCredentialId',
-      'passkeyPublicKeyHash',
-      'requestedLabel',
-    ]);
-    pending.approve();
-    expect(JSON.stringify(savedRecords)).not.toContain('from-the-relay');
+    expect(host.trackedClientCount).toBe(0);
+    expect(host.outstandingInvitationCount).toBe(0);
+    expect(invitationEvents.at(-1)).not.toMatchObject({ state: 'reserved' });
+    expect(host.invitationState(invitation.inviteId)).toBe('consumed');
   });
 
-  it('routes setup-token-redeemed, the one frame that addresses no client', () => {
-    const redeemed: string[] = [];
-    makeHost(
-      () => [],
-      () => Date.now(),
-      { onSetupTokenRedeemed: (mintId) => redeemed.push(mintId) },
-    );
-    socket.receive({ t: 'setup-token-redeemed', mintId: 'mint-1' });
-    // It names the mint, never the token, so a Host showing several codes can
-    // retire the right one.
-    expect(redeemed).toEqual(['mint-1']);
-    // The relay is not trusted to have stamped one.
-    socket.receive({ t: 'setup-token-redeemed' });
-    expect(redeemed).toEqual(['mint-1']);
-    // It carries no clientId by design, so it must be routed before the
-    // addressed-frame narrowing rather than dropped by it.
+  it('a connection handshake finishing after stop() allocates nothing', async () => {
+    makeHost();
+    const { clientStatic } = await pairedClient();
+    const connectionId = testRoutingId();
+    const handshake = await createNoiseInitiator({
+      prologue: e2eConnectionPrologue(enrollment.hostId, connectionId),
+      staticKeyPair: clientStatic,
+      remoteStaticPublicKey: fromBase64Url(enrollment.noiseStaticPublicKey!),
+    });
+    sendE2e('c2', 'connection', connectionId, 'init', toBase64Url(await handshake.writeMessage()));
+    host.stop();
+    await settle();
+
+    expect(host.trackedClientCount).toBe(0);
+  });
+
+  it('evicting a scanned invitation at the cap reports consumed, not dropped', async () => {
+    // `dropped` means nobody scanned it. The oldest by insertion is whatever it
+    // is doing, so an eviction that always said `dropped` would tell the panel
+    // to offer a new code for a ceremony a phone is mid-way through.
+    makeHost();
+    const scanned = await requestPairing('c1', await newAuthenticator());
+    invitationEvents.length = 0;
+    for (let i = 0; i < MAX_TOKENS_PER_HOST; i += 1) await mintInvitation();
+
+    expect(invitationEvents).toContainEqual({
+      inviteId: scanned.invitation.inviteId,
+      state: 'consumed',
+    });
+    expect(
+      invitationEvents.filter((e) => e.inviteId === scanned.invitation.inviteId),
+    ).toHaveLength(1);
+  });
+
+  it('stands down for good on a displacement close', async () => {
+    makeHost();
+    socket.closeWith(WS_CLOSE_HOST_REPLACED);
+    await settle();
+    expect(host.status).toBe('displaced');
+  });
+
+  it('ignores every frame that is not the e2e envelope or client-gone', async () => {
+    makeHost();
+    for (const t of ['pair', 'pair-status', 'connect', 'connect2', 'msg']) {
+      socket.receive({ t, clientId: 'c1', request: {}, query: {}, data: {} });
+    }
+    await settle();
     expect(socket.sent).toEqual([]);
+    expect(host.trackedClientCount).toBe(0);
   });
 
-  it('bounds and strips requestedLabel before it reaches the approval UI', () => {
+  it('ignores a client-gone whose clientId is past the wire bound', async () => {
     makeHost();
-    socket.receive({
-      t: 'pair',
-      clientId: 'c1',
-      request: {
-        passkeyCredentialId: 'cred-1',
-        passkeyPublicKeyHash: 'hash-1',
-        devicePublicKey: 'device-1',
-        // A bidi override plus far more text than the modal can show.
-        requestedLabel: `\u202eiPhone${'A'.repeat(500)}`,
-        accountId: `\u202eowner${'B'.repeat(500)}`,
-      },
-    });
-
-    const shown = approvals[0]!.request.requestedLabel;
-    expect(shown).not.toContain('\u202e');
-    expect(Array.from(shown).length).toBeLessThanOrEqual(64);
-    // `accountId` is the modal's other rendered field and is just as
-    // attacker-chosen; bounding one without the other only moves the overflow.
-    expect(Array.from(approvals[0]!.request.accountId).length).toBeLessThanOrEqual(64);
-
-    approvals[0]!.approve();
-    // The bound applies to what is persisted too, not only to what is shown.
-    expect(Array.from(savedRecords[0]!.label).length).toBeLessThanOrEqual(64);
+    await requestPairing('c1', await newAuthenticator());
+    expect(host.trackedClientCount).toBe(1);
+    // The relay chooses this value and this is the one frame that reaches the
+    // client map without the `e2e` guard, so the Host bounds it itself.
+    socket.receive({ t: 'client-gone', clientId: 'x'.repeat(257) });
+    socket.receive({ t: 'client-gone', clientId: 42 });
+    await settle();
+    expect(host.trackedClientCount).toBe(1);
+    socket.receive({ t: 'client-gone', clientId: 'c1' });
+    await settle();
+    expect(host.trackedClientCount).toBe(0);
   });
 
-  it('bounds pending pairings so pair frames cannot grow the host unbounded', () => {
-    const host = makeHost();
-    // Every `pair` frame allocates under a relay-chosen clientId, and
-    // `client-gone` — the only thing that removes one — is what a hostile relay
-    // simply never sends. Unbounded, 5000 frames retained 5000 requests holding
-    // megabytes of relay-chosen strings in the process that owns every PTY.
-    const sent = 200;
-    for (let i = 0; i < sent; i++) {
-      socket.receive({
-        t: 'pair',
-        clientId: `c${i}`,
-        request: {
-          accountId: 'owner',
-          passkeyCredentialId: `cred-${i}`,
-          passkeyPublicKeyHash: `hash-${i}`,
-          devicePublicKey: `device-${i}`,
-          requestedLabel: `iPhone ${i}`,
-        },
+  it('allocates no challenge for a connection init that never authenticates', async () => {
+    makeHost();
+    const { clientStatic } = await pairedClient();
+    expect(host.pendingChallengeCount).toBe(0);
+    // Nothing but its own TTL reclaims a challenge, so a garbage `init` must
+    // not leave one behind: the relay can send those at line rate.
+    for (let i = 0; i < 5; i += 1) {
+      sendE2e('c2', 'connection', testRoutingId(), 'init', toBase64Url(new Uint8Array(96)));
+    }
+    await settle();
+    expect(host.pendingChallengeCount).toBe(0);
+    // A real message 1 does allocate one — otherwise the assertion above would
+    // pass against a Host that never issues at all.
+    await openConnection('c1', clientStatic, testRoutingId());
+    expect(host.pendingChallengeCount).toBe(1);
+  });
+
+  it('leaves no established session behind when there is no remote-api to build', async () => {
+    // A Host with no session factory answers the outcome and holds nothing.
+    // Leaving the previous `established` in place would route the next frame on
+    // the old id into a handler that has already been disposed.
+    makeHost(() => [], { withSession: false });
+    const { authenticator, clientStatic } = await pairedClient();
+    for (const connectionId of [testRoutingId(), testRoutingId()]) {
+      const { session, hostChallenge } = await openConnection('c1', clientStatic, connectionId);
+      const binding = connectionBinding(connectionId, hostChallenge, session, authenticator.credentialId);
+      sendE2e(
+        'c1',
+        'connection',
+        connectionId,
+        'transport',
+        toBase64Url(session.sendControl({ presence: await presenceProofFor(authenticator, binding) })),
+      );
+      expect(await outcome(session, 'connection', connectionId)).toEqual({
+        ok: true,
+        hostLabel: HOST_LABEL,
       });
     }
-
-    // `approvals` is the harness's cumulative call log, so it counts every
-    // request ever shown — the live queue is what is bounded. Evictions are
-    // observable as denials on the wire, which is also the point: an evicted
-    // client is told, rather than left waiting on a modal that no longer
-    // exists.
-    const denials = socket.frames('pair-result').filter((f) => f.approved === false);
-    expect(denials).toHaveLength(sent - MAX_PENDING_PAIRINGS);
-    expect(denials.every((f) => f.error === 'superseded')).toBe(true);
-    // The record is dropped, not just the payload it holds: evicting only
-    // `pending` would free the capped request and keep the slot plus its
-    // relay-chosen key forever, which is the unbounded half. This bounds the
-    // pairing path — `connect` frames allocate through a different route that
-    // this counter deliberately does not evict.
-    expect(host.trackedClientCount).toBeLessThanOrEqual(MAX_PENDING_PAIRINGS);
-
-    // Nothing reached the ACL without a human.
-    expect(savedRecords).toHaveLength(0);
-  });
-
-  it('deny → pair-result approved:false, ACL untouched', () => {
-    makeHost();
-    socket.receive({
-      t: 'pair',
-      clientId: 'c1',
-      request: {
-        accountId: 'owner',
-        passkeyCredentialId: 'cred-1',
-        passkeyPublicKeyHash: 'hash-1',
-        devicePublicKey: 'device-1',
-        requestedLabel: 'iPhone Safari',
-      } satisfies PairingRequest,
-    });
-    approvals[0]!.deny();
-
-    const result = socket.frames('pair-result')[0]!;
-    expect(result).toMatchObject({ clientId: 'c1', approved: false });
-    expect(result.record).toBeUndefined();
-    expect(savedRecords).toEqual([]);
-  });
-
-  it('ignores approval callbacks superseded under the same client id', () => {
-    makeHost();
-    const first = {
-      accountId: 'owner',
-      passkeyCredentialId: 'cred-1',
-      passkeyPublicKeyHash: 'hash-1',
-      devicePublicKey: 'device-1',
-      requestedLabel: 'iPhone Safari',
-    } satisfies PairingRequest;
-    socket.receive({ t: 'pair', clientId: 'c1', request: first });
-    const stale = approvals[0]!;
-
-    const replacement = {
-      ...first,
-      devicePublicKey: 'device-2',
-      requestedLabel: 'Android Chrome',
-    };
-    socket.receive({ t: 'pair', clientId: 'c1', request: replacement });
-    expect(approvals[1]!.pairingId).not.toBe(stale.pairingId);
-
-    stale.approve();
-    stale.deny();
-    expect(socket.frames('pair-result')).toEqual([]);
-    expect(savedRecords).toEqual([]);
-
-    approvals[1]!.approve();
-    expect(socket.frames('pair-result')[0]).toMatchObject({
-      approved: true,
-      record: { devicePublicKey: 'device-2' },
-    });
-  });
-
-  it('expired approval → pair-result approved:false, ACL untouched', () => {
-    let now = 1_000;
-    makeHost(() => [], () => now);
-    socket.receive({
-      t: 'pair',
-      clientId: 'c1',
-      request: {
-        accountId: 'owner',
-        passkeyCredentialId: 'cred-1',
-        passkeyPublicKeyHash: 'hash-1',
-        devicePublicKey: 'device-1',
-        requestedLabel: 'iPhone Safari',
-      } satisfies PairingRequest,
-    });
-    now += DEFAULT_PAIRING_TTL_MS;
-
-    approvals[0]!.approve();
-
-    const result = socket.frames('pair-result')[0]!;
-    expect(result).toMatchObject({
-      clientId: 'c1',
-      approved: false,
-      error: 'pairing approval expired',
-    });
-    expect(result.record).toBeUndefined();
-    expect(savedRecords).toEqual([]);
-  });
-
-  it('answers pair-status from the ACL without minting client state', () => {
-    const host = makeHost();
-    socket.receive({
-      t: 'pair-status',
-      clientId: 'c1',
-      query: { passkeyCredentialId: 'cred-1', devicePublicKey: 'device-1' },
-    });
-
-    expect(socket.frames('pair-status-result')[0]).toMatchObject({
-      clientId: 'c1',
-      paired: false,
-    });
-    // Inert by construction: no approval surfaced, no ticket minted, and
-    // nothing tracked under the relay-chosen clientId that asking could grow.
-    expect(approvals).toHaveLength(0);
+    await settle();
     expect(host.trackedClientCount).toBe(0);
   });
 
-  it('answers pair-status true only for a pair on one active record', () => {
-    makeHost();
-    socket.receive({
-      t: 'pair',
-      clientId: 'c1',
-      request: {
-        accountId: 'owner',
-        passkeyCredentialId: 'cred-1',
-        passkeyPublicKeyHash: 'hash-1',
-        devicePublicKey: 'device-1',
-        requestedLabel: 'iPhone Safari',
-      } satisfies PairingRequest,
-    });
-    approvals[0]!.approve();
-
-    socket.sent.length = 0;
-    socket.receive({
-      t: 'pair-status',
-      clientId: 'c1',
-      query: { passkeyCredentialId: 'cred-1', devicePublicKey: 'device-1' },
-    });
-    expect(socket.frames('pair-status-result')[0]!.paired).toBe(true);
-
-    // A record authorizes the PAIR, so the same passkey on a second browser is
-    // not paired — the display answer has to agree with `authorizeConnection`
-    // on that or it sends the user to a Connect the Host will deny.
-    socket.sent.length = 0;
-    socket.receive({
-      t: 'pair-status',
-      clientId: 'c1',
-      query: { passkeyCredentialId: 'cred-1', devicePublicKey: 'device-2' },
-    });
-    expect(socket.frames('pair-status-result')[0]!.paired).toBe(false);
-  });
-
-  it('answers a malformed pair-status query instead of leaving the client waiting', () => {
-    makeHost();
-    // The client awaits exactly one frame per query, so silence strands that
-    // wait until the socket dies; `false` only ever offers Pair, whose approval
-    // is local anyway.
-    socket.receive({ t: 'pair-status', clientId: 'c1', query: { devicePublicKey: 42 } });
-
-    expect(socket.frames('pair-status-result')[0]).toMatchObject({
-      clientId: 'c1',
-      paired: false,
-    });
-    expect(savedRecords).toHaveLength(0);
-  });
-
-  it('connect issues a challenge frame', () => {
-    makeHost();
-    socket.receive({ t: 'connect', clientId: 'c1' });
-    const challenge = socket.frames('challenge')[0]!;
-    expect(challenge.clientId).toBe('c1');
-    expect(typeof challenge.challenge).toBe('string');
-    expect(typeof challenge.expiresAt).toBe('number');
-  });
-
-  it('connect2 for an unpaired device denies with failures', async () => {
-    makeHost();
-    const authenticator = await createAuthenticator(ENROLLMENT.rpId);
-    const deviceKey = await generateDeviceKeyPair();
-
-    const decision = await runConnect(socket, 'c1', async (challenge) => ({
-      accountId: 'owner',
-      devicePublicKey: deviceKey.devicePublicKey,
-      challenge,
-      deviceSignature: await signDeviceChallenge(deviceKey.privateKey, {
-        hostId: ENROLLMENT.hostId,
-        challenge,
-        devicePublicKey: deviceKey.devicePublicKey,
-      }),
-      passkey: {
-        publicKey: authenticator.publicKey,
-        assertion: await authenticator.assert(challenge, ENROLLMENT.origin),
-      },
-    }));
-
-    expect(decision).toMatchObject({ clientId: 'c1', allowed: false });
-    expect(decision.failures).toEqual(
-      expect.arrayContaining(['passkey-not-paired', 'device-not-paired']),
-    );
-  });
-
-  it('contains and denies a malformed connect2 from the relay', async () => {
-    makeHost();
+  it('refuses to pair when this Host has no Noise static to present', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    socket.receive({ t: 'connect2', clientId: 'c1', request: {} });
-
-    const decision = await flushUntil(() => socket.frames('decision')[0]);
-    expect(decision).toMatchObject({ clientId: 'c1', allowed: false });
-    expect(decision.failures).toEqual(
-      expect.arrayContaining(['passkey-assertion-invalid', 'device-signature-invalid']),
-    );
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
-  });
-
-  it('pair then connect2 allows and omits failures', async () => {
-    makeHost();
-    const authenticator = await createAuthenticator(ENROLLMENT.rpId);
-    const deviceKey = await generateDeviceKeyPair();
-    const passkeyPublicKeyHash = await hashPasskeyPublicKey(authenticator.publicKey);
-
-    // Pair this exact (passkey, device) pair through the real ceremony.
-    socket.receive({
-      t: 'pair',
-      clientId: 'c1',
-      request: {
-        accountId: 'owner',
-        passkeyCredentialId: authenticator.credentialId,
-        passkeyPublicKeyHash,
-        devicePublicKey: deviceKey.devicePublicKey,
-        requestedLabel: 'iPhone Safari',
-      } satisfies PairingRequest,
-    });
-    approvals[0]!.approve();
-    expect(socket.frames('pair-result')[0]).toMatchObject({ approved: true });
-
-    const decision = await runConnect(socket, 'c1', async (challenge) => ({
-      accountId: 'owner',
-      devicePublicKey: deviceKey.devicePublicKey,
-      challenge,
-      deviceSignature: await signDeviceChallenge(deviceKey.privateKey, {
-        hostId: ENROLLMENT.hostId,
-        challenge,
-        devicePublicKey: deviceKey.devicePublicKey,
-      }),
-      passkey: {
-        publicKey: authenticator.publicKey,
-        assertion: await authenticator.assert(challenge, ENROLLMENT.origin),
+    const created = new RemoteHost({
+      // Every other field is a real enrollment; only the static is missing,
+      // which is the state a corrupt store leaves behind.
+      enrollment: {
+        ...enrollment,
+        noiseStaticPrivateKey: undefined,
+        noiseStaticPublicKey: undefined,
       },
-    }));
-
-    expect(decision).toMatchObject({ clientId: 'c1', allowed: true });
-    // `failures` is omitted from an allowed decision.
-    expect('failures' in decision).toBe(false);
-  });
-
-  it('gates msg on an allowed decision and routes to a session', async () => {
-    const handled: unknown[] = [];
-    let disposed = 0;
-    savedRecords = [];
-    approvals = [];
-    const host = new RemoteHost({
-      enrollment: ENROLLMENT,
       reconnect: false,
       createWebSocket: () => (socket = new FakeSocket()),
       loadAcl: () => [],
-      saveAcl: () => {},
-      requestApproval: (pending) => pending.approve(),
-      dismissApproval: () => {},
-      createSession: () => ({
-        handle: (data) => handled.push(data),
-        dispose: () => {
-          disposed += 1;
-        },
-      }),
-    });
-    host.start();
-    socket.open();
-
-    // Before any allowed decision, msg is dropped (the host-side gate).
-    socket.receive({ t: 'msg', clientId: 'c1', data: { requestId: 'r', method: 'hello' } });
-    expect(handled).toHaveLength(0);
-
-    // Force an allowed decision by pairing + connecting.
-    const authenticator = await createAuthenticator(ENROLLMENT.rpId);
-    const deviceKey = await generateDeviceKeyPair();
-    const passkeyPublicKeyHash = await hashPasskeyPublicKey(authenticator.publicKey);
-    socket.receive({
-      t: 'pair',
-      clientId: 'c1',
-      request: {
-        accountId: 'owner',
-        passkeyCredentialId: authenticator.credentialId,
-        passkeyPublicKeyHash,
-        devicePublicKey: deviceKey.devicePublicKey,
-        requestedLabel: 'x',
-      } satisfies PairingRequest,
-    });
-    await runConnect(socket, 'c1', async (challenge) => ({
-      accountId: 'owner',
-      devicePublicKey: deviceKey.devicePublicKey,
-      challenge,
-      deviceSignature: await signDeviceChallenge(deviceKey.privateKey, {
-        hostId: ENROLLMENT.hostId,
-        challenge,
-        devicePublicKey: deviceKey.devicePublicKey,
-      }),
-      passkey: {
-        publicKey: authenticator.publicKey,
-        assertion: await authenticator.assert(challenge, ENROLLMENT.origin),
+      saveAcl: (_hostId, records) => {
+        savedRecords = [...records];
       },
-    }));
-
-    socket.receive({ t: 'msg', clientId: 'c1', data: { requestId: 'r', method: 'hello' } });
-    expect(handled).toHaveLength(1);
-
-    // A new, malformed authorization attempt fails closed and revokes this
-    // connection's message gate. The relay is not an authority merely because
-    // this clientId was allowed once.
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    socket.sent.length = 0;
-    socket.receive({ t: 'connect2', clientId: 'c1', request: {} });
-    await flushUntil(() => socket.frames('decision')[0]);
-    socket.receive({ t: 'msg', clientId: 'c1', data: { requestId: 'r2', method: 'hello' } });
-    expect(handled).toHaveLength(1);
-    expect(disposed).toBe(1);
-    warn.mockRestore();
-
-    // client-gone disposes the session and re-gates.
-    socket.receive({ t: 'client-gone', clientId: 'c1' });
-    // The failed re-authorization already disposed it; client-gone is
-    // idempotent rather than disposing the old session twice.
-    expect(disposed).toBe(1);
-    socket.receive({ t: 'msg', clientId: 'c1', data: { requestId: 'r3', method: 'hello' } });
-    expect(handled).toHaveLength(1);
-  });
-
-  it('lets only the newest connect2 answer, even when an older one lands last', async () => {
-    // Verification is async and the relay can start a second attempt while the
-    // first is still running. An older `allowed` landing last would re-open the
-    // gate the newer attempt closed — the relay would then have talked this Host
-    // into establishing a client it had just denied.
-    const handled: unknown[] = [];
-    savedRecords = [];
-    approvals = [];
-    const host = new RemoteHost({
-      enrollment: ENROLLMENT,
-      reconnect: false,
-      createWebSocket: () => (socket = new FakeSocket()),
-      loadAcl: () => [],
-      saveAcl: () => {},
-      requestApproval: (pending) => pending.approve(),
-      dismissApproval: () => {},
-      createSession: () => ({ handle: (data) => handled.push(data), dispose: () => {} }),
+      requestApproval: (pending) => approvals.push(pending),
+      dismissApproval: (clientId) => dismissed.push(clientId),
+      onInvitationChanged: (inviteId, state) => invitationEvents.push({ inviteId, state }),
+      now: () => clock,
     });
-    host.start();
+    created.start();
     socket.open();
+    host = created;
+    hosts.push(created);
 
-    const authenticator = await createAuthenticator(ENROLLMENT.rpId);
-    const deviceKey = await generateDeviceKeyPair();
-    const passkeyPublicKeyHash = await hashPasskeyPublicKey(authenticator.publicKey);
-    socket.receive({
-      t: 'pair',
-      clientId: 'c1',
-      request: {
-        accountId: 'owner',
-        passkeyCredentialId: authenticator.credentialId,
-        passkeyPublicKeyHash,
-        devicePublicKey: deviceKey.devicePublicKey,
-        requestedLabel: 'x',
-      } satisfies PairingRequest,
+    const { invitation, session, code } = await requestPairing('c1', await newAuthenticator());
+    approvals[0]!.approve(code);
+    // A record written here would authorize a Client that could never complete
+    // a connection IK, and its `hostStaticPublicKey` pin would be empty.
+    expect(await outcome(session, 'pairing', invitation.inviteId)).toEqual({
+      ok: false,
+      code: 'host-error',
     });
-
-    // The older attempt would be allowed — and is held open until after the
-    // newer one has been answered.
-    const held = gate();
-    authProbe.gates[authProbe.calls] = held.promise;
-    socket.sent.length = 0;
-    socket.receive({ t: 'connect', clientId: 'c1' });
-    const challenge = socket.frames('challenge')[0]!.challenge as string;
-    socket.receive({
-      t: 'connect2',
-      clientId: 'c1',
-      request: {
-        accountId: 'owner',
-        devicePublicKey: deviceKey.devicePublicKey,
-        challenge,
-        deviceSignature: await signDeviceChallenge(deviceKey.privateKey, {
-          hostId: ENROLLMENT.hostId,
-          challenge,
-          devicePublicKey: deviceKey.devicePublicKey,
-        }),
-        passkey: {
-          publicKey: authenticator.publicKey,
-          assertion: await authenticator.assert(challenge, ENROLLMENT.origin),
-        },
-      } satisfies ConnectionRequest,
-    });
-    await settle();
-    expect(socket.frames('decision')).toHaveLength(0);
-
-    // The newer attempt is malformed, so it denies and closes the gate.
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    socket.receive({ t: 'connect2', clientId: 'c1', request: {} });
-    expect(await flushUntil(() => socket.frames('decision')[0])).toMatchObject({ allowed: false });
-
-    held.release();
-    await settle();
-
-    // The superseded evaluation answers nothing at all — a second `decision`
-    // would settle a request the client is no longer waiting on.
-    expect(socket.frames('decision')).toHaveLength(1);
-    socket.receive({ t: 'msg', clientId: 'c1', data: { requestId: 'r', method: 'hello' } });
-    expect(handled).toHaveLength(0);
+    expect(savedRecords).toEqual([]);
     warn.mockRestore();
   });
-});
 
-describe('RemoteHost close-code policy', () => {
-  /** Every socket the host has opened, in order. */
-  let sockets: FakeSocket[] = [];
-  let live: RemoteHost | null = null;
-
-  /** A host with the real reconnect policy (backoff timers under fake timers). */
-  function makeHost(): RemoteHost {
-    sockets = [];
-    const host = new RemoteHost({
-      enrollment: ENROLLMENT,
-      createWebSocket: () => {
-        const socket = new FakeSocket();
-        sockets.push(socket);
-        return socket;
-      },
-      loadAcl: () => [],
-      saveAcl: () => {},
-      requestApproval: () => {},
-      dismissApproval: () => {},
-    });
-    live = host;
-    host.start();
-    sockets[0]!.open();
-    expect(host.status).toBe('connected');
-    return host;
-  }
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    live?.stop();
-    live = null;
-    vi.useRealTimers();
-  });
-
-  it('reconnects after a transient close', () => {
-    const host = makeHost();
-
-    sockets[0]!.closeWith(1006); // abnormal closure — a Wi-Fi blip
-    expect(host.status).toBe('disconnected');
-    expect(sockets).toHaveLength(1);
-
-    vi.advanceTimersByTime(1_000);
-    expect(sockets).toHaveLength(2);
-    sockets[1]!.open();
-    expect(host.status).toBe('connected');
-  });
-
-  it('stands down on a displacement close instead of reconnecting', () => {
-    const host = makeHost();
-
-    sockets[0]!.closeWith(WS_CLOSE_HOST_REPLACED);
-    expect(host.status).toBe('displaced');
-
-    // No timer brings it back — fighting the newer Host for the hostId is the
-    // bug this close code exists to prevent.
-    vi.advanceTimersByTime(10 * 60_000);
-    expect(sockets).toHaveLength(1);
-    expect(host.status).toBe('displaced');
-  });
-
-  it('start() is the explicit way back from displaced', () => {
-    const host = makeHost();
-    sockets[0]!.closeWith(WS_CLOSE_HOST_REPLACED);
-    expect(host.status).toBe('displaced');
-
-    host.start();
-    expect(sockets).toHaveLength(2);
-    sockets[1]!.open();
-    expect(host.status).toBe('connected');
-
-    // And the reconnect policy is intact afterwards.
-    sockets[1]!.closeWith(1006);
-    vi.advanceTimersByTime(1_000);
-    expect(sockets).toHaveLength(3);
-  });
-
-  it('ignores a close from a socket it no longer owns', () => {
-    const host = makeHost();
-    sockets[0]!.closeWith(1006);
-    vi.advanceTimersByTime(1_000);
-    sockets[1]!.open();
-    expect(host.status).toBe('connected');
-
-    // The relay evicts the *dead* first socket. That close says nothing about
-    // the live one, so it must not stand this Host down.
-    sockets[0]!.closeWith(WS_CLOSE_HOST_REPLACED);
-    expect(host.status).toBe('connected');
-    expect(sockets).toHaveLength(2);
-  });
-
-  it('stop() wins over a displacement close', () => {
-    const host = makeHost();
-    host.stop();
-    expect(host.status).toBe('stopped');
-
-    // `stop()` drops the socket reference without waiting for its close event.
-    sockets[0]!.closeWith(WS_CLOSE_HOST_REPLACED);
-    expect(host.status).toBe('stopped');
+  it('drops a frame whose routing values are out of shape, before any crypto', async () => {
+    makeHost();
+    const generateKey = vi.spyOn(globalThis.crypto.subtle, 'generateKey');
+    const invitation = await mintInvitation();
+    generateKey.mockClear();
+    for (const frame of [
+      { t: 'e2e', clientId: 'c1', hostId: 'short', kind: 'pairing', id: invitation.inviteId, step: 'init', ct: 'AAAA' },
+      { t: 'e2e', clientId: 'c1', hostId: enrollment.hostId, kind: 'nope', id: invitation.inviteId, step: 'init', ct: 'AAAA' },
+      { t: 'e2e', clientId: 'c1', hostId: enrollment.hostId, kind: 'pairing', id: 'short', step: 'init', ct: 'AAAA' },
+      { t: 'e2e', clientId: 'c1', hostId: enrollment.hostId, kind: 'pairing', id: invitation.inviteId, step: 'init', ct: 'not base64url!' },
+      { t: 'e2e', clientId: 42, hostId: enrollment.hostId, kind: 'pairing', id: invitation.inviteId, step: 'init', ct: 'AAAA' },
+    ]) {
+      socket.receive(frame);
+    }
+    await settle();
+    expect(generateKey).not.toHaveBeenCalled();
+    expect(host.trackedClientCount).toBe(0);
+    expect(host.invitationState(invitation.inviteId)).toBe('live');
+    generateKey.mockRestore();
   });
 });

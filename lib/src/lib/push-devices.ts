@@ -14,8 +14,8 @@
  */
 
 export interface PushDevice {
-  /** Base64url device identity — the Host ACL's `devicePublicKey`. */
-  devicePublicKey: string;
+  /** Base64url delivery capability — the Host ACL record's `deliveryId`. */
+  deliveryId: string;
   /** Human name from the Host's ACL record, e.g. `iPhone Safari`. */
   label: string;
 }

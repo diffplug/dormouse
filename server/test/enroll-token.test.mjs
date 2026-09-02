@@ -63,7 +63,7 @@ async function appWithOffer(contents, options = {}) {
 }
 
 function enroll(app, body) {
-  return post(app, API_ROUTES.hostEnroll, { label: 'This Machine', ...body });
+  return post(app, API_ROUTES.hostEnroll, body);
 }
 
 test('a valid enroll token enrolls the host and consumes the offer', async () => {

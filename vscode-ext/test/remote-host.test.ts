@@ -31,6 +31,13 @@ type HostModule = typeof import('../src/remote-host');
 type LinkModule = typeof import('../src/peer-link');
 
 /**
+ * A well-formed `hostId`: base64url of 16 bytes. `isEnrollment` accepts only
+ * that shape, so a stored enrollment naming a shorter id reads as malformed
+ * and this window never starts a Host.
+ */
+const HOST_ID = 'S6kyjjqOS7mw3l8ye89U3g';
+
+/**
  * The installer's offer file is the one thing an idle `status` reads off the
  * real disk, and whether the machine running these tests happens to have a
  * Dormouse server installed must not decide whether they pass. Mocked at the
@@ -299,16 +306,20 @@ afterEach(async () => {
 
 /**
  * A complete `HostAclRecord`. The store's read-back guard checks the whole
- * shape now, not just `hostId` — a partial object is dropped, which is the
- * point (`SECURITY.md` -> Remote Control), so fixtures have to be real records.
+ * shape, not just `hostId` — a partial object is dropped, which is the point
+ * (`SECURITY.md` -> Remote Control), so fixtures have to be real records. The
+ * two E2E fields are base64url of exactly 32 bytes, i.e. 43 characters, and a
+ * fixture shorter than that is dropped rather than tested.
  */
-function aclRecord(hostId: string, devicePublicKey: string) {
+function aclRecord(hostId: string, client: string) {
+  const pad = (text: string): string => text.padEnd(43, 'A').slice(0, 43);
   return {
     hostId,
     accountId: 'owner',
     passkeyCredentialId: 'cred-1',
     passkeyPublicKeyHash: 'hash-1',
-    devicePublicKey,
+    clientStaticPublicKey: pad(`client-${client}`),
+    deliveryId: pad(`delivery-${client}`),
     approvedAt: 1,
     approvedBy: 'host-user',
     label: 'iPhone Safari',
@@ -323,7 +334,7 @@ describe('host state store', () => {
     const target = new VsCodeHostStateStore(context);
     const enrollment = {
       serverUrl: 'https://relay.dormouse.sh',
-      hostId: 'host-1',
+      hostId: HOST_ID,
       hostToken: 'token',
       origin: 'https://relay.dormouse.sh',
       rpId: 'relay.dormouse.sh',
@@ -345,20 +356,20 @@ describe('host state store', () => {
     const { context, store } = fakeContext();
     const enrollment = {
       serverUrl: 'https://relay.dormouse.sh',
-      hostId: 'host-1',
+      hostId: HOST_ID,
       hostToken: 'token',
       origin: 'https://relay.dormouse.sh',
       rpId: 'relay.dormouse.sh',
     };
     store.secrets.set('dormouse.remote-host.enrollment', JSON.stringify(enrollment));
     store.global.set(
-      'dormouse.remote-host.acl.host-1',
-      JSON.stringify([aclRecord('host-1', 'device-1')]),
+      `dormouse.remote-host.acl.${HOST_ID}`,
+      JSON.stringify([aclRecord(HOST_ID, 'client-1')]),
     );
 
     const target = new VsCodeHostStateStore(context);
     expect(await target.loadEnrollment()).toEqual(enrollment);
-    expect(await target.loadAcl('host-1')).toEqual([aclRecord('host-1', 'device-1')]);
+    expect(await target.loadAcl(HOST_ID)).toEqual([aclRecord(HOST_ID, 'client-1')]);
   });
 
   it('forgets a failed keychain read instead of memoizing it', async () => {
@@ -370,7 +381,7 @@ describe('host state store', () => {
     const { context, store } = fakeContext();
     const enrollment = {
       serverUrl: 'https://relay.dormouse.sh',
-      hostId: 'host-1',
+      hostId: HOST_ID,
       hostToken: 'token',
       origin: 'https://relay.dormouse.sh',
       rpId: 'relay.dormouse.sh',
@@ -399,7 +410,7 @@ describe('host state store', () => {
     const target = new VsCodeHostStateStore(context, () => changes.push(1));
     const enrollment = {
       serverUrl: 'https://relay.dormouse.sh',
-      hostId: 'host-1',
+      hostId: HOST_ID,
       hostToken: 'token',
       origin: 'https://relay.dormouse.sh',
       rpId: 'relay.dormouse.sh',
@@ -435,13 +446,14 @@ describe('host state store', () => {
     const target = new VsCodeHostStateStore(context);
 
     await target.saveAcl('host-1', [
-      aclRecord('host-2', 'device-2') as never,
-      aclRecord('host-1', 'device-1') as never,
+      aclRecord('host-2', 'client-2') as never,
+      aclRecord('host-1', 'client-1') as never,
       // Right host, wrong shape: the guard is the whole record, not just the
-      // hostId, because `adopt` can hand this store records it never wrote.
-      { hostId: 'host-1', devicePublicKey: 42 } as never,
+      // hostId, because `globalState` is hand-editable and a record written
+      // before the end-to-end cutover has neither E2E field.
+      { hostId: 'host-1', clientStaticPublicKey: 42 } as never,
     ]);
-    expect(await target.loadAcl('host-1')).toEqual([aclRecord('host-1', 'device-1')]);
+    expect(await target.loadAcl('host-1')).toEqual([aclRecord('host-1', 'client-1')]);
 
     store.secrets.set('dormouse.remote-host.enrollment', 'not json');
     expect(await target.loadEnrollment()).toBeNull();
@@ -454,8 +466,8 @@ describe('host state store', () => {
     const pending: PendingGlobalWrite[] = [];
     const { context } = fakeContext({ deferGlobalWrites: pending });
     const target = new VsCodeHostStateStore(context);
-    const first = [aclRecord('host-1', 'device-1')] as never;
-    const second = [aclRecord('host-1', 'device-1'), aclRecord('host-1', 'device-2')] as never;
+    const first = [aclRecord('host-1', 'client-1')] as never;
+    const second = [aclRecord('host-1', 'client-1'), aclRecord('host-1', 'client-2')] as never;
 
     const firstSave = target.saveAcl('host-1', first);
     const secondSave = target.saveAcl('host-1', second);
@@ -613,7 +625,7 @@ describe('remote host service glue', () => {
       ENROLLMENT_KEY,
       JSON.stringify({
         serverUrl: 'https://relay.example.com',
-        hostId: 'host-1',
+        hostId: HOST_ID,
         hostToken: 'token',
         origin: 'https://relay.example.com',
         rpId: 'relay.example.com',
@@ -737,7 +749,7 @@ describe('remote host service glue', () => {
       ENROLLMENT_KEY,
       JSON.stringify({
         serverUrl: 'https://relay.example.com',
-        hostId: 'host-1',
+        hostId: HOST_ID,
         hostToken: 'token',
         origin: 'https://relay.example.com',
         rpId: 'relay.example.com',

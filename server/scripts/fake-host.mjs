@@ -1,17 +1,21 @@
 /**
  * Manual smoke tool: enroll a Host against a running selfhost server and run one
- * auto-approving `FakeHost`, logging every handshake event. This is the headless
- * stand-in for the standalone Host (slice 4) — handy for driving a real Pocket
- * page through pairing + connect without a laptop app.
+ * auto-approving `FakeHost`, logging every ceremony event. This is the headless
+ * stand-in for the standalone Host — handy for driving a real Pocket page
+ * through pairing + connect without a laptop app.
  *
  *   DORMOUSE_SETUP_PASSWORD=... node scripts/fake-host.mjs http://localhost:3000
  *
  * The server URL (default http://localhost:3000) is argv[2]. The setup password
  * comes from DORMOUSE_SETUP_PASSWORD (same secret that gates enrollment). Build
  * first (`pnpm --filter server build`) so `server-lib-common` is compiled.
+ *
+ * It prints one pairing URL — the text a real Host would draw as a QR — and
+ * mints a fresh one whenever the previous invitation is spent, so a phone can
+ * pair repeatedly against it.
  */
 
-import { API_ROUTES } from 'server-lib-common';
+import { API_ROUTES, formatPairingInvitationUrl, generateNoiseKeyPair } from 'server-lib-common';
 
 import { FakeHost } from '../test/harness/fake-host.mjs';
 
@@ -28,7 +32,7 @@ async function main() {
   const res = await fetch(`${serverUrl}${API_ROUTES.hostEnroll}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ password, label }),
+    body: JSON.stringify({ password }),
   });
   if (!res.ok) {
     console.error(`enroll failed: ${res.status} ${await res.text()}`);
@@ -43,28 +47,53 @@ async function main() {
     hostId: host.hostId,
     origin: host.origin,
     rpId: host.rpId,
+    label,
     autoApprove: true,
+    requireUserVerification: host.requireUserVerification,
+    // Minted locally and never sent to the Server, exactly as a real Host does.
+    noiseStaticKeyPair: await generateNoiseKeyPair(),
   });
 
+  /** Mint a Server setup token + a local invitation and print the code's URL. */
+  const showCode = async () => {
+    const minted = await fetch(`${serverUrl}${API_ROUTES.hostSetupToken}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${host.hostToken}` },
+    });
+    if (!minted.ok) {
+      console.error(`setup-token mint failed: ${minted.status} ${await minted.text()}`);
+      return;
+    }
+    const { token, expiresAt } = await minted.json();
+    const invitation = await fakeHost.mintInvitation({ setupToken: token, expiresAt });
+    console.log(`\npairing code (paste into Pocket):\n  ${formatPairingInvitationUrl(host.origin, invitation)}\n`);
+  };
+
   fakeHost.on('open', () => console.log('host socket open — waiting for clients'));
-  fakeHost.on('pair', ({ clientId, request }) =>
-    console.log(`pair ← ${clientId} label=${request?.requestedLabel} (auto-approving)`),
+  fakeHost.on('pairing-request', ({ clientId, label: asked }) =>
+    console.log(`pairing ← ${clientId} label=${asked} (auto-approving)`),
   );
   fakeHost.on('paired', ({ clientId }) => console.log(`paired ✓ ${clientId}`));
-  fakeHost.on('connect', ({ clientId }) => console.log(`connect ← ${clientId} (issued challenge)`));
-  fakeHost.on('decision', ({ clientId, allowed, failures }) =>
-    console.log(`decision → ${clientId} allowed=${allowed}${allowed ? '' : ` ${failures?.join(',')}`}`),
+  fakeHost.on('denied', ({ clientId, code }) => console.log(`denied → ${clientId} ${code}`));
+  fakeHost.on('decision', ({ clientId, allowed, code }) =>
+    console.log(`decision → ${clientId} allowed=${allowed}${allowed ? '' : ` ${code}`}`),
   );
   fakeHost.on('msg', ({ clientId, request, response }) =>
-    console.log(`msg ${clientId} ${request.method} → ok=${response.ok}`),
+    console.log(`api ${clientId} ${request.method} → ok=${response.ok}`),
   );
   fakeHost.on('client-gone', ({ clientId }) => console.log(`client-gone ${clientId}`));
+  fakeHost.on('invitation', ({ inviteId, state }) => {
+    console.log(`invitation ${inviteId} → ${state}`);
+    // A spent code is no use to the next phone; show another.
+    if (state === 'consumed' || state === 'expired') void showCode();
+  });
   fakeHost.on('close', (ev) => {
     console.log(`host socket closed (${ev?.code ?? '?'}) — exiting`);
     process.exit(0);
   });
 
   await fakeHost.ready;
+  await showCode();
 
   process.on('SIGINT', () => {
     console.log('\nshutting down');

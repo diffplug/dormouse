@@ -52,11 +52,11 @@ function makeLink(command: (cmd: string, params?: unknown) => Promise<unknown>) 
 /** Frozen only where a setup code's countdown has to read the same every run. */
 const NOW = Date.now();
 
-/** A `setupQr` answer: both of the QR's secrets in the URL, plus its mint id. */
+/** A `setupQr` answer: the QR's secrets in the URL, plus the invitation's id. */
 function qr(over: Partial<SetupQrResult> = {}): SetupQrResult {
   return {
-    url: 'https://laptop.tailnet.ts.net/#setup?token=abc123&nonce=xyz789',
-    mintId: 'mint-1',
+    url: 'https://laptop.tailnet.ts.net/#pair?token=abc123&nonce=xyz789',
+    inviteId: 'invite-1',
     expiresAt: NOW + 300_000,
     ...over,
   };
@@ -528,7 +528,7 @@ describe('RemoteControlSection', () => {
     expect(buttonLabelled('New code')).toBeTruthy();
   });
 
-  it('stops offering the code the phone redeemed, and only that one', async () => {
+  it('stops offering the invitation the phone used, and only that one', async () => {
     const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : enrolled()));
     platform = { remoteHost: link };
     await render();
@@ -537,20 +537,74 @@ describe('RemoteControlSection', () => {
     await settleQrChunk();
     expect(container.querySelector('svg[role="img"]')).toBeTruthy();
 
-    // Another window's code was scanned. Every open panel hears the frame, so
-    // one that is showing a different mint has to ignore it.
+    // Another window's code was scanned. Every open panel hears the event, so
+    // one that is showing a different invitation has to ignore it.
     await act(async () => {
-      link.emit('setupTokenRedeemed', { name: 'setupTokenRedeemed', mintId: 'someone-elses' });
+      link.emit('invitation', {
+        name: 'invitation',
+        inviteId: 'someone-elses',
+        state: 'reserved',
+      });
     });
     expect(container.querySelector('svg[role="img"]')).toBeTruthy();
 
-    // The redemption happens on the phone; the Server tells the Host that
-    // minted the token, which is the only way this panel can learn of it.
+    // The scan happens on the phone, so the Host's own invitation state is the
+    // only way this panel can learn of it. `reserved` is the flip that matters:
+    // a phone has completed the handshake against this code, so it is spent
+    // whatever the person at the laptop decides next.
     await act(async () => {
-      link.emit('setupTokenRedeemed', { name: 'setupTokenRedeemed', mintId: 'mint-1' });
+      link.emit('invitation', { name: 'invitation', inviteId: 'invite-1', state: 'reserved' });
     });
     expect(container.querySelector('svg[role="img"]')).toBeNull();
     expect(text()).toContain('This code is used up.');
+  });
+
+  it('does not call a dropped invitation a scan', async () => {
+    // The Host discards every held invitation when its relay socket goes, so a
+    // wifi blip must not tell the user to finish on a phone that never asked
+    // (`docs/specs/remote-security-model.md` → Pairing).
+    const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : enrolled()));
+    platform = { remoteHost: link };
+    await render();
+
+    await act(async () => buttonLabelled('Set up a phone')!.click());
+    await settleQrChunk();
+    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
+
+    await act(async () => {
+      link.emit('invitation', { name: 'invitation', inviteId: 'invite-1', state: 'dropped' });
+    });
+    expect(container.querySelector('svg[role="img"]')).toBeNull();
+    expect(text()).toContain('no longer valid');
+    expect(text()).not.toContain('Scanned.');
+    // And the way out is still one click away.
+    expect(buttonLabelled('New code')).toBeTruthy();
+  });
+
+  // Four states reach this panel and only two of them mean a phone is waiting.
+  // `expired` in particular — the refresh timer runs late whenever the window
+  // is backgrounded or the laptop wakes from sleep — must not read as a scan
+  // (`docs/specs/remote-security-model.md` → Pairing).
+  it.each([
+    ['reserved', 'This code is used up.', 'nobody scanned it'],
+    ['consumed', 'This code is used up.', 'nobody scanned it'],
+    ['dropped', 'This code is no longer valid — nobody scanned it.', 'Scanned.'],
+    ['expired', 'This code expired — nobody scanned it.', 'Scanned.'],
+  ])('reads a %s invitation as the fact it is', async (state, expected, forbidden) => {
+    const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : enrolled()));
+    platform = { remoteHost: link };
+    await render();
+    await act(async () => buttonLabelled('Set up a phone')!.click());
+    await settleQrChunk();
+
+    await act(async () => {
+      link.emit('invitation', { name: 'invitation', inviteId: 'invite-1', state });
+    });
+    expect(container.querySelector('svg[role="img"]')).toBeNull();
+    expect(text()).toContain(expected);
+    expect(text()).not.toContain(forbidden);
+    // And the way out is always one click away.
+    expect(buttonLabelled('New code')).toBeTruthy();
   });
 
   it('drops the panel when the machine enrolls somewhere else under it', async () => {
@@ -586,8 +640,8 @@ describe('RemoteControlSection', () => {
       if (cmd === 'setupQr') {
         minted += 1;
         return qr({
-          url: `https://x/#setup?token=t${minted}&nonce=n${minted}`,
-          mintId: `mint-${minted}`,
+          url: `https://x/#pair?token=t${minted}&nonce=n${minted}`,
+          inviteId: `invite-${minted}`,
           expiresAt: Date.now() + ttlMs,
         });
       }
@@ -767,8 +821,8 @@ describe('RemoteControlSection', () => {
       await act(async () => {
         release!(
           qr({
-            url: 'https://x/#setup?token=t2&nonce=n2',
-            mintId: 'mint-2',
+            url: 'https://x/#pair?token=t2&nonce=n2',
+            inviteId: 'invite-2',
             expiresAt: Date.now() + 300_000,
           }),
         );
@@ -800,7 +854,7 @@ describe('RemoteControlSection', () => {
     // live code rendering into a panel the user already dismissed.
     await act(async () => buttonLabelled('Done')!.click());
     await act(async () => {
-      release(qr({ url: 'https://x/#setup?token=late&nonce=late' }));
+      release(qr({ url: 'https://x/#pair?token=late&nonce=late' }));
     });
     await settleQrChunk();
 
@@ -816,7 +870,7 @@ describe('RemoteControlSection', () => {
     let oversized = true;
     const link = makeLink(async (cmd) => {
       if (cmd !== 'setupQr') return enrolled();
-      return oversized ? qr({ url: `https://x/#setup?token=${'A'.repeat(5000)}` }) : qr();
+      return oversized ? qr({ url: `https://x/#pair?token=${'A'.repeat(5000)}` }) : qr();
     });
     // React logs a caught render error; catching it is the point of the test.
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -850,7 +904,7 @@ describe('RemoteControlSection', () => {
   it('pins the story stub both panel states are driven from', async () => {
     // The `SetupPhoneQr` / `SetupPhoneRedeemed` stories drive the section
     // through `makeStubRemoteHostLink` and nothing else, so a fixture that
-    // stopped answering `setupQr` — or stopped firing the redeemed event —
+    // stopped answering `setupQr` — or stopped firing the invitation event —
     // would fail only in Chromatic. The states themselves are covered above, so
     // this pins the fixture rather than re-rendering them.
     const link = makeStubRemoteHostLink({
@@ -859,13 +913,20 @@ describe('RemoteControlSection', () => {
     });
     expect(await link.command('setupQr')).toMatchObject({ expiresAt: NOW + 300_000 });
 
-    let redeemed = 0;
-    makeStubRemoteHostLink({ status: enrolledStatus(), setupRedeemed: true }).on(
-      'setupTokenRedeemed',
-      () => redeemed++,
-    );
+    // The used-up state has to name the invitation the stub's own `setupQr`
+    // answered, and carry a state other than `live` — the panel ignores both a
+    // stranger's id and a code that is still good.
+    const used = setupQrResult();
+    const events: unknown[] = [];
+    makeStubRemoteHostLink({
+      status: enrolledStatus(),
+      setupQr: used,
+      setupRedeemed: true,
+    }).on('invitation', (data) => void events.push(data));
     await Promise.resolve();
-    expect(redeemed).toBe(1);
+    expect(events).toEqual([
+      { name: 'invitation', inviteId: used.inviteId, state: 'reserved' },
+    ]);
   });
 
   it('re-reads the status when the service announces a change', async () => {

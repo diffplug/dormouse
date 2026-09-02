@@ -1,30 +1,13 @@
 /**
  * The webview's end of the Host service (`lib/src/host/remote/service.ts`): it
- * forwards console commands, mirrors the pairing queue, reports rings, and
- * hands over a Host it persisted before the service existed. It starts no
- * `RemoteHost` of its own — there is no webview-resident mode left to fall back
- * to, so a host with no service behind it gets nothing at all.
+ * forwards console commands, mirrors the pairing queue, and reports rings. It
+ * starts no `RemoteHost` of its own and holds no Host state — there is no
+ * webview-resident mode left to fall back to, so a host with no service behind
+ * it gets nothing at all.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PairingRequest } from 'server-lib-common';
 import type { RemoteHostLink } from '../../lib/platform/types';
-
-const enrollmentState = vi.hoisted(() => ({
-  current: {
-    serverUrl: 'https://relay.example.ts.net',
-    hostId: 'host-1',
-    hostToken: 'token',
-    origin: 'https://relay.example.ts.net',
-    rpId: 'relay.example.ts.net',
-  } as {
-    serverUrl: string;
-    hostId: string;
-    hostToken: string;
-    origin: string;
-    rpId: string;
-  } | null,
-}));
 
 const pushWatch = vi.hoisted(() => ({
   fire: undefined as ((sessionId: string, title: string) => void) | undefined,
@@ -55,20 +38,6 @@ vi.mock('../../lib/push-devices', () => ({
     pushRefreshers.cleared += 1;
   },
 }));
-const aclState = vi.hoisted(() => ({
-  records: [] as unknown[],
-  cleared: [] as string[],
-}));
-vi.mock('./acl', () => ({
-  loadAclRecords: () => aclState.records,
-  clearAclRecords: (hostId: string) => void aclState.cleared.push(hostId),
-}));
-vi.mock('./enrollment', () => ({
-  getEnrollment: () => enrollmentState.current,
-  clearEnrollment: () => {
-    enrollmentState.current = null;
-  },
-}));
 
 let remoteHostLink: RemoteHostLink | undefined;
 // A host with `remoteHost` has a Host service behind it; without one (the
@@ -85,15 +54,6 @@ beforeEach(() => {
   pushWatch.loads.length = 0;
   pushRefreshers.current.length = 0;
   pushRefreshers.cleared = 0;
-  aclState.records = [];
-  aclState.cleared.length = 0;
-  enrollmentState.current = {
-    serverUrl: 'https://relay.example.ts.net',
-    hostId: 'host-1',
-    hostToken: 'token',
-    origin: 'https://relay.example.ts.net',
-    rpId: 'relay.example.ts.net',
-  };
   // The console hook lives on globalThis and outlives `vi.resetModules()`;
   // leaving it set would make the next test call the previous module's closure.
   delete (globalThis as { dormouseRemoteHost?: unknown }).dormouseRemoteHost;
@@ -104,14 +64,6 @@ afterEach(() => {
 });
 
 // --- Bridge mode ---
-
-const PAIRING_REQUEST = {
-  accountId: 'owner',
-  passkeyCredentialId: 'cred-1',
-  passkeyPublicKeyHash: 'hash-1',
-  devicePublicKey: 'device-1',
-  requestedLabel: 'iPhone Safari',
-} satisfies PairingRequest;
 
 interface FakeLink extends RemoteHostLink {
   commands: Array<{ cmd: string; params?: unknown }>;
@@ -150,16 +102,12 @@ function fakeLink(): FakeLink {
  */
 async function installBridge(link: FakeLink) {
   link.results.status ??= { enrolled: true };
-  // A store that survives a restart, which is what lets the webview drop its
-  // own copy of an adopted Host.
-  link.results.adopt ??= { persisted: true };
   remoteHostLink = link;
   vi.resetModules();
   const mod = await import('./activation');
   const pairing = await import('./pairing-approval');
   mod.installRemoteHostConsoleHook();
-  // The adoption round trip gates the queue seed, and the `status` seed gates
-  // the ring watch.
+  // The `status` seed gates the ring watch and the queue seed behind it.
   await settle();
   return { mod, pairing };
 }
@@ -211,90 +159,29 @@ describe('remote host bridge mode', () => {
     });
   });
 
-  it('hands a webview-persisted Host over once, then clears its keys', async () => {
-    aclState.records = [{ hostId: 'host-1' }];
-    const link = fakeLink();
-    await installBridge(link);
-
-    const adopt = link.commands.find((c) => c.cmd === 'adopt');
-    expect(adopt?.params).toMatchObject({
-      enrollment: { hostId: 'host-1' },
-      aclRecords: [{ hostId: 'host-1' }],
-    });
-    // The service is holding it somewhere durable now, so this copy is obsolete
-    // — leaving it would be a second ACL for the same hostId.
-    expect(enrollmentState.current).toBeNull();
-    expect(aclState.cleared).toEqual(['host-1']);
-  });
-
-  it('keeps the local copy when the service could not persist it', async () => {
-    // The dev harness with no state directory holds the Host in memory only:
-    // this copy is the one that survives the process, and clearing it would
-    // lose the Host at the next launch.
-    aclState.records = [{ hostId: 'host-1' }];
-    const link = fakeLink();
-    link.results.adopt = { persisted: false };
-    await installBridge(link);
-
-    expect(link.commands.some((c) => c.cmd === 'adopt')).toBe(true);
-    expect(enrollmentState.current).not.toBeNull();
-    expect(aclState.cleared).toEqual([]);
-  });
-
-  it('adopts nothing when the webview never was a Host', async () => {
-    enrollmentState.current = null;
-    const link = fakeLink();
-    await installBridge(link);
-    expect(link.commands.some((c) => c.cmd === 'adopt')).toBe(false);
-    expect(aclState.cleared).toEqual([]);
-  });
-
-  it('keeps the local copy when the hand-off fails', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const link = fakeLink();
-    link.command = async (cmd, params) => {
-      link.commands.push({ cmd, params });
-      if (cmd === 'adopt') throw new Error('sidecar is down');
-      return link.results[cmd];
-    };
-    await installBridge(link);
-
-    expect(enrollmentState.current).not.toBeNull();
-    expect(aclState.cleared).toEqual([]);
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
-  });
-
   it('mirrors the service queue and answers by clientId', async () => {
     const link = fakeLink();
     const { pairing } = await installBridge(link);
 
     link.emit('pairing-queue', {
       name: 'pairing-queue',
-      queue: [
-        {
-          clientId: 'c1',
-          pairingId: 'p1',
-          request: PAIRING_REQUEST,
-          verified: false,
-          requestedAt: 5,
-        },
-      ],
+      queue: [{ clientId: 'c1', pairingId: 'p1', label: 'iPhone Safari', requestedAt: 5 }],
     });
 
     const head = pairing.getPairingApprovalSnapshot()[0]!;
     expect(head).toMatchObject({
       clientId: 'c1',
       pairingId: 'p1',
-      request: PAIRING_REQUEST,
-      verified: false,
+      label: 'iPhone Safari',
       requestedAt: 5,
     });
 
-    head.approve('Ned iPhone');
+    // The digits a person read off the phone and typed here; only the Host
+    // knows what they should be, so the webview can do nothing but echo them.
+    head.approve('47');
     expect(link.commands.at(-1)).toEqual({
       cmd: 'approve',
-      params: { clientId: 'c1', pairingId: 'p1', label: 'Ned iPhone' },
+      params: { clientId: 'c1', pairingId: 'p1', code: '47' },
     });
     head.deny();
     expect(link.commands.at(-1)).toEqual({
@@ -311,8 +198,7 @@ describe('remote host bridge mode', () => {
       queue: ids.map((clientId) => ({
         clientId,
         pairingId: `pairing-${clientId}`,
-        request: PAIRING_REQUEST,
-        verified: false,
+        label: 'iPhone Safari',
         requestedAt: 5,
       })),
     });
@@ -330,36 +216,21 @@ describe('remote host bridge mode', () => {
   });
 
   it('re-mirrors a request the service replaced under the same clientId', async () => {
-    // The service coalesces a re-sent pair by clientId, so the same id can come
-    // to name a different device. Approving authorizes what the *service*
-    // holds, so a mirror that skipped the update would show device #1 while
-    // Approve wrote device #2 (docs/specs/remote-security-model.md).
+    // The service coalesces a re-sent pairing by clientId, so the same id can
+    // come to name a different device. Confirming authorizes what the *service*
+    // holds, so a mirror that skipped the update would show device #1 while the
+    // typed digits authorized device #2 (docs/specs/remote-security-model.md).
     const link = fakeLink();
     const { pairing } = await installBridge(link);
-    const second = {
-      ...PAIRING_REQUEST,
-      devicePublicKey: 'device-2',
-      requestedLabel: 'Android Chrome',
-    };
 
     link.emit('pairing-queue', {
       name: 'pairing-queue',
-      queue: [
-        {
-          clientId: 'c1',
-          pairingId: 'p1',
-          request: PAIRING_REQUEST,
-          verified: false,
-          requestedAt: 5,
-        },
-      ],
+      queue: [{ clientId: 'c1', pairingId: 'p1', label: 'iPhone Safari', requestedAt: 5 }],
     });
     const stale = pairing.getPairingApprovalSnapshot()[0]!;
     link.emit('pairing-queue', {
       name: 'pairing-queue',
-      queue: [
-        { clientId: 'c1', pairingId: 'p2', request: second, verified: false, requestedAt: 9 },
-      ],
+      queue: [{ clientId: 'c1', pairingId: 'p2', label: 'Android Chrome', requestedAt: 9 }],
     });
 
     const head = pairing.getPairingApprovalSnapshot();
@@ -367,16 +238,16 @@ describe('remote host bridge mode', () => {
     expect(head[0]).toMatchObject({
       clientId: 'c1',
       pairingId: 'p2',
-      request: second,
+      label: 'Android Chrome',
       requestedAt: 9,
     });
 
-    // A click already queued from the old modal stays bound to the old ticket;
-    // the service can reject it instead of applying it to the replacement.
-    stale.approve();
+    // Digits already typed against the old modal stay bound to the old ticket;
+    // the service can reject them instead of applying them to the replacement.
+    stale.approve('47');
     expect(link.commands.at(-1)).toEqual({
       cmd: 'approve',
-      params: { clientId: 'c1', pairingId: 'p1', label: undefined },
+      params: { clientId: 'c1', pairingId: 'p1', code: '47' },
     });
   });
 
@@ -387,15 +258,7 @@ describe('remote host bridge mode', () => {
     const { pairing } = await installBridge(link);
     const snapshot = () => ({
       name: 'pairing-queue',
-      queue: [
-        {
-          clientId: 'c1',
-          pairingId: 'p1',
-          request: { ...PAIRING_REQUEST },
-          verified: false,
-          requestedAt: 5,
-        },
-      ],
+      queue: [{ clientId: 'c1', pairingId: 'p1', label: 'iPhone Safari', requestedAt: 5 }],
     });
 
     link.emit('pairing-queue', snapshot());
@@ -407,49 +270,16 @@ describe('remote host bridge mode', () => {
     // its ticket still has to replace the closures that answer the old one.
     link.emit('pairing-queue', {
       name: 'pairing-queue',
-      queue: [
-        {
-          clientId: 'c1',
-          pairingId: 'p2',
-          request: { ...PAIRING_REQUEST },
-          verified: false,
-          requestedAt: 5,
-        },
-      ],
+      queue: [{ clientId: 'c1', pairingId: 'p2', label: 'iPhone Safari', requestedAt: 5 }],
     });
     expect(pairing.getPairingApprovalSnapshot()[0]).not.toBe(first);
     expect(pairing.getPairingApprovalSnapshot()[0]!.pairingId).toBe('p2');
   });
 
-  it('carries the verified flag through to the modal', async () => {
-    // The flag decides which of the modal's two copies renders, and the mirror
-    // is the only path it travels: the Host strips the proof that produced it,
-    // so nothing downstream can re-derive it (docs/specs/remote-security-model.md).
-    const link = fakeLink();
-    const { pairing } = await installBridge(link);
-
-    link.emit('pairing-queue', {
-      name: 'pairing-queue',
-      queue: [
-        {
-          clientId: 'c1',
-          pairingId: 'p1',
-          request: PAIRING_REQUEST,
-          verified: true,
-          requestedAt: 5,
-        },
-      ],
-    });
-
-    const head = pairing.getPairingApprovalSnapshot()[0]!;
-    expect(head.verified).toBe(true);
-    expect((head.request as PairingRequest).setupProof).toBeUndefined();
-  });
-
   it('seeds the mirror, for a webview that reloaded mid-pairing', async () => {
     const link = fakeLink();
     link.results.pairingQueue = [
-      { clientId: 'c1', pairingId: 'p1', request: PAIRING_REQUEST, requestedAt: 5 },
+      { clientId: 'c1', pairingId: 'p1', label: 'iPhone Safari', requestedAt: 5 },
     ];
     const { pairing } = await installBridge(link);
 
@@ -464,7 +294,7 @@ describe('remote host bridge mode', () => {
     const link = fakeLink();
     link.results.status = { enrolled: false };
     link.results.pairingQueue = [
-      { clientId: 'c1', pairingId: 'p1', request: PAIRING_REQUEST, requestedAt: 5 },
+      { clientId: 'c1', pairingId: 'p1', label: 'iPhone Safari', requestedAt: 5 },
     ];
     const { pairing } = await installBridge(link);
     expect(link.commands.some((c) => c.cmd === 'pairingQueue')).toBe(false);

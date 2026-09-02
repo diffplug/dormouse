@@ -414,20 +414,15 @@ same sequence is documented against the dev loop in `docs/specs/server.md`
 `localhost:3000`, and the password comes from the installer rather than the
 command line.
 
-1. **The setup password.** Have the user run `manage show-password` in their own
+**The Host comes first**: a passkey is registered only off a code an enrolled
+Host displays (`docs/specs/server.md` → Setup tokens and the pairing QR).
+
+1. **The setup password.** Only needed if the offer card in step 2 is gone or
+   the Host is elsewhere. Have the user run `manage show-password` in their own
    terminal when they are ready. It warns before printing. Do not ask for the
    value, and do not print it into the conversation.
 
-2. **The passkey.** On the phone, open `https://<laptop>.<tailnet>.ts.net` in
-   Safari. A browser that has never been here leads with the setup fields:
-   password + label create the passkey and sign them in, no disclosure to open.
-   The passkey is bound to this exact origin. If they want push
-   notifications, add Pocket to the Home Screen *before* signing in and do all
-   of this inside the installed app — iOS delivers Web Push only there, and the
-   install is a separate storage partition that would otherwise need its own
-   pairing (`docs/specs/pocket-app.md` → Installable web app).
-
-3. **The Host.** On this same machine, launch the standalone or VS Code build
+2. **The Host.** On this same machine, launch the standalone or VS Code build
    made with `DORMOUSE_REMOTE_CONNECT_SRC` (see Prerequisites) and open
    **Settings → Remote control** — the sliders icon at the far right of the
    baseboard. Until its 24-hour limit or another Host enrollment, the offer
@@ -447,10 +442,21 @@ command line.
    refusal verbatim. That is the expected symptom of a stock build, not a server
    problem.
 
-4. **A real session.** On the phone: Hosts → **Pair** → approve the modal that
-   appears on the laptop → **Connect** (one biometric prompt) → pick a pane and
-   type. Only now have HTTPS proxying, the WebSocket upgrade, and the security
-   flow been exercised together.
+3. **The phone.** In **Settings → Remote control**, press **Set up a phone**
+   for a pairing code. On the phone, open `https://<laptop>.<tailnet>.ts.net` in
+   Safari; a browser that has never been here leads with **Scan a Host QR**.
+   Scanning (or pasting) that code creates the passkey and signs them in — there
+   is no password to type on the phone — bound to this exact origin. For push,
+   add Pocket to the Home Screen *before* scanning and do all of this inside the
+   installed app: iOS delivers Web Push only there, and the install is a
+   separate storage partition that would otherwise need its own pairing
+   (`docs/specs/pocket-app.md` → Installable web app, which also covers what
+   happens if they reach for the phone's own camera instead).
+
+4. **A real session.** The scan runs straight into pairing: read the two digits
+   off the phone, type them into the modal on the laptop, then **Connect** (one
+   biometric prompt) → pick a pane and type. Only now have HTTPS proxying, the
+   WebSocket upgrade, and the security flow been exercised together.
 
 5. **State.** Confirm `account.json`, `hosts.json`, and `vapid.json` now exist
    in `state/` (plus `push-subscriptions.json` if push was enabled). Record

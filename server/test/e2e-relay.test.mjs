@@ -24,121 +24,31 @@ import {
   utf8Encode,
 } from 'server-lib-common';
 
-import { enrollHost, freshApp, ownerSession, startServer, until } from './helpers.mjs';
-import { FakeClient } from './harness/fake-client.mjs';
-import { FakeHost } from './harness/fake-host.mjs';
-import { newE2eId } from './harness/e2e.mjs';
+import { until } from './helpers.mjs';
+import { e2eFixture, establish, flip, newE2eId, watch } from './harness/e2e.mjs';
 
 const EMPTY = new Uint8Array(0);
-
-/** A live server, one Host with a Noise static, and one Client that pins it. */
-async function e2eFixture() {
-  const created = await freshApp();
-  const server = await startServer(created);
-  const { body: enrollment } = await enrollHost(created.app);
-  const hostStatic = await generateNoiseKeyPair();
-  const clientStatic = await generateNoiseKeyPair();
-  const host = new FakeHost({
-    serverUrl: server.wsUrl,
-    hostToken: enrollment.hostToken,
-    hostId: enrollment.hostId,
-    origin: created.origin,
-    rpId: created.rpId,
-    noiseStaticKeyPair: hostStatic,
-  });
-  await host.ready;
-  const { sessionToken } = await ownerSession(created.app);
-  const client = new FakeClient({
-    serverUrl: server.wsUrl,
-    sessionToken,
-    hostId: enrollment.hostId,
-    staticKeyPair: clientStatic,
-    hostStaticPublicKey: hostStatic.publicKey,
-  });
-  await client.ready;
-  const opened = [host, client];
-  return {
-    app: created.app,
-    server,
-    host,
-    client,
-    enrollment,
-    hostStatic,
-    clientStatic,
-    /** A second Host socket for the same enrollment — models a Host restart. */
-    async replacementHost() {
-      const replacement = new FakeHost({
-        serverUrl: server.wsUrl,
-        hostToken: enrollment.hostToken,
-        hostId: enrollment.hostId,
-        origin: created.origin,
-        rpId: created.rpId,
-        noiseStaticKeyPair: hostStatic,
-      });
-      await replacement.ready;
-      opened.push(replacement);
-      return replacement;
-    },
-    async secondHost() {
-      const { body } = await enrollHost(created.app, { label: 'Second' });
-      const second = new FakeHost({
-        serverUrl: server.wsUrl,
-        hostToken: body.hostToken,
-        hostId: body.hostId,
-        origin: created.origin,
-        rpId: created.rpId,
-        noiseStaticKeyPair: hostStatic,
-      });
-      await second.ready;
-      opened.push(second);
-      return second;
-    },
-    close: async () => {
-      for (const conn of opened) conn.close();
-      await server.close();
-    },
-  };
-}
-
-/** Record the Host's e2e outcomes so a test can await one. */
-function watch(host) {
-  const receipts = [];
-  const errors = [];
-  const opens = [];
-  host.on('e2e-receive', (ev) => receipts.push(ev));
-  host.on('e2e-error', (ev) => errors.push(ev));
-  host.on('e2e-open', (ev) => opens.push(ev));
-  return { receipts, errors, opens };
-}
-
-/** Flip one byte of a base64url ciphertext — what a hostile relay looks like. */
-function flip(ct, index = -1) {
-  const bytes = fromBase64Url(ct);
-  const at = index < 0 ? bytes.length + index : index;
-  bytes[at] ^= 0x01;
-  return toBase64Url(bytes);
-}
 
 /** Every frame the relay handled: what both peers sent and what it delivered. */
 function relayView(...peers) {
   return JSON.stringify(peers.flatMap((peer) => [...peer.sent, ...peer.frames]));
 }
 
-test('a connection ceremony handshakes and round-trips transport through the relay', async () => {
+test('an established session round-trips every transport kind through the relay', async () => {
   const fixture = await e2eFixture();
   const { host, client, clientStatic } = fixture;
-  const seen = watch(host);
+  const opens = [];
+  host.on('e2e-open', (ev) => opens.push(ev));
   try {
-    await client.open();
-    await until(() => seen.opens.length === 1);
-    const entry = seen.opens[0];
-
-    // Both sides agree on the transcript, and IK authenticated the Client's
-    // static: this is the key the ACL conjunction checks in stage 4.
+    await establish(fixture);
+    // The connection handshake: both sides agree on the transcript, and IK
+    // authenticated the Client's static — the key the ACL conjunction matched.
+    const entry = opens.at(-1);
     assert.deepEqual(entry.session.handshakeHash, client.session.handshakeHash);
-    assert.deepEqual(entry.clientStaticPublicKey, clientStatic.publicKey);
+    assert.equal(entry.clientStaticPublicKey, toBase64Url(clientStatic.publicKey));
 
     // Client → Host, all three kinds.
+    const seen = watch(host);
     const payload = utf8Encode('terminal.write rides in here');
     client.sendKeepalive();
     client.sendControl({ presence: 'proof' });
@@ -151,15 +61,17 @@ test('a connection ceremony handshakes and round-trips transport through the rel
     // Host → Client, on the other direction's cipher state.
     const reply = utf8Encode('terminal.data rides back');
     host.e2eSendApp(entry.clientId, reply);
-    const frame = await client.waitFor((f) => f.t === 'e2e' && f.step === 'transport');
+    const frame = await client.nextTransport();
     assert.equal(frame.hostId, fixture.enrollment.hostId, 'the relay stamps hostId');
     assert.deepEqual(client.receiveFrame(frame).messages, [reply]);
 
-    // An e2e ceremony is not an authorization: the legacy `msg` pipe stays shut.
+    // The envelope is the whole surface: an established session opens no other
+    // pipe, and every other frame type is simply unknown.
     const hostFramesBefore = host.frames.length;
     client.sendFrame({ t: 'msg', data: { forbidden: true } });
-    assert.equal(await client.quiet(), true);
-    assert.equal(host.frames.length, hostFramesBefore, 'e2e establishes no msg session');
+    const refusal = await client.waitFor((f) => f.t === 'error');
+    assert.equal(refusal.error, 'unknown frame type');
+    assert.equal(host.frames.length, hostFramesBefore, 'nothing else reaches the Host');
   } finally {
     await fixture.close();
   }
@@ -294,10 +206,9 @@ test('a reordered transport frame poisons the session', async () => {
 test('a 100 KiB application message chunks across frames and reassembles byte-exact', async () => {
   const fixture = await e2eFixture();
   const { host, client } = fixture;
-  const seen = watch(host);
   try {
-    await client.open();
-    await until(() => seen.opens.length === 1);
+    await establish(fixture);
+    const seen = watch(host);
 
     const message = new Uint8Array(100 * 1024);
     for (let i = 0; i < message.length; i++) message[i] = (i * 131) & 0xff;
@@ -347,17 +258,17 @@ test('an application message declaring more than 1 MiB is a hard failure', async
 test('keepalives and control messages are one fixed size each', async () => {
   const fixture = await e2eFixture();
   const { host, client } = fixture;
-  const seen = watch(host);
   try {
-    await client.open();
-    await until(() => seen.opens.length === 1);
+    await establish(fixture);
+    const seen = watch(host);
+    const before = client.sent.length;
 
     client.sendKeepalive();
     client.sendControl({ outcome: 'approved' });
     client.sendControl({ outcome: 'denied', reason: 'x'.repeat(500) });
     await until(() => seen.receipts.length === 3);
 
-    const [keepalive, small, large] = client.sent.filter((f) => f.step === 'transport');
+    const [keepalive, small, large] = client.sent.slice(before).filter((f) => f.step === 'transport');
     // kind byte + 32 zero bytes + tag, and kind byte + 4096 + tag.
     assert.equal(fromBase64Url(keepalive.ct).length, 1 + 32 + 16);
     assert.equal(fromBase64Url(small.ct).length, 1 + 4096 + 16);
@@ -442,18 +353,19 @@ test('a Host e2e frame for a Client bound elsewhere is not forwarded', async () 
 test('the relay is opaque: no plaintext, static, or handshake hash crosses it', async () => {
   const fixture = await e2eFixture();
   const { host, client, hostStatic, clientStatic } = fixture;
-  const seen = watch(host);
   const MARKER = 'DORMOUSE-PLAINTEXT-ORACLE-9f3a';
+  const opens = [];
+  host.on('e2e-open', (ev) => opens.push(ev));
   try {
-    await client.open();
-    await until(() => seen.opens.length === 1);
-    const entry = seen.opens[0];
+    await establish(fixture);
+    const seen = watch(host);
+    const entry = opens.at(-1);
 
     client.sendControl({ note: MARKER });
     client.sendApp(utf8Encode(`app ${MARKER}`));
     host.e2eSendApp(entry.clientId, utf8Encode(`reply ${MARKER}`));
     await until(() => seen.receipts.length === 2);
-    await client.waitFor((f) => f.t === 'e2e' && f.step === 'transport');
+    await client.nextTransport();
 
     const view = relayView(client, host);
     assert.equal(view.includes(MARKER), false, 'no plaintext crosses the relay');

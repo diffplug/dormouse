@@ -38,9 +38,11 @@
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 
 import {
+  base64UrlLength,
   concatBytes,
   constantTimeEqual,
   fromBase64Url,
+  isExactBase64Url,
   toBase64Url,
   utf8Encode,
 } from './bytes.js';
@@ -223,6 +225,18 @@ export async function mintNoiseStaticKeyPair(
 }
 
 /**
+ * Whether a value is base64url of a raw 32-byte X25519 public key.
+ *
+ * **Shape only, and required before a key is pinned.** A peer that names a
+ * static of any other length is one whose key nothing can import, so a store
+ * that keeps it holds a pin no later handshake can ever be built from — the
+ * failure surfaces at the *next* attempt, far from the outcome that caused it.
+ */
+export function isNoisePublicKey(value: unknown): value is string {
+  return isExactBase64Url(value, base64UrlLength(NOISE_KEY_LENGTH));
+}
+
+/**
  * Whether a persisted {@link NoiseStaticKeyMaterial} is well-formed enough to
  * hand back to {@link importNoiseStaticPrivateKey}: both halves base64url, the
  * public one 32 bytes, the private one a PKCS#8-sized blob.
@@ -245,6 +259,47 @@ export function isNoiseStaticMaterial(publicKey: string, privateKeyPkcs8: string
     );
   } catch {
     return false;
+  }
+}
+
+/**
+ * The public half of a persisted static, derived from the private one.
+ *
+ * Whatever first consumes a Host static checks that its halves correspond: two
+ * halves of different keypairs pass {@link isNoiseStaticMaterial}, which is
+ * shape only, and a mismatch would read as a *changed Host identity* at every
+ * paired Client rather than as the corrupt state file it is
+ * (`docs/specs/remote-security-model.md` → Identities and storage).
+ *
+ * The private key is imported extractable for exactly this call and discarded;
+ * the copy the Host actually holds still comes from
+ * {@link importNoiseStaticPrivateKey}. JWK is the only WebCrypto route from an
+ * X25519 private key to its public point — `deriveBits` yields a shared secret,
+ * never the point — and `x` is the raw public key in unpadded base64url, which
+ * is the encoding this module already persists.
+ */
+export async function deriveNoiseStaticPublicKey(
+  privateKeyPkcs8: string,
+  crypto: WebCryptoLike = getWebCrypto(),
+): Promise<string> {
+  try {
+    const temporary = await crypto.subtle.importKey(
+      'pkcs8',
+      fromBase64Url(privateKeyPkcs8),
+      X25519_ALGORITHM,
+      true,
+      ['deriveBits'],
+    );
+    const jwk = await crypto.subtle.exportKey('jwk', temporary);
+    if (typeof jwk.x !== 'string' || fromBase64Url(jwk.x).length !== NOISE_KEY_LENGTH) {
+      throw new Error('no public point');
+    }
+    // Re-encoded rather than returned as the runtime spelled it: a JWK `x` is
+    // base64url by contract, but only this round trip makes it the same
+    // canonical string the enrollment stored.
+    return toBase64Url(fromBase64Url(jwk.x));
+  } catch {
+    throw new NoiseError('X25519 static public key could not be derived');
   }
 }
 
@@ -475,6 +530,8 @@ export class NoiseHandshake {
   #remoteEphemeral: Uint8Array | undefined;
   #firstMessageDone = false;
   #failed = false;
+  /** True from the first line of {@link NoiseHandshake.#step} to its last. */
+  #inFlight = false;
   #session: NoiseSession | undefined;
 
   private constructor(
@@ -557,14 +614,33 @@ export class NoiseHandshake {
     });
   }
 
+  /**
+   * Run one handshake message, at most one at a time.
+   *
+   * **A second call while one is in flight fails the handshake**, rather than
+   * queueing behind it. A step is a dozen awaited WebCrypto calls that mutate
+   * the symmetric state in order; two interleaved would mix the same key twice
+   * or read `h` between two of its writes, producing a transcript neither peer
+   * can reproduce. The message-order guards above cannot see that, because they
+   * read `#firstMessageDone` — which the step sets at its *end*. Failing is the
+   * whole recovery: a caller reaching here has a bug, and the handshake is
+   * cheap to redo but impossible to resynchronize.
+   */
   async #step(run: () => Promise<Uint8Array>): Promise<Uint8Array> {
     if (this.#failed) throw new NoiseError('handshake already failed');
     if (this.#session !== undefined) throw new NoiseError('handshake already complete');
+    if (this.#inFlight) {
+      this.#failed = true;
+      throw new NoiseError('handshake step is already in flight');
+    }
+    this.#inFlight = true;
     try {
       return await run();
     } catch (error) {
       this.#failed = true;
       throw error instanceof NoiseError ? error : new NoiseError('handshake failed');
+    } finally {
+      this.#inFlight = false;
     }
   }
 

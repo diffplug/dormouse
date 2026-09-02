@@ -138,9 +138,9 @@ three rules of the shared store contract (`docs/specs/server.md` → "Host side"
   passes an empty value when it cannot create one — the fallback store still
   *holds* both values in memory (an empty read would de-pair each device the
   moment it was approved, since the ACL a Host authorizes against is the one it
-  just wrote), warns once, and reports `persistent: false`, which `adopt` relays
-  so the webview keeps its own copy of the Host; a store omitting the flag would
-  read as durable and cost the webview that copy. The browser dev harness is
+  just wrote), warns once, and reports `persistent: false` so the dev loop knows
+  the Host dies with the process; a store omitting the flag would read as
+  durable and say nothing. The browser dev harness is
   *not* this case: its per-run temp directory makes a dev enrollment live and die
   with the run.
 

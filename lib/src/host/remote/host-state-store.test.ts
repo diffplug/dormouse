@@ -50,7 +50,7 @@ import { createEphemeralHostStateStore, FileHostStateStore } from './host-state-
 
 const ENROLLMENT: HostEnrollment = {
   serverUrl: 'https://relay.example',
-  hostId: 'host-1',
+  hostId: 'S6kyjjqOS7mw3l8ye89U3g',
   hostToken: 'tok',
   origin: 'https://relay.example',
   rpId: 'relay.example',
@@ -62,13 +62,23 @@ const ENROLLMENT: HostEnrollment = {
   noiseStaticPublicKey: toBase64Url(new Uint8Array(32)),
 };
 
-function aclRecord(hostId: string, devicePublicKey: string): HostAclRecord {
+/**
+ * Base64url of exactly 32 bytes is 43 characters, and `isHostAclRecord` checks
+ * both E2E fields for that length exactly — the records here go back through it
+ * on every load, so a shorter fixture would simply vanish.
+ */
+function id32(name: string): string {
+  return name.padEnd(43, '0');
+}
+
+function aclRecord(hostId: string, client: string): HostAclRecord {
   return {
     hostId,
     accountId: 'owner',
     passkeyCredentialId: 'cred',
     passkeyPublicKeyHash: 'hash',
-    devicePublicKey,
+    clientStaticPublicKey: id32(`static-${client}`),
+    deliveryId: id32(`delivery-${client}`),
     approvedAt: 1,
     approvedBy: 'host-user',
     label: 'iPhone',
@@ -95,7 +105,7 @@ describe('FileHostStateStore', () => {
   it('round-trips the enrollment and the ACL across instances', async () => {
     const store = new FileHostStateStore(dir);
     await store.saveEnrollment(ENROLLMENT);
-    await store.saveAcl('host-1', [aclRecord('host-1', 'device-1')]);
+    await store.saveAcl('host-1', [aclRecord('host-1', 'client-1')]);
 
     const reopened = new FileHostStateStore(dir);
     const loaded = await reopened.loadEnrollment();
@@ -115,9 +125,9 @@ describe('FileHostStateStore', () => {
 
   it('keeps ACLs apart by hostId', async () => {
     const store = new FileHostStateStore(dir);
-    await store.saveAcl('host-1', [aclRecord('host-1', 'device-1')]);
-    await store.saveAcl('host-2', [aclRecord('host-2', 'device-2')]);
-    expect(await store.loadAcl('host-1')).toEqual([aclRecord('host-1', 'device-1')]);
+    await store.saveAcl('host-1', [aclRecord('host-1', 'client-1')]);
+    await store.saveAcl('host-2', [aclRecord('host-2', 'client-2')]);
+    expect(await store.loadAcl('host-1')).toEqual([aclRecord('host-1', 'client-1')]);
     // A record filed under the wrong host is dropped rather than failing the
     // whole load — `HostAcl.fromRecords` would reject the mismatch.
     await writeFile(
@@ -130,7 +140,7 @@ describe('FileHostStateStore', () => {
   it('clearing the enrollment leaves the records alone', async () => {
     const store = new FileHostStateStore(dir);
     await store.saveEnrollment(ENROLLMENT);
-    await store.saveAcl('host-1', [aclRecord('host-1', 'device-1')]);
+    await store.saveAcl('host-1', [aclRecord('host-1', 'client-1')]);
     await store.clearEnrollment();
 
     const reopened = new FileHostStateStore(dir);
@@ -187,12 +197,12 @@ describe('FileHostStateStore', () => {
   it('leaves no temp file behind, and overwrites in place', async () => {
     const store = new FileHostStateStore(dir);
     await store.saveEnrollment(ENROLLMENT);
-    await store.saveEnrollment({ ...ENROLLMENT, hostId: 'host-2' });
+    await store.saveEnrollment({ ...ENROLLMENT, hostId: 'LnExjA-KKeADf221aLlYyw' });
 
     const { readdir } = await import('node:fs/promises');
     expect(await readdir(dir)).toEqual(['remote-host.json']);
     const parsed = JSON.parse(await readFile(file(), 'utf8')) as { enrollment: HostEnrollment };
-    expect(parsed.enrollment.hostId).toBe('host-2');
+    expect(parsed.enrollment.hostId).toBe('LnExjA-KKeADf221aLlYyw');
   });
 
   it('serializes concurrent saves instead of interleaving their writes', async () => {
@@ -204,7 +214,7 @@ describe('FileHostStateStore', () => {
     const store = new FileHostStateStore(dir);
 
     await Promise.all([
-      store.saveAcl('host-1', [aclRecord('host-1', 'device-1')]),
+      store.saveAcl('host-1', [aclRecord('host-1', 'client-1')]),
       store.saveEnrollment(ENROLLMENT),
     ]);
 
@@ -233,8 +243,8 @@ describe('FileHostStateStore', () => {
     await writeFile(blocker, 'not a directory');
 
     await expect(store.saveEnrollment(ENROLLMENT)).rejects.toBeTruthy();
-    // A failed flush is not a successful in-memory save. Adoption reads this
-    // value to decide whether the webview may discard its legacy copy.
+    // A failed flush is not a successful in-memory save: a change reaches later
+    // reads only once its atomic rename has succeeded.
     expect(await store.loadEnrollment()).toBeNull();
     await rm(blocker, { force: true });
     await expect(store.saveEnrollment(ENROLLMENT)).resolves.toBeUndefined();
@@ -248,14 +258,14 @@ describe('FileHostStateStore', () => {
     // nothing we invented, de-pairing every device for good.
     const seeded = new FileHostStateStore(dir);
     await seeded.saveEnrollment(ENROLLMENT);
-    await seeded.saveAcl('host-1', [aclRecord('host-1', 'device-1')]);
+    await seeded.saveAcl('host-1', [aclRecord('host-1', 'client-1')]);
     const before = await readFile(file(), 'utf8');
 
     const store = new FileHostStateStore(dir);
     fsProbe.readFileError = Object.assign(new Error('EACCES'), { code: 'EACCES' });
     await expect(store.loadEnrollment()).rejects.toMatchObject({ code: 'EACCES' });
     await expect(store.loadAcl('host-1')).rejects.toMatchObject({ code: 'EACCES' });
-    await expect(store.saveEnrollment({ ...ENROLLMENT, hostId: 'host-2' })).rejects.toMatchObject({
+    await expect(store.saveEnrollment({ ...ENROLLMENT, hostId: 'LnExjA-KKeADf221aLlYyw' })).rejects.toMatchObject({
       code: 'EACCES',
     });
     await expect(store.clearEnrollment()).rejects.toMatchObject({ code: 'EACCES' });
@@ -300,7 +310,7 @@ describe('createEphemeralHostStateStore', () => {
     const store = createEphemeralHostStateStore((message) => warnings.push(message));
 
     await store.saveEnrollment(ENROLLMENT);
-    await store.saveAcl('host-1', [aclRecord('host-1', 'device-1')]);
+    await store.saveAcl('host-1', [aclRecord('host-1', 'client-1')]);
     expect(await store.loadEnrollment()).toEqual(ENROLLMENT);
     expect(await store.loadAcl('host-1')).toHaveLength(1);
     expect(warnings).toHaveLength(1);
@@ -309,14 +319,17 @@ describe('createEphemeralHostStateStore', () => {
     expect(await store.loadEnrollment()).toBeNull();
   });
 
-  it('declares that nothing here survives, so an adopting webview keeps its copy', () => {
+  it('says out loud whether a write survives the process', () => {
+    // The two stores have to disagree here: the dev harness holds the Host in
+    // memory only, and a store read as durable when it is not would let a
+    // caller believe an enrollment outlives a restart.
     expect(createEphemeralHostStateStore(() => {}).persistent).toBe(false);
     expect(new FileHostStateStore(dir).persistent).toBe(true);
   });
 
   it('files records under their own host, like the real store', async () => {
     const store = createEphemeralHostStateStore(() => {});
-    await store.saveAcl('host-1', [aclRecord('other', 'device-1')]);
+    await store.saveAcl('host-1', [aclRecord('other', 'client-1')]);
     expect(await store.loadAcl('host-1')).toEqual([]);
   });
 });

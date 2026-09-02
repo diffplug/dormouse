@@ -12,7 +12,7 @@ import {
 import { DEFAULT_PAIRING_TTL_MS } from 'server-lib-common';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
 import type { RemoteHostConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
-import type { RemoteHostStatus } from '../remote/host/remote-host';
+import type { InvitationState, RemoteHostStatus } from '../remote/host/remote-host';
 import {
   clearRemoteHostEnrollment,
   enrollOfferRemoteHost,
@@ -22,7 +22,7 @@ import {
   reconnectRemoteHost,
   refreshRemoteHostStatus,
   subscribeToRemoteHostStatus,
-  subscribeToSetupTokenRedeemed,
+  subscribeToInvitation,
 } from '../remote/host/host-status-store';
 
 /**
@@ -138,15 +138,38 @@ function useBusyAction() {
  * Everything the phone-setup panel can be showing, as one value.
  *
  * `null` is the closed panel. The rest are open: waiting on a mint, holding a
- * live code, spent, or refused. `minting` carries the code being replaced when
- * there is one, so an auto-refresh never blanks a QR a camera is pointed at.
+ * live code, spent, dropped, or refused. `minting` carries the code being
+ * replaced when there is one, so an auto-refresh never blanks a QR a camera is
+ * pointed at.
+ *
+ * **`spent`, `dropped`, and `expired` are three different facts and read
+ * differently.** `spent` means a phone completed the handshake and the next
+ * step is on that phone; `dropped` means this Host discarded the code
+ * un-scanned — the relay socket went, or a newer mint evicted it; `expired`
+ * means its TTL ran out before anyone scanned it. Only the first sends the user
+ * to a phone (`docs/specs/remote-security-model.md` → Pairing).
  */
 type SetupQrState =
   | null
   | { phase: 'minting'; prev?: SetupQrResult }
   | { phase: 'live'; qr: SetupQrResult }
   | { phase: 'spent' }
+  | { phase: 'dropped' }
+  | { phase: 'expired' }
   | { phase: 'failed'; message: string };
+
+/**
+ * How each terminal invitation state reads in the panel. Exhaustive over
+ * `InvitationState` minus `live`, so a state added to the Host cannot quietly
+ * fall through to "Scanned" — which is the one sentence that must never be
+ * shown for a code nobody touched.
+ */
+const TERMINAL_PHASE: Record<Exclude<InvitationState, 'live'>, 'spent' | 'dropped' | 'expired'> = {
+  reserved: 'spent',
+  consumed: 'spent',
+  dropped: 'dropped',
+  expired: 'expired',
+};
 
 /**
  * The phone-setup panel's whole lifecycle: mint on open, replace the code before
@@ -212,21 +235,23 @@ function useSetupQr() {
     return () => clearTimeout(timer);
   }, [state, mint]);
 
-  // The Server announces a spent token to the Host that minted it
-  // (`docs/specs/server.md` → Relay), which is the only way this panel can know
-  // its code was used: the redemption happens on the phone. Only for the mint
-  // this panel is showing — a second window offering a different code stays
-  // live — and bumping the sequence makes it terminal, so a mint already in
-  // flight cannot paint a code over it.
-  const mintId = displayedQr(state)?.mintId;
+  // The Host reports its own invitation states, which is the only way this
+  // panel can know its code was used: the scan happens on the phone. Only for
+  // the invitation this panel is showing — a second window offering a different
+  // code stays live — and bumping the sequence makes it terminal, so a mint
+  // already in flight cannot paint a code over it.
+  const inviteId = displayedQr(state)?.inviteId;
   useEffect(() => {
-    if (mintId === undefined) return;
-    return subscribeToSetupTokenRedeemed((redeemed) => {
-      if (redeemed !== mintId) return;
+    if (inviteId === undefined) return;
+    return subscribeToInvitation((changed, invitationState) => {
+      // `reserved` is the flip that matters: a phone has completed the
+      // handshake against this code, so it is spent whatever the person at the
+      // laptop decides next. `live` is the only state that keeps the panel.
+      if (changed !== inviteId || invitationState === 'live') return;
       mintSeq.current++;
-      setState({ phase: 'spent' });
+      setState({ phase: TERMINAL_PHASE[invitationState] });
     });
-  }, [mintId]);
+  }, [inviteId]);
 
   return { state, mint, close };
 }
@@ -626,10 +651,31 @@ function SetupPhonePanel({
       {state.phase === 'spent' ? (
         <>
           <div className="mt-1 text-sm leading-relaxed text-foreground">
-            Scanned. Finish on the phone — it registers a passkey, then asks to pair, and that
-            request interrupts you here.
+            Scanned. Finish on the phone — it asks to pair, and that request interrupts you here
+            with a two-digit code to type.
           </div>
           <div className="mt-1 text-xs text-muted">This code is used up.</div>
+        </>
+      ) : state.phase === 'dropped' ? (
+        // Nobody scanned it: this machine let it go. Saying "scanned" here sends
+        // the user to a phone that never asked.
+        <>
+          <div className="mt-1 text-sm leading-relaxed text-foreground">
+            This code is no longer valid — nobody scanned it.
+          </div>
+          <div className="mt-1 text-xs text-muted">
+            This machine lost its connection to the server, or replaced the code. Get a new one.
+          </div>
+        </>
+      ) : state.phase === 'expired' ? (
+        // Nobody scanned this one either — it simply ran out, which happens
+        // whenever the refresh timer runs late: a backgrounded window, a laptop
+        // waking from sleep.
+        <>
+          <div className="mt-1 text-sm leading-relaxed text-foreground">
+            This code expired — nobody scanned it.
+          </div>
+          <div className="mt-1 text-xs text-muted">Get a new one.</div>
         </>
       ) : shown ? (
         <>
