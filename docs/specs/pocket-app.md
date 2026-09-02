@@ -220,10 +220,10 @@ rather than mirror them. `lib/vite.sw.config.ts` bundles it as one classic IIFE
 at the stable, unhashed `dist-pocket/sw.js`, after the app build and with
 `emptyOutDir: false` so the app's own clean cannot wipe it; registration stays
 `register('/sw.js', { scope: '/' })` with **no `type: 'module'`**, pinned by
-`service-worker.test.ts`. `lib/scripts/assert-pocket-worker.mjs` runs last in
-`build:pocket` and fails the build on a missing worker, a sibling chunk, a
-top-level `import`/`export`, or a dynamic-import loader — a module-syntax worker
-installs on nothing, and push is the one feature no desktop exercises. **Root
+`service-worker.test.ts`. **A worker that is not one classic self-contained
+script fails the build**: `lib/scripts/assert-pocket-worker.mjs` runs last in
+`build:pocket` and owns the exact refusals, because a module-syntax worker
+installs on nothing and push is the one feature no desktop exercises. **Root
 `pnpm build` runs `build:pocket`**, so CI checks a real bundler output rather
 than only the assertion's own fixtures (`assert-pocket-worker.test.ts`).
 `dev:pocket` bundles the same config in memory per `/sw.js` request, so the dev
@@ -258,12 +258,10 @@ server serves what production would emit.
 **The installed app is a separate storage partition from the browser tab.** On
 iOS, cookies, `localStorage`, and IndexedDB are not shared between Safari and a
 Home Screen web app, so the install mints its own per-Host statics and is a
-*different Client* than the same phone's Safari tab.
-
-**The install needs its own pairing approval on each Host** — the one
-consequence that survives, and the security model working as designed: signing
-in is not enough to reach a machine, and a Client the user has not approved
-there must not inherit access
+*different Client* than the same phone's Safari tab. **It therefore needs its
+own pairing approval on each Host** — the security model working as designed:
+signing in is not enough to reach a machine, and a Client the user has not
+approved there must not inherit access
 ([remote-security-model.md](./remote-security-model.md)).
 
 Signing in *is* enough to ask. `SigninFinishResponse` returns the asserted

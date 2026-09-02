@@ -494,9 +494,11 @@ with `hostId` stamped from the socket), shapes in
 `client-gone`; anything else it receives is ignored.
 
 - **An `init` binds** the Client socket to the named Host, replacing whatever
-  binding it held; the previous Host gets `client-gone`.
+  binding it held; the previous live Host gets `client-gone` first, so its
+  pairing UI, remote-api sessions, and watchers are disposed immediately.
 - **A `transport` frame is forwarded only within that binding**, in either
-  direction. One outside it is dropped.
+  direction. One outside it is dropped — including a late reply from a Host the
+  Client has since left.
 - **Never parsed, never remembered, never authorized.** The relay does not
   decode `ct`, keeps no Noise state, holds no policy of its own, and has no
   notion of "authorized" — no gate, no challenge memory, nothing verified before
@@ -521,13 +523,6 @@ contract rather than a log line: the evicted Host keys its stand-down on it
 *replacement* time and not only on disconnect is load-bearing — the displaced
 socket's own close event is a no-op here, and the new Host process has a fresh
 ACL and no memory of them.
-
-The relay keeps one current Host binding per Client socket. Host-originated
-frames are routed only when the frame comes from that current Host; late replies
-from a previous Host are ignored. When a Client socket binds to a different
-Host, the relay sends `client-gone` to the previous live Host before replacing
-the binding, so Host-side pairing UI, remote-api sessions, and watchers are
-disposed immediately.
 
 Source of truth: `server/src/relay.ts` (`registerHost`), and `isE2eClientFrame` /
 `isE2eHostFrame` in `server-lib-common/src/remote/wire.ts`, written for a Host to
@@ -1021,28 +1016,15 @@ nothing typed on the phone (Setup tokens, Host side,
 One settled decision constrains what is left: **the stock allowlist stays
 `*.dormouse.sh`-only** ("Where a Host may reach a relay server") —
 self-hosting keeps requiring a source build, deliberately, so nothing may depend
-on widening it. The remaining phone-side items — in-app scanning and the end of
-the setup-password path — are absorbed by the **e2e-client-host** scope
-([remote-security-model.md](./remote-security-model.md) `## Future`), which also
-rules out the one-minute resume token that used to be staged here: every new
-session requires fresh WebAuthn presence, by design.
+on widening it. The phone-side items are done: scanning happens in Pocket
+([pocket-app.md](./pocket-app.md)) and nothing on the phone takes the setup
+password. Nor is a resume token staged — every new session requires fresh
+WebAuthn presence, by design
+([remote-security-model.md](./remote-security-model.md) -> Presence proofs).
 
 Unstaged but adjacent: origin migration (re-binding the passkey and
 enrollments after a Tailscale node rename), and the revocation UI staged in
 [remote-security-model.md](./remote-security-model.md) `## Future`.
-
-**Owned here for the e2e-client-host scope** — what remains of the syntax,
-routes, and state the trust model in
-[remote-security-model.md](./remote-security-model.md) `## Future` requires. The
-QR grammar and its parser, the relay envelope, the reauth and retire routes, the
-delivery-keyed push routes, the Host side, the sealed push envelope, and the
-deletion of every legacy path all landed in that scope's stages 4 to 6 (above),
-the malicious-relay harness with them.
-
-- **Operator recovery** (`SELF_HOST.md`): a Host whose enrollment predates the
-  scope shows the enrollment form again; re-run the installer only if the offer
-  is wanted — it mints one solely while `state/hosts.json` is absent, so remove
-  that file first or enroll with the setup password.
 
 **Scope: saas-multitenant** — the server-side hurdles between today's
 single-owner selfhost server and a multi-tenant SaaS on `*.dormouse.sh`,

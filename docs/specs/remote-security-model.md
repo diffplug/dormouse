@@ -16,14 +16,12 @@ Client (Dormouse Pocket), Host (Dormouse Terminal), and coordinating Server:
 
 The separation is what makes account-level compromise insufficient for host
 access: the Host rejects any Client it has not locally approved
-([Security Guarantees](#security-guarantees)).
+([Security Guarantees](#security-guarantees)). `SECURITY.md` -> "Remote Control"
+is this model's audited face — the properties load-bearing enough to be checked
+nightly, and the gaps left open (revocation, the audit trail).
 
-`SECURITY.md` -> "Remote Control" is this model's audited face: it names the
-properties load-bearing enough to be checked nightly, and states plainly which
-gaps are open (revocation, the audit trail).
-
-The primitives — the Noise suite, the transport framing, presence proofs, the
-invitation grammar, the ceremony messages, the ACL — live in
+Every primitive here — the Noise suite, the transport framing, presence proofs,
+the invitation grammar, the ceremony messages, the ACL — lives in
 `server-lib-common/src/security/`: runtime-agnostic modules shared verbatim by
 the Server, the Host module in `lib`, and the Pocket client, so the three sides
 cannot disagree on what a valid credential is. The concrete message sequences
@@ -40,10 +38,9 @@ Dormouse enables a user to control a Host (Dormouse Terminal) from a Client
 Primary goals:
 
 * No native mobile application required
-* Strong protection against account compromise
-* Strong protection against newly-added credentials
-* Strong protection against server compromise, including confidentiality of
-  everything the two endpoints say to each other
+* Strong protection against account compromise, newly-added credentials, and
+  server compromise — including confidentiality of everything the two endpoints
+  say to each other
 * Explicit host-controlled authorization
 * Long-lived trusted client devices
 * Modern passkey-based authentication
@@ -68,10 +65,10 @@ Non-goals:
   establishes and terminates control sessions. **The Host is the final
   authority for access decisions.**
 * **Server** — the coordinating service: account management, passkey
-  registration, presence-challenge minting, and routing. It is not the final
-  authority for Host access, and cannot read what it routes. (Revocation today
-  is local state editing plus a Host restart — [server.md](./server.md)
-  Guardrails; propagating one is staged in [Future](#future).)
+  registration, presence-challenge minting, and routing. Not the final authority
+  for Host access, and it cannot read what it routes. Revocation today is local
+  state editing plus a Host restart ([server.md](./server.md) Guardrails);
+  propagating one is staged in [Future](#future).
 
 ## Trust Model
 
@@ -88,17 +85,21 @@ Dormouse separates:
 **No single layer is sufficient to gain access** — a successful connection
 requires all of them to agree.
 
+**Exactly two endpoints are trusted: the distributed Host binaries and the exact
+served Pocket artifact** — an operator serving modified Pocket code is outside
+the model, as are a compromised device and XSS in the Pocket origin. **The
+Server is trusted with nothing**: it may drop, delay, reorder, or refuse
+traffic, and must gain no plaintext and no authorization by doing so.
+
 ## Passkeys
 
 Passkeys prove fresh user presence: every pairing and every connection carries
 one WebAuthn assertion, verified by the Host inside the encrypted channel.
 
-Passkeys are frequently *synchronized* credentials — iCloud Keychain, Google
-Password Manager, platform authenticators — so a single passkey may appear on
-multiple physical devices:
-
-> Passkeys are treated as user credentials, not device identities. A passkey
-> authenticates a user account; it grants access to no Host.
+> **Passkeys are user credentials, not device identities.** A passkey
+> authenticates a user account; it grants access to no Host. Synchronized
+> credentials — iCloud Keychain, Google Password Manager — put the same passkey
+> on many physical devices, and that changes nothing here.
 
 **Presence, or verification.** The default demand is the authenticator's
 user-*presence* flag. `DORMOUSE_REQUIRE_USER_VERIFICATION=true` raises it to user
@@ -150,10 +151,9 @@ the Server cannot unilaterally grant access.
 
 `HostAclRecord` binds the Host and account to one passkey credential and public
 key hash, one Client static public key, a fresh 256-bit `deliveryId`, approval
-metadata, and a nullable revocation time. Its canonical schema and behavior
-live in `server-lib-common/src/security/acl.ts`; the Host service persists it
-through `HostStateStore` — a 0600 file in standalone, `globalState` in VS Code —
-never on the Server ([server.md](./server.md)).
+metadata, and a nullable revocation time. It is persisted through
+`HostStateStore` — a 0600 file in standalone, `globalState` in VS Code —
+**never on the Server** ([server.md](./server.md)).
 
 **Authorization is the conjunction, on one record.** `HostAcl.authorize`
 reports a miss (`passkey-not-paired`, `client-not-paired`, `pairing-mismatch`)
@@ -162,20 +162,24 @@ record. Halves on different records are not authorization, and a passkey added
 to the account after pairing grants nothing until a new local approval.
 
 **The two E2E fields are checked for exact length on read, and that is the whole
-of the Host-ACL version.** `isHostAclRecord` + `filterAclRecords`
-(`lib/src/remote/host/acl.ts`) drop anything malformed or belonging to another
-`hostId` before it can reach the conjunction — which also drops every record
-written before the end-to-end cutover, since those carry a device key and
-neither E2E field. There is no migration reader: a Host reads an empty ACL and
-every phone pairs again. That is hygiene, not authorization — every field is
-attacker-choosable by anything that can write the store at all; the local
-approval that minted the record is the authorization.
+of the Host-ACL version.** `isHostAclRecord` + `filterAclRecords` drop anything
+malformed or belonging to another
+`hostId` before it can reach the conjunction — including every record written
+before the end-to-end cutover, which carries neither field. **There is no
+migration reader**: such a Host reads an empty ACL and every phone pairs again.
+That check is hygiene, not authorization — every field is attacker-choosable by
+anything that can write the store at all, and the local approval that minted the
+record is the authorization.
 
 **Delivery IDs are opaque bearer capabilities**, minted by the Host at approval
-and known only to the record and the Client's own pinned copy. Possession
-authorizes registering, querying, and deleting a push subscription, and the
-Server never lists them to a session ([server.md](./server.md) -> Web Push).
-They are not an anonymity mechanism.
+and held only by the record and the Client's own pinned copy. **Possession is
+the whole authorization** for registering, querying, and deleting a push
+subscription, so the Server never lists one to a session
+([server.md](./server.md) -> Web Push). They are not an anonymity mechanism
+(rationale).
+
+Source of truth: `server-lib-common/src/security/acl.ts` (the schema and
+`HostAcl.authorize`) and `lib/src/remote/host/acl.ts` (the read filter).
 
 ## Presence proofs
 
@@ -195,33 +199,28 @@ connection share one verifier.
   verified binding.
 - **`POST /api/reauth/begin` takes a required, kind-tagged binding**, mints a
   one-use Server nonce, and answers the derived challenge under the RP ID, the
-  nonce, and the named credential as the sole `allowCredentials` entry. A
-  request with no binding, or no nonce to `finish`, is a 400: there is no arm
-  that answers a challenge nothing is bound to.
-  `finish` consumes the nonce, recomputes the challenge, verifies the assertion
-  against the stored key for that exact credential, and **extends nothing** —
-  not the session's life, not the relay socket.
+  nonce, and the named credential as the sole `allowCredentials` entry. **No
+  binding, or no nonce to `finish`, is a 400**: no arm answers a challenge
+  nothing is bound to. `finish` consumes the nonce, recomputes the challenge,
+  verifies the assertion against the stored key for that exact credential, and
+  **extends nothing** — not the session's life, not the relay socket.
 - **`PresenceProofV1`** carries the binding, the Server nonce, `accountId`, the
-  passkey credential id, the canonical SPKI public key, and the assertion. It
+  passkey credential id, the canonical SPKI public key, and the assertion, and
   travels only inside the first Client→Host transport payload. The Host
-  recomputes the challenge with the same builder, requires **every binding
-  field to equal what it built from its own state**, verifies RP ID, origin,
+  recomputes the challenge with the same builder, requires **every binding field
+  to equal what it built from its own state**, verifies RP ID, origin,
   presence/verification policy, and signature against the *presented* key, and
   hashes that key for the ACL. **A Server success flag is never evidence**, and
-  the verifier never throws: its input is attacker-supplied plaintext inside a
-  Node process that owns every PTY, so a rejection is an ordinary denial.
+  **the verifier never throws** — its input is attacker-supplied plaintext
+  inside the process that owns every PTY, so a rejection is an ordinary denial.
 - **Every proof is fresh and single-use.** A dropped transport, a consumed
   challenge, a failed handshake, or a later attempt requires a new handshake,
-  Host challenge, Server nonce, and authenticator operation. **A self-hosted
-  first run costs three authenticator prompts** — create the passkey, sign in,
-  prove presence for the pairing — and every pairing or connection after it
-  costs exactly one. That is the price of the Host verifying freshness itself
-  rather than trusting a Server-attested window.
-
+  Host challenge, Server nonce, and authenticator operation — one authenticator
+  prompt per pairing or connection, three on a self-hosted first run
+  (rationale).
 - **The Server session is authentication-plane only.** The bearer token stays
   memory-only with its absolute 12-hour life, is never reusable proof of
-  presence for a Host, and has no app-session signing key beside it: TLS covers
-  transit, so a second key would answer no threat in scope.
+  presence for a Host, and has no app-session signing key beside it (rationale).
 
 Source of truth: `presenceChallenge` / `isPresenceBinding` in
 `server-lib-common/src/security/presence.ts`, `verifyPresenceProof` in
@@ -238,17 +237,16 @@ newly-added passkey is not automatically trusted — the Client must still pair.
   and, locally, a 16-byte invitation id plus a one-use X25519 invitation
   keypair, bounded by the eight-invitation cap and expiring on the pairing TTL.
   The QR carries `hostId`, invitation id, expiry, setup token, and invitation
-  public key ([server.md](./server.md) owns the grammar) and deliberately omits
-  the Host's long-term static, its label, and any signature: a first-time Client
-  has no key to check a signature with, and the IK responder proves possession
-  of the scanned key.
+  public key ([server.md](./server.md) owns the grammar). **It carries no Host
+  static, no label, and no signature** (rationale).
 - **Invitation lifecycle, Host-owned.** `live` until a valid Noise message 1
   decrypts against it (`reserved`), then `consumed` by the terminal outcome,
   `expired` by TTL, or `dropped` when the Host discards it un-scanned — lost
   relay socket, or evicted at the cap. **Each invitation accepts one request**,
-  and a message 1 that fails to decrypt leaves it live. The QR panel renders that
-  state and offers a new code; **`dropped` must not read as a scan**, or it sends
-  the user to a phone that never asked. Redemption at the Server flips nothing.
+  a message 1 that fails to decrypt leaves it live, and redemption at the Server
+  flips nothing. The QR panel renders that state and offers a new code;
+  **`dropped` must not read as a scan**, or it sends the user to a phone that
+  never asked.
 - **IK against the invitation key.** Client initiator, fresh per-Host static as
   `s`, invitation public key as `rs`. **Both handshake payloads are empty**, and
   `Split` yields the pairing channel; no ACL, delivery ID, or resumable state
@@ -261,8 +259,7 @@ newly-added passkey is not automatically trusted — the Client must still pair.
   error or no code, cancel this request.* **The Host holds the expected code and
   never displays, mirrors, or retransmits it**; the webview echoes the typed
   digits with the immutable pairing ID, and the Host compares them without early
-  exit. **Exactly one attempt** — a two-digit secret with retries is not a
-  secret.
+  exit. **Exactly one attempt** — a two-digit secret with retries is none.
 - **Every terminal outcome consumes the invitation and erases handshake
   material**: a mismatch, denial, timeout on the pairing TTL, replacement by a
   newer pairing from the same Client, malformed input, or a failed proof.
@@ -271,23 +268,20 @@ newly-added passkey is not automatically trusted — the Client must still pair.
   `passkeyCredentialId`, `passkeyPublicKeyHash`, **the Client static IK
   authenticated** — never one the payload merely claimed — and a fresh
   `deliveryId`, then sends `PairingOutcomeV1`: success carries the Host static
-  public key, the local Host label, the paired passkey identifiers and hash, and
-  the `deliveryId`; denial carries only `user-denied`,
-  `confirmation-mismatch`, `presence-rejected`, `invitation-expired`,
-  `superseded`, or `host-error`. **Both use the same fixed padded control
-  message**, so approval and denial are one size on the wire.
-- **An unparseable first control is terminal**, not a retry: the invitation is
-  single-use and a person is about to be interrupted, so a peer that cannot
-  produce the one message this step expects spends the code.
-- **A resumed handshake re-checks that its invitation is still the live one.**
-  Minting runs off the frame chain and reaps synchronously, so a code can be
-  retired while message 1 is mid-flight; reserving it afterwards would report a
-  state change for one already gone.
+  public key, the local label, the paired passkey identifiers and hash, and the
+  `deliveryId`; denial carries only `user-denied`, `confirmation-mismatch`,
+  `presence-rejected`, `invitation-expired`, `superseded`, or `host-error`.
+  **Both use the same fixed padded control message**, so approval and denial are
+  one size on the wire.
+- **An unparseable first control is terminal**, not a retry: it spends the code
+  (rationale).
+- **A resumed handshake re-checks that its invitation is still the live one**,
+  because a code can be retired while message 1 is mid-flight (rationale).
 
-Pocket verifies the passkey fields match its ceremony and compares the Host
-static to any existing pin for that `hostId` — a mismatch is a terminal security
-error that keeps the old pin — before storing the record, and maps every denial
-to fixed copy rather than rendering Host- or relay-supplied text.
+Before storing the record, Pocket verifies the passkey fields match its ceremony
+and compares the Host static to any existing pin for that `hostId` — **a
+mismatch is a terminal security error that keeps the old pin** — and it maps
+every denial to fixed copy rather than rendering Host- or relay-supplied text.
 
 Source of truth: `RemoteHost.mintInvitation` / `#onPairingInit` /
 `#onPairingTransport` / `#approvePairing` in
@@ -318,8 +312,7 @@ Source of truth: `RemoteHost.mintInvitation` / `#onPairingInit` /
   clears pending state; **failures before `Split` yield only a generic outer
   error**, because there is no session to encrypt a denial on.
 - **Protocol-v1 rides inside**, as application messages on the session's byte
-  stream ([server.md](./server.md) -> E2E framing); nothing in protocol-v1
-  changes ([remote-api.md](./remote-api.md)).
+  stream ([remote-api.md](./remote-api.md) -> Transport).
 
 Pocket accepts an outcome only after decrypting it on the cipher state for the
 expected handshake hash, and a timer expiring without one reports unavailable
@@ -335,8 +328,8 @@ Source of truth: `RemoteHost.#onConnectionInit` / `#onConnectionTransport` /
 ## Push sealing
 
 A push is the one message the two endpoints exchange with no live session
-between them — the Host is awake, the phone is asleep, the Server is
-store-and-forward — so it gets its own construction.
+between them — Host awake, phone asleep, Server store-and-forward — so it gets
+its own construction.
 
 - **A fresh key per message, from the two pinned statics.**
   `ss = X25519(hostStatic, clientStatic)`, a random 32-byte salt,
@@ -348,18 +341,19 @@ store-and-forward — so it gets its own construction.
   a shared counter, and a phone may receive one push, none, or three, days apart
   and out of order. The ChaChaPoly binding is the pinned `@noble/ciphers` the
   suite already uses ([Noise suite](#noise-suite)).
-- **Confidentiality, not freshness.** Nothing binds a push to a moment and the
-  sink keeps no replay memory, so a Server that kept an envelope can re-deliver
-  it; accepted residual ([Residual metadata](#residual-metadata)).
+- **Confidentiality, not freshness**: nothing binds a push to a moment and the
+  sink keeps no replay memory, an accepted residual
+  ([Residual metadata](#residual-metadata)).
 - **The Host seals once per recipient**, to that ACL record's own Client static,
   from the nonextractable `CryptoKey` it holds — the delivery path is handed a
   seal capability, never the key. There is no group key.
 - **The Server forwards exactly `{ hostId, v, salt, ct }`**, `hostId` taken from
-  the sending Host's token, and validates only shape and bounds
-  ([server.md](./server.md) -> Web Push). **Copied field by field, never spread**
-  — the guard bounds those three and ignores any others, so a spread would let a
-  Host override the token's `hostId` and smuggle readable text through. **The
-  ciphertext bound** keeps the envelope inside Web Push's ~4 KB ceiling.
+  the sending Host's token, validating only shape and bounds — the ciphertext
+  bound is what keeps the envelope inside Web Push's ~4 KB ceiling
+  ([server.md](./server.md) -> Web Push). **Copied field by field, never
+  spread**: the guard bounds those three and ignores any others, so a spread
+  would let a Host override the token's `hostId` and smuggle readable text
+  through.
 - **The worker decrypts at the sink**, against the pinned record for that
   `hostId`, and re-bounds what it recovers. **Any failure shows the generic
   content-free notification**, because `userVisibleOnly` makes showing nothing a
@@ -379,42 +373,44 @@ Every bound is Host-enforced and independent of the relay; Server-side gates are
 defense in depth only, and Host correctness must survive a relay that omits
 `client-gone`, invents client IDs, or reorders frames.
 
-- `MAX_PENDING_PAIRINGS = 8`, `MAX_PENDING_CONNECTION_HANDSHAKES = 8`,
-  `MAX_ESTABLISHED_E2E_SESSIONS = 16`, `MAX_CLIENT_ID_LENGTH = 256`, and the
-  eight-invitation cap (`MAX_TOKENS_PER_HOST`, shared with the Server's own
-  bound on the setup tokens they ride with).
+| Bound | Value | Declared in |
+| --- | --- | --- |
+| `MAX_PENDING_PAIRINGS` | 8 | `server-lib-common/src/security/pairing.ts` |
+| `MAX_TOKENS_PER_HOST` | 8 | `server-lib-common/src/remote/wire.ts`, shared with the Server's setup-token cap (rationale) |
+| `MAX_CLIENT_ID_LENGTH` | 256 | `server-lib-common/src/remote/wire.ts` |
+| `MAX_PENDING_CONNECTION_HANDSHAKES` | 8 | `lib/src/remote/host/remote-host.ts` |
+| `MAX_ESTABLISHED_E2E_SESSIONS` | 16 | `server-lib-common/src/security/e2e-bounds.ts` |
+| `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` | 120 000 | same |
+| `E2E_INIT_BURST` / `E2E_INIT_REFILL_INTERVAL_MS` | 8 / 1 000 | same |
+
 - **At most one pairing, one connection, and one established session per relay
   client**; a replacement disposes its predecessor, whatever identity that
   predecessor belonged to (rationale). Pending pairings expire on the pairing
   TTL (a human is typing); pending connections on the challenge TTL.
 - **The session cap is checked at promotion and nowhere else**, after the
   presence proof and the ACL conjunction have both succeeded (rationale). A
-  Client static already holding a session **replaces its own** atomically,
-  whatever relay-chosen `clientId` the replacement arrived under; any other
-  identity at the cap receives the fixed-size `host-busy` and **evicts no other
-  entry** — reaching the cap is never what displaces an authorized phone. The
+  Client static already holding a session **replaces its own** atomically; any
+  other identity at the cap receives the fixed-size `host-busy` and **evicts no
+  other entry** — reaching the cap never displaces an authorized phone. The
   pending caps and the token bucket stay active at the cap.
-- **A Host-global token bucket gates the WebCrypto an accepted `init` buys**:
-  an eight-operation burst decaying to one per second, on the Host's own clock.
-  A frame it refuses is dropped exactly like one refused by shape, size, or a
-  pending cap, and answered with nothing at all (rationale).
+- **A Host-global token bucket gates the WebCrypto an accepted `init` buys**, on
+  the Host's own clock. A frame it refuses is dropped exactly like one refused
+  by shape, size, or a pending cap, and answered with nothing (rationale).
 - **A message is processed only for its exact pending ID and expected step.**
   Unknown IDs are dropped without decryption, established frames only decrypt at
   their session's next nonce, and **the first invalid ciphertext destroys its
   session** — there is no resynchronization point in a stream cipher.
 - **Rejected frames perform no WebCrypto operation and allocate no entry.** The
   wire guard bounds every routing value, `clientId` first, before the ciphertext
-  scan; a handshake that fails allocates no client record under a relay-chosen
-  key. Every handshake message is capped at 65,535 bytes and application
-  payloads at 1 MiB, measured before JSON parsing or base64 decoding.
+  scan — handshake messages at 65,535 bytes, application payloads at 1 MiB,
+  measured before JSON parsing or base64 decoding.
 - **One reaper owns every deadline**, over absolute timestamps: invitation
-  expiry, pairing TTL, challenge TTL, and
-  `ESTABLISHED_E2E_IDLE_TIMEOUT_MS = 120_000`. It runs on every `init`, every
-  local decision, every relay lifecycle event, and a timer armed for the
-  soonest deadline — re-armed when that instant moves earlier, cleared on
-  `stop()` — so a Host whose relay never delivers another frame still reclaims
-  what it holds. **An expiry emits an outcome only where a transport cipher
-  exists and someone is owed one:**
+  expiry, pairing TTL, challenge TTL, and the idle timeout. It runs on every
+  `init`, every local decision, every relay lifecycle event, and a timer armed
+  for the soonest deadline — re-armed when that instant moves earlier, cleared
+  on `stop()` — so a Host whose relay never delivers another frame still
+  reclaims what it holds. **An expiry emits an outcome only where a transport
+  cipher exists and someone is owed one:**
 
   | Expired | Answer |
   | --- | --- |
@@ -432,18 +428,16 @@ defense in depth only, and Host correctness must survive a relay that omits
   on both sides ([pocket-app.md](./pocket-app.md)).
 - **Every expiry or outcome disposes remote-control attachments without killing
   terminal sessions**, erases Noise state and keys, and removes the entry before
-  accepting replacement work. `client-gone` disposes that client's state; losing
-  the Host's own relay socket disposes everything, invitations included — the
-  one-use key behind a displayed code belongs to the socket it was minted over.
+  accepting replacement work. `client-gone` disposes that client's state;
+  **losing the Host's own relay socket disposes everything, invitations
+  included** — the one-use key behind a displayed code belongs to the socket it
+  was minted over.
 
-Source of truth: `lib/src/remote/host/remote-host.ts`, with the caps in
-`server-lib-common/src/security/e2e-bounds.ts`,
-`server-lib-common/src/security/pairing.ts`, and
-`server-lib-common/src/remote/wire.ts`. Pinned by
-`lib/src/remote/host/remote-host-bounds.test.ts`, which counts the WebCrypto a
-rejected frame buys and drives every deadline off an injected clock. The wire
-refusals those bounds sit behind are shown to survive a relay holding no guards
-of its own by `server/test/malicious-relay.test.mjs`.
+Source of truth: `lib/src/remote/host/remote-host.ts`, over the constants above.
+Pinned by `lib/src/remote/host/remote-host-bounds.test.ts`, which counts the
+WebCrypto a rejected frame buys and drives every deadline off an injected clock,
+and by `server/test/malicious-relay.test.mjs`, which drives the same refusals
+through a relay holding no guards of its own.
 
 ## Noise suite
 
@@ -454,27 +448,29 @@ two endpoints say to each other.
   No generic pattern API, cipher negotiation, protocol-name override, or
   caller-selectable suite. `IK` only: pre-message `<- s`, then
   `-> e, es, s, ss` and `<- e, ee, se`.
-- **Prologues are canonical and length-prefixed** (`lengthPrefixedConcat`):
-  pairing binds the E2E version, ceremony kind `pairing`, `hostId`, and every
-  invitation field including the setup token; connection binds the version, kind
-  `connection`, `hostId`, and the connection ID. Application authentication
-  binds to Noise's final handshake hash — no parallel transcript, exporter, KDF,
-  or nonce scheme. Sessions use only the two `CipherState`s from `Split`, each
-  from nonce zero, with empty associated data; routing metadata is never
-  authenticated application content. **No rekey**: sessions are idle-bounded,
-  not long-lived.
+- **No plaintext path, feature flag, negotiated downgrade, or legacy frame
+  discriminant.** `scripts/e2e-lint.mjs` (`pnpm lint:e2e`) refuses each
+  textually; `scripts/e2e-lint-selftest.mjs` proves those refusals load-bearing.
+- **Prologues are canonical and length-prefixed** (`lengthPrefixedConcat`), each
+  binding its own ceremony's identifiers so a transcript is useless against
+  another Host, id, or ceremony ([server.md](./server.md) -> E2E framing owns
+  the field order). **Application authentication binds to Noise's final
+  handshake hash** — no parallel transcript, exporter, KDF, or nonce scheme.
+  Sessions use only the two `CipherState`s from `Split`, each from nonce zero,
+  with empty associated data; routing metadata is never authenticated
+  application content. **No rekey**: sessions are idle-bounded, not long-lived.
 - **X25519 stays WebCrypto-only** (`generateKey` / `deriveBits` / `importKey`),
-  so a long-term private key can remain a nonextractable `CryptoKey`; never a
-  JavaScript curve. **An X25519 rejection and an all-zero shared secret are one
-  terminal handshake failure** — indistinguishable, and the handshake refuses
-  every later call rather than resuming on half-mixed state. SHA-256 and HMAC
-  are WebCrypto; **HKDF is Noise's own HMAC construction** (section 4.3), never
-  WebCrypto HKDF.
+  **never a JavaScript curve**, so a long-term private key can remain a
+  nonextractable `CryptoKey` (rationale). **An X25519 rejection and an all-zero
+  shared secret are one terminal handshake failure** — indistinguishable, and
+  the handshake refuses every later call rather than resuming on half-mixed
+  state. SHA-256 and HMAC are WebCrypto; **HKDF is Noise's own HMAC
+  construction** (section 4.3), never WebCrypto HKDF.
 - **ChaChaPoly is bundled** from an exactly pinned `@noble/ciphers` release, as
-  no interoperable WebCrypto ChaChaPoly exists. **The module header records the
-  pin, the published audit, and what changed in the chacha path between the
-  audited and the pinned release**; a version bump rewrites that note in the
-  same commit.
+  no interoperable WebCrypto ChaChaPoly exists (rationale). **The module header
+  records the pin, the published audit, and what changed in the chacha path
+  between the audited and the pinned release**; a version bump rewrites that
+  note in the same commit.
 - **Every message — handshake and transport — is capped at 65,535 bytes** on
   write and read, the tag counted. The 96-bit nonce is
   `00000000 || little_endian_u64(n)` with `2^64-1` reserved, so **counter
@@ -499,23 +495,22 @@ Source of truth: `server-lib-common/src/security/noise.ts` and
 
 ## Host identity
 
-**Each Host mints one permanent Noise static at enrollment**, before the
-request and never in it: `noiseStaticPrivateKey` (PKCS#8, base64url)
-and `noiseStaticPublicKey` (raw 32 bytes, base64url) ride in the enrollment
-record, so they land exactly where `hostToken` already does (`SECURITY.md` ->
-"Credentials at rest"). The Host's local label rides there too, and reaches a
-Client only inside an encrypted outcome.
+**Each Host mints one permanent Noise static at enrollment**, before the request
+and never in it: `noiseStaticPrivateKey` (PKCS#8, base64url) and
+`noiseStaticPublicKey` (raw 32 bytes, base64url) ride in the enrollment record,
+landing exactly where `hostToken` does (`SECURITY.md` -> "Credentials at rest").
+The Host's local label rides there too, and reaches a Client only inside an
+encrypted outcome.
 
 - **A runtime that cannot mint one does not enroll, and the mint runs *before*
-  the exchange.** A successful `POST /api/host/enroll` appends a `hosts.json` row
-  and spends the installer's single-use token, neither of which the Host can
-  undo, so a failure has to land while the Server still has nothing to forget.
+  the exchange**, because a successful `POST /api/host/enroll` appends a
+  `hosts.json` row and spends the installer's single-use token, neither of which
+  the Host can undo.
 - **Both halves or neither.** `isEnrollment` rejects a single half, a malformed
   encoding, or a wrong decoded length, and accepts a record from before the
   fields existed.
-- **A Host missing one mints it at start.** Minting is never retried once it has
-  failed, so a gate without that backfill would un-enroll a machine over one
-  transient failure; the backfill persists before the Host runs.
+- **A Host missing one mints it at start**, persisting before the Host runs
+  (rationale).
 - **Whatever consumes the static checks that the halves correspond.**
   `deriveNoiseStaticPublicKey` derives the public point from the private half
   and the service compares it; a mismatch keeps the Host **down**, loudly,
@@ -534,12 +529,11 @@ in `lib/src/remote/host/enrollment.ts`, and
 `lib/src/host/remote/service.ts`.
 
 **X25519 is probed, not assumed.** `probeNoiseSupport` runs one `generateKey`
-and one `deriveBits`. **Every rejection — a missing WebCrypto included — is
+and one `deriveBits`, and **every rejection — a missing WebCrypto included — is
 `false`, never a throw**, because its callers are boot-path gates. **Runtimes
-are gated, not degraded**: a Host whose halves do not correspond stays down, and
-Pocket runs the same probe before sign-in, setup, pairing, or connection and
-shows a fixed upgrade requirement on `false`, performing no remote operation
-([pocket-app.md](./pocket-app.md)).
+are gated, not degraded**: Pocket runs the same probe before sign-in, setup,
+pairing, or connection and shows a fixed upgrade requirement on `false`,
+performing no remote operation ([pocket-app.md](./pocket-app.md)).
 
 ## Client static loss
 
@@ -547,11 +541,11 @@ shows a fixed upgrade requirement on `false`, performing no remote operation
 — storage may be evicted after inactivity — an Android tab is generally
 durable, and an installed PWA is the preferred mode on both (rationale).
 
-Loss is expected, and recovery is a re-run of the normal flow: the user scans a
-fresh Host QR, the Client generates a new per-Host static, the Host pairs again,
-and the previous record may be revoked (`revokedAt`). No security compromise
-occurs — the lost key authorized nothing without its paired passkey, and the new
-key starts unauthorized everywhere.
+**Loss is expected, and recovery is a re-run of the normal flow**: scan a fresh
+Host QR, generate a new per-Host static, pair again, and optionally revoke the
+previous record (`revokedAt`). Nothing is compromised — the lost key authorized
+nothing without its paired passkey, and the new one starts unauthorized
+everywhere.
 
 ## Security Guarantees
 
@@ -570,65 +564,28 @@ reviewer verifies against, and the one
   connection's own transcript.
 * Every access decision is ultimately made by the Host.
 
+**Never claim this model for paid SaaS before an independent cryptographic
+review** of the Noise integration, the WebAuthn channel binding, key storage,
+and the push construction. Self-hosting is the shipped deployment and carries no
+such claim.
+
 ## Residual metadata
 
-The Server still observes account and passkey authentication data, IPs, Host
-IDs and online state, routing relationships, every session's reauth exchange,
-push endpoints, timing, ciphertext sizes, and volume. Without batching or cover
-traffic, Client→Host ciphertext timing exposes inter-keystroke timing; that leak
-is accepted while keystroke values stay encrypted. One worker scope has one
-`PushSubscription`, so a shared endpoint lets the Server correlate every
-`deliveryId` one Pocket profile registers across Hosts. No traffic-analysis
-resistance, per-Host unlinkability, or metadata-anonymity is claimed.
+**No traffic-analysis resistance, per-Host unlinkability, or metadata anonymity
+is claimed.** The Server still observes account and passkey authentication data,
+IPs, Host IDs and online state, routing relationships, every session's reauth
+exchange, push endpoints, timing, ciphertext sizes, and volume; two leaks follow
+from that and are accepted rather than closed (rationale): Client→Host timing
+exposes inter-keystroke timing while keystroke *values* stay encrypted, and one
+`PushSubscription` per worker scope lets a shared endpoint correlate every
+`deliveryId` one Pocket profile registers across Hosts. A push carries no
+counter, so a Server that kept an envelope can re-deliver it
+([Push sealing](#push-sealing)).
 
 ## Future
 
 Onboarding changes with security surface are staged in the
 **selfhost-onboarding** scope ([server.md](./server.md) `## Future`).
-
-**Scope: e2e-client-host** — replace the Server-readable pairing, connection,
-terminal, and push paths with one mandatory end-to-end protocol. The Server
-keeps account authentication, Host discovery, routing, availability, and Web
-Push delivery, and never receives Client or Host identity keys, Host labels,
-remote API messages, terminal data, pairing decisions, or notification contents
-in plaintext. **No feature flag, negotiation, plaintext fallback, or
-compatibility path**: existing Hosts re-enroll, existing Pocket identities
-reset, and every Client pairs again from a fresh Host QR — this is pre-launch,
-so reset-and-re-pair beats any migration reader. This spec owns the trust model;
-[server.md](./server.md) `## Future` owns the remaining routes and state files;
-[pocket-app.md](./pocket-app.md) `## Future` owns the phone flows and the worker
-build; [remote-api.md](./remote-api.md) and [alert.md](./alert.md) each carry
-one pointer item. Trusted endpoints: the distributed Host binaries and the exact
-served Pocket artifact — a compromised device, XSS, or an operator serving
-modified Pocket code is out of scope, as is availability (the Server may drop,
-delay, reorder, or refuse traffic, but must gain no plaintext and no
-authorization by doing so).
-
-Staged order. Every stage lands as a green commit with its specs promoted above
-the fold, then a `/simplify` pass and a code review; no stage introduces a
-runtime selector, a dual ACL shape, temporary key distribution, or fallback
-machinery. Stages 1–6 landed — the suite and its vectors
-([Noise suite](#noise-suite)), the identities ([Host identity](#host-identity)),
-the relay-integrated harness ([server.md](./server.md) -> Relay), the cutover
-itself (the shared protocol, the Host's two ceremonies, the Server's routes and
-state, Pocket's whole phone side, and the deletion of every legacy path from the
-Server and the shared package: [Pairing](#pairing), [Connection](#connection),
-[pocket-app.md](./pocket-app.md)), the remaining
-[Host bounds](#host-bounds) with the instrumentation and malicious-relay harness
-that prove them, and the sealed push with its built worker
-([Push sealing](#push-sealing), [pocket-app.md](./pocket-app.md) -> Installable
-web app). The numbering is preserved because other specs cite these stages by
-number.
-7. **Documentation and enforcement.** Deletion of superseded prose, the
-   `SECURITY.md` `FAIL IF` rewrite for stages 5–6, the E2E structural lint with
-   its load-bearing selftest, and the nightly application-security prompt
-   extended to the new boundary.
-
-Final acceptance: `pnpm test`, `pnpm build`, the Pocket and worker production
-builds, the recorded audit review, and a passing local application-security
-audit. An independent cryptographic review of the Noise integration, the
-WebAuthn channel binding, key storage, and the push construction is required
-before paid SaaS may claim this model.
 
 ### Device verification
 
@@ -641,11 +598,9 @@ loses on every reload), and `getUserMedia` working inside a Home Screen web app
 ### Revocation propagation
 
 The Server pushing revocations to Hosts. Today `HostAcl.revokeClient` /
-`revokePasskey` exist but have no callers, and no relay frame carries a
-revocation — revoking is hand-editing state ([server.md](./server.md),
-Guardrails). Note what that costs an operator: `RemoteHostService` reads the
-store once and hands the `RemoteHost` a snapshot for its whole lifetime, so an
-edited record is not observed until the Host is restarted. Restarting is
-therefore the entire lever — it reloads the ACL *and*, by dropping the relay
-socket, ends every established session. Editing alone changes nothing that is
-running.
+`revokePasskey` have no callers and no relay frame carries a revocation, so
+revoking is hand-editing state ([server.md](./server.md), Guardrails) — and
+`RemoteHostService` hands the `RemoteHost` one ACL snapshot for its whole
+lifetime, so **restarting the Host is the entire lever**: it reloads the ACL
+*and*, by dropping the relay socket, ends every established session. Editing
+alone changes nothing that is running.

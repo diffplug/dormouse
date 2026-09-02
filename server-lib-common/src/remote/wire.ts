@@ -560,7 +560,7 @@ export interface E2eHostFrame {
   ct: string;
 }
 
-/** Server → client: the Host's frame with `hostId` stamped, as for `challenge`. */
+/** Server → client: the Host's frame with `hostId` stamped from its socket. */
 export interface E2eServerToClientFrame extends Omit<E2eHostFrame, 'clientId'> {
   hostId: string;
 }
