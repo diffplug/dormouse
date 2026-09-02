@@ -438,7 +438,7 @@ export function resolveCommandStart(
 // already-equal paths stay equal.
 function canonicalizeCwdForMatch(path: string): string {
   const withDrive = path.replace(/^\/([A-Za-z])\//, (_match, drive: string) => `${drive}:/`);
-  if (!WINDOWS_DRIVE_PREFIX.test(withDrive)) return path;
+  if (!/^[A-Za-z]:[\\/]/.test(withDrive)) return path;
   const unified = withDrive.replace(/\//g, '\\');
   return unified.charAt(0).toUpperCase() + unified.slice(1);
 }
@@ -681,10 +681,6 @@ function inferPathKind(path: string): PathKind {
   return 'unknown';
 }
 
-// A drive letter plus a separator. Narrower than `isWindowsPath`, which also
-// accepts a bare `C:` and the UNC forms.
-const WINDOWS_DRIVE_PREFIX = /^[A-Za-z]:[\\/]/;
-
 function isWindowsPath(path: string): boolean {
   return /^[A-Za-z]:(?:[\\/]|$)/.test(path) || isUncPath(path);
 }
@@ -793,12 +789,14 @@ function withRequiredHostPrefixes(
  * and the pipeline/compound separators `| || && ; &`, which are emitted as
  * their own tokens.
  *
- * A `\` escapes only whitespace or a `POSIX_ESCAPABLE` metacharacter (`foo\ bar`
- * is one token, `\*.ts` passes a literal glob); before anything else it is a
- * literal, so a native Windows program path survives tokenizing intact and
- * `commandBasename` still has separators to split on. A Windows segment that
- * does start with a metacharacter (`C:\$Recycle.Bin`) is the accepted cost of
- * sharing one set with `shellEscapePosix`.
+ * A `\` escapes exactly the `POSIX_ESCAPABLE` set (`foo\ bar` is one token,
+ * `\*.ts` passes a literal glob, and a path Dormouse escaped for paste reads
+ * back as itself); before anything else it is a literal, so a native Windows
+ * program path survives tokenizing intact and `commandBasename` still has
+ * separators to split on. Two accepted costs of one dialect-free set: a Windows
+ * segment that starts with a metacharacter (`C:\$Recycle.Bin`) still loses its
+ * separator, and a POSIX escape of an ordinary character (`grep \-v`) keeps a
+ * backslash bash would drop. Both are display-only — neither reaches argv[0].
  */
 function tokenizeCommand(input: string): string[] {
   const tokens: string[] = [];
@@ -822,7 +820,7 @@ function tokenizeCommand(input: string): string[] {
     }
     if (char === '\\' && quote !== "'") {
       const next = input[i + 1];
-      if (next !== undefined && (/\s/.test(next) || POSIX_ESCAPABLE.test(next))) {
+      if (next !== undefined && POSIX_ESCAPABLE.test(next)) {
         escaping = true;
         continue;
       }
@@ -866,33 +864,6 @@ function tokenizeCommand(input: string): string[] {
   return tokens;
 }
 
-const WINDOWS_EXECUTABLE_SUFFIX = /\.(?:exe|cmd|bat|com|ps1)$/i;
-
-/**
- * cmd.exe resolves an unquoted program path containing spaces by probing
- * successively longer prefixes, so `C:\Program Files\nodejs\npm.cmd run dev`
- * is one program plus two arguments — a shape only cmd.exe accepts, and one the
- * keystroke fallback reads straight off a `C:\...>` prompt. Tokenizing cannot know that, so re-join
- * across directory boundaries — each continuation must still carry a separator
- * — and commit only when the join lands on a Windows executable suffix.
- *
- * A space inside the *final* segment (`C:\Tools\My Program.exe`) therefore
- * stays split, deliberately: `C:\bin\run test.exe` is the same shape and far
- * more likely to be a program plus an argument.
- */
-function joinWindowsProgramPath(tokens: string[]): string[] {
-  const head = tokens[0];
-  if (!head || !WINDOWS_DRIVE_PREFIX.test(head) || WINDOWS_EXECUTABLE_SUFFIX.test(head)) return tokens;
-  let joined = head;
-  for (let i = 1; i < tokens.length; i += 1) {
-    const token = tokens[i];
-    if (!token.includes('\\') || WINDOWS_DRIVE_PREFIX.test(token)) break;
-    joined = `${joined} ${token}`;
-    if (WINDOWS_EXECUTABLE_SUFFIX.test(token)) return [joined, ...tokens.slice(i + 1)];
-  }
-  return tokens;
-}
-
 function takePrimaryCommandTokens(tokens: string[]): string[] {
   // PowerShell's call operator. `& "C:\Program Files\nodejs\npm.cmd" run dev`
   // is the only way that shell runs a quoted program path, and a leading `&` is
@@ -907,7 +878,7 @@ function takePrimaryCommandTokens(tokens: string[]): string[] {
     index += 1;
     while (isEnvAssignment(command[index])) index += 1;
   }
-  return joinWindowsProgramPath(command.slice(index));
+  return command.slice(index);
 }
 
 function isEnvAssignment(token: string | undefined): boolean {
@@ -916,13 +887,18 @@ function isEnvAssignment(token: string | undefined): boolean {
 
 /** argv[0] reduced to a bare program name, in either path dialect. */
 function commandBasename(command: string): string {
-  return command.split(/[\\/]/).pop() ?? command;
+  return command.replace(/^.*[\\/]/, '');
 }
+
+// `.cmd`/`.exe` is how the same program spells itself on Windows, so strip it
+// before matching or rendering: `npm.cmd run dev` is `npm run dev`, and the
+// per-program cases below (which are keyed on bare names) still fire there.
+const WINDOWS_EXECUTABLE_SUFFIX = /\.(?:exe|cmd|bat|com|ps1)$/i;
 
 function commandTitleTokens(tokens: string[]): string[] {
   const command = tokens[0];
   if (!command) return [];
-  const basename = commandBasename(command);
+  const basename = commandBasename(command).replace(WINDOWS_EXECUTABLE_SUFFIX, '');
   const rest = tokens.slice(1);
 
   if (basename === 'npm' && rest[0] === 'run') return [basename, ...rest.slice(0, 2)];

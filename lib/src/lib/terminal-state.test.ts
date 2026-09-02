@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { shellEscapePosix } from './shell-escape';
+import { POSIX_ESCAPABLE, shellEscapePosix } from './shell-escape';
 import {
   commandArgv0,
   createTerminalPaneState,
@@ -268,6 +268,12 @@ describe('command title summarizer', () => {
     expect(summarizeCommandLine('ssh prod-box')).toBe('ssh prod-box');
   });
 
+  it('matches its per-program cases through a Windows launcher suffix', () => {
+    expect(summarizeCommandLine('vim.exe notes.txt')).toBe('vim');
+    expect(summarizeCommandLine('cargo.exe watch -x test')).toBe('cargo watch -x test');
+    expect(summarizeCommandLine('C:\\tools\\nodejs\\npm.cmd')).toBe('npm');
+  });
+
   it('keeps pipelines and compound commands recognizable', () => {
     expect(summarizeCommandLine('cat package.json | jq .name')).toBe('cat package.json | ...');
     expect(summarizeCommandLine('cd lib && pnpm test')).toBe('cd lib ...');
@@ -279,16 +285,16 @@ describe('command tokenizer dialects', () => {
   // A backslash is a path separator unless it precedes something a shell really
   // escapes, so both dialects reduce to the bare program name.
   it.each([
-    // Windows: absolute paths, launchers, quoted and unquoted spaces, UNC.
-    ['C:\\tools\\dor.cmd tool storybook', 'dor.cmd', 'dor.cmd tool storybook'],
+    // Windows: absolute paths, launchers, a quoted path with spaces.
+    ['C:\\tools\\dor.cmd tool storybook', 'dor.cmd', 'dor tool storybook'],
     ['C:\\Users\\me\\.claude\\local\\claude', 'claude', 'claude'],
-    ['C:\\Program Files\\nodejs\\npm.cmd run dev', 'npm.cmd', 'npm.cmd run dev'],
-    ['"C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm.cmd', 'npm.cmd run dev'],
-    ['FOO=1 C:\\Program Files\\nodejs\\npm.cmd run dev', 'npm.cmd', 'npm.cmd run dev'],
-    ['\\\\build\\share\\tools\\claude.exe --print', 'claude.exe', 'claude.exe --print'],
+    ['"C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm.cmd', 'npm run dev'],
+    ['\\\\build\\share\\tools\\claude.exe --print', 'claude.exe', 'claude --print'],
+    ['FOO=1 "C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm.cmd', 'npm run dev'],
     // PowerShell's call operator, the only way that shell runs a quoted path.
-    ['& "C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm.cmd', 'npm.cmd run dev'],
-    ['& C:\\tools\\dor.cmd tool storybook', 'dor.cmd', 'dor.cmd tool storybook'],
+    // Without the leading-`&` skip it reads as a boundary and argv0 is null.
+    ['& "C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm.cmd', 'npm run dev'],
+    ['& C:\\tools\\dor.cmd tool storybook', 'dor.cmd', 'dor tool storybook'],
     // POSIX escapes keep their meaning.
     ['/opt/my\\ tools/claude --print', 'claude', 'claude --print'],
     ['grep \\*.ts src', 'grep', 'grep *.ts src'],
@@ -298,18 +304,25 @@ describe('command tokenizer dialects', () => {
     expect(summarizeCommandLine(raw)).toBe(summary);
   });
 
-  // Pins the `POSIX_ESCAPABLE` contract: every character `shellEscapePosix`
-  // writes for a drag-and-drop paste, the tokenizer reads back unchanged.
+  // An unquoted Windows path with spaces is undecidable without probing the
+  // filesystem — `A\B C\D.cmd` is equally `A\B` plus an argument — so the
+  // tokenizer splits it and argv0 misses rather than naming the wrong program.
+  it('leaves an unquoted Windows path with spaces split', () => {
+    expect(commandArgv0('C:\\Program Files\\nodejs\\npm.cmd run dev')).toBe('Program');
+    expect(commandArgv0('"C:\\Program Files\\Git\\bin\\bash" scripts\\bootstrap.cmd')).toBe('bash');
+  });
+
+  // `POSIX_ESCAPABLE` is `shellEscapePosix`'s set; the tokenizer unescapes it.
+  // The two halves must name the same characters or a path Dormouse escaped for
+  // a drag-and-drop paste renders with stray backslashes in the pane header.
   it.each(Array.from(` \t!"#$&'()*;<>?[]\`{|}~\\`))('round-trips %j out of shellEscapePosix', (char) => {
+    expect(POSIX_ESCAPABLE.test(char)).toBe(true);
     expect(summarizeCommandLine(`cat ${shellEscapePosix(`a${char}b`)}`)).toBe(`cat a${char}b`);
   });
 
-  it('only re-joins an unquoted Windows program path that lands on an executable', () => {
-    // Two real words, not one path with a space. The second token starting its
-    // own absolute path stops the join even when it ends in an executable...
-    expect(commandArgv0('C:\\bin\\tool C:\\data\\run.cmd')).toBe('tool');
-    // ...and a relative continuation still has to reach an executable suffix.
-    expect(commandArgv0('C:\\bin\\tool sub\\dir\\notes.txt')).toBe('tool');
+  it('holds no path character, which is what keeps Windows separators intact', () => {
+    const pathChars = Array.from('AZaz09_-.+=,@:^%');
+    expect(pathChars.filter((char) => POSIX_ESCAPABLE.test(char))).toEqual([]);
   });
 });
 

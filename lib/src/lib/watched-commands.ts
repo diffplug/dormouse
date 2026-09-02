@@ -18,15 +18,26 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 }
 
-function readStored(): string[] {
-  const raw = loadJson<string[], string[]>(STORAGE_KEY, [], isStringArray);
-  // Dedupe and drop blanks defensively: the key is user-visible in devtools and
-  // a malformed entry would otherwise show up as a blank row in the rule list.
-  return [...new Set(raw.map((name) => name.trim()).filter(Boolean))].sort();
+/**
+ * A key is `commandArgv0` output — a basename — so a separator or a `:` in one
+ * means it can never match any command again. Before the tokenizer learned that
+ * `\` is a Windows path separator, a full-path invocation stored keys like
+ * `C:toolsclaude.exe`; dropping them keeps a dead row out of the rule list.
+ */
+function isKeyableName(name: string): boolean {
+  return !/[\\/:]/.test(name);
 }
 
+function readStored(): string[] {
+  return normalize(loadJson<string[], string[]>(STORAGE_KEY, [], isStringArray));
+}
+
+// Dedupe and drop what can never be a rule: the key is user-visible in devtools
+// and in the rule list, so a malformed entry would otherwise sit there as a row
+// that matches nothing. Applied to both sources, `localStorage` and the host's
+// canonical snapshot, since a stale key reaches the mirror either way.
 function normalize(names: string[]): string[] {
-  return [...new Set(names.map((name) => name.trim()).filter(Boolean))].sort();
+  return [...new Set(names.map((name) => name.trim()).filter(Boolean).filter(isKeyableName))].sort();
 }
 
 let watched: string[] = readStored();

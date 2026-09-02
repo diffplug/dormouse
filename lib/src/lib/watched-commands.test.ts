@@ -54,6 +54,13 @@ describe('commandArgv0', () => {
 });
 
 describe('watched-commands store', () => {
+  it('drops a key no command line can ever produce', () => {
+    // Written by the pre-fix tokenizer, which ate the backslashes in
+    // `C:\tools\claude.exe`. A real key is a basename, so it holds no separator.
+    applyWatchedCommandsFromHost(['C:toolsclaude.exe', 'claude', '/usr/bin/claude']);
+    expect(getWatchedCommands()).toEqual(['claude']);
+  });
+
   it('adds, reports, and removes rules', () => {
     expect(getWatchedCommands()).toEqual([]);
     expect(isCommandWatched('claude')).toBe(false);
