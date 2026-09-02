@@ -597,10 +597,10 @@ speaker today.
   keep every Noise message inside 65,535 bytes with its kind byte and tag
   (`MAX_STREAM_BODY_LENGTH`). **Reassembly rejects a declared length over
   `MAX_APP_MESSAGE_LENGTH` (1 MiB) as soon as its prefix arrives**, which also
-  bounds the queue — it only ever waits on a length it accepted. **Bodies are
-  queued and copied once, when a message completes**: a peer may legally split
-  one message into single-byte bodies, and concatenating on arrival would be
-  quadratic.
+  bounds it — it only ever waits on a length it accepted. **Bodies compact into
+  one geometrically-grown buffer**: a peer may legally split one message into
+  single-byte bodies, so a queue of bodies is bounded in bytes and unbounded in
+  entries, while concatenating on arrival would be quadratic.
 - **The first failure poisons the session.** A decrypt failure, a nonce gap or
   reorder (which Noise's counter turns into a decrypt failure), or a framing
   violation destroys it and every later call throws — there is no
@@ -887,8 +887,14 @@ the `FakeClient` in `server/test/harness/fake-client.mjs` runs both ceremonies
 as a real Noise initiator with `SimAuthenticator` producing presence proofs
 through the real `/api/reauth/*` routes, and process-level tests spawn the real
 entrypoint. `server-lib-common/test/security-guarantees.test.mjs` drives the
-model's guarantee list end to end. Browser-dependent Host and Pocket UI remain
-dogfood coverage.
+model's guarantee list end to end.
+
+`server/test/malicious-relay.test.mjs` runs the same two halves over a relay
+that records, drops, reorders, duplicates, modifies, and invents frames
+(`server/test/harness/malicious-relay.mjs`, wrapping the real `RelayHub` over an
+in-memory socket pair, so its routing is the shipped routing). Its last case
+strips the relay's own `ct`/`id`/shape guards, and the Host refuses every frame
+itself. Browser-dependent Host and Pocket UI remain dogfood coverage.
 
 ## Running it
 
@@ -1027,16 +1033,14 @@ routes, and state the trust model in
 [remote-security-model.md](./remote-security-model.md) `## Future` requires. The
 QR grammar and its parser, the relay envelope, the reauth and retire routes, the
 delivery-keyed push routes, the Host side, and the deletion of every legacy path
-all landed in that scope's stage 4 (above).
+all landed in that scope's stages 4 and 5 (above), the malicious-relay harness
+with them.
 
 - **Sealed push** (stage 6). `POST /api/push/send` carries only the sealed
   envelope; the Server also deletes a delivery row when its push provider
   answers 404/410 — which it does already — and Pocket stays the normal
   lifecycle initiator, with provider deletion as cleanup for clients that can no
   longer submit tombstones.
-- **Testing.** What remains is stage 5's flood and malicious-relay cases
-  (record, drop, reorder, modify, inject — asserting nothing decrypts or forges
-  a decision, remote API traffic, terminal bytes, labels, or notifications).
 - **Operator recovery** (`SELF_HOST.md`): a Host whose enrollment predates the
   scope shows the enrollment form again; re-run the installer only if the offer
   is wanted — it mints one solely while `state/hosts.json` is absent, so remove

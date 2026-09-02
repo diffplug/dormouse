@@ -469,6 +469,26 @@ files that no longer exist and fails to boot. Two rules make it hold:
 
 Source of truth: `registerPocketServing` in `server/src/app.ts`.
 
+## A backgrounded phone loses its Host session
+
+While a connection is established **and the page is visible**, Pocket sends one
+fixed-size keepalive every `E2E_KEEPALIVE_INTERVAL_MS` (30 s) on the Noise
+session; hiding the page pauses them, and returning sends one immediately before
+resuming the interval. **Hidden means paused, not slowed**: a backgrounded tab
+has its timers throttled or suspended outright, so a phone in a pocket must not
+promise a liveness it cannot keep.
+
+The Host disposes any session it has not decrypted a Client message on for
+`ESTABLISHED_E2E_IDLE_TIMEOUT_MS` (120 s — four intervals;
+[remote-security-model.md](./remote-security-model.md) → Host bounds). **A phone
+suspended for longer than that comes back to no session**, and reconnecting
+costs a fresh Noise handshake and one WebAuthn prompt. That is the price of the
+Host being able to reclaim state a hostile relay would otherwise never let it
+reclaim.
+
+Source of truth: `PocketClient.sendKeepalive` and its injected timer and
+visibility seams in `lib/src/remote/client/pocket-client.ts`.
+
 ## An expired session drops to sign-in
 
 Sessions live only in the Server's memory ([server.md](./server.md)), so they

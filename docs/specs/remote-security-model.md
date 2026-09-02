@@ -336,17 +336,27 @@ Source of truth: `RemoteHost.#onConnectionInit` / `#onConnectionTransport` /
 
 Every bound is Host-enforced and independent of the relay; Server-side gates are
 defense in depth only, and Host correctness must survive a relay that omits
-`client-gone`, invents client IDs, or reorders frames. The remaining bounds —
-the token bucket, the established-session cap, keepalives, and the idle reaper —
-are staged in [Future](#future).
+`client-gone`, invents client IDs, or reorders frames.
 
-- `MAX_PENDING_PAIRINGS = 8`, `MAX_CLIENT_ID_LENGTH = 256`, the
+- `MAX_PENDING_PAIRINGS = 8`, `MAX_PENDING_CONNECTION_HANDSHAKES = 8`,
+  `MAX_ESTABLISHED_E2E_SESSIONS = 16`, `MAX_CLIENT_ID_LENGTH = 256`, and the
   eight-invitation cap (`MAX_TOKENS_PER_HOST`, shared with the Server's own
-  bound on the setup tokens they ride with), and
-  `MAX_PENDING_CONNECTION_HANDSHAKES = 8`.
+  bound on the setup tokens they ride with).
 - **At most one pending pairing and one pending connection per relay client**; a
   replacement disposes its predecessor. Pending pairings expire on the pairing
   TTL (a human is typing); pending connections on the challenge TTL.
+- **The session cap is checked at promotion and nowhere else**, after the
+  presence proof and the ACL conjunction have both succeeded — a cap applied to
+  handshakes would let unauthenticated traffic decide who gets in. A Client
+  static already holding a session **replaces its own** atomically, whatever
+  relay-chosen `clientId` the replacement arrived under; any other identity at
+  the cap receives the fixed-size `host-busy` and **evicts nothing**. The
+  pending caps and the token bucket stay active at the cap.
+- **A Host-global token bucket gates the WebCrypto an accepted `init` buys**:
+  an eight-operation burst decaying to one per second, on the Host's own clock.
+  A frame it refuses is dropped exactly like one refused by shape, size, or a
+  pending cap — and an outer error frame is never required, because a reply is
+  itself something a flood can buy.
 - **A message is processed only for its exact pending ID and expected step.**
   Unknown IDs are dropped without decryption, established frames only decrypt at
   their session's next nonce, and **the first invalid ciphertext destroys its
@@ -356,6 +366,22 @@ are staged in [Future](#future).
   scan; a handshake that fails allocates no client record under a relay-chosen
   key. Every handshake message is capped at 65,535 bytes and application
   payloads at 1 MiB, measured before JSON parsing or base64 decoding.
+- **One reaper owns every deadline**, over absolute timestamps: invitation
+  expiry, pairing TTL, challenge TTL, and
+  `ESTABLISHED_E2E_IDLE_TIMEOUT_MS = 120_000`. It runs on every `init`, every
+  local decision, every relay lifecycle event, and a timer armed for the
+  soonest deadline — re-armed on change, cleared on `stop()` — so a Host whose
+  relay never delivers another frame still reclaims what it holds. An expiry
+  emits an outcome only where a transport cipher exists and someone is owed
+  one: `invitation-expired` for a pending pairing, `presence-rejected` for a
+  pending connection whose challenge is now dead, nothing for an idle session
+  or a ceremony evicted at a cap.
+- **The idle deadline moves only on a successfully decrypted Client→Host
+  transport message**, keepalive or application data. Host output, a failed
+  decrypt, a relay envelope, a socket ping, and any unauthenticated frame are
+  all things a Client that has gone silent still produces. A Client keepalives
+  every `E2E_KEEPALIVE_INTERVAL_MS = 30_000` while its page is visible
+  ([pocket-app.md](./pocket-app.md)), so the timeout is four missed intervals.
 - **Every expiry or outcome disposes remote-control attachments without killing
   terminal sessions**, erases Noise state and keys, and removes the entry before
   accepting replacement work. `client-gone` disposes that client's state; losing
@@ -363,8 +389,13 @@ are staged in [Future](#future).
   one-use key behind a displayed code belongs to the socket it was minted over.
 
 Source of truth: `lib/src/remote/host/remote-host.ts`, with the caps in
-`server-lib-common/src/security/pairing.ts` and
-`server-lib-common/src/remote/wire.ts`.
+`server-lib-common/src/security/e2e-bounds.ts`,
+`server-lib-common/src/security/pairing.ts`, and
+`server-lib-common/src/remote/wire.ts`. Pinned by
+`lib/src/remote/host/remote-host-bounds.test.ts`, which counts the WebCrypto a
+rejected frame buys and drives every deadline off an injected clock, and by
+`server/test/malicious-relay.test.mjs`, which runs the same floods through a
+relay holding no guards of its own.
 
 ## Noise suite
 
@@ -532,25 +563,16 @@ authorization by doing so).
 Staged order. Every stage lands as a green commit with its specs promoted above
 the fold, then a `/simplify` pass and a code review; no stage introduces a
 runtime selector, a dual ACL shape, temporary key distribution, or fallback
-machinery. Stages 1–4 landed — the suite and its vectors
+machinery. Stages 1–5 landed — the suite and its vectors
 ([Noise suite](#noise-suite)), the identities ([Host identity](#host-identity)),
-the relay-integrated harness ([server.md](./server.md) -> Relay), and the
-cutover itself: the shared protocol, the Host's two ceremonies, the Server's
-routes and state, Pocket's whole phone side, and the deletion of every legacy
-path from the Server and the shared package ([Pairing](#pairing),
-[Connection](#connection), [pocket-app.md](./pocket-app.md)). The numbering is
-preserved because other specs cite these stages by number.
-5. **Bounds and flood harness.** The remaining [Host bounds](#host-bounds): the
-   crypto token bucket (eight-operation burst, one per second sustained, on
-   accepted `init` frames); `MAX_ESTABLISHED_E2E_SESSIONS = 16` checked at
-   promotion — a Client static that already holds a session replaces it
-   atomically after presence succeeds, a different identity at the cap receives
-   `host-busy` and evicts nothing; `E2E_KEEPALIVE_INTERVAL_MS = 30_000` and
-   `ESTABLISHED_E2E_IDLE_TIMEOUT_MS = 120_000`, refreshed only by a successfully
-   decrypted Client→Host message; and one reaper over absolute timestamps
-   running on every init, completion, relay lifecycle event, and next-expiry
-   timer. With instrumentation proving pre-bound rejection performs no crypto
-   and allocates nothing, and a malicious-relay harness.
+the relay-integrated harness ([server.md](./server.md) -> Relay), the cutover
+itself (the shared protocol, the Host's two ceremonies, the Server's routes and
+state, Pocket's whole phone side, and the deletion of every legacy path from the
+Server and the shared package: [Pairing](#pairing), [Connection](#connection),
+[pocket-app.md](./pocket-app.md)), and the remaining
+[Host bounds](#host-bounds) with the instrumentation and malicious-relay harness
+that prove them. The numbering is preserved because other specs cite these
+stages by number.
 6. **Sealed push and the built worker** (push PR). The Host seals every
    notification field: `ss = X25519(hostStatic, clientStatic)`, a random 32-byte
    salt, `key = HKDF-SHA-256(ss, salt, "dormouse/push/v1", 32)`,
