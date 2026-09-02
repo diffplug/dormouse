@@ -16,9 +16,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_PAIRING_TTL_MS,
+  E2E_KEEPALIVE_INTERVAL_MS,
+  KEEPALIVE_BODY_SIZE,
   SELFHOST_ACCOUNT_ID,
   SETUP_TOKEN_INVALID_ERROR,
   formatPairingInvitationUrl,
+  fromBase64Url,
   generateNoiseKeyPair,
   hashPasskeyPublicKey,
   mintNoiseStaticKeyPair,
@@ -320,6 +323,8 @@ interface E2eHarness {
   calls: FetchCall[];
   /** The harness's own `fetch`, for a second client on the same fake Server. */
   fetch: typeof fetch;
+  /** The Client's relay socket, once one is open — what a keepalive lands on. */
+  clientSocket(): FakeSocket;
   /** One live invitation, as `setupQr` would mint it. */
   mintInvitation(): Promise<PairingInvitation>;
   /** Run a pairing and confirm it on the Host with the digits the phone showed. */
@@ -354,6 +359,8 @@ async function makeE2eHarness(
     now?: () => number;
     /** Make every delivery-row deletion fail, as an offline phone's would. */
     pushDeleteFails?: boolean;
+    /** Extra `PocketClient` deps — the keepalive timer and visibility seams. */
+    deps?: Partial<PocketClientDeps>;
   } = {},
 ): Promise<E2eHarness> {
   const hostId = options.hostId ?? randomBase64Url(16);
@@ -457,15 +464,17 @@ async function makeE2eHarness(
     // The real thing: a signature this Host's own verifier accepts.
     getAssertion: (challenge) => authenticator.assert(challenge, ORIGIN),
   };
+  let clientSocket: FakeSocket | null = null;
   const client = new PocketClient({
     wsBase: 'ws://test',
     fetch,
     webauthn,
-    createWebSocket: () => relay.openClientSocket(),
+    createWebSocket: () => (clientSocket = relay.openClientSocket()),
     knownHosts,
     pendingDeletions,
     storage,
     ...(options.now ? { now: options.now } : {}),
+    ...options.deps,
   });
   // Sign-in caches the asserted passkey's public key and names the credential
   // every presence proof is built from, exactly as it does in the app.
@@ -486,6 +495,10 @@ async function makeE2eHarness(
     },
     calls,
     fetch,
+    clientSocket: () => {
+      if (!clientSocket) throw new Error('the Client has not opened a relay socket');
+      return clientSocket;
+    },
     mintInvitation: () => host.mintInvitation(secret(), Date.now() + DEFAULT_PAIRING_TTL_MS),
     async pairAndApprove(invitation, { code } = {}) {
       // Counted from here: a harness that pairs twice must confirm the *new*
@@ -858,6 +871,112 @@ describe('connecting, end to end', () => {
 
     expect(hostGone).toBe(1);
     expect(harness.client.connectedHostId).toBeNull();
+  });
+});
+
+// --- Keepalives -------------------------------------------------------------
+
+/** One armed timer at a time, fired by hand — no test waits thirty seconds. */
+function fakeTimers() {
+  const armed: Array<{ run: () => void; delayMs: number; cancelled: boolean }> = [];
+  return {
+    setTimer(run: () => void, delayMs: number): () => void {
+      const timer = { run, delayMs, cancelled: false };
+      armed.push(timer);
+      return () => {
+        timer.cancelled = true;
+      };
+    },
+    get live() {
+      return armed.filter((timer) => !timer.cancelled);
+    },
+    /** Fire the armed timer, as its delay elapsing would. */
+    fire(): void {
+      const timer = this.live.at(-1);
+      if (!timer) throw new Error('no keepalive timer is armed');
+      timer.cancelled = true;
+      timer.run();
+    },
+  };
+}
+
+/** `document.visibilityState`, as a seam a test can flip. */
+function fakeVisibility() {
+  let visible = true;
+  const listeners = new Set<() => void>();
+  return {
+    visibility: {
+      isVisible: () => visible,
+      subscribe(onChange: () => void) {
+        listeners.add(onChange);
+        return () => listeners.delete(onChange);
+      },
+    },
+    set(next: boolean): void {
+      visible = next;
+      for (const listener of listeners) listener();
+    },
+  };
+}
+
+describe('keepalives on an established session', () => {
+  /** A connected phone whose timer and visibility the test owns. */
+  async function connected() {
+    const timers = fakeTimers();
+    const visibility = fakeVisibility();
+    const harness = await makeE2eHarness({
+      deps: { setTimer: timers.setTimer, visibility: visibility.visibility },
+    });
+    await harness.pairAndApprove(await harness.mintInvitation());
+    expect(await harness.client.connect(harness.hostId)).toMatchObject({ ok: true });
+    return { harness, timers, visibility };
+  }
+
+  /** Transport frames this phone put on the wire since `from`. */
+  function sentSince(harness: E2eHarness, from: number): Array<Record<string, unknown>> {
+    return harness.clientSocket().frames('e2e').slice(from);
+  }
+
+  it('sends one fixed-size keepalive per interval, and re-arms', async () => {
+    const { harness, timers } = await connected();
+    const before = harness.clientSocket().frames('e2e').length;
+
+    timers.fire();
+
+    const sent = sentSince(harness, before);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ kind: 'connection', step: 'transport' });
+    // The kind byte, 32 zero bytes, and the Poly1305 tag: every keepalive is
+    // this size, so the interval tells a timing observer nothing else.
+    expect(fromBase64Url(sent[0]!.ct as string).length).toBe(1 + KEEPALIVE_BODY_SIZE + 16);
+    expect(timers.live).toHaveLength(1);
+    expect(timers.live[0]!.delayMs).toBe(E2E_KEEPALIVE_INTERVAL_MS);
+  });
+
+  it('pauses while the page is hidden and sends one the moment it returns', async () => {
+    const { harness, timers, visibility } = await connected();
+    const before = harness.clientSocket().frames('e2e').length;
+
+    // Backgrounded: a phone in a pocket has its timers throttled, so it must
+    // not promise a liveness it cannot keep.
+    visibility.set(false);
+    expect(timers.live).toHaveLength(0);
+    expect(sentSince(harness, before)).toHaveLength(0);
+
+    // Back in front of the user: one immediately, then the interval again.
+    visibility.set(true);
+    expect(sentSince(harness, before)).toHaveLength(1);
+    expect(timers.live).toHaveLength(1);
+  });
+
+  it('stops when the session does', async () => {
+    const { harness, timers } = await connected();
+    harness.client.close();
+
+    expect(timers.live).toHaveLength(0);
+    const before = harness.clientSocket().frames('e2e').length;
+    harness.client.sendKeepalive();
+    expect(harness.clientSocket().frames('e2e').length).toBe(before);
   });
 });
 

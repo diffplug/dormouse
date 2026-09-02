@@ -14,6 +14,7 @@ import {
   DEFAULT_CHALLENGE_TTL_MS,
   DEFAULT_PAIRING_TTL_MS,
   E2E_ID_BYTE_LENGTH,
+  E2E_KEEPALIVE_INTERVAL_MS,
   MAX_PUSH_QUERY_DELIVERY_IDS,
   NoiseTransportSession,
   REMOTE_EVENTS,
@@ -116,6 +117,17 @@ export interface PocketStorage {
   setRegisteredPushEndpoint(fingerprint: string): void;
 }
 
+/**
+ * Whether this page is in front of the user, and a way to be told when that
+ * changes. Injectable because keepalives are the one thing Pocket does on a
+ * timer, and a test must not wait thirty real seconds to see one.
+ */
+export interface PocketVisibility {
+  isVisible(): boolean;
+  /** Subscribe to visibility changes; returns an unsubscribe. */
+  subscribe(onChange: () => void): () => void;
+}
+
 export interface PocketClientDeps {
   /** Prepended to API routes; `''` for same-origin (the served app). */
   readonly baseUrl?: string;
@@ -130,6 +142,9 @@ export interface PocketClientDeps {
   readonly pendingDeletions: PendingDeletionStore;
   readonly storage?: PocketStorage;
   readonly now?: () => number;
+  /** The keepalive timer, as `(run, delayMs) => cancel`. */
+  readonly setTimer?: (run: () => void, delayMs: number) => () => void;
+  readonly visibility?: PocketVisibility;
 }
 
 /** Terminal stream callbacks for {@link PocketClient.attach}. */
@@ -288,6 +303,8 @@ export class PocketClient {
   readonly #pendingDeletions: PendingDeletionStore;
   readonly #storage: PocketStorage;
   readonly #now: () => number;
+  readonly #setTimer: (run: () => void, delayMs: number) => () => void;
+  readonly #visibility: PocketVisibility;
 
   #ws: PocketSocket | null = null;
   #sessionToken: string | null = null;
@@ -296,6 +313,9 @@ export class PocketClient {
   #established: EstablishedSession | null = null;
   #connectedHostId: string | null = null;
   #onHostGone: (() => void) | null = null;
+  /** Cancels the armed keepalive, and the visibility subscription behind it. */
+  #cancelKeepalive: (() => void) | null = null;
+  #cancelVisibility: (() => void) | null = null;
 
   /**
    * In-flight `e2e` waiters, keyed by `${kind}:${id}:${step}`.
@@ -320,6 +340,13 @@ export class PocketClient {
     this.#pendingDeletions = deps.pendingDeletions;
     this.#storage = deps.storage ?? localStoragePocketStorage();
     this.#now = deps.now ?? (() => Date.now());
+    this.#setTimer =
+      deps.setTimer ??
+      ((run, delayMs) => {
+        const timer = setTimeout(run, delayMs);
+        return () => clearTimeout(timer);
+      });
+    this.#visibility = deps.visibility ?? documentVisibility();
   }
 
   get sessionToken(): string | null {
@@ -809,6 +836,7 @@ export class PocketClient {
     if (outcome.ok) {
       this.#established = { connectionId, session };
       this.#connectedHostId = hostId;
+      this.#startKeepalives();
       return { ok: true, hostLabel: outcome.hostLabel };
     }
     if (outcome.code === 'pairing-required') {
@@ -1053,6 +1081,73 @@ export class PocketClient {
     }
   }
 
+  // --- Keepalives ----------------------------------------------------------
+
+  /**
+   * One fixed-size keepalive on the established session, or nothing if there
+   * is none. **The only thing that refreshes the Host's idle deadline** other
+   * than real traffic (`docs/specs/remote-security-model.md` → Host bounds).
+   */
+  sendKeepalive(): void {
+    const established = this.#established;
+    const hostId = this.#connectedHostId;
+    if (!established || hostId === null) return;
+    try {
+      this.#sendE2e(
+        { kind: 'connection', id: established.connectionId, hostId },
+        'transport',
+        established.session.sendKeepalive(),
+      );
+    } catch {
+      // A closed socket or a poisoned session; both have their own teardown,
+      // and a keepalive must not be what reports host loss.
+    }
+  }
+
+  /**
+   * Keepalives run **only while the page is visible**. A backgrounded tab has
+   * its timers throttled or suspended outright, so a phone in a pocket cannot
+   * promise liveness it does not have — the Host reaps it, and coming back
+   * costs a fresh handshake and one WebAuthn prompt
+   * ([pocket-app.md](../../../docs/specs/pocket-app.md)). Returning to the
+   * foreground sends one immediately, because a tab hidden for less than the
+   * idle timeout still has a session worth keeping.
+   */
+  #startKeepalives(): void {
+    this.#stopKeepalives();
+    this.#cancelVisibility = this.#visibility.subscribe(() => {
+      if (!this.#established) return;
+      if (!this.#visibility.isVisible()) {
+        this.#cancelKeepaliveTimer();
+        return;
+      }
+      this.sendKeepalive();
+      this.#armKeepalive();
+    });
+    this.#armKeepalive();
+  }
+
+  #armKeepalive(): void {
+    this.#cancelKeepaliveTimer();
+    if (!this.#established || !this.#visibility.isVisible()) return;
+    this.#cancelKeepalive = this.#setTimer(() => {
+      this.#cancelKeepalive = null;
+      this.sendKeepalive();
+      this.#armKeepalive();
+    }, E2E_KEEPALIVE_INTERVAL_MS);
+  }
+
+  #cancelKeepaliveTimer(): void {
+    this.#cancelKeepalive?.();
+    this.#cancelKeepalive = null;
+  }
+
+  #stopKeepalives(): void {
+    this.#cancelKeepaliveTimer();
+    this.#cancelVisibility?.();
+    this.#cancelVisibility = null;
+  }
+
   /** One `e2e` envelope. Every Client→Host byte in this file goes through here. */
   #sendE2e(route: E2eRoute, step: E2eClientStep, ciphertext: Uint8Array): void {
     this.#send({
@@ -1135,8 +1230,7 @@ export class PocketClient {
         if (isE2eServerToClientFrame(frame)) this.#onE2e(frame);
         return;
       case 'host-gone':
-        this.#connectedHostId = null;
-        this.#established = null;
+        this.#disposeCeremony();
         this.#onHostGone?.();
         this.#rejectAll(new Error('host disconnected'));
         return;
@@ -1243,6 +1337,7 @@ export class PocketClient {
 
   /** Erase every session's cipher state; a new ceremony starts from a handshake. */
   #disposeCeremony(): void {
+    this.#stopKeepalives();
     this.#connectedHostId = null;
     this.#established = null;
   }
@@ -1357,6 +1452,33 @@ class HostUnavailableError extends Error {
 
 function uuid(): string {
   return globalThis.crypto.randomUUID();
+}
+
+/**
+ * The browser's own visibility, as {@link PocketVisibility}.
+ *
+ * A runtime with no `document` — a test, a worker — reads as visible: the
+ * alternative is a client that silently never keepalives, and the only place
+ * this default runs is the app, which always has one.
+ */
+function documentVisibility(): PocketVisibility {
+  const doc = (
+    globalThis as {
+      document?: {
+        visibilityState?: string;
+        addEventListener(type: string, handler: () => void): void;
+        removeEventListener(type: string, handler: () => void): void;
+      };
+    }
+  ).document;
+  return {
+    isVisible: () => doc === undefined || doc.visibilityState === 'visible',
+    subscribe(onChange) {
+      if (!doc) return () => {};
+      doc.addEventListener('visibilitychange', onChange);
+      return () => doc.removeEventListener('visibilitychange', onChange);
+    },
+  };
 }
 
 /**
