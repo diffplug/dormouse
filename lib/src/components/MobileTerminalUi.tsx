@@ -278,16 +278,25 @@ function KeyboardModeSelector({
   );
 }
 
-const RESERVE_PLACEHOLDER_COPY = {
-  recent: 'WIP - commands you have recently executed will be available here',
-  type: 'Onscreen keyboard goes here',
-  draft: 'WIP - this will be a place to draft prompts before pasting into the terminal',
+/**
+ * What each reserve says when the OS keyboard is not covering it.
+ *
+ * `type` is not a placeholder: the reserve is the stable-height area the OS
+ * keyboard occupies, so this is what a phone shows once that keyboard has been
+ * dismissed, and it is the label on the button that brings it back. Recent and
+ * Draft genuinely are unbuilt, and say so rather than reading as broken
+ * (`docs/specs/mobile-terminal-ui.md` → Future).
+ */
+const RESERVE_COPY = {
+  recent: 'Not built yet — commands you have run will show up here.',
+  type: 'Tap here to show the keyboard',
+  draft: 'Not built yet — a place to draft prompts before sending them.',
 } as const;
 
 function WorkInProgressPane({ mode }: { mode: 'recent' | 'draft' }) {
   return (
     <div className="grid h-full place-items-center px-4 text-center font-mono text-sm text-muted">
-      {RESERVE_PLACEHOLDER_COPY[mode]}
+      {RESERVE_COPY[mode]}
     </div>
   );
 }
@@ -854,7 +863,7 @@ export function MobileTerminalUi({
               'disabled:pointer-events-none disabled:opacity-60',
             )}
           >
-            <span className="px-4 text-center font-mono text-sm text-muted">{RESERVE_PLACEHOLDER_COPY.type}</span>
+            <span className="px-4 text-center font-mono text-sm text-muted">{RESERVE_COPY.type}</span>
           </button>
         ) : null}
       </div>
