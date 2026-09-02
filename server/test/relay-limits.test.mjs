@@ -16,7 +16,31 @@ import { WS_ROUTES, WS_TOKEN_PARAM } from 'server-lib-common';
 import { MAX_RELAY_FRAME_BYTES } from '../dist/app.js';
 import { MAX_RELAY_CLIENT_SOCKETS } from '../dist/relay.js';
 
-import { connectClient, connectHost, freshApp, makeClock, ownerSession, startServer, until, wsConnect } from './helpers.mjs';
+import {
+  connectClient,
+  connectHost,
+  freshApp,
+  makeClock,
+  ownerSession,
+  startServer,
+  until,
+  wsConnect,
+} from './helpers.mjs';
+import { e2eClientFrame, newE2eId } from './harness/e2e.mjs';
+
+/** The `RelaySocket` slice the hub uses, recording what it was handed. */
+function fakeSocket() {
+  return {
+    sent: [],
+    closeCode: null,
+    send(data) {
+      this.sent.push(JSON.parse(data));
+    },
+    close(code) {
+      this.closeCode = code;
+    },
+  };
+}
 
 /** A live server plus a signed-in owner; the session token is reused per socket. */
 async function relayApp(options = {}) {
@@ -129,4 +153,30 @@ test('a socket that stops answering the heartbeat is closed; a live one is not',
 
   const closed = await socket.closed;
   assert.equal(closed.code, 1001);
+});
+
+test('the expiry sweep tells a Host client-gone exactly once', async () => {
+  // The sweep tears down and THEN closes, so the socket's own `onClose` reaches
+  // `unregisterClient` a second time. Driven at the hub rather than over a real
+  // socket, because what needs proving is that the second call is a no-op, not
+  // how long a close handshake takes.
+  const { hub } = await freshApp();
+  const hostId = newE2eId();
+  const hostSocket = fakeSocket();
+  hub.registerHost(hostId, hostSocket);
+  const clientSocket = fakeSocket();
+  const client = hub.registerClient(clientSocket, { expiresAt: 1000 });
+  // `client-gone` only reaches a Host the client is bound to.
+  hub.onClientFrame(client, JSON.stringify(e2eClientFrame(hostId)));
+  assert.equal(client.hostId, hostId, 'precondition: bound');
+
+  assert.equal(hub.closeExpiredClients(1000), 1);
+  assert.equal(clientSocket.closeCode, 1008);
+  // What the socket's own `onClose` then does.
+  hub.unregisterClient(client);
+
+  assert.deepEqual(
+    hostSocket.sent.filter((frame) => frame.t === 'client-gone').length,
+    1,
+  );
 });

@@ -277,8 +277,17 @@ export class RelayHub {
     });
   }
 
-  /** Tear down a Client socket: tell its Host `client-gone`, then forget it. */
+  /**
+   * Tear down a Client socket: tell its Host `client-gone`, then forget it.
+   *
+   * Guarded so a second call is a no-op, the way {@link unregisterHost} is:
+   * {@link closeExpiredClients} tears down and *then* closes, so the socket's
+   * own `onClose` arrives here again, and a second `client-gone` for the same
+   * `clientId` would be a frame naming a ceremony the Host has already
+   * disposed.
+   */
   unregisterClient(client: ClientConn): void {
+    if (this.#clients.get(client.clientId) !== client) return; // already torn down
     this.#clients.delete(client.clientId);
     if (client.hostId !== null) {
       const host = this.#hosts.get(client.hostId);
