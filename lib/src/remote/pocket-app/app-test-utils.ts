@@ -12,8 +12,8 @@ import type { HostView } from './App';
 
 /** The two Hosts every suite lists, named so an assertion says which one. */
 export const HOSTS: HostView[] = [
-  { hostId: 'host-1', label: 'First laptop', online: true },
-  { hostId: 'host-2', label: 'Second laptop', online: true },
+  { hostId: 'host-1', label: 'First laptop', online: true, needsPairing: false },
+  { hostId: 'host-2', label: 'Second laptop', online: true, needsPairing: false },
 ];
 
 /** Let every pending promise chain land and React commit what they produced. */
