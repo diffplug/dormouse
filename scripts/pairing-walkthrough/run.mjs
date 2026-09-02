@@ -242,8 +242,20 @@ async function cleanup(state, opts) {
     .join('|');
   // pgrep exits 1 when nothing matches, which `exec` reports as a failure.
   const survivors = await exec('pgrep', ['-fl', marks]).catch(() => ({ stdout: '' }));
-  if (survivors.stdout.trim()) {
-    console.error(`[walkthrough] processes survived cleanup:\n${survivors.stdout.trim()}`);
+  // **This process and the shell that started it match the marks themselves.**
+  // `pairing-walkthrough` is a substring of this script's own path, and `--out`
+  // puts the run directory in its own argv — so a diagnostic whose whole job is
+  // to say "something leaked" would cry wolf on every path that ends before
+  // `opts.session` exists: `--help`, a bad flag, and the `:3000` refusal a
+  // first-time run is most likely to hit. (Whether the parent is listed at all
+  // is a `pgrep` difference — GNU lists it, BSD does not — which is not
+  // something to leave the answer resting on.)
+  const mine = new Set([process.pid, process.ppid]);
+  const left = survivors.stdout
+    .split('\n')
+    .filter((line) => line.trim() && !mine.has(Number(line.trim().split(/\s+/)[0])));
+  if (left.length > 0) {
+    console.error(`[walkthrough] processes survived cleanup:\n${left.join('\n')}`);
   }
 }
 
