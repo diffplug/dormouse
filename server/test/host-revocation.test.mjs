@@ -7,6 +7,7 @@ import { WS_CLOSE_HOST_REVOKED } from 'server-lib-common';
 
 import { enrollHost, freshApp } from './helpers.mjs';
 import { e2eClientFrame } from './harness/e2e.mjs';
+import { recordingSocket } from './harness/memory-socket.mjs';
 
 /** A session that never expires: these cases are about sockets, not TTLs. */
 const LIVE_SESSION = { expiresAt: Number.POSITIVE_INFINITY };
@@ -16,19 +17,6 @@ const LIVE_SESSION = { expiresAt: Number.POSITIVE_INFINITY };
  * `sweepRevokedHosts` rather than its interval, which `index.ts` owns: the
  * timer is wall-clock plumbing, and what needs proving is the decision.
  */
-
-function fakeSocket() {
-  return {
-    sent: [],
-    closeCode: null,
-    send(data) {
-      this.sent.push(JSON.parse(data));
-    },
-    close(code) {
-      this.closeCode = code;
-    },
-  };
-}
 
 function hostsPath(stateDir) {
   return join(stateDir, 'hosts.json');
@@ -41,9 +29,9 @@ test('a Host whose row is deleted loses its relay socket, and its clients are to
 
   // The Host is connected and one Client is bound to it — the state the upgrade
   // check can no longer see anything about.
-  const hostSocket = fakeSocket();
+  const hostSocket = recordingSocket();
   hub.registerHost(host.hostId, hostSocket);
-  const clientSocket = fakeSocket();
+  const clientSocket = recordingSocket();
   const client = hub.registerClient(clientSocket, LIVE_SESSION);
   hub.onClientFrame(client, JSON.stringify(e2eClientFrame(host.hostId)));
   assert.equal(client.hostId, host.hostId, 'precondition: bound');
@@ -63,7 +51,7 @@ test('an enrolled Host is left alone, however often the sweep runs', async () =>
   const created = await freshApp();
   const { hub } = created;
   const { body: host } = await enrollHost(created.app);
-  const hostSocket = fakeSocket();
+  const hostSocket = recordingSocket();
   hub.registerHost(host.hostId, hostSocket);
 
   assert.equal(await created.sweepRevokedHosts(), 0);
@@ -81,7 +69,7 @@ test('a `hosts.json` caught mid-edit revokes nobody', async () => {
   const created = await freshApp();
   const { hub, stateDir } = created;
   const { body: host } = await enrollHost(created.app);
-  const hostSocket = fakeSocket();
+  const hostSocket = recordingSocket();
   hub.registerHost(host.hostId, hostSocket);
 
   await writeFile(hostsPath(stateDir), '[{"hostId": "half-writ');
@@ -99,7 +87,7 @@ test('a `hosts.json` absent for an instant revokes nobody', async () => {
   const created = await freshApp();
   const { hub, stateDir } = created;
   const { body: host } = await enrollHost(created.app);
-  const hostSocket = fakeSocket();
+  const hostSocket = recordingSocket();
   hub.registerHost(host.hostId, hostSocket);
 
   await rm(hostsPath(stateDir));
@@ -119,8 +107,8 @@ test('one Host revoked out of two closes only that one', async () => {
   const { hub, stateDir } = created;
   const { body: first } = await enrollHost(created.app);
   const { body: second } = await enrollHost(created.app);
-  const firstSocket = fakeSocket();
-  const secondSocket = fakeSocket();
+  const firstSocket = recordingSocket();
+  const secondSocket = recordingSocket();
   hub.registerHost(first.hostId, firstSocket);
   hub.registerHost(second.hostId, secondSocket);
 

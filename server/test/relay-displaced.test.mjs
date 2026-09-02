@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { RelayHub } from '../dist/relay.js';
 import { e2eClientFrame, e2eHostFrame, newE2eId } from './harness/e2e.mjs';
+import { recordingSocket } from './harness/memory-socket.mjs';
 
 /** A session that never expires: these cases are about sockets, not TTLs. */
 const LIVE_SESSION = { expiresAt: Number.POSITIVE_INFINITY };
@@ -17,26 +18,13 @@ const LIVE_SESSION = { expiresAt: Number.POSITIVE_INFINITY };
 const HOST_A = newE2eId();
 const HOST_B = newE2eId();
 
-function fakeSocket() {
-  return {
-    sent: [],
-    closed: false,
-    send(data) {
-      this.sent.push(JSON.parse(data));
-    },
-    close() {
-      this.closed = true;
-    },
-  };
-}
-
 // `RelayHub` is driven with raw strings here, one level below the socket.
 const clientFrame = (hostId, overrides) => JSON.stringify(e2eClientFrame(hostId, overrides));
 const hostFrame = (clientId, overrides) => JSON.stringify(e2eHostFrame(clientId, overrides));
 
 /** Register a client and bind it to `hostId`. */
 function boundClient(hub, hostId) {
-  const socket = fakeSocket();
+  const socket = recordingSocket();
   const client = hub.registerClient(socket, LIVE_SESSION);
   hub.onClientFrame(client, clientFrame(hostId));
   assert.equal(client.hostId, hostId, 'precondition: bound');
@@ -45,12 +33,12 @@ function boundClient(hub, hostId) {
 
 test('frames from a displaced host socket are ignored', () => {
   const hub = new RelayHub();
-  const oldSocket = fakeSocket();
+  const oldSocket = recordingSocket();
   const oldConn = hub.registerHost(HOST_A, oldSocket);
   const { socket: clientSocket, client } = boundClient(hub, HOST_A);
 
   // The host reconnects: the old socket is displaced and the binding dropped.
-  const newSocket = fakeSocket();
+  const newSocket = recordingSocket();
   const newConn = hub.registerHost(HOST_A, newSocket);
   assert.equal(oldSocket.closed, true);
   assert.equal(client.hostId, null);
@@ -69,10 +57,10 @@ test('frames from a displaced host socket are ignored', () => {
 
 test('a displaced socket is also ignored after the replacement disconnects', () => {
   const hub = new RelayHub();
-  const oldConn = hub.registerHost(HOST_A, fakeSocket());
+  const oldConn = hub.registerHost(HOST_A, recordingSocket());
   const { socket: clientSocket, client } = boundClient(hub, HOST_A);
 
-  const newConn = hub.registerHost(HOST_A, fakeSocket());
+  const newConn = hub.registerHost(HOST_A, recordingSocket());
   hub.unregisterHost(newConn); // host fully offline now
   const sentBefore = clientSocket.sent.length;
 
@@ -86,9 +74,9 @@ test('a displaced socket is also ignored after the replacement disconnects', () 
 
 test('late frames from a host the client left are ignored', () => {
   const hub = new RelayHub();
-  const hostA = hub.registerHost(HOST_A, fakeSocket());
-  hub.registerHost(HOST_B, fakeSocket());
-  const clientSocket = fakeSocket();
+  const hostA = hub.registerHost(HOST_A, recordingSocket());
+  hub.registerHost(HOST_B, recordingSocket());
+  const clientSocket = recordingSocket();
   const client = hub.registerClient(clientSocket, LIVE_SESSION);
 
   hub.onClientFrame(client, clientFrame(HOST_A));
@@ -102,8 +90,8 @@ test('late frames from a host the client left are ignored', () => {
 
 test('rebinding a client tells the previous host client-gone', () => {
   const hub = new RelayHub();
-  const hostA = hub.registerHost(HOST_A, fakeSocket());
-  const hostB = hub.registerHost(HOST_B, fakeSocket());
+  const hostA = hub.registerHost(HOST_A, recordingSocket());
+  const hostB = hub.registerHost(HOST_B, recordingSocket());
   const { client } = boundClient(hub, HOST_A);
 
   hub.onClientFrame(client, clientFrame(HOST_B));

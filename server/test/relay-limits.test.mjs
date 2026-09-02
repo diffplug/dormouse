@@ -27,20 +27,7 @@ import {
   wsConnect,
 } from './helpers.mjs';
 import { e2eClientFrame, newE2eId } from './harness/e2e.mjs';
-
-/** The `RelaySocket` slice the hub uses, recording what it was handed. */
-function fakeSocket() {
-  return {
-    sent: [],
-    closeCode: null,
-    send(data) {
-      this.sent.push(JSON.parse(data));
-    },
-    close(code) {
-      this.closeCode = code;
-    },
-  };
-}
+import { recordingSocket } from './harness/memory-socket.mjs';
 
 /** A live server plus a signed-in owner; the session token is reused per socket. */
 async function relayApp(options = {}) {
@@ -162,9 +149,9 @@ test('the expiry sweep tells a Host client-gone exactly once', async () => {
   // how long a close handshake takes.
   const { hub } = await freshApp();
   const hostId = newE2eId();
-  const hostSocket = fakeSocket();
+  const hostSocket = recordingSocket();
   hub.registerHost(hostId, hostSocket);
-  const clientSocket = fakeSocket();
+  const clientSocket = recordingSocket();
   const client = hub.registerClient(clientSocket, { expiresAt: 1000 });
   // `client-gone` only reaches a Host the client is bound to.
   hub.onClientFrame(client, JSON.stringify(e2eClientFrame(hostId)));
