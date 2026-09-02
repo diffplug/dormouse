@@ -44,6 +44,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
     "chromatic": "^17.0.0",
+    "fake-indexeddb": "^6.2.5",
     "remark-gfm": "^4.0.1",
     "storybook": "^10.4.0",
     "tailwindcss": "^4.3.0",

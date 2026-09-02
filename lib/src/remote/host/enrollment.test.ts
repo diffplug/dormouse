@@ -1,6 +1,29 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { clearEnrollment, getEnrollment, performEnrollment } from './enrollment';
+import { fromBase64Url, mintNoiseStaticKeyPair, toBase64Url } from 'server-lib-common';
+import { clearEnrollment, getEnrollment, isEnrollment, performEnrollment } from './enrollment';
 import { ENROLLMENT_KEY } from './store';
+
+// Only the minter is faked, and only where a test asks for it; everything else
+// in the package stays real so the guards under test are the shipped ones.
+vi.mock('server-lib-common', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('server-lib-common')>();
+  return { ...actual, mintNoiseStaticKeyPair: vi.fn(actual.mintNoiseStaticKeyPair) };
+});
+
+/** A server answering a well-formed enrollment; the body is what varies. */
+function enrollResponder(): ReturnType<typeof vi.fn> {
+  return vi.fn(async () =>
+    new Response(
+      JSON.stringify({
+        hostId: 'host-abc',
+        hostToken: 'tok-xyz',
+        origin: 'https://dormouse.example',
+        rpId: 'dormouse.example',
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ),
+  );
+}
 
 function stubLocalStorage(): Map<string, string> {
   const store = new Map<string, string>();
@@ -50,10 +73,72 @@ describe('remote-host enrollment', () => {
       hostToken: 'tok-xyz',
       origin: 'https://dormouse.example',
       rpId: 'dormouse.example',
+      // Minted locally, after the answer above (see the Noise-static test).
+      noiseStaticPrivateKey: expect.any(String),
+      noiseStaticPublicKey: expect.any(String),
     });
     // The service that asked decides where the credentials live; the exchange
     // itself writes nowhere.
     expect(store.size).toBe(0);
+  });
+
+  it('mints a Noise static the server never sees', async () => {
+    // The Host's permanent end-to-end identity is generated on this machine
+    // and persisted with the enrollment; the enroll request body is unchanged
+    // (docs/specs/remote-security-model.md → E2E identities and presence).
+    stubLocalStorage();
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          hostId: 'host-abc',
+          hostToken: 'tok-xyz',
+          origin: 'https://dormouse.example',
+          rpId: 'dormouse.example',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const enrollment = await performEnrollment(
+      'https://dormouse.example',
+      { password: 'hunter2' },
+      'My Laptop',
+    );
+
+    expect(enrollment.noiseStaticPublicKey).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(fromBase64Url(enrollment.noiseStaticPublicKey!)).toHaveLength(32);
+    // A canonical X25519 PKCS#8.
+    expect(fromBase64Url(enrollment.noiseStaticPrivateKey!)).toHaveLength(48);
+    // Round-trips through the guard every read runs.
+    expect(isEnrollment(enrollment)).toBe(true);
+
+    const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string) as Record<
+      string,
+      unknown
+    >;
+    expect(body).toEqual({ password: 'hunter2', label: 'My Laptop' });
+  });
+
+  it('still enrolls when the runtime mints a static this build cannot persist', async () => {
+    // Minting is best-effort: a PKCS#8 outside what `isEnrollment` accepts must
+    // cost the Host its E2E identity, not its enrollment.
+    stubLocalStorage();
+    vi.mocked(mintNoiseStaticKeyPair).mockResolvedValueOnce({
+      privateKeyPkcs8: toBase64Url(new Uint8Array(256)),
+      publicKey: toBase64Url(new Uint8Array(32)),
+    });
+    vi.stubGlobal('fetch', enrollResponder());
+
+    const enrollment = await performEnrollment(
+      'https://dormouse.example',
+      { password: 'hunter2' },
+      'My Laptop',
+    );
+
+    expect(enrollment.hostId).toBe('host-abc');
+    expect(enrollment.noiseStaticPrivateKey).toBeUndefined();
+    expect(enrollment.noiseStaticPublicKey).toBeUndefined();
   });
 
   it('sends the installer’s one-time token in place of the password', async () => {
@@ -168,6 +253,43 @@ describe('remote-host enrollment', () => {
     await expect(performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x')).rejects.toThrow(
       /did not answer JSON/,
     );
+  });
+
+  it('takes both halves of the Noise static or neither, never one', () => {
+    // A record written before the field existed must keep loading; one half
+    // alone is a truncated write or a hand-edited file, and a Host that
+    // believed it had an identity it cannot use is worse than one that knows
+    // it has none.
+    const base = {
+      serverUrl: 's',
+      hostId: 'h',
+      hostToken: 't',
+      origin: 'o',
+      rpId: 'r',
+    };
+    const noiseStaticPublicKey = toBase64Url(new Uint8Array(32));
+    const noiseStaticPrivateKey = toBase64Url(new Uint8Array(48));
+
+    expect(isEnrollment(base)).toBe(true);
+    expect(isEnrollment({ ...base, noiseStaticPublicKey, noiseStaticPrivateKey })).toBe(true);
+    expect(isEnrollment({ ...base, noiseStaticPublicKey })).toBe(false);
+    expect(isEnrollment({ ...base, noiseStaticPrivateKey })).toBe(false);
+    // Well-formed base64url of the right decoded length: the value goes
+    // straight to `importKey`, from a file writable by anything running as
+    // this user.
+    expect(
+      isEnrollment({ ...base, noiseStaticPrivateKey, noiseStaticPublicKey: 'not base64url!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!' }),
+    ).toBe(false);
+    expect(
+      isEnrollment({ ...base, noiseStaticPrivateKey, noiseStaticPublicKey: toBase64Url(new Uint8Array(31)) }),
+    ).toBe(false);
+    expect(
+      isEnrollment({ ...base, noiseStaticPublicKey, noiseStaticPrivateKey: toBase64Url(new Uint8Array(16)) }),
+    ).toBe(false);
+    expect(
+      isEnrollment({ ...base, noiseStaticPublicKey, noiseStaticPrivateKey: toBase64Url(new Uint8Array(256)) }),
+    ).toBe(false);
+    expect(isEnrollment({ ...base, noiseStaticPublicKey, noiseStaticPrivateKey: 42 })).toBe(false);
   });
 
   it('clears and rejects malformed persisted enrollment', () => {

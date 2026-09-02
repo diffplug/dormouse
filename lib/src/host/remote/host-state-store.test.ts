@@ -44,7 +44,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     },
   };
 });
-import type { HostAclRecord } from 'server-lib-common';
+import { toBase64Url, type HostAclRecord } from 'server-lib-common';
 import type { HostEnrollment } from '../../remote/host/enrollment';
 import { createEphemeralHostStateStore, FileHostStateStore } from './host-state-store';
 
@@ -54,6 +54,12 @@ const ENROLLMENT: HostEnrollment = {
   hostToken: 'tok',
   origin: 'https://relay.example',
   rpId: 'relay.example',
+  // The Host's Noise static rides with the enrollment, so this store is where
+  // its private half lives (`docs/specs/remote-security-model.md` → E2E
+  // identities and presence). Shapes, not real keys — `isEnrollment` checks
+  // the encoding and the decoded lengths on the way back in.
+  noiseStaticPrivateKey: toBase64Url(new Uint8Array(48)),
+  noiseStaticPublicKey: toBase64Url(new Uint8Array(32)),
 };
 
 function aclRecord(hostId: string, devicePublicKey: string): HostAclRecord {
@@ -92,7 +98,12 @@ describe('FileHostStateStore', () => {
     await store.saveAcl('host-1', [aclRecord('host-1', 'device-1')]);
 
     const reopened = new FileHostStateStore(dir);
-    expect(await reopened.loadEnrollment()).toEqual(ENROLLMENT);
+    const loaded = await reopened.loadEnrollment();
+    expect(loaded).toEqual(ENROLLMENT);
+    // Including the Noise static: nothing else persists it, and a Host that
+    // came back without it would be a different party to every paired Client.
+    expect(loaded?.noiseStaticPrivateKey).toBe(ENROLLMENT.noiseStaticPrivateKey);
+    expect(loaded?.noiseStaticPublicKey).toBe(ENROLLMENT.noiseStaticPublicKey);
     expect(await reopened.loadAcl('host-1')).toHaveLength(1);
   });
 

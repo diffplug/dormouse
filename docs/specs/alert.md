@@ -365,3 +365,17 @@ Notification text is untrusted terminal output.
 - Wherever notification text appears in visible UI or accessible labels, it is plain text, and layout must tolerate long text, CJK, RTL, combining marks, and emoji without pushing fixed controls out of bounds. Sanitized terminal-supplied `OSC 0` / `OSC 2` / `OSC 9` text also participates in normal Pane-label derivation, and that label may reach the opt-in speech and push channels — each after its own second pass, because a label safe to *render* is not automatically safe to hand a speech engine or an OS notification, and those two fail in different ways. See `toSpokenText` under Spoken alarms and `toPushText` under Push notifications.
 
 Alert-specific robustness requirements: multiple Sessions ring independently; minimize, reattach, rerender, resize, and theme changes preserve existing alert state without creating new rings; an exited Session may keep ringing until attended, dismissed, or destroyed; ringing must not rely on color alone and must respect `prefers-reduced-motion`.
+
+## Future
+
+**Push contents are sealed end to end** in the **e2e-client-host** scope
+([remote-security-model.md](./remote-security-model.md) `## Future`, Push
+sealing): the Host encrypts title, body, and tag to the paired Client's static
+key, names recipients by opaque `deliveryId` instead of device key, and the
+Server forwards ciphertext. The delivery-half rules above are unchanged — the
+Host still reads its active ACL at send time and the Server still refuses a
+send that names nobody — while the render sink moves from a verbatim-copied
+worker to a built one that decrypts and re-sanitizes
+([pocket-app.md](./pocket-app.md) `## Future`). Pocket retires obsolete
+delivery mappings through a durable tombstone queue and an idempotent
+authenticated deletion route ([server.md](./server.md) `## Future`).

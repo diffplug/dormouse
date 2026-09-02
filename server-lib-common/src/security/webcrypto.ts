@@ -36,6 +36,7 @@ export interface SubtleCryptoLike {
     extractable: boolean,
     keyUsages: readonly string[],
   ): Promise<CryptoKeyLike>;
+  deriveBits(algorithm: object, baseKey: CryptoKeyLike, length: number): Promise<ArrayBuffer>;
   sign(algorithm: object, key: CryptoKeyLike, data: Uint8Array): Promise<ArrayBuffer>;
   verify(
     algorithm: object,

@@ -8,6 +8,8 @@ import { randomBytes } from 'node:crypto';
 import {
   WS_CLOSE_HOST_REPLACED,
   WS_CLOSE_HOST_REPLACED_REASON,
+  isE2eClientFrame,
+  isE2eHostFrame,
   isPairStatusQuery,
   toBase64Url,
 } from 'server-lib-common';
@@ -186,6 +188,20 @@ export class RelayHub {
           this.#toClient(client, { t: 'msg', data: frame.data });
         }
         return;
+      case 'e2e':
+        // No `established` gate: the relay never learns whether the Host
+        // authorized anything, so the binding checked above is the whole
+        // routing rule (server.md -> Relay).
+        if (!isE2eHostFrame(frame)) return;
+        this.#toClient(client, {
+          t: 'e2e',
+          hostId: host.hostId,
+          kind: frame.kind,
+          id: frame.id,
+          step: frame.step,
+          ct: frame.ct,
+        });
+        return;
       default:
         return; // unknown host frame type — ignore
     }
@@ -283,18 +299,8 @@ export class RelayHub {
       case 'connect2': {
         const host = this.#resolveHost(client, frame.hostId);
         if (!host) return;
-        // Binding to a (new) host, or re-attempting `connect`, drops any prior
-        // established session — a client holds at most one at a time.
-        if (client.hostId !== null && client.hostId !== frame.hostId) {
-          const previousHost = this.#hosts.get(client.hostId);
-          if (previousHost) {
-            this.#toHost(previousHost, { t: 'client-gone', clientId: client.clientId });
-          }
-        }
-        if (client.hostId !== frame.hostId || frame.t === 'connect') {
-          client.established = false;
-        }
-        client.hostId = frame.hostId;
+        // Re-attempting `connect` also drops the established session.
+        this.#bindClientToHost(client, frame.hostId, frame.t === 'connect');
 
         if (frame.t === 'connect') {
           this.#toHost(host, { t: 'connect', clientId: client.clientId });
@@ -331,6 +337,34 @@ export class RelayHub {
         this.#toHost(host, { t: 'connect2', clientId: client.clientId, request: frame.request });
         return;
       }
+      case 'e2e': {
+        // The envelope the end-to-end protocol rides in: an `init` binds, and
+        // everything after it is forwarded within that binding (server.md ->
+        // Relay). Never decoded here.
+        if (!isE2eClientFrame(frame)) {
+          this.#toClient(client, { t: 'error', error: 'malformed e2e frame' });
+          return;
+        }
+        const host = this.#resolveHost(client, frame.hostId);
+        if (!host) return;
+        if (frame.step === 'init') {
+          this.#bindClientToHost(client, frame.hostId, true);
+        } else if (client.hostId !== frame.hostId) {
+          // Transport outside the binding: the client is talking to a Host it
+          // is not bound to, so there is nothing to forward it to.
+          return;
+        }
+        this.#toHost(host, {
+          t: 'e2e',
+          clientId: client.clientId,
+          hostId: frame.hostId,
+          kind: frame.kind,
+          id: frame.id,
+          step: frame.step,
+          ct: frame.ct,
+        });
+        return;
+      }
       case 'msg':
         // Blocked until the session is established; silently dropped otherwise.
         if (client.established && client.hostId !== null) {
@@ -355,9 +389,28 @@ export class RelayHub {
   }
 
   /**
+   * Bind a client socket to `hostId` — the one place that transition is
+   * written, so `pair`/`connect`/`connect2` and an `e2e` `init` cannot drift.
+   * A client holds at most one binding: moving to a new Host tells the old one
+   * the client is gone and drops the session established with it. Frames that
+   * re-attempt an already-bound Host pass `dropEstablished` to say whether
+   * they restart the handshake (`connect`, `e2e` `init`) or continue it.
+   */
+  #bindClientToHost(client: ClientConn, hostId: string, dropEstablished: boolean): void {
+    if (client.hostId !== null && client.hostId !== hostId) {
+      const previousHost = this.#hosts.get(client.hostId);
+      if (previousHost) {
+        this.#toHost(previousHost, { t: 'client-gone', clientId: client.clientId });
+      }
+    }
+    if (dropEstablished || client.hostId !== hostId) client.established = false;
+    client.hostId = hostId;
+  }
+
+  /**
    * Resolve the Host a client frame addresses, answering the two refusals
-   * (missing hostId, offline) itself. Resolution only — binding the client to
-   * the Host stays with the `pair`/`connect`/`connect2` group.
+   * (missing hostId, offline) itself. Resolution only — binding is
+   * {@link RelayHub.#bindClientToHost}.
    */
   #resolveHost(client: ClientConn, hostId: unknown): HostConn | null {
     if (typeof hostId !== 'string') {

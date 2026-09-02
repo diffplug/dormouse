@@ -32,6 +32,29 @@ export function toBase64Url(bytes: Uint8Array): string {
 }
 
 /**
+ * A non-empty base64url string no longer than `limit` — the shape of every
+ * handle, id, and ciphertext on this wire. Length first, alphabet second: the
+ * scan is the expensive half, so a bound rejects before it runs.
+ *
+ * Padding is rejected even though {@link fromBase64Url} tolerates it, so a
+ * given byte string has exactly one accepted spelling on the wire.
+ */
+export function isBoundedBase64Url(value: unknown, limit: number): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= limit &&
+    /^[A-Za-z0-9_-]+$/.test(value)
+  );
+}
+
+/** Unpadded base64url characters for `byteLength` bytes. */
+export function base64UrlLength(byteLength: number): number {
+  const remainder = byteLength % 3;
+  return Math.floor(byteLength / 3) * 4 + (remainder === 0 ? 0 : remainder + 1);
+}
+
+/**
  * Decode base64url. Trailing `=` padding is tolerated; anything else invalid
  * (bad characters, impossible length, nonzero trailing bits) throws, so a
  * given byte string has exactly one accepted encoding.
@@ -143,18 +166,46 @@ export function concatBytes(...parts: readonly Uint8Array[]): Uint8Array {
  */
 export function lengthPrefixedConcat(parts: readonly Uint8Array[]): Uint8Array {
   let total = 0;
-  for (const part of parts) total += 4 + part.length;
+  for (const part of parts) total += UINT32_SIZE + part.length;
   const out = new Uint8Array(total);
   let offset = 0;
   for (const part of parts) {
-    out[offset] = (part.length >>> 24) & 0xff;
-    out[offset + 1] = (part.length >>> 16) & 0xff;
-    out[offset + 2] = (part.length >>> 8) & 0xff;
-    out[offset + 3] = part.length & 0xff;
-    out.set(part, offset + 4);
-    offset += 4 + part.length;
+    writeUint32BE(out, offset, part.length);
+    out.set(part, offset + UINT32_SIZE);
+    offset += UINT32_SIZE + part.length;
   }
   return out;
+}
+
+/** Bytes in the big-endian `u32` every length prefix in this system uses. */
+export const UINT32_SIZE = 4;
+
+/** Write `value` as big-endian `u32` at `offset`; the caller sizes `out`. */
+export function writeUint32BE(out: Uint8Array, offset: number, value: number): void {
+  out[offset] = (value >>> 24) & 0xff;
+  out[offset + 1] = (value >>> 16) & 0xff;
+  out[offset + 2] = (value >>> 8) & 0xff;
+  out[offset + 3] = value & 0xff;
+}
+
+/** Read the big-endian `u32` at `offset`, unsigned. */
+export function readUint32BE(bytes: Uint8Array, offset = 0): number {
+  return (
+    ((bytes[offset]! << 24) >>> 0) +
+    (bytes[offset + 1]! << 16) +
+    (bytes[offset + 2]! << 8) +
+    bytes[offset + 3]!
+  );
+}
+
+/**
+ * A string no longer than `limit` — what a wire guard actually wants, since a
+ * type check alone bounds nothing: a megabyte string is a `string`. The limit
+ * is the caller's, because what a pairing field may cost is not what a
+ * presence binding may cost.
+ */
+export function isBoundedString(value: unknown, limit: number): value is string {
+  return typeof value === 'string' && value.length <= limit;
 }
 
 /** Compare byte arrays without early exit on the first mismatching byte. */

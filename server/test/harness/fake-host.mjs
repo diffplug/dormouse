@@ -8,12 +8,18 @@
  * fresh instance (reconnecting with the same token) models a Host restart: its
  * ACL starts empty again.
  *
- * Constructor: `{ serverUrl, hostToken, hostId, origin, rpId, autoApprove }`.
- * `serverUrl` may be `http(s)://…` or `ws(s)://…`. When `autoApprove` is true a
- * `pair` is approved the moment it arrives; otherwise call `approve(clientId)` /
- * `deny(clientId)` from the pairing-approval hook. Subscribe to events for logs
- * and assertions: `open`, `close`, `pair`, `pair-status`, `paired`, `denied`,
- * `connect`, `decision`, `msg`, `client-gone`, `setup-token-redeemed`.
+ * Constructor: `{ serverUrl, hostToken, hostId, origin, rpId, autoApprove,
+ * noiseStaticKeyPair }`. `serverUrl` may be `http(s)://…` or `ws(s)://…`. When
+ * `autoApprove` is true a `pair` is approved the moment it arrives; otherwise
+ * call `approve(clientId)` / `deny(clientId)` from the pairing-approval hook.
+ * Subscribe to events for logs and assertions: `open`, `close`, `pair`,
+ * `pair-status`, `paired`, `denied`, `connect`, `decision`, `msg`,
+ * `client-gone`, `setup-token-redeemed`, `e2e-open`, `e2e-receive`,
+ * `e2e-error`.
+ *
+ * `noiseStaticKeyPair` turns on the `e2e` half: the Host answers `init` as the
+ * IK responder and everything after it as a `NoiseTransportSession`. Both
+ * statics are injected (server.md -> Relay).
  *
  * The handshake smoke test and the manual `scripts/fake-host.mjs` dev
  * stand-in both reuse this class.
@@ -24,6 +30,7 @@ import { EventEmitter } from 'node:events';
 import {
   HostAcl,
   HostChallengeIssuer,
+  NoiseTransportSession,
   PairingCeremony,
   REMOTE_EVENTS,
   REMOTE_METHODS,
@@ -31,6 +38,8 @@ import {
   WS_TOKEN_PARAM,
   authorizeConnection,
   clampTerminalDimension,
+  createNoiseResponder,
+  isE2eServerToHostFrame,
   isPairStatusQuery,
   fromBase64Url,
   toBase64Url,
@@ -38,11 +47,28 @@ import {
   utf8Encode,
 } from 'server-lib-common';
 
+import { e2ePrologueFor } from './e2e.mjs';
+import { attachFrameSocket, closeSocket, receiveFrame, sendFrame } from './frame-socket.mjs';
+
 export class FakeHost extends EventEmitter {
-  constructor({ serverUrl, hostToken, hostId, origin, rpId, autoApprove = true }) {
+  /** Frames from this socket are handled one at a time, in arrival order. */
+  #chain = Promise.resolve();
+
+  constructor({
+    serverUrl,
+    hostToken,
+    hostId,
+    origin,
+    rpId,
+    autoApprove = true,
+    noiseStaticKeyPair,
+  }) {
     super();
     this.hostId = hostId;
     this.autoApprove = autoApprove;
+    this.noiseStaticKeyPair = noiseStaticKeyPair;
+    /** `${clientId}|${kind}|${id}` → the live (or poisoned) e2e ceremony. */
+    this.e2e = new Map();
     this.policy = { rpId, origin };
     this.acl = new HostAcl(hostId);
     this.challenges = new HostChallengeIssuer();
@@ -65,38 +91,29 @@ export class FakeHost extends EventEmitter {
     this.attachments = new Map();
 
     const wsBase = serverUrl.replace(/^http/, 'ws');
-    this.ws = new WebSocket(`${wsBase}${WS_ROUTES.host}?${WS_TOKEN_PARAM}=${hostToken}`);
-    this.ready = new Promise((resolve, reject) => {
-      this.ws.addEventListener('open', () => {
-        this.emit('open');
-        resolve();
-      });
-      this.ws.addEventListener('error', (ev) => reject(ev.error ?? new Error('host ws error')));
-      this.ws.addEventListener('close', (ev) => reject(new Error(`closed before open (${ev.code})`)));
-    });
-    this.closed = new Promise((resolve) => this.ws.addEventListener('close', (ev) => resolve(ev)));
-    this.ws.addEventListener('close', (ev) => this.emit('close', ev));
-    this.ws.addEventListener('message', (ev) => {
-      void this.#onFrame(ev.data);
+    const ws = attachFrameSocket(this, `${wsBase}${WS_ROUTES.host}?${WS_TOKEN_PARAM}=${hostToken}`);
+    ws.addEventListener('message', (ev) => {
+      // Serialized through a promise chain for the reason the relay serializes
+      // its client socket (`server/src/app.ts`): `#onFrame` awaits — an `e2e`
+      // `init` three times before it records the session — so unchained
+      // handlers would let a pipelined frame overtake the one before it.
+      this.#chain = this.#chain.then(() => this.#onFrame(ev.data)).catch(() => undefined);
     });
   }
 
   #send(frame) {
-    try {
-      this.ws.send(JSON.stringify(frame));
-    } catch {
-      /* socket mid-close */
-    }
+    sendFrame(this, frame);
   }
 
   async #onFrame(raw) {
-    let frame;
-    try {
-      frame = JSON.parse(typeof raw === 'string' ? raw : '');
-    } catch {
+    const frame = receiveFrame(this, raw);
+    if (!frame) return;
+    if (frame.t === 'e2e') {
+      // Handled before the clientId narrowing below: it runs the wire guard
+      // itself, which bounds `clientId` more tightly than that check does.
+      await this.#onE2e(frame);
       return;
     }
-    if (!frame || typeof frame.t !== 'string') return;
     if (frame.t === 'setup-token-redeemed') {
       // The one server→host frame addressing no Client, so it is handled before
       // the clientId guard. It names the mint, never the token — the real Host
@@ -157,12 +174,91 @@ export class FakeHost extends EventEmitter {
         this.pending.delete(clientId);
         this.directorySubs.delete(clientId);
         this.attachments.delete(clientId);
+        for (const [key, entry] of this.e2e) {
+          if (entry.clientId === clientId) this.e2e.delete(key);
+        }
         this.emit('client-gone', { clientId });
         return;
       }
       default:
         return;
     }
+  }
+
+  // --- The `e2e` envelope ---------------------------------------------------
+
+  /**
+   * One `e2e` frame: `init` is the IK responder's message 1 read plus message 2
+   * write, everything after it is transport on the resulting session.
+   *
+   * A failure keeps the poisoned session rather than erasing it, so a test can
+   * see that the session — not just this frame — is dead. The real Host erases
+   * the entry (`docs/specs/remote-security-model.md` -> Host bounds); the
+   * observable rule, that nothing later decrypts, is the same either way.
+   */
+  async #onE2e(frame) {
+    if (!isE2eServerToHostFrame(frame)) {
+      this.emit('e2e-error', { error: new Error('malformed e2e frame'), frame });
+      return;
+    }
+    const { clientId, kind, id } = frame;
+    const key = `${clientId}|${kind}|${id}`;
+    try {
+      if (frame.step === 'init') {
+        if (!this.noiseStaticKeyPair) throw new Error('this host has no Noise static');
+        const handshake = await createNoiseResponder({
+          prologue: e2ePrologueFor({ kind, hostId: this.hostId, id }),
+          staticKeyPair: this.noiseStaticKeyPair,
+        });
+        await handshake.readMessage(fromBase64Url(frame.ct));
+        const message2 = await handshake.writeMessage();
+        const entry = {
+          clientId,
+          kind,
+          id,
+          session: new NoiseTransportSession(handshake.session),
+          // IK authenticates the initiator's static: this is the key the ACL
+          // conjunction is checked against once the ceremony lands (stage 4).
+          clientStaticPublicKey: handshake.remoteStaticPublicKey,
+        };
+        this.e2e.set(key, entry);
+        this.#send({ t: 'e2e', clientId, kind, id, step: 'response', ct: toBase64Url(message2) });
+        this.emit('e2e-open', entry);
+        return;
+      }
+      const entry = this.e2e.get(key);
+      if (!entry) throw new Error('no e2e session for this client, kind, and id');
+      const receipt = entry.session.receive(fromBase64Url(frame.ct));
+      this.emit('e2e-receive', { clientId, kind, id, receipt, entry });
+    } catch (error) {
+      this.emit('e2e-error', { clientId, kind, id, error, frame });
+    }
+  }
+
+  /** The most recent ceremony for a client; `#onE2e` does the keyed lookup. */
+  e2eEntry(clientId) {
+    let found;
+    for (const entry of this.e2e.values()) if (entry.clientId === clientId) found = entry;
+    return found;
+  }
+
+  /** Wrap one ciphertext this Host produced in a transport frame. */
+  e2eSendCiphertext(entry, ciphertext) {
+    this.#send({
+      t: 'e2e',
+      clientId: entry.clientId,
+      kind: entry.kind,
+      id: entry.id,
+      step: 'transport',
+      ct: typeof ciphertext === 'string' ? ciphertext : toBase64Url(ciphertext),
+    });
+  }
+
+  e2eSendApp(clientId, bytes) {
+    const entry = this.e2eEntry(clientId);
+    const ciphertexts = entry.session.sendApp(bytes);
+    for (const ciphertext of ciphertexts) this.e2eSendCiphertext(entry, ciphertext);
+    return ciphertexts.length;
   }
 
   /**
@@ -320,10 +416,6 @@ export class FakeHost extends EventEmitter {
   }
 
   close() {
-    try {
-      this.ws.close();
-    } catch {
-      /* already closing */
-    }
+    closeSocket(this);
   }
 }

@@ -3,7 +3,13 @@
  * "Host side" owns the exchange and persistence contracts.
  */
 
-import { API_ROUTES, normalizeOrigin, type HostEnrollResponse } from 'server-lib-common';
+import {
+  API_ROUTES,
+  isNoiseStaticMaterial,
+  mintNoiseStaticKeyPair,
+  normalizeOrigin,
+  type HostEnrollResponse,
+} from 'server-lib-common';
 import { loadJson, removeJson } from '../../lib/local-json-store';
 import { HOST_REQUEST_TIMEOUT_MS } from './host-fetch';
 import { ENROLLMENT_KEY } from './store';
@@ -28,6 +34,19 @@ export interface HostEnrollment {
    * rejected as malformed.
    */
   requireUserVerification?: boolean;
+  /**
+   * This Host's permanent Noise static, minted locally at enrollment: PKCS#8
+   * of the X25519 private key, base64url.
+   *
+   * **The Server never receives it** — the enroll request body is unchanged —
+   * and it lives only where the enrollment lives, which is owner-only storage
+   * on both hosts (`SECURITY.md` → "Credentials at rest"). Optional today
+   * because an enrollment persisted before this field existed must keep
+   * loading; nothing reads it yet.
+   */
+  noiseStaticPrivateKey?: string;
+  /** The raw 32-byte public half of that static, base64url. */
+  noiseStaticPublicKey?: string;
 }
 
 /**
@@ -48,8 +67,25 @@ export function isEnrollment(value: unknown): value is HostEnrollment {
     // Optional — absent is the documented default. Present-but-wrong-typed is
     // still a rejection: a store that round-trips `"false"` as truthy would be
     // the silent disagreement this field exists to prevent.
-    (v.requireUserVerification === undefined || typeof v.requireUserVerification === 'boolean')
+    (v.requireUserVerification === undefined || typeof v.requireUserVerification === 'boolean') &&
+    hasValidNoiseStatic(v)
   );
+}
+
+/**
+ * **Both halves of the Noise static, or neither.** Absent is an enrollment
+ * from before the field existed; one half alone is a truncated write or a
+ * hand-edited file, and accepting it would leave a Host that believes it has
+ * an identity it cannot use. What a well-formed half looks like is
+ * `isNoiseStaticMaterial`'s to say — the value goes straight to `importKey`
+ * from a file writable by anything running as this user.
+ */
+function hasValidNoiseStatic(v: Record<string, unknown>): boolean {
+  const privateKey = v.noiseStaticPrivateKey;
+  const publicKey = v.noiseStaticPublicKey;
+  if (privateKey === undefined && publicKey === undefined) return true;
+  if (typeof privateKey !== 'string' || typeof publicKey !== 'string') return false;
+  return isNoiseStaticMaterial(publicKey, privateKey);
 }
 
 export function getEnrollment(): HostEnrollment | null {
@@ -140,6 +176,10 @@ export async function performEnrollment(
     ...(typeof enrolled?.requireUserVerification === 'boolean'
       ? { requireUserVerification: enrolled.requireUserVerification }
       : {}),
+    // Minted here, after the Server answered, and never sent to it: the
+    // request body above carries the credential and the label, nothing else.
+    // Persisting it is the caller's job, alongside `hostToken`.
+    ...(await mintNoiseStatic()),
   };
   if (!isEnrollment(enrollment)) {
     throw new Error(
@@ -147,6 +187,39 @@ export async function performEnrollment(
     );
   }
   return enrollment;
+}
+
+/**
+ * This Host's Noise static, or nothing.
+ *
+ * Best-effort on purpose: nothing consumes the static yet, so a runtime
+ * without X25519 must still be able to enroll and run remote control exactly
+ * as it does today. When the end-to-end protocol becomes mandatory, the
+ * capability probe is what tells that runtime it cannot take part — an
+ * enrollment that fails here with no explanation is not that message
+ * (`docs/specs/remote-security-model.md`).
+ */
+async function mintNoiseStatic(): Promise<{
+  noiseStaticPrivateKey?: string;
+  noiseStaticPublicKey?: string;
+}> {
+  try {
+    const material = await mintNoiseStaticKeyPair();
+    // Checked against the guard the enrollment must pass: a runtime whose
+    // PKCS#8 falls outside what `isEnrollment` accepts would otherwise fail
+    // the whole exchange, which is the opposite of best-effort.
+    if (!isNoiseStaticMaterial(material.publicKey, material.privateKeyPkcs8)) {
+      console.warn('[remote-host] the minted Noise static is not a shape this build persists');
+      return {};
+    }
+    return {
+      noiseStaticPrivateKey: material.privateKeyPkcs8,
+      noiseStaticPublicKey: material.publicKey,
+    };
+  } catch (error) {
+    console.warn('[remote-host] could not mint the Noise static key', error);
+    return {};
+  }
 }
 
 /**

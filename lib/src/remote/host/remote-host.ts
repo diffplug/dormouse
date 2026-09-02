@@ -16,6 +16,8 @@ import {
   computeSetupProof,
   constantTimeEqual,
   getWebCrypto,
+  importNoiseStaticPrivateKey,
+  isBoundedString,
   toBase64Url,
   utf8Encode,
   MAX_PENDING_PAIRINGS,
@@ -25,9 +27,11 @@ import {
   boundedPairingLabel,
   isPairStatusQuery,
   isPairingRequest,
+  MAX_CLIENT_ID_LENGTH,
   type ConnectionDecision,
   type ConnectionPolicy,
   type ConnectionRequest,
+  type CryptoKeyLike,
   type HostAclRecord,
   type HostFrame,
   type PairingRequest,
@@ -121,17 +125,6 @@ export interface RemoteHostOptions {
   reconnect?: boolean;
 }
 
-/**
- * The longest `clientId` this Host will act on.
- *
- * The relay mints these as base64url of 16 random bytes (~22 characters), so
- * this is an order of magnitude of headroom. It exists because the id is a
- * *map key* on a hostile-relay path: every other field of a `pair` frame is
- * capped by `PAIRING_FIELD_LIMIT`, and bounding those while leaving the key
- * free would bound only the part that was already bounded.
- */
-const MAX_CLIENT_ID_LENGTH = 256;
-
 /** The server→host frames that address one Client; the rest are handled apart. */
 type AddressedFrame = Extract<ServerToHostFrame, { clientId: string }>;
 
@@ -142,7 +135,7 @@ type AddressedFrame = Extract<ServerToHostFrame, { clientId: string }>;
  */
 function isAddressedFrame(frame: ServerToHostFrame): frame is AddressedFrame {
   const clientId: unknown = (frame as { clientId?: unknown }).clientId;
-  return typeof clientId === 'string' && clientId.length <= MAX_CLIENT_ID_LENGTH;
+  return isBoundedString(clientId, MAX_CLIENT_ID_LENGTH);
 }
 
 const INITIAL_BACKOFF_MS = 1_000;
@@ -205,6 +198,19 @@ export class RemoteHost {
    * degradation — it pairs the ordinary fingerprint-compare way.
    */
   #verifying = 0;
+
+  /**
+   * This Host's long-term Noise identity, imported nonextractably from the
+   * enrollment. Null until {@link RemoteHost.start} loads it, and on an
+   * enrollment minted before the field existed.
+   *
+   * **Nothing reads it yet** — the end-to-end ceremonies are staged
+   * (`docs/specs/remote-security-model.md` → Future). It is loaded here rather
+   * than in the constructor because `importKey` is async and constructing a
+   * Host must stay synchronous, and it is never re-exported: the PKCS#8 in the
+   * state file is the only copy that leaves WebCrypto.
+   */
+  #noiseStatic: CryptoKeyLike | null = null;
 
   #ws: WebSocketLike | null = null;
   #status: RemoteHostStatus = 'idle';
@@ -372,7 +378,26 @@ export class RemoteHost {
     this.#displaced = false;
     this.#clearReconnectTimer();
     this.#backoffMs = INITIAL_BACKOFF_MS;
+    // Off the critical path: the socket does not wait on it, and a failure
+    // costs nothing that runs today.
+    void this.#loadNoiseStatic();
     this.#connect();
+  }
+
+  /**
+   * Import the enrolled Noise static once, nonextractably. Never rejects: an
+   * unusable key must not take down a Host whose shipped paths do not use one
+   * (see {@link RemoteHost.#noiseStatic}).
+   */
+  async #loadNoiseStatic(): Promise<void> {
+    if (this.#noiseStatic) return;
+    const pkcs8 = this.#enrollment.noiseStaticPrivateKey;
+    if (pkcs8 === undefined) return;
+    try {
+      this.#noiseStatic = await importNoiseStaticPrivateKey(pkcs8);
+    } catch (error) {
+      console.warn('[remote-host] could not import the Noise static key', error);
+    }
   }
 
   stop(): void {
