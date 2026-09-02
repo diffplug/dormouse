@@ -11,7 +11,7 @@
 import { waitFor } from './proc.mjs';
 
 /** Every page target the browser at `port` currently has. */
-export async function pageTargets(port) {
+async function pageTargets(port) {
   const res = await fetch(`http://127.0.0.1:${port}/json/list`);
   if (!res.ok) throw new Error(`/json/list answered ${res.status}`);
   return (await res.json()).filter((target) => target.type === 'page');
@@ -25,7 +25,7 @@ export async function pageTargets(port) {
  * client that enabled it goes away, and the virtual authenticator is exactly
  * that state — closing this socket would delete the passkey mid-ceremony.
  */
-export class CdpSession {
+class CdpSession {
   #ws;
   #nextId = 1;
   #pending = new Map();
@@ -33,9 +33,8 @@ export class CdpSession {
   /** Everything the page logged, in order, as `LEVEL text` lines. */
   messages = [];
 
-  constructor(ws, target) {
+  constructor(ws) {
     this.#ws = ws;
-    this.target = target;
     ws.addEventListener('message', (event) => {
       const message = JSON.parse(String(event.data));
       if (message.method) {
@@ -110,7 +109,7 @@ export async function attachPage(port, matches, what = 'a page target') {
       once: true,
     });
   });
-  const session = new CdpSession(ws, target);
+  const session = new CdpSession(ws);
   // Both: `Runtime` carries what the page's own code logs, `Log` carries what
   // the browser says about the page — a blocked request, a worker that would
   // not register.

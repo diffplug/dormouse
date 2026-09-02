@@ -1,17 +1,20 @@
 /**
  * The Pocket side's own Chrome, launched by the harness rather than by
- * `agent-browser` (`scripts/pairing-walkthrough/README.md` → Stage (b) notes).
+ * `agent-browser` (`scripts/pairing-walkthrough/README.md` → The Pocket browser).
  *
- * `agent-browser` exposes no way to pass launch flags, and the whole point of
- * the Pocket browser is three of them — the fake camera, its file, and a
- * debugging port to attach to. So the harness launches Chrome itself and
- * `agent-browser --session <s> connect <port>` attaches afterwards.
+ * `agent-browser --args` *can* carry launch flags (probed on 0.31.1), so the
+ * fake camera does not by itself require this. What does: the harness wants the
+ * browser as its own child, so `pocket-chrome.log` holds its output and a Chrome
+ * that dies during the run reads as an exited child rather than as a CLI error
+ * on some later verb. `agent-browser --session <s> connect <port>` attaches
+ * afterwards.
  */
 
 import { existsSync, readdirSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 
+import { AGENT_BROWSER_HOME } from './ab.mjs';
 import { spawnLogged, waitFor } from './proc.mjs';
 
 /** The binary inside a Chrome-for-Testing directory, per platform. */
@@ -40,7 +43,9 @@ function candidates() {
   const push = (path, from) => {
     if (path) found.push({ path, from });
   };
-  push(process.env.AGENT_BROWSER_CHROME, 'AGENT_BROWSER_CHROME');
+  // `agent-browser`'s own documented override first, so a machine already
+  // pointed at a particular Chrome drives both sides with it.
+  push(process.env.AGENT_BROWSER_EXECUTABLE_PATH, 'AGENT_BROWSER_EXECUTABLE_PATH');
   push(process.env.CHROME_PATH, 'CHROME_PATH');
   for (const path of agentBrowserChromes()) push(path, "agent-browser's own download");
   for (const path of playwrightCacheChromes()) push(path, 'the Playwright browser cache');
@@ -60,7 +65,7 @@ function candidates() {
 
 /** Every `~/.agent-browser/browsers/chrome-<version>`, newest version first. */
 function agentBrowserChromes() {
-  const root = join(process.env.AGENT_BROWSER_HOME || join(homedir(), '.agent-browser'), 'browsers');
+  const root = join(AGENT_BROWSER_HOME, 'browsers');
   return versionedChromes(root, /^chrome-(\d[\d.]*)$/, (name) => name.slice('chrome-'.length));
 }
 
@@ -109,7 +114,7 @@ export function resolveChrome() {
   throw new Error(
     'no Chrome found for the Pocket browser. Tried:\n' +
       tried.map(({ path, from }) => `  ${path}  (${from})`).join('\n') +
-      '\nInstall one with `agent-browser install`, or set AGENT_BROWSER_CHROME.',
+      '\nInstall one with `agent-browser install`, or set AGENT_BROWSER_EXECUTABLE_PATH.',
   );
 }
 
@@ -161,5 +166,5 @@ export async function launchChrome({
     },
     { what: `Chrome's DevTools port :${port}`, timeoutMs: 60_000, intervalMs: 200 },
   );
-  return { handle, port, version };
+  return { handle, version };
 }

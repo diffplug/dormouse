@@ -5,7 +5,7 @@
  * `--until <name>` stops after the one it names.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -40,6 +40,17 @@ const SCAN_LABEL = 'Scan a Host QR';
  * (`lib/src/remote/host/RemotePairingModal.tsx`).
  */
 const PAIRING_MODAL = '[role="dialog"][aria-labelledby="remote-pairing-title"]';
+
+/**
+ * The setup QR, by the accessible name `QrCode` gives it
+ * (`lib/src/remote/host/RemoteControlSection.tsx`) — an accessibility contract
+ * rather than copy, so it survives the copy pass the way `PAIRING_MODAL` does.
+ */
+const SETUP_QR = 'svg[aria-label="Setup code for this machine"]';
+
+/** The Settings dialog's Remote control section, which every Host step reads. */
+const REMOTE_SECTION = `[...document.querySelectorAll('[role="dialog"] section')]
+  .find((el) => el.innerText.startsWith('Remote control'))`;
 
 /**
  * What a person types to prove the terminal is real, and where its answer lands.
@@ -110,11 +121,10 @@ async function stepServer(ctx) {
       env: {
         DORMOUSE_SETUP_PASSWORD: opts.password,
         DORMOUSE_STATE_DIR: stateDir,
-        PORT: String(opts.serverPort),
+        PORT: String(ctx.serverPort),
       },
     },
   );
-  ctx.state.server = handle;
 
   await waitForLine(handle, /server listening on/, {
     timeoutMs: skipBuild ? 60_000 : 600_000,
@@ -151,7 +161,6 @@ async function stepHost(ctx) {
       DORMOUSE_BROWSER_DEV_HOST_PORT: String(opts.hostPort),
     },
   });
-  ctx.state.host = handle;
 
   // The harness prints where the sidecar keeps the Host's enrollment + ACL. It
   // picks that path itself (a per-pid temp directory), so this is a read rather
@@ -176,19 +185,15 @@ async function stepHost(ctx) {
 async function stepSettings(ctx) {
   const ab = ctx.state.hostBrowser;
   await ab.run(['click', 'button[aria-label="Settings"]']);
-  await waitFor(
-    () =>
-      ab.eval(`const dialog = document.querySelector('[role="dialog"]');
-        return !!dialog && dialog.innerText.includes('Remote control');`),
+  // The section is below the fold in a short window, and a screenshot is
+  // viewport-only — so the wait scrolls it into view as it finds it.
+  await ab.waitUntil(
+    `const section = ${REMOTE_SECTION};
+     if (!section) return null;
+     section.scrollIntoView({ block: 'center' });
+     return true;`,
     { what: 'the Settings dialog to show Remote control' },
   );
-  // The section is below the fold in a short window, and a screenshot is
-  // viewport-only.
-  await ab.eval(`for (const el of document.querySelectorAll('[role="dialog"] section')) {
-      if (el.innerText.startsWith('Remote control')) el.scrollIntoView({ block: 'center' });
-    }
-    return true;`);
-  await delay(300);
   await ctx.shot('02-settings-open.png');
 }
 
@@ -215,16 +220,14 @@ async function stepEnroll(ctx) {
     return true;`);
   await ab.run(['find', 'role', 'button', 'click', '--name', 'Connect', '--exact']);
 
-  const status = await waitFor(
-    () =>
-      ab.eval(`const section = [...document.querySelectorAll('[role="dialog"] section')]
-          .find((el) => el.innerText.startsWith('Remote control'));
-        if (!section) return null;
-        const text = section.innerText;
-        if (/Set up a phone/.test(text)) return { enrolled: true, text };
-        const error = section.querySelector('.text-error');
-        if (error && error.textContent.trim()) return { enrolled: false, text: error.textContent.trim() };
-        return null;`),
+  const status = await ab.waitUntil(
+    `const section = ${REMOTE_SECTION};
+     if (!section) return null;
+     const text = section.innerText;
+     if (/Set up a phone/.test(text)) return { enrolled: true, text };
+     const error = section.querySelector('.text-error');
+     if (error && error.textContent.trim()) return { enrolled: false, text: error.textContent.trim() };
+     return null;`,
     { what: 'enrollment to settle', timeoutMs: 90_000 },
   );
   if (!status.enrolled) throw new Error(`enrollment was refused: ${status.text}`);
@@ -232,11 +235,9 @@ async function stepEnroll(ctx) {
   // `connected` is the Host's relay socket, which is a second round trip after
   // the enrollment POST; a walkthrough that stops at "enrolled" would mint a
   // setup code the Server has no socket to tell this Host about.
-  await waitFor(
-    () =>
-      ab.eval(`const section = [...document.querySelectorAll('[role="dialog"] section')]
-          .find((el) => el.innerText.startsWith('Remote control'));
-        return section && /Connected/.test(section.innerText) ? true : null;`),
+  await ab.waitUntil(
+    `const section = ${REMOTE_SECTION};
+     return section && /Connected/.test(section.innerText) ? true : null;`,
     { what: 'the Host relay socket to connect', timeoutMs: 60_000 },
   );
   await ctx.shot('04-enrolled.png');
@@ -268,31 +269,31 @@ async function stepQr(ctx) {
  */
 async function captureQr(ctx) {
   const ab = ctx.state.hostBrowser;
-  const { runDir, repoRoot } = ctx;
+  const { runDir } = ctx;
 
-  await waitFor(
-    () => ab.eval(`return !!document.querySelector('svg[aria-label="Setup code for this machine"]');`),
+  // One round trip for "it is there" and "here is where": a second read could
+  // land after a rotation and measure a different code than the one captured.
+  const measured = await ab.waitUntil(
+    `const svg = document.querySelector(${JSON.stringify(SETUP_QR)});
+     if (!svg) return null;
+     svg.scrollIntoView({ block: 'center' });
+     const r = svg.getBoundingClientRect();
+     return { x: r.x, y: r.y, width: r.width, height: r.height, innerWidth: innerWidth,
+       url: ${invitationUrlExpr('svg')} };`,
     { what: 'the setup QR to render', timeoutMs: 60_000 },
   );
-  await ab.eval(`document.querySelector('svg[aria-label="Setup code for this machine"]')
-      .scrollIntoView({ block: 'center' });
-    return true;`);
+  // The scroll above only just happened; the screenshot is cropped against the
+  // rect it returned, so a stale frame would be a mis-crop rather than a wobble.
   await delay(400);
 
   const full = join(runDir, 'qr-full.png');
   await ctx.shot('qr-full.png');
 
-  const measured = await ab.eval(`const svg = document.querySelector('svg[aria-label="Setup code for this machine"]');
-    if (!svg) return null;
-    const r = svg.getBoundingClientRect();
-    return { x: r.x, y: r.y, width: r.width, height: r.height, innerWidth: window.innerWidth, dpr: window.devicePixelRatio };`);
-  if (!measured) throw new Error('the QR disappeared between rendering and measuring');
-
   // Screenshot pixels per CSS pixel, measured rather than taken from
   // `devicePixelRatio`: agent-browser captures at the page's own scale factor,
   // which is not necessarily the one the page reports.
-  const shot = await imageSize(full);
-  const scale = shot.width / measured.innerWidth;
+  const shotSize = await imageSize(full);
+  const scale = shotSize.width / measured.innerWidth;
   const rect = {
     x: measured.x * scale,
     y: measured.y * scale,
@@ -300,27 +301,18 @@ async function captureQr(ctx) {
     height: measured.height * scale,
   };
   const cropped = join(runDir, 'qr.png');
-  const cropBox = await crop(full, cropped, rect, Math.round(12 * scale));
-  ctx.artifacts.push('qr.png');
-
+  const cropBox = await crop(full, cropped, rect, { padding: Math.round(12 * scale), size: shotSize });
+  ctx.artifacts.add('qr.png');
   const y4m = await toY4m(cropped, join(runDir, 'qr.y4m'));
-  ctx.artifacts.push('qr.y4m');
+  ctx.artifacts.add('qr.y4m');
 
-  const invitationUrl = await readInvitationUrl(ab);
-  let decodedFrom = 'qr.png';
-  let decoded = await decodeQr(cropped, repoRoot);
-  if (decoded === null) {
-    await upscale(cropped, join(runDir, 'qr-large.png'));
-    ctx.artifacts.push('qr-large.png');
-    decodedFrom = 'qr-large.png';
-    decoded = await decodeQr(join(runDir, 'qr-large.png'), repoRoot);
-  }
-  if (decoded === null) throw new Error(`qr.png did not decode (crop ${JSON.stringify(cropBox)})`);
+  const { decoded, decodedFrom } = await proveDecodes(ctx, cropped, cropBox);
+  const invitationUrl = measured.url;
   if (invitationUrl !== null && decoded !== invitationUrl) {
     throw new Error(`the QR encodes ${decoded}, but the panel is showing ${invitationUrl}`);
   }
-  writeFileSync(join(runDir, 'invitation-url.txt'), `${invitationUrl ?? decoded}\n`);
-  ctx.artifacts.push('invitation-url.txt');
+  ctx.state.invitationUrl = invitationUrl ?? decoded;
+  ctx.write('invitation-url.txt', ctx.state.invitationUrl);
 
   ctx.record({
     qr: {
@@ -333,9 +325,28 @@ async function captureQr(ctx) {
       // Against `setupTokenTtlMs`: how much of the code's life was still ahead
       // of it when the camera got its frame.
       capturedAt: new Date().toISOString(),
-      captures: (ctx.state.qrCaptures = (ctx.state.qrCaptures ?? 0) + 1),
     },
   });
+}
+
+/**
+ * Read the cropped PNG back and prove it still holds a code.
+ *
+ * The crop is what the Y4M was made from, so an illegible one would surface two
+ * steps later as an unexplained scanner timeout. A raw crop that misses is
+ * retried enlarged — see `qr.mjs` → `upscale` for why that is closer to a phone
+ * camera than the crop is, not further from it.
+ */
+async function proveDecodes(ctx, cropped, cropBox) {
+  const decoded = await decodeQr(cropped, ctx.repoRoot, cropBox);
+  if (decoded !== null) return { decoded, decodedFrom: 'qr.png' };
+
+  const large = join(ctx.runDir, 'qr-large.png');
+  const largeSize = await upscale(cropped, large);
+  ctx.artifacts.add('qr-large.png');
+  const enlarged = await decodeQr(large, ctx.repoRoot, largeSize);
+  if (enlarged === null) throw new Error(`qr.png did not decode (crop ${JSON.stringify(cropBox)})`);
+  return { decoded: enlarged, decodedFrom: 'qr-large.png' };
 }
 
 /**
@@ -347,12 +358,11 @@ async function captureQr(ctx) {
  * fatal: `null` means the run falls back to the decoded value and says so in
  * `summary.json`.
  */
-async function readInvitationUrl(ab) {
-  return ab.eval(`const svg = document.querySelector('svg[aria-label="Setup code for this machine"]');
-    if (!svg) return null;
-    const key = Object.keys(svg).find((k) => k.startsWith('__reactFiber$'));
+function invitationUrlExpr(svgVar) {
+  return `(() => {
+    const key = Object.keys(${svgVar}).find((k) => k.startsWith('__reactFiber$'));
     if (!key) return null;
-    let fiber = svg[key];
+    let fiber = ${svgVar}[key];
     for (let depth = 0; depth < 16 && fiber; depth++, fiber = fiber.return) {
       const props = fiber.memoizedProps;
       if (!props) continue;
@@ -360,7 +370,13 @@ async function readInvitationUrl(ab) {
         if (typeof candidate === 'string' && candidate.includes('#pair?')) return candidate;
       }
     }
-    return null;`);
+    return null;
+  })()`;
+}
+
+function readInvitationUrl(ab) {
+  return ab.eval(`const svg = document.querySelector(${JSON.stringify(SETUP_QR)});
+    return svg ? ${invitationUrlExpr('svg')} : null;`);
 }
 
 /**
@@ -368,11 +384,8 @@ async function readInvitationUrl(ab) {
  * pointed at the QR, and a virtual authenticator standing in for the phone's
  * biometrics.
  *
- * **A browser of its own, not a second tab.** Pocket is a different device from
- * the laptop in every way this walkthrough is about — its own passkeys, its own
- * IndexedDB, its own service worker — and the flags it needs (the fake capture
- * device and the file behind it) can only be given at launch, which
- * `agent-browser` has no verb for. So the harness launches Chrome and attaches.
+ * **A browser of its own, not a second tab** — its passkeys, its IndexedDB and
+ * its service worker are the state this whole ceremony is about (`chrome.mjs`).
  *
  * **The plain origin, never the invitation URL.** Opening the `#pair?` fragment
  * is the native-camera bootstrap path, which Pocket deliberately spends nothing
@@ -405,27 +418,7 @@ async function stepPocket(ctx) {
   // screen is laid out for a phone.
   await ab.run(['set', 'viewport', String(POCKET_VIEWPORT.width), String(POCKET_VIEWPORT.height)]);
 
-  // Attached before the app is opened, so the page's log is recorded from its
-  // first paint; the target survives the navigation that follows.
-  let session = await attachPage(port, () => true, 'the Pocket browser to have a page');
-  await ab.openUntil(
-    `${ctx.serverOrigin}/`,
-    `return !!document.body && document.body.innerText.includes(${JSON.stringify(SCAN_LABEL)});`,
-  );
-  // …unless `connect` adopted a *different* tab than the one attached to, in
-  // which case the authenticator would land on a page nothing is looking at and
-  // every `navigator.credentials` call would hang rather than fail. Cheap to
-  // check, and impossible to diagnose from the symptom.
-  if (!(await pageUrl(session)).startsWith(ctx.serverOrigin)) {
-    ctx.log('the attached page is not the one Pocket opened in; re-attaching');
-    session.close();
-    session = await attachPage(
-      port,
-      (target) => target.url.startsWith(ctx.serverOrigin),
-      'the page target showing Pocket',
-    );
-  }
-
+  const session = await openPocket(ctx, ab, port);
   // Before anything can call `navigator.credentials`: the authenticator belongs
   // to this page target, and a WebAuthn call made without one hangs until its
   // own timeout rather than failing.
@@ -443,6 +436,34 @@ async function stepPocket(ctx) {
     },
   });
   await ctx.shot('05-pocket-first-run.png', ab);
+}
+
+/**
+ * Open Pocket's first-run screen and hand back a CDP session on the page it is
+ * actually in.
+ *
+ * The socket is opened *before* the app, so the page's log is recorded from its
+ * first paint; the target survives the same-tab navigation that follows. It
+ * does not survive `connect` having adopted a *different* tab, though — and
+ * that failure is invisible, because the authenticator would land on a page
+ * nothing is looking at and every `navigator.credentials` call would hang
+ * rather than fail. So the tab is checked rather than assumed.
+ */
+async function openPocket(ctx, ab, port) {
+  const session = await attachPage(port, () => true, 'the Pocket browser to have a page');
+  await ab.openUntil(
+    `${ctx.serverOrigin}/`,
+    `return !!document.body && document.body.innerText.includes(${JSON.stringify(SCAN_LABEL)});`,
+  );
+  if ((await pageUrl(session)).startsWith(ctx.serverOrigin)) return session;
+
+  ctx.log('the attached page is not the one Pocket opened in; re-attaching');
+  session.close();
+  return attachPage(
+    port,
+    (target) => target.url.startsWith(ctx.serverOrigin),
+    'the page target showing Pocket',
+  );
 }
 
 /**
@@ -464,20 +485,19 @@ async function stepCode(ctx) {
   // The scanner is on screen for as long as the decode takes, which behind a
   // fake camera is under a second — so the wait polls fast and the screenshot
   // goes in front of everything else this step does.
-  await waitFor(() => pocket.eval(scannerUpExpr()), {
+  await pocket.waitUntil(scannerUpExpr(), {
     what: 'the scanner to open',
     timeoutMs: 30_000,
     intervalMs: 50,
   });
   await ctx.shot('06-scanner.png', pocket);
 
-  const code = await waitFor(() => pocket.eval(pairingCodeExpr()), {
+  const code = await pocket.waitUntil(pairingCodeExpr(), {
     what: 'Pocket to register a passkey, sign in, and show a pairing code',
     timeoutMs: 180_000,
     intervalMs: 250,
   });
-  writeFileSync(join(ctx.runDir, 'pairing-code.txt'), `${code}\n`);
-  ctx.artifacts.push('pairing-code.txt');
+  ctx.write('pairing-code.txt', code);
   ctx.state.pairingCode = code;
   await ctx.shot('07-code-screen.png', pocket);
 
@@ -498,7 +518,7 @@ async function stepCode(ctx) {
 
   // The Host's own interruption, which is the half of this ceremony the phone
   // cannot see: the pairing request reaches the webview and opens the modal.
-  const modalText = await waitFor(() => host.eval(pairingModalExpr()), {
+  const modalText = await host.waitUntil(pairingModalExpr(), {
     what: "the Host's pairing modal to open",
     timeoutMs: 120_000,
   });
@@ -518,9 +538,8 @@ async function stepCode(ctx) {
  */
 async function ensureCapturedCodeIsLive(ctx) {
   const ab = ctx.state.hostBrowser;
-  const captured = readFileSync(join(ctx.runDir, 'invitation-url.txt'), 'utf8').trim();
   const showing = await readInvitationUrl(ab);
-  if (showing === captured) return;
+  if (showing === ctx.state.invitationUrl) return;
   ctx.log(
     showing === null
       ? 'the setup panel is no longer showing a code; asking for a new one'
@@ -605,11 +624,9 @@ async function approveOnHost(ctx) {
   });
   // The modal closing only says the request was answered. What says it was
   // *approved* is the ACL the Host wrote, which the enrolled view counts.
-  const section = await waitFor(
-    async () => {
-      const text = await remoteControlText(ab);
-      return /\d+\s+paired/.test(text ?? '') ? text : null;
-    },
+  const section = await ab.waitUntil(
+    `const section = ${REMOTE_SECTION};
+     return section && /\\d+\\s+paired/.test(section.innerText) ? section.innerText : null;`,
     { what: 'the Host to count a paired device', timeoutMs: 60_000 },
   );
   ctx.record({
@@ -629,7 +646,7 @@ async function approveOnHost(ctx) {
  */
 async function connectPocket(ctx) {
   const pocket = ctx.state.pocketBrowser;
-  await waitFor(() => pocket.eval(wallReadyExpr()), {
+  await pocket.waitUntil(wallReadyExpr(), {
     what: 'Pocket to connect and land on the terminal',
     timeoutMs: 120_000,
     intervalMs: 250,
@@ -642,7 +659,7 @@ async function connectPocket(ctx) {
 
 /** Run a command from the phone and read its output on the laptop. */
 async function runFromPocket(ctx) {
-  const proof = await proveCommand(ctx, TERMINAL_PROOF, {});
+  const proof = await proveCommand(ctx, TERMINAL_PROOF);
   // A second, weaker witness on the phone's own side, and the only one there is:
   // both terminals render through WebGL, so the pane title — which the Host
   // derives from the command line and ships in the directory snapshot — is the
@@ -699,14 +716,14 @@ async function ringFromHost(ctx) {
 async function leaveAndReconnect(ctx) {
   const pocket = ctx.state.pocketBrowser;
   await clickElement(pocket, `return document.querySelector('header button');`, "Pocket's back button");
-  const row = await waitFor(() => pocket.eval(hostRowExpr()), {
+  const row = await pocket.waitUntil(hostRowExpr(), {
     what: 'the Hosts view to list the paired computer',
     timeoutMs: 60_000,
   });
   await ctx.shot('13-pocket-hosts.png', pocket);
 
-  const action = await clickElement(pocket, hostRowActionExpr(), "the Hosts row's own action");
-  await waitFor(() => pocket.eval(wallReadyExpr()), {
+  await clickElement(pocket, hostRowActionExpr(), "the Hosts row's own action");
+  await pocket.waitUntil(wallReadyExpr(), {
     what: 'Pocket to reconnect',
     timeoutMs: 120_000,
     intervalMs: 250,
@@ -718,8 +735,8 @@ async function leaveAndReconnect(ctx) {
   // The attachment is new too, so the input path is proved again rather than
   // assumed to have survived: a wall that paints and cannot be typed into is
   // exactly what a broken re-attach looks like.
-  const proof = await proveCommand(ctx, RECONNECT_PROOF, {});
-  ctx.record({ reconnect: { row, action, signCountAfterReconnect: signCount, ...proof } });
+  const proof = await proveCommand(ctx, RECONNECT_PROOF);
+  ctx.record({ reconnect: { row, signCountAfterReconnect: signCount, ...proof } });
 }
 
 /**
@@ -729,7 +746,7 @@ async function leaveAndReconnect(ctx) {
  * that can be dropped, and a spare one lands on an empty prompt and costs
  * nothing.
  */
-async function proveCommand(ctx, name, { prefix = '' }) {
+async function proveCommand(ctx, name, { prefix = '' } = {}) {
   const pocket = ctx.state.pocketBrowser;
   const marker = `WALKTHROUGH-OK-${Date.now().toString(36)}`;
   const proof = join(ctx.runDir, name);
@@ -760,7 +777,7 @@ async function proveCommand(ctx, name, { prefix = '' }) {
   if (!text.includes(marker) || !text.includes('EXIT=0')) {
     throw new Error(`${name} is not that command's output: ${JSON.stringify(text)}`);
   }
-  ctx.artifacts.push(name);
+  ctx.artifacts.add(name);
   return { marker, command, roundTripMs, output: text.trim() };
 }
 
@@ -817,13 +834,6 @@ async function clickElement(ab, js, what) {
     return text;`);
   if (typeof label !== 'string') throw new Error(`could not click ${what}: ${JSON.stringify(label)}`);
   return label;
-}
-
-/** The enrolled Remote control section, as text, or null. */
-function remoteControlText(ab) {
-  return ab.eval(`const section = [...document.querySelectorAll('[role="dialog"] section')]
-      .find((el) => el.innerText.startsWith('Remote control'));
-    return section ? section.innerText : null;`);
 }
 
 /**

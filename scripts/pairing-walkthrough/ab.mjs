@@ -12,9 +12,16 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-import { delay, exec } from './proc.mjs';
+import { exec, signalUntilGone, waitFor } from './proc.mjs';
 
 const BIN = 'agent-browser';
+
+/**
+ * Where `agent-browser` keeps its state — daemon pid files, session configs and
+ * its Chrome downloads. `agent-browser doctor` prints it as "State and socket
+ * directory"; the CLI has no env var that relocates it, so neither does this.
+ */
+export const AGENT_BROWSER_HOME = join(homedir(), '.agent-browser');
 
 export class AgentBrowser {
   /** @param {string} session `--session` name. @param {string} cwd repo root. */
@@ -57,6 +64,15 @@ export class AgentBrowser {
 
   async open(url) {
     return this.run(['open', url]);
+  }
+
+  /**
+   * Poll `js` in the page until it answers something truthy, and hand that
+   * answer back — the probe and the read the step wants are the same round
+   * trip, so they cannot disagree (`proc.mjs` → `waitFor`).
+   */
+  waitUntil(js, options) {
+    return waitFor(() => this.eval(js), options);
   }
 
   /**
@@ -116,11 +132,15 @@ export class AgentBrowser {
    * nothing.
    */
   async openUntil(url, ready, { attempts = 6, settleMs = 1500 } = {}) {
+    const isReady = () => this.eval(ready).catch(() => false);
     for (let attempt = 0; attempt <= attempts; attempt++) {
-      if (await this.eval(ready).catch(() => false)) return;
+      if (await isReady()) return;
       if (attempt === attempts) break;
       await this.open(url).catch(() => {});
-      await delay(settleMs);
+      // Poll the same oracle rather than sleeping the settle out: a page that
+      // is up in 200ms costs 200ms, and one that is not still gets its full
+      // window before the next `open`.
+      await waitFor(isReady, { timeoutMs: settleMs, intervalMs: 200, what: url }).catch(() => {});
     }
     throw new Error(`page at ${url} never became ready (session ${this.session})`);
   }
@@ -139,13 +159,16 @@ export class AgentBrowser {
    * mode and a stale profile. The config goes too: session names carry the run's
    * timestamp, so one left behind per run is litter in the user's home directory
    * that nothing will ever read again.
+   *
+   * The shipped app carries the same workaround for the same reason
+   * (`lib/src/host/agent-browser-host.ts`); a CLI that grows a `session stop`
+   * retires both.
    */
   async killDaemon() {
-    const dir = process.env.AGENT_BROWSER_SOCKET_DIR || join(homedir(), '.agent-browser');
     try {
-      return await stopDaemon(join(dir, `${this.session}.pid`));
+      return await stopDaemon(join(AGENT_BROWSER_HOME, `${this.session}.pid`));
     } finally {
-      rmSync(join(dir, `${this.session}.config`), { force: true });
+      rmSync(join(AGENT_BROWSER_HOME, `${this.session}.config`), { force: true });
     }
   }
 }
@@ -155,20 +178,25 @@ async function stopDaemon(pidFile) {
   if (!existsSync(pidFile)) return null;
   const pid = Number(readFileSync(pidFile, 'utf8').trim());
   if (!Number.isInteger(pid) || pid <= 0) return null;
-  for (const signal of ['SIGTERM', 'SIGKILL']) {
+  const gone = () => {
     try {
-      process.kill(pid, signal);
+      process.kill(pid, 0);
+      return false;
     } catch {
-      return pid;
+      return true;
     }
-    for (let i = 0; i < 20; i++) {
-      await delay(100);
+  };
+  await signalUntilGone(
+    (signal) => {
       try {
-        process.kill(pid, 0);
+        process.kill(pid, signal);
+        return true;
       } catch {
-        return pid;
+        return false;
       }
-    }
-  }
+    },
+    gone,
+    { graceMs: 2000, killMs: 2000 },
+  );
   return pid;
 }

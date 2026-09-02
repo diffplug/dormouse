@@ -5,6 +5,12 @@
  * Nothing here is product code and nothing here listens: the harness only
  * *probes* ports with an outbound connect, so `scripts/loopback-lint.mjs` has
  * no listener to guard.
+ *
+ * `docs/specs/dor-cli.md` -> "Spawning External Binaries" requires product code
+ * to spawn through `spawnAndCapture`; this file spawns raw on purpose. It is a
+ * dependency-free script outside the pnpm workspace (nothing to import from),
+ * it needs `cwd`/`env`/stdin/timeouts that helper does not take, and it is
+ * POSIX-only by construction — process groups below, `pgrep` in `run.mjs`.
  */
 
 import { createWriteStream } from 'node:fs';
@@ -127,18 +133,25 @@ export async function findFreePort(start) {
   throw new Error(`no free port in [${start}, ${start + 200})`);
 }
 
-/** Run a command to completion, capturing its output. Throws on non-zero exit. */
-export function exec(command, args, { cwd, env, input, timeoutMs = 120_000 } = {}) {
+/**
+ * Run a command to completion, capturing its output. Throws on non-zero exit.
+ *
+ * `binary: true` keeps stdout as a `Buffer` — what `ffmpeg -f rawvideo` writes
+ * is samples, not text. Everything else (the timeout, the `exited N` message)
+ * is the same either way, which is the reason there is one of these.
+ */
+export function exec(command, args, { cwd, env, input, binary = false, timeoutMs = 120_000 } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
       env: { ...process.env, ...env },
       stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     });
-    let stdout = '';
+    const chunks = [];
     let stderr = '';
-    child.stdout.on('data', (c) => { stdout += c; });
+    child.stdout.on('data', (c) => chunks.push(c));
     child.stderr.on('data', (c) => { stderr += c; });
+    const stdoutOf = () => (binary ? Buffer.concat(chunks) : chunks.join(''));
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       reject(new Error(`${command} ${args.join(' ')} timed out after ${timeoutMs}ms`));
@@ -147,6 +160,7 @@ export function exec(command, args, { cwd, env, input, timeoutMs = 120_000 } = {
     child.once('error', (err) => { clearTimeout(timer); reject(err); });
     child.once('close', (code) => {
       clearTimeout(timer);
+      const stdout = stdoutOf();
       if (code === 0) resolve({ stdout, stderr });
       else reject(new Error(`${command} ${args.join(' ')} exited ${code}\n${stderr || stdout}`));
     });
@@ -154,23 +168,49 @@ export function exec(command, args, { cwd, env, input, timeoutMs = 120_000 } = {
   });
 }
 
-/** SIGTERM the whole group, then SIGKILL what is left. Never throws. */
-export async function killTree(handle, { graceMs = 3000 } = {}) {
-  if (!handle || handle.exit) return;
-  for (const signal of ['SIGTERM', 'SIGKILL']) {
-    try {
-      process.kill(-handle.child.pid, signal);
-    } catch {
-      try {
-        handle.child.kill(signal);
-      } catch {
-        // Already gone.
-      }
+/**
+ * SIGTERM, wait, SIGKILL, wait — the ladder every teardown here climbs.
+ *
+ * `send` reports whether the signal reached anything and `isGone` answers
+ * whether the target is dead; both sides of the harness's teardown have their
+ * own answers (a process group and its exit event, a daemon pid and `kill 0`)
+ * and nothing else differs. Never throws.
+ */
+export async function signalUntilGone(send, isGone, { graceMs = 3000, killMs = 1500 } = {}) {
+  for (const [signal, waitMs] of [['SIGTERM', graceMs], ['SIGKILL', killMs]]) {
+    if (isGone()) return true;
+    if (!send(signal)) return true;
+    const deadline = Date.now() + waitMs;
+    while (Date.now() < deadline) {
+      if (isGone()) return true;
+      await delay(100);
     }
-    const deadline = Date.now() + (signal === 'SIGTERM' ? graceMs : 1500);
-    while (!handle.exit && Date.now() < deadline) await delay(100);
-    if (handle.exit) return;
   }
+  return isGone();
+}
+
+/** SIGTERM the whole group, then SIGKILL what is left. Never throws. */
+export function killTree(handle, { graceMs = 3000 } = {}) {
+  if (!handle) return Promise.resolve(true);
+  return signalUntilGone(
+    (signal) => {
+      // The group first — `spawnLogged` detaches, and killing only the pnpm
+      // shim orphans the vite/esbuild tree under it.
+      try {
+        process.kill(-handle.child.pid, signal);
+        return true;
+      } catch {
+        try {
+          handle.child.kill(signal);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+    },
+    () => handle.exit !== null,
+    { graceMs },
+  );
 }
 
 /** Every handle `spawnLogged` created, newest first. */

@@ -15,6 +15,11 @@ import { join } from 'node:path';
 import { exec } from './proc.mjs';
 
 const FFMPEG = process.env.FFMPEG_BIN || 'ffmpeg';
+/** Overwrite, and say nothing unless something went wrong. */
+const QUIET = ['-y', '-hide_banner', '-loglevel', 'error'];
+
+/** The frame a phone's front camera hands `getUserMedia`. */
+const CAMERA = { width: 640, height: 480, seconds: 2, fps: 5 };
 
 /** Round up to an even number: yuv420p subsamples, so odd dimensions are refused. */
 function even(n) {
@@ -22,7 +27,12 @@ function even(n) {
   return rounded % 2 === 0 ? rounded : rounded + 1;
 }
 
-/** `{ width, height }` of an image, read back from ffmpeg rather than assumed. */
+/**
+ * `{ width, height }` of an image, read back from ffmpeg rather than assumed.
+ *
+ * One full decode per call, so `crop` and `decodeQr` take a `size` a caller
+ * already holds rather than re-deriving it.
+ */
 export async function imageSize(path) {
   // `-f null -` decodes without writing anything; the size lands on stderr.
   const { stderr } = await exec(FFMPEG, ['-hide_banner', '-i', path, '-f', 'null', '-'], {})
@@ -36,15 +46,14 @@ export async function imageSize(path) {
  * Crop `rect` (device pixels) out of `source` into `out`, with `padding` px of
  * margin on every side, clamped to the image.
  */
-export async function crop(source, out, rect, padding = 12) {
-  const { width, height } = await imageSize(source);
+export async function crop(source, out, rect, { padding, size } = {}) {
+  const { width, height } = size ?? (await imageSize(source));
   const x = Math.max(0, Math.floor(rect.x - padding));
   const y = Math.max(0, Math.floor(rect.y - padding));
   const w = Math.min(width - x, Math.ceil(rect.width + padding * 2));
   const h = Math.min(height - y, Math.ceil(rect.height + padding * 2));
   if (w <= 0 || h <= 0) throw new Error(`crop rect ${JSON.stringify(rect)} is outside ${source}`);
-  await exec(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error',
-    '-i', source, '-vf', `crop=${w}:${h}:${x}:${y}`, out]);
+  await exec(FFMPEG, [...QUIET, '-i', source, '-vf', `crop=${w}:${h}:${x}:${y}`, out]);
   return { x, y, width: w, height: h };
 }
 
@@ -56,15 +65,15 @@ export async function crop(source, out, rect, padding = 12) {
  * is scaled with `neighbor` — a smoothing filter is exactly the blur a decoder
  * trips over — and padded onto white so the quiet zone survives the frame edge.
  */
-export async function toY4m(source, out, { width = 640, height = 480, seconds = 2, fps = 5 } = {}) {
-  const w = even(width);
-  const h = even(height);
+export async function toY4m(source, out) {
+  const w = even(CAMERA.width);
+  const h = even(CAMERA.height);
   const side = even(Math.min(w, h) * 0.8);
-  await exec(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error',
-    '-loop', '1', '-t', String(seconds), '-i', source,
+  await exec(FFMPEG, [...QUIET,
+    '-loop', '1', '-t', String(CAMERA.seconds), '-i', source,
     '-vf', `scale=${side}:${side}:flags=neighbor,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:white`,
-    '-r', String(fps), '-pix_fmt', 'yuv420p', out]);
-  return { width: w, height: h, seconds, fps };
+    '-r', String(CAMERA.fps), '-pix_fmt', 'yuv420p', out]);
+  return { ...CAMERA, width: w, height: h };
 }
 
 /**
@@ -78,35 +87,18 @@ export async function toY4m(source, out, { width = 640, height = 480, seconds = 
  * is the one thing that would genuinely destroy information.
  */
 export async function upscale(source, out, factor = 4) {
-  await exec(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error',
+  const { width, height } = await imageSize(source);
+  await exec(FFMPEG, [...QUIET,
     '-i', source, '-vf', `scale=iw*${factor}:ih*${factor}:flags=neighbor`, out]);
-  return out;
+  return { width: width * factor, height: height * factor };
 }
 
 /** Raw 8-bit grayscale samples of an image, straight out of ffmpeg. */
-async function grayscale(path) {
-  const { width, height } = await imageSize(path);
-  const { stdout } = await execBinary(FFMPEG, ['-hide_banner', '-loglevel', 'error',
-    '-i', path, '-f', 'rawvideo', '-pix_fmt', 'gray', '-']);
+async function grayscale(path, size) {
+  const { width, height } = size ?? (await imageSize(path));
+  const { stdout } = await exec(FFMPEG, ['-hide_banner', '-loglevel', 'error',
+    '-i', path, '-f', 'rawvideo', '-pix_fmt', 'gray', '-'], { binary: true });
   return { width, height, data: new Uint8ClampedArray(stdout) };
-}
-
-/** `exec`, but keeping stdout as bytes. */
-function execBinary(command, args) {
-  return new Promise((resolve, reject) => {
-    import('node:child_process').then(({ spawn }) => {
-      const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-      const chunks = [];
-      let stderr = '';
-      child.stdout.on('data', (c) => chunks.push(c));
-      child.stderr.on('data', (c) => { stderr += c; });
-      child.once('error', reject);
-      child.once('close', (code) => {
-        if (code === 0) resolve({ stdout: Buffer.concat(chunks) });
-        else reject(new Error(`${command} exited ${code}: ${stderr}`));
-      });
-    }, reject);
-  });
 }
 
 /**
@@ -115,12 +107,12 @@ function execBinary(command, args) {
  * `repoRoot` locates `lib/node_modules/@zxing/library`; the harness declares no
  * dependencies of its own, so the workspace's copy is the one that gets used.
  */
-export async function decodeQr(path, repoRoot) {
+export async function decodeQr(path, repoRoot, size) {
   // The CJS build, not the ESM one: `esm/index.js` re-exports through directory
   // specifiers, which Node's ESM resolver refuses outright.
   const entry = join(repoRoot, 'lib', 'node_modules', '@zxing', 'library', 'cjs', 'index.js');
   const zxing = createRequire(import.meta.url)(entry);
-  const { width, height, data } = await grayscale(path);
+  const { width, height, data } = await grayscale(path, size);
   const source = new zxing.RGBLuminanceSource(data, width, height);
   const bitmap = new zxing.BinaryBitmap(new zxing.HybridBinarizer(source));
   const reader = new zxing.MultiFormatReader();

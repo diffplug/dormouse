@@ -2,11 +2,9 @@
 /**
  * Drive the self-host setup → pairing story against the real Server and the
  * real Host, with real browsers, and leave every artifact behind.
- * `scripts/pairing-walkthrough/README.md` is the operator's guide; this file is
- * the entry point.
- *
- * Not in CI and not wired into any `pnpm test`: it wants Chrome, `ffmpeg`, a
- * free `:3000`, and several minutes.
+ * `scripts/pairing-walkthrough/README.md` is the operator's guide — what it
+ * needs, what it leaves behind, and what it does not cover; this file is the
+ * entry point. **Never wire it into `pnpm test` or a CI workflow.**
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -19,16 +17,28 @@ import { delay, exec, findFreePort, isPortFree, killTree, spawnedHandles } from 
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-function parseArgs(argv) {
-  const opts = {
+/**
+ * Not an option, and `--server-port` is deliberately not one: the Host's allowed
+ * relay origins are baked into its sidecar bundle from
+ * `DORMOUSE_REMOTE_CONNECT_SRC` at stage time, and Pocket must be same-origin
+ * with its own API, so both sides of a run are pinned to one origin.
+ */
+const SERVER_PORT = 3000;
+
+/** The defaults `parseArgs` starts from, and the ones `usage` prints. */
+function defaults() {
+  return {
     until: STEPS.at(-1).name,
-    out: null,
+    out: '$TMPDIR/pairing-walkthrough/<timestamp>',
     skipBuild: false,
     password: 'walkthrough-hunter2',
     machineName: 'Walkthrough Mac',
-    serverPort: 3000,
     keep: false,
   };
+}
+
+function parseArgs(argv) {
+  const opts = { ...defaults(), out: null };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const value = () => {
@@ -54,15 +64,16 @@ function parseArgs(argv) {
 }
 
 function usage() {
+  const d = defaults();
   return [
     'Usage: node scripts/pairing-walkthrough/run.mjs [options]',
     '',
-    '  --until <step>     stop after this step (default: the last one)',
+    `  --until <step>     stop after this step (default: ${d.until})`,
     `                     steps: ${STEPS.map((s) => s.name).join(', ')}`,
-    '  --out <dir>        run directory (default: $TMPDIR/pairing-walkthrough/<timestamp>)',
+    `  --out <dir>        run directory (default: ${d.out})`,
     '  --skip-build       reuse lib/dist-pocket and server/dist instead of rebuilding',
-    '  --password <pw>    DORMOUSE_SETUP_PASSWORD for the run',
-    '  --machine-name <n> the name the Host enrolls under',
+    `  --password <pw>    DORMOUSE_SETUP_PASSWORD for the run (default: ${d.password})`,
+    `  --machine-name <n> the name the Host enrolls under (default: ${d.machineName})`,
     '  --keep             leave the Server and Host running after the last step',
     '',
   ].join('\n');
@@ -87,12 +98,9 @@ async function main(live) {
     : join(tmpdir(), 'pairing-walkthrough', stamp);
   mkdirSync(runDir, { recursive: true });
 
-  if (!(await isPortFree(opts.serverPort))) {
-    // Not a port this run can move: the Host's allowed relay origins are baked
-    // at build time from `DORMOUSE_REMOTE_CONNECT_SRC`, and the Pocket app must
-    // be same-origin with its own API, so both sides are pinned to one origin.
+  if (!(await isPortFree(SERVER_PORT))) {
     throw new Error(
-      `something is already listening on :${opts.serverPort}; stop it first ` +
+      `something is already listening on :${SERVER_PORT}; stop it first ` +
         '(the Server origin is baked into the Host bundle, so this port is not negotiable)',
     );
   }
@@ -100,6 +108,8 @@ async function main(live) {
   opts.hostPort = await findFreePort(opts.vitePort + 1);
   opts.session = `pairing-walkthrough-${stamp}`;
 
+  /** Every file the run left behind, by name. A re-captured QR rewrites its own. */
+  const artifacts = new Set();
   const summary = {
     startedAt: new Date().toISOString(),
     runDir,
@@ -117,11 +127,17 @@ async function main(live) {
     runDir,
     opts,
     state,
-    serverOrigin: `http://localhost:${opts.serverPort}`,
+    serverPort: SERVER_PORT,
+    serverOrigin: `http://localhost:${SERVER_PORT}`,
     viteOrigin: `http://localhost:${opts.vitePort}`,
-    artifacts: summary.artifacts,
+    artifacts,
     log: (message) => console.log(`[walkthrough] ${message}`),
     record: (facts) => Object.assign(summary.facts, facts),
+    /** Write `text` into the run directory and register it as an artifact. */
+    write: (name, text) => {
+      writeFileSync(join(runDir, name), `${text}\n`);
+      artifacts.add(name);
+    },
     /**
      * Screenshot a browser into the run directory — the Host's by default, the
      * Pocket one when it is passed.
@@ -134,17 +150,19 @@ async function main(live) {
     shot: async (name, browser = state.hostBrowser) => {
       if (!browser) throw new Error('no browser to screenshot yet');
       await browser.screenshot(join(runDir, name));
-      summary.artifacts.push(name);
-      const textName = `${name.replace(/\.png$/, '')}.txt`;
+      artifacts.add(name);
       const text = await browser
         .visibleText()
         .catch((err) => `(text capture failed: ${err.message})`);
-      writeFileSync(join(runDir, textName), `${text ?? ''}\n`);
-      summary.artifacts.push(textName);
-      return name;
+      ctx.write(`${name.replace(/\.png$/, '')}.txt`, text ?? '');
     },
   };
+  // Written by the children rather than by a step, so registered here.
+  for (const log of ['server.log', 'host.log', 'pocket-chrome.log', 'pocket-console.log']) {
+    artifacts.add(log);
+  }
 
+  ctx.record({ serverOrigin: ctx.serverOrigin });
   console.log(`[walkthrough] run directory: ${runDir}`);
   console.log(`[walkthrough] server ${ctx.serverOrigin} · vite ${ctx.viteOrigin} · bridge :${opts.hostPort}`);
   console.log(`[walkthrough] agent-browser session: ${opts.session}`);
@@ -173,8 +191,7 @@ async function main(live) {
   }
 
   summary.finishedAt = new Date().toISOString();
-  // A re-captured QR rewrites the same files, so the list is a set of names.
-  summary.artifacts = [...new Set(summary.artifacts)];
+  summary.artifacts = [...artifacts];
   summary.reached = reached;
   summary.ok = failure === null;
   writeFileSync(join(runDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
@@ -188,10 +205,8 @@ async function main(live) {
 /**
  * Stop everything this run started, in reverse order, and say what survived.
  *
- * The browser is two things, not one: `close` stops Chrome but leaves the
- * per-session daemon alive holding its profile and its headed/headless mode, so
- * the daemon has to be signalled by pid. `close --all` is deliberately not used
- * — it would take down every other agent-browser session on the machine.
+ * The browser is two things, not one — Chrome and the per-session daemon behind
+ * it, which `close` leaves running (`ab.mjs` → `killDaemon`).
  */
 async function cleanup(state, opts) {
   // Written before anything is closed, and on the failure path too: the Host
@@ -227,19 +242,24 @@ async function cleanup(state, opts) {
   }
 }
 
+/**
+ * The one way out. `exit: true` is the signal path, which has no stack to
+ * return to; the normal path sets `process.exitCode` and lets the loop drain.
+ */
 let cleaning = false;
-async function shutdown(code, live) {
+async function shutdown(code, live, { exit = false } = {}) {
   if (cleaning) return;
   cleaning = true;
   await cleanup(live.state, live.opts).catch((err) =>
     console.error(`[walkthrough] cleanup: ${err.message}`),
   );
-  process.exit(code);
+  if (exit) process.exit(code);
+  process.exitCode = code;
 }
 
 const live = { state: {}, opts: null };
 for (const signal of ['SIGINT', 'SIGTERM']) {
-  process.on(signal, () => { void shutdown(130, live); });
+  process.on(signal, () => { void shutdown(130, live, { exit: true }); });
 }
 
 let exitCode = 1;
@@ -255,9 +275,5 @@ if (live.opts?.keep && exitCode === 0) {
   console.log('[walkthrough] --keep: the Server and Host are still running. Ctrl-C to stop them.');
   await new Promise(() => {});
 } else {
-  cleaning = true;
-  await cleanup(live.state, live.opts).catch((err) =>
-    console.error(`[walkthrough] cleanup: ${err.message}`),
-  );
-  process.exitCode = exitCode;
+  await shutdown(exitCode, live);
 }
