@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fromBase64Url, mintNoiseStaticKeyPair, toBase64Url } from 'server-lib-common';
+import {
+  BAD_PASSWORD_ERROR,
+  UNAUTHORIZED_ERROR,
+  fromBase64Url,
+  mintNoiseStaticKeyPair,
+  toBase64Url,
+} from 'server-lib-common';
 import { isEnrollment, performEnrollment } from './enrollment';
 
 // A real `hostId`: base64url of 16 bytes, the one shape `isEnrollment`
@@ -225,21 +231,31 @@ describe('remote-host enrollment', () => {
     timeout.mockRestore();
   });
 
-  /**
-   * The Server answers one 401 for every way a credential can be wrong, so this
-   * side is the only one that knows which one it sent — and the two have
-   * different recoveries: retype the password, or stop pressing the offer's
-   * button and use the typed form.
-   */
-  it('says which credential the 401 refused', async () => {
+  /** A 401 answers the same status for two credentials with different recoveries. */
+  const refused = (error: string) =>
+    vi.fn(async () => new Response(JSON.stringify({ error }), { status: 401 }));
+
+  it('names the credential the Server says it refused', async () => {
     stubLocalStorage();
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('invalid setup password', { status: 401 })));
+    vi.stubGlobal('fetch', refused(BAD_PASSWORD_ERROR));
     await expect(
       performEnrollment('https://dormouse.example', { password: 'wrong' }, 'x'),
     ).rejects.toThrow('The server did not accept that setup password.');
+
+    vi.stubGlobal('fetch', refused(UNAUTHORIZED_ERROR));
     await expect(
       performEnrollment('https://dormouse.example', { enrollToken: 'spent' }, 'x'),
     ).rejects.toThrow(/enrollment offer is no longer valid/);
+  });
+
+  it('does not blame a credential for a 401 the Server did not raise', async () => {
+    // A reverse proxy, a rate limiter. Telling the operator to retype a password
+    // that was fine is worse than saying only what is known.
+    stubLocalStorage();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('Unauthorized', { status: 401 })));
+    await expect(
+      performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x'),
+    ).rejects.toThrow('The server refused the enrollment (HTTP 401): Unauthorized');
   });
 
   it('keeps the status and the server text on any other refusal', async () => {
@@ -250,6 +266,17 @@ describe('remote-host enrollment', () => {
     await expect(
       performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x'),
     ).rejects.toThrow('The server refused the enrollment (HTTP 502): gateway is asleep');
+  });
+
+  it('keeps a proxy’s error page from becoming the sentence', async () => {
+    // The slot is one line in the Settings dialog; a 502 from nginx is a whole
+    // HTML document.
+    stubLocalStorage();
+    const page = `<html>\n<head><title>502 Bad Gateway</title></head>\n${'<hr>'.repeat(200)}`;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(page, { status: 502 })));
+    await expect(
+      performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x'),
+    ).rejects.toThrow('The server refused the enrollment (HTTP 502): <html>');
   });
 
   it('refuses a 200 whose body is not an enrollment', async () => {

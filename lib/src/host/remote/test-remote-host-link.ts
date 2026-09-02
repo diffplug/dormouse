@@ -59,7 +59,7 @@ export function enrolledStatus(
 }
 
 /**
- * A pairing code as `setupQr` answers one: the positional `#pair?` URL, the
+ * A setup code as `setupQr` answers one: the positional `#pair?` URL, the
  * invitation it belongs to, and its clock. Composed by the real formatter, so a
  * grammar change reaches the fixture too — and so a fixture that would not
  * scan fails here rather than in a story.
@@ -92,7 +92,7 @@ export function setupQrResult(over: Partial<SetupQrResult> = {}): SetupQrResult 
 export interface PrimedRemoteHost {
   /** What `status` answers. */
   status?: RemoteHostConsoleStatus;
-  /** Make `status` reject — "could not reach this machine's Host service". */
+  /** Make `status` reject — "could not reach this machine's remote-control service". */
   statusError?: string;
   /**
    * Make `enroll` *and* `enrollOffer` reject — the refused-origin case both

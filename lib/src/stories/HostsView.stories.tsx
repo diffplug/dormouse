@@ -114,9 +114,10 @@ export const Forgetting: Story = {
   args: { busy: 'forget' },
 };
 
-// Host dropped → the red error text above the list.
+// Host dropped → the red error text above the list, in the words `setOnHostGone`
+// puts there (`App.tsx`).
 export const Error: Story = {
-  args: { error: 'The host disconnected.' },
+  args: { error: 'The connection to the computer ended.' },
 };
 
 // Every paired Host holds a row → the card collapses to one settled line and

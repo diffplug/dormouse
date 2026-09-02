@@ -23,6 +23,7 @@ import {
   MAX_PUSH_QUERY_DELIVERY_IDS,
   SELFHOST_ACCOUNT_ID,
   SETUP_TOKEN_INVALID_ERROR,
+  BAD_PASSWORD_ERROR,
   UNAUTHORIZED_ERROR,
   WS_ROUTES,
   PUSH_SEND_DEADLINE_MS,
@@ -193,8 +194,6 @@ const MAX_PENDING_REAUTH_NONCES = 64;
 export const HOST_REVOCATION_SWEEP_MS = 60_000;
 /** A small fixed delay on a rejected credential — the extent of POC brute-force hardening. */
 const CREDENTIAL_FAILURE_DELAY_MS = 250;
-/** The one answer to a wrong setup password, wherever it is supplied. */
-const BAD_PASSWORD_ERROR = 'invalid setup password';
 
 /** The credential fields `pickCredential` reads. */
 type CredentialBody = { password?: unknown; enrollToken?: unknown };

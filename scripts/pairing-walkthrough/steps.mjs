@@ -572,9 +572,14 @@ async function ensureCapturedCodeIsLive(ctx) {
   ctx.record({ qrRecaptured: true });
 }
 
-/** The scanner screen, matched on copy with no typographic quotes in it. */
+/**
+ * The scanner screen, by the id of the paste field only it renders — the same
+ * anchor the unit tests use (`App.scan.test.tsx`). Not by its lead copy, which
+ * this pass rewrote: a rewrite would have surfaced here as "the scanner never
+ * came up".
+ */
 function scannerUpExpr() {
-  return `return !!document.body && document.body.innerText.includes('Or paste the code');`;
+  return `return !!document.querySelector('#pocket-paste-code');`;
 }
 
 /**
@@ -648,7 +653,7 @@ async function approveOnHost(ctx) {
   const section = await ab.waitUntil(
     `const section = ${REMOTE_SECTION};
      return section && /\\d+\\s+paired/.test(section.innerText) ? section.innerText : null;`,
-    { what: 'the Host to count a paired device', timeoutMs: 60_000 },
+    { what: 'the Host to count a paired phone', timeoutMs: 60_000 },
   );
   ctx.record({
     approval: { code, confirm, approvedInMs: Date.now() - startedAt, remoteControl: section.trim() },

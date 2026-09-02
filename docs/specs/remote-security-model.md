@@ -239,14 +239,14 @@ newly-added passkey is not automatically trusted — the Client must still pair.
   public key ([server.md](./server.md) owns the grammar). **It carries no Host
   static, no label, and no signature** (rationale).
 - **Invitation lifecycle, Host-owned.** `live` until a valid Noise message 1
-  decrypts against it (`reserved`), then `consumed` by the terminal outcome,
-  `expired` by TTL, or `dropped` when the Host discards it un-scanned — lost
-  relay socket, or evicted at the cap. **A mint whose keygen straddles a
+  decrypts against it (`reserved`), which then always ends `consumed`; an
+  un-scanned one ends `expired` by TTL or `dropped` when the Host discards it —
+  lost relay socket, or evicted at the cap. **A mint whose keygen straddles a
   teardown is refused rather than inserted**, so no code outlives the socket it
   was made for. **Each invitation accepts one request**,
   a message 1 that fails to decrypt leaves it live, and redemption at the Server
   flips nothing. The QR panel renders that state and offers a new code;
-  **`dropped` must not read as a scan**, or it sends the user to a phone that
+  **neither may read as a scan**, or it sends the user to a phone that
   never asked.
 - **IK against the invitation key.** Client initiator, fresh per-Host static as
   `s`, invitation public key as `rs`. **Both handshake payloads are empty**, and
@@ -543,7 +543,7 @@ performing no remote operation ([pocket-app.md](./pocket-app.md)).
 durable, and an installed PWA is the preferred mode on both (rationale).
 
 **Loss is expected, and recovery is a re-run of the normal flow**: scan a fresh
-Host QR, generate a new per-Host static, pair again, and optionally revoke the
+setup code, generate a new per-Host static, pair again, and optionally revoke the
 previous record (`revokedAt`). Nothing is compromised — the lost key authorized
 nothing without its paired passkey, and the new one starts unauthorized
 everywhere.

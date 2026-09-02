@@ -156,7 +156,7 @@ export const ConnectedManyDevices: Story = {
       }),
     },
   },
-  play: settled('4 paired devices.'),
+  play: settled('4 paired phones.'),
 };
 
 /**
@@ -250,6 +250,6 @@ export const SetupPhoneRefused: Story = {
  * none, which renders nothing at all rather than an error.
  */
 export const HostServiceError: Story = {
-  parameters: { primedRemoteHost: { statusError: 'The Host service did not answer.' } },
+  parameters: { primedRemoteHost: { statusError: 'It did not answer.' } },
   play: settled(/Could not reach this machine’s remote-control service/),
 };

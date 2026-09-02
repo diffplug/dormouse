@@ -918,6 +918,22 @@ describe('RemoteHost end-to-end ceremonies', () => {
     expect(host.trackedClientCount).toBe(0);
   });
 
+  it('expiring a scanned invitation reports consumed, not expired', async () => {
+    // The pairing shares the invitation's `expiresAt`, and the reaper sweeps
+    // invitations before pairings — so a person still deciding at the modal when
+    // the TTL passes would have seen the panel behind it flip to "This code
+    // expired — nobody scanned it", about the code their phone had scanned.
+    makeHost();
+    const { invitation } = await requestPairing('c1', await newAuthenticator());
+    invitationEvents.length = 0;
+    clock += DEFAULT_PAIRING_TTL_MS + 1;
+    // Any `init` runs the reaper; this one is refused by the id it names.
+    sendE2e('c2', 'pairing', invitation.inviteId, 'init', toBase64Url(new Uint8Array(96)));
+    await settle();
+
+    expect(invitationEvents).toEqual([{ inviteId: invitation.inviteId, state: 'consumed' }]);
+  });
+
   it('evicting a scanned invitation at the cap reports consumed, not dropped', async () => {
     // `dropped` means nobody scanned it. The oldest by insertion is whatever it
     // is doing, so an eviction that always said `dropped` would tell the panel

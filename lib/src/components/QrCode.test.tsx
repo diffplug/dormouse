@@ -10,7 +10,7 @@ import { QrCode } from './QrCode';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-// A real pairing code's shape — six dot-separated fields — so the fixture is a
+// A real setup code's shape — six dot-separated fields — so the fixture is a
 // URL `parsePairingInvitationUrl` would actually accept, not just one that
 // starts like it (`server-lib-common/src/security/pairing-invitation.ts`).
 const URL_UNDER_TEST =

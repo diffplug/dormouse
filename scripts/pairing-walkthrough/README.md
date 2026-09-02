@@ -175,8 +175,8 @@ the Server derives from its own origin
 - **Push is off**, because a loopback origin has no routable VAPID subject
   ([`docs/specs/server.md`](../../docs/specs/server.md) → Configuration). So the
   Hosts view's card reads *Push notifications are off · This server has push
-  notifications disabled* (`13-pocket-hosts.txt`), the alarm settings say no
-  device has enabled alerts, and **the whole delivery-keyed push path — Enable,
+  notifications turned off* (`13-pocket-hosts.txt`), the alarm settings say no
+  paired phone has push on, and **the whole delivery-keyed push path — Enable,
   the sealed payload, the worker's notification — is untested here.** Only the
   in-session ring is.
 - **Nothing on this path is a phone.** The Client is a desktop Chrome at a
