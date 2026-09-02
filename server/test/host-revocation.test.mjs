@@ -8,6 +8,9 @@ import { WS_CLOSE_HOST_REVOKED } from 'server-lib-common';
 import { enrollHost, freshApp } from './helpers.mjs';
 import { e2eClientFrame } from './harness/e2e.mjs';
 
+/** A session that never expires: these cases are about sockets, not TTLs. */
+const LIVE_SESSION = { expiresAt: Number.POSITIVE_INFINITY };
+
 /**
  * `docs/specs/server.md` -> Guardrails owns the rule. Driven through
  * `sweepRevokedHosts` rather than its interval, which `index.ts` owns: the
@@ -41,7 +44,7 @@ test('a Host whose row is deleted loses its relay socket, and its clients are to
   const hostSocket = fakeSocket();
   hub.registerHost(host.hostId, hostSocket);
   const clientSocket = fakeSocket();
-  const client = hub.registerClient(clientSocket);
+  const client = hub.registerClient(clientSocket, LIVE_SESSION);
   hub.onClientFrame(client, JSON.stringify(e2eClientFrame(host.hostId)));
   assert.equal(client.hostId, host.hostId, 'precondition: bound');
   assert.equal(hub.isHostOnline(host.hostId), true, 'precondition: online');

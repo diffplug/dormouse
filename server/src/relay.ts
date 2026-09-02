@@ -37,13 +37,50 @@ export interface HostConn {
   readonly socket: RelaySocket;
 }
 
+/**
+ * What the hub needs of the sign-in session behind a Client socket: when it
+ * dies. Structural rather than an import of `app.ts`'s `Session`, which would
+ * make the dependency circular for no gain.
+ */
+export interface RelaySession {
+  readonly expiresAt: number;
+}
+
 /** A live Client socket and its (single) relationship to a Host. */
 export interface ClientConn {
   readonly clientId: string;
   readonly socket: RelaySocket;
+  /**
+   * The session that authorized the upgrade. Held so it can be re-checked: the
+   * upgrade gate runs once and a socket outlives it, exactly the reason
+   * `sweepRevokedHosts` exists for the other socket kind
+   * (`docs/specs/server.md` -> Relay).
+   */
+  readonly session: RelaySession;
   /** The Host this client is currently talking to, or `null` if unbound. */
   hostId: string | null;
 }
+
+/**
+ * How many Client sockets this process will hold at once.
+ *
+ * `/ws/client` needs a session token, and one account's phones are a handful,
+ * so this is far above real use — but without it a token-holder opens sockets
+ * until the process runs out, and a half-open TCP connection keeps its entry
+ * until the OS gives up. The heartbeat in `app.ts` is the other half of that.
+ */
+export const MAX_RELAY_CLIENT_SOCKETS = 64;
+
+/** Refused because the process is already holding {@link MAX_RELAY_CLIENT_SOCKETS}. */
+export const WS_CLOSE_TRY_AGAIN_LATER = 1013;
+
+/**
+ * The session behind this socket is gone. The same pair the `/ws/client`
+ * upgrade answers with, so a socket closed by the sweep is indistinguishable
+ * from one refused at the door and Pocket needs no second recovery.
+ */
+export const WS_CLOSE_UNAUTHORIZED = 1008;
+export const WS_CLOSE_UNAUTHORIZED_REASON = 'unauthorized';
 
 export class RelayHub {
   readonly #hosts = new Map<string, HostConn>();
@@ -161,12 +198,45 @@ export class RelayHub {
 
   // --- Client lifecycle -----------------------------------------------------
 
-  /** Register a freshly-opened Client socket with a fresh secret `clientId`. */
-  registerClient(socket: RelaySocket): ClientConn {
+  /** How many Client sockets are live right now. */
+  get clientCount(): number {
+    return this.#clients.size;
+  }
+
+  /**
+   * Register a freshly-opened Client socket with a fresh secret `clientId`, or
+   * `null` when the process is already at {@link MAX_RELAY_CLIENT_SOCKETS}.
+   *
+   * **Refuses rather than evicting.** A live socket belongs to a ceremony or an
+   * attached terminal; dropping one to admit another would let a token-holder
+   * take the relay away from itself, which is worse than making the new socket
+   * retry.
+   */
+  registerClient(socket: RelaySocket, session: RelaySession): ClientConn | null {
+    if (this.#clients.size >= MAX_RELAY_CLIENT_SOCKETS) return null;
     const clientId = toBase64Url(randomBytes(16));
-    const conn: ClientConn = { clientId, socket, hostId: null };
+    const conn: ClientConn = { clientId, socket, session, hostId: null };
     this.#clients.set(clientId, conn);
     return conn;
+  }
+
+  /**
+   * Close every Client socket whose session has expired by `now`, and report
+   * how many. The `/ws/client` counterpart of {@link RelayHub.closeHost}'s
+   * sweep: the upgrade gate runs once, so a socket opened a minute before a
+   * 12-hour session expires would otherwise relay for the process's lifetime
+   * (`docs/specs/server.md` -> Relay). Closed with the code and reason the
+   * upgrade itself uses, so Pocket's recovery is the one it already has.
+   */
+  closeExpiredClients(now: number): number {
+    let closed = 0;
+    for (const client of [...this.#clients.values()]) {
+      if (now < client.session.expiresAt) continue;
+      this.unregisterClient(client);
+      safeClose(client.socket, WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON);
+      closed += 1;
+    }
+    return closed;
   }
 
   /** Handle one raw frame from a Client socket. Malformed/unknown frames get an `error`. */

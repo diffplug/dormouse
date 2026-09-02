@@ -572,6 +572,34 @@ with `hostId` stamped from the socket), shapes in
 **The envelope is the whole client surface.** Any other frame type is answered
 with an `error` and reaches no Host.
 
+Its resource bounds, all four enforced under `sweepRelaySockets` or at the
+socket itself:
+
+* **A frame larger than any legal one never reaches a guard.** `ws` defaults to
+  a 100 MiB message, which the relay would buffer whole before
+  `isE2eClientFrame` ran, so the adapter's `maxPayload` is set to
+  `MAX_RELAY_FRAME_BYTES` — *derived* from `MAX_E2E_CIPHERTEXT_LENGTH`,
+  `MAX_CLIENT_ID_LENGTH` and `E2E_ID_LENGTH`, the same bounds the frame guards
+  enforce. Over it, the socket closes 1009.
+* **Client sockets are capped** at `MAX_RELAY_CLIENT_SOCKETS` (64). The
+  (n+1)-th **is refused, never admitted by evicting another**: a live socket
+  belongs to a ceremony or an attached terminal, and dropping one would let a
+  token holder take the relay away from itself. It closes 1013, a retry.
+* **An expired session is closed after the fact.** The `/ws/client` upgrade
+  checks the session once and the socket outlives it by up to twelve hours, so
+  the sweep closes any whose session has expired — the `/ws/client` counterpart
+  of the revoked-Host sweep in Guardrails. Closed 1008 `unauthorized`, the same
+  pair the upgrade answers with, so Pocket needs no second recovery.
+* **A half-open connection is closed by heartbeat.** It sends nothing and
+  closes nothing, so its entry and its Host binding would live until the OS
+  gave up. The sweep pings every socket and closes whatever has not been heard
+  from within `RELAY_IDLE_TIMEOUT_MS` (three sweeps) with 1001 — a pong, not
+  traffic, is what tells a dead socket from a legitimately idle terminal.
+
+`index.ts` runs the sweep every `RELAY_SWEEP_MS` (30 s), `unref`'d like the
+revocation sweep and far more often because it touches no disk. Pinned by
+`server/test/relay-limits.test.mjs`.
+
 **Only one socket may own a `hostId`.** Registering a second one for the same
 `hostId` displaces the first: clients bound to it are told `host-gone`, their
 bindings are cleared, and the old socket is closed with

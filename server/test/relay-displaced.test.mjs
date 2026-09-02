@@ -4,6 +4,9 @@ import assert from 'node:assert/strict';
 import { RelayHub } from '../dist/relay.js';
 import { e2eClientFrame, e2eHostFrame, newE2eId } from './harness/e2e.mjs';
 
+/** A session that never expires: these cases are about sockets, not TTLs. */
+const LIVE_SESSION = { expiresAt: Number.POSITIVE_INFINITY };
+
 /**
  * Unit tests for the displaced-host-socket guard, driving RelayHub directly
  * with fake sockets: a socket replaced by a host reconnect may still deliver
@@ -34,7 +37,7 @@ const hostFrame = (clientId, overrides) => JSON.stringify(e2eHostFrame(clientId,
 /** Register a client and bind it to `hostId`. */
 function boundClient(hub, hostId) {
   const socket = fakeSocket();
-  const client = hub.registerClient(socket);
+  const client = hub.registerClient(socket, LIVE_SESSION);
   hub.onClientFrame(client, clientFrame(hostId));
   assert.equal(client.hostId, hostId, 'precondition: bound');
   return { socket, client };
@@ -86,7 +89,7 @@ test('late frames from a host the client left are ignored', () => {
   const hostA = hub.registerHost(HOST_A, fakeSocket());
   hub.registerHost(HOST_B, fakeSocket());
   const clientSocket = fakeSocket();
-  const client = hub.registerClient(clientSocket);
+  const client = hub.registerClient(clientSocket, LIVE_SESSION);
 
   hub.onClientFrame(client, clientFrame(HOST_A));
   hub.onClientFrame(client, clientFrame(HOST_B));

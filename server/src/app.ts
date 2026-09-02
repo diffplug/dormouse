@@ -19,8 +19,11 @@ import {
   API_ROUTES,
   CEREMONY_FIELD_LIMIT,
   DELIVERY_ID_LENGTH,
+  E2E_ID_LENGTH,
   HELLO_ROUTE,
   HostChallengeIssuer,
+  MAX_CLIENT_ID_LENGTH,
+  MAX_E2E_CIPHERTEXT_LENGTH,
   MAX_PUSH_QUERY_DELIVERY_IDS,
   MAX_SEALED_PUSH_LENGTH,
   SELFHOST_ACCOUNT_ID,
@@ -76,7 +79,12 @@ import type {
 } from 'server-lib-common';
 
 import { invalidateEnrollOffer, redeemEnrollToken } from './enroll-token.js';
-import { RelayHub } from './relay.js';
+import {
+  RelayHub,
+  WS_CLOSE_TRY_AGAIN_LATER,
+  WS_CLOSE_UNAUTHORIZED,
+  WS_CLOSE_UNAUTHORIZED_REASON,
+} from './relay.js';
 import type { ClientConn, HostConn } from './relay.js';
 import { secretEquals } from './secrets.js';
 import { SetupTokenIssuer } from './setup-token.js';
@@ -215,6 +223,30 @@ export const MAX_PENDING_CHALLENGES = 64;
  * — puts a disk read on the path every keystroke takes.
  */
 export const HOST_REVOCATION_SWEEP_MS = 60_000;
+/**
+ * How often {@link CreatedApp.sweepRelaySockets} should be run. Far more often
+ * than the revocation sweep, because it touches no disk — it closes expired
+ * Client sessions and pings the rest.
+ */
+export const RELAY_SWEEP_MS = 30_000;
+/**
+ * How long a relay socket may go unheard-from before it is closed. Three sweeps
+ * of silence: a live peer answers the first ping, so reaching this means the
+ * connection is half-open, not idle. Generous against a phone whose radio has
+ * dozed, which reconnects anyway.
+ */
+export const RELAY_IDLE_TIMEOUT_MS = 3 * RELAY_SWEEP_MS;
+/** A socket closed for silence, not for anything it did. */
+const WS_CLOSE_IDLE = 1001;
+const WS_CLOSE_IDLE_REASON = 'no response to heartbeat';
+/**
+ * The largest frame `ws` may buffer for us. Derived from the wire bounds the
+ * relay's own guards enforce — a maximal `ct` plus the envelope around it —
+ * because without it `ws` buffers up to 100 MiB before any guard has run.
+ * `MAX_CLIENT_ID_LENGTH` is in here because a Host frame carries one.
+ */
+export const MAX_RELAY_FRAME_BYTES =
+  MAX_E2E_CIPHERTEXT_LENGTH + MAX_CLIENT_ID_LENGTH + 2 * E2E_ID_LENGTH + 1024;
 /** A small fixed delay on a rejected credential — the extent of POC brute-force hardening. */
 const CREDENTIAL_FAILURE_DELAY_MS = 250;
 
@@ -411,6 +443,24 @@ export interface CreatedApp {
    * instead of a timer.
    */
   readonly sweepRevokedHosts: () => Promise<number>;
+  /**
+   * Close the Client sockets whose session has expired, then ping the rest and
+   * close whatever has not been heard from within
+   * {@link RELAY_IDLE_TIMEOUT_MS}. Reports what it closed. `index.ts` runs it
+   * every {@link RELAY_SWEEP_MS}; exposed for the same reason
+   * {@link CreatedApp.sweepRevokedHosts} is.
+   */
+  readonly sweepRelaySockets: () => { expired: number; idle: number };
+}
+
+/**
+ * The `ws` slice the heartbeat needs. Structural rather than an import: `ws` is
+ * `@hono/node-ws`'s dependency, not this package's, and a socket that does not
+ * answer this shape simply goes unwatched.
+ */
+interface PingableSocket {
+  ping(): void;
+  on(event: 'pong' | 'message', listener: () => void): void;
 }
 
 export function createApp(config: AppConfig): CreatedApp {
@@ -534,7 +584,49 @@ export function createApp(config: AppConfig): CreatedApp {
   const app = new Hono<AppEnv>();
   // The WS relay routes need the http server that `serve()` builds later, so the
   // adapter is created here and `injectWebSocket` is handed back to the caller.
-  const { upgradeWebSocket, injectWebSocket } = createNodeWebSocket({ app });
+  const { upgradeWebSocket, injectWebSocket, wss } = createNodeWebSocket({ app });
+  // `ws` defaults to a 100 MiB frame, which the relay would buffer whole before
+  // any guard ran. Read at upgrade time, so setting it on the options here is
+  // what every socket this adapter accepts is built with.
+  wss.options.maxPayload = MAX_RELAY_FRAME_BYTES;
+
+  /**
+   * Liveness bookkeeping for one relay socket. A half-open TCP connection sends
+   * nothing and closes nothing, so its entry — and its Host binding — would
+   * live until the OS gave up. WebSocket ping/pong is what distinguishes it
+   * from a socket that is merely idle, which a terminal legitimately is.
+   */
+  interface RelayHeartbeat {
+    lastSeenAt: number;
+    readonly ping: () => void;
+    readonly close: () => void;
+  }
+  const heartbeats = new Set<RelayHeartbeat>();
+
+  /** Track `ws` for the heartbeat; returns the teardown for its `onClose`. */
+  function watchLiveness(ws: { raw?: unknown; close: (code?: number, reason?: string) => void }) {
+    const raw = ws.raw as PingableSocket | undefined;
+    if (typeof raw?.ping !== 'function' || typeof raw.on !== 'function') return () => {};
+    const entry: RelayHeartbeat = {
+      lastSeenAt: now(),
+      ping: () => {
+        raw.ping();
+      },
+      close: () => {
+        ws.close(WS_CLOSE_IDLE, WS_CLOSE_IDLE_REASON);
+      },
+    };
+    // Any traffic at all proves the peer is there; a pong is what proves it for
+    // a socket that has nothing to say.
+    raw.on('pong', () => {
+      entry.lastSeenAt = now();
+    });
+    raw.on('message', () => {
+      entry.lastSeenAt = now();
+    });
+    heartbeats.add(entry);
+    return () => heartbeats.delete(entry);
+  }
 
   // The Host (standalone webview) and dev Pocket builds call the API from
   // other origins, so preflights must succeed. Permissive CORS is safe here:
@@ -1150,14 +1242,17 @@ export function createApp(config: AppConfig): CreatedApp {
       // The auth middleware above ran on this same context and stashed `host`.
       const host = (c as Context<AppEnv>).get('host');
       let conn: HostConn | undefined;
+      let unwatch = () => {};
       return {
         onOpen: (_evt, ws) => {
           conn = hub.registerHost(host.hostId, ws);
+          unwatch = watchLiveness(ws);
         },
         onMessage: (evt) => {
           if (conn && typeof evt.data === 'string') hub.onHostFrame(conn, evt.data);
         },
         onClose: () => {
+          unwatch();
           if (conn) hub.unregisterHost(conn);
         },
       };
@@ -1177,23 +1272,57 @@ export function createApp(config: AppConfig): CreatedApp {
       // between that check and the upgrade.
       const token = c.req.query(WS_TOKEN_PARAM);
       let conn: ClientConn | undefined;
+      let unwatch = () => {};
       return {
         onOpen: (_evt, ws) => {
-          if (!token || !sessions.validate(token)) {
-            ws.close(1008, 'unauthorized');
+          const session = token ? sessions.validate(token) : null;
+          if (!session) {
+            ws.close(WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON);
             return;
           }
-          conn = hub.registerClient(ws);
+          // The session rides along so the sweep can re-check it: this gate
+          // runs once and the socket outlives it by up to twelve hours.
+          const registered = hub.registerClient(ws, session);
+          if (!registered) {
+            ws.close(WS_CLOSE_TRY_AGAIN_LATER, 'too many client sockets');
+            return;
+          }
+          conn = registered;
+          unwatch = watchLiveness(ws);
         },
         onMessage: (evt) => {
           if (conn && typeof evt.data === 'string') hub.onClientFrame(conn, evt.data);
         },
         onClose: () => {
+          unwatch();
           if (conn) hub.unregisterClient(conn);
         },
       };
     }),
   );
+
+  /**
+   * The socket-level sweep: expire, then probe. `docs/specs/server.md` -> Relay
+   * owns both rules. Synchronous and cheap — it touches no disk — so `index.ts`
+   * can run it far more often than the revocation sweep.
+   */
+  function sweepRelaySockets(): { expired: number; idle: number } {
+    const at = now();
+    const expired = hub.closeExpiredClients(at);
+    let idle = 0;
+    for (const entry of [...heartbeats]) {
+      if (at - entry.lastSeenAt > RELAY_IDLE_TIMEOUT_MS) {
+        heartbeats.delete(entry);
+        entry.close();
+        idle += 1;
+        continue;
+      }
+      // A socket with nothing to say is not a dead one; the pong is what tells
+      // the two apart, and it refreshes `lastSeenAt` when it lands.
+      entry.ping();
+    }
+    return { expired, idle };
+  }
 
   /** `docs/specs/server.md` -> Guardrails owns the rule this enforces. */
   async function sweepRevokedHosts(): Promise<number> {
@@ -1222,7 +1351,15 @@ export function createApp(config: AppConfig): CreatedApp {
   //     /ws route above wins. Missing build → a stub with the build command.
   registerPocketServing(app, config.pocketDir);
 
-  return { app, sessions, requireSession, hub, injectWebSocket, sweepRevokedHosts };
+  return {
+    app,
+    sessions,
+    requireSession,
+    hub,
+    injectWebSocket,
+    sweepRevokedHosts,
+    sweepRelaySockets,
+  };
 }
 
 /** Message shown at `GET /` when the Pocket app has not been built yet. */
