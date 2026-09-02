@@ -1862,7 +1862,10 @@ function Invoke-Uninstall {
 
   # Turn off only the mapping this installer owns.
   $serve = Invoke-Tailscale @('serve', 'status')
-  if (($serve.StdOut + $serve.StdErr) -match ([regex]::Escape("127.0.0.1:$PORT") + '([^0-9]|$)')) {
+  # Root-scoped, like the unix `serve_proxies_root`: `serve --bg off` resets the
+  # node's whole Serve config, so an unscoped port match turned off a root
+  # mapping this install never owned whenever our port sat on another path.
+  if (($serve.StdOut + $serve.StdErr) -match ('(?m)^\|--\s+/\s+proxy.*' + [regex]::Escape("127.0.0.1:$PORT") + '([^0-9]|$)')) {
     $off = Invoke-Tailscale @('serve', '--bg', 'off')
     if ($off.ExitCode -eq 0) { Write-Host "turned off the Serve mapping to 127.0.0.1:$PORT" }
     else { [Console]::Error.WriteLine('could not turn off the Serve mapping; check "tailscale serve status" and remove it by hand') }

@@ -1350,7 +1350,11 @@ cmd_uninstall() {
   # Turn off only the mapping this installer owns.
   local serve_out
   serve_out="$(ts serve status 2>/dev/null || true)"
-  if grep -qE "127\.0\.0\.1:$PORT([^0-9]|\$)" <<<"$serve_out"; then
+  # Root-scoped, because `serve --bg off` resets the node's whole Serve config:
+  # an unscoped port match turned off a root mapping this install never owned —
+  # the operator's own, which the installer itself refuses to repoint without a
+  # confirm — whenever our port happened to sit on some other path.
+  if serve_proxies_root "$PORT" "$serve_out"; then
     if ts serve --bg off 2>/dev/null; then
       printf 'turned off the Serve mapping to 127.0.0.1:%s\n' "$PORT"
     else
@@ -1742,6 +1746,11 @@ fi
 
 if [ "$TEST_MODE" != "1" ]; then
   SERVE_AFTER="$(ts serve status 2>&1 || true)"
+  # Not root-scoped, unlike the gate above and `manage verify`: this asserts
+  # that OUR mutation landed, and both branches that reach it ran
+  # `ts serve --bg` or found / already ours, so / is ours here unless Tailscale
+  # returned 0 having done nothing. A root-scoped `die` at this point would
+  # abort an install whose service is already up, the day the layout changes.
   grep -qE "127\.0\.0\.1:$LOOPBACK_PORT([^0-9]|\$)" <<<"$SERVE_AFTER" \
     || { printf '%s\n' "$SERVE_AFTER" >&2; die "Serve does not report a proxy to 127.0.0.1:$LOOPBACK_PORT."; }
   grep -q "$TS_DNS" <<<"$SERVE_AFTER" \

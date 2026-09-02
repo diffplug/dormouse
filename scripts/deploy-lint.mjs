@@ -338,7 +338,7 @@ export const RULES = [
     },
     skip: {
       Windows:
-        'its ladder and its verify check are both `-match` over a string already captured from `Invoke-Tailscale`, so there is no pipeline to take SIGPIPE; the rule below pins that they are root-scoped',
+        'its ladder, verify and uninstall checks are all `-match` over a string already captured from `Invoke-Tailscale`, so there is no pipeline to take SIGPIPE; the rule below pins the `/` in the verify message, and the root scoping itself has no signal on this platform at all',
     },
     exactMatches: { macOS: 3, Linux: 3 },
   },
