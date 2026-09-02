@@ -226,8 +226,8 @@ shape what the user should expect day to day:
 `manage verify` checks all of these locally and exits nonzero on any failure:
 
 - The service is registered and running, declares its run-at-load and
-  restart-on-exit behavior, and carries no credential — a definition `verify`
-  could not read at all fails, since a search through nothing finds nothing. On macOS: the LaunchAgent
+  restart-on-exit behavior, and carries no credential — a definition it cannot
+  read at all fails rather than passes. On macOS: the LaunchAgent
   is loaded in `gui/$UID` and its plist lints, declares `RunAtLoad` and
   `KeepAlive`. On Windows: the Scheduled Task is `Running`, has an at-logon
   trigger, no execution time limit, restarts on failure, runs unelevated, is not
@@ -248,9 +248,8 @@ shape what the user should expect day to day:
   `config/server.env`, and `tailscale funnel` is **off** — a Funnel would
   publish this same origin to the public internet, which the setup password's
   hardening was never sized for (`SECURITY.md` -> "Network posture"). A Funnel
-  check that could not run fails too: an unavailable Tailscale CLI prints
-  nothing, and nothing matches, so only its exit status tells "off" from
-  "unknown".
+  check that could not run fails too — only its exit status separates "off"
+  from "unknown".
 - `config/`, `state/`, `run/` and `config/server.env` are readable only by the
   installing user: modes `0700`/`0600` on macOS and Linux, a DACL with exactly
   that one user on Windows. The Windows check also covers each file in `state/`
@@ -739,9 +738,8 @@ is live rather than asserting either.
   platform's CSPRNG — 32 bytes, i.e. **64 hex characters**, and a guard refuses
   anything shorter, counting characters rather than bytes so a regression to
   half the entropy cannot pass — and is preserved byte-for-byte thereafter. A
-  preserved file missing installer-owned keys is a half-written one: the install
-  names them and stops, rather than rewriting a password or an origin it cannot
-  prove is stale.
+  preserved file missing installer-owned keys is half-written: the install names
+  them and stops rather than rewriting values it cannot prove are stale.
   `manage verify` fails if the password ever appears in the service definition;
   it must live only in `server.env`. Windows applies the `server.env` DACL
   *before* writing the password (Linux: `chmod 0600` on the empty file first),

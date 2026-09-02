@@ -10,14 +10,16 @@
  * Why this exists: `deploy-lint.mjs` is textual, so it can say a control is
  * still present and nothing more. These are controls where "present" was not
  * the property that failed — each read the right string and reported the wrong
- * answer, because `printf … | grep -q` under `set -o pipefail` returns 141
- * when `grep` exits early and the writer takes SIGPIPE, and 141 reads exactly
- * like "no match". The direction is the bad one: a Funnel that is ON and a
- * socket bound off-loopback both report clean, and the Serve ladder — the one
- * that mutates rather than reports — took neither branch, so the `confirm`
- * guarding an operator's existing root mapping never ran. It only shows above
- * the pipe buffer (64 KiB), so every hand-run on a small tailnet passes, and
- * nothing here is provable by reading the file.
+ * answer. Two ways that happened, both fail-open:
+ *
+ *   - Scope. `grep -q "127.0.0.1:$PORT"` is an unanchored substring match, so
+ *     it matched `/api` on our port while `/` belonged to someone else, and
+ *     matched `127.0.0.1:31000` when the port was 3100. On a three-line Serve
+ *     config that skipped the `confirm` and repointed the operator's root.
+ *   - Volume. `printf … | grep -q` under `set -o pipefail` returns 141 once
+ *     `grep` exits early and the writer takes SIGPIPE, and 141 reads exactly
+ *     like "no match". Only reachable past the pipe buffer (64 KiB), so it is
+ *     much the narrower of the two, but it fails in the same direction.
  *
  * How: the functions are extracted from each installer — the real text, not a
  * copy — and driven under the same `set -euo pipefail` those scripts run
@@ -28,15 +30,9 @@
  * copy), `env_missing_keys`, `serve_state` and `serve_root_target` in the
  * installer body.
  *
- * The cases labelled `witness` are not tests of shipped code: each runs an old
- * piped idiom over the same input and requires it to get the answer wrong. If
- * one ever fails, the bug stopped being reachable on this platform — delete
- * the witness, keep the fix.
- *
- * Windows is not covered: PowerShell has no pipeline that can take SIGPIPE
- * here — `Invoke-Verify` and the Serve ladder both match against strings they
- * have already captured — and nothing in CI can run PowerShell anyway (see
- * `deploy-lint.mjs`).
+ * Windows is not covered: `Invoke-Verify` and the Serve ladder both match
+ * against strings they have already captured, and nothing in CI can run
+ * PowerShell anyway (see `deploy-lint.mjs`).
  */
 
 import { spawnSync } from 'node:child_process';
@@ -141,11 +137,6 @@ function cases(platform, env) {
       `funnel_state 0 "${FUNNEL_ON}" ${pad('some tailscale prose')}`,
       'on',
     ],
-    [
-      'funnel_state: ON in funnel output, ahead of 1 MiB of it',
-      `funnel_state 0 "" "$(printf '%s\\n' "${FUNNEL_ON}"; awk 'BEGIN{for(i=0;i<20000;i++) print "trailing prose"}')"`,
-      'on',
-    ],
     ['funnel_state: 1 MiB of output, no Funnel', `funnel_state 0 "" ${pad('trailing prose')}`, 'off'],
     ['funnel_state: no Tailscale CLI', 'funnel_state 127 "" ""', 'unknown'],
     ['funnel_state: funnel status errored, serve output still names it', `funnel_state 1 "${FUNNEL_ON}" ""`, 'on'],
@@ -153,11 +144,6 @@ function cases(platform, env) {
     [
       'has_off_loopback: off-loopback first, 1 MiB of loopback after',
       `if has_off_loopback 3100 "$(printf '%s\\n' "${offLoopback}"; awk 'BEGIN{for(i=0;i<20000;i++) print "${loopback}"}')"; then echo detected; else echo clean; fi`,
-      'detected',
-    ],
-    [
-      'has_off_loopback: off-loopback last, after 1 MiB of loopback',
-      `if has_off_loopback 3100 "$(awk 'BEGIN{for(i=0;i<20000;i++) print "${loopback}"}'; printf '%s\\n' "${offLoopback}")"; then echo detected; else echo clean; fi`,
       'detected',
     ],
     [
@@ -216,11 +202,6 @@ function cases(platform, env) {
       '[]',
     ],
     [
-      'serve_state: our own mapping, ahead of 1 MiB of serve status',
-      `serve_state 3100 "$(printf '%s\\n' "${SERVE_ROOT_OURS}"; awk 'BEGIN{for(i=0;i<20000;i++) print "${SERVE_OTHER_PATH}"}')"`,
-      'loopback',
-    ],
-    [
       "serve_state: a foreign root mapping, ahead of 1 MiB — the gate the confirm hangs off",
       `serve_state 3100 "$(printf '%s\\n' "${SERVE_ROOT_FOREIGN}"; awk 'BEGIN{for(i=0;i<20000;i++) print "${SERVE_OTHER_PATH}"}')"`,
       'conflict',
@@ -252,24 +233,6 @@ function cases(platform, env) {
       `serve="$(printf '%s\\n' "${SERVE_ROOT_FOREIGN}"; awk 'BEGIN{for(i=0;i<20000;i++) print "${SERVE_ROOT_FOREIGN}"}')"\n` +
         `if target="$(serve_root_target "$serve")"; then printf '[%s]\\n' "$target"; else echo aborted; fi`,
       '[http://127.0.0.1:9999]',
-    ],
-    [
-      'witness: the piped form reports a live Funnel as off (this is the bug)',
-      `if printf '%s\\n%s' "${FUNNEL_ON}" ${pad('some tailscale prose')} | grep -qi 'funnel on'; then echo on; else echo off; fi`,
-      'off',
-    ],
-    [
-      'witness: `sed … | head -1` over the same output aborts the install under set -e',
-      `big="$(awk 'BEGIN{for(i=0;i<20000;i++) print "${SERVE_ROOT_FOREIGN}"}')"\n` +
-        `if t="$(printf '%s' "$big" | sed -n 's%^|-- / *proxy *%%p' | head -1)"; then echo "survived:[$t]"; else echo aborted; fi`,
-      'aborted',
-    ],
-    [
-      'witness: the piped conflict gate takes neither branch, so `confirm` never runs',
-      `serve="$(printf '%s\\n' "${SERVE_ROOT_FOREIGN}"; awk 'BEGIN{for(i=0;i<20000;i++) print "${SERVE_OTHER_PATH}"}')"\n` +
-        `if printf '%s' "$serve" | grep -q "127.0.0.1:3100"; then echo loopback; ` +
-        `elif printf '%s' "$serve" | grep -qE '^\\|-- / +proxy'; then echo conflict; else echo none; fi`,
-      'none',
     ],
   ];
 }

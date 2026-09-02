@@ -98,7 +98,7 @@ Four sibling lints run alongside it in `pnpm test`, each enforcing one invariant
 
 The last two carry a load-bearing self-test, and the two are inverses because the lints are: `scripts/deploy-lint-selftest.mjs` deletes each installer control — and, for exact-count rules, adds a copy — while `scripts/e2e-lint-selftest.mjs` re-introduces each forbidden thing. Either way the requirement is the same: the lint must go red. **A rule added to one of these lints without its self-test case is not enforced** — it is a claim that something is checked. They share their plumbing, and only that, through `scripts/lint-kit.mjs`.
 
-`scripts/installer-verify-test.mjs` (also `pnpm lint:deploy`) executes what that lint can only read: the shell functions behind `manage verify`'s verdicts, the Serve conflict gate and the `server.env` check, driven over CLI output past a pipe buffer, where each once answered wrongly.
+`scripts/installer-verify-test.mjs` (also `pnpm lint:deploy`) executes what that lint can only read: it extracts the shell helpers behind `manage verify`, the Serve conflict gate and the `server.env` check from the shipped installers and runs them over crafted input.
 
 `pnpm test` also runs `scripts/clamp-issue-body-selftest.mjs` — not a lint but the test for `scripts/clamp-issue-body.mjs`, the helper the audit workflows use to keep an issue body postable. It lives at the repo root because its callers do.
 

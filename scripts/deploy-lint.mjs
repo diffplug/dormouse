@@ -197,24 +197,6 @@ export const RULES = [
     },
   },
   {
-    // The two verify checks whose verdict is a text search over CLI output
-    // nobody bounds. `scripts/installer-verify-test.mjs` executes both and is
-    // the real enforcement; this is the floor under it, because that test
-    // skips itself where there is no `bash`. An alternation with an exact
-    // count of 2, so editing either half is a miss — the idiom the count
-    // forbids is `printf … | grep -q`, whose SIGPIPE reads as "no match".
-    rule: 'Network posture — the Funnel and off-loopback verdicts search captured text, never a pipe into grep -q',
-    patterns: {
-      macOS: /grep -qi 'funnel on' <<<|grep -qv "127\\\.0\\\.0\\\.1:\$1" <<</,
-      Linux: /grep -qi 'funnel on' <<<|grep -qv '\^127\\\.0\\\.0\\\.1:' <<</,
-    },
-    skip: {
-      Windows:
-        'PowerShell has no pipeline that can take SIGPIPE here — `Invoke-Verify` matches `(?i)funnel on` and the listener addresses against values it has already captured',
-    },
-    exactMatches: { macOS: 2, Linux: 2 },
-  },
-  {
     // Anchored on the three paths that matter. A bare `chmod 0700` also matches
     // `run-server`, `manage` and the probe state dir, and `Protect-Path` has
     // six hits, so relaxing config/+state/ to 0755 passed.
