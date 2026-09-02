@@ -293,7 +293,12 @@ never be replayed even when verification would succeed, then
 Challenges are `HostChallengeIssuer` from `server-lib-common` — a generic
 single-use/TTL store despite the name — and setup, sign-in/re-auth, and
 push-subscribe each get **their own issuer**, so a challenge minted for one flow
-can never be redeemed in another. Before consuming, the server canonicalizes the
+can never be redeemed in another. Both server-side issuers are **capped**
+(`MAX_PENDING_CHALLENGES`, oldest evicted) as well as swept:
+`POST /api/signin/begin` needs no auth and no body, so expiry alone lets the map
+plateau at request-rate x TTL rather than at a bound the process chose. A flood
+evicts abandoned challenges of its own making, and the ceremony that loses one
+retries; single use is untouched. Before consuming, the server canonicalizes the
 browser's `clientDataJSON.challenge` by decoded base64url bytes, so padded
 browser serializations redeem the issued challenge without weakening single-use
 replay protection.
@@ -349,8 +354,16 @@ read it. Source of truth: `server/src/app.ts`, pinned by
 
 The setup password is compared in constant time (SHA-256 digests, so length
 never branches) with a small fixed delay on failure; host tokens are resolved
-the same way, checking every row without an early break. That is the extent of
-the hardening today.
+the same way, checking every row without an early break. **The same delay
+answers a rejected host token**, on `requireHost` and on the `/ws/host`
+upgrade: both run unauthenticated over the most expensive lookup here — a read,
+a parse, and two SHA-256 per row — so answering instantly made probing cheaper
+for the caller than for the server. **A `hostToken` is pinned to its minted
+shape**, 32 bytes base64url, and a value of any other shape is refused before
+`hosts.json` is read at all, the way `isDeliveryId` guards the push routes. The
+session token gets neither: an in-memory `Map` lookup costs nothing, so a delay
+there would buy an attacker held connections rather than cost them anything.
+That is the extent of the hardening today.
 
 Every session-gated route — including the `/ws/client` upgrade, which is
 rejected before `injectWebSocket` ever sees it — answers an unknown or expired

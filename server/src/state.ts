@@ -4,7 +4,14 @@ import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 
-import { E2E_ID_BYTE_LENGTH, SELFHOST_ACCOUNT_ID, isE2eId, toBase64Url } from 'server-lib-common';
+import {
+  E2E_ID_BYTE_LENGTH,
+  SELFHOST_ACCOUNT_ID,
+  base64UrlLength,
+  isE2eId,
+  isExactBase64Url,
+  toBase64Url,
+} from 'server-lib-common';
 import type { PushSubscriptionPayload } from 'server-lib-common';
 
 import { secretEquals } from './secrets.js';
@@ -166,6 +173,19 @@ export interface StoredHost {
 }
 
 /**
+ * The one shape a `hostToken` has: 32 random bytes, base64url. Minted here and
+ * required at every lookup, the way `hostId` is pinned to `isE2eId`
+ * (`docs/specs/server.md` -> State files).
+ */
+const HOST_TOKEN_BYTE_LENGTH = 32;
+export const HOST_TOKEN_LENGTH = base64UrlLength(HOST_TOKEN_BYTE_LENGTH);
+
+/** Whether `value` could be a token this Server minted. */
+export function isHostToken(value: unknown): value is string {
+  return isExactBase64Url(value, HOST_TOKEN_LENGTH);
+}
+
+/**
  * Persistent host enrollment (`hosts.json`). Mirrors {@link AccountStore}: an
  * append-only JSON array, atomic writes, and a mutex so concurrent enrollments
  * cannot lose a write. Revocation is deleting a line by hand (POC guardrail).
@@ -213,8 +233,15 @@ export class HostStore extends JsonFileStore {
    * The token is a secret, so it is compared with `secretEquals` rather than
    * `===`, whose early-exit leaks byte positions. Every host is checked without
    * an early break so the work does not depend on which entry matches.
+   *
+   * **A value of the wrong shape never reaches the file.** This runs
+   * unauthenticated, on `requireHost` and on every `/ws/host` upgrade, and the
+   * lookup costs a `readFile` + `JSON.parse` + two SHA-256 per row — so a probe
+   * that cannot possibly be a token this Server minted must not buy any of it.
+   * The same reasoning `isDeliveryId` applies at the push routes.
    */
   async findByToken(hostToken: string): Promise<StoredHost | undefined> {
+    if (!isHostToken(hostToken)) return undefined;
     const hosts = await this.list();
     let match: StoredHost | undefined;
     for (const h of hosts) {
@@ -253,7 +280,7 @@ export class HostStore extends JsonFileStore {
       const hosts = await this.list();
       const host: StoredHost = {
         hostId: toBase64Url(randomBytes(E2E_ID_BYTE_LENGTH)),
-        hostToken: toBase64Url(randomBytes(32)),
+        hostToken: toBase64Url(randomBytes(HOST_TOKEN_BYTE_LENGTH)),
         enrolledAt: this.now(),
       };
       hosts.push(host);

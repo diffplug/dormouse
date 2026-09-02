@@ -199,6 +199,13 @@ const MAX_PENDING_REAUTH_NONCES_PER_SESSION = 8;
  */
 const MAX_REAUTH_NONCE_SESSIONS = 32;
 /**
+ * How many unredeemed WebAuthn challenges either issuer will hold. Sized like
+ * its siblings — a person signs in from a handful of devices, and every
+ * challenge dies in two minutes — and applied because `signinChallenges` is
+ * minted by an unauthenticated, bodyless route.
+ */
+export const MAX_PENDING_CHALLENGES = 64;
+/**
  * How often {@link CreatedApp.sweepRevokedHosts} should be run. `index.ts` owns
  * the timer — `createApp` starts no background work of its own.
  *
@@ -425,8 +432,12 @@ export function createApp(config: AppConfig): CreatedApp {
   const sessions = new SessionStore(now);
   const hub = new RelayHub();
   // Separate issuers per flow: a setup challenge cannot be redeemed at sign-in.
-  const setupChallenges = new HostChallengeIssuer({ now });
-  const signinChallenges = new HostChallengeIssuer({ now });
+  // Both are capped as well as swept: `POST /api/signin/begin` needs no auth
+  // and no body, so the expiry sweep alone only makes the map plateau at
+  // request-rate x TTL. A flood evicts abandoned challenges of its own making —
+  // a real ceremony that loses one retries — and cannot forge or extend any.
+  const setupChallenges = new HostChallengeIssuer({ now, maxPending: MAX_PENDING_CHALLENGES });
+  const signinChallenges = new HostChallengeIssuer({ now, maxPending: MAX_PENDING_CHALLENGES });
   // The presence nonces of `/api/reauth/*`. Its own store for the same reason
   // the issuers above are separate — a nonce minted for one flow may never be
   // redeemed in another — and it holds the binding the challenge was derived
@@ -441,7 +452,12 @@ export function createApp(config: AppConfig): CreatedApp {
 
   const credentialFailureDelayMs = config.credentialFailureDelayMs ?? CREDENTIAL_FAILURE_DELAY_MS;
 
-  // Every rejected credential answers 401 the same way, after the same delay.
+  // One 401 shape and one delay, for the credentials whose rejection is worth
+  // slowing down: the setup password, an enroll token, a setup token, and a
+  // host token. NOT the session token — an in-memory `Map` lookup costs the
+  // server nothing, so a delay there would buy an attacker held connections
+  // rather than cost them anything — and not a failed assertion, which is
+  // expensive to produce in the first place.
   async function credentialFailure(c: Context<AppEnv>, error: string): Promise<Response> {
     await delay(credentialFailureDelayMs);
     return c.json({ error }, 401);
@@ -766,10 +782,17 @@ export function createApp(config: AppConfig): CreatedApp {
 
   // Gate a route on a valid `Authorization: Bearer` host token. Mirrors
   // `requireSession`, resolving through the constant-time `findByToken`.
+  //
+  // **Rejection pays the same delay the setup password does.** This gate is
+  // unauthenticated by definition and its lookup is the most expensive one on
+  // the server — a `readFile` + `JSON.parse` + two SHA-256 per row — so
+  // answering instantly made probing cheaper for the caller than for us.
+  // `findByToken` refuses a wrong-shaped token before the read; this covers the
+  // rest.
   const requireHost: MiddlewareHandler<AppEnv> = async (c, next) => {
     const token = bearerToken(c);
     const host = token ? await hostStore.findByToken(token) : undefined;
-    if (!host) return c.json({ error: 'unauthorized' }, 401);
+    if (!host) return credentialFailure(c, UNAUTHORIZED_ERROR);
     c.set('host', host);
     await next();
   };
@@ -1117,7 +1140,9 @@ export function createApp(config: AppConfig): CreatedApp {
     async (c, next) => {
       const token = c.req.query(WS_TOKEN_PARAM);
       const host = token ? await hostStore.findByToken(token) : undefined;
-      if (!host) return c.json({ error: 'unknown host token' }, 401);
+      // The same delay `requireHost` pays: this is the other unauthenticated
+      // door onto the same expensive lookup.
+      if (!host) return credentialFailure(c, 'unknown host token');
       c.set('host', host);
       return next();
     },
