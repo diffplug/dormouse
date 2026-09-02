@@ -479,8 +479,15 @@ export function createApp(config: AppConfig): CreatedApp {
   // Enforced, not assumed: every compare below is a string compare against this
   // value, so a `https://host/` that slipped past `readConfig` (a direct caller,
   // a test) would fail each of them while reading as correct.
-  if (!isOrigin(origin)) {
-    throw new Error(`createApp needs a bare origin (scheme, host, port), got '${origin}'.`);
+  //
+  // **The scheme too, not merely "bare".** `isOrigin` admits any WHATWG special
+  // scheme — `ws://x` reduces to itself — and everything downstream reads this
+  // as `http(s)`: no browser can send one as `clientData.origin`, and
+  // `pocketContentSecurityPolicy` swaps the scheme by slicing off `http`. The
+  // env path has the same guard in `requireOrigin` (`server/src/config.ts`);
+  // this is the one every direct caller passes through.
+  if (!isOrigin(origin) || !(origin.startsWith('http://') || origin.startsWith('https://'))) {
+    throw new Error(`createApp needs a bare http(s) origin (scheme, host, port), got '${origin}'.`);
   }
   // The one parse, and only for the host part.
   const rpId = new URL(origin).hostname;
@@ -1413,7 +1420,8 @@ const CSP_HEADER = 'Content-Security-Policy';
  * the built output.
  */
 export function pocketContentSecurityPolicy(origin: string): string {
-  // `createApp` has already proved this is a bare `http(s)` origin.
+  // `createApp` refuses anything but a bare `http(s)` origin, which is what
+  // makes this slice exact rather than a guess.
   const wsOrigin = `ws${origin.slice('http'.length)}`;
   return [
     "default-src 'self'",

@@ -574,9 +574,12 @@ shipped webview hosts already have. Every source is the app's own origin
   own relay.
 
 **`script-src` stays `'self'`, with no nonce pipeline**, and the build has to
-keep earning that: `server/test/static.test.mjs` parses the built `index.html`
-and fails on any inline `<script>` body or off-origin `src`/`href`. Source of
-truth: `pocketContentSecurityPolicy` in `server/src/app.ts`.
+keep earning that: `assertPocketShell` fails `build:pocket` on any inline
+`<script>` body or off-origin `src`/`href` in the emitted `index.html`. It runs
+there rather than in a test suite because no suite builds the app first, and
+Vite emits an inline module-preload polyfill for some configurations. Source of
+truth: `pocketContentSecurityPolicy` in `server/src/app.ts` for the header,
+`lib/scripts/assert-pocket-worker.mjs` for what earns it.
 
 One lib-owned bundle, two deployments:
 

@@ -528,7 +528,7 @@ export class PushSubscriptionStore extends JsonFileStore {
  * caller picks for itself — the Server cannot check one against a Host's ACL,
  * by design — so without a cap one signed-in caller appends a durable row per
  * request, and every push route thereafter re-reads and re-parses the file.
- * Every sibling transient store is capped (`MAX_PENDING_REAUTH_NONCES`,
+ * Every sibling transient store is capped (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`,
  * `MAX_TOKENS_PER_HOST`); this is the durable one, so it matters more.
  *
  * Far above any real use: the per-Host cap is phones paired with one laptop,

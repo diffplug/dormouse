@@ -6,10 +6,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { createApp } from '../dist/app.js';
 
@@ -161,29 +160,6 @@ test('connect-src names this deployment own relay and no other host', async () =
   }
 });
 
-test('the BUILT Pocket app satisfies script-src self', async (t) => {
-  // The reason `script-src` needs no `'unsafe-inline'` and no nonce pipeline.
-  // Vite injects an inline module-preload polyfill for some builds, so this
-  // reads the real output rather than trusting the source shell.
-  const built = fileURLToPath(new URL('../../lib/dist-pocket/index.html', import.meta.url));
-  let html;
-  try {
-    html = await readFile(built, 'utf8');
-  } catch {
-    t.skip('lib/dist-pocket is not built; run `pnpm --filter dormouse-lib build:pocket`');
-    return;
-  }
-
-  for (const tag of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)) {
-    const [, attributes, body] = tag;
-    assert.equal(body.trim(), '', `inline script body: ${body.slice(0, 60)}`);
-    const src = /\ssrc=["']([^"']+)["']/.exec(attributes)?.[1];
-    assert.ok(src, `script with neither src nor body: ${attributes}`);
-    assert.match(src, /^\//, `off-origin script src: ${src}`);
-  }
-  // Stylesheets and the manifest are same-origin too, so `default-src 'self'`
-  // covers them without a per-directive exception.
-  for (const link of html.matchAll(/<link\b[^>]*\shref=["']([^"']+)["']/g)) {
-    assert.match(link[1], /^\//, `off-origin link href: ${link[1]}`);
-  }
-});
+// The other half of `script-src 'self'` — that the BUILT shell carries no inline
+// script and nothing off-origin — is asserted by `lib/scripts/assert-pocket-worker.mjs`
+// inside `build:pocket`, because no test suite builds the app first.
