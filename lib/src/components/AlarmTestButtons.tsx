@@ -114,13 +114,15 @@ export function PushTestButton() {
                 );
               } else if (outcome.delivered === 0) {
                 show(`No phone accepted the push (${outcome.failed} failed).`, 'bad');
-              } else if (outcome.failed > 0) {
-                show(`Sent to ${outcome.delivered}; ${outcome.failed} failed.`, 'bad');
               } else {
-                show(
-                  `Sent to ${outcome.delivered} ${outcome.delivered === 1 ? 'phone' : 'phones'}.`,
-                  'ok',
-                );
+                // One noun across every outcome: the mixed case is the one a
+                // reader has to count, so it may not be the one with none.
+                const phones = `${outcome.delivered} ${outcome.delivered === 1 ? 'phone' : 'phones'}`;
+                if (outcome.failed > 0) {
+                  show(`Sent to ${phones}; ${outcome.failed} failed.`, 'bad');
+                } else {
+                  show(`Sent to ${phones}.`, 'ok');
+                }
               }
             })
             .catch((error: unknown) => {

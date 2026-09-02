@@ -858,6 +858,14 @@ export function SetupOrSignin({
               : 'On the computer: Settings → Remote control → Set up a phone. Scan the code it shows.'}
           </p>
         </div>
+        {/* Above the actions, never below: the passkey this screen mints
+            belongs to whichever partition creates it, so guidance that arrives
+            after setup arrives after the trap. **Above the camera notice too**,
+            on the one arrival where both render — iOS Safari, reached from the
+            phone's own camera — because that notice sends the reader to the
+            scan button, and doing that before installing walks into the trap
+            this one is here to prevent. */}
+        {!signinLeads && needsInstall ? <InstallFirstNotice /> : null}
         {/* The one thing a native-camera arrival is for: saying where the scan
             has to happen. The code it carried is already gone and unspent. */}
         {arrivedByCamera ? (
@@ -869,10 +877,6 @@ export function SetupOrSignin({
             </p>
           </div>
         ) : null}
-        {/* Above the actions, never below: the passkey this screen mints
-            belongs to whichever partition creates it, so guidance that arrives
-            after setup arrives after the trap. */}
-        {!signinLeads && needsInstall ? <InstallFirstNotice /> : null}
         {error ? <ErrorRow message={error} /> : null}
 
         {signinLeads ? (

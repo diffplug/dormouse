@@ -127,6 +127,21 @@ describe('PushTestButton', () => {
     expect(text()).toContain('No phone accepted the push');
   });
 
+  it('names what a partly-failed fan-out reached, like every other outcome', async () => {
+    platform = {
+      remoteHost: {
+        command: vi.fn(async () => ({ targeted: 3, delivered: 2, failed: 1 })),
+        on: () => () => {},
+        respond: () => {},
+        notify: () => {},
+      },
+    };
+    await act(async () => root.render(<PushTestButton />));
+    await act(async () => button().click());
+
+    expect(text()).toContain('Sent to 2 phones; 1 failed.');
+  });
+
   it('surfaces the service error', async () => {
     platform = {
       remoteHost: {

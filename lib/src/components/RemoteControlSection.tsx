@@ -186,8 +186,10 @@ const TERMINAL_COPY: Record<TerminalPhase, { headline: string; detail: string }>
       'A phone scanned this code. It will ask to pair — that request interrupts you here with two digits to type.',
     detail: 'This code is used up.',
   },
-  // Approved or cancelled: either way the panel must stop sending the user to a
-  // phone. The paired count above says which way it went.
+  // Approved or cancelled: the Host publishes one `consumed` for both, so this
+  // sentence has to be true of either. **It deliberately does not claim the
+  // pairing succeeded** — the count above it is absolute, not a delta, so on a
+  // machine with a phone already paired it reads the same either way.
   finished: {
     headline: 'This setup code is finished.',
     detail: 'Pair another phone with a new code, or close this.',

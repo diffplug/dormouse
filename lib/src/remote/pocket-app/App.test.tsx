@@ -258,6 +258,21 @@ describe('SetupOrSignin install guidance', () => {
     expect(notice!.contains(scan!)).toBe(false);
   });
 
+  it('warns before the camera notice too, the one arrival that shows both', () => {
+    // iOS Safari, opened by the phone's own camera: the camera notice sends the
+    // reader to the scan button, and scanning here before installing mints the
+    // passkey in the wrong partition — the trap the install notice exists for.
+    renderAuth({ hasPriorUse: false, needsInstall: true, arrivedByCamera: true });
+
+    const notice = installNotice()!;
+    const camera = [...container.querySelectorAll<HTMLElement>('div')].find(
+      (el) => el.textContent === CAMERA_BOOTSTRAP_MESSAGE,
+    )!;
+    expect(notice).not.toBeUndefined();
+    expect(camera).not.toBeUndefined();
+    expect(notice.compareDocumentPosition(camera) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('stays quiet on a return visit, which mints no passkey', () => {
     renderAuth({ hasPriorUse: true, needsInstall: true });
 
