@@ -590,6 +590,12 @@ socket itself:
   the sweep closes any whose session has expired — the `/ws/client` counterpart
   of the revoked-Host sweep in Guardrails. Closed 1008 `unauthorized`, the same
   pair the upgrade answers with, so Pocket needs no second recovery.
+  **Only a registered conn is routed or torn down**, on both sides: a `close()`
+  starts a handshake rather than ending the socket, so a frame already buffered
+  still arrives carrying the conn the sweep dropped. `onClientFrame` and
+  `unregisterClient` carry the same generation guard `onHostFrame` and
+  `unregisterHost` do, or a late `init` would open a fresh ceremony for the
+  session that was just expired.
 * **A half-open connection is closed by heartbeat.** It sends nothing and
   closes nothing, so its entry and its Host binding would live until the OS
   gave up. The sweep pings every socket and closes whatever has not been heard

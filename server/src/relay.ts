@@ -241,6 +241,15 @@ export class RelayHub {
 
   /** Handle one raw frame from a Client socket. Malformed/unknown frames get an `error`. */
   onClientFrame(client: ClientConn, raw: string): void {
+    // The client-side twin of {@link onHostFrame}'s guard. `closeExpiredClients`
+    // unregisters and *then* closes, and `close()` starts a handshake rather
+    // than ending the socket, so a frame already in the receive buffer still
+    // arrives carrying this same conn. `hostId` is never cleared on teardown,
+    // so forwarding it would name a `clientId` the Host was told a moment ago
+    // was gone — and an `init` in that window would open a fresh ceremony for
+    // the session the sweep just expired, which is the whole point of expiring
+    // it (`docs/specs/server.md` -> Relay).
+    if (this.#clients.get(client.clientId) !== client) return;
     const frame = parseFrame<ClientFrame>(raw);
     if (!frame || typeof frame.t !== 'string') {
       this.#toClient(client, { t: 'error', error: 'malformed frame' });

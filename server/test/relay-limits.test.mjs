@@ -167,3 +167,29 @@ test('the expiry sweep tells a Host client-gone exactly once', async () => {
     1,
   );
 });
+
+test('a frame in flight when the sweep closed a socket reaches no Host', async () => {
+  // `close()` starts a handshake rather than ending the socket, so a frame
+  // already buffered still arrives carrying the torn-down conn. Forwarding it
+  // would name a `clientId` the Host was just told was gone — and an `init`
+  // would open a fresh ceremony for the session the sweep expired, which is
+  // exactly what expiring it exists to stop.
+  const { hub } = await freshApp();
+  const hostId = newE2eId();
+  const hostSocket = recordingSocket();
+  hub.registerHost(hostId, hostSocket);
+  const clientSocket = recordingSocket();
+  const client = hub.registerClient(clientSocket, { expiresAt: 1000 });
+  hub.onClientFrame(client, JSON.stringify(e2eClientFrame(hostId)));
+  assert.equal(hostSocket.sent.at(-1).t, 'e2e', 'precondition: it was routing');
+
+  assert.equal(hub.closeExpiredClients(1000), 1);
+  const afterSweep = hostSocket.sent.length;
+
+  // Both shapes: a transport frame inside the old binding, and an `init` that
+  // would otherwise bind afresh.
+  hub.onClientFrame(client, JSON.stringify(e2eClientFrame(hostId, { step: 'transport' })));
+  hub.onClientFrame(client, JSON.stringify(e2eClientFrame(hostId)));
+
+  assert.equal(hostSocket.sent.length, afterSweep, 'a torn-down conn still routed');
+});
