@@ -101,19 +101,36 @@ describe('assertPocketShell', () => {
     expect(() => checkShell(dir)).toThrow(/inline script/);
   });
 
-  it('fails on an off-origin script or stylesheet, in either spelling', () => {
-    // A `base` pointing at a CDN is the one input that makes this guard fire,
-    // and the protocol-relative form is the half that also starts with `/`.
-    for (const src of ['https://cdn.example.com/x.js', '//cdn.example.com/x.js']) {
+  it('fails on an off-origin script or stylesheet, however it is spelled', () => {
+    // A `base` pointing at a CDN is the one input that makes this guard fire.
+    // The authority-relative forms are the ones that also start with `/` —
+    // including the backslash spelling, which WHATWG folds into `//` for a
+    // special scheme, so `new URL('/\\cdn.example.com/x.js', origin)` is
+    // `https://cdn.example.com/x.js`.
+    for (const src of [
+      'https://cdn.example.com/x.js',
+      '//cdn.example.com/x.js',
+      '/\\cdn.example.com/x.js',
+    ]) {
       expect(() => checkShell(shell(`<script src="${src}"></script>`)), src).toThrow(
         /not same-origin/,
       );
     }
-    for (const href of ['https://fonts.example.com/x.css', '//fonts.example.com/x.css']) {
-      expect(
-        () => checkShell(shell(`<link rel="stylesheet" href="${href}">`)),
-        href,
-      ).toThrow(/off-origin/);
+    for (const href of [
+      'https://fonts.example.com/x.css',
+      '//fonts.example.com/x.css',
+      '/\\fonts.example.com/x.css',
+    ]) {
+      expect(() => checkShell(shell(`<link rel="stylesheet" href="${href}">`)), href).toThrow(
+        /off-origin/,
+      );
+    }
+  });
+
+  it('still approves the root-relative forms a real build emits', () => {
+    // Including bare `/`, which the shape test admits at end of input.
+    for (const href of ['/manifest.webmanifest', '/']) {
+      expect(checkShell(shell(`<link rel="manifest" href="${href}">`)), href).toBe(0);
     }
   });
 
