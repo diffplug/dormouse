@@ -206,17 +206,23 @@ export async function settleUntil(until?: () => boolean): Promise<void> {
  * (CI counted a burst of eight mid-handshake, 29 operations of 32). Waiting on
  * quiescence rather than on the expected number keeps the measurement honest:
  * it never settles early because the count already looks right.
+ *
+ * Throws rather than answering a mid-burst count, which would fail the caller's
+ * assertion with the same truncated-read message this waiter exists to
+ * eliminate — and would leak the still-running work into the next flood's
+ * count.
  */
 export async function settleUntilQuiet(read: () => number, stableRounds = 3): Promise<number> {
   let last = read();
   let stable = 0;
-  for (let round = 0; round < 40 && stable < stableRounds; round += 1) {
+  for (let round = 0; round < 40; round += 1) {
     await settle();
     const value = read();
     stable = value === last ? stable + 1 : 0;
     last = value;
+    if (stable >= stableRounds) return last;
   }
-  return last;
+  throw new Error(`settleUntilQuiet: reading never went quiet after 40 settles (last ${last})`);
 }
 
 /** The Host's outgoing `e2e` frames for one ceremony, in order. */
