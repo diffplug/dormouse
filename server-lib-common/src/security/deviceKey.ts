@@ -30,12 +30,13 @@ export interface DeviceKeyPair {
 }
 
 /**
- * Generate a Client device keypair. The private key is non-extractable; the
- * browser side is expected to persist the `CryptoKey` objects themselves in
- * IndexedDB (`lib/src/remote/client/device-key.ts`) rather than exporting
- * anything. Asking for `navigator.storage.persist()` is staged
- * (docs/specs/remote-security-model.md -> Future), so retention is currently
- * best-effort — see that spec's Storage Durability.
+ * Generate a Client device keypair. The private key is non-extractable; a
+ * browser holding one is expected to persist the `CryptoKey` objects themselves
+ * in IndexedDB rather than exporting anything.
+ *
+ * No first-party Client mints these any more — Pocket's store went with the
+ * cutover — and this whole module is deleted in stage 4c
+ * (docs/specs/remote-security-model.md -> Future).
  */
 export async function generateDeviceKeyPair(
   crypto: WebCryptoLike = getWebCrypto(),

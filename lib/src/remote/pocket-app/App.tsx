@@ -44,7 +44,19 @@ import { PocketWall } from './PocketWall';
 import { ScanInvitation, type StartScan } from './ScanInvitation';
 import { ErrorRow, PK, pkButton } from './pocket-chrome';
 
-type Phase = 'auth' | 'scan' | 'pairing' | 'hosts' | 'wall';
+/**
+ * Which screen is up, carrying whatever only that screen has. The two pieces
+ * that used to sit beside it — the pairing digits and the connected Host — are
+ * in here because they are meaningless anywhere else, and keeping them in
+ * lockstep with a separate `phase` string was four places to get it wrong.
+ */
+type Phase =
+  | { readonly at: 'auth' }
+  | { readonly at: 'scan' }
+  /** `code` is null for the moment between the handshake and the sampled code. */
+  | { readonly at: 'pairing'; readonly code: string | null }
+  | { readonly at: 'hosts' }
+  | { readonly at: 'wall'; readonly host: HostView };
 
 /** One row of the Hosts view: a pinned record, plus what the Server knows. */
 export interface HostView {
@@ -59,13 +71,13 @@ export interface HostView {
   needsPairing: boolean;
 }
 
-export type PushConfigStatus = 'loading' | 'ready' | 'disabled' | 'error';
-
 type PushConfigState =
   | { status: 'loading' }
   | { status: 'ready'; key: string }
   | { status: 'disabled' }
   | { status: 'error' };
+
+export type PushConfigStatus = PushConfigState['status'];
 
 /**
  * The label this Client suggests at pairing.
@@ -147,7 +159,7 @@ export default function App({
    */
   const [passkeyAlreadyRegistered, setPasskeyAlreadyRegistered] = useState(false);
 
-  const [phase, setPhase] = useState<Phase>('auth');
+  const [phase, setPhase] = useState<Phase>({ at: 'auth' });
   /**
    * The last failure. Unkeyed, because every screen that reports one owns its
    * whole viewport: whatever failed last is the only thing there is to say.
@@ -155,9 +167,6 @@ export default function App({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [hosts, setHosts] = useState<HostView[]>([]);
-  const [activeHost, setActiveHost] = useState<HostView | null>(null);
-  /** The two digits the laptop must be told, while a pairing is pending. */
-  const [pairingCode, setPairingCode] = useState<string | null>(null);
   /** Set by Cancel on the waiting screen, so the abort is not reported as a failure. */
   const cancelledPairingRef = useRef(false);
   const [pushState, setPushState] = useState<PushAvailability | null>(null);
@@ -166,19 +175,39 @@ export default function App({
   const [pushSubscriptionCurrent, setPushSubscriptionCurrent] = useState(false);
   const [pushConfig, setPushConfig] = useState<PushConfigState>({ status: 'loading' });
   /**
-   * Advances at the start of every push load, and on a completed registration
-   * that supersedes one; see the effect below.
+   * A monotonic token: every push read commits only while it is still the
+   * current one, so anything newer — a later load, or a completed registration
+   * — supersedes a load whole rather than each continuation carrying a guard.
+   * Cheaper than a cleanup, and it survives the hop onto the wall.
    */
   const pushLoadRunRef = useRef(0);
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
 
   /**
-   * Whether this browser has a passkey it could sign in with. Derived, never
-   * latched: a scan that registers one has to flip the screen on the next
-   * commit, so a later drop back to `auth` offers sign-in rather than a second
-   * registration.
+   * The Server's VAPID key, and whether this browser's subscription still
+   * matches it. One operation, two callers: the Hosts-entry load below (which
+   * commits only while its run token is current) and the Retry action.
    */
-  const hasPriorUse = phase === 'auth' && client.hasPriorUse();
+  const loadPushConfig = useCallback(
+    async (commit: () => boolean) => {
+      setPushConfig({ status: 'loading' });
+      try {
+        const key = await client.getPushConfig();
+        const subscriptionCurrent =
+          key !== null &&
+          (await hasCurrentPushSubscription(key, client.registeredPushEndpoint()).catch(
+            () => false,
+          ));
+        if (!commit()) return;
+        setPushConfig(key === null ? { status: 'disabled' } : { status: 'ready', key });
+        setPushSubscriptionCurrent(subscriptionCurrent);
+      } catch (err) {
+        if (commit()) setPushConfig({ status: 'error' });
+        throw err;
+      }
+    },
+    [client],
+  );
 
   // Availability depends on browser state the app cannot change (permission,
   // whether it was launched from the Home Screen), so it is read on entering the
@@ -186,42 +215,25 @@ export default function App({
   // authoritative one.
   //
   // Keyed to the `hosts` phase alone, so the hop onto the wall neither refetches
-  // it nor throws it away. What a cleanup would have done, a monotonic run token
-  // does instead: every continuation commits only if its token is still the
-  // current one, so anything newer supersedes this load whole — a later load, or
-  // a completed registration (see `onEnablePush`) — without an in-flight read
-  // being dropped at the navigation. (`App` never unmounts between phases, so
-  // there is nothing to tear down on the way out.)
+  // it nor throws it away; the run token (above) is what supersedes an in-flight
+  // read instead of a cleanup. (`App` never unmounts between phases, so there is
+  // nothing to tear down on the way out.)
   //
   // The VAPID key is fetched here too, so the Enable tap has no network round
   // trip in front of the permission prompt — iOS drops transient activation
   // across one.
+  const at = phase.at;
   useEffect(() => {
-    if (phase !== 'hosts') return;
+    if (at !== 'hosts') return;
     const run = ++pushLoadRunRef.current;
     const current = () => pushLoadRunRef.current === run;
-    setPushConfig({ status: 'loading' });
     setPushSubscriptionCurrent(false);
     void getPushAvailability().then((state) => {
       if (current()) setPushState(state);
     });
-    void client
-      .getPushConfig()
-      .then(async (key) => {
-        const subscriptionCurrent =
-          key !== null
-            ? await hasCurrentPushSubscription(key, client.registeredPushEndpoint()).catch(
-                () => false,
-              )
-            : false;
-        if (current()) {
-          setPushConfig(key === null ? { status: 'disabled' } : { status: 'ready', key });
-          setPushSubscriptionCurrent(subscriptionCurrent);
-        }
-      })
-      .catch(() => {
-        if (current()) setPushConfig({ status: 'error' });
-      });
+    void loadPushConfig(current).catch(() => {
+      // Reported by the card's Retry state; a failed prefetch is not an alert.
+    });
     // Which Hosts this device already registered with, asked by presenting this
     // browser's own delivery ids. Without it a reload re-offers Enable for every
     // Host, including ones the Server already holds a row for. Authoritative
@@ -239,7 +251,7 @@ export default function App({
         // re-offers its idempotent Enable rather than claiming push is on; the
         // next Hosts entry re-reads.
       });
-  }, [phase, client]);
+  }, [at, client, loadPushConfig]);
 
   /**
    * Whether this device is registered for push notifications with one Host.
@@ -273,9 +285,7 @@ export default function App({
         if (err instanceof SessionExpiredError) {
           teardownAdapter();
           client.close();
-          setActiveHost(null);
-          setPairingCode(null);
-          setPhase('auth');
+          setPhase({ at: 'auth' });
           setError(err.message);
           return;
         }
@@ -297,10 +307,12 @@ export default function App({
     const [records, enrolled] = await Promise.all([client.listKnownHosts(), client.listHosts()]);
     const online = new Map(enrolled.map((host) => [host.hostId, host.online]));
     setHosts(records.map((record) => toHostView(record, online.get(record.hostId) ?? false)));
+    setPhase({ at: 'hosts' });
     // Owed deletions retry here: this runs after every sign-in and on every
     // return to the list, and a tombstone clears only on the Server's answer.
-    await client.retirePendingDeletions();
-    setPhase('hosts');
+    // Never awaited: it is best-effort, never throws, and nothing on the list
+    // it just painted depends on it — a backlog is N serial DELETEs.
+    void client.retirePendingDeletions();
   }, [client]);
 
   // Socket drop / host-gone: dispose the adapter and fall back to Hosts.
@@ -308,8 +320,7 @@ export default function App({
     client.setOnHostGone(() => {
       teardownAdapter();
       setError('The host disconnected.');
-      setActiveHost(null);
-      setPhase('hosts');
+      setPhase({ at: 'hosts' });
     });
     return () => client.setOnHostGone(null);
   }, [client, teardownAdapter]);
@@ -335,8 +346,7 @@ export default function App({
       initAlertStateReceiver();
       await adapter.init();
 
-      setActiveHost(host);
-      setPhase('wall');
+      setPhase({ at: 'wall', host });
     },
     [client, loadHosts],
   );
@@ -378,10 +388,12 @@ export default function App({
       if (!spentOnSetup) await client.retireSetupToken(invitation.setupToken);
       await client.retirePendingDeletions();
 
-      setPhase('pairing');
-      setPairingCode(null);
-      const result = await client.pair(invitation, label, setPairingCode);
-      setPairingCode(null);
+      setPhase({ at: 'pairing', code: null });
+      // The digits land on the screen already showing them, and only while it
+      // is still up — a code arriving after Cancel has nowhere to go.
+      const result = await client.pair(invitation, label, (code) =>
+        setPhase((current) => (current.at === 'pairing' ? { at: 'pairing', code } : current)),
+      );
       if (cancelledPairingRef.current) {
         // The user stopped waiting; whatever the ceremony answered afterwards
         // is not a failure to report at them.
@@ -401,12 +413,11 @@ export default function App({
 
   const onCancelPairing = () => {
     cancelledPairingRef.current = true;
-    setPairingCode(null);
     // Closing the socket is what ends a ceremony there is no other way out of:
     // the Host's own invitation is spent by the outcome or by its TTL, and the
     // waiter this drops is the only thing still holding the screen.
     client.close();
-    setPhase('hosts');
+    setPhase({ at: 'hosts' });
   };
 
   const onForget = (host: HostView) =>
@@ -460,30 +471,12 @@ export default function App({
 
   // A config retry deliberately stops after caching the key. The next Enable
   // tap is the fresh user gesture the iOS permission prompt requires.
-  const onRetryPushConfig = () =>
-    run('push-config', async () => {
-      setPushConfig({ status: 'loading' });
-      try {
-        const key = await client.getPushConfig();
-        const subscriptionCurrent =
-          key !== null
-            ? await hasCurrentPushSubscription(key, client.registeredPushEndpoint()).catch(
-                () => false,
-              )
-            : false;
-        setPushConfig(key === null ? { status: 'disabled' } : { status: 'ready', key });
-        setPushSubscriptionCurrent(subscriptionCurrent);
-      } catch (err) {
-        setPushConfig({ status: 'error' });
-        throw err;
-      }
-    });
+  const onRetryPushConfig = () => run('push-config', () => loadPushConfig(() => true));
 
   const leaveWall = () => {
     teardownAdapter();
     client.close();
-    setActiveHost(null);
-    setPhase('hosts');
+    setPhase({ at: 'hosts' });
   };
 
   // --- Views ---------------------------------------------------------------
@@ -491,83 +484,81 @@ export default function App({
   // Gated, not degraded: nothing above has performed a remote operation, and
   // nothing below is reachable until the probe answers.
   if (noiseSupported === false) return <UnsupportedBrowser />;
-  if (noiseSupported === null) {
-    return (
-      <div className={PK.app}>
-        <div className={clsx(PK.body, PK.bodyCenter)}>…</div>
-      </div>
-    );
-  }
+  if (noiseSupported === null) return <Waiting />;
 
-  if (phase === 'scan') {
-    return (
-      <ScanInvitation
-        busy={busy}
-        error={error}
-        appOrigin={location.origin}
-        startScan={startScan}
-        onScanned={onScanned}
-        onCancel={() => {
-          setError(null);
-          setPhase(client.sessionToken === null ? 'auth' : 'hosts');
-        }}
-      />
-    );
-  }
+  const openScanner = () => {
+    setError(null);
+    setPhase({ at: 'scan' });
+  };
 
-  if (phase === 'pairing') {
-    return <PairingCodeView code={pairingCode} onCancel={onCancelPairing} />;
+  switch (phase.at) {
+    case 'scan':
+      return (
+        <ScanInvitation
+          busy={busy}
+          error={error}
+          appOrigin={location.origin}
+          startScan={startScan}
+          onScanned={onScanned}
+          onCancel={() => {
+            setError(null);
+            setPhase({ at: client.sessionToken === null ? 'auth' : 'hosts' });
+          }}
+        />
+      );
+    case 'pairing':
+      return <PairingCodeView code={phase.code} onCancel={onCancelPairing} />;
+    case 'auth':
+      return (
+        <SetupOrSignin
+          busy={busy}
+          error={error}
+          // Read here, never latched: a scan that registers a passkey has to
+          // flip this screen on the next commit, so a later drop back to auth
+          // offers sign-in rather than a second registration.
+          hasPriorUse={client.hasPriorUse()}
+          arrivedByCamera={arrivedByCamera}
+          passkeyAlreadyRegistered={passkeyAlreadyRegistered}
+          needsInstall={needsInstall}
+          onScan={openScanner}
+          onSignin={() =>
+            run('signin', async () => {
+              await client.signin();
+              await loadHosts();
+            })
+          }
+        />
+      );
+    case 'wall':
+      // The adapter is stood up before the phase moves, so the ref is set
+      // whenever this branch is reachable.
+      return adapterRef.current ? (
+        <ConnectedView host={phase.host} adapter={adapterRef.current} onLeave={leaveWall} />
+      ) : (
+        <Waiting />
+      );
+    case 'hosts':
+      return (
+        <HostsView
+          hosts={hosts}
+          busy={busy}
+          error={error}
+          isPushSubscribed={isPushOn}
+          pushState={pushState}
+          pushConfigStatus={pushConfig.status}
+          onRefresh={() => run('refresh', loadHosts)}
+          onScan={openScanner}
+          onConnect={onConnect}
+          onForget={onForget}
+          onEnablePush={onEnablePush}
+          onRetryPushConfig={onRetryPushConfig}
+        />
+      );
   }
+}
 
-  if (phase === 'auth') {
-    return (
-      <SetupOrSignin
-        busy={busy}
-        error={error}
-        hasPriorUse={hasPriorUse}
-        arrivedByCamera={arrivedByCamera}
-        passkeyAlreadyRegistered={passkeyAlreadyRegistered}
-        needsInstall={needsInstall}
-        onScan={() => {
-          setError(null);
-          setPhase('scan');
-        }}
-        onSignin={() =>
-          run('signin', async () => {
-            await client.signin();
-            await loadHosts();
-          })
-        }
-      />
-    );
-  }
-
-  if (phase === 'hosts') {
-    return (
-      <HostsView
-        hosts={hosts}
-        busy={busy}
-        error={error}
-        isPushSubscribed={isPushOn}
-        pushState={pushState}
-        pushConfigStatus={pushConfig.status}
-        onRefresh={() => run('refresh', loadHosts)}
-        onScan={() => {
-          setError(null);
-          setPhase('scan');
-        }}
-        onConnect={onConnect}
-        onForget={onForget}
-        onEnablePush={onEnablePush}
-        onRetryPushConfig={onRetryPushConfig}
-      />
-    );
-  }
-
-  if (phase === 'wall' && activeHost && adapterRef.current) {
-    return <ConnectedView host={activeHost} adapter={adapterRef.current} onLeave={leaveWall} />;
-  }
-
+/** The whole shell with nothing in it yet; the capability probe's screen too. */
+function Waiting(): React.ReactElement {
   return (
     <div className={PK.app}>
       <div className={clsx(PK.body, PK.bodyCenter)}>…</div>
@@ -824,6 +815,10 @@ export function SetupOrSignin({
  * The one iOS install gesture, written once so the two notices cannot drift on
  * it — everything else in them differs on purpose (identity vs push-notification
  * framing).
+ *
+ * Both notices close with a line for someone who installed the app already and
+ * opened the wrong window. It is not optional: storage partitions share no
+ * signal, so a tab cannot detect the install and the copy has to allow for it.
  */
 const INSTALL_RITUAL = (
   <>
@@ -840,10 +835,6 @@ const INSTALL_RITUAL = (
  * Guidance, not a gate: iOS offers no install prompt to fire, and someone who
  * does not want push notifications and never installs is still entitled to a
  * terminal.
- *
- * The second line is not optional. A tab cannot see whether the app is *also*
- * installed (separate storage, no shared signal), so this shows to someone who
- * installed it already and simply opened the wrong window.
  *
  * Push notifications are deliberately not mentioned: whether they work at all
  * depends on the Server's push config, which {@link InstallNotice} and the Hosts
@@ -872,10 +863,6 @@ function InstallFirstNotice(): React.ReactElement {
  * there is anything to regret). Web Push is granted only to a Home Screen web app,
  * and there is no API to prompt for that install — it can only be described,
  * which is why the push rows below point up here.
- *
- * The second line matters: a tab cannot see whether the app is *also* installed
- * (separate storage, no shared signal), so this notice shows even to someone
- * who already installed it and simply opened the wrong window.
  */
 function InstallNotice(): React.ReactElement {
   return (

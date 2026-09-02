@@ -69,14 +69,18 @@ export const startCameraScan: StartScan = async (video, onText) => {
 };
 
 /**
- * Stop every track the element still holds.
+ * Every way this screen stops looking: the decoder's own teardown, then the
+ * tracks the element still holds.
  *
- * Belt to the decoder's own `stop()`: a camera left running after this screen
- * is gone is a recording light the user cannot account for, and the failure
- * modes that would leave one — an unmount mid-start, a decoder that threw after
- * `getUserMedia` resolved — are exactly the ones its own teardown misses.
+ * The second half is a belt to the first. A camera left running after this
+ * screen is gone is a recording light the user cannot account for, and the
+ * failure modes that would leave one — an unmount mid-start, a decoder that
+ * threw after `getUserMedia` resolved — are exactly the ones `controls.stop()`
+ * misses. The element is passed rather than read off the ref, since a cleanup
+ * runs after the ref is detached.
  */
-function releaseTracks(video: HTMLVideoElement | null): void {
+function release(controls: ScanControls | null, video: HTMLVideoElement | null): void {
+  controls?.stop();
   const stream = video?.srcObject;
   if (!stream || typeof (stream as MediaStream).getTracks !== 'function') return;
   for (const track of (stream as MediaStream).getTracks()) track.stop();
@@ -109,9 +113,8 @@ export function ScanInvitation({
   const [rejected, setRejected] = useState(false);
 
   const stopCamera = useCallback(() => {
-    controlsRef.current?.stop();
+    release(controlsRef.current, videoRef.current);
     controlsRef.current = null;
-    releaseTracks(videoRef.current);
   }, []);
 
   /**
@@ -144,8 +147,7 @@ export function ScanInvitation({
     })
       .then((controls) => {
         if (!live) {
-          controls.stop();
-          releaseTracks(video);
+          release(controls, video);
           return;
         }
         controlsRef.current = controls;
@@ -160,9 +162,8 @@ export function ScanInvitation({
       });
     return () => {
       live = false;
-      controlsRef.current?.stop();
+      release(controlsRef.current, video);
       controlsRef.current = null;
-      releaseTracks(video);
     };
   }, [accept, startScan]);
 

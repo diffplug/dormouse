@@ -6,25 +6,20 @@
  * `test-e2e-client.ts` are: the Pocket client and the Host both have to be
  * driven against *the same* idea of what the relay does, and two private copies
  * would be two opinions about which frames reach whom. It stamps `clientId` on
- * the way to the Host and `hostId` on the way back, binds a Client socket on
- * `init`, forwards `transport` only inside that binding, and decodes no
- * ciphertext — exactly what `server/src/relay.ts` does with these frames.
+ * the way to the Host and `hostId` on the way back, binds each Client socket on
+ * its own `init`, forwards `transport` only inside that binding, and decodes no
+ * ciphertext. `server/src/relay.ts` is the original of those rules and
+ * `server/test/e2e-relay.test.mjs` is what pins them there; nothing mechanically
+ * ties this copy to it, so an edit to either belongs in both.
  *
  * Everything it deliberately does *not* do is the point of the harness: it
  * keeps no Noise state, learns no outcome, and has no notion of an authorized
  * session, so a pairing or connection that succeeds here succeeded end to end.
  */
 
-import {
-  isE2eClientFrame,
-  isE2eHostFrame,
-  randomBase64Url,
-  type E2eKind,
-} from 'server-lib-common';
+import { isE2eClientFrame, isE2eHostFrame, type E2eKind } from 'server-lib-common';
 import { FakeSocket } from './test-fake-socket';
-
-/** Every routing id the relay mints or reads is base64url of 16 bytes. */
-const ROUTING_ID_BYTE_LENGTH = 16;
+import { testRoutingId } from './test-e2e-client';
 
 export interface TestRelay {
   /** The `hostId` this relay routes to; a frame naming another gets an `error`. */
@@ -52,25 +47,28 @@ export function createTestRelay(options: {
   clientId?: string;
 }): TestRelay {
   const { hostId, hostSocket } = options;
-  const clientId = options.clientId ?? randomBase64Url(ROUTING_ID_BYTE_LENGTH);
-  let clientSocket: FakeSocket | null = null;
-  /** The one Host this client socket is talking to, or null while unbound. */
-  let bound: string | null = null;
+  const clientId = options.clientId ?? testRoutingId();
+  /**
+   * The live Client socket and the one Host it is bound to. Per socket, not per
+   * relay: `registerClient` starts every registration unbound, so a reconnect
+   * must send its own `init` before anything is forwarded for it.
+   */
+  let client: { socket: FakeSocket; bound: string | null } | null = null;
   let live = true;
   let tamper = false;
 
   hostSocket.onSend = (frame) => {
-    if (!live || !clientSocket) return;
+    if (!live || !client) return;
     // A malformed Host frame is dropped, where a malformed Client frame earns
     // an `error` — the asymmetry is the relay's.
     if (frame.t !== 'e2e' || !isE2eHostFrame(frame)) return;
     if (frame.clientId !== clientId) return;
     // Late replies from a Host this client has left are not routed, and cannot
     // re-establish anything.
-    if (bound !== hostId) return;
+    if (client.bound !== hostId) return;
     const ct = tamper ? flipLastCharacter(frame.ct) : frame.ct;
     tamper = false;
-    clientSocket.receive({
+    client.socket.receive({
       t: 'e2e',
       hostId,
       kind: frame.kind as E2eKind,
@@ -86,7 +84,10 @@ export function createTestRelay(options: {
     hostSocket,
     openClientSocket() {
       const socket = new FakeSocket();
-      clientSocket = socket;
+      // A replaced registration is a client gone, as `unregisterClient` reports.
+      if (client) hostSocket.receive({ t: 'client-gone', clientId });
+      const registration: { socket: FakeSocket; bound: string | null } = { socket, bound: null };
+      client = registration;
       socket.onSend = (frame) => {
         if (!live) return;
         if (frame.t !== 'e2e') {
@@ -101,8 +102,8 @@ export function createTestRelay(options: {
           socket.receive({ t: 'error', error: 'host is not connected' });
           return;
         }
-        if (frame.step === 'init') bound = frame.hostId;
-        else if (bound !== frame.hostId) return;
+        if (frame.step === 'init') registration.bound = frame.hostId;
+        else if (registration.bound !== frame.hostId) return;
         // Stamped, exactly as `registerClient`'s secret is: the Client never
         // sees or sends its own id.
         hostSocket.receive({ ...frame, clientId });
@@ -112,8 +113,9 @@ export function createTestRelay(options: {
       return socket;
     },
     hostGone() {
-      bound = null;
-      clientSocket?.receive({ t: 'host-gone' });
+      if (!client) return;
+      client.bound = null;
+      client.socket.receive({ t: 'host-gone' });
     },
     tamperNextHostFrame() {
       tamper = true;

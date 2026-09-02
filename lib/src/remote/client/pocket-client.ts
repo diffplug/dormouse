@@ -13,6 +13,7 @@ import {
   API_ROUTES,
   DEFAULT_CHALLENGE_TTL_MS,
   DEFAULT_PAIRING_TTL_MS,
+  E2E_ID_BYTE_LENGTH,
   MAX_PUSH_QUERY_DELIVERY_IDS,
   NoiseTransportSession,
   REMOTE_EVENTS,
@@ -43,6 +44,7 @@ import {
   type DirectoryEntry,
   type DirectorySnapshot,
   type E2eClientFrame,
+  type E2eClientStep,
   type E2eKind,
   type E2eServerToClientFrame,
   type HelloResult,
@@ -477,10 +479,6 @@ export class PocketClient {
     return this.#knownHosts.list();
   }
 
-  knownHost(hostId: string): Promise<KnownHostV1 | null> {
-    return this.#knownHosts.get(hostId);
-  }
-
   /**
    * Forget one Host locally: the tombstone is written *before* the record that
    * holds the delivery id is deleted, so an unreachable Server cannot strand a
@@ -653,6 +651,7 @@ export class PocketClient {
     await this.#ensureSocket();
     const deadline = this.#now() + DEFAULT_PAIRING_TTL_MS;
     const { hostId, inviteId } = invitation;
+    const route = { kind: 'pairing', id: inviteId, hostId } as const;
     const clientStatic = await generateNoiseKeyPair();
     const handshake = await createNoiseInitiator({
       prologue: pairingInvitationPrologue(invitation),
@@ -662,11 +661,7 @@ export class PocketClient {
     const message1 = await handshake.writeMessage();
     let session: NoiseTransportSession;
     try {
-      const response = await this.#exchange(
-        { kind: 'pairing', id: inviteId, hostId },
-        message1,
-        deadline,
-      );
+      const response = await this.#exchange(route, message1, deadline);
       // Both handshake payloads are empty; anything else is a peer this Client
       // does not speak the same protocol as.
       const payload = await handshake.readMessage(fromBase64Url(response));
@@ -692,15 +687,7 @@ export class PocketClient {
     const request: PairingRequestV1 = { code, label, presence };
     let outcome: unknown;
     try {
-      this.#sendCiphertext(
-        { kind: 'pairing', id: inviteId, hostId },
-        session.sendControl({ ...request }),
-      );
-      outcome = await this.#awaitControl(
-        { kind: 'pairing', id: inviteId, hostId },
-        session,
-        deadline,
-      );
+      outcome = await this.#exchangeControl(route, session, { ...request }, deadline);
     } catch (err) {
       return this.#unavailable(err);
     }
@@ -805,8 +792,8 @@ export class PocketClient {
     });
     let outcome: unknown;
     try {
-      this.#sendCiphertext(route, session.sendControl({ presence } satisfies ConnectionRequestV1));
-      outcome = await this.#awaitControl(route, session, deadline);
+      const request: ConnectionRequestV1 = { presence };
+      outcome = await this.#exchangeControl(route, session, { ...request }, deadline);
     } catch (err) {
       return this.#connectionUnavailable(err);
     }
@@ -1008,19 +995,26 @@ export class PocketClient {
     const key = waiterKey(route.kind, route.id, 'response');
     const awaited = this.#expect(key, deadline);
     try {
-      this.#send({
-        t: 'e2e',
-        hostId: route.hostId,
-        kind: route.kind,
-        id: route.id,
-        step: 'init',
-        ct: toBase64Url(message1),
-      });
+      this.#sendE2e(route, 'init', message1);
     } catch (error) {
       this.#reclaim(key, awaited, error);
       throw error;
     }
     return await awaited;
+  }
+
+  /**
+   * A ceremony's one control message, and the Host's single answer to it. Both
+   * ceremonies are this shape, so the send and the await share a `try`.
+   */
+  async #exchangeControl(
+    route: E2eRoute,
+    session: NoiseTransportSession,
+    request: Record<string, unknown>,
+    deadline: number,
+  ): Promise<unknown> {
+    this.#sendE2e(route, 'transport', session.sendControl(request));
+    return await this.#awaitControl(route, session, deadline);
   }
 
   /**
@@ -1041,13 +1035,14 @@ export class PocketClient {
     }
   }
 
-  #sendCiphertext(route: E2eRoute, ciphertext: Uint8Array): void {
+  /** One `e2e` envelope. Every Client→Host byte in this file goes through here. */
+  #sendE2e(route: E2eRoute, step: E2eClientStep, ciphertext: Uint8Array): void {
     this.#send({
       t: 'e2e',
       hostId: route.hostId,
       kind: route.kind,
       id: route.id,
-      step: 'transport',
+      step,
       ct: toBase64Url(ciphertext),
     });
   }
@@ -1058,8 +1053,9 @@ export class PocketClient {
     if (!established) throw new Error('not connected to a host');
     const hostId = this.#connectedHostId;
     if (hostId === null) throw new Error('not connected to a host');
+    const route = { kind: 'connection', id: established.connectionId, hostId } as const;
     for (const ciphertext of established.session.sendApp(utf8Encode(JSON.stringify(payload)))) {
-      this.#sendCiphertext({ kind: 'connection', id: established.connectionId, hostId }, ciphertext);
+      this.#sendE2e(route, 'transport', ciphertext);
     }
   }
 
@@ -1071,9 +1067,9 @@ export class PocketClient {
   /**
    * Await one ciphertext for `key`, bounded by the ceremony's own deadline.
    *
-   * A Host that never answers must not strand the key (and throw on the next
-   * ask) until the socket dies, and a timer expiring is reported as
-   * unavailability rather than as a denial — see {@link HOST_UNAVAILABLE_MESSAGE}.
+   * A Host that never answers must not strand the key — and throw on the next
+   * ask — until the socket dies. The expiry reports
+   * {@link HOST_UNAVAILABLE_MESSAGE}, never a denial.
    */
   #expect(key: string, deadline: number): Promise<string> {
     if (this.#waiters.has(key)) throw new Error(`already awaiting '${key}'`);
@@ -1236,20 +1232,17 @@ export class PocketClient {
   }
 
   /**
-   * A ceremony that failed before an outcome. A relay error, a dropped socket,
-   * and an expired timer are all "the computer did not answer" — never a
-   * denial, which only an authenticated outcome can be.
+   * A ceremony that failed before an outcome: relay error, dropped socket, or
+   * expired timer, all of them {@link HOST_UNAVAILABLE_MESSAGE}.
    */
-  #unavailable(error: unknown): PairingResult {
+  #unavailable(error: unknown): { readonly ok: false; readonly message: string } {
     this.#disposeCeremony();
     if (error instanceof SessionExpiredError) throw error;
     return { ok: false, message: HOST_UNAVAILABLE_MESSAGE };
   }
 
   #connectionUnavailable(error: unknown): ConnectResult {
-    this.#disposeCeremony();
-    if (error instanceof SessionExpiredError) throw error;
-    return { ok: false, message: HOST_UNAVAILABLE_MESSAGE, pairingRequired: false };
+    return { ...this.#unavailable(error), pairingRequired: false };
   }
 
   async #api<T>(route: string, body?: unknown, init?: RequestInit): Promise<T> {
@@ -1317,9 +1310,6 @@ export class PocketClient {
     return publicKey;
   }
 }
-
-/** Every routing id on the `e2e` envelope is base64url of 16 bytes. */
-const E2E_ID_BYTE_LENGTH = 16;
 
 /** Where one ceremony's frames are addressed; the envelope's routing triple. */
 interface E2eRoute {
@@ -1406,16 +1396,11 @@ export function localStoragePocketStorage(): PocketStorage {
     },
     knownCredentialIds: () => {
       // Union, not either-or: storage holds earlier visits, the mirror holds
-      // this one's writes.
+      // this one's writes. Blocked storage contributes nothing and the mirror
+      // still answers.
       const ids = new Set(passkeys.keys());
-      try {
-        const store = globalThis.localStorage;
-        for (let i = 0; i < store.length; i++) {
-          const key = store.key(i);
-          if (key?.startsWith(PASSKEY_PREFIX)) ids.add(key.slice(PASSKEY_PREFIX.length));
-        }
-      } catch {
-        // Blocked storage contributes nothing; the mirror still answers.
+      for (const key of keysWithPrefix(PASSKEY_PREFIX)) {
+        ids.add(key.slice(PASSKEY_PREFIX.length));
       }
       return [...ids];
     },
@@ -1436,16 +1421,30 @@ export function localStoragePocketStorage(): PocketStorage {
  * like every other touch of this storage.
  */
 export function purgeLegacyPairedMarkers(): void {
-  const PAIRED_PREFIX = 'dormouse-pocket:paired:';
+  // Collected before removing: mutating while enumerating by index skips keys.
+  const stale = keysWithPrefix('dormouse-pocket:paired:');
   try {
-    const store = globalThis.localStorage;
-    const stale: string[] = [];
-    for (let i = 0; i < store.length; i++) {
-      const key = store.key(i);
-      if (key?.startsWith(PAIRED_PREFIX)) stale.push(key);
-    }
-    for (const key of stale) store.removeItem(key);
+    for (const key of stale) globalThis.localStorage.removeItem(key);
   } catch {
     // Blocked or absent storage holds no markers to remove.
   }
+}
+
+/**
+ * Every `localStorage` key under `prefix`, or none when the store cannot be
+ * read at all — a browser with site data blocked throws on the property access
+ * itself, not merely on `getItem`.
+ */
+function keysWithPrefix(prefix: string): string[] {
+  const found: string[] = [];
+  try {
+    const store = globalThis.localStorage;
+    for (let i = 0; i < store.length; i++) {
+      const key = store.key(i);
+      if (key?.startsWith(prefix)) found.push(key);
+    }
+  } catch {
+    // Nothing readable is nothing to report.
+  }
+  return found;
 }

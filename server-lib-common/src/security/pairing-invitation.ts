@@ -39,9 +39,12 @@ const EXPIRY_PATTERN = new RegExp(`^[0-9]{${EXPIRY_DIGITS}}$`);
 const MAX_UINT32 = 0xffff_ffff;
 
 /**
- * The hosts a browser already treats as a secure context over plain HTTP, and
- * the whole of the parser's HTTPS exemption. `URL.hostname` spells the IPv6
- * loopback bracketed, so that is the form matched.
+ * The three origins the documented dev loop serves Pocket from, and the whole
+ * of the parser's HTTPS exemption. **Matched by exact host, and deliberately
+ * narrower than the platform's own secure-context rule**, which also trusts
+ * `*.localhost` and all of `127.0.0.0/8`: this is a policy list, not a
+ * re-derivation, so widening it is a decision rather than a correction.
+ * `URL.hostname` spells the IPv6 loopback bracketed, so that is the form here.
  */
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
@@ -173,9 +176,9 @@ export function formatPairingInvitationUrl(origin: string, invitation: PairingIn
  * that keeps a code from bootstrapping a *different* deployment's Pocket is
  * this compare.
  *
- * **HTTPS, or a plain-HTTP loopback host.** That exemption is exactly the set
- * a browser already treats as a secure context, so it admits no origin the
- * platform would refuse to run WebAuthn or a service worker on.
+ * **HTTPS, or plain HTTP on one of {@link LOOPBACK_HOSTS}.** Every one of those
+ * is a secure context by the platform's own rule, so the exemption admits no
+ * origin WebAuthn or a service worker would refuse to run on.
  */
 export async function parsePairingInvitationUrl(
   text: unknown,
@@ -187,10 +190,8 @@ export async function parsePairingInvitationUrl(
   if (typeof text !== 'string' || text.length > PAIRING_QR_URL_MAX_LENGTH) return null;
   const url = parseUrl(text);
   if (!url) return null;
-  // HTTPS, or the one plain-HTTP origin a browser already calls a secure
-  // context — the documented `http://localhost:3000` dev loop, which WebAuthn
-  // and service workers are exempted for by the same rule. The origin compare
-  // below still has to pass, so this widens nothing a remote code could reach.
+  // The origin compare below still has to pass, so this widens nothing a
+  // remote code could reach — see {@link LOOPBACK_HOSTS}.
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname))) {
     return null;
   }

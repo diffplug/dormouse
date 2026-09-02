@@ -13,19 +13,20 @@
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  formatPairingInvitationUrl,
-  generateNoiseKeyPair,
-  randomBase64Url,
-  toBase64Url,
-  type PairingInvitation,
-} from 'server-lib-common';
+import { generateNoiseKeyPair, toBase64Url, type PairingInvitation } from 'server-lib-common';
 
 import App, { UNSUPPORTED_BROWSER_TITLE } from './App';
 import type { ConnectResult, PairingResult } from '../client/pocket-client';
 import { SETUP_CODE_DEAD_MESSAGE, SetupTokenInvalidError } from '../client/pocket-client';
 import type { KnownHostV1 } from '../client/pocket-db';
-import { alertText, buttonNamed, click, rowFor, settle } from './app-test-utils';
+import {
+  alertText,
+  buttonNamed,
+  click,
+  invitationUrl as sharedInvitationUrl,
+  rowFor,
+  settle,
+} from './app-test-utils';
 import { setNativeFieldValue } from '../../lib/dom';
 
 const fake = vi.hoisted(() => ({
@@ -143,18 +144,7 @@ async function knownHost(hostId: string, label = 'First laptop'): Promise<KnownH
 }
 
 /** A real pairing URL for the origin this app is served from. */
-async function invitationUrl(): Promise<{ url: string; invitation: PairingInvitation }> {
-  const keyPair = await generateNoiseKeyPair();
-  const invitation: PairingInvitation = {
-    hostId: randomBase64Url(16),
-    inviteId: randomBase64Url(16),
-    expiry: Math.floor(Date.now() / 1000) + 300,
-    setupToken: randomBase64Url(32),
-    ephPub: keyPair.publicKey,
-    ephPubBase64Url: toBase64Url(keyPair.publicKey),
-  };
-  return { url: formatPairingInvitationUrl(location.origin, invitation), invitation };
-}
+const invitationUrl = () => sharedInvitationUrl(location.origin);
 
 beforeEach(() => {
   fake.noiseSupported = true;

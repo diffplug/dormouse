@@ -524,15 +524,19 @@ export type E2eClientStep = 'init' | 'transport';
 /** A Host answers message 2 (`response`), then transport. */
 export type E2eHostStep = 'response' | 'transport';
 
-/** Every routing id on this envelope — `hostId`, `id`, `clientId` — is this. */
-const ROUTING_ID_BYTE_LENGTH = 16;
+/**
+ * Every routing id on this envelope — `hostId`, `id`, `clientId` — is this many
+ * bytes. Exported so a minter and {@link isE2eId} cannot drift: an id built at
+ * any other length is one the shared guard silently refuses.
+ */
+export const E2E_ID_BYTE_LENGTH = 16;
 
 /**
  * The invitation or connection id, base64url of 16 bytes. Exactly this long:
  * the id is a map key on both sides and appears in the prologue, so a variable
  * one would be a length the transcript does not pin.
  */
-export const E2E_ID_LENGTH = base64UrlLength(ROUTING_ID_BYTE_LENGTH);
+export const E2E_ID_LENGTH = base64UrlLength(E2E_ID_BYTE_LENGTH);
 
 /**
  * The longest `ct` any `e2e` frame may carry: the base64url encoding of a

@@ -56,11 +56,7 @@ export interface KnownHostV1 {
   readonly label: string;
   /** The pinned Host Noise static, base64url. A change is a terminal error. */
   readonly hostStaticPublicKey: string;
-  /**
-   * This Client's static for this Host. Only the private half is a key object:
-   * a `NoiseKeyPair` wants the public half as raw bytes, so storing a second
-   * `CryptoKey` for it would be a structured clone nothing ever reads.
-   */
+  /** This Client's static for this Host; only the private half is a key object. */
   readonly clientStaticKeyPair: {
     readonly privateKey: CryptoKey;
     /** The raw 32-byte public half, base64url — what the ACL records. */
@@ -125,8 +121,9 @@ export function openPocketDb(): Promise<IDBDatabase> {
     const request = indexedDB.open(POCKET_DB_NAME, POCKET_DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
-      // The device key is gone with the legacy protocol, and a key nothing can
-      // use is only a credential left lying about.
+      // The idiom holds only while no upgrade transforms *data*: the first one
+      // that re-keys records or backfills an index has to branch on
+      // `event.oldVersion` instead.
       if (db.objectStoreNames.contains(DEVICE_KEY_STORE)) {
         db.deleteObjectStore(DEVICE_KEY_STORE);
       }

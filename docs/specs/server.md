@@ -329,9 +329,10 @@ Pocket from: 103 characters.
 **One parser boundary.** `parsePairingInvitationUrl(text, appOrigin, now?)`
 answers the complete invitation or `null` — **never a partial parse**, and never
 an error a caller can distinguish. Two of its checks are this spec's rather than
-the parser's: the URL must be **HTTPS — or plain HTTP on `localhost`,
-`127.0.0.1`, or `[::1]`, the exact set a browser already treats as a secure
-context, so the documented `http://localhost:3000` dev loop parses** — and its
+the parser's: the URL must be **HTTPS — or plain HTTP on exactly `localhost`,
+`127.0.0.1`, or `[::1]`, so the documented `http://localhost:3000` dev loop
+parses. Each is a secure context by the platform's rule, but the list is
+narrower than that rule and is policy, not derivation** — and its
 origin must **equal the running
 app's exactly** — a fragment is invisible to this server, so that compare is the
 only thing keeping a code from bootstrapping another deployment's Pocket. The

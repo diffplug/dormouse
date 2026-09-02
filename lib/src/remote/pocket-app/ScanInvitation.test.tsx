@@ -13,17 +13,10 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  formatPairingInvitationUrl,
-  fromBase64Url,
-  generateNoiseKeyPair,
-  randomBase64Url,
-  toBase64Url,
-  type PairingInvitation,
-} from 'server-lib-common';
+import { fromBase64Url, toBase64Url, type PairingInvitation } from 'server-lib-common';
 
 import { SCAN_REJECTED_MESSAGE, ScanInvitation, type ScanControls } from './ScanInvitation';
-import { buttonNamed, settle } from './app-test-utils';
+import { buttonNamed, invitationUrl as sharedInvitationUrl, settle } from './app-test-utils';
 import { setNativeFieldValue } from '../../lib/dom';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -44,19 +37,8 @@ afterEach(() => {
   container.remove();
 });
 
-/** A live invitation URL, composed by the emitter a Host actually uses. */
-async function invitationUrl(): Promise<{ url: string; invitation: PairingInvitation }> {
-  const keyPair = await generateNoiseKeyPair();
-  const invitation: PairingInvitation = {
-    hostId: randomBase64Url(16),
-    inviteId: randomBase64Url(16),
-    expiry: Math.floor(Date.now() / 1000) + 300,
-    setupToken: randomBase64Url(32),
-    ephPub: keyPair.publicKey,
-    ephPubBase64Url: toBase64Url(keyPair.publicKey),
-  };
-  return { url: formatPairingInvitationUrl(ORIGIN, invitation), invitation };
-}
+/** A live invitation URL for the origin this screen is checking against. */
+const invitationUrl = () => sharedInvitationUrl(ORIGIN);
 
 /** A camera whose decodes the test drives, and whose teardown it can observe. */
 function fakeCamera() {

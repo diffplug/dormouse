@@ -139,6 +139,13 @@ function memoryKnownHosts(): MemoryKnownHosts {
   };
 }
 
+/** The delivery id a paired record holds; throws if the record is not paired. */
+function deliveryIdOf(store: MemoryKnownHosts, hostId: string): string {
+  const authorization = store.records.get(hostId)?.authorization;
+  if (authorization?.state !== 'paired') throw new Error(`${hostId} is not paired`);
+  return authorization.deliveryId;
+}
+
 interface MemoryPendingDeletions extends PendingDeletionStore {
   readonly records: Map<string, PendingDeliveryDeletionV1>;
 }
@@ -627,15 +634,11 @@ describe('pairing, end to end', () => {
     // previous id names is unreachable the moment the record is rewritten.
     const first = await makeE2eHarness();
     await first.pairAndApprove(await first.mintInvitation());
-    const before = (first.knownHosts.records.get(first.hostId)!.authorization as {
-      deliveryId: string;
-    }).deliveryId;
+    const before = deliveryIdOf(first.knownHosts, first.hostId);
 
     await first.pairAndApprove(await first.mintInvitation());
 
-    const after = (first.knownHosts.records.get(first.hostId)!.authorization as {
-      deliveryId: string;
-    }).deliveryId;
+    const after = deliveryIdOf(first.knownHosts, first.hostId);
     expect(after).not.toBe(before);
     expect([...first.pendingDeletions.records.values()].map((t) => t.deliveryId)).toContain(before);
   });
@@ -687,9 +690,7 @@ describe('connecting, end to end', () => {
   it('drops authorization on pairing-required, tombstoning the delivery id first', async () => {
     const paired = await makeE2eHarness();
     await paired.pairAndApprove(await paired.mintInvitation());
-    const deliveryId = (paired.knownHosts.records.get(paired.hostId)!.authorization as {
-      deliveryId: string;
-    }).deliveryId;
+    const deliveryId = deliveryIdOf(paired.knownHosts, paired.hostId);
 
     // The same Host identity, an ACL that has forgotten this Client.
     const reset = await makeE2eHarness({
