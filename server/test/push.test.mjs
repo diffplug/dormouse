@@ -15,7 +15,18 @@ import assert from 'node:assert/strict';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { API_ROUTES, MAX_PUSH_QUERY_DELIVERY_IDS, pushSubscriptionDeletePath, toBase64Url } from 'server-lib-common';
+import {
+  API_ROUTES,
+  MAX_PUSH_QUERY_DELIVERY_IDS,
+  MAX_SEALED_PUSH_LENGTH,
+  generateNoiseKeyPair,
+  openPush,
+  pushSubscriptionDeletePath,
+  sealPush,
+  toBase64Url,
+  utf8Decode,
+  utf8Encode,
+} from 'server-lib-common';
 import webpush from 'web-push';
 
 import {
@@ -156,6 +167,21 @@ function removeDelivery(app, sessionToken, deliveryId) {
 
 function sendAs(app, hostToken, body) {
   return authed(app, API_ROUTES.pushSend, hostToken, body);
+}
+
+/**
+ * A well-formed sealed envelope with no real key behind it. The Server can only
+ * ever check shape and bounds — it holds no key and must not open one — so
+ * every case that is about routing rather than about the seal uses this.
+ */
+function fakeSealed() {
+  const random = (n) => toBase64Url(globalThis.crypto.getRandomValues(new Uint8Array(n)));
+  return { v: 1, salt: random(32), ct: random(96) };
+}
+
+/** A send body naming these deliveries, one distinct envelope each. */
+function to(...deliveryIds) {
+  return { recipients: deliveryIds.map((deliveryId) => ({ deliveryId, sealed: fakeSealed() })) };
 }
 
 function storedRows(stateDir) {
@@ -535,6 +561,11 @@ test('devices rejects a session token — it is host-gated', async () => {
 });
 
 // --- send ------------------------------------------------------------------
+//
+// Every send carries one sealed envelope per recipient and no readable text:
+// the Host seals to each Client's own static and the Server forwards ciphertext
+// (docs/specs/remote-security-model.md -> Push sealing). What it can still
+// check is shape, bounds, and that a Host reaches only its own subscribers.
 
 test('send fans out to every named delivery', async () => {
   const { app, sender, host, sessionToken } = await pushApp();
@@ -543,31 +574,93 @@ test('send fans out to every named delivery', async () => {
   await subscribe(app, { sessionToken, host, deliveryId: phone, sub: subscription('https://push.example.com/phone') });
   await subscribe(app, { sessionToken, host, deliveryId: tablet, sub: subscription('https://push.example.com/tablet') });
 
-  const res = await sendAs(app, host.hostToken, {
-    deliveryIds: [phone, tablet],
-    title: 'build finished',
-    body: 'zsh',
-    tag: 'pane-1',
-  });
+  const recipients = [
+    { deliveryId: phone, sealed: fakeSealed() },
+    { deliveryId: tablet, sealed: fakeSealed() },
+  ];
+  const res = await sendAs(app, host.hostToken, { recipients });
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { delivered: 2, expired: 0, unknown: 0, failed: 0 });
   assert.equal(sender.sent.length, 2);
-  assert.deepEqual(JSON.parse(sender.sent[0].payload), {
-    title: 'build finished',
-    body: 'zsh',
-    tag: 'pane-1',
-  });
+  // Each phone gets its own envelope, verbatim, under the sending Host's id.
+  for (const [i, recipient] of recipients.entries()) {
+    assert.deepEqual(JSON.parse(sender.sent[i].payload), {
+      hostId: host.hostId,
+      ...recipient.sealed,
+    });
+  }
 });
 
-test('send without named deliveries is rejected — the Host must choose recipients', async () => {
+test('the forwarded payload is the sealed envelope and nothing else', async () => {
+  // Sealed for real, so the assertion is against what a Host actually mints:
+  // the Server holds no key, cannot open it, and must not add, drop, or
+  // re-encode a field on the way through.
+  const { app, sender, host, sessionToken } = await pushApp();
+  const deliveryId = newDeliveryId();
+  await subscribe(app, { sessionToken, host, deliveryId });
+
+  const hostStatic = await generateNoiseKeyPair();
+  const clientStatic = await generateNoiseKeyPair();
+  const plaintext = utf8Encode(JSON.stringify({ title: 'build finished', body: 'zsh', tag: 'pty-1' }));
+  const sealed = await sealPush({
+    hostStaticPrivateKey: hostStatic.privateKey,
+    clientStaticPublicKey: clientStatic.publicKey,
+    plaintext,
+  });
+
+  await sendAs(app, host.hostToken, { recipients: [{ deliveryId, sealed }] });
+  const payload = sender.sent[0].payload;
+  assert.equal(payload, JSON.stringify({ hostId: host.hostId, ...sealed }));
+  // The whole point: none of the notification text survives to this boundary.
+  for (const secret of ['build finished', 'zsh', 'pty-1']) {
+    assert.equal(payload.includes(secret), false, secret);
+  }
+  // And what did arrive still opens on the recipient's key.
+  const opened = await openPush({
+    clientStaticPrivateKey: clientStatic.privateKey,
+    hostStaticPublicKey: hostStatic.publicKey,
+    sealed: JSON.parse(payload),
+  });
+  assert.equal(utf8Decode(opened), utf8Decode(plaintext));
+});
+
+test('send without recipients is rejected — the Host must choose them', async () => {
   // The Host holds the ACL; a Server that picked recipients itself would keep
   // notifying a Client the Host had revoked.
   const { app, sender, host, sessionToken } = await pushApp();
   await subscribe(app, { sessionToken, host, deliveryId: newDeliveryId() });
 
-  for (const body of [{ title: 'x', body: 'y' }, { deliveryIds: [], title: 'x', body: 'y' }]) {
+  for (const body of [{}, { recipients: [] }, { recipients: 'all' }]) {
     const res = await sendAs(app, host.hostToken, body);
-    assert.equal(res.status, 400);
+    assert.equal(res.status, 400, JSON.stringify(body));
+  }
+  assert.equal(sender.sent.length, 0);
+});
+
+test('send bounds the recipient list and every envelope in it', async () => {
+  const { app, sender, host, sessionToken } = await pushApp();
+  const deliveryId = newDeliveryId();
+  await subscribe(app, { sessionToken, host, deliveryId });
+  const good = fakeSealed();
+
+  const tooMany = Array.from({ length: MAX_PUSH_QUERY_DELIVERY_IDS + 1 }, () => ({
+    deliveryId: newDeliveryId(),
+    sealed: fakeSealed(),
+  }));
+  assert.equal((await sendAs(app, host.hostToken, { recipients: tooMany })).status, 400);
+
+  // `readJson` caps nothing and the envelope is forwarded verbatim, so its
+  // bounds are the Server's only defense against a huge push payload.
+  for (const sealed of [
+    undefined,
+    { ...good, v: 2 },
+    { ...good, salt: `${good.salt}A` },
+    { ...good, ct: 'A'.repeat(MAX_SEALED_PUSH_LENGTH + 1) },
+    { ...good, ct: '' },
+    { salt: good.salt, ct: good.ct },
+  ]) {
+    const res = await sendAs(app, host.hostToken, { recipients: [{ deliveryId, sealed }] });
+    assert.equal(res.status, 400, JSON.stringify(sealed));
   }
   assert.equal(sender.sent.length, 0);
 });
@@ -579,7 +672,7 @@ test('send addresses only the named deliveries', async () => {
   await subscribe(app, { sessionToken, host, deliveryId: phone, sub: subscription('https://push.example.com/phone') });
   await subscribe(app, { sessionToken, host, deliveryId: tablet, sub: subscription('https://push.example.com/tablet') });
 
-  const res = await sendAs(app, host.hostToken, { deliveryIds: [phone], title: 'x', body: 'y' });
+  const res = await sendAs(app, host.hostToken, to(phone));
   assert.deepEqual(await res.json(), { delivered: 1, expired: 0, unknown: 0, failed: 0 });
   assert.equal(sender.sent.length, 1);
   assert.equal(sender.sent[0].endpoint, 'https://push.example.com/phone');
@@ -587,11 +680,7 @@ test('send addresses only the named deliveries', async () => {
 
 test('a named delivery with no subscription counts as unknown, not delivered', async () => {
   const { app, host } = await pushApp();
-  const res = await sendAs(app, host.hostToken, {
-    deliveryIds: [newDeliveryId()],
-    title: 'x',
-    body: 'y',
-  });
+  const res = await sendAs(app, host.hostToken, to(newDeliveryId()));
   assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 1, failed: 0 });
 });
 
@@ -604,7 +693,7 @@ test('every delivery-id route refuses an id no Host could have minted', async ()
   const oversized = 'A'.repeat(100_000);
   for (const bad of ['never-subscribed', oversized, `${newDeliveryId()}x`]) {
     assert.equal((await query(app, sessionToken, [bad])).status, 400, `query ${bad.length}`);
-    const sent = await sendAs(app, host.hostToken, { deliveryIds: [bad], title: 'x', body: 'y' });
+    const sent = await sendAs(app, host.hostToken, to(bad));
     assert.equal(sent.status, 400, `send ${bad.length}`);
   }
   // The delete stays idempotent-and-silent whatever it is handed: answering a
@@ -620,7 +709,7 @@ test('send treats a subscription registered under an old VAPID key as unknown', 
 
   await rotateStoredVapidKey(stateDir);
 
-  const res = await sendAs(app, host.hostToken, { deliveryIds: [deliveryId], title: 'x', body: 'y' });
+  const res = await sendAs(app, host.hostToken, to(deliveryId));
   assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 1, failed: 0 });
   assert.equal(sender.sent.length, 0);
 });
@@ -631,7 +720,7 @@ test('a subscription the push service calls gone is dropped', async () => {
   await subscribe(app, { sessionToken, host, deliveryId, sub: subscription('https://push.example.com/dead') });
   sender.expire('https://push.example.com/dead');
 
-  const res = await sendAs(app, host.hostToken, { deliveryIds: [deliveryId], title: 'x', body: 'y' });
+  const res = await sendAs(app, host.hostToken, to(deliveryId));
   assert.deepEqual(await res.json(), { delivered: 0, expired: 1, unknown: 0, failed: 0 });
 
   assert.deepEqual(await storedRows(stateDir), []);
@@ -643,7 +732,7 @@ test('a transient failure leaves the subscription in place', async () => {
   await subscribe(app, { sessionToken, host, deliveryId, sub: subscription('https://push.example.com/flaky') });
   sender.fail('https://push.example.com/flaky');
 
-  const res = await sendAs(app, host.hostToken, { deliveryIds: [deliveryId], title: 'x', body: 'y' });
+  const res = await sendAs(app, host.hostToken, to(deliveryId));
   assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 0, failed: 1 });
 
   assert.equal((await storedRows(stateDir)).length, 1);
@@ -659,7 +748,7 @@ test('a send that never answers is bounded and leaves the subscription in place'
   await subscribe(app, { sessionToken, host, deliveryId, sub: subscription(endpoint) });
   sender.hang(endpoint);
 
-  const res = await sendAs(app, host.hostToken, { deliveryIds: [deliveryId], title: 'x', body: 'y' });
+  const res = await sendAs(app, host.hostToken, to(deliveryId));
   // Transient, like any other failure — so the row survives to be retried,
   // rather than being pruned the way a 404/410 would prune it.
   assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 0, failed: 1 });
@@ -674,11 +763,7 @@ test('one wedged device does not hold up the rest of the fan-out', async () => {
   await subscribe(app, { sessionToken, host, deliveryId: healthy, sub: subscription('https://push.example.com/healthy') });
   sender.hang('https://push.example.com/wedged');
 
-  const res = await sendAs(app, host.hostToken, {
-    deliveryIds: [wedged, healthy],
-    title: 'x',
-    body: 'y',
-  });
+  const res = await sendAs(app, host.hostToken, to(wedged, healthy));
   assert.deepEqual(await res.json(), { delivered: 1, expired: 0, unknown: 0, failed: 1 });
 });
 
@@ -689,58 +774,54 @@ test('a host cannot push to another host subscribers', async () => {
   await subscribe(app, { sessionToken, host, deliveryId });
 
   // Naming the delivery explicitly must not escape the token's own host scope.
-  const res = await sendAs(app, other.hostToken, { deliveryIds: [deliveryId], title: 'x', body: 'y' });
+  const res = await sendAs(app, other.hostToken, to(deliveryId));
   assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 1, failed: 0 });
   assert.equal(sender.sent.length, 0);
 });
 
 test('send rejects an unknown host token', async () => {
   const { app } = await pushApp();
-  const res = await sendAs(app, 'not-a-host-token', { title: 'x', body: 'y' });
+  const res = await sendAs(app, 'not-a-host-token', to(newDeliveryId()));
   assert.equal(res.status, 401);
 });
 
-test('payload text is bounded and collapsed at the server boundary', async () => {
-  const { app, sender, host, sessionToken } = await pushApp();
+// --- the hosts.json cascade -------------------------------------------------
+
+test('a row whose Host is no longer enrolled is dropped on read', async () => {
+  // Deleting a line from `hosts.json` is the documented revocation mechanism,
+  // so a subscription registered against that Host must stop being reported as
+  // live — Pocket would otherwise show push as on for a machine that is gone.
+  const { app, stateDir, host, sessionToken } = await pushApp();
   const deliveryId = newDeliveryId();
   await subscribe(app, { sessionToken, host, deliveryId });
-
-  await sendAs(app, host.hostToken, {
-    deliveryIds: [deliveryId],
-    title: `${'x'.repeat(500)}`,
-    body: 'a\n\n  b',
+  assert.deepEqual(await (await query(app, sessionToken, [deliveryId])).json(), {
+    registered: [{ hostId: host.hostId, deliveryId }],
   });
-  const payload = JSON.parse(sender.sent[0].payload);
-  assert.equal(payload.title.length, 200);
-  assert.equal(payload.body, 'a b');
-});
 
-test('control and bidi characters are stripped at the server boundary', async () => {
-  // The Host already sanitizes, but this text is Pane-derived and therefore
-  // terminal-supplied; both layers run the same shared rule.
-  const { app, sender, host, sessionToken } = await pushApp();
-  const deliveryId = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId });
+  // A second Host survives the edit, so the row that goes is the orphan.
+  const { body: survivor } = await enrollHost(app);
+  const survivorDelivery = newDeliveryId();
+  const hosts = JSON.parse(await readFile(join(stateDir, 'hosts.json'), 'utf8'));
+  await writeFile(
+    join(stateDir, 'hosts.json'),
+    `${JSON.stringify(hosts.filter((h) => h.hostId !== host.hostId), null, 2)}\n`,
+  );
 
-  await sendAs(app, host.hostToken, {
-    deliveryIds: [deliveryId],
-    title: 'build finished',
-    body: 'wat‮ch',
+  // Read fresh, so revoking a Host takes effect without a restart.
+  assert.deepEqual(await (await query(app, sessionToken, [deliveryId])).json(), {
+    registered: [],
   });
-  const payload = JSON.parse(sender.sent[0].payload);
-  assert.equal(payload.title, 'build finished');
-  assert.equal(payload.body, 'watch');
-});
-
-test('an all-whitespace payload falls back rather than pushing an empty notification', async () => {
-  const { app, sender, host, sessionToken } = await pushApp();
-  const deliveryId = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId });
-
-  await sendAs(app, host.hostToken, { deliveryIds: [deliveryId], title: '   ', body: '' });
-  const payload = JSON.parse(sender.sent[0].payload);
-  assert.equal(payload.title, 'Dormouse');
-  assert.equal(payload.body, 'A terminal needs attention.');
+  // And the next mutation writes the pruned set back to disk.
+  await subscribe(app, {
+    sessionToken,
+    host: survivor,
+    deliveryId: survivorDelivery,
+    sub: subscription('https://push.example.com/survivor'),
+  });
+  assert.deepEqual(
+    (await storedRows(stateDir)).map((row) => row.deliveryId),
+    [survivorDelivery],
+  );
 });
 
 // --- rows this Server cannot use --------------------------------------------

@@ -289,15 +289,24 @@ export interface PushSubscriptionUpsertResult {
  * No secret of ours lives here, but the endpoint plus its keys IS a bearer
  * capability to notify that phone, so the inherited `0o600` still matters.
  *
- * **Removing a `hosts.json` row cascades lazily.** {@link listForHost} answers
- * nothing for a Host that is no longer enrolled and every read path filters,
- * so an orphaned row is unreachable the moment its Host is revoked; provider
- * 404/410 pruning ({@link removeEndpoints}) and the Client's own deletion are
- * what eventually take it off disk.
+ * **Removing a `hosts.json` row cascades.** {@link list} drops every row whose
+ * Host is no longer enrolled, so the read boundary that already handles
+ * malformed rows handles orphans too, and the next mutation writes the pruned
+ * set back. Deleting a Host by hand is the documented revocation mechanism, so
+ * this is read fresh rather than cached — the same rule `HostStore.has`
+ * follows.
  */
 export class PushSubscriptionStore extends JsonFileStore {
-  constructor(stateDir: string, now: () => number = () => Date.now()) {
+  /** Which Hosts are still enrolled, or `null` when nothing supplies the join. */
+  readonly #hosts: HostStore | null;
+
+  constructor(
+    stateDir: string,
+    now: () => number = () => Date.now(),
+    hosts: HostStore | null = null,
+  ) {
     super(stateDir, 'push-subscriptions.json', now);
+    this.#hosts = hosts;
   }
 
   /**
@@ -311,13 +320,20 @@ export class PushSubscriptionStore extends JsonFileStore {
    * caller downstream. A dropped row reads as a missing registration, which
    * Pocket repairs by re-offering Enable, instead of as a live one that
    * cannot be delivered to.
+   *
+   * A row naming a Host that is no longer in `hosts.json` is dropped the same
+   * way — silently, because a deleted Host is a deliberate revocation rather
+   * than an edit to complain about, and the Client repairs it by re-registering
+   * against a Host that exists.
    */
   async list(): Promise<StoredPushSubscription[]> {
     const rows = await this.read<unknown>([]);
     if (!Array.isArray(rows)) return [];
     const kept = rows.filter(isStoredPushSubscription);
     if (kept.length !== rows.length) warnOnceAboutDroppedRows();
-    return kept;
+    if (!this.#hosts) return kept;
+    const enrolled = new Set((await this.#hosts.list()).map((h) => h.hostId));
+    return kept.filter((s) => enrolled.has(s.hostId));
   }
 
   async listForHost(hostId: string): Promise<StoredPushSubscription[]> {

@@ -37,7 +37,7 @@ import {
   presenceChallenge,
   toBase64Url,
   utf8Decode,
-  boundedPushText,
+  isSealedPushV1,
   verifyPasskeyAssertion,
 } from 'server-lib-common';
 import type {
@@ -59,6 +59,7 @@ import type {
   ReauthBeginResponse,
   ReauthFinishRequest,
   ReauthFinishResponse,
+  SealedPushRecipient,
   SetupBeginRequest,
   SetupBeginResponse,
   SetupFinishRequest,
@@ -306,7 +307,9 @@ export function createApp(config: AppConfig): CreatedApp {
   const rpId = new URL(origin).hostname;
   const accounts = new AccountStore(config.stateDir, now);
   const hostStore = new HostStore(config.stateDir, now);
-  const pushStore = new PushSubscriptionStore(config.stateDir, now);
+  // Joined against the Host store so a row outliving its `hosts.json` line is
+  // dropped on read (docs/specs/server.md -> State files).
+  const pushStore = new PushSubscriptionStore(config.stateDir, now, hostStore);
   const sessions = new SessionStore(now);
   const hub = new RelayHub();
   // Separate issuers per flow: a setup challenge cannot be redeemed at sign-in.
@@ -890,49 +893,53 @@ export function createApp(config: AppConfig): CreatedApp {
     const sender = config.pushSender;
     if (!sender) return c.json({ error: 'push is not configured' }, 503);
     const body = await readJson<PushSendRequest>(c);
-    if (!body || typeof body.title !== 'string' || typeof body.body !== 'string') {
-      return c.json({ error: 'malformed request' }, 400);
-    }
-    // Targets are required. The Host holds the ACL and is the only party that
-    // may decide who a push reaches; a Server that fanned out on its own would
-    // keep notifying a Client the Host had revoked, since nothing propagates a
-    // revocation today (docs/specs/remote-security-model.md).
-    const names: unknown = body.deliveryIds;
-    if (!Array.isArray(names) || names.length === 0 || names.some((n) => !isDeliveryId(n))) {
-      return c.json({ error: 'deliveryIds must be a non-empty array of delivery ids' }, 400);
+    // Recipients are required, one sealed envelope each. The Host holds the ACL
+    // and is the only party that may decide who a push reaches; a Server that
+    // fanned out on its own would keep notifying a Client the Host had revoked,
+    // since nothing propagates a revocation today
+    // (docs/specs/remote-security-model.md).
+    const recipients: unknown = body?.recipients;
+    if (
+      !Array.isArray(recipients) ||
+      recipients.length === 0 ||
+      recipients.length > MAX_PUSH_QUERY_DELIVERY_IDS ||
+      !recipients.every(isSealedPushRecipient)
+    ) {
+      return c.json(
+        {
+          error:
+            `recipients must be 1..${MAX_PUSH_QUERY_DELIVERY_IDS} ` +
+            '{ deliveryId, sealed } pairs',
+        },
+        400,
+      );
     }
 
     // The Host is identified by its token, never by the body: a Host can only
-    // ever reach subscriptions registered against itself.
-    const subscriptions = await currentPushSubscriptionsForHost(c.get('host').hostId);
-    const targets = subscriptions.filter((s) => names.includes(s.deliveryId));
-
-    // Title and body originate in a renderer and are ultimately Pane-derived,
-    // so they are re-bounded here rather than trusted — the same
-    // revalidate-at-the-boundary rule the alarm settings follow, through the
-    // same shared function the Host used (`boundedPushText`).
-    const payload = JSON.stringify({
-      title: boundedPushText(body.title, { limit: PUSH_TEXT_LIMIT, fallback: 'Dormouse' }),
-      body: boundedPushText(body.body, {
-        limit: PUSH_TEXT_LIMIT,
-        fallback: 'A terminal needs attention.',
-      }),
-      ...(typeof body.tag === 'string' && body.tag
-        ? // Code-point slice for the same reason as `boundedPushText`: a cut
-          // mid-surrogate would ship a lone half.
-          { tag: Array.from(body.tag).slice(0, PUSH_TEXT_LIMIT).join('') }
-        : {}),
+    // ever reach subscriptions registered against itself. The same `hostId`
+    // rides in the payload, because it is how the worker picks the pinned
+    // record to decrypt against — taken from the token for the same reason.
+    const { hostId } = c.get('host');
+    const subscriptions = await currentPushSubscriptionsForHost(hostId);
+    const byDelivery = new Map(subscriptions.map((s) => [s.deliveryId, s]));
+    const targets = recipients.flatMap((recipient) => {
+      const subscription = byDelivery.get(recipient.deliveryId);
+      // Sealed to that Client's own static, so there is no shared payload and
+      // nothing here to re-sanitize: the Server cannot read what it forwards
+      // (docs/specs/remote-security-model.md -> Push sealing). Serialized
+      // verbatim — the worker's guard rejects anything else.
+      return subscription ? [{ subscription, payload: JSON.stringify({ hostId, ...recipient.sealed }) }] : [];
     });
 
     // Every send starts at once, so one deadline per send also bounds the whole
     // route regardless of how many devices a Host has.
     const deadlineMs = config.pushSendDeadlineMs ?? PUSH_SEND_DEADLINE_MS;
     const results = await Promise.all(
-      targets.map(async (s) => ({
-        endpoint: s.endpoint,
+      targets.map(async ({ subscription, payload }) => ({
+        endpoint: subscription.endpoint,
         result: await sendWithinDeadline(
           sender,
-          { endpoint: s.endpoint, keys: s.keys },
+          { endpoint: subscription.endpoint, keys: subscription.keys },
           payload,
           deadlineMs,
         ),
@@ -947,7 +954,7 @@ export function createApp(config: AppConfig): CreatedApp {
     const res: PushSendResponse = {
       delivered: results.filter((r) => r.result === 'delivered').length,
       expired: expired.length,
-      unknown: names.filter((n) => !targets.some((t) => t.deliveryId === n)).length,
+      unknown: recipients.length - targets.length,
       failed: results.filter((r) => r.result === 'failed').length,
     };
     return c.json(res);
@@ -1131,9 +1138,6 @@ async function readJson<T>(c: { req: { json(): Promise<unknown> } }): Promise<T 
   }
 }
 
-/** Longest push title/body we will forward; see the send route for why. */
-const PUSH_TEXT_LIMIT = 200;
-
 /** Read an `Authorization: Bearer <token>` header, or null if absent/malformed. */
 function bearerToken(c: Context<AppEnv>): string | null {
   const match = /^Bearer (.+)$/.exec(c.req.header('Authorization') ?? '');
@@ -1147,6 +1151,21 @@ function bearerToken(c: Context<AppEnv>): string | null {
  */
 function isDeliveryId(value: unknown): value is string {
   return isExactBase64Url(value, DELIVERY_ID_LENGTH);
+}
+
+/**
+ * One `{ deliveryId, sealed }` pair on a send.
+ *
+ * Both halves are bounded before anything is read from disk: `readJson` caps
+ * nothing, and the envelope is forwarded verbatim, so its size is the Server's
+ * only defense against a Host token being used to push megabytes at a phone.
+ * The Server cannot check that the seal is *correct* — that is the point — so
+ * shape and bounds are the whole of what it validates.
+ */
+function isSealedPushRecipient(value: unknown): value is SealedPushRecipient {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as SealedPushRecipient;
+  return isDeliveryId(v.deliveryId) && isSealedPushV1(v.sealed);
 }
 
 /** True if `value` is a `PushSubscriptionPayload` with both encryption keys. */
