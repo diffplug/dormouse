@@ -63,6 +63,12 @@ describe('watched-commands store', () => {
     // shape `commandArgv0` can still return with a `:` in it.
     setCommandWatched('C:foo.exe', true);
     expect(getWatchedCommands()).toEqual(['claude']);
+    // A launcher suffix is the other tell: a relative invocation had no
+    // separator to eat (`tools\\dor.cmd` -> `toolsdor.cmd`), and a bare
+    // `npm.cmd` stored cleanly — but `commandProgramName` strips the suffix, so
+    // neither can match again.
+    applyWatchedCommandsFromHost(['npm.cmd', 'toolsdor.cmd', '.build.ps1', 'claude']);
+    expect(getWatchedCommands()).toEqual(['claude']);
   });
 
   it('adds, reports, and removes rules', () => {

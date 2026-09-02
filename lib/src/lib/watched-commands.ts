@@ -1,5 +1,6 @@
 import { loadJson, saveJson } from './local-json-store';
 import { getPlatform } from './platform';
+import { WINDOWS_EXECUTABLE_SUFFIX } from './terminal-state';
 
 /**
  * The WATCHING rule set: the bare program names (`commandArgv0` output) whose
@@ -19,13 +20,20 @@ function isStringArray(value: unknown): value is string[] {
 }
 
 /**
- * A key is `commandArgv0` output — a basename — so a separator or a `:` in one
- * means it can never match any command again. Before the tokenizer learned that
- * `\` is a Windows path separator, a full-path invocation stored keys like
- * `C:toolsclaude.exe`; dropping them keeps a dead row out of the rule list.
+ * Whether a stored key is one `commandArgv0` can still produce. It is a bare
+ * program name, so it holds no separator or `:`, and it never ends in a
+ * launcher suffix — `commandProgramName` strips those. Keys written before this
+ * module's fixes fail one test or the other: a full path mangled to
+ * `C:toolsclaude.exe`, a relative one to `toolsdor.cmd`, and a bare launcher
+ * stored cleanly as `npm.cmd`. Each can only sit in the rule list as a row that
+ * matches nothing, so it is dropped rather than shown.
+ *
+ * Residual: a mangled *relative* path with no suffix (`bin\claude` ->
+ * `binclaude`) is indistinguishable from a program actually named that, and
+ * survives. The user deletes it from the rule list.
  */
 function isKeyableName(name: string): boolean {
-  return !/[\\/:]/.test(name);
+  return !/[\\/:]/.test(name) && !WINDOWS_EXECUTABLE_SUFFIX.test(name);
 }
 
 function readStored(): string[] {

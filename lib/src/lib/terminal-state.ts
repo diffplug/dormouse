@@ -900,7 +900,9 @@ function commandBasename(command: string): string {
   return command.replace(/^.*[\\/]/, '');
 }
 
-const WINDOWS_EXECUTABLE_SUFFIX = /\.(?:exe|cmd|bat|com|ps1)$/i;
+/** PATHEXT's spellings of one program. Exported for `watched-commands.ts`,
+ *  which drops a stored key ending in one: `commandArgv0` cannot produce one. */
+export const WINDOWS_EXECUTABLE_SUFFIX = /\.(?:exe|cmd|bat|com|ps1)$/i;
 
 /**
  * argv[0] reduced to the one name a program answers to: no path, no launcher
