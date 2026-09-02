@@ -78,7 +78,7 @@ qr-large.png          only when the raw crop was too small to decode
 qr.y4m                640×480 single frame on repeat — Chromium's fake camera
 invitation-url.txt    the pairing URL, for cross-checking a later scan
 pocket-chrome.log     the Pocket browser's own stdout/stderr
-pocket-console.log    the Pocket page's console and page errors, taken at teardown
+pocket-console.log    everything the Pocket page logged, recorded over CDP
 pocket-profile/       the Pocket browser's profile — passkeys, IndexedDB, worker
 pairing-code.txt      the two digits Pocket showed
 summary.json          per-step status and timing, plus the run's facts
@@ -155,8 +155,11 @@ Testing 150 rather than assumed:
   time.** It need not exist at launch, and rewriting it between two
   `getUserMedia` calls changes what the second one sees — which is what lets the
   `code` step re-capture a rotated QR into a browser that is already up.
-- **There is no raw-CDP verb on the CLI**, so the virtual authenticator needs a
-  WebSocket of its own: take the page's `webSocketDebuggerUrl` from
+- **There is no raw-CDP verb on the CLI**, so the harness keeps a WebSocket of
+  its own to the page target — attached before the app is opened, so
+  `pocket-console.log` covers the first paint (`agent-browser console` answers
+  empty for a browser it merely connected to). The virtual authenticator rides
+  the same socket: take the page's `webSocketDebuggerUrl` from
   `http://127.0.0.1:<port>/json/list` and send `WebAuthn.enable` then
   `WebAuthn.addVirtualAuthenticator` over Node's built-in `WebSocket`. Chrome
   accepts that second client while `agent-browser` is still attached. The

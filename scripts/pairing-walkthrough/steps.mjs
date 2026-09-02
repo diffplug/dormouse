@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { AgentBrowser } from './ab.mjs';
-import { installVirtualAuthenticator, virtualCredentials } from './cdp.mjs';
+import { addVirtualAuthenticator, attachPage, virtualCredentials } from './cdp.mjs';
 import { launchChrome, resolveChrome } from './chrome.mjs';
 import { crop, decodeQr, imageSize, toY4m, upscale } from './qr.mjs';
 import { delay, findFreePort, spawnLogged, waitFor, waitForLine } from './proc.mjs';
@@ -380,6 +380,10 @@ async function stepPocket(ctx) {
   // `connect` adopts the browser but not its window size, and every Pocket
   // screen is laid out for a phone.
   await ab.run(['set', 'viewport', String(POCKET_VIEWPORT.width), String(POCKET_VIEWPORT.height)]);
+
+  // Attached before the app is opened, so the page's log is recorded from its
+  // first paint; the target survives the navigation that follows.
+  const session = await attachPage(port, /^(about:blank$|chrome:|http)/);
   await ab.openUntil(
     `${ctx.serverOrigin}/`,
     `return !!document.body && document.body.innerText.includes(${JSON.stringify(SCAN_LABEL)});`,
@@ -388,10 +392,7 @@ async function stepPocket(ctx) {
   // Before anything can call `navigator.credentials`: the authenticator belongs
   // to this page target, and a WebAuthn call made without one hangs until its
   // own timeout rather than failing.
-  ctx.state.pocketAuth = await installVirtualAuthenticator(
-    port,
-    new RegExp(`^${escapeRegExp(ctx.serverOrigin)}/`),
-  );
+  ctx.state.pocketAuth = { session, authenticatorId: await addVirtualAuthenticator(session) };
 
   ctx.record({
     pocket: {
@@ -514,11 +515,6 @@ function pairingModalExpr() {
   return `const modal = [...document.querySelectorAll('[role="dialog"]')]
       .find((el) => el.innerText.includes('Pair a new device'));
     return modal ? modal.innerText.trim() : null;`;
-}
-
-/** Escape `value` for use inside a regular expression. */
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /** `fill`, then read the value back — a controlled input can swallow a paste. */

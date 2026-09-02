@@ -194,19 +194,12 @@ async function main(live) {
  * — it would take down every other agent-browser session on the machine.
  */
 async function cleanup(state, opts) {
-  // Before anything is closed, and on the failure path too: the Host mirrors
-  // its webview's console into `host.log`, and this is the Pocket side's only
-  // equivalent — the one place a client-side throw shows up at all.
-  if (state.pocketBrowser && state.runDir) {
-    const dumps = await Promise.all(
-      [['console'], ['errors']].map((argv) =>
-        state.pocketBrowser.run(argv).catch((err) => `(${argv[0]} unavailable: ${err.message})`),
-      ),
-    );
-    writeFileSync(
-      join(state.runDir, 'pocket-console.log'),
-      `--- console ---\n${dumps[0]}\n\n--- errors ---\n${dumps[1]}\n`,
-    );
+  // Written before anything is closed, and on the failure path too: the Host
+  // mirrors its webview's console into `host.log`, and this is the Pocket
+  // side's only equivalent — the one place a client-side throw shows up at all.
+  if (state.pocketAuth && state.runDir) {
+    const { messages } = state.pocketAuth.session;
+    writeFileSync(join(state.runDir, 'pocket-console.log'), `${messages.join('\n')}\n`);
   }
   // The CDP socket next: it is the only thing holding the Pocket page's virtual
   // authenticator, and closing it after Chrome is gone throws.

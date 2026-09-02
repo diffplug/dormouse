@@ -1,7 +1,7 @@
 /**
- * Just enough raw CDP for the one thing `agent-browser` cannot do: give the
- * Pocket page a virtual WebAuthn authenticator
- * (`scripts/pairing-walkthrough/README.md` → Stage (b) notes).
+ * Just enough raw CDP for the two things `agent-browser` cannot do: give the
+ * Pocket page a virtual WebAuthn authenticator, and keep a record of everything
+ * that page logs (`scripts/pairing-walkthrough/README.md` → The Pocket browser).
  *
  * The CLI has no raw-CDP verb, so this opens a WebSocket of its own to the page
  * target's `webSocketDebuggerUrl`. Chrome accepts that second client while
@@ -18,7 +18,8 @@ export async function pageTargets(port) {
 }
 
 /**
- * A CDP connection to one target, with `send` awaiting the matching reply.
+ * A CDP connection to one target: `send` awaits the matching reply, and
+ * everything the page logs accumulates in `messages`.
  *
  * **Held open for the whole run.** Chrome tears a domain's state down when the
  * client that enabled it goes away, and the virtual authenticator is exactly
@@ -29,11 +30,19 @@ export class CdpSession {
   #nextId = 1;
   #pending = new Map();
 
+  /** Everything the page logged, in order, as `LEVEL text` lines. */
+  messages = [];
+
   constructor(ws, target) {
     this.#ws = ws;
     this.target = target;
     ws.addEventListener('message', (event) => {
       const message = JSON.parse(String(event.data));
+      if (message.method) {
+        const line = describeLogEvent(message);
+        if (line !== null) this.messages.push(line);
+        return;
+      }
       const waiter = this.#pending.get(message.id);
       if (!waiter) return;
       this.#pending.delete(message.id);
@@ -44,17 +53,6 @@ export class CdpSession {
       for (const waiter of this.#pending.values()) waiter.reject(new Error('CDP socket closed'));
       this.#pending.clear();
     });
-  }
-
-  static async attach(target) {
-    const ws = new WebSocket(target.webSocketDebuggerUrl);
-    await new Promise((resolve, reject) => {
-      ws.addEventListener('open', resolve, { once: true });
-      ws.addEventListener('error', () => reject(new Error('could not open a CDP socket')), {
-        once: true,
-      });
-    });
-    return new CdpSession(ws, target);
   }
 
   send(method, params = {}) {
@@ -74,9 +72,55 @@ export class CdpSession {
   }
 }
 
+/** One log line for a CDP event, or null for an event that is not one. */
+function describeLogEvent({ method, params }) {
+  if (method === 'Runtime.consoleAPICalled') {
+    const text = (params.args ?? [])
+      .map((arg) => arg.value ?? arg.description ?? arg.unserializableValue ?? `[${arg.type}]`)
+      .join(' ');
+    return `${params.type.toUpperCase()} ${text}`;
+  }
+  if (method === 'Runtime.exceptionThrown') {
+    const details = params.exceptionDetails;
+    return `EXCEPTION ${details.exception?.description ?? details.text} (${details.url ?? '?'})`;
+  }
+  if (method === 'Log.entryAdded') {
+    return `${params.entry.level.toUpperCase()} ${params.entry.text} (${params.entry.url ?? '?'})`;
+  }
+  return null;
+}
+
 /**
- * Give the page whose URL matches `urlPattern` a virtual authenticator that
- * answers every prompt by itself.
+ * Attach to the page target matching `urlPattern` and start recording its log.
+ *
+ * **Before the app is opened**, so the record covers the first paint: the
+ * target survives a same-tab navigation, which is what the `open` that follows
+ * is. `agent-browser console` is not a substitute — it answers empty for a
+ * browser it merely connected to.
+ */
+export async function attachPage(port, urlPattern) {
+  const target = await waitFor(
+    async () => (await pageTargets(port)).find((t) => urlPattern.test(t.url)) ?? null,
+    { what: `a page target matching ${urlPattern}`, timeoutMs: 30_000, intervalMs: 250 },
+  );
+  const ws = new WebSocket(target.webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => {
+    ws.addEventListener('open', resolve, { once: true });
+    ws.addEventListener('error', () => reject(new Error('could not open a CDP socket')), {
+      once: true,
+    });
+  });
+  const session = new CdpSession(ws, target);
+  // Both: `Runtime` carries what the page's own code logs, `Log` carries what
+  // the browser says about the page — a blocked request, a worker that would
+  // not register.
+  await session.send('Runtime.enable');
+  await session.send('Log.enable');
+  return session;
+}
+
+/**
+ * Give `session`'s page an authenticator that answers every prompt by itself.
  *
  * Every option is load-bearing. `ctap2` + `internal` is a platform
  * authenticator, which is what a phone has; `hasResidentKey` is what
@@ -86,14 +130,9 @@ export class CdpSession {
  * `navigator.credentials.*` call hangs until its own timeout.
  *
  * **The authenticator belongs to the target, not the browser.** A flow that
- * opens a new tab needs this called again for that tab.
+ * opens a new tab needs a session on that tab and this called again.
  */
-export async function installVirtualAuthenticator(port, urlPattern) {
-  const target = await waitFor(
-    async () => (await pageTargets(port)).find((t) => urlPattern.test(t.url)) ?? null,
-    { what: `a page target matching ${urlPattern}`, timeoutMs: 30_000, intervalMs: 250 },
-  );
-  const session = await CdpSession.attach(target);
+export async function addVirtualAuthenticator(session) {
   await session.send('WebAuthn.enable', { enableUI: false });
   const { authenticatorId } = await session.send('WebAuthn.addVirtualAuthenticator', {
     options: {
@@ -105,7 +144,7 @@ export async function installVirtualAuthenticator(port, urlPattern) {
       automaticPresenceSimulation: true,
     },
   });
-  return { session, authenticatorId, targetId: target.id, targetUrl: target.url };
+  return authenticatorId;
 }
 
 /**
