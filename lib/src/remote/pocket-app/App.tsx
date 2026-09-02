@@ -345,11 +345,23 @@ export default function App({
       setPlatform(adapter);
       disposeAllSessions();
       initAlertStateReceiver();
-      await adapter.init();
+      try {
+        await adapter.init();
+      } catch (err) {
+        // The session is already established, and the throw sends the user back
+        // to the Hosts list — where nothing can end it. Leaving it up keeps
+        // this phone keepaliving a Host it is not attached to and holding one
+        // of the Host's session slots, while the next Connect handshakes over
+        // the top of it. So a failed init leaves exactly what leaving the wall
+        // leaves: no adapter, no socket.
+        teardownAdapter();
+        client.close();
+        throw err;
+      }
 
       setPhase({ at: 'wall', host });
     },
-    [client, loadHosts],
+    [client, loadHosts, teardownAdapter],
   );
 
   const onConnect = (host: HostView) => run('connect', () => connectTo(host));

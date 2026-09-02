@@ -119,6 +119,14 @@ export function pendingDeletionKey(hostId: string, deliveryId: string): string {
 export function openPocketDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(POCKET_DB_NAME, POCKET_DB_VERSION);
+    /**
+     * Whether `blocked` already answered this caller. `blocked` is not
+     * terminal: the other tab can still close, and the open then *succeeds* —
+     * handing back a connection nobody is holding a reference to. One leaked
+     * connection is exactly what blocks the next upgrade, so a late success is
+     * closed rather than resolved.
+     */
+    let settled = false;
     request.onupgradeneeded = () => {
       const db = request.result;
       // The idiom holds only while no upgrade transforms *data*: the first one
@@ -140,8 +148,10 @@ export function openPocketDb(): Promise<IDBDatabase> {
     // nor `error` follows while it does. Naming the failure beats an unbounded
     // wait — the caller can tell the user to close the other tab, which nothing
     // can do from a hang.
-    request.onblocked = () =>
+    request.onblocked = () => {
+      settled = true;
       reject(new Error('another tab is holding the Pocket database at an older version'));
+    };
     request.onsuccess = () => {
       const db = request.result;
       // Another tab asking for a newer version is blocked for as long as this
@@ -150,9 +160,16 @@ export function openPocketDb(): Promise<IDBDatabase> {
       // tab is up; every operation here already closes its own handle, so the
       // only reader this can interrupt is one that never released it.
       db.onversionchange = () => db.close();
+      if (settled) {
+        db.close();
+        return;
+      }
       resolve(db);
     };
-    request.onerror = () => reject(request.error ?? new Error('failed to open IndexedDB'));
+    request.onerror = () => {
+      settled = true;
+      reject(request.error ?? new Error('failed to open IndexedDB'));
+    };
   });
 }
 

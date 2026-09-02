@@ -389,8 +389,19 @@ export class RemoteHost {
    * Prunes on insert, since nothing else sweeps this map, and evicts its own
    * oldest at the cap: the code longest on screen is the one whose scanner has
    * most likely given up.
+   *
+   * **Everything that decides what this Host holds runs after the keygen, on
+   * one synchronous stretch.** `generateNoiseKeyPair` is the only await here,
+   * and two mints overlapping across it would each evict against the same
+   * pre-await size and then both insert — leaving `MAX_TOKENS_PER_HOST + 1`
+   * live invitations, which is the cap the Server's own setup-token bound is
+   * shared with. A `stop()` in that same window is the other half: re-arming
+   * the reaper and returning a QR the panel paints `live` would advertise a
+   * code over a relay socket that is gone.
    */
   async mintInvitation(setupToken: string, serverExpiresAtMs: number): Promise<PairingInvitation> {
+    const keyPair = await generateNoiseKeyPair();
+    if (this.#stopped) throw new Error('this machine is no longer connected to a Dormouse server.');
     this.#reap();
     const now = this.#now();
     while (this.#invitations.size >= MAX_TOKENS_PER_HOST) {
@@ -401,7 +412,6 @@ export class RemoteHost {
       this.#retireInvitation(oldest.value[0]);
     }
     const expiresAt = Math.min(now + DEFAULT_PAIRING_TTL_MS, serverExpiresAtMs);
-    const keyPair = await generateNoiseKeyPair();
     const inviteId = randomBase64Url(LOCAL_ID_BYTE_LENGTH);
     const invitation: PairingInvitation = {
       hostId: this.#enrollment.hostId,

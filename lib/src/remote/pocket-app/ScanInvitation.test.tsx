@@ -10,7 +10,7 @@
  * `parsePairingInvitationUrl` is the shipped one, so a code accepted here is a
  * code a Host could have minted.
  */
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fromBase64Url, toBase64Url, type PairingInvitation } from 'server-lib-common';
@@ -309,6 +309,72 @@ describe('the camera is stopped on every way out', () => {
 
     expect(stops).toBeGreaterThan(0);
   });
+});
+
+/**
+ * The `<video>` is one element shared by every effect run, and `startScan`
+ * attaches its stream to it — so two overlapping starts race for `srcObject`
+ * and the loser's teardown takes the winner's preview down with it. StrictMode
+ * double-invokes the effect, which makes that the ordinary mount path.
+ */
+it('opens one camera under StrictMode, and leaves it running', async () => {
+  const attached: Array<{ stopped: boolean }> = [];
+  let starts = 0;
+  const startScan = async (video: HTMLVideoElement) => {
+    starts++;
+    const track = { stopped: false, stop() { this.stopped = true; } };
+    attached.push(track);
+    (video as unknown as { srcObject: unknown }).srcObject = {
+      getTracks: () => [track],
+    };
+    // One microtask of latency, which is what lets two starts overlap at all.
+    await Promise.resolve();
+    return { stop: () => track.stop() } satisfies ScanControls;
+  };
+
+  act(() => {
+    root.render(
+      <StrictMode>
+        <ScanInvitation
+          busy={null}
+          error={null}
+          appOrigin={ORIGIN}
+          startScan={startScan}
+          onScanned={vi.fn()}
+          onCancel={vi.fn()}
+        />
+      </StrictMode>,
+    );
+  });
+  await settle();
+
+  expect(starts).toBe(1);
+  // The surviving start's stream is still live, and it is the one on screen.
+  expect(attached.filter((t) => !t.stopped)).toHaveLength(1);
+  expect(container.querySelector('video')?.srcObject).not.toBeNull();
+});
+
+it('drops a stale rejection when a real code is accepted, so one row shows at a time', async () => {
+  const camera = fakeCamera();
+  render({ startScan: camera.startScan });
+  await settle();
+
+  act(() => camera.read('https://example.com/some-other-qr'));
+  await settle();
+  expect(container.querySelectorAll('[role="alert"]')).toHaveLength(1);
+
+  // The ceremony this code starts fails without leaving the screen, so its
+  // error lands here — beneath the rejection, if that one never cleared.
+  render({
+    startScan: camera.startScan,
+    error: 'That code is no longer valid.',
+  });
+  const { url } = await invitationUrl();
+  act(() => camera.read(url));
+  await settle();
+
+  const alerts = [...container.querySelectorAll('[role="alert"]')].map((n) => n.textContent);
+  expect(alerts).toEqual(['That code is no longer valid.']);
 });
 
 it('refuses a value the parser cannot even look at', async () => {

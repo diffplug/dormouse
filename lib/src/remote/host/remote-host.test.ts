@@ -417,6 +417,31 @@ describe('RemoteHost end-to-end ceremonies', () => {
     expect(invitationEvents).toContainEqual({ inviteId: first.inviteId, state: 'dropped' });
   });
 
+  it('holds the cap when two mints overlap across the keygen', async () => {
+    // The one await in `mintInvitation` is `generateNoiseKeyPair`. Evicting
+    // before it lets two mints read the same pre-await size, each evict one,
+    // and then both insert — one past the cap the Server's setup-token bound is
+    // shared with.
+    makeHost();
+    for (let i = 0; i < MAX_TOKENS_PER_HOST; i += 1) await mintInvitation();
+    expect(host.outstandingInvitationCount).toBe(MAX_TOKENS_PER_HOST);
+
+    await Promise.all([mintInvitation(), mintInvitation(), mintInvitation()]);
+
+    expect(host.outstandingInvitationCount).toBe(MAX_TOKENS_PER_HOST);
+  });
+
+  it('refuses to mint onto a Host stopped while the keygen was in flight', async () => {
+    // A QR the panel paints `live` over a relay socket that is gone, plus a
+    // re-armed reaper on a Host that holds nothing — both from the same window.
+    makeHost();
+    const minting = host.mintInvitation(randomBase64Url(32), clock + DEFAULT_PAIRING_TTL_MS);
+    host.stop();
+
+    await expect(minting).rejects.toThrow(/no longer connected/);
+    expect(host.outstandingInvitationCount).toBe(0);
+  });
+
   it('reports an invitation expired once its TTL passes', async () => {
     makeHost();
     const invitation = await mintInvitation();

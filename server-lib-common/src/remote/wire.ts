@@ -94,6 +94,19 @@ export const WS_CLOSE_HOST_REPLACED = 4000;
 /** Human-readable reason paired with {@link WS_CLOSE_HOST_REPLACED}. */
 export const WS_CLOSE_HOST_REPLACED_REASON = 'replaced by a newer host connection';
 
+/**
+ * The Host's `hosts.json` row is gone, so its bearer token names nothing.
+ *
+ * A distinct code from {@link WS_CLOSE_HOST_REPLACED} because the two mean
+ * opposite things to a reconnect: a replaced Host must stand down, while a
+ * revoked one may retry as often as it likes — the upgrade will simply 401,
+ * which is the whole of what revocation is.
+ */
+export const WS_CLOSE_HOST_REVOKED = 4001;
+
+/** Human-readable reason paired with {@link WS_CLOSE_HOST_REVOKED}. */
+export const WS_CLOSE_HOST_REVOKED_REASON = 'this host is no longer enrolled';
+
 /** The selfhost mode has exactly one account. */
 export const SELFHOST_ACCOUNT_ID = 'owner';
 

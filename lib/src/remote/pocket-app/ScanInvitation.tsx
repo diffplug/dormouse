@@ -119,6 +119,20 @@ export function ScanInvitation({
    * an error on screen telling the user to scan again.
    */
   const acceptingRef = useRef(false);
+  /**
+   * The tail of every start this screen has run, so **at most one is ever in
+   * flight**.
+   *
+   * The `<video>` is one element shared by every effect run, and `startScan`
+   * attaches its stream to it — so two overlapping starts race for
+   * `srcObject`, and the loser's teardown (ours, or the decoder's own
+   * `stop()`) detaches the *winner's* preview and stops tracks it does not
+   * own. The result is a black viewfinder reporting `camera === 'live'`, and
+   * React StrictMode's double-invoked effect makes it the ordinary mount path
+   * rather than a rare race. Serializing costs nothing here: a superseded run
+   * checks `live` after the wait and never opens a camera at all.
+   */
+  const chainRef = useRef<Promise<void>>(Promise.resolve());
   const [camera, setCamera] = useState<CameraState>('starting');
   const [pasted, setPasted] = useState('');
   const [rejected, setRejected] = useState(false);
@@ -143,6 +157,10 @@ export function ScanInvitation({
       }
       if (acceptingRef.current) return;
       acceptingRef.current = true;
+      // A code that parsed clears the rejection this screen may still be
+      // showing: the two rows stack otherwise, and a ceremony that fails after
+      // this point leaves its own error beneath a stale "that is not a code".
+      setRejected(false);
       stopCamera();
       try {
         await onScanned(invitation);
@@ -164,18 +182,24 @@ export function ScanInvitation({
     let live = true;
     const video = videoRef.current;
     if (!video) return;
-    void startScan(video, (text) => {
-      if (live) void accept(text);
-    })
-      .then((controls) => {
+    const previous = chainRef.current;
+    const run = (async () => {
+      // Queued behind whatever the last run left doing, so this start owns the
+      // element outright. A run superseded before it got that far stops here
+      // and never opens a camera — which is the whole StrictMode case.
+      await previous;
+      if (!live) return;
+      try {
+        const controls = await startScan(video, (text) => {
+          if (live) void accept(text);
+        });
         if (!live) {
           release(controls, video);
           return;
         }
         controlsRef.current = controls;
         setCamera('live');
-      })
-      .catch((err: unknown) => {
+      } catch (err: unknown) {
         // Released here too, not only on the way out: the decoder can throw
         // after `getUserMedia` already attached a stream, and there are no
         // controls to stop in that case — so without this the screen explains
@@ -186,7 +210,9 @@ export function ScanInvitation({
         // no camera, no `getUserMedia`, an insecure context — reads the same
         // from here and leaves paste as the path.
         setCamera(isPermissionDenied(err) ? 'denied' : 'unsupported');
-      });
+      }
+    })();
+    chainRef.current = run;
     return () => {
       live = false;
       release(controlsRef.current, video);

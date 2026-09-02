@@ -52,6 +52,27 @@ export class RelayHub {
     return this.#hosts.has(hostId);
   }
 
+  /** Every `hostId` with a live socket right now. */
+  onlineHostIds(): string[] {
+    return [...this.#hosts.keys()];
+  }
+
+  /**
+   * Close a Host's socket and drop its clients, as if it had disconnected.
+   *
+   * The `/ws/host` token is checked once, at the upgrade, so nothing here
+   * notices a Host whose `hosts.json` row was later deleted — the documented
+   * revocation. `createApp`'s sweep is what calls this; see
+   * `docs/specs/server.md` -> Guardrails.
+   */
+  closeHost(hostId: string, code: number, reason: string): boolean {
+    const conn = this.#hosts.get(hostId);
+    if (!conn) return false;
+    this.unregisterHost(conn);
+    safeClose(conn.socket, code, reason);
+    return true;
+  }
+
   // --- Host lifecycle -------------------------------------------------------
 
   /**

@@ -23,7 +23,15 @@ primitive lives in `server-lib-common`; the terminal UI lives in
   displayed. The setup password enrolls Hosts and registers nothing.
 * Terminal surfaces only — exactly remote-api.md's **protocol-v1** (browser
   remoting is staged in that spec's `## Future`).
-* Revocation is editing a JSON file by hand; no management UI.
+* Revocation is editing a JSON file by hand; no management UI. **A `/ws/host`
+  token is re-checked against `hosts.json` after the upgrade too**, on a bounded
+  sweep (`HOST_REVOCATION_SWEEP_MS`, one minute), because the upgrade check runs
+  once and a Host can stay connected indefinitely — so deleting its row would
+  otherwise leave the revoked socket relaying. The sweep closes it with
+  `WS_CLOSE_HOST_REVOKED` (4001) and its Clients get `host-gone`, the same
+  teardown a disconnect performs; the Host may reconnect, and the upgrade then
+  answers 401. Revoking a *Client* is still the Host's own ACL and still needs a
+  Host restart ([remote-security-model.md](./remote-security-model.md)).
 * A dropped WebSocket is handled by reloading the page / reconnecting the
   host. No resume protocol.
 * Everything transient (challenges, sessions, presence nonces, relay state) is
