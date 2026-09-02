@@ -3,15 +3,12 @@ import bundledExtensions from './bundled-extensions.json';
 import bundledThemes from './bundled.json';
 
 // Every theme in bundled.json is compiled into every build (store.ts imports
-// it), so each one owes an upstream-provenance row on the supply-chain page —
-// SECURITY.md, "Dependency Supply Chain". bundled-extensions.json is that
-// disclosure, and website/scripts/generate-deps.js appends it to the npm table.
+// it), so each one owes an upstream-provenance row on the supply-chain page.
+// bundled-extensions.json is that disclosure, and
+// website/scripts/generate-deps.js appends it to the npm table.
 //
-// lib/scripts/bundle-themes.mjs writes both files from one EXTENSIONS list, but
-// both are checked in and the script needs network, so nothing stops a hand-edit
-// to one from drifting off the other — and regenerating the disclosure produces
-// no diff, so ci.yml's stale-snapshot gate cannot see it. `extensionId` is the
-// join key; this test is the gate.
+// Why the two can drift, and why ci.yml's stale-snapshot gate cannot see it:
+// SECURITY.md, "Dependency Supply Chain". `extensionId` is the join key.
 describe('bundled.json / bundled-extensions.json disclosure parity', () => {
   // bundled.json ids are `${namespace}.${name}.${slugify(label)}`; the first two
   // segments are the OpenVSX extension the theme was extracted from.
