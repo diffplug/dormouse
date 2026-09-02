@@ -47,8 +47,10 @@ const SCAN_LABEL = 'Scan a Host QR';
  */
 async function setupTokenTtlMs(repoRoot) {
   const entry = join(repoRoot, 'server-lib-common', 'dist', 'index.js');
-  const { DEFAULT_PAIRING_TTL_MS } = await import(pathToFileURL(entry).href);
-  return DEFAULT_PAIRING_TTL_MS;
+  // Informational, so an unbuilt workspace (`--skip-build` against a stale
+  // tree) records `null` rather than failing a run that works without it.
+  const module = await import(pathToFileURL(entry).href).catch(() => null);
+  return module?.DEFAULT_PAIRING_TTL_MS ?? null;
 }
 
 /** The Host webview is ready when its first terminal has an input to type into. */
