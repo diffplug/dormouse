@@ -7,7 +7,9 @@ import {
   PAIRING_OUTCOME_LABEL,
 } from '../components/RemoteControlSection';
 import { enrollmentOfferPath } from '../host/remote/enroll-offer';
+import { SETUP_CODE_DEAD_MESSAGE } from '../remote/client/pocket-client';
 import { PAIRING_CODE_LABEL } from '../remote/pocket-app/App';
+import { SCAN_REJECTED_MESSAGE } from '../remote/pocket-app/ScanInvitation';
 import { SCAN_LABEL } from '../remote/setup-copy';
 import { ITERM2_COMPAT_VERSION } from './terminal-protocol';
 import { OPEN_PORT_TIMEOUT_MS } from './platform/types';
@@ -149,6 +151,22 @@ describe('the pairing walkthrough mirrors the copy it clicks', () => {
         sentence.startsWith(prefix),
       );
       expect(matched.map(([outcome]) => outcome)).toHaveLength(1);
+    },
+  );
+
+  // The same, for the scanner's two refusals: `--scenario expired-code` turns
+  // on which one a pasted code earns, and a rewrite that let them share an
+  // opening would leave it green on a run that told the user the wrong thing.
+  const REFUSALS = {
+    REFUSED_EXPIRED: SETUP_CODE_DEAD_MESSAGE,
+    REFUSED_NOT_A_CODE: SCAN_REJECTED_MESSAGE,
+  } as const;
+  it.each(Object.keys(REFUSALS) as (keyof typeof REFUSALS)[])(
+    '%s names exactly one shipped refusal sentence',
+    (name) => {
+      const prefix = extract(source, file, new RegExp(`^const ${name} = '([^']+)';$`, 'm'));
+      const matched = Object.values(REFUSALS).filter((sentence) => sentence.startsWith(prefix));
+      expect(matched).toEqual([REFUSALS[name]]);
     },
   );
 });

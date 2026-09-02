@@ -16,7 +16,7 @@ import { pathToFileURL } from 'node:url';
 import { AgentBrowser } from './ab.mjs';
 import { addVirtualAuthenticator, attachPage, pageUrl, virtualCredentials } from './cdp.mjs';
 import { launchChrome, resolveChrome } from './chrome.mjs';
-import { crop, decodeQr, imageSize, toY4m, upscale } from './qr.mjs';
+import { blankY4m, crop, decodeQr, imageSize, toY4m, upscale } from './qr.mjs';
 import { delay, findFreePort, spawnLogged, waitFor, waitForLine } from './proc.mjs';
 
 /**
@@ -83,6 +83,28 @@ const OUTCOME_CODE_MISMATCH = 'The two digits did not match';
 const OUTCOME_CANCELLED = 'You cancelled this request';
 
 /**
+ * Enough of each of the scanner's two refusals to tell them apart.
+ *
+ * The same exception, for the same reason: the screen's structure says a code
+ * was refused, and `expired-code` turns on *which* refusal it was. Pinned to
+ * exactly one shipped sentence each by `mirrored-constants.test.ts`.
+ */
+const REFUSED_EXPIRED = 'That setup code has expired';
+const REFUSED_NOT_A_CODE = 'That is not a Dormouse setup code';
+
+/**
+ * The expiry a re-issued code is stamped with: 2023-11-14, comfortably behind
+ * any clock this runs on and the same value the unit tests use.
+ */
+const DEAD_EXPIRY_SECONDS = 1_700_000_000;
+
+/**
+ * An origin no run of this harness serves Pocket from, for the code that is
+ * refused on the origin compare rather than on its expiry.
+ */
+const FOREIGN_ORIGIN = 'https://someone-elses-dormouse.example';
+
+/**
  * The setup QR, by the accessible name `QrCode` gives it
  * (`lib/src/components/RemoteControlSection.tsx`) — an accessibility contract
  * rather than copy, so it survives the copy pass the way `PAIRING_MODAL` does.
@@ -113,18 +135,53 @@ const RECONNECT_PROOF = 'reconnect-proof.txt';
 const NOTIFY_SEQUENCE = String.raw`printf '\033]777;notify;Walkthrough;the Host is ringing\033\\'`;
 
 /**
+ * The workspace's built `server-lib-common`, or `null` when it is not built.
+ *
+ * The one place this harness reads product code rather than driving it, and it
+ * reads the shipped module rather than a copy: the setup code's TTL, and the
+ * emitter/parser pair {@link reissueInvitation} re-stamps a live code with.
+ */
+function securityModule(repoRoot) {
+  const entry = join(repoRoot, 'server-lib-common', 'dist', 'index.js');
+  return import(pathToFileURL(entry).href).catch(() => null);
+}
+
+/**
  * How long a setup code stays redeemable, read out of the workspace rather than
  * copied here — a harness that mirrors the number would keep claiming the old
  * one after somebody changed it. `server/src/setup-token.ts` pins the Server's
  * TTL to this same constant, and `RemoteControlSection.tsx` mints a replacement
  * 20s before it, so the capture → scan gap has to stay comfortably under it.
+ *
+ * Informational, so an unbuilt workspace (`--skip-build` against a stale tree)
+ * records `null` rather than failing a run that works without it.
  */
 async function setupTokenTtlMs(repoRoot) {
-  const entry = join(repoRoot, 'server-lib-common', 'dist', 'index.js');
-  // Informational, so an unbuilt workspace (`--skip-build` against a stale
-  // tree) records `null` rather than failing a run that works without it.
-  const module = await import(pathToFileURL(entry).href).catch(() => null);
-  return module?.DEFAULT_PAIRING_TTL_MS ?? null;
+  return (await securityModule(repoRoot))?.DEFAULT_PAIRING_TTL_MS ?? null;
+}
+
+/**
+ * The Host's own live code, re-emitted with a field changed.
+ *
+ * **Through the shipped emitter and parser, never by editing the fragment.**
+ * It is positional and carries no field names, so a harness that spliced
+ * "field four" would go on splicing field four after somebody reordered the
+ * grammar — and would write a code the Host could never have minted, which is
+ * the one thing this scenario must not do. Parsed at the epoch, so a code that
+ * rotated out from under the run still re-issues.
+ */
+async function reissueInvitation(ctx, url, { expiry, origin } = {}) {
+  const security = await securityModule(ctx.repoRoot);
+  if (!security) {
+    throw new Error('server-lib-common is not built; run `pnpm --filter server-lib-common build`');
+  }
+  const liveOrigin = new URL(url).origin;
+  const invitation = await security.parsePairingInvitationUrl(url, liveOrigin, 0);
+  if (!invitation) throw new Error(`the Host's own setup code did not parse: ${url}`);
+  return security.formatPairingInvitationUrl(origin ?? liveOrigin, {
+    ...invitation,
+    expiry: expiry ?? invitation.expiry,
+  });
 }
 
 /** The Host webview is ready when its first terminal has an input to type into. */
@@ -801,36 +858,114 @@ function nextCode(code) {
 }
 
 /**
- * Follow the phone off the two-digit screen and record what it was told.
+ * Two codes a phone can be handed that will never pair, told apart.
  *
- * **Structural, and the sentence is evidence rather than an assertion**: what is
- * checked is that the digits are gone, that the phone announced *something*, and
- * that it is back on a list screen with a title — the words themselves are fixed
- * copy the phone chooses from a closed set (`PAIRING_DENIAL_MESSAGES`), and they
- * land in the shot's `.txt` beside the summary for the pass that reads them.
+ * Setup codes live five minutes, so an expired one is the likeliest thing this
+ * scanner ever meets — and `parsePairingInvitationUrl` refuses it with the same
+ * `null` it gives a QR off a cereal box (`docs/specs/pocket-app.md` → the
+ * scanner). The scenario exists because the phone used to say the same sentence
+ * to both, sending a user who needed a fresh code off to look for a different
+ * QR. Nothing is scanned and no ceremony starts: both codes go in by hand,
+ * through the paste field beside the viewfinder.
  */
-async function recordPocketRefusal(ctx, shot) {
+async function stepDeadCode(ctx) {
   const pocket = ctx.state.pocketBrowser;
-  const refusal = await pocket.waitUntil(pocketRefusedExpr(), {
-    what: 'the phone to leave the two-digit screen and say why',
-    timeoutMs: 120_000,
-    intervalMs: 250,
+  if (!pocket) throw new Error('the pocket step has to run first');
+  const live = ctx.state.invitationUrl;
+  if (!live) throw new Error('the qr step has to run first');
+
+  // Before the scanner mounts, or the camera — still pointed at the Host's live
+  // QR — decodes it and starts a real pairing underneath this one.
+  await blankY4m(join(ctx.runDir, ctx.artifactName('qr.y4m')));
+
+  await pocket.run(['find', 'role', 'button', 'click', '--name', SCAN_LABEL, '--exact']);
+  await pocket.waitUntil(scannerUpExpr(), {
+    what: 'the scanner to open',
+    timeoutMs: 30_000,
+    intervalMs: 50,
   });
-  ctx.record({ pocketRefusal: refusal });
-  await ctx.shot(shot, pocket);
+
+  const expired = await reissueInvitation(ctx, live, { expiry: DEAD_EXPIRY_SECONDS });
+  await pasteIntoScanner(ctx, expired);
+  const dead = await recordPocketRefusal(ctx, '06-pocket-expired.png', {
+    announces: REFUSED_EXPIRED,
+    as: 'expiredCode',
+  });
+
+  // The same dead code, minted by somebody else's deployment. Expiry is not the
+  // first question about it: there is no fresh code to go and get on a computer
+  // this phone was never pointed at, so it gets the other sentence.
+  const foreign = await reissueInvitation(ctx, live, {
+    expiry: DEAD_EXPIRY_SECONDS,
+    origin: FOREIGN_ORIGIN,
+  });
+  await pasteIntoScanner(ctx, foreign);
+  const rejected = await recordPocketRefusal(ctx, '07-pocket-foreign.png', {
+    announces: REFUSED_NOT_A_CODE,
+    as: 'foreignCode',
+  });
+  if (dead.announced === rejected.announced) {
+    throw new Error(`both codes got the same sentence: ${JSON.stringify(dead.announced)}`);
+  }
+  ctx.record({ deadCode: { expired, foreign, expiry: DEAD_EXPIRY_SECONDS } });
 }
 
 /**
- * The phone after a refusal: no digits, an announced sentence, and the list it
- * fell back to (`lib/src/remote/pocket-app/App.tsx` → `HostsView`, whose header
- * is the only `h1` on that screen).
+ * Type a code into the scanner's own paste field and submit it.
+ *
+ * The button is `disabled` until the field holds something, which is the
+ * scanner's gate to decide — so clicking it through {@link clickElement}
+ * exercises that rather than working around it.
  */
-function pocketRefusedExpr() {
+async function pasteIntoScanner(ctx, url) {
+  const pocket = ctx.state.pocketBrowser;
+  await fillField(ctx, '#pocket-paste-code', url, pocket);
+  return clickElement(
+    pocket,
+    `const field = document.querySelector('#pocket-paste-code');
+     return field ? field.form.querySelector('button[type="submit"]') : null;`,
+    "the scanner's paste button",
+  );
+}
+
+/**
+ * Follow the phone to a refusal and record what it was told.
+ *
+ * **Structural, except for `announces`.** What is always checked is that no
+ * digits are on screen, that the phone announced *something*, and that it is on
+ * a screen with a title; the words are fixed copy the phone chooses from closed
+ * sets (`PAIRING_DENIAL_MESSAGES`, the scanner's two), and they land in the
+ * shot's `.txt` for the pass that reads them. A scenario that turns on *which*
+ * sentence passes `announces`, and then waits for that one — which is also what
+ * makes a second refusal on an unchanged screen distinguishable from the first.
+ */
+async function recordPocketRefusal(ctx, shot, { announces = null, as = 'pocketRefusal' } = {}) {
+  const pocket = ctx.state.pocketBrowser;
+  const refusal = await pocket.waitUntil(pocketRefusedExpr(announces), {
+    what: announces
+      ? `the phone to answer with “${announces}…”`
+      : 'the phone to leave the two-digit screen and say why',
+    timeoutMs: 120_000,
+    intervalMs: 250,
+  });
+  ctx.record({ [as]: refusal });
+  await ctx.shot(shot, pocket);
+  return refusal;
+}
+
+/**
+ * The phone after a refusal: no digits, an announced sentence, and the screen it
+ * is on (`lib/src/remote/pocket-app/App.tsx` → `HostsView` and the scanner both
+ * carry exactly one `h1`, in a header).
+ */
+function pocketRefusedExpr(prefix = null) {
   return `if (document.querySelector(${JSON.stringify(PAIRING_CODE_REGION)})) return null;
     const alert = document.querySelector('[role="alert"]');
     const title = document.querySelector('header h1');
     if (!alert || !alert.innerText.trim() || !title) return null;
-    return { announced: alert.innerText.trim(), screen: title.innerText.trim() };`;
+    const announced = alert.innerText.trim();
+    ${prefix === null ? '' : `if (!announced.startsWith(${JSON.stringify(prefix)})) return null;`}
+    return { announced, screen: title.innerText.trim() };`;
 }
 
 /**
@@ -1103,8 +1238,7 @@ function shellQuote(value) {
  * change, so a run in which it fires is a run where the honest path is broken:
  * it says so out loud rather than passing quietly.
  */
-async function fillField(ctx, selector, value) {
-  const ab = ctx.state.hostBrowser;
+async function fillField(ctx, selector, value, ab = ctx.state.hostBrowser) {
   await ab.run(['fill', selector, value]);
   const seen = await ab.eval(`const el = document.querySelector(${JSON.stringify(selector)});
     return el ? el.value : null;`);
@@ -1170,5 +1304,19 @@ export const SCENARIOS = {
   denied: {
     expect: 'cancelling on the laptop pairs nothing and returns the phone to its list',
     steps: [...PRELUDE, { name: 'cancel', title: 'Cancel the request', run: stepDenied }],
+  },
+  // The one scenario that stops short of the prelude's last step: nothing is
+  // ever scanned, so there is no ceremony and no two digits.
+  'expired-code': {
+    expect:
+      'a setup code that ran out of time is told apart from one that was never for this server, and neither starts a ceremony',
+    steps: [
+      ...PRELUDE.slice(0, -1),
+      {
+        name: 'dead-code',
+        title: 'Paste a code that expired, then one for another server',
+        run: stepDeadCode,
+      },
+    ],
   },
 };

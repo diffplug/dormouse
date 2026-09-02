@@ -43,16 +43,17 @@ Every line about `agent-browser` and Chrome here was probed against
 
 ## Scenarios
 
-`--scenario <name>` picks which ending the run drives. They share the first
-seven steps — everything up to the two digits is the same code on every path —
-so a scenario is only ever the last step, and the differences are all in what
-the laptop and the phone say afterwards.
+`--scenario <name>` picks which ending the run drives. They share the first six
+steps — everything up to the scan is the same code on every path — so a scenario
+is only ever the last step or two, and the differences are all in what the laptop
+and the phone say afterwards.
 
 | Scenario | Ends with | What a green run proves | Artifacts |
 | --- | --- | --- | --- |
 | `happy` (default) | `terminal` | A phone paired from a QR runs a command the laptop's own shell answers, and hears it ring. | unprefixed, as below |
 | `wrong-code` | `mismatch` | The two digits are mistyped: nothing pairs, the laptop's panel says the digits did not match, and the phone lands back on its list with its own sentence. | `wrong-code-*` |
 | `denied` | `cancel` | Cancel on the laptop: nothing pairs, the panel says the request was cancelled, the phone goes back to its list. | `denied-*` |
+| `expired-code` | `dead-code` | A code that ran out of time is told apart from one that was never for this server: the phone says the first has expired and the second is not a setup code, and neither starts a ceremony. | `expired-code-*` |
 
 Each scenario's sentence is in `summary.json` as `expect`, beside the artifacts
 that back it. **Every artifact of a scenario other than `happy` is prefixed with
@@ -60,10 +61,16 @@ the scenario's name** — screenshots, text captures, logs, proof files — so
 several scenarios can share one `--out` without overwriting each other's
 evidence.
 
-The two refusal scenarios both check an *absence* — that nothing was paired —
+`wrong-code` and `denied` both check an *absence* — that nothing was paired —
 which the count cannot show the instant a decision lands, since the section
 re-reads its status on a 2 s poll. Each therefore waits a poll cycle out before
 believing the count.
+
+`expired-code` never scans anything, so it stops one step short of the others
+and its two codes go in through the paste field beside the viewfinder. Both are
+the Host's own live code re-issued through the shipped emitter — never by
+splicing the fragment, which is positional and carries no field names — so what
+the phone refuses is a code that Host could have minted.
 
 ## Steps
 
@@ -83,6 +90,7 @@ it.
 | 8 | `terminal` | Types the two digits into the Host's modal and authorizes; waits for Pocket to connect itself and land on the terminal; runs a command from the phone and reads the file it wrote; rings the Host and finds the bell on the phone; then leaves to the Hosts view and connects again. → `09-host-approved.png` … `14-pocket-reconnected.png`, `terminal-proof.txt`, `notify-proof.txt`, `reconnect-proof.txt` |
 | 8′ | `mismatch` | (`wrong-code`) Types the *next* two digits instead, and waits for the panel to report a mismatch; checks the paired count did not move and follows the phone back to its list. → `09-host-mismatch.png`, `10-pocket-mismatch.png` |
 | 8′ | `cancel` | (`denied`) Presses the modal's Cancel and waits for the panel to report it; same two checks. → `09-host-cancelled.png`, `10-pocket-cancelled.png` |
+| 7′ | `dead-code` | (`expired-code`) Replaces the camera's Y4M with a blank frame, opens the scanner, and pastes the Host's own code re-issued twice — once stamped with a 2023 expiry, once for another origin as well. Waits for the phone's own sentence each time, and checks the two differ. → `06-pocket-expired.png`, `07-pocket-foreign.png` |
 
 Everything a later step needs from an earlier one is on `ctx.state` —
 `hostBrowser`, `pocketBrowser`, `pocketAuth` (the live CDP session holding the
