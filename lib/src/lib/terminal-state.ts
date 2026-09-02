@@ -1,4 +1,4 @@
-import { POSIX_ESCAPABLE } from './shell-escape';
+import { POSIX_ESCAPABLE } from './posix-escape';
 
 export type CwdSource = 'osc7' | 'osc9_9' | 'osc633' | 'osc1337' | 'process' | 'manual';
 export type PathKind = 'posix' | 'windows' | 'unknown';

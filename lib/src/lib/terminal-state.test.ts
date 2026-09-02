@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { POSIX_ESCAPABLE, shellEscapePosix } from './shell-escape';
+import { POSIX_ESCAPABLE } from './posix-escape';
+import { shellEscapePosix } from './shell-escape';
 import {
   commandArgv0,
   createTerminalPaneState,
