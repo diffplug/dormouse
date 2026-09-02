@@ -557,6 +557,27 @@ it is not what upholds this rule. The bundle mounts at the origin **root**,
 never under a path prefix: the manifest's `start_url`/`scope`, the worker's
 registration scope, and the shell's manifest/icon links are all root-absolute.
 
+**The origin is served with a Content-Security-Policy.** It holds a per-Host
+Client static and the worker that opens sealed pushes, and `SECURITY.md` ->
+Accepted limitations already names active XSS here as a risk it cannot rule
+out — so the policy is the defense in depth around exactly that, which both
+shipped webview hosts already have. Every source is the app's own origin
+(`default-src 'self'`, with `frame-ancestors`, `base-uri` and `object-src`
+`'none'`), and there are exactly two loosenings:
+
+* **`style-src 'unsafe-inline'`**, because the shell carries a pre-paint
+  `<style>` and React writes `style` attributes — a hash covers the first but
+  not the second.
+* **`connect-src` names the WebSocket origin explicitly** — `DORMOUSE_ORIGIN`
+  with the scheme swapped — rather than resting on `'self'`, whose ws/wss
+  coverage browsers have disagreed about. It can only ever be this deployment's
+  own relay.
+
+**`script-src` stays `'self'`, with no nonce pipeline**, and the build has to
+keep earning that: `server/test/static.test.mjs` parses the built `index.html`
+and fails on any inline `<script>` body or off-origin `src`/`href`. Source of
+truth: `pocketContentSecurityPolicy` in `server/src/app.ts`.
+
 One lib-owned bundle, two deployments:
 
 * **Selfhost (shipped):** the Node server serves the bundle

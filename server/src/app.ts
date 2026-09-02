@@ -1372,7 +1372,7 @@ export function createApp(config: AppConfig): CreatedApp {
 
   // --- Static Pocket app: GET /* fallback, registered LAST so every API and
   //     /ws route above wins. Missing build → a stub with the build command.
-  registerPocketServing(app, config.pocketDir);
+  registerPocketServing(app, config.pocketDir, pocketContentSecurityPolicy(origin));
 
   return {
     app,
@@ -1385,6 +1385,53 @@ export function createApp(config: AppConfig): CreatedApp {
   };
 }
 
+const CSP_HEADER = 'Content-Security-Policy';
+
+/**
+ * The Pocket origin's Content-Security-Policy
+ * (`docs/specs/pocket-app.md` -> Deployment).
+ *
+ * This origin holds a per-Host Client static and the worker that opens sealed
+ * pushes, and `SECURITY.md` -> Accepted limitations already names active XSS
+ * here as the risk it cannot rule out — so it gets the defense in depth the
+ * two shipped webview hosts already have.
+ *
+ * Every source is the app's own origin. The two loosenings are load-bearing
+ * and no wider than they must be:
+ *
+ * * `style-src 'unsafe-inline'` — the shell carries an inline `<style>` for
+ *   viewport plumbing that has to apply before first paint, and React writes
+ *   `style` attributes. A hash covers the first but not the second, and CSS is
+ *   not where the risk this policy exists for lives.
+ * * `connect-src` names the WebSocket origin explicitly rather than resting on
+ *   `'self'`, whose ws/wss coverage browsers have disagreed about. It is the
+ *   configured origin with the scheme swapped, so it can only ever be this
+ *   deployment's own relay.
+ *
+ * `script-src 'self'` needs no exception: the build emits no inline script and
+ * loads nothing off-origin, which `server/test/static.test.mjs` pins against
+ * the built output.
+ */
+export function pocketContentSecurityPolicy(origin: string): string {
+  // `createApp` has already proved this is a bare `http(s)` origin.
+  const wsOrigin = `ws${origin.slice('http'.length)}`;
+  return [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self'",
+    "media-src 'self' blob:",
+    `connect-src 'self' ${wsOrigin}`,
+    "worker-src 'self'",
+    "manifest-src 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+  ].join('; ');
+}
+
 /** Message shown at `GET /` when the Pocket app has not been built yet. */
 const POCKET_MISSING_MESSAGE =
   'Dormouse selfhost server. The Pocket web app is not built yet — run ' +
@@ -1395,7 +1442,7 @@ const POCKET_MISSING_MESSAGE =
  * `index.html` for any non-file GET (the app is a single page). When the
  * directory or its `index.html` is absent, keep the old stub at `GET /`.
  */
-function registerPocketServing(app: Hono<AppEnv>, pocketDir?: string): void {
+function registerPocketServing(app: Hono<AppEnv>, pocketDir: string | undefined, csp: string): void {
   const indexHtmlPath = pocketDir ? join(pocketDir, 'index.html') : null;
   if (!pocketDir || !indexHtmlPath || !existsSync(indexHtmlPath)) {
     app.get('/', (c) => c.text(POCKET_MISSING_MESSAGE));
@@ -1411,6 +1458,7 @@ function registerPocketServing(app: Hono<AppEnv>, pocketDir?: string): void {
     // `serveStatic`'s `onFound` hook, which runs *after* the Response has been
     // built and so cannot add a header to it.
     c.header('Cache-Control', pocketCacheControl(c.req.path));
+    c.header(CSP_HEADER, csp);
     return serveFile(c, next);
   });
   // Re-read the SPA shell per deep-link fallback: a Pocket rebuild swaps in an
@@ -1422,6 +1470,7 @@ function registerPocketServing(app: Hono<AppEnv>, pocketDir?: string): void {
     // for, so the class the static handler staged from the *request* path is
     // wrong here — a response's cache policy describes the response.
     c.header('Cache-Control', POCKET_SHELL_CACHE_CONTROL);
+    c.header(CSP_HEADER, csp);
     // A subresource miss is not a routing question, and the shell is never a
     // useful answer to one. Answering it put an HTML body under a hashed-asset
     // URL: `immutable` then meant the browser could never revalidate it away,
