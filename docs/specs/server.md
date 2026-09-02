@@ -825,8 +825,8 @@ to honor:
 - **Enrolled, "Set up a phone" opens an inline QR panel**, so a phone is set up
   by pointing a camera at the laptop rather than typing an origin and a 64-hex
   password. It mints on open and never before — a code is a credential with a
-  clock on it — re-mints shortly before `expiresAt` while the panel stays open,
-  and offers New code and Done. Rules it exists to honor:
+  clock on it — re-mints shortly before `expiresAt` while the panel stays open.
+  Rules it exists to honor:
   - **The panel owns its busy and error**, not the section's shared pair: a mint
     also fires on a timer, and the view's one error slot belongs to what the
     user clicked.
@@ -834,12 +834,13 @@ to honor:
     floor stops a fast-clock mint loop; the TTL ceiling replaces a slow-clock
     code before its real Server expiry.
   - **The code being replaced stays on screen** until its replacement lands;
-    only a first mint blanks. The refresh lead exists so a camera mid-scan keeps
-    a live code.
+    only a first mint blanks.
   - **An invitation state change flips only the panel showing that `inviteId`**,
-    so a second window offering a different code stays live. The flip that
-    matters is `reserved`: a phone has completed the handshake against this
-    code, so it is spent whatever the person at the laptop decides next.
+    so a second window offering a different code stays live. Two flips matter,
+    and the panel stays subscribed past the QR to hear both: `reserved` (a phone
+    completed the handshake, so the code is spent whatever the laptop decides)
+    and `consumed` (that decision is made, so the panel **must stop sending the
+    user to a phone**).
   - **The view is keyed by enrollment identity and the QR sits behind its own
     error boundary**: a server swap drops the stale code, and a failed chunk
     fetch or a refused encode costs a retry button rather than the app-wide

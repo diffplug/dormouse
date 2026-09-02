@@ -225,10 +225,31 @@ describe('remote-host enrollment', () => {
     timeout.mockRestore();
   });
 
-  it('throws on a non-ok response', async () => {
+  /**
+   * The Server answers one 401 for every way a credential can be wrong, so this
+   * side is the only one that knows which one it sent — and the two have
+   * different recoveries: retype the password, or stop pressing the offer's
+   * button and use the typed form.
+   */
+  it('says which credential the 401 refused', async () => {
     stubLocalStorage();
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('bad password', { status: 401 })));
-    await expect(performEnrollment('https://dormouse.example', { password: 'wrong' }, 'x')).rejects.toThrow(/401/);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('invalid setup password', { status: 401 })));
+    await expect(
+      performEnrollment('https://dormouse.example', { password: 'wrong' }, 'x'),
+    ).rejects.toThrow('The server did not accept that setup password.');
+    await expect(
+      performEnrollment('https://dormouse.example', { enrollToken: 'spent' }, 'x'),
+    ).rejects.toThrow(/enrollment offer is no longer valid/);
+  });
+
+  it('keeps the status and the server text on any other refusal', async () => {
+    // Nothing here is a user action to name — a reverse proxy, a restarting
+    // server — so the operator gets both halves of what the Server said.
+    stubLocalStorage();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('gateway is asleep', { status: 502 })));
+    await expect(
+      performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x'),
+    ).rejects.toThrow('The server refused the enrollment (HTTP 502): gateway is asleep');
   });
 
   it('refuses a 200 whose body is not an enrollment', async () => {

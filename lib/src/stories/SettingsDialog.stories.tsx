@@ -308,6 +308,6 @@ export const WithRemoteControl: Story = {
     primedAlertSettings: { pushEnabled: true },
   },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByText('1 paired device.');
+    await within(canvasElement).findByText('1 paired phone.');
   },
 };

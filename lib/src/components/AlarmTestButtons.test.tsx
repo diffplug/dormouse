@@ -92,7 +92,7 @@ describe('PushTestButton', () => {
     await act(async () => root.render(<PushTestButton />));
     await act(async () => button().click());
 
-    expect(text()).toContain('Sent to 2 devices');
+    expect(text()).toContain('Sent to 2 phones');
   });
 
   it('distinguishes "nowhere to send it" from a failure', async () => {
@@ -107,7 +107,7 @@ describe('PushTestButton', () => {
     await act(async () => root.render(<PushTestButton />));
     await act(async () => button().click());
 
-    expect(text()).toContain('No paired phone has enabled alerts yet');
+    expect(text()).toContain('No paired phone has push notifications turned on');
     // The ordinary answer on a freshly enrolled machine — not rendered as an error.
     expect(container.querySelector('[role="status"]')?.className).not.toContain('text-error');
   });
@@ -124,7 +124,7 @@ describe('PushTestButton', () => {
     await act(async () => root.render(<PushTestButton />));
     await act(async () => button().click());
 
-    expect(text()).toContain('No device accepted the push');
+    expect(text()).toContain('No phone accepted the push');
   });
 
   it('surfaces the service error', async () => {

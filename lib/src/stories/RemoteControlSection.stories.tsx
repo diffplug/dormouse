@@ -134,7 +134,7 @@ export const ConnectedNoDevices: Story = {
 /** After a successful pairing ceremony. */
 export const ConnectedOneDevice: Story = {
   parameters: { primedRemoteHost: { status: enrolledStatus({ pairedClients: 1 }) } },
-  play: settled('1 paired device.'),
+  play: settled('1 paired phone.'),
 };
 
 /** Plural, and a long tailnet origin exercising the URL line's `break-all`. */
@@ -197,13 +197,34 @@ export const SetupPhoneQr: Story = {
  */
 export const SetupPhoneRedeemed: Story = {
   parameters: {
-    primedRemoteHost: { status: enrolledStatus(), setupRedeemed: true },
+    primedRemoteHost: { status: enrolledStatus(), setupInvitation: 'reserved' },
     docs: { story: { height: '340px' } },
   },
   play: async (context) => {
     const canvas = within(context.canvasElement);
     await userEvent.click(await canvas.findByRole('button', { name: 'Set up a phone' }));
     await canvas.findByText(/This code is used up/);
+  },
+};
+
+/**
+ * The pairing request that code produced has been answered — approved on this
+ * machine, or cancelled. The panel is behind the modal the whole time, so this
+ * is the frame the user is left looking at, and the one sentence it must not
+ * still be showing is the one above, sending them to a phone that has finished.
+ */
+export const SetupPhoneFinished: Story = {
+  parameters: {
+    primedRemoteHost: {
+      status: enrolledStatus({ pairedClients: 1 }),
+      setupInvitation: 'consumed',
+    },
+    docs: { story: { height: '340px' } },
+  },
+  play: async (context) => {
+    const canvas = within(context.canvasElement);
+    await userEvent.click(await canvas.findByRole('button', { name: 'Set up a phone' }));
+    await canvas.findByText(/This setup code is finished/);
   },
 };
 
@@ -232,5 +253,5 @@ export const SetupPhoneRefused: Story = {
  */
 export const HostServiceError: Story = {
   parameters: { primedRemoteHost: { statusError: 'The Host service did not answer.' } },
-  play: settled(/Could not reach this machine’s Host service/),
+  play: settled(/Could not reach this machine’s remote-control service/),
 };

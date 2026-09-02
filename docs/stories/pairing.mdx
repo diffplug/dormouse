@@ -208,6 +208,12 @@ a handshake against the invitation rather than going on offering a code that can
 no longer work — the laptop knows that itself, because the key it was completed
 against is the laptop's own.
 
+The panel keeps listening past that, because it is the thing the pairing modal
+in §6 is covering: once the request has been answered, either way, it stops
+pointing at a phone that has already finished.
+
+<Canvas of={RemoteControl.SetupPhoneFinished} />
+
 ---
 
 ## 4. Scan it with the phone

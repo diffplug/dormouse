@@ -113,6 +113,33 @@ function hasValidNoiseStatic(v: Record<string, unknown>): boolean {
 export type HostEnrollCredential = { password: string } | { enrollToken: string };
 
 /**
+ * What the settings form shows for a refused enrollment.
+ *
+ * **The 401 splits on which credential was sent**, because only one of them is
+ * something the person at the laptop can retype: a rejected password is a typo,
+ * while a rejected offer token means the installer's one-time offer is spent or
+ * was rewritten, and no amount of retrying that button will help. The Server
+ * answers the same status for both — it refuses to say which one it hit
+ * (`server/src/app.ts`) — so the distinction has to be made from this side,
+ * which knows what it sent.
+ *
+ * Every other status keeps the number and the server's own text: there is no
+ * user action to name, and an operator debugging a reverse proxy needs both.
+ */
+function refusalMessage(
+  status: number,
+  detail: string,
+  credential: HostEnrollCredential,
+): string {
+  if (status === 401) {
+    return 'password' in credential
+      ? 'The server did not accept that setup password.'
+      : 'This machine’s enrollment offer is no longer valid. Enroll with the server address and setup password instead.';
+  }
+  return `The server refused the enrollment (HTTP ${status})${detail ? `: ${detail}` : ''}`;
+}
+
+/**
  * `POST /api/host/enroll` with one {@link HostEnrollCredential} and map the
  * response to an enrollment. Throws with the server's status text on failure —
  * or with what the response was missing when it answered 200 with something
@@ -154,7 +181,7 @@ export async function performEnrollment(
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
-    throw new Error(`host enroll failed (${response.status})${detail ? `: ${detail}` : ''}`);
+    throw new Error(refusalMessage(response.status, detail, credential));
   }
   // The response body is untrusted like any other, so it goes through the same
   // guard every *read* of an enrollment uses. Without it a server that answers
@@ -169,7 +196,7 @@ export async function performEnrollment(
   try {
     body = await response.json();
   } catch (error) {
-    throw new Error(`host enroll failed: the server did not answer JSON (${errorMessage(error)})`);
+    throw new Error(`Could not enroll: the server did not answer JSON (${errorMessage(error)})`);
   }
   const enrolled = body as Partial<HostEnrollResponse> | null;
   const enrollment = {
@@ -195,7 +222,7 @@ export async function performEnrollment(
   };
   if (!isEnrollment(enrollment)) {
     throw new Error(
-      `host enroll failed: the server's response is missing or invalid: ${missingEnrollmentFields(enrollment).join(', ')}`,
+      `Could not enroll: the server's answer is missing or invalid: ${missingEnrollmentFields(enrollment).join(', ')}`,
     );
   }
   return enrollment;
@@ -220,14 +247,14 @@ async function mintNoiseStatic(): Promise<{
     material = await mintNoiseStaticKeyPair();
   } catch (error) {
     throw new Error(
-      `host enroll failed: this build cannot generate the X25519 key remote control requires (${errorMessage(error)})`,
+      `Could not enroll: this build cannot generate the X25519 key remote control requires (${errorMessage(error)})`,
     );
   }
   // Checked against the guard the enrollment must pass, so a runtime whose
   // PKCS#8 falls outside what `isEnrollment` accepts fails here — naming the
   // key — rather than at the next read, naming nothing.
   if (!isNoiseStaticMaterial(material.publicKey, material.privateKeyPkcs8)) {
-    throw new Error('host enroll failed: the minted X25519 key is not a shape this build persists');
+    throw new Error('Could not enroll: the minted X25519 key is not a shape this build persists');
   }
   return {
     noiseStaticPrivateKey: material.privateKeyPkcs8,

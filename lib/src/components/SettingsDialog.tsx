@@ -46,8 +46,8 @@ const SECTION = 'mt-4 border-t border-border pt-3';
  * list to show and the copy must not imply one.
  */
 function describePushTargets(push: PushDevicesState, hasHostService: boolean): string {
-  if (push.status === 'loading') return 'Looking for devices…';
-  if (push.status === 'error') return 'Could not reach the server to list devices.';
+  if (push.status === 'loading') return 'Looking for phones…';
+  if (push.status === 'error') return 'Could not reach the server to list phones.';
   // `no-host` covers two builds: one whose Host service simply has not enrolled,
   // and one with no Host service at all (`push-devices.ts` — the website leaves
   // it here forever). Only the first has a Remote control section beneath this
@@ -59,8 +59,11 @@ function describePushTargets(push: PushDevicesState, hasHostService: boolean): s
       ? 'Connect this machine to a Dormouse server below to send push.'
       : 'Connect this machine to a Dormouse server to send push.';
   }
+  // Reached on a machine that has just paired one, so it must not read as
+  // "nothing is paired": the phone is there, its push registration is not, and
+  // the tap that fixes it happens on the phone rather than here.
   if (push.devices.length === 0) {
-    return 'No device paired with this machine has enabled alerts in Dormouse Pocket yet.';
+    return 'No paired phone has push notifications turned on yet — tap Enable push notifications in Dormouse Pocket.';
   }
   return `Push will be sent to ${push.devices.map((device) => device.label).join(', ')}`;
 }

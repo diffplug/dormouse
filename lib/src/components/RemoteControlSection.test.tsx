@@ -333,10 +333,10 @@ describe('RemoteControlSection', () => {
       expect(text()).toContain('https://ned-mac.tail9c2f1.ts.net');
 
       await act(async () => {
-        failEnroll(new Error('host enroll failed (401)'));
+        failEnroll(new Error('The server did not accept that setup password.'));
         await Promise.resolve();
       });
-      expect(text()).toContain('host enroll failed (401)');
+      expect(text()).toContain('The server did not accept that setup password.');
     } finally {
       vi.useRealTimers();
     }
@@ -420,7 +420,7 @@ describe('RemoteControlSection', () => {
     platform = { remoteHost: makeLink(async () => enrolled({ pairedClients: 2 })) };
     await render();
     expect(text()).toContain('https://laptop.tailnet.ts.net');
-    expect(text()).toContain('2 paired devices');
+    expect(text()).toContain('2 paired phones');
     expect(buttonLabelled('Reconnect')).toBeUndefined();
   });
 
@@ -504,7 +504,7 @@ describe('RemoteControlSection', () => {
     // What the code *is* belongs to `QrCode.test.tsx`; this is the section's
     // claim that a scannable one reached the panel with its clock.
     expect(container.querySelector('svg[role="img"]')).toBeTruthy();
-    expect(text()).toContain('within 5 min');
+    expect(text()).toContain('Expires in 5 min');
   });
 
   it('renders a refused mint in the panel, leaving the view’s error slot alone', async () => {
@@ -556,7 +556,7 @@ describe('RemoteControlSection', () => {
       link.emit('invitation', { name: 'invitation', inviteId: 'invite-1', state: 'reserved' });
     });
     expect(container.querySelector('svg[role="img"]')).toBeNull();
-    expect(text()).toContain('This code is used up.');
+    expect(text()).toContain('A phone scanned this code.');
   });
 
   it('does not call a dropped invitation a scan', async () => {
@@ -576,20 +576,44 @@ describe('RemoteControlSection', () => {
     });
     expect(container.querySelector('svg[role="img"]')).toBeNull();
     expect(text()).toContain('no longer valid');
-    expect(text()).not.toContain('Scanned.');
+    expect(text()).not.toContain('A phone scanned this code.');
     // And the way out is still one click away.
     expect(buttonLabelled('New code')).toBeTruthy();
   });
 
-  // Four states reach this panel and only two of them mean a phone is waiting.
+  it('stops sending the user to a phone once the request is answered', async () => {
+    // The panel sits behind the pairing modal, so this is the frame the user is
+    // left looking at after approving — and `reserved`'s sentence ("it will ask
+    // to pair") is a lie by then. The Host publishes `consumed` for every
+    // terminal outcome, which is why the subscription outlives the QR.
+    const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : enrolled()));
+    platform = { remoteHost: link };
+    await render();
+    await act(async () => buttonLabelled('Set up a phone')!.click());
+    await settleQrChunk();
+
+    await act(async () => {
+      link.emit('invitation', { name: 'invitation', inviteId: 'invite-1', state: 'reserved' });
+    });
+    expect(text()).toContain('A phone scanned this code.');
+
+    await act(async () => {
+      link.emit('invitation', { name: 'invitation', inviteId: 'invite-1', state: 'consumed' });
+    });
+    expect(text()).toContain('This setup code is finished.');
+    expect(text()).not.toContain('A phone scanned this code.');
+    expect(buttonLabelled('New code')).toBeTruthy();
+  });
+
+  // Four states reach this panel and only one of them means a phone is waiting.
   // `expired` in particular — the refresh timer runs late whenever the window
   // is backgrounded or the laptop wakes from sleep — must not read as a scan
   // (`docs/specs/remote-security-model.md` → Pairing).
   it.each([
-    ['reserved', 'This code is used up.', 'nobody scanned it'],
-    ['consumed', 'This code is used up.', 'nobody scanned it'],
-    ['dropped', 'This code is no longer valid — nobody scanned it.', 'Scanned.'],
-    ['expired', 'This code expired — nobody scanned it.', 'Scanned.'],
+    ['reserved', 'A phone scanned this code.', 'nobody scanned it'],
+    ['consumed', 'This setup code is finished.', 'nobody scanned it'],
+    ['dropped', 'This code is no longer valid — nobody scanned it.', 'A phone scanned this code.'],
+    ['expired', 'This code expired — nobody scanned it.', 'A phone scanned this code.'],
   ])('reads a %s invitation as the fact it is', async (state, expected, forbidden) => {
     const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : enrolled()));
     platform = { remoteHost: link };
@@ -683,18 +707,18 @@ describe('RemoteControlSection', () => {
       platform = { remoteHost: mintingLink() };
       await render();
       await act(async () => buttonLabelled('Set up a phone')!.click());
-      expect(text()).toContain('within 5 min');
+      expect(text()).toContain('Expires in 5 min');
 
       // Half a minute in, there is nothing to repaint; the panel wakes on the
       // boundary where the number actually changes rather than once a second.
       await act(async () => {
         await vi.advanceTimersByTimeAsync(30_000);
       });
-      expect(text()).toContain('within 5 min');
+      expect(text()).toContain('Expires in 5 min');
       await act(async () => {
         await vi.advanceTimersByTimeAsync(30_000);
       });
-      expect(text()).toContain('within 4 min');
+      expect(text()).toContain('Expires in 4 min');
     } finally {
       vi.useRealTimers();
     }
@@ -921,7 +945,7 @@ describe('RemoteControlSection', () => {
     makeStubRemoteHostLink({
       status: enrolledStatus(),
       setupQr: used,
-      setupRedeemed: true,
+      setupInvitation: 'reserved',
     }).on('invitation', (data) => void events.push(data));
     await Promise.resolve();
     expect(events).toEqual([
