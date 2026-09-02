@@ -236,4 +236,33 @@ describe('Pocket push service worker', () => {
     await deliver(worker, { hostId: HOST_ID, v: 1, salt: 'nope', ct: 'nope' });
     expect(worker.showNotification).toHaveBeenCalledTimes(3);
   });
+
+  it('retries with the generic notice when the UA refuses the options', async () => {
+    // A rejected `showNotification` would otherwise reject the `waitUntil`
+    // promise — an unhandled rejection in a worker, and a delivery that showed
+    // nothing. The retry is what can still land when it was the payload-derived
+    // options the UA refused.
+    const worker = await harness();
+    worker.showNotification.mockRejectedValueOnce(new TypeError('bad options'));
+
+    await deliver(worker, await sealedPayload(worker, { title: 'build finished', tag: 'pty-1' }));
+
+    expect(worker.showNotification).toHaveBeenCalledTimes(2);
+    expect(worker.shown()).toMatchObject(GENERIC_PUSH_NOTIFICATION);
+    // The generic notice carries no collapse key, so a retry cannot replace an
+    // unrelated Session's notification.
+    expect(worker.shown().tag).toBeUndefined();
+  });
+
+  it('settles even when every showNotification is refused', async () => {
+    // Permission revoked between subscribe and delivery: nothing can be shown,
+    // and the handler must still resolve rather than reject out of `waitUntil`.
+    const worker = await harness();
+    worker.showNotification.mockRejectedValue(new Error('permission revoked'));
+
+    await expect(
+      deliver(worker, await sealedPayload(worker, { title: 'build finished' })),
+    ).resolves.toBeUndefined();
+    expect(worker.showNotification).toHaveBeenCalledTimes(2);
+  });
 });

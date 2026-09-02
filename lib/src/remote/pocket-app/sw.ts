@@ -143,9 +143,22 @@ export function installPocketWorker(scope: WorkerScope, store: KnownHostStore): 
       payload = null;
     }
     event.waitUntil(
-      notificationForPush(payload, store).then((notification) =>
-        scope.registration.showNotification(notification.title, notificationOptions(notification)),
-      ),
+      notificationForPush(payload, store)
+        .then((notification) =>
+          scope.registration.showNotification(notification.title, notificationOptions(notification)),
+        )
+        // `notificationForPush` is total, but `showNotification` still rejects —
+        // on a revoked permission, where nothing helps, and on options the UA
+        // refuses, where the content-free notice still lands. Retried once for
+        // the second case, then swallowed: a rejected `waitUntil` is an
+        // unhandled rejection in a worker, and there is nothing left to try.
+        .catch(() =>
+          scope.registration.showNotification(
+            GENERIC_PUSH_NOTIFICATION.title,
+            notificationOptions(GENERIC_PUSH_NOTIFICATION),
+          ),
+        )
+        .catch(() => undefined),
     );
   });
 

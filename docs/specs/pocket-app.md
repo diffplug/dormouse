@@ -243,7 +243,9 @@ server serves what production would emit.
   `pairing-required` record, a failed decrypt, or malformed plaintext shows the
   generic content-free notice rather than returning early. What does decrypt is
   re-validated and re-bounded here, the last boundary that can read it
-  ([alert.md](./alert.md) -> Push notifications owns the rule). Pinned by
+  ([alert.md](./alert.md) -> Push notifications owns the rule). A
+  `showNotification` the UA refuses is retried once with that generic notice and
+  then swallowed, so the handler never rejects out of `waitUntil`. Pinned by
   `lib/src/remote/pocket-app/sw.test.ts`.
 - **Registration is best-effort and never awaited.** Every screen works without
   the worker, so a failure warns and boot continues — ordinary without support
