@@ -460,30 +460,24 @@ runs the bundled copy through the sidecar/Rust adapter.
 `agentBrowserCommand` implementation must enforce the shared allowlist; the CLI
 is not trusted to pre-filter arguments.
 
-**`binaryPath` names what the host spawns, so it is checked at the spawn.** It
+**`binaryPath` names what the host spawns, so it is checked at the spawn** — it
 crosses from the webview realm and is persisted into the pane's params, so an
-unchecked one is arbitrary local execution in the extension host or the Tauri
-sidecar — on the next launch, with no user interaction. The subcommand allowlist
-does not cover it: `streamStatus`, `open` and `popOut` supply their own args and
-take a `binaryPath` of their own, so the gate is `runWithBinaryFallback`, which
-every entry point shares. Accepted: an **absolute** path whose file name is the
-agent-browser executable (with its Windows `.cmd`/`.bat`/`.exe` shims), the
-host's own `DORMOUSE_AGENT_BROWSER_BIN` by exact match, or the bare name
-resolved on `PATH`. A refused path is dropped and the host's own candidates run,
-so a stale or hostile value degrades to "resolve it yourself". The webview
-applies the same predicate before storing or sending one. Source of truth:
-`isAllowedAgentBrowserBinary` in `lib/src/lib/agent-browser-binary.ts`.
+unchecked one runs on the next launch with no user interaction. The gate is
+`runWithBinaryFallback`, the one call every entry point shares; the subcommand
+allowlist does not cover it (rationale). Accepted: the agent-browser executable
+by file name — absolute, or bare and resolved on `PATH` — plus the host's own
+`DORMOUSE_AGENT_BROWSER_BIN` by exact match. **A refused path is dropped, never
+fatal**, so the host's own candidates run. The webview applies the same predicate
+before storing or sending one. Source of truth: `isAllowedAgentBrowserBinary` in
+`lib/src/lib/agent-browser-binary.ts`.
 
 **Screenshots are captured into a private per-process directory, and it is
-removed.** The frame is a picture of the user's authenticated browser, written by
-an external process under the ambient umask, so the path is an `0700` `mkdtemp`
-with an unguessable file name rather than a derivable name in the shared temp
-directory — the same discipline `standalone/sidecar/clipboard-ops.js` applies to
-clipboard images, cleanup included. The byte-returning capture unlinks its file
-once the bytes are in memory; `closePoppedOut` drops the whole directory on
-shutdown, with a `process.once('exit')` backstop for a host that never reaches
-it. A tmpdir that cannot be created is answered as `{ ok: false }` and retried
-on the next capture, never memoized.
+removed.** An `0700` `mkdtemp` with an unguessable file name, never a derivable
+name in the shared temp directory (rationale). The byte-returning capture unlinks
+its file once the bytes are in memory; `closePoppedOut` drops the whole
+directory, with a `process.once('exit')` backstop. **A tmpdir that cannot be
+created is answered `{ ok: false }` and retried on the next capture, never
+memoized.**
 
 **VS Code must reach the stream through a loopback relay** — the agent-browser
 stream server rejects `vscode-webview://` origins. The relay grants one
@@ -569,11 +563,9 @@ posts only these messages to the parent:
 - `open-window`: intercepted `target=_blank` anchor or `window.open` URL.
 
 **A URL from the frame is re-checked before it becomes a pane.** `open-window`
-carries a string the framed page chose, and the new-tab prompt is user consent,
-not a boundary; the same check gates `surface.iframe` over the control socket,
-which is a wire protocol rather than the CLI. Only `http:` and `https:` are
-accepted. Source of truth: `browserSurfaceUrl` in
-`lib/src/components/wall/browser-url.ts`.
+and the control socket's `surface.iframe` both go through `browserSurfaceUrl`;
+only `http:` and `https:` are accepted. (rationale) Source of truth:
+`browserSurfaceUrl` in `lib/src/components/wall/browser-url.ts`.
 
 **Parent listeners must validate the message origin against live proxy grants.**
 Leader messages feed the same Wall command-mode exit path as in-document dual-tap
@@ -603,14 +595,12 @@ Source of truth: `IFRAME_SHIM` in
 - **Every framed page is sandboxed, proxied or raw**, and the `sandbox` omits
   `allow-top-navigation` to block framebusting while allowing scripts,
   same-origin (within the frame's own origin), forms, popups, modals, and
-  downloads. The raw fallback is the case with *no* proxy in front of it, so it
-  is not the trusted one and gets the same attribute.
+  downloads. The raw fallback has no proxy in front of it, so it is not the
+  trusted case (rationale).
 - **The `allow` attribute grants no device or clipboard-read permission** —
-  `autoplay`, `clipboard-write` and `fullscreen` only. `dor iframe` takes any
-  http(s) URL, not just a loopback dev server, and a desktop webview often has
-  no per-site prompt (WKWebView with no media `WKUIDelegate`, WebView2
-  defaults), so a grant here is a grant rather than a request; `clipboard-read`
-  most pointedly, since a terminal's clipboard is where secrets get pasted.
+  `autoplay`, `clipboard-write` and `fullscreen` only. A desktop webview often
+  has no per-site prompt, so a grant here is a grant rather than a request
+  (rationale).
 
 Source of truth: `IframePanel.tsx`, `lib/src/components/wall/use-window-focused.ts`,
 `lib/src/lib/terminal-lifecycle.ts` (`registerSurfaceFocusHandle`).
@@ -627,14 +617,13 @@ framed with its frame-blocking headers replaced — so v1 mostly returns `ok` or
 `scheme`.
 
 **The webview passes its own ancestor chain with every request for a proxy
-URL.** `frame-ancestors` is checked against every ancestor, not just the parent,
-and VS Code nests the extension's document two frames deep inside the workbench,
-so the chain is `location.origin` plus `location.ancestorOrigins` — knowable only
-in the realm that has a `location`. It is validated host-side and used
-all-or-nothing: an unparseable or opaque (`"null"`) entry means no chain, because
-a partial one would block Dormouse's own frame. Source of truth:
-`embedderOrigins` in `lib/src/lib/embedder-origins.ts`, `normalizeEmbedderOrigins`
-in `lib/src/host/iframe-proxy-rewrite.ts`.
+URL** — `location.origin` plus `location.ancestorOrigins`, knowable only in the
+realm that has a `location`, because `frame-ancestors` is checked against every
+ancestor and VS Code nests our document two frames deep. **Validated host-side
+and used all-or-nothing**: an unparseable or opaque (`"null"`) entry means no
+chain (rationale). Source of truth: `embedderOrigins` in
+`lib/src/lib/embedder-origins.ts`, `normalizeEmbedderOrigins` in
+`lib/src/host/iframe-proxy-rewrite.ts`.
 
 VS Code routes this through webview request/response messages to
 `vscode-ext/src/iframe-proxy-host.ts`; standalone routes through
@@ -658,27 +647,22 @@ Security boundaries:
 - no user script is injected,
 - link-local/cloud-metadata ranges are blocked,
 - every other user-supplied `http://` target is trusted as the user's command
-  and framed with its response CSP and `X-Frame-Options` **replaced** by
-  `frame-ancestors <the webview's own chain>` (the embed is the user's own, not
-  third-party clickjacking). The cost is real: inside the frame the upstream
-  loses its own XSS policy for the duration of the embed.
+  and framed with its framing controls replaced (below). The cost is real:
+  inside the frame the upstream loses its own XSS policy for the duration of the
+  embed.
 
-**Must replace the upstream's framing controls, never merely drop them.** The
-port is not a secret and no request header separates our webview from an
-attacker page — an iframe navigation carries no `Origin`, and `Sec-Fetch-Site`
-reads `cross-site` for both — so dropping them for everyone hands a stranger two
-privileges the upstream refused it: framing a page that answered `DENY`, and
-reading that page's live URL and anchor hrefs back through the shim. Both are
-conditioned on a known embedder chain instead, and **the shim's `postMessage`
-targets that origin, never `'*'`**. With no chain the proxy strips nothing and
-injects nothing.
+**Must replace the upstream's framing controls with a `frame-ancestors` naming
+the embedder chain, never merely drop them**, and **the shim's `postMessage` must
+target that chain's origin, never `'*'`** — dropping them for everyone hands any
+page that scanned the port both a `DENY`ing document framed and that document's
+URLs read back, and no request header tells it apart from our webview
+(rationale; `SECURITY.md` → "Loopback Listeners"). **With no chain the proxy
+strips nothing and injects nothing.**
 
-**Must refresh a grant's idle timer for every caller except one that named
-itself foreign.** A live frame's navigations and sub-resource loads carry no
-`Origin` at all, so "own-origin only" would expire a grant the user is still
-looking at; what an `Origin: https://evil.example` must not buy is keeping a
-closed pane's grant, and its upstream binding, alive indefinitely. `isOwnOrigin`
-and `isForeignOrigin` are deliberately not each other's negation.
+**Must refresh a grant's idle timer for every caller except one that named itself
+foreign.** `isOwnOrigin` and `isForeignOrigin` are not each other's negation: an
+*absent* `Origin` must keep refreshing, since that is what a live frame's own
+navigations and sub-resources send. (rationale)
 
 **Must rewrite `Origin` only when it names the proxy itself.** Forward a foreign
 origin unchanged and keep an absent origin absent, on request and upgrade paths;
