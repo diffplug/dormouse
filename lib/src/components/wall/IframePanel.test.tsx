@@ -60,6 +60,43 @@ async function renderPanel(
 }
 
 describe('IframePanel', () => {
+  // The raw fallback is the case with no proxy in front of it at all — the
+  // website, Storybook, the tutorial — so it is not the trusted one. It used to
+  // be framed with no sandbox and a full camera/microphone/geolocation/
+  // clipboard-read grant, in a webview where the per-site prompt is often
+  // absent.
+  it('sandboxes the raw fallback and grants no device or clipboard-read permission', async () => {
+    const iframe = await renderPanel(stubActions());
+
+    const sandbox = iframe.getAttribute('sandbox') ?? '';
+    expect(sandbox).toContain('allow-scripts');
+    expect(sandbox).not.toContain('allow-top-navigation');
+    const allow = iframe.getAttribute('allow') ?? '';
+    for (const forbidden of ['camera', 'microphone', 'geolocation', 'clipboard-read']) {
+      expect(allow).not.toContain(forbidden);
+    }
+  });
+
+  it('refuses an open-window url that is not http(s)', async () => {
+    const onOpenBrowserPane = vi.fn();
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'createIframeProxyUrl'>;
+    platform.createIframeProxyUrl = vi.fn(async () => ({ ok: true, url: 'http://127.0.0.1:61234/app' }));
+    setPlatform(platform);
+    await renderPanel(stubActions({ onOpenBrowserPane }), paneProps('iframe-openwindow'));
+
+    // A hostile framed page picks this string; the confirm prompt is consent,
+    // not a boundary, so the scheme is checked before the prompt is offered.
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', {
+        origin: 'http://127.0.0.1:61234',
+        data: { __dormouse: 'open-window', url: 'javascript:alert(1)' },
+      }));
+    });
+
+    expect(container.textContent).not.toContain('wants to open a new tab');
+    expect(onOpenBrowserPane).not.toHaveBeenCalled();
+  });
+
   it('adopts clicks into the raw iframe fallback via window blur focus', async () => {
     const onClickPanel = vi.fn();
     const actions = stubActions({ onClickPanel });

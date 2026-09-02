@@ -1,5 +1,6 @@
 [
   {
+    "extensionId": "vscode.theme-defaults",
     "name": "Default Themes (built-in)",
     "version": "1.95.3",
     "license": "SEE LICENSE IN LICENSE-vscode.txt",
@@ -7,6 +8,7 @@
     "homepage": "https://github.com/eclipse-theia/vscode-builtin-extensions#readme"
   },
   {
+    "extensionId": "vscode.theme-monokai",
     "name": "Monokai Theme (built-in)",
     "version": "1.95.3",
     "license": "SEE LICENSE IN LICENSE-vscode.txt",
@@ -14,6 +16,7 @@
     "homepage": "https://github.com/eclipse-theia/vscode-builtin-extensions#readme"
   },
   {
+    "extensionId": "vscode.theme-quietlight",
     "name": "Quiet Light Theme (built-in)",
     "version": "1.95.3",
     "license": "SEE LICENSE IN LICENSE-vscode.txt",
@@ -21,6 +24,7 @@
     "homepage": "https://github.com/eclipse-theia/vscode-builtin-extensions#readme"
   },
   {
+    "extensionId": "vscode.theme-red",
     "name": "Red Theme (built-in)",
     "version": "1.95.3",
     "license": "SEE LICENSE IN LICENSE-vscode.txt",
@@ -28,6 +32,7 @@
     "homepage": "https://github.com/eclipse-theia/vscode-builtin-extensions#readme"
   },
   {
+    "extensionId": "vscode.theme-kimbie-dark",
     "name": "Kimbie Dark Theme (built-in)",
     "version": "1.95.3",
     "license": "SEE LICENSE IN LICENSE-vscode.txt",
@@ -35,6 +40,7 @@
     "homepage": "https://github.com/eclipse-theia/vscode-builtin-extensions#readme"
   },
   {
+    "extensionId": "vscode.theme-abyss",
     "name": "Abyss Theme (built-in)",
     "version": "1.95.3",
     "license": "SEE LICENSE IN LICENSE-vscode.txt",
@@ -42,6 +48,7 @@
     "homepage": "https://github.com/eclipse-theia/vscode-builtin-extensions#readme"
   },
   {
+    "extensionId": "santoso-wijaya.helios-selene",
     "name": "Solarized & Selenized",
     "version": "0.3.18",
     "license": null,

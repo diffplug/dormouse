@@ -39,6 +39,14 @@ primitive lives in `server-lib-common`; the terminal UI lives in
   prune** — `HostChallengeIssuer.issue` drops expired entries on every call, and
   the presence-nonce and setup-token stores do the same — because the requests
   that mint them are cheap to send and need little or no auth (rationale).
+* **A cap that one caller can spend on another's behalf is not a cap.** Every
+  bounded transient store here is keyed by whoever grew it: setup tokens per
+  minting Host (`MAX_TOKENS_PER_HOST`), presence nonces per session
+  (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`, with `MAX_REAUTH_NONCE_SESSIONS`
+  least-recently-used buckets bounding the total). A presence nonce is minted
+  *before* its WebAuthn prompt, so it waits out human latency; under a global
+  cap any other session's flood evicted it mid-prompt and failed every pairing
+  and connection ceremony for as long as the flood ran.
 
 ## Configuration
 
@@ -235,6 +243,19 @@ rotation:
   `listForHost` answers nothing for a `hostId` that is gone, so its subscription
   rows are unreachable the moment the edit lands, and they leave disk on the
   next 404/410 prune or when the Client deletes them.
+* **Every stored field is bounded and the row count is capped.** A `deliveryId`
+  is the caller's own choice and no Server can check one against a Host's ACL,
+  so this is the one *durable* store a session token can grow, and every push
+  route re-reads and re-parses the whole file. `endpoint` is capped at
+  `MAX_PUSH_ENDPOINT_LENGTH` (1024) on admission; both `keys` at the base64
+  lengths RFC 8291 fixes — `p256dh` an uncompressed P-256 point, `auth` the
+  16-byte secret — each at its *padded* encoding, so a browser that pads still
+  registers. An upsert then caps the committed set at
+  `MAX_PUSH_SUBSCRIPTIONS_PER_HOST` (32) and `MAX_PUSH_SUBSCRIPTIONS_TOTAL`
+  (256), **evicting the oldest `subscribedAt` first and never the row it just
+  wrote**. Eviction covers every Host, so a hand-edited file over the cap
+  converges on the next write; an evicted Client reads as un-registered and
+  repairs by pressing Enable, which is the recovery a dropped row already has.
 
 `hosts.json` stores `hostToken` — the host↔server relay bearer secret — in
 plaintext, and `vapid.json` a private key, so both files are written owner-only:
@@ -272,7 +293,12 @@ never be replayed even when verification would succeed, then
 Challenges are `HostChallengeIssuer` from `server-lib-common` — a generic
 single-use/TTL store despite the name — and setup, sign-in/re-auth, and
 push-subscribe each get **their own issuer**, so a challenge minted for one flow
-can never be redeemed in another. Before consuming, the server canonicalizes the
+can never be redeemed in another. Both server-side issuers are **capped**
+(`MAX_PENDING_CHALLENGES`, oldest evicted) as well as swept:
+`POST /api/signin/begin` needs no auth and no body, so expiry alone lets the map
+plateau at request-rate x TTL rather than at a bound the process chose. A flood
+evicts abandoned challenges of its own making, and the ceremony that loses one
+retries; single use is untouched. Before consuming, the server canonicalizes the
 browser's `clientDataJSON.challenge` by decoded base64url bytes, so padded
 browser serializations redeem the issued challenge without weakening single-use
 replay protection.
@@ -288,13 +314,13 @@ This table is the whole route surface. Paths and request/response shapes live in
 | -------------------------------- | -------------- | ------------------------------------------------- |
 | `GET /api/hello`                 | —              | The shared greeting. Carries no release identity: it is unauthenticated, CORS-`*` and reachable through `tailscale serve` — see the runtime file under "Installing it" |
 | `POST /api/setup/begin`          | setup token    | Issues a registration challenge, gated exactly as `finish` is, so neither is softer. A setup token buys one registration; an absent, mistyped, or spent one is the same delayed 401. Answers with the account's credential ids, so a retry's `excludeCredentials` cannot duplicate a passkey that already signs in — an orphan the Server never registered is absent, and is still replaced |
-| `POST /api/setup/finish`         | setup token    | Registers the passkey in `account.json`. The token is spent at the gate and put back if the registration then fails |
+| `POST /api/setup/finish`         | setup token    | Registers the passkey in `account.json`. The token is spent at the gate and put back if the registration then fails. `label` is **reduced, not refused** — bounded to `MAX_PASSKEY_LABEL_LENGTH` code points and stripped of control and bidi characters by the same `boundedPushText` a pairing label goes through — so a long device name still registers |
 | `POST /api/setup/retire`         | session token  | Spends a live setup token without registering anything, so a phone that scanned a QR it will not register with cannot leave a photographed code redeemable. 204, or 401 `SETUP_TOKEN_INVALID_ERROR` after the same fixed delay |
 | `POST /api/signin/begin`         | —              | Issues a sign-in challenge                          |
 | `POST /api/signin/finish`        | —              | Verifies the assertion and issues a 12-hour in-memory session token |
 | `POST /api/reauth/begin`         | session token  | Takes a required, kind-tagged `PresenceBinding`, mints a single-use 2-minute `serverNonce`, and answers `presenceChallenge(binding, nonce)` with the RP ID, the nonce, and the bound credential as the sole `allowCredentials` entry. 404 for a credential this account has not registered; 400 for a missing or malformed binding |
 | `POST /api/reauth/finish`        | session token  | Consumes the nonce, recomputes the challenge, and verifies the assertion against the **stored** key for exactly that credential. **Extends nothing** — not the session, not the relay socket |
-| `POST /api/host/enroll`          | setup password or one-time enroll token | Enrolls a Host, appends `hosts.json`, and mirrors the user-verification policy. Exactly one credential — both, or neither, is a 400. **Takes no label**: the name a machine presents is its own, and a Client learns it only inside an encrypted outcome |
+| `POST /api/host/enroll`          | setup password or one-time enroll token | Enrolls a Host, appends `hosts.json`, and mirrors the user-verification policy. Exactly one credential — both, or neither, is a 400. **Takes no label**: the name a machine presents is its own, and a Client learns it only inside an encrypted outcome. Capped at `MAX_ENROLLED_HOSTS`, answering 409 naming the file to edit — checked inside the store mutex and **after** the credential, so a caller that proved nothing cannot learn the server is full |
 | `POST /api/host/setup-token`     | host token     | Mints the single-use, short-TTL token behind this Host's QR (below) |
 | `GET /api/hosts`                 | session token  | Enrolled hosts + whether each is currently connected |
 | `GET /api/push/config`           | —              | Returns the public VAPID key, or `null` when push is unconfigured |
@@ -312,10 +338,32 @@ setup password or a bearer token and no cookies exist for a foreign origin to
 ride on; the Host and dev Pocket builds call from other origins. WS auth rides
 the `token` query param, since browsers cannot set WebSocket headers.
 
+**Every request body is bounded before any route runs**, at
+`MAX_REQUEST_BODY_BYTES` (64 KiB), answering 413. The unauthenticated routes —
+`/api/host/enroll`, `/api/setup/*`, `/api/signin/finish` — read their body
+*before* the credential gate, so an unbounded reader would let any page on the
+tailnet make the process buffer whatever it liked with no auth, no rate limit,
+and no delay. The bound is on the body, never on the caller: a correct
+credential inside an over-long body is still 413. One route is exempt because
+its legitimate body is larger — `/api/push/send`, whose
+`MAX_PUSH_SEND_BODY_BYTES` is *derived* from `MAX_PUSH_QUERY_DELIVERY_IDS` and
+`MAX_SEALED_PUSH_LENGTH` so it cannot drift from what a maximal fan-out costs.
+The limit is staged after CORS, so a 413 carries the headers a browser needs to
+read it. Source of truth: `server/src/app.ts`, pinned by
+`server/test/body-limit.test.mjs`.
+
 The setup password is compared in constant time (SHA-256 digests, so length
 never branches) with a small fixed delay on failure; host tokens are resolved
-the same way, checking every row without an early break. That is the extent of
-the hardening today.
+the same way, checking every row without an early break. **The same delay
+answers a rejected host token**, on `requireHost` and on the `/ws/host`
+upgrade: both run unauthenticated over the most expensive lookup here — a read,
+a parse, and two SHA-256 per row — so answering instantly made probing cheaper
+for the caller than for the server. **A `hostToken` is pinned to its minted
+shape**, 32 bytes base64url, and a value of any other shape is refused before
+`hosts.json` is read at all, the way `isDeliveryId` guards the push routes. The
+session token gets neither: an in-memory `Map` lookup costs nothing, so a delay
+there would buy an attacker held connections rather than cost them anything.
+That is the extent of the hardening today.
 
 Every session-gated route — including the `/ws/client` upgrade, which is
 rejected before `injectWebSocket` ever sees it — answers an unknown or expired
@@ -523,6 +571,40 @@ with `hostId` stamped from the socket), shapes in
 
 **The envelope is the whole client surface.** Any other frame type is answered
 with an `error` and reaches no Host.
+
+Its resource bounds, all four enforced under `sweepRelaySockets` or at the
+socket itself:
+
+* **A frame larger than any legal one never reaches a guard.** `ws` defaults to
+  a 100 MiB message, which the relay would buffer whole before
+  `isE2eClientFrame` ran, so the adapter's `maxPayload` is set to
+  `MAX_RELAY_FRAME_BYTES` — *derived* from `MAX_E2E_CIPHERTEXT_LENGTH`,
+  `MAX_CLIENT_ID_LENGTH` and `E2E_ID_LENGTH`, the same bounds the frame guards
+  enforce. Over it, the socket closes 1009.
+* **Client sockets are capped** at `MAX_RELAY_CLIENT_SOCKETS` (64). The
+  (n+1)-th **is refused, never admitted by evicting another**: a live socket
+  belongs to a ceremony or an attached terminal, and dropping one would let a
+  token holder take the relay away from itself. It closes 1013, a retry.
+* **An expired session is closed after the fact.** The `/ws/client` upgrade
+  checks the session once and the socket outlives it by up to twelve hours, so
+  the sweep closes any whose session has expired — the `/ws/client` counterpart
+  of the revoked-Host sweep in Guardrails. Closed 1008 `unauthorized`, the same
+  pair the upgrade answers with, so Pocket needs no second recovery.
+  **Only a registered conn is routed or torn down**, on both sides: a `close()`
+  starts a handshake rather than ending the socket, so a frame already buffered
+  still arrives carrying the conn the sweep dropped. `onClientFrame` and
+  `unregisterClient` carry the same generation guard `onHostFrame` and
+  `unregisterHost` do, or a late `init` would open a fresh ceremony for the
+  session that was just expired.
+* **A half-open connection is closed by heartbeat.** It sends nothing and
+  closes nothing, so its entry and its Host binding would live until the OS
+  gave up. The sweep pings every socket and closes whatever has not been heard
+  from within `RELAY_IDLE_TIMEOUT_MS` (three sweeps) with 1001 — a pong, not
+  traffic, is what tells a dead socket from a legitimately idle terminal.
+
+`index.ts` runs the sweep every `RELAY_SWEEP_MS` (30 s), `unref`'d like the
+revocation sweep and far more often because it touches no disk. Pinned by
+`server/test/relay-limits.test.mjs`.
 
 **Only one socket may own a `hostId`.** Registering a second one for the same
 `hostId` displaces the first: clients bound to it are told `host-gone`, their

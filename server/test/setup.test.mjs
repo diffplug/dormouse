@@ -281,3 +281,23 @@ test('the configured origin drives setup and Host policy', async () => {
   assert.equal(body.origin, 'https://example.com');
   assert.equal(body.rpId, 'example.com');
 });
+
+test('a passkey label is bounded and reduced before it is persisted', async () => {
+  // `account.json` is durable and is re-read and re-parsed on every sign-in and
+  // every re-auth, while the two sibling fields on this route are already
+  // bounded, so an unbounded label was an omission rather than a policy.
+  const { app, stateDir } = await freshApp();
+  const authenticator = await newAuthenticator();
+  const res = await register(app, authenticator, {
+    // Long, and carrying a bidi override plus a control character.
+    label: `‮Pixel ${'x'.repeat(4096)}`,
+  });
+  assert.equal(res.status, 200);
+
+  const account = await readAccount(stateDir);
+  const { label } = account.passkeys[0];
+  assert.ok([...label].length <= 64, `stored ${[...label].length} code points`);
+  assert.equal(label.includes('‮'), false, 'bidi overrides are stripped');
+  assert.equal(label.includes(''), false, 'control characters are stripped');
+  assert.match(label, /^Pixel/);
+});

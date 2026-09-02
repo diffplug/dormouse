@@ -25,7 +25,10 @@ import type {
   PeerSurfaceParams,
   PeerSurfaceResult,
 } from '../../lib/src/remote/host/peer-surfaces';
-import type { WebSocketLike } from '../../lib/src/remote/host/remote-host';
+import {
+  MAX_SERVER_TO_HOST_FRAME_LENGTH,
+  type WebSocketLike,
+} from '../../lib/src/remote/host/remote-host';
 import type { ExtensionMessage } from './message-types';
 import {
   broadcastUiEvent,
@@ -198,10 +201,18 @@ export function notifyDirectoryChanged(): void {
  *
  * `ws`'s optional native accelerators (`bufferutil`, `utf-8-validate`) are
  * deliberately left unbundled and unshipped; `ws` falls back to its JS paths.
+ *
+ * `ws` defaults `maxPayload` to 100 MiB, which a hostile relay would spend in
+ * this process — the extension host, holding every PTY. Cap it at the largest
+ * legal frame so an oversized one is never buffered; `RemoteHost` re-measures
+ * the same bound before parsing, because the global implementation takes no
+ * such option.
  */
 export function createRelaySocket(url: string): WebSocketLike {
-  const Impl = globalThis.WebSocket ?? (require('ws') as typeof import('ws')).WebSocket;
-  return new Impl(url) as unknown as WebSocketLike;
+  const global = globalThis.WebSocket;
+  if (global) return new global(url) as unknown as WebSocketLike;
+  const Ws = (require('ws') as typeof import('ws')).WebSocket;
+  return new Ws(url, { maxPayload: MAX_SERVER_TO_HOST_FRAME_LENGTH }) as unknown as WebSocketLike;
 }
 
 function startService(): void {

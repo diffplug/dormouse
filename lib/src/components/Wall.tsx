@@ -14,6 +14,7 @@ const RemotePairingModalHost = lazy(() =>
 );
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
 import { markAgentBrowserSessionClosed } from './wall/agent-browser-sessions';
+import { isAllowedAgentBrowserBinary } from '../lib/agent-browser-binary';
 import { disposeAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
 import {
@@ -170,6 +171,9 @@ function compareBySurfaceRef(a: DorSurface, b: DorSurface): number {
 function closeAgentBrowserSession(params: unknown): void {
   const session = agentBrowserSessionFromParams(params);
   if (!session) return;
+  // Checked, not merely typed: these params come off the persisted session
+  // blob, and `binaryPath` names a program the host will spawn
+  // (`lib/src/lib/agent-browser-binary.ts`).
   const binaryPath = (params as { binaryPath?: unknown }).binaryPath;
   // Mark before issuing the close so a popped-out surface's auto-revert sees
   // the impending teardown and doesn't relaunch the session we're killing.
@@ -177,7 +181,7 @@ function closeAgentBrowserSession(params: unknown): void {
   getPlatform().agentBrowserCommand?.(
     session,
     ['close'],
-    typeof binaryPath === 'string' ? binaryPath : undefined,
+    isAllowedAgentBrowserBinary(binaryPath) ? binaryPath : undefined,
   ).catch(() => {});
 }
 

@@ -7,7 +7,7 @@
 
 import { serve } from '@hono/node-server';
 
-import { createApp, HOST_REVOCATION_SWEEP_MS } from './app.js';
+import { createApp, HOST_REVOCATION_SWEEP_MS, RELAY_SWEEP_MS } from './app.js';
 import { ConfigError, readConfig } from './config.js';
 import {
   assertVapidKeyPair,
@@ -51,7 +51,7 @@ if (vapidSubject === null) {
   );
 }
 
-const { app, injectWebSocket, sweepRevokedHosts } = createApp({
+const { app, injectWebSocket, sweepRevokedHosts, sweepRelaySockets } = createApp({
   ...appConfig,
   // Both together or neither: advertising a key the server has no subject to
   // sign with would let a phone register against a push it can never receive.
@@ -116,3 +116,11 @@ setInterval(() => {
     // next sweep reads it again.
   });
 }, HOST_REVOCATION_SWEEP_MS).unref();
+
+// The socket-level sweep, on the same terms and for the same reason: the
+// `/ws/client` session is checked once at the upgrade, and a half-open TCP
+// connection closes nothing on its own (`docs/specs/server.md` -> Relay). It
+// touches no disk, so it runs far more often and cannot throw.
+setInterval(() => {
+  sweepRelaySockets();
+}, RELAY_SWEEP_MS).unref();

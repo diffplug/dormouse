@@ -262,6 +262,27 @@ describe('TerminalProtocolParser', () => {
     ]);
   });
 
+  // The command line is *retained* per Session — re-tokenized on every header
+  // derivation, and the key `dor ensure --restart` matches on — so it is bounded
+  // and sanitized like a title rather than stored as it arrived. The `\xNN`
+  // unescape is what puts control characters back, so the sanitize runs after it.
+  it('bounds and sanitizes the OSC 633 command line', () => {
+    const parser = new TerminalProtocolParser();
+
+    expect(parser.process('\x1b]633;E;git\\x0a\\x1bcommit\x07').events).toEqual([
+      { kind: 'semantic', event: { type: 'commandLine', commandLine: 'git commit' } },
+    ]);
+
+    const long = parser.process(`\x1b]633;E;${'a'.repeat(100_000)}\x07`).events;
+    expect(long).toHaveLength(1);
+    const event = long[0];
+    if (event.kind !== 'semantic' || event.event.type !== 'commandLine') throw new Error('expected a commandLine');
+    expect(event.event.commandLine.length).toBe(2048);
+
+    // Nothing but control characters is nothing, not an empty command line.
+    expect(parser.process('\x1b]633;E;\\x01\\x02\x07').events).toEqual([]);
+  });
+
   // W1: the OSC terminator scan runs on raw bytes, so a `Cwd=` payload holding
   // one ends the sequence early and everything after it parses as a fresh,
   // fully-trusted OSC. The parser cannot defend against this — by the time it

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hostPathDisplay, loopbackPort, normalizeNavUrl, pathDisplay } from './browser-url';
+import { browserSurfaceUrl, hostPathDisplay, loopbackPort, normalizeNavUrl, pathDisplay } from './browser-url';
 
 describe('hostPathDisplay', () => {
   it('drops the scheme and a bare root path', () => {
@@ -105,5 +105,35 @@ describe('loopbackPort', () => {
   it('returns null for unparseable input', () => {
     expect(loopbackPort('localhost:5173')).toBeNull();
     expect(loopbackPort('')).toBeNull();
+  });
+});
+
+// `dor iframe` validates its own argument, but the control socket is a wire
+// protocol and a proxied page's `open-window` message reaches the same sink, so
+// this is where the scheme is decided. On a host with no iframe proxy the value
+// becomes a raw `<iframe src>`, where `javascript:` runs in the app's origin.
+describe('browserSurfaceUrl', () => {
+  it('accepts http(s) and the schemeless forms that normalize to them', () => {
+    expect(browserSurfaceUrl('http://localhost:5173/app')).toBe('http://localhost:5173/app');
+    expect(browserSurfaceUrl('https://example.test/x?q=1#f')).toBe('https://example.test/x?q=1#f');
+    expect(browserSurfaceUrl('localhost:5173')).toBe('http://localhost:5173');
+    expect(browserSurfaceUrl(' example.test ')).toBe('https://example.test');
+  });
+
+  it('refuses every other scheme', () => {
+    for (const bad of [
+      'javascript:alert(1)',
+      'JavaScript:alert(1)',
+      'data:text/html,<script>1</script>',
+      'blob:http://localhost/abc',
+      'file:///etc/passwd',
+      'about:blank',
+      'vscode-webview://uuid/index.html',
+      'view-source:http://localhost:5173',
+      '',
+      '   ',
+    ]) {
+      expect(browserSurfaceUrl(bad)).toBeNull();
+    }
   });
 });

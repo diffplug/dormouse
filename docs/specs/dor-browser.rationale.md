@@ -28,6 +28,28 @@
 
 **Why the stray-`about:blank` sweep is guarded.** The close/reopen pair can leave an extra blank tab beside the navigated one. Sweeping blanks unconditionally is the obvious fix and is wrong: a session whose only tab is legitimately blank would lose it, leaving the pane with nothing to show. Requiring that a real page be open first makes the sweep a no-op in exactly that case.
 
+## Agent-Browser Host Capabilities
+
+**Why `binaryPath` needs a gate of its own.** The subcommand allowlist covers arguments, not the executable: `streamStatus`, `open` and `popOut` supply their own args and each take a `binaryPath`, so an allowlist on subcommands never sees one. And because the value is persisted into the pane's params, an unchecked one is not a one-shot — it is arbitrary local execution in the extension host or the Tauri sidecar on every subsequent launch. Refusing by dropping rather than failing means a stale or hostile value degrades to "resolve it yourself".
+
+**Why the screenshot path is private.** The frame is a picture of the user's authenticated browser, written by an external process under the ambient umask, so a derivable name in the shared temp directory is readable by anything else on the machine for as long as it exists. `standalone/sidecar/clipboard-ops.js` already applies the same discipline, cleanup included, to clipboard images.
+
+## Iframe Shim
+
+**Why the CLI's own check is not enough.** `open-window` carries a string the framed page chose, and the new-tab prompt in front of it is user consent, not a boundary — the user is agreeing to open a pane, not vetting a scheme. The same check gates `surface.iframe`, which is a wire protocol on the control socket rather than the CLI, so nothing upstream of it has already filtered.
+
+## Iframe Focus And Rendering Notes
+
+**Why the raw fallback is sandboxed too.** It is tempting to read "raw" as the trusted path and the proxy as the one needing containment; it is the reverse. The raw fallback is the case with *no* proxy in front of the page at all.
+
+**What a permission in `allow` actually costs.** `dor iframe` takes any http(s) URL, not just a loopback dev server, and a desktop webview often has no per-site prompt (WKWebView with no media `WKUIDelegate`, WebView2 defaults), so the attribute grants outright what a browser would have asked about. `clipboard-read` most pointedly, since a terminal's clipboard is where secrets get pasted.
+
 ## Iframe Host Capability And CSP
 
 **Why the `Origin` rewrite is conditional.** Rewriting vouches that a request came from the upstream's own origin. The grant port is enumerable, so rewriting a foreign origin would let any browser page launder a request; on WebSocket upgrades, which are not protected by CORS, that yields a readable socket the upstream may have refused. Forwarding the foreign origin unchanged leaves that decision with the upstream.
+
+**Why no request header can recognize the embedder.** An iframe navigation carries no `Origin`, and `Sec-Fetch-Site` reads `cross-site` for our own webview and for a page that scanned the ephemeral range alike. That is what forces the recognizer to be a `frame-ancestors` the browser enforces, supplied by the one realm that knows its own chain.
+
+**Why a partial chain is no chain.** A `frame-ancestors` naming a subset of the real ancestors blocks Dormouse's own frame, which is the one embed that must always work. Failing closed to "no chain" instead leaves the caller exactly what the upstream would have served it directly, so the degraded case is safe in both directions.
+
+**Why the idle timer refreshes for an absent `Origin`.** "Own origin only" would expire a grant the user is still looking at, because a live frame's navigations and sub-resource loads carry no `Origin` at all. What a foreign `Origin` must not buy is keeping a closed pane's grant — and its live upstream binding — alive indefinitely by polling.

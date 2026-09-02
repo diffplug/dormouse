@@ -109,6 +109,10 @@ export interface AlertPushDeps {
  * and the Server never learns a label
  * (`docs/specs/remote-security-model.md`). The send path does not need it, and
  * deliberately does not pay for it; see {@link sendPush}.
+ *
+ * **The delivery id is the join key and stops here.** It is a bearer capability
+ * for that Client's push rows, the caller is the webview realm, and the dialog
+ * renders labels only (`SECURITY.md` → "What crosses the boundary").
  */
 export async function loadPushDevices(deps: AlertPushDeps): Promise<PushDevice[]> {
   const response = await hostFetch(deps, API_ROUTES.pushDevices);
@@ -117,10 +121,7 @@ export async function loadPushDevices(deps: AlertPushDeps): Promise<PushDevice[]
   const labels = new Map(deps.activeRecords().map((r) => [r.deliveryId, r.label]));
   return body.devices
     .filter((device) => labels.has(device.deliveryId))
-    .map((device) => ({
-      deliveryId: device.deliveryId,
-      label: labels.get(device.deliveryId) || 'Unnamed device',
-    }));
+    .map((device) => ({ label: labels.get(device.deliveryId) || 'Unnamed device' }));
 }
 
 /**

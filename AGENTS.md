@@ -66,6 +66,7 @@ When updating code covered by a spec, update the spec to match. When the two spe
 
 **The rationale split.** A spec stays dense and normative; the evidence behind its rules moves to a paired `docs/specs/<foo>.rationale.md`. Opt-in per spec — thin specs keep rationale inline. What moves and what stays:
 
+- **Maximize the rationale file, minimize the spec.** The default destination for a new sentence is `<foo>.rationale.md`; it earns a place in the spec only by the boundary test below. When a change grows a spec, the growth should be the rule — one bolded imperative — and the paragraph behind it should land in the rationale. A spec's word budget rising while its rationale's stays flat means the split went backwards.
 - Every prohibition and constraint keeps a one-line form in the spec. The boundary test: if deleting the sentence would let a competent editor reintroduce a bug or break compatibility, its one-line form stays in the spec; everything past that line is rationale.
 - Mechanism explanation stays inline when the invariant is illegible without it.
 - Forensic history — measurement narratives, dead-approach stories, grievances against replaced dependencies — moves to the rationale file, or is deleted outright once depreciated (git history keeps the record).
@@ -98,7 +99,7 @@ Four sibling lints run alongside it in `pnpm test`, each enforcing one invariant
 
 The last two carry a load-bearing self-test, and the two are inverses because the lints are: `scripts/deploy-lint-selftest.mjs` deletes each installer control — and, for exact-count rules, adds a copy — while `scripts/e2e-lint-selftest.mjs` re-introduces each forbidden thing. Either way the requirement is the same: the lint must go red. **A rule added to one of these lints without its self-test case is not enforced** — it is a claim that something is checked. They share their plumbing, and only that, through `scripts/lint-kit.mjs`.
 
-`scripts/installer-verify-test.mjs` (also `pnpm lint:deploy`) executes what that lint can only read: it extracts the shell helpers behind `manage verify`, the Serve conflict gate and the `server.env` check from the shipped installers and runs them over crafted input.
+`scripts/installer-verify-test.mjs` (also `pnpm lint:deploy`) runs the installer shell helpers that lint can only read, extracted from the shipped files.
 
 `pnpm test` also runs `scripts/clamp-issue-body-selftest.mjs` — not a lint but the test for `scripts/clamp-issue-body.mjs`, the helper the audit workflows use to keep an issue body postable. It lives at the repo root because its callers do.
 

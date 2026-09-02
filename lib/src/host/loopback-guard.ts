@@ -25,6 +25,14 @@
  *      origin — it would land in `location.pathname`, break client-side
  *      routers, and never survive onto root-relative sub-resource requests.
  *
+ * A third question has no request-header answer at all: **who is allowed to
+ * frame me?** An iframe navigation carries no `Origin`, and `Sec-Fetch-Site`
+ * reads `cross-site` for our own webview and for an attacker page alike — so a
+ * listener whose response confers something on its *embedder* (the iframe
+ * proxy's framing-header replacement, and its shim) has to name that embedder
+ * and let the browser enforce it, through `frame-ancestors`. See
+ * `./iframe-proxy-rewrite.ts` → `FRAMING_RESPONSE_HEADERS`.
+ *
  * `SECURITY.md` → "Loopback Listeners" is the authority on which listeners
  * exist and how each answers; it is deliberately not restated here, since it
  * tells its reader to derive that set by search rather than trust a list.
@@ -55,4 +63,20 @@ export function isOwnOrigin(originHeader: string | undefined, port: number): boo
   // caller then declines to vouch and forwards the header untouched.
   const origin = (originHeader ?? '').toLowerCase();
   return origin === `http://127.0.0.1:${port}` || origin === `http://localhost:${port}`;
+}
+
+/**
+ * True when the caller **named itself** as somebody else: an `Origin` is
+ * present and is not this listener's own.
+ *
+ * Not the negation of {@link isOwnOrigin}, and the difference is the whole
+ * point: an *absent* `Origin` is neither own nor foreign. Treating absence as
+ * own would vouch for every navigation; treating it as foreign would penalize
+ * the ordinary iframe case, which is precisely the one that carries no
+ * `Origin`. Ask this where the question is "may this caller keep something of
+ * mine alive", and {@link isOwnOrigin} where it is "may I speak for this
+ * caller".
+ */
+export function isForeignOrigin(originHeader: string | undefined, port: number): boolean {
+  return !!originHeader && !isOwnOrigin(originHeader, port);
 }

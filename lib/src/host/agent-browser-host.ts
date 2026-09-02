@@ -27,8 +27,9 @@
  *    render swap (docs/specs/dor-browser.md → "Display Modal And Render Swaps").
  * 6. `popOut` / `popIn` — relaunch a session headed/headless at its live active
  *    url (Chrome's mode is fixed at launch, so this is a close + relaunch).
- * 7. `closePoppedOut` — close every still-headed window, called from each host's
- *    shutdown so quitting never orphans a real Chrome window.
+ * 7. `closePoppedOut` — close every still-headed window **and drop the capture
+ *    directory**, called from each host's shutdown so quitting never orphans a
+ *    real Chrome window or leaves a frame of the user's browser in tmp.
  *
  * The VS Code stream relay is NOT here: it works around the `vscode-webview://`
  * origin the agent-browser stream server rejects, which is a VS-Code-only
@@ -37,7 +38,7 @@
  */
 import * as os from 'os';
 import * as path from 'path';
-import { promises as fs } from 'fs';
+import { promises as fs, rmSync } from 'fs';
 // All external spawns go through dor-lib-common's spawnAndCapture, which owns the
 // Windows recipe (cross-spawn for PATHEXT/.cmd, windowsHide, exit-vs-close). The
 // GUI host needs it even for the absolute `binaryPath` dor ab resolved.
@@ -51,6 +52,7 @@ import {
   DEFAULT_AGENT_BROWSER_BIN,
 } from 'dor-lib-common';
 import { randomBytes } from 'crypto';
+import { isAllowedAgentBrowserBinary } from '../lib/agent-browser-binary';
 import { type AgentBrowserTab, parseAgentBrowserTabs } from '../lib/agent-browser-tab';
 import {
   AGENT_BROWSER_ALLOWED_SUBCOMMANDS,
@@ -119,10 +121,25 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   // The host's PATH is often the GUI login PATH (no nvm/volta shims), so prefer
   // the absolute path `dor ab` resolved in the user's terminal; fall through on
   // ENOENT (binary missing) to the next candidate in case it has gone stale.
+  //
+  // The one gate every entry point shares. `binaryPath` arrives from the webview
+  // realm and from a pane's persisted Lath params, so an unchecked one is
+  // arbitrary local execution in the extension host or the Tauri sidecar — the
+  // exact escape the nonce CSP exists to prevent, and reachable without any user
+  // interaction on the next launch. The subcommand allowlist in `command()` does
+  // not cover it: `streamStatus`, `open` and `popOut` supply their own args and
+  // take a `binaryPath` of their own. A refused path is dropped, not fatal: the
+  // host's own candidates still run, so a stale or hostile value degrades to
+  // "resolve it yourself" rather than to a broken surface.
   async function runWithBinaryFallback(args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
+    const configured = process.env[AGENT_BROWSER_BIN_ENV];
+    if (binaryPath !== undefined && !isAllowedAgentBrowserBinary(binaryPath, configured)) {
+      log(`[agent-browser] refused a caller-supplied binary path that is not an agent-browser: ${JSON.stringify(binaryPath)}`);
+      binaryPath = undefined;
+    }
     const candidates = [...new Set([
       binaryPath,
-      process.env[AGENT_BROWSER_BIN_ENV],
+      configured,
       DEFAULT_AGENT_BROWSER_BIN,
     ].filter((c): c is string => !!c))];
 
@@ -257,11 +274,61 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     return sessionForKey(`gui-${randomBytes(6).toString('hex')}`);
   }
 
-  // Reused per session so we don't litter tmp with one file per frame; the panel
-  // guarantees one screenshot in flight per surface, so overwriting is safe.
-  function screenshotPath(session: string, ext: string): string {
-    const safe = session.replace(/[^A-Za-z0-9._-]/g, '_');
-    return path.join(os.tmpdir(), `dormouse-ab-shot-${safe}.${ext}`);
+  // Screenshots of the user's authenticated browser land here, written by an
+  // external process under the ambient umask, so the *directory* is the control:
+  // one `mkdtemp` per host process, which is `0700` and unguessable. A derivable
+  // path directly in `os.tmpdir()` let any other local account read every frame,
+  // or pre-create the name as a symlink and have agent-browser clobber whatever
+  // it pointed at. `standalone/sidecar/clipboard-ops.js` does the same for
+  // clipboard images; the two paths are meant to match, cleanup included — a
+  // frame of someone's authenticated browser is not something to leave in tmp
+  // for the OS to reap whenever it gets round to it.
+  let screenshotDirOnce: Promise<string> | null = null;
+  let screenshotDirPath: string | null = null;
+  function screenshotDir(): Promise<string> {
+    // mkdtemp creates at 0700 already; the chmod covers an inherited-mode
+    // filesystem and is a no-op on Windows, where %TEMP% is per-user.
+    screenshotDirOnce ??= fs.mkdtemp(path.join(os.tmpdir(), 'dormouse-ab-')).then(async (dir) => {
+      if (process.platform !== 'win32') await fs.chmod(dir, 0o700).catch(() => {});
+      screenshotDirPath = dir;
+      // Backstop for an exit that never reaches `closePoppedOut` — a crash, or
+      // a host that skips its shutdown hook. An `exit` handler cannot await,
+      // hence the sync removal.
+      process.once('exit', () => {
+        try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+      });
+      return dir;
+    }).catch((err: unknown) => {
+      // Never memoize the failure. `??=` would otherwise cache the rejected
+      // promise, so one transient EACCES/ENOSPC on tmpdir would disable
+      // screenshots for the rest of this process's life with no retry.
+      screenshotDirOnce = null;
+      throw err;
+    });
+    return screenshotDirOnce;
+  }
+
+  /** Drop the whole capture directory. Called on shutdown; safe to repeat. */
+  async function removeScreenshotDir(): Promise<void> {
+    const dir = screenshotDirPath;
+    screenshotDirOnce = null;
+    screenshotDirPath = null;
+    screenshotNames.clear();
+    if (dir) await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+
+  // Reused per session so we don't litter with one file per frame; the panel
+  // guarantees one screenshot in flight per surface, so overwriting is safe. The
+  // random component is per session, so the name stays stable for reuse while
+  // being unguessable from the session key alone.
+  const screenshotNames = new Map<string, string>();
+  async function screenshotPath(session: string, ext: string): Promise<string> {
+    let name = screenshotNames.get(session);
+    if (name === undefined) {
+      name = randomBytes(12).toString('hex');
+      screenshotNames.set(session, name);
+    }
+    return path.join(await screenshotDir(), `shot-${name}.${ext}`);
   }
 
   async function command(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
@@ -342,7 +409,16 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     }
     const format = opts.format === 'png' ? 'png' : 'jpeg';
     const ext = format === 'png' ? 'png' : 'jpg';
-    const out = screenshotPath(session, ext);
+    let out: string;
+    try {
+      // Every other failure in here answers `{ ok: false, error }`; a tmpdir
+      // that cannot be created must not escape as a rejection instead.
+      out = await screenshotPath(session, ext);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log(`[agent-browser] could not create the capture directory: ${message}`);
+      return { ok: false, error: `could not create a private screenshot directory: ${message}` };
+    }
     const args = ['--session', session, 'screenshot', out, '--screenshot-format', format];
     if (format === 'jpeg') {
       const q = Number.isFinite(opts.quality) ? Math.min(100, Math.max(1, Math.round(opts.quality as number))) : 85;
@@ -370,6 +446,11 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
       const buffer = await fs.readFile(shot.path);
       // A Uint8Array view over exactly this file's bytes.
       const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+      // The bytes are in memory now and this path owns the file's whole life,
+      // so the frame does not sit on disk until shutdown. The path-returning
+      // sibling cannot do this — its caller (Rust) reads the file afterwards —
+      // so there the next capture overwrites it and shutdown removes the dir.
+      await fs.unlink(shot.path).catch(() => {});
       return { ok: true, bytes, mime: shot.mime };
     } catch (err) {
       log(`[agent-browser] screenshot read failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -469,9 +550,14 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   async function closePoppedOut(): Promise<void> {
     const entries = [...poppedOutSessions.entries()];
     poppedOutSessions.clear();
-    await Promise.all(entries.map(([session, binaryPath]) =>
-      runWithBinaryFallback(['--session', session, 'close'], binaryPath).catch(() => undefined),
-    ));
+    await Promise.all([
+      ...entries.map(([session, binaryPath]) =>
+        runWithBinaryFallback(['--session', session, 'close'], binaryPath).catch(() => undefined),
+      ),
+      // The same shutdown, so the same hook: this is the only moment both hosts
+      // reliably reach, and every captured frame is still on disk until it runs.
+      removeScreenshotDir(),
+    ]);
   }
 
   return { command, edit, screenshot, screenshotToFile, streamStatus, open, popOut, popIn, closePoppedOut };
