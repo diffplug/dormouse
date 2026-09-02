@@ -25,6 +25,7 @@ import {
   type PresenceBinding,
   type PresenceProofV1,
 } from 'server-lib-common';
+import { createNoiseInitiator, pairingInvitationPrologue } from 'server-lib-common';
 import { RemoteHost, type RemoteApiSessionLike } from './remote-host';
 import type { HostEnrollment } from './enrollment';
 import type { PendingPairing } from './pairing-approval';
@@ -781,6 +782,56 @@ describe('RemoteHost end-to-end ceremonies', () => {
     expect(invitationEvents.filter((e) => e.state === 'dropped')).toHaveLength(1);
   });
 
+  it('client-gone during a handshake disposes what the handshake then creates', async () => {
+    // `client-gone` is queued on the same chain as every `e2e` step. Run inline
+    // it would land *between* the responder's awaits, find nothing to dispose,
+    // and leave the resumed init holding a reserved invitation and a client
+    // entry for a peer the relay has already forgotten — one nothing removes.
+    makeHost();
+    const invitation = await mintInvitation();
+    const clientStatic = await generateNoiseKeyPair();
+    const handshake = await createNoiseInitiator({
+      prologue: pairingInvitationPrologue(invitation),
+      staticKeyPair: clientStatic,
+      remoteStaticPublicKey: invitation.ephPub,
+    });
+    sendE2e(
+      'c1',
+      'pairing',
+      invitation.inviteId,
+      'init',
+      toBase64Url(await handshake.writeMessage()),
+    );
+    // No await between the two: the init's WebCrypto is still in flight.
+    socket.receive({ t: 'client-gone', clientId: 'c1' });
+    await settle();
+
+    expect(host.trackedClientCount).toBe(0);
+    expect(approvals).toEqual([]);
+    // The invitation is spent either way — a phone did complete message 1
+    // against it — but it must not be left `reserved` on a client that is gone.
+    expect(host.invitationState(invitation.inviteId)).toBe('consumed');
+    expect(host.outstandingInvitationCount).toBe(0);
+  });
+
+  it('evicting a scanned invitation at the cap reports consumed, not dropped', async () => {
+    // `dropped` means nobody scanned it. The oldest by insertion is whatever it
+    // is doing, so an eviction that always said `dropped` would tell the panel
+    // to offer a new code for a ceremony a phone is mid-way through.
+    makeHost();
+    const scanned = await requestPairing('c1', await newAuthenticator());
+    invitationEvents.length = 0;
+    for (let i = 0; i < MAX_TOKENS_PER_HOST; i += 1) await mintInvitation();
+
+    expect(invitationEvents).toContainEqual({
+      inviteId: scanned.invitation.inviteId,
+      state: 'consumed',
+    });
+    expect(
+      invitationEvents.filter((e) => e.inviteId === scanned.invitation.inviteId),
+    ).toHaveLength(1);
+  });
+
   it('stands down for good on a displacement close', async () => {
     makeHost();
     socket.closeWith(WS_CLOSE_HOST_REPLACED);
@@ -788,7 +839,7 @@ describe('RemoteHost end-to-end ceremonies', () => {
     expect(host.status).toBe('displaced');
   });
 
-  it('ignores every legacy relay frame', async () => {
+  it('ignores every frame that is not the e2e envelope or client-gone', async () => {
     makeHost();
     for (const t of ['pair', 'pair-status', 'connect', 'connect2', 'msg']) {
       socket.receive({ t, clientId: 'c1', request: {}, query: {}, data: {} });

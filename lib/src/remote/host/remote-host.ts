@@ -315,9 +315,14 @@ export class RemoteHost {
     const now = this.#now();
     this.#reapInvitations(now);
     while (this.#invitations.size >= MAX_TOKENS_PER_HOST) {
-      const oldest = this.#invitations.keys().next();
+      const oldest = this.#invitations.entries().next();
       if (oldest.done) break;
-      this.#retireInvitation(oldest.value, 'dropped');
+      const [inviteId, held] = oldest.value;
+      // The state table, not the cause: eviction reaches the oldest by
+      // insertion whatever it is doing, and a `reserved` one has been scanned —
+      // reporting that as `dropped` would tell the panel nobody asked, when a
+      // phone is mid-ceremony against it.
+      this.#retireInvitation(inviteId, held.state === 'reserved' ? 'consumed' : 'dropped');
     }
     const expiresAt = Math.min(now + DEFAULT_PAIRING_TTL_MS, serverExpiresAtMs);
     const keyPair = await generateNoiseKeyPair();
@@ -560,9 +565,15 @@ export class RemoteHost {
     if (frame.t === 'client-gone') {
       // Bounded before it is used as a map key: the relay chooses it, and this
       // is the only frame that reaches the map without the `e2e` guard.
-      if (isBoundedString(frame.clientId, MAX_CLIENT_ID_LENGTH)) {
+      if (!isBoundedString(frame.clientId, MAX_CLIENT_ID_LENGTH)) return;
+      // Queued on the same chain as every `e2e` step, not run inline. A
+      // ceremony step is several awaits long, and a teardown that ran *between*
+      // them would find nothing to dispose and then watch the resumed step
+      // reserve an invitation and allocate a client entry for a peer the relay
+      // has already forgotten — one nothing would ever remove.
+      this.#enqueue(() => {
         this.#onClientGone(frame.clientId);
-      }
+      });
       return;
     }
     if (frame.t !== 'e2e') return;
@@ -571,11 +582,20 @@ export class RemoteHost {
     // to have (`docs/specs/server.md` → Relay).
     if (!isE2eServerToHostFrame(frame)) return;
     const e2e = frame;
-    this.#chain = this.#chain.then(() => this.#onE2e(e2e)).catch((error: unknown) => {
+    this.#enqueue(() => this.#onE2e(e2e));
+  }
+
+  /**
+   * Run `step` after everything already queued for this socket, in arrival
+   * order. Every frame that touches the client map goes through here, so a
+   * teardown can never land in the middle of a ceremony step's awaits.
+   */
+  #enqueue(step: () => void | Promise<void>): void {
+    this.#chain = this.#chain.then(step).catch((error: unknown) => {
       // A ceremony step must never reject into the chain: this Host runs in
       // Node, where an unhandled rejection can take the sidecar or the extension
       // host down rather than merely logging in a webview.
-      console.warn('[remote-host] e2e frame failed', error);
+      console.warn('[remote-host] frame handling failed', error);
     });
   }
 
