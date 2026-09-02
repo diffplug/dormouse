@@ -163,10 +163,21 @@ async function pollFor<T>(get: () => T | undefined, timeoutMs: number): Promise<
   }
 }
 
-/** Let every already-queued microtask run, so a dropped frame stays dropped. */
+/**
+ * Let everything already queued run, so a dropped frame stays dropped.
+ *
+ * **Several event-loop turns, not one.** A ceremony step is a dozen awaited
+ * WebCrypto calls, and each resolves off the threadpool — under a full suite's
+ * parallel load they do not all land inside a single timer, which made an
+ * assertion about what the Host did *not* do pass vacuously and one about what
+ * it did do fail. A caller with an observable should still name it through
+ * {@link settleUntil}; this is the floor for the ones asserting absence.
+ */
 export async function settle(): Promise<void> {
-  for (let i = 0; i < 16; i += 1) await Promise.resolve();
-  await new Promise((resolve) => setTimeout(resolve, 5));
+  for (let round = 0; round < 8; round += 1) {
+    for (let i = 0; i < 16; i += 1) await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
 }
 
 /**

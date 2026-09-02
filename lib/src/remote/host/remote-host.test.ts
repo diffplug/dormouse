@@ -794,7 +794,9 @@ describe('RemoteHost end-to-end ceremonies', () => {
     await sendPairingInit('c1', invitation);
     // No await between the two: the init's WebCrypto is still in flight.
     socket.receive({ t: 'client-gone', clientId: 'c1' });
-    await settle();
+    // Named, not counted: the step this waits on is a dozen WebCrypto awaits,
+    // which no fixed number of turns can be trusted to cover.
+    await settleUntil(() => host.invitationState(invitation.inviteId) === 'consumed');
 
     expect(host.trackedClientCount).toBe(0);
     expect(approvals).toEqual([]);
@@ -817,7 +819,9 @@ describe('RemoteHost end-to-end ceremonies', () => {
     // the clock moves past the TTL and the next mint reaps it.
     clock += DEFAULT_PAIRING_TTL_MS + 1;
     await mintInvitation();
-    await settle();
+    await settleUntil(() =>
+      invitationEvents.some((e) => e.inviteId === invitation.inviteId && e.state === 'expired'),
+    );
 
     expect(invitationEvents).toContainEqual({
       inviteId: invitation.inviteId,
