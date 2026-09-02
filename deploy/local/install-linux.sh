@@ -1180,7 +1180,7 @@ cmd_restart() {
 }
 
 cmd_show_password() {
-  printf '\n%sWARNING%s the setup password gates account creation and Host enrollment.\n' "$C_YEL" "$C_OFF"
+  printf '\n%sWARNING%s the setup password gates Host enrollment.\n' "$C_YEL" "$C_OFF"
   printf 'It is about to be printed to this terminal. Make sure nobody is looking\n'
   printf 'over your shoulder and that this session is not being recorded or shared.\n\n'
   if [ ! -t 0 ]; then
@@ -1698,7 +1698,8 @@ printf '\n'
 
 if [ "$FIRST_INSTALL" = "1" ]; then
   printf '    First install. Retrieve the generated setup password when you are ready\n'
-  printf '    to create the passkey and enroll a Host:\n\n'
+  printf '    to enroll a Host by hand (the one-time offer card in the Host'"'"'s\n'
+  printf '    Remote control settings needs no password):\n\n'
   printf '        "%s" show-password\n\n' "$BIN_DIR/manage"
 fi
 

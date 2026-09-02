@@ -94,7 +94,7 @@ surfaces (future). The API and the security model are identical in the Server's
 selfhost and (future) SaaS modes; only how accounts come to exist differs.
 
 A `RemoteApiSession` is created lazily on the first message after an allowed
-`connect2` decision, and disposed both when the Client disconnects and on any
+connection outcome, and disposed both when the Client disconnects and on any
 fresh authorization attempt — so a re-authorizing client can never inherit the
 previous session's attachment. Source of truth: `RemoteHost` in
 `lib/src/remote/host/remote-host.ts`.

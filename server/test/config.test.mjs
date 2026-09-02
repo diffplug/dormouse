@@ -44,8 +44,8 @@ test('DORMOUSE_ORIGIN is normalized to a bare origin', () => {
   // The only normalization there is — `createApp` compares against this string
   // rather than re-parsing it. A trailing slash, a path, or a capitalized host
   // reads as correct in an `.env` and fails every compare it reaches: the
-  // WebAuthn `clientData.origin` check, and the `<origin>/#setup?…` QR a Host
-  // composes, which would scan to `//#setup`.
+  // WebAuthn `clientData.origin` check, and the `<origin>/#pair?…` QR a Host
+  // composes, which would scan to `//#pair`.
   const trailing = readConfig({ ...MINIMAL, DORMOUSE_ORIGIN: 'https://dor.example.ts.net/' });
   assert.equal(trailing.origin, 'https://dor.example.ts.net');
   const pathed = readConfig({ ...MINIMAL, DORMOUSE_ORIGIN: 'https://dor.example.ts.net:8443/pocket?x=1' });

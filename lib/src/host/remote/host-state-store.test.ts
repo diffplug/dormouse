@@ -50,7 +50,7 @@ import { createEphemeralHostStateStore, FileHostStateStore } from './host-state-
 
 const ENROLLMENT: HostEnrollment = {
   serverUrl: 'https://relay.example',
-  hostId: 'host-1',
+  hostId: 'S6kyjjqOS7mw3l8ye89U3g',
   hostToken: 'tok',
   origin: 'https://relay.example',
   rpId: 'relay.example',
@@ -197,12 +197,12 @@ describe('FileHostStateStore', () => {
   it('leaves no temp file behind, and overwrites in place', async () => {
     const store = new FileHostStateStore(dir);
     await store.saveEnrollment(ENROLLMENT);
-    await store.saveEnrollment({ ...ENROLLMENT, hostId: 'host-2' });
+    await store.saveEnrollment({ ...ENROLLMENT, hostId: 'LnExjA-KKeADf221aLlYyw' });
 
     const { readdir } = await import('node:fs/promises');
     expect(await readdir(dir)).toEqual(['remote-host.json']);
     const parsed = JSON.parse(await readFile(file(), 'utf8')) as { enrollment: HostEnrollment };
-    expect(parsed.enrollment.hostId).toBe('host-2');
+    expect(parsed.enrollment.hostId).toBe('LnExjA-KKeADf221aLlYyw');
   });
 
   it('serializes concurrent saves instead of interleaving their writes', async () => {
@@ -265,7 +265,7 @@ describe('FileHostStateStore', () => {
     fsProbe.readFileError = Object.assign(new Error('EACCES'), { code: 'EACCES' });
     await expect(store.loadEnrollment()).rejects.toMatchObject({ code: 'EACCES' });
     await expect(store.loadAcl('host-1')).rejects.toMatchObject({ code: 'EACCES' });
-    await expect(store.saveEnrollment({ ...ENROLLMENT, hostId: 'host-2' })).rejects.toMatchObject({
+    await expect(store.saveEnrollment({ ...ENROLLMENT, hostId: 'LnExjA-KKeADf221aLlYyw' })).rejects.toMatchObject({
       code: 'EACCES',
     });
     await expect(store.clearEnrollment()).rejects.toMatchObject({ code: 'EACCES' });

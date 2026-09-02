@@ -5,6 +5,7 @@
 
 import {
   API_ROUTES,
+  isE2eId,
   isNoiseStaticMaterial,
   mintNoiseStaticKeyPair,
   normalizeOrigin,
@@ -68,7 +69,13 @@ export function isEnrollment(value: unknown): value is HostEnrollment {
   const v = value as Record<string, unknown>;
   return (
     typeof v.serverUrl === 'string' &&
-    typeof v.hostId === 'string' &&
+    // The shape, not merely the type: this `hostId` is the routing id of every
+    // `e2e` envelope and the second field of every QR fragment, both of which
+    // accept exactly `isE2eId`. A Server that answered another length — or a
+    // hand-edited store — would otherwise leave this Host minting codes no
+    // phone can parse, with nothing to explain it (`docs/specs/server.md` ->
+    // State files, which pins the same shape at the mint).
+    isE2eId(v.hostId) &&
     typeof v.hostToken === 'string' &&
     typeof v.origin === 'string' &&
     typeof v.rpId === 'string' &&
@@ -229,14 +236,17 @@ async function mintNoiseStatic(): Promise<{
 }
 
 /**
- * Which `HostEnrollResponse` fields the server left out or sent with the wrong
- * type, for the error above. The list mirrors {@link isEnrollment} minus
- * `serverUrl`, which is set locally and can never be the one at fault.
+ * Which `HostEnrollResponse` fields the server left out or sent wrong, for the
+ * error above. Mirrors {@link isEnrollment} minus `serverUrl`, which is set
+ * locally and can never be the one at fault — including its *shape* checks, so
+ * a rejection can never name nothing. Pinned by `enrollment.test.ts`.
  */
 function missingEnrollmentFields(enrollment: Record<string, unknown>): string[] {
-  return (['hostId', 'hostToken', 'origin', 'rpId'] as const).filter(
+  const wrong = (['hostId', 'hostToken', 'origin', 'rpId'] as const).filter(
     (field) => typeof enrollment[field] !== 'string',
   );
+  if (!wrong.includes('hostId') && !isE2eId(enrollment.hostId)) wrong.unshift('hostId');
+  return wrong;
 }
 
 function errorMessage(error: unknown): string {

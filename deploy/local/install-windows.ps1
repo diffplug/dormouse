@@ -1704,7 +1704,7 @@ function Invoke-Restart {
 
 function Invoke-ShowPassword {
   Write-Host ""
-  Write-Host "${C_YEL}WARNING$C_OFF the setup password gates account creation and Host enrollment."
+  Write-Host "${C_YEL}WARNING$C_OFF the setup password gates Host enrollment."
   Write-Host "It is about to be printed to this terminal. Make sure nobody is looking"
   Write-Host "over your shoulder and that this session is not being recorded or shared."
   Write-Host ""
@@ -2312,7 +2312,8 @@ fs.renameSync(process.argv[2], process.argv[3]);
 
   if ($FIRST_INSTALL) {
     Write-Host "    First install. Retrieve the generated setup password when you are ready"
-    Write-Host "    to create the passkey and enroll a Host:"
+    Write-Host "    to enroll a Host by hand (the one-time offer card in the Host's"
+    Write-Host "    Remote control settings needs no password):"
     Write-Host ""
     Write-Host "        `"$BIN_DIR\manage.cmd`" show-password"
     Write-Host ""

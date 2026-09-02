@@ -153,7 +153,8 @@ export class FakeHost extends EventEmitter {
     while (this.invitations.size >= MAX_TOKENS_PER_HOST) {
       const oldest = this.invitations.keys().next();
       if (oldest.done) break;
-      this.#retireInvitation(oldest.value, 'consumed');
+      // Unstated, so the entry's own state decides — as `RemoteHost` does.
+      this.#retireInvitation(oldest.value);
     }
     const keyPair = await generateNoiseKeyPair();
     const invitation = {
@@ -184,9 +185,19 @@ export class FakeHost extends EventEmitter {
     }
   }
 
+  /**
+   * Mirrors `RemoteHost.#retireInvitation`: with no `state` the entry's own
+   * decides it, so an evicted code a phone had already scanned reports
+   * `consumed` and one nobody touched reports `dropped`.
+   */
   #retireInvitation(inviteId, state) {
-    if (!this.invitations.delete(inviteId)) return;
-    this.emit('invitation', { inviteId, state });
+    const held = this.invitations.get(inviteId);
+    if (!held) return;
+    this.invitations.delete(inviteId);
+    this.emit('invitation', {
+      inviteId,
+      state: state ?? (held.state === 'reserved' ? 'consumed' : 'dropped'),
+    });
   }
 
   // --- The `e2e` envelope ---------------------------------------------------

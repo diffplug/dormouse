@@ -75,6 +75,37 @@ test('an e2e frame naming an offline host returns an error and nothing else', as
   }
 });
 
+test('a transport outside a binding reaches no host, before and after one exists', async () => {
+  // The `init` is what binds; only it may create one. A `transport` that
+  // arrives with no binding — or naming a Host this socket has bound away
+  // from — has nowhere to go, and is dropped rather than answered, so nothing
+  // tells a prober which Hosts a session is talking to.
+  const { app, server, close } = await relay();
+  try {
+    const a = await connectHost(app, server);
+    const b = await connectHost(app, server);
+    const { socket: clientWs } = await connectClient(app, server);
+
+    // Never bound: the Host is online and the frame is well formed anyway.
+    clientWs.send(e2eClientFrame(a.host.hostId, { step: 'transport' }));
+    assert.ok(await a.socket.quiet(), 'an unbound transport reaches no host');
+    assert.ok(await clientWs.quiet(), 'and is dropped rather than answered');
+
+    // Bound to A, so a transport for B is outside the binding.
+    clientWs.send(e2eClientFrame(a.host.hostId));
+    assert.equal((await a.socket.take()).step, 'init');
+    clientWs.send(e2eClientFrame(b.host.hostId, { step: 'transport' }));
+    assert.ok(await b.socket.quiet(), 'a transport for the unbound host is dropped');
+    assert.ok(await clientWs.quiet());
+
+    // The binding it does hold still carries.
+    clientWs.send(e2eClientFrame(a.host.hostId, { step: 'transport' }));
+    assert.equal((await a.socket.take()).step, 'transport');
+  } finally {
+    await close();
+  }
+});
+
 test('malformed JSON and unknown client frames get an error; host garbage is ignored', async () => {
   const { app, server, close } = await relay();
   try {

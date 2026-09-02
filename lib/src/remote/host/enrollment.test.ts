@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fromBase64Url, mintNoiseStaticKeyPair, toBase64Url } from 'server-lib-common';
 import { isEnrollment, performEnrollment } from './enrollment';
 
+// A real `hostId`: base64url of 16 bytes, the one shape `isEnrollment`
+// accepts, because it is also the routing id every `e2e` envelope carries.
+const HOST_ID = 'S6kyjjqOS7mw3l8ye89U3g';
+
 // Only the minter is faked, and only where a test asks for it; everything else
 // in the package stays real so the guards under test are the shipped ones.
 vi.mock('server-lib-common', async (importOriginal) => {
@@ -14,7 +18,7 @@ function enrollResponder(): ReturnType<typeof vi.fn> {
   return vi.fn(async () =>
     new Response(
       JSON.stringify({
-        hostId: 'host-abc',
+        hostId: HOST_ID,
         hostToken: 'tok-xyz',
         origin: 'https://dormouse.example',
         rpId: 'dormouse.example',
@@ -42,7 +46,7 @@ describe('remote-host enrollment', () => {
     const fetchMock = vi.fn(async () =>
       new Response(
         JSON.stringify({
-          hostId: 'host-abc',
+          hostId: HOST_ID,
           hostToken: 'tok-xyz',
           origin: 'https://dormouse.example',
           rpId: 'dormouse.example',
@@ -68,7 +72,7 @@ describe('remote-host enrollment', () => {
 
     expect(enrollment).toEqual({
       serverUrl: 'https://dormouse.example',
-      hostId: 'host-abc',
+      hostId: HOST_ID,
       hostToken: 'tok-xyz',
       origin: 'https://dormouse.example',
       rpId: 'dormouse.example',
@@ -92,7 +96,7 @@ describe('remote-host enrollment', () => {
     const fetchMock = vi.fn(async () =>
       new Response(
         JSON.stringify({
-          hostId: 'host-abc',
+          hostId: HOST_ID,
           hostToken: 'tok-xyz',
           origin: 'https://dormouse.example',
           rpId: 'dormouse.example',
@@ -156,7 +160,7 @@ describe('remote-host enrollment', () => {
     const fetchMock = vi.fn(async () =>
       new Response(
         JSON.stringify({
-          hostId: 'host-abc',
+          hostId: HOST_ID,
           hostToken: 'tok-xyz',
           origin: 'https://dormouse.example',
           rpId: 'dormouse.example',
@@ -238,7 +242,7 @@ describe('remote-host enrollment', () => {
       'fetch',
       vi.fn(async () =>
         new Response(
-          JSON.stringify({ hostId: 'host-abc', hostToken: 'tok-xyz' }), // no origin/rpId
+          JSON.stringify({ hostId: HOST_ID, hostToken: 'tok-xyz' }), // no origin/rpId
           { status: 200, headers: { 'content-type': 'application/json' } },
         ),
       ),
@@ -269,6 +273,43 @@ describe('remote-host enrollment', () => {
     );
   });
 
+  it('refuses a hostId of any shape but the routing id', async () => {
+    // The response body is untrusted like any other, and this field is not just
+    // stored: it routes every `e2e` envelope and is the second field of every QR
+    // fragment, both of which accept exactly 16 bytes as base64url. Accepted
+    // here, a wrong-length id would leave this Host minting codes no phone can
+    // parse, with nothing anywhere to explain it. The Server pins the same shape
+    // at the mint (`server/src/state.ts`).
+    for (const hostId of ['host-abc', '', `${HOST_ID}A`, HOST_ID.slice(0, 21), `${HOST_ID}==`]) {
+      expect(
+        isEnrollment({ serverUrl: 's', hostId, hostToken: 't', origin: 'o', rpId: 'r' }),
+      ).toBe(false);
+    }
+    expect(
+      isEnrollment({ serverUrl: 's', hostId: HOST_ID, hostToken: 't', origin: 'o', rpId: 'r' }),
+    ).toBe(true);
+
+    // And the exchange fails naming the field rather than persisting one.
+    stubLocalStorage();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            hostId: 'host-abc',
+            hostToken: 'tok-xyz',
+            origin: 'https://dormouse.example',
+            rpId: 'dormouse.example',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      ),
+    );
+    await expect(
+      performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x'),
+    ).rejects.toThrow(/missing or invalid: hostId/);
+  });
+
   it('refuses a 200 that is not JSON at all', async () => {
     // A captive portal or a proxy error page served with a 200.
     stubLocalStorage();
@@ -289,7 +330,7 @@ describe('remote-host enrollment', () => {
     // it has none.
     const base = {
       serverUrl: 's',
-      hostId: 'h',
+      hostId: HOST_ID,
       hostToken: 't',
       origin: 'o',
       rpId: 'r',

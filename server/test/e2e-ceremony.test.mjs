@@ -17,6 +17,7 @@ import assert from 'node:assert/strict';
 
 import {
   API_ROUTES,
+  MAX_TOKENS_PER_HOST,
   REMOTE_METHODS,
   SELFHOST_ACCOUNT_ID,
   fromBase64Url,
@@ -174,6 +175,42 @@ test('a phone scans, registers off the token, pairs, and is told everything it p
   }
 });
 
+test('evicting at the cap reports what the code was doing, as the real Host does', async () => {
+  // The harness exists to fail where a real Host would, so it has to make the
+  // same `dropped`-vs-`consumed` call `RemoteHost.#retireInvitation` makes:
+  // `dropped` says nobody scanned it, and reporting that for a code a phone is
+  // mid-ceremony against would tell the panel to offer a replacement.
+  const fixture = await ceremonyFixture();
+  try {
+    const events = [];
+    fixture.host.on('invitation', (e) => events.push(e));
+
+    const scanned = await fixture.invite();
+    const { client } = await fixture.phone({
+      credential: { setupToken: scanned.setupToken },
+    });
+    // The IK handshake only: the invitation is now `reserved`, not yet spent.
+    await client.openPairing(scanned);
+    assert.equal(fixture.host.invitationState(scanned.inviteId), 'reserved');
+
+    const untouched = await fixture.invite();
+    events.length = 0;
+    // Mint past the cap so both of the above are evicted by insertion order.
+    for (let i = 0; i < MAX_TOKENS_PER_HOST; i += 1) await fixture.invite();
+
+    assert.deepEqual(
+      events.filter((e) => e.inviteId === scanned.inviteId),
+      [{ inviteId: scanned.inviteId, state: 'consumed' }],
+    );
+    assert.deepEqual(
+      events.filter((e) => e.inviteId === untouched.inviteId),
+      [{ inviteId: untouched.inviteId, state: 'dropped' }],
+    );
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('a paired phone connects and speaks protocol-v1 inside the session', async () => {
   const fixture = await ceremonyFixture({ autoApprove: true });
   try {
@@ -201,8 +238,8 @@ test('a paired phone connects and speaks protocol-v1 inside the session', async 
       grants: { input: true, layout: false },
     });
 
-    // The relay never learned any of it: `msg` was never established, and the
-    // hello text never crossed in the clear.
+    // The relay never learned any of it: it forwards ciphertext it cannot
+    // decode, and the hello text never crossed in the clear.
     const view = JSON.stringify([...client.sent, ...client.frames]);
     assert.equal(view.includes(REMOTE_METHODS.hello), false);
   } finally {

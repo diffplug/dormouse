@@ -43,7 +43,7 @@ This table is the whole of what `server/src/` reads from the environment.
 | `DORMOUSE_STATE_DIR`      | Where the JSON state files live. Default `./data`.         |
 | `DORMOUSE_POCKET_DIR`     | The built Pocket app to serve at `/*`. Defaults to `lib/dist-pocket` resolved from the compiled server's own location rather than from the cwd, so a service manager's working directory cannot change what is served. Absent or missing its `index.html`, `GET /` is a plaintext stub naming the build command. |
 | `PORT`                    | Default 3000. Blank is unset — `Number('')` is 0, which would ask the OS for an ephemeral port and move the server out from under whatever proxy is pointed at it. An explicit `PORT=0` is a `ConfigError` for the same reason. |
-| `DORMOUSE_REQUIRE_USER_VERIFICATION` | `true` demands a *user-verified* passkey assertion (biometric/PIN), not merely user presence. Off by default, and only the exact string `true` enables it — a misspelling must read as off, because turning this on without UV-capable authenticators locks the account out of its own server. Applies to sign-in, re-auth and `connect2` alike, so no route is a softer path than another, and is mirrored to every Host in its `HostEnrollResponse` so both sides demand the same thing (`SECURITY.md` -> Remote Control). |
+| `DORMOUSE_REQUIRE_USER_VERIFICATION` | `true` demands a *user-verified* passkey assertion (biometric/PIN), not merely user presence. Off by default, and only the exact string `true` enables it — a misspelling must read as off, because turning this on without UV-capable authenticators locks the account out of its own server. Applies to sign-in and re-auth alike, so neither is a softer path than the other, and is mirrored to every Host in its `HostEnrollResponse` as its `ConnectionPolicy.requireUserVerification`, so the presence proofs the Host verifies demand the same thing (`SECURITY.md` -> Remote Control). |
 | `DORMOUSE_BIND_HOST`      | Interface to listen on. Unset binds every interface (what a container wants); set `127.0.0.1` when a TLS proxy on the same machine is the front door. |
 | `DORMOUSE_VAPID_PUBLIC_KEY` / `DORMOUSE_VAPID_PRIVATE_KEY` | Web Push signing keypair. Set both or neither. At startup the Server decodes both, derives the P-256 public point from the private key, and exits on a missing, malformed, or mismatched pair. Unset, the server mints a pair on first boot and persists it to `vapid.json`. |
 | `DORMOUSE_VAPID_SUBJECT`  | `mailto:`/`https:` contact for push-service operators (RFC 8292). Defaults to `DORMOUSE_ORIGIN` when that origin is https and not loopback; otherwise there is no default and push stays off. Validated at startup — an invalid value, a loopback contact included, exits. |
@@ -174,11 +174,13 @@ which Pocket repairs by re-offering Enable, rather than as a live one nothing
 can be delivered to.
 
 **`hostId` is pinned at enrollment: base64url of 16 bytes**, minted and
-validated as `isE2eId`. Every `e2e` envelope routes on it and the shared guard
-accepts no other length, so a hand-edited row of another shape would otherwise
-be a Host the relay admits and no Client can address. Dropping it on read makes
-that row an un-enrolled Host instead, which is what the person editing the file
-was reaching for.
+validated as `isE2eId` — on both sides, by the Server reading `hosts.json` and
+by `isEnrollment` on the Host. Every `e2e` envelope routes on it and the QR
+fragment carries it at a fixed width, so a value of another shape would
+otherwise be a Host the relay admits, no Client can address, and whose codes no
+phone can parse. Reading it as un-enrolled instead is what the person editing
+the file was reaching for, and on the Host it fails the exchange naming the
+field.
 
 **A subscription row from before the end-to-end cutover carries a device key and
 no `deliveryId`, so it is dropped on read** — with **one** warning per process
@@ -486,46 +488,43 @@ Client.
 (Client→Server, Server→Host with `clientId` stamped, Host→Server, Server→Client
 with `hostId` stamped from the socket), shapes in
 `server-lib-common/src/remote/wire.ts`. A Host handles exactly these and
-`client-gone`; every legacy frame it receives is ignored.
+`client-gone`; anything else it receives is ignored.
 
-- **An `init` binds** the Client socket to the named Host: the previous Host
-  gets `client-gone` and any `established` flag is cleared.
+- **An `init` binds** the Client socket to the named Host, replacing whatever
+  binding it held; the previous Host gets `client-gone`.
 - **A `transport` frame is forwarded only within that binding**, in either
-  direction.
+  direction. One outside it is dropped.
 - **Never parsed, never remembered, never authorized.** The relay does not
-  decode `ct`, keeps no Noise state, and has no notion of "authorized" here —
-  only the Host knows whether a ceremony succeeded, and it says so only inside
-  the ciphertext.
+  decode `ct`, keeps no Noise state, holds no policy of its own, and has no
+  notion of "authorized" — no gate, no challenge memory, nothing verified before
+  forwarding — because only the Host knows whether a ceremony succeeded, and it
+  says so only inside the ciphertext.
 - **Its bounds are defense in depth**, on a both-sides rule: `hostId` and `id`
   base64url of 16 bytes, `clientId` a bounded string, `ct` base64url bounded by
   `MAX_E2E_CIPHERTEXT_LENGTH` (the encoding of a maximal Noise message). A
   malformed Client frame gets an `error`; a malformed Host frame is dropped. The
   Host runs the same guard on arrival because it does not trust the relay.
 
+**The envelope is the whole client surface.** Any other frame type is answered
+with an `error` and reaches no Host.
+
 **Only one socket may own a `hostId`.** Registering a second one for the same
 `hostId` displaces the first: clients bound to it are told `host-gone`, their
-sessions are cleared, and the old socket is closed with
+bindings are cleared, and the old socket is closed with
 `WS_CLOSE_HOST_REPLACED` (4000) / `WS_CLOSE_HOST_REPLACED_REASON`. Those
 constants live in `server-lib-common`, not in `server`, because the code is a
 contract rather than a log line: the evicted Host keys its stand-down on it
-(see [Host side](#host-side-lib--the-two-node-hosts)). Clearing the sessions at
+(see [Host side](#host-side-lib--the-two-node-hosts)). Clearing the bindings at
 *replacement* time and not only on disconnect is load-bearing — the displaced
 socket's own close event is a no-op here, and the new Host process has a fresh
-ACL and no memory of those sessions.
+ACL and no memory of them.
 
 The relay keeps one current Host binding per Client socket. Host-originated
 frames are routed only when the frame comes from that current Host; late replies
-from a previous Host are ignored and cannot re-establish an old session. When a
-Client socket binds to a different Host, the relay sends `client-gone` to the
-previous live Host before replacing the binding, so Host-side pairing UI,
-remote-api sessions, and watchers are disposed immediately.
-
-**The envelope is the whole client surface.** Any other frame type — including
-every frame the pre-cutover handshake used — is answered with an `error` and
-reaches no Host; a Host-originated frame that is not one is dropped. The relay
-holds no policy of its own: there is no gate, no challenge memory, and nothing
-it verifies before forwarding, because only the Host can tell whether a ceremony
-succeeded.
+from a previous Host are ignored. When a Client socket binds to a different
+Host, the relay sends `client-gone` to the previous live Host before replacing
+the binding, so Host-side pairing UI, remote-api sessions, and watchers are
+disposed immediately.
 
 Source of truth: `server/src/relay.ts` (`registerHost`), and `isE2eClientFrame` /
 `isE2eHostFrame` in `server-lib-common/src/remote/wire.ts`, written for a Host to
@@ -664,8 +663,9 @@ memo invalidation — live in that host's spec.
   `hostToken` is a bearer credential and never enters a webview realm. Refused outright for a server outside this build's allowlist
   (above), before the password leaves the machine. **A 200 that is not an
   enrollment fails the exchange**: the response goes through the same
-  `isEnrollment` guard every *read* uses, and a body missing a field or sending
-  one mistyped throws naming those fields rather than minting a record with an
+  `isEnrollment` guard every *read* uses, and a body missing a field, sending
+  one mistyped, or sending a `hostId` of the wrong shape (above) throws naming
+  those fields rather than minting a record with an
   `undefined` in the `ConnectionPolicy` the Host authenticates passkeys against
   (rationale). The request carries a 10 s `AbortSignal.timeout`, under the
   webview's own 15 s command budget so the console sees the real error
