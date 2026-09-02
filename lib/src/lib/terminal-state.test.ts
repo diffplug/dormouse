@@ -7,8 +7,10 @@ import {
   cwdDisplay,
   cwdFromManualPath,
   cwdFromOsc7,
+  cwdFromOsc633,
   cwdFromOsc9_9,
   cwdIdentity,
+  MAX_CWD_LENGTH,
   COMMAND_FAIL_GLYPH,
   DEFAULT_IDLE_TITLE,
   deriveHeader,
@@ -60,6 +62,23 @@ describe('terminal CWD normalization', () => {
       pathKind: 'unknown',
       isRemote: false,
     });
+  });
+
+  // A CWD is retained per Session, rendered in the header, and used as a
+  // grouping key, so it is bounded and stripped of control characters on the
+  // way in — every source, not only the shell scripts Dormouse injects, since
+  // OSC 7 / 9;9 / 1337 are emitted by any program the user runs.
+  it('bounds every CWD source and strips control characters', () => {
+    expect(cwdFromOsc9_9('/repo/a\x07b\x9c', 100)?.path).toBe('/repo/ab');
+    expect(cwdFromOsc633('/repo/a\x00b', 100)?.path).toBe('/repo/ab');
+    expect(cwdFromOsc7('file:///repo/a%07b', 100)?.path).toBe('/repo/ab');
+
+    const long = `/${'a'.repeat(MAX_CWD_LENGTH * 3)}`;
+    expect(cwdFromOsc9_9(long, 100)?.path.length).toBe(MAX_CWD_LENGTH);
+    expect(cwdFromOsc633(long, 100)?.path.length).toBe(MAX_CWD_LENGTH);
+    const osc7 = cwdFromOsc7(`file://localhost${long}`, 100)!;
+    expect(osc7.path.length).toBeLessThanOrEqual(MAX_CWD_LENGTH);
+    expect(osc7.uri.length).toBe(MAX_CWD_LENGTH);
   });
 
   it('builds shortest unique labels without losing remote hosts', () => {

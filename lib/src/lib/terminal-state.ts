@@ -260,7 +260,10 @@ function sameActivity(a: ShellActivity, b: ShellActivity): boolean {
   return true;
 }
 
-export function cwdFromOsc7(rawUri: string, now = Date.now()): CwdState | null {
+export function cwdFromOsc7(rawUriInput: string, now = Date.now()): CwdState | null {
+  // Bounded before the URL parse and the percent-decode, not after: every value
+  // below is retained per Session (see `boundedCwdValue`).
+  const rawUri = boundedCwdValue(rawUriInput);
   let parsed: URL;
   try {
     parsed = new URL(rawUri);
@@ -269,7 +272,7 @@ export function cwdFromOsc7(rawUri: string, now = Date.now()): CwdState | null {
   }
   if (parsed.protocol !== 'file:') return null;
 
-  const decodedPath = normalizeFileUriPath(safeDecodeURIComponent(parsed.pathname));
+  const decodedPath = boundedCwdValue(normalizeFileUriPath(safeDecodeURIComponent(parsed.pathname)));
   const host = extractFileUriHost(rawUri) || parsed.hostname || undefined;
   return {
     uri: rawUri,
@@ -284,7 +287,7 @@ export function cwdFromOsc7(rawUri: string, now = Date.now()): CwdState | null {
 }
 
 export function cwdFromOsc9_9(rawPath: string, now = Date.now()): CwdState | null {
-  const path = safeDecodeURIComponent(rawPath.trim());
+  const path = boundedCwdValue(safeDecodeURIComponent(boundedCwdValue(rawPath).trim()));
   if (!path) return null;
   return {
     path,
@@ -643,7 +646,7 @@ function statusBucket(kind: ShellActivity['kind']): 'unknown' | 'idle' | 'runnin
 }
 
 function cwdFromDecodedPath(rawPath: string, source: CwdSource, now: number): CwdState | null {
-  const path = safeDecodeURIComponent(rawPath.trim());
+  const path = boundedCwdValue(safeDecodeURIComponent(boundedCwdValue(rawPath).trim()));
   if (!path) return null;
   return {
     path,
@@ -680,6 +683,33 @@ function safeDecodeURIComponent(value: string): string {
   } catch {
     return value;
   }
+}
+
+/**
+ * The longest CWD any source may report. PATH_MAX is 4096 on Linux and 1024 on
+ * macOS; a directory nobody can `cd` into is not one worth retaining.
+ */
+export const MAX_CWD_LENGTH = 4096;
+
+/**
+ * Strip control characters and cap the length of a reported CWD.
+ *
+ * A CWD is retained per Session, rendered in the pane header, and used as a
+ * grouping key, so it is held state rather than a transient — the same reason
+ * titles and notification bodies are sanitized (`terminal-protocol.ts`). The
+ * emit-side scripts already remove control characters
+ * (`docs/specs/terminal-escapes.md` → the `Cwd=` rule), but the parser accepts
+ * OSC 7 / OSC 9;9 / OSC 1337 from any program, not only from those scripts.
+ *
+ * Interior whitespace is preserved rather than collapsed: a path may legally
+ * contain runs of spaces, and this value is compared against real filesystem
+ * paths.
+ */
+function boundedCwdValue(value: string): string {
+  const stripped = value.replace(/[\x00-\x1f\x7f-\x9f]+/g, '');
+  return stripped.length <= MAX_CWD_LENGTH
+    ? stripped
+    : Array.from(stripped).slice(0, MAX_CWD_LENGTH).join('');
 }
 
 function inferPathKind(path: string): PathKind {

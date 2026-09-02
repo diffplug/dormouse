@@ -42,6 +42,8 @@ CWD:
 | `OSC 633 ; P ; Cwd=<cwd> ST` | `osc633` | VS Code-style CWD. |
 | `OSC 1337 ; CurrentDir=<cwd> ST` | `osc1337` | iTerm2-style CWD compatibility. |
 
+**Every CWD is bounded at `MAX_CWD_LENGTH` and stripped of control characters before it is stored**, whatever the source — it is retained per Session, rendered in the header, and used as a grouping key ([terminal-escapes.md](terminal-escapes.md)).
+
 Non-OSC CWD sources:
 
 - `process` — adapter polled the PTY's process for its working directory. Applied only while no OSC source has ever reported for the pane (see CWD precedence below — the rule is source-based, not time-based).
@@ -54,7 +56,7 @@ Command lifecycle:
 | `OSC 133 ; A ST` / `OSC 633 ; A ST` | `promptStart` |
 | `OSC 133 ; B ST` / `OSC 633 ; B ST` | `promptEnd` |
 | `OSC 133 ; C ST` | `commandStart(source: "osc133_boundaries")` |
-| `OSC 633 ; E ; <commandline> [; <nonce>] ST` | `commandLine`; parses only the command field and decodes VS Code `\xAB` / `\\` escapes before storing it. |
+| `OSC 633 ; E ; <commandline> [; <nonce>] ST` | `commandLine`; parses only the command field and decodes VS Code `\xAB` / `\\` escapes before storing it. Bounded and sanitized on the way in like every other retained value, and a command line that reduces to nothing emits nothing ([terminal-escapes.md](terminal-escapes.md)). |
 | `OSC 633 ; C ST` | `commandStart(source: "osc633_boundaries")`. The reducer re-labels the stored run `osc633_E` when a command line is pending; the *event* source stays a boundary, which is what promotes the pane to OSC-driven (see [Keystroke fallback](#keystroke-fallback)). |
 | `OSC 133 ; D ; <exitCode?> ST` / `OSC 633 ; D ; <exitCode?> ST` | `commandFinish` |
 
