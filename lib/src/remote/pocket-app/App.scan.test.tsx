@@ -15,7 +15,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateNoiseKeyPair, toBase64Url, type PairingInvitation } from 'server-lib-common';
 
-import App, { CAMERA_BOOTSTRAP_MESSAGE, SCAN_LABEL, UNSUPPORTED_BROWSER_TITLE } from './App';
+import App, {
+  CAMERA_BOOTSTRAP_MESSAGE,
+  HOSTS_TITLE,
+  SCAN_LABEL,
+  UNSUPPORTED_BROWSER_TITLE,
+} from './App';
 import type { ConnectResult, PairingResult } from '../client/pocket-client';
 import {
   PAIRING_DENIAL_MESSAGES,
@@ -271,7 +276,7 @@ describe('a first run, from the scan to the terminal', () => {
 
     expect(fake.connect).toHaveBeenCalledWith(invitation.hostId);
     // Approving on the laptop lands the phone in a terminal, not back on a list.
-    expect(buttonNamed(container, '‹ Hosts')).not.toBeNull();
+    expect(buttonNamed(container, `‹ ${HOSTS_TITLE}`)).not.toBeNull();
   });
 
   it('reports a pairing the laptop refused, and lands on the Hosts list', async () => {

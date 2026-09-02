@@ -332,7 +332,7 @@ export default function App({
   useEffect(() => {
     client.setOnHostGone(() => {
       teardownAdapter();
-      setError('The host disconnected.');
+      setError('The connection to the computer ended.');
       setPhase({ at: 'hosts' });
     });
     return () => client.setOnHostGone(null);
@@ -493,7 +493,7 @@ export default function App({
   const onEnablePush = () =>
     run(PUSH_OP, async () => {
       if (pushConfig.status !== 'ready') {
-        throw new Error('Check the server configuration before enabling push notifications.');
+        throw new Error('Could not read this server’s push settings. Try again.');
       }
       try {
         const subscription = await subscribeToPushInBrowser(pushConfig.key, () => {
@@ -733,6 +733,15 @@ export function PairingCodeView({
 
 // --- ConnectedView ---------------------------------------------------------
 
+/**
+ * What the list of paired machines is called, on its own header and on the back
+ * button that returns to it. **"Computer", not "Host"** — every other sentence
+ * Pocket shows says computer, and Host is a word from the specs
+ * (`docs/specs/remote-security-model.md` → Terminology), not one to put in
+ * front of someone who has just been told to go press a button on their laptop.
+ */
+export const HOSTS_TITLE = 'Computers';
+
 /** The connected Pocket shell: host navigation chrome over the remote wall. */
 export function ConnectedView({
   host,
@@ -747,7 +756,7 @@ export function ConnectedView({
     <div className={PK.app}>
       <header className={PK.header}>
         <button type="button" className={pkButton({ tone: 'ghost', size: 'sm' })} onClick={onLeave}>
-          ‹ Hosts
+          ‹ {HOSTS_TITLE}
         </button>
         <h1 className={PK.headerTitle}>{host.label || host.hostId}</h1>
       </header>
@@ -767,6 +776,7 @@ export function ConnectedView({
  * with this one.
  */
 export const SCAN_LABEL = 'Scan a setup code';
+
 
 /**
  * The auth screen, in two layouts on one question: does this browser hold a
@@ -975,7 +985,7 @@ const PUSH_PITCH =
 const PUSH_BLOCKED: Record<Exclude<PushAvailability, 'ready' | 'needs-install'>, string> = {
   denied: 'Notifications are blocked for this site in your browser settings.',
   unsupported: 'This browser cannot receive push notifications.',
-  'no-worker': 'Background worker unavailable — the server must be served over https.',
+  'no-worker': 'Push needs the server to be reached over https.',
 };
 
 /** What the one push card says; `on` is the settled state and carries no action. */
@@ -1018,7 +1028,13 @@ export function pushNoticeState({
   // Outranks every browser state, a settled `on` included: a Server that no
   // longer holds VAPID keys cannot deliver through the rows it still stores.
   if (configStatus === 'disabled') {
-    return { kind: 'blocked', reason: 'This server has push notifications disabled.' };
+    // The one blocked reason with nothing behind it for the person holding the
+    // phone: it is the Server's config, so say so rather than leave them
+    // hunting through iOS settings for a switch that would not help.
+    return {
+      kind: 'blocked',
+      reason: 'This server has push notifications turned off. Nothing on this phone can turn them on.',
+    };
   }
   if (pairedHostIds.every(isPushSubscribed)) return { kind: 'on' };
   // `InstallNotice` is the push card for this state, and it is on screen
@@ -1134,7 +1150,7 @@ export function HostsView({
   return (
     <div className={PK.app}>
       <header className={PK.header}>
-        <h1 className={PK.headerTitle}>Hosts</h1>
+        <h1 className={PK.headerTitle}>{HOSTS_TITLE}</h1>
         <button
           type="button"
           className={pkButton({ tone: 'ghost', size: 'sm' })}
@@ -1162,7 +1178,8 @@ export function HostsView({
         ) : null}
         {hosts.length === 0 ? (
           <div className={PK.empty}>
-            No computers paired yet. Show a pairing code on one and scan it.
+            No computers paired yet. On a computer, open Settings → Remote control → Set up a
+            phone, then scan the code.
           </div>
         ) : (
           hosts.map((host) => {

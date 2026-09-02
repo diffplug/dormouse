@@ -141,7 +141,8 @@ Three details the table above leaves implicit:
   the active pane (`attachableDirectoryEntries` in
   `lib/src/remote/pocket-app/wall-model.ts`).
 
-**The pinned record picks a row's one action.** The Hosts view lists the
+**The pinned record picks a row's one action.** The Hosts view — titled
+**Computers**, because that is the word the rest of Pocket uses — lists the
 `KnownHostV1` records — a Host with no record is not a row — labeled from the
 record and stamped with online state from `GET /api/hosts`, and offers Connect
 alone or **Pair again** alone, never a Connect that can only fail. Nothing asks
