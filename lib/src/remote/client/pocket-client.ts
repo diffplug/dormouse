@@ -418,7 +418,7 @@ export class PocketClient {
 
   /**
    * First-time setup: passkey registration gated by the single-use `setupToken`
-   * off a scanned pairing code. Follow with {@link signin}.
+   * off a scanned setup code. Follow with {@link signin}.
    */
   async setup({ setupToken }: { setupToken: string }, label: string): Promise<SetupFinishResponse> {
     const begin = await this.#setupApi<SetupBeginResponse>(API_ROUTES.setupBegin, { setupToken });

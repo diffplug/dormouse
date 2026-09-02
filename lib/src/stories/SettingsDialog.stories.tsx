@@ -85,7 +85,7 @@ export const PushEnabled: Story = {
   },
 };
 
-/** Fan-out: several devices have enabled alerts, so all of them are named. */
+/** Fan-out: several phones have turned push on, so all of them are named. */
 export const PushManyDevices: Story = {
   parameters: {
     primedWatchedCommands: ['claude'],

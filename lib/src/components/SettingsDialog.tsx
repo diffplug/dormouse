@@ -59,11 +59,13 @@ function describePushTargets(push: PushDevicesState, hasHostService: boolean): s
       ? 'Connect this machine to a Dormouse server below to send push.'
       : 'Connect this machine to a Dormouse server to send push.';
   }
-  // Reached on a machine that has just paired one, so it must not read as
-  // "nothing is paired": the phone is there, its push registration is not, and
-  // the tap that fixes it happens on the phone rather than here.
+  // Reached both before anything is paired and right after a pairing, so it
+  // must read as true in each: not "nothing is paired" (the phone may well be
+  // there), and not an instruction to go tap something on a phone that does not
+  // exist yet. Naming the app and the setting is what makes it actionable once
+  // there is a phone to act on.
   if (push.devices.length === 0) {
-    return 'No paired phone has push notifications turned on yet — tap Enable push notifications in Dormouse Pocket.';
+    return 'No paired phone has turned push notifications on in Dormouse Pocket yet.';
   }
   return `Push will be sent to ${push.devices.map((device) => device.label).join(', ')}`;
 }

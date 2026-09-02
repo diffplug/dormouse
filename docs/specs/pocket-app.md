@@ -62,9 +62,9 @@ fragment is erased with `history.replaceState` before the first render, parsed
 or not — an address bar, a history stack and a screenshot are no place for a
 live credential — nothing from it is retained, no call is made, and the token is
 not spent. All the run keeps is a flag that leads the auth screen with *Scan
-again from inside Dormouse Pocket*: on iOS the camera opens
-Safari, a different storage partition from the installed app, so the keys must
-be minted where they will live.
+again from inside Dormouse Pocket*: on iOS the camera opens Safari, a different
+storage partition from the installed app, so the keys must be minted where they
+will live.
 
 **The scanner reads a code as data.** `ScanInvitation` lazy-loads
 `@zxing/browser` for a rear-camera scan (iOS has no `BarcodeDetector`), never
