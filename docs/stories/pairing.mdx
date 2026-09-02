@@ -209,8 +209,10 @@ no longer work — the laptop knows that itself, because the key it was complete
 against is the laptop's own.
 
 The panel keeps listening past that, because it is the thing the pairing modal
-in §6 is covering: once the request has been answered, either way, it stops
-pointing at a phone that has already finished.
+in §6 is covering: once the request has been answered it stops pointing at a
+phone that has already finished, and — where a person answered it — says which
+way it went (§6). This is the frame a socket that dropped mid-ceremony leaves,
+where nobody decided anything:
 
 <Canvas of={RemoteControl.SetupPhoneFinished} />
 
@@ -328,6 +330,13 @@ the laptop compares the digits itself, exactly once
 (`docs/specs/remote-security-model.md` → Pairing owns the rule and what it rules
 out). The modal is the whole security model in one screen, which is why it is a
 modal and not a settings row.
+
+Exactly once is unforgiving, so the panel behind the modal says which way it
+went. Mistype the digits and the code is spent — there is no second try, and
+the paired count above is absolute, so nothing else on that screen would have
+moved:
+
+<Canvas of={RemoteControl.PairingOutcomeCodeMismatch} />
 
 - **Local confirmation is the only path into the ACL.** Not signing in, not
   owning the account, not holding a synced passkey. Someone with your account

@@ -215,9 +215,10 @@ export const SetupPhoneRedeemed: Story = {
 };
 
 /**
- * The pairing request that code produced has been answered — approved on this
- * machine, or cancelled. The panel is behind the modal the whole time, so this
- * is the frame the user is left looking at.
+ * The code is spent and nobody decided anything — the relay socket went while
+ * the request was up, or this machine stopped. Every ceremony a person *did*
+ * answer carries an outcome and gets the sentence for it below, so this is the
+ * one frame left where the panel can only say the code is finished.
  */
 export const SetupPhoneFinished: Story = {
   parameters: {
@@ -228,6 +229,98 @@ export const SetupPhoneFinished: Story = {
     docs: { story: { height: '340px' } },
   },
   play: setupPanel(/This setup code is finished/),
+};
+
+/**
+ * The Host discarded the code before anyone scanned it — its relay socket went,
+ * or a newer mint evicted it. **Not a scan**, so it must not send anyone to a
+ * phone (`docs/specs/remote-security-model.md` → Pairing).
+ */
+export const SetupPhoneDropped: Story = {
+  parameters: {
+    primedRemoteHost: { status: enrolledStatus(), setupInvitation: 'dropped' },
+    docs: { story: { height: '340px' } },
+  },
+  play: setupPanel(/no longer valid/),
+};
+
+/** The TTL ran out with the panel still open and nobody scanning. */
+export const SetupPhoneExpired: Story = {
+  parameters: {
+    primedRemoteHost: { status: enrolledStatus(), setupInvitation: 'expired' },
+    docs: { story: { height: '340px' } },
+  },
+  play: setupPanel(/This code expired/),
+};
+
+/**
+ * The six ways a ceremony ends, each in its own fixed sentence.
+ *
+ * They all spend the code and dismiss the modal, and the paired count above is
+ * absolute — so without these the panel said the same thing for a phone that
+ * paired and for one whose digits were mistyped
+ * (`docs/specs/server.md` → "Remote control, in the Settings dialog").
+ */
+export const PairingOutcomePaired: Story = {
+  parameters: {
+    primedRemoteHost: { status: enrolledStatus({ pairedClients: 1 }), setupOutcome: 'paired' },
+    docs: { story: { height: '340px' } },
+  },
+  play: setupPanel(/This phone is paired/),
+};
+
+/** The one this whole outcome exists for: one attempt, and it was spent. */
+export const PairingOutcomeCodeMismatch: Story = {
+  parameters: {
+    primedRemoteHost: { status: enrolledStatus(), setupOutcome: 'code-mismatch' },
+    docs: { story: { height: '340px' } },
+  },
+  play: setupPanel(/The two digits did not match/),
+};
+
+export const PairingOutcomeCancelled: Story = {
+  parameters: {
+    primedRemoteHost: { status: enrolledStatus(), setupOutcome: 'cancelled' },
+    docs: { story: { height: '340px' } },
+  },
+  play: setupPanel(/You cancelled this request/),
+};
+
+export const PairingOutcomeExpired: Story = {
+  parameters: {
+    primedRemoteHost: { status: enrolledStatus(), setupOutcome: 'expired' },
+    docs: { story: { height: '340px' } },
+  },
+  play: setupPanel(/The request expired/),
+};
+
+export const PairingOutcomeSuperseded: Story = {
+  parameters: {
+    primedRemoteHost: { status: enrolledStatus(), setupOutcome: 'superseded' },
+    docs: { story: { height: '340px' } },
+  },
+  play: setupPanel(/Another pairing request replaced this one/),
+};
+
+export const PairingOutcomeHostError: Story = {
+  parameters: {
+    primedRemoteHost: { status: enrolledStatus(), setupOutcome: 'host-error' },
+    docs: { story: { height: '340px' } },
+  },
+  play: setupPanel(/could not finish pairing/),
+};
+
+/**
+ * The same report with the panel shut, which is where it lands when the modal
+ * was answered from a dialog that never opened one — the count is then the only
+ * other thing that could have said anything, and it did not move.
+ */
+export const PairingOutcomeWithPanelClosed: Story = {
+  parameters: {
+    primedRemoteHost: { status: enrolledStatus(), setupOutcome: 'code-mismatch' },
+    docs: { story: { height: '260px' } },
+  },
+  play: settled(/The two digits did not match/),
 };
 
 /**
