@@ -96,8 +96,9 @@ The parser accepts both BEL and ST terminators and handles split chunks. Support
 - `commandLine` stores `pendingCommandLine`.
 - `commandStart` creates `currentCommand`, snapshots `cwdAtStart`, uses `event.startedAt` when present, clears `pendingCommandLine`, and sets `{ kind: "running" }`. `displayCommand` is the summarized pending command line; when none is pending (`OSC 133 ; C` carries no command), it falls back to the newest non-user title candidate, then to the literal `shell`.
 - `commandFinish` moves `currentCommand` to `lastCommand`, stores `finishedAt`/`exitCode`, snapshots the latest in-run OSC 0/2/9 title into `lastCommand.finalTerminalTitle` (titles older than `startedAt` or younger than `finishedAt` are excluded), clears `currentCommand`, and sets `{ kind: "finished", exitCode }`. With no `currentCommand` it only sets the activity — it never invents a `lastCommand`.
-- `displayCommand` and the `commandArgv0` WATCHING key (`docs/specs/alert.md`) share one tokenizer, so they can never disagree about a command line. `\` escapes only before a character a shell escapes, so a native Windows program path survives to the basename split; an unquoted one with spaces is re-joined only when the join ends in an executable suffix.
 - `title` updates `title` and the per-source entry in `titleCandidates`. Later OSC title events do not erase earlier user, shell, or notification candidates from other sources.
+
+Command-line tokenizing is dialect-free: `\` escapes only what `shellEscapePosix` escapes (`lib/src/lib/shell-escape.ts` owns the set, so the two must stay in sync), which leaves the separators of a native Windows program path intact for the basename step.
 
 ### Keystroke fallback
 

@@ -47,13 +47,9 @@ describe('commandArgv0', () => {
     expect(commandArgv0(raw)).toBeNull();
   });
 
-  // Native Windows paths reduce to the same bare name a rule is stored under;
-  // the tokenizer's dialect handling is pinned in `terminal-state.test.ts`.
-  it.each([
-    ['C:\\tools\\claude.exe --print', 'claude.exe'],
-    ['C:\\Users\\me\\.claude\\local\\claude', 'claude'],
-  ])('reduces the Windows path %j to %j', (raw, expected) => {
-    expect(commandArgv0(raw)).toBe(expected);
+  it('reduces a native Windows path to the bare name a rule is stored under', () => {
+    // The tokenizer's dialect handling is pinned in `terminal-state.test.ts`.
+    expect(commandArgv0('C:\\Users\\me\\.claude\\local\\claude')).toBe('claude');
   });
 });
 

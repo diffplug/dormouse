@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { shellEscapePosix } from './shell-escape';
 import {
+  commandArgv0,
   createTerminalPaneState,
   cwdDisplay,
   cwdFromManualPath,
@@ -15,7 +17,6 @@ import {
   notificationDisplayTitle,
   reduceTerminalState,
   shortestUniqueCwdLabels,
-  commandArgv0,
   summarizeCommandLine,
   surfaceRunsCommand,
   terminalTitleFromNotification,
@@ -283,22 +284,31 @@ describe('command tokenizer dialects', () => {
     ['C:\\Users\\me\\.claude\\local\\claude', 'claude', 'claude'],
     ['C:\\Program Files\\nodejs\\npm.cmd run dev', 'npm.cmd', 'npm.cmd run dev'],
     ['"C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm.cmd', 'npm.cmd run dev'],
-    ['c:/tools/dor.cmd tool storybook', 'dor.cmd', 'dor.cmd tool storybook'],
+    ['FOO=1 C:\\Program Files\\nodejs\\npm.cmd run dev', 'npm.cmd', 'npm.cmd run dev'],
     ['\\\\build\\share\\tools\\claude.exe --print', 'claude.exe', 'claude.exe --print'],
-    ['FOO=1 C:\\tools\\claude.exe --print', 'claude.exe', 'claude.exe --print'],
+    // PowerShell's call operator, the only way that shell runs a quoted path.
+    ['& "C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm.cmd', 'npm.cmd run dev'],
+    ['& C:\\tools\\dor.cmd tool storybook', 'dor.cmd', 'dor.cmd tool storybook'],
     // POSIX escapes keep their meaning.
     ['/opt/my\\ tools/claude --print', 'claude', 'claude --print'],
-    ['find . -name \\*.ts', 'find', 'find . -name'],
+    ['grep \\*.ts src', 'grep', 'grep *.ts src'],
     ['echo a\\\\b', 'echo', 'echo a\\b'],
   ])('reduces %j to %j / %j', (raw, argv0, summary) => {
     expect(commandArgv0(raw)).toBe(argv0);
     expect(summarizeCommandLine(raw)).toBe(summary);
   });
 
+  // Pins the `POSIX_ESCAPABLE` contract: every character `shellEscapePosix`
+  // writes for a drag-and-drop paste, the tokenizer reads back unchanged.
+  it.each(Array.from(` \t!"#$&'()*;<>?[]\`{|}~\\`))('round-trips %j out of shellEscapePosix', (char) => {
+    expect(summarizeCommandLine(`cat ${shellEscapePosix(`a${char}b`)}`)).toBe(`cat a${char}b`);
+  });
+
   it('only re-joins an unquoted Windows program path that lands on an executable', () => {
-    // Two real words, not one path with a space: the second token starts its own
-    // absolute path, so the split stands and argv0 stays the program.
-    expect(commandArgv0('C:\\bin\\tool C:\\data\\in.txt')).toBe('tool');
+    // Two real words, not one path with a space. The second token starting its
+    // own absolute path stops the join even when it ends in an executable...
+    expect(commandArgv0('C:\\bin\\tool C:\\data\\run.cmd')).toBe('tool');
+    // ...and a relative continuation still has to reach an executable suffix.
     expect(commandArgv0('C:\\bin\\tool sub\\dir\\notes.txt')).toBe('tool');
   });
 });
