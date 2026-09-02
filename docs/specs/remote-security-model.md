@@ -332,6 +332,44 @@ Source of truth: `RemoteHost.#onConnectionInit` / `#onConnectionTransport` /
 `#promoteConnection` in `lib/src/remote/host/remote-host.ts`, and
 `HostChallengeIssuer` in `server-lib-common/src/security/challenge.ts`.
 
+## Push sealing
+
+A push is the one message the two endpoints exchange with no live session
+between them — the Host is awake, the phone is asleep, the Server is
+store-and-forward — so it gets its own construction.
+
+- **A fresh key per message, from the two pinned statics.**
+  `ss = X25519(hostStatic, clientStatic)`, a random 32-byte salt,
+  `key = HKDF-SHA-256(ikm = ss, salt, info = "dormouse/push/v1", 32)`, and
+  ChaCha20-Poly1305 under the all-zero 96-bit nonce. **That nonce is spent
+  exactly once per key**, by construction: the key exists only for its own salt
+  and no counter advances.
+- **Never a Noise `CipherState`, and never Noise's HKDF** — a transport state is
+  a shared counter, and a phone may receive one push, none, or three, days apart
+  and out of order. The ChaChaPoly binding is the pinned `@noble/ciphers` the
+  suite already uses ([Noise suite](#noise-suite)).
+- **The Host seals once per recipient**, to that ACL record's own Client static,
+  from the nonextractable `CryptoKey` it holds — the delivery path is handed a
+  seal capability, never the key. There is no group key.
+- **The Server forwards `{ hostId, v, salt, ct }` verbatim**, `hostId` taken
+  from the sending Host's token, validates only shape and bounds, and keeps no
+  plaintext ([server.md](./server.md) -> Web Push). **The ciphertext bound** is
+  what keeps the envelope inside Web Push's ~4 KB ceiling and a Host token from
+  asking the Server to forward an unbounded blob.
+- **The worker decrypts at the sink**, against the pinned record for that
+  `hostId`, and re-bounds what it recovers. **Any failure shows the generic
+  content-free notification** — no payload, an unknown Host, a
+  `pairing-required` record, a decrypt failure, malformed plaintext — because
+  `userVisibleOnly` makes showing nothing a browser-substituted notice
+  ([pocket-app.md](./pocket-app.md) -> Installable web app).
+
+Source of truth: `sealPush` / `openPush` / `isSealedPushV1` in
+`server-lib-common/src/security/push-seal.ts`, proven by
+`server-lib-common/test/push-seal.test.mjs`;
+`RemoteHost.sealPushForClient` and `sendPush` in
+`lib/src/remote/host/push-delivery.ts`; the sink in
+`lib/src/remote/pocket-app/sw.ts`.
+
 ## Host bounds
 
 Every bound is Host-enforced and independent of the relay; Server-side gates are
@@ -529,10 +567,6 @@ reviewer verifies against, and the one
   connection's own transcript.
 * Every access decision is ultimately made by the Host.
 
-**Notification text is the one exception, until stage 6**: a push payload still
-reaches the Server in plaintext ([server.md](./server.md) -> Web Push), and the
-sealed construction that closes it is in [Future](#future).
-
 ## Residual metadata
 
 The Server still observes account and passkey authentication data, IPs, Host
@@ -570,26 +604,18 @@ authorization by doing so).
 Staged order. Every stage lands as a green commit with its specs promoted above
 the fold, then a `/simplify` pass and a code review; no stage introduces a
 runtime selector, a dual ACL shape, temporary key distribution, or fallback
-machinery. Stages 1–5 landed — the suite and its vectors
+machinery. Stages 1–6 landed — the suite and its vectors
 ([Noise suite](#noise-suite)), the identities ([Host identity](#host-identity)),
 the relay-integrated harness ([server.md](./server.md) -> Relay), the cutover
 itself (the shared protocol, the Host's two ceremonies, the Server's routes and
 state, Pocket's whole phone side, and the deletion of every legacy path from the
 Server and the shared package: [Pairing](#pairing), [Connection](#connection),
-[pocket-app.md](./pocket-app.md)), and the remaining
+[pocket-app.md](./pocket-app.md)), the remaining
 [Host bounds](#host-bounds) with the instrumentation and malicious-relay harness
-that prove them. The numbering is preserved because other specs cite these
-stages by number.
-6. **Sealed push and the built worker** (push PR). The Host seals every
-   notification field: `ss = X25519(hostStatic, clientStatic)`, a random 32-byte
-   salt, `key = HKDF-SHA-256(ss, salt, "dormouse/push/v1", 32)`,
-   ChaCha20-Poly1305 under the all-zero 96-bit nonce exactly once per key — a
-   separate, domain-separated construction, never a Noise `CipherState`. The
-   envelope carries `hostId`, the salt, and the ciphertext; the Server forwards
-   it to the named `deliveryId`s and reads nothing, and the worker decrypts at
-   the sink against the pinned record, showing a generic content-free
-   notification on any failure. Plus the worker's build
-   ([pocket-app.md](./pocket-app.md) `## Future`).
+that prove them, and the sealed push with its built worker
+([Push sealing](#push-sealing), [pocket-app.md](./pocket-app.md) -> Installable
+web app). The numbering is preserved because other specs cite these stages by
+number.
 7. **Documentation and enforcement.** Deletion of superseded prose, the
    `SECURITY.md` `FAIL IF` rewrite for stages 5–6, the E2E structural lint with
    its load-bearing selftest, and the nightly application-security prompt

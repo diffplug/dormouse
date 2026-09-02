@@ -196,9 +196,10 @@ rules + pre-boot color fallbacks).
 
 Pocket ships a web app manifest and a service worker so it can be installed to
 a phone's home screen and receive Web Push while backgrounded or closed. Source
-of truth: `lib/pocket/public/manifest.webmanifest`, `lib/pocket/public/sw.js`,
-and `registerPushServiceWorker()` in
-`lib/src/remote/pocket-app/service-worker.ts`, called from `main.tsx`.
+of truth: `lib/pocket/public/manifest.webmanifest`, the worker in
+`lib/src/remote/pocket-app/sw.ts` with its build `lib/vite.sw.config.ts`, and
+`registerPushServiceWorker()` in `lib/src/remote/pocket-app/service-worker.ts`,
+called from `main.tsx`.
 
 **On iOS, installing is a prerequisite, not a nicety.** Web Push is granted only
 to a Home Screen web app — never to a Safari tab — which is why the manifest
@@ -207,12 +208,24 @@ must be requested from a real user gesture. Adding to the Home Screen is manual
 and cannot be automated or prompted for. iOS also ignores the manifest's `icons`
 and honors only `apple-touch-icon`, so `lib/pocket/index.html` declares both.
 
-The manifest, icons, and `sw.js` live in `lib/pocket/public/` rather than the
-bundle because Vite copies `publicDir` verbatim: each is referenced by an
-absolute root path, and a service worker must be served from the scope it
-controls under a stable, unhashed name — all of which bundling breaks.
-`emptyOutDir` wipes `lib/dist-pocket` on every build, so they must be checked-in
-source, never dropped into the output by hand.
+The manifest and icons live in `lib/pocket/public/`, which Vite copies verbatim:
+each is referenced by an absolute root path. `emptyOutDir` wipes
+`lib/dist-pocket` on every app build, so they must be checked-in source, never
+dropped into the output by hand.
+
+**The worker is built, not copied.** It decrypts sealed pushes
+([remote-security-model.md](./remote-security-model.md) -> Push sealing), so it
+must import the shared crypto, the IndexedDB records, and `boundedPushText`
+rather than mirror them. `lib/vite.sw.config.ts` bundles it as one classic IIFE
+at the stable, unhashed `dist-pocket/sw.js`, after the app build and with
+`emptyOutDir: false` so the app's own clean cannot wipe it; registration stays
+`register('/sw.js', { scope: '/' })` with **no `type: 'module'`**, pinned by
+`service-worker.test.ts`. `lib/scripts/assert-pocket-worker.mjs` runs last in
+`build:pocket` and fails the build on a missing worker, a sibling chunk, a
+top-level `import`/`export`, or a dynamic-import loader — a module-syntax worker
+installs on nothing, and push is the one feature no desktop exercises.
+`dev:pocket` bundles the same config in memory per `/sw.js` request, so the dev
+server serves what production would emit.
 
 - **The worker caches nothing and registers no `fetch` handler.** Pocket is
   useless without a live relay connection, so an offline cache would buy no
@@ -221,15 +234,15 @@ source, never dropped into the output by hand.
   handles `push`, `notificationclick`, and `install`/`activate` to take over
   immediately (`skipWaiting` + `clients.claim`, free with no cache to migrate) —
   nothing else.
-- **A push that cannot be parsed still shows a notification.**
-  `userVisibleOnly: true` promises that every delivery becomes visible; a
-  browser catching the worker showing none substitutes its own "site updated in
-  the background" notice and counts it against the subscription. Malformed and
-  payload-less pushes therefore fall back to generic text rather than returning
-  early — reading the raw text is guarded separately, so no payload shape exits
-  the handler without a notification. `title`/`body` are re-bounded at this sink
-  because the string is terminal-supplied ([alert.md](./alert.md) -> Push
-  notifications owns the rule).
+- **Every delivery ends in a notification.** `userVisibleOnly: true` promises
+  that every push becomes visible; a browser catching the worker showing none
+  substitutes its own "site updated in the background" notice and counts it
+  against the subscription. So a push with no payload, an unknown `hostId`, a
+  `pairing-required` record, a failed decrypt, or malformed plaintext shows the
+  generic content-free notice rather than returning early. What does decrypt is
+  re-validated and re-bounded here, the last boundary that can read it
+  ([alert.md](./alert.md) -> Push notifications owns the rule). Pinned by
+  `lib/src/remote/pocket-app/sw.test.ts`.
 - **Registration is best-effort and never awaited.** Every screen works without
   the worker, so a failure warns and boot continues — ordinary without support
   and on an insecure origin, since service workers need a secure context
@@ -449,7 +462,8 @@ Content types need no special-casing: `serveStatic` already answers
 Caching is set explicitly, because the build has two kinds of file needing
 opposite answers. Vite content-hashes everything it emits into `assets/`, so
 those are `immutable` — the name changes when the content does. Everything else
-— `index.html` plus the `public/` passthroughs at the root — is `no-cache`:
+— `index.html`, the built `sw.js`, and the `public/` passthroughs at the root —
+is `no-cache`:
 revalidate before use, not never store. That half is load-bearing, because
 `emptyOutDir` deletes the previous build's hashed assets: a browser reusing a
 heuristically cached `index.html` does not merely run stale code, it requests
@@ -564,17 +578,3 @@ code.
    entry) once its dropdown is phone-friendly.
 4. **Onboarding friction** — Pocket carries the phone-side items of the
    **selfhost-onboarding** scope ([server.md](./server.md) `## Future`).
-5. **The Pocket worker is built, not copied** — the phone side of stage 6 of
-   the **e2e-client-host** scope
-   ([remote-security-model.md](./remote-security-model.md) `## Future`).
-   `sw.js` moves to a TypeScript source under the Pocket app that imports the
-   shared E2E, IndexedDB, and sanitization code, bundled by a second Vite
-   config as one classic IIFE with `inlineDynamicImports`, no runtime
-   `import`/`export`, no secondary chunk, and the stable unhashed output name
-   `dist-pocket/sw.js`, run after the app build with `emptyOutDir: false`.
-   Registration stays `register('/sw.js', { scope: '/' })` with no
-   `type: 'module'`. The worker decrypts with the pinned record for the
-   envelope's `hostId`, re-validates and sanitizes, and shows a generic
-   notification on any failure. Production assertions in the Pocket build
-   script require exactly one `dist-pocket/sw.js`, classic registration, and no
-   top-level imports, exports, dynamic-import loaders, or auxiliary chunks.

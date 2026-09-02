@@ -182,8 +182,11 @@ phone can parse. Reading it as un-enrolled instead is what the person editing
 the file was reaching for, and on the Host it fails the exchange naming the
 field.
 
-**A subscription row from before the end-to-end cutover carries a device key and
-no `deliveryId`, so it is dropped on read** — with **one** warning per process
+**A row whose `hostId` has left `hosts.json` is dropped on read**, joined
+against the Host store rather than pruned at startup, so revoking a Host
+cascades without a restart; the next mutation writes the pruned set back. A row
+from before the end-to-end cutover carries a device key and no `deliveryId`, so
+**it is dropped on read** too — with **one** warning per process
 naming the file and saying to re-register. No versioned refusal, no archive
 step: the Client that owns the row re-registers on its next Enable, and a
 warning per row would bury that in a log.
@@ -288,7 +291,7 @@ This table is the whole route surface. Paths and request/response shapes live in
 | `POST /api/push/subscriptions/query` | session token | Reports which of the **presented** `deliveryIds` are registered, and for which Host. Parameterized by a capability the caller must already hold, which is proof of possession rather than the enumeration primitive a device-key parameter was |
 | `DELETE /api/push/subscriptions/:deliveryId` | session token | Idempotent: **always 204**, so the route reveals nothing about whether a row existed |
 | `GET /api/push/devices`          | host token     | The `deliveryId`s subscribed to **this** Host under the current VAPID key |
-| `POST /api/push/send`            | host token     | Fans a notification out to the named deliveries; `deliveryIds` is required |
+| `POST /api/push/send`            | host token     | Fans out one sealed envelope per named delivery; `recipients` is required, and the Server reads no notification text |
 | `GET /ws/host`                   | host token     | The Host's relay socket                            |
 | `GET /ws/client`                 | session token  | A Client's relay socket                            |
 | `GET /*`                         | —              | The built Pocket app, registered last so every route above wins. Cache policy and SPA fallback: [pocket-app.md](./pocket-app.md) |
@@ -405,7 +408,7 @@ dependency. Source of truth: `server/src/push.ts` plus the routes in
   it; a Host reads and sends with its `hostToken`. The send route takes the
   `hostId` from the token and never from the body, so naming a delivery
   explicitly cannot escape the calling Host's own scope.
-- **The Server never selects recipients.** `deliveryIds` is required and
+- **The Server never selects recipients.** `recipients` is required and
   non-empty; an absent or empty list is a 400, not a fan-out. The Host holds the
   ACL and is the only party that may decide who a push reaches.
 - **Possession of the delivery id is the whole authorization.** It is 256
@@ -437,14 +440,14 @@ dependency. Source of truth: `server/src/push.ts` plus the routes in
   `SECURITY.md` -> "Remote Control". Source of truth:
   `server/src/push-endpoint.ts`, wired into registration in `server/src/app.ts`
   and delivery in `server/src/push.ts`.
-- **Payload text is re-sanitized at this boundary** even though the Host already
-  did it, because it originates in a renderer and is ultimately Pane-derived
-  ([alert.md](./alert.md) -> Text And Security). Both sides call the same
-  `boundedPushText`, so the two layers cannot enforce different rules. Reserved:
-  the payload is the one thing on this wire the Server still reads in plaintext.
-  Stage 6 of **Scope: e2e-client-host**
-  ([remote-security-model.md](./remote-security-model.md) `## Future`) replaces
-  it with a sealed envelope, and nothing else about this route changes then.
+- **The payload is sealed, and the Server reads none of it.** A send carries
+  `recipients: [{ deliveryId, sealed }]` — one envelope per Client, because the
+  seal is to that Client's own static — and the Server validates only shape and
+  bounds, then forwards exactly `JSON.stringify({ hostId, ...sealed })` with the
+  `hostId` from the caller's own token, which is how the worker picks the record
+  to decrypt against. Notification text is bounded on the Host before sealing
+  and re-sanitized in the worker at the sink
+  ([remote-security-model.md](./remote-security-model.md) -> Push sealing).
 - **Delivery outcomes prune.** 404/410 means the subscription is permanently
   gone and its row is deleted; anything else is transient and left alone, but
   never silent: the refusal is logged (origin only — the endpoint is a bearer
@@ -1032,15 +1035,10 @@ enrollments after a Tailscale node rename), and the revocation UI staged in
 routes, and state the trust model in
 [remote-security-model.md](./remote-security-model.md) `## Future` requires. The
 QR grammar and its parser, the relay envelope, the reauth and retire routes, the
-delivery-keyed push routes, the Host side, and the deletion of every legacy path
-all landed in that scope's stages 4 and 5 (above), the malicious-relay harness
-with them.
+delivery-keyed push routes, the Host side, the sealed push envelope, and the
+deletion of every legacy path all landed in that scope's stages 4 to 6 (above),
+the malicious-relay harness with them.
 
-- **Sealed push** (stage 6). `POST /api/push/send` carries only the sealed
-  envelope; the Server also deletes a delivery row when its push provider
-  answers 404/410 — which it does already — and Pocket stays the normal
-  lifecycle initiator, with provider deletion as cleanup for clients that can no
-  longer submit tombstones.
 - **Operator recovery** (`SELF_HOST.md`): a Host whose enrollment predates the
   scope shows the enrollment form again; re-run the installer only if the offer
   is wanted — it mints one solely while `state/hosts.json` is absent, so remove
