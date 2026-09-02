@@ -3,13 +3,13 @@ import { derivePromptShape, extractCommand } from './terminal-prompt-shape';
 
 describe('derivePromptShape', () => {
   it('reads the zsh terminator and ignores earlier non-alphanumerics', () => {
-    expect(derivePromptShape('ntwigg@ntwigg-mac-2025 dormouse % ')).toEqual({ terminator: '%', countBefore: 0 });
+    expect(derivePromptShape('dormouse@dormouse-mac-2025 dormouse % ')).toEqual({ terminator: '%', countBefore: 0 });
   });
 
   it('reads the cmd.exe terminator as ">" regardless of the path', () => {
     // At the drive root the tail ":\>" could be mistaken for the terminator,
     // but the stable terminator across both paths is just ">".
-    expect(derivePromptShape('C:\\Users\\ntwigg>')).toEqual({ terminator: '>', countBefore: 0 });
+    expect(derivePromptShape('C:\\Users\\dormouse>')).toEqual({ terminator: '>', countBefore: 0 });
     expect(derivePromptShape('C:\\>')).toEqual({ terminator: '>', countBefore: 0 });
   });
 
@@ -32,15 +32,15 @@ describe('extractCommand', () => {
   const zsh = { terminator: '%', countBefore: 0 };
 
   it('slices the command after the zsh terminator and its space', () => {
-    expect(extractCommand('ntwigg@ntwigg-mac-2025 dormouse % pnpm dev:website', zsh)).toBe('pnpm dev:website');
+    expect(extractCommand('dormouse@dormouse-mac-2025 dormouse % pnpm dev:website', zsh)).toBe('pnpm dev:website');
   });
 
   it('slices the command with no space after the cmd.exe terminator', () => {
-    expect(extractCommand('C:\\Users\\ntwigg>dir', { terminator: '>', countBefore: 0 })).toBe('dir');
+    expect(extractCommand('C:\\Users\\dormouse>dir', { terminator: '>', countBefore: 0 })).toBe('dir');
   });
 
   it('keeps redirection and command-internal terminators', () => {
-    expect(extractCommand('C:\\Users\\ntwigg>dir > out.txt', { terminator: '>', countBefore: 0 })).toBe('dir > out.txt');
+    expect(extractCommand('C:\\Users\\dormouse>dir > out.txt', { terminator: '>', countBefore: 0 })).toBe('dir > out.txt');
     expect(extractCommand('u@h dir % echo 99%', zsh)).toBe('echo 99%');
   });
 
@@ -49,7 +49,7 @@ describe('extractCommand', () => {
   });
 
   it('returns null for a bare prompt with nothing typed', () => {
-    expect(extractCommand('ntwigg@mac dormouse % ', zsh)).toBeNull();
+    expect(extractCommand('dormouse@mac dormouse % ', zsh)).toBeNull();
   });
 
   it('returns null when the line lacks enough terminators to be this prompt', () => {

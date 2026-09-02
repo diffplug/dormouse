@@ -119,7 +119,3 @@ before adding or changing any `text-*`, `bg-*`, `text-color-*`, or border
 class anywhere in `lib/src/`. The actual `@theme` token definitions are in
 [`lib/src/theme.css`](lib/src/theme.css); when adding or removing a token,
 update both files together.
-
-## GitHub
-
-The maintainer's GitHub handle is `@nedtwigg`. `ntwigg` is their local shell username — it appears verbatim in prompt fixtures like `ntwigg@ntwigg-mac-2025` in [`lib/src/lib/terminal-prompt-shape.test.ts`](lib/src/lib/terminal-prompt-shape.test.ts) — and on GitHub it belongs to an unrelated person, so writing `@ntwigg` in a comment, PR body, or commit message pings a stranger and subscribes them to the thread, which only they can undo.
